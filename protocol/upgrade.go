@@ -32,11 +32,19 @@ type Server struct {
 	// Options tunes transport-layer behavior. DefaultProtocolOptions()
 	// supplies SPEC-005 §12 defaults.
 	Options ProtocolOptions
-	// Upgraded receives the accepted connection and the negotiated
-	// context immediately after the WebSocket handshake completes
-	// (SPEC-005 §5). Story 3.4 wires this to the OnConnect + emit
-	// InitialConnection handoff. Leaving it nil in tests is allowed;
-	// the handler will close the connection immediately.
+	// Executor is the lifecycle seam used by the default Upgraded
+	// handler to run OnConnect and emit InitialConnection (Story 3.4).
+	// When non-nil AND Conns is non-nil AND Upgraded is nil, the
+	// handler drives Conn.RunLifecycle for every admitted upgrade.
+	Executor ExecutorInbox
+	// Conns tracks currently admitted connections. Required whenever
+	// Executor is set so RunLifecycle can register the admitted
+	// connection before the first server message is sent.
+	Conns *ConnManager
+	// Upgraded, when non-nil, overrides the built-in lifecycle and is
+	// called immediately after the WebSocket handshake completes. It
+	// is the extension point for tests that want to bypass OnConnect
+	// and for advanced hosts that want custom admission semantics.
 	Upgraded func(ctx context.Context, uc *UpgradeContext)
 }
 
@@ -142,8 +150,24 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		s.Upgraded(r.Context(), uc)
 		return
 	}
-	// No Upgraded hook — close the connection so the client doesn't
-	// hang. Useful during bring-up before Story 3.4 wiring lands.
+	if s.Executor != nil && s.Conns != nil {
+		c := NewConn(
+			uc.ConnectionID,
+			uc.Identity,
+			uc.Token,
+			uc.Compression == CompressionGzip,
+			uc.Conn,
+			&s.Options,
+		)
+		// RunLifecycle closes the socket on its own failure paths; on
+		// success it leaves the socket open for the Epic 4 read/write
+		// loops and Story 3.5 keep-alive goroutine.
+		_ = c.RunLifecycle(r.Context(), s.Executor, s.Conns)
+		return
+	}
+	// No Upgraded hook and no Executor wiring — close the connection
+	// so the client does not hang. Preserves pre-3.4 bring-up behavior
+	// when the embedder is still assembling its executor graph.
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 }
 
