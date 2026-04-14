@@ -15,13 +15,18 @@ Validate predicate constraints before a subscription is accepted. Reject early w
 
 - `ValidatePredicate(pred Predicate, schema SchemaLookup) error`
 
-- `SchemaLookup` interface (or function type) for checking table/column/index existence:
+- `SchemaLookup` interface (or function type) for checking table/column/index existence plus name resolution used by later wire/debug paths:
   ```go
   type SchemaLookup interface {
       TableExists(TableID) bool
       ColumnExists(TableID, ColID) bool
       ColumnType(TableID, ColID) ValueKind
       HasIndex(TableID, ColID) bool
+      // TableName returns the declared name for wire/debug use
+      // (subscription errors, fan-out labels). Empty string is
+      // acceptable when the caller does not carry names. Not consulted
+      // by validation itself.
+      TableName(TableID) string
   }
   ```
 
@@ -55,6 +60,6 @@ Validate predicate constraints before a subscription is accepted. Reject early w
 
 ## Design Notes
 
-- `SchemaLookup` is a narrow read-only interface. During registration, the executor provides this from committed state. The validation function does not need full store access.
+- `SchemaLookup` is a narrow read-only interface. During registration, the executor provides this from committed state. The validation function does not need full store access, and does not consult `TableName` — that method exists so the same lookup serves eval-time code paths (SubscriptionError, FanOut labels) that need a display name per table.
 - `ErrTableNotFound` and `ErrColumnNotFound` are introduced here and then reused by registration and interface-contract stories; Epic 4 should not be read as re-introducing them.
 - Validation is O(predicate_size), which is small (bounded by the 2-table constraint).

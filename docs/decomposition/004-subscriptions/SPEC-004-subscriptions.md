@@ -166,19 +166,13 @@ For subscriptions with a `ColEq` predicate on a table.
 
 ```go
 type ValueIndex struct {
-    // cols tracks which columns have parameterized subscriptions.
-    // Used for cleanup and iteration.
-    cols map[TableID]map[ColID]struct{}
+    // cols[table][col] = refcount of active entries for that column.
+    // Used by TrackedColumns during candidate collection.
+    cols map[TableID]map[ColID]int
 
-    // args maps (table, column, value) → set of query hashes.
-    // Sorted by key for range queries during cleanup.
-    args *btree.Map[valueIndexKey, map[QueryHash]struct{}]
-}
-
-type valueIndexKey struct {
-    Table  TableID
-    Column ColID
-    Value  Value
+    // args[table][col][encodedValue] = set of query hashes.
+    // encodedValue is the canonical byte form of a Value used as a map key.
+    args map[TableID]map[ColID]map[string]map[QueryHash]struct{}
 }
 ```
 
@@ -187,11 +181,13 @@ type valueIndexKey struct {
 ```
 For each (tableID, colID) tracked in cols for this table:
     Extract the column value from the changed row.
-    Look up (tableID, colID, value) in args.
+    Look up (tableID, colID, encode(value)) in args.
     Add all matching query hashes to the candidate set.
 ```
 
-**Cost**: O(indexed_columns * log(distinct_values)) per changed row. For the common case (one equality predicate), this is O(log n) — vastly better than scanning all subscriptions.
+**Cost**: O(indexed_columns) per changed row for the map lookup (amortized O(1) per level). For the common case (one equality predicate), this is constant-time per changed row — vastly better than scanning all subscriptions.
+
+**Data-structure note**: tier-1 is pure equality lookup. There is no predicate pattern today that requires ordered iteration over value keys, so a nested map is the simplest correct structure. Empty-map cleanup on Remove gives the same "entry disappears when no hashes remain" effect a B-tree range-delete would provide. SpacetimeDB's reference implementation uses a BTreeMap here but still accesses it equality-only.
 
 **Example**: 10,000 clients subscribe to `messages WHERE channel_id = ?` with different channel IDs. Inserting a message in channel 42 looks up `(messages, channel_id, 42)` and finds only the subscriptions for that channel.
 
@@ -211,10 +207,15 @@ type JoinEdge struct {
 }
 
 type JoinEdgeIndex struct {
-    // edges maps JoinEdge → (rhs_filter_value → set of query hashes)
-    edges *btree.Map[JoinEdge, map[Value]map[QueryHash]struct{}]
+    // edges[edge][encodedFilterValue] = set of query hashes.
+    edges map[JoinEdge]map[string]map[QueryHash]struct{}
+    // byTable[LHSTable][edge] = refcount, so EdgesForTable returns the
+    // LHSTable-rooted edges without scanning the full edges map.
+    byTable map[TableID]map[JoinEdge]int
 }
 ```
+
+**Data-structure note**: candidate collection iterates the edges whose LHSTable matches the changed table. SpacetimeDB's reference implementation serves this via a BTreeMap's prefix scan; Shunter serves it via the `byTable` denormalization. Both approaches preserve the same external contract — the ordered key is an implementation detail, not a requirement of the tier-2 semantics.
 
 **Lookup on row change in LHS table:**
 
@@ -354,26 +355,30 @@ The evaluator needs a data source that can serve both:
 // DeltaView wraps committed state + transaction deltas.
 type DeltaView struct {
     // Committed state (read-only snapshot after this transaction).
-    committed ReadTx
+    committed CommittedReadView
 
     // Delta rows from this transaction, per table.
     inserts map[TableID][]ProductValue
     deletes map[TableID][]ProductValue
 
-    // Indexes built over delta rows for efficient lookup.
-    deltaIndexes DeltaIndexes
+    // Scratch indexes built over delta rows for efficient equality lookup.
+    deltaIdx DeltaIndexes
 }
 
-// DeltaIndexes provides index scans over delta rows.
+// DeltaIndexes provides per-transaction scratch index scans over delta rows.
+// These are not real store indexes — they are ephemeral equality maps built
+// just for the columns referenced by the current set of active subscriptions.
 type DeltaIndexes struct {
-    // insertIdx[tableID][indexID] = btree mapping value → positions in inserts[tableID]
-    insertIdx map[TableID]map[IndexID]*btree.Map[Value, []int]
-    // deleteIdx mirrors for deletes.
-    deleteIdx map[TableID]map[IndexID]*btree.Map[Value, []int]
+    // insertIdx[tableID][colID][encodedValue] = positions into inserts[tableID].
+    insertIdx map[TableID]map[ColID]map[string][]int
+    // deleteIdx mirrors the same shape for deletes.
+    deleteIdx map[TableID]map[ColID]map[string][]int
 }
 ```
 
-Delta indexes are built eagerly when the DeltaView is constructed (once per transaction evaluation, not per subscription). Only indexes that are referenced by at least one active subscription are built.
+Delta indexes are built eagerly when the DeltaView is constructed (once per transaction evaluation, not per subscription). Only columns referenced by at least one active subscription are indexed.
+
+**Keying rationale**: `ColID` is the natural coordinate for delta-side scratch indexes because they have no identity separate from the transaction — there is no persistent `IndexID` to name them. Committed-side access on the other hand still uses the real store `IndexID` (see §10.3 `CommittedReadView.IndexSeek`). This is a deliberate divergence from SpacetimeDB's `DeltaStore` trait, which unifies delta and committed lookups under a single `IndexId`; Shunter trades that symmetry for a simpler delta view that does not depend on `SchemaRegistry` / `IndexResolver` at construction time.
 
 ---
 

@@ -43,8 +43,8 @@ Structured predicate expression tree that the entire pruning and evaluation syst
 Three-tier index structure that maps changesets to candidate subscriptions in sub-linear time.
 
 **Scope:**
-- `ValueIndex` (Tier 1): `(table, column, value) → set of query hashes` via B-tree
-- `JoinEdgeIndex` (Tier 2): `JoinEdge → (rhs_filter_value → set of query hashes)` via B-tree
+- `ValueIndex` (Tier 1): nested map `table → column → encoded(value) → set of query hashes` (equality-only lookup)
+- `JoinEdgeIndex` (Tier 2): `JoinEdge → encoded(rhs_filter_value) → set of query hashes`, plus a `byTable` denormalization so `EdgesForTable` runs without iterating the full edge map
 - `TableIndex` (Tier 3 fallback): `table → set of query hashes`
 - Index placement logic per §5.4 invariant: ColEq → Tier 1, join with filterable edge → Tier 2, else → Tier 3
 - Insert/remove operations on all three indexes (used by registration/deregistration)
@@ -72,7 +72,7 @@ Incremental view maintenance engine. Computes deltas for single-table and join s
 
 **Scope:**
 - `DeltaView` struct: committed read view + per-table insert/delete slices + delta indexes
-- `DeltaIndexes`: temporary B-tree indexes over delta rows for indexed columns
+- `DeltaIndexes`: per-transaction scratch indexes over delta rows, keyed by `(TableID, ColID)` via nested maps with canonical encoded-value keys. Stores positions (int indices) into the insert/delete slice rather than copying rows
 - Eager delta index construction (once per transaction, not per subscription)
 - Single-table delta: filter inserts → delta inserts, filter deletes → delta deletes
 - Join delta: 4 insert fragments (I1–I4) + 4 delete fragments (D1–D4) per §6.2

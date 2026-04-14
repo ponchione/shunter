@@ -9,25 +9,27 @@
 
 ## Summary
 
-B-tree mapping `(table, column, value)` to sets of query hashes. The most common pruning path — equality predicates land here.
+Map-backed equality index from `(table, column, value)` to sets of query hashes. The most common pruning path — `ColEq` predicates land here.
 
 ## Deliverables
 
 - `ValueIndex` struct:
   ```go
   type ValueIndex struct {
-      cols map[TableID]map[ColID]struct{}
-      args *btree.Map[valueIndexKey, map[QueryHash]struct{}]
+      // cols[table][col] = refcount of active entries for that column.
+      // Used by TrackedColumns for candidate collection.
+      cols map[TableID]map[ColID]int
+      // args[table][col][encodedValue] = set of query hashes for that
+      // (table, column, value) triple.
+      args map[TableID]map[ColID]map[string]map[QueryHash]struct{}
   }
   ```
-
-- `valueIndexKey` struct: `{Table TableID, Column ColID, Value Value}` with ordering (table, column, value lexicographic)
 
 - `NewValueIndex() *ValueIndex`
 
 - `Add(table TableID, col ColID, value Value, hash QueryHash)` — insert mapping
 
-- `Remove(table TableID, col ColID, value Value, hash QueryHash)` — remove mapping; clean up empty entries
+- `Remove(table TableID, col ColID, value Value, hash QueryHash)` — remove mapping; clean up empty entries on the way out
 
 - `Lookup(table TableID, col ColID, value Value) []QueryHash` — return all hashes for exact match
 
@@ -39,13 +41,14 @@ B-tree mapping `(table, column, value)` to sets of query hashes. The most common
 - [ ] Add two entries same (table, col, value), different hash → Lookup returns both
 - [ ] Add entries for different values, Lookup returns only matching value's hashes
 - [ ] Remove entry, Lookup no longer returns it
-- [ ] Remove last hash for a (table, col, value) → key cleaned up from B-tree
+- [ ] Remove last hash for a (table, col, value) → key cleaned up (parent column/table maps shrink when empty)
 - [ ] TrackedColumns returns columns with active entries
 - [ ] TrackedColumns for untracked table → empty
 - [ ] Lookup for untracked (table, col, value) → empty slice, not nil
 
 ## Design Notes
 
-- B-tree chosen over hash map for `args` because the sorted key structure enables efficient cleanup: removing all entries for a given (table, column) prefix is a range delete.
-- `cols` is a denormalized acceleration structure for candidate collection (§7.2 step 3). Without it, you'd have to scan the B-tree for all keys matching a table, which defeats the purpose.
-- Value comparison in the B-tree key uses the same ordering as SPEC-001 §2.2.
+- Tier 1 is pure equality lookup. No predicate pattern we accept today requires ordered iteration over value keys, so a nested map is the natural structure. Empty-map cleanup on `Remove` gives the same "entry disappears when no hashes remain" behavior a B-tree range-delete would provide, without the extra dependency.
+- `cols` is a denormalized acceleration structure for candidate collection (§7.2 step 3). Without it, you'd have to iterate the full `args[table]` map to find tracked columns, which is O(colCount) per changed table per transaction.
+- Values are used as map keys via a canonical encoded-bytes form (see `encodeValueKey`), consistent with SPEC-001 §2.2 ordering semantics for equality.
+- Reference: SpacetimeDB's `module_subscription_manager.rs` uses a BTreeMap for the equivalent structure, but primarily for the tier-2 range-for-table iteration on join edges — tier-1 itself is used equality-only. The Go map-backed design is semantically aligned; see Story 2.2 for the tier-2 ordering that does matter.

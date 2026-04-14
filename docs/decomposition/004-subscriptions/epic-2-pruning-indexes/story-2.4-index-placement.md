@@ -29,7 +29,7 @@ Route each `(query, table)` pair to exactly one pruning tier. A subscription tou
 
 - `RemoveSubscription(indexes *PruningIndexes, pred Predicate, hash QueryHash)` — reverse of placement, removes from the correct tier for each table
 
-- `CollectCandidatesForTable(indexes *PruningIndexes, table TableID, rows []ProductValue, committed CommittedReadView) []QueryHash` — union results from all three tiers for a changed table
+- `CollectCandidatesForTable(indexes *PruningIndexes, table TableID, rows []ProductValue, committed CommittedReadView, resolver IndexResolver) []QueryHash` — union results from all three tiers for a changed table. `resolver` is consulted for Tier 2 RHS index lookup; when nil, Tier 2 is skipped (test paths exercising only Tier 1/3)
 
 ## Acceptance Criteria
 

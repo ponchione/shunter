@@ -16,7 +16,7 @@ Given a changeset, determine which query hashes might be affected. Consults all 
 - `CollectCandidates(indexes *PruningIndexes, changeset *Changeset, committed CommittedReadView) map[QueryHash]struct{}`
 
 - Low-level helper owned by Story 2.4 remains per-table:
-  - `CollectCandidatesForTable(indexes *PruningIndexes, table TableID, rows []ProductValue, committed CommittedReadView) []QueryHash`
+  - `CollectCandidatesForTable(indexes *PruningIndexes, table TableID, rows []ProductValue, committed CommittedReadView, resolver IndexResolver) []QueryHash` — `resolver` supplies the Tier 2 RHS `IndexID` for the join-edge scan; nil skips Tier 2.
 
 - Per-table collection (per §7.2 step 3):
   ```
