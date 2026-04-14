@@ -1,3 +1,4 @@
 /reference/*
 .idea
 .vscode
+.tmp_*
