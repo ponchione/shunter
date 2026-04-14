@@ -1,27 +1,26 @@
 # Shunter
 
-Read `docs/PROJECT-BRIEF.md` first. It defines what Shunter is, the architectural decomposition, and the spec plan.
+Read `RTK.md` first for command rules, then `docs/project-brief.md`, then `docs/EXECUTION-ORDER.md`.
 
-## Current Phase: Spec Derivation
+## Current Repo State
 
-We are reading the SpacetimeDB codebase (in `reference/SpacetimeDB/`) to understand algorithms and architecture, then writing standalone specs in `docs/specs/SPEC-*.md`. No Rust code is copied or ported. Specs describe *what* and *why* — not *how SpacetimeDB does it*.
+This repo is still docs-first. There is no implementation code yet. The working source of truth is the docs tree: project brief, spec docs, decomposition epics/stories, and execution order.
 
-Specs must be implementable by someone who has never seen the SpacetimeDB source.
+## What to Use
+
+- `docs/project-brief.md` = product and architectural intent
+- `docs/EXECUTION-ORDER.md` = implementation sequencing and dependency gates
+- `docs/decomposition/` = executable epic/story breakdown
+- `reference/SpacetimeDB/` = read-only research input only
 
 ## Rules
 
-- Output goes in `docs/`. Research notes go in `docs/research/notes/`.
-- Never copy Rust code into specs. Describe the algorithm in plain language.
-- Each spec is self-contained with defined interfaces to other subsystems.
-- When a design decision has multiple valid approaches, present the tradeoffs and make a recommendation.
+- Keep the clean-room boundary: do not copy or port Rust code from `reference/SpacetimeDB/`.
+- Treat `docs/EXECUTION-ORDER.md` as the sequencing authority when choosing what lands next.
+- Keep the repo lean. Do not invent extra structure before the work actually needs it.
+- When editing docs, keep them tight and operational.
+- For any shell or git command, follow `RTK.md`: prefix it with `rtk`.
 
-## Repo Layout
+## Practical Default
 
-```
-docs/               # Project brief and specs (our output)
-reference/           # SpacetimeDB clone (read-only research input)
-```
-
-Implementation comes later via SodorYard. That's not this phase.
-
-@RTK.md
+Before starting a task, identify the exact spec/epic/story slice it belongs to and work only that slice unless explicitly asked to widen scope.
