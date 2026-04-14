@@ -100,15 +100,37 @@ func (s *Scheduler) Notify() {
 
 // scan reads sys_scheduled via a read-locked snapshot, enqueues every
 // row with next_run_at_ns <= now, and records the earliest future
-// next_run_at_ns into s.nextWakeup.
+// next_run_at_ns into s.nextWakeup. Per-row behavior is shared with
+// ReplayFromCommitted; callers interested in the observed max
+// schedule_id should use ReplayFromCommitted directly.
 func (s *Scheduler) scan() {
+	_ = s.scanAndTrackMax()
+}
+
+// ReplayFromCommitted is the startup entry point for SPEC-003 §9.2
+// persistence: rebuilds the in-memory wakeup cache from sys_scheduled
+// and enqueues any rows that are already past due so they fire
+// promptly after recovery (Story 6.5).
+//
+// Returned: the largest observed schedule_id. Callers reset their
+// ScheduleID sequence to maxID+1 so post-replay Schedule() calls don't
+// collide with replayed rows.
+func (s *Scheduler) ReplayFromCommitted() ScheduleID {
+	return s.scanAndTrackMax()
+}
+
+func (s *Scheduler) scanAndTrackMax() ScheduleID {
 	now := s.now()
 	nowNs := now.UnixNano()
 	view := s.cs.Snapshot()
 	defer view.Close()
 
 	s.nextWakeup = time.Time{}
+	var maxID ScheduleID
 	for _, row := range view.TableScan(s.tableID) {
+		if id := ScheduleID(row[SysScheduledColScheduleID].AsUint64()); id > maxID {
+			maxID = id
+		}
 		nextNs := row[SysScheduledColNextRunAtNs].AsInt64()
 		if nextNs <= nowNs {
 			s.enqueue(row)
@@ -119,6 +141,7 @@ func (s *Scheduler) scan() {
 			s.nextWakeup = t
 		}
 	}
+	return maxID
 }
 
 // enqueue sends a CallReducerCmd for a due schedule row. A blocked

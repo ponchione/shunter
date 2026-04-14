@@ -8,6 +8,22 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+// maxScheduleID scans sys_scheduled for the largest schedule_id value.
+// Used by NewExecutor to seed the schedule-sequence counter above any
+// schedule_id that survived from a prior process (Story 6.5). Returns
+// 0 when the table is empty.
+func maxScheduleID(cs *store.CommittedState, tableID schema.TableID) ScheduleID {
+	view := cs.Snapshot()
+	defer view.Close()
+	var maxID ScheduleID
+	for _, row := range view.TableScan(tableID) {
+		if id := ScheduleID(row[SysScheduledColScheduleID].AsUint64()); id > maxID {
+			maxID = id
+		}
+	}
+	return maxID
+}
+
 // advanceOrDeleteSchedule mutates sys_scheduled atomically with a
 // scheduled reducer's writes (Story 6.4, SPEC-003 §9.4):
 //   - one-shot (repeat_ns == 0): delete the row

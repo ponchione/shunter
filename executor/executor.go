@@ -77,6 +77,13 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 	if !ok {
 		panic("executor: sys_scheduled is not registered; every schema.Build call must register system tables")
 	}
+	schedSeq := store.NewSequence()
+	// Story 6.5: replayed sys_scheduled rows may already use
+	// schedule_ids > 0. Reset the in-memory sequence past the max
+	// existing id so post-restart Schedule() calls don't collide.
+	if maxID := maxScheduleID(cs, schedTS.ID); maxID > 0 {
+		schedSeq.Reset(uint64(maxID) + 1)
+	}
 	e := &Executor{
 		inbox:        make(chan ExecutorCommand, cap),
 		registry:     reg,
@@ -85,7 +92,7 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 		nextTxID:     recoveredTxID + 1,
 		rejectMode:   cfg.RejectOnFull,
 		schedTableID: schedTS.ID,
-		schedSeq:     store.NewSequence(),
+		schedSeq:     schedSeq,
 		durability:   dur,
 		subs:         subs,
 		done:         make(chan struct{}),
