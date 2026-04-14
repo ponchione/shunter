@@ -266,6 +266,23 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		return
 	}
 
+	// Scheduled-reducer firing semantics (Story 6.4, SPEC-003 §9.4).
+	// On success, atomically delete (one-shot) or advance (repeating)
+	// the sys_scheduled row in the same transaction as the reducer's
+	// writes. A missing row is acceptable: it means a concurrent
+	// Cancel raced the firing — the reducer still commits
+	// (at-least-once semantics).
+	if req.Source == CallSourceScheduled {
+		if err := e.advanceOrDeleteSchedule(tx, req.ScheduleID, req.IntendedFireAt); err != nil {
+			store.Rollback(tx)
+			cmd.ResponseCh <- ReducerResponse{
+				Status: StatusFailedInternal,
+				Error:  fmt.Errorf("schedule advance: %w", err),
+			}
+			return
+		}
+	}
+
 	// Commit.
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {

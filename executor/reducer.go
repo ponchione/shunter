@@ -15,6 +15,14 @@ type ReducerRequest struct {
 	Args        []byte
 	Caller      types.CallerContext
 	Source      CallSource
+	// ScheduleID and IntendedFireAt are populated when Source ==
+	// CallSourceScheduled. IntendedFireAt is the sys_scheduled row's
+	// next_run_at_ns at enqueue time; firing uses it so repeat
+	// semantics are fixed-rate (SPEC-003 §9.5) rather than
+	// completion-time-based. Both are zero for external / lifecycle
+	// calls.
+	ScheduleID     ScheduleID
+	IntendedFireAt int64
 }
 
 // ReducerResponse is the result of a reducer execution.

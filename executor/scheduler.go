@@ -8,6 +8,33 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+// advanceOrDeleteSchedule mutates sys_scheduled atomically with a
+// scheduled reducer's writes (Story 6.4, SPEC-003 §9.4):
+//   - one-shot (repeat_ns == 0): delete the row
+//   - repeating (repeat_ns > 0): advance next_run_at_ns to
+//     intended+repeat for fixed-rate semantics (§9.5), independent of
+//     how late the firing actually ran
+//
+// A missing row returns nil: a concurrent Cancel between enqueue and
+// firing is acceptable; the reducer still commits (at-least-once).
+func (e *Executor) advanceOrDeleteSchedule(tx *store.Transaction, id ScheduleID, intendedNs int64) error {
+	target := uint64(id)
+	for rowID, row := range tx.ScanTable(e.schedTableID) {
+		if row[SysScheduledColScheduleID].AsUint64() != target {
+			continue
+		}
+		repeatNs := row[SysScheduledColRepeatNs].AsInt64()
+		if repeatNs == 0 {
+			return tx.Delete(e.schedTableID, rowID)
+		}
+		newRow := row.Copy()
+		newRow[SysScheduledColNextRunAtNs] = types.NewInt64(intendedNs + repeatNs)
+		_, err := tx.Update(e.schedTableID, rowID, newRow)
+		return err
+	}
+	return nil
+}
+
 // newSchedulerHandle builds a fresh SchedulerHandle bound to a reducer's
 // transaction. Each reducer call gets its own handle so that mutations
 // on sys_scheduled roll back with the reducer.
