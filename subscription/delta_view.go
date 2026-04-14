@@ -1,0 +1,168 @@
+package subscription
+
+import (
+	"fmt"
+	"iter"
+
+	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/types"
+)
+
+// DeltaView wraps committed state and per-transaction deltas into a unified
+// data source (SPEC-004 §6.4). Delta indexes are built eagerly for the
+// columns flagged as active — one pass per transaction, not per subscription.
+//
+// Lifecycle: the committed view is borrowed, not owned. Callers respect the
+// SPEC-001 snapshot contract — materialize needed rows promptly, never hold
+// the view across blocking work.
+type DeltaView struct {
+	committed store.CommittedReadView
+	inserts   map[TableID][]types.ProductValue
+	deletes   map[TableID][]types.ProductValue
+	deltaIdx  DeltaIndexes
+}
+
+// DeltaIndexes maps (table, column) → encoded value → positions in the
+// corresponding inserts/deletes slice. Positions (int indices) avoid
+// double-storing row data.
+type DeltaIndexes struct {
+	insertIdx map[TableID]map[ColID]map[string][]int
+	deleteIdx map[TableID]map[ColID]map[string][]int
+}
+
+// NewDeltaView constructs a DeltaView from a changeset and a committed snapshot.
+// activeColumns is the set of columns per table that at least one active
+// subscription cares about; delta indexes are built only for these columns.
+func NewDeltaView(
+	committed store.CommittedReadView,
+	changeset *store.Changeset,
+	activeColumns map[TableID][]ColID,
+) *DeltaView {
+	dv := &DeltaView{
+		committed: committed,
+		inserts:   make(map[TableID][]types.ProductValue),
+		deletes:   make(map[TableID][]types.ProductValue),
+		deltaIdx: DeltaIndexes{
+			insertIdx: make(map[TableID]map[ColID]map[string][]int),
+			deleteIdx: make(map[TableID]map[ColID]map[string][]int),
+		},
+	}
+	if changeset == nil {
+		return dv
+	}
+	for tid, tc := range changeset.Tables {
+		if tc == nil {
+			continue
+		}
+		if len(tc.Inserts) > 0 {
+			ins := make([]types.ProductValue, len(tc.Inserts))
+			copy(ins, tc.Inserts)
+			dv.inserts[tid] = ins
+		}
+		if len(tc.Deletes) > 0 {
+			del := make([]types.ProductValue, len(tc.Deletes))
+			copy(del, tc.Deletes)
+			dv.deletes[tid] = del
+		}
+	}
+	for table, cols := range activeColumns {
+		dv.buildDeltaIndex(table, cols)
+	}
+	return dv
+}
+
+func (dv *DeltaView) buildDeltaIndex(table TableID, cols []ColID) {
+	if ins := dv.inserts[table]; len(ins) > 0 {
+		byCol := make(map[ColID]map[string][]int, len(cols))
+		for _, col := range cols {
+			byVal := make(map[string][]int)
+			for i, row := range ins {
+				if int(col) >= len(row) {
+					continue
+				}
+				key := encodeValueKey(row[col])
+				byVal[key] = append(byVal[key], i)
+			}
+			byCol[col] = byVal
+		}
+		dv.deltaIdx.insertIdx[table] = byCol
+	}
+	if del := dv.deletes[table]; len(del) > 0 {
+		byCol := make(map[ColID]map[string][]int, len(cols))
+		for _, col := range cols {
+			byVal := make(map[string][]int)
+			for i, row := range del {
+				if int(col) >= len(row) {
+					continue
+				}
+				key := encodeValueKey(row[col])
+				byVal[key] = append(byVal[key], i)
+			}
+			byCol[col] = byVal
+		}
+		dv.deltaIdx.deleteIdx[table] = byCol
+	}
+}
+
+// InsertedRows returns the delta inserts for a table (nil if none).
+func (dv *DeltaView) InsertedRows(table TableID) []types.ProductValue {
+	return dv.inserts[table]
+}
+
+// DeletedRows returns the delta deletes for a table (nil if none).
+func (dv *DeltaView) DeletedRows(table TableID) []types.ProductValue {
+	return dv.deletes[table]
+}
+
+// DeltaIndexScan returns the delta rows whose indexed column equals value.
+// inserted=true scans the insert side, false scans the delete side.
+// Panics when the requested column does not have a built delta index.
+func (dv *DeltaView) DeltaIndexScan(table TableID, col ColID, value Value, inserted bool) []types.ProductValue {
+	src := dv.deltaIdx.deleteIdx
+	rows := dv.deletes[table]
+	if inserted {
+		src = dv.deltaIdx.insertIdx
+		rows = dv.inserts[table]
+	}
+	if rows == nil {
+		return nil
+	}
+	byCol, ok := src[table]
+	if !ok {
+		panic(fmt.Sprintf("subscription: DeltaIndexScan on table %d with no delta indexes", table))
+	}
+	byVal, ok := byCol[col]
+	if !ok {
+		panic(fmt.Sprintf("subscription: DeltaIndexScan on table %d col %d with no delta index", table, col))
+	}
+	positions := byVal[encodeValueKey(value)]
+	if len(positions) == 0 {
+		return nil
+	}
+	out := make([]types.ProductValue, 0, len(positions))
+	for _, pos := range positions {
+		out = append(out, rows[pos])
+	}
+	return out
+}
+
+// CommittedScan delegates to the underlying committed view.
+func (dv *DeltaView) CommittedScan(table TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	if dv.committed == nil {
+		return func(func(types.RowID, types.ProductValue) bool) {}
+	}
+	return dv.committed.TableScan(table)
+}
+
+// CommittedIndexSeek delegates to the underlying committed view.
+// Returns nil when there is no committed view attached.
+func (dv *DeltaView) CommittedIndexSeek(table TableID, indexID IndexID, key store.IndexKey) []types.RowID {
+	if dv.committed == nil {
+		return nil
+	}
+	return dv.committed.IndexSeek(table, indexID, key)
+}
+
+// CommittedView exposes the underlying read view for advanced callers that
+// need row materialization (store.GetRow).
+func (dv *DeltaView) CommittedView() store.CommittedReadView { return dv.committed }
