@@ -132,7 +132,7 @@ func (e *Executor) runLifecycleReducer(
 		ReducerName: rr.Name,
 		Caller:      caller,
 		DB:          tx,
-		Scheduler:   e.scheduler,
+		Scheduler:   e.newSchedulerHandle(tx),
 	}
 
 	var reducerErr error

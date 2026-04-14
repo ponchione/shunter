@@ -37,7 +37,15 @@ type Executor struct {
 	fatal      bool
 	rejectMode bool
 	shutdown   bool
-	scheduler  SchedulerHandle
+	// schedTableID is the cached schema.TableID for sys_scheduled,
+	// resolved once at NewExecutor so per-reducer handle construction
+	// avoids a registry lookup on every dispatch.
+	schedTableID schema.TableID
+	// schedSeq allocates monotonic ScheduleIDs across reducer
+	// transactions. Rollback produces gaps, matching Postgres
+	// sequence semantics. Story 6.5 resets this from the max existing
+	// schedule_id at startup so replayed schedules keep their IDs.
+	schedSeq   *store.Sequence
 	durability DurabilityHandle
 	subs       SubscriptionManager
 	// snapshotFn acquires the committed read view used by post-commit
@@ -65,17 +73,22 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 	if subs == nil {
 		subs = noopSubs{}
 	}
+	schedTS, ok := SysScheduledTable(schemaReg)
+	if !ok {
+		panic("executor: sys_scheduled is not registered; every schema.Build call must register system tables")
+	}
 	e := &Executor{
-		inbox:      make(chan ExecutorCommand, cap),
-		registry:   reg,
-		committed:  cs,
-		schemaReg:  schemaReg,
-		nextTxID:   recoveredTxID + 1,
-		rejectMode: cfg.RejectOnFull,
-		scheduler:  noopScheduler{},
-		durability: dur,
-		subs:       subs,
-		done:       make(chan struct{}),
+		inbox:        make(chan ExecutorCommand, cap),
+		registry:     reg,
+		committed:    cs,
+		schemaReg:    schemaReg,
+		nextTxID:     recoveredTxID + 1,
+		rejectMode:   cfg.RejectOnFull,
+		schedTableID: schedTS.ID,
+		schedSeq:     store.NewSequence(),
+		durability:   dur,
+		subs:         subs,
+		done:         make(chan struct{}),
 	}
 	e.snapshotFn = func() store.CommittedReadView { return e.committed.Snapshot() }
 	return e
@@ -218,7 +231,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		ReducerName: req.ReducerName,
 		Caller:      caller,
 		DB:          tx,
-		Scheduler:   e.scheduler,
+		Scheduler:   e.newSchedulerHandle(tx),
 	}
 
 	// Execute with panic recovery.
@@ -351,14 +364,6 @@ func isUserCommitError(err error) bool {
 		errors.Is(err, store.ErrUniqueConstraintViolation) ||
 		errors.Is(err, store.ErrDuplicateRow)
 }
-
-type noopScheduler struct{}
-
-func (noopScheduler) Schedule(string, []byte, time.Time) (ScheduleID, error) { return 0, nil }
-func (noopScheduler) ScheduleRepeat(string, []byte, time.Duration) (ScheduleID, error) {
-	return 0, nil
-}
-func (noopScheduler) Cancel(ScheduleID) bool { return false }
 
 type noopDurability struct{}
 
