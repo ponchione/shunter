@@ -1,0 +1,76 @@
+# Story 1.2: Reducer Types
+
+**Epic:** [Epic 1 — Core Types & Command Model](EPIC.md)  
+**Spec ref:** SPEC-003 §3.1–§3.4  
+**Depends on:** Story 1.1  
+**Blocks:** Stories 1.3, Epic 2
+
+---
+
+## Summary
+
+Type definitions for the reducer runtime: handler signature, registration struct, call request/response, and execution context.
+
+## Deliverables
+
+- ```go
+  type ReducerHandler func(ctx *ReducerContext, argBSATN []byte) ([]byte, error)
+  ```
+  Byte-oriented runtime signature. SPEC-006 may wrap with typed adapters.
+
+- ```go
+  type RegisteredReducer struct {
+      Name      string
+      Handler   ReducerHandler
+      Lifecycle LifecycleKind
+  }
+  ```
+
+- ```go
+  type CallerContext struct {
+      Identity     Identity       // from SPEC-001
+      ConnectionID ConnectionID   // zero for internal callers
+      Timestamp    time.Time      // set at dequeue, not caller-provided
+  }
+  ```
+
+- ```go
+  type ReducerRequest struct {
+      ReducerName string
+      Args        []byte
+      Caller      CallerContext
+      Source      CallSource
+  }
+  ```
+
+- ```go
+  type ReducerResponse struct {
+      Status      ReducerStatus
+      Error       error
+      ReturnBSATN []byte
+      TxID        TxID
+  }
+  ```
+
+- ```go
+  type ReducerContext struct {
+      ReducerName string
+      Caller      CallerContext
+      DB          *Transaction   // from SPEC-001
+      Scheduler   SchedulerHandle
+  }
+  ```
+
+## Acceptance Criteria
+
+- [ ] ReducerHandler signature accepts `*ReducerContext` and `[]byte`, returns `([]byte, error)`
+- [ ] RegisteredReducer has Name, Handler, and Lifecycle fields
+- [ ] CallerContext.ConnectionID is zero-value for internal callers
+- [ ] ReducerResponse carries Status, Error, optional ReturnBSATN, and TxID
+- [ ] ReducerContext references Transaction and SchedulerHandle (interfaces from SPEC-001 and Story 1.4)
+
+## Design Notes
+
+- ReducerContext is valid only during synchronous reducer invocation. Enforcement is by contract, not runtime check.
+- CallerContext.Timestamp is set by the executor at dequeue time (Epic 4), not by the caller. Caller-supplied timestamps are ignored.
+- Identity and ConnectionID types come from SPEC-001. If those aren't implemented yet, use placeholder type aliases.
