@@ -1,0 +1,164 @@
+package schema
+
+import (
+	"reflect"
+	"testing"
+)
+
+type AllTypes struct {
+	A bool    `shunter:"primarykey"`
+	B int8
+	C uint8
+	D int16
+	E uint16
+	F int32
+	G uint32
+	H int64
+	I uint64
+	J float32
+	K float64
+	L string
+	M []byte
+}
+
+func TestDiscoverFieldsAllTypes(t *testing.T) {
+	fields, err := discoverFields(reflect.TypeFor[AllTypes](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 13 {
+		t.Fatalf("expected 13 fields, got %d", len(fields))
+	}
+}
+
+type BadPtr struct {
+	X *int64
+}
+
+func TestDiscoverFieldsUnsupportedType(t *testing.T) {
+	_, err := discoverFields(reflect.TypeFor[BadPtr](), "")
+	if err == nil {
+		t.Fatal("expected error for *int64 field")
+	}
+}
+
+type PlatformInt struct {
+	X int
+}
+
+func TestDiscoverFieldsPlatformInt(t *testing.T) {
+	_, err := discoverFields(reflect.TypeFor[PlatformInt](), "")
+	if err == nil {
+		t.Fatal("expected error for int field")
+	}
+}
+
+type WithUnexported struct {
+	Exported   string
+	unexported string //nolint:unused
+}
+
+func TestDiscoverFieldsSkipsUnexported(t *testing.T) {
+	fields, err := discoverFields(reflect.TypeFor[WithUnexported](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 1 {
+		t.Fatalf("expected 1 field (unexported skipped), got %d", len(fields))
+	}
+}
+
+type WithExclude struct {
+	A string
+	B string `shunter:"-"`
+}
+
+func TestDiscoverFieldsExclude(t *testing.T) {
+	fields, err := discoverFields(reflect.TypeFor[WithExclude](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 1 {
+		t.Fatalf("expected 1 field (excluded skipped), got %d", len(fields))
+	}
+}
+
+type Base struct {
+	ID uint64 `shunter:"primarykey"`
+}
+
+type WithEmbed struct {
+	Base
+	Name string
+}
+
+func TestDiscoverFieldsEmbedded(t *testing.T) {
+	fields, err := discoverFields(reflect.TypeFor[WithEmbed](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 2 {
+		t.Fatalf("expected 2 fields (embedded flattened), got %d", len(fields))
+	}
+	if fields[0].FieldName != "ID" {
+		t.Fatalf("first field should be ID from embedded struct")
+	}
+}
+
+type PtrEmbed struct {
+	*Base
+	Name string
+}
+
+func TestDiscoverFieldsEmbeddedPtrErrors(t *testing.T) {
+	_, err := discoverFields(reflect.TypeFor[PtrEmbed](), "")
+	if err == nil {
+		t.Fatal("expected error for embedded pointer-to-struct")
+	}
+}
+
+type DeepBase struct {
+	Base
+	Extra int32
+}
+type DeepEmbed struct {
+	DeepBase
+	Score int64
+}
+
+func TestDiscoverFieldsDeeplyNested(t *testing.T) {
+	fields, err := discoverFields(reflect.TypeFor[DeepEmbed](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// DeepBase.Base.ID, DeepBase.Extra, Score
+	if len(fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(fields))
+	}
+}
+
+func TestDiscoverFieldsNameOverride(t *testing.T) {
+	type T struct {
+		MyField string `shunter:"name:custom_name"`
+	}
+	fields, err := discoverFields(reflect.TypeFor[T](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fields[0].ColumnName != "custom_name" {
+		t.Fatalf("expected column name 'custom_name', got %q", fields[0].ColumnName)
+	}
+}
+
+func TestDiscoverFieldsSnakeCaseDefault(t *testing.T) {
+	type T struct {
+		PlayerID uint64
+	}
+	fields, err := discoverFields(reflect.TypeFor[T](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fields[0].ColumnName != "player_id" {
+		t.Fatalf("expected 'player_id', got %q", fields[0].ColumnName)
+	}
+}
