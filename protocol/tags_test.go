@@ -1,0 +1,39 @@
+package protocol
+
+import "testing"
+
+func TestClientTagsDistinct(t *testing.T) {
+	tags := []uint8{TagSubscribe, TagUnsubscribe, TagCallReducer, TagOneOffQuery}
+	seen := map[uint8]bool{}
+	for _, tag := range tags {
+		if seen[tag] {
+			t.Errorf("duplicate C2S tag value %d", tag)
+		}
+		seen[tag] = true
+	}
+	// Spec-pinned values (SPEC-005 §6).
+	if TagSubscribe != 1 || TagUnsubscribe != 2 || TagCallReducer != 3 || TagOneOffQuery != 4 {
+		t.Errorf("C2S tag values drifted from SPEC-005 §6")
+	}
+}
+
+func TestServerTagsDistinct(t *testing.T) {
+	tags := []uint8{
+		TagInitialConnection, TagSubscribeApplied, TagUnsubscribeApplied,
+		TagSubscriptionError, TagTransactionUpdate, TagOneOffQueryResult,
+		TagReducerCallResult,
+	}
+	seen := map[uint8]bool{}
+	for _, tag := range tags {
+		if seen[tag] {
+			t.Errorf("duplicate S2C tag value %d", tag)
+		}
+		seen[tag] = true
+	}
+	// Spec-pinned values.
+	if TagInitialConnection != 1 || TagSubscribeApplied != 2 || TagUnsubscribeApplied != 3 ||
+		TagSubscriptionError != 4 || TagTransactionUpdate != 5 || TagOneOffQueryResult != 6 ||
+		TagReducerCallResult != 7 {
+		t.Errorf("S2C tag values drifted from SPEC-005 §6")
+	}
+}
