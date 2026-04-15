@@ -21,13 +21,22 @@ import (
 //     connection. A nil error means StatusCommitted (admit); a non-nil
 //     error means any non-committed outcome (reject). Reason text is
 //     relayed only to the close frame — it is not machine-parseable.
+//   - DisconnectClientSubscriptions asks the executor to drop every
+//     subscription registered for this connection. It MUST complete
+//     before OnDisconnect is called (SPEC-005 §5.3). A non-nil error
+//     is logged and does not veto the rest of the disconnect
+//     sequence.
+//   - OnDisconnect runs the OnDisconnect lifecycle reducer and the
+//     sys_clients cleanup. A non-nil error is logged; disconnect
+//     cannot be vetoed (SPEC-003 §10.4).
 //
-// Additional methods (OnDisconnect, subscription disconnect cleanup)
-// arrive in Story 3.6 and later epics. The interface intentionally
-// stays minimal per-story so each slice lands with the smallest useful
-// shape.
+// Additional methods (subscription dispatch, call-reducer submit)
+// arrive in later epics. The interface intentionally stays minimal
+// per-story so each slice lands with the smallest useful shape.
 type ExecutorInbox interface {
 	OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
+	OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
+	DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
 }
 
 // RunLifecycle drives SPEC-005 §5.1–§5.2 admission for one connection:

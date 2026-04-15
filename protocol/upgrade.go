@@ -167,8 +167,21 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		if err := c.RunLifecycle(r.Context(), s.Executor, s.Conns); err != nil {
 			return
 		}
-		go c.runReadPump(context.Background())
-		go c.runKeepalive(context.Background())
+		// Spawn per-connection lifecycle goroutines. They outlive
+		// this HTTP handler; the supervisor invokes Disconnect when
+		// the first of them exits (peer close, idle timeout, ws
+		// error), which drives the SPEC-005 §5.3 teardown once.
+		pumpDone := make(chan struct{})
+		keepaliveDone := make(chan struct{})
+		go func() {
+			c.runReadPump(context.Background())
+			close(pumpDone)
+		}()
+		go func() {
+			c.runKeepalive(context.Background())
+			close(keepaliveDone)
+		}()
+		go c.superviseLifecycle(context.Background(), s.Executor, s.Conns, pumpDone, keepaliveDone)
 		return
 	}
 	// No Upgraded hook and no Executor wiring — close the connection

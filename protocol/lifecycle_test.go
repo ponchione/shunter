@@ -18,13 +18,24 @@ import (
 )
 
 // fakeInbox is a test double for ExecutorInbox. It records each
-// OnConnect call and returns a configurable outcome.
+// lifecycle call and returns a configurable outcome.
 type fakeInbox struct {
-	mu           sync.Mutex
+	mu sync.Mutex
+
+	// OnConnect knobs + observations.
 	onConnectErr error
 	calls        int
 	gotConnID    types.ConnectionID
 	gotIdentity  types.Identity
+
+	// Disconnect knobs + observations (Story 3.6).
+	onDisconnectErr error
+	disconnectSubsErr error
+	disconnectCalls int
+	disconnectSubsCalls int
+	// events records the order in which disconnect methods fired,
+	// so tests can assert "subs removed BEFORE OnDisconnect".
+	events []string
 }
 
 func (f *fakeInbox) OnConnect(_ context.Context, connID types.ConnectionID, identity types.Identity) error {
@@ -36,10 +47,34 @@ func (f *fakeInbox) OnConnect(_ context.Context, connID types.ConnectionID, iden
 	return f.onConnectErr
 }
 
+func (f *fakeInbox) OnDisconnect(_ context.Context, connID types.ConnectionID, _ types.Identity) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.disconnectCalls++
+	f.events = append(f.events, "OnDisconnect")
+	_ = connID
+	return f.onDisconnectErr
+}
+
+func (f *fakeInbox) DisconnectClientSubscriptions(_ context.Context, connID types.ConnectionID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.disconnectSubsCalls++
+	f.events = append(f.events, "DisconnectClientSubscriptions")
+	_ = connID
+	return f.disconnectSubsErr
+}
+
 func (f *fakeInbox) snapshot() (int, types.ConnectionID, types.Identity) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls, f.gotConnID, f.gotIdentity
+}
+
+func (f *fakeInbox) disconnectSnapshot() (onDis, onSubs int, events []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.disconnectCalls, f.disconnectSubsCalls, append([]string{}, f.events...)
 }
 
 // lifecycleServer returns a Server configured for strict auth + the
