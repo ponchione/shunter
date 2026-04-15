@@ -160,9 +160,15 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 			&s.Options,
 		)
 		// RunLifecycle closes the socket on its own failure paths; on
-		// success it leaves the socket open for the Epic 4 read/write
-		// loops and Story 3.5 keep-alive goroutine.
-		_ = c.RunLifecycle(r.Context(), s.Executor, s.Conns)
+		// success it leaves the socket open for the background
+		// goroutines below. Story 3.6 (Disconnect) closes c.closed,
+		// unblocking them all; until 3.6 lands, the goroutines exit
+		// naturally on ws error when the peer closes.
+		if err := c.RunLifecycle(r.Context(), s.Executor, s.Conns); err != nil {
+			return
+		}
+		go c.runReadPump(context.Background())
+		go c.runKeepalive(context.Background())
 		return
 	}
 	// No Upgraded hook and no Executor wiring — close the connection

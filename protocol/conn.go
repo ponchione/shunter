@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -133,6 +135,13 @@ type Conn struct {
 
 	closeOnce sync.Once
 	closed    chan struct{}
+
+	// lastActivity is the unix-nanos timestamp of the most recent
+	// inbound signal observed on this connection: a Pong reply to
+	// the keep-alive Ping (Story 3.5) or any application-level frame
+	// received by the read loop (Epic 4). The keep-alive goroutine
+	// samples this to decide if IdleTimeout has expired.
+	lastActivity atomic.Int64
 }
 
 // NewConn constructs a per-connection state with its outbound queue
@@ -147,7 +156,7 @@ func NewConn(
 	ws *websocket.Conn,
 	opts *ProtocolOptions,
 ) *Conn {
-	return &Conn{
+	c := &Conn{
 		ID:            id,
 		Identity:      identity,
 		Token:         token,
@@ -158,6 +167,17 @@ func NewConn(
 		opts:          opts,
 		closed:        make(chan struct{}),
 	}
+	c.MarkActivity()
+	return c
+}
+
+// MarkActivity records that an inbound signal was observed on this
+// connection. The Story 3.5 keep-alive loop calls it on every
+// successful Ping-and-Pong round-trip; the Epic 4 read loop will call
+// it on every inbound application frame. SPEC-005 §5.4: the idle
+// timer resets on any received data, not only Pongs.
+func (c *Conn) MarkActivity() {
+	c.lastActivity.Store(time.Now().UnixNano())
 }
 
 // ConnManager tracks all currently active connections by
