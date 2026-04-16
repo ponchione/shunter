@@ -169,6 +169,8 @@ Returns:
 - `[]byte`: optional BSATN-encoded reducer return value; nil means no return payload
 - `error`: aborts the transaction if non-nil
 
+"BSATN" is the binary encoding defined in SPEC-002 §3.3; the name is non-standard and not byte-compatible with SpacetimeDB's `bsatn` crate — see the canonical disclaimer in **SPEC-002 §3.1**.
+
 SPEC-006 may provide typed registration helpers that decode arguments into Go structs and re-encode return values, but the executor runtime contract is byte-oriented and fully specified here. Typed adapters are out of scope for v1 (SPEC-006 §4.3). The sentinel for typed-adapter argument-decode failures, reserved as `ErrReducerArgsDecode`, is owned by SPEC-006 rather than SPEC-003. SPEC-003 classifies any non-nil error returned by a `ReducerHandler` as `StatusFailedUser` (§11) regardless of sentinel identity; a future typed adapter does not require a dedicated executor-level catalog entry.
 
 ### 3.2 Reducer Registration

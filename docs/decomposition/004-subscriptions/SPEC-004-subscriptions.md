@@ -266,6 +266,8 @@ A subscription touching two tables may appear in different tiers for each table.
 
 ## 6. Delta Computation — Incremental View Maintenance
 
+> **Row-payload encoding.** `ProductValue` rows computed here are serialized to wire bytes by the protocol layer (SPEC-005) using BSATN as defined in SPEC-002 §3.3. The name "BSATN" is borrowed from SpacetimeDB and is non-standard; see the canonical disclaimer in **SPEC-002 §3.1**. SPEC-004 never touches BSATN bytes directly — it operates on decoded `ProductValue`.
+
 ### 6.1 Single-Table Subscriptions
 
 For a subscription `V = filter(T)` on one table:

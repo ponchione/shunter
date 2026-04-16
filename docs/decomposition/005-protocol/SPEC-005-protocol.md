@@ -71,6 +71,8 @@ GET /subscribe?token=<jwt>
 
 All messages are serialized using BSATN (the binary encoding defined in SPEC-002 §3.3). Each WebSocket frame payload contains exactly one complete message, length-delimited by the WebSocket frame header. No additional length prefix on the message itself.
 
+> **Naming.** "BSATN" is a name imported from SpacetimeDB's `bsatn` crate; it is not a standard encoding format and the Shunter encoding is not byte-compatible with SpacetimeDB's. See the canonical disclaimer in **SPEC-002 §3.1**.
+
 ### 3.2 Message Framing
 
 Each message begins with a 1-byte **message type tag**, followed by the BSATN-encoded message body. The tag identifies the message type and determines how to decode the body.

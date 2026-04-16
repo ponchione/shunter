@@ -106,6 +106,8 @@ Written as 4 bytes, little-endian, immediately after the payload.
 
 **Recommendation:** Use a simple length-prefixed binary encoding of `Changeset`. Not protobuf (adds a dependency), not JSON (too large). A custom encoding with explicit version byte, matching the simplicity of the log format.
 
+**BSATN naming disclaimer (canonical).** "BSATN" = "Binary SpacetimeDB Algebraic Type Notation" — the acronym is borrowed verbatim from SpacetimeDB's `bsatn` crate. It is **not** a standard encoding format (distinct from MessagePack / CBOR / Protobuf / Postcard). Shunter's BSATN is a clean-room rewrite per `CLAUDE.md`: own tag numbering (0–12 for 13 scalars, see §3.3), no Sum / Array / nested-Product types, Shunter-specific framing. The encoding is of the same family as SpacetimeDB's BSATN but is **not byte-compatible** — no wire interoperability is intended, and no Rust source was copied. All other specs MUST point to this subsection rather than re-describe the name.
+
 ### 3.2 Payload Structure
 
 ```
@@ -130,7 +132,7 @@ Lengths are always little-endian `uint32`. No padding between fields. `row_len` 
 
 ### 3.3 ProductValue Encoding (BSATN Codec — canonical reference)
 
-> **Canonical reference:** This section defines the BSATN binary encoding used throughout Shunter. Both the commit log payload (§3.2) and the client wire protocol (SPEC-005 §3.1) use this encoding. When implementing the `bsatn` package, use this section as the sole source of truth. SPEC-001 and SPEC-005 cross-reference `SPEC-002 §3.3`.
+> **Canonical reference:** This section defines the BSATN binary encoding used throughout Shunter. Both the commit log payload (§3.2) and the client wire protocol (SPEC-005 §3.1) use this encoding. When implementing the `bsatn` package, use this section as the sole source of truth. SPEC-001 and SPEC-005 cross-reference `SPEC-002 §3.3`. The name "BSATN" is non-standard — see the disclaimer in §3.1.
 
 Each `ProductValue` (a row) is encoded as its column values in schema-defined column order:
 

@@ -34,6 +34,10 @@ This spec does not cover:
 
 Cross-spec engine identifier types (`RowID`, `Identity`, `ConnectionID`, `TxID`, `ColID`, `SubscriptionID`, `ScheduleID`) and the reducer runtime types (`ReducerHandler`, `ReducerContext`, `CallerContext`, `ReducerDB`, `ReducerScheduler`) are declared in the `types/` Go package — see SPEC-001 §1.1 and SPEC-003 §3.1. The `schema/` package re-exports `ReducerHandler`, `ReducerContext`, and `ValueKind` for ergonomic builder / registration call sites; those re-exports are not new declarations. If a future typed reducer layer (SPEC-006 §4.3) lands, it must reserve the sentinel name `ErrReducerArgsDecode` in §13 and live in `schema/` — but it, too, operates on the `types/`-declared handler signature.
 
+### 1.2 Wire encoding terminology
+
+Reducer arguments (`argBSATN []byte` in §4.3) and return values travel as BSATN bytes. BSATN is the binary encoding defined in SPEC-002 §3.3; the name is imported from SpacetimeDB and is non-standard — see the canonical disclaimer in **SPEC-002 §3.1**. SPEC-006 does not encode or decode BSATN itself; it only declares the byte-oriented handler surface.
+
 ---
 
 ## 2. Go Type Mapping
