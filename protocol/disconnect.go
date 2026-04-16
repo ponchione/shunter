@@ -61,6 +61,8 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 // before returning.
 func (c *Conn) superviseLifecycle(
 	ctx context.Context,
+	code websocket.StatusCode,
+	reason string,
 	inbox ExecutorInbox,
 	mgr *ConnManager,
 	dispatchDone <-chan struct{},
@@ -70,7 +72,7 @@ func (c *Conn) superviseLifecycle(
 	case <-dispatchDone:
 	case <-keepaliveDone:
 	}
-	c.Disconnect(ctx, websocket.StatusNormalClosure, "", inbox, mgr)
+	c.Disconnect(ctx, code, reason, inbox, mgr)
 	<-dispatchDone
 	<-keepaliveDone
 }

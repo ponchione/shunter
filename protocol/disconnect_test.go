@@ -146,7 +146,7 @@ func TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit(t *testing.T) {
 
 	supervised := make(chan struct{})
 	go func() {
-		c.superviseLifecycle(context.Background(), inbox, mgr, pumpDone, kaDone)
+		c.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, pumpDone, kaDone)
 		close(supervised)
 	}()
 

@@ -8,6 +8,45 @@ import (
 	"github.com/coder/websocket"
 )
 
+func TestClientInitiatedClose_DisconnectSequenceRuns(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.PingInterval = 2 * time.Second
+	opts.IdleTimeout = 4 * time.Second
+	conn, clientWS, cleanup := loopbackConn(t, opts)
+	defer cleanup()
+
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	mgr.Add(conn)
+
+	handlers := &MessageHandlers{}
+	dispatchDone := runDispatchAsync(conn, context.Background(), handlers)
+	keepaliveDone := runKeepaliveAsync(conn, context.Background())
+
+	supervised := make(chan struct{})
+	go func() {
+		conn.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, dispatchDone, keepaliveDone)
+		close(supervised)
+	}()
+
+	// Client sends Close.
+	_ = clientWS.Close(websocket.StatusNormalClosure, "bye")
+
+	select {
+	case <-supervised:
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not complete after client close")
+	}
+
+	onDis, onSubs, _ := inbox.disconnectSnapshot()
+	if onDis != 1 {
+		t.Errorf("OnDisconnect calls = %d, want 1", onDis)
+	}
+	if onSubs != 1 {
+		t.Errorf("DisconnectClientSubscriptions calls = %d, want 1", onSubs)
+	}
+}
+
 func TestCloseConstants(t *testing.T) {
 	tests := []struct {
 		name string
