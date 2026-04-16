@@ -91,6 +91,14 @@ func (t *SubscriptionTracker) IsActive(id uint32) bool {
 	return ok && st == SubActive
 }
 
+// IsPending reports whether id is tracked and in the SubPending state.
+func (t *SubscriptionTracker) IsPending(id uint32) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	st, ok := t.subs[id]
+	return ok && st == SubPending
+}
+
 // IsActiveOrPending reports whether id is currently tracked.
 func (t *SubscriptionTracker) IsActiveOrPending(id uint32) bool {
 	t.mu.Lock()
@@ -138,6 +146,11 @@ type Conn struct {
 	// fullness of this channel to decide between enqueue and close.
 	OutboundCh chan []byte
 
+	// inflightSem limits concurrent in-flight inbound messages.
+	// Capacity is IncomingQueueMessages. The dispatch loop acquires
+	// before handler dispatch and the handler releases on completion.
+	inflightSem chan struct{}
+
 	ws   *websocket.Conn
 	opts *ProtocolOptions
 
@@ -171,6 +184,7 @@ func NewConn(
 		Compression:   compression,
 		Subscriptions: NewSubscriptionTracker(),
 		OutboundCh:    make(chan []byte, opts.OutgoingBufferMessages),
+		inflightSem:   make(chan struct{}, opts.IncomingQueueMessages),
 		ws:            ws,
 		opts:          opts,
 		closed:        make(chan struct{}),

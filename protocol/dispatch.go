@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"errors"
 	"log"
 
 	"github.com/coder/websocket"
@@ -40,6 +39,7 @@ func sendError(conn *Conn, msg any) {
 // (protocol error). Runs in a goroutine because coder/websocket.Close
 // blocks on the close handshake.
 func closeProtocolError(conn *Conn, reason string) {
+	log.Printf("protocol: closing conn %x with protocol error: %s", conn.ID[:], reason)
 	go func() {
 		_ = conn.ws.Close(websocket.StatusProtocolError, truncateCloseReason(reason))
 	}()
@@ -91,11 +91,21 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 
 		_, msg, decodeErr := DecodeClientMessage(frame)
 		if decodeErr != nil {
-			reason := "malformed message"
-			if errors.Is(decodeErr, ErrUnknownMessageTag) {
-				reason = "unknown message tag"
-			}
+			reason := decodeErr.Error()
 			closeProtocolError(c, reason)
+			return
+		}
+
+		// Incoming backpressure (SPEC-005 §10.2, Story 6.2):
+		// non-blocking acquire on the inflight semaphore. If full,
+		// the client is flooding faster than we can process —
+		// close with 1008.
+		select {
+		case c.inflightSem <- struct{}{}:
+		default:
+			go func() {
+				_ = c.ws.Close(websocket.StatusPolicyViolation, "too many requests")
+			}()
 			return
 		}
 
@@ -105,25 +115,37 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			handlers.OnSubscribe(ctx, c, &m)
+			go func() {
+				defer func() { <-c.inflightSem }()
+				handlers.OnSubscribe(ctx, c, &m)
+			}()
 		case UnsubscribeMsg:
 			if handlers.OnUnsubscribe == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			handlers.OnUnsubscribe(ctx, c, &m)
+			go func() {
+				defer func() { <-c.inflightSem }()
+				handlers.OnUnsubscribe(ctx, c, &m)
+			}()
 		case CallReducerMsg:
 			if handlers.OnCallReducer == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			handlers.OnCallReducer(ctx, c, &m)
+			go func() {
+				defer func() { <-c.inflightSem }()
+				handlers.OnCallReducer(ctx, c, &m)
+			}()
 		case OneOffQueryMsg:
 			if handlers.OnOneOffQuery == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			handlers.OnOneOffQuery(ctx, c, &m)
+			go func() {
+				defer func() { <-c.inflightSem }()
+				handlers.OnOneOffQuery(ctx, c, &m)
+			}()
 		}
 	}
 }
