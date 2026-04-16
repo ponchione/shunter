@@ -1,0 +1,77 @@
+package protocol
+
+import (
+	"errors"
+	"fmt"
+
+	"github.com/ponchione/shunter/types"
+)
+
+// ErrClientBufferFull is returned when a non-blocking send to a
+// connection's OutboundCh finds the channel full. The caller should
+// trigger a disconnect (Epic 6).
+var ErrClientBufferFull = errors.New("protocol: client outbound buffer full")
+
+// ErrConnNotFound is returned when the target ConnectionID is not in
+// the ConnManager (client disconnected between evaluation and delivery).
+var ErrConnNotFound = errors.New("protocol: connection not found")
+
+// ClientSender is the cross-subsystem contract for delivering server
+// messages to connected clients (SPEC-005 §13). The fan-out worker
+// (SPEC-004 E6) and executor response paths call these methods.
+type ClientSender interface {
+	// Send encodes msg and enqueues the frame on the connection's
+	// outbound channel. Used for direct response messages
+	// (SubscribeApplied, UnsubscribeApplied, SubscriptionError,
+	// OneOffQueryResult).
+	Send(connID types.ConnectionID, msg any) error
+	// SendTransactionUpdate delivers a TransactionUpdate to one connection.
+	SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error
+	// SendReducerResult delivers a ReducerCallResult to the calling connection.
+	SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error
+}
+
+// NewClientSender returns a ClientSender backed by mgr for connection
+// lookup and frame delivery.
+func NewClientSender(mgr *ConnManager) ClientSender {
+	return &connManagerSender{mgr: mgr}
+}
+
+type connManagerSender struct {
+	mgr *ConnManager
+}
+
+func (s *connManagerSender) Send(connID types.ConnectionID, msg any) error {
+	return s.enqueue(connID, msg)
+}
+
+func (s *connManagerSender) SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error {
+	return s.enqueue(connID, *update)
+}
+
+func (s *connManagerSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
+	return s.enqueue(connID, *result)
+}
+
+// enqueue encodes msg, wraps it in the connection's compression
+// envelope, and does a non-blocking send to OutboundCh.
+func (s *connManagerSender) enqueue(connID types.ConnectionID, msg any) error {
+	conn := s.mgr.Get(connID)
+	if conn == nil {
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	}
+
+	frame, err := EncodeServerMessage(msg)
+	if err != nil {
+		return fmt.Errorf("encode server message: %w", err)
+	}
+
+	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, CompressionNone)
+
+	select {
+	case conn.OutboundCh <- wrapped:
+		return nil
+	default:
+		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
+	}
+}
