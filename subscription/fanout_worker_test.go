@@ -239,3 +239,118 @@ func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
 		t.Fatalf("txCalls = %d, want 0 (failed reducer, no standalone delivery)", len(mock.txCalls))
 	}
 }
+
+func TestFanOutWorker_BufferFull_DropsClient(t *testing.T) {
+	mock := &mockFanOutSender{sendErr: ErrSendBufferFull}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	conn1 := cid(1)
+	inbox <- FanOutMessage{
+		TxID: types.TxID(1),
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 1, TableName: "t1"}},
+		},
+	}
+
+	select {
+	case id := <-dropped:
+		if id != conn1 {
+			t.Fatalf("dropped = %x, want %x", id[:], conn1[:])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no dropped client signal")
+	}
+}
+
+func TestFanOutWorker_ConnGone_Silent(t *testing.T) {
+	mock := &mockFanOutSender{sendErr: ErrSendConnGone}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	inbox <- FanOutMessage{
+		TxID: types.TxID(1),
+		Fanout: CommitFanout{
+			cid(1): {{SubscriptionID: 1, TableName: "t1"}},
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case id := <-dropped:
+		t.Fatalf("unexpected dropped signal: %x", id[:])
+	default:
+	}
+}
+
+func TestFanOutWorker_MultipleSlowClients(t *testing.T) {
+	failConn := cid(2)
+	sender := &selectiveFailSender{fail: failConn}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, sender, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	inbox <- FanOutMessage{
+		TxID: types.TxID(1),
+		Fanout: CommitFanout{
+			cid(1):   {{SubscriptionID: 1, TableName: "t1"}},
+			failConn: {{SubscriptionID: 2, TableName: "t1"}},
+			cid(3):   {{SubscriptionID: 3, TableName: "t1"}},
+		},
+	}
+
+	select {
+	case id := <-dropped:
+		if id != failConn {
+			t.Fatalf("dropped = %x, want %x", id[:], failConn[:])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no dropped client signal")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+	if sender.okCount < 2 {
+		t.Fatalf("okCount = %d, want >= 2", sender.okCount)
+	}
+}
+
+// selectiveFailSender fails with ErrSendBufferFull for a specific connID.
+type selectiveFailSender struct {
+	mu      sync.Mutex
+	fail    types.ConnectionID
+	okCount int
+}
+
+func (s *selectiveFailSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if connID == s.fail {
+		return ErrSendBufferFull
+	}
+	s.okCount++
+	return nil
+}
+func (s *selectiveFailSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
+	return nil
+}
+func (s *selectiveFailSender) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {
+	return nil
+}
