@@ -135,3 +135,107 @@ func TestFanOutWorker_ClosedInbox(t *testing.T) {
 		t.Fatal("worker did not exit on closed inbox")
 	}
 }
+
+func TestFanOutWorker_CallerDiversion(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	caller, other := cid(1), cid(2)
+	callerResult := &ReducerCallResult{
+		RequestID: 7,
+		Status:    0,
+		TxID:      types.TxID(20),
+	}
+	inbox <- FanOutMessage{
+		TxID: types.TxID(20),
+		Fanout: CommitFanout{
+			caller: {{SubscriptionID: 1, TableName: "t1", Inserts: []types.ProductValue{{types.NewUint32(10)}}}},
+			other:  {{SubscriptionID: 2, TableName: "t1", Inserts: []types.ProductValue{{types.NewUint32(20)}}}},
+		},
+		CallerConnID: &caller,
+		CallerResult: callerResult,
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+
+	// Caller gets ReducerCallResult, not TransactionUpdate.
+	if len(mock.resCalls) != 1 {
+		t.Fatalf("resCalls = %d, want 1", len(mock.resCalls))
+	}
+	if mock.resCalls[0].ConnID != caller {
+		t.Fatalf("caller connID mismatch")
+	}
+	if mock.resCalls[0].Result.RequestID != 7 {
+		t.Fatalf("RequestID = %d, want 7", mock.resCalls[0].Result.RequestID)
+	}
+	// Caller's updates embedded in the result
+	if len(mock.resCalls[0].Result.TransactionUpdate) != 1 {
+		t.Fatalf("caller TransactionUpdate len = %d, want 1", len(mock.resCalls[0].Result.TransactionUpdate))
+	}
+
+	// Other connection gets standalone TransactionUpdate.
+	if len(mock.txCalls) != 1 {
+		t.Fatalf("txCalls = %d, want 1", len(mock.txCalls))
+	}
+	if mock.txCalls[0].ConnID != other {
+		t.Fatalf("non-caller connID mismatch")
+	}
+}
+
+func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	caller := cid(1)
+	callerResult := &ReducerCallResult{
+		RequestID: 3,
+		Status:    1, // failed
+		TxID:      types.TxID(30),
+		Error:     "panic in reducer",
+	}
+	inbox <- FanOutMessage{
+		TxID: types.TxID(30),
+		Fanout: CommitFanout{
+			caller: {{SubscriptionID: 1, TableName: "t1"}},
+		},
+		CallerConnID: &caller,
+		CallerResult: callerResult,
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+
+	if len(mock.resCalls) != 1 {
+		t.Fatalf("resCalls = %d, want 1", len(mock.resCalls))
+	}
+	// Failed status: result delivered with error, no TransactionUpdate embedded.
+	if mock.resCalls[0].Result.Status != 1 {
+		t.Fatalf("Status = %d, want 1", mock.resCalls[0].Result.Status)
+	}
+	if mock.resCalls[0].Result.TransactionUpdate != nil {
+		t.Fatalf("TransactionUpdate should be nil for failed status")
+	}
+	// Caller NOT in txCalls.
+	if len(mock.txCalls) != 0 {
+		t.Fatalf("txCalls = %d, want 0 (failed reducer, no standalone delivery)", len(mock.txCalls))
+	}
+}

@@ -64,10 +64,31 @@ func (w *FanOutWorker) Run(ctx context.Context) {
 }
 
 func (w *FanOutWorker) deliver(msg FanOutMessage) {
-	// Deliver standalone TransactionUpdate to all connections.
+	// Extract caller if present — must happen before iterating fanout
+	// so caller does NOT receive a standalone TransactionUpdate.
+	var callerUpdates []SubscriptionUpdate
+	if msg.CallerConnID != nil {
+		callerUpdates = msg.Fanout[*msg.CallerConnID]
+		delete(msg.Fanout, *msg.CallerConnID)
+	}
+
+	// Deliver standalone TransactionUpdate to non-caller connections.
 	for connID, updates := range msg.Fanout {
 		if err := w.sender.SendTransactionUpdate(connID, msg.TxID, updates); err != nil {
 			w.handleSendError(connID, err)
+		}
+	}
+
+	// Deliver ReducerCallResult to caller.
+	if msg.CallerConnID != nil && msg.CallerResult != nil {
+		result := *msg.CallerResult
+		if result.Status == 0 {
+			result.TransactionUpdate = callerUpdates
+		} else {
+			result.TransactionUpdate = nil
+		}
+		if err := w.sender.SendReducerResult(*msg.CallerConnID, &result); err != nil {
+			w.handleSendError(*msg.CallerConnID, err)
 		}
 	}
 }
