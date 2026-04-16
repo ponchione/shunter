@@ -25,7 +25,7 @@ type ReducerDB interface {
 type ReducerScheduler interface {
 	Schedule(reducerName string, args []byte, at time.Time) (ScheduleID, error)
 	ScheduleRepeat(reducerName string, args []byte, interval time.Duration) (ScheduleID, error)
-	Cancel(id ScheduleID) bool
+	Cancel(id ScheduleID) (bool, error)
 }
 
 // ReducerHandler is the raw runtime signature for all reducers.

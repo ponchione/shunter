@@ -2,7 +2,9 @@ package store
 
 import (
 	"errors"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -331,6 +333,40 @@ func TestSnapshotBlocksCommitUntilClose(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestLeakedSnapshotEventuallyStopsBlockingCommitAfterGC(t *testing.T) {
+	cs, reg := buildTestState()
+	func() {
+		_ = cs.Snapshot()
+	}()
+
+	tx := NewTransaction(cs, reg)
+	if _, err := tx.Insert(0, mkRow(1, "alice")); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Commit(cs, tx)
+		done <- err
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		runtime.Gosched()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		default:
+		}
+	}
+
+	t.Fatal("commit remained blocked after leaked snapshot became unreachable and GC ran")
 }
 
 func TestTableInsertDetachesFromCaller(t *testing.T) {

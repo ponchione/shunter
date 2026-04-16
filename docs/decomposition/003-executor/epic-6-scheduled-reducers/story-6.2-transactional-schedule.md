@@ -39,10 +39,12 @@ SchedulerHandle implementation: Schedule, ScheduleRepeat, and Cancel as transact
     - `repeat_ns` = interval.Nanoseconds()
 
 - ```go
-  func (h *schedulerHandle) Cancel(id ScheduleID) bool
+  func (h *schedulerHandle) Cancel(id ScheduleID) (bool, error)
   ```
   - Delete row from `sys_scheduled` where `schedule_id = id`
-  - Return true if row existed and was deleted
+  - Return `(true, nil)` if the row existed and was deleted
+  - Return `(false, nil)` if the schedule was not found
+  - Return `(false, err)` if a matching row was found but delete failed
 
 - Transactional guarantee: since all operations go through `h.tx`, if the surrounding reducer rolls back, these mutations are discarded.
 
@@ -50,8 +52,9 @@ SchedulerHandle implementation: Schedule, ScheduleRepeat, and Cancel as transact
 
 - [ ] Schedule inserts row with correct fields, returns ScheduleID
 - [ ] ScheduleRepeat inserts row with repeat_ns > 0
-- [ ] Cancel deletes row, returns true
-- [ ] Cancel non-existent ID returns false
+- [ ] Cancel deletes row, returns `(true, nil)`
+- [ ] Cancel non-existent ID returns `(false, nil)`
+- [ ] Cancel delete failure returns non-nil error without collapsing into “not found”
 - [ ] Reducer rollback → schedule insert discarded
 - [ ] Reducer rollback → cancel reverted (row still present)
 - [ ] ScheduleID is autoincremented by sys_scheduled's sequence

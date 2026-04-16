@@ -109,19 +109,20 @@ func (h *schedulerHandle) insertSchedule(reducerName string, args []byte, nextRu
 	return id, nil
 }
 
-// Cancel removes the schedule row for id. Returns true if a row was
-// found and marked for deletion. v1 scans the table; sys_scheduled is
-// expected to be small.
-func (h *schedulerHandle) Cancel(id ScheduleID) bool {
+// Cancel removes the schedule row for id. Returns (true, nil) if a row was
+// found and marked for deletion, (false, nil) if no row matched, and a
+// non-nil error if the delete failed after a matching row was found.
+// v1 scans the table; sys_scheduled is expected to be small.
+func (h *schedulerHandle) Cancel(id ScheduleID) (bool, error) {
 	target := uint64(id)
 	for rowID, row := range h.tx.ScanTable(h.tableID) {
 		if row[SysScheduledColScheduleID].AsUint64() != target {
 			continue
 		}
-		if err := h.tx.Delete(h.tableID, rowID); err == nil {
-			return true
+		if err := h.tx.Delete(h.tableID, rowID); err != nil {
+			return false, err
 		}
-		return false
+		return true, nil
 	}
-	return false
+	return false, nil
 }

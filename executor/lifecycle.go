@@ -162,6 +162,8 @@ func (e *Executor) runLifecycleReducer(
 // the case where OnConnect never successfully inserted (e.g. auth failure
 // followed by a belt-and-suspenders disconnect from the protocol layer).
 func deleteSysClientsRow(tx *store.Transaction, sysID schema.TableID, conn types.ConnectionID) error {
+	var targetRowID types.RowID
+	found := false
 	for rowID, row := range tx.ScanTable(sysID) {
 		if int(SysClientsColConnectionID) >= len(row) {
 			continue
@@ -169,7 +171,12 @@ func deleteSysClientsRow(tx *store.Transaction, sysID schema.TableID, conn types
 		if !bytes.Equal(row[SysClientsColConnectionID].AsBytes(), conn[:]) {
 			continue
 		}
-		return tx.Delete(sysID, rowID)
+		targetRowID = rowID
+		found = true
+		break
+	}
+	if found {
+		return tx.Delete(sysID, targetRowID)
 	}
 	return nil
 }

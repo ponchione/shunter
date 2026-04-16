@@ -43,7 +43,7 @@ Interfaces the executor consumes from other subsystems: durability, subscription
   type SchedulerHandle interface {
       Schedule(reducerName string, args []byte, at time.Time) (ScheduleID, error)
       ScheduleRepeat(reducerName string, args []byte, interval time.Duration) (ScheduleID, error)
-      Cancel(id ScheduleID) bool
+      Cancel(id ScheduleID) (bool, error)
   }
   ```
   - Operations are transactional — roll back with surrounding reducer

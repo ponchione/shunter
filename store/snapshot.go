@@ -2,13 +2,21 @@ package store
 
 import (
 	"iter"
+	"log"
+	"runtime"
+	"sync"
+	"sync/atomic"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
 // CommittedReadView is a read-only point-in-time snapshot.
-// Close() must be called when done to release the read lock.
+// Close() must be called promptly when done to release the read lock.
+// While a snapshot remains open, commits block on the CommittedState write
+// lock. A leaked snapshot can therefore stall all commits until it is closed.
+// v1 installs a best-effort finalizer to mitigate unreachable leaks, but that
+// is only a last resort after GC runs — callers must still close explicitly.
 type CommittedReadView interface {
 	TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue]
 	IndexScan(tableID schema.TableID, indexID schema.IndexID, value types.Value) iter.Seq2[types.RowID, types.ProductValue]
@@ -21,20 +29,38 @@ type CommittedReadView interface {
 
 // CommittedSnapshot holds a read lock on CommittedState.
 type CommittedSnapshot struct {
-	cs     *CommittedState
-	closed bool
+	cs        *CommittedState
+	closed    atomic.Bool
+	closeOnce sync.Once
 }
 
 // Snapshot acquires a read lock and returns a point-in-time view.
 func (cs *CommittedState) Snapshot() *CommittedSnapshot {
 	cs.RLock()
-	return &CommittedSnapshot{cs: cs}
+	s := &CommittedSnapshot{cs: cs}
+	runtime.SetFinalizer(s, finalizeCommittedSnapshot)
+	return s
 }
 
 func (s *CommittedSnapshot) ensureOpen() {
-	if s.closed {
+	if s.closed.Load() {
 		panic("store: CommittedSnapshot used after Close")
 	}
+}
+
+func finalizeCommittedSnapshot(s *CommittedSnapshot) {
+	log.Printf("store: leaked CommittedSnapshot finalized without Close(); commits may have been blocked until GC")
+	s.close(true)
+}
+
+func (s *CommittedSnapshot) close(fromFinalizer bool) {
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		if !fromFinalizer {
+			runtime.SetFinalizer(s, nil)
+		}
+		s.cs.RUnlock()
+	})
 }
 
 func (s *CommittedSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
@@ -154,8 +180,5 @@ func (s *CommittedSnapshot) RowCount(tableID schema.TableID) int {
 }
 
 func (s *CommittedSnapshot) Close() {
-	if !s.closed {
-		s.cs.RUnlock()
-		s.closed = true
-	}
+	s.close(false)
 }

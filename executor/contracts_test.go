@@ -111,7 +111,7 @@ func TestReducerContractsMatchPhase1dSpec(t *testing.T) {
 		t.Fatalf("ReducerResponse fields incorrect: %+v", response)
 	}
 	_, _ = ctx.DB.Insert(0, nil)
-	_ = ctx.Scheduler.Cancel(1)
+	_, _ = ctx.Scheduler.Cancel(1)
 }
 
 func TestSchedulerHandleMinimalContract(t *testing.T) {
@@ -124,7 +124,11 @@ func TestSchedulerHandleMinimalContract(t *testing.T) {
 	if err != nil || id != 2 {
 		t.Fatalf("ScheduleRepeat() = (%d, %v), want (2, nil)", id, err)
 	}
-	if !scheduler.Cancel(2) {
+	deleted, err := scheduler.Cancel(2)
+	if err != nil {
+		t.Fatalf("Cancel() error = %v, want nil", err)
+	}
+	if !deleted {
 		t.Fatal("Cancel() should return true")
 	}
 }
@@ -222,7 +226,7 @@ func (stubReducerScheduler) Schedule(string, []byte, time.Time) (types.ScheduleI
 func (stubReducerScheduler) ScheduleRepeat(string, []byte, time.Duration) (types.ScheduleID, error) {
 	return 2, nil
 }
-func (stubReducerScheduler) Cancel(types.ScheduleID) bool { return true }
+func (stubReducerScheduler) Cancel(types.ScheduleID) (bool, error) { return true, nil }
 
 type stubScheduler struct{}
 
@@ -230,7 +234,7 @@ func (stubScheduler) Schedule(string, []byte, time.Time) (types.ScheduleID, erro
 func (stubScheduler) ScheduleRepeat(string, []byte, time.Duration) (types.ScheduleID, error) {
 	return 2, nil
 }
-func (stubScheduler) Cancel(types.ScheduleID) bool { return true }
+func (stubScheduler) Cancel(types.ScheduleID) (bool, error) { return true, nil }
 
 type stubDurability struct{}
 

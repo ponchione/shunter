@@ -139,7 +139,11 @@ func TestSchedulerHandleCancelDeletesTxLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !h.Cancel(id) {
+	deleted, err := h.Cancel(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
 		t.Fatal("Cancel should return true for existing schedule")
 	}
 
@@ -153,7 +157,11 @@ func TestSchedulerHandleCancelDeletesTxLocal(t *testing.T) {
 
 func TestSchedulerHandleCancelMissing(t *testing.T) {
 	_, h, _ := setupScheduler(t)
-	if h.Cancel(ScheduleID(9999)) {
+	deleted, err := h.Cancel(ScheduleID(9999))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted {
 		t.Fatal("Cancel of missing id should return false")
 	}
 }

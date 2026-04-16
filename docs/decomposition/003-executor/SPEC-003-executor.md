@@ -536,7 +536,7 @@ The in-memory scheduler is only a cache of future wakeups. `sys_scheduled` is th
 type SchedulerHandle interface {
     Schedule(reducerName string, args []byte, at time.Time) (ScheduleID, error)
     ScheduleRepeat(reducerName string, args []byte, interval time.Duration) (ScheduleID, error)
-    Cancel(id ScheduleID) bool
+    Cancel(id ScheduleID) (bool, error)
 }
 ```
 

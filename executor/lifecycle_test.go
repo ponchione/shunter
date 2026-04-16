@@ -333,6 +333,31 @@ func TestOnDisconnectDeletesRowNoReducer(t *testing.T) {
 	}
 }
 
+func TestOnDisconnectDeletesOnlyMatchingSysClientsRow(t *testing.T) {
+	h := newLifecycleHarness(t, lifecycleOpt{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	connA := types.ConnectionID{1}
+	connB := types.ConnectionID{2}
+	prime(t, h, connA, types.Identity{0x1})
+	prime(t, h, connB, types.Identity{0x2})
+
+	resp := submitOnDisconnect(t, h.exec, connA, types.Identity{0x1})
+	if resp.Status != StatusCommitted {
+		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
+	}
+
+	rows := h.sysClientsSnapshot()
+	if len(rows) != 1 {
+		t.Fatalf("post-disconnect rows=%d, want 1", len(rows))
+	}
+	if !bytes.Equal(rows[0].ConnID, connB[:]) {
+		t.Fatalf("remaining connection_id=%x, want %x", rows[0].ConnID, connB[:])
+	}
+}
+
 // Story 7.3 AC: reducer runs AND row is deleted in the same transaction.
 func TestOnDisconnectRunsReducerAndDeletes(t *testing.T) {
 	rh := &recordedHandler{}
