@@ -1,7 +1,7 @@
 # Audit Handoff
 
 > **Two lanes coexist in this file.**
-> **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E2`.
+> **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E4`.
 > **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 4 (cluster C — BSATN + per-column trailer).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
@@ -10,9 +10,9 @@
 Objective
 - Continue the code-vs-spec audit from `docs/EXECUTION-ORDER.md`.
 - Keep appending grounded findings to root `TECH-DEBT.md`.
-- The audit trail is now advanced through `SPEC-004 E1`.
+- The audit trail is now advanced through `SPEC-004 E3`.
 - `REMAINING.md` currently says all tracked implementation slices are complete; keep this lane audit-only unless a tiny doc correction is required.
-- Latest newly logged audit findings remain `TD-114` and `TD-115`; `SPEC-004 E1` audited cleanly with no new debt item.
+- Latest newly logged audit findings are now `TD-116` and `TD-117` from the `SPEC-004 E3` pass.
 
 Required reading order
 1. `AGENTS.md`
@@ -55,24 +55,27 @@ Already audited in sequence:
 - `SPEC-002 E6`
 - `SPEC-002 E7`
 - `SPEC-004 E1`
+- `SPEC-004 E2`
+- `SPEC-004 E3`
 
 Next execution-order slice
-- `SPEC-004 E2: Pruning Indexes`
+- `SPEC-004 E4: Subscription Manager`
 
 Recommended next reading
 - `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md`
-- `docs/decomposition/004-subscriptions/epic-2-pruning-indexes/EPIC.md`
-- all Epic 2 story docs
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/EPIC.md`
+- all Epic 4 story docs
 - live files likely to matter:
-  - `subscription/value_index.go`
-  - `subscription/join_edge_index.go`
-  - `subscription/table_index.go`
-  - `subscription/placement.go`
-  - relevant pruning/placement tests under `subscription/*_test.go`
+  - `subscription/manager.go`
+  - `subscription/register.go`
+  - `subscription/unregister.go`
+  - `subscription/query_state.go`
+  - `subscription/manager_test.go`
+  - other manager/query-registry tests under `subscription/*_test.go`
 
 Newest findings added this pass
-- `SPEC-004 E1` predicate/query-hash audit looked operationally aligned; no new debt item was logged
-- Existing latest open findings are still `TD-114` and `TD-115`
+- `TD-116`: Story 3.5 allocation-discipline contract is only partially implemented
+- `TD-117`: Epic 3 story docs are stale on the live delta-helper signatures
 
 Important open themes to keep in mind
 - Passing tests mean operational health only, not spec completeness.
@@ -97,7 +100,7 @@ Useful verification commands already used
 - earlier focused passes recorded in `TECH-DEBT.md`
 
 Expected deliverable for next agent
-- Audit `SPEC-004 E2`
+- Audit `SPEC-004 E4`
 - append any new grounded debt items to `TECH-DEBT.md`
 - update the phase plan/note block
 - report the next slice after that

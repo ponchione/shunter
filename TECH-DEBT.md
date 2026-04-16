@@ -37,7 +37,10 @@ Current planned audit sequence follows `docs/EXECUTION-ORDER.md` Phase 1 foundat
 25. `SPEC-002 E6` Recovery — audited
 26. `SPEC-002 E7` Log Compaction — audited
 27. `SPEC-004 E1` Predicate Types & Query Hash — audited
-28. `SPEC-004 E2` Pruning Indexes — next audit slice
+28. `SPEC-004 E2` Pruning Indexes — audited
+29. `SPEC-004 E3` DeltaView & Delta Computation — audited
+30. `SPEC-004 E4` Subscription Manager — audited
+31. `SPEC-004 E6.1-enabling contract slice` — next audit slice
 
 Audit notes:
 - `SPEC-006 E2` (`schema/tag.go`, `schema/tag_test.go`) appears operationally aligned with the tag-parser stories. No new debt logged from that slice at this time.
@@ -66,6 +69,9 @@ Audit notes:
 - `SPEC-002 E6` recovery is mostly operationally present (`commitlog/segment_scan.go`, `snapshot_select.go`, `replay.go`, `recovery.go`, related tests), but two concrete recovery/resume gaps remain and are logged below: active-tail checksum mismatches after a valid prefix are still treated as hard failures instead of truncation-at-horizon, and append-open still truncates first-record corruption instead of failing closed.
 - `SPEC-002 E7` log compaction appears operationally aligned (`commitlog/compaction.go`, `compaction_test.go`) with the current compaction stories. I did not log a new compaction debt item from that slice.
 - `SPEC-004 E1` predicate/query-hash foundations appear operationally aligned (`subscription/predicate.go`, `validate.go`, `hash.go`, `register.go`, related tests). The sealed predicate interface was also verified via an external compile-only repro that failed with `unexported method sealed`. I did not log a new debt item from this slice.
+- `SPEC-004 E2` pruning indexes appear operationally aligned (`subscription/value_index.go`, `join_edge_index.go`, `table_index.go`, `placement.go`, related tests). Tier 1/2/3 structures, placement, cleanup, and candidate-union behavior are present; I did not log a new debt item from this slice.
+- `SPEC-004 E3` delta computation is mostly present (`subscription/delta_view.go`, `delta_single.go`, `delta_join.go`, `delta_dedup.go`, related tests), but one real implementation gap remains and one story-surface doc drift is logged below: Story 3.5's allocation-discipline contract is only partially implemented, and Story 3.2/3.3 helper signatures are stale relative to the live API.
+- `SPEC-004 E4` subscription-manager behavior is operationally present (`subscription/manager.go`, `query_state.go`, `register.go`, `unregister.go`, `disconnect.go`, related tests), but the decomposition/spec docs are now stale in three places: Story 4.1 still models subscriber bookkeeping as one-subscription-per-connection, SPEC-004 §4.1 omits the `ClientIdentity` required for parameterized query hashes, and Story 4.5 / SPEC-004 §10.1 still publish the pre-`PostCommitMeta` `EvalAndBroadcast` signature.
 - Verification runs completed during audit:
   - `rtk go test ./schema`
   - `rtk go test ./schema ./executor`
@@ -76,7 +82,104 @@ Audit notes:
   - latest recovery/compaction pass: `rtk go test ./...`
   - earlier broad pass: `rtk go test ./types ./bsatn ./schema ./store ./subscription ./executor ./commitlog`
 
-## Open items
+### TD-116: SPEC-004 E3 Story 3.5 allocation-discipline contract is only partially implemented
+
+Status: open
+Severity: medium
+First found: SPEC-004 Epic 3 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5c (`SPEC-004 E3: DeltaView & Delta Computation`)
+
+Summary:
+- SPEC-004 §9.2 and Story 3.5 require three hot-path reuse layers: pooled `[]byte` buffers, pooled/reused `DeltaView.inserts` / `DeltaView.deletes` slices, and reuse of both candidate hash sets and bag-dedup maps across transactions.
+- Live code only implements the bag-dedup scratch-map reuse portion (`dedupPool`) plus the shared canonical encoder pool used for row/hash key encoding.
+- `NewDeltaView(...)` still allocates fresh maps and fresh insert/delete slices per transaction, and candidate collection still allocates a fresh `map[QueryHash]struct{}` every call.
+
+Why this matters:
+- Story 3.5 is the explicit performance/GC-discipline layer for the delta hot path.
+- The repo now claims the Epic 3 slice is complete in `REMAINING.md`, but the allocation-discipline part of the spec is only partially present.
+- This is not just missing benchmark coverage; the requested reuse mechanisms are materially absent in live code.
+
+Related code:
+- `subscription/delta_view.go:41-48`
+  - `NewDeltaView(...)` allocates new `inserts`, `deletes`, and `DeltaIndexes` maps on every construction
+- `subscription/delta_view.go:57-65`
+  - per-table insert/delete row slices are copied into freshly allocated slices each transaction
+- `subscription/placement.go:87`
+  - `CollectCandidatesForTable(...)` allocates a fresh candidate set map every call
+- `subscription/delta_pool.go:19-44`
+  - only the bag-dedup scratch maps are pooled and cleared for reuse
+- `subscription/hash.go:39-41`
+  - canonical encoder pooling exists, but Story 3.5's broader DeltaView/candidate reuse contract is still missing
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:582-589`
+  - §9.2 requires buffer pooling, DeltaView slice reuse, candidate-hashset reuse, and bag-dedup map reuse
+- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.5-allocation-discipline.md:16-29`
+  - Story 3.5 assigns pooled buffers, DeltaView slice reuse, and map reuse as deliverables
+- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.5-allocation-discipline.md:33-38`
+  - acceptance criteria require reuse behavior, not just correctness
+
+Current observed behavior:
+- Package and repo tests still pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+- No focused tests currently verify Story 3.5's required reuse behavior.
+
+Recommended resolution options:
+1. Preferred code + test fix:
+   - add reusable DeltaView slice/map scratch ownership for inserts/deletes and active delta indexes
+   - reuse candidate hash sets in the evaluation path rather than allocating a fresh set per call
+   - add focused reuse/benchmark tests covering DeltaView slices, candidate sets, and oversized-buffer behavior
+2. Alternative doc fix:
+   - if the project intentionally wants only bag-dedup pooling in v1, narrow §9.2 and Story 3.5 so they no longer promise DeltaView and candidate-set reuse
+   - this would be a real reduction in the currently documented performance contract
+
+Suggested follow-up tests:
+- sequential `NewDeltaView(...)` calls reuse retained-capacity insert/delete backing storage
+- candidate set reuse across repeated `CollectCandidatesForTable(...)` evaluations
+- buffer-pool behavior for normal vs oversized row-key/delta-encoding buffers
+
+### TD-117: SPEC-004 E3 story docs are stale on the public helper signatures used for delta evaluation
+
+Status: doc-drift
+Severity: low
+First found: SPEC-004 Epic 3 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5c (`SPEC-004 E3: DeltaView & Delta Computation`)
+
+Summary:
+- Story 3.2 still documents `MatchRow(pred Predicate, row ProductValue) bool`, but the live exported helper is `MatchRow(pred Predicate, table TableID, row ProductValue) bool` so cross-table leaves can be treated as "no constraint" during join-filter evaluation.
+- Story 3.3 still documents `EvalJoinDeltaFragments(dv *DeltaView, join *Join) (insertFragments, deleteFragments [][]ProductValue)` plus committed-side `CommittedIndexScan`, but the live API returns a `JoinFragments` struct and requires an `IndexResolver` for committed-side index lookup; the committed-view helper is named `CommittedIndexSeek`.
+
+Why this matters:
+- This is story-surface drift, not a runtime bug.
+- The live API shape is coherent and used by tests/callers, but the decomposition docs no longer describe it accurately.
+- Future audit or implementation work will waste time reconciling signatures that have already evolved.
+
+Related code:
+- `subscription/delta_single.go:23-58`
+  - live `MatchRow(pred Predicate, table TableID, row types.ProductValue) bool`
+- `subscription/delta_join.go:8-22`
+  - live `JoinFragments` return type and `EvalJoinDeltaFragments(dv, join, resolver)` signature
+- `subscription/delta_view.go:157-163`
+  - committed-side helper is `CommittedIndexSeek(...)`
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.2-single-table-delta.md:27`
+  - still documents `MatchRow(pred Predicate, row ProductValue) bool`
+- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.3-join-delta-fragments.md:16-17`
+  - still documents the older two-slice return signature without resolver input
+- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.3-join-delta-fragments.md:42-44`
+  - still refers to `CommittedIndexScan`
+
+Current observed behavior:
+- Live package and repo verification pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+
+Recommended resolution:
+- Update Stories 3.2 and 3.3 to describe the current helper signatures and `JoinFragments`/`CommittedIndexSeek` naming.
+
+---
 
 ### TD-026: SPEC-002 E4 `CommitLogOptions` is missing the documented `SnapshotInterval` field
 
