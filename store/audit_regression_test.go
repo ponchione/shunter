@@ -193,6 +193,58 @@ func TestSnapshotBlocksCommitUntilClose(t *testing.T) {
 	}
 }
 
+func TestTableInsertDetachesFromCaller(t *testing.T) {
+	tbl := NewTable(pkSchema())
+	id := tbl.AllocRowID()
+	row := mkRow(1, "alice")
+	if err := tbl.InsertRow(id, row); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mutate caller's slice after insert.
+	row[1] = types.NewString("mutated")
+
+	got, ok := tbl.GetRow(id)
+	if !ok {
+		t.Fatal("row should exist")
+	}
+	if got[1].AsString() != "alice" {
+		t.Fatalf("stored row mutated by caller: got %q, want %q", got[1].AsString(), "alice")
+	}
+}
+
+func TestTableGetRowReturnsDetachedCopy(t *testing.T) {
+	tbl := NewTable(pkSchema())
+	id := tbl.AllocRowID()
+	if err := tbl.InsertRow(id, mkRow(1, "alice")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mutate row returned by GetRow.
+	got, _ := tbl.GetRow(id)
+	got[1] = types.NewString("mutated-via-getrow")
+
+	// Subsequent read should be unaffected.
+	got2, _ := tbl.GetRow(id)
+	if got2[1].AsString() != "alice" {
+		t.Fatalf("stored row mutated via GetRow: got %q, want %q", got2[1].AsString(), "alice")
+	}
+}
+
+func TestTxStateAddInsertDetachesFromCaller(t *testing.T) {
+	tx := NewTxState()
+	row := mkRow(1, "alice")
+	tx.AddInsert(0, 1, row)
+
+	// Mutate caller's slice.
+	row[1] = types.NewString("mutated")
+
+	stored := tx.Inserts(0)[1]
+	if stored[1].AsString() != "alice" {
+		t.Fatalf("tx insert mutated by caller: got %q, want %q", stored[1].AsString(), "alice")
+	}
+}
+
 func TestApplyChangesetDeletesByPrimaryKeyNotStoredRowID(t *testing.T) {
 	cs, _ := buildTestState()
 	tbl, _ := cs.Table(0)

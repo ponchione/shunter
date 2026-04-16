@@ -26,7 +26,7 @@ func (tx *TxState) AddInsert(tableID schema.TableID, id types.RowID, row types.P
 		m = make(map[types.RowID]types.ProductValue)
 		tx.inserts[tableID] = m
 	}
-	m[id] = row
+	m[id] = row.Copy()
 }
 
 // RemoveInsert removes a tx-local insert (for delete-of-tx-insert collapse).

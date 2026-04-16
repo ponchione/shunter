@@ -69,7 +69,7 @@ func (t *Table) InsertRow(id types.RowID, row types.ProductValue) error {
 		t.rowHashIndex[h] = append(bucket, id)
 	}
 
-	t.rows[id] = row
+	t.rows[id] = row.Copy()
 	return nil
 }
 
@@ -96,20 +96,23 @@ func (t *Table) DeleteRow(id types.RowID) (types.ProductValue, bool) {
 	}
 
 	delete(t.rows, id)
-	return row, true
+	return row.Copy(), true
 }
 
 // GetRow retrieves a row by RowID.
 func (t *Table) GetRow(id types.RowID) (types.ProductValue, bool) {
 	row, ok := t.rows[id]
-	return row, ok
+	if !ok {
+		return nil, false
+	}
+	return row.Copy(), true
 }
 
 // Scan yields all rows in unordered iteration.
 func (t *Table) Scan() iter.Seq2[types.RowID, types.ProductValue] {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		for id, row := range t.rows {
-			if !yield(id, row) {
+			if !yield(id, row.Copy()) {
 				return
 			}
 		}
