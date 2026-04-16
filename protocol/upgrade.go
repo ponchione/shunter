@@ -188,6 +188,9 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 			c.runKeepalive(context.Background())
 			close(keepaliveDone)
 		}()
+		// Outbound writer goroutine drains OutboundCh → WebSocket.
+		// Exits when OutboundCh is closed during Disconnect.
+		go c.runOutboundWriter(context.Background())
 		go c.superviseLifecycle(context.Background(), s.Executor, s.Conns, dispatchDone, keepaliveDone)
 		return
 	}
@@ -201,24 +204,26 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 // client message type to the appropriate handler function, closing over
 // the Server's dependencies (executor, schema, state).
 func (s *Server) buildMessageHandlers() *MessageHandlers {
-	return &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, conn *Conn, msg *SubscribeMsg) {
-			if s.Schema != nil {
-				handleSubscribe(ctx, conn, msg, s.Executor, s.Schema)
-			}
-		},
-		OnUnsubscribe: func(ctx context.Context, conn *Conn, msg *UnsubscribeMsg) {
-			handleUnsubscribe(ctx, conn, msg, s.Executor)
-		},
-		OnCallReducer: func(ctx context.Context, conn *Conn, msg *CallReducerMsg) {
-			handleCallReducer(ctx, conn, msg, s.Executor)
-		},
-		OnOneOffQuery: func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg) {
-			if s.Schema != nil && s.State != nil {
-				handleOneOffQuery(ctx, conn, msg, s.State, s.Schema)
-			}
-		},
+	handlers := &MessageHandlers{}
+	if s.Executor != nil && s.Schema != nil {
+		handlers.OnSubscribe = func(ctx context.Context, conn *Conn, msg *SubscribeMsg) {
+			handleSubscribe(ctx, conn, msg, s.Executor, s.Schema)
+		}
 	}
+	if s.Executor != nil {
+		handlers.OnUnsubscribe = func(ctx context.Context, conn *Conn, msg *UnsubscribeMsg) {
+			handleUnsubscribe(ctx, conn, msg, s.Executor)
+		}
+		handlers.OnCallReducer = func(ctx context.Context, conn *Conn, msg *CallReducerMsg) {
+			handleCallReducer(ctx, conn, msg, s.Executor)
+		}
+	}
+	if s.Schema != nil && s.State != nil {
+		handlers.OnOneOffQuery = func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg) {
+			handleOneOffQuery(ctx, conn, msg, s.State, s.Schema)
+		}
+	}
+	return handlers
 }
 
 // extractToken pulls a JWT from either the Authorization: Bearer
