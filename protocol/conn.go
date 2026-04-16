@@ -83,6 +83,14 @@ func (t *SubscriptionTracker) Remove(id uint32) error {
 	return nil
 }
 
+// IsActive reports whether id is tracked and in the SubActive state.
+func (t *SubscriptionTracker) IsActive(id uint32) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	st, ok := t.subs[id]
+	return ok && st == SubActive
+}
+
 // IsActiveOrPending reports whether id is currently tracked.
 func (t *SubscriptionTracker) IsActiveOrPending(id uint32) bool {
 	t.mu.Lock()
