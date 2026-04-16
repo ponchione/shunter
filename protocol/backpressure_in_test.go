@@ -189,3 +189,35 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 		t.Errorf("processed ids = %v, want [100]", got)
 	}
 }
+
+func TestIncomingBackpressure_NilHandlerDoesNotLeakSemaphoreToken(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.IncomingQueueMessages = 1
+	conn, clientWS := testConnPair(t, &opts)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, &MessageHandlers{})
+
+	frame, _ := EncodeClientMessage(SubscribeMsg{
+		RequestID:      1,
+		SubscriptionID: 100,
+		Query:          Query{TableName: "t"},
+	})
+	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
+	if err := clientWS.Write(wCtx, websocket.MessageBinary, frame); err != nil {
+		wCancel()
+		t.Fatalf("write subscribe: %v", err)
+	}
+	wCancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch loop did not exit on nil handler")
+	}
+
+	if got := len(conn.inflightSem); got != 0 {
+		t.Fatalf("inflight semaphore len = %d, want 0 after nil-handler close", got)
+	}
+}

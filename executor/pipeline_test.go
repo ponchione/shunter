@@ -72,6 +72,12 @@ type fakeSubs struct {
 	panicOn  bool
 }
 
+func (f *fakeSubs) Register(SubscriptionRegisterRequest, store.CommittedReadView) (SubscriptionRegisterResult, error) {
+	return SubscriptionRegisterResult{}, nil
+}
+
+func (f *fakeSubs) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
+
 func (f *fakeSubs) EvalAndBroadcast(txID types.TxID, cs *store.Changeset, view store.CommittedReadView) {
 	f.rec.add("eval-start")
 	if f.onEval != nil {
@@ -154,8 +160,7 @@ func newPipelineHarness(t *testing.T) *pipelineHarness {
 	rr.Register(RegisteredReducer{
 		Name: "InsertPlayer",
 		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, args []byte) ([]byte, error) {
-			tx := ctx.DB.(*store.Transaction)
-			tx.Insert(0, types.ProductValue{types.NewUint64(1), types.NewString("alice")})
+			_, _ = ctx.DB.Insert(0, types.ProductValue{types.NewUint64(1), types.NewString("alice")})
 			return []byte("ret"), nil
 		}),
 	})
@@ -499,7 +504,7 @@ func TestPostCommitPanicInDurabilitySetsFatal(t *testing.T) {
 	if !errors.Is(resp.Error, ErrExecutorFatal) {
 		t.Fatalf("err=%v, want wraps ErrExecutorFatal", resp.Error)
 	}
-	if !h.exec.fatal {
+	if !h.exec.fatal.Load() {
 		t.Fatal("executor.fatal not set after post-commit panic")
 	}
 }
@@ -519,7 +524,7 @@ func TestPostCommitPanicInEvalSetsFatal(t *testing.T) {
 	if !errors.Is(resp.Error, ErrExecutorFatal) {
 		t.Fatalf("err=%v, want wraps ErrExecutorFatal", resp.Error)
 	}
-	if !h.exec.fatal {
+	if !h.exec.fatal.Load() {
 		t.Fatal("executor.fatal not set after eval panic")
 	}
 }
@@ -539,7 +544,7 @@ func TestPostCommitPanicInSnapshotSetsFatal(t *testing.T) {
 	if !errors.Is(resp.Error, ErrExecutorFatal) {
 		t.Fatalf("err=%v, want wraps ErrExecutorFatal", resp.Error)
 	}
-	if !h.exec.fatal {
+	if !h.exec.fatal.Load() {
 		t.Fatal("executor.fatal not set after snapshot panic")
 	}
 }
@@ -649,7 +654,7 @@ func TestReducerPanicDoesNotSetFatal(t *testing.T) {
 	if resp.Status != StatusFailedPanic {
 		t.Fatalf("status=%d, want StatusFailedPanic", resp.Status)
 	}
-	if exec.fatal {
+	if exec.fatal.Load() {
 		t.Fatal("executor.fatal should NOT be set for pre-commit reducer panic")
 	}
 	// Further calls still work.

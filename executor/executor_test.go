@@ -2,6 +2,9 @@ package executor
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,8 +36,7 @@ func setupExecutor() (*Executor, schema.SchemaRegistry) {
 	rr.Register(RegisteredReducer{
 		Name: "InsertPlayer",
 		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, args []byte) ([]byte, error) {
-			tx := ctx.DB.(*store.Transaction)
-			tx.Insert(0, types.ProductValue{types.NewUint64(1), types.NewString("alice")})
+			_, _ = ctx.DB.Insert(0, types.ProductValue{types.NewUint64(1), types.NewString("alice")})
 			return nil, nil
 		}),
 	})
@@ -110,6 +112,95 @@ func TestExecutorShutdown(t *testing.T) {
 	}
 }
 
+func TestExecutorShutdownConcurrentSubmittersDoNotPanic(t *testing.T) {
+	exec, _ := setupExecutor()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go exec.Run(ctx)
+
+	panicCh := make(chan any, 1)
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					select {
+					case panicCh <- r:
+					default:
+					}
+				}
+			}()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				respCh := make(chan ReducerResponse, 1)
+				err := exec.Submit(CallReducerCmd{
+					Request: ReducerRequest{
+						ReducerName: "InsertPlayer",
+						Source:      CallSourceExternal,
+					},
+					ResponseCh: respCh,
+				})
+				if err != nil && !errors.Is(err, ErrExecutorShutdown) {
+					select {
+					case panicCh <- err:
+					default:
+					}
+					return
+				}
+			}
+		}()
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	shutdownDone := make(chan struct{})
+	go func() {
+		exec.Shutdown()
+		close(shutdownDone)
+	}()
+
+	select {
+	case <-shutdownDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown did not complete")
+	}
+	close(stop)
+	wg.Wait()
+
+	select {
+	case p := <-panicCh:
+		t.Fatalf("concurrent submit/shutdown should not panic, got %v", p)
+	default:
+	}
+}
+
+func TestSubmitAfterPostCommitFatalReturnsExecutorFatal(t *testing.T) {
+	h := newPipelineHarness(t)
+	h.dur.panicOn = true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	resp := submit(t, h.exec, "InsertPlayer")
+	if resp.Status != StatusFailedInternal {
+		t.Fatalf("status=%d, want StatusFailedInternal", resp.Status)
+	}
+	if !errors.Is(resp.Error, ErrExecutorFatal) {
+		t.Fatalf("err=%v, want wraps ErrExecutorFatal", resp.Error)
+	}
+
+	err := h.exec.Submit(CallReducerCmd{})
+	if !errors.Is(err, ErrExecutorFatal) {
+		t.Fatalf("Submit after post-commit fatal = %v, want %v", err, ErrExecutorFatal)
+	}
+}
+
 func TestSubmitWithContextRejectOnFullReturnsBusy(t *testing.T) {
 	exec, _ := setupExecutor()
 	exec = NewExecutor(ExecutorConfig{InboxCapacity: 1, RejectOnFull: true}, exec.registry, exec.committed, exec.schemaReg, 0)
@@ -169,5 +260,79 @@ func TestReducerRegistryLifecycle(t *testing.T) {
 	r, ok := rr.LookupLifecycle(LifecycleOnConnect)
 	if !ok || r.Name != "OnConnect" {
 		t.Fatal("LookupLifecycle failed")
+	}
+}
+
+func TestReducerRegistryFrozenLookupsReturnDetachedCopies(t *testing.T) {
+	rr := NewReducerRegistry()
+	h := types.ReducerHandler(func(_ *types.ReducerContext, _ []byte) ([]byte, error) { return nil, nil })
+	if err := rr.Register(RegisteredReducer{Name: "A", Handler: h}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rr.Register(RegisteredReducer{Name: "OnConnect", Handler: h, Lifecycle: LifecycleOnConnect}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rr.Register(RegisteredReducer{Name: "OnDisconnect", Handler: h, Lifecycle: LifecycleOnDisconnect}); err != nil {
+		t.Fatal(err)
+	}
+	rr.Freeze()
+
+	lookup, ok := rr.Lookup("A")
+	if !ok {
+		t.Fatal("Lookup should find registered reducer")
+	}
+	lookup.Name = "MUTATED"
+	if again, ok := rr.Lookup("A"); !ok || again.Name != "A" {
+		t.Fatalf("Lookup should return detached copy, got ok=%v reducer=%+v", ok, again)
+	}
+
+	all := rr.All()
+	if len(all) != 3 {
+		t.Fatalf("All len = %d, want 3", len(all))
+	}
+	for _, reducer := range all {
+		if reducer.Lifecycle == LifecycleOnConnect {
+			reducer.Lifecycle = LifecycleNone
+			reducer.Name = "Broken"
+		}
+	}
+	lifecycle, ok := rr.LookupLifecycle(LifecycleOnConnect)
+	if !ok || lifecycle.Name != "OnConnect" {
+		t.Fatalf("LookupLifecycle should be unchanged after All mutation, got ok=%v reducer=%+v", ok, lifecycle)
+	}
+}
+
+func TestReducerRegistryConcurrentRegisterLookupAndFreeze(t *testing.T) {
+	rr := NewReducerRegistry()
+	h := types.ReducerHandler(func(_ *types.ReducerContext, _ []byte) ([]byte, error) { return nil, nil })
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			<-start
+			name := fmt.Sprintf("r%d", id)
+			for j := 0; j < 200; j++ {
+				_ = rr.Register(RegisteredReducer{Name: name, Handler: h})
+				_, _ = rr.Lookup(name)
+				_, _ = rr.LookupLifecycle(LifecycleOnConnect)
+				_ = rr.All()
+				_ = rr.IsFrozen()
+			}
+		}(i)
+	}
+
+	close(start)
+	time.Sleep(10 * time.Millisecond)
+	rr.Freeze()
+	wg.Wait()
+
+	if !rr.IsFrozen() {
+		t.Fatal("Freeze should latch frozen state")
+	}
+	if err := rr.Register(RegisteredReducer{Name: "late", Handler: h}); err == nil {
+		t.Fatal("register after freeze should fail")
 	}
 }

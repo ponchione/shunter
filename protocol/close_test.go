@@ -163,11 +163,14 @@ func TestCloseAll_EmptyManagerNoOp(t *testing.T) {
 	}
 }
 
-func TestCloseWithHandshake_UnresponsivePeerTimesOut(t *testing.T) {
+func TestCloseWithHandshake_UnresponsivePeerReturnsAfterTimeoutButDoesNotGuaranteeTransportForceClose(t *testing.T) {
 	conn, _, cleanup := loopbackConn(t, DefaultProtocolOptions())
 	defer cleanup()
 
-	// Client does NOT read — close handshake will time out.
+	// Client does NOT read — close handshake will time out from the
+	// caller's perspective. Under coder/websocket this only guarantees
+	// bounded helper return latency, not immediate forced transport
+	// teardown.
 	timeout := 100 * time.Millisecond
 	start := time.Now()
 
@@ -180,7 +183,7 @@ func TestCloseWithHandshake_UnresponsivePeerTimesOut(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("closeWithHandshake did not time out")
+		t.Fatal("closeWithHandshake did not return after timeout")
 	}
 
 	elapsed := time.Since(start)

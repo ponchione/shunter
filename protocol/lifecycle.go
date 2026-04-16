@@ -38,8 +38,25 @@ type ExecutorInbox interface {
 	OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
 	RegisterSubscription(ctx context.Context, req RegisterSubscriptionRequest) error
-	UnregisterSubscription(ctx context.Context, connID types.ConnectionID, subID uint32) error
+	UnregisterSubscription(ctx context.Context, req UnregisterSubscriptionRequest) error
 	CallReducer(ctx context.Context, req CallReducerRequest) error
+}
+
+// SubscriptionCommandResponse is the protocol-side async result envelope
+// for a submitted subscribe command. E4 only allocates and hands this
+// channel to the executor seam; E5 watches it and turns accepted-command
+// outcomes into wire responses.
+type SubscriptionCommandResponse struct {
+	Applied *SubscribeApplied
+	Error   *SubscriptionError
+}
+
+// UnsubscribeCommandResponse is the protocol-side async result envelope
+// for a submitted unsubscribe command. E5 watches it to deliver the
+// eventual UnsubscribeApplied / SubscriptionError message.
+type UnsubscribeCommandResponse struct {
+	Applied *UnsubscribeApplied
+	Error   *SubscriptionError
 }
 
 // RegisterSubscriptionRequest carries the fields the executor needs to
@@ -49,6 +66,17 @@ type RegisterSubscriptionRequest struct {
 	SubscriptionID uint32
 	RequestID      uint32
 	Predicate      any // subscription.Predicate — typed as any to avoid import cycle
+	ResponseCh     chan<- SubscriptionCommandResponse
+}
+
+// UnregisterSubscriptionRequest carries the unsubscribe fields the
+// executor / delivery path needs to produce UnsubscribeApplied later.
+type UnregisterSubscriptionRequest struct {
+	ConnID         types.ConnectionID
+	SubscriptionID uint32
+	RequestID      uint32
+	SendDropped    bool
+	ResponseCh     chan<- UnsubscribeCommandResponse
 }
 
 // CallReducerRequest carries the fields for a reducer invocation
@@ -59,6 +87,7 @@ type CallReducerRequest struct {
 	RequestID   uint32
 	ReducerName string
 	Args        []byte
+	ResponseCh  chan<- ReducerCallResult
 }
 
 // RunLifecycle drives SPEC-005 §5.1–§5.2 admission for one connection:

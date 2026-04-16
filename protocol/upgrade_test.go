@@ -372,3 +372,37 @@ func TestUpgradeCompressionUnknownRejected(t *testing.T) {
 		t.Errorf("status = %v, want 400", resp)
 	}
 }
+
+func TestBuildMessageHandlers_NilWhenDependenciesMissing(t *testing.T) {
+	s := &Server{}
+	h := s.buildMessageHandlers()
+	if h.OnSubscribe != nil {
+		t.Fatal("OnSubscribe should be nil when schema/executor are missing")
+	}
+	if h.OnUnsubscribe != nil {
+		t.Fatal("OnUnsubscribe should be nil when executor is missing")
+	}
+	if h.OnCallReducer != nil {
+		t.Fatal("OnCallReducer should be nil when executor is missing")
+	}
+	if h.OnOneOffQuery != nil {
+		t.Fatal("OnOneOffQuery should be nil when schema/state are missing")
+	}
+}
+
+func TestBuildMessageHandlers_WiresOnlySatisfiedDependencies(t *testing.T) {
+	s := &Server{Executor: &fakeInbox{}}
+	h := s.buildMessageHandlers()
+	if h.OnSubscribe != nil {
+		t.Fatal("OnSubscribe should stay nil until schema is wired")
+	}
+	if h.OnUnsubscribe == nil {
+		t.Fatal("OnUnsubscribe should be wired when executor is present")
+	}
+	if h.OnCallReducer == nil {
+		t.Fatal("OnCallReducer should be wired when executor is present")
+	}
+	if h.OnOneOffQuery != nil {
+		t.Fatal("OnOneOffQuery should stay nil until schema and state are both wired")
+	}
+}

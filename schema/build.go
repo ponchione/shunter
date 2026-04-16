@@ -1,9 +1,6 @@
 package schema
 
-import (
-	"context"
-	"errors"
-)
+import "errors"
 
 // Engine holds an immutable SchemaRegistry and runtime configuration.
 // Subsystem wiring happens at Start().
@@ -14,9 +11,6 @@ type Engine struct {
 
 // Registry returns the immutable schema registry.
 func (e *Engine) Registry() SchemaRegistry { return e.registry }
-
-// Start performs runtime initialization (stub — deferred to SPEC-002/003 integration).
-func (e *Engine) Start(_ context.Context) error { return nil }
 
 // Build validates all registrations, assigns stable IDs, and constructs the Engine.
 func (b *Builder) Build(opts EngineOptions) (*Engine, error) {
@@ -34,7 +28,6 @@ func (b *Builder) Build(opts EngineOptions) (*Engine, error) {
 
 	// Build against a temporary builder that includes system tables so they go
 	// through the same registration and structural validation path.
-	userTableCount := len(b.tables)
 	builtBuilder := *b
 	builtBuilder.tables = append([]TableDefinition(nil), b.tables...)
 	builtBuilder.reducerOrder = append([]string(nil), b.reducerOrder...)
@@ -105,7 +98,7 @@ func (b *Builder) Build(opts EngineOptions) (*Engine, error) {
 		schemas[i] = ts
 	}
 
-	reg := newSchemaRegistry(schemas, userTableCount, &builtBuilder)
+	reg := newSchemaRegistry(schemas, &builtBuilder)
 	b.built = true
 
 	return &Engine{registry: reg, opts: opts}, nil

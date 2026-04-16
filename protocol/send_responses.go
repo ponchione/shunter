@@ -15,13 +15,13 @@ import "github.com/ponchione/shunter/types"
 // the caller, who is responsible for triggering a disconnect. The
 // disconnect path calls RemoveAll, which cleans up the pending entry.
 func SendSubscribeApplied(sender ClientSender, conn *Conn, msg *SubscribeApplied) error {
-	if !conn.Subscriptions.IsActiveOrPending(msg.SubscriptionID) {
+	if !conn.Subscriptions.IsPending(msg.SubscriptionID) {
 		return nil
 	}
+	conn.Subscriptions.Activate(msg.SubscriptionID)
 	if err := sender.Send(conn.ID, *msg); err != nil {
 		return err
 	}
-	conn.Subscriptions.Activate(msg.SubscriptionID)
 	return nil
 }
 

@@ -190,6 +190,122 @@ func TestCommitDeleteIdenticalReinsertCollapsesToEmptyChangeset(t *testing.T) {
 	}
 }
 
+func TestCommitAtomicityFailureLeavesCommittedStateUnchanged(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	keptID := tbl.AllocRowID()
+	deletedID := tbl.AllocRowID()
+	keptRow := mkRow(1, "kept")
+	deletedRow := mkRow(2, "to-delete")
+	if err := tbl.InsertRow(keptID, keptRow); err != nil {
+		t.Fatal(err)
+	}
+	if err := tbl.InsertRow(deletedID, deletedRow); err != nil {
+		t.Fatal(err)
+	}
+
+	tx := NewTransaction(cs, reg)
+	if err := tx.Delete(0, deletedID); err != nil {
+		t.Fatal(err)
+	}
+	// Bypass transaction-time validation so commit reaches delete application
+	// and then fails during insert on the second duplicate key.
+	tx.TxState().AddInsert(0, 999, mkRow(77, "first-duplicate"))
+	tx.TxState().AddInsert(0, 1000, mkRow(77, "second-duplicate"))
+
+	_, err := Commit(cs, tx)
+	if err == nil {
+		t.Fatal("expected commit to fail on duplicate primary key")
+	}
+	if !errors.Is(err, ErrPrimaryKeyViolation) {
+		t.Fatalf("commit error = %v, want ErrPrimaryKeyViolation", err)
+	}
+
+	if tbl.RowCount() != 2 {
+		t.Fatalf("row count after failed commit = %d, want 2", tbl.RowCount())
+	}
+	if row, ok := tbl.GetRow(keptID); !ok || !row.Equal(keptRow) {
+		t.Fatalf("kept row changed after failed commit: ok=%v row=%v", ok, row)
+	}
+	if row, ok := tbl.GetRow(deletedID); !ok || !row.Equal(deletedRow) {
+		t.Fatalf("deleted row missing after failed commit: ok=%v row=%v", ok, row)
+	}
+	if _, ok := tbl.GetRow(999); ok {
+		t.Fatal("failed commit must not leave first staged insert behind")
+	}
+	if _, ok := tbl.GetRow(1000); ok {
+		t.Fatal("failed commit must not leave second staged insert behind")
+	}
+}
+
+func TestCommitMissingDeleteTargetReturnsErrorWithoutMutation(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	rid := tbl.AllocRowID()
+	row := mkRow(1, "alice")
+	if err := tbl.InsertRow(rid, row); err != nil {
+		t.Fatal(err)
+	}
+
+	tx := NewTransaction(cs, reg)
+	tx.TxState().AddDelete(0, rid+99)
+
+	_, err := Commit(cs, tx)
+	if err == nil {
+		t.Fatal("expected commit to fail on missing delete target")
+	}
+	if !errors.Is(err, ErrRowNotFound) {
+		t.Fatalf("commit error = %v, want ErrRowNotFound", err)
+	}
+	if tbl.RowCount() != 1 {
+		t.Fatalf("row count after failed delete commit = %d, want 1", tbl.RowCount())
+	}
+	if got, ok := tbl.GetRow(rid); !ok || !got.Equal(row) {
+		t.Fatalf("committed row changed after failed delete commit: ok=%v row=%v", ok, got)
+	}
+}
+
+func TestCommittedStateRegisterAndLookupAreRaceFree(t *testing.T) {
+	cs := NewCommittedState()
+	tables := []*Table{NewTable(pkSchema()), NewTable(noPKSchema())}
+	registered := make(chan struct{}, len(tables))
+	stop := make(chan struct{})
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			for id := range []schema.TableID{0, 1} {
+				cs.Table(schema.TableID(id))
+			}
+			_ = cs.TableIDs()
+		}
+	}()
+
+	for id, tbl := range tables {
+		go func(id schema.TableID, tbl *Table) {
+			cs.RegisterTable(id, tbl)
+			registered <- struct{}{}
+		}(schema.TableID(id), tbl)
+	}
+	for range tables {
+		<-registered
+	}
+	close(stop)
+	<-done
+
+	for id := range []schema.TableID{0, 1} {
+		if _, ok := cs.Table(schema.TableID(id)); !ok {
+			t.Fatalf("table %d should be registered", id)
+		}
+	}
+}
+
 func TestSnapshotBlocksCommitUntilClose(t *testing.T) {
 	cs, reg := buildTestState()
 	snap := cs.Snapshot()

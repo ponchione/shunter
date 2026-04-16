@@ -46,16 +46,17 @@ func schedulerWorkerFixture(t *testing.T) (*Scheduler, *store.CommittedState, sc
 
 // seedSchedule inserts a sys_scheduled row directly into committed state
 // for test setup. Bypasses Transaction so the worker can observe the row
-// without running a reducer. Takes cs.Lock to avoid racing with
-// concurrent snapshot readers (e.g. the Run-loop goroutine).
+// without running a reducer. Resolve the table before taking cs.Lock:
+// calling CommittedState.Table while already holding the write lock would
+// self-deadlock on the RWMutex.
 func seedSchedule(t testing.TB, cs *store.CommittedState, tableID schema.TableID, id uint64, reducerName string, args []byte, nextRunAtNs, repeatNs int64) types.RowID {
 	t.Helper()
-	cs.Lock()
-	defer cs.Unlock()
 	tbl, ok := cs.Table(tableID)
 	if !ok {
 		t.Fatal("sys_scheduled missing from committed state")
 	}
+	cs.Lock()
+	defer cs.Unlock()
 	rid := tbl.AllocRowID()
 	row := types.ProductValue{
 		types.NewUint64(id),
@@ -198,6 +199,78 @@ func TestSchedulerNotifyTriggersRescan(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Notify should have triggered rescan within 500ms")
+	}
+}
+
+func TestSchedulerRunCancelsWhileEnqueueBlocked(t *testing.T) {
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "noop",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: types.KindUint64, PrimaryKey: true}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := eng.Registry()
+	cs := store.NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, store.NewTable(ts))
+	}
+	schedTS, _ := SysScheduledTable(reg)
+	seedSchedule(t, cs, schedTS.ID, 1, "blocked", nil, time.Unix(50, 0).UnixNano(), 0)
+
+	inbox := make(chan ExecutorCommand)
+	s := NewScheduler(inbox, cs, schedTS.ID)
+	s.now = func() time.Time { return time.Unix(100, 0) }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(runDone)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("Run did not return after cancellation while enqueue was blocked")
+	}
+}
+
+func TestSchedulerDrainResponsesKeepsDrainingAfterCancel(t *testing.T) {
+	s := &Scheduler{respCh: make(chan ReducerResponse, 1)}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		s.drainResponses(ctx)
+		close(done)
+	}()
+
+	cancel()
+	time.Sleep(20 * time.Millisecond)
+
+	s.respCh <- ReducerResponse{Status: StatusFailedUser, Error: stubError("first")}
+	sentSecond := make(chan struct{})
+	go func() {
+		s.respCh <- ReducerResponse{Status: StatusFailedInternal, Error: stubError("second")}
+		close(sentSecond)
+	}()
+
+	select {
+	case <-sentSecond:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("drainResponses stopped reading too early after ctx cancellation")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("drainResponses should exit after draining in-flight responses")
 	}
 }
 

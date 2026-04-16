@@ -1,8 +1,6 @@
 package executor
 
 import (
-	"time"
-
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -10,11 +8,7 @@ import (
 // SchedulerHandle provides transactional access to the scheduled-reducer system.
 // Operations are logically part of the current transaction — rolled back if the
 // reducer fails. Implemented in SPEC-003 Epic 6.
-type SchedulerHandle interface {
-	Schedule(reducerName string, args []byte, at time.Time) (ScheduleID, error)
-	ScheduleRepeat(reducerName string, args []byte, interval time.Duration) (ScheduleID, error)
-	Cancel(id ScheduleID) bool
-}
+type SchedulerHandle = types.ReducerScheduler
 
 // DurabilityHandle is the narrow surface the executor uses to hand committed
 // changesets to the commit-log durability subsystem (SPEC-003 §7).
@@ -35,6 +29,8 @@ type DurabilityHandle interface {
 // Story 5.2). The drain is non-blocking: a nil channel or empty channel
 // exits immediately.
 type SubscriptionManager interface {
+	Register(req SubscriptionRegisterRequest, view store.CommittedReadView) (SubscriptionRegisterResult, error)
+	Unregister(connID types.ConnectionID, subscriptionID types.SubscriptionID) error
 	EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView)
 	DroppedClients() <-chan types.ConnectionID
 	DisconnectClient(connID types.ConnectionID) error

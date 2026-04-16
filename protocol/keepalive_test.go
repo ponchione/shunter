@@ -126,13 +126,10 @@ func TestKeepaliveMarksActivityOnPongFromResponsiveClient(t *testing.T) {
 	start := time.Now().UnixNano()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	// Story 3.5 needs BOTH goroutines: runReadPump consumes Pongs so
-	// Ping(ctx) can complete; runKeepalive fires the Ping.
-	pumpDone := make(chan struct{})
-	go func() {
-		c.runReadPump(ctx)
-		close(pumpDone)
-	}()
+	// Story 3.5 needs BOTH goroutines: runDispatchLoop consumes control
+	// frames so Ping(ctx) can complete; runKeepalive fires the Ping.
+	handlers := &MessageHandlers{}
+	pumpDone := runDispatchAsync(c, ctx, handlers)
 	kaDone := runKeepaliveAsync(c, ctx)
 
 	time.Sleep(250 * time.Millisecond) // ~4 PingInterval cycles
@@ -182,7 +179,7 @@ func TestKeepaliveClosesIdleConnection(t *testing.T) {
 	}
 }
 
-func TestReadPumpMarksActivityOnInboundFrame(t *testing.T) {
+func TestDispatchLoopMarksActivityOnInboundFrame(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	c, clientWS, cleanup := loopbackConn(t, opts)
 	defer cleanup()
@@ -190,56 +187,64 @@ func TestReadPumpMarksActivityOnInboundFrame(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pumpDone := make(chan struct{})
-	go func() {
-		c.runReadPump(ctx)
-		close(pumpDone)
-	}()
+	handled := make(chan struct{})
+	handlers := &MessageHandlers{
+		OnSubscribe: func(_ context.Context, _ *Conn, _ *SubscribeMsg) {
+			close(handled)
+		},
+	}
+	pumpDone := runDispatchAsync(c, ctx, handlers)
 
-	// Give the pump a moment to start and sample a baseline AFTER
-	// NewConn's construction MarkActivity so we can detect movement.
+	// Give the dispatch loop a moment to start and sample a baseline
+	// AFTER NewConn's construction MarkActivity so we can detect movement.
 	time.Sleep(10 * time.Millisecond)
 	before := c.lastActivity.Load()
 
-	// Client sends a small binary frame. The pump discards the body
-	// but should MarkActivity. A 5 ms spin-wait is enough on localhost.
+	// Client sends a valid Subscribe frame. The dispatch loop routes it
+	// and must still MarkActivity before handler dispatch.
+	frame, err := EncodeClientMessage(SubscribeMsg{
+		RequestID:      1,
+		SubscriptionID: 1,
+		Query:          Query{TableName: "events"},
+	})
+	if err != nil {
+		t.Fatalf("encode subscribe: %v", err)
+	}
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer writeCancel()
-	if err := clientWS.Write(writeCtx, websocket.MessageBinary, []byte{0x00}); err != nil {
+	if err := clientWS.Write(writeCtx, websocket.MessageBinary, frame); err != nil {
 		t.Fatalf("client write: %v", err)
 	}
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if c.lastActivity.Load() > before {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-handled:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("dispatch loop did not invoke subscribe handler")
 	}
 	if c.lastActivity.Load() <= before {
 		t.Errorf("MarkActivity was not called on inbound frame (before=%d, after=%d)",
 			before, c.lastActivity.Load())
 	}
+
+	cancel()
+	<-pumpDone
 }
 
-func TestReadPumpExitsOnReadError(t *testing.T) {
+func TestDispatchLoopExitsOnReadError(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	c, clientWS, cleanup := loopbackConn(t, opts)
 	defer cleanup()
 
-	pumpDone := make(chan struct{})
-	go func() {
-		c.runReadPump(context.Background())
-		close(pumpDone)
-	}()
+	handlers := &MessageHandlers{}
+	pumpDone := runDispatchAsync(c, context.Background(), handlers)
 
-	// Client closes. Server Read returns an error; pump must exit.
+	// Client closes. Server Read returns an error; dispatch loop must exit.
 	_ = clientWS.Close(websocket.StatusNormalClosure, "")
 
 	select {
 	case <-pumpDone:
 	case <-time.After(1 * time.Second):
-		t.Fatal("runReadPump did not exit on peer close")
+		t.Fatal("runDispatchLoop did not exit on peer close")
 	}
 }
 

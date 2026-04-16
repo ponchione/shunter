@@ -102,6 +102,7 @@ func TestProductValueRoundTrip(t *testing.T) {
 
 func TestDecodeProductValueFromBytesTrailing(t *testing.T) {
 	ts := &schema.TableSchema{
+		Name: "players",
 		Columns: []schema.ColumnSchema{
 			{Index: 0, Name: "id", Type: types.KindUint64},
 		},
@@ -113,6 +114,37 @@ func TestDecodeProductValueFromBytesTrailing(t *testing.T) {
 	_, err := DecodeProductValueFromBytes(buf.Bytes(), ts)
 	if !errors.Is(err, ErrRowLengthMismatch) {
 		t.Fatalf("expected ErrRowLengthMismatch, got %v", err)
+	}
+	var shapeErr *RowShapeMismatchError
+	if !errors.As(err, &shapeErr) {
+		t.Fatalf("expected trailing-byte error to preserve RowShapeMismatchError details, got %T", err)
+	}
+	if shapeErr.TableName != "players" || shapeErr.Expected != 1 || shapeErr.Got != 2 {
+		t.Fatalf("unexpected row shape details: %+v", shapeErr)
+	}
+}
+
+func TestDecodeProductValueFromBytesShortPreservesRowShapeMismatch(t *testing.T) {
+	ts := &schema.TableSchema{
+		Name: "players",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "name", Type: types.KindString},
+		},
+	}
+	var buf bytes.Buffer
+	EncodeValue(&buf, types.NewUint64(1))
+
+	_, err := DecodeProductValueFromBytes(buf.Bytes(), ts)
+	if !errors.Is(err, ErrRowLengthMismatch) {
+		t.Fatalf("expected ErrRowLengthMismatch, got %v", err)
+	}
+	var shapeErr *RowShapeMismatchError
+	if !errors.As(err, &shapeErr) {
+		t.Fatalf("expected short-row error to preserve RowShapeMismatchError details, got %T", err)
+	}
+	if shapeErr.TableName != "players" || shapeErr.Expected != 2 || shapeErr.Got != 1 {
+		t.Fatalf("unexpected row shape details: %+v", shapeErr)
 	}
 }
 

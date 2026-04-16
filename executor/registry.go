@@ -1,11 +1,15 @@
 package executor
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // ReducerRegistry holds registered reducers and lifecycle handlers.
 type ReducerRegistry struct {
-	reducers  map[string]*RegisteredReducer
-	frozen    bool
+	mu       sync.RWMutex
+	reducers map[string]*RegisteredReducer
+	frozen   bool
 }
 
 var lifecycleNames = map[string]LifecycleKind{
@@ -22,6 +26,8 @@ func NewReducerRegistry() *ReducerRegistry {
 
 // Register adds a reducer. Returns error on duplicates, reserved names, or if frozen.
 func (rr *ReducerRegistry) Register(r RegisteredReducer) error {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
 	if rr.frozen {
 		return fmt.Errorf("executor: registry is frozen")
 	}
@@ -50,17 +56,32 @@ func (rr *ReducerRegistry) Register(r RegisteredReducer) error {
 	return nil
 }
 
+func cloneRegisteredReducer(r *RegisteredReducer) *RegisteredReducer {
+	if r == nil {
+		return nil
+	}
+	clone := *r
+	return &clone
+}
+
 // Lookup returns a registered reducer by name.
 func (rr *ReducerRegistry) Lookup(name string) (*RegisteredReducer, bool) {
+	rr.mu.RLock()
+	defer rr.mu.RUnlock()
 	r, ok := rr.reducers[name]
-	return r, ok
+	if !ok {
+		return nil, false
+	}
+	return cloneRegisteredReducer(r), true
 }
 
 // LookupLifecycle returns a lifecycle reducer by kind.
 func (rr *ReducerRegistry) LookupLifecycle(kind LifecycleKind) (*RegisteredReducer, bool) {
+	rr.mu.RLock()
+	defer rr.mu.RUnlock()
 	for _, r := range rr.reducers {
 		if r.Lifecycle == kind {
-			return r, true
+			return cloneRegisteredReducer(r), true
 		}
 	}
 	return nil, false
@@ -68,19 +89,25 @@ func (rr *ReducerRegistry) LookupLifecycle(kind LifecycleKind) (*RegisteredReduc
 
 // All returns all registered reducers.
 func (rr *ReducerRegistry) All() []*RegisteredReducer {
+	rr.mu.RLock()
+	defer rr.mu.RUnlock()
 	out := make([]*RegisteredReducer, 0, len(rr.reducers))
 	for _, r := range rr.reducers {
-		out = append(out, r)
+		out = append(out, cloneRegisteredReducer(r))
 	}
 	return out
 }
 
 // Freeze prevents further registrations.
 func (rr *ReducerRegistry) Freeze() {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
 	rr.frozen = true
 }
 
 // IsFrozen returns whether the registry is frozen.
 func (rr *ReducerRegistry) IsFrozen() bool {
+	rr.mu.RLock()
+	defer rr.mu.RUnlock()
 	return rr.frozen
 }

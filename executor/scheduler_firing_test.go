@@ -84,7 +84,16 @@ func fireCallCmd(ff firingFixture, id ScheduleID, intendedNs int64) ReducerRespo
 func TestFiringOneShotDeletesRow(t *testing.T) {
 	ff := newFiringFixture(t, nil)
 	intendedNs := time.Unix(100, 0).UnixNano()
-	seedSchedule(t, ff.cs, ff.schedTable, 7, "fire", nil, intendedNs, 0)
+	seedDone := make(chan struct{})
+	go func() {
+		seedSchedule(t, ff.cs, ff.schedTable, 7, "fire", nil, intendedNs, 0)
+		close(seedDone)
+	}()
+	select {
+	case <-seedDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("seedSchedule deadlocked while executor loop was active")
+	}
 
 	resp := fireCallCmd(ff, 7, intendedNs)
 	if resp.Status != StatusCommitted {

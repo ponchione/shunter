@@ -13,7 +13,7 @@ type ExecutorInbox interface {
 }
 ```
 
-Story 3.6 extends the interface with OnDisconnect; later epics add subscription / call-reducer submit methods as each slice lands.
+Story 3.6 extends the interface with OnDisconnect; later epics add submit-and-return subscription / call-reducer methods. Those later methods use protocol-owned request structs so wire metadata (`RequestID`, `SendDropped`) and response channels can cross the seam without importing `executor` internals.
 
 The **adapter** that converts these calls into `executor.OnConnectCmd` + `executor.OnDisconnectCmd` + `ReducerResponse` is owned by the host application for now. Tests use fakes. If a second consumer emerges, the adapter can be promoted into a `protocol/executorbridge` subpackage without breaking the interface.
 

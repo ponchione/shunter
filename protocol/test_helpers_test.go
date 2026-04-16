@@ -1,6 +1,9 @@
 package protocol
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // testConnDirect builds a *Conn without a real WebSocket, suitable for
 // handler unit tests that only inspect Subscriptions and OutboundCh.
@@ -9,12 +12,16 @@ func testConnDirect(opts *ProtocolOptions) *Conn {
 		o := DefaultProtocolOptions()
 		opts = &o
 	}
+	readCtx, cancelRead := context.WithCancel(context.Background())
 	return &Conn{
 		ID:            GenerateConnectionID(),
 		Identity:      [32]byte{1},
 		Subscriptions: NewSubscriptionTracker(),
 		OutboundCh:    make(chan []byte, opts.OutgoingBufferMessages),
+		inflightSem:   make(chan struct{}, opts.IncomingQueueMessages),
 		opts:          opts,
+		readCtx:       readCtx,
+		cancelRead:    cancelRead,
 		closed:        make(chan struct{}),
 	}
 }

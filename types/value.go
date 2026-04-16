@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"hash/fnv"
@@ -11,11 +12,13 @@ import (
 	"strings"
 )
 
+var ErrInvalidFloat = errors.New("invalid float value")
+
 // ValueKind identifies the type of a column value.
 type ValueKind int
 
 const (
-	KindBool    ValueKind = iota
+	KindBool ValueKind = iota
 	KindInt8
 	KindUint8
 	KindInt16
@@ -109,14 +112,14 @@ func NewUint64(x uint64) Value {
 
 func NewFloat32(x float32) (Value, error) {
 	if math.IsNaN(float64(x)) {
-		return Value{}, fmt.Errorf("shunter: NaN is not a valid Float32 value")
+		return Value{}, fmt.Errorf("shunter: NaN is not a valid Float32 value: %w", ErrInvalidFloat)
 	}
 	return Value{kind: KindFloat32, f32: x}, nil
 }
 
 func NewFloat64(x float64) (Value, error) {
 	if math.IsNaN(x) {
-		return Value{}, fmt.Errorf("shunter: NaN is not a valid Float64 value")
+		return Value{}, fmt.Errorf("shunter: NaN is not a valid Float64 value: %w", ErrInvalidFloat)
 	}
 	return Value{kind: KindFloat64, f64: x}, nil
 }

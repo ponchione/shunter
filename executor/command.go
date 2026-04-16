@@ -1,6 +1,19 @@
 package executor
 
-import "github.com/ponchione/shunter/types"
+import (
+	"github.com/ponchione/shunter/subscription"
+	"github.com/ponchione/shunter/types"
+)
+
+// SubscriptionRegisterRequest aliases the canonical SPEC-004 registration
+// request so executor command contracts can reference the subscription-owned
+// type without duplicating its shape.
+type SubscriptionRegisterRequest = subscription.SubscriptionRegisterRequest
+
+// SubscriptionRegisterResult aliases the canonical SPEC-004 registration
+// result so executor command contracts can reference the subscription-owned
+// type without duplicating its shape.
+type SubscriptionRegisterResult = subscription.SubscriptionRegisterResult
 
 // ExecutorCommand is the interface for all executor inbox commands.
 type ExecutorCommand interface {
@@ -14,6 +27,32 @@ type CallReducerCmd struct {
 }
 
 func (CallReducerCmd) isExecutorCommand() {}
+
+// RegisterSubscriptionCmd requests atomic subscription registration through the
+// executor queue.
+type RegisterSubscriptionCmd struct {
+	Request    SubscriptionRegisterRequest
+	ResponseCh chan<- SubscriptionRegisterResult
+}
+
+func (RegisterSubscriptionCmd) isExecutorCommand() {}
+
+// UnregisterSubscriptionCmd removes one connection-owned subscription.
+type UnregisterSubscriptionCmd struct {
+	ConnID         types.ConnectionID
+	SubscriptionID types.SubscriptionID
+	ResponseCh     chan<- error
+}
+
+func (UnregisterSubscriptionCmd) isExecutorCommand() {}
+
+// DisconnectClientSubscriptionsCmd removes all subscriptions for one client.
+type DisconnectClientSubscriptionsCmd struct {
+	ConnID     types.ConnectionID
+	ResponseCh chan<- error
+}
+
+func (DisconnectClientSubscriptionsCmd) isExecutorCommand() {}
 
 // OnConnectCmd is an internal command delivered by the protocol layer when a
 // client connection is being admitted (SPEC-003 §10.3). It inserts the

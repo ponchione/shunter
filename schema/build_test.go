@@ -317,6 +317,61 @@ func TestRegistryTableByName(t *testing.T) {
 	}
 }
 
+func TestRegistryTableLookupReturnsDetachedCopy(t *testing.T) {
+	e, _ := validBuilder().Build(EngineOptions{})
+	reg := e.Registry()
+
+	ts, ok := reg.Table(TableID(0))
+	if !ok {
+		t.Fatal("Table(0) should return players")
+	}
+	originalIndexName := ts.Indexes[0].Name
+	ts.Name = "mutated"
+	ts.Columns[0].Name = "mutated_col"
+	ts.Indexes[0].Name = "mutated_idx"
+
+	again, ok := reg.Table(TableID(0))
+	if !ok {
+		t.Fatal("Table(0) should still exist")
+	}
+	if again.Name != "players" {
+		t.Fatalf("Table(0).Name = %q, want players", again.Name)
+	}
+	if again.Columns[0].Name != "id" {
+		t.Fatalf("Table(0).Columns[0].Name = %q, want id", again.Columns[0].Name)
+	}
+	if again.Indexes[0].Name != originalIndexName {
+		t.Fatalf("Table(0).Indexes[0].Name = %q, want %q", again.Indexes[0].Name, originalIndexName)
+	}
+}
+
+func TestRegistryTableByNameReturnsDetachedCopy(t *testing.T) {
+	e, _ := validBuilder().Build(EngineOptions{})
+	reg := e.Registry()
+
+	ts, ok := reg.TableByName("players")
+	if !ok {
+		t.Fatal("TableByName(players) should exist")
+	}
+	ts.Name = "mutated"
+	ts.Columns[1].Name = "mutated_name"
+	ts.Indexes[0].Columns[0] = 99
+
+	again, ok := reg.TableByName("players")
+	if !ok {
+		t.Fatal("TableByName(players) should still exist")
+	}
+	if again.Name != "players" {
+		t.Fatalf("TableByName(players).Name = %q, want players", again.Name)
+	}
+	if again.Columns[1].Name != "name" {
+		t.Fatalf("TableByName(players).Columns[1].Name = %q, want name", again.Columns[1].Name)
+	}
+	if again.Indexes[0].Columns[0] != 0 {
+		t.Fatalf("TableByName(players).Indexes[0].Columns[0] = %d, want 0", again.Indexes[0].Columns[0])
+	}
+}
+
 func TestRegistryTablesReturnsFreshSlice(t *testing.T) {
 	e, _ := validBuilder().Build(EngineOptions{})
 	reg := e.Registry()

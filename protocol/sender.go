@@ -74,6 +74,14 @@ func (s *connManagerSender) enqueue(connID types.ConnectionID, msg any) error {
 	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, CompressionNone)
 
 	select {
+	case <-conn.closed:
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	default:
+	}
+
+	select {
+	case <-conn.closed:
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	case conn.OutboundCh <- wrapped:
 		return nil
 	default:

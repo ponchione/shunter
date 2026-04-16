@@ -26,20 +26,22 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 	}
 
 	for tableID, dels := range txState.AllDeletes() {
-		table, ok := cs.Table(tableID)
+		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
 		tc := ensureTableChangeset(changeset, tableID, table.schema.Name)
 		for rowID := range dels {
-			if oldRow, ok := table.DeleteRow(rowID); ok {
-				tc.Deletes = append(tc.Deletes, oldRow)
+			oldRow, ok := table.DeleteRow(rowID)
+			if !ok {
+				return nil, fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
 			}
+			tc.Deletes = append(tc.Deletes, oldRow)
 		}
 	}
 
 	for tableID, ins := range txState.AllInserts() {
-		table, ok := cs.Table(tableID)
+		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
@@ -72,8 +74,21 @@ func ensureTableChangeset(cs *Changeset, id schema.TableID, tableName string) *T
 }
 
 func revalidateCommit(cs *CommittedState, txState *TxState) error {
+	for tableID, deletes := range txState.AllDeletes() {
+		table, ok := cs.tableLocked(tableID)
+		if !ok {
+			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
+		}
+		for rowID := range deletes {
+			if _, ok := table.GetRow(rowID); !ok {
+				return fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
+			}
+		}
+	}
+
+	pending := make(map[schema.TableID][]types.ProductValue)
 	for tableID, inserts := range txState.AllInserts() {
-		table, ok := cs.Table(tableID)
+		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
@@ -81,6 +96,31 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 			if err := revalidateInsertAgainstCommitted(tableID, table, row, txState); err != nil {
 				return err
 			}
+			if err := revalidateInsertAgainstPending(table, row, pending[tableID]); err != nil {
+				return err
+			}
+			pending[tableID] = append(pending[tableID], row)
+		}
+	}
+	return nil
+}
+
+func revalidateInsertAgainstPending(table *Table, row types.ProductValue, pending []types.ProductValue) error {
+	for _, prior := range pending {
+		for _, idx := range table.indexes {
+			if !idx.schema.Unique {
+				continue
+			}
+			key := idx.ExtractKey(row)
+			if key.Equal(idx.ExtractKey(prior)) {
+				if idx.schema.Primary {
+					return &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+				}
+				return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+			}
+		}
+		if table.rowHashIndex != nil && prior.Equal(row) {
+			return ErrDuplicateRow
 		}
 	}
 	return nil

@@ -64,26 +64,44 @@ func (s *Scheduler) Run(ctx context.Context) {
 	go s.drainResponses(ctx)
 
 	for {
-		s.scan()
+		if !s.scanWithContext(ctx) {
+			return
+		}
 
-		var wait <-chan time.Time
+		var (
+			wait  <-chan time.Time
+			timer *time.Timer
+		)
 		if !s.nextWakeup.IsZero() {
 			d := time.Until(s.nextWakeup)
 			if d < 0 {
 				d = 0
 			}
-			timer := time.NewTimer(d)
+			timer = time.NewTimer(d)
 			wait = timer.C
-			defer timer.Stop()
 		}
 
 		select {
 		case <-ctx.Done():
+			if timer != nil {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}
 			return
 		case <-s.wakeup:
 			// rescan
 		case <-wait:
 			// timer fired, rescan
+		}
+		if timer != nil && !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
 		}
 	}
 }
@@ -104,7 +122,12 @@ func (s *Scheduler) Notify() {
 // ReplayFromCommitted; callers interested in the observed max
 // schedule_id should use ReplayFromCommitted directly.
 func (s *Scheduler) scan() {
-	_ = s.scanAndTrackMax()
+	_, _ = s.scanAndTrackMaxWithContext(context.Background())
+}
+
+func (s *Scheduler) scanWithContext(ctx context.Context) bool {
+	_, ok := s.scanAndTrackMaxWithContext(ctx)
+	return ok
 }
 
 // ReplayFromCommitted is the startup entry point for SPEC-003 §9.2
@@ -116,10 +139,16 @@ func (s *Scheduler) scan() {
 // ScheduleID sequence to maxID+1 so post-replay Schedule() calls don't
 // collide with replayed rows.
 func (s *Scheduler) ReplayFromCommitted() ScheduleID {
-	return s.scanAndTrackMax()
+	maxID, _ := s.scanAndTrackMaxWithContext(context.Background())
+	return maxID
 }
 
 func (s *Scheduler) scanAndTrackMax() ScheduleID {
+	maxID, _ := s.scanAndTrackMaxWithContext(context.Background())
+	return maxID
+}
+
+func (s *Scheduler) scanAndTrackMaxWithContext(ctx context.Context) (ScheduleID, bool) {
 	now := s.now()
 	nowNs := now.UnixNano()
 	view := s.cs.Snapshot()
@@ -133,7 +162,9 @@ func (s *Scheduler) scanAndTrackMax() ScheduleID {
 		}
 		nextNs := row[SysScheduledColNextRunAtNs].AsInt64()
 		if nextNs <= nowNs {
-			s.enqueue(row)
+			if !s.enqueueWithContext(ctx, row) {
+				return maxID, false
+			}
 			continue
 		}
 		t := time.Unix(0, nextNs)
@@ -141,13 +172,17 @@ func (s *Scheduler) scanAndTrackMax() ScheduleID {
 			s.nextWakeup = t
 		}
 	}
-	return maxID
+	return maxID, true
 }
 
 // enqueue sends a CallReducerCmd for a due schedule row. A blocked
 // inbox backpressures the scheduler — acceptable in v1 because the
 // executor drains at a much higher rate than schedules can be due.
 func (s *Scheduler) enqueue(row types.ProductValue) {
+	_ = s.enqueueWithContext(context.Background(), row)
+}
+
+func (s *Scheduler) enqueueWithContext(ctx context.Context, row types.ProductValue) bool {
 	cmd := CallReducerCmd{
 		Request: ReducerRequest{
 			ReducerName: row[SysScheduledColReducerName].AsString(),
@@ -157,20 +192,45 @@ func (s *Scheduler) enqueue(row types.ProductValue) {
 		},
 		ResponseCh: s.respCh,
 	}
-	s.inbox <- cmd
+	select {
+	case s.inbox <- cmd:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // drainResponses consumes scheduled-reducer outcomes so the executor's
 // post-commit write to respCh never blocks. Failures are logged; no
 // caller is listening.
 func (s *Scheduler) drainResponses(ctx context.Context) {
+	logResp := func(resp ReducerResponse) {
+		if resp.Status != StatusCommitted {
+			log.Printf("scheduler: reducer outcome status=%d err=%v", resp.Status, resp.Error)
+		}
+	}
+
 	for {
 		select {
-		case <-ctx.Done():
-			return
 		case resp := <-s.respCh:
-			if resp.Status != StatusCommitted {
-				log.Printf("scheduler: reducer outcome status=%d err=%v", resp.Status, resp.Error)
+			logResp(resp)
+		case <-ctx.Done():
+			idle := time.NewTimer(100 * time.Millisecond)
+			defer idle.Stop()
+			for {
+				select {
+				case resp := <-s.respCh:
+					logResp(resp)
+					if !idle.Stop() {
+						select {
+						case <-idle.C:
+						default:
+						}
+					}
+					idle.Reset(100 * time.Millisecond)
+				case <-idle.C:
+					return
+				}
 			}
 		}
 	}

@@ -1,10 +1,14 @@
 package executor
 
 import (
+	"errors"
+	"iter"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -96,7 +100,8 @@ func TestReducerContractsMatchPhase1dSpec(t *testing.T) {
 	ctx := types.ReducerContext{
 		ReducerName: request.ReducerName,
 		Caller:      request.Caller,
-		DB:          nil,
+		DB:          stubReducerDB{},
+		Scheduler:   stubReducerScheduler{},
 	}
 
 	if request.ReducerName != "CreatePlayer" || request.Source != CallSourceExternal {
@@ -105,7 +110,8 @@ func TestReducerContractsMatchPhase1dSpec(t *testing.T) {
 	if response.Status != StatusCommitted || string(response.ReturnBSATN) != "reply" || response.TxID != 7 {
 		t.Fatalf("ReducerResponse fields incorrect: %+v", response)
 	}
-	_ = ctx
+	_, _ = ctx.DB.Insert(0, nil)
+	_ = ctx.Scheduler.Cancel(1)
 }
 
 func TestSchedulerHandleMinimalContract(t *testing.T) {
@@ -123,10 +129,120 @@ func TestSchedulerHandleMinimalContract(t *testing.T) {
 	}
 }
 
-type stubScheduler struct{}
+func TestEpic1CommandTypesImplementExecutorCommand(t *testing.T) {
+	var cmd ExecutorCommand
 
-func (stubScheduler) Schedule(string, []byte, time.Time) (ScheduleID, error) { return 1, nil }
-func (stubScheduler) ScheduleRepeat(string, []byte, time.Duration) (ScheduleID, error) {
+	cmd = CallReducerCmd{}
+	if _, ok := cmd.(CallReducerCmd); !ok {
+		t.Fatal("CallReducerCmd should satisfy ExecutorCommand")
+	}
+
+	cmd = RegisterSubscriptionCmd{}
+	if _, ok := cmd.(RegisterSubscriptionCmd); !ok {
+		t.Fatal("RegisterSubscriptionCmd should satisfy ExecutorCommand")
+	}
+
+	cmd = UnregisterSubscriptionCmd{}
+	if _, ok := cmd.(UnregisterSubscriptionCmd); !ok {
+		t.Fatal("UnregisterSubscriptionCmd should satisfy ExecutorCommand")
+	}
+
+	cmd = DisconnectClientSubscriptionsCmd{}
+	if _, ok := cmd.(DisconnectClientSubscriptionsCmd); !ok {
+		t.Fatal("DisconnectClientSubscriptionsCmd should satisfy ExecutorCommand")
+	}
+}
+
+func TestEpic1CommandShapesMatchSpec(t *testing.T) {
+	regReq := subscription.SubscriptionRegisterRequest{
+		ConnID:         types.ConnectionID{1},
+		SubscriptionID: types.SubscriptionID(2),
+	}
+	regCmd := RegisterSubscriptionCmd{Request: regReq, ResponseCh: make(chan SubscriptionRegisterResult, 1)}
+	if regCmd.Request.ConnID != regReq.ConnID || regCmd.Request.SubscriptionID != regReq.SubscriptionID {
+		t.Fatalf("RegisterSubscriptionCmd.Request = %+v, want %+v", regCmd.Request, regReq)
+	}
+
+	unregCmd := UnregisterSubscriptionCmd{
+		ConnID:         types.ConnectionID{3},
+		SubscriptionID: types.SubscriptionID(4),
+		ResponseCh:     make(chan error, 1),
+	}
+	if unregCmd.ConnID != (types.ConnectionID{3}) || unregCmd.SubscriptionID != 4 {
+		t.Fatalf("UnregisterSubscriptionCmd = %+v", unregCmd)
+	}
+
+	disconnectCmd := DisconnectClientSubscriptionsCmd{
+		ConnID:     types.ConnectionID{5},
+		ResponseCh: make(chan error, 1),
+	}
+	if disconnectCmd.ConnID != (types.ConnectionID{5}) {
+		t.Fatalf("DisconnectClientSubscriptionsCmd = %+v", disconnectCmd)
+	}
+}
+
+func TestEpic1InterfacesAndErrorsExist(t *testing.T) {
+	var _ DurabilityHandle = stubDurability{}
+	var _ SubscriptionManager = stubSubscriptionManager{}
+
+	base := []error{
+		ErrReducerNotFound,
+		ErrLifecycleReducer,
+		ErrExecutorBusy,
+		ErrExecutorShutdown,
+		ErrReducerPanic,
+		ErrCommitFailed,
+		ErrExecutorFatal,
+	}
+	for _, err := range base {
+		if !errors.Is(err, err) {
+			t.Fatalf("errors.Is(%v, %v) = false", err, err)
+		}
+	}
+}
+
+type stubReducerDB struct{}
+
+func (stubReducerDB) Insert(uint32, types.ProductValue) (types.RowID, error) { return 0, nil }
+func (stubReducerDB) Delete(uint32, types.RowID) error                       { return nil }
+func (stubReducerDB) Update(uint32, types.RowID, types.ProductValue) (types.RowID, error) {
+	return 0, nil
+}
+func (stubReducerDB) GetRow(uint32, types.RowID) (types.ProductValue, bool) { return nil, false }
+func (stubReducerDB) ScanTable(uint32) iter.Seq2[types.RowID, types.ProductValue] {
+	return func(yield func(types.RowID, types.ProductValue) bool) {}
+}
+func (stubReducerDB) Underlying() any { return nil }
+
+type stubReducerScheduler struct{}
+
+func (stubReducerScheduler) Schedule(string, []byte, time.Time) (types.ScheduleID, error) {
+	return 1, nil
+}
+func (stubReducerScheduler) ScheduleRepeat(string, []byte, time.Duration) (types.ScheduleID, error) {
 	return 2, nil
 }
-func (stubScheduler) Cancel(ScheduleID) bool { return true }
+func (stubReducerScheduler) Cancel(types.ScheduleID) bool { return true }
+
+type stubScheduler struct{}
+
+func (stubScheduler) Schedule(string, []byte, time.Time) (types.ScheduleID, error) { return 1, nil }
+func (stubScheduler) ScheduleRepeat(string, []byte, time.Duration) (types.ScheduleID, error) {
+	return 2, nil
+}
+func (stubScheduler) Cancel(types.ScheduleID) bool { return true }
+
+type stubDurability struct{}
+
+func (stubDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
+
+type stubSubscriptionManager struct{}
+
+func (stubSubscriptionManager) Register(SubscriptionRegisterRequest, store.CommittedReadView) (SubscriptionRegisterResult, error) {
+	return SubscriptionRegisterResult{}, nil
+}
+func (stubSubscriptionManager) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
+func (stubSubscriptionManager) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView) {
+}
+func (stubSubscriptionManager) DroppedClients() <-chan types.ConnectionID { return nil }
+func (stubSubscriptionManager) DisconnectClient(types.ConnectionID) error { return nil }

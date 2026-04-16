@@ -29,9 +29,9 @@ type fakeInbox struct {
 	gotIdentity  types.Identity
 
 	// Disconnect knobs + observations (Story 3.6).
-	onDisconnectErr error
-	disconnectSubsErr error
-	disconnectCalls int
+	onDisconnectErr     error
+	disconnectSubsErr   error
+	disconnectCalls     int
 	disconnectSubsCalls int
 	// events records the order in which disconnect methods fired,
 	// so tests can assert "subs removed BEFORE OnDisconnect".
@@ -69,7 +69,7 @@ func (f *fakeInbox) RegisterSubscription(_ context.Context, _ RegisterSubscripti
 	return nil
 }
 
-func (f *fakeInbox) UnregisterSubscription(_ context.Context, _ types.ConnectionID, _ uint32) error {
+func (f *fakeInbox) UnregisterSubscription(_ context.Context, _ UnregisterSubscriptionRequest) error {
 	return nil
 }
 

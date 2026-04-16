@@ -155,6 +155,9 @@ type Conn struct {
 	ws   *websocket.Conn
 	opts *ProtocolOptions
 
+	readCtx    context.Context
+	cancelRead context.CancelFunc
+
 	closeOnce sync.Once
 	closed    chan struct{}
 
@@ -178,6 +181,7 @@ func NewConn(
 	ws *websocket.Conn,
 	opts *ProtocolOptions,
 ) *Conn {
+	readCtx, cancelRead := context.WithCancel(context.Background())
 	c := &Conn{
 		ID:            id,
 		Identity:      identity,
@@ -188,6 +192,8 @@ func NewConn(
 		inflightSem:   make(chan struct{}, opts.IncomingQueueMessages),
 		ws:            ws,
 		opts:          opts,
+		readCtx:       readCtx,
+		cancelRead:    cancelRead,
 		closed:        make(chan struct{}),
 	}
 	c.MarkActivity()

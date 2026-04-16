@@ -3,20 +3,22 @@ package store
 import (
 	"errors"
 	"fmt"
+
+	"github.com/ponchione/shunter/types"
 )
 
 var (
-	ErrTableNotFound              = errors.New("table not found")
-	ErrColumnNotFound             = errors.New("column not found")
-	ErrTypeMismatch               = errors.New("type mismatch")
-	ErrPrimaryKeyViolation        = errors.New("primary key violation")
-	ErrUniqueConstraintViolation  = errors.New("unique constraint violation")
-	ErrDuplicateRow               = errors.New("duplicate row")
-	ErrRowNotFound                = errors.New("row not found")
-	ErrNullNotAllowed             = errors.New("null not allowed")
-	ErrInvalidFloat               = errors.New("invalid float value")
-	ErrRowShapeMismatch           = errors.New("row shape mismatch")
-	ErrTransactionRolledBack      = errors.New("transaction rolled back")
+	ErrTableNotFound             = errors.New("table not found")
+	ErrColumnNotFound            = errors.New("column not found")
+	ErrTypeMismatch              = errors.New("type mismatch")
+	ErrPrimaryKeyViolation       = errors.New("primary key violation")
+	ErrUniqueConstraintViolation = errors.New("unique constraint violation")
+	ErrDuplicateRow              = errors.New("duplicate row")
+	ErrRowNotFound               = errors.New("row not found")
+	ErrNullNotAllowed            = errors.New("null not allowed")
+	ErrInvalidFloat              = types.ErrInvalidFloat
+	ErrRowShapeMismatch          = errors.New("row shape mismatch")
+	ErrTransactionRolledBack     = errors.New("transaction rolled back")
 )
 
 // TypeMismatchError is returned when a column value doesn't match the schema type.

@@ -22,12 +22,14 @@ func handleCallReducer(
 		return
 	}
 
+	respCh := make(chan ReducerCallResult, 1)
 	if err := executor.CallReducer(ctx, CallReducerRequest{
 		ConnID:      conn.ID,
 		Identity:    conn.Identity,
 		RequestID:   msg.RequestID,
 		ReducerName: msg.ReducerName,
 		Args:        msg.Args,
+		ResponseCh:  respCh,
 	}); err != nil {
 		sendError(conn, ReducerCallResult{
 			RequestID: msg.RequestID,

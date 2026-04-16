@@ -14,7 +14,7 @@ func ApplyChangeset(cs *CommittedState, changeset *Changeset) error {
 	defer cs.Unlock()
 
 	for tableID, tc := range changeset.Tables {
-		table, ok := cs.Table(tableID)
+		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}

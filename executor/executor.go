@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"log"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ponchione/shunter/schema"
@@ -34,9 +36,10 @@ type Executor struct {
 	committed  *store.CommittedState
 	schemaReg  schema.SchemaRegistry
 	nextTxID   uint64
-	fatal      bool
+	fatal      atomic.Bool
 	rejectMode bool
-	shutdown   bool
+	shutdown   atomic.Bool
+	submitMu   sync.RWMutex
 	// schedTableID is the cached schema.TableID for sys_scheduled,
 	// resolved once at NewExecutor so per-reducer handle construction
 	// avoids a registry lookup on every dispatch.
@@ -61,9 +64,9 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 	if !reg.IsFrozen() {
 		panic("executor: registry must be frozen before creating executor")
 	}
-	cap := cfg.InboxCapacity
-	if cap <= 0 {
-		cap = 256
+	capacity := cfg.InboxCapacity
+	if capacity <= 0 {
+		capacity = 256
 	}
 	dur := cfg.Durability
 	if dur == nil {
@@ -85,7 +88,7 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 		schedSeq.Reset(uint64(maxID) + 1)
 	}
 	e := &Executor{
-		inbox:        make(chan ExecutorCommand, cap),
+		inbox:        make(chan ExecutorCommand, capacity),
 		registry:     reg,
 		committed:    cs,
 		schemaReg:    schemaReg,
@@ -119,10 +122,12 @@ func (e *Executor) Run(ctx context.Context) {
 
 // Submit sends a command to the executor inbox.
 func (e *Executor) Submit(cmd ExecutorCommand) error {
-	if e.fatal {
+	e.submitMu.RLock()
+	defer e.submitMu.RUnlock()
+	if e.fatal.Load() {
 		return ErrExecutorFatal
 	}
-	if e.shutdown {
+	if e.shutdown.Load() {
 		return ErrExecutorShutdown
 	}
 	if e.rejectMode {
@@ -139,10 +144,12 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 
 // SubmitWithContext sends a command respecting a caller context.
 func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) error {
-	if e.fatal {
+	e.submitMu.RLock()
+	defer e.submitMu.RUnlock()
+	if e.fatal.Load() {
 		return ErrExecutorFatal
 	}
-	if e.shutdown {
+	if e.shutdown.Load() {
 		return ErrExecutorShutdown
 	}
 	if e.rejectMode {
@@ -163,8 +170,10 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 
 // Shutdown stops accepting new commands and waits for Run to finish.
 func (e *Executor) Shutdown() {
-	e.shutdown = true
+	e.shutdown.Store(true)
+	e.submitMu.Lock()
 	e.closeOnce.Do(func() { close(e.inbox) })
+	e.submitMu.Unlock()
 	<-e.done
 }
 
@@ -180,11 +189,11 @@ func (e *Executor) dispatchSafely(cmd ExecutorCommand) {
 func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) {
 	log.Printf("executor: panic during dispatch: %v\n%s", r, debug.Stack())
 	// Send error response if possible.
-	if c, ok := cmd.(CallReducerCmd); ok && c.ResponseCh != nil {
-		c.ResponseCh <- ReducerResponse{
+	if c, ok := cmd.(CallReducerCmd); ok {
+		sendReducerResponse(c.ResponseCh, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  fmt.Errorf("reducer panicked: %v", r),
-		}
+		})
 	}
 }
 
@@ -192,18 +201,22 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 	// Story 5.3: short-circuit write-affecting commands that were already in
 	// the inbox when the executor latched into the fatal state. Submit
 	// catches the common case; this catch covers the race window.
-	if e.fatal {
-		if c, ok := cmd.(CallReducerCmd); ok && c.ResponseCh != nil {
-			c.ResponseCh <- ReducerResponse{
-				Status: StatusFailedInternal,
-				Error:  ErrExecutorFatal,
-			}
+	if e.fatal.Load() {
+		switch c := cmd.(type) {
+		case CallReducerCmd:
+			sendReducerResponse(c.ResponseCh, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal})
 		}
 		return
 	}
 	switch c := cmd.(type) {
 	case CallReducerCmd:
 		e.handleCallReducer(c)
+	case RegisterSubscriptionCmd:
+		e.handleRegisterSubscription(c)
+	case UnregisterSubscriptionCmd:
+		e.handleUnregisterSubscription(c)
+	case DisconnectClientSubscriptionsCmd:
+		e.handleDisconnectClientSubscriptions(c)
 	case OnConnectCmd:
 		e.handleOnConnect(c)
 	case OnDisconnectCmd:
@@ -213,14 +226,70 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 	}
 }
 
+func (e *Executor) handleRegisterSubscription(cmd RegisterSubscriptionCmd) {
+	view := e.snapshotFn()
+	defer view.Close()
+	result, err := e.subs.Register(cmd.Request, view)
+	if err != nil {
+		log.Printf("executor: RegisterSubscription failed: %v", err)
+		cmd.ResponseCh <- SubscriptionRegisterResult{}
+		return
+	}
+	cmd.ResponseCh <- result
+}
+
+func (e *Executor) handleUnregisterSubscription(cmd UnregisterSubscriptionCmd) {
+	cmd.ResponseCh <- e.subs.Unregister(cmd.ConnID, cmd.SubscriptionID)
+}
+
+func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) {
+	cmd.ResponseCh <- e.subs.DisconnectClient(cmd.ConnID)
+}
+
+type reducerDBAdapter struct {
+	tx *store.Transaction
+}
+
+func (d *reducerDBAdapter) Insert(tableID uint32, row types.ProductValue) (types.RowID, error) {
+	return d.tx.Insert(schema.TableID(tableID), row)
+}
+
+func (d *reducerDBAdapter) Delete(tableID uint32, rowID types.RowID) error {
+	return d.tx.Delete(schema.TableID(tableID), rowID)
+}
+
+func (d *reducerDBAdapter) Update(tableID uint32, rowID types.RowID, newRow types.ProductValue) (types.RowID, error) {
+	return d.tx.Update(schema.TableID(tableID), rowID, newRow)
+}
+
+func (d *reducerDBAdapter) GetRow(tableID uint32, rowID types.RowID) (types.ProductValue, bool) {
+	return d.tx.GetRow(schema.TableID(tableID), rowID)
+}
+
+func (d *reducerDBAdapter) ScanTable(tableID uint32) iter.Seq2[types.RowID, types.ProductValue] {
+	return d.tx.ScanTable(schema.TableID(tableID))
+}
+
+func (d *reducerDBAdapter) Underlying() any {
+	return d.tx
+}
+
+func sendReducerResponse(ch chan<- ReducerResponse, resp ReducerResponse) bool {
+	if ch == nil {
+		return true
+	}
+	ch <- resp
+	return true
+}
+
 func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	req := cmd.Request
 	if req.Source != CallSourceLifecycle {
 		if _, reserved := lifecycleNames[req.ReducerName]; reserved {
-			cmd.ResponseCh <- ReducerResponse{
+			sendReducerResponse(cmd.ResponseCh, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  ErrLifecycleReducer,
-			}
+			})
 			return
 		}
 	}
@@ -228,10 +297,10 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	// Lookup reducer.
 	rr, ok := e.registry.Lookup(req.ReducerName)
 	if !ok {
-		cmd.ResponseCh <- ReducerResponse{
+		sendReducerResponse(cmd.ResponseCh, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  fmt.Errorf("%w: %s", ErrReducerNotFound, req.ReducerName),
-		}
+		})
 		return
 	}
 
@@ -245,7 +314,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	rctx := &types.ReducerContext{
 		ReducerName: req.ReducerName,
 		Caller:      caller,
-		DB:          tx,
+		DB:          &reducerDBAdapter{tx: tx},
 		Scheduler:   e.newSchedulerHandle(tx),
 	}
 
@@ -265,19 +334,25 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	// Decision routing.
 	if panicked != nil {
 		store.Rollback(tx)
-		cmd.ResponseCh <- ReducerResponse{
+		panicErr := func(r any) error {
+			if err, ok := r.(error); ok {
+				return errors.Join(ErrReducerPanic, err)
+			}
+			return fmt.Errorf("%v: %w", r, ErrReducerPanic)
+		}(panicked)
+		sendReducerResponse(cmd.ResponseCh, ReducerResponse{
 			Status: StatusFailedPanic,
-			Error:  fmt.Errorf("%v: %w", panicked, ErrReducerPanic),
-		}
+			Error:  panicErr,
+		})
 		return
 	}
 
 	if reducerErr != nil {
 		store.Rollback(tx)
-		cmd.ResponseCh <- ReducerResponse{
+		sendReducerResponse(cmd.ResponseCh, ReducerResponse{
 			Status: StatusFailedUser,
 			Error:  reducerErr,
-		}
+		})
 		return
 	}
 
@@ -290,10 +365,10 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	if req.Source == CallSourceScheduled {
 		if err := e.advanceOrDeleteSchedule(tx, req.ScheduleID, req.IntendedFireAt); err != nil {
 			store.Rollback(tx)
-			cmd.ResponseCh <- ReducerResponse{
+			sendReducerResponse(cmd.ResponseCh, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  fmt.Errorf("schedule advance: %w", err),
-			}
+			})
 			return
 		}
 	}
@@ -306,10 +381,10 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		if isUserCommitError(err) {
 			status = StatusFailedUser
 		}
-		cmd.ResponseCh <- ReducerResponse{
+		sendReducerResponse(cmd.ResponseCh, ReducerResponse{
 			Status: status,
 			Error:  fmt.Errorf("commit: %w", err),
-		}
+		})
 		return
 	}
 	txID := types.TxID(e.nextTxID)
@@ -344,13 +419,13 @@ func (e *Executor) postCommit(
 	ret []byte,
 	responseCh chan<- ReducerResponse,
 ) {
-	responded := false
+	responded := responseCh == nil
 	defer func() {
 		r := recover()
 		if r == nil {
 			return
 		}
-		e.fatal = true
+		e.fatal.Store(true)
 		log.Printf("executor: post-commit panic (txID=%d): %v\n%s", txID, r, debug.Stack())
 		if responded {
 			return
@@ -367,12 +442,11 @@ func (e *Executor) postCommit(
 	e.subs.EvalAndBroadcast(txID, changeset, view)
 	view.Close()
 
-	responseCh <- ReducerResponse{
+	responded = sendReducerResponse(responseCh, ReducerResponse{
 		Status:      StatusCommitted,
 		ReturnBSATN: ret,
 		TxID:        txID,
-	}
-	responded = true
+	})
 
 	// Step 6 (Story 5.2): non-blocking drop-client drain. Runs after
 	// response delivery, before the next command is dequeued. A failing
@@ -403,6 +477,10 @@ func (noopDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
 
 type noopSubs struct{}
 
+func (noopSubs) Register(SubscriptionRegisterRequest, store.CommittedReadView) (SubscriptionRegisterResult, error) {
+	return SubscriptionRegisterResult{}, nil
+}
+func (noopSubs) Unregister(types.ConnectionID, types.SubscriptionID) error              { return nil }
 func (noopSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView) {}
 func (noopSubs) DroppedClients() <-chan types.ConnectionID                              { return nil }
 func (noopSubs) DisconnectClient(types.ConnectionID) error                              { return nil }

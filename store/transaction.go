@@ -288,46 +288,13 @@ func (t *Transaction) GetRow(tableID schema.TableID, rowID types.RowID) (types.P
 	if t.rolledBack {
 		return nil, false
 	}
-	// Check tx-local inserts.
-	if row, ok := t.tx.Inserts(tableID)[rowID]; ok {
-		return row, true
-	}
-	// Check if deleted in this tx.
-	if t.tx.IsDeleted(tableID, rowID) {
-		return nil, false
-	}
-	// Check committed.
-	table, ok := t.committed.Table(tableID)
-	if !ok {
-		return nil, false
-	}
-	return table.GetRow(rowID)
+	return NewStateView(t.committed, t.tx).GetRow(tableID, rowID)
 }
 
 // ScanTable yields all visible rows (committed minus deletes plus tx inserts).
 func (t *Transaction) ScanTable(tableID schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
-	return func(yield func(types.RowID, types.ProductValue) bool) {
-		if t.rolledBack {
-			return
-		}
-		table, ok := t.committed.Table(tableID)
-		if !ok {
-			return
-		}
-		// Committed rows minus deletes.
-		for id, row := range table.Scan() {
-			if t.tx.IsDeleted(tableID, id) {
-				continue
-			}
-			if !yield(id, row) {
-				return
-			}
-		}
-		// Tx-local inserts.
-		for id, row := range t.tx.Inserts(tableID) {
-			if !yield(id, row) {
-				return
-			}
-		}
+	if t.rolledBack {
+		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
+	return NewStateView(t.committed, t.tx).ScanTable(tableID)
 }

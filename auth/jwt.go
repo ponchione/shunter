@@ -75,7 +75,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 		return config.SigningKey, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrJWTInvalid, err)
+		return nil, errors.Join(ErrJWTInvalid, err)
 	}
 	if !parsed.Valid {
 		return nil, fmt.Errorf("%w: token reported invalid", ErrJWTInvalid)

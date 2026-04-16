@@ -67,7 +67,7 @@ func TestOutboundWriterDeliversFrames(t *testing.T) {
 	wg.Wait()
 }
 
-func TestOutboundWriterExitsOnClose(t *testing.T) {
+func TestOutboundWriterExitsOnDisconnectSignal(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	c := &Conn{
 		OutboundCh: make(chan []byte, 8),
@@ -81,11 +81,11 @@ func TestOutboundWriterExitsOnClose(t *testing.T) {
 		close(done)
 	}()
 
-	close(c.OutboundCh)
+	close(c.closed)
 
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("writer goroutine did not exit after OutboundCh closed")
+		t.Fatal("writer goroutine did not exit after c.closed")
 	}
 }

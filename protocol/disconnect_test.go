@@ -41,15 +41,13 @@ func TestDisconnectHappyPath(t *testing.T) {
 		t.Error("c.closed was not closed by Disconnect")
 	}
 
-	// OutboundCh must be closed. A receive on a closed channel yields
-	// the zero value with ok=false.
+	// Disconnect must not close OutboundCh directly. Sender lookups may
+	// still hold a conn pointer concurrently; closing the channel opens a
+	// send-on-closed panic window. Writer shutdown is driven by c.closed.
 	select {
-	case _, ok := <-c.OutboundCh:
-		if ok {
-			t.Error("OutboundCh was not closed")
-		}
+	case <-c.OutboundCh:
+		t.Error("OutboundCh was closed or unexpectedly drained by Disconnect")
 	default:
-		t.Error("receive from OutboundCh blocked — channel not closed")
 	}
 
 	// The client should observe the close frame in bounded time. The

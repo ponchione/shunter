@@ -14,6 +14,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+var errReducerBoom = errors.New("reducer boom")
+
 func phase4ExecutorHarness(t *testing.T) (*Executor, *store.CommittedState, schema.SchemaRegistry, *ReducerRegistry) {
 	t.Helper()
 	b := schema.NewBuilder()
@@ -193,25 +195,25 @@ func TestPhase4HandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 	}
 	rr := NewReducerRegistry()
 	var captured types.CallerContext
-	var scheduler any
+	var scheduler types.ReducerScheduler
 	_ = rr.Register(RegisteredReducer{Name: "ok", Handler: func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
 		captured = ctx.Caller
 		scheduler = ctx.Scheduler
-		_, err := ctx.DB.(*store.Transaction).Insert(0, types.ProductValue{types.NewUint64(2), types.NewString("alice")})
+		_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(2), types.NewString("alice")})
 		if err != nil {
 			return nil, err
 		}
 		return []byte("ret"), nil
 	}})
 	_ = rr.Register(RegisteredReducer{Name: "user", Handler: func(*types.ReducerContext, []byte) ([]byte, error) { return nil, errors.New("user fail") }})
-	_ = rr.Register(RegisteredReducer{Name: "panic", Handler: func(*types.ReducerContext, []byte) ([]byte, error) { panic("boom") }})
+	_ = rr.Register(RegisteredReducer{Name: "panic", Handler: func(*types.ReducerContext, []byte) ([]byte, error) { panic(errReducerBoom) }})
 	_ = rr.Register(RegisteredReducer{Name: "commit-user", Handler: func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
-		tx := ctx.DB.(*store.Transaction)
+		tx := ctx.DB.Underlying().(*store.Transaction)
 		tx.TxState().AddInsert(0, 999, types.ProductValue{types.NewUint64(1), types.NewString("dup")})
 		return nil, nil
 	}})
 	_ = rr.Register(RegisteredReducer{Name: "commit-internal", Handler: func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
-		tx := ctx.DB.(*store.Transaction)
+		tx := ctx.DB.Underlying().(*store.Transaction)
 		tx.TxState().AddInsert(999, 1, types.ProductValue{types.NewUint64(9), types.NewString("ghost")})
 		return nil, nil
 	}})
@@ -252,6 +254,9 @@ func TestPhase4HandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 	if resp.Status != StatusFailedPanic || !errors.Is(resp.Error, ErrReducerPanic) {
 		t.Fatalf("panic failure = %+v", resp)
 	}
+	if !errors.Is(resp.Error, errReducerBoom) {
+		t.Fatalf("panic failure should preserve original panic error chain, got %+v", resp)
+	}
 	resp = call("commit-user", CallSourceExternal)
 	if resp.Status != StatusFailedUser || resp.Error == nil || !strings.Contains(resp.Error.Error(), "commit:") {
 		t.Fatalf("commit user failure = %+v", resp)
@@ -272,4 +277,36 @@ func TestPhase4HandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 	if !errors.Is(resp.Error, ErrReducerNotFound) {
 		t.Fatalf("missing reducer should surface ErrReducerNotFound, got %+v", resp)
 	}
+}
+
+func TestPhase4HandleCallReducerNilResponseChannelDoesNotPanic(t *testing.T) {
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{Name: "players", Columns: []schema.ColumnDefinition{{Name: "id", Type: types.KindUint64, PrimaryKey: true}, {Name: "name", Type: types.KindString}}})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := eng.Registry()
+	cs := store.NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, store.NewTable(ts))
+	}
+	rr := NewReducerRegistry()
+	if err := rr.Register(RegisteredReducer{Name: "ok", Handler: func(*types.ReducerContext, []byte) ([]byte, error) { return nil, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	rr.Freeze()
+	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("handleCallReducer should tolerate nil ResponseCh, panicked with %v", r)
+		}
+	}()
+
+	exec.handleCallReducer(CallReducerCmd{
+		Request: ReducerRequest{ReducerName: "ok", Source: CallSourceExternal},
+	})
 }

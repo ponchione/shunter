@@ -20,6 +20,10 @@ The read loop calls handlers directly on the read goroutine. Handlers that need 
 
 **Rationale:** E4 scope excludes backpressure enforcement. Direct dispatch is simpler, testable, and the async boundary already exists at the executor inbox.
 
+### Unconfigured dependencies leave handlers nil
+
+`buildMessageHandlers` only wires handlers when the server has the required dependencies for that message type. Missing schema/state/executor dependencies therefore leave the handler nil, which lets `runDispatchLoop` close 1002 for an unsupported message type instead of silently dropping a client frame.
+
 ### Protocol-owned name resolution
 
 A `protocol.SchemaLookup` interface maps wire-format string names (table, column) to internal IDs (schema.TableID, types.ColID). The protocol layer compiles predicates into `subscription.Predicate` before handing them to the executor/subscription layer.
@@ -138,10 +142,10 @@ func handleUnsubscribe(
    - Active → proceed
    - Pending → `ErrSubscriptionNotFound` (cannot unsubscribe before SubscribeApplied)
    - Missing → `ErrSubscriptionNotFound`
-2. `executor.UnregisterSubscription(ctx, conn.ID, msg.SubscriptionID)` — submit to inbox
+2. `executor.UnregisterSubscription(ctx, req)` — submit `UnregisterSubscriptionRequest{ConnID, SubscriptionID, RequestID, SendDropped, ResponseCh}` to the inbox
 3. On submission failure: send error to client, tracker unchanged
 4. On submission success: `conn.Subscriptions.Remove(msg.SubscriptionID)` immediately (read loop is single-goroutine, no race)
-5. `UnsubscribeApplied` client delivery is E5's responsibility
+5. `UnsubscribeApplied` / unsubscribe-side `SubscriptionError` delivery is E5's responsibility via `req.ResponseCh`
 
 ### CallReducer: `handleCallReducer`
 
@@ -155,9 +159,9 @@ func handleCallReducer(
 ```
 
 1. Reject lifecycle names `"OnConnect"`, `"OnDisconnect"` at protocol layer → send `ReducerCallResult` with `status=3` (not_found) and `ErrLifecycleReducer` message directly to `conn.OutboundCh`
-2. `executor.CallReducer(ctx, req)` — submit to inbox (channel send)
+2. `executor.CallReducer(ctx, req)` — submit `CallReducerRequest{..., ResponseCh}` to the inbox (channel send)
 3. On submission failure: send `ReducerCallResult` with error to `conn.OutboundCh`
-4. On submission success: return. E5 handles `ReducerCallResult` delivery from executor response.
+4. On submission success: return. E5 handles `ReducerCallResult` delivery from `req.ResponseCh`.
 
 Lifecycle filtering happens here so the executor never sees these names from a client call path.
 
@@ -215,13 +219,13 @@ type ExecutorInbox interface {
 E4 adds:
 ```go
     RegisterSubscription(ctx context.Context, req RegisterSubscriptionRequest) error
-    UnregisterSubscription(ctx context.Context, connID types.ConnectionID, subID types.SubscriptionID) error
+    UnregisterSubscription(ctx context.Context, req UnregisterSubscriptionRequest) error
     CallReducer(ctx context.Context, req CallReducerRequest) error
 ```
 
 Submit-and-return. Error means inbox full or executor shutdown — the command was NOT accepted. Success means the executor WILL process it. Response delivery (SubscribeApplied, UnsubscribeApplied, ReducerCallResult) is E5's job, wired through response channels embedded in the request types.
 
-`RegisterSubscriptionRequest` and `CallReducerRequest` are protocol-side types wrapping wire fields + a response channel for E5 to watch.
+`RegisterSubscriptionRequest`, `UnregisterSubscriptionRequest`, and `CallReducerRequest` are protocol-side types wrapping the wire fields plus the response channel E5 watches.
 
 ---
 

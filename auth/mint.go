@@ -34,15 +34,16 @@ func MintAnonymousToken(config *MintConfig) (string, types.Identity, error) {
 		return "", types.Identity{}, fmt.Errorf("auth: mint random subject: %w", err)
 	}
 	identity := DeriveIdentity(config.Issuer, subject)
+	now := time.Now()
 
 	claims := jwt.MapClaims{
 		"iss": config.Issuer,
 		"sub": subject,
 		"aud": config.Audience,
-		"iat": time.Now().Unix(),
+		"iat": now.Unix(),
 	}
 	if config.Expiry > 0 {
-		claims["exp"] = time.Now().Add(config.Expiry).Unix()
+		claims["exp"] = now.Add(config.Expiry).Unix()
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

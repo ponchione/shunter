@@ -131,7 +131,7 @@ func (e *Executor) runLifecycleReducer(
 	rctx := &types.ReducerContext{
 		ReducerName: rr.Name,
 		Caller:      caller,
-		DB:          tx,
+		DB:          &reducerDBAdapter{tx: tx},
 		Scheduler:   e.newSchedulerHandle(tx),
 	}
 

@@ -23,17 +23,31 @@ func NewCommittedState() *CommittedState {
 
 // RegisterTable adds a table to the committed state.
 func (cs *CommittedState) RegisterTable(id schema.TableID, t *Table) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
 	cs.tables[id] = t
 }
 
 // Table returns the table for the given ID.
 func (cs *CommittedState) Table(id schema.TableID) (*Table, bool) {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.tableLocked(id)
+}
+
+func (cs *CommittedState) tableLocked(id schema.TableID) (*Table, bool) {
 	t, ok := cs.tables[id]
 	return t, ok
 }
 
 // TableIDs returns all registered table IDs.
 func (cs *CommittedState) TableIDs() []schema.TableID {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.tableIDsLocked()
+}
+
+func (cs *CommittedState) tableIDsLocked() []schema.TableID {
 	ids := make([]schema.TableID, 0, len(cs.tables))
 	for id := range cs.tables {
 		ids = append(ids, id)

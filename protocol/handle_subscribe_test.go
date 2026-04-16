@@ -67,7 +67,7 @@ func (m *mockSubExecutor) RegisterSubscription(_ context.Context, req RegisterSu
 	return m.registerErr
 }
 
-func (m *mockSubExecutor) UnregisterSubscription(_ context.Context, _ types.ConnectionID, _ uint32) error {
+func (m *mockSubExecutor) UnregisterSubscription(_ context.Context, _ UnregisterSubscriptionRequest) error {
 	return nil
 }
 
@@ -267,6 +267,9 @@ func TestHandleSubscribe_Valid(t *testing.T) {
 	}
 	if req.RequestID != 10 {
 		t.Errorf("RequestID = %d, want 10", req.RequestID)
+	}
+	if req.ResponseCh == nil {
+		t.Error("ResponseCh = nil, want non-nil subscribe response channel")
 	}
 
 	// Predicate should be ColEq for "name" column.

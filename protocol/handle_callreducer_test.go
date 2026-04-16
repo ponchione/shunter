@@ -14,8 +14,7 @@ import (
 // unsubscribe and call-reducer interactions.
 type mockDispatchExecutor struct {
 	mu             sync.Mutex
-	unregisterConn types.ConnectionID
-	unregisterSub  uint32
+	unregisterReq  *UnregisterSubscriptionRequest
 	unregisterErr  error
 	callReducerReq *CallReducerRequest
 	callReducerErr error
@@ -37,11 +36,10 @@ func (m *mockDispatchExecutor) RegisterSubscription(_ context.Context, _ Registe
 	return nil
 }
 
-func (m *mockDispatchExecutor) UnregisterSubscription(_ context.Context, connID types.ConnectionID, subID uint32) error {
+func (m *mockDispatchExecutor) UnregisterSubscription(_ context.Context, req UnregisterSubscriptionRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.unregisterConn = connID
-	m.unregisterSub = subID
+	m.unregisterReq = &req
 	return m.unregisterErr
 }
 
@@ -75,11 +73,23 @@ func TestHandleUnsubscribe_Active(t *testing.T) {
 	// Executor must have received the unregister call.
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
-	if exec.unregisterConn != conn.ID {
-		t.Errorf("UnregisterSubscription connID = %x, want %x", exec.unregisterConn, conn.ID)
+	if exec.unregisterReq == nil {
+		t.Fatal("UnregisterSubscription request was not recorded")
 	}
-	if exec.unregisterSub != 42 {
-		t.Errorf("UnregisterSubscription subID = %d, want 42", exec.unregisterSub)
+	if exec.unregisterReq.ConnID != conn.ID {
+		t.Errorf("UnregisterSubscription connID = %x, want %x", exec.unregisterReq.ConnID, conn.ID)
+	}
+	if exec.unregisterReq.SubscriptionID != 42 {
+		t.Errorf("UnregisterSubscription subID = %d, want 42", exec.unregisterReq.SubscriptionID)
+	}
+	if exec.unregisterReq.RequestID != 1 {
+		t.Errorf("UnregisterSubscription requestID = %d, want 1", exec.unregisterReq.RequestID)
+	}
+	if exec.unregisterReq.SendDropped {
+		t.Error("SendDropped = true, want false")
+	}
+	if exec.unregisterReq.ResponseCh == nil {
+		t.Error("ResponseCh = nil, want non-nil unsubscribe response channel")
 	}
 
 	// No error message should have been sent.
@@ -215,6 +225,9 @@ func TestHandleCallReducer_Valid(t *testing.T) {
 	}
 	if len(req.Args) != 2 || req.Args[0] != 0xCA || req.Args[1] != 0xFE {
 		t.Errorf("Args = %x, want cafe", req.Args)
+	}
+	if req.ResponseCh == nil {
+		t.Error("ResponseCh = nil, want non-nil reducer response channel")
 	}
 
 	// No error message should have been sent.

@@ -105,11 +105,13 @@ func handleSubscribe(
 		return
 	}
 
+	respCh := make(chan SubscriptionCommandResponse, 1)
 	if err := executor.RegisterSubscription(ctx, RegisterSubscriptionRequest{
 		ConnID:         conn.ID,
 		SubscriptionID: subID,
 		RequestID:      msg.RequestID,
 		Predicate:      pred,
+		ResponseCh:     respCh,
 	}); err != nil {
 		sendError(conn, SubscriptionError{
 			RequestID:      msg.RequestID,

@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,4 +105,45 @@ func TestOutgoingBackpressure_FurtherSendsAfterDisconnect(t *testing.T) {
 	if !errors.Is(err, ErrConnNotFound) {
 		t.Fatalf("expected ErrConnNotFound after disconnect, got %v", err)
 	}
+}
+
+func TestOutgoingBackpressure_SendConcurrentWithDisconnectDoesNotPanic(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.OutgoingBufferMessages = 32
+	conn, clientWS, cleanup := loopbackConn(t, opts)
+	defer cleanup()
+
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	mgr.Add(conn)
+	s := NewClientSender(mgr, inbox)
+
+	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				_ = s.Send(conn.ID, msg)
+			}
+		}()
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	conn.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
+	wg.Wait()
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer readCancel()
+	_, _, _ = clientWS.Read(readCtx)
 }

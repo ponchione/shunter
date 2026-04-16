@@ -65,8 +65,12 @@ func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// DecodeChangeset deserializes a Changeset from bytes.
-func DecodeChangeset(data []byte, reg schema.SchemaRegistry, maxRowBytes uint32) (*store.Changeset, error) {
+// DecodeChangeset deserializes a Changeset from bytes using the default row-size limit.
+func DecodeChangeset(data []byte, reg schema.SchemaRegistry) (*store.Changeset, error) {
+	return decodeChangesetWithMax(data, reg, DefaultCommitLogOptions().MaxRowBytes)
+}
+
+func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes uint32) (*store.Changeset, error) {
 	if len(data) < 5 {
 		return nil, fmt.Errorf("commitlog: changeset too short")
 	}

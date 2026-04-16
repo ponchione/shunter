@@ -49,6 +49,20 @@ func closeProtocolError(conn *Conn, reason string) {
 //
 // Exit conditions: ctx cancelled, c.closed closed, or ws.Read error.
 func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
+	readCtx := ctx
+	if c.readCtx != nil {
+		combinedCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go func() {
+			select {
+			case <-c.readCtx.Done():
+				cancel()
+			case <-combinedCtx.Done():
+			}
+		}()
+		readCtx = combinedCtx
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -58,7 +72,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		default:
 		}
 
-		typ, frame, err := c.ws.Read(ctx)
+		typ, frame, err := c.ws.Read(readCtx)
 		if err != nil {
 			return
 		}
@@ -94,6 +108,34 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 			return
 		}
 
+		var run func()
+		switch m := msg.(type) {
+		case SubscribeMsg:
+			if handlers.OnSubscribe == nil {
+				closeProtocolError(c, "unsupported message type")
+				return
+			}
+			run = func() { handlers.OnSubscribe(ctx, c, &m) }
+		case UnsubscribeMsg:
+			if handlers.OnUnsubscribe == nil {
+				closeProtocolError(c, "unsupported message type")
+				return
+			}
+			run = func() { handlers.OnUnsubscribe(ctx, c, &m) }
+		case CallReducerMsg:
+			if handlers.OnCallReducer == nil {
+				closeProtocolError(c, "unsupported message type")
+				return
+			}
+			run = func() { handlers.OnCallReducer(ctx, c, &m) }
+		case OneOffQueryMsg:
+			if handlers.OnOneOffQuery == nil {
+				closeProtocolError(c, "unsupported message type")
+				return
+			}
+			run = func() { handlers.OnOneOffQuery(ctx, c, &m) }
+		}
+
 		// Incoming backpressure (SPEC-005 §10.2, Story 6.2):
 		// non-blocking acquire on the inflight semaphore. If full,
 		// the client is flooding faster than we can process —
@@ -105,43 +147,9 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 			return
 		}
 
-		switch m := msg.(type) {
-		case SubscribeMsg:
-			if handlers.OnSubscribe == nil {
-				closeProtocolError(c, "unsupported message type")
-				return
-			}
-			go func() {
-				defer func() { <-c.inflightSem }()
-				handlers.OnSubscribe(ctx, c, &m)
-			}()
-		case UnsubscribeMsg:
-			if handlers.OnUnsubscribe == nil {
-				closeProtocolError(c, "unsupported message type")
-				return
-			}
-			go func() {
-				defer func() { <-c.inflightSem }()
-				handlers.OnUnsubscribe(ctx, c, &m)
-			}()
-		case CallReducerMsg:
-			if handlers.OnCallReducer == nil {
-				closeProtocolError(c, "unsupported message type")
-				return
-			}
-			go func() {
-				defer func() { <-c.inflightSem }()
-				handlers.OnCallReducer(ctx, c, &m)
-			}()
-		case OneOffQueryMsg:
-			if handlers.OnOneOffQuery == nil {
-				closeProtocolError(c, "unsupported message type")
-				return
-			}
-			go func() {
-				defer func() { <-c.inflightSem }()
-				handlers.OnOneOffQuery(ctx, c, &m)
-			}()
-		}
+		go func(run func()) {
+			defer func() { <-c.inflightSem }()
+			run()
+		}(run)
 	}
 }

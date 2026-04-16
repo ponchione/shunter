@@ -154,12 +154,15 @@ func DecodeProductValueFromBytes(data []byte, ts *schema.TableSchema) (types.Pro
 	if err != nil {
 		var shapeErr *RowShapeMismatchError
 		if errors.As(err, &shapeErr) {
-			return nil, ErrRowLengthMismatch
+			return nil, errors.Join(ErrRowLengthMismatch, shapeErr)
 		}
 		return nil, err
 	}
 	if r.pos < len(r.data) {
-		return nil, &RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: len(ts.Columns) + 1}
+		return nil, errors.Join(
+			ErrRowLengthMismatch,
+			&RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: len(ts.Columns) + 1},
+		)
 	}
 	return pv, nil
 }

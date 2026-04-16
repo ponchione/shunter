@@ -41,7 +41,9 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 			log.Printf("protocol: OnDisconnect for %x failed: %v", c.ID[:], err)
 		}
 		mgr.Remove(c.ID)
-		close(c.OutboundCh)
+		if c.cancelRead != nil {
+			c.cancelRead()
+		}
 		close(c.closed)
 		if c.ws != nil {
 			go closeWithHandshake(c.ws, code, reason, c.opts.CloseHandshakeTimeout)

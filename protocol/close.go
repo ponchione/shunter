@@ -8,27 +8,33 @@ import (
 
 // Close codes used by the server (RFC 6455 + SPEC-005 §11.1).
 const (
-	CloseNormal   = websocket.StatusNormalClosure  // 1000: graceful shutdown
+	CloseNormal   = websocket.StatusNormalClosure   // 1000: graceful shutdown
 	CloseProtocol = websocket.StatusProtocolError   // 1002: unknown tag, malformed
 	ClosePolicy   = websocket.StatusPolicyViolation // 1008: auth, buffer overflow, flood
 	CloseInternal = websocket.StatusInternalError   // 1011: unexpected server error
 )
 
-// closeWithHandshake sends a Close frame and waits up to timeout for
-// the peer's echo. If the peer does not respond in time the caller
-// returns immediately; the coder/websocket internal close handshake
-// (up to 10 s) continues in the background and will tear down the TCP
-// connection on its own.
+// closeWithHandshake starts a WebSocket Close handshake and waits up to
+// timeout for the peer's echo. If the peer does not respond in time the
+// caller returns immediately, but the underlying coder/websocket Close
+// call continues in the background and may still block for its own
+// internal handshake window.
 //
 // Runs synchronously — callers that cannot block should invoke in a
 // goroutine.
 //
-// Design note: coder/websocket.Conn.Close uses a one-shot CAS gate
-// that prevents a concurrent CloseNow from interrupting it. The only
-// way to bound the wait from outside is to let Close run in a
-// background goroutine and select on a timeout. This matches the
-// fire-and-forget pattern already used in Disconnect and keepalive
-// idle-close paths.
+// IMPORTANT LIMITATION:
+// Story 6.3 wants "send Close, then force-close TCP after
+// CloseHandshakeTimeout if no echo arrives." coder/websocket v1.8.14
+// does not expose a public API that can enforce that exactly. A live
+// experiment showed that calling Conn.CloseNow after Conn.Close has
+// started does NOT preempt the in-flight Close; both calls still wait
+// for the library's internal close path to finish.
+//
+// So this helper only guarantees a bounded wait for Shunter's own
+// control flow. It does NOT guarantee immediate transport teardown at
+// timeout. Callers should treat it as "best-effort close initiation,
+// then return" rather than a true hard-close timeout implementation.
 func closeWithHandshake(ws *websocket.Conn, code websocket.StatusCode, reason string, timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {

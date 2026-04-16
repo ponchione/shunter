@@ -2,8 +2,10 @@ package executor
 
 import "github.com/ponchione/shunter/types"
 
-// ScheduleID identifies a scheduled reducer entry.
-type ScheduleID uint64
+// ScheduleID aliases the canonical ScheduleID in types.
+// Canonical home: types.ScheduleID. Alias kept so existing executor
+// callers and tests continue to compile.
+type ScheduleID = types.ScheduleID
 
 // SubscriptionID aliases the canonical SubscriptionID in types.
 // Canonical home: types.SubscriptionID. Alias kept so existing executor

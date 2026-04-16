@@ -15,8 +15,8 @@ type SchemaRegistry interface {
 
 type schemaRegistry struct {
 	tables       []TableSchema
-	byID         map[TableID]*TableSchema
-	byName       map[string]*TableSchema
+	byID         map[TableID]int
+	byName       map[string]int
 	tableIDs     []TableID // user tables first, then system
 	reducers     map[string]ReducerHandler
 	reducerNames []string
@@ -25,19 +25,19 @@ type schemaRegistry struct {
 	version      uint32
 }
 
-func newSchemaRegistry(schemas []TableSchema, userTableCount int, b *Builder) SchemaRegistry {
+func newSchemaRegistry(schemas []TableSchema, b *Builder) SchemaRegistry {
 	r := &schemaRegistry{
 		tables:   schemas,
-		byID:     make(map[TableID]*TableSchema, len(schemas)),
-		byName:   make(map[string]*TableSchema, len(schemas)),
+		byID:     make(map[TableID]int, len(schemas)),
+		byName:   make(map[string]int, len(schemas)),
 		tableIDs: make([]TableID, len(schemas)),
 		reducers: make(map[string]ReducerHandler, len(b.reducers)),
 		version:  b.version,
 	}
 
 	for i := range schemas {
-		r.byID[schemas[i].ID] = &r.tables[i]
-		r.byName[schemas[i].Name] = &r.tables[i]
+		r.byID[schemas[i].ID] = i
+		r.byName[schemas[i].Name] = i
 		r.tableIDs[i] = schemas[i].ID
 	}
 
@@ -49,19 +49,25 @@ func newSchemaRegistry(schemas []TableSchema, userTableCount int, b *Builder) Sc
 
 	r.onConnect = b.onConnect
 	r.onDisconnect = b.onDisconnect
-	_ = userTableCount
-
 	return r
 }
 
 func (r *schemaRegistry) Table(id TableID) (*TableSchema, bool) {
-	ts, ok := r.byID[id]
-	return ts, ok
+	i, ok := r.byID[id]
+	if !ok {
+		return nil, false
+	}
+	ts := cloneTableSchema(r.tables[i])
+	return &ts, true
 }
 
 func (r *schemaRegistry) TableByName(name string) (*TableSchema, bool) {
-	ts, ok := r.byName[name]
-	return ts, ok
+	i, ok := r.byName[name]
+	if !ok {
+		return nil, false
+	}
+	ts := cloneTableSchema(r.tables[i])
+	return &ts, true
 }
 
 func (r *schemaRegistry) Tables() []TableID {
@@ -91,4 +97,16 @@ func (r *schemaRegistry) OnDisconnect() func(*ReducerContext) error {
 
 func (r *schemaRegistry) Version() uint32 {
 	return r.version
+}
+
+func cloneTableSchema(ts TableSchema) TableSchema {
+	clone := ts
+	clone.Columns = append([]ColumnSchema(nil), ts.Columns...)
+	clone.Indexes = make([]IndexSchema, len(ts.Indexes))
+	for i, idx := range ts.Indexes {
+		idxClone := idx
+		idxClone.Columns = append([]int(nil), idx.Columns...)
+		clone.Indexes[i] = idxClone
+	}
+	return clone
 }

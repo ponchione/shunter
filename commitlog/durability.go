@@ -39,16 +39,20 @@ type durabilityItem struct {
 
 // DurabilityWorker persists committed transactions to the segment log.
 type DurabilityWorker struct {
-	ch       chan durabilityItem
-	durable  atomic.Uint64
-	stateMu  sync.Mutex
-	fatalErr error
-	closing  bool
-	lastEnq  uint64
-	done     chan struct{}
-	opts     CommitLogOptions
-	dir      string
-	seg      *SegmentWriter
+	ch         chan durabilityItem
+	closeCh    chan struct{}
+	durable    atomic.Uint64
+	stateMu    sync.Mutex
+	fatalErr   error
+	closing    bool
+	lastEnq    uint64
+	sends      sync.WaitGroup
+	done       chan struct{}
+	closeOnce  sync.Once
+	signalOnce sync.Once
+	opts       CommitLogOptions
+	dir        string
+	seg        *SegmentWriter
 }
 
 // NewDurabilityWorker creates and starts the worker.
@@ -60,11 +64,12 @@ func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*
 		return nil, err
 	}
 	dw := &DurabilityWorker{
-		ch:   make(chan durabilityItem, opts.ChannelCapacity),
-		done: make(chan struct{}),
-		opts: opts,
-		dir:  dir,
-		seg:  seg,
+		ch:      make(chan durabilityItem, opts.ChannelCapacity),
+		closeCh: make(chan struct{}),
+		done:    make(chan struct{}),
+		opts:    opts,
+		dir:     dir,
+		seg:     seg,
 	}
 	if seg.lastTx > 0 {
 		dw.durable.Store(seg.lastTx)
@@ -89,23 +94,41 @@ func openOrCreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 // Panics if closed or fatally errored.
 func (dw *DurabilityWorker) EnqueueCommitted(txID uint64, cs *store.Changeset) {
 	dw.stateMu.Lock()
-	fatal := dw.fatalErr
-	closing := dw.closing
-	if fatal == nil && !closing {
-		if txID <= dw.lastEnq {
-			dw.stateMu.Unlock()
-			panic(fmt.Sprintf("commitlog: enqueue tx %d after %d", txID, dw.lastEnq))
-		}
-		dw.lastEnq = txID
-	}
-	dw.stateMu.Unlock()
-	if fatal != nil {
+	if dw.fatalErr != nil {
+		fatal := dw.fatalErr
+		dw.stateMu.Unlock()
 		panic(fmt.Errorf("%w: %w", ErrDurabilityFailed, fatal))
 	}
-	if closing {
+	if dw.closing {
+		dw.stateMu.Unlock()
 		panic("commitlog: enqueue after close")
 	}
-	dw.ch <- durabilityItem{txID: txID, changeset: cs}
+	if txID <= dw.lastEnq {
+		dw.stateMu.Unlock()
+		panic(fmt.Sprintf("commitlog: enqueue tx %d after %d", txID, dw.lastEnq))
+	}
+	dw.lastEnq = txID
+	dw.sends.Add(1)
+	dw.stateMu.Unlock()
+	defer dw.sends.Done()
+
+	item := durabilityItem{txID: txID, changeset: cs}
+	select {
+	case dw.ch <- item:
+		return
+	case <-dw.closeCh:
+		dw.stateMu.Lock()
+		fatal := dw.fatalErr
+		closing := dw.closing
+		dw.stateMu.Unlock()
+		if fatal != nil {
+			panic(fmt.Errorf("%w: %w", ErrDurabilityFailed, fatal))
+		}
+		if closing {
+			panic("commitlog: enqueue after close")
+		}
+		panic("commitlog: enqueue after worker stop")
+	}
 }
 
 // DurableTxID returns the latest durably written TxID.
@@ -118,7 +141,9 @@ func (dw *DurabilityWorker) Close() (uint64, error) {
 	dw.stateMu.Lock()
 	dw.closing = true
 	dw.stateMu.Unlock()
-	close(dw.ch)
+	dw.signalClose()
+	dw.sends.Wait()
+	dw.closeOnce.Do(func() { close(dw.ch) })
 	<-dw.done
 
 	if dw.seg != nil {
@@ -145,28 +170,32 @@ func (dw *DurabilityWorker) run() {
 			return
 		}
 		batch := []durabilityItem{item}
-		// Non-blocking drain.
+	drain:
 		for range dw.opts.DrainBatchSize - 1 {
 			select {
 			case it, ok := <-dw.ch:
 				if !ok {
-					break
+					break drain
 				}
 				batch = append(batch, it)
 			default:
-				goto process
+				break drain
 			}
 		}
-	process:
 		if err := dw.processBatch(batch); err != nil {
 			dw.stateMu.Lock()
 			if dw.fatalErr == nil {
 				dw.fatalErr = err
 			}
 			dw.stateMu.Unlock()
+			dw.signalClose()
 			return
 		}
 	}
+}
+
+func (dw *DurabilityWorker) signalClose() {
+	dw.signalOnce.Do(func() { close(dw.closeCh) })
 }
 
 func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {

@@ -123,4 +123,5 @@ type EngineOptions struct {
 	ExecutorQueueCapacity   int
 	DurabilityQueueCapacity int
 	EnableProtocol          bool
+	StartupSnapshotSchema   *SnapshotSchema
 }

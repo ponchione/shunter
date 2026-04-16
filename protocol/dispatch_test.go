@@ -1,7 +1,9 @@
 package protocol
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -177,6 +179,46 @@ func TestDispatchLoop_UnknownTagCloses(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("dispatch loop did not exit on unknown tag")
+	}
+}
+
+func TestDispatchLoop_UnknownTagLogsDetail(t *testing.T) {
+	conn, client := testConnPair(t, nil)
+
+	handlers := &MessageHandlers{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, handlers)
+
+	var logs bytes.Buffer
+	prevWriter := log.Writer()
+	prevFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
+	}()
+
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer writeCancel()
+	if err := client.Write(writeCtx, websocket.MessageBinary, []byte{0xFF, 0x00, 0x00}); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch loop did not exit on unknown tag")
+	}
+
+	got := logs.String()
+	if got == "" {
+		t.Fatal("expected protocol error log output, got empty log")
+	}
+	if !bytes.Contains([]byte(got), []byte("unknown message tag")) {
+		t.Fatalf("log output %q does not mention unknown message tag", got)
 	}
 }
 

@@ -73,6 +73,9 @@ func TestValidateJWTExpiredRejected(t *testing.T) {
 	if !errors.Is(err, ErrJWTInvalid) {
 		t.Errorf("got %v, want ErrJWTInvalid for expired token", err)
 	}
+	if !errors.Is(err, jwt.ErrTokenExpired) {
+		t.Fatalf("expired token error should preserve jwt.ErrTokenExpired, got %v", err)
+	}
 }
 
 func TestValidateJWTBadSignatureRejected(t *testing.T) {
@@ -81,6 +84,9 @@ func TestValidateJWTBadSignatureRejected(t *testing.T) {
 	_, err := ValidateJWT(s, cfg)
 	if !errors.Is(err, ErrJWTInvalid) {
 		t.Errorf("got %v, want ErrJWTInvalid for bad signature", err)
+	}
+	if !errors.Is(err, jwt.ErrTokenSignatureInvalid) {
+		t.Fatalf("bad signature error should preserve jwt.ErrTokenSignatureInvalid, got %v", err)
 	}
 }
 

@@ -170,11 +170,11 @@ func TestSegmentReaderDetectsEOFTruncationAndCorruption(t *testing.T) {
 	}
 	defer sr.Close()
 	for i := 0; i < 2; i++ {
-		if _, err := sr.Next(0); err != nil {
+		if _, err := sr.Next(); err != nil {
 			t.Fatalf("read %d: %v", i, err)
 		}
 	}
-	if _, err := sr.Next(0); !errors.Is(err, io.EOF) {
+	if _, err := sr.Next(); !errors.Is(err, io.EOF) {
 		t.Fatalf("expected clean EOF, got %v", err)
 	}
 	if sr.LastTxID() != 2 {
@@ -185,7 +185,7 @@ func TestSegmentReaderDetectsEOFTruncationAndCorruption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	truncatedPath := filepath.Join(dir, "truncated.log")
+	truncatedPath := filepath.Join(dir, SegmentFileName(3))
 	if err := os.WriteFile(truncatedPath, full[:len(full)-2], 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -193,17 +193,17 @@ func TestSegmentReaderDetectsEOFTruncationAndCorruption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tr.Next(0); err != nil {
+	if _, err := tr.Next(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tr.Next(0); !errors.Is(err, ErrTruncatedRecord) {
+	if _, err := tr.Next(); !errors.Is(err, ErrTruncatedRecord) {
 		t.Fatalf("expected ErrTruncatedRecord, got %v", err)
 	}
 	_ = tr.Close()
 
 	corrupt := append([]byte(nil), full...)
 	corrupt[len(corrupt)-1] ^= 0xFF
-	corruptPath := filepath.Join(dir, "corrupt.log")
+	corruptPath := filepath.Join(dir, SegmentFileName(4))
 	if err := os.WriteFile(corruptPath, corrupt, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -211,14 +211,52 @@ func TestSegmentReaderDetectsEOFTruncationAndCorruption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cr.Next(0); err != nil {
+	if _, err := cr.Next(); err != nil {
 		t.Fatal(err)
 	}
 	var checksum *ChecksumMismatchError
-	if _, err := cr.Next(0); !errors.As(err, &checksum) {
+	if _, err := cr.Next(); !errors.As(err, &checksum) {
 		t.Fatalf("expected checksum mismatch, got %v", err)
 	}
 	_ = cr.Close()
+}
+
+func TestSegmentWriterEnforcesStartTxAlignment(t *testing.T) {
+	dir := t.TempDir()
+	sw, err := CreateSegment(dir, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sw.Append(&Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("bad")}); err == nil {
+		t.Fatal("expected first append before startTx to fail")
+	}
+
+	if err := sw.Append(&Record{TxID: 100, RecordType: RecordTypeChangeset, Payload: []byte("good")}); err != nil {
+		t.Fatalf("first append at startTx should succeed: %v", err)
+	}
+	if err := sw.Append(&Record{TxID: 101, RecordType: RecordTypeChangeset, Payload: []byte("next")}); err != nil {
+		t.Fatalf("second append after aligned first append should succeed: %v", err)
+	}
+	if err := sw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sr, err := OpenSegment(filepath.Join(dir, SegmentFileName(100)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sr.Close()
+	if sr.StartTxID() != 100 {
+		t.Fatalf("StartTxID = %d, want 100", sr.StartTxID())
+	}
+	first, err := sr.Next()
+	if err != nil {
+		t.Fatalf("read first record: %v", err)
+	}
+	if first.TxID != 100 {
+		t.Fatalf("first record tx = %d, want 100", first.TxID)
+	}
 }
 
 func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
@@ -238,7 +276,7 @@ func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 		t.Fatalf("first table id = %d, want 0", got)
 	}
 
-	decoded, err := DecodeChangeset(data, reg, DefaultCommitLogOptions().MaxRowBytes)
+	decoded, err := DecodeChangeset(data, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +296,7 @@ func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err = DecodeChangeset(zeroCounts, reg, DefaultCommitLogOptions().MaxRowBytes)
+	decoded, err = DecodeChangeset(zeroCounts, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,15 +304,15 @@ func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 		t.Fatalf("zero-count table missing after round-trip: %#v", decoded.Tables)
 	}
 
-	if _, err := DecodeChangeset(append([]byte{2}, empty[1:]...), reg, DefaultCommitLogOptions().MaxRowBytes); err == nil {
+	if _, err := DecodeChangeset(append([]byte{2}, empty[1:]...), reg); err == nil {
 		t.Fatal("expected version error")
 	}
 	unknownTable := []byte{1, 1, 0, 0, 0, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-	if _, err := DecodeChangeset(unknownTable, reg, DefaultCommitLogOptions().MaxRowBytes); err == nil {
+	if _, err := DecodeChangeset(unknownTable, reg); err == nil {
 		t.Fatal("expected unknown table error")
 	}
 	tooLargeRow := []byte{1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 8, 0, 0, 0}
-	if _, err := DecodeChangeset(tooLargeRow, reg, 4); err == nil {
+	if _, err := decodeChangesetWithMax(tooLargeRow, reg, 4); err == nil {
 		t.Fatal("expected RowTooLargeError")
 	}
 }
@@ -351,6 +389,72 @@ func TestDurabilityWorkerCloseThenEnqueuePanics(t *testing.T) {
 	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
 }
 
+func TestDurabilityWorkerCloseWhileEnqueueBlockedReturnsControlledClosePanic(t *testing.T) {
+	dw := &DurabilityWorker{
+		ch:      make(chan durabilityItem, 1),
+		closeCh: make(chan struct{}),
+		done:    make(chan struct{}),
+		opts:    CommitLogOptions{DrainBatchSize: 1},
+	}
+	close(dw.done)
+	dw.ch <- durabilityItem{txID: 1, changeset: &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}}}
+
+	panicCh := make(chan any, 1)
+	enqueueDone := make(chan struct{})
+	go func() {
+		defer close(enqueueDone)
+		defer func() {
+			if r := recover(); r != nil {
+				panicCh <- r
+			}
+		}()
+		dw.EnqueueCommitted(2, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	if _, err := dw.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	select {
+	case <-enqueueDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked enqueue did not return")
+	}
+
+	select {
+	case p := <-panicCh:
+		if got := p.(string); got != "commitlog: enqueue after close" {
+			t.Fatalf("blocked enqueue panic = %q, want controlled close panic", got)
+		}
+	default:
+		t.Fatal("blocked enqueue should exit with a controlled close panic")
+	}
+}
+
+func TestDurabilityWorkerCloseAfterSingleQueuedItemDoesNotSpinOnClosedDrain(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.DrainBatchSize = 500000000
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+
+	closeDone := make(chan struct{})
+	go func() {
+		_, _ = dw.Close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Close should exit promptly after draining one queued item")
+	}
+}
+
 func TestDurabilityWorkerReopensExistingSegment(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultCommitLogOptions()
@@ -419,7 +523,7 @@ func TestDurabilityWorkerReopensExistingSegment(t *testing.T) {
 	defer sr.Close()
 	var txIDs []uint64
 	for {
-		rec, err := sr.Next(0)
+		rec, err := sr.Next()
 		if err != nil {
 			if err == io.EOF {
 				break

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"errors"
 	"math"
 	"testing"
 )
@@ -200,12 +201,18 @@ func TestFloat32RejectsNaN(t *testing.T) {
 	if err == nil {
 		t.Fatal("NewFloat32(NaN) should return error")
 	}
+	if !errors.Is(err, ErrInvalidFloat) {
+		t.Fatalf("NewFloat32(NaN) error = %v, want errors.Is(..., ErrInvalidFloat)", err)
+	}
 }
 
 func TestFloat64RejectsNaN(t *testing.T) {
 	_, err := NewFloat64(math.NaN())
 	if err == nil {
 		t.Fatal("NewFloat64(NaN) should return error")
+	}
+	if !errors.Is(err, ErrInvalidFloat) {
+		t.Fatalf("NewFloat64(NaN) error = %v, want errors.Is(..., ErrInvalidFloat)", err)
 	}
 }
 

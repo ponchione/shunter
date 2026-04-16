@@ -11,7 +11,7 @@
 
 ## Summary
 
-Two handlers grouped together because they share the pattern: validate, route to executor, await response.
+Two handlers grouped together because they share the same E4 shape: validate locally, submit to the executor, and return immediately. E5 owns the accepted-command response watchers.
 
 ## Deliverables
 
@@ -19,15 +19,15 @@ Two handlers grouped together because they share the pattern: validate, route to
 
 - `func handleUnsubscribe(conn *Conn, msg *UnsubscribeMsg, executor ExecutorInbox)`:
   1. Validate `subscription_id` is active → `ErrSubscriptionNotFound` if pending or not found
-  2. Send `UnregisterSubscriptionCmd` to executor using the SPEC-003 fields (`ConnID`, `SubscriptionID`, `ResponseCh`); preserve `send_dropped` in the protocol-layer response path
-  3. On executor response: remove subscription from tracker, deliver `UnsubscribeApplied` (Epic 5)
+  2. Send `UnregisterSubscriptionRequest` to the executor using the SPEC-003 fields (`ConnID`, `SubscriptionID`, `RequestID`, `SendDropped`, `ResponseCh`)
+  3. On executor submission success: remove subscription from tracker immediately; E5 watches the response channel and delivers `UnsubscribeApplied` / `SubscriptionError`
 
 ### CallReducer
 
 - `func handleCallReducer(conn *Conn, msg *CallReducerMsg, executor ExecutorInbox)`:
   1. Reject lifecycle reducer names (`"OnConnect"`, `"OnDisconnect"`) → send `ReducerCallResult` with `status = not_found` and `ErrLifecycleReducer` error message
-  2. Send `CallReducerCmd` to executor inbox with `ResponseCh` for result delivery
-  3. Executor sends `ReducerCallResult` back via `ResponseCh` → delivered to client (Epic 5)
+  2. Send `CallReducerRequest` to executor inbox with `RequestID`, raw args, and `ResponseCh` for later result delivery
+  3. On submission failure: send `ReducerCallResult` with `status=3` and error message
 
 - Reuse/surface `ErrLifecycleReducer` from SPEC-003 when the client attempts to invoke a lifecycle reducer directly
 

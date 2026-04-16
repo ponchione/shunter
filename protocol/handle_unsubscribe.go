@@ -22,7 +22,14 @@ func handleUnsubscribe(
 		return
 	}
 
-	if err := executor.UnregisterSubscription(ctx, conn.ID, subID); err != nil {
+	respCh := make(chan UnsubscribeCommandResponse, 1)
+	if err := executor.UnregisterSubscription(ctx, UnregisterSubscriptionRequest{
+		ConnID:         conn.ID,
+		SubscriptionID: subID,
+		RequestID:      msg.RequestID,
+		SendDropped:    msg.SendDropped,
+		ResponseCh:     respCh,
+	}); err != nil {
 		sendError(conn, SubscriptionError{
 			RequestID:      msg.RequestID,
 			SubscriptionID: subID,

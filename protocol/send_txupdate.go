@@ -1,6 +1,18 @@
 package protocol
 
-import "github.com/ponchione/shunter/types"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/ponchione/shunter/types"
+)
+
+// ErrSubscriptionNotActive is returned when a TransactionUpdate fanout
+// references a subscription_id that has not yet reached SubActive on
+// the target connection. This is a protocol pipeline invariant
+// violation: SubscribeApplied must be delivered before any update for
+// that subscription.
+var ErrSubscriptionNotActive = errors.New("protocol: subscription not active for transaction update")
 
 // DeliveryError pairs a connection ID with the error encountered
 // during delivery. Used by callers to trigger disconnect for
@@ -30,10 +42,23 @@ func DeliverTransactionUpdate(
 		if conn == nil {
 			continue
 		}
+		if err := validateActiveSubscriptionUpdates(conn, txID, updates); err != nil {
+			errs = append(errs, DeliveryError{ConnID: connID, Err: err})
+			continue
+		}
 		msg := &TransactionUpdate{TxID: txID, Updates: updates}
 		if err := sender.SendTransactionUpdate(connID, msg); err != nil {
 			errs = append(errs, DeliveryError{ConnID: connID, Err: err})
 		}
 	}
 	return errs
+}
+
+func validateActiveSubscriptionUpdates(conn *Conn, txID uint64, updates []SubscriptionUpdate) error {
+	for _, update := range updates {
+		if !conn.Subscriptions.IsActive(update.SubscriptionID) {
+			return fmt.Errorf("%w: conn=%x tx=%d subscription_id=%d", ErrSubscriptionNotActive, conn.ID[:], txID, update.SubscriptionID)
+		}
+	}
+	return nil
 }

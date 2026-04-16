@@ -1,6 +1,32 @@
 package types
 
-import "time"
+import (
+	"iter"
+	"time"
+)
+
+// ScheduleID identifies a scheduled reducer entry.
+type ScheduleID uint64
+
+// ReducerDB is the reducer-facing transactional database surface.
+// It exposes the operations reducers may perform synchronously during
+// execution without leaking the concrete store implementation through
+// `ReducerContext`.
+type ReducerDB interface {
+	Insert(tableID uint32, row ProductValue) (RowID, error)
+	Delete(tableID uint32, rowID RowID) error
+	Update(tableID uint32, rowID RowID, newRow ProductValue) (RowID, error)
+	GetRow(tableID uint32, rowID RowID) (ProductValue, bool)
+	ScanTable(tableID uint32) iter.Seq2[RowID, ProductValue]
+	Underlying() any
+}
+
+// ReducerScheduler is the reducer-facing scheduling surface.
+type ReducerScheduler interface {
+	Schedule(reducerName string, args []byte, at time.Time) (ScheduleID, error)
+	ScheduleRepeat(reducerName string, args []byte, interval time.Duration) (ScheduleID, error)
+	Cancel(id ScheduleID) bool
+}
 
 // ReducerHandler is the raw runtime signature for all reducers.
 type ReducerHandler func(ctx *ReducerContext, argBSATN []byte) ([]byte, error)
@@ -12,8 +38,8 @@ type ReducerHandler func(ctx *ReducerContext, argBSATN []byte) ([]byte, error)
 type ReducerContext struct {
 	ReducerName string
 	Caller      CallerContext
-	DB          any // *store.Transaction at runtime
-	Scheduler   any // executor.SchedulerHandle at runtime
+	DB          ReducerDB
+	Scheduler   ReducerScheduler
 }
 
 // CallerContext captures the identity and timing of a reducer invocation.

@@ -293,7 +293,7 @@ func TestOnConnectReducerPanicRollsBackInsert(t *testing.T) {
 		t.Errorf("sys_clients rows=%d, want 0 (rolled back)", n)
 	}
 	// Executor still works — fatal NOT set (pre-commit panic is per-request).
-	if h.exec.fatal {
+	if h.exec.fatal.Load() {
 		t.Error("executor.fatal set by OnConnect reducer panic; should be per-request")
 	}
 }
@@ -396,7 +396,7 @@ func TestOnDisconnectReducerPanicStillDeletes(t *testing.T) {
 	if n := len(h.sysClientsSnapshot()); n != 0 {
 		t.Errorf("rows=%d, want 0", n)
 	}
-	if h.exec.fatal {
+	if h.exec.fatal.Load() {
 		t.Error("executor.fatal set after OnDisconnect reducer panic; should not be")
 	}
 }

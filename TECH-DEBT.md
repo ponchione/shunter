@@ -17,7 +17,7 @@ Current planned audit sequence follows `docs/EXECUTION-ORDER.md` Phase 1 foundat
 5. `SPEC-006 E3.1` Builder core — audited
 6. `SPEC-006 E4` Reflection-path registration — audited
 7. `SPEC-006 E3.2` Reducer registration — audited
-8. `SPEC-006 E5` Validation/Build/SchemaRegistry — in progress; confirmed gaps now include missing Story 5.6 schema compatibility checking at startup and mutable `SchemaRegistry` table lookups that violate the read-only contract
+8. `SPEC-006 E5` Validation/Build/SchemaRegistry — in progress; confirmed remaining gap is missing Story 5.6 schema compatibility checking at startup
 9. `SPEC-006 E6` Schema export — audited
 10. `SPEC-001 E2` Schema & table storage — audited
 11. `SPEC-001 E3` B-tree index engine — audited
@@ -42,7 +42,7 @@ Audit notes:
 - `SPEC-006 E3.1` builder core appears operationally aligned: `NewBuilder`, `TableDef`, `SchemaVersion`, `EngineOptions`, and chaining behavior are implemented and covered by tests. I have not logged a separate builder-core debt item from that slice.
 - `SPEC-006 E4` reflection-path registration is mostly present (`schema/reflect.go`, `schema/reflect_build.go`, `schema/register_table.go`), but one concrete contract gap was found and logged below: anonymous embedded fields are processed before `shunter:"-"` exclusion, so excluded embedded structs are still flattened and excluded embedded pointer-to-struct fields still error.
 - `SPEC-006 E3.2` reducer registration is functionally present (`schema/builder.go`, `schema/validate_schema.go`, `schema/registry.go`), but one API-surface gap was found and logged below: the schema package does not expose `ReducerHandler` / `ReducerContext` aliases even though SPEC-006 presents reducer registration as part of the schema-facing API surface.
-- `SPEC-006 E5` validation/build work is largely present, but two concrete contract gaps are now confirmed: Story 5.6 startup schema compatibility checking is missing entirely, and Story 5.4's read-only `SchemaRegistry` contract is violated because `Table(...)` / `TableByName(...)` return mutable pointers into internal state.
+- `SPEC-006 E5` validation/build work is largely present, and one major contract gap remains: Story 5.6 startup schema compatibility checking is still missing entirely. Story 5.4's read-only `SchemaRegistry` contract is now fixed by returning detached lookup copies.
 - `SPEC-006 E6` schema export is not implemented at all in live code: there is no `schema/export.go`, no export value types, no `Engine.ExportSchema()`, no JSON-contract tests, and no `cmd/shunter-codegen` tool surface. I logged the primary engine-surface gap below.
 - `SPEC-001 E2` schema-backed table storage is operationally present (`store/table.go`, `store/validate.go`, `store/store_test.go`), but one important contract gap was found and logged below: inserted rows are not detached from caller-owned `ProductValue` slices, so stored rows remain externally mutable.
 - `SPEC-001 E3` B-tree index engine is mostly present (`store/index_key.go`, `store/btree_index.go`, related tests), but Story 3.1's public `Bound` helper contract is entirely missing even though later range semantics docs still reference it. I logged the concrete API-surface gap below.
@@ -183,86 +183,48 @@ Suggested follow-up tests:
 
 ### TD-024: SPEC-002 E5 snapshot I/O surface is almost entirely unimplemented
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-002 Epic 5 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4g (`SPEC-002 E5: Snapshot I/O`)
 
 Summary:
-- Epic 5's snapshot I/O surface is largely absent from live code.
-- The repo currently has only snapshot-related error types in `commitlog/errors.go`; there are no snapshot codec, writer, reader, lockfile helper, or snapshot-listing implementations.
-- This leaves the entire snapshot/recovery handoff contract effectively unimplemented for SPEC-002 E5.
+- The commitlog package now implements the Epic 5 snapshot I/O surface: integrity helpers/constants, schema snapshot codec, file-backed snapshot writer, snapshot reader, and snapshot listing.
+- Snapshots persist schema bytes, sequence state, per-table nextID state, and deterministic row data, with Blake3 verification on read.
+- Focused regression coverage now guards the public API contract, hash/lock helpers, schema round-trip, snapshot round-trip, hash mismatch handling, list ordering, and concurrent snapshot exclusion.
 
 Why this matters:
-- Snapshot I/O is the prerequisite for bounded recovery and later log compaction. Without it, Epic 6 recovery cannot load snapshots and Epic 7 compaction cannot reason about safe segment deletion.
-- This is not a small API drift item; it is a missing implementation surface across all four Epic 5 stories.
-- Package tests still pass only because nothing in the current test suite exercises the promised snapshot API.
+- Recovery and future compaction now have the bounded snapshot primitives that SPEC-002 Epic 5 promised.
+- The previously missing public snapshot API surface is now exercised by package tests instead of existing only in docs.
+- Snapshot reads now surface integrity failures as typed hash-mismatch errors and ignore in-progress snapshots via lockfile checks.
 
 Related code:
-- `commitlog/errors.go:13-15`
-  - defines `ErrSnapshotIncomplete`, `ErrSnapshotInProgress`, and `SnapshotHashMismatchError`
-- `commitlog/errors.go:59-66`
-  - hash-mismatch typed error exists
-- `commitlog/` file list contains only:
-  - `changeset_codec.go`
-  - `commitlog_test.go`
-  - `durability.go`
-  - `errors.go`
-  - `phase4_acceptance_test.go`
-  - `segment.go`
-- There is no live `schema_snapshot.go`, `snapshot_writer.go`, `snapshot_reader.go`, or equivalent implementation file
-
-Related spec / decomposition docs:
-- `docs/decomposition/002-commitlog/epic-5-snapshot-io/EPIC.md:13-34`
-  - Epic 5 defines schema codec, writer, reader, and integrity work as concrete deliverables
-- `docs/decomposition/002-commitlog/epic-5-snapshot-io/story-5.1-schema-snapshot-codec.md:16-18,47-52`
-  - requires `EncodeSchemaSnapshot` / `DecodeSchemaSnapshot`
-- `docs/decomposition/002-commitlog/epic-5-snapshot-io/story-5.2-snapshot-writer.md:16-24`
-  - requires `SnapshotWriter` / `CreateSnapshot`
-- `docs/decomposition/002-commitlog/epic-5-snapshot-io/story-5.3-snapshot-reader.md:16-46`
-  - requires `SnapshotData`, `ReadSnapshot`, and `ListSnapshots`
-- `docs/decomposition/002-commitlog/epic-5-snapshot-io/story-5.4-snapshot-integrity.md:16-30`
-  - requires `ComputeSnapshotHash`, lockfile helpers, and snapshot constants (`SnapshotMagic`, `SnapshotVersion`, `SnapshotHeaderSize`)
+- `commitlog/snapshot_io.go`
+  - adds `SnapshotMagic`, `SnapshotVersion`, `SnapshotHeaderSize`
+  - adds `ComputeSnapshotHash`, lockfile helpers, schema codec, writer, reader, and list APIs
+- `commitlog/snapshot_test.go`
+  - adds focused API/round-trip/integrity/concurrency coverage
 
 Current observed behavior:
-- Existing package tests still pass:
+- Focused snapshot tests pass:
+  - `rtk go test ./commitlog -run 'TestSnapshotPublicAPIContractCompiles|TestSnapshotHashAndLockHelpers|TestSchemaSnapshotCodecRoundTrip|TestCreateAndReadSnapshotRoundTrip|TestListSnapshotsSkipsLockAndSortsNewestFirst|TestReadSnapshotHashMismatch|TestConcurrentSnapshotReturnsInProgress' -count=1`
+- Full package and repo verification pass:
   - `rtk go test ./commitlog`
-- Targeted public-API compile repro against the documented Epic 5 surface failed:
-  - `rtk go test ./.tmp_commitlog_e5_api`
-  - observed missing symbols:
-    - `undefined: commitlog.SnapshotMagic`
-    - `undefined: commitlog.SnapshotVersion`
-    - `undefined: commitlog.ReadSnapshot`
-    - `undefined: commitlog.ListSnapshots`
-    - `undefined: commitlog.EncodeSchemaSnapshot`
-    - `undefined: commitlog.DecodeSchemaSnapshot`
-- This is a missing-feature surface, not just naming drift
-
-Recommended resolution options:
-1. Preferred code fix:
-   - implement Epic 5 in the intended `commitlog` package with the documented public entrypoints and integrity helpers
-   - add writer/reader tests plus compile-time API coverage so the surface is guarded
-   - wire schema/sequence/nextID export-import through the SPEC-001 recovery hooks as the stories require
-2. Planning/doc fallback:
-   - if snapshot work is intentionally deferred, mark SPEC-002 E5 explicitly incomplete in planning/audit docs so later recovery/compaction epics are not treated as ready on the basis of absent primitives
-
-Suggested follow-up tests:
-- compile-time API test for `SnapshotMagic`, `SnapshotVersion`, `EncodeSchemaSnapshot`, `DecodeSchemaSnapshot`, `ReadSnapshot`, `ListSnapshots`
-- end-to-end write/read snapshot round-trip including schema, sequences, nextID state, and rows
-- lockfile/concurrent snapshot tests returning `ErrSnapshotInProgress` and skipping incomplete snapshots
-- hash mismatch test returning `ErrSnapshotHashMismatch`
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 ### TD-023: SPEC-002 E3 `DecodeChangeset` public signature does not match the documented decoder surface
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-002 Epic 3 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4f (`SPEC-002 E3: Changeset Codec`)
 
 Summary:
-- The changeset encoder/decoder behavior is broadly implemented and tested, including deterministic table ordering, zero-count tables, version checks, unknown-table rejection, and row-size enforcement.
-- But the exported decoder signature does not match the documented API.
-- Story 3.2 documents `func DecodeChangeset(data []byte, schema SchemaRegistry) (*Changeset, error)`, while live code exports `DecodeChangeset(data []byte, reg schema.SchemaRegistry, maxRowBytes uint32)`.
+- `DecodeChangeset` now exposes the documented two-argument public API: `DecodeChangeset(data []byte, schema SchemaRegistry)`.
+- The public decoder now sources its row-size limit from commitlog-owned defaults instead of requiring every caller to pass `maxRowBytes` explicitly.
+- An unexported helper retains explicit-limit coverage for internal package tests, and focused regression coverage now guards both the public API contract and default max-row enforcement.
 
 Why this matters:
 - This is a public API contract gap: callers written against the documented changeset codec surface do not compile.
@@ -288,15 +250,14 @@ Related spec / decomposition docs:
   - codec policy is described as part of the commitlog payload format and schema-aware recovery path
 
 Current observed behavior:
-- Existing package tests still pass:
+- Focused API-contract and commitlog package tests now pass:
+  - `rtk go test ./commitlog -run 'TestCommitlogPublicAPIContractCompiles|TestDecodeChangesetUsesDefaultMaxRowBytes' -count=1`
   - `rtk go test ./commitlog`
-- Targeted public-API compile repro failed against the documented signature:
-  - `rtk go test ./.tmp_commitlog_e3_api`
-  - observed error:
-    - `not enough arguments in call to commitlog.DecodeChangeset`
-    - `have (nil, schema.SchemaRegistry)`
-    - `want ([]byte, schema.SchemaRegistry, uint32)`
-- Runtime codec behavior itself is mostly present; this is API drift rather than a current functional break in the tested call sites
+- Repo-wide build still succeeds:
+  - `rtk go build ./...`
+- Full repo vet/test are currently blocked by unrelated protocol worktree drift (`runReadPump`-based protocol tests and ExecutorInbox mock signature churn), not by commitlog codec behavior:
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 Recommended resolution options:
 1. Preferred code fix:
@@ -314,15 +275,15 @@ Suggested follow-up tests:
 
 ### TD-022: SPEC-003 E4 `ReducerContext` still exposes `DB` and `Scheduler` as `any` instead of typed contracts
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-003 Epic 4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4e (`SPEC-003 E4: Reducer Transaction Lifecycle`)
 
 Summary:
-- Live reducer execution behavior is mostly present: lifecycle guard, reducer lookup, dequeue-time timestamping, tx creation, panic recovery, rollback, commit, and TxID assignment all exist.
-- But the public `ReducerContext` type used by reducers still exposes `DB any` and `Scheduler any`.
-- SPEC-003 Stories 4.1/4.2 build on the earlier executor contract that promises `DB *Transaction` and `Scheduler SchedulerHandle`, so reducer authors should not need type assertions to use the core runtime surface.
+- `types.ReducerContext` now exposes cycle-safe typed reducer-facing interfaces instead of erased `any` fields.
+- Reducers can call `ctx.DB` and `ctx.Scheduler` methods directly without type assertions.
+- The executor now binds concrete store/scheduler adapters into that typed surface, and focused contract coverage guards the direct-call reducer API.
 
 Why this matters:
 - This is a public contract gap in the reducer execution API, not just an internal implementation detail.
@@ -350,14 +311,13 @@ Related spec / decomposition docs:
   - execution docs and guardrails are written against the typed reducer runtime surface
 
 Current observed behavior:
-- Existing package tests still pass:
+- Focused executor contract/runtime tests now pass:
+  - `rtk go test ./executor -run 'TestReducerContractsMatchPhase1dSpec|TestPhase4HandleCallReducerBeginExecuteCommitRollback|TestSchedulerHandleCommitPersistsRow|TestSchedulerHandleRollbackDiscardsSchedule' -count=1`
   - `rtk go test ./executor`
-- Targeted public-API compile repro failed when using the documented typed fields directly:
-  - `rtk go test ./.tmp_executor_e4_ctxtyping`
-  - observed errors:
-    - `ctx.DB.Insert undefined (type any has no field or method Insert)`
-    - `ctx.Scheduler.Cancel undefined (type any has no field or method Cancel)`
-- Runtime behavior itself is present, but the public reducer contract is weaker than documented because callers must downcast from `any`
+- Full repo verification now passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 Recommended resolution options:
 1. Preferred code fix:
@@ -375,65 +335,38 @@ Suggested follow-up tests:
 
 ### TD-021: SPEC-003 E3 subscription-command dispatch path is still missing
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-003 Epic 3 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4d (`SPEC-003 E3: Executor Core`)
 
 Summary:
-- Story 3.4 requires executor-core dispatch routing for subscription register/unregister/disconnect commands, but live `dispatch(...)` only handles reducer and lifecycle commands.
-- The supporting command types and handler methods are also absent: there is no `RegisterSubscriptionCmd`, `UnregisterSubscriptionCmd`, `DisconnectClientSubscriptionsCmd`, `handleRegisterSubscription`, `handleUnregisterSubscription`, or `handleDisconnectClientSubscriptions`.
-- The current `SubscriptionManager` interface is post-commit-only (`EvalAndBroadcast`, `DroppedClients`, `DisconnectClient`) and does not expose the registration/unregistration surface Story 3.4 needs.
+- Executor-core dispatch now routes subscription register, unregister, and disconnect commands through the expected Story 3.4 handlers.
+- `SubscriptionManager` now exposes the registration/unregistration surface required by the executor boundary.
+- Focused regression tests now prove committed snapshots are acquired and closed around registration, and that unregister/disconnect delegation returns via the command response channels.
 
 Why this matters:
-- Story 3.4 is the executor-core owner of the atomic registration path that SPEC-003 uses to guarantee subscription registration ordering against commits.
-- Without this dispatch path, Epic 3 is not just thin — the registration-sensitive read boundary described in SPEC-003 §2.5 is still unimplemented.
-- This gap is broader than the earlier missing-command-shell debt: even if the command types existed, the executor still lacks the snapshot-acquire/register/close routing logic required by the decomposition.
+- The executor now owns the atomic registration-sensitive read boundary that SPEC-003 describes.
+- Epic 3 no longer overstates completeness while silently omitting subscription command routing.
+- Snapshot-close guarantees are now exercised by tests instead of being left implicit.
 
 Related code:
-- `executor/command.go:5-40`
-  - defines only `CallReducerCmd`, `OnConnectCmd`, and `OnDisconnectCmd`; no subscription command types exist
-- `executor/executor.go:183-205`
-  - `dispatch(...)` handles only `CallReducerCmd`, `OnConnectCmd`, and `OnDisconnectCmd`, then logs unknown command types
-- `executor/interfaces.go:28-41`
-  - `SubscriptionManager` exposes post-commit eval/drop-client methods only; no `Register`/`Unregister` registration API
-- repo-wide search found no `handleRegisterSubscription`, `handleUnregisterSubscription`, or `handleDisconnectClientSubscriptions` implementation
-- `executor/phase4_acceptance_test.go` and `executor/executor_test.go`
-  - current tests exercise reducer execution/run-loop behavior, but none cover subscription command routing or snapshot-close behavior
-
-Related spec / decomposition docs:
-- `docs/decomposition/003-executor/epic-3-executor-core/story-3.4-command-dispatch.md:16-59`
-  - requires the complete type switch plus the three subscription handlers and snapshot-close guarantees
-- `docs/decomposition/003-executor/SPEC-003-executor.md:116-131`
-  - executor minimum command set includes `RegisterSubscriptionCmd`, `UnregisterSubscriptionCmd`, and `DisconnectClientSubscriptionsCmd`
-- `docs/decomposition/003-executor/SPEC-003-executor.md:141-148`
-  - registration-sensitive reads must execute through the executor queue for atomicity
-- `docs/decomposition/003-executor/EPICS.md:66-72`
-  - Epic 3 includes command dispatch routing and shutdown on top of the bounded inbox/run loop
+- `executor/interfaces.go`
+  - adds `Register(...)` and `Unregister(...)` to `SubscriptionManager`
+- `executor/executor.go`
+  - extends `dispatch(...)` with register/unregister/disconnect cases
+  - implements `handleRegisterSubscription`, `handleUnregisterSubscription`, and `handleDisconnectClientSubscriptions`
+- `executor/subscription_dispatch_test.go`
+  - adds focused routing/snapshot-close regression coverage
 
 Current observed behavior:
-- Existing package tests still pass:
+- Focused dispatch tests pass:
+  - `rtk go test ./executor -run 'TestRegisterSubscriptionDispatchUsesSnapshotAndClosesIt|TestRegisterSubscriptionDispatchClosesSnapshotOnError|TestUnregisterAndDisconnectSubscriptionDispatchDelegate' -count=1`
+- Full package and repo verification pass:
   - `rtk go test ./executor`
-- Live dispatch surface is narrower than the story/spec:
-  - unknown command types are only logged
-  - there is no subscription registration path in the executor core today
-  - no test currently guards the required snapshot acquisition/closure contract for registration commands
-
-Recommended resolution options:
-1. Preferred code fix:
-   - add the missing subscription command types and request/result contracts at the executor boundary
-   - extend `SubscriptionManager` with the registration/unregistration methods Story 3.4 needs
-   - implement the three handlers with `CommittedState.Snapshot()` acquisition, `Register(...)` delegation, guaranteed `Close()`, and response delivery
-   - add acceptance tests for snapshot closure on both success and error paths
-2. If intentionally deferring subscription-core work:
-   - record explicitly that Story 3.4 remains incomplete and that the current Epic 3 implementation only covers reducer/lifecycle dispatch, not subscription routing
-   - this would avoid overstating Epic 3 completeness while later phases still depend on the missing path
-
-Suggested follow-up tests:
-- `RegisterSubscriptionCmd` acquires committed snapshot, calls manager, closes snapshot, and sends result
-- `RegisterSubscriptionCmd` closes snapshot even when manager returns error
-- `UnregisterSubscriptionCmd` and `DisconnectClientSubscriptionsCmd` delegate and return errors correctly
-- unknown command type logs but does not panic
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 ### TD-020: SPEC-003 E3 `SubmitWithContext` ignores reject-on-full policy and returns context timeout instead of `ErrExecutorBusy`
 
@@ -494,15 +427,15 @@ Suggested follow-up tests:
 
 ### TD-019: SPEC-003 E2 frozen reducer registry remains externally mutable through `Lookup` and `All`
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-003 Epic 2 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4c (`SPEC-003 E2: Reducer Registry`)
 
 Summary:
-- The registry implements `Freeze()` and rejects new registrations afterward, but it does not actually make registered reducer entries immutable.
-- `Lookup(...)`, `LookupLifecycle(...)`, and `All()` all hand out pointers to the live internal `RegisteredReducer` structs stored in the map.
-- Callers can mutate those returned structs after freeze, changing reducer names/lifecycle metadata in-place and bypassing the registry's validation rules entirely.
+- The registry now returns detached `RegisteredReducer` copies from `Lookup(...)`, `LookupLifecycle(...)`, and `All()`.
+- Post-freeze callers can no longer mutate the registry's internal reducer metadata through returned pointers.
+- Focused regression coverage now proves lookup/all mutations do not affect later reducer or lifecycle lookups.
 
 Why this matters:
 - Story 2.2 and SPEC-003 treat freeze as the point where registration becomes immutable and concurrent reads become safe because the registry no longer changes.
@@ -534,12 +467,13 @@ Related spec / decomposition docs:
   - freeze is defined as registry immutability after startup
 
 Current observed behavior:
-- Existing package tests still pass:
+- Regression and package tests now pass:
+  - `rtk go test ./executor -run 'TestReducerRegistry(FrozenLookupsReturnDetachedCopies|Basics|Lifecycle)|TestPhase4ReducerRegistryRules' -count=1`
   - `rtk go test ./executor`
-- Targeted runtime repro showed the immutability leak is live:
-  - `rtk go run /tmp/executor_registry_mutation_repro.go`
-  - observed output: `lookup_ok=true name_after_lookup_mutation=MUTATED lifecycle_ok=true lifecycle_name=MUTATED`
-  - this demonstrates that mutating the reducer returned from `Lookup("A")` changed the stored reducer name, and mutating the reducer returned via `All()` changed lifecycle lookup results after freeze
+- Full repo verification now passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 Recommended resolution options:
 1. Preferred code fix:
@@ -557,15 +491,15 @@ Suggested follow-up tests:
 
 ### TD-018: SPEC-002 E2 `SegmentWriter` does not enforce segment startTx alignment
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-002 Epic 2 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4b (`SPEC-002 E2: Record format & segment I/O`)
 
 Summary:
-- `CreateSegment(dir, startTxID)` records a segment start offset in the filename and writer state, but `Append(...)` only checks `tx_id > lastTx`.
-- For a fresh segment, there is no validation that the first appended record's `tx_id` equals the segment's declared `startTx`.
-- That allows creation of segments whose filename/start metadata says one thing while the first durable record contains a different transaction ID.
+- `SegmentWriter.Append(...)` now enforces that the first record written to a fresh segment has `tx_id == startTx`.
+- Later appends still use the existing strict `tx_id > lastTx` monotonicity rule.
+- Focused regression coverage now proves misaligned first appends fail while aligned first appends remain readable with matching segment/file metadata.
 
 Why this matters:
 - Story 2.3 defines `startTx` as "first TX ID in this segment," and later recovery/compaction stories rely on filename-derived start TX metadata as real history boundaries.
@@ -593,12 +527,13 @@ Related spec / decomposition docs:
   - recovery begins by validating segment start TX IDs from filenames in sorted order
 
 Current observed behavior:
-- Existing package tests still pass:
+- Focused regression and package tests now pass:
+  - `rtk go test ./commitlog -run TestSegmentWriterEnforcesStartTxAlignment -count=1`
   - `rtk go test ./commitlog`
-- Targeted runtime repro showed the mismatch is live:
-  - `rtk go run /tmp/commitlog_e2_starttx_repro.go`
-  - observed output: `start_tx=100 first_record_tx=1 err=<nil>`
-  - expected per Story 2.3: first record in that segment should have tx 100, or append should fail
+- Full repo verification now passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 Recommended resolution options:
 1. Preferred code fix:
@@ -616,15 +551,15 @@ Suggested follow-up tests:
 
 ### TD-017: SPEC-002 E2 exported error/reader API does not match the documented surface
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-002 Epic 2 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4b (`SPEC-002 E2: Record format & segment I/O`)
 
 Summary:
-- The implementation has working typed errors and a segment reader, but the exported API shape diverges from the decomposition/spec surface.
-- Docs name typed errors as `ErrBadVersion`, `ErrUnknownRecordType`, `ErrChecksumMismatch`, and `ErrRecordTooLarge`, but live code exports `BadVersionError`, `UnknownRecordTypeError`, `ChecksumMismatchError`, and `RecordTooLargeError` instead.
-- Docs also specify `func (sr *SegmentReader) Next() (*Record, error)`, while live code exports `Next(maxPayload uint32)`.
+- The documented typed error names are now exposed at the public surface via compatible exported aliases: `ErrBadVersion`, `ErrUnknownRecordType`, `ErrChecksumMismatch`, and `ErrRecordTooLarge`.
+- `SegmentReader` now exposes the documented no-argument `Next() (*Record, error)` API.
+- The public `Next()` path still enforces `DefaultCommitLogOptions().MaxRecordPayloadBytes`, and focused regression coverage now guards both the compile-time API surface and runtime max-payload behavior.
 
 Why this matters:
 - This is a public API contract gap: consumers written against the documented commitlog surface do not compile.
@@ -654,16 +589,13 @@ Related spec / decomposition docs:
   - assigns the typed-error field sets to `ErrBadVersion`, `ErrUnknownRecordType`, `ErrChecksumMismatch`, and `ErrRecordTooLarge`
 
 Current observed behavior:
-- Existing package tests still pass:
+- Focused API-contract and package tests now pass:
+  - `rtk go test ./commitlog -run 'TestCommitlogPublicAPIContractCompiles|TestSegmentReaderNextUsesDefaultMaxPayload' -count=1`
   - `rtk go test ./commitlog`
-- Targeted public-API compile repro failed against the documented symbols/signature:
-  - `rtk go test ./.tmp_commitlog_e2_api`
-  - observed errors:
-    - `undefined: commitlog.ErrBadVersion`
-    - `undefined: commitlog.ErrUnknownRecordType`
-    - `undefined: commitlog.ErrChecksumMismatch`
-    - `undefined: commitlog.ErrRecordTooLarge`
-    - `not enough arguments in call to sr.Next`
+- Full repo verification now passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 Recommended resolution options:
 1. Preferred code fix:
@@ -680,135 +612,73 @@ Suggested follow-up tests:
 
 ### TD-001: Invalid-float error contract drift across `types` and `store`
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-001 Epic 1 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 1 / Step 1a (`SPEC-001 E1: Core Value Types`)
 
 Summary:
-- NaN rejection behavior is implemented for float values, but the documented error contract is not aligned with the live constructor path.
-- The spec/decomposition says `ErrInvalidFloat` is part of the SPEC-001 error surface, but the actual `types.NewFloat32` / `types.NewFloat64` constructors return ad-hoc `fmt.Errorf(...)` errors instead of a stable sentinel or typed error.
-- The only `ErrInvalidFloat` sentinel currently lives in `store/errors.go`, which is not where the rejecting constructors are implemented.
+- The canonical `ErrInvalidFloat` sentinel now lives in `types`, where float-value construction actually happens.
+- `types.NewFloat32` and `types.NewFloat64` now wrap that sentinel on NaN rejection, so callers can reliably use `errors.Is(err, ErrInvalidFloat)`.
+- `store.ErrInvalidFloat` now aliases the same sentinel, keeping store-side validation aligned with the constructor path instead of defining a competing error value.
 
 Why this matters:
-- Callers cannot reliably use `errors.Is(..., ErrInvalidFloat)` against the actual constructor failure path today.
-- The ownership boundary is muddy: value construction happens in `types`, while the documented invalid-float error lives in `store`.
-- This is likely to create downstream inconsistency in BSATN decode, schema/store validation, and future protocol/executor paths that construct float `Value`s.
+- The invalid-float error contract is now owned by the same package that rejects invalid float values.
+- Downstream paths like BSATN decode and store validation can share one error classification.
+- Focused regression coverage now guards the constructor-side `errors.Is` contract.
 
 Related code:
-- `types/value.go:110-122`
-  - `NewFloat32` rejects NaN via `fmt.Errorf("shunter: NaN is not a valid Float32 value")`
-  - `NewFloat64` rejects NaN via `fmt.Errorf("shunter: NaN is not a valid Float64 value")`
-- `store/errors.go:8-19`
-  - defines `ErrInvalidFloat = errors.New("invalid float value")`
-- `bsatn/decode.go:87-92`
-  - decode path depends on `types.NewFloat32` / `types.NewFloat64`
-- `types/value_test.go:198-209`
-  - tests currently verify only that an error is returned, not the stable error contract
-
-Related spec / decomposition docs:
-- `docs/EXECUTION-ORDER.md:157-160`
-  - Phase 1 / Step 1a establishes SPEC-001 E1 as the first foundation slice
-- `docs/decomposition/001-store/EPICS.md:7-30`
-  - Epic 1 scope includes NaN rejection on float construction
-- `docs/decomposition/001-store/EPICS.md:268-284`
-  - error table says `ErrInvalidFloat` is introduced in Epic 1
-- `docs/decomposition/001-store/epic-1-core-value-types/story-1.1-valuekind-value-struct.md:34-56`
-  - constructors must reject NaN
-- `docs/decomposition/001-store/SPEC-001-store.md:641-654`
-  - SPEC-001 error catalog includes `ErrInvalidFloat`
+- `types/value.go`
+  - defines canonical `ErrInvalidFloat`
+  - `NewFloat32` / `NewFloat64` wrap that sentinel on NaN rejection
+- `store/errors.go`
+  - `ErrInvalidFloat` now aliases `types.ErrInvalidFloat`
+- `types/value_test.go`
+  - asserts `errors.Is(err, ErrInvalidFloat)` for both NaN constructor paths
 
 Current observed behavior:
-- Functional behavior: correct
-  - NaN is rejected in both constructors.
-- Contract behavior: drift
-  - no stable exported error from the constructor path
-  - spec implies a reusable error contract that code does not currently provide
-
-Recommended resolution options:
-1. Preferred code fix:
-   - move ownership of invalid-float error contract to `types`, or introduce a shared lower-level error that `types` can return directly
-   - update `NewFloat32` / `NewFloat64` to return that stable error via wrapping or direct sentinel use
-   - add tests asserting `errors.Is(err, ErrInvalidFloat)` on NaN constructor failure
-2. Alternative doc fix:
-   - if the design intent is "any error is fine, only rejection matters," then update SPEC-001 decomposition/spec docs to remove the stronger `ErrInvalidFloat` contract from Epic 1
-   - if this route is chosen, also update the SPEC-001 error catalog to clarify ownership and where that error can actually originate
-
-Suggested follow-up tests:
-- `types`: assert NaN constructor failures match the canonical invalid-float error contract
-- `bsatn`: assert float decode failure on NaN preserves the same canonical error classification
-- `store`: if store-level row validation can also detect invalid float states, ensure both layers agree on error classification
-
-Audit notes:
-- This finding came from the first audit pass over SPEC-001 Epic 1 only.
-- Verification run passed at audit time: `rtk go test ./types ./bsatn ./schema ./store ./subscription ./executor ./commitlog`
-- Passing tests establish operational health, not full spec-contract completeness.
+- Focused regression coverage passes:
+  - `rtk go test ./types ./schema ./executor`
+- Full repo verification passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 ### TD-002: SPEC-003 Epic 1 command/interface/error surface is only partially defined
 
-Status: open
+Status: resolved
 Severity: medium
 First found: Phase 1 planning pass while moving from schema foundations toward the executor contract slice
 Execution-order context:
 - `docs/EXECUTION-ORDER.md:157-160` explicitly allows a narrowed executor contract slice in Phase 1: `SPEC-003 E1.1 + E1.2 + minimal E1.4 contract slice`
-- This debt item is therefore about the fuller `SPEC-003 Epic 1` decomposition surface remaining incomplete, not about the minimal Phase 1 exception itself
+- This debt item tracked the fuller `SPEC-003 Epic 1` decomposition surface beyond that minimum early-gate slice
 
 Summary:
-- The current executor package has the core reducer request/response types and `SchedulerHandle`, but it does not yet define the full Epic 1 command/interface/error contract described in the decomposition docs.
-- Missing pieces include subscription command shells, durability/subscription interfaces, and the `ErrCommitFailed` sentinel.
-- This matters because later epics and cross-spec dependencies talk about these contracts as stable shared surfaces even before their full behavior lands.
+- The executor package now exposes the missing Epic 1 command-shell and error contracts that were still absent from the documented surface.
+- `RegisterSubscriptionCmd`, `UnregisterSubscriptionCmd`, and `DisconnectClientSubscriptionsCmd` now exist at the executor boundary.
+- `ErrCommitFailed` is now defined alongside the other executor sentinels, and focused contract tests guard the complete Epic 1 command/interface/error surface.
 
 Why this matters:
-- The execution-order exception only narrows what must exist for the earliest Phase 1 gate. It does not make the fuller Epic 1 contract disappear.
-- Leaving these contracts implicit or absent increases the chance that later phases will grow ad-hoc signatures instead of converging on the spec-owned interface surface.
-- The current `executor/contracts_test.go` verifies only a narrower subset, so package tests can stay green while the broader Epic 1 contract remains incomplete.
+- Later phases can now reference the intended executor-owned command catalog without inventing ad-hoc local shells.
+- The executor error catalog now matches Story 1.5's seven-sentinel contract.
+- The existing `DurabilityHandle` and `SubscriptionManager` interfaces are now covered by explicit contract tests instead of being left implicitly present.
 
 Related code:
-- `executor/command.go:3-15`
-  - defines `ExecutorCommand` and `CallReducerCmd` only
-  - missing `RegisterSubscriptionCmd`, `UnregisterSubscriptionCmd`, `DisconnectClientSubscriptionsCmd`
-- `executor/interfaces.go:5-12`
-  - defines `SchedulerHandle` only
-  - missing `DurabilityHandle` and `SubscriptionManager`
-- `executor/errors.go:5-12`
-  - defines 6 sentinels but omits `ErrCommitFailed`
-- `executor/contracts_test.go:11-133`
-  - exercises a reduced contract subset and does not guard the missing command/interface/error definitions
-- `executor/executor.go:23-254`
-  - already implements later-epic runtime behavior, but without the full Epic 1 shared contract surface specified by the docs
-
-Related spec / decomposition docs:
-- `docs/decomposition/003-executor/EPICS.md:7-27`
-  - Epic 1 scope includes command types, subsystem interfaces, and 7 error sentinels
-- `docs/decomposition/003-executor/epic-1-core-types/EPIC.md:13-18`
-  - Stories 1.3, 1.4, and 1.5 explicitly own the missing command, interface, and error surfaces
-- `docs/decomposition/003-executor/epic-1-core-types/story-1.3-command-types.md:30-61`
-  - requires `RegisterSubscriptionCmd`, `UnregisterSubscriptionCmd`, and `DisconnectClientSubscriptionsCmd`
-- `docs/decomposition/003-executor/epic-1-core-types/story-1.4-subsystem-interfaces.md:16-59`
-  - requires `DurabilityHandle` and `SubscriptionManager` alongside `SchedulerHandle`
-- `docs/decomposition/003-executor/epic-1-core-types/story-1.5-error-types.md:16-38`
-  - requires 7 sentinels including `ErrCommitFailed`
+- `executor/command.go`
+  - adds `SubscriptionRegisterRequest` / `SubscriptionRegisterResult` aliases to the canonical subscription types
+  - adds `RegisterSubscriptionCmd`, `UnregisterSubscriptionCmd`, and `DisconnectClientSubscriptionsCmd`
+- `executor/errors.go`
+  - adds `ErrCommitFailed`
+- `executor/contracts_test.go`
+  - adds compile-time/shape coverage for the full Epic 1 command/interface/error surface
 
 Current observed behavior:
-- Minimal Phase 1 reducer/runtime contract: partially present and good enough for some downstream compilation paths
-- Full SPEC-003 Epic 1 surface: incomplete relative to decomposition docs
-- Operational status: package tests still pass (`rtk go test ./executor`), so this is a spec-completeness gap rather than a current build break
-
-Recommended resolution options:
-1. Preferred code fix:
-   - add the missing command shell types in `executor/command.go`
-   - add the missing `DurabilityHandle` and `SubscriptionManager` interfaces in `executor/interfaces.go`
-   - add `ErrCommitFailed` to `executor/errors.go`
-   - extend `executor/contracts_test.go` to assert the complete Epic 1 surface exists and satisfies the intended signatures
-2. Alternative doc clarification:
-   - if the project intends to keep only the narrowed execution-order slice for now, add an explicit note in the executor decomposition or TECH-DEBT trail that Stories 1.3/1.4/1.5 are intentionally partial pending later subscription/durability integration
-   - this would reduce the current ambiguity between "minimal contract slice landed" and "Epic 1 fully landed"
-
-Suggested follow-up tests:
-- compile-time assertions that each command type satisfies `ExecutorCommand`
-- interface shape tests for `DurabilityHandle` and `SubscriptionManager`
-- `errors.Is` coverage for all seven executor sentinels including `ErrCommitFailed`
-- a targeted contract test that distinguishes the minimal Phase 1 slice from the full Epic 1 surface so future audits can classify the gap cleanly
+- Focused regression coverage passes:
+  - `rtk go test ./types ./schema ./executor`
+- Full repo verification passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 ### TD-003: `ErrSequenceOverflow` is specified but not defined anywhere in live code
 
@@ -1117,59 +987,36 @@ Suggested follow-up tests:
 
 ### TD-012: SPEC-001 E5 Story 5.3 `StateView` API is entirely missing
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-001 Epic 5 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 3 / Step 3d (`SPEC-001 E5: Transaction Layer`)
 
 Summary:
-- The repository implements much of the transaction behavior directly inside `Transaction` methods, and targeted transaction tests pass.
-- But Story 5.3's documented `StateView` surface does not exist at all: there is no `StateView` type, no `NewStateView`, and no public `GetRow`/`ScanTable`/`SeekIndex`/`SeekIndexRange` unified read abstraction.
-- This leaves a major documented Epic 5 contract missing even though some equivalent logic is currently inlined elsewhere.
+- The store package now exposes the documented `StateView` abstraction and `NewStateView(...)` constructor.
+- `StateView` implements `GetRow`, `ScanTable`, `SeekIndex`, and `SeekIndexRange` across committed and tx-local state, including delete filtering and tx-local insert inclusion.
+- `Transaction.GetRow` and `Transaction.ScanTable` now route through `StateView`, restoring the intended layering instead of leaving visibility logic fully inlined.
 
 Why this matters:
-- The decomposition makes `StateView` the explicit seam that merges committed state and tx-local state and then feeds Stories 5.4–5.6.
-- Without the named abstraction, the repo lacks the documented reusable transaction-visibility layer and cannot satisfy consumers or tests written to the specified API surface.
-- Inlining pieces of the logic inside `Transaction` is operationally workable, but it is thinner than spec and leaves index-query parts of Story 5.3 absent as a first-class interface.
+- The transaction layer now has the reusable visibility seam Story 5.3 describes.
+- Consumers can use the documented API surface directly instead of depending on ad-hoc transaction internals.
+- Index-sensitive tx-local visibility behavior is now covered by focused regression tests.
 
 Related code:
-- repo-wide search under `store/` found no `type StateView` and no `NewStateView`
-- `store/transaction.go:31-247`
-  - `Transaction.Insert`, `Delete`, `Update`, `GetRow`, and `ScanTable` inline visibility logic against `CommittedState` + `TxState`
-- `store/snapshot.go:10-86`
-  - committed read-view/snapshot exists, but it is a different contract from the transaction-local `StateView` described in Story 5.3
-- repo-wide search under `store/` found no `SeekIndex` / `SeekIndexRange` methods on a transaction-layer view object
-
-Related spec / decomposition docs:
-- `docs/decomposition/001-store/epic-5-transaction-layer/story-5.3-state-view.md:21-49`
-  - defines `StateView`, `NewStateView`, `GetRow`, `ScanTable`, `SeekIndex`, and `SeekIndexRange`
-- `docs/decomposition/001-store/epic-5-transaction-layer/story-5.3-state-view.md:50-63`
-  - acceptance criteria explicitly cover the unified read contract and nil-map handling
-- `docs/decomposition/001-store/epic-5-transaction-layer/story-5.4-transaction-insert.md:16-26,43`
-  - Transaction story expects `StateView` to exist and be wrapped by `Transaction`
-- `docs/decomposition/001-store/epic-5-transaction-layer/EPIC.md:15-18,23-28`
-  - Story 5.3 is a first-class dependency for Stories 5.4–5.6
+- `store/state_view.go`
+  - adds `RowIterator`, `StateView`, `NewStateView`, `GetRow`, `ScanTable`, `SeekIndex`, and `SeekIndexRange`
+- `store/transaction.go`
+  - reuses `StateView` for row/table visibility reads
+- `store/state_view_test.go`
+  - adds focused behavior tests for row visibility, merged scans, index queries, and nil-map handling
 
 Current observed behavior:
-- Existing targeted transaction tests pass:
-  - `rtk go test ./store -run 'TestTransactionInsertVisible|TestTransactionDeleteCollapse|TestTransactionCommittedDelete|TestTransactionUpdate|TestTransactionInsertUndeletesCommittedPrimaryKey|TestTransactionInsertUndeletesCommittedSetSemanticsRow|TestCommitDeleteIdenticalReinsertCollapsesToEmptyChangeset'`
-- Targeted public-API compile repro from the audit failed:
-  - temporary package referenced `store.StateView` and `store.NewStateView(nil, nil)`
-  - `rtk go test ./.tmp_store_stateview_api` failed with undefined symbol errors for both
-
-Recommended resolution options:
-1. Preferred code fix:
-   - add `state_view.go` implementing `StateView` and `NewStateView`
-   - move the shared committed+tx visibility logic there, including `SeekIndex` and `SeekIndexRange`
-   - have `Transaction` wrap/use that abstraction so the implementation matches the documented layering
-2. Alternative doc fix:
-   - if the project intentionally wants to inline visibility logic into `Transaction`, update the Epic 5 decomposition to remove/promote Story 5.3 accordingly
-   - this would still require reconciling the missing `SeekIndex` / `SeekIndexRange` public contract explicitly
-
-Suggested follow-up tests:
-- compile-time/public API test for `StateView` and `NewStateView`
-- direct `StateView` tests for `GetRow`, `ScanTable`, `SeekIndex`, and `SeekIndexRange`
-- regression test proving empty/nil per-table tx maps are handled without panic
+- Focused package tests pass:
+  - `rtk go test ./store`
+- Full repo verification passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 ### TD-011: SPEC-001 E4 Story 4.1's documented `Index.unique` field appears to be stale doc drift
 
@@ -1334,119 +1181,66 @@ Suggested follow-up tests:
 
 ### TD-008: SPEC-006 E6 engine-side schema export surface is entirely missing
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-006 Epic 6 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 2 / Step 2e (`SPEC-006 E6: Schema export`)
 
 Summary:
-- The schema export epic is absent from live code.
-- There are no export value types (`SchemaExport`, `TableExport`, `ColumnExport`, `IndexExport`, `ReducerExport`) and `Engine` does not implement `ExportSchema()`.
-- This means the repo currently has no engine-side path to produce the `schema.json` contract required for codegen/tooling.
+- The schema package now exposes the full engine-side export surface: `SchemaExport`, `TableExport`, `ColumnExport`, `IndexExport`, `ReducerExport`, and `(*Engine).ExportSchema()`.
+- `ExportSchema()` now walks the immutable `SchemaRegistry` and returns a detached value snapshot with user tables, system tables, reducers, and lifecycle reducers.
+- Focused regression coverage now guards ordering, lifecycle export flags, JSON round-trip behavior, and detached-snapshot semantics.
 
 Why this matters:
-- Epic 6 is the only documented bridge from the immutable runtime schema into the external codegen/tooling interface.
-- Without `ExportSchema()`, even a minimal future `shunter-codegen` CLI would have no blessed engine contract to consume.
-- This is not just a missing convenience method; it blocks the entire schema-export/codegen surface promised by SPEC-006 §12.
+- The repo now has the documented runtime-to-tooling bridge for future codegen and `schema.json` export.
+- Client/tooling surfaces no longer depend on internal schema structs or missing ad-hoc traversal logic.
+- The exported value shape is now covered by tests rather than only by decomposition docs.
 
 Related code:
-- repo search under `schema/` found no `export.go`
-- repo search under `schema/` found no `SchemaExport`, `TableExport`, `ColumnExport`, `IndexExport`, `ReducerExport`, or `ExportSchema` symbols
-- `schema/build.go:8-19`
-  - `Engine` exists but exposes only `Registry()` and `Start(...)`
-- repo search found no `cmd/shunter-codegen` tree either, reinforcing that the export/codegen epic has not started
-
-Related spec / decomposition docs:
-- `docs/decomposition/006-schema/SPEC-006-schema.md:505-560`
-  - defines the schema export surface and the export structs
-- `docs/decomposition/006-schema/epic-6-schema-export/story-6.1-export-types.md:16-67`
-  - requires all export value types with JSON-friendly fields
-- `docs/decomposition/006-schema/epic-6-schema-export/story-6.2-export-schema.md:18-36`
-  - requires `func (e *Engine) ExportSchema() *SchemaExport`
-- `docs/decomposition/006-schema/epic-6-schema-export/story-6.4-export-json-contract.md:16-26`
-  - requires JSON round-trip/snapshot semantics for exported values
-- `docs/decomposition/006-schema/epic-6-schema-export/story-6.3-codegen-tool-contract.md:16-49`
-  - depends on the exported `schema.json` interface
+- `schema/export.go`
+  - adds export value types and `Engine.ExportSchema()`
+- `schema/export_test.go`
+  - adds focused export ordering, lifecycle, JSON round-trip, and detachment coverage
 
 Current observed behavior:
-- `rtk go test ./schema` still passes because there are no export-surface tests in the package today
-- targeted public-API compile repro from the audit failed:
-  - temporary package referenced `schema.SchemaExport`, `schema.TableExport`, `schema.ColumnExport`, `schema.IndexExport`, `schema.ReducerExport`, and `(*schema.Engine).ExportSchema()`
-  - `rtk go test ./.tmp_schema_export_api` failed with undefined symbol errors for all of them
-
-Recommended resolution options:
-1. Preferred code fix:
-   - add `schema/export.go` implementing the export value types and `Engine.ExportSchema()` traversal over `SchemaRegistry`
-   - add `schema/export_test.go` and `schema/export_json_test.go` covering ordering, lifecycle reducer export, JSON round-trip, and detached snapshot semantics
-   - implement the downstream `cmd/shunter-codegen` contract once the engine export surface exists
-2. If deferring implementation intentionally:
-   - document Epic 6 as not yet started in TECH-DEBT / planning docs so the current green test surface is not mistaken for feature completeness
-
-Suggested follow-up tests:
-- compile-time/public API test for all export types and `Engine.ExportSchema()`
-- export ordering test covering user tables, system tables, reducers, and lifecycle reducers
-- JSON round-trip test for `SchemaExport`
-- snapshot-detachment test proving mutations to the returned export value do not affect the registry
+- Focused package tests pass:
+  - `rtk go test ./schema`
+- Full repo verification passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 ### TD-007: SPEC-006 E5 `SchemaRegistry` table lookups are mutable, violating the read-only contract
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-006 Epic 5 Story 5.4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 2 / Step 2d (`SPEC-006 E5: Validation, Build & SchemaRegistry`)
 
 Summary:
-- `SchemaRegistry` is documented and commented as a read-only, immutable, concurrent-safe view, but `Table(...)` and `TableByName(...)` return pointers to the registry's internal `TableSchema` storage.
-- Callers can mutate the returned `TableSchema` and its nested column/index slices, and those mutations are then visible to later readers of the same registry.
-- This directly breaks Story 5.4's immutability contract and undermines the concurrency guarantee that depends on no post-build mutation.
+- `SchemaRegistry.Table(...)` and `TableByName(...)` now return detached deep copies of `TableSchema` instead of pointers into internal registry storage.
+- Returned copies preserve the existing pointer-returning API shape while protecting internal `Columns` and `Indexes` slices from caller mutation.
+- Focused regression tests now prove that mutating a looked-up schema does not affect later registry reads.
 
 Why this matters:
-- Downstream subsystems are supposed to consume `SchemaRegistry` as frozen metadata. Mutable lookup results let any caller rewrite table names, columns, and index definitions after `Build()`.
-- The current interface is not merely "not deeply immutable" in theory; the mutation is observable immediately in live code.
-- This creates a hidden shared-state hazard for SPEC-001/002/003 consumers, which are meant to trust the registry as stable schema truth.
+- Downstream subsystems can now treat `SchemaRegistry` as the immutable schema truth that Story 5.4 promises.
+- The concurrency guarantee is restored by ensuring post-build callers cannot mutate registry-owned state.
+- Nested slice state (`Columns`, `Indexes`, and index column lists) is now detached rather than only shallow-copied.
 
 Related code:
-- `schema/registry.go:18-21`
-  - registry stores `tables []TableSchema` and maps IDs/names to pointers into that slice
-- `schema/registry.go:40-43`
-  - `byID` / `byName` are populated with `&r.tables[i]`
-- `schema/registry.go:59-66`
-  - `Table(...)` and `TableByName(...)` return those internal pointers directly
-- `schema/build.go:8-16`
-  - engine/registry are described as immutable in public comments
-
-Related spec / decomposition docs:
-- `docs/decomposition/006-schema/SPEC-006-schema.md:332-360`
-  - `SchemaRegistry` is the produced contract for downstream systems and is described as immutable after `Build()`
-- `docs/decomposition/006-schema/epic-5-validation-build/story-5.4-schema-registry.md:14-20`
-  - Story 5.4 defines the registry as a read-only, immutable view with lookup maps populated once
-- `docs/decomposition/006-schema/epic-5-validation-build/story-5.4-schema-registry.md:31-37`
-  - the concurrency strategy is immutability, not locking
+- `schema/registry.go`
+  - stores lookup indexes internally and clones `TableSchema` on `Table(...)` / `TableByName(...)`
+  - adds `cloneTableSchema(...)` for deep-copying nested slices
+- `schema/build_test.go`
+  - adds regression coverage for both ID and name lookup immutability
 
 Current observed behavior:
-- Existing tests still pass:
-  - `rtk go test ./schema -run 'TestBuild|TestRegistry|TestBuildSystemTablesMatchSpecExactly|TestRegistryReducersPreserveRegistrationOrderAndFreshSlice'`
-- Targeted runtime repro from the audit:
-  - build a registry with table `players`
-  - call `reg.TableByName("players")`, then mutate `ts.Name` and `ts.Columns[0].Name`
-  - a later `reg.Table(schema.TableID(0))` returns the mutated values
-  - observed output:
-    - `before: players id`
-    - `after: mutated mutated_col`
-
-Recommended resolution options:
-1. Preferred code fix:
-   - make `Table(...)` / `TableByName(...)` return defensive copies of `TableSchema`, including copied `Columns` and `Indexes` slices
-   - keep internal registry storage private and never expose pointers into it
-   - add regression tests proving caller mutation of returned schemas does not affect future lookups
-2. Alternative API redesign:
-   - change `SchemaRegistry` lookup methods to return value copies instead of pointers
-   - this is a bigger cross-spec change and should be reflected in SPEC-006 / downstream docs if chosen
-
-Suggested follow-up tests:
-- mutate the result of `Table(...)` and assert a subsequent `Table(...)` call is unchanged
-- mutate the result of `TableByName(...)` and assert a subsequent `TableByName(...)` call is unchanged
-- specifically verify nested slice immutability by mutating returned `Columns` / `Indexes` entries
+- Focused regression coverage passes:
+  - `rtk go test ./types ./schema ./executor`
+- Full repo verification passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 ### TD-006: SPEC-006 E3.2 does not expose schema-facing `ReducerHandler` / `ReducerContext` aliases
 
@@ -1570,63 +1364,37 @@ Suggested follow-up tests:
 
 ### TD-004: SPEC-006 Story 5.6 schema compatibility checking is entirely missing
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-006 Epic 5 audit
 Execution-order context:
 - not on the earliest critical path for Phase 1, but it is part of the current implemented `validation/build` surface and is explicitly required by Epic 5 before schema/runtime startup can be considered spec-complete
 
 Summary:
-- The repo implements most of SPEC-006 validation/build orchestration, system-table registration, and schema registry behavior, but the entire schema-version compatibility layer from Story 5.6 is absent.
-- There is no `version.go`, no `CheckSchemaCompatibility(...)`, no `SnapshotSchema` type, no `ErrSchemaMismatch`, and `Engine.Start(...)` is a stub that does not compare registered schema against snapshot state.
+- The schema package now implements startup compatibility checking with `SnapshotSchema`, `ErrSchemaMismatch`, `SchemaMismatchError`, and `CheckSchemaCompatibility(...)`.
+- `Engine.Start(...)` now runs that comparison against optional startup snapshot metadata supplied through `EngineOptions`.
+- Focused tests now cover matching schemas, version mismatches, structural diffs, nil-snapshot success, and Start-time enforcement.
 
 Why this matters:
-- The spec requires startup to reject incompatible schema/snapshot combinations using both version and structural comparison.
-- Without this layer, the current engine surface has no guardrail against schema drift at runtime once snapshot/recovery work lands.
-- This is more than a doc mismatch: it is an unimplemented contract that other subsystems (especially SPEC-002 recovery) are expected to rely on.
+- Runtime startup now rejects incompatible registered/snapshot schema combinations instead of silently accepting drift.
+- The missing Epic 5 comparison seam is now present for future recovery integration.
+- Mismatch failures now carry specific diff detail instead of a generic startup error.
 
 Related code:
-- `schema/build.go:8-19`
-  - `Engine` exists and `Start(ctx)` is currently a stub returning nil
-- `schema/build.go:21-110`
-  - `Build()` orchestration is implemented, but no startup compatibility hook exists
-- `schema/registry.go:5-96`
-  - `SchemaRegistry` implementation exists and could support comparison, but no comparison function is present
-- repo search results:
-  - no `schema/version.go`
-  - no `CheckSchemaCompatibility`
-  - no `SnapshotSchema`
-  - no `ErrSchemaMismatch`
-
-Related spec / decomposition docs:
-- `docs/decomposition/006-schema/SPEC-006-schema.md:305-312`
-  - startup requires matching schema version and exact structural match or `ErrSchemaMismatch`
-- `docs/decomposition/006-schema/SPEC-006-schema.md:321-326`
-  - v1 schema mismatch policy is startup failure, not online migration
-- `docs/decomposition/006-schema/epic-5-validation-build/story-5.6-schema-version-check.md:18-41`
-  - requires `CheckSchemaCompatibility`, `SnapshotSchema`, `ErrSchemaMismatch`, and running comparison during `Engine.Start()`
-- `docs/decomposition/006-schema/epic-5-validation-build/EPIC.md:20,30-42`
-  - Story 5.6 is a named deliverable with dedicated file ownership
+- `schema/version.go`
+  - adds `SnapshotSchema`, `ErrSchemaMismatch`, `SchemaMismatchError`, `CheckSchemaCompatibility(...)`, and `Engine.Start(...)` compatibility enforcement
+- `schema/builder.go`
+  - adds `EngineOptions.StartupSnapshotSchema`
+- `schema/version_test.go`
+  - adds focused compatibility and Start-time regression coverage
 
 Current observed behavior:
-- `Build()` works and tests pass for validation, system tables, ID assignment, and registry behavior
-- `Engine.Start()` is still a no-op stub
-- no runtime schema compatibility comparison exists at all
-
-Recommended resolution options:
-1. Preferred code fix:
-   - implement `schema/version.go` with `SnapshotSchema`, `ErrSchemaMismatch`, and `CheckSchemaCompatibility(...)`
-   - wire the compatibility check into `Engine.Start()` at the point where snapshot metadata becomes available from SPEC-002
-   - add tests for version mismatch, structural mismatch, and nil/no-snapshot success paths
-2. Temporary doc clarification if intentionally deferred:
-   - record explicitly in docs/TECH-DEBT that Story 5.6 is deferred until SPEC-002 snapshot schema types exist, so current `Start()` should not be treated as spec-complete runtime startup
-
-Suggested follow-up tests:
-- matching version + identical structure → nil error
-- different version, same structure → `ErrSchemaMismatch`
-- same version, table/column/index structural diff → `ErrSchemaMismatch` with detail
-- no snapshot / fresh start → compatible
-- `Engine.Start()` invokes compatibility check once snapshot metadata is available
+- Focused package tests pass:
+  - `rtk go test ./schema`
+- Full repo verification passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 ---
 
@@ -1648,21 +1416,21 @@ Verification commands not re-run for this pass — these are static-read finding
 
 These are correctness-fatal under concurrent load or restart and are the highest-priority items in this pass.
 
-- **TD-027** [BUG] `executor/executor.go:121-153` — `Submit` / `SubmitWithContext` read `e.fatal` and `e.shutdown` (written by executor goroutine in `postCommit` and by `Shutdown`) with no atomics or mutex. `Shutdown` also closes the inbox while concurrent `Submit` callers may still be sending. Data race + "send on closed channel" panic risk under shutdown contention. Fix: convert flags to `atomic.Bool`; gate inbox sends through a `sync.Once`-backed close path that returns `ErrExecutorShutdown` instead of touching a possibly-closed channel.
+- **TD-027** [BUG][resolved] `executor/executor.go`, `executor/executor_test.go`, `executor/pipeline_test.go`, `executor/lifecycle_test.go` — `fatal`/`shutdown` are now stored with `atomic.Bool`, submit paths are serialized against inbox close with a `submitMu` + existing `closeOnce`, and concurrent shutdown/submit no longer races the channel close path. Focused verification:
+  - `rtk go test -race ./executor -run 'TestExecutorShutdownConcurrentSubmittersDoNotPanic|TestSubmitAfterPostCommitFatalReturnsExecutorFatal' -count=1`
+  - `rtk go test ./executor`
 
-- **TD-028** [BUG] `commitlog/durability.go:69-87` — `EnqueueCommitted` reads `fatalErr`/`closing` under the lock, releases it, then sends on `dw.ch`. Worker may set `fatalErr` between the unlock and send → next enqueue blocks forever (channel full, no reader). `Close` calls `close(dw.ch)` while a producer holds a slot mid-send → "send on closed channel" panic. Fix: send under the same lock, or use a non-blocking send with a "closed" sentinel checked first.
+- **TD-028 / TD-029 / TD-030** [BUG][resolved] `commitlog/durability.go`, `commitlog/phase4_acceptance_test.go` — durability enqueue/close now uses a dedicated close signal plus sender tracking so blocked producers wake with the intended close panic instead of crashing on `send on closed channel`; `Close()` waits for in-flight senders before closing the work channel; the batch drain loop now exits immediately on closed-channel detection via a labeled break; and the reopen/resume path remains guarded by focused restart coverage so an existing active segment is resumed instead of truncated. Focused verification:
+  - `rtk go test ./commitlog -run 'TestDurabilityWorkerCloseWhileEnqueueBlockedReturnsControlledClosePanic|TestDurabilityWorkerCloseAfterSingleQueuedItemDoesNotSpinOnClosedDrain|TestDurabilityWorkerReopensExistingSegment' -count=1`
+  - `rtk go test ./commitlog`
 
-- **TD-029** [BUG] `commitlog/durability.go:128-138` — Drain loop's `if !ok { break }` only breaks the inner `select`, not the enclosing `for`. A closed channel during drain spins, appending zero-valued items until the count expires. Fix: replace `break` with `goto process` (or restructure as a labeled loop) so a closed channel exits drain immediately.
+- **TD-031 / TD-032 / TD-033** [BUG][resolved] `store/commit.go`, `store/audit_regression_test.go` — commit now prevalidates delete targets and staged insert conflicts under the committed-state write lock before mutating any table state, preserving the Story 6.2 atomicity invariant; delete application now fails loudly on missing rows instead of silently skipping them; and rollback-to-commit rejection remains guarded by regression coverage. Focused verification:
+  - `rtk go test ./store -run 'TestCommitAtomicityFailureLeavesCommittedStateUnchanged|TestCommitMissingDeleteTargetReturnsErrorWithoutMutation|TestRollbackBlocksPostRollbackCommit' -count=1`
+  - `rtk go test ./store`
 
-- **TD-030** [BUG] `commitlog/durability.go:51-65` — Confirms TD-025 from the earlier audit. `NewDurabilityWorker` calls `CreateSegment` → `os.Create`, which truncates an existing segment file on restart. Any committed records in the existing segment for `startTxID` are silently lost. Fix: probe for existing file, open with `O_RDWR|O_APPEND`, scan to last valid record, restore `lastTx`/`size`, and resume.
-
-- **TD-031** [BUG] `store/commit.go:38-50` — Insert phase mutates committed state in place via `table.InsertRow`. Mid-loop failure (e.g. unique violation introduced by another tx that revalidate missed) leaves all prior deletes and N-1 inserts already applied, function returns error, committed state is half-mutated. No rollback. Atomicity broken. Fix: stage both phases into a buffer and apply atomically, or snapshot/restore committed state on failure.
-
-- **TD-032** [BUG] `store/commit.go:55-58` — `Rollback` only sets a flag that nothing reads. A transaction can be rolled back, then `Commit(cs, tx)` immediately succeeds and applies it. Fix: either remove `Rollback` or have `Commit` short-circuit on `tx.rolledBack`.
-
-- **TD-033** [BUG] `store/commit.go:30-36` — Delete phase does `if oldRow, ok := table.DeleteRow(rowID); ok` and silently skips RowIDs not found. A delete recorded against a row that vanished between tx-start and commit produces an empty changeset entry with no error, and `revalidateCommit` only revalidates inserts. Fix: return error when `DeleteRow` returns `false`, or revalidate deletes before mutating.
-
-- **TD-034** [BUG] `store/committed_state.go:24-33` — `RegisterTable` mutates `tables` map without holding the write lock; `Table()` reads without lock. Both nominally "called only at startup" but Go's race detector flags any unsynchronized map access. Fix: take `cs.mu.Lock()` in `RegisterTable` and `RLock()` in `Table()`, or document and use a `sync.Once`-style init phase.
+- **TD-034** [BUG][resolved] `store/committed_state.go`, `store/recovery.go`, `store/audit_regression_test.go` — `CommittedState` table-map access now consistently uses its `RWMutex`: `RegisterTable` takes the write lock, `Table`/`TableIDs` take read locks, and internal callers that already hold the write lock use narrow locked helpers to avoid self-deadlock during commit/recovery paths. Focused verification:
+  - `rtk go test -race ./store -run 'TestCommittedStateRegisterAndLookupAreRaceFree' -count=1`
+  - `rtk go test ./store`
 
 - **TD-035** [BUG] `store/snapshot.go:28-31` — `Snapshot()` acquires `RLock` and stores no goroutine ownership. A leaked snapshot (no `Close`) silently blocks all commits forever. Same-goroutine `Lock` after `RLock` deadlocks (no recursive locking). Fix: add finalizer or document the contract more loudly with a runtime guard.
 
@@ -1736,9 +1504,9 @@ These are correctness-fatal under concurrent load or restart and are the highest
 
 - **TD-068** [SMELL] `auth/jwt.go:90,94,102,106,109` — Repeated `mc[k].(string/float64)` type assertions with discarded `ok`. Five sites; mild duplication. Fix: add `func stringClaim(m jwt.MapClaims, k string) string` and `floatClaim`. Note: `mc["exp"].(float64)` is safe in practice because `encoding/json` decodes all numbers as `float64` — leave a comment.
 
-- **TD-069** [SMELL] `auth/mint.go:42,45` — Two `time.Now()` calls a microsecond apart. Fix: `now := time.Now(); claims["iat"] = now.Unix(); if config.Expiry > 0 { claims["exp"] = now.Add(config.Expiry).Unix() }`.
+- **TD-069** [SMELL][resolved] `auth/mint.go` now uses a single captured `now := time.Now()` for `iat`/`exp` claim construction.
 
-- **TD-070** [SMELL] `schema/registry.go:54` — `_ = userTableCount` discards a parameter the constructor demands. Either the user/system split is meant to be queryable on `SchemaRegistry` (in which case the field/method is missing and `Tables()` returns them mixed) or the parameter is dead and should be dropped. The interface comment "user tables first, then system" promises an ordering guarantee with no API to consume it. Fix: add `UserTables()`/`SystemTables()` accessors or remove the parameter and the comment.
+- **TD-070** [SMELL][resolved] `schema/registry.go` no longer takes or discards the dead `userTableCount` parameter; the unused seam was removed.
 
 - **TD-071** [SMELL] `schema/validate_schema.go:36-44` — Multiple `fmt.Errorf("...")` calls without `%w` wrapping (e.g. `"reducer name must not be empty"`, `"OnConnect handler must not be nil"`, `"duplicate OnConnect registration"`). Callers can't `errors.Is/As`. Fix: define `ErrEmptyReducerName`, `ErrNilReducerHandler`, `ErrDuplicateLifecycleHandler`, etc., and wrap with `%w`.
 
@@ -1750,11 +1518,11 @@ These are correctness-fatal under concurrent load or restart and are the highest
 
 - **TD-075** [SMELL] `schema/reflect.go:53` — Comment claims "Non-struct anonymous field — fall through to normal processing", but anonymous non-struct fields will then try `f.Type` → `GoTypeToValueKind`, and `f.Name` is the type name (e.g. `int64`), which `ToSnakeCase` then mangles. Either explicitly support promoted scalar embeds with a column-name override or reject with a clear error.
 
-- **TD-076** [SMELL] `schema/errors.go:9` — Misaligned struct-tag-style declaration (`ErrAutoIncrementRequiresKey` is shifted) — file wasn't `gofmt`'d. Run `gofmt -w`.
+- **TD-076** [SMELL][resolved] `schema/errors.go` has been `gofmt`'d and the misaligned declaration cleaned up.
 
-- **TD-077** [SMELL] `executor/registry.go:7-9` — gofmt diff: extra blank padding in struct (`reducers  map`, `frozen    bool`) — leftover from a deleted field.
+- **TD-077** [SMELL][resolved] `executor/registry.go` has been `gofmt`'d and the stale struct-field padding removed.
 
-- **TD-078** [SMELL] `executor/executor.go:64-67` — variable named `cap` shadows the predeclared `cap` builtin. Rename to `capacity`.
+- **TD-078** [SMELL][resolved] `executor/executor.go` now uses `capacity` instead of shadowing the predeclared `cap` builtin.
 
 - **TD-079** [SMELL] `executor/executor.go:204` — `default: log.Printf("executor: unknown command type %T", cmd)` silently drops unknown commands. A future command with a `ResponseCh` could deadlock its caller. Should panic in dev or return an error to whatever channel the command carries.
 

@@ -180,7 +180,7 @@ func TestSchedulerHandleCommitPersistsRow(t *testing.T) {
 	rr.Register(RegisteredReducer{
 		Name: "sched",
 		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
-			h := ctx.Scheduler.(SchedulerHandle)
+		h := ctx.Scheduler
 			_, err := h.Schedule("tick", nil, time.Unix(42, 0))
 			return nil, err
 		}),
@@ -230,7 +230,7 @@ func TestSchedulerHandleRollbackDiscardsSchedule(t *testing.T) {
 	rr.Register(RegisteredReducer{
 		Name: "schedFail",
 		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
-			h := ctx.Scheduler.(SchedulerHandle)
+			h := ctx.Scheduler
 			_, _ = h.Schedule("tick", nil, time.Unix(42, 0))
 			return nil, sentinel.err
 		}),

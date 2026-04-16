@@ -88,7 +88,7 @@ func TestSegmentWriterReader(t *testing.T) {
 
 	count := 0
 	for {
-		_, err := sr.Next(0)
+		_, err := sr.Next()
 		if err != nil {
 			break
 		}
@@ -96,6 +96,27 @@ func TestSegmentWriterReader(t *testing.T) {
 	}
 	if count != 5 {
 		t.Fatalf("read %d records, want 5", count)
+	}
+}
+
+func TestOpenSegmentRejectsMalformedFilename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "not-a-segment.log")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSegmentHeader(f); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = OpenSegment(path)
+	if err == nil {
+		t.Fatal("expected malformed segment filename to fail")
 	}
 }
 
@@ -142,7 +163,7 @@ func TestChangesetCodecRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := DecodeChangeset(data, reg, DefaultCommitLogOptions().MaxRowBytes)
+	got, err := DecodeChangeset(data, reg)
 	if err != nil {
 		t.Fatal(err)
 	}

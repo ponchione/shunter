@@ -581,7 +581,7 @@ func (m *mockExecutorInbox) RegisterSubscription(ctx context.Context, req Regist
 (Also add stubs for `UnregisterSubscription` and `CallReducer` — we'll flesh these out in Task 3.)
 
 ```go
-func (m *mockExecutorInbox) UnregisterSubscription(ctx context.Context, connID types.ConnectionID, subID uint32) error {
+func (m *mockExecutorInbox) UnregisterSubscription(ctx context.Context, req UnregisterSubscriptionRequest) error {
 	return nil
 }
 
@@ -610,7 +610,7 @@ And add `UnregisterSubscription` and `CallReducer` to the `ExecutorInbox` interf
 ```go
 	// UnregisterSubscription submits a subscription removal. Returns
 	// error only on inbox rejection.
-	UnregisterSubscription(ctx context.Context, connID types.ConnectionID, subID uint32) error
+	UnregisterSubscription(ctx context.Context, req UnregisterSubscriptionRequest) error
 	// CallReducer submits a reducer invocation. Returns error only on
 	// inbox rejection. Lifecycle names must be filtered before calling.
 	CallReducer(ctx context.Context, req CallReducerRequest) error
@@ -932,7 +932,7 @@ func (m *mockSubExecutor) OnDisconnect(ctx context.Context, connID types.Connect
 func (m *mockSubExecutor) DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error {
 	return nil
 }
-func (m *mockSubExecutor) UnregisterSubscription(ctx context.Context, connID types.ConnectionID, subID uint32) error {
+func (m *mockSubExecutor) UnregisterSubscription(ctx context.Context, req UnregisterSubscriptionRequest) error {
 	return nil
 }
 func (m *mockSubExecutor) CallReducer(ctx context.Context, req CallReducerRequest) error {
@@ -1254,8 +1254,7 @@ import (
 
 type mockDispatchExecutor struct {
 	mu             sync.Mutex
-	unregisterConn types.ConnectionID
-	unregisterSub  uint32
+	unregisterReq  *UnregisterSubscriptionRequest
 	unregisterErr  error
 
 	callReducerReq *CallReducerRequest
@@ -1275,11 +1274,10 @@ func (m *mockDispatchExecutor) RegisterSubscription(ctx context.Context, req Reg
 	return nil
 }
 
-func (m *mockDispatchExecutor) UnregisterSubscription(ctx context.Context, connID types.ConnectionID, subID uint32) error {
+func (m *mockDispatchExecutor) UnregisterSubscription(ctx context.Context, req UnregisterSubscriptionRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.unregisterConn = connID
-	m.unregisterSub = subID
+	m.unregisterReq = &req
 	return m.unregisterErr
 }
 
@@ -1308,8 +1306,8 @@ func TestHandleUnsubscribe_Active(t *testing.T) {
 	// Executor should have received the unregister.
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
-	if exec.unregisterSub != 10 {
-		t.Fatalf("unregisterSub = %d, want 10", exec.unregisterSub)
+	if exec.unregisterReq == nil || exec.unregisterReq.SubscriptionID != 10 {
+		t.Fatalf("unregisterReq = %#v, want SubscriptionID=10", exec.unregisterReq)
 	}
 }
 

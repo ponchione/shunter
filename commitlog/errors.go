@@ -18,11 +18,15 @@ var (
 
 type BadVersionError struct{ Got byte }
 
+type ErrBadVersion = BadVersionError
+
 func (e *BadVersionError) Error() string {
 	return fmt.Sprintf("commitlog: bad version %d", e.Got)
 }
 
 type UnknownRecordTypeError struct{ Type byte }
+
+type ErrUnknownRecordType = UnknownRecordTypeError
 
 func (e *UnknownRecordTypeError) Error() string {
 	return fmt.Sprintf("commitlog: unknown record type %d", e.Type)
@@ -34,6 +38,8 @@ type ChecksumMismatchError struct {
 	TxID     uint64
 }
 
+type ErrChecksumMismatch = ChecksumMismatchError
+
 func (e *ChecksumMismatchError) Error() string {
 	return fmt.Sprintf("commitlog: checksum mismatch on tx %d: expected %08x, got %08x", e.TxID, e.Expected, e.Got)
 }
@@ -42,6 +48,8 @@ type RecordTooLargeError struct {
 	Size uint32
 	Max  uint32
 }
+
+type ErrRecordTooLarge = RecordTooLargeError
 
 func (e *RecordTooLargeError) Error() string {
 	return fmt.Sprintf("commitlog: record payload %d exceeds max %d", e.Size, e.Max)

@@ -243,7 +243,11 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 
 // Append writes a record. TxID must be monotonically increasing.
 func (sw *SegmentWriter) Append(rec *Record) error {
-	if rec.TxID <= sw.lastTx && sw.lastTx > 0 {
+	if sw.lastTx == 0 {
+		if rec.TxID != sw.startTx {
+			return fmt.Errorf("commitlog: first tx_id %d must equal segment start %d", rec.TxID, sw.startTx)
+		}
+	} else if rec.TxID <= sw.lastTx {
 		return fmt.Errorf("commitlog: tx_id %d not > last %d", rec.TxID, sw.lastTx)
 	}
 	if err := EncodeRecord(sw.bw, rec); err != nil {
@@ -293,13 +297,20 @@ func OpenSegment(path string) (*SegmentReader, error) {
 	// Parse startTx from filename.
 	base := filepath.Base(path)
 	var startTx uint64
-	fmt.Sscanf(base, "%d.log", &startTx)
+	if n, scanErr := fmt.Sscanf(base, "%d.log", &startTx); scanErr != nil || n != 1 {
+		f.Close()
+		return nil, fmt.Errorf("commitlog: invalid segment filename %q", base)
+	}
 
 	return &SegmentReader{file: f, startTx: startTx}, nil
 }
 
-// Next reads the next record.
-func (sr *SegmentReader) Next(maxPayload uint32) (*Record, error) {
+// Next reads the next record using the default max record payload limit.
+func (sr *SegmentReader) Next() (*Record, error) {
+	return sr.nextWithMax(DefaultCommitLogOptions().MaxRecordPayloadBytes)
+}
+
+func (sr *SegmentReader) nextWithMax(maxPayload uint32) (*Record, error) {
 	rec, err := DecodeRecord(sr.file, maxPayload)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
