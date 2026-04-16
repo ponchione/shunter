@@ -28,6 +28,10 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	}
 	fanout, errs := m.evaluate(txID, changeset, view)
 	if m.inbox != nil {
+		// CallerConnID, CallerResult, and TxDurable are populated by
+		// the executor's post-commit pipeline (SPEC-003 E5) before
+		// sending to the inbox. EvalAndBroadcast only fills the
+		// evaluation output fields.
 		m.inbox <- FanOutMessage{
 			TxID:   txID,
 			Fanout: fanout,

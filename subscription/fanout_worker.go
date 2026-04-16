@@ -102,15 +102,18 @@ func (w *FanOutWorker) deliver(msg FanOutMessage) {
 		}
 	}
 
-	// Extract caller if present.
+	// Extract caller's updates if present. Skip (not delete) caller
+	// during iteration to avoid mutating the shared Fanout map.
 	var callerUpdates []SubscriptionUpdate
 	if msg.CallerConnID != nil {
 		callerUpdates = msg.Fanout[*msg.CallerConnID]
-		delete(msg.Fanout, *msg.CallerConnID)
 	}
 
 	// Deliver standalone TransactionUpdate to non-caller connections.
 	for connID, updates := range msg.Fanout {
+		if msg.CallerConnID != nil && connID == *msg.CallerConnID {
+			continue
+		}
 		if err := w.sender.SendTransactionUpdate(connID, msg.TxID, updates); err != nil {
 			w.handleSendError(connID, err)
 		}
