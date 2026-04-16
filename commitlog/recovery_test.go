@@ -183,6 +183,26 @@ func TestOpenAndRecoverNoData(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverDetailedCorruptActiveSegmentAfterValidPrefixFails(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	path := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	corruptScanTestRecordPayloadByte(t, path, 2, 0)
+
+	_, _, _, err := OpenAndRecoverDetailed(root, reg)
+	if err == nil {
+		t.Fatal("expected recovery failure for corrupt active segment after valid prefix")
+	}
+	var checksumErr *ChecksumMismatchError
+	if !errors.As(err, &checksumErr) {
+		t.Fatalf("expected checksum mismatch error, got %T (%v)", err, err)
+	}
+}
+
 func TestRecoveryResumePlanDamagedTailStartsFreshNextSegment(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
@@ -191,9 +211,9 @@ func TestRecoveryResumePlanDamagedTailStartsFreshNextSegment(t *testing.T) {
 		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
 		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
 	)
-	truncateScanTestFile(t, path, 2)
+	truncateScanTestFileToOffset(t, path, int64(scanTestRecordPayloadOffset(t, path, 2, 10)))
 
-	recovered, maxTxID, err := OpenAndRecover(root, reg)
+	recovered, maxTxID, plan, err := OpenAndRecoverDetailed(root, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,20 +221,70 @@ func TestRecoveryResumePlanDamagedTailStartsFreshNextSegment(t *testing.T) {
 		t.Fatalf("maxTxID = %d, want 2", maxTxID)
 	}
 	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
-
-	segments, _, err := ScanSegments(root)
-	if err != nil {
-		t.Fatal(err)
+	if plan.AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("appendMode = %d, want %d", plan.AppendMode, AppendByFreshNextSegment)
 	}
-	plan, err := planRecoveryResume(segments, maxTxID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.appendMode != AppendByFreshNextSegment {
-		t.Fatalf("appendMode = %d, want %d", plan.appendMode, AppendByFreshNextSegment)
-	}
-	if plan.segmentStartTx != 3 || plan.nextTxID != 3 {
+	if plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
 		t.Fatalf("resume plan = %+v, want segmentStartTx=3 nextTxID=3", plan)
+	}
+
+	compatRecovered, compatMaxTxID, err := OpenAndRecover(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compatMaxTxID != maxTxID {
+		t.Fatalf("OpenAndRecover maxTxID = %d, want %d", compatMaxTxID, maxTxID)
+	}
+	assertReplayPlayerRows(t, compatRecovered, map[uint64]string{1: "alice", 2: "bob"})
+}
+
+func TestRecoveryResumePlanCleanTailReopensActiveSegment(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("eve")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(6), types.NewString("frank")}}},
+	)
+
+	recovered, maxTxID, plan, err := OpenAndRecoverDetailed(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{5: "eve", 6: "frank"})
+	if plan.AppendMode != AppendInPlace {
+		t.Fatalf("appendMode = %d, want %d", plan.AppendMode, AppendInPlace)
+	}
+	if plan.SegmentStartTx != 1 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want segmentStartTx=1 nextTxID=3", plan)
+	}
+}
+
+func TestOpenAndRecoverDetailedDamagedTailReturnsFreshNextSegmentPlan(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	path := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	truncateScanTestFileToOffset(t, path, int64(scanTestRecordPayloadOffset(t, path, 2, 10)))
+
+	recovered, maxTxID, plan, err := OpenAndRecoverDetailed(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+	if plan.AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("AppendMode = %d, want %d", plan.AppendMode, AppendByFreshNextSegment)
+	}
+	if plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want SegmentStartTx=3 NextTxID=3", plan)
 	}
 }
 

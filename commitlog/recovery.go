@@ -8,18 +8,29 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-type recoveryResumePlan struct {
-	segmentStartTx types.TxID
-	nextTxID       types.TxID
-	appendMode     AppendMode
+type RecoveryResumePlan struct {
+	SegmentStartTx types.TxID
+	NextTxID       types.TxID
+	AppendMode     AppendMode
 }
 
 // OpenAndRecover reconstructs committed state from the latest valid snapshot
 // plus any durable segment records after that snapshot.
 func OpenAndRecover(dir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, error) {
-	segments, durableHorizon, err := ScanSegments(dir)
+	committed, maxAppliedTxID, _, err := OpenAndRecoverDetailed(dir, reg)
 	if err != nil {
 		return nil, 0, err
+	}
+	return committed, maxAppliedTxID, nil
+}
+
+// OpenAndRecoverDetailed reconstructs committed state and also returns the
+// append-resume plan needed to decide whether durability should reopen the
+// active segment or start a fresh next segment.
+func OpenAndRecoverDetailed(dir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, RecoveryResumePlan, error) {
+	segments, durableHorizon, err := ScanSegments(dir)
+	if err != nil {
+		return nil, 0, RecoveryResumePlan{}, err
 	}
 	if len(segments) == 0 {
 		durableHorizon = types.TxID(^uint64(0))
@@ -27,14 +38,14 @@ func OpenAndRecover(dir string, reg schema.SchemaRegistry) (*store.CommittedStat
 
 	snapshot, err := SelectSnapshot(dir, durableHorizon, reg)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, RecoveryResumePlan{}, err
 	}
 
 	committed := store.NewCommittedState()
 	for _, tableID := range reg.Tables() {
 		tableSchema, ok := reg.Table(tableID)
 		if !ok {
-			return nil, 0, fmt.Errorf("commitlog: registry missing table %d", tableID)
+			return nil, 0, RecoveryResumePlan{}, fmt.Errorf("commitlog: registry missing table %d", tableID)
 		}
 		committed.RegisterTable(tableID, store.NewTable(tableSchema))
 	}
@@ -42,31 +53,32 @@ func OpenAndRecover(dir string, reg schema.SchemaRegistry) (*store.CommittedStat
 	var replayFrom types.TxID
 	if snapshot != nil {
 		if err := restoreSnapshot(committed, snapshot); err != nil {
-			return nil, 0, err
+			return nil, 0, RecoveryResumePlan{}, err
 		}
 		replayFrom = snapshot.TxID
 	} else if len(segments) == 0 {
-		return nil, 0, ErrNoData
+		return nil, 0, RecoveryResumePlan{}, ErrNoData
 	} else if segments[0].StartTx > 1 {
-		return nil, 0, ErrMissingBaseSnapshot
+		return nil, 0, RecoveryResumePlan{}, ErrMissingBaseSnapshot
 	}
 
 	maxAppliedTxID, err := ReplayLog(committed, segments, replayFrom, reg)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, RecoveryResumePlan{}, err
 	}
 	if snapshot != nil && maxAppliedTxID < snapshot.TxID {
 		maxAppliedTxID = snapshot.TxID
 	}
 
 	if err := advanceRecoveredSequences(committed); err != nil {
-		return nil, 0, err
+		return nil, 0, RecoveryResumePlan{}, err
 	}
-	if _, err := planRecoveryResume(segments, maxAppliedTxID); err != nil {
-		return nil, 0, err
+	plan, err := planRecoveryResume(segments, maxAppliedTxID)
+	if err != nil {
+		return nil, 0, RecoveryResumePlan{}, err
 	}
 
-	return committed, maxAppliedTxID, nil
+	return committed, maxAppliedTxID, plan, nil
 }
 
 func restoreSnapshot(committed *store.CommittedState, snapshot *SnapshotData) error {
@@ -162,30 +174,30 @@ func autoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, b
 	}
 }
 
-func planRecoveryResume(segments []SegmentInfo, maxAppliedTxID types.TxID) (recoveryResumePlan, error) {
-	plan := recoveryResumePlan{
-		segmentStartTx: maxAppliedTxID + 1,
-		nextTxID:       maxAppliedTxID + 1,
-		appendMode:     AppendByFreshNextSegment,
+func planRecoveryResume(segments []SegmentInfo, maxAppliedTxID types.TxID) (RecoveryResumePlan, error) {
+	plan := RecoveryResumePlan{
+		SegmentStartTx: maxAppliedTxID + 1,
+		NextTxID:       maxAppliedTxID + 1,
+		AppendMode:     AppendByFreshNextSegment,
 	}
 	if len(segments) == 0 {
 		return plan, nil
 	}
 
 	last := segments[len(segments)-1]
-	plan.appendMode = last.AppendMode
+	plan.AppendMode = last.AppendMode
 	switch last.AppendMode {
 	case AppendInPlace:
-		plan.segmentStartTx = last.StartTx
-		plan.nextTxID = maxAppliedTxID + 1
+		plan.SegmentStartTx = last.StartTx
+		plan.NextTxID = maxAppliedTxID + 1
 		return plan, nil
 	case AppendByFreshNextSegment:
-		plan.segmentStartTx = maxAppliedTxID + 1
-		plan.nextTxID = maxAppliedTxID + 1
+		plan.SegmentStartTx = maxAppliedTxID + 1
+		plan.NextTxID = maxAppliedTxID + 1
 		return plan, nil
 	case AppendForbidden:
-		return recoveryResumePlan{}, fmt.Errorf("commitlog: append forbidden for recovery tail segment %s", last.Path)
+		return RecoveryResumePlan{}, fmt.Errorf("commitlog: append forbidden for recovery tail segment %s", last.Path)
 	default:
-		return recoveryResumePlan{}, fmt.Errorf("commitlog: unknown append mode %d", last.AppendMode)
+		return RecoveryResumePlan{}, fmt.Errorf("commitlog: unknown append mode %d", last.AppendMode)
 	}
 }

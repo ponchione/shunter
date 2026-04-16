@@ -103,6 +103,59 @@ func TestReplayLogSkipAllRecordsReturnsFromTxID(t *testing.T) {
 	assertReplayPlayerRows(t, committed, map[uint64]string{1: "alice", 2: "bob"})
 }
 
+func TestReplayLogDamagedTailStopsAtValidatedPrefix(t *testing.T) {
+	root := t.TempDir()
+	committed, reg := buildReplayCommittedState(t)
+
+	path := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	truncateScanTestFileToOffset(t, path, int64(scanTestRecordPayloadOffset(t, path, 2, 10)))
+
+	segments, _, err := ScanSegments(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	maxTxID, err := ReplayLog(committed, segments, 0, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("ReplayLog max tx = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, committed, map[uint64]string{1: "alice", 2: "bob"})
+}
+
+func TestReplayLogSkipsDamagedTailSegmentWhenFromTxIDAlreadyAtValidatedPrefix(t *testing.T) {
+	root := t.TempDir()
+	committed, reg := buildReplayCommittedState(t)
+	seedReplayState(t, committed, map[uint64]string{1: "alice", 2: "bob"})
+
+	path := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	truncateScanTestFileToOffset(t, path, int64(scanTestRecordPayloadOffset(t, path, 2, 10)))
+
+	segments, _, err := ScanSegments(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	maxTxID, err := ReplayLog(committed, segments, 2, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("ReplayLog max tx = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, committed, map[uint64]string{1: "alice", 2: "bob"})
+}
+
 func TestReplayLogDecodeErrorIncludesTxAndSegmentContext(t *testing.T) {
 	root := t.TempDir()
 	committed, reg := buildReplayCommittedState(t)

@@ -61,7 +61,17 @@ type DurabilityWorker struct {
 // If an active segment already exists for startTxID, it is reopened for appending.
 // Otherwise a new segment is created.
 func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*DurabilityWorker, error) {
-	seg, err := openOrCreateSegment(dir, startTxID)
+	return NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{
+		SegmentStartTx: types.TxID(startTxID),
+		NextTxID:       types.TxID(startTxID),
+		AppendMode:     AppendInPlace,
+	}, opts)
+}
+
+// NewDurabilityWorkerWithResumePlan creates and starts the worker using the
+// append strategy chosen during recovery.
+func NewDurabilityWorkerWithResumePlan(dir string, plan RecoveryResumePlan, opts CommitLogOptions) (*DurabilityWorker, error) {
+	seg, durableTxID, err := openSegmentForResumePlan(dir, plan)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +84,10 @@ func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*
 		dir:     dir,
 		seg:     seg,
 	}
-	if seg.lastTx > 0 {
+	if durableTxID > 0 {
+		dw.durable.Store(durableTxID)
+		dw.lastEnq = durableTxID
+	} else if seg.lastTx > 0 {
 		dw.durable.Store(seg.lastTx)
 		dw.lastEnq = seg.lastTx
 	}
@@ -91,6 +104,30 @@ func openOrCreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 		return CreateSegment(dir, startTxID)
 	}
 	return nil, err
+}
+
+func openSegmentForResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWriter, uint64, error) {
+	switch plan.AppendMode {
+	case AppendInPlace:
+		seg, err := openOrCreateSegment(dir, uint64(plan.SegmentStartTx))
+		if err != nil {
+			return nil, 0, err
+		}
+		return seg, seg.lastTx, nil
+	case AppendByFreshNextSegment:
+		if plan.SegmentStartTx == 0 || plan.NextTxID == 0 {
+			return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v", plan)
+		}
+		seg, err := CreateSegment(dir, uint64(plan.SegmentStartTx))
+		if err != nil {
+			return nil, 0, err
+		}
+		return seg, uint64(plan.NextTxID - 1), nil
+	case AppendForbidden:
+		return nil, 0, fmt.Errorf("commitlog: append forbidden for recovery resume plan")
+	default:
+		return nil, 0, fmt.Errorf("commitlog: unknown append mode %d", plan.AppendMode)
+	}
 }
 
 // EnqueueCommitted sends a committed changeset for durability.

@@ -285,15 +285,19 @@ func (w *FileSnapshotWriter) buildSnapshotContent(committed *store.CommittedStat
 	}
 	ids := committed.TableIDs()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	if err := binary.Write(&body, binary.LittleEndian, uint32(len(ids))); err != nil {
-		return nil, err
-	}
+	sequenceTableIDs := make([]schema.TableID, 0, len(ids))
 	for _, tableID := range ids {
 		table, _ := committed.Table(tableID)
-		seq, ok := table.SequenceValue()
-		if !ok {
-			seq = 0
+		if _, ok := table.SequenceValue(); ok {
+			sequenceTableIDs = append(sequenceTableIDs, tableID)
 		}
+	}
+	if err := binary.Write(&body, binary.LittleEndian, uint32(len(sequenceTableIDs))); err != nil {
+		return nil, err
+	}
+	for _, tableID := range sequenceTableIDs {
+		table, _ := committed.Table(tableID)
+		seq, _ := table.SequenceValue()
 		if err := binary.Write(&body, binary.LittleEndian, uint32(tableID)); err != nil {
 			return nil, err
 		}

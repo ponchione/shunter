@@ -28,7 +28,7 @@ func phase4TestSchema(t *testing.T) schema.SchemaRegistry {
 		},
 	})
 	b.TableDef(schema.TableDefinition{
-		Name: "logs",
+		Name:    "logs",
 		Columns: []schema.ColumnDefinition{{Name: "msg", Type: types.KindString}},
 	})
 	eng, err := b.Build(schema.EngineOptions{})
@@ -608,6 +608,126 @@ func TestDurabilityWorkerCreatesNewSegmentWhenNoneExists(t *testing.T) {
 	finalTx, _ := dw.Close()
 	if finalTx != 1 {
 		t.Fatalf("final tx = %d, want 1", finalTx)
+	}
+}
+
+func TestDurabilityWorkerResumePlanStartsFreshNextSegment(t *testing.T) {
+	dir := t.TempDir()
+	segPath := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	truncateScanTestFile(t, segPath, 2)
+
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if horizon != 2 {
+		t.Fatalf("horizon = %d, want 2", horizon)
+	}
+	plan, err := planRecoveryResume(segments, horizon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(segPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dw.DurableTxID() != 2 {
+		t.Fatalf("recovery worker durable TxID = %d, want 2", dw.DurableTxID())
+	}
+	dw.EnqueueCommitted(3, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+	finalTx, err := dw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalTx != 3 {
+		t.Fatalf("final tx = %d, want 3", finalTx)
+	}
+
+	after, err := os.Stat(segPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() != before.Size() {
+		t.Fatalf("damaged tail segment size changed: before=%d after=%d", before.Size(), after.Size())
+	}
+
+	freshPath := filepath.Join(dir, SegmentFileName(3))
+	freshInfo, err := os.Stat(freshPath)
+	if err != nil {
+		t.Fatalf("fresh segment missing: %v", err)
+	}
+	if freshInfo.Size() <= int64(SegmentHeaderSize) {
+		t.Fatalf("fresh segment size = %d, want > %d", freshInfo.Size(), SegmentHeaderSize)
+	}
+	sr, err := OpenSegment(freshPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sr.Close()
+	rec, err := sr.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.TxID != 3 {
+		t.Fatalf("fresh segment first tx = %d, want 3", rec.TxID)
+	}
+	if _, err := sr.Next(); err != io.EOF {
+		t.Fatalf("fresh segment extra read err = %v, want EOF", err)
+	}
+}
+
+func TestDurabilityWorkerResumePlanAppendInPlaceReopensSegment(t *testing.T) {
+	dir := t.TempDir()
+	makeScanTestSegment(t, dir, 1, 1, 2)
+	plan := RecoveryResumePlan{SegmentStartTx: 1, NextTxID: 3, AppendMode: AppendInPlace}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dw.DurableTxID() != 2 {
+		t.Fatalf("reopened durable TxID = %d, want 2", dw.DurableTxID())
+	}
+	dw.EnqueueCommitted(3, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+	finalTx, err := dw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalTx != 3 {
+		t.Fatalf("final tx = %d, want 3", finalTx)
+	}
+
+	sr, err := OpenSegment(filepath.Join(dir, SegmentFileName(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sr.Close()
+	var txIDs []uint64
+	for {
+		rec, err := sr.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatal(err)
+		}
+		txIDs = append(txIDs, rec.TxID)
+	}
+	if len(txIDs) != 3 || txIDs[0] != 1 || txIDs[1] != 2 || txIDs[2] != 3 {
+		t.Fatalf("txIDs = %v, want [1 2 3]", txIDs)
+	}
+}
+
+func TestDurabilityWorkerResumePlanAppendForbiddenFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	_, err := NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{AppendMode: AppendForbidden}, DefaultCommitLogOptions())
+	if err == nil {
+		t.Fatal("expected append-forbidden resume plan to fail")
 	}
 }
 

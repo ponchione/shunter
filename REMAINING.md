@@ -8,8 +8,8 @@ Tracks spec/epic work not yet implemented. Tech debt tracked separately in TECH-
 
 | Epic | What | Status | Deps |
 |------|------|--------|------|
-| E5: Snapshot I/O | Schema snapshot codec, snapshot writer/reader, integrity checks | Not implemented (error types only) | SPEC-001 E8 + SPEC-002 E1 |
-| E6: Recovery | Segment scanning, snapshot selection, log replay, `OpenAndRecover` | Not implemented (error types only) | E2 + E3 + E5 + SPEC-001 E8 |
+| E5: Snapshot I/O | Schema snapshot codec, snapshot writer/reader, integrity checks | **Done** (implemented in `commitlog/snapshot_io.go`, verified 2026-04-16) | SPEC-001 E8 + SPEC-002 E1 |
+| E6: Recovery | Segment scanning, snapshot selection, log replay, `OpenAndRecover` + resume-plan handoff for durability startup | **Done** (implemented in `commitlog/segment_scan.go`, `snapshot_select.go`, `replay.go`, `recovery.go`; verified 2026-04-16) | E2 + E3 + E5 + SPEC-001 E8 |
 | E7: Log Compaction | Segment coverage tracking, compaction | Not implemented | E5 + recovery-side segment metadata |
 
 Decomposition docs: `docs/decomposition/002-commitlog/epic-5-snapshot-io/`, `epic-6-recovery/`, `epic-7-log-compaction/`

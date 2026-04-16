@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -118,19 +119,62 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 	if remaining == 0 {
 		return nil, io.EOF
 	}
-	maxPayload := uint32(0)
-	if remaining > RecordHeaderSize+RecordCRCSize {
-		maxPayload = uint32(remaining - RecordHeaderSize - RecordCRCSize)
+	if remaining < RecordHeaderSize {
+		return nil, ErrTruncatedRecord
 	}
-	rec, err := DecodeRecord(sr.file, maxPayload)
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil, io.EOF
+
+	var header [RecordHeaderSize]byte
+	if _, err := io.ReadFull(sr.file, header[:]); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, ErrTruncatedRecord
 		}
 		return nil, err
 	}
+
+	rec := &Record{
+		TxID:       binary.LittleEndian.Uint64(header[:8]),
+		RecordType: header[8],
+		Flags:      header[9],
+	}
+	dataLen := binary.LittleEndian.Uint32(header[10:14])
+	if int64(dataLen)+RecordCRCSize > remaining-RecordHeaderSize {
+		return nil, ErrTruncatedRecord
+	}
+
+	rec.Payload = make([]byte, dataLen)
+	if _, err := io.ReadFull(sr.file, rec.Payload); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, ErrTruncatedRecord
+		}
+		return nil, err
+	}
+
+	var crcBuf [RecordCRCSize]byte
+	if _, err := io.ReadFull(sr.file, crcBuf[:]); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, ErrTruncatedRecord
+		}
+		return nil, err
+	}
+
+	expectedCRC := binary.LittleEndian.Uint32(crcBuf[:])
+	actualCRC := ComputeRecordCRC(rec)
+	if expectedCRC != actualCRC {
+		return nil, &ChecksumMismatchError{Expected: expectedCRC, Got: actualCRC, TxID: rec.TxID}
+	}
+	if rec.RecordType != RecordTypeChangeset {
+		return nil, &UnknownRecordTypeError{Type: rec.RecordType}
+	}
+	if rec.Flags != 0 {
+		return nil, ErrBadFlags
+	}
+
 	sr.lastTx = rec.TxID
 	return rec, nil
+}
+
+func canTreatAsDamagedTail(err error, isLast bool, recordCount int) bool {
+	return isLast && recordCount > 0 && errors.Is(err, ErrTruncatedRecord)
 }
 
 func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
@@ -158,11 +202,11 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			if !isLast || recordCount == 0 {
-				return SegmentInfo{}, err
+			if canTreatAsDamagedTail(err, isLast, recordCount) {
+				info.AppendMode = AppendByFreshNextSegment
+				break
 			}
-			info.AppendMode = AppendByFreshNextSegment
-			break
+			return SegmentInfo{}, err
 		}
 
 		if recordCount == 0 {

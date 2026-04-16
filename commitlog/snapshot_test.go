@@ -124,6 +124,29 @@ func TestCreateAndReadSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSnapshotOmitsSequenceEntriesForTablesWithoutAutoincrement(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	if err := writer.CreateSnapshot(cs, 78); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "78"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := data.Sequences[0]; ok {
+		t.Fatalf("players table should not have a sequence entry: %+v", data.Sequences)
+	}
+	if _, ok := data.Sequences[1]; ok {
+		t.Fatalf("sys_clients table should not have a sequence entry: %+v", data.Sequences)
+	}
+	if got, ok := data.Sequences[2]; !ok || got == 0 {
+		t.Fatalf("autoincrement sys_scheduled table should keep its sequence entry, got %+v", data.Sequences)
+	}
+}
+
 func TestListSnapshotsSkipsLockAndSortsNewestFirst(t *testing.T) {
 	baseDir := t.TempDir()
 	for _, txID := range []uint64{10, 20} {

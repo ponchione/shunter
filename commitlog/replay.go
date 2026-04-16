@@ -10,10 +10,18 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+func shouldStopAfterRecord(segment SegmentInfo, txID types.TxID) bool {
+	return segment.AppendMode == AppendByFreshNextSegment && txID >= segment.LastTx
+}
+
 func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID types.TxID, reg schema.SchemaRegistry) (types.TxID, error) {
 	maxAppliedTxID := fromTxID
 
 	for _, segment := range segments {
+		if segment.LastTx <= fromTxID {
+			continue
+		}
+
 		reader, err := OpenSegment(segment.Path)
 		if err != nil {
 			return maxAppliedTxID, fmt.Errorf("commitlog: replay open segment %s: %w", segment.Path, err)
@@ -25,16 +33,17 @@ func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID
 				if errors.Is(err, io.EOF) {
 					break
 				}
-				if segment.AppendMode == AppendByFreshNextSegment && maxAppliedTxID >= segment.LastTx {
-					break
-				}
 				closeErr := reader.Close()
 				if closeErr != nil {
 					return maxAppliedTxID, fmt.Errorf("commitlog: replay read segment %s: %w (close error: %v)", segment.Path, err, closeErr)
 				}
 				return maxAppliedTxID, fmt.Errorf("commitlog: replay read segment %s: %w", segment.Path, err)
 			}
-			if types.TxID(record.TxID) <= fromTxID {
+			txID := types.TxID(record.TxID)
+			if txID <= fromTxID {
+				if shouldStopAfterRecord(segment, txID) {
+					break
+				}
 				continue
 			}
 
@@ -53,8 +62,11 @@ func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID
 				}
 				return maxAppliedTxID, fmt.Errorf("commitlog: replay apply tx %d from segment %s: %w", record.TxID, segment.Path, err)
 			}
-			if txID := types.TxID(record.TxID); txID > maxAppliedTxID {
+			if txID > maxAppliedTxID {
 				maxAppliedTxID = txID
+			}
+			if shouldStopAfterRecord(segment, txID) {
+				break
 			}
 		}
 

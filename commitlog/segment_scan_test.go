@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
@@ -154,12 +155,32 @@ func TestScanSegmentsCorruptFirstRecordActiveSegment(t *testing.T) {
 func TestScanSegmentsCorruptActiveSegmentAfterValidPrefixIsHardError(t *testing.T) {
 	dir := t.TempDir()
 
-	path := makeScanTestSegment(t, dir, 1, 1, 2)
-	corruptScanTestByte(t, path, SegmentHeaderSize+RecordHeaderSize+1)
+	path := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	corruptScanTestRecordPayloadByte(t, path, 2, 0)
 
 	_, _, err := ScanSegments(dir)
 	if err == nil {
 		t.Fatal("expected hard error for non-tail corruption in active segment")
+	}
+	var checksumErr *ChecksumMismatchError
+	if !errors.As(err, &checksumErr) {
+		t.Fatalf("expected checksum mismatch error, got %T (%v)", err, err)
+	}
+}
+
+func TestScanSegmentsChecksumMismatchAfterValidPrefixIsHardError(t *testing.T) {
+	dir := t.TempDir()
+
+	path := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	corruptScanTestRecordCRCByte(t, path, 2, 0)
+
+	_, _, err := ScanSegments(dir)
+	if err == nil {
+		t.Fatal("expected hard error for checksum mismatch in active segment")
+	}
+	var checksumErr *ChecksumMismatchError
+	if !errors.As(err, &checksumErr) {
+		t.Fatalf("expected checksum mismatch error, got %T (%v)", err, err)
 	}
 }
 
@@ -209,7 +230,12 @@ func truncateScanTestFile(t *testing.T, path string, trim int64) {
 	if err != nil {
 		t.Fatalf("os.Stat() error = %v", err)
 	}
-	if err := os.Truncate(path, info.Size()-trim); err != nil {
+	truncateScanTestFileToOffset(t, path, info.Size()-trim)
+}
+
+func truncateScanTestFileToOffset(t *testing.T, path string, size int64) {
+	t.Helper()
+	if err := os.Truncate(path, size); err != nil {
 		t.Fatalf("os.Truncate() error = %v", err)
 	}
 }
@@ -232,6 +258,62 @@ func corruptScanTestByte(t *testing.T, path string, offset int) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
+}
+
+func corruptScanTestRecordPayloadByte(t *testing.T, path string, recordIndex int, payloadOffset int) {
+	t.Helper()
+	corruptScanTestByte(t, path, scanTestRecordPayloadOffset(t, path, recordIndex, payloadOffset))
+}
+
+func corruptScanTestRecordCRCByte(t *testing.T, path string, recordIndex int, crcOffset int) {
+	t.Helper()
+	corruptScanTestByte(t, path, scanTestRecordCRCOffset(t, path, recordIndex, crcOffset))
+}
+
+func scanTestRecordPayloadOffset(t *testing.T, path string, recordIndex int, payloadOffset int) int {
+	t.Helper()
+	base := scanTestRecordOffset(t, path, recordIndex)
+	return base + RecordHeaderSize + payloadOffset
+}
+
+func scanTestRecordCRCOffset(t *testing.T, path string, recordIndex int, crcOffset int) int {
+	t.Helper()
+	base := scanTestRecordOffset(t, path, recordIndex)
+	payloadLen := scanTestRecordPayloadLength(t, path, recordIndex)
+	return base + RecordHeaderSize + payloadLen + crcOffset
+}
+
+func scanTestRecordOffset(t *testing.T, path string, recordIndex int) int {
+	t.Helper()
+	if recordIndex < 0 {
+		t.Fatalf("recordIndex must be >= 0, got %d", recordIndex)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	offset := SegmentHeaderSize
+	for idx := 0; idx < recordIndex; idx++ {
+		if offset+RecordHeaderSize > len(data) {
+			t.Fatalf("record %d header out of bounds in %s", idx, path)
+		}
+		payloadLen := int(binary.LittleEndian.Uint32(data[offset+10 : offset+14]))
+		offset += RecordOverhead + payloadLen
+	}
+	if offset+RecordHeaderSize > len(data) {
+		t.Fatalf("record %d header out of bounds in %s", recordIndex, path)
+	}
+	return offset
+}
+
+func scanTestRecordPayloadLength(t *testing.T, path string, recordIndex int) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	offset := scanTestRecordOffset(t, path, recordIndex)
+	return int(binary.LittleEndian.Uint32(data[offset+10 : offset+14]))
 }
 
 func assertHistoryGap(t *testing.T, err error, expected, got uint64) {
