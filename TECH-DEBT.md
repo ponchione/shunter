@@ -1466,7 +1466,7 @@ These are correctness-fatal under concurrent load or restart and are the highest
 
 - **TD-052** [BUG] `commitlog/segment.go:243-244` — `OpenSegment` calls `fmt.Sscanf(base, "%d.log", &startTx)` and discards both the count and error. A malformed filename silently yields `startTx=0`, masking corruption. Fix: check the return values and error out on parse failure.
 
-- **TD-053** [BUG] `executor/executor.go:208-218` — `handleCallReducer` writes to `cmd.ResponseCh` without checking `nil`. `dispatchSafely`'s panic path (line 175) checks `cmd.ResponseCh != nil`, proving nil is a contemplated input → guaranteed nil-panic on the happy path. Fix: early `if cmd.ResponseCh == nil { return }` or use a `respondReducer` helper mirroring `respondLifecycle`.
+- **TD-053** [BUG][resolved] `executor/executor.go`, `executor/phase4_acceptance_test.go` — reducer response delivery now goes through `sendReducerResponse`, which treats a nil `ResponseCh` as fire-and-forget instead of panicking on direct channel send. Regression coverage: `TestPhase4HandleCallReducerNilResponseChannelDoesNotPanic`.
 
 - **TD-054** [BUG][resolved] `executor/executor.go`, `executor/phase4_acceptance_test.go` — reducer panic handling now preserves the original panic error chain when the panic value is itself an `error` by joining it with `ErrReducerPanic`, instead of flattening it through `%v`. Regression coverage: `TestPhase4HandleCallReducerBeginExecuteCommitRollback` asserts both `errors.Is(resp.Error, ErrReducerPanic)` and `errors.Is(resp.Error, errReducerBoom)`.
 
