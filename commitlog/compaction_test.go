@@ -1,6 +1,10 @@
 package commitlog
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestSegmentCoverageBuildsRangesFromSegmentInfo(t *testing.T) {
 	segments := []SegmentInfo{
@@ -34,6 +38,85 @@ func TestSegmentCoverageHandlesSingleRecordAndEmptySegments(t *testing.T) {
 	assertSegmentRangesEqual(t, got, want)
 }
 
+func TestCompactDeletesFullyCoveredSegmentsOnly(t *testing.T) {
+	deleted, retained := Compact([]SegmentRange{
+		{Path: "seg-1", MinTxID: 1, MaxTxID: 900},
+		{Path: "seg-2", MinTxID: 900, MaxTxID: 1100},
+		{Path: "seg-3", MinTxID: 1001, MaxTxID: 1500},
+		{Path: "seg-4", MinTxID: 1501, MaxTxID: 1700, Active: true},
+	}, 1000)
+
+	assertStringSlicesEqual(t, deleted, []string{"seg-1"})
+	assertStringSlicesEqual(t, retained, []string{"seg-2", "seg-3", "seg-4"})
+}
+
+func TestCompactKeepsEverythingWithoutSnapshotAndDeletesMultipleCoveredSegments(t *testing.T) {
+	segments := []SegmentRange{
+		{Path: "seg-1", MinTxID: 1, MaxTxID: 4},
+		{Path: "seg-2", MinTxID: 5, MaxTxID: 8},
+		{Path: "seg-3", MinTxID: 9, MaxTxID: 12, Active: true},
+	}
+
+	deleted, retained := Compact(segments, 0)
+	assertStringSlicesEqual(t, deleted, nil)
+	assertStringSlicesEqual(t, retained, []string{"seg-1", "seg-2", "seg-3"})
+
+	deleted, retained = Compact(segments, 8)
+	assertStringSlicesEqual(t, deleted, []string{"seg-1", "seg-2"})
+	assertStringSlicesEqual(t, retained, []string{"seg-3"})
+}
+
+func TestRunCompactionDeletesCoveredSegmentsAndFsyncsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	seg2 := makeScanTestSegment(t, dir, 4, 4, 5, 6)
+	seg3 := makeScanTestSegment(t, dir, 7, 7, 8)
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		syncCalls++
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 6); err != nil {
+		t.Fatalf("RunCompaction() error = %v", err)
+	}
+	if syncCalls != 1 {
+		t.Fatalf("syncDir calls = %d, want 1", syncCalls)
+	}
+	assertFileMissing(t, seg1)
+	assertFileMissing(t, seg2)
+	assertFileExists(t, seg3)
+}
+
+func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
+	dir := t.TempDir()
+	boundary := makeScanTestSegment(t, dir, 900, contiguousTxs(900, 1100)...)
+	active := makeScanTestSegment(t, dir, 1101, 1101, 1102)
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		syncCalls++
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 1000); err != nil {
+		t.Fatalf("RunCompaction() error = %v", err)
+	}
+	if syncCalls != 0 {
+		t.Fatalf("syncDir calls = %d, want 0", syncCalls)
+	}
+	assertFileExists(t, boundary)
+	assertFileExists(t, active)
+}
+
 func assertSegmentRangesEqual(t *testing.T, got, want []SegmentRange) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -44,4 +127,38 @@ func assertSegmentRangesEqual(t *testing.T, got, want []SegmentRange) {
 			t.Fatalf("range[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}
+}
+
+func assertStringSlicesEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d; got=%v want=%v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("item[%d] = %q, want %q; got=%v want=%v", i, got[i], want[i], got, want)
+		}
+	}
+}
+
+func assertFileMissing(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected %s to be removed, stat err=%v", filepath.Base(path), err)
+	}
+}
+
+func assertFileExists(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected %s to exist: %v", filepath.Base(path), err)
+	}
+}
+
+func contiguousTxs(start, end uint64) []uint64 {
+	txs := make([]uint64, 0, end-start+1)
+	for tx := start; tx <= end; tx++ {
+		txs = append(txs, tx)
+	}
+	return txs
 }

@@ -2,6 +2,8 @@
 
 Tracks spec/epic work not yet implemented. Tech debt tracked separately in TECH-DEBT.md.
 
+As of 2026-04-16, all currently tracked implementation slices in this ledger are complete.
+
 ---
 
 ## Phase 4 — Commit-log gaps (SPEC-002)
@@ -10,7 +12,7 @@ Tracks spec/epic work not yet implemented. Tech debt tracked separately in TECH-
 |------|------|--------|------|
 | E5: Snapshot I/O | Schema snapshot codec, snapshot writer/reader, integrity checks | **Done** (implemented in `commitlog/snapshot_io.go`, verified 2026-04-16) | SPEC-001 E8 + SPEC-002 E1 |
 | E6: Recovery | Segment scanning, snapshot selection, log replay, `OpenAndRecover` + resume-plan handoff for durability startup | **Done** (implemented in `commitlog/segment_scan.go`, `snapshot_select.go`, `replay.go`, `recovery.go`; verified 2026-04-16) | E2 + E3 + E5 + SPEC-001 E8 |
-| E7: Log Compaction | Segment coverage tracking, compaction | Not implemented | E5 + recovery-side segment metadata |
+| E7: Log Compaction | Segment coverage tracking, compaction | **Done** (implemented in `commitlog/compaction.go`, verified 2026-04-16) | E5 + recovery-side segment metadata |
 
 Decomposition docs: `docs/decomposition/002-commitlog/epic-5-snapshot-io/`, `epic-6-recovery/`, `epic-7-log-compaction/`
 
@@ -40,13 +42,9 @@ Decomposition docs: `docs/decomposition/004-subscriptions/epic-6-fanout-delivery
 ## Dependency chain for remaining work
 
 ```
-commitlog E5 + E6 + E7    ← can start now (all upstream landed)
-subscription E6 remainder  ← DONE
+All currently tracked implementation work is done.
 ```
 
 ## Parallelism
 
-Two independent tracks can run simultaneously:
-
-1. **Commit-log track:** E5 → E6 → E7
-2. **Fan-out integration:** SPEC-004 E6 (all protocol deps landed)
+No tracked remaining implementation slices in this ledger.

@@ -17,7 +17,7 @@ Current planned audit sequence follows `docs/EXECUTION-ORDER.md` Phase 1 foundat
 5. `SPEC-006 E3.1` Builder core — audited
 6. `SPEC-006 E4` Reflection-path registration — audited
 7. `SPEC-006 E3.2` Reducer registration — audited
-8. `SPEC-006 E5` Validation/Build/SchemaRegistry — in progress; confirmed remaining gap is missing Story 5.6 schema compatibility checking at startup
+8. `SPEC-006 E5` Validation/Build/SchemaRegistry — audited; startup schema compatibility checking gap was fixed and logged as resolved `TD-004`
 9. `SPEC-006 E6` Schema export — audited
 10. `SPEC-001 E2` Schema & table storage — audited
 11. `SPEC-001 E3` B-tree index engine — audited
@@ -34,6 +34,10 @@ Current planned audit sequence follows `docs/EXECUTION-ORDER.md` Phase 1 foundat
 22. `SPEC-002 E3` Changeset Codec — audited
 23. `SPEC-002 E5` Snapshot I/O — audited
 24. `SPEC-002 E4` Durability Worker — audited
+25. `SPEC-002 E6` Recovery — audited
+26. `SPEC-002 E7` Log Compaction — audited
+27. `SPEC-004 E1` Predicate Types & Query Hash — audited
+28. `SPEC-004 E2` Pruning Indexes — next audit slice
 
 Audit notes:
 - `SPEC-006 E2` (`schema/tag.go`, `schema/tag_test.go`) appears operationally aligned with the tag-parser stories. No new debt logged from that slice at this time.
@@ -42,7 +46,7 @@ Audit notes:
 - `SPEC-006 E3.1` builder core appears operationally aligned: `NewBuilder`, `TableDef`, `SchemaVersion`, `EngineOptions`, and chaining behavior are implemented and covered by tests. I have not logged a separate builder-core debt item from that slice.
 - `SPEC-006 E4` reflection-path registration is mostly present (`schema/reflect.go`, `schema/reflect_build.go`, `schema/register_table.go`), but one concrete contract gap was found and logged below: anonymous embedded fields are processed before `shunter:"-"` exclusion, so excluded embedded structs are still flattened and excluded embedded pointer-to-struct fields still error.
 - `SPEC-006 E3.2` reducer registration is functionally present (`schema/builder.go`, `schema/validate_schema.go`, `schema/registry.go`), but one API-surface gap was found and logged below: the schema package does not expose `ReducerHandler` / `ReducerContext` aliases even though SPEC-006 presents reducer registration as part of the schema-facing API surface.
-- `SPEC-006 E5` validation/build work is largely present, and one major contract gap remains: Story 5.6 startup schema compatibility checking is still missing entirely. Story 5.4's read-only `SchemaRegistry` contract is now fixed by returning detached lookup copies.
+- `SPEC-006 E5` validation/build work is now audited; Story 5.6 startup schema compatibility checking was fixed and logged as resolved `TD-004`, and Story 5.4's read-only `SchemaRegistry` contract is also fixed by returning detached lookup copies.
 - `SPEC-006 E6` schema export is not implemented at all in live code: there is no `schema/export.go`, no export value types, no `Engine.ExportSchema()`, no JSON-contract tests, and no `cmd/shunter-codegen` tool surface. I logged the primary engine-surface gap below.
 - `SPEC-001 E2` schema-backed table storage is operationally present (`store/table.go`, `store/validate.go`, `store/store_test.go`), but one important contract gap was found and logged below: inserted rows are not detached from caller-owned `ProductValue` slices, so stored rows remain externally mutable.
 - `SPEC-001 E3` B-tree index engine is mostly present (`store/index_key.go`, `store/btree_index.go`, related tests), but Story 3.1's public `Bound` helper contract is entirely missing even though later range semantics docs still reference it. I logged the concrete API-surface gap below.
@@ -56,15 +60,20 @@ Audit notes:
 - `SPEC-003 E2` reducer registry behavior is broadly present (`executor/registry.go`, registry-related executor tests, `executor/phase4_acceptance_test.go`), but one important immutability gap was found and logged below: `Lookup`/`All` return mutable internal reducer pointers, so callers can still mutate the supposedly frozen registry after startup.
 - `SPEC-003 E3` executor core is partially present (`executor/executor.go`, `executor/executor_test.go`, `executor/phase4_acceptance_test.go`), but two concrete contract gaps were found and logged below: `SubmitWithContext` ignores reject-on-full semantics, and Story 3.4's subscription-command dispatch path is still absent.
 - `SPEC-003 E4` reducer transaction lifecycle is operationally present in behavior (`executor/executor.go`, `executor/phase4_acceptance_test.go`, related lifecycle tests), but one important public contract gap was found and logged below: `ReducerContext` still exposes `DB` and `Scheduler` as `any`, not the typed `*Transaction` / `SchedulerHandle` surface the spec/decomposition promise.
-- `SPEC-002 E3` changeset codec behavior is mostly present (`commitlog/changeset_codec.go`, `commitlog/commitlog_test.go`, `commitlog/phase4_acceptance_test.go`), but one concrete API drift was found and logged below: `DecodeChangeset` requires a third `maxRowBytes` argument even though the documented decoder surface takes only `(data, schema)`.
-- `SPEC-002 E5` snapshot I/O is not implemented in live code beyond a few snapshot-related error types in `commitlog/errors.go`; the schema snapshot codec, snapshot writer/reader, lockfile helpers, and public snapshot constants/APIs are all absent. I logged the primary missing-surface gap below.
-- `SPEC-002 E4` durability worker is partially present (`commitlog/durability.go`, `commitlog/commitlog_test.go`, `commitlog/phase4_acceptance_test.go`), but two concrete gaps were found and logged below: `NewDurabilityWorker` recreates/truncates an existing active segment instead of opening/resuming it, and `CommitLogOptions` is missing the documented `SnapshotInterval` field.
+- `SPEC-002 E3` changeset codec behavior is now audited; the public decoder surface was aligned to the documented two-argument API and tracked as resolved `TD-023`.
+- `SPEC-002 E5` snapshot I/O is now audited and operationally present (`commitlog/snapshot_io.go`, `commitlog/snapshot_test.go`); the previously missing snapshot surface was fixed and tracked as resolved `TD-024`.
+- `SPEC-002 E4` durability worker is now audited and operationally present (`commitlog/durability.go`, `commitlog/commitlog_test.go`, `commitlog/phase4_acceptance_test.go`); the reopen/resume truncation issue and missing `SnapshotInterval` option were fixed and tracked as resolved `TD-025` and `TD-026`.
+- `SPEC-002 E6` recovery is mostly operationally present (`commitlog/segment_scan.go`, `snapshot_select.go`, `replay.go`, `recovery.go`, related tests), but two concrete recovery/resume gaps remain and are logged below: active-tail checksum mismatches after a valid prefix are still treated as hard failures instead of truncation-at-horizon, and append-open still truncates first-record corruption instead of failing closed.
+- `SPEC-002 E7` log compaction appears operationally aligned (`commitlog/compaction.go`, `compaction_test.go`) with the current compaction stories. I did not log a new compaction debt item from that slice.
+- `SPEC-004 E1` predicate/query-hash foundations appear operationally aligned (`subscription/predicate.go`, `validate.go`, `hash.go`, `register.go`, related tests). The sealed predicate interface was also verified via an external compile-only repro that failed with `unexported method sealed`. I did not log a new debt item from this slice.
 - Verification runs completed during audit:
   - `rtk go test ./schema`
   - `rtk go test ./schema ./executor`
   - `rtk go test ./schema ./store ./executor`
   - `rtk go test ./executor`
   - `rtk go test ./commitlog`
+  - `rtk go test ./subscription`
+  - latest recovery/compaction pass: `rtk go test ./...`
   - earlier broad pass: `rtk go test ./types ./bsatn ./schema ./store ./subscription ./executor ./commitlog`
 
 ## Open items
@@ -1395,6 +1404,117 @@ Current observed behavior:
   - `rtk go build ./...`
   - `rtk go vet ./...`
   - `rtk go test ./...`
+
+### TD-114: SPEC-002 E6 active-tail CRC mismatch after a valid prefix is treated as a hard failure instead of a truncation horizon
+
+Status: open
+Severity: high
+First found: SPEC-002 Epic 6 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4i (`SPEC-002 E6: Recovery`)
+
+Summary:
+- SPEC-002 recovery explicitly allows a crash-truncated active-tail record to surface as either EOF/truncation or a CRC mismatch, and says recovery should stop at the last valid contiguous record.
+- Live scanning only classifies `ErrTruncatedRecord` as a resumable damaged tail. A checksum mismatch in the active tail, even after a valid prefix, is still returned as a hard error.
+- The current tests lock in that stricter behavior by asserting checksum mismatches after a valid prefix must fail recovery.
+
+Why this matters:
+- This rejects a recovery case the spec calls out as valid crash fallout.
+- Operators can lose an otherwise recoverable log suffix if the partial crash write manifests as a bad CRC instead of a short read.
+- The implementation/test contract currently disagrees with SPEC-002's stated replay-horizon rule.
+
+Related code:
+- `commitlog/segment_scan.go:160-163`
+  - `scanNextRecord(...)` returns `ChecksumMismatchError` when the tail CRC does not match
+- `commitlog/segment_scan.go:176-178`
+  - `canTreatAsDamagedTail(...)` only treats `ErrTruncatedRecord` as resumable damaged tail
+- `commitlog/segment_scan.go:199-209`
+  - `scanOneSegment(...)` therefore hard-fails on active-tail checksum mismatches even after a valid prefix
+- `commitlog/segment_scan_test.go:171-185`
+  - `TestScanSegmentsChecksumMismatchAfterValidPrefixIsHardError` asserts the hard-error behavior
+- `commitlog/recovery_test.go:186-204`
+  - `TestOpenAndRecoverDetailedCorruptActiveSegmentAfterValidPrefixFails` also locks in the same failure mode
+
+Related spec / decomposition docs:
+- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md:433-434`
+  - startup recovery allows the active tail to stop at the last valid contiguous record on a truncated record or CRC-mismatched partial tail write
+- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md:478-484`
+  - §6.4 says truncated tail writes may surface as CRC mismatch or EOF and should use the prior valid prefix as the replay horizon
+- `docs/decomposition/002-commitlog/epic-6-recovery/story-6.1-segment-scanning.md:48-54`
+  - Story 6.1 assigns truncated-tail handling and fresh-next-segment append classification to segment scanning
+
+Current observed behavior:
+- Verification still passes because the tests encode the stricter live behavior:
+  - `rtk go test ./commitlog`
+  - `rtk go test ./...`
+
+Recommended resolution options:
+1. Preferred code + test fix:
+   - extend damaged-tail classification to treat an active-tail `ChecksumMismatchError` after at least one valid record as `AppendByFreshNextSegment`
+   - keep checksum mismatches in sealed segments or at the first record of the active segment as hard failures
+   - update recovery tests to distinguish resumable partial-tail CRC corruption from fatal non-tail corruption
+2. Alternative doc fix:
+   - if the project intentionally wants any checksum mismatch to be fatal, update SPEC-002 §6.1/§6.4 and Story 6.1 to drop the CRC-mismatched-partial-tail recovery rule
+   - this would be a real narrowing of the current recovery contract
+
+Suggested follow-up tests:
+- active-segment checksum mismatch after a valid prefix yields `AppendByFreshNextSegment` and horizon=`last_valid_tx`
+- sealed-segment checksum mismatch remains fatal
+- first-record checksum mismatch in the active segment remains fatal / append-forbidden
+
+### TD-115: SPEC-002 E6 append-open truncates first-record corruption instead of failing closed
+
+Status: open
+Severity: high
+First found: SPEC-002 Epic 6 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4i (`SPEC-002 E6: Recovery`)
+
+Summary:
+- SPEC-002 says that if the first record in the last segment is corrupt and there is no valid prefix, reopening for append is a hard recovery error.
+- Live `OpenSegmentForAppend(...)` truncates the file back to the last good offset on any decode error, including corruption in the first record immediately after the header.
+- A focused runtime repro showed `OpenSegmentForAppend(...)` returning success and shrinking a corrupt one-record segment from 27 bytes back to the 8-byte header instead of erroring.
+
+Why this matters:
+- This is exactly the spec's "must fail closed" edge case for resume handling.
+- Silent truncation can discard the only durable record in the active segment instead of forcing operator intervention.
+- `NewDurabilityWorkerWithResumePlan(...)` uses this append-open path for `AppendInPlace`, so the helper behavior is part of the recovery resume surface.
+
+Related code:
+- `commitlog/segment.go:196-241`
+  - `OpenSegmentForAppend(...)` truncates to `size` on any `DecodeRecord` error and then returns a writable segment
+- `commitlog/durability.go:109-116`
+  - `openSegmentForResumePlan(...)` uses `openOrCreateSegment(...)` / `OpenSegmentForAppend(...)` for `AppendInPlace` recovery resumes
+- `commitlog/durability.go:98-107`
+  - `openOrCreateSegment(...)` treats any successful append-open as reusable active tail state
+
+Related spec / decomposition docs:
+- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md:484`
+  - first-record corruption in the last segment with no valid prefix is a hard error until operator intervention or reset
+- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md:625`
+  - verification checklist includes "Corrupt first record in active tail segment and reopen for append | Hard-error edge case on resume"
+- `docs/decomposition/002-commitlog/epic-6-recovery/story-6.4-open-and-recover.md:26-29,53`
+  - Story 6.4 requires append-open behavior to follow the scan result and treat append-forbidden cases as hard recovery failures
+
+Current observed behavior:
+- Package and repo tests still pass:
+  - `rtk go test ./commitlog`
+  - `rtk go test ./...`
+- Targeted runtime repro from the audit:
+  - `rtk go run /tmp/commitlog_open_append_repro.go`
+  - observed output before cleanup: `err=<nil> before=27 after=8 statErr=<nil>`
+  - the corrupt segment was truncated to header-only size instead of returning an error
+
+Recommended resolution options:
+1. Preferred code fix:
+   - make `OpenSegmentForAppend(...)` distinguish "damaged tail after a valid prefix" from "corrupt first record / no valid prefix"
+   - only truncate-and-resume when a valid prefix exists; otherwise return a hard error
+   - add focused tests for first-record corruption and valid-prefix truncation separately
+2. Alternative design guard:
+   - if direct append-open is no longer intended as a public recovery helper, narrow its callers and make the function fail closed by default unless recovery explicitly authorizes truncation from prior scan metadata
+
+Suggested follow-up tests:
+- `OpenSegmentForAppend(...)` on corrupt-first-record segment returns an error and does not truncate the file
+- `OpenSegmentForAppend(...)` still truncates a partial tail only when a valid prefix exists
+- `NewDurabilityWorkerWithResumePlan(...)` preserves the append-forbidden edge case instead of silently reopening it
 
 ---
 

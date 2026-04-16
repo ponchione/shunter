@@ -1625,3 +1625,940 @@ Live `subscription/` is substantially ahead of the spec (Epics 1–6 all land pe
 - Allocation discipline partial: `encoderPool` and `dedupPool` landed (`subscription/hash.go:39-41`, `subscription/delta_dedup.go:19-28`); `PHASE-5-DEFERRED.md` §C still lists 4 KiB buffer pool and DeltaView slice pooling as open.
 
 Recommend: fix the spec first (above), then a single drift-reconciliation pass to realign `subscription/` naming and error catalog with the repaired SPEC-004 in lock-step with the pending SPEC-001/002/003 reconciliations.
+
+---
+
+# SPEC-005 — Client Protocol
+
+Audited files:
+
+- `docs/decomposition/005-protocol/SPEC-005-protocol.md`
+- `docs/decomposition/005-protocol/EPICS.md`
+- `docs/decomposition/005-protocol/epic-{1..6}/EPIC.md`
+- All `story-*.md` under those epics
+- `WEBSOCKET-CLOSE-HANDSHAKE-FORK-PROPOSAL.md` (repo root; cross-referenced from Story 6.3)
+
+SpacetimeDB reference: `reference/SpacetimeDB/crates/{client-api-messages,client-api,core/src/client,core/src/host}`.
+
+Live implementation cross-read: `protocol/*.go` (substantially implemented — `REMAINING.md` marks E5 and E6 as **Done**; used to spot doc drift, not graded as a code audit).
+
+---
+
+## 1. Critical
+
+### 1.1 [CRITICAL] `ClientSender` interface in §13 is missing `SendSubscriptionError`
+
+- `SPEC-005-protocol.md` §13 declares the cross-subsystem contract as two methods: `SendTransactionUpdate(connID, *TransactionUpdate) error` and `SendReducerResult(connID, *ReducerCallResult) error`.
+- `SPEC-004-subscriptions.md` §8.2 and §11.1 require per-connection delivery of `SubscriptionError` entries through the fan-out seam (SPEC-004 audit §2.4 / §2.6 flagged this and explicitly routed ownership to SPEC-005 via Story 6.1's `sender.SendSubscriptionError` reference). SPEC-005 never declares that method.
+- Story 5.1 Deliverables repeat the two-method interface; Story 5.2 `SendSubscriptionError` is a protocol-internal function that calls `sender.Send` (see 1.5), not the fan-out-facing method SPEC-004 wants.
+- Live resolves the mismatch with an adapter: `protocol/fanout_adapter.go:16-47` defines `FanOutSenderAdapter` that wraps `ClientSender` and exposes the three-method `subscription.FanOutSender` interface (`SendTransactionUpdate`, `SendReducerResult`, `SendSubscriptionError`). The adapter's `SendSubscriptionError` calls `sender.Send(connID, SubscriptionError{...})` via the convenience path.
+- So the live system needs a three-method surface at the SPEC-004→SPEC-005 seam, the spec declares two, and Story 5.2's send-subscription-error path goes through an undocumented `Send` method (1.5).
+
+Fix: either (a) extend §13 `ClientSender` to three methods (`SendTransactionUpdate`, `SendReducerResult`, `SendSubscriptionError(connID, subID SubscriptionID, message string) error`) and have Story 5.2 route `SubscriptionError` through it; or (b) introduce a distinct §13 `FanOutSender` interface owned by this spec for fan-out delivery, with `ClientSender` remaining the internal response-sender. Coordinate sentinels in both directions (SPEC-004 audit §2.6: `ErrSendBufferFull`/`ErrSendConnGone` vs SPEC-005 `ErrClientBufferFull` — see 1.6 below).
+
+### 1.2 [CRITICAL] `FanOutMessage` description in §13 is stale vs SPEC-004 §8.1 post-audit shape
+
+- `SPEC-005-protocol.md` §13 (SPEC-004 subsection) step 1: "evaluator computes `CommitFanout` for the committed transaction and sends `FanOutMessage{TxDurable, Fanout}` to the fan-out worker inbox".
+- SPEC-004 audit §1.3 / §2.3 required the FanOutMessage to also carry `TxID TxID`, `Errors map[ConnectionID][]SubscriptionError`, `CallerConnID *ConnectionID`, and `CallerResult *ReducerCallResult` (all present in live `subscription/fanout.go:12-36`). SPEC-005 §13 lists only two fields.
+- §13 step 2 asserts the fan-out worker constructs `TransactionUpdate{TxID, Updates}` — but §13 step 1 omits the `TxID` carrier. The step 2 sentence is self-contradictory against the step 1 shape.
+- §13 step 4 mentions "standalone `TransactionUpdate` messages" but the `SubscriptionError` (1.1) and `ReducerCallResult` (caller diversion, Story 5.4) delivery paths that §8.2 of SPEC-004 demands are not surfaced.
+
+Fix: once SPEC-004 audit §1.3 / §2.3 lands, rewrite §13 step 1 to cite the full `FanOutMessage{TxID, TxDurable, Fanout, Errors, CallerConnID, CallerResult}` shape; cite SPEC-004 §8.1 as the authoritative home; rewrite step 2 to no longer construct `TxID` locally ("the fan-out worker stamps each outgoing `TransactionUpdate` with `FanOutMessage.TxID`"); add a step for per-connection `Errors` delivery (1.1 resolution).
+
+### 1.3 [CRITICAL] `Identity` type is re-declared in SPEC-005 despite SPEC-001 §2.4 owning it
+
+- `SPEC-001-store.md` §2.4 already declares `type Identity [32]byte` with the exact derivation invariant SPEC-005 depends on: "the same `(iss, sub)` pair always produces the same `Identity`". SPEC-001 Story 1.6 places it in the core types package.
+- `SPEC-005-protocol.md` §4.1 describes `Identity` as "a protocol-level 32-byte opaque identifier" and punts canonical-form ownership to "the shared identity type spec" that does not exist. §15 Open Question 4: "Identity type spec ownership."
+- Story 2.1 redeclares `type Identity [32]byte` in `auth/identity.go`, adds `DeriveIdentity`, `Hex`, `ParseIdentityHex`, `IsZero`. Design Notes: "If a shared identity spec is written later, this type moves there and the protocol layer imports it."
+- Live `types/types.go` is the canonical home (`grep` finds the only non-spec declaration there). `protocol/` imports `types.Identity`; no `auth/identity.go` declaration exists in the tree.
+- Result: three specs (SPEC-001, SPEC-005, informally SPEC-003) gesture at `Identity` without a single authoritative contract. The same concern SPEC-001/002/003/004 audits flagged for `TxID` and `ConnectionID` recurs here.
+
+Fix: close §15 OQ#4 by citing SPEC-001 §2.4 (and SPEC-001 Story 1.6) as the Identity home; drop Story 2.1's type declaration and rename the story to "Identity derivation & canonical string form" with `DeriveIdentity(issuer, subject) Identity`, `Hex()`, `ParseIdentityHex()` as the Shunter-chosen derivation for the SPEC-001 type (or move the derivation into SPEC-001 if that is preferred). Remove the "shared identity type spec" placeholder from §4.1.
+
+### 1.4 [CRITICAL] `OutboundCh` close vs concurrent `Send` is a send-on-closed-channel race
+
+- `story-3.6-ondisconnect-cleanup.md` step 5: "Close `OutboundCh` and `closed` channel to unblock write loop and keepalive goroutine".
+- `story-5.1-client-sender.md` Send path step 3: "Non-blocking send to `conn.OutboundCh`; if channel full → return `ErrClientBufferFull`".
+- Between a sender's `select` decision to push into `OutboundCh` and the actual channel send, `Disconnect` on another goroutine may close the channel. A send on a closed channel panics in Go.
+- Live `protocol/sender.go:76-89` uses a double-select guard: `case <-conn.closed` before and alongside the send. That narrows but does not eliminate the race — a close between the first `<-conn.closed` check and the send-select still panics.
+- Live `protocol/disconnect.go:36-51` closes `c.closed` then relies on `sync.Once` to prevent re-entry, but does NOT close `OutboundCh` — which means the writer goroutine must drain and exit via `<-c.closed` instead. That is a deliberate choice the spec does not document. Story 3.6 says "Close `OutboundCh`", the live impl does not, and the difference is safety-critical.
+- Same pattern SPEC-003 audit §2.11 flagged for the executor inbox.
+
+Fix: pin one protocol. Option A — "never close `OutboundCh`; signal shutdown only via `c.closed`; writer drains until `<-c.closed` then returns" (matches live). Option B — "hold a `sync.RWMutex` or similar: senders hold RLock for the send attempt, `Disconnect` takes WLock before closing `OutboundCh`." Pick one; update Stories 3.6 and 5.1 and the `Conn` struct in Story 3.3 accordingly.
+
+### 1.5 [CRITICAL] `ClientSender.Send(connID, msg any)` is the delivery path for four message types but is not in §13
+
+- Story 5.1 Deliverables add a third method to the `ClientSender` interface: `Send(connID ConnectionID, msg any) error`, described as "convenience helper for SubscribeApplied, etc.".
+- Story 5.2 `SendSubscribeApplied`, `SendUnsubscribeApplied`, `SendSubscriptionError`, `SendOneOffQueryResult` all delegate to `sender.Send`. Live `protocol/sender.go:30` + live `fanout_adapter.go:43` confirm.
+- SPEC-005 §13 does not list `Send`. The spec-level cross-subsystem contract is two typed methods; the story-level interface grew a third method to make the response path work.
+- Result: an implementer reading only §13 cannot deliver four of the seven S2C messages because no interface method covers them.
+
+Fix: either (a) lift `Send(connID, msg any) error` into §13 as part of `ClientSender`; (b) add four typed methods (`SendSubscribeApplied`, `SendUnsubscribeApplied`, `SendSubscriptionError`, `SendOneOffQueryResult`) to §13 and drop the `any`-typed helper; or (c) split §13 into two interfaces — fan-out-facing (SPEC-004 consumer, narrow typed set, see 1.1) and response-facing (protocol-internal, broader). Pick one and propagate to Stories 5.1 and 5.2.
+
+### 1.6 [CRITICAL] Error catalog §14 is incomplete for the spec's own requirements
+
+- §14 lists ten sentinels but omits several the spec or its stories require:
+  - `ErrConnNotFound` — live `protocol/sender.go:20` returns this to distinguish "connection disconnected between evaluation and delivery" from "buffer full". Story 5.3 AC "Connection not in ConnManager → skipped, no error" and live `fanout_adapter.go:58` explicitly maps this error into `subscription.ErrSendConnGone` so the fan-out worker can react — without a sentinel the fan-out contract breaks.
+  - `ErrTextFrameReceived` — Story 4.1 AC "Text frame → Close frame sent, connection closed". No named sentinel for the dispatch loop to branch on.
+  - `ErrMaxMessageSize` — Story 3.1 `MaxMessageSize` field + Story 4.1 AC "Frame exceeding `MaxMessageSize` → connection closed". No sentinel. Live `protocol/upgrade.go:142-143` sets the read limit and the WebSocket library surfaces the error — but the spec error catalog is silent.
+  - `ErrTooManyRequests` — Story 6.2 AC "Close reason string is `\"too many requests\"`". No sentinel.
+- §14 also lists `ErrClientBufferFull` but the subscription seam renames it to `ErrSendBufferFull` + `ErrSendConnGone` at the `FanOutSender` boundary (SPEC-004 audit §2.6). SPEC-005 is the authoritative owner; the rename must be either adopted in §14 or the subscription-side sentinels explicitly declared as shared/re-exported.
+
+Fix: extend §14 with `ErrConnNotFound`, `ErrTextFrameReceived`, `ErrMaxMessageSize`, `ErrTooManyRequests`; reconcile `ErrClientBufferFull` vs `ErrSendBufferFull`/`ErrSendConnGone` with SPEC-004 §11 (single canonical name in SPEC-005, SPEC-004 imports).
+
+---
+
+## 2. Gaps
+
+### 2.1 [GAP] `SubscriptionUpdate` wire format drops `TableID` without a join-unreachability cross-reference
+
+- `story-1.1-tag-constants-wire-types.md` Deliverables: "Protocol `SubscriptionUpdate` wire struct (derived from SPEC-004 §10.2 for wire delivery; protocol omits `TableID`, which is evaluator-internal)". Fields: `SubscriptionID`, `TableName`, `Inserts`, `Deletes`.
+- SPEC-004 audit §1.5 flagged that `SubscriptionUpdate.TableID` has no defined meaning for join subscriptions (concatenated LHS+RHS rows with a single TableID). SPEC-005 avoids the problem by dropping TableID from the wire entirely and rejecting joins on the Subscribe path (§7.1.1 "Rejected in protocol v1: … joins, references to more than one table").
+- But SPEC-004 §7.2 produces join deltas internally; the guarantee that a joined `SubscriptionUpdate` never reaches the wire depends on §7.1.1's subset rule never being loosened. SPEC-005 §8.5 and §10 / §13 do not say "joined subscriptions are unreachable on the wire in v1; this encoding covers only single-table updates". A future protocol-layer contributor who reads §8.5 alone might assume all `SubscriptionUpdate` shapes (including joins) fit.
+
+Fix: add a normative sentence to §8.5 and to Story 1.1: "`SubscriptionUpdate` wire form carries one `table_name` per entry and represents a single-table subscription's delta. Join subscriptions (SPEC-004 §3.3 rule 2) are not expressible via §7.1.1 Subscribe in protocol v1 and therefore never reach this wire form." Cross-reference from SPEC-004 §10.2.
+
+### 2.2 [GAP] `ReducerCallResult.TxID = 0` sentinel conflicts silently with SPEC-002 TxID reservation
+
+- `SPEC-005-protocol.md` §8.7: "tx_id: uint64 LE — corresponds to TxID (SPEC-003 §6); 0 if the reducer did not commit".
+- SPEC-002 audit §3.5 established: "the first committed transaction has `tx_id = 1`; `tx_id = 0` is reserved as the pre-commit sentinel used by `DurableTxID()`".
+- The two uses agree semantically (both mean "no durable commit") but §8.7 never cites the SPEC-002 reservation, and §2.2 Story 4.3 CallReducer not-found case has no rule for the TxID value in a `ReducerCallResult{status=3}` response.
+
+Fix: add a one-line clause to §8.7: "`tx_id = 0` matches SPEC-002's reserved pre-commit sentinel; callers must treat it as 'no durable transaction'." Story 5.4 AC "Not-found reducer (status=3) → empty embedded TransactionUpdate, TxID=0" is consistent; spell it out.
+
+### 2.3 [GAP] Confirmed-read opt-in has no wire representation
+
+- SPEC-003 audit §1.3 and SPEC-004 audit §3.5 both route `TxDurable <-chan TxID` through the fan-out worker so subscription updates can wait for durable commit before delivery.
+- SpacetimeDB exposes this as `confirmed_reads: bool` on ClientConfig at upgrade time (reference briefing §3 "Confirmed-Reads Semantics"; `crates/core/src/client/client_connection.rs:213-249`).
+- SPEC-005 has no such flag: Subscribe messages have no `confirmed_reads` field; §2.3 endpoint does not list a `?confirmed_reads=` query param; `ProtocolOptions` (§12) has no server-side toggle.
+- Consequence: the live executor/fan-out pipeline always waits for `TxDurable` (per SPEC-004 §8.2 step 1), and that is observably the v1 policy, but it is not documented as a wire contract. A client has no way to request fast (non-durable) reads.
+
+Fix: either (a) declare "v1 always waits for TxDurable; per-client opt-out is deferred" in §8.5 or §9.4 as a divergence; or (b) add a `?confirmed_reads=` query param or Subscribe flag and thread it through Story 4.2. Option (a) is simpler and matches live.
+
+### 2.4 [GAP] `SubscriptionError.RequestID = 0` sentinel collides with client-chosen `request_id = 0`
+
+- §8.4: "`request_id`: uint32 LE — echoes Subscribe request_id; 0 if error occurred during re-evaluation".
+- Client-chosen `request_id` is arbitrary uint32 (§7.1). A client that picks `request_id = 0` for its own Subscribe cannot distinguish "the Subscribe I sent with request_id 0 failed" from "my already-active subscription failed during re-evaluation".
+- Live `protocol/server_messages.go:32` `SubscriptionError` struct carries RequestID; live `fanout_adapter.go:43-46` SendSubscriptionError never populates it (all re-eval errors emit `request_id=0`; no path for echoing the original Subscribe request_id even at apply-time errors reached via fan-out).
+- SpacetimeDB solves this with `Option<u32>` (`crates/client-api-messages/src/websocket/v1.rs:293`) so `None` is unambiguously "no correlated request".
+
+Fix: reserve `request_id = 0` as "no associated client request" and document that clients MUST pick non-zero `request_id` for Subscribe (Story 4.2 validation). Alternatively, promote the wire field to a `has_request_id: uint8` + `request_id: uint32` shape so the sentinel is explicit (less compact, more unambiguous).
+
+### 2.5 [GAP] Anonymous-mode mint flooding is not bounded
+
+- `story-3.2-websocket-upgrade-handler.md` step 2 mints a fresh JWT on every upgrade if no token is presented and the server is in `AuthModeAnonymous`.
+- No rate-limit, no per-source cap, no mint-count metric. An attacker can exhaust the signing-key scheme or flood identity allocation.
+- §4.2 "Anonymous minting mode" silent on abuse protection.
+
+Fix: either (a) document that rate-limiting is a deployment concern outside SPEC-005 (reverse proxy, WAF) and add a note to §4.2; or (b) add `MintConfig.RateLimit` and specify behavior on exhaustion (reject with `429`).
+
+### 2.6 [GAP] `OnConnect` has no timeout, and the idle timer hasn't started yet
+
+- `story-3.4-initial-connection-onconnect.md` Design Notes: "If the executor is slow to respond to `OnConnect`, the client waits. No timeout on `OnConnect` itself (the executor has its own scheduling). The idle timeout does not apply during this phase because keep-alive has not started yet."
+- Result: a stuck executor permanently parks a socket in "upgraded, awaiting OnConnect response" with no server-side bound.
+- SpacetimeDB has a similar caveat but the server uses `idle_timeout` from the start (reference briefing §3).
+
+Fix: add a `ConnectTimeout` option (default matches `IdleTimeout`) to `ProtocolOptions`; Story 3.4 enforces it by starting a timer before queuing `OnConnect` and closing the connection with `1008` if the executor does not respond in time. Or document the current open-ended wait as intentional.
+
+### 2.7 [GAP] Compression query-param accepted-values list is not normative
+
+- §2.3 endpoint shows `compression=<none|gzip>` in the example, but §3.3 Compression values are only `0x00`/`0x01` (Gzip). No explicit enum of HTTP-level accepted strings.
+- Story 3.2 step 4 says "accept `none` (default) or `gzip`; reject unknown with `400`" — Story-level, not spec-level.
+- Adding Brotli (§15 not listed) or any other codec later requires both spec updates and handler updates.
+
+Fix: §2.3 should include the complete accepted list ("`none` | `gzip`; reject others with `400`"). Add a line to §3.3 tying the query-param value to the on-wire compression byte.
+
+### 2.8 [GAP] Buffer-overflow Close-reason strings have no reserved contract
+
+- §10.1 "send buffer full" and §10.2 "too many requests" reason strings.
+- RFC 6455 Close reason strings are informational. Clients should not parse them. Spec doesn't say "reason strings are diagnostic only; clients MUST NOT depend on them".
+- Reference briefing §3 "Close Frame Reason Encoding": same advice.
+
+Fix: one-liner in §11.1: "Reason strings are diagnostic. Clients must not depend on specific text; branch on Close code only."
+
+### 2.9 [GAP] `ExecutorInbox` interface is referenced across stories but never declared
+
+- Story 3.4 Design Notes: "`ExecutorInbox` is an interface or channel type matching SPEC-003's executor command pattern". Story 4.1 `MessageHandlers` dispatch to executor via "executor command inbox". Story 3.6 `Disconnect` takes an `ExecutorInbox` parameter.
+- §13 SPEC-003 subsection lists the four commands (`CallReducerCmd`, `RegisterSubscriptionCmd`, `UnregisterSubscriptionCmd`, `DisconnectClientSubscriptionsCmd`) but not the adapter shape that gates them.
+- Live `protocol/disconnect.go:35-43` uses an `ExecutorInbox` with methods `DisconnectClientSubscriptions(ctx, connID) error` and `OnDisconnect(ctx, connID, identity) error` — a method-based interface, not raw command submission. No story documents those method signatures.
+
+Fix: add a §13 subsection or a new Story 3.7 declaring the `ExecutorInbox` method set (`Submit(cmd ExecutorCommand)` OR typed methods `RegisterSubscription`, `UnregisterSubscription`, `CallReducer`, `DisconnectClientSubscriptions`, `OnConnect`, `OnDisconnect`). Pick one; cross-reference with SPEC-003 Story 1.3 / 1.4 command shape.
+
+### 2.10 [GAP] `Predicate.Value` wire encoding is undefined
+
+- `story-1.1-tag-constants-wire-types.md` Deliverables: `Predicate{Column string, Value Value}` with the comment "SPEC-001 §2.2 Value encoding".
+- SPEC-001 §2.2 defines `Value` as an in-memory Go tagged struct; it does NOT define a byte-level wire encoding. SPEC-002 §3.3 BSATN defines encoding for `ProductValue` (a list of Values), not for a single `Value`.
+- So "encoding" of a single `Value` on the wire is unspecified. Story 1.2 Subscribe decoder relies on it implicitly.
+- Live presumably degenerates to "ProductValue of one Value"; untested assumption.
+
+Fix: either (a) declare in §7.1.1 that `Predicate.Value` is encoded as a one-element BSATN ProductValue; (b) add a new §3 subsection "Value encoding on wire" defining the per-Value bytestream; or (c) redefine `Predicate.Value` to be a raw `[]byte` BSATN ProductValue so the wire shape is already covered.
+
+### 2.11 [GAP] Unsubscribe-while-pending rejection diverges from reference and doesn't document the race
+
+- `SPEC-005-protocol.md` §9.1 and Story 4.3: "Unsubscribe for a pending or unknown subscription_id returns `ErrSubscriptionNotFound`".
+- Result: a client that calls `Subscribe` then `Unsubscribe` fast enough to race the `SubscribeApplied` gets `ErrSubscriptionNotFound` on the Unsubscribe — but may still receive `SubscribeApplied` later (Story 5.2 says "Disconnect while subscription is pending → later SubscribeApplied result is discarded", but that is for disconnect, not for unsubscribe while connected).
+- SpacetimeDB accepts unsubscribe-while-pending as cancellation (reference briefing §1 v1 Unsubscribe). Shunter's strict rule leaves a client in an ambiguous state: got SubscribeApplied for a subscription it tried to cancel.
+
+Fix: either (a) loosen Story 4.3 to accept unsubscribe-while-pending as cancellation and suppress the late `SubscribeApplied`; or (b) document the current strict rule as a DIVERGE and spell out the client-side contract ("ignore any late `SubscribeApplied` for a `subscription_id` you already attempted to Unsubscribe").
+
+### 2.12 [GAP] Subscribe argument size / predicate count bounds undefined
+
+- `story-4.2-subscribe-handler.md` validates table/column existence + predicate subset, but not predicate count. Story 1.1 `Query.Predicates []Predicate` unbounded.
+- A malicious client can send Subscribe with a huge predicate slice — protected only by the WebSocket `MaxMessageSize` (4 MiB). 4 MiB / 10 bytes per predicate = ~400k predicates, all accepted.
+- SpacetimeDB similar exposure via SQL string but typically caps query size.
+
+Fix: §7.1 should declare a `MaxPredicatesPerSubscribe` bound (configurable, e.g., 64) or explicitly note "predicate count bounded only by `MaxMessageSize`; deployment-specific".
+
+### 2.13 [GAP] Subscribe activation timing vs Story 5.2 is unclear
+
+- `story-3.3-connection-state.md` `SubscriptionTracker` has two states: `SubPending`, `SubActive`.
+- `story-4.2-subscribe-handler.md` step 5: "Reserve `subscription_id` as pending in `SubscriptionTracker`".
+- `story-5.2-response-messages.md` `SendSubscribeApplied`: "Activate subscription in tracker (pending → active); Send via `sender.Send`".
+- What makes the transition atomic? If `Send` succeeds but the client socket dies before delivery, the activation persisted without the client knowing. Story 5.2 says "Disconnect while subscription is pending → later SubscribeApplied result is discarded" — but the discard has to happen before activation to avoid a zombie active subscription. Order is: Activate → Send. If Activate happens first and `Disconnect` fires before `Send`, the subscription is `SubActive` on a dead connection.
+- Live likely reorders or wraps in a disconnect guard; spec silent.
+
+Fix: Story 5.2 `SendSubscribeApplied` Deliverables must pin the order: (a) acquire disconnect-guard lock, (b) check connection is not closed, (c) activate, (d) Send. Name the lock.
+
+### 2.14 [GAP] `SubscribeApplied` / `UnsubscribeApplied` activation vs pre-E5 tracker removal (Story 4.3)
+
+- `story-4.3-unsubscribe-callreducer.md` step 3: "On executor submission success: **remove subscription from tracker immediately**; E5 watches the response channel and delivers `UnsubscribeApplied` / `SubscriptionError`."
+- `story-5.2-response-messages.md` `SendUnsubscribeApplied`: "Remove subscription from tracker".
+- The tracker is removed twice — once at submission time (Story 4.3), once at response-delivery time (Story 5.2). On executor failure the tracker is still removed; on `SubscriptionError` Story 5.2 says "release subscription_id", also a second remove.
+- Live `protocol/conn.go` `SubscriptionTracker.Remove(id)` returns `ErrSubscriptionNotFound` on missing — second-remove raises error unless code swallows it.
+
+Fix: pick one owner. Either (a) Story 4.3 defers tracker removal until the response path, so submission-success keeps the entry and the response path removes; or (b) Story 4.3 owns the removal and Story 5.2 stops removing.
+
+### 2.15 [GAP] `PingInterval` / `IdleTimeout` silent during OnConnect phase
+
+- Story 3.4 Design Notes: "The idle timeout does not apply during this phase because keep-alive has not started yet."
+- Story 3.5 Design Notes: `PingInterval` < `IdleTimeout` (15s < 30s) for pong tolerance.
+- Silent: at what exact moment does keep-alive arm? Story 3.4 step 5 "start read loop, write loop, and keepalive goroutine" — after `InitialConnection` delivery. So the server parks the socket with no timer from upgrade through OnConnect → InitialConnection send. See 2.6.
+
+Fix: 2.6 above covers the timeout. Also explicitly state in Story 3.5 "keep-alive arms after `InitialConnection` has been enqueued for send".
+
+---
+
+## 3. Divergences from SpacetimeDB (should be documented)
+
+### 3.1 [DIVERGE] Subprotocol token `v1.bsatn.shunter` forks the namespace
+
+- Shunter: single subprotocol `v1.bsatn.shunter` (`SPEC-005-protocol.md` §2.2).
+- SpacetimeDB: three tokens with preference order `v2.bsatn.spacetimedb > v1.bsatn.spacetimedb > v1.json.spacetimedb` (`crates/client-api/src/routes/subscribe.rs:153-175`; reference briefing §1).
+- Shunter intentionally replaces the vendor segment and drops the JSON and v2 paths. Clean-room correct and wire-incompatible by construction.
+
+Fix: add a §2.2 note: "Protocol identifier is Shunter-specific. Clients cannot negotiate SpacetimeDB's `v1.json.spacetimedb` or `*.spacetimedb` tokens against this server; interop with SpacetimeDB clients is out of scope for v1."
+
+### 3.2 [DIVERGE] Compression tag values collide with reference
+
+- Shunter: `None=0x00`, `Gzip=0x01` (§3.3).
+- SpacetimeDB: `None=0x00`, `Brotli=0x01`, `Gzip=0x02` (`crates/client-api-messages/src/websocket/common.rs:35-54`).
+- Shunter has no Brotli and assigns `0x01` to Gzip — the same tag SpacetimeDB uses for Brotli. Byte-level incompatibility; intentional.
+- Live `protocol/sender.go:74` always sends `[0x00][tag][body]` when compression is enabled, never gzips — matches spec §3.3 "Implement compression as optional in v1. Default to none."
+
+Fix: document the tag-value divergence explicitly in §3.3 ("tag values differ from SpacetimeDB; Brotli is out of scope for v1").
+
+### 3.3 [DIVERGE] Outgoing buffer capacity 256 vs SpacetimeDB 16,384
+
+- §12 `OutgoingBufferMessages` default 256.
+- SpacetimeDB `CLIENT_CHANNEL_CAPACITY = 16 * 1024 = 16,384` (`crates/core/src/client/client_connection.rs:655-661`).
+- ~64× smaller. Combined with Shunter's disconnect-on-overflow policy (§10.1) and SPEC-004 §8.4 bounded fan-out inbox (64), the overall queueing budget is an order of magnitude tighter than SpacetimeDB. Trade-off documented partially (SPEC-004 audit §3.2).
+
+Fix: cross-reference SPEC-004 §3.2 in §10 or §12; add a line noting the v1 buffer budget is deliberately tight.
+
+### 3.4 [DIVERGE] No TransactionUpdate light/heavy split
+
+- SpacetimeDB v1 distinguishes `TransactionUpdate` (heavy, caller metadata) vs `TransactionUpdateLight` (deltas only, non-caller broadcast) via `ClientConfig.tx_update_full` (`crates/client-api-messages/src/websocket/v1.rs:281-283`).
+- Shunter has a single `TransactionUpdate` shape — strictly delta-only, no reducer metadata — and routes caller-specific delivery through a dedicated `ReducerCallResult` tag (§8.7). SPEC-004 audit §3.2 flagged the absence of light/heavy distinction.
+- Shunter's design is cleaner (one tag, one shape) but means the caller's reducer metadata is delivered entirely via `ReducerCallResult`, and non-callers never see any reducer metadata at all.
+
+Fix: add a one-line note to §8.5 or §12 explaining the divergence: "SpacetimeDB distinguishes heavy/light TransactionUpdate variants by client preference. Shunter emits a single delta-only TransactionUpdate and routes caller-specific reducer metadata via ReducerCallResult (§8.7); non-callers never observe reducer metadata."
+
+### 3.5 [DIVERGE] No SubscribeMulti / SubscribeSingle / QuerySetId
+
+- SpacetimeDB v1/v2 support `SubscribeMulti(query_id, query_strings)` and `SubscribeSingle(query_id, query_string)` where `query_id` is a u32 (`QuerySetId`) grouping multiple queries into one logical set (`crates/client-api-messages/src/websocket/v1.rs:60-62` and `v2.rs:20`).
+- Shunter exposes only `Subscribe(subscription_id, query)` — one predicate per subscription, no set grouping. `subscription_id` and `QuerySetId` are semantically similar but Shunter's is single-predicate.
+
+Fix: add a §15 Open Question or §3 divergence note: "SpacetimeDB's multi-query subscription set grouping is not exposed in v1. A future extension may introduce a `SubscribeMulti`-style set; reserve `subscription_id` namespace accordingly."
+
+### 3.6 [DIVERGE] No `CallReducer.flags` byte (NoSuccessfulUpdate, etc.)
+
+- SpacetimeDB `CallReducer` carries `flags: CallReducerFlags` (`crates/client-api-messages/src/websocket/v1.rs:55`; e.g., `NoSuccessfulUpdate` to suppress echoing the caller's `TransactionUpdate`).
+- Shunter `CallReducerMsg` (§7.3) carries only `request_id`, `reducer_name`, `args`. No flags.
+- Consequence: a client that wants to issue a fire-and-forget reducer (no caller-echo) cannot opt out; the `ReducerCallResult.TransactionUpdate` always embeds matching subscription deltas.
+
+Fix: defer explicitly ("v1 reducer calls always deliver caller deltas via `ReducerCallResult.transaction_update`; suppressing that echo is out of scope for v1").
+
+### 3.7 [DIVERGE] OneOffQuery uses structured predicates, not SQL string
+
+- §7.4: `OneOffQueryMsg{request_id, table_name, predicates []Predicate}` — structured, same shape as Subscribe.
+- SpacetimeDB: `OneOffQuery{request_id, query_string: Box<str>}` — SQL string (`v1.rs:237-250`, `v2.rs:101-109`).
+
+Fix: already covered by §7.1 equality-only design decision; add one line to §7.4 noting the same rationale applies.
+
+### 3.8 [DIVERGE] Close codes differ slightly
+
+- Shunter server uses `1000 / 1002 / 1008 / 1011` (Story 6.3, §11.1).
+- SpacetimeDB uses `1001 Away` for engine shutdown, `1002 Error` for protocol errors, `1008 Again/Policy Violation` for too-many-requests; rarely `1011` (reference briefing §3).
+- Shunter picks `1000` (Normal) for graceful shutdown where SpacetimeDB picks `1001` (Away). RFC 6455 reads `1000` as "normal, initiated by this endpoint without a specific reason" vs `1001` as "going away".
+
+Fix: either mirror SpacetimeDB (`1001` for shutdown) or document the intentional choice: "`1000` is used for graceful shutdown because the close is initiated by the server, not because the server is being relocated; SpacetimeDB uses `1001` (Away)."
+
+### 3.9 [DIVERGE] `ReducerCallResult.status` enum maps to neither UpdateStatus nor ReducerOutcome
+
+- Shunter: `0=committed, 1=failed_user, 2=failed_panic, 3=not_found` (§8.7).
+- SpacetimeDB v1 `UpdateStatus`: `Committed / Failed(String) / OutOfEnergy`.
+- SpacetimeDB v2 `ReducerOutcome`: `Ok(ReducerOk) / OkEmpty / Err(Bytes) / InternalError(String)`.
+- Shunter's status=3 (`not_found`) does not exist in either reference variant; in reference this would be a `CloseFrame(Error)` (v1 behavior per message_handlers_v1.rs) or `ReducerOutcome::InternalError` (v2).
+- Shunter's status=2 (`failed_panic`) maps to SpacetimeDB's `InternalError` but is semantically narrower (specifically "Go panic" per SPEC-003).
+
+Fix: add a §8.7 divergence note: "Status enum is Shunter-specific; `not_found` is surfaced as a reducer-call result in Shunter rather than a connection-level error."
+
+### 3.10 [DIVERGE] No `OutOfEnergy` / `Energy` semantics
+
+- §8.7 `energy: uint64` reserved, always 0 in v1.
+- SpacetimeDB tracks energy quanta and refuses reducer execution on exhaustion (`UpdateStatus::OutOfEnergy`, `ReducerOutcome::OutOfEnergy`).
+- Shunter defers; already documented.
+
+### 3.11 [DIVERGE] ConnectionId reuse on reconnect has no server-side meaning
+
+- §2.3: "Clients may reuse a previous `connection_id` on reconnect to signal intent to resume (future session-resume feature; no semantic effect in v1)."
+- SpacetimeDB: each WebSocket connection is independent; ConnectionId is not tracked across reconnects (reference briefing §3).
+- Shunter matches SpacetimeDB's lack-of-resume semantics and reserves the field for future use. OK as-is; flagged because it introduces an ignored-field invariant that future-Shunter could accidentally start honoring.
+
+---
+
+## 4. Internal consistency
+
+### 4.1 [NIT] BSATN naming disclaimer is missing despite SPEC-005 being a major consumer
+
+- §3.1: "All messages are serialized using BSATN (the binary encoding defined in SPEC-002 §3.3)."
+- SPEC-002 audit §3.1 recommended a disclaimer at BSATN's first-mention ("Shunter's encoding is of the same family as SpacetimeDB's BSATN but not byte-compatible. Tag numbering and type coverage are Shunter-specific.").
+- SPEC-005 cites BSATN a dozen times across §3, §7, §8, §14 and never propagates the disclaimer.
+
+Fix: once SPEC-002 §3.3 carries the disclaimer, add one sentence to SPEC-005 §3.1 pointing at it.
+
+### 4.2 [NIT] `Depends on:` front matter underclaims
+
+- Current: "SPEC-001 (row encoding), SPEC-002 (BSATN encoding), SPEC-003 (executor interfaces), SPEC-004 (subscription evaluator)".
+- §4.1 consumes SPEC-001 §2.4 `Identity` (see 1.3).
+- §8.5/§8.7 consume SPEC-003 §6 `TxID`.
+- Story 4.2 consumes `SchemaLookup` — "TableByName(name) (TableID, *TableSchema, bool)" — SPEC-006 territory (schema definition). SPEC-006 is not in "Depends on".
+- Story 4.4 consumes `CommittedStateAccess.Snapshot()` — SPEC-001 §7.
+
+Fix: "Depends on: SPEC-001 (Identity, TxID, ConnectionID, CommittedReadView), SPEC-002 (BSATN encoding), SPEC-003 (ExecutorCommand set, ReducerCallResult metadata), SPEC-004 (CommitFanout, FanOutMessage, SubscriptionUpdate), SPEC-006 (SchemaLookup)."
+
+### 4.3 [NIT] §9.1 state machine names a "pending removal" state Story 3.3 doesn't model
+
+- §9.1 diagram: `[active] → Unsubscribe(subscription_id) → [pending removal] → UnsubscribeApplied → [not subscribed]`.
+- `story-3.3-connection-state.md` `SubscriptionState` enum: `SubPending`, `SubActive`. No third variant.
+- Story 4.3 "remove subscription from tracker immediately" + Story 5.2 "Remove subscription from tracker" — tracker doesn't model the removal-pending window; the subscription id vanishes the moment Unsubscribe is accepted. If `UnsubscribeApplied` arrives later, Story 5.2's remove call finds it gone (see 2.14).
+
+Fix: either (a) add `SubPendingRemoval` to the tracker and Story 4.3 transitions SubActive→SubPendingRemoval (Story 5.2 removes on UnsubscribeApplied); or (b) drop "pending removal" from §9.1 and state explicitly that Unsubscribe is fire-and-forget at the tracker level.
+
+### 4.4 [NIT] §15 OQ #4 is resolvable and should be closed
+
+See 1.3. SPEC-001 §2.4 owns Identity; close the open question.
+
+### 4.5 [NIT] `CloseHandshakeTimeout` is in §12 but §11.1 Clean Close text doesn't mention it
+
+- §11.1: "The receiver echoes a Close frame. The connection is then closed." No mention of bounded-wait.
+- §12 `CloseHandshakeTimeout` default 250ms.
+- Story 6.3 carries the full transport-limitation note (already good).
+
+Fix: one sentence in §11.1: "Servers wait up to `CloseHandshakeTimeout` (§12; default 250ms) for the peer's echo before forcibly closing the TCP connection; see Story 6.3 for current transport-layer caveats."
+
+### 4.6 [NIT] §8.5 `SubscriptionUpdate` shape comment references a non-existent protocol wire struct name
+
+- §8.5 body (the explanation beneath the struct-layout block): "`SubscriptionUpdate` Go struct is defined in SPEC-004 §10.2."
+- SPEC-004 §10.2 defines it with `TableID`. Story 1.1 (SPEC-005) redefines it without TableID for the wire. Two `SubscriptionUpdate` struct types with the same name — one subscription-domain (with TableID), one protocol-wire (without). An implementer reading only §8.5 sees the Go struct reference and imports the subscription-domain one, which has a field the wire layout does not serialize.
+
+Fix: §8.5 should cite Story 1.1's protocol-wire shape as the authoritative wire definition and explicitly note the `TableID`-drop conversion (live `protocol/fanout_adapter.go:76-91`).
+
+### 4.7 [NIT] §5.2/§5.3 OnConnect/OnDisconnect are described as reducers but §2.4 model is single-command
+
+See SPEC-003 audit §2.6. SPEC-005 §5.2 "the executor runs the `OnConnect` reducer" + §5.3 "the executor runs the `OnDisconnect` reducer". SPEC-003 §2.4 claims "Scheduled reducers and lifecycle reducers use `CallReducerCmd`" but Stories 7.2/7.3 and the live impl use bespoke `OnConnectCmd`/`OnDisconnectCmd`. SPEC-005 inherits the ambiguity.
+
+Fix: once SPEC-003 audit §2.6 lands (command-set reconciliation), SPEC-005 §5.2/§5.3 should cite the final command name instead of saying "the executor runs the reducer".
+
+### 4.8 [NIT] `ErrZeroConnectionID` listed but validation is duplicated
+
+- Story 3.1 defines `ErrZeroConnectionID`.
+- Story 3.2 step 3 checks the zero case and returns 400.
+- §4.3 also lists "Zero `connection_id` → `400` before WebSocket upgrade" as an auth error, under "Authentication Errors" — but this is not actually an auth concern, it's a connection-id validation. Moving §4.3 bullet into §2.3 clarifies ownership.
+
+### 4.9 [NIT] `Energy` always 0 but no decode-side tolerance documented
+
+- Story 1.3 Design Notes: "`Energy` in `ReducerCallResult` is reserved. Always encode as `0`. Ignore non-zero on decode (forward compat)."
+- §8.7 does not say "ignore non-zero on decode". Implementers reading §8.7 may strictly reject non-zero values.
+
+Fix: move the forward-compat note from Story 1.3 into §8.7.
+
+### 4.10 [NIT] `Conn.OutboundCh` close rule vs Story 3.6 instruction (see 1.4)
+
+Already flagged as CRITICAL; noted here as a consistency issue between Story 3.6 (close the channel) and live impl (do not close).
+
+### 4.11 [NIT] `ConnectionID` type hex-encoding format on wire is underspecified
+
+- §2.3 endpoint: "`connection_id=<16-hex-bytes>`" — 32-hex-char lowercase.
+- §8.1 InitialConnection body: `connection_id: bytes (16)` — raw 16-byte BSATN bytes.
+- Story 3.1 `Hex()` returns "32 lowercase hex chars" and `ParseConnectionIDHex` accepts hex input.
+- Two different representations (query-param hex, wire raw bytes) are fine but not cross-referenced.
+
+---
+
+## 5. Epic/story coverage
+
+### 5.1 Verified good coverage
+
+- Epic 1 covers §3 (BSATN, framing, compression, RowList), §6 (tag constants), §7/§8 struct layouts.
+- Epic 2 covers §4.
+- Epic 3 covers §2 (ConnectionID, upgrade, protocol negotiation), §5 (OnConnect/OnDisconnect lifecycle, keep-alive), §12 (ProtocolOptions).
+- Epic 4 covers §7 handlers (Subscribe, Unsubscribe, CallReducer, OneOffQuery), §9.1 state machine.
+- Epic 5 covers §8 delivery and §13 cross-subsystem seam (save 1.1 / 1.2 / 1.5 gaps).
+- Epic 6 covers §10 backpressure and §11 disconnect; Story 6.3 documents the transport-timeout caveat.
+
+### 5.2 [GAP] No story owns the `SendSubscriptionError` fan-out method (see 1.1)
+
+### 5.3 [GAP] No story covers `OutboundCh` close-race synchronization (see 1.4)
+
+### 5.4 [GAP] No story covers the `ExecutorInbox` interface shape (see 2.9)
+
+### 5.5 [GAP] No story covers `Predicate.Value` wire encoding (see 2.10)
+
+### 5.6 [GAP] No story covers confirmed-read opt-in (see 2.3)
+
+### 5.7 [GAP] Story 5.2 `SendSubscribeApplied` disconnect-race handling underspecified (see 2.13)
+
+### 5.8 [GAP] Double-removal of subscription tracker entries across Stories 4.3 / 5.2 (see 2.14)
+
+---
+
+## 6. Clean-room boundary
+
+Overall: clean. SPEC-005 decomposition is Go-typed and prose-original. No Rust identifiers, no SpacetimeDB file paths, no verbatim copied doc text. Subprotocol token `v1.bsatn.shunter` deliberately forks the `*.spacetimedb` namespace.
+
+Type and method names (`ConnectionID`, `Identity`, `ProtocolOptions`, `Conn`, `ConnManager`, `ClientSender`, `SubscriptionTracker`, `InitialConnection`, `SubscribeApplied`, `TransactionUpdate`, `ReducerCallResult`, `OneOffQueryResult`, `SubscriptionError`, `RowList`, `Predicate`, `Query`) are idiomatic Go; the concept names largely parallel SpacetimeDB's Rust/protobuf surface but use different granularity, different wire layouts, and different defaults.
+
+Concept → name map against reference:
+
+- `ClientConnectionSender` (`crates/core/src/client/client_connection.rs:265`) → `ClientSender` + `Conn` (Shunter splits the send-facing interface from per-connection state).
+- `ClientConfig { tx_update_full, confirmed_reads }` → `ProtocolOptions` (no per-client toggles; see 2.3 / 3.4).
+- `IdentityToken` (v1) / `InitialConnection` (v2) → `InitialConnection` (Shunter matches the v2 name even though the rest of the protocol uses v1-ish semantics).
+- `TransactionUpdate` (heavy) + `TransactionUpdateLight` → single `TransactionUpdate` + dedicated `ReducerCallResult` (see 3.4).
+- `SubscribeMulti` / `SubscribeSingle` / `QuerySetId` → `Subscribe` + `subscription_id` (single-predicate; see 3.5).
+- `CallReducer` + `flags: CallReducerFlags` → `CallReducer` without flags (see 3.6).
+- `UpdateStatus` / `ReducerOutcome` → `Status uint8` (see 3.9).
+- `BsatnRowList{size_hint, rows_data}` (`crates/client-api-messages/src/websocket/common.rs:59-156`) → `RowList` with per-row length prefix (Shunter's form is simpler; already documented as v1 choice in §3.4).
+- `CloseCode::Away/Error/Again` (`tungstenite::protocol::frame::coding::CloseCode`) → `1000 / 1002 / 1008 / 1011` (see 3.8).
+- `SpacetimeCreds` / `SpacetimeIdentityClaims` (`crates/client-api/src/auth.rs:66-199`) → `JWTConfig` / `Claims` / `AuthMode`.
+- `client_connected` / `client_disconnected` hooks → `OnConnect` / `OnDisconnect` (matches SPEC-003 lifecycle naming; see SPEC-003 audit §2.6).
+- `CLIENT_CHANNEL_CAPACITY = 16 * 1024` → `OutgoingBufferMessages = 256` (see 3.3).
+
+No Rust symbol names leaked. No SpacetimeDB file paths cited.
+
+Two clean-room caveats carry over from earlier audits:
+
+### 6.1 BSATN name disclaimer (see 4.1)
+
+SPEC-005 is the most visible external consumer of the "BSATN" name (wire encoding for every message). Once the SPEC-002 audit §3.1 disclaimer lands, SPEC-005 §3.1 must carry the same disclaimer so a compliance/security reader cannot infer byte-compatibility with SpacetimeDB.
+
+### 6.2 Subprotocol-value clean-room hygiene
+
+§2.2 `v1.bsatn.shunter` correctly forks the vendor suffix. Make sure any new version bumps (`v2.bsatn.shunter`) follow the same pattern and do not silently re-use SpacetimeDB's v2 tag.
+
+---
+
+## 7. Quick wins (suggested ordering for doc repair)
+
+1. Add `SendSubscriptionError` to §13 ClientSender / FanOutSender contract and Story 5.1 (1.1). Coordinated with SPEC-004 audit §2.4 / §2.6.
+2. Align §13 FanOutMessage shape with SPEC-004 §8.1 post-audit (1.2). Coordinated with SPEC-004 audit §1.3.
+3. Close §15 OQ #4: cite SPEC-001 §2.4 as Identity home (1.3). Drop the Story 2.1 type redeclaration; keep derivation helpers.
+4. Pick `OutboundCh` lifecycle rule (close-and-signal vs signal-only) in Stories 3.6 and 5.1 (1.4). Name the synchronization.
+5. Lift `Send(connID, msg any)` into §13 or introduce typed per-message-type methods (1.5).
+6. Extend §14 error catalog: `ErrConnNotFound`, `ErrTextFrameReceived`, `ErrMaxMessageSize`, `ErrTooManyRequests`; reconcile `ErrClientBufferFull` vs SPEC-004 `ErrSendBufferFull`/`ErrSendConnGone` (1.6).
+7. Cross-reference §8.5 → §7.1.1 for join-unreachable invariant (2.1).
+8. Declare confirmed-read contract as "v1 always waits; opt-out deferred" (2.3).
+9. Document `Predicate.Value` wire encoding (2.10). One-element ProductValue is the cheapest rule.
+10. Extend "Depends on:" front matter (4.2).
+11. Add BSATN naming disclaimer to §3.1 once SPEC-002 lands (4.1 / 6.1).
+12. Document compression tag divergence from SpacetimeDB (3.2).
+13. Fix `SubscriptionError.request_id = 0` sentinel clash with client-chosen 0 (2.4).
+14. Resolve double-removal of subscription tracker entries across Stories 4.3 / 5.2 (2.14).
+15. Add `ConnectTimeout` option or document the unbounded-OnConnect wait (2.6 / 2.15).
+16. Everything else (nits and DIVERGE notes).
+
+---
+
+## 8. Spec-to-code drift (follow-up, not this pass)
+
+Live `protocol/` is substantially ahead of the spec (`REMAINING.md` marks Epics 5 and 6 as Done). After the spec fixes above land, reconcile:
+
+- `ClientSender.Send(connID, any)` (`protocol/sender.go:30`) — not in §13 (1.5).
+- `FanOutSenderAdapter` (`protocol/fanout_adapter.go:16-47`) — three-method `subscription.FanOutSender` wrapper; no spec home (1.1 / 2.6 of SPEC-004 audit).
+- `ErrConnNotFound` (`protocol/sender.go:20`) — not in §14 (1.6).
+- `SubscriptionError.RequestID` field exists (`protocol/server_messages.go:32`) but `FanOutSenderAdapter.SendSubscriptionError` (`protocol/fanout_adapter.go:42-47`) never populates it — all fan-out-path errors emit `request_id = 0`; no path echoes the original Subscribe `request_id` for apply-time errors reached via fan-out (2.4).
+- `SubscriptionTracker.SubscriptionState` enum exposes only `SubPending` / `SubActive` (`protocol/conn.go:~151`); spec §9.1 names a "pending removal" state (4.3).
+- `EncodeFrame(frame[0], frame[1:], conn.Compression, CompressionNone)` (`protocol/sender.go:74`) — live never gzips; always sends `[0x00][tag][body]` when compression negotiated. Matches spec §3.3 recommendation ("Default to `none`"); spec should state this policy explicitly.
+- `Conn.cancelRead` (`protocol/disconnect.go:45`) + `Conn.inflightSem` (`protocol/conn.go:~192`) + `Conn.closed` chan — not in Story 3.3 `Conn` struct (consistent with 1.4 / 2.9 under-specification).
+- `Disconnect` closes `c.closed` but does NOT close `OutboundCh` (`protocol/disconnect.go:36-51`) — contradicts Story 3.6 step 5 "Close `OutboundCh` and `closed` channel" (1.4).
+- `closeWithHandshake` bounded-wait caveat (`protocol/close.go:17-37`) — already cross-referenced from Story 6.3 and `WEBSOCKET-CLOSE-HANDSHAKE-FORK-PROPOSAL.md`. No spec drift; good.
+- `ExecutorInbox` method surface (`protocol/disconnect.go:35-41` uses `DisconnectClientSubscriptions(ctx, connID) error` + `OnDisconnect(ctx, connID, identity) error`) — not in any spec (2.9).
+- `types.Identity` / `types.ConnectionID` / `types.TxID` (`types/types.go`) — canonical homes live in a `types` package; SPEC-005 Story 2.1 and SPEC-001 Story 1.6 both declare `type Identity [32]byte` (1.3).
+- Handler pattern: live uses bespoke `OnConnectCmd` / `OnDisconnectCmd` commands on `ExecutorInbox`; SPEC-005 §5.2/§5.3 say "the executor runs the reducer" — terminology drift against SPEC-003 Story 7.2 / 7.3 bespoke handlers (4.7).
+
+Recommend: fix the spec first (above), then a single drift-reconciliation pass for SPEC-005 Epics 1 / 3 / 5 / 6 to realign impl and docs in lock-step with the SPEC-001 / 002 / 003 / 004 reconciliations already pending. In particular, SPEC-005 can't be reconciled in isolation — items 1.1, 1.2, 1.3 all require coordinated edits to SPEC-004 §8 and SPEC-001 §2.4 to close.
+
+# SPEC-006 — Schema Definition
+
+**Audited files:**
+- `docs/decomposition/006-schema/SPEC-006-schema.md`
+- `docs/decomposition/006-schema/EPICS.md`
+- `docs/decomposition/006-schema/epic-{1..6}/EPIC.md`
+- Stories `story-1.1`..`story-1.4`, `story-2.1`..`story-2.2`, `story-3.1`..`story-3.2`, `story-4.1`..`story-4.3`, `story-5.1`..`story-5.6`, `story-6.1`..`story-6.4`
+- Cross-reference: SPEC-001 audit §§2.3, 3.2, 3.4, 4.6, 4.7; SPEC-002 audit §§2.3, 2.5, 2.7; SPEC-003 audit §§2.1, 2.3, 5.5; SPEC-004 audit §§2.3, 2.7; SPEC-005 audit §§4.1, 4.2
+- Reference: `reference/SpacetimeDB/crates/schema/src/{def.rs,schema.rs,def/error.rs,def/validate/{v9.rs,v10.rs}}`, `crates/primitives/src/ids.rs`, `crates/sats/src/bsatn.rs`, `crates/datastore/src/system_tables.rs`, `crates/bindings/src/lib.rs`, `crates/bindings-macro/src/{lib.rs,reducer.rs,table.rs}`
+- Live impl: `schema/{types,registry,builder,build,errors,typemap,tag,reflect,reflect_build,register_table,validate_structure,validate_schema,system_tables,version,export,naming,valuekind_export,reducer_aliases}.go`; cross-package `subscription/{validate.go,placement.go}`, `protocol/handle_subscribe.go`, `store/errors.go`, `types/reducer.go`
+
+**Severity key:** **[CRIT]** blocks downstream spec/impl consistency; **[GAP]** missing contract / undeclared behavior; **[DIVERGE]** known/intentional divergence from SpacetimeDB that needs explicit documentation; **[NIT]** local cleanup.
+
+SPEC-006 is the last spec and a sink for bleed-items from SPEC-001..005. It is also the only spec with extensive live implementation already in `schema/` (30 files) predating audit. Drift between spec and live is therefore larger here than in SPEC-001..004.
+
+---
+
+## 1. Critical
+
+### 1.1 [CRIT] `SchemaLookup` interface has no home — SPEC-006 is the expected provider
+
+- SPEC-005 audit §4.2: Story 4.2 consumes `SchemaLookup.TableByName(name) (TableID, *TableSchema, bool)` — "SPEC-006 territory."
+- SPEC-004 audit §2.14: `SchemaLookup` listed in SPEC-004's cross-spec dependencies; the predicate validation in SPEC-004 Story 1.2 declares a `SchemaLookup` with `TableName(TableID) string` plus column resolution.
+- SPEC-006 declares **only** `SchemaRegistry` (§7). No `SchemaLookup` interface anywhere in the spec or stories.
+- Live has three independent declarations:
+  - `subscription/validate.go:9` — narrow read-only surface for predicate validation.
+  - `protocol/handle_subscribe.go:16` — name-resolution for wire handlers (`TableByName(name) (schema.TableID, *schema.TableSchema, bool)`, plus column-name lookup).
+  - `protocol/upgrade.go:46` — `Schema SchemaLookup` field on upgrade config.
+
+Fix: SPEC-006 §7 must declare `SchemaLookup` as the narrow read-only surface consumed by SPEC-004 / SPEC-005, either (a) as a sub-interface of `SchemaRegistry` (registry embeds it) or (b) as a distinct type `Schema**Registry** satisfies SchemaLookup`. Either way pick one signature for `TableByName` — live subscription uses `(TableID, bool)`, protocol uses `(TableID, *TableSchema, bool)`. SPEC-005's Story 4.2 consumer requires the 3-tuple form. Name and wire consistently.
+
+### 1.2 [CRIT] `IndexResolver` interface has no home — SPEC-006 is the expected provider
+
+- SPEC-004 audit §2.7: explicit call-out that SPEC-006 is the expected provider of `IndexResolver.IndexIDForColumn(TableID, ColID) (IndexID, bool)`.
+- SPEC-006 spec and stories make no mention of `IndexResolver`.
+- Live `subscription/placement.go:27-29` defines the interface locally. `subscription/register.go:67` returns `ErrJoinIndexUnresolved` when runtime resolution fails. The resolver is wired at executor startup (SPEC-004 audit §2.7). Nobody owns producing one.
+- Reference: SpacetimeDB has no equivalent — index lookup there goes by name via `TableSchema::col_list_for_index_id` (`reference/SpacetimeDB/crates/schema/src/schema.rs:478-485`). Shunter's `(TableID, ColID) -> IndexID` lookup is a Shunter-specific simplification for tier-2 pruning.
+
+Fix: SPEC-006 §7 (or a new §7.1) declares:
+```go
+type IndexResolver interface {
+    IndexIDForColumn(table TableID, col ColID) (IndexID, bool)
+}
+```
+Document that the registry's index table is the backing data and returning the resolver is a `SchemaRegistry` capability (or that the registry implements `IndexResolver`). Cross-reference SPEC-004 §10 to drop the ancillary-types gap.
+
+### 1.3 [CRIT] `ErrReducerArgsDecode` / typed-adapter error sentinel unowned
+
+- SPEC-003 audit §2.3: "add `ErrReducerArgsDecode` to the SPEC-003 §11 catalog, or defer to SPEC-006 and add a one-liner in §3.1." Still unresolved.
+- SPEC-006 §4.3: "Typed reducer helpers are explicitly out of the v1 engine contract." §12.2: "Codegen for typed reducer argument/return types is out of scope."
+- SPEC-006 §13 catalog does not include `ErrReducerArgsDecode`.
+- Reference: SpacetimeDB has no dedicated sentinel either — `buffer::DecodeError` bubbles up from `bsatn::from_reader` (`reference/SpacetimeDB/crates/sats/src/bsatn.rs:18,42-43`). So parity does not force the issue.
+
+Fix: Add one normative line to SPEC-006 §4.3: "v1 does not ship typed reducer adapters; any future adapter layer must define its own `ErrReducerArgsDecode` sentinel and SPEC-003 will classify it as `StatusFailedUser` via the generic handler-error path." Then SPEC-003 §11 drops the implied sentinel with a back-reference. This kills the three-way-unowned bleed.
+
+### 1.4 [CRIT] Reducer registration / freeze lifecycle is not specified
+
+- SPEC-003 audit §5.5: "Story 2.2 says 'Freeze before executor construction.' Story 3.1 panics if not frozen. But who orchestrates: schema → SPEC-006 register reducers → freeze → NewExecutor → scheduler replay → dangling-client sweep → Run?"
+- SPEC-006 §5 describes `Build(opts) (*Engine, error)` as the terminal registration step and says `Build` "validates all registrations and constructs the Engine" but never names "freeze" nor defines ordering relative to `NewExecutor`.
+- Live `schema/build.go:16-105` builds the registry and returns `*Engine`; `Engine.Start(_ context.Context) error` (`schema/version.go:134`) currently does only schema-compat check — it does not start executor, durability worker, or accept connections (spec §5 promises those).
+- Reference: SpacetimeDB `ModuleDef::try_from(RawModuleDef)` (`reference/SpacetimeDB/crates/schema/src/def.rs:397-398`) is the analog — immutable (`#[non_exhaustive]`) after conversion. No explicit `freeze` step; validation during conversion is the freeze.
+
+Fix: §5 Build / Start contract needs two additions:
+1. State that `Build()` is the "freeze" step. After `Build()`, the registry is immutable and may be consumed by any subsystem. Downstream specs (SPEC-003 §2.2 "Freeze before executor construction") anchor on this.
+2. Name the subsystem-start ordering that `Engine.Start(ctx)` performs. Either declare the sequence ("1. recover commit log; 2. construct committed store; 3. start durability worker; 4. construct executor with frozen registry; 5. replay scheduler; 6. dangling-client sweep; 7. open protocol listener") or explicitly defer to an integration doc and mark SPEC-006 §5 as pending.
+
+### 1.5 [CRIT] `SchemaRegistry.Version()` semantics still undefined
+
+- SPEC-002 audit §2.7: snapshot stores `schema_version` in two places (header and schema body); SPEC-002 says "compare to `SchemaRegistry.Version()`"; authority unspecified.
+- SPEC-006 §6.1: "The version is a `uint32` chosen by the application developer. It is stored in every snapshot (SPEC-002 §5.3) and compared at startup against the version stored in the latest snapshot." §6.2: "Schema versions must only increase. There is no mechanism to detect non-monotonic changes in v1."
+- Not specified: (a) is the compare byte-equal or numeric-equal? (b) must the snapshot header `schema_version` equal the snapshot-body `schema_version`? (c) what if the engine boots with snapshot.Version > registered.Version (downgrade)?
+- Reference: SpacetimeDB has no `schema_version` at all — only `RawModuleDefVersion` (V9 vs V10, a *format* version). Shunter's explicit app-supplied version is a divergence and the semantics must be Shunter-specific.
+
+Fix: §6.1 pin three things: (1) compare is numeric equality of `uint32`, not byte-equal; (2) snapshot header `schema_version` is authoritative, the body copy is redundant / reserved for future re-keying and MUST equal the header (SPEC-002 §5.3 ditto); (3) downgrade (`snapshot.Version > registered.Version`) is treated identically to upgrade — both return `ErrSchemaMismatch`. Also: §6.2 "monotonic" is aspirational since the engine cannot enforce; either drop the "must only increase" wording or label it "convention, not enforced."
+
+---
+
+## 2. Gap findings
+
+### 2.1 [GAP] `ColumnSchema` is inconsistent between spec §8 and live impl
+
+- Spec §8 / Story 1.1 deliverable: `ColumnSchema{ Index int, Name string, Type ValueKind, Nullable bool }` — four fields.
+- Live `schema/types.go:42-48`: `ColumnSchema{ Index int, Name string, Type ValueKind, Nullable bool, AutoIncrement bool }` — five fields.
+- SPEC-002 §5.3 per-column trailer lives impl writes three bytes per column (`type_tag, nullable, auto_increment`) per SPEC-002 audit §2.3. The live encoder, Story 5.6 compatibility check, and live `CheckSchemaCompatibility` all compare `AutoIncrement`.
+- Reference: SpacetimeDB `ColumnSchema` has `{ table_id, col_pos, col_name, col_type }` — no `nullable`, no `auto_increment`. Auto-increment is external (`SequenceDef` tied to a column, `reference/SpacetimeDB/crates/schema/src/def.rs:806`). Columns are non-nullable by design.
+
+Fix: Pick a side.
+- **Option A** (match live): §8 / Story 1.1 add `AutoIncrement bool`; declare both `Nullable` and `AutoIncrement` are authoritative on `ColumnSchema`. SPEC-002 §5.3 adopts the three-byte trailer (already flagged in SPEC-002 audit §2.3).
+- **Option B** (match SpacetimeDB): drop `AutoIncrement` from `ColumnSchema`; model it as a `SequenceSchema` owned by `TableSchema`. Requires a bigger refactor touching live `ColumnDefinition`, `reflect_build.go`, `validate_structure.go`, snapshot encoder.
+- Recommend Option A for v1 (smaller diff); defer Option B to v2.
+
+### 2.2 [GAP] `Nullable` is preemptive-field-only but §9 / §13 don't state the v1 policy
+
+- Spec §8: "Nullable bool; always false in v1."
+- Story 1.1 acceptance: "Nullable bool always false in v1" — no test that setting Nullable=true is rejected.
+- Spec §9 "Nullable columns are rejected in v1" is normative but no error sentinel in §13 and live `validateStructure` does not check `Nullable`. A builder-path registration with `Nullable:true` slips through today.
+- Reference: SpacetimeDB has no nullable at all.
+
+Fix: (a) Add `ErrNullableColumn` to §13 with Story 5.1 responsibility, or (b) declare in §8 that "Nullable is reserved for v2 and MUST be false; builder-path registrations that set it are silently coerced to false." Live impl matches (b) by default. If (a), Story 5.1 needs one more check.
+
+### 2.3 [GAP] Reducer argument schema is unreachable from `ReducerExport`
+
+- Spec §12.1 `ReducerExport{ Name string, Lifecycle bool }` — nothing about argument types.
+- §4.3: `ReducerHandler func(ctx, argBSATN []byte) ([]byte, error)` — argument shape is opaque bytes.
+- §14.2 open question: "Typed reducer registration and codegen metadata... Recommendation: add an explicit reducer metadata registration surface in v2."
+- SPEC-005 §6.2 / §8.3 protocol `CallReducer` carries `args: bytes` — client must already know the schema out-of-band to encode.
+- Reference: SpacetimeDB stores reducer args as `ProductType` (`reference/SpacetimeDB/crates/schema/src/def.rs:1665`) and emits them to bindings-macro-generated typed wrappers.
+
+Fix: v1 scope is clear (no typed reducers), but the gap is user-facing: without args schema, `shunter-codegen` can generate table subscription helpers but cannot generate reducer call helpers. §12.1 should add a one-liner: "`ReducerExport` deliberately omits argument schemas in v1; clients must document args out-of-band. Typed reducer codegen requires a metadata registration surface added in v2 (see §14.2)." Also Story 6.3 acceptance: the generated TypeScript must document that reducer wrappers accept raw bytes, not typed args.
+
+### 2.4 [GAP] `init` lifecycle reducer not declared or deferred
+
+- SPEC-003 audit §2.1 flagged that `init`-analog is missing; SPEC-006 was expected to own the decision.
+- Spec §4.3 / §9 reserves `"OnConnect"` and `"OnDisconnect"`. No `init`, no `update` (first-boot / schema migration hooks in SpacetimeDB).
+- Reference: SpacetimeDB supports `#[reducer(init)]` and `#[reducer(update)]` as lifecycle attributes (`reference/SpacetimeDB/crates/bindings-macro/src/reducer.rs:46-49`).
+
+Fix: §9 Reducer-level rules add one line: either "Shunter v1 has no `init` or `update` lifecycle reducer; applications that need one-time bootstrap must use a normal reducer triggered by deployment scripts (no runtime guarantee of once-only execution)" **or** "`init`/`update` names are reserved and will be added in v2."
+
+### 2.5 [GAP] `ErrReservedReducerName` / nil-handler / duplicate-lifecycle errors have no sentinel
+
+- Spec §13 catalog is missing: `ErrReservedReducerName`, `ErrNilReducerHandler`, `ErrDuplicateLifecycleReducer`, `ErrNullableColumn`, `ErrAlreadyBuilt`, `ErrEmptyColumnName`, `ErrInvalidTableName` (pattern).
+- Live `schema/validate_schema.go:34, 40, 42-43, 49, 52, 55, 58` emits plain-string errors for these cases; no `errors.Is` discrimination possible.
+- Live `schema/errors.go:17` declares `ErrAlreadyBuilt` but §13 does not.
+- Live `schema/validate_structure.go:26` wraps table-name-pattern failure with `ErrEmptyTableName` — wrong class.
+
+Fix: §13 catalog should add:
+| Error | Condition |
+|---|---|
+| `ErrReservedReducerName` | Normal reducer named `OnConnect`/`OnDisconnect` |
+| `ErrNilReducerHandler` | Nil reducer or lifecycle handler |
+| `ErrDuplicateLifecycleReducer` | Second `OnConnect`/`OnDisconnect` registration |
+| `ErrAlreadyBuilt` | Second `Build()` on same builder |
+| `ErrInvalidTableName` | Name fails `[A-Za-z][A-Za-z0-9_]*` |
+| `ErrEmptyColumnName` | Column with empty name |
+
+Story 5.1 / 5.5 acceptance criteria name the sentinels used. Live switches from `fmt.Errorf` strings to wrapped sentinels.
+
+### 2.6 [GAP] `ErrColumnNotFound` is defined three times with no single owner
+
+- Bleed-item from SPEC-001 audit §2.3 ("drop from SPEC-001 §9 and Story 2.4, OR keep and point to SPEC-006").
+- Live has three separate declarations:
+  - `store/errors.go:12` — store-layer sentinel.
+  - `subscription/errors.go:16` — subscription predicate-validation sentinel.
+  - `docs/decomposition/004-subscriptions/EPICS.md:224` — "Epic 1" owner in SPEC-004.
+- SPEC-006 §13 does not mention it.
+
+Fix: Make SPEC-006 Story 5.4 / 5.5 declare `ErrColumnNotFound` as a schema-layer sentinel, since `SchemaRegistry.TableByName` + column lookup is a schema-layer capability. SPEC-001 and SPEC-004 re-export / wrap it. Live consolidates three definitions into one schema-owned sentinel.
+
+### 2.7 [GAP] No "v1 simplifications vs SpacetimeDB" consolidated block
+
+SPEC-001 audit §3.2 recommended such a block for SPEC-001; it applies here with higher force because SPEC-006 is the developer-facing surface most likely to be compared against SpacetimeDB.
+
+Missing consolidated list (content from reference exploration + live):
+
+| Topic | SpacetimeDB | Shunter v1 |
+|---|---|---|
+| Schema registration | Proc-macros (`#[table]`, `#[reducer]`) expand at compile time; `ModuleDef::try_from(RawModuleDef)` validates | Runtime reflection over struct tags; `Builder.Build()` validates |
+| Column types | `AlgebraicType` (rich sum/product/array/option) | 13 scalar kinds + `[]byte` |
+| Nullable | Not a feature (use `Option<T>` via Sum) | Reserved field, always false |
+| Primary key | Single-column (`Option<ColId>`) | Single-column (v1) |
+| Auto-increment | Separate `SequenceSchema` tied to one column | Per-column `AutoIncrement bool` |
+| Lifecycle reducers | `init`, `client_connected`, `client_disconnected`, `update` with typed args | `OnConnect`, `OnDisconnect` with zero args |
+| Reducer args | Typed `ProductType`, decoded via bindings-macro | Opaque BSATN bytes; no typed adapter in v1 |
+| Schema version | `RawModuleDefVersion` (format version only) | App-supplied `uint32` compared at startup |
+| System tables | 15+ (`st_table`, `st_column`, `st_index`, `st_sequence`, `st_module`, `st_client`, `st_var`, …) | 2 (`sys_clients`, `sys_scheduled`) |
+| Index lookup | By name via iteration or `col_list_for_index_id` | `IndexResolver.IndexIDForColumn(table, col)` |
+| ID widths | `TableId`/`IndexId`/`ConstraintId`/`ScheduleId` = u32; `ColId` = u16 | `TableID`/`IndexID` = uint32; `ScheduleID` = uint64 |
+
+Add as §1.1 "Simplifications" or §15 "v1 scope and known divergences."
+
+### 2.8 [GAP] `ScheduleID` width divergence from SpacetimeDB
+
+- Spec §10.2 `sys_scheduled.schedule_id: Uint64` (live `schema/system_tables.go:17` matches).
+- `types/reducer.go:9` `type ScheduleID uint64`.
+- Reference: SpacetimeDB `ScheduleId(u32)` (`reference/SpacetimeDB/crates/primitives/src/ids.rs:112-116`).
+- Shunter uses u64 for no stated reason. Either is fine; flag the divergence so a future "match SpacetimeDB IDs" pass doesn't rediscover it.
+
+Fix: §10.2 footnote or §2 Go-type-mapping note: "`schedule_id` uses `uint64` for headroom; SpacetimeDB uses `u32`. Divergence is intentional."
+
+### 2.9 [GAP] BSATN naming disclaimer not propagated to SPEC-006
+
+- SPEC-005 audit §4.1 flagged the missing disclaimer.
+- SPEC-006 references BSATN in §4.3 (`argBSATN []byte`), §10.2 (`args  []byte  // BSATN-encoded args`), and §12.2 (Story 6.3 TypeScript codegen consumer).
+- Reference: SpacetimeDB's `bsatn` crate (`reference/SpacetimeDB/crates/sats/src/bsatn.rs`) is SpacetimeDB's native format; expansion not documented in their source; not a MessagePack / CBOR / Postcard variant.
+
+Fix: SPEC-006 §1 or new §1.1: "BSATN is the binary encoding defined in SPEC-002 §3.3. The name is Shunter's adopted-from-SpacetimeDB convention; it is not a standard encoding." Mirror SPEC-002 / SPEC-005 fixes once they land.
+
+### 2.10 [GAP] `Engine.Start(ctx)` contract vs live stub
+
+- Spec §5: "`Engine.Start(ctx)` performs runtime initialization: open/recover the commit log, construct the committed store, start the executor and durability worker, restore scheduled reducers, and begin accepting protocol connections if `EnableProtocol` is true."
+- Live `schema/version.go:134`:
+  ```go
+  func (e *Engine) Start(_ context.Context) error {
+      return CheckSchemaCompatibility(e.registry, e.opts.StartupSnapshotSchema)
+  }
+  ```
+- All other subsystem wiring is absent. `EngineOptions.StartupSnapshotSchema` (`schema/builder.go:126`) is the caller's workaround: app passes the snapshot schema in, Start compares, returns. Spec has no mention of this field.
+
+Fix: Either (a) spec acknowledges Start is currently scope-limited to schema-compat, and a later integration spec will own the full bring-up; or (b) SPEC-006 absorbs the full bring-up sequence (see 1.4). Also add `EngineOptions.StartupSnapshotSchema` to §5 if the workaround is the intended shape.
+
+### 2.11 [GAP] Multi-column PK enforcement is implicit, not explicit
+
+- Spec §3.1 "At most one `primarykey` column per table in v1." §4.2 "Composite primary keys are out of scope for v1." §9 "At most one `primarykey` column per table → `ErrDuplicatePrimaryKey`" and "Primary indexes must reference exactly one column in v1."
+- Story 5.1 acceptance: "Two PK columns on one table → `ErrDuplicatePrimaryKey`" — via column `PrimaryKey` flag, caught in `validate_structure.go:80`.
+- But live `validate_structure.go` never checks the "Primary index references exactly one column" rule directly: the `IndexDefinition` path does not carry a `Primary bool` — PK is synthesized at `build.go:67-76` from the first column with `PrimaryKey:true`. Explicit `IndexDefinition{Primary:true, Columns:[a,b]}` is not expressible via `IndexDefinition` at all (no `Primary` field), so composite-PK-via-builder is blocked by the type shape.
+- SPEC-001 audit §3.4 flagged that Shunter *type shape* allows multi-column PKs via `IndexSchema.Columns []int + Primary:true`. After `Build()`, yes — IndexSchema can express it. After `Build()` though, no user code can construct an IndexSchema (it's the output, not input).
+
+Fix: §8 `IndexSchema` comment: "In v1, `Primary:true` implies `len(Columns) == 1`. The builder never synthesizes a multi-column primary index; post-`Build` mutation is not supported." This documents the invariant SPEC-001 audit §3.4 asked about.
+
+### 2.12 [GAP] Named composite index uniqueness check is not runs on builder path
+
+- Spec §9: "Mixed `unique` vs non-`unique` declarations for the same named composite index are registration errors."
+- Story 5.1 acceptance: "Mixed unique flags on the same named composite index → error."
+- Live `reflect_build.go:61-65` catches this in the **reflection-path** (per-struct). Live `validateStructure` (`validate_structure.go`) does **not** re-check at the builder level.
+- Builder-path registration with `[]IndexDefinition{ {Name:"x", Columns:[...], Unique:true}, {Name:"x", Columns:[...], Unique:false} }` hits `duplicate index name` before the mixed-unique check ever fires. Acceptable since duplicate-name subsumes mixed-unique for one-table case. But multi-table is unchecked.
+
+Fix: §9 wording is fine. Clarify that "same named composite index" means "same name within the same table" and note that duplicate-name-within-table is the enforcement path. Drop the reflection-path-specific check from Story 5.1 acceptance since `validateStructure` doesn't do it (reflection does it earlier).
+
+### 2.13 [GAP] SPEC-006 front matter understates dependencies
+
+- Header: "Depends on: SPEC-001 (column types and `TableSchema`)". "Depended on by: SPEC-001, SPEC-002, SPEC-003."
+- Actual dependencies in body / stories:
+  - §4.3 / Story 3.2: `ReducerHandler` / `ReducerContext` — SPEC-003 §10.
+  - Story 5.2: `ConnectionID` — SPEC-005 §2 (16 raw bytes).
+  - Story 5.6: `SnapshotSchema` for startup compare — SPEC-002 §5.3.
+- "Depended on by" currently omits SPEC-004 (`SchemaLookup`, `IndexResolver`) and SPEC-005 (`SchemaLookup`).
+
+Fix: Header → "Depends on: SPEC-001 (`ValueKind`, `TableSchema`), SPEC-002 (`SnapshotSchema`), SPEC-003 (`ReducerHandler`, `ReducerContext`), SPEC-005 (`ConnectionID` for `sys_clients`). Depended on by: SPEC-001, SPEC-002, SPEC-003, SPEC-004, SPEC-005."
+
+### 2.14 [GAP] `cmd/shunter-codegen` does not exist
+
+- Story 6.3 Suggested Files: `cmd/shunter-codegen/main.go`, `cmd/shunter-codegen/main_test.go`.
+- `ls cmd/` → "no cmd dir". Not implemented. Story 6.3 is a forward-declaration.
+
+Fix: No spec change needed. Story 6.3 already names it future work. Flag as "not yet implemented" in `REMAINING.md` and EPIC-6 tracking (presumably already captured).
+
+---
+
+## 3. Divergence findings (SpacetimeDB parity)
+
+### 3.1 [DIVERGE] Registration model: runtime reflection vs compile-time proc-macros
+
+- SpacetimeDB: `#[table]`, `#[reducer]`, `#[procedure]`, `#[view]` proc-macros emit `__register_describer()` symbols linked at WASM load time (`reference/SpacetimeDB/crates/bindings-macro/src/reducer.rs:132,138-141`). Registration is static.
+- Shunter: `RegisterTable[T any]` via `reflect` at runtime; `Builder.TableDef` for explicit path. Registration is dynamic.
+- Divergence intentional — Go lacks stable proc-macros. Required.
+
+Fix: Spec §1 ("Purpose and Scope") add one line: "Shunter uses runtime reflection + struct tags where SpacetimeDB uses compile-time proc-macros. Both produce equivalent schema registrations; the validation timing differs (Shunter at `Build()`, SpacetimeDB at WASM load)."
+
+### 3.2 [DIVERGE] Lifecycle reducer convention
+
+- SpacetimeDB: attribute-based (`#[reducer(init)]`, `#[reducer(client_connected)]`). Name is not reserved; any reducer function name is allowed and `lifecycle: Option<Lifecycle>` distinguishes. Lifecycle reducers carry typed args (`params: ProductType`).
+- Shunter: name-reserved (`OnConnect` / `OnDisconnect`) and registered via separate methods `Builder.OnConnect(h)` / `OnDisconnect(h)`. Zero-arg signature.
+- Naming: SpacetimeDB snake_case matches Rust convention; Shunter CamelCase matches Go exported-identifier convention. Reasonable divergence.
+
+Fix: Add to §4.3 Design Notes: "Lifecycle reducers are registered via separate builder methods, not as normal reducers with reserved names. Their signature excludes typed args because the caller context already supplies `Identity` / `ConnectionID` (the only data a lifecycle hook needs in v1). SpacetimeDB's attribute-based model with typed args is a v2 target."
+
+### 3.3 [DIVERGE] System tables minimal vs reflective
+
+- SpacetimeDB: schema is persisted in `st_table`, `st_column`, `st_index`, `st_constraint`, `st_sequence`, `st_module`, `st_client`, `st_var`, `st_scheduled`, `st_row_level_security`, `st_view*` — schema is queryable as user data (`reference/SpacetimeDB/crates/datastore/src/system_tables.rs:47-111`).
+- Shunter: `sys_clients` and `sys_scheduled` only. Schema is in-memory `SchemaRegistry`, not SQL-queryable.
+
+Fix: §10 Design Note: "Shunter v1 persists only transactional ephemera (client connections, scheduled reducers) in system tables. Schema itself is held in `SchemaRegistry` (in-memory) and serialized to snapshots (SPEC-002 §5.3), but not exposed as queryable tables. Introspection via `ExportSchema()` is the v1 equivalent."
+
+### 3.4 [DIVERGE] No `SequenceSchema` — auto-increment is a column flag
+
+- SpacetimeDB: `SequenceSchema` bound to one column via `SequenceDef` (`reference/SpacetimeDB/crates/schema/src/def.rs:806`). Sequences have their own identifiers, system-table entries (`st_sequence`), and lifecycle.
+- Shunter: `ColumnDefinition.AutoIncrement bool`. Sequence state lives in the store (SPEC-001 Story 8.x).
+
+Fix: §8 or §10 cross-reference to SPEC-001 auto-increment mechanism. State that Shunter does not model sequences as first-class schema objects in v1; `AutoIncrement` is sufficient for single-column primary-key use.
+
+### 3.5 [DIVERGE] Column-type enum vs `AlgebraicType`
+
+- SpacetimeDB: `AlgebraicType` is a recursive sum/product/array/option type. Column `col_type: AlgebraicType`.
+- Shunter: 13 flat scalar kinds + `[]byte`. No sum, product, array, option.
+
+Fix: Already partially covered by §2 "Excluded in v1" list. Add note: "Shunter v1 deliberately flattens SpacetimeDB's `AlgebraicType` to a small scalar set. Sum types (including `Option<T>` / nullability) are a v2 surface. See §14 open questions."
+
+---
+
+## 4. Internal consistency
+
+### 4.1 [NIT] Story 5.4 `Table(id)` returns a clone each call — perf vs immutability trade not documented
+
+- Live `schema/registry.go:55-62`: every `Table(id)` call allocates via `cloneTableSchema`. Hot-path consumers (SPEC-001 insert loop, SPEC-003 reducer runner, SPEC-004 subscription eval) will call this per row/tx.
+- Story 5.4 Acceptance: "Registry is safe for concurrent reads because it is immutable after construction" — but the defensive clone suggests distrust of that immutability.
+
+Fix: Story 5.4 Design Notes add: "`Table(id)` returns a detached clone; callers who require raw pointers for hot paths may access `Registry` internals via an unexported helper or accept the clone cost." Or — my recommendation — drop the clone since the registry is immutable by invariant. Returning `*TableSchema` pointing into internal storage is safe and saves allocation. SPEC-006 should pick.
+
+### 4.2 [NIT] `Reducers()` ordering is "stable" but ambiguous
+
+- Spec §7 comment: "Reducers returns all registered reducer names in stable order (excluding lifecycle)."
+- Story 5.4 Acceptance: "names in registration order, excluding lifecycle reducers."
+- Live `schema/builder.go:91` appends to `reducerOrder` on first call for a name — but a subsequent call to `Reducer("x", handler2)` after `Reducer("y", handler1)` + `Reducer("x", handler1)` would leave the order `[x, y]`, not `[y, x]`. OK.
+- But duplicate `Reducer("x", h)` calls increment the count but don't reorder — so the order is stable under duplicates. Undocumented in spec §7.
+
+Fix: Narrow "stable" → "registration order of first call per name."
+
+### 4.3 [NIT] `SchemaRegistry.Tables()` ordering "user tables first, then system" is not in §7
+
+- Spec §7 text body (after the interface): "User tables receive IDs first in registration order. Built-in system tables are appended afterward in fixed order: `sys_clients`, then `sys_scheduled`."
+- That paragraph describes *IDs*, not the `Tables()` slice. The slice ordering follows from the ID assignment but spec doesn't spell it out.
+- Story 5.4 Acceptance: "`Tables()` returns user IDs then system IDs, stable order" — explicit here; good.
+
+Fix: §7 add one sentence: "`Tables()` returns `TableID` values in the same order as ID assignment — user tables first in registration order, then system tables in fixed order."
+
+### 4.4 [NIT] Story 4.1 `discoverFields` signature drift
+
+- Story 4.1 deliverable: `func discoverFields(t reflect.Type) ([]fieldInfo, error)`.
+- Live `schema/reflect.go:18`: `func discoverFields(t reflect.Type, prefix string) ([]fieldInfo, error)`.
+- The `prefix` arg is used for error messages (`Player.CachedAt`, `Player.BaseEntity.ID`). Story 4.1 Design Notes mentions the capability ("retain enough path context for useful error messages") but the signature hides the arg.
+
+Fix: Story 4.1 deliverable signature: add `prefix string` parameter. Or mark the prefix as internal and expose only a wrapper.
+
+### 4.5 [NIT] Story 2.2 `ValidateTag` split vs ParseTag fold
+
+- Story 2.2 Design Notes: "Validation may be folded into `ParseTag` so callers get a single call."
+- Live `schema/tag.go:21-83` folds. No separate `ValidateTag`.
+- Story 2.2 deliverables name `ValidateTag(td *TagDirectives) error` as first deliverable.
+
+Fix: Story 2.2 deliverable text should pick: either "extend ParseTag with validation, no separate ValidateTag" or "add separate ValidateTag." Live already picked; doc should match.
+
+### 4.6 [NIT] `DefaultIndexName` signature inconsistency
+
+- Story 2.2: `DefaultIndexName(columnName string, isPK bool, isUnique bool) string`. Acceptance: `DefaultIndexName("id", true, true) → "pk"`.
+- Live `schema/tag.go:86-94` signature matches, but `isPK=true` ignores `isUnique` (returns `"pk"` regardless). Fine. Document that `isPK` wins.
+
+Fix: Story 2.2 Design Notes: "When `isPK` is true, `isUnique` is ignored and the name is always `"pk"`."
+
+### 4.7 [NIT] Story 5.3 TableID assignment "same registration inputs → same IDs across runs"
+
+- Story 5.3 acceptance: "Same registration inputs → same TableIDs across runs".
+- Live `schema/build.go:41-46` assigns `TableID(i)` by slice position. This is deterministic *only* if the caller registers tables in the same order every run.
+- Spec §7 body and Story 5.3 do not mandate that. If the application uses Go map iteration or `RegisterTable` called from different goroutines, ordering is not guaranteed.
+
+Fix: Story 5.3 Design Notes: "Determinism requires the application to register tables in a deterministic order across runs. Go map iteration and concurrent registration break this." Document caller responsibility.
+
+### 4.8 [NIT] `validateStructure` doesn't check "PK column must not appear in explicit IndexDefinition" when column is named-composite participant
+
+- Live `schema/validate_structure.go:112-115` emits "PK column %q must not appear in explicit index" when any index column name matches PK.
+- But this triggers on *every* index column match — including the desired case of "column appears in a composite index alongside others." E.g., PK on `id`, composite index `(id, score)` — allowed in reflection path (`id` can have PK and be part of `index:foo`? — no, §3.2 "primarykey may not be combined with index or index:<name>", tag-parser rejects this combo). But builder-path: nothing stops it.
+
+Fix: Spec §9 explicitly says "A PK column must not also appear in an explicit `IndexDefinition`" — matches live. No bug, but note that reflection-path users hit tag-parser first. Cross-reference in Story 5.1.
+
+### 4.9 [NIT] `ExportSchema` includes lifecycle at end regardless of version
+
+- Live `schema/export.go:71-76` appends OnConnect / OnDisconnect lifecycle reducers after normal reducers. Spec §12.1 just says "`ReducerExport.Lifecycle` is `true` for `OnConnect`/`OnDisconnect`" — ordering not specified.
+- Story 6.2 acceptance: "Non-lifecycle reducers have `Lifecycle: false`; registered lifecycle reducers export with `Lifecycle: true`" — ordering silent.
+
+Fix: Story 6.2 acceptance: "Lifecycle reducers appear after normal reducers in export order. `OnConnect` precedes `OnDisconnect`." Or explicitly allow any order.
+
+---
+
+## 5. Epic coverage / story decomposition
+
+### 5.1 [GAP] No story owns `SchemaLookup` or `IndexResolver` interface declaration
+
+See §1.1 and §1.2. Epic 5 Story 5.4 is the natural home (it owns `SchemaRegistry`).
+
+Fix: Extend Story 5.4 deliverables: "Declare `SchemaLookup` and `IndexResolver` sub-interfaces that `SchemaRegistry` satisfies. Cross-reference SPEC-004 and SPEC-005 consumers."
+
+### 5.2 [GAP] No story owns SPEC-006 `ErrReservedReducerName` / related reducer sentinels
+
+Story 5.5 deliverables list reducer checks but emit plain-string errors in live impl. No story declares the sentinels §13 should carry.
+
+Fix: Add a Story 5.7 "Reducer / schema error sentinels" or extend Story 5.5 deliverables with the sentinel list from §2.5.
+
+### 5.3 [GAP] No story owns registration-order freeze behavior
+
+See §1.4. Story 5.3 Build orchestration is close but doesn't address the pre-executor-construction ordering requirement that SPEC-003 depends on.
+
+Fix: Extend Story 5.3 acceptance: "`Build()` is the freeze point. No `RegisterTable`, `Reducer`, `OnConnect`, `OnDisconnect`, or `TableDef` call after `Build()` is supported; attempts after `Build()` return `ErrAlreadyBuilt` at each call site." Live `Build()` sets `b.built` but `Reducer` / `TableDef` don't check it — re-check mutation paths.
+
+### 5.4 [NIT] Epic 4 implementation order glosses over Story 4.2 mixed-unique check placement
+
+Story 4.2 catches mixed-unique at reflection-path assembly time. Story 5.1 expects same check (builder-path) but live doesn't run it (see §2.12). Acceptable design but cross-reference missing.
+
+Fix: Story 5.1 Design Notes: "Mixed-unique-on-composite-index is already caught in Story 4.2 for reflection-path. Builder-path does not re-check because duplicate index names within a table subsume the common case; multi-table leakage is out of scope."
+
+### 5.5 [NIT] Story 6.3 acceptance doesn't spell out generated TypeScript shape
+
+Acceptance mentions "table row/type definitions and typed subscription helpers" but no canonical output. Hard to test without a fixture.
+
+Fix: Story 6.3 add a fixture: "a minimal `schema.json` with one user table and one reducer, expected generated TypeScript attached to the story for drift detection."
+
+---
+
+## 6. Clean-room boundary
+
+### 6.1 No copied Rust code or prose in SPEC-006
+
+Reviewed SPEC-006 + stories + live `schema/*.go`. No verbatim Rust snippets, identifier reuse, or documentation lift. Shapes converge (TableSchema / ColumnSchema / IndexSchema — universal schema concepts), but Shunter field names (`ID`, `Name`, `Columns`, `Indexes`) differ from Rust (`table_id`, `table_name`, `columns`, `indexes`). Acceptable.
+
+### 6.2 Rust `bindings` / `bindings-macro` surface not mirrored
+
+- Rust `#[reducer]` expands to marker types with `_never: Infallible` and linker-section-exported `__register_describer` symbols (`reference/SpacetimeDB/crates/bindings-macro/src/reducer.rs:132-149`). Shunter has no equivalent — uses Go generics + reflect.
+- Rust `#[table]` derives `Serialize`, `Deserialize`, `SpacetimeType` (`reference/SpacetimeDB/crates/bindings-macro/src/lib.rs:32-66`). Shunter has no derive; tags drive column mapping.
+
+Verdict: ✓ clean.
+
+### 6.3 Rust `AlgebraicType` not mirrored
+
+Shunter's 13-scalar `ValueKind` set is a v1 simplification, not a re-implementation. ✓ clean.
+
+### 6.4 Rust system-table names not mirrored
+
+SpacetimeDB `st_*` naming (`st_table`, `st_column`, ...) vs Shunter `sys_*` (`sys_clients`, `sys_scheduled`). Naming convention differs. ✓ clean.
+
+---
+
+## 7. Quick wins / punch list
+
+Short-term edits to SPEC-006 (order = impact × effort):
+
+1. Declare `SchemaLookup` and `IndexResolver` in §7 (1.1, 1.2). Fixes SPEC-004 audit §2.7 and SPEC-005 audit §4.2.
+2. Pin `SchemaRegistry.Version()` semantics in §6.1 (1.5). Fixes SPEC-002 audit §2.7.
+3. Name the freeze step: §5 declares `Build()` = freeze (1.4). Fixes SPEC-003 audit §5.5.
+4. Add `AutoIncrement` to `ColumnSchema` in §8 / Story 1.1 (2.1). Matches live + SPEC-002 audit §2.3.
+5. Add missing sentinels to §13: `ErrReservedReducerName`, `ErrNilReducerHandler`, `ErrDuplicateLifecycleReducer`, `ErrAlreadyBuilt`, `ErrColumnNotFound`, `ErrInvalidTableName`, `ErrEmptyColumnName` (2.5, 2.6).
+6. Decide `init` lifecycle: add §9 line (2.4).
+7. Add BSATN naming disclaimer to §1 (2.9). Propagate from SPEC-005 audit §4.1.
+8. Extend SPEC-006 front matter dependencies (2.13).
+9. Add "v1 simplifications vs SpacetimeDB" block (2.7).
+10. Document typed-adapter sentinel deferral in §4.3 (1.3).
+11. Pin `Tables()` / `Reducers()` ordering contract (4.2, 4.3).
+12. Spec Story 5.3 freeze/mutation invariants: `Reducer`/`TableDef`/`OnConnect`/`OnDisconnect` return `ErrAlreadyBuilt` after `Build()` (5.3).
+13. Story 5.4 pin `Table(id)` clone-vs-pointer policy (4.1).
+
+---
+
+## 8. Spec-to-code drift
+
+Items where the live implementation diverges from the spec as written. These may be spec bugs (update doc) or impl bugs (update code); each needs a decision.
+
+- `ColumnSchema.AutoIncrement` — live (`schema/types.go:47`), not in spec §8 / Story 1.1 (2.1).
+- `EngineOptions.StartupSnapshotSchema *SnapshotSchema` — live (`schema/builder.go:126`), not in spec §5 (2.10).
+- `Engine.Start(ctx)` current scope = schema-compat check only (`schema/version.go:134`); spec §5 promises full bring-up (1.4, 2.10).
+- `schema/validate_structure.go:26` wraps pattern-failure with `ErrEmptyTableName` — spec §9 implies distinct `ErrInvalidTableName` (2.5).
+- `schema/validate_schema.go:34,40-43,49-55` emits plain-string errors for reserved-name / nil-handler / duplicate-lifecycle; §13 has no sentinels (2.5).
+- `schema/errors.go:17` declares `ErrAlreadyBuilt` — not in §13 (2.5).
+- `schema/reflect.go:18` signature adds `prefix string` param; Story 4.1 omits it (4.4).
+- `schema/tag.go` folds validation into `ParseTag`; Story 2.2 deliverable names `ValidateTag` separately (4.5).
+- `schema/registry.go:55-71` `Table(id)` / `TableByName(name)` return clones — not in Story 5.4 acceptance (4.1).
+- `schema/export.go:71-76` `ExportSchema` appends lifecycle reducers after normal reducers — ordering not in Story 6.2 (4.9).
+- `schema/system_tables.go` registers two tables through the same `TableDef` path as user tables — matches Story 5.2 but relies on a builder copy in `schema/build.go:30-34` to avoid permanent mutation; not documented.
+- `cmd/shunter-codegen` — does not exist; Story 6.3 is forward-declared only (2.14).
+- `ValueKind`, `ReducerHandler`, `ReducerContext` all re-exported from `types` package via `schema/types.go:8,10-25` and `schema/reducer_aliases.go:6-9`. Spec says these live in SPEC-001 / SPEC-003 packages. Canonical home is `types/`. Flagged previously under SPEC-003 audit §4.1 / SPEC-005 audit 1.3. Same pattern here.
+- `subscription/validate.go:9` + `protocol/handle_subscribe.go:16` + `protocol/upgrade.go:46` — three independent `SchemaLookup` declarations (1.1).
+- `subscription/placement.go:27` — only definition of `IndexResolver` (1.2).
+- `store/errors.go:12` + `subscription/errors.go:16` — two independent `ErrColumnNotFound` sentinels (2.6).
+
+---
+
+Recommend: reconcile the five critical items (1.1–1.5) before any further work on SPEC-006 epics, since they clear bleed-items from SPEC-002 / SPEC-003 / SPEC-004 / SPEC-005 simultaneously. Nit-level drift items in §8 can be folded into the next SPEC-006 maintenance pass alongside the SPEC-001 reconciliation.
+
