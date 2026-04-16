@@ -483,3 +483,120 @@ func TestFanOutWorker_RemoveClient(t *testing.T) {
 		t.Fatal("RemoveClient should clear confirmedReads entry")
 	}
 }
+
+func TestFanOutWorker_SubscriptionErrorDelivery(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	conn1 := cid(1)
+	inbox <- FanOutMessage{
+		TxID: types.TxID(1),
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 1, TableName: "t1"}},
+		},
+		Errors: map[types.ConnectionID][]SubscriptionError{
+			conn1: {
+				{SubscriptionID: 5, QueryHash: QueryHash{1}, Message: "eval failed"},
+				{SubscriptionID: 6, QueryHash: QueryHash{2}, Message: "type mismatch"},
+			},
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+
+	if len(mock.errCalls) != 2 {
+		t.Fatalf("errCalls = %d, want 2", len(mock.errCalls))
+	}
+	if mock.errCalls[0].SubID != 5 || mock.errCalls[1].SubID != 6 {
+		t.Fatalf("errCalls SubIDs = %d, %d; want 5, 6", mock.errCalls[0].SubID, mock.errCalls[1].SubID)
+	}
+	if len(mock.txCalls) != 1 {
+		t.Fatalf("txCalls = %d, want 1", len(mock.txCalls))
+	}
+}
+
+func TestFanOutWorker_ErrorsDeliveredBeforeUpdates(t *testing.T) {
+	type call struct {
+		kind string
+		conn types.ConnectionID
+	}
+	var mu sync.Mutex
+	var order []call
+
+	sender := &orderTrackingSender{
+		onTx: func(connID types.ConnectionID) {
+			mu.Lock()
+			order = append(order, call{kind: "tx", conn: connID})
+			mu.Unlock()
+		},
+		onErr: func(connID types.ConnectionID) {
+			mu.Lock()
+			order = append(order, call{kind: "err", conn: connID})
+			mu.Unlock()
+		},
+	}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, sender, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	conn1 := cid(1)
+	inbox <- FanOutMessage{
+		TxID: types.TxID(1),
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 1, TableName: "t1"}},
+		},
+		Errors: map[types.ConnectionID][]SubscriptionError{
+			conn1: {{SubscriptionID: 5, Message: "boom"}},
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) < 2 {
+		t.Fatalf("order len = %d, want >= 2", len(order))
+	}
+	if order[0].kind != "err" {
+		t.Fatalf("first call = %q, want 'err' (errors before updates)", order[0].kind)
+	}
+	if order[1].kind != "tx" {
+		t.Fatalf("second call = %q, want 'tx'", order[1].kind)
+	}
+}
+
+type orderTrackingSender struct {
+	onTx  func(types.ConnectionID)
+	onErr func(types.ConnectionID)
+}
+
+func (s *orderTrackingSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate) error {
+	if s.onTx != nil {
+		s.onTx(connID)
+	}
+	return nil
+}
+func (s *orderTrackingSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
+	return nil
+}
+func (s *orderTrackingSender) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {
+	if s.onErr != nil {
+		s.onErr(connID)
+	}
+	return nil
+}

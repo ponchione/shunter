@@ -88,14 +88,21 @@ func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout) bool {
 }
 
 func (w *FanOutWorker) deliver(msg FanOutMessage) {
-	// Confirmed-read gating (Story 6.4): wait for durability if any
-	// client in this batch requires confirmed reads.
+	// Confirmed-read gating (Story 6.4).
 	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout) {
 		<-msg.TxDurable
 	}
 
-	// Extract caller if present — must happen before iterating fanout
-	// so caller does NOT receive a standalone TransactionUpdate.
+	// Deliver subscription errors first (before updates).
+	for connID, errs := range msg.Errors {
+		for _, se := range errs {
+			if err := w.sender.SendSubscriptionError(connID, se.SubscriptionID, se.Message); err != nil {
+				w.handleSendError(connID, err)
+			}
+		}
+	}
+
+	// Extract caller if present.
 	var callerUpdates []SubscriptionUpdate
 	if msg.CallerConnID != nil {
 		callerUpdates = msg.Fanout[*msg.CallerConnID]
