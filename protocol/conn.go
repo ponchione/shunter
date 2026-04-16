@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -235,4 +236,27 @@ func (m *ConnManager) Get(id types.ConnectionID) *Conn {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.conns[id]
+}
+
+// CloseAll sends a Close frame to every connected client and runs
+// the disconnect sequence for each. Used for graceful server shutdown
+// (SPEC-005 §11.1, close code 1000). Connections are closed
+// concurrently with a bounded wait for all teardowns to complete.
+func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
+	m.mu.RLock()
+	conns := make([]*Conn, 0, len(m.conns))
+	for _, c := range m.conns {
+		conns = append(conns, c)
+	}
+	m.mu.RUnlock()
+
+	var wg sync.WaitGroup
+	for _, c := range conns {
+		wg.Add(1)
+		go func(c *Conn) {
+			defer wg.Done()
+			c.Disconnect(ctx, CloseNormal, "server shutdown", inbox, m)
+		}(c)
+	}
+	wg.Wait()
 }

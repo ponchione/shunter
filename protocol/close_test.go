@@ -116,6 +116,53 @@ func TestUnknownCompressionTag_Closes1002(t *testing.T) {
 	}
 }
 
+func TestCloseAll_DisconnectsEveryConnection(t *testing.T) {
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+
+	conns := make([]*Conn, 3)
+	for i := range conns {
+		c, _, cleanup := loopbackConn(t, DefaultProtocolOptions())
+		defer cleanup()
+		conns[i] = c
+		mgr.Add(c)
+	}
+
+	mgr.CloseAll(context.Background(), inbox)
+
+	for i, c := range conns {
+		select {
+		case <-c.closed:
+		default:
+			t.Errorf("conn %d: c.closed not signaled after CloseAll", i)
+		}
+		if mgr.Get(c.ID) != nil {
+			t.Errorf("conn %d: still in ConnManager after CloseAll", i)
+		}
+	}
+
+	onDis, onSubs, _ := inbox.disconnectSnapshot()
+	if onDis != 3 {
+		t.Errorf("OnDisconnect calls = %d, want 3", onDis)
+	}
+	if onSubs != 3 {
+		t.Errorf("DisconnectClientSubscriptions calls = %d, want 3", onSubs)
+	}
+}
+
+func TestCloseAll_EmptyManagerNoOp(t *testing.T) {
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+
+	// Must not panic.
+	mgr.CloseAll(context.Background(), inbox)
+
+	onDis, _, _ := inbox.disconnectSnapshot()
+	if onDis != 0 {
+		t.Errorf("OnDisconnect calls = %d, want 0", onDis)
+	}
+}
+
 func TestCloseWithHandshake_UnresponsivePeerTimesOut(t *testing.T) {
 	conn, _, cleanup := loopbackConn(t, DefaultProtocolOptions())
 	defer cleanup()
