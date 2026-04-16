@@ -167,9 +167,25 @@ func TestDecodeProductValueShapeMismatchAndFromBytesLengthMismatch(t *testing.T)
 	if err := EncodeValue(&exact, types.NewString("alice")); err != nil {
 		t.Fatal(err)
 	}
-	_, err = DecodeProductValueFromBytes(append(exact.Bytes(), 0xff), ts)
+
+	var extra bytes.Buffer
+	if err := EncodeValue(&extra, types.NewUint64(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := EncodeValue(&extra, types.NewString("alice")); err != nil {
+		t.Fatal(err)
+	}
+	if err := EncodeValue(&extra, types.NewUint64(99)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = DecodeProductValue(bytes.NewReader(extra.Bytes()), ts)
 	if !errors.As(err, &shapeErr) {
-		t.Fatalf("expected RowShapeMismatchError for trailing bytes, got %v", err)
+		t.Fatalf("expected RowShapeMismatchError for extra encoded column, got %v", err)
+	}
+
+	_, err = DecodeProductValueFromBytes(append(exact.Bytes(), 0xff), ts)
+	if !errors.Is(err, ErrRowLengthMismatch) {
+		t.Fatalf("expected ErrRowLengthMismatch for trailing bytes, got %v", err)
 	}
 
 	_, err = DecodeProductValueFromBytes(short.Bytes(), ts)

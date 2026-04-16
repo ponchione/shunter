@@ -1,15 +1,13 @@
 package schema
 
-import "github.com/ponchione/shunter/types"
-
 // Builder accumulates table definitions, reducers, and engine configuration
 // before Build() validates and freezes everything.
 type Builder struct {
 	tables                    []TableDefinition
 	reducers                  map[string]reducerEntry
 	reducerOrder              []string
-	onConnect                 func(*types.ReducerContext) error
-	onDisconnect              func(*types.ReducerContext) error
+	onConnect                 func(*ReducerContext) error
+	onDisconnect              func(*ReducerContext) error
 	onConnectRegistrations    int
 	onDisconnectRegistrations int
 	version                   uint32
@@ -18,7 +16,7 @@ type Builder struct {
 }
 
 type reducerEntry struct {
-	handler types.ReducerHandler
+	handler ReducerHandler
 	count   int // registration count for duplicate detection
 }
 
@@ -87,7 +85,7 @@ func (b *Builder) SchemaVersion(v uint32) *Builder {
 
 // Reducer registers a named reducer handler. Duplicate names are preserved
 // for detection during Build() validation.
-func (b *Builder) Reducer(name string, h types.ReducerHandler) *Builder {
+func (b *Builder) Reducer(name string, h ReducerHandler) *Builder {
 	e := b.reducers[name]
 	if e.count == 0 {
 		b.reducerOrder = append(b.reducerOrder, name)
@@ -100,7 +98,7 @@ func (b *Builder) Reducer(name string, h types.ReducerHandler) *Builder {
 
 // OnConnect registers the lifecycle handler invoked when a client connects.
 // Duplicate registrations are tracked for Build() validation.
-func (b *Builder) OnConnect(h func(*types.ReducerContext) error) *Builder {
+func (b *Builder) OnConnect(h func(*ReducerContext) error) *Builder {
 	b.onConnect = h
 	b.onConnectRegistrations++
 	return b
@@ -108,7 +106,7 @@ func (b *Builder) OnConnect(h func(*types.ReducerContext) error) *Builder {
 
 // OnDisconnect registers the lifecycle handler invoked when a client disconnects.
 // Duplicate registrations are tracked for Build() validation.
-func (b *Builder) OnDisconnect(h func(*types.ReducerContext) error) *Builder {
+func (b *Builder) OnDisconnect(h func(*ReducerContext) error) *Builder {
 	b.onDisconnect = h
 	b.onDisconnectRegistrations++
 	return b

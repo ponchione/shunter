@@ -72,6 +72,44 @@ func TestIndexKeyPrefixOrdering(t *testing.T) {
 	}
 }
 
+func TestBoundConstructors(t *testing.T) {
+	var _ Bound
+
+	low := UnboundedLow()
+	if !low.Unbounded {
+		t.Fatal("UnboundedLow should set Unbounded")
+	}
+
+	high := UnboundedHigh()
+	if !high.Unbounded {
+		t.Fatal("UnboundedHigh should set Unbounded")
+	}
+
+	inclValue := types.NewInt64(7)
+	incl := Inclusive(inclValue)
+	if incl.Unbounded {
+		t.Fatal("Inclusive should not be unbounded")
+	}
+	if !incl.Inclusive {
+		t.Fatal("Inclusive should set Inclusive=true")
+	}
+	if incl.Value.Compare(inclValue) != 0 {
+		t.Fatal("Inclusive should preserve bound value")
+	}
+
+	exclValue := types.NewInt64(9)
+	excl := Exclusive(exclValue)
+	if excl.Unbounded {
+		t.Fatal("Exclusive should not be unbounded")
+	}
+	if excl.Inclusive {
+		t.Fatal("Exclusive should set Inclusive=false")
+	}
+	if excl.Value.Compare(exclValue) != 0 {
+		t.Fatal("Exclusive should preserve bound value")
+	}
+}
+
 // --- BTreeIndex tests (E3 Stories 3.2-3.4) ---
 
 func TestBTreeInsertSeek(t *testing.T) {

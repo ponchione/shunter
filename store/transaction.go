@@ -36,6 +36,65 @@ func (t *Transaction) checkUsable() error {
 	return nil
 }
 
+func (t *Transaction) applyAutoIncrement(table *Table, row types.ProductValue) (types.ProductValue, error) {
+	if table.sequence == nil || table.sequenceCol < 0 {
+		return row, nil
+	}
+
+	col := table.schema.Columns[table.sequenceCol]
+	if !isZeroAutoIncrementValue(row[table.sequenceCol], col.Type) {
+		return row, nil
+	}
+
+	_, max, ok := schema.AutoIncrementBounds(col.Type)
+	if !ok {
+		return nil, schema.ErrAutoIncrementType
+	}
+	next := table.sequence.Peek()
+	if next > max {
+		return nil, schema.ErrSequenceOverflow
+	}
+
+	assigned := row.Copy()
+	assigned[table.sequenceCol] = newAutoIncrementValue(next, col.Type)
+	table.sequence.Next()
+	return assigned, nil
+}
+
+func isZeroAutoIncrementValue(v types.Value, kind schema.ValueKind) bool {
+	switch kind {
+	case schema.KindInt8, schema.KindInt16, schema.KindInt32, schema.KindInt64:
+		return v.AsInt64() == 0
+	case schema.KindUint8, schema.KindUint16, schema.KindUint32, schema.KindUint64:
+		return v.AsUint64() == 0
+	default:
+		return false
+	}
+}
+
+func newAutoIncrementValue(n uint64, kind schema.ValueKind) types.Value {
+	switch kind {
+	case schema.KindInt8:
+		return types.NewInt8(int8(n))
+	case schema.KindUint8:
+		return types.NewUint8(uint8(n))
+	case schema.KindInt16:
+		return types.NewInt16(int16(n))
+	case schema.KindUint16:
+		return types.NewUint16(uint16(n))
+	case schema.KindInt32:
+		return types.NewInt32(int32(n))
+	case schema.KindUint32:
+		return types.NewUint32(uint32(n))
+	case schema.KindInt64:
+		return types.NewInt64(int64(n))
+	case schema.KindUint64:
+		return types.NewUint64(n)
+	default:
+		panic("unsupported autoincrement kind")
+	}
+}
+
 // Insert validates and inserts a row, returning the provisional RowID.
 func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (types.RowID, error) {
 	if err := t.checkUsable(); err != nil {
@@ -47,6 +106,10 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 	}
 
 	if err := ValidateRow(table.Schema(), row); err != nil {
+		return 0, err
+	}
+	row, err := t.applyAutoIncrement(table, row)
+	if err != nil {
 		return 0, err
 	}
 

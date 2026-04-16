@@ -1,17 +1,15 @@
 package schema
 
-import "github.com/ponchione/shunter/types"
-
 // SchemaRegistry is a read-only view of all registered tables, indexes, and reducers.
 // Safe for concurrent use — immutable after construction.
 type SchemaRegistry interface {
 	Table(id TableID) (*TableSchema, bool)
 	TableByName(name string) (*TableSchema, bool)
 	Tables() []TableID
-	Reducer(name string) (types.ReducerHandler, bool)
+	Reducer(name string) (ReducerHandler, bool)
 	Reducers() []string
-	OnConnect() func(*types.ReducerContext) error
-	OnDisconnect() func(*types.ReducerContext) error
+	OnConnect() func(*ReducerContext) error
+	OnDisconnect() func(*ReducerContext) error
 	Version() uint32
 }
 
@@ -20,10 +18,10 @@ type schemaRegistry struct {
 	byID         map[TableID]*TableSchema
 	byName       map[string]*TableSchema
 	tableIDs     []TableID // user tables first, then system
-	reducers     map[string]types.ReducerHandler
+	reducers     map[string]ReducerHandler
 	reducerNames []string
-	onConnect    func(*types.ReducerContext) error
-	onDisconnect func(*types.ReducerContext) error
+	onConnect    func(*ReducerContext) error
+	onDisconnect func(*ReducerContext) error
 	version      uint32
 }
 
@@ -33,7 +31,7 @@ func newSchemaRegistry(schemas []TableSchema, userTableCount int, b *Builder) Sc
 		byID:     make(map[TableID]*TableSchema, len(schemas)),
 		byName:   make(map[string]*TableSchema, len(schemas)),
 		tableIDs: make([]TableID, len(schemas)),
-		reducers: make(map[string]types.ReducerHandler, len(b.reducers)),
+		reducers: make(map[string]ReducerHandler, len(b.reducers)),
 		version:  b.version,
 	}
 
@@ -72,7 +70,7 @@ func (r *schemaRegistry) Tables() []TableID {
 	return out
 }
 
-func (r *schemaRegistry) Reducer(name string) (types.ReducerHandler, bool) {
+func (r *schemaRegistry) Reducer(name string) (ReducerHandler, bool) {
 	h, ok := r.reducers[name]
 	return h, ok
 }
@@ -83,11 +81,11 @@ func (r *schemaRegistry) Reducers() []string {
 	return out
 }
 
-func (r *schemaRegistry) OnConnect() func(*types.ReducerContext) error {
+func (r *schemaRegistry) OnConnect() func(*ReducerContext) error {
 	return r.onConnect
 }
 
-func (r *schemaRegistry) OnDisconnect() func(*types.ReducerContext) error {
+func (r *schemaRegistry) OnDisconnect() func(*ReducerContext) error {
 	return r.onDisconnect
 }
 

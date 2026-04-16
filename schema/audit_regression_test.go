@@ -38,7 +38,7 @@ func TestBuildSystemTablesMatchSpecExactly(t *testing.T) {
 		t.Fatal("sys_scheduled should exist")
 	}
 	wantScheduled := []ColumnSchema{
-		{Index: 0, Name: "schedule_id", Type: KindUint64, Nullable: false},
+		{Index: 0, Name: "schedule_id", Type: KindUint64, Nullable: false, AutoIncrement: true},
 		{Index: 1, Name: "reducer_name", Type: KindString, Nullable: false},
 		{Index: 2, Name: "args", Type: KindBytes, Nullable: false},
 		{Index: 3, Name: "next_run_at_ns", Type: KindInt64, Nullable: false},

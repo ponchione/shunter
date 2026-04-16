@@ -111,9 +111,8 @@ func TestDecodeProductValueFromBytesTrailing(t *testing.T) {
 	buf.WriteByte(0xFF) // trailing byte
 
 	_, err := DecodeProductValueFromBytes(buf.Bytes(), ts)
-	var shapeErr *RowShapeMismatchError
-	if !errors.As(err, &shapeErr) {
-		t.Fatalf("expected RowShapeMismatchError, got %v", err)
+	if !errors.Is(err, ErrRowLengthMismatch) {
+		t.Fatalf("expected ErrRowLengthMismatch, got %v", err)
 	}
 }
 

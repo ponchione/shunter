@@ -19,7 +19,7 @@ This repo is still docs-first. There is no implementation code yet. The working 
 - Treat `docs/EXECUTION-ORDER.md` as the sequencing authority when choosing what lands next.
 - Keep the repo lean. Do not invent extra structure before the work actually needs it.
 - When editing docs, keep them tight and operational.
-- For any shell or git command, follow `RTK.md`: prefix it with `rtk`.
+- For any shell or git command, follow `RTK.md`: use RTK and prefer RTK-native subcommands when available; otherwise prefix the underlying command with `rtk`.
 
 ## Practical Default
 

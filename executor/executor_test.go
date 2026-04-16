@@ -110,6 +110,24 @@ func TestExecutorShutdown(t *testing.T) {
 	}
 }
 
+func TestSubmitWithContextRejectOnFullReturnsBusy(t *testing.T) {
+	exec, _ := setupExecutor()
+	exec = NewExecutor(ExecutorConfig{InboxCapacity: 1, RejectOnFull: true}, exec.registry, exec.committed, exec.schemaReg, 0)
+	exec.inbox <- CallReducerCmd{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := exec.SubmitWithContext(ctx, CallReducerCmd{})
+	if err != ErrExecutorBusy {
+		t.Fatalf("SubmitWithContext on full reject-mode inbox = %v, want %v", err, ErrExecutorBusy)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
+		t.Fatalf("SubmitWithContext should reject immediately, took %v", elapsed)
+	}
+}
+
 func TestReducerRegistryBasics(t *testing.T) {
 	rr := NewReducerRegistry()
 	h := types.ReducerHandler(func(_ *types.ReducerContext, _ []byte) ([]byte, error) { return nil, nil })

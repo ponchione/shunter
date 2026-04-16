@@ -64,6 +64,16 @@ func TestBuilderReducer(t *testing.T) {
 	}
 }
 
+func TestSchemaReducerAliasesExist(t *testing.T) {
+	var h ReducerHandler = func(_ *ReducerContext, _ []byte) ([]byte, error) { return nil, nil }
+	_ = h
+
+	b := NewBuilder()
+	b.Reducer("CreatePlayer", h)
+	b.OnConnect(func(_ *ReducerContext) error { return nil })
+	b.OnDisconnect(func(_ *ReducerContext) error { return nil })
+}
+
 func TestBuilderReducerDuplicatePreserved(t *testing.T) {
 	b := NewBuilder()
 	h := types.ReducerHandler(func(_ *types.ReducerContext, _ []byte) ([]byte, error) { return nil, nil })

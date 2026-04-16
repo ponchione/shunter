@@ -812,14 +812,15 @@ Suggested follow-up tests:
 
 ### TD-003: `ErrSequenceOverflow` is specified but not defined anywhere in live code
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-006 Epic 1 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 1 / Step 1c (`SPEC-006 E1: Schema Types & Type Mapping`)
 
 Summary:
-- The schema/type-mapping slice correctly provides `AutoIncrementBounds(...)`, but the documented paired error contract `ErrSequenceOverflow` does not exist anywhere in the repository's Go code.
-- The decomposition explicitly assigns that contract to SPEC-006 Epic 1 as the schema-owned bounds/error surface consumed by SPEC-001 auto-increment logic.
+- The schema/type-mapping slice correctly provides `AutoIncrementBounds(...)`, and the canonical schema-owned `ErrSequenceOverflow` sentinel now exists alongside that bounds contract.
+- This restores the documented schema-side overflow error surface that later auto-increment runtime enforcement can wrap with `errors.Is(..., ErrSequenceOverflow)`.
+- Focused regression coverage now guards that `ErrSequenceOverflow` is present as a usable sentinel.
 
 Why this matters:
 - The auto-increment bounds contract is only half surfaced today: callers can ask what the bounds are, but there is no canonical sentinel for overflow.
@@ -869,15 +870,15 @@ Suggested follow-up tests:
 
 ### TD-016: SPEC-002 E1 `DecodeProductValue` does not reject extra encoded columns
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-002 Epic 1 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4a (`SPEC-002 E1: BSATN codec`)
 
 Summary:
-- The BSATN value codec is broadly implemented and tested, and `DecodeProductValueFromBytes` correctly rejects trailing bytes.
-- But `DecodeProductValue(r, schema)` decodes exactly `len(schema.Columns)` values and then returns success without checking whether the reader still contains more encoded columns.
-- Story 1.3 says a row with more values than the schema expects should be treated as a row-shape mismatch. In live code, extra values are silently left unread.
+- `DecodeProductValue(r, schema)` now treats extra encoded columns as a row-shape mismatch instead of silently succeeding.
+- A focused regression test now covers the schema-N / encoded-(N+1) case directly.
+- The existing `DecodeProductValueFromBytes(...)` tests were tightened to assert the documented `ErrRowLengthMismatch` behavior for trailing bytes.
 
 Why this matters:
 - This is a contract gap in the row decoder itself, not just a missing convenience wrapper.
@@ -901,13 +902,14 @@ Related spec / decomposition docs:
   - row-shape and row-length error taxonomy for malformed rows
 
 Current observed behavior:
-- Existing package tests still pass:
+- Targeted regression test now passes:
+  - `rtk go test ./bsatn -run TestDecodeProductValueShapeMismatchAndFromBytesLengthMismatch -count=1`
+- Broader package verification passes:
   - `rtk go test ./bsatn`
-- Targeted runtime repro from the audit showed silent acceptance of an extra encoded value:
-  - schema has 2 columns
-  - buffer contains 3 encoded values
-  - `DecodeProductValue(...)` returned `row_len=2 err=<nil> trailing=9`
-  - the third encoded value remained unread instead of causing a row-shape failure
+- Repo-wide verification passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 Recommended resolution options:
 1. Preferred code fix:
@@ -925,15 +927,15 @@ Suggested follow-up tests:
 
 ### TD-015: SPEC-001 E8 auto-increment sequence is not integrated into table/transaction inserts
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-001 Epic 8 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 3 / Step 3g (`SPEC-001 E8: Auto-Increment & Recovery`)
 
 Summary:
-- The repo has a standalone `Sequence` type and some recovery helpers, but auto-increment is not wired into table or transaction behavior.
-- Tables do not gain a `sequence` or `sequenceCol`, and `Transaction.Insert(...)` does not rewrite zero values in autoincrement columns.
-- As a result, inserting a row with `0` in an autoincrement column preserves `0` instead of assigning the next sequence value, which misses the central behavior of Story 8.1.
+- `schema.ColumnSchema` now preserves autoincrement metadata into the built registry so the store can detect autoincrement columns at runtime.
+- `store.Table` now initializes optional per-table sequence state (`sequence`, `sequenceCol`) from schema metadata and exposes `SequenceValue` / `SetSequenceValue` for recovery.
+- `Transaction.Insert(...)` now rewrites zero-valued autoincrement columns before constraint checks, while preserving explicit non-zero values.
 
 Why this matters:
 - Story 8.1 is not just a utility-type story; it requires observable insert-time behavior for autoincrement columns.
@@ -959,14 +961,19 @@ Related spec / decomposition docs:
   - store spec defines autoincrement behavior and overflow expectations tied to inserted rows, not just a helper object
 
 Current observed behavior:
-- Existing targeted Epic 8 tests still pass:
-  - `rtk go test ./store -run 'TestSequenceMonotonic|TestSequenceReset|TestApplyChangeset|TestApplyChangesetDeletesByPrimaryKeyNotStoredRowID|TestApplyChangesetDeletesByRowEqualityForSetSemanticsTables'`
-- Targeted runtime repro from the audit showed the feature gap directly:
-  - build a schema table with `PrimaryKey: true, AutoIncrement: true` on `id`
-  - insert row `{id: 0, name: "job-a"}` through `Transaction.Insert(...)`
-  - observed output:
-    - `inserted row pk=0 provisionalRowID=1`
-  - expected per spec: row PK should be rewritten to the next sequence value rather than staying `0`
+- Targeted RED test failed before the fix because the recovery accessors were absent:
+  - `rtk go test ./store -run 'TestTransactionInsertAutoIncrementAssignsSequentialValues|TestTransactionInsertAutoIncrementPreservesExplicitValue|TestTableSequenceStateAccessorsRoundTrip' -count=1`
+  - observed compile errors included:
+    - `tbl.SequenceValue undefined`
+    - `tbl.SetSequenceValue undefined`
+- Targeted store verification now passes:
+  - `rtk go test ./store -run 'TestTransactionInsertAutoIncrementAssignsSequentialValues|TestTransactionInsertAutoIncrementPreservesExplicitValue|TestTableSequenceStateAccessorsRoundTrip' -count=1`
+  - `rtk go test ./store`
+- Broader verification now passes:
+  - `rtk go test ./schema ./store`
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 Recommended resolution options:
 1. Preferred code fix:
@@ -985,15 +992,15 @@ Suggested follow-up tests:
 
 ### TD-014: SPEC-001 E7 `CommittedReadView` is missing the documented `IndexScan` and Bound-based `IndexRange` API
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-001 Epic 7 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 3 / Step 3f (`SPEC-001 E7: Read-Only Snapshots`)
 
 Summary:
-- The snapshot subsystem exists and basic behavior works: snapshots hold a read lock, row-count reads work, and commit blocks until snapshots close.
-- But the public `CommittedReadView` interface in live code does not match Story 7.1's documented surface.
-- Specifically, the spec requires `IndexScan(tableID, indexID, value Value)` and `IndexRange(tableID, indexID, lower, upper Bound)`, while live code exposes `IndexSeek(..., key IndexKey)` and `IndexRange(..., low, high *IndexKey)` instead.
+- `CommittedReadView` now exposes the documented snapshot-side `IndexScan(tableID, indexID, value)` and Bound-based `IndexRange(tableID, indexID, lower, upper)` methods.
+- `CommittedSnapshot` now resolves matching RowIDs to `(RowID, ProductValue)` pairs for both point scans and range scans, with Bound filtering applied in key order.
+- Legacy helper methods (`IndexSeek`, `GetRow`) were kept alongside the new surface so this API-alignment fix stays narrow and does not force unrelated subscription/protocol refactors in the same slice.
 
 Why this matters:
 - This is a public API contract gap, not just an internal refactor. Consumers written to the documented snapshot interface do not compile.
@@ -1017,14 +1024,21 @@ Related spec / decomposition docs:
   - acceptance criteria explicitly cover `IndexScan` and Bound/unbounded range behavior
 
 Current observed behavior:
-- Existing targeted snapshot tests pass:
-  - `rtk go test ./store -run 'TestSnapshotPointInTime|TestSnapshotCloseSafe|TestSnapshotBlocksCommitUntilClose'`
-- Targeted public-API compile repro from the audit failed:
-  - temporary package referenced `CommittedReadView.IndexScan(...)` and `CommittedReadView.IndexRange(..., store.UnboundedLow(), store.UnboundedHigh())`
-  - `rtk go test ./.tmp_store_snapshot_api` failed with:
-    - `v.IndexScan undefined`
-    - `undefined: store.UnboundedLow`
-    - `undefined: store.UnboundedHigh`
+- Targeted RED build/test failed before the fix because the snapshot API surface was missing:
+  - `rtk go test ./store -run 'TestCommittedSnapshotIndexScanByPrimaryKey|TestCommittedSnapshotIndexScanMissingValueReturnsEmpty|TestCommittedSnapshotIndexRangeBoundSemantics' -count=1`
+  - observed errors included:
+    - `snap.IndexScan undefined`
+    - `cannot use Inclusive(...) as *IndexKey`
+    - `cannot use UnboundedLow() as *IndexKey`
+- Targeted verification now passes:
+  - `rtk go test ./store -run 'TestCommittedSnapshotIndexScanByPrimaryKey|TestCommittedSnapshotIndexScanMissingValueReturnsEmpty|TestCommittedSnapshotIndexRangeBoundSemantics' -count=1`
+  - `rtk go test ./store`
+  - `rtk go test ./subscription`
+  - `rtk go test ./protocol`
+- Repo-wide verification now passes:
+  - `rtk go build ./...`
+  - `rtk go vet ./...`
+  - `rtk go test ./...`
 
 Recommended resolution options:
 1. Preferred code fix:
@@ -1159,15 +1173,15 @@ Suggested follow-up tests:
 
 ### TD-011: SPEC-001 E4 Story 4.1's documented `Index.unique` field appears to be stale doc drift
 
-Status: doc-drift
+Status: resolved
 Severity: low
 First found: SPEC-001 Epic 4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 3 / Step 3c (`SPEC-001 E4: Table Indexes & Constraints`)
 
 Summary:
 - The live implementation of table indexes and constraints appears operationally correct: index wrappers are created, synchronous maintenance works, PK/unique/set-semantics enforcement is present, and targeted tests pass.
-- However, Story 4.1 still specifies an `Index` struct with a separate `unique bool` field populated from schema.
-- Live code omits that field and reads uniqueness directly from `idx.schema.Unique` / `idx.schema.Primary` instead.
+- The stale docs have been updated so `Index` is described as wrapping `IndexSchema` + `BTreeIndex`, with uniqueness and primary-ness derived from `schema.Unique` / `schema.Primary` instead of a redundant cached field.
+- Story 4.1 and the nearby SPEC text now match the simpler live implementation shape.
 
 Why this is classified as doc drift, not a product bug:
 - The behavior the field was meant to support is present.
@@ -1206,15 +1220,15 @@ Suggested follow-up checks:
 
 ### TD-010: SPEC-001 E3 is missing the documented `Bound` type and helper constructors
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-001 Epic 3 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 3 / Step 3b (`SPEC-001 E3: B-Tree Index Engine`)
 
 Summary:
 - The core `IndexKey`, `BTreeIndex`, `SeekRange`, `Scan`, and multi-column behavior are implemented and tested.
-- But Story 3.1 explicitly requires a public `Bound` type plus `UnboundedLow`, `UnboundedHigh`, `Inclusive`, and `Exclusive` helper constructors, and none of those symbols exist in live code.
-- This leaves the documented range-endpoint API incomplete and creates a mismatch between Story 3.1 and the later Story 3.3 note that still references Bound semantics.
+- The public `Bound` type plus `UnboundedLow`, `UnboundedHigh`, `Inclusive`, and `Exclusive` helper constructors now exist in the `store` package.
+- Focused constructor/API regression coverage now guards the documented Story 3.1 surface.
 
 Why this matters:
 - Even though the current runtime path uses `SeekRange(low, high *IndexKey)` with nil for unbounded endpoints, the decomposition/spec still defines `Bound` as part of the Epic 3 public contract.
@@ -1436,15 +1450,15 @@ Suggested follow-up tests:
 
 ### TD-006: SPEC-006 E3.2 does not expose schema-facing `ReducerHandler` / `ReducerContext` aliases
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-006 Epic 3 Story 3.2 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 2 / Step 2c (`SPEC-006 E3.2: Reducer registration`)
 
 Summary:
-- Reducer registration behavior is implemented in `schema/builder.go`, and validation/registry wiring are present, but the schema package does not expose `ReducerHandler` or `ReducerContext` at all.
-- The current public signatures use `types.ReducerHandler` and `*types.ReducerContext` directly, which leaks the lower-level `types` package through the schema-facing API.
-- SPEC-006 Story 3.2 explicitly assigns a schema-surface reducer contract: either re-export the SPEC-003 reducer types from schema or define aliases there until the executor-owned package exists.
+- Reducer registration behavior remains implemented in `schema/builder.go`, and the schema package now exposes `ReducerHandler` and `ReducerContext` aliases at the schema-facing API boundary.
+- Public builder and registry signatures now use the schema-owned names instead of leaking `types.*` directly.
+- Focused regression coverage now guards that callers can use reducer registration via `schema.ReducerHandler` / `*schema.ReducerContext`.
 
 Why this matters:
 - The decomposition/spec treats reducer registration as part of the schema builder API, not as a requirement for callers to import an internal/shared `types` package.
@@ -1500,15 +1514,15 @@ Suggested follow-up tests:
 
 ### TD-005: SPEC-006 E4 does not honor `shunter:"-"` on anonymous embedded fields
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-006 Epic 4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 2 / Step 2b (`SPEC-006 E4: Reflection path`)
 
 Summary:
-- The reflection path mostly implements Story 4.1/4.2/4.3, but `discoverFields` handles anonymous embedding before it parses the `shunter` tag.
-- That ordering violates SPEC-006 §11.1, which requires `shunter:"-"` exclusion to run first for every field.
-- As a result, an anonymous embedded non-pointer struct tagged `shunter:"-"` is still flattened into the schema, and an anonymous embedded pointer-to-struct tagged `shunter:"-"` still fails registration instead of being skipped.
+- The reflection path now parses the `shunter` tag before anonymous-embedding handling, so `shunter:"-"` exclusion applies first for every field.
+- Excluded anonymous embedded structs are skipped instead of flattened, and excluded anonymous embedded pointer-to-struct fields are skipped instead of erroring.
+- Focused reflection and `RegisterTable` regression tests now guard the exclusion-on-anonymous-embed contract.
 
 Why this matters:
 - The spec's ordered field-discovery contract is not just stylistic; it defines which reflected fields are part of the public schema surface.

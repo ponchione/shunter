@@ -235,9 +235,10 @@ Two index types are supported in the abstract interface, but only one is recomme
 ```go
 type Index struct {
     schema *IndexSchema
-    unique bool
     btree  *BTreeIndex
 }
+
+// uniqueness and primary-ness are derived from schema.Unique / schema.Primary
 
 // IndexID is a stable uint32 that identifies an index within a table.
 // Assigned by the store in the order IndexSchema entries appear in TableSchema.Indexes.

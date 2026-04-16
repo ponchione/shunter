@@ -158,6 +158,13 @@ func TestChangesetCodecRoundTrip(t *testing.T) {
 
 // --- Durability worker tests ---
 
+func TestDefaultCommitLogOptionsIncludesSnapshotInterval(t *testing.T) {
+	opts := DefaultCommitLogOptions()
+	if opts.SnapshotInterval != 0 {
+		t.Fatalf("SnapshotInterval = %d, want 0", opts.SnapshotInterval)
+	}
+}
+
 func TestDurabilityWorkerBasic(t *testing.T) {
 	dir := t.TempDir()
 	_, reg := testSchema()

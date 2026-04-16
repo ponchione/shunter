@@ -1,6 +1,7 @@
 package bsatn
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -120,9 +121,14 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 
 // DecodeProductValue reads a schema-validated row.
 func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue, error) {
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReader(r)
+	}
+
 	pv := make(types.ProductValue, len(ts.Columns))
 	for i, col := range ts.Columns {
-		v, err := DecodeValueExpecting(r, col.Type, col.Name)
+		v, err := DecodeValueExpecting(br, col.Type, col.Name)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return nil, &RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: i}
@@ -131,6 +137,13 @@ func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue
 		}
 		pv[i] = v
 	}
+
+	if _, err := br.Peek(1); err == nil {
+		return nil, &RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: len(ts.Columns) + 1}
+	} else if !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+
 	return pv, nil
 }
 

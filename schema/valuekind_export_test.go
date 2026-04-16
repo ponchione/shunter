@@ -1,6 +1,8 @@
 package schema
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"testing"
 )
@@ -91,5 +93,12 @@ func TestAutoIncrementBoundsAllIntegers(t *testing.T) {
 		if !ok {
 			t.Errorf("AutoIncrementBounds(%v) should return ok=true", k)
 		}
+	}
+}
+
+func TestErrSequenceOverflowSentinelExists(t *testing.T) {
+	err := fmt.Errorf("wrap: %w", ErrSequenceOverflow)
+	if !errors.Is(err, ErrSequenceOverflow) {
+		t.Fatal("ErrSequenceOverflow should be a usable sentinel")
 	}
 }

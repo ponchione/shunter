@@ -55,9 +55,10 @@ func (b *Builder) Build(opts EngineOptions) (*Engine, error) {
 		ts.Columns = make([]ColumnSchema, len(td.Columns))
 		for j, cd := range td.Columns {
 			ts.Columns[j] = ColumnSchema{
-				Index: j,
-				Name:  cd.Name,
-				Type:  cd.Type,
+				Index:         j,
+				Name:          cd.Name,
+				Type:          cd.Type,
+				AutoIncrement: cd.AutoIncrement,
 			}
 		}
 

@@ -130,3 +130,22 @@ func TestBuildTableDefinitionNoPKIndex(t *testing.T) {
 		t.Fatalf("expected 0 explicit indexes (PK synthesized at Build), got %d", len(def.Indexes))
 	}
 }
+
+func TestRegisterTableExcludedEmbeddedFieldsOmitted(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	if err := RegisterTable[ExcludedEmbedded](b); err != nil {
+		t.Fatalf("RegisterTable excluded embedded struct: %v", err)
+	}
+	eng, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	ts, ok := eng.Registry().TableByName("excluded_embedded")
+	if !ok {
+		t.Fatal("excluded_embedded table missing")
+	}
+	if len(ts.Columns) != 1 || ts.Columns[0].Name != "name" {
+		t.Fatalf("excluded_embedded columns = %+v, want only name", ts.Columns)
+	}
+}

@@ -14,14 +14,25 @@ type Table struct {
 	nextID       types.RowID
 	indexes      []*Index
 	rowHashIndex map[uint64][]types.RowID // set semantics for no-PK tables
+	sequence     *Sequence
+	sequenceCol  int
 }
 
 // NewTable creates a table from its schema, initializing indexes.
 func NewTable(ts *schema.TableSchema) *Table {
 	t := &Table{
-		schema: ts,
-		rows:   make(map[types.RowID]types.ProductValue),
-		nextID: 1,
+		schema:      ts,
+		rows:        make(map[types.RowID]types.ProductValue),
+		nextID:      1,
+		sequenceCol: -1,
+	}
+
+	for i := range ts.Columns {
+		if ts.Columns[i].AutoIncrement {
+			t.sequence = NewSequence()
+			t.sequenceCol = i
+			break
+		}
 	}
 
 	// Create indexes from schema.
@@ -127,6 +138,22 @@ func (t *Table) NextID() types.RowID { return t.nextID }
 
 // SetNextID restores the RowID counter (for recovery).
 func (t *Table) SetNextID(id types.RowID) { t.nextID = id }
+
+// SequenceValue returns the current sequence counter and whether the table has an autoincrement column.
+func (t *Table) SequenceValue() (uint64, bool) {
+	if t.sequence == nil {
+		return 0, false
+	}
+	return t.sequence.Peek(), true
+}
+
+// SetSequenceValue restores the sequence counter (for recovery).
+func (t *Table) SetSequenceValue(v uint64) {
+	if t.sequence == nil {
+		return
+	}
+	t.sequence.Reset(v)
+}
 
 // IndexByID returns the index with the given ID, or nil.
 func (t *Table) IndexByID(id schema.IndexID) *Index {

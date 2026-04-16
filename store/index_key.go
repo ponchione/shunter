@@ -41,6 +41,33 @@ func (k IndexKey) Equal(other IndexKey) bool {
 	return k.Compare(other) == 0
 }
 
+// Bound represents one endpoint of an index range.
+type Bound struct {
+	Value     types.Value
+	Inclusive bool
+	Unbounded bool
+}
+
+// UnboundedLow constructs an unbounded lower endpoint.
+func UnboundedLow() Bound {
+	return Bound{Unbounded: true}
+}
+
+// UnboundedHigh constructs an unbounded upper endpoint.
+func UnboundedHigh() Bound {
+	return Bound{Unbounded: true}
+}
+
+// Inclusive constructs a closed bound at v.
+func Inclusive(v types.Value) Bound {
+	return Bound{Value: v, Inclusive: true}
+}
+
+// Exclusive constructs an open bound at v.
+func Exclusive(v types.Value) Bound {
+	return Bound{Value: v}
+}
+
 // ExtractKey builds an IndexKey from a row using the given column indices.
 func ExtractKey(row types.ProductValue, columns []int) IndexKey {
 	parts := make([]types.Value, len(columns))

@@ -145,6 +145,14 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 	if e.shutdown {
 		return ErrExecutorShutdown
 	}
+	if e.rejectMode {
+		select {
+		case e.inbox <- cmd:
+			return nil
+		default:
+			return ErrExecutorBusy
+		}
+	}
 	select {
 	case e.inbox <- cmd:
 		return nil

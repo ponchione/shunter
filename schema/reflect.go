@@ -35,6 +35,19 @@ func discoverFields(t reflect.Type, prefix string) ([]fieldInfo, error) {
 
 		path := prefix + "." + f.Name
 
+		// Parse tag before any embedding behavior so shunter:"-" exclusion
+		// applies uniformly to ordinary and anonymous fields.
+		raw := f.Tag.Get("shunter")
+		td, err := ParseTag(raw)
+		if err != nil {
+			return nil, fmt.Errorf("schema error: %s: %w", path, err)
+		}
+
+		// Skip excluded fields.
+		if td.Exclude {
+			continue
+		}
+
 		// Handle embedded structs.
 		if f.Anonymous {
 			ft := f.Type
@@ -50,18 +63,6 @@ func discoverFields(t reflect.Type, prefix string) ([]fieldInfo, error) {
 				continue
 			}
 			// Non-struct anonymous field — fall through to normal processing.
-		}
-
-		// Parse tag.
-		raw := f.Tag.Get("shunter")
-		td, err := ParseTag(raw)
-		if err != nil {
-			return nil, fmt.Errorf("schema error: %s: %w", path, err)
-		}
-
-		// Skip excluded fields.
-		if td.Exclude {
-			continue
 		}
 
 		// Map Go type to ValueKind.

@@ -70,8 +70,22 @@ func (m *mockCommitted) IndexSeek(tableID TableID, indexID IndexID, key store.In
 	return out
 }
 
-func (m *mockCommitted) IndexRange(tableID TableID, indexID IndexID, low, high *store.IndexKey) iter.Seq[types.RowID] {
-	return func(yield func(types.RowID) bool) {}
+func (m *mockCommitted) IndexScan(tableID TableID, indexID IndexID, value types.Value) iter.Seq2[types.RowID, types.ProductValue] {
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for _, rid := range m.IndexSeek(tableID, indexID, store.NewIndexKey(value)) {
+			row, ok := m.GetRow(tableID, rid)
+			if !ok {
+				continue
+			}
+			if !yield(rid, row) {
+				return
+			}
+		}
+	}
+}
+
+func (m *mockCommitted) IndexRange(tableID TableID, indexID IndexID, low, high store.Bound) iter.Seq2[types.RowID, types.ProductValue] {
+	return func(yield func(types.RowID, types.ProductValue) bool) {}
 }
 
 func (m *mockCommitted) GetRow(tableID TableID, rowID types.RowID) (types.ProductValue, bool) {

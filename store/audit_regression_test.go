@@ -29,6 +29,30 @@ func buildNoPKState(t *testing.T) (*CommittedState, schema.SchemaRegistry) {
 	return cs, reg
 }
 
+func buildAutoIncrementState(t *testing.T) (*CommittedState, schema.SchemaRegistry) {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "jobs",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint64, PrimaryKey: true, AutoIncrement: true},
+			{Name: "name", Type: types.KindString},
+		},
+	})
+	e, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := e.Registry()
+	cs := NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, NewTable(ts))
+	}
+	return cs, reg
+}
+
 func TestValidateRowTypeMismatchMatchesCatalog(t *testing.T) {
 	ts := pkSchema()
 	err := ValidateRow(ts, types.ProductValue{types.NewString("bad"), types.NewString("alice")})
@@ -402,5 +426,187 @@ func TestApplyChangesetUnknownTableReturnsError(t *testing.T) {
 	changeset := &Changeset{Tables: map[schema.TableID]*TableChangeset{99: {}}}
 	if err := ApplyChangeset(cs, changeset); err == nil {
 		t.Fatal("expected unknown table error")
+	}
+}
+
+func TestCommittedSnapshotIndexScanByPrimaryKey(t *testing.T) {
+	cs, _ := buildTestState()
+	tbl, _ := cs.Table(0)
+	rowID := tbl.AllocRowID()
+	if err := tbl.InsertRow(rowID, mkRow(7, "alice")); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := cs.Snapshot()
+	defer snap.Close()
+
+	var got []types.ProductValue
+	for _, row := range snap.IndexScan(0, 0, types.NewUint64(7)) {
+		got = append(got, row)
+	}
+	if len(got) != 1 {
+		t.Fatalf("IndexScan result len = %d, want 1", len(got))
+	}
+	if got[0][0].AsUint64() != 7 || got[0][1].AsString() != "alice" {
+		t.Fatalf("IndexScan row = %#v, want pk=7 name=alice", got[0])
+	}
+}
+
+func TestCommittedSnapshotIndexScanMissingValueReturnsEmpty(t *testing.T) {
+	cs, _ := buildTestState()
+	tbl, _ := cs.Table(0)
+	if err := tbl.InsertRow(tbl.AllocRowID(), mkRow(1, "alice")); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := cs.Snapshot()
+	defer snap.Close()
+
+	count := 0
+	for range snap.IndexScan(0, 0, types.NewUint64(99)) {
+		count++
+	}
+	if count != 0 {
+		t.Fatalf("missing-value IndexScan yielded %d rows, want 0", count)
+	}
+}
+
+func TestCommittedSnapshotIndexRangeBoundSemantics(t *testing.T) {
+	cs, reg := buildTestState()
+	tx := NewTransaction(cs, reg)
+	for _, row := range []types.ProductValue{
+		mkRow(1, "alice"),
+		mkRow(2, "bob"),
+		mkRow(3, "carol"),
+		mkRow(4, "dave"),
+	} {
+		if _, err := tx.Insert(0, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Commit(cs, tx); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := cs.Snapshot()
+	defer snap.Close()
+
+	var got []uint64
+	for _, row := range snap.IndexRange(0, 0, Inclusive(types.NewUint64(2)), Exclusive(types.NewUint64(4))) {
+		got = append(got, row[0].AsUint64())
+	}
+	want := []uint64{2, 3}
+	if len(got) != len(want) {
+		t.Fatalf("bounded IndexRange len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("bounded IndexRange = %v, want %v", got, want)
+		}
+	}
+
+	got = nil
+	for _, row := range snap.IndexRange(0, 0, UnboundedLow(), Inclusive(types.NewUint64(2))) {
+		got = append(got, row[0].AsUint64())
+	}
+	want = []uint64{1, 2}
+	if len(got) != len(want) {
+		t.Fatalf("unbounded-lower IndexRange len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unbounded-lower IndexRange = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestTransactionInsertAutoIncrementAssignsSequentialValues(t *testing.T) {
+	cs, reg := buildAutoIncrementState(t)
+	tx := NewTransaction(cs, reg)
+
+	id1, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("job-a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row1, ok := tx.GetRow(0, id1)
+	if !ok {
+		t.Fatal("first inserted row should be visible")
+	}
+	if got := row1[0].AsUint64(); got != 1 {
+		t.Fatalf("first autoincrement value = %d, want 1", got)
+	}
+
+	id2, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("job-b")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row2, ok := tx.GetRow(0, id2)
+	if !ok {
+		t.Fatal("second inserted row should be visible")
+	}
+	if got := row2[0].AsUint64(); got != 2 {
+		t.Fatalf("second autoincrement value = %d, want 2", got)
+	}
+
+	id3, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("job-c")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row3, ok := tx.GetRow(0, id3)
+	if !ok {
+		t.Fatal("third inserted row should be visible")
+	}
+	if got := row3[0].AsUint64(); got != 3 {
+		t.Fatalf("third autoincrement value = %d, want 3", got)
+	}
+}
+
+func TestTransactionInsertAutoIncrementPreservesExplicitValue(t *testing.T) {
+	cs, reg := buildAutoIncrementState(t)
+	tx := NewTransaction(cs, reg)
+
+	id, err := tx.Insert(0, types.ProductValue{types.NewUint64(42), types.NewString("job-explicit")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := tx.GetRow(0, id)
+	if !ok {
+		t.Fatal("explicit-value inserted row should be visible")
+	}
+	if got := row[0].AsUint64(); got != 42 {
+		t.Fatalf("explicit autoincrement value = %d, want 42", got)
+	}
+}
+
+func TestTableSequenceStateAccessorsRoundTrip(t *testing.T) {
+	cs, _ := buildAutoIncrementState(t)
+	tbl, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("expected autoincrement table")
+	}
+
+	if seq, has := tbl.SequenceValue(); !has || seq != 1 {
+		t.Fatalf("initial SequenceValue = (%d, %v), want (1, true)", seq, has)
+	}
+
+	tbl.SetSequenceValue(9)
+	if seq, has := tbl.SequenceValue(); !has || seq != 9 {
+		t.Fatalf("restored SequenceValue = (%d, %v), want (9, true)", seq, has)
+	}
+
+	tx := NewTransaction(cs, nil)
+	id, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("after-restore")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := tx.GetRow(0, id)
+	if !ok {
+		t.Fatal("post-restore inserted row should be visible")
+	}
+	if got := row[0].AsUint64(); got != 9 {
+		t.Fatalf("post-restore autoincrement value = %d, want 9", got)
+	}
+	if seq, has := tbl.SequenceValue(); !has || seq != 10 {
+		t.Fatalf("next SequenceValue after insert = (%d, %v), want (10, true)", seq, has)
 	}
 }

@@ -40,10 +40,11 @@ type TableSchema struct {
 
 // ColumnSchema describes a single column.
 type ColumnSchema struct {
-	Index    int       `json:"index"`
-	Name     string    `json:"name"`
-	Type     ValueKind `json:"type"`
-	Nullable bool      `json:"nullable"`
+	Index         int       `json:"index"`
+	Name          string    `json:"name"`
+	Type          ValueKind `json:"type"`
+	Nullable      bool      `json:"nullable"`
+	AutoIncrement bool      `json:"auto_increment,omitempty"`
 }
 
 // IndexSchema describes a table index.

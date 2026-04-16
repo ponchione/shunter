@@ -117,6 +117,42 @@ func TestDiscoverFieldsEmbeddedPtrErrors(t *testing.T) {
 	}
 }
 
+type ExcludedEmbedded struct {
+	Base `shunter:"-"`
+	Name string
+}
+
+type ExcludedEmbeddedPtr struct {
+	*Base `shunter:"-"`
+	Name string
+}
+
+func TestDiscoverFieldsExcludedEmbeddedStructSkipsAnonymousField(t *testing.T) {
+	fields, err := discoverFields(reflect.TypeFor[ExcludedEmbedded](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 1 {
+		t.Fatalf("expected only outer field after excluded embed, got %d", len(fields))
+	}
+	if fields[0].FieldName != "Name" {
+		t.Fatalf("expected remaining field Name, got %q", fields[0].FieldName)
+	}
+}
+
+func TestDiscoverFieldsExcludedEmbeddedPointerSkipsAnonymousField(t *testing.T) {
+	fields, err := discoverFields(reflect.TypeFor[ExcludedEmbeddedPtr](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 1 {
+		t.Fatalf("expected only outer field after excluded embedded pointer, got %d", len(fields))
+	}
+	if fields[0].FieldName != "Name" {
+		t.Fatalf("expected remaining field Name, got %q", fields[0].FieldName)
+	}
+}
+
 type DeepBase struct {
 	Base
 	Extra int32

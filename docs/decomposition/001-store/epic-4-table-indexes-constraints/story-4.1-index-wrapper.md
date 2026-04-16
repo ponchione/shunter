@@ -17,13 +17,13 @@ Wrap BTreeIndex with schema metadata. Wire indexes into Table at construction ti
   ```go
   type Index struct {
       schema  *IndexSchema
-      unique  bool
       btree   *BTreeIndex
   }
   ```
+  - uniqueness and primary-ness are derived from `schema.Unique` / `schema.Primary`
 
 - `func NewIndex(schema *IndexSchema) *Index`
-  - Sets `unique` from `schema.Unique`
+  - Stores the schema pointer as the single source of truth for uniqueness/primary metadata
   - Creates empty BTreeIndex
 
 - `func (idx *Index) ExtractKey(row ProductValue) IndexKey`
@@ -49,7 +49,7 @@ Wrap BTreeIndex with schema metadata. Wire indexes into Table at construction ti
 ## Acceptance Criteria
 
 - [ ] NewTable with 3 IndexSchemas creates 3 Index instances
-- [ ] Each Index has correct schema and unique flag; primary-ness is derived from `schema.Primary`
+- [ ] Each Index has the correct schema; uniqueness and primary-ness are derived from `schema.Unique` / `schema.Primary`
 - [ ] IndexByID returns correct index
 - [ ] PrimaryIndex returns the primary one, or nil if none
 - [ ] ExtractKey for single-column index produces 1-part key

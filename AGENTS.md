@@ -25,13 +25,14 @@ Read in this order:
 
 `RTK.md` is mandatory for shell usage.
 
-- Prefix every shell command with `rtk`.
+- Use RTK for shell commands.
+- Prefer RTK-native subcommands from `RTK.md` when available; otherwise wrap the underlying command with `rtk`.
 - Prefix every git command with `rtk`.
 
 Examples:
 - `rtk git status`
 - `rtk go test ./...`
-- `rtk rg "pattern" docs`
+- `rtk grep "pattern" docs`
 
 ## If docs disagree
 
