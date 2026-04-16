@@ -44,9 +44,7 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 		close(c.OutboundCh)
 		close(c.closed)
 		if c.ws != nil {
-			go func() {
-				_ = c.ws.Close(code, truncateCloseReason(reason))
-			}()
+			go closeWithHandshake(c.ws, code, reason, c.opts.CloseHandshakeTimeout)
 		}
 	})
 }

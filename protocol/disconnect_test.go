@@ -170,6 +170,27 @@ func TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit(t *testing.T) {
 	}
 }
 
+func TestDisconnectCloseHandshakeTimeout(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.CloseHandshakeTimeout = 100 * time.Millisecond
+
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	c, _, cleanup := loopbackConn(t, opts)
+	defer cleanup()
+	mgr.Add(c)
+
+	// Client does NOT read — handshake will time out.
+	c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
+
+	// Disconnect returns immediately (async close). Verify c.closed is signaled.
+	select {
+	case <-c.closed:
+	default:
+		t.Error("c.closed not signaled")
+	}
+}
+
 // TestDisconnectNotAffectedByConnIdentity pins that the interface is
 // invoked with the Conn's configured ConnectionID + Identity, not a
 // zero-value pair that would silently bypass OnDisconnect semantics
