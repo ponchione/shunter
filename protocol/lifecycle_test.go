@@ -65,6 +65,18 @@ func (f *fakeInbox) DisconnectClientSubscriptions(_ context.Context, connID type
 	return f.disconnectSubsErr
 }
 
+func (f *fakeInbox) RegisterSubscription(_ context.Context, _ RegisterSubscriptionRequest) error {
+	return nil
+}
+
+func (f *fakeInbox) UnregisterSubscription(_ context.Context, _ types.ConnectionID, _ uint32) error {
+	return nil
+}
+
+func (f *fakeInbox) CallReducer(_ context.Context, _ CallReducerRequest) error {
+	return nil
+}
+
 func (f *fakeInbox) snapshot() (int, types.ConnectionID, types.Identity) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

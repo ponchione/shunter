@@ -37,6 +37,28 @@ type ExecutorInbox interface {
 	OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
+	RegisterSubscription(ctx context.Context, req RegisterSubscriptionRequest) error
+	UnregisterSubscription(ctx context.Context, connID types.ConnectionID, subID uint32) error
+	CallReducer(ctx context.Context, req CallReducerRequest) error
+}
+
+// RegisterSubscriptionRequest carries the fields the executor needs to
+// register and evaluate a new subscription (SPEC-004 §2.1).
+type RegisterSubscriptionRequest struct {
+	ConnID         types.ConnectionID
+	SubscriptionID uint32
+	RequestID      uint32
+	Predicate      any // subscription.Predicate — typed as any to avoid import cycle
+}
+
+// CallReducerRequest carries the fields for a reducer invocation
+// (SPEC-003 §10.3).
+type CallReducerRequest struct {
+	ConnID      types.ConnectionID
+	Identity    types.Identity
+	RequestID   uint32
+	ReducerName string
+	Args        []byte
 }
 
 // RunLifecycle drives SPEC-005 §5.1–§5.2 admission for one connection:
