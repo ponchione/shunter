@@ -87,6 +87,35 @@ func TestCloseWithHandshake_ResponsivePeer(t *testing.T) {
 	}
 }
 
+func TestUnknownCompressionTag_Closes1002(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	conn, clientWS := testConnPair(t, &opts)
+	conn.Compression = true // enable compression path
+
+	handlers := &MessageHandlers{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, handlers)
+
+	// Send binary frame with invalid compression byte (0xFF).
+	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
+	_ = clientWS.Write(wCtx, websocket.MessageBinary, []byte{0xFF, TagSubscribe, 0x00})
+	wCancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch loop did not exit on bad compression tag")
+	}
+
+	readCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer rCancel()
+	_, _, err := clientWS.Read(readCtx)
+	if code := websocket.CloseStatus(err); code != websocket.StatusProtocolError {
+		t.Errorf("close code = %d, want %d (1002)", code, websocket.StatusProtocolError)
+	}
+}
+
 func TestCloseWithHandshake_UnresponsivePeerTimesOut(t *testing.T) {
 	conn, _, cleanup := loopbackConn(t, DefaultProtocolOptions())
 	defer cleanup()

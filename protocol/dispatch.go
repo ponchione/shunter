@@ -40,9 +40,7 @@ func sendError(conn *Conn, msg any) {
 // blocks on the close handshake.
 func closeProtocolError(conn *Conn, reason string) {
 	log.Printf("protocol: closing conn %x with protocol error: %s", conn.ID[:], reason)
-	go func() {
-		_ = conn.ws.Close(websocket.StatusProtocolError, truncateCloseReason(reason))
-	}()
+	go closeWithHandshake(conn.ws, CloseProtocol, reason, conn.opts.CloseHandshakeTimeout)
 }
 
 // runDispatchLoop replaces runReadPump (Story 3.5) with the full
@@ -103,9 +101,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		select {
 		case c.inflightSem <- struct{}{}:
 		default:
-			go func() {
-				_ = c.ws.Close(websocket.StatusPolicyViolation, "too many requests")
-			}()
+			go closeWithHandshake(c.ws, ClosePolicy, "too many requests", c.opts.CloseHandshakeTimeout)
 			return
 		}
 
