@@ -1,7 +1,7 @@
 # SPEC-002 — Commit Log
 
 **Status:** Draft  
-**Depends on:** SPEC-001 (In-Memory Store) for `Changeset` and `ProductValue` types  
+**Depends on:** SPEC-001 (In-Memory Store) for `Changeset` and `ProductValue` types; SPEC-003 (Transaction Executor) for the `TxID` contract (TxID flows through record framing and `DurabilityHandle.EnqueueCommitted`); SPEC-006 (Schema Definition) for `SchemaRegistry` + `SchemaRegistry.Version()` consumed by snapshot schema compare and recovery  
 **Depended on by:** SPEC-003 (Transaction Executor) calls `DurabilityHandle`; recovery reconstructs state consumed by SPEC-001
 
 ---

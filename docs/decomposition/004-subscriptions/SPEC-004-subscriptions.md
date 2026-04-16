@@ -1,5 +1,11 @@
 # SPEC-004: Subscription Evaluator
 
+**Status:** Draft
+**Depends on:** SPEC-001 (`CommittedReadView`, `Changeset`, `ProductValue`, `Bound`), SPEC-003 (`TxID`, `ConnectionID`, `Identity`, `ReducerCallResult`), SPEC-005 (`ClientSender` / `FanOutSender` delivery surface, backpressure contract), SPEC-006 (`SchemaLookup`, `IndexResolver`)
+**Depended on by:** SPEC-003 (executor hands changesets to the evaluator post-commit), SPEC-005 (protocol layer consumes `FanOutMessage` / `SubscriptionUpdate` / `SubscriptionError` and registers subscriptions via the manager)
+
+---
+
 ## 1. Purpose
 
 The subscription evaluator answers one question after every committed transaction: **which clients care about this change, and what exactly changed in their view of the data?**

@@ -1,8 +1,8 @@
 # SPEC-006 — Schema Definition
 
 **Status:** Draft  
-**Depends on:** SPEC-001 (column types and `TableSchema`)  
-**Depended on by:** SPEC-001 (store uses `SchemaRegistry`), SPEC-002 (snapshot stores schema), SPEC-003 (executor registers reducers)
+**Depends on:** SPEC-001 (`ValueKind`, `TableSchema`, column type system), SPEC-002 (`SnapshotSchema` and `schema_version` comparison at recovery — see §6.1), SPEC-003 (`ReducerHandler`, `ReducerContext` canonical declarations in `types/reducer.go`; schema re-exports for builder ergonomics), SPEC-005 (`ConnectionID` consumed by the `sys_clients` system table definition)  
+**Depended on by:** SPEC-001 (store consumes `SchemaRegistry`), SPEC-002 (snapshot stores schema, compares `SchemaRegistry.Version()`), SPEC-003 (executor registers reducers / looks up handlers), SPEC-004 (`SchemaLookup`, `IndexResolver`), SPEC-005 (`SchemaLookup` for predicate validation + subscription registration)
 
 ---
 

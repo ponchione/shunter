@@ -1,7 +1,7 @@
 # SPEC-005 — Client Protocol
 
 **Status:** Draft  
-**Depends on:** SPEC-001 (row encoding), SPEC-002 (BSATN encoding), SPEC-003 (executor interfaces), SPEC-004 (subscription evaluator)  
+**Depends on:** SPEC-001 (`Identity`, `ConnectionID`, `TxID`, `CommittedReadView`, row encoding), SPEC-002 (BSATN encoding; `TxID(0)` sentinel reservation), SPEC-003 (`ExecutorCommand` set, `ReducerCallResult` metadata, `TxID` contract), SPEC-004 (`CommitFanout`, `FanOutMessage`, `SubscriptionUpdate`, `SubscriptionError`), SPEC-006 (`SchemaLookup`)  
 **Depended on by:** None (terminal spec)
 
 ---

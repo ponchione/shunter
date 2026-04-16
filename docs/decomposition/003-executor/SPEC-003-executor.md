@@ -1,8 +1,8 @@
 # SPEC-003 — Transaction Executor
 
 **Status:** Draft  
-**Depends on:** SPEC-001 (In-Memory Store), SPEC-004 (Subscription Evaluator), SPEC-006 (Schema Definition)  
-**Depended on by:** SPEC-002 (Commit Log), SPEC-005 (Client Protocol)
+**Depends on:** SPEC-001 (In-Memory Store), SPEC-002 (Commit Log — `DurabilityHandle` + `max_applied_tx_id` at recovery), SPEC-004 (Subscription Evaluator), SPEC-006 (Schema Definition)  
+**Depended on by:** SPEC-002 (Commit Log — consumes `TxID` contract declared here; bidirectional interface dep resolved via SPEC-002 declaring `DurabilityHandle` and SPEC-003 declaring `TxID`), SPEC-005 (Client Protocol)
 
 ---
 
