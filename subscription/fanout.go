@@ -39,9 +39,10 @@ type FanOutMessage struct {
 // for clients affected by a broken subscription. SPEC-005 owns wire encoding;
 // this package only carries the semantic content across the fan-out seam.
 type SubscriptionError struct {
-	QueryHash QueryHash
-	Predicate string
-	Message   string
+	SubscriptionID types.SubscriptionID
+	QueryHash      QueryHash
+	Predicate      string
+	Message        string
 }
 
 // ReducerCallResult is the caller-side response envelope used by fan-out

@@ -37,3 +37,11 @@ var (
 	// (corrupted index, type mismatch, etc.).
 	ErrSubscriptionEval = errors.New("subscription: evaluation failed")
 )
+
+// Delivery errors (Story 6.1 / 6.3).
+var (
+	// ErrSendBufferFull — client outbound buffer is full, client should be dropped.
+	ErrSendBufferFull = errors.New("subscription: client send buffer full")
+	// ErrSendConnGone — connection not found, client already disconnected.
+	ErrSendConnGone = errors.New("subscription: connection not found for delivery")
+)

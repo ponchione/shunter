@@ -80,13 +80,15 @@ func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.Conne
 	predRepr := fmt.Sprintf("%#v", qs.predicate)
 	wrapped := fmt.Errorf("%w: %v", ErrSubscriptionEval, err)
 	log.Printf("subscription: evaluation error for query %s predicate=%s: %v", qs.hash, predRepr, wrapped)
-	payload := SubscriptionError{
-		QueryHash: qs.hash,
-		Predicate: predRepr,
-		Message:   wrapped.Error(),
-	}
-	for connID := range qs.subscribers {
-		out[connID] = append(out[connID], payload)
+	for connID, subIDs := range qs.subscribers {
+		for subID := range subIDs {
+			out[connID] = append(out[connID], SubscriptionError{
+				SubscriptionID: subID,
+				QueryHash:      qs.hash,
+				Predicate:      predRepr,
+				Message:        wrapped.Error(),
+			})
+		}
 		m.signalDropped(connID)
 	}
 }
