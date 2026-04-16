@@ -11,7 +11,7 @@ func TestDeliverTransactionUpdateSingleConn(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	c.Subscriptions.Reserve(1)
 	c.Subscriptions.Activate(1)
@@ -55,7 +55,7 @@ func TestDeliverTransactionUpdateMultiConn(t *testing.T) {
 	mgr := NewConnManager()
 	mgr.Add(c1)
 	mgr.Add(c2)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	c1.Subscriptions.Reserve(1)
 	c1.Subscriptions.Activate(1)
@@ -86,7 +86,7 @@ func TestDeliverTransactionUpdateMultiConn(t *testing.T) {
 
 func TestDeliverTransactionUpdateSkipsDisconnected(t *testing.T) {
 	mgr := NewConnManager()
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
 		{99}: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
@@ -102,7 +102,7 @@ func TestDeliverTransactionUpdateSkipsEmptyUpdates(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
 		id: {},
@@ -115,6 +115,32 @@ func TestDeliverTransactionUpdateSkipsEmptyUpdates(t *testing.T) {
 	select {
 	case <-c.OutboundCh:
 		t.Fatal("empty update should not send a frame")
+	default:
+	}
+}
+
+func TestDeliverTransactionUpdateRejectsPendingSubscription(t *testing.T) {
+	c, id := testConn(false)
+	mgr := NewConnManager()
+	mgr.Add(c)
+	s := NewClientSender(mgr, &fakeInbox{})
+
+	c.Subscriptions.Reserve(1)
+
+	fanout := map[types.ConnectionID][]SubscriptionUpdate{
+		id: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
+	}
+
+	errs := DeliverTransactionUpdate(s, mgr, 7, fanout)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 invariant error, got %d", len(errs))
+	}
+	if !errors.Is(errs[0].Err, ErrSubscriptionNotActive) {
+		t.Fatalf("expected ErrSubscriptionNotActive, got %v", errs[0].Err)
+	}
+	select {
+	case <-c.OutboundCh:
+		t.Fatal("pending subscription update should not be delivered")
 	default:
 	}
 }
@@ -132,7 +158,7 @@ func TestDeliverTransactionUpdateBufferFull(t *testing.T) {
 	}
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	c.Subscriptions.Reserve(1)
 	c.Subscriptions.Activate(1)

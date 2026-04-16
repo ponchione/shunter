@@ -25,7 +25,7 @@ func TestSendEnqueuesFrame(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
 	if err := s.Send(id, msg); err != nil {
@@ -45,7 +45,7 @@ func TestSendWithCompressionWrapsEnvelope(t *testing.T) {
 	c, id := testConn(true)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
 	if err := s.Send(id, msg); err != nil {
@@ -60,7 +60,7 @@ func TestSendWithCompressionWrapsEnvelope(t *testing.T) {
 
 func TestSendConnNotFound(t *testing.T) {
 	mgr := NewConnManager()
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 	id := types.ConnectionID{99}
 	err := s.Send(id, SubscribeApplied{})
 	if !errors.Is(err, ErrConnNotFound) {
@@ -81,7 +81,7 @@ func TestSendBufferFull(t *testing.T) {
 	}
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	// Fill buffer.
 	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
@@ -98,7 +98,7 @@ func TestSendTransactionUpdateTyped(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	update := &TransactionUpdate{TxID: 42, Updates: []SubscriptionUpdate{
 		{SubscriptionID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
@@ -124,7 +124,7 @@ func TestSendReducerResultTyped(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	result := &ReducerCallResult{RequestID: 5, Status: 0, TxID: 99}
 	if err := s.SendReducerResult(id, result); err != nil {

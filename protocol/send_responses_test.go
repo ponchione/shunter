@@ -2,13 +2,34 @@ package protocol
 
 import (
 	"testing"
+
+	"github.com/ponchione/shunter/types"
 )
+
+type assertingSender struct {
+	sendFn func(any) error
+}
+
+func (s assertingSender) Send(_ types.ConnectionID, msg any) error {
+	if s.sendFn != nil {
+		return s.sendFn(msg)
+	}
+	return nil
+}
+
+func (s assertingSender) SendTransactionUpdate(_ types.ConnectionID, _ *TransactionUpdate) error {
+	return nil
+}
+
+func (s assertingSender) SendReducerResult(_ types.ConnectionID, _ *ReducerCallResult) error {
+	return nil
+}
 
 func TestSendSubscribeAppliedActivatesSubscription(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	c.Subscriptions.Reserve(10)
 
@@ -28,11 +49,33 @@ func TestSendSubscribeAppliedActivatesSubscription(t *testing.T) {
 	}
 }
 
+func TestSendSubscribeAppliedActivatesBeforeSend(t *testing.T) {
+	c, _ := testConn(false)
+	c.Subscriptions.Reserve(10)
+
+	sender := assertingSender{
+		sendFn: func(msg any) error {
+			if _, ok := msg.(SubscribeApplied); !ok {
+				t.Fatalf("expected SubscribeApplied, got %T", msg)
+			}
+			if !c.Subscriptions.IsActive(10) {
+				t.Fatal("subscription should be active before send")
+			}
+			return nil
+		},
+	}
+
+	msg := &SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	if err := SendSubscribeApplied(sender, c, msg); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSendSubscribeAppliedDiscardsAfterDisconnect(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	c.Subscriptions.Reserve(10)
 	c.Subscriptions.Remove(10)
@@ -53,7 +96,7 @@ func TestSendUnsubscribeAppliedRemovesSubscription(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	c.Subscriptions.Reserve(10)
 	c.Subscriptions.Activate(10)
@@ -72,7 +115,7 @@ func TestSendSubscriptionErrorReleasesID(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	c.Subscriptions.Reserve(10)
 
@@ -94,7 +137,7 @@ func TestSendOneOffQueryResult(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	msg := &OneOffQueryResult{RequestID: 7, Status: 0, Rows: []byte{0x01}}
 	if err := SendOneOffQueryResult(s, id, msg); err != nil {

@@ -13,7 +13,7 @@ func testConnDirect(opts *ProtocolOptions) *Conn {
 		ID:            GenerateConnectionID(),
 		Identity:      [32]byte{1},
 		Subscriptions: NewSubscriptionTracker(),
-		OutboundCh:    make(chan []byte, 16),
+		OutboundCh:    make(chan []byte, opts.OutgoingBufferMessages),
 		opts:          opts,
 		closed:        make(chan struct{}),
 	}

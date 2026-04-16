@@ -1,8 +1,11 @@
 package protocol
 
 import (
+	"context"
 	"errors"
 	"fmt"
+
+	"github.com/coder/websocket"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -32,13 +35,15 @@ type ClientSender interface {
 }
 
 // NewClientSender returns a ClientSender backed by mgr for connection
-// lookup and frame delivery.
-func NewClientSender(mgr *ConnManager) ClientSender {
-	return &connManagerSender{mgr: mgr}
+// lookup and frame delivery. The inbox is used to run the disconnect
+// teardown sequence when a connection's outbound buffer overflows.
+func NewClientSender(mgr *ConnManager, inbox ExecutorInbox) ClientSender {
+	return &connManagerSender{mgr: mgr, inbox: inbox}
 }
 
 type connManagerSender struct {
-	mgr *ConnManager
+	mgr   *ConnManager
+	inbox ExecutorInbox
 }
 
 func (s *connManagerSender) Send(connID types.ConnectionID, msg any) error {
@@ -72,6 +77,7 @@ func (s *connManagerSender) enqueue(connID types.ConnectionID, msg any) error {
 	case conn.OutboundCh <- wrapped:
 		return nil
 	default:
+		go conn.Disconnect(context.Background(), websocket.StatusPolicyViolation, "send buffer full", s.inbox, s.mgr)
 		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
 	}
 }

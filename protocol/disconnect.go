@@ -43,9 +43,11 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 		mgr.Remove(c.ID)
 		close(c.OutboundCh)
 		close(c.closed)
-		go func() {
-			_ = c.ws.Close(code, truncateCloseReason(reason))
-		}()
+		if c.ws != nil {
+			go func() {
+				_ = c.ws.Close(code, truncateCloseReason(reason))
+			}()
+		}
 	})
 }
 

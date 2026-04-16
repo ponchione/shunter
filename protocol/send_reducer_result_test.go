@@ -21,7 +21,7 @@ func TestDeliverReducerResultEmbedsDelta(t *testing.T) {
 	mgr := NewConnManager()
 	mgr.Add(caller)
 	mgr.Add(other)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	caller.Subscriptions.Reserve(1)
 	caller.Subscriptions.Activate(1)
@@ -76,7 +76,7 @@ func TestDeliverReducerResultFailedReducerEmptyUpdate(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	result := &ReducerCallResult{RequestID: 1, Status: 1, Error: "user error"}
 	errs := DeliverReducerCallResult(s, mgr, result, &id, nil)
@@ -102,7 +102,7 @@ func TestDeliverReducerResultNoCaller(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	c.Subscriptions.Reserve(1)
 	c.Subscriptions.Activate(1)
@@ -139,7 +139,7 @@ func TestDeliverReducerResultCallerDisconnected(t *testing.T) {
 	}
 	mgr := NewConnManager()
 	mgr.Add(other)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	other.Subscriptions.Reserve(2)
 	other.Subscriptions.Activate(2)
@@ -171,7 +171,7 @@ func TestDeliverReducerResultNotFoundStatus(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	result := &ReducerCallResult{RequestID: 1, Status: 3, TxID: 0, Error: "reducer not found"}
 	errs := DeliverReducerCallResult(s, mgr, result, &id, nil)
@@ -197,7 +197,7 @@ func TestDeliverReducerResultEnergyAlwaysZero(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
-	s := NewClientSender(mgr)
+	s := NewClientSender(mgr, &fakeInbox{})
 
 	// Set Energy to non-zero — delivery must force it to 0.
 	result := &ReducerCallResult{RequestID: 1, Status: 0, TxID: 10, Energy: 999}
