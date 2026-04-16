@@ -22,7 +22,7 @@ import (
 //     teardown (disconnect cannot be vetoed — SPEC-003 §10.4).
 //  3. ConnManager.Remove — drop the ConnectionID pointer so no
 //     further fan-out resolution finds this connection.
-//  4. close(c.closed) — signals runReadPump, runKeepalive, and the
+//  4. close(c.closed) — signals runDispatchLoop, runKeepalive, and the
 //     Epic 4 write loop to exit. OutboundCh is closed alongside so
 //     any writer goroutine blocked on a send unblocks cleanly.
 //  5. c.ws.Close — drives the WebSocket Close handshake. Fired in a
@@ -32,7 +32,7 @@ import (
 //
 // DisconnectClientSubscriptions and OnDisconnect are dispatched with
 // the caller's ctx so engine shutdown can bound the teardown window.
-func (c *Conn) Disconnect(ctx context.Context, inbox ExecutorInbox, mgr *ConnManager) {
+func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason string, inbox ExecutorInbox, mgr *ConnManager) {
 	c.closeOnce.Do(func() {
 		if err := inbox.DisconnectClientSubscriptions(ctx, c.ID); err != nil {
 			log.Printf("protocol: DisconnectClientSubscriptions for %x failed: %v", c.ID[:], err)
@@ -44,12 +44,12 @@ func (c *Conn) Disconnect(ctx context.Context, inbox ExecutorInbox, mgr *ConnMan
 		close(c.OutboundCh)
 		close(c.closed)
 		go func() {
-			_ = c.ws.Close(websocket.StatusNormalClosure, "")
+			_ = c.ws.Close(code, truncateCloseReason(reason))
 		}()
 	})
 }
 
-// superviseLifecycle watches runReadPump + runKeepalive and invokes
+// superviseLifecycle watches runDispatchLoop + runKeepalive and invokes
 // Disconnect exactly once when the first of them exits. Used by the
 // default Upgraded handler (HandleSubscribe) to convert a goroutine
 // exit into the full SPEC-005 §5.3 teardown.
@@ -70,7 +70,7 @@ func (c *Conn) superviseLifecycle(
 	case <-dispatchDone:
 	case <-keepaliveDone:
 	}
-	c.Disconnect(ctx, inbox, mgr)
+	c.Disconnect(ctx, websocket.StatusNormalClosure, "", inbox, mgr)
 	<-dispatchDone
 	<-keepaliveDone
 }

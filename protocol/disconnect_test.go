@@ -18,7 +18,7 @@ func TestDisconnectHappyPath(t *testing.T) {
 	defer cleanup()
 	mgr.Add(c)
 
-	c.Disconnect(context.Background(), inbox, mgr)
+	c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
 
 	onDis, onSubs, events := inbox.disconnectSnapshot()
 	if onSubs != 1 {
@@ -71,7 +71,7 @@ func TestDisconnectOnDisconnectErrorDoesNotVetoTeardown(t *testing.T) {
 	defer cleanup()
 	mgr.Add(c)
 
-	c.Disconnect(context.Background(), inbox, mgr)
+	c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
 
 	// Even when OnDisconnect errored, every other step must run.
 	onDis, onSubs, _ := inbox.disconnectSnapshot()
@@ -95,9 +95,9 @@ func TestDisconnectIdempotent(t *testing.T) {
 	defer cleanup()
 	mgr.Add(c)
 
-	c.Disconnect(context.Background(), inbox, mgr)
-	c.Disconnect(context.Background(), inbox, mgr)
-	c.Disconnect(context.Background(), inbox, mgr)
+	c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
+	c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
+	c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
 
 	onDis, onSubs, _ := inbox.disconnectSnapshot()
 	if onDis != 1 {
@@ -117,7 +117,7 @@ func TestDisconnectSubscriptionsErrorLoggedNotFatal(t *testing.T) {
 	defer cleanup()
 	mgr.Add(c)
 
-	c.Disconnect(context.Background(), inbox, mgr)
+	c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
 
 	// Subs error must NOT veto OnDisconnect or the rest of teardown.
 	onDis, onSubs, _ := inbox.disconnectSnapshot()
@@ -141,10 +141,8 @@ func TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit(t *testing.T) {
 
 	// Start the two background goroutines the default Upgraded path
 	// normally spawns, wrapped with supervisor-style done channels.
-	pumpDone := make(chan struct{})
-	kaDone := make(chan struct{})
-	go func() { c.runReadPump(context.Background()); close(pumpDone) }()
-	go func() { c.runKeepalive(context.Background()); close(kaDone) }()
+	pumpDone := runDispatchAsync(c, context.Background(), &MessageHandlers{})
+	kaDone := runKeepaliveAsync(c, context.Background())
 
 	supervised := make(chan struct{})
 	go func() {
@@ -188,7 +186,7 @@ func TestDisconnectPassesConnIDAndIdentity(t *testing.T) {
 	c.Identity = types.Identity{0xDE, 0xAD, 0xBE, 0xEF}
 
 	mgr.Add(c)
-	c.Disconnect(context.Background(), inbox, mgr)
+	c.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
 
 	// Not directly observable via disconnectSnapshot; re-inspect the
 	// fake's internal fields via a lock + copy.
