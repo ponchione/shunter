@@ -31,6 +31,8 @@ This spec does not cover:
 // ConnectionID is a 16-byte opaque identifier for one WebSocket connection.
 // Clients may supply it on connect; the server generates one if absent.
 // All-zeros is rejected.
+// Declared in types/types.go (SPEC-001 §1.1); helpers live in types/connection_id.go.
+// SPEC-005 consumes the declaration and does not redeclare the type.
 type ConnectionID [16]byte
 ```
 
@@ -147,7 +149,7 @@ Shunter validates client identity via a JWT. The JWT must be signed with a key r
 | `iat` | number | Issued-at timestamp |
 | `hex_identity` | string | Optional redundant identity claim. If present, it MUST match the identity recomputed from `iss` and `sub`. |
 
-`Identity` is a protocol-level 32-byte opaque identifier. Its exact derivation and canonical string form MUST be defined in the shared identity type spec used by the engine and protocol layers. For v1, the only required semantic property is: the same `(iss, sub)` pair always maps to the same `Identity` across reconnections.
+`Identity` is declared in `types/types.go` as `[32]byte` — SPEC-001 §2.4 owns the contract, and `types/identity.go` carries the derivation helpers (`DeriveIdentity`, `Hex`, `ParseIdentityHex`, `IsZero`). SPEC-005 does not redeclare the type. The required semantic property at the protocol layer is unchanged: the same `(iss, sub)` pair always maps to the same `Identity` across reconnections.
 
 ### 4.2 Token Generation
 
@@ -656,7 +658,7 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 
 3. **Subscription for all rows (no predicate) vs table watch.** A subscription with no predicates returns all table rows. For large tables this may be expensive. Should there be an explicit `WatchTable` message, or is the no-predicate Subscribe sufficient? No distinction needed in v1 — document the performance implication clearly.
 
-4. **Identity type spec ownership.** The protocol relies on a shared `Identity` type but this spec does not define its canonical derivation or string form. Should that live in a dedicated shared type spec or be added to SPEC-001/another foundational spec?
+4. **Identity type spec ownership.** *Closed.* `Identity` is declared in `types/types.go` (SPEC-001 §2.4 owns the contract); derivation helpers (`DeriveIdentity`, `Hex`, `ParseIdentityHex`, `IsZero`) live in `types/identity.go`. SPEC-005 consumes the declaration and does not redeclare the type.
 
 5. **Anonymous token policy defaults.** If anonymous minting mode is enabled, what are the default issuer, audience, and expiry settings? This spec requires them to be configured/documented but does not prescribe defaults.
 

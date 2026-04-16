@@ -21,6 +21,10 @@ This spec does not cover:
 - Reducer execution lifecycle (covered by SPEC-003)
 - Subscription evaluation (covered by SPEC-004)
 
+### 1.1 Canonical Go-package homes
+
+The cross-spec engine identifier types — `RowID`, `Identity`, `ConnectionID`, `ColID`, `TxID`, `SubscriptionID` — are declared in the `types/` Go package (`types/types.go`), which is the single authoritative home. SPEC-001 §2 defines contract semantics; SPEC-003 owns the `TxID` contract (§6 of SPEC-003). Other specs that reference these types do not redeclare them.
+
 ---
 
 ## 2. Type System
@@ -130,10 +134,10 @@ Within a transaction, newly inserted rows receive a provisional `RowID` immediat
 ### 2.4 Identity
 
 ```go
-type Identity [32]byte
+type Identity [32]byte // declared in types/types.go
 ```
 
-`Identity` is the 32-byte canonical client identifier. It is derived from `(issuer, subject)` JWT claims at authentication time. The derivation algorithm is outside the scope of v1 specs; the only required property is that the same `(iss, sub)` pair always produces the same `Identity`.
+`Identity` is the 32-byte canonical client identifier. It is derived from `(issuer, subject)` JWT claims at authentication time. The derivation algorithm is outside the scope of v1 specs; the only required property is that the same `(iss, sub)` pair always produces the same `Identity`. Derivation helpers (`DeriveIdentity`, `Hex`, `ParseIdentityHex`, `IsZero`) live alongside the type in `types/identity.go`. Other specs (notably SPEC-005) reference this declaration rather than redeclaring the type.
 
 ---
 

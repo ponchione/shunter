@@ -153,6 +153,8 @@ This resolves the atomicity requirement from SPEC-004: registration-sensitive re
 
 ### 3.1 Runtime Reducer Signature
 
+**Go-package home.** `ReducerHandler`, `ReducerContext`, `CallerContext`, and the reducer-facing interfaces (`ReducerDB`, `ReducerScheduler`) are declared in `types/reducer.go`. SPEC-003 owns the contract; `types/` is the canonical symbol home. SPEC-006 re-exports these for ergonomic builder/registration call sites (see SPEC-006 §1 footnote); the canonical declaration is not in `schema/`. Identifier types shared with SPEC-001 (`Identity`, `ConnectionID`, `TxID`, `ScheduleID`, `SubscriptionID`) live in `types/types.go` — see SPEC-001 §1.1.
+
 The executor invokes reducers through a raw runtime signature:
 
 ```go

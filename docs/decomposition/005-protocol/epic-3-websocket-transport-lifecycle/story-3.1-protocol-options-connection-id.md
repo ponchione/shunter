@@ -13,10 +13,9 @@ Configuration struct for tunable protocol parameters and the ConnectionID type.
 
 ## Deliverables
 
-- `ConnectionID` type:
-  ```go
-  type ConnectionID [16]byte
-  ```
+The `ConnectionID` type itself is declared in `types/types.go` (SPEC-001 §1.1). This story owns the protocol-layer helpers that live alongside it in `types/connection_id.go`:
+
+- `type ConnectionID [16]byte` — canonical declaration in `types/types.go`; imported here, not redeclared
 
 - `func (c ConnectionID) IsZero() bool` — all bytes zero
 

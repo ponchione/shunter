@@ -30,6 +30,10 @@ This spec does not cover:
 - Commit log snapshot schema storage (SPEC-002)
 - Executor internals (SPEC-003)
 
+### 1.1 Go-package homes
+
+Cross-spec engine identifier types (`RowID`, `Identity`, `ConnectionID`, `TxID`, `ColID`, `SubscriptionID`, `ScheduleID`) and the reducer runtime types (`ReducerHandler`, `ReducerContext`, `CallerContext`, `ReducerDB`, `ReducerScheduler`) are declared in the `types/` Go package — see SPEC-001 §1.1 and SPEC-003 §3.1. The `schema/` package re-exports `ReducerHandler`, `ReducerContext`, and `ValueKind` for ergonomic builder / registration call sites; those re-exports are not new declarations. If a future typed reducer layer (SPEC-006 §4.3) lands, it must reserve the sentinel name `ErrReducerArgsDecode` in §13 and live in `schema/` — but it, too, operates on the `types/`-declared handler signature.
+
 ---
 
 ## 2. Go Type Mapping

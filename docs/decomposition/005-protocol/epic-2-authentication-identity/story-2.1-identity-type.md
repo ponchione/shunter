@@ -1,22 +1,19 @@
-# Story 2.1: Identity Type & Derivation
+# Story 2.1: Identity Derivation & Canonical String Form
 
 **Epic:** [Epic 2 — Authentication & Identity](EPIC.md)
-**Spec ref:** SPEC-005 §4.1
-**Depends on:** Nothing
+**Spec ref:** SPEC-005 §4.1; canonical `Identity` type declaration in SPEC-001 §2.4 (`types/types.go`)
+**Depends on:** SPEC-001 Story 1.6 (named ID types — provides `Identity`)
 **Blocks:** Stories 2.2, 2.3
 
 ---
 
 ## Summary
 
-`Identity` is a 32-byte opaque identifier for a client. Derived deterministically from `(iss, sub)` JWT claims. Same pair always maps to same Identity.
+`Identity` is the engine-wide 32-byte opaque client identifier. The type itself is declared in `types/types.go` (SPEC-001 §2.4). This story owns the derivation-and-string-form helpers consumed by the protocol layer; it does **not** redeclare the type.
 
 ## Deliverables
 
-- `Identity` type:
-  ```go
-  type Identity [32]byte
-  ```
+Helpers declared in `types/identity.go`, operating on the `types.Identity` declared by SPEC-001:
 
 - `func DeriveIdentity(issuer, subject string) Identity` — deterministic derivation. The same `(iss, sub)` pair always produces the same 32-byte Identity.
 
@@ -41,5 +38,5 @@
 ## Design Notes
 
 - Derivation must include a separator or length-prefix between issuer and subject to prevent `("a", "bc")` colliding with `("ab", "c")`. A simple approach: `SHA-256(len(issuer) || issuer || subject)` where `len` is encoded as a fixed-width integer.
-- The spec notes: "Its exact derivation and canonical string form MUST be defined in the shared identity type spec." For now, this is the definition. If a shared identity spec is written later, this type moves there and the protocol layer imports it.
+- The type itself lives in `types/types.go` (SPEC-001 §2.4). This story only defines the derivation and canonical-string helpers alongside it in `types/identity.go`. SPEC-005 §15 OQ#4 closes on that split.
 - Zero Identity is not explicitly rejected by the spec (unlike zero ConnectionID), but `IsZero()` is useful for defensive checks.

@@ -13,9 +13,13 @@ Simple named types for type safety in function signatures.
 
 ## Deliverables
 
+All declared in the canonical `types/` Go package (`types/types.go`), not in a store-local file. SPEC-001 owns the contract; `types/` owns the symbol:
+
 - `type RowID uint64` — row identifier within a table
-- `type Identity [32]byte` — canonical client identifier
+- `type Identity [32]byte` — canonical client identifier (helpers in `types/identity.go`)
 - `type ColID int` — zero-based column index
+
+Related engine-wide identifier types (`ConnectionID`, `TxID`, `SubscriptionID`) also live in `types/types.go` but are introduced by SPEC-003 / SPEC-005 and are not the subject of this story. Stories in other specs that reference those types must not re-declare them.
 
 ## Acceptance Criteria
 

@@ -11,6 +11,8 @@
 
 Type definitions for the reducer runtime: handler signature, registration struct, call request/response, and execution context.
 
+**Go-package home.** All types in this story live in the `types/` package (`types/reducer.go`) — the canonical symbol home (SPEC-003 §3.1). SPEC-006 re-exports `ReducerHandler` / `ReducerContext` for ergonomic builder call sites; it does not redeclare them. `Identity`, `ConnectionID`, and `TxID` are imported from `types/types.go` (SPEC-001 §1.1, §2.4), never re-declared here.
+
 ## Deliverables
 
 - ```go
@@ -73,4 +75,4 @@ Type definitions for the reducer runtime: handler signature, registration struct
 
 - ReducerContext is valid only during synchronous reducer invocation. Enforcement is by contract, not runtime check.
 - CallerContext.Timestamp is set by the executor at dequeue time (Epic 4), not by the caller. Caller-supplied timestamps are ignored.
-- Identity and ConnectionID types come from SPEC-001. If those aren't implemented yet, use placeholder type aliases.
+- `Identity` and `ConnectionID` are declared in `types/types.go` (SPEC-001 §2.4, §1.1). This story imports them; no placeholder aliases are needed once Story 1.6 of SPEC-001 has landed.
