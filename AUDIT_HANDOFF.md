@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E4`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 4 (cluster C — BSATN + per-column trailer).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 5 (Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -137,11 +137,11 @@ Untangle error-home and type-home bleeds.
 - **B4 Canonical types-package home** — SPEC-005 §1.3 (Identity re-declared), SPEC-006 §8 drift (`ReducerHandler`/`ReducerContext` re-exported via `schema/types.go`). **Resolved:** `types/` is the canonical Go-package home for `RowID`/`Identity`/`ConnectionID`/`TxID`/`ColID`/`SubscriptionID`/`ScheduleID` (SPEC-001 §1.1, §2.4) and `ReducerHandler`/`ReducerContext`/`CallerContext`/`ReducerDB`/`ReducerScheduler` (SPEC-003 §3.1). `schema/` re-exports for builder ergonomics (SPEC-006 §1.1). SPEC-005 §15 OQ#4 closed; Story 2.1 retitled; Story 3.1 imports `ConnectionID` from `types/`.
 - **B5 Front-matter dependency completeness** — SPEC-001 §4.1, SPEC-002 §2.5, SPEC-003 §4.1, SPEC-004 §2.14, SPEC-005 §4.2, SPEC-006 §2.13. **Resolved:** each spec's `Depends on:` / `Depended on by:` lines now list every spec referenced in its body or stories. SPEC-004 gained the missing front-matter block outright.
 
-#### Cluster C — BSATN naming + per-column trailer (Session 4)
+#### Cluster C — BSATN naming + per-column trailer (closed Session 4)
 SPEC-002 encoding edits drag SPEC-005/006 along.
 
-- **C1 BSATN naming disclaimer** — SPEC-002 §3.1, SPEC-002 §6.1, SPEC-003 §6 (clean-room note), SPEC-004 §6 (caveat), SPEC-005 §4.1, SPEC-005 §6.1, SPEC-006 §2.9. Land disclaimer once in SPEC-002 §3.1 and propagate as one-liner cross-refs in the others.
-- **C2 `Nullable` / `AutoIncrement` per-column trailer** — SPEC-002 §2.3, SPEC-001 §4.6 (Nullable decorative), SPEC-006 §2.1 (ColumnSchema inconsistency), SPEC-006 §2.2 (Nullable v1 policy), SPEC-006 §8 drift (`schema/types.go:47` AutoIncrement). Decide trailer = match live (3-byte form) or strip; reflect in SPEC-002 §5.3 layout, SPEC-006 §8 ColumnSchema, Story 1.1.
+- **C1 BSATN naming disclaimer** — SPEC-002 §3.1, SPEC-002 §6.1, SPEC-003 §6 (clean-room note), SPEC-004 §6 (caveat), SPEC-005 §4.1, SPEC-005 §6.1, SPEC-006 §2.9. **Resolved:** canonical disclaimer paragraph landed in SPEC-002 §3.1 as `BSATN naming disclaimer (canonical)`; §3.3 Canonical reference callout notes the name is non-standard with a back-reference. Cross-refs added at SPEC-003 §3.1 (under the `argBSATN` reducer signature), SPEC-004 §6 (row-payload note at the head of Delta Computation), SPEC-005 §3.1 (naming callout beneath the existing BSATN section), and SPEC-006 §1.2 (new "Wire encoding terminology" subsection). SPEC-003/004 have no dedicated clean-room sidebar at §6; the cross-refs land at the most natural encoding site in each.
+- **C2 `Nullable` / `AutoIncrement` per-column trailer** — SPEC-002 §2.3, SPEC-001 §4.6 (Nullable decorative), SPEC-006 §2.1 (ColumnSchema inconsistency), SPEC-006 §2.2 (Nullable v1 policy), SPEC-006 §8 drift (`schema/types.go:47` AutoIncrement). **Resolved (Option A — match live 3-byte trailer):** SPEC-002 §5.3 and Story 5.1 (schema snapshot codec) pin the per-column trailer at `(type_tag, nullable, auto_increment)`, all three bytes, matching `commitlog/snapshot_io.go:87`. SPEC-002 §6.1 step 4b and Story 6.2 (snapshot selection) add `Nullable` + `AutoIncrement` to the schema-equality check and reject snapshots with `nullable = 1`. SPEC-006 §8 `ColumnSchema` grows `AutoIncrement bool`; §9 column-level validation pins the v1 Nullable rule with `ErrNullableColumn`; §13 adds the `ErrNullableColumn` sentinel; Story 5.1 (validation rules) adds the acceptance. SPEC-001 §3.1 `ColumnSchema` aligns with SPEC-006 (five fields; cross-ref for canonical); Story 2.1 ColumnSchema block + acceptance updated. Option B (strip trailer / external SequenceSchema) explicitly not chosen — would require tearing out shipped schema format.
 
 #### Cluster D — Lifecycle reducer / OnConnect / OnDisconnect / init (Session 5 — newly identified)
 Cross-spec lifecycle model has three+ open seams.
@@ -197,7 +197,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §4.3 | NIT | `ColID` exists but schema uses raw `int` | schema sections | open |
 | §4.4 | NIT | Performance section title vs open-question framing | §perf | open |
 | §4.5 | NIT | Story 1.1 zero-initialized Value status | Story 1.1 | open |
-| §4.6 | NIT | `Nullable` decorative but not marked | — | in-cluster C2 |
+| §4.6 | NIT | `Nullable` decorative but not marked | — | closed (C2) |
 | §4.7 | NIT | Primary IndexID=0 rule ambiguous for no-PK tables | §index section | open |
 | §4.8 | NIT | Epic 7 blocks "Nothing" but other specs consume it | EPICS.md | open |
 | §4.9 | NIT | §11 executor contract restates `(cs).Snapshot()` outside Epic-7 | §11 | open |
@@ -215,7 +215,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §1.4 | CRIT | Recovery sequence-advance step undefined | Story 6.4 (or SPEC-001 Story 8.2) | open |
 | §2.1 | GAP | `ErrSnapshotInProgress` omitted from §9 catalog | §9 | open |
 | §2.2 | GAP | `ErrTruncatedRecord` omitted from §9 / §2.3 / §6.4 | §9, §2.3, §6.4 | open |
-| §2.3 | GAP | Schema snapshot §5.3 lacks per-column `Nullable`/`AutoIncrement` | — | in-cluster C2 |
+| §2.3 | GAP | Schema snapshot §5.3 lacks per-column `Nullable`/`AutoIncrement` | — | closed (C2) |
 | §2.4 | GAP | `row_count` width spec `uint64` vs Story+impl `uint32` | §5.3, Story 5.2 | open |
 | §2.5 | GAP | Front matter omits SPEC-003 / SPEC-006 deps | — | closed (B5) |
 | §2.6 | GAP | Snapshot→CommittedState restore API not named | SPEC-001 Story 8.3/8.4, Story 6.4 | open |
@@ -226,7 +226,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.11 | GAP | No story owns "schema is static for data-dir lifetime" invariant | new write-path story | open |
 | §2.12 | GAP | Snapshot retention deferred but no story owns | new story | open |
 | §2.13 | GAP | Graceful-shutdown snapshot orchestration unowned | new story | open |
-| §3.1 | DIVERGE | "BSATN" name imported but encoding is rewrite | — | in-cluster C1 |
+| §3.1 | DIVERGE | "BSATN" name imported but encoding is rewrite | — | closed (C1) |
 | §3.2 | DIVERGE | No offset index file; recovery linear-scan | divergence block | open |
 | §3.3 | DIVERGE | Single TX per record vs 1–65535-TX commits | divergence block | open |
 | §3.4 | DIVERGE | Replay strictness — `ApplyChangeset` errors fatal | divergence block | open |
@@ -367,7 +367,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §3.9 | DIVERGE | `ReducerCallResult.status` enum maps neither way | — | in-cluster E4 |
 | §3.10 | DIVERGE | No `OutOfEnergy` / `Energy` | divergence block | open |
 | §3.11 | DIVERGE | ConnectionId reuse on reconnect no server-side meaning | divergence block | open |
-| §4.1 | NIT | BSATN naming disclaimer missing | — | in-cluster C1 |
+| §4.1 | NIT | BSATN naming disclaimer missing | — | closed (C1) |
 | §4.2 | NIT | "Depends on:" front matter underclaims | — | closed (B5) |
 | §4.3 | NIT | §9.1 names "pending removal" state Story 3.3 doesn't model | Story 3.3 / §9.1 | open |
 | §4.4 | NIT | §15 OQ #4 resolvable; should close | §15 | closed (B4) |
@@ -395,15 +395,15 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §1.3 | CRIT | `ErrReducerArgsDecode` typed-adapter sentinel unowned | — | closed (B1) |
 | §1.4 | CRIT | Reducer registration / freeze lifecycle unspecified | — | closed (A4) |
 | §1.5 | CRIT | `SchemaRegistry.Version()` semantics undefined | — | closed (A3) |
-| §2.1 | GAP | `ColumnSchema` inconsistent spec §8 vs live | — | in-cluster C2 |
-| §2.2 | GAP | `Nullable` preemptive-only but §9/§13 silent | — | in-cluster C2 |
+| §2.1 | GAP | `ColumnSchema` inconsistent spec §8 vs live | — | closed (C2) |
+| §2.2 | GAP | `Nullable` preemptive-only but §9/§13 silent | — | closed (C2) |
 | §2.3 | GAP | Reducer-arg schema unreachable from `ReducerExport` | §8 / Story 6.x | open |
 | §2.4 | GAP | `init` lifecycle not declared/deferred | — | in-cluster D1 |
 | §2.5 | GAP | `ErrReservedReducerName`/nil-handler/dup-lifecycle no sentinel | §13 | open |
 | §2.6 | GAP | `ErrColumnNotFound` defined three times | — | closed (B2) |
 | §2.7 | GAP | No "v1 simplifications vs SpacetimeDB" block | divergence block | open |
 | §2.8 | GAP | `ScheduleID` width divergence | divergence block | open |
-| §2.9 | GAP | BSATN naming disclaimer not propagated | — | in-cluster C1 |
+| §2.9 | GAP | BSATN naming disclaimer not propagated | — | closed (C1) |
 | §2.10 | GAP | `Engine.Start(ctx)` contract vs live stub | §5, Story x | open (overlaps A4) |
 | §2.11 | GAP | Multi-column PK enforcement implicit | §x | open |
 | §2.12 | GAP | Named composite index uniqueness check not on builder path | Story x | open |
@@ -438,7 +438,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 | 1 | This tracking doc (current) | full SPEC-AUDIT.md headings | tracking doc committed |
 | 2 | Cluster A — schema contracts (`SchemaLookup`, `IndexResolver`, `Version()`, freeze) | SPEC-006 §1.1–1.5; SPEC-002 §2.7; SPEC-003 §5.5; SPEC-004 §2.7/§2.14; SPEC-005 §4.2 | **(closed)** SPEC-006 §7 + §5 + §6.1 carry the four declarations; cross-refs added in SPEC-002/003/004/005 |
 | 3 | Cluster B — error sentinels + types canonicalization + Commit/TxID | SPEC-006 §1.3/§2.6; SPEC-001 §1.3/§2.3/§4.1/§4.2; SPEC-002 §1.2/§2.5/§4.2; SPEC-003 §1.1/§2.3/§4.1/§4.7; SPEC-005 §1.3/§2.2/§4.2; SPEC-004 §2.14 | **(closed)** Model A pinned (executor allocates TxID, stamps `changeset.TxID`); `ErrReducerArgsDecode` deferred to SPEC-006; `ErrColumnNotFound` canonicalized in SPEC-006 §13; `types/` named as canonical Go-package home; front-matter deps completed across all six specs |
-| 4 | Cluster C — BSATN disclaimer + per-column trailer | SPEC-002 §2.3/§3.1/§6.1; SPEC-001 §4.6; SPEC-005 §4.1/§6.1; SPEC-006 §2.1/§2.2/§2.9; SPEC-003/004 clean-room caveats | Disclaimer in SPEC-002 §3.1 + cross-refs; ColumnSchema trailer policy decided |
+| 4 | Cluster C — BSATN disclaimer + per-column trailer | SPEC-002 §2.3/§3.1/§6.1; SPEC-001 §4.6; SPEC-005 §4.1/§6.1; SPEC-006 §2.1/§2.2/§2.9; SPEC-003/004 clean-room caveats | **(closed)** SPEC-002 §3.1 carries canonical disclaimer; cross-refs in SPEC-003 §3.1 / SPEC-004 §6 / SPEC-005 §3.1 / SPEC-006 §1.2. Per-column trailer pinned at `(type_tag, nullable, auto_increment)` (Option A — match live); SPEC-006 §8 ColumnSchema gets `AutoIncrement`; `ErrNullableColumn` landed in §13 + Story 5.1 acceptance. |
 | 5 | Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init | SPEC-003 §1.5/§2.1/§2.6/§3.5; SPEC-005 §4.7; SPEC-006 §2.4/§3.2 | `init` adopt-or-defer landed; OnConnect/Disconnect command identity unified |
 | 6 | Cluster E — post-commit fan-out shapes (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, ClientSender, DurabilityHandle, eval-error vs fatal) | SPEC-002 §2.9; SPEC-003 §1.3/§3.4/§5.4; SPEC-004 §1.1/§1.3/§1.4/§2.3/§2.4/§2.5/§2.6/§2.12/§3.5/§4.1/§4.2; SPEC-005 §1.1/§1.2/§1.5/§1.6/§2.4/§3.9/§5.2 | Five type shapes pinned in §10 (SPEC-004) and §13 (SPEC-005); post-commit fatal-vs-recoverable resolved |
 | 7 | SPEC-001 residue cleanup | SPEC-001 §1.1/1.2/1.4/1.5, §2.1/2.2/2.4–2.9, §3.x, §4.3–4.5/4.7–4.9, §5.2–5.4 | All "open" SPEC-001 rows resolved or explicitly deferred |
@@ -495,4 +495,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 4 (Cluster C — BSATN naming disclaimer + per-column `Nullable`/`AutoIncrement` trailer).
+Cursor: Session 5 (Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init).

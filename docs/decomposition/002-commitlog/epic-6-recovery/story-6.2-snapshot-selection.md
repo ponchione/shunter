@@ -23,7 +23,8 @@ Pick the best usable snapshot for recovery. Fall back through older snapshots on
      b. If read fails → log warning, try next
      c. Compare snapshot schema to registered schema:
         - Schema version match (`SchemaRegistry.Version()`)
-        - All table IDs, names, column definitions (index, name, type), and index definitions (name, columns, unique, primary) must match exactly
+        - All table IDs, names, column definitions (`Index`, `Name`, `Type`, `Nullable`, `AutoIncrement` — all five fields of `ColumnSchema`, see SPEC-006 §8), and index definitions (name, columns, unique, primary) must match exactly
+        - Any column with `Nullable == true` in the snapshot is also rejected under the v1 policy (SPEC-002 §5.3, SPEC-006 §9)
         - Mismatch → `ErrSchemaMismatch` with details
      d. If schema matches → return this snapshot
   4. No usable snapshot found:
@@ -38,6 +39,9 @@ Pick the best usable snapshot for recovery. Fall back through older snapshots on
 - [ ] All snapshots corrupt + log starts at tx > 1 → `ErrMissingBaseSnapshot`
 - [ ] Snapshot tx_id > durableHorizon → skipped
 - [ ] Schema mismatch (different column type) → `ErrSchemaMismatch` with detail
+- [ ] Schema mismatch (different column `Nullable` flag) → `ErrSchemaMismatch` with detail
+- [ ] Schema mismatch (different column `AutoIncrement` flag) → `ErrSchemaMismatch` with detail
+- [ ] Snapshot column with `Nullable == true` → `ErrSchemaMismatch` (v1 rejection policy)
 - [ ] Schema mismatch (missing table) → `ErrSchemaMismatch` with detail
 - [ ] Schema mismatch (extra index) → `ErrSchemaMismatch` with detail
 - [ ] .lock snapshot → already skipped by ListSnapshots

@@ -26,13 +26,14 @@ Define the metadata that describes a table's shape.
   }
   ```
 
-- `ColumnSchema` struct:
+- `ColumnSchema` struct (canonical shape declared in SPEC-006 §8; kept aligned here):
   ```go
   type ColumnSchema struct {
-      Index    int        // position in Columns slice
-      Name     string
-      Type     ValueKind
-      Nullable bool       // always false in v1
+      Index         int        // position in Columns slice
+      Name          string
+      Type          ValueKind
+      Nullable      bool       // reserved; MUST be false in v1 (SPEC-006 §9 ErrNullableColumn)
+      AutoIncrement bool       // per-column auto-increment flag; integer type + PrimaryKey/Unique enforced by SPEC-006 §9
   }
   ```
 
@@ -66,6 +67,8 @@ Define the metadata that describes a table's shape.
 - [ ] Duplicate column names → validation error
 - [ ] Duplicate index names → validation error
 - [ ] Non-contiguous or mismatched `ColumnSchema.Index` values → validation error
+- [ ] `ColumnSchema.Nullable = true` rejected at schema build time (delegated to SPEC-006 §9 / `ErrNullableColumn` for the full enforcement path; SPEC-001 stores the flag but does not independently coerce it)
+- [ ] `ColumnSchema.AutoIncrement` round-trips through TableSchema without being stripped
 - [ ] TableID and IndexID usable as map keys
 - [ ] Table with primary index assigns `IndexID(0)` to that primary index
 - [ ] Table with additional indexes assigns subsequent `IndexID` values in declaration order

@@ -358,13 +358,20 @@ table_count    : uint32 LE
     name       : [name_len]byte
     col_count  : uint32 LE
     [ for each column:
-        col_idx  : uint32 LE
-        name_len : uint32 LE
-        name     : [name_len]byte
-        type_tag : uint8          — ValueKind
+        col_idx        : uint32 LE
+        name_len       : uint32 LE
+        name           : [name_len]byte
+        type_tag       : uint8       — ValueKind
+        nullable       : uint8       — 0 or 1; reserved, MUST be 0 in v1
+        auto_increment : uint8       — 0 or 1
     ]
     // Decoder note: col_idx is stored as uint32 but decoded as int for ColumnSchema.Index.
     // Values exceeding math.MaxInt32 are a hard recovery error.
+    // v1 Nullable policy: `nullable` is stored for forward compatibility; v1 writers
+    // MUST emit 0, and v1 readers MUST reject any snapshot where a column has
+    // `nullable = 1` (see SPEC-006 §2.2 / §9 — `ErrNullableColumn` in SPEC-006 §13).
+    // The three trailing bytes (type_tag, nullable, auto_increment) match the live
+    // encoder at `commitlog/snapshot_io.go`.
     idx_count  : uint32 LE
     [ for each index:
         idx_name_len : uint32 LE
@@ -439,7 +446,7 @@ func OpenAndRecover(dir string, schema SchemaRegistry) (*CommittedState, TxID, e
 3. **Scan snapshot directory.** List snapshot subdirectories sorted by TX ID descending. Skip any with a `.lock` file. Only snapshots with `tx_id <= durable_horizon` are candidates.
 4. **Load snapshot** (if found):
    a. Read snapshot file and verify Blake3 hash
-   b. Compare embedded schema to `SchemaRegistry` (SPEC-006 §7) exactly: schema version (from `SchemaRegistry.Version()` — semantics pinned in SPEC-006 §6.1; the snapshot header integer is authoritative when header and body disagree), all table IDs, table names, column indices/names/types in declaration order, and index definitions (names, column references, Unique, Primary). If any field differs, return `ErrSchemaMismatch`.
+   b. Compare embedded schema to `SchemaRegistry` (SPEC-006 §7) exactly: schema version (from `SchemaRegistry.Version()` — semantics pinned in SPEC-006 §6.1; the snapshot header integer is authoritative when header and body disagree), all table IDs, table names, column indices/names/types/`Nullable`/`AutoIncrement` in declaration order, and index definitions (names, column references, Unique, Primary). Column equality checks all five `ColumnSchema` fields (`Index`, `Name`, `Type`, `Nullable`, `AutoIncrement`) — see SPEC-006 §8. Any column with `Nullable == true` in the snapshot is also rejected under the v1 policy (§5.3, SPEC-006 §9). If any field differs, return `ErrSchemaMismatch`.
    c. Reconstruct table rows from snapshot contents
    d. Rebuild indexes from those rows
    e. Restore sequence counters from snapshot sequence entries

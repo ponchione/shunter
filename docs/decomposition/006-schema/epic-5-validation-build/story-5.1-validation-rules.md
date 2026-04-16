@@ -31,7 +31,7 @@ Validate the structural parts of registered tables before `Build()` proceeds: ta
   - Column name must match `[a-z][a-z0-9_]*` → `ErrInvalidColumnName`
   - Column name must be unique within the table
   - Column type must be a valid `ValueKind`
-  - Nullable must be `false` in v1
+  - `Nullable` must be `false` in v1; `Nullable == true` → `ErrNullableColumn` (no silent coercion — see SPEC-006 §13)
 
   Index-level checks:
   - Index name must be non-empty
@@ -51,6 +51,7 @@ Validate the structural parts of registered tables before `Build()` proceeds: ta
 - [ ] Column name `"123"` → `ErrInvalidColumnName`
 - [ ] Two PK columns on one table → `ErrDuplicatePrimaryKey`
 - [ ] `AutoIncrement` on `String` column or without PK/unique → validation error
+- [ ] Column declared with `Nullable = true` → `ErrNullableColumn`
 - [ ] Index with zero columns or nonexistent column reference → validation error
 - [ ] Explicit index containing the PK column or mixed unique flags on a composite index → validation error
 

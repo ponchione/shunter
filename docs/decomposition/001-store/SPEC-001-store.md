@@ -166,10 +166,11 @@ type TableSchema struct {
 }
 
 type ColumnSchema struct {
-    Index    int
-    Name     string
-    Type     ValueKind
-    Nullable bool    // always false in v1; retained for forward compatibility
+    Index         int
+    Name          string
+    Type          ValueKind
+    Nullable      bool  // reserved; MUST be false in v1 — SPEC-006 §9 rejects Nullable=true with ErrNullableColumn (no silent coercion). Canonical declaration in SPEC-006 §8.
+    AutoIncrement bool  // per-column auto-increment; SPEC-006 §9 enforces integer type + PrimaryKey/Unique
 }
 
 type IndexSchema struct {
