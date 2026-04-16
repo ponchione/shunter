@@ -2,6 +2,7 @@ package executor
 
 import (
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -17,6 +18,7 @@ type SchedulerHandle = types.ReducerScheduler
 // post-commit pipeline (SPEC-003 §5.1).
 type DurabilityHandle interface {
 	EnqueueCommitted(txID types.TxID, changeset *store.Changeset)
+	WaitUntilDurable(txID types.TxID) <-chan types.TxID
 }
 
 // SubscriptionManager is the post-commit subscription-evaluation surface used
@@ -31,7 +33,7 @@ type DurabilityHandle interface {
 type SubscriptionManager interface {
 	Register(req SubscriptionRegisterRequest, view store.CommittedReadView) (SubscriptionRegisterResult, error)
 	Unregister(connID types.ConnectionID, subscriptionID types.SubscriptionID) error
-	EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView)
+	EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta subscription.PostCommitMeta)
 	DroppedClients() <-chan types.ConnectionID
 	DisconnectClient(connID types.ConnectionID) error
 }

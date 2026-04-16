@@ -22,20 +22,19 @@ type memoizedResult struct {
 //
 // Called synchronously on the executor goroutine; changeset is read-only.
 // When no subscriptions are active the function returns immediately.
-func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView) {
+func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta PostCommitMeta) {
 	if !m.registry.hasActive() || changeset == nil || changeset.IsEmpty() {
 		return
 	}
 	fanout, errs := m.evaluate(txID, changeset, view)
 	if m.inbox != nil {
-		// CallerConnID, CallerResult, and TxDurable are populated by
-		// the executor's post-commit pipeline (SPEC-003 E5) before
-		// sending to the inbox. EvalAndBroadcast only fills the
-		// evaluation output fields.
 		m.inbox <- FanOutMessage{
-			TxID:   txID,
-			Fanout: fanout,
-			Errors: errs,
+			TxID:         txID,
+			TxDurable:    meta.TxDurable,
+			Fanout:       fanout,
+			Errors:       errs,
+			CallerConnID: meta.CallerConnID,
+			CallerResult: meta.CallerResult,
 		}
 	}
 }
@@ -84,6 +83,12 @@ func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.Conne
 	predRepr := fmt.Sprintf("%#v", qs.predicate)
 	wrapped := fmt.Errorf("%w: %v", ErrSubscriptionEval, err)
 	log.Printf("subscription: evaluation error for query %s predicate=%s: %v", qs.hash, predRepr, wrapped)
+
+	type doomedSub struct {
+		connID types.ConnectionID
+		subID  types.SubscriptionID
+	}
+	var doomed []doomedSub
 	for connID, subIDs := range qs.subscribers {
 		for subID := range subIDs {
 			out[connID] = append(out[connID], SubscriptionError{
@@ -92,8 +97,11 @@ func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.Conne
 				Predicate:      predRepr,
 				Message:        wrapped.Error(),
 			})
+			doomed = append(doomed, doomedSub{connID: connID, subID: subID})
 		}
-		m.signalDropped(connID)
+	}
+	for _, sub := range doomed {
+		_ = m.Unregister(sub.connID, sub.subID)
 	}
 }
 

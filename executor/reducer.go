@@ -14,6 +14,7 @@ type ReducerRequest struct {
 	ReducerName string
 	Args        []byte
 	Caller      types.CallerContext
+	RequestID   uint32
 	Source      CallSource
 	// ScheduleID and IntendedFireAt are populated when Source ==
 	// CallSourceScheduled. IntendedFireAt is the sys_scheduled row's

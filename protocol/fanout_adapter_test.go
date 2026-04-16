@@ -1,10 +1,12 @@
 package protocol
 
 import (
+	"bytes"
 	"errors"
 	"sync"
 	"testing"
 
+	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
@@ -147,9 +149,12 @@ func TestEncodeReducerCallResult_Failed(t *testing.T) {
 // --- Adapter integration tests ---
 
 type mockClientSender struct {
-	mu      sync.Mutex
-	calls   []senderCall
-	sendErr error
+	mu             sync.Mutex
+	calls          []senderCall
+	sendErr        error
+	txUpdates      []*TransactionUpdate
+	reducerResults []*ReducerCallResult
+	genericMsgs    []any
 }
 
 type senderCall struct {
@@ -161,18 +166,21 @@ func (m *mockClientSender) Send(connID types.ConnectionID, msg any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, senderCall{method: "Send", connID: connID})
+	m.genericMsgs = append(m.genericMsgs, msg)
 	return m.sendErr
 }
 func (m *mockClientSender) SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, senderCall{method: "SendTransactionUpdate", connID: connID})
+	m.txUpdates = append(m.txUpdates, update)
 	return m.sendErr
 }
 func (m *mockClientSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, senderCall{method: "SendReducerResult", connID: connID})
+	m.reducerResults = append(m.reducerResults, result)
 	return m.sendErr
 }
 
@@ -224,5 +232,103 @@ func TestFanOutSenderAdapter_ConnNotFound_MapsError(t *testing.T) {
 	)
 	if !errors.Is(err, subscription.ErrSendConnGone) {
 		t.Fatalf("err = %v, want ErrSendConnGone", err)
+	}
+}
+
+func TestFanOutSenderAdapter_RowPayloadRoundTrip(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	updates := []subscription.SubscriptionUpdate{{
+		SubscriptionID: 5,
+		TableName:      "players",
+		Inserts: []types.ProductValue{
+			{types.NewUint32(42), types.NewString("alice")},
+		},
+		Deletes: []types.ProductValue{
+			{types.NewUint32(7), types.NewString("gone")},
+		},
+	}}
+	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(22), updates); err != nil {
+		t.Fatal(err)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.txUpdates) != 1 {
+		t.Fatalf("txUpdates=%d want 1", len(mock.txUpdates))
+	}
+	got := mock.txUpdates[0]
+	if len(got.Updates) != 1 {
+		t.Fatalf("encoded updates=%d want 1", len(got.Updates))
+	}
+	checkRows := func(name string, rows []types.ProductValue, encoded []byte) {
+		decoded, err := DecodeRowList(encoded)
+		if err != nil {
+			t.Fatalf("DecodeRowList(%s): %v", name, err)
+		}
+		if len(decoded) != len(rows) {
+			t.Fatalf("%s rows=%d want %d", name, len(decoded), len(rows))
+		}
+		for i, row := range rows {
+			var want bytes.Buffer
+			if err := bsatn.EncodeProductValue(&want, row); err != nil {
+				t.Fatalf("EncodeProductValue(%s[%d]): %v", name, i, err)
+			}
+			if !bytes.Equal(decoded[i], want.Bytes()) {
+				t.Fatalf("%s[%d] bytes mismatch\n got=%v\nwant=%v", name, i, decoded[i], want.Bytes())
+			}
+		}
+	}
+	checkRows("inserts", updates[0].Inserts, got.Updates[0].Inserts)
+	checkRows("deletes", updates[0].Deletes, got.Updates[0].Deletes)
+}
+
+func TestFanOutSenderAdapter_SendReducerResultSuccessPath(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	result := &subscription.ReducerCallResult{
+		RequestID: 9,
+		Status:    0,
+		TxID:      types.TxID(44),
+		Energy:    999,
+		TransactionUpdate: []subscription.SubscriptionUpdate{{
+			SubscriptionID: 1,
+			TableName:      "players",
+			Inserts:        []types.ProductValue{{types.NewUint32(1)}},
+		}},
+	}
+	if err := adapter.SendReducerResult(connID(1), result); err != nil {
+		t.Fatal(err)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.reducerResults) != 1 {
+		t.Fatalf("reducerResults=%d want 1", len(mock.reducerResults))
+	}
+	got := mock.reducerResults[0]
+	if got.RequestID != 9 || got.TxID != 44 || got.Energy != 0 {
+		t.Fatalf("encoded reducer result = %+v", got)
+	}
+	if len(got.TransactionUpdate) != 1 {
+		t.Fatalf("TransactionUpdate len=%d want 1", len(got.TransactionUpdate))
+	}
+}
+
+func TestFanOutSenderAdapter_SendSubscriptionErrorSuccessPath(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	if err := adapter.SendSubscriptionError(connID(3), 77, "boom"); err != nil {
+		t.Fatal(err)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.genericMsgs) != 1 {
+		t.Fatalf("genericMsgs=%d want 1", len(mock.genericMsgs))
+	}
+	msg, ok := mock.genericMsgs[0].(SubscriptionError)
+	if !ok {
+		t.Fatalf("message type = %T, want SubscriptionError", mock.genericMsgs[0])
+	}
+	if msg.SubscriptionID != 77 || msg.Error != "boom" {
+		t.Fatalf("subscription error = %+v", msg)
 	}
 }

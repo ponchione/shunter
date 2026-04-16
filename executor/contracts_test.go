@@ -239,6 +239,7 @@ func (stubScheduler) Cancel(types.ScheduleID) (bool, error) { return true, nil }
 type stubDurability struct{}
 
 func (stubDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
+func (stubDurability) WaitUntilDurable(types.TxID) <-chan types.TxID  { return nil }
 
 type stubSubscriptionManager struct{}
 
@@ -246,7 +247,7 @@ func (stubSubscriptionManager) Register(SubscriptionRegisterRequest, store.Commi
 	return SubscriptionRegisterResult{}, nil
 }
 func (stubSubscriptionManager) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
-func (stubSubscriptionManager) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView) {
+func (stubSubscriptionManager) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
 func (stubSubscriptionManager) DroppedClients() <-chan types.ConnectionID { return nil }
 func (stubSubscriptionManager) DisconnectClient(types.ConnectionID) error { return nil }

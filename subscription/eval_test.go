@@ -16,7 +16,7 @@ func TestEvalNoActiveSubsReturnsImmediately(t *testing.T) {
 	mgr := NewManager(s, s)
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil)
 	// Should not panic and inbox (nil) should not be touched.
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 }
 
 func TestEvalSingleTableColEqMatches(t *testing.T) {
@@ -34,7 +34,7 @@ func TestEvalSingleTableColEqMatches(t *testing.T) {
 			{types.NewUint64(7), types.NewString("nope")},
 		}, nil,
 	)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	select {
 	case msg := <-inbox:
 		if len(msg.Fanout[types.ConnectionID{1}]) != 1 {
@@ -61,7 +61,7 @@ func TestEvalSkipsUnaffectedTables(t *testing.T) {
 		Predicate: AllRows{Table: 2},
 	}, nil)
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	select {
 	case msg := <-inbox:
 		if len(msg.Fanout) != 0 {
@@ -83,7 +83,7 @@ func TestEvalTwoSubscribersSharedQuery(t *testing.T) {
 	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: types.ConnectionID{2}, SubscriptionID: 11, Predicate: pred}, nil)
 
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 
 	msg := <-inbox
 	if len(msg.Fanout) != 2 {
@@ -106,7 +106,7 @@ func TestEvalSameConnectionSameQueryProducesIndependentUpdates(t *testing.T) {
 	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 11, Predicate: pred}, nil)
 
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 
 	msg := <-inbox
 	updates := msg.Fanout[c]
@@ -122,12 +122,13 @@ func TestEvalSameConnectionSameQueryProducesIndependentUpdates(t *testing.T) {
 	}
 }
 
-func TestEvalErrorSignalsDroppedAndQueuesSubscriptionError(t *testing.T) {
+func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T) {
 	s := testSchema()
-	inbox := make(chan FanOutMessage, 1)
+	inbox := make(chan FanOutMessage, 2)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	c := types.ConnectionID{1}
 	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 10, Predicate: AllRows{Table: 1}}, nil)
+	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 11, Predicate: AllRows{Table: 2}}, nil)
 
 	var logs bytes.Buffer
 	oldOut := log.Writer()
@@ -141,7 +142,7 @@ func TestEvalErrorSignalsDroppedAndQueuesSubscriptionError(t *testing.T) {
 
 	mgr.schema = nil
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("x")}}, nil)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 
 	msg := <-inbox
 	if len(msg.Errors[c]) != 1 {
@@ -159,11 +160,8 @@ func TestEvalErrorSignalsDroppedAndQueuesSubscriptionError(t *testing.T) {
 	}
 	select {
 	case dropped := <-mgr.DroppedClients():
-		if dropped != c {
-			t.Fatalf("dropped conn = %v, want %v", dropped, c)
-		}
+		t.Fatalf("unexpected dropped connection signal: %v", dropped)
 	default:
-		t.Fatal("expected dropped client signal")
 	}
 	logText := logs.String()
 	if !strings.Contains(logText, ComputeQueryHash(AllRows{Table: 1}, nil).String()) {
@@ -171,6 +169,24 @@ func TestEvalErrorSignalsDroppedAndQueuesSubscriptionError(t *testing.T) {
 	}
 	if !strings.Contains(logText, "AllRows") {
 		t.Fatalf("log output missing predicate repr: %q", logText)
+	}
+
+	mgr.schema = s
+	cs2 := &store.Changeset{
+		TxID: 2,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			2: {
+				TableID:   2,
+				TableName: "t2",
+				Inserts:   []types.ProductValue{{types.NewUint64(2)}},
+			},
+		},
+	}
+	mgr.EvalAndBroadcast(types.TxID(2), cs2, nil, PostCommitMeta{})
+	msg2 := <-inbox
+	updates := msg2.Fanout[c]
+	if len(updates) != 1 || updates[0].SubscriptionID != 11 {
+		t.Fatalf("healthy subscription should remain active, got %v", updates)
 	}
 }
 
@@ -190,7 +206,7 @@ func TestEvalBatchedTier1SingleLookup(t *testing.T) {
 		ins[i] = types.ProductValue{types.NewUint64(42), types.NewString("x")}
 	}
 	cs := simpleChangeset(1, ins, nil)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	msg := <-inbox
 	u := msg.Fanout[types.ConnectionID{1}][0]
 	if len(u.Inserts) != 100 {
@@ -231,7 +247,7 @@ func TestEvalJoinSubscription(t *testing.T) {
 	}
 	// Keep committed view consistent by pre-inserting into mock.
 	committed.addRow(joinRHS, 2, types.ProductValue{types.NewUint64(101), types.NewUint64(1)})
-	mgr.EvalAndBroadcast(types.TxID(2), cs, committed)
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
 
 	msg := <-inbox
 	updates := msg.Fanout[types.ConnectionID{1}]
@@ -257,7 +273,7 @@ func TestEvalPruningFallbackVsBaseline(t *testing.T) {
 			Upper: Bound{Value: types.NewUint64(100), Inclusive: true}},
 	}, nil)
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(50), types.NewString("in")}}, nil)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	msg := <-inbox
 	u := msg.Fanout[types.ConnectionID{1}]
 	if len(u) != 1 || len(u[0].Inserts) != 1 {
@@ -280,7 +296,7 @@ func TestEvalChangesetNotMutated(t *testing.T) {
 	}
 	cs := simpleChangeset(1, original, nil)
 	lenBefore := len(cs.Tables[1].Inserts)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	<-inbox
 	if len(cs.Tables[1].Inserts) != lenBefore {
 		t.Fatalf("changeset mutated: before=%d after=%d", lenBefore, len(cs.Tables[1].Inserts))
@@ -303,7 +319,7 @@ func TestEvalMultipleTableUpdatesGrouped(t *testing.T) {
 			2: {TableID: 2, Inserts: []types.ProductValue{{types.NewUint64(2), types.NewInt32(3)}}},
 		},
 	}
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 
 	msg := <-inbox
 	updates := msg.Fanout[c]

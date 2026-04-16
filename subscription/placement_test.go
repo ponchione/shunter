@@ -65,6 +65,22 @@ func TestPlaceJoinWithFilterOnRHS(t *testing.T) {
 	}
 }
 
+func TestPlaceJoinWithFilterOnLHSStillTracksRHSChangesViaJoinEdge(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 0,
+		Filter: ColEq{Table: 1, Column: 1, Value: types.NewString("red")},
+	}
+	PlaceSubscription(idx, p, hashN(1))
+
+	if edges := idx.JoinEdge.EdgesForTable(2); len(edges) != 1 {
+		t.Fatalf("expected join-edge placement for RHS-driven changes, got %v", edges)
+	}
+	if got := idx.Value.Lookup(1, 1, types.NewString("red")); len(got) != 1 {
+		t.Fatalf("expected LHS filter to stay in ValueIndex, got %v", got)
+	}
+}
+
 func TestPlaceAndTwoColEqs(t *testing.T) {
 	// And{ColEq T1.col0=1, ColEq T2.col0=2} — each lands in ValueIndex.
 	idx := NewPruningIndexes()

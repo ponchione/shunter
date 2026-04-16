@@ -120,6 +120,27 @@ func TestOpenSegmentRejectsMalformedFilename(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentRejectsNonCanonicalFilename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "1.log")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSegmentHeader(f); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = OpenSegment(path)
+	if err == nil {
+		t.Fatal("expected non-canonical segment filename to fail")
+	}
+}
+
 func TestSegmentFileName(t *testing.T) {
 	got := SegmentFileName(1)
 	if got != "00000000000000000001.log" {

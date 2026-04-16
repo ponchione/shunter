@@ -50,7 +50,7 @@ type SubscriptionManager interface {
 	Register(req SubscriptionRegisterRequest, view store.CommittedReadView) (SubscriptionRegisterResult, error)
 	Unregister(connID types.ConnectionID, subscriptionID types.SubscriptionID) error
 	DisconnectClient(connID types.ConnectionID) error
-	EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView)
+	EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta PostCommitMeta)
 	DroppedClients() <-chan types.ConnectionID
 }
 

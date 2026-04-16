@@ -9,6 +9,7 @@ import (
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -38,8 +39,9 @@ type fakeDurability struct {
 	rec      *recorder
 	txIDs    []types.TxID
 	payloads []*store.Changeset
-	block    chan struct{} // if set, EnqueueCommitted waits on it
-	panicOn  bool          // panic when EnqueueCommitted is called
+	block    chan struct{}      // if set, EnqueueCommitted waits on it
+	waitCh   <-chan types.TxID  // optional readiness channel returned by WaitUntilDurable
+	panicOn  bool               // panic when EnqueueCommitted is called
 	mu       sync.Mutex
 }
 
@@ -57,13 +59,24 @@ func (f *fakeDurability) EnqueueCommitted(txID types.TxID, cs *store.Changeset) 
 	f.rec.add("durability")
 }
 
+func (f *fakeDurability) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
+	if f.waitCh != nil {
+		return f.waitCh
+	}
+	ch := make(chan types.TxID, 1)
+	ch <- txID
+	close(ch)
+	return ch
+}
+
 // fakeSubs records every EvalAndBroadcast call. It optionally inspects the
 // view it is handed to prove the view was still live.
 type fakeSubs struct {
 	rec      *recorder
 	txIDs    []types.TxID
-	viewSaw  []store.CommittedReadView
-	block    chan struct{}
+	viewSaw   []store.CommittedReadView
+	metas     []subscription.PostCommitMeta
+	block     chan struct{}
 	onEval   func(view store.CommittedReadView)
 	mu       sync.Mutex
 	dropped  chan types.ConnectionID // DroppedClients() source; nil when unset
@@ -78,7 +91,7 @@ func (f *fakeSubs) Register(SubscriptionRegisterRequest, store.CommittedReadView
 
 func (f *fakeSubs) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
 
-func (f *fakeSubs) EvalAndBroadcast(txID types.TxID, cs *store.Changeset, view store.CommittedReadView) {
+func (f *fakeSubs) EvalAndBroadcast(txID types.TxID, cs *store.Changeset, view store.CommittedReadView, meta subscription.PostCommitMeta) {
 	f.rec.add("eval-start")
 	if f.onEval != nil {
 		f.onEval(view)
@@ -92,6 +105,7 @@ func (f *fakeSubs) EvalAndBroadcast(txID types.TxID, cs *store.Changeset, view s
 	f.mu.Lock()
 	f.txIDs = append(f.txIDs, txID)
 	f.viewSaw = append(f.viewSaw, view)
+	f.metas = append(f.metas, meta)
 	f.mu.Unlock()
 	f.rec.add("eval-end")
 }
@@ -194,7 +208,14 @@ func submit(t *testing.T, exec *Executor, name string) ReducerResponse {
 	t.Helper()
 	ch := make(chan ReducerResponse, 1)
 	if err := exec.Submit(CallReducerCmd{
-		Request:    ReducerRequest{ReducerName: name, Source: CallSourceExternal},
+		Request: ReducerRequest{
+			ReducerName: name,
+			Source:      CallSourceExternal,
+			RequestID:   77,
+			Caller: types.CallerContext{
+				ConnectionID: types.ConnectionID{9},
+			},
+		},
 		ResponseCh: ch,
 	}); err != nil {
 		t.Fatal(err)
@@ -309,7 +330,12 @@ func TestPostCommitDurabilityBackpressureStalls(t *testing.T) {
 
 	ch := make(chan ReducerResponse, 1)
 	if err := h.exec.Submit(CallReducerCmd{
-		Request:    ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+		Request: ReducerRequest{
+			ReducerName: "InsertPlayer",
+			Source:      CallSourceExternal,
+			RequestID:   88,
+			Caller:      types.CallerContext{ConnectionID: types.ConnectionID{7}},
+		},
 		ResponseCh: ch,
 	}); err != nil {
 		t.Fatal(err)
@@ -487,6 +513,70 @@ func TestPostCommitDrainContinuesAfterDisconnectError(t *testing.T) {
 }
 
 var errTestDisconnect = &userErr{msg: "disconnect-failed"}
+
+func TestPostCommitExternalReducerPropagatesCallerMetadata(t *testing.T) {
+	h := newPipelineHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	resp := submit(t, h.exec, "InsertPlayer")
+	if resp.Status != StatusCommitted {
+		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
+	}
+
+	h.subs.mu.Lock()
+	defer h.subs.mu.Unlock()
+	if len(h.subs.metas) != 1 {
+		t.Fatalf("metas=%d want 1", len(h.subs.metas))
+	}
+	meta := h.subs.metas[0]
+	if meta.CallerConnID == nil || *meta.CallerConnID != (types.ConnectionID{9}) {
+		t.Fatalf("CallerConnID=%v want %v", meta.CallerConnID, types.ConnectionID{9})
+	}
+	if meta.CallerResult == nil {
+		t.Fatal("CallerResult = nil, want populated result")
+	}
+	if meta.CallerResult.RequestID != 77 {
+		t.Fatalf("CallerResult.RequestID=%d want 77", meta.CallerResult.RequestID)
+	}
+	if meta.CallerResult.Status != 0 || meta.CallerResult.TxID != resp.TxID {
+		t.Fatalf("CallerResult=%+v want committed result for tx %d", *meta.CallerResult, resp.TxID)
+	}
+}
+
+func TestPostCommitLifecycleLeavesCallerMetadataNil(t *testing.T) {
+	h := newPipelineHarness(t)
+	changeset := &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}}
+	h.exec.postCommit(types.TxID(55), changeset, nil, nil, postCommitOptions{source: CallSourceLifecycle})
+
+	h.subs.mu.Lock()
+	defer h.subs.mu.Unlock()
+	if len(h.subs.metas) != 1 {
+		t.Fatalf("metas=%d want 1", len(h.subs.metas))
+	}
+	meta := h.subs.metas[0]
+	if meta.CallerConnID != nil || meta.CallerResult != nil {
+		t.Fatalf("lifecycle meta should not fabricate caller fields: %+v", meta)
+	}
+}
+
+func TestPostCommitPropagatesDurabilityReadinessChannel(t *testing.T) {
+	h := newPipelineHarness(t)
+	waitCh := make(chan types.TxID)
+	h.dur.waitCh = waitCh
+	changeset := &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}}
+	h.exec.postCommit(types.TxID(66), changeset, nil, nil, postCommitOptions{source: CallSourceLifecycle})
+
+	h.subs.mu.Lock()
+	defer h.subs.mu.Unlock()
+	if len(h.subs.metas) != 1 {
+		t.Fatalf("metas=%d want 1", len(h.subs.metas))
+	}
+	if h.subs.metas[0].TxDurable != waitCh {
+		t.Fatal("TxDurable channel was not propagated from durability handle")
+	}
+}
 
 // Story 5.3 AC: panic in EnqueueCommitted sets fatal and delivers an error
 // response (transaction already committed in memory but pipeline broke).

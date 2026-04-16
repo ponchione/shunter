@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/types"
 )
 
 // CommitLogOptions configures the durability worker.
@@ -43,6 +44,7 @@ type DurabilityWorker struct {
 	closeCh    chan struct{}
 	durable    atomic.Uint64
 	stateMu    sync.Mutex
+	waiters    map[uint64][]chan types.TxID
 	fatalErr   error
 	closing    bool
 	lastEnq    uint64
@@ -67,6 +69,7 @@ func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*
 		ch:      make(chan durabilityItem, opts.ChannelCapacity),
 		closeCh: make(chan struct{}),
 		done:    make(chan struct{}),
+		waiters: make(map[uint64][]chan types.TxID),
 		opts:    opts,
 		dir:     dir,
 		seg:     seg,
@@ -134,6 +137,28 @@ func (dw *DurabilityWorker) EnqueueCommitted(txID uint64, cs *store.Changeset) {
 // DurableTxID returns the latest durably written TxID.
 func (dw *DurabilityWorker) DurableTxID() uint64 {
 	return dw.durable.Load()
+}
+
+// WaitUntilDurable returns a readiness channel for txID. Already-durable txIDs
+// return an already-ready channel.
+func (dw *DurabilityWorker) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
+	ready := func(id types.TxID) <-chan types.TxID {
+		ch := make(chan types.TxID, 1)
+		ch <- id
+		close(ch)
+		return ch
+	}
+	if txID == 0 {
+		return nil
+	}
+	dw.stateMu.Lock()
+	defer dw.stateMu.Unlock()
+	if dw.durable.Load() >= uint64(txID) {
+		return ready(txID)
+	}
+	ch := make(chan types.TxID, 1)
+	dw.waiters[uint64(txID)] = append(dw.waiters[uint64(txID)], ch)
+	return ch
 }
 
 // Close stops the worker and returns the final durable TxID and any fatal error.
@@ -217,7 +242,9 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		return err
 	}
 	// Update durable TxID to last in batch.
-	dw.durable.Store(batch[len(batch)-1].txID)
+	lastDurable := batch[len(batch)-1].txID
+	dw.durable.Store(lastDurable)
+	dw.releaseWaitersUpTo(lastDurable)
 
 	// Check rotation.
 	if dw.seg.Size() >= dw.opts.MaxSegmentSize {
@@ -232,4 +259,19 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		dw.seg = seg
 	}
 	return nil
+}
+
+func (dw *DurabilityWorker) releaseWaitersUpTo(lastDurable uint64) {
+	dw.stateMu.Lock()
+	defer dw.stateMu.Unlock()
+	for txID, waiters := range dw.waiters {
+		if txID > lastDurable {
+			continue
+		}
+		delete(dw.waiters, txID)
+		for _, ch := range waiters {
+			ch <- types.TxID(txID)
+			close(ch)
+		}
+	}
 }

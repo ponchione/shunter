@@ -215,6 +215,30 @@ func TestRegisterJoinResolverMissingIndexFails(t *testing.T) {
 	}
 }
 
+func TestRegisterJoinBootstrapFallsBackToLeftIndex(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString})
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1), types.NewString("lhs")}},
+		2: {{types.NewUint64(1), types.NewString("rhs")}},
+	})
+	mgr := NewManager(s, s)
+	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
+	got, err := mgr.Register(SubscriptionRegisterRequest{
+		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: p,
+	}, view)
+	if err != nil {
+		t.Fatalf("Register = %v", err)
+	}
+	if len(got.InitialRows) != 1 {
+		t.Fatalf("initial rows = %v, want 1 joined row", got.InitialRows)
+	}
+	if len(got.InitialRows[0]) != 4 {
+		t.Fatalf("joined row = %v, want concatenated lhs+rhs columns", got.InitialRows[0])
+	}
+}
+
 func TestRegisterInitialRowLimit(t *testing.T) {
 	s := testSchema()
 	view := buildMockCommitted(s, map[TableID][]types.ProductValue{

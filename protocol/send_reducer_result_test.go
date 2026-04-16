@@ -216,3 +216,33 @@ func TestDeliverReducerResultEnergyAlwaysZero(t *testing.T) {
 		t.Fatalf("Energy = %d, want 0 (v1 always zero)", rcr.Energy)
 	}
 }
+
+func TestDeliverReducerResultDoesNotMutateInputFanout(t *testing.T) {
+	caller, callerID := testConn(false)
+	other := &Conn{ID: types.ConnectionID{2}, Subscriptions: NewSubscriptionTracker(), OutboundCh: make(chan []byte, 32), opts: func() *ProtocolOptions { o := DefaultProtocolOptions(); return &o }(), closed: make(chan struct{})}
+	other.Subscriptions.Reserve(2)
+	other.Subscriptions.Activate(2)
+	mgr := NewConnManager()
+	mgr.Add(caller)
+	mgr.Add(other)
+	s := NewClientSender(mgr, &fakeInbox{})
+
+	caller.Subscriptions.Reserve(1)
+	caller.Subscriptions.Activate(1)
+	fanout := map[types.ConnectionID][]SubscriptionUpdate{
+		callerID: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
+		other.ID: {{SubscriptionID: 2, TableName: "t", Inserts: []byte{0x02}}},
+	}
+	_, okBefore := fanout[callerID]
+	if !okBefore {
+		t.Fatal("caller missing before delivery")
+	}
+
+	errs := DeliverReducerCallResult(s, mgr, &ReducerCallResult{RequestID: 5, Status: 0, TxID: 42}, &callerID, fanout)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if _, ok := fanout[callerID]; !ok {
+		t.Fatal("input fanout mutated by caller diversion")
+	}
+}

@@ -35,6 +35,15 @@ type FanOutMessage struct {
 	CallerResult *ReducerCallResult
 }
 
+// PostCommitMeta carries executor-owned delivery metadata into the
+// subscription fan-out seam. Zero value means ordinary non-caller,
+// fast-read delivery.
+type PostCommitMeta struct {
+	TxDurable    <-chan types.TxID
+	CallerConnID *types.ConnectionID
+	CallerResult *ReducerCallResult
+}
+
 // SubscriptionError is the protocol-facing evaluation-failure payload queued
 // for clients affected by a broken subscription. SPEC-005 owns wire encoding;
 // this package only carries the semantic content across the fan-out seam.

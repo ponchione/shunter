@@ -672,7 +672,7 @@ The evaluator needs read-only access to committed state. These are provided by `
 If delta computation fails for a subscription (e.g., corrupted index, type mismatch):
 1. Log the error with the subscription's query hash and SQL/predicate representation.
 2. Send a `SubscriptionError` message to all clients subscribed to that query.
-3. Mark those clients for cleanup (they will be disconnected).
+3. Unregister the affected subscription(s) / query state without disconnecting unrelated subscriptions on the same connection.
 4. Do **not** abort the evaluation loop — other subscriptions are unaffected.
 
 ### 11.2 Registration Errors

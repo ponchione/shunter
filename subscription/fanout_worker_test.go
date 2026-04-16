@@ -116,6 +116,38 @@ func TestFanOutWorker_ContextCancel(t *testing.T) {
 	}
 }
 
+func TestFanOutWorker_ContextCancelWhileWaitingOnTxDurable(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+	conn1 := cid(1)
+	w.SetConfirmedReads(conn1, true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	inbox <- FanOutMessage{
+		TxID:      types.TxID(1),
+		TxDurable: make(chan types.TxID),
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 1, TableName: "t1"}},
+		},
+	}
+
+	time.Sleep(25 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not exit while waiting on TxDurable")
+	}
+}
+
 func TestFanOutWorker_ClosedInbox(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage)
@@ -484,6 +516,68 @@ func TestFanOutWorker_RemoveClient(t *testing.T) {
 	}
 }
 
+func TestFanOutWorker_DeliverDoesNotMutateFanout(t *testing.T) {
+	mock := &mockFanOutSender{}
+	w := NewFanOutWorker(nil, mock, make(chan types.ConnectionID, 1))
+	caller, other := cid(1), cid(2)
+	fanout := CommitFanout{
+		caller: {{SubscriptionID: 1, TableName: "t1"}},
+		other:  {{SubscriptionID: 2, TableName: "t2"}},
+	}
+	w.deliver(context.Background(), FanOutMessage{
+		TxID:          5,
+		Fanout:        fanout,
+		CallerConnID:  &caller,
+		CallerResult:  &ReducerCallResult{RequestID: 1, Status: 0, TxID: 5},
+	})
+	if _, ok := fanout[caller]; !ok {
+		t.Fatal("deliver mutated original fanout map by removing caller entry")
+	}
+}
+
+func TestFanOutWorker_DroppedChannelFullDoesNotBlock(t *testing.T) {
+	mock := &mockFanOutSender{sendErr: ErrSendBufferFull}
+	dropped := make(chan types.ConnectionID, 1)
+	dropped <- cid(9)
+	w := NewFanOutWorker(nil, mock, dropped)
+	done := make(chan struct{})
+	go func() {
+		w.deliver(context.Background(), FanOutMessage{
+			TxID: 1,
+			Fanout: CommitFanout{
+				cid(1): {{SubscriptionID: 1, TableName: "t1"}},
+			},
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("deliver blocked on full dropped channel")
+	}
+}
+
+func TestFanOutWorker_ConfirmedReadPolicyConcurrentToggle(t *testing.T) {
+	mock := &mockFanOutSender{}
+	w := NewFanOutWorker(nil, mock, make(chan types.ConnectionID, 16))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan types.TxID)
+	go func() {
+		w.deliver(ctx, FanOutMessage{
+			TxID:      2,
+			TxDurable: ready,
+			Fanout: CommitFanout{
+				cid(1): {{SubscriptionID: 1, TableName: "t1"}},
+			},
+		})
+	}()
+	for i := 0; i < 100; i++ {
+		w.SetConfirmedReads(cid(1), i%2 == 0)
+	}
+	close(ready)
+}
+
 func TestFanOutWorker_SubscriptionErrorDelivery(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
@@ -631,7 +725,7 @@ func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
 		[]types.ProductValue{{types.NewUint64(42), types.NewString("alice")}},
 		nil,
 	)
-	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 
 	// Wait for fan-out delivery.
 	time.Sleep(100 * time.Millisecond)

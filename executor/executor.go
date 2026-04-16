@@ -13,6 +13,7 @@ import (
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -57,6 +58,12 @@ type Executor struct {
 	snapshotFn func() store.CommittedReadView
 	done       chan struct{}
 	closeOnce  sync.Once
+}
+
+type postCommitOptions struct {
+	source          CallSource
+	callerConnID    *types.ConnectionID
+	callerRequestID uint32
 }
 
 // NewExecutor creates an executor. Registry must be frozen.
@@ -391,7 +398,14 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	e.nextTxID++
 	changeset.TxID = txID
 
-	e.postCommit(txID, changeset, ret, cmd.ResponseCh)
+	var opts postCommitOptions
+	opts.source = req.Source
+	if req.Source == CallSourceExternal {
+		connID := req.Caller.ConnectionID
+		opts.callerConnID = &connID
+		opts.callerRequestID = req.RequestID
+	}
+	e.postCommit(txID, changeset, ret, cmd.ResponseCh, opts)
 }
 
 // postCommit runs the ordered post-commit pipeline (SPEC-003 §5.1–§5.4,
@@ -418,6 +432,7 @@ func (e *Executor) postCommit(
 	changeset *store.Changeset,
 	ret []byte,
 	responseCh chan<- ReducerResponse,
+	opts postCommitOptions,
 ) {
 	responded := responseCh == nil
 	defer func() {
@@ -439,7 +454,18 @@ func (e *Executor) postCommit(
 
 	e.durability.EnqueueCommitted(txID, changeset)
 	view := e.snapshotFn()
-	e.subs.EvalAndBroadcast(txID, changeset, view)
+	meta := subscription.PostCommitMeta{TxDurable: e.durability.WaitUntilDurable(txID)}
+	if opts.source == CallSourceExternal && opts.callerConnID != nil {
+		callerConnID := *opts.callerConnID
+		meta.CallerConnID = &callerConnID
+		meta.CallerResult = &subscription.ReducerCallResult{
+			RequestID: opts.callerRequestID,
+			Status:    0,
+			TxID:      txID,
+			Energy:    0,
+		}
+	}
+	e.subs.EvalAndBroadcast(txID, changeset, view, meta)
 	view.Close()
 
 	responded = sendReducerResponse(responseCh, ReducerResponse{
@@ -474,13 +500,15 @@ func isUserCommitError(err error) bool {
 type noopDurability struct{}
 
 func (noopDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
+func (noopDurability) WaitUntilDurable(types.TxID) <-chan types.TxID  { return nil }
 
 type noopSubs struct{}
 
 func (noopSubs) Register(SubscriptionRegisterRequest, store.CommittedReadView) (SubscriptionRegisterResult, error) {
 	return SubscriptionRegisterResult{}, nil
 }
-func (noopSubs) Unregister(types.ConnectionID, types.SubscriptionID) error              { return nil }
-func (noopSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView) {}
-func (noopSubs) DroppedClients() <-chan types.ConnectionID                              { return nil }
-func (noopSubs) DisconnectClient(types.ConnectionID) error                              { return nil }
+func (noopSubs) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
+func (noopSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
+}
+func (noopSubs) DroppedClients() <-chan types.ConnectionID { return nil }
+func (noopSubs) DisconnectClient(types.ConnectionID) error { return nil }

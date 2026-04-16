@@ -162,7 +162,7 @@ func runIVMInvariantIteration(t *testing.T, seed uint64) {
 	postRows := applyDelta(initRows, inserts, deletes)
 	sPost := buildMockCommitted(s, map[TableID][]types.ProductValue{1: postRows})
 
-	mgr.EvalAndBroadcast(types.TxID(2), cs, sPost)
+	mgr.EvalAndBroadcast(types.TxID(2), cs, sPost, PostCommitMeta{})
 
 	var dIns, dDel []types.ProductValue
 	select {
@@ -260,7 +260,7 @@ func runPruningSafetyIteration(t *testing.T, seed uint64) {
 	sPost := buildMockCommitted(s, map[TableID][]types.ProductValue{1: postRows})
 
 	// Pruned path: normal EvalAndBroadcast.
-	mgr.EvalAndBroadcast(types.TxID(2), cs, sPost)
+	mgr.EvalAndBroadcast(types.TxID(2), cs, sPost, PostCommitMeta{})
 	msg := <-inbox
 	pruned := groupPerQueryDeltas(mgr, msg.Fanout[conn])
 

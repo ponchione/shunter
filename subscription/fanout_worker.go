@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sync"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -31,6 +32,7 @@ type FanOutSender interface {
 type FanOutWorker struct {
 	inbox          <-chan FanOutMessage
 	sender         FanOutSender
+	mu             sync.RWMutex
 	confirmedReads map[types.ConnectionID]bool
 	dropped        chan<- types.ConnectionID
 }
@@ -58,14 +60,15 @@ func (w *FanOutWorker) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			w.deliver(msg)
+			w.deliver(ctx, msg)
 		}
 	}
 }
 
 // SetConfirmedReads toggles the per-connection confirmed-read policy.
-// Accessed only from the fan-out goroutine — no mutex needed.
 func (w *FanOutWorker) SetConfirmedReads(connID types.ConnectionID, enabled bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if enabled {
 		w.confirmedReads[connID] = true
 	} else {
@@ -75,10 +78,14 @@ func (w *FanOutWorker) SetConfirmedReads(connID types.ConnectionID, enabled bool
 
 // RemoveClient clears all fan-out worker state for the given connection.
 func (w *FanOutWorker) RemoveClient(connID types.ConnectionID) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	delete(w.confirmedReads, connID)
 }
 
 func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	for connID := range fanout {
 		if w.confirmedReads[connID] {
 			return true
@@ -87,10 +94,14 @@ func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout) bool {
 	return false
 }
 
-func (w *FanOutWorker) deliver(msg FanOutMessage) {
+func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// Confirmed-read gating (Story 6.4).
 	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout) {
-		<-msg.TxDurable
+		select {
+		case <-ctx.Done():
+			return
+		case <-msg.TxDurable:
+		}
 	}
 
 	// Deliver subscription errors first (before updates).
@@ -142,7 +153,9 @@ func (w *FanOutWorker) handleSendError(connID types.ConnectionID, err error) {
 }
 
 func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
+	w.mu.Lock()
 	delete(w.confirmedReads, connID)
+	w.mu.Unlock()
 	select {
 	case w.dropped <- connID:
 	default:

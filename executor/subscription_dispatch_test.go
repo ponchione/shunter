@@ -35,7 +35,7 @@ func (f *registerDispatchSubs) DisconnectClient(connID types.ConnectionID) error
 	f.disconnectConnID = connID
 	return f.disconnectErr
 }
-func (f *registerDispatchSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView) {
+func (f *registerDispatchSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
 func (f *registerDispatchSubs) DroppedClients() <-chan types.ConnectionID { return nil }
 

@@ -35,7 +35,7 @@ func BenchmarkEvalEqualitySubs1K(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+		mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	}
 }
 
@@ -62,7 +62,7 @@ func BenchmarkEvalEqualitySubs10K(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+		mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	}
 }
 
@@ -106,7 +106,7 @@ func BenchmarkFanOut1KClientsSameQuery(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+		mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	}
 }
 
@@ -171,7 +171,7 @@ func BenchmarkJoinFragmentEval(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		mgr.EvalAndBroadcast(types.TxID(uint64(i+2)), cs, committed)
+		mgr.EvalAndBroadcast(types.TxID(uint64(i+2)), cs, committed, PostCommitMeta{})
 	}
 }
 

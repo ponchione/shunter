@@ -111,3 +111,23 @@ func TestReconcileStructurallyEqualFromDifferentFragments(t *testing.T) {
 		t.Fatalf("structurally equal rows should cancel, got %d/%d", len(i), len(d))
 	}
 }
+
+func TestReconcileDistributedFragmentsNetCount(t *testing.T) {
+	row := mkRow(uint64(7), "net")
+	ins := [][]types.ProductValue{
+		{row},
+		{row, row},
+		nil,
+		{row},
+	}
+	del := [][]types.ProductValue{
+		{row, row},
+		nil,
+		{row},
+		nil,
+	}
+	i, d := ReconcileJoinDelta(ins, del)
+	if len(i) != 1 || len(d) != 0 {
+		t.Fatalf("distributed fragments should net to 1 insert, got %d/%d", len(i), len(d))
+	}
+}

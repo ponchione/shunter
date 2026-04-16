@@ -58,32 +58,59 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 
 	switch p := pred.(type) {
 	case Join:
-		// Re-evaluate join: iterate LHS committed, probe RHS by join key.
+		// Re-evaluate join: iterate one side and probe the other by join key.
 		// Validation already confirmed an index exists on at least one side;
-		// if the resolver disagrees, that is a contract violation, not a
-		// user error — hard-fail instead of silently returning empty rows
+		// if the resolver disagrees on both sides, that is a contract violation,
+		// not a user error — hard-fail instead of silently returning empty rows
 		// (PHASE-5-DEFERRED §D).
 		if m.resolver == nil {
-			return nil, fmt.Errorf("%w: manager has no IndexResolver (table=%d col=%d)", ErrJoinIndexUnresolved, p.Right, p.RightCol)
+			return nil, fmt.Errorf("%w: manager has no IndexResolver (join=%d.%d=%d.%d)", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
 		}
-		rhsIdx, ok := m.resolver.IndexIDForColumn(p.Right, p.RightCol)
-		if !ok {
-			return nil, fmt.Errorf("%w: table=%d col=%d", ErrJoinIndexUnresolved, p.Right, p.RightCol)
-		}
-		for _, lrow := range func() []types.ProductValue {
-			var ls []types.ProductValue
-			for _, row := range iterateAll(view, p.Left) {
-				ls = append(ls, row)
+		if rhsIdx, ok := m.resolver.IndexIDForColumn(p.Right, p.RightCol); ok {
+			for _, lrow := range func() []types.ProductValue {
+				var ls []types.ProductValue
+				for _, row := range iterateAll(view, p.Left) {
+					ls = append(ls, row)
+				}
+				return ls
+			}() {
+				if int(p.LeftCol) >= len(lrow) {
+					continue
+				}
+				key := store.NewIndexKey(lrow[p.LeftCol])
+				rowIDs := view.IndexSeek(p.Right, rhsIdx, key)
+				for _, rid := range rowIDs {
+					rrow, ok := view.GetRow(p.Right, rid)
+					if !ok {
+						continue
+					}
+					if joined := tryJoinFilter(lrow, p.Left, rrow, p.Right, &p); joined != nil {
+						if err := add(joined); err != nil {
+							return nil, err
+						}
+					}
+				}
 			}
-			return ls
+			break
+		}
+		lhsIdx, ok := m.resolver.IndexIDForColumn(p.Left, p.LeftCol)
+		if !ok {
+			return nil, fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
+		}
+		for _, rrow := range func() []types.ProductValue {
+			var rs []types.ProductValue
+			for _, row := range iterateAll(view, p.Right) {
+				rs = append(rs, row)
+			}
+			return rs
 		}() {
-			if int(p.LeftCol) >= len(lrow) {
+			if int(p.RightCol) >= len(rrow) {
 				continue
 			}
-			key := store.NewIndexKey(lrow[p.LeftCol])
-			rowIDs := view.IndexSeek(p.Right, rhsIdx, key)
+			key := store.NewIndexKey(rrow[p.RightCol])
+			rowIDs := view.IndexSeek(p.Left, lhsIdx, key)
 			for _, rid := range rowIDs {
-				rrow, ok := view.GetRow(p.Right, rid)
+				lrow, ok := view.GetRow(p.Left, rid)
 				if !ok {
 					continue
 				}

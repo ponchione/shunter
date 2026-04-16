@@ -301,6 +301,10 @@ func OpenSegment(path string) (*SegmentReader, error) {
 		f.Close()
 		return nil, fmt.Errorf("commitlog: invalid segment filename %q", base)
 	}
+	if base != SegmentFileName(startTx) {
+		f.Close()
+		return nil, fmt.Errorf("commitlog: non-canonical segment filename %q", base)
+	}
 
 	return &SegmentReader{file: f, startTx: startTx}, nil
 }

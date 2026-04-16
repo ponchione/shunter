@@ -36,7 +36,7 @@ The main algorithm called after every committed transaction. Orchestrates DeltaV
 
 - Fanout assembly: `CommitFanout map[ConnectionID][]SubscriptionUpdate`
 
-- Error handling per subscription (§11.1): if delta evaluation fails, log error, send `SubscriptionError` to affected clients, mark for cleanup. Do not abort loop — other subscriptions unaffected.
+- Error handling per subscription (§11.1): if delta evaluation fails, log error, send `SubscriptionError` to affected clients, unregister the affected subscription(s), and continue. Do not abort loop — other subscriptions unaffected.
 
 ## Acceptance Criteria
 
@@ -49,7 +49,7 @@ The main algorithm called after every committed transaction. Orchestrates DeltaV
 - [ ] Evaluation error for one subscription → others still evaluated
 - [ ] Evaluation error logs query hash plus predicate/query representation
 - [ ] Evaluation error sends `SubscriptionError` to all clients subscribed to that query
-- [ ] Evaluation error marks affected clients for cleanup/disconnect
+- [ ] Evaluation error unregisters the affected subscription(s) without disconnecting unrelated subscriptions on the same connection
 - [ ] FanOutMessage sent to fan-out worker inbox
 - [ ] Changeset not mutated
 

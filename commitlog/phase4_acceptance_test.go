@@ -455,6 +455,63 @@ func TestDurabilityWorkerCloseAfterSingleQueuedItemDoesNotSpinOnClosedDrain(t *t
 	}
 }
 
+func TestDurabilityWorkerWaitUntilDurableAlreadyDurable(t *testing.T) {
+	dir := t.TempDir()
+	dw, err := NewDurabilityWorker(dir, 1, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+	if _, err := dw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ready := dw.WaitUntilDurable(types.TxID(1))
+	select {
+	case txID := <-ready:
+		if txID != 1 {
+			t.Fatalf("txID=%d want 1", txID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("already durable tx did not return ready channel")
+	}
+}
+
+func TestDurabilityWorkerWaitUntilDurableLaterBatch(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.DrainBatchSize = 8
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait2 := dw.WaitUntilDurable(types.TxID(2))
+	wait3 := dw.WaitUntilDurable(types.TxID(3))
+	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+	dw.EnqueueCommitted(2, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+	dw.EnqueueCommitted(3, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+
+	select {
+	case txID := <-wait2:
+		if txID != 2 {
+			t.Fatalf("txID=%d want 2", txID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait2 did not become ready")
+	}
+	select {
+	case txID := <-wait3:
+		if txID != 3 {
+			t.Fatalf("txID=%d want 3", txID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait3 did not become ready")
+	}
+	if _, err := dw.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDurabilityWorkerReopensExistingSegment(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultCommitLogOptions()

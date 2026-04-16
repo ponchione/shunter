@@ -17,9 +17,6 @@ import "github.com/ponchione/shunter/types"
 //
 // When result.Status != 0 (failed/panic/not-found), the embedded
 // TransactionUpdate is forced empty per SPEC-005 §8.7.
-//
-// Note: this function mutates fanout by deleting the caller's entry
-// before passing the remainder to DeliverTransactionUpdate.
 func DeliverReducerCallResult(
 	sender ClientSender,
 	mgr *ConnManager,
@@ -32,10 +29,9 @@ func DeliverReducerCallResult(
 		return DeliverTransactionUpdate(sender, mgr, result.TxID, fanout)
 	}
 
-	// Extract caller's entry and remove it so standalone delivery
-	// never sends the caller a duplicate TransactionUpdate.
+	// Extract caller's entry and keep the input map unchanged so shared fanout
+	// state can be safely reused by other delivery paths.
 	callerUpdates := fanout[*callerConnID]
-	delete(fanout, *callerConnID)
 
 	var errs []DeliveryError
 
@@ -54,9 +50,18 @@ func DeliverReducerCallResult(
 	}
 
 	// Deliver standalone TransactionUpdate to everyone else.
-	if result != nil && result.Status == 0 && len(fanout) > 0 {
-		txErrs := DeliverTransactionUpdate(sender, mgr, result.TxID, fanout)
-		errs = append(errs, txErrs...)
+	if result != nil && result.Status == 0 {
+		nonCaller := make(map[types.ConnectionID][]SubscriptionUpdate, len(fanout))
+		for connID, updates := range fanout {
+			if connID == *callerConnID {
+				continue
+			}
+			nonCaller[connID] = updates
+		}
+		if len(nonCaller) > 0 {
+			txErrs := DeliverTransactionUpdate(sender, mgr, result.TxID, nonCaller)
+			errs = append(errs, txErrs...)
+		}
 	}
 
 	return errs
