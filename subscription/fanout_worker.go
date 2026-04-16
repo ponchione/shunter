@@ -63,7 +63,37 @@ func (w *FanOutWorker) Run(ctx context.Context) {
 	}
 }
 
+// SetConfirmedReads toggles the per-connection confirmed-read policy.
+// Accessed only from the fan-out goroutine — no mutex needed.
+func (w *FanOutWorker) SetConfirmedReads(connID types.ConnectionID, enabled bool) {
+	if enabled {
+		w.confirmedReads[connID] = true
+	} else {
+		delete(w.confirmedReads, connID)
+	}
+}
+
+// RemoveClient clears all fan-out worker state for the given connection.
+func (w *FanOutWorker) RemoveClient(connID types.ConnectionID) {
+	delete(w.confirmedReads, connID)
+}
+
+func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout) bool {
+	for connID := range fanout {
+		if w.confirmedReads[connID] {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *FanOutWorker) deliver(msg FanOutMessage) {
+	// Confirmed-read gating (Story 6.4): wait for durability if any
+	// client in this batch requires confirmed reads.
+	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout) {
+		<-msg.TxDurable
+	}
+
 	// Extract caller if present — must happen before iterating fanout
 	// so caller does NOT receive a standalone TransactionUpdate.
 	var callerUpdates []SubscriptionUpdate

@@ -354,3 +354,132 @@ func (s *selectiveFailSender) SendReducerResult(connID types.ConnectionID, resul
 func (s *selectiveFailSender) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {
 	return nil
 }
+
+func TestFanOutWorker_FastRead_NoWait(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	// TxDurable never signals — if worker waits, test will timeout.
+	durableCh := make(chan types.TxID)
+	inbox <- FanOutMessage{
+		TxID:      types.TxID(1),
+		TxDurable: durableCh,
+		Fanout: CommitFanout{
+			cid(1): {{SubscriptionID: 1, TableName: "t1"}},
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.txCalls) != 1 {
+		t.Fatalf("txCalls = %d, want 1 (fast-read should not wait)", len(mock.txCalls))
+	}
+}
+
+func TestFanOutWorker_ConfirmedRead_Waits(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+	conn1 := cid(1)
+	w.SetConfirmedReads(conn1, true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	durableCh := make(chan types.TxID, 1)
+	inbox <- FanOutMessage{
+		TxID:      types.TxID(1),
+		TxDurable: durableCh,
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 1, TableName: "t1"}},
+		},
+	}
+
+	// No delivery yet — waiting for TxDurable.
+	time.Sleep(50 * time.Millisecond)
+	mock.mu.Lock()
+	preCount := len(mock.txCalls)
+	mock.mu.Unlock()
+	if preCount != 0 {
+		t.Fatalf("txCalls = %d before TxDurable, want 0", preCount)
+	}
+
+	// Signal durability.
+	durableCh <- types.TxID(1)
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.txCalls) != 1 {
+		t.Fatalf("txCalls = %d after TxDurable, want 1", len(mock.txCalls))
+	}
+}
+
+func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+	conn1 := cid(1)
+	w.SetConfirmedReads(conn1, true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	// TxDurable is nil — treat as already durable.
+	inbox <- FanOutMessage{
+		TxID: types.TxID(1),
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 1, TableName: "t1"}},
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.txCalls) != 1 {
+		t.Fatalf("txCalls = %d, want 1 (nil TxDurable = already durable)", len(mock.txCalls))
+	}
+}
+
+func TestFanOutWorker_SetConfirmedReads_Toggle(t *testing.T) {
+	w := &FanOutWorker{confirmedReads: make(map[types.ConnectionID]bool)}
+	conn1 := cid(1)
+
+	w.SetConfirmedReads(conn1, true)
+	if !w.confirmedReads[conn1] {
+		t.Fatal("expected confirmed reads enabled")
+	}
+
+	w.SetConfirmedReads(conn1, false)
+	if w.confirmedReads[conn1] {
+		t.Fatal("expected confirmed reads disabled")
+	}
+}
+
+func TestFanOutWorker_RemoveClient(t *testing.T) {
+	w := &FanOutWorker{confirmedReads: make(map[types.ConnectionID]bool)}
+	conn1 := cid(1)
+	w.confirmedReads[conn1] = true
+
+	w.RemoveClient(conn1)
+	if _, ok := w.confirmedReads[conn1]; ok {
+		t.Fatal("RemoveClient should clear confirmedReads entry")
+	}
+}
