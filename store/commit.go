@@ -10,6 +10,9 @@ import (
 // Commit applies the transaction's mutations to committed state and produces a changeset.
 // It revalidates constraints under the committed-state write lock before mutating state.
 func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
+	if tx.rolledBack {
+		return nil, ErrTransactionRolledBack
+	}
 	cs.Lock()
 	defer cs.Unlock()
 
@@ -53,8 +56,10 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 }
 
 // Rollback discards the transaction. No committed state mutation.
+// After rollback, all Transaction methods return errors or zero values.
 func Rollback(tx *Transaction) {
 	tx.rolledBack = true
+	tx.tx = nil
 }
 
 func ensureTableChangeset(cs *Changeset, id schema.TableID, tableName string) *TableChangeset {

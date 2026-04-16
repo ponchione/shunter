@@ -28,8 +28,19 @@ func NewTransaction(cs *CommittedState, reg schema.SchemaRegistry) *Transaction 
 // TxState returns the underlying transaction state (for commit).
 func (t *Transaction) TxState() *TxState { return t.tx }
 
+// checkUsable returns ErrTransactionRolledBack if the transaction has been rolled back.
+func (t *Transaction) checkUsable() error {
+	if t.rolledBack {
+		return ErrTransactionRolledBack
+	}
+	return nil
+}
+
 // Insert validates and inserts a row, returning the provisional RowID.
 func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (types.RowID, error) {
+	if err := t.checkUsable(); err != nil {
+		return 0, err
+	}
 	table, ok := t.committed.Table(tableID)
 	if !ok {
 		return 0, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
@@ -138,6 +149,9 @@ func (t *Transaction) tryUndelete(tableID schema.TableID, table *Table, row type
 
 // Delete removes a row by RowID.
 func (t *Transaction) Delete(tableID schema.TableID, rowID types.RowID) error {
+	if err := t.checkUsable(); err != nil {
+		return err
+	}
 	if _, ok := t.committed.Table(tableID); !ok {
 		return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 	}
@@ -166,6 +180,9 @@ func (t *Transaction) Delete(tableID schema.TableID, rowID types.RowID) error {
 // Update deletes the old row and inserts the new one.
 // On insert failure, the delete is rolled back.
 func (t *Transaction) Update(tableID schema.TableID, rowID types.RowID, newRow types.ProductValue) (types.RowID, error) {
+	if err := t.checkUsable(); err != nil {
+		return 0, err
+	}
 	// Remember if this was a committed row vs tx-local.
 	wasTxInsert := t.tx.IsInserted(tableID, rowID)
 	var oldRow types.ProductValue
@@ -205,6 +222,9 @@ func (t *Transaction) Update(tableID schema.TableID, rowID types.RowID, newRow t
 
 // GetRow returns a row visible in this transaction.
 func (t *Transaction) GetRow(tableID schema.TableID, rowID types.RowID) (types.ProductValue, bool) {
+	if t.rolledBack {
+		return nil, false
+	}
 	// Check tx-local inserts.
 	if row, ok := t.tx.Inserts(tableID)[rowID]; ok {
 		return row, true
@@ -224,6 +244,9 @@ func (t *Transaction) GetRow(tableID schema.TableID, rowID types.RowID) (types.P
 // ScanTable yields all visible rows (committed minus deletes plus tx inserts).
 func (t *Transaction) ScanTable(tableID schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
+		if t.rolledBack {
+			return
+		}
 		table, ok := t.committed.Table(tableID)
 		if !ok {
 			return

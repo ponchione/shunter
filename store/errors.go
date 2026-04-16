@@ -16,6 +16,7 @@ var (
 	ErrNullNotAllowed             = errors.New("null not allowed")
 	ErrInvalidFloat               = errors.New("invalid float value")
 	ErrRowShapeMismatch           = errors.New("row shape mismatch")
+	ErrTransactionRolledBack      = errors.New("transaction rolled back")
 )
 
 // TypeMismatchError is returned when a column value doesn't match the schema type.

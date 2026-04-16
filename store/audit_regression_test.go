@@ -245,6 +245,107 @@ func TestTxStateAddInsertDetachesFromCaller(t *testing.T) {
 	}
 }
 
+func TestRollbackBlocksPostRollbackInsert(t *testing.T) {
+	cs, reg := buildTestState()
+	tx := NewTransaction(cs, reg)
+	Rollback(tx)
+
+	_, err := tx.Insert(0, mkRow(1, "alice"))
+	if !errors.Is(err, ErrTransactionRolledBack) {
+		t.Fatalf("post-rollback Insert: got %v, want ErrTransactionRolledBack", err)
+	}
+}
+
+func TestRollbackBlocksPostRollbackDelete(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	rid := tbl.AllocRowID()
+	_ = tbl.InsertRow(rid, mkRow(1, "alice"))
+
+	tx := NewTransaction(cs, reg)
+	Rollback(tx)
+
+	err := tx.Delete(0, rid)
+	if !errors.Is(err, ErrTransactionRolledBack) {
+		t.Fatalf("post-rollback Delete: got %v, want ErrTransactionRolledBack", err)
+	}
+}
+
+func TestRollbackBlocksPostRollbackUpdate(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	rid := tbl.AllocRowID()
+	_ = tbl.InsertRow(rid, mkRow(1, "alice"))
+
+	tx := NewTransaction(cs, reg)
+	Rollback(tx)
+
+	_, err := tx.Update(0, rid, mkRow(2, "bob"))
+	if !errors.Is(err, ErrTransactionRolledBack) {
+		t.Fatalf("post-rollback Update: got %v, want ErrTransactionRolledBack", err)
+	}
+}
+
+func TestRollbackBlocksPostRollbackCommit(t *testing.T) {
+	cs, reg := buildTestState()
+	tx := NewTransaction(cs, reg)
+	if _, err := tx.Insert(0, mkRow(1, "alice")); err != nil {
+		t.Fatal(err)
+	}
+	Rollback(tx)
+
+	_, err := Commit(cs, tx)
+	if !errors.Is(err, ErrTransactionRolledBack) {
+		t.Fatalf("post-rollback Commit: got %v, want ErrTransactionRolledBack", err)
+	}
+}
+
+func TestRollbackGetRowReturnsNil(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	rid := tbl.AllocRowID()
+	_ = tbl.InsertRow(rid, mkRow(1, "alice"))
+
+	tx := NewTransaction(cs, reg)
+	Rollback(tx)
+
+	row, ok := tx.GetRow(0, rid)
+	if ok || row != nil {
+		t.Fatalf("post-rollback GetRow should return nil, false; got %v, %v", row, ok)
+	}
+}
+
+func TestRollbackScanTableYieldsNothing(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	_ = tbl.InsertRow(tbl.AllocRowID(), mkRow(1, "alice"))
+
+	tx := NewTransaction(cs, reg)
+	Rollback(tx)
+
+	count := 0
+	for range tx.ScanTable(0) {
+		count++
+	}
+	if count != 0 {
+		t.Fatalf("post-rollback ScanTable yielded %d rows, want 0", count)
+	}
+}
+
+func TestRollbackLeavesCommittedStateUnchanged(t *testing.T) {
+	cs, reg := buildTestState()
+	tx := NewTransaction(cs, reg)
+	if _, err := tx.Insert(0, mkRow(1, "alice")); err != nil {
+		t.Fatal(err)
+	}
+	Rollback(tx)
+
+	tbl, _ := cs.Table(0)
+	if tbl.RowCount() != 0 {
+		t.Fatalf("rollback should not mutate committed state; row count = %d", tbl.RowCount())
+	}
+}
+
 func TestApplyChangesetDeletesByPrimaryKeyNotStoredRowID(t *testing.T) {
 	cs, _ := buildTestState()
 	tbl, _ := cs.Table(0)

@@ -71,15 +71,15 @@ Audit notes:
 
 ### TD-026: SPEC-002 E4 `CommitLogOptions` is missing the documented `SnapshotInterval` field
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-002 Epic 4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4h (`SPEC-002 E4: Durability Worker`)
 
 Summary:
 - Story 4.1 and SPEC-002 §8 document `CommitLogOptions.SnapshotInterval uint64` with a default of 0.
-- Live `CommitLogOptions` includes `MaxSegmentSize`, `MaxRecordPayloadBytes`, `MaxRowBytes`, `ChannelCapacity`, and `DrainBatchSize`, but no `SnapshotInterval` field.
-- This leaves the documented durability/snapshot policy surface incomplete even before periodic snapshotting behavior is implemented.
+- Live `commitlog.CommitLogOptions` now includes `SnapshotInterval`, and `DefaultCommitLogOptions()` now returns the documented default of 0.
+- A focused regression test now guards that public options surface.
 
 Why this matters:
 - This is a public API contract gap in the documented options surface.
@@ -1042,7 +1042,7 @@ Suggested follow-up tests:
 
 ### TD-013: SPEC-001 E6 rollback does not make transactions unusable
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-001 Epic 6 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 3 / Step 3e (`SPEC-001 E6: Commit, Rollback & Changeset`)
