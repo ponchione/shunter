@@ -115,15 +115,15 @@ Objective
 
 Bleed-items are findings that span ≥2 specs and share one fix. Resolve clusters first; per-spec residue afterward.
 
-#### Cluster A — Schema-contract surfaces (Session 2)
+#### Cluster A — Schema-contract surfaces (closed Session 2)
 Single SPEC-006 §7 edit unblocks four downstream consumers.
 
-- **A1 `SchemaLookup` interface** — SPEC-006 §1.1, SPEC-005 §4.2 callout, SPEC-004 §2.14, SPEC-005 §4.2 (front-matter dep). Three live homes (`subscription/validate.go:9`, `protocol/handle_subscribe.go:16`, `protocol/upgrade.go:46`) need consolidation. Pick `TableByName` 3-tuple form per SPEC-005 Story 4.2.
-- **A2 `IndexResolver` interface** — SPEC-006 §1.2, SPEC-004 §2.7. Single live home (`subscription/placement.go:27`); declare in SPEC-006 §7 as `SchemaRegistry` capability.
-- **A3 `SchemaRegistry.Version()` semantics** — SPEC-006 §1.5, SPEC-002 §2.7. Pin meaning (registration epoch vs schema-version-on-disk).
-- **A4 Freeze / registration-order lifecycle** — SPEC-006 §1.4, SPEC-003 §5.5, SPEC-006 §5.3 (epic gap). Name `Build()` = freeze; spell ordering: schema → reducers → freeze → NewExecutor → scheduler replay → dangling-client sweep → Run.
+- **A1 `SchemaLookup` interface** — SPEC-006 §1.1, SPEC-005 §4.2 callout, SPEC-004 §2.14, SPEC-005 §4.2 (front-matter dep). Three live homes (`subscription/validate.go:9`, `protocol/handle_subscribe.go:16`, `protocol/upgrade.go:46`) need consolidation. Pick `TableByName` 3-tuple form per SPEC-005 Story 4.2. **Resolved:** SPEC-006 §7 declares `SchemaLookup` as the union narrow read-only surface (Table / TableByName 3-tuple / TableExists / TableName / ColumnExists / ColumnType / HasIndex). `SchemaRegistry` embeds it. Consumer-side narrow declarations in `subscription/`, `protocol/` are now documentation, not new types.
+- **A2 `IndexResolver` interface** — SPEC-006 §1.2, SPEC-004 §2.7. Single live home (`subscription/placement.go:27`); declare in SPEC-006 §7 as `SchemaRegistry` capability. **Resolved:** SPEC-006 §7 declares `IndexResolver`; `SchemaRegistry` embeds it. SPEC-004 §10.4 cross-refs.
+- **A3 `SchemaRegistry.Version()` semantics** — SPEC-006 §1.5, SPEC-002 §2.7. Pin meaning. **Resolved:** SPEC-006 §6.1 pins Version() as application-supplied uint32, opaque to engine, never derived/mutated. Snapshot-header authoritative on header-vs-body disagreement; full dual-storage collapse deferred to Session 8 (SPEC-002 §4.1). SPEC-002 §6.1 step 4b updated with explicit cross-ref.
+- **A4 Freeze / registration-order lifecycle** — SPEC-006 §1.4, SPEC-003 §5.5, SPEC-006 §5.3 (epic gap). **Resolved:** SPEC-006 §5.1 names Build()=freeze, lists post-freeze rejection rule + ErrAlreadyBuilt sentinel. §5.2 spells the eight-step engine boot ordering (registration → freeze → subsystem construction → recovery → scheduler replay → dangling-client sweep → run). Story 5.3 algorithm updated with explicit freeze step 1 and step 10; acceptance criteria extended. SPEC-003 §13.5 cross-refs.
 
-Edits land in: `docs/decomposition/006-schema/SPEC-006-schema.md` §7, §5, §6.1; `docs/decomposition/006-schema/epic-5-*/story-5.3-*.md`; cross-refs in SPEC-002 §5.6, SPEC-003 §13.1, SPEC-004 §10, SPEC-005 §13.
+Edits landed in: `docs/decomposition/006-schema/SPEC-006-schema.md` §5/§5.1/§5.2/§6.1/§7; `docs/decomposition/006-schema/epic-5-validation-build/story-5.3-build-orchestration.md`; cross-refs in `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §6.1, `docs/decomposition/003-executor/SPEC-003-executor.md` §13.5, `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md` §10.4 (added), `docs/decomposition/005-protocol/SPEC-005-protocol.md` §13 (added SPEC-006 subsection).
 
 #### Cluster B — Error-sentinel ownership + canonical types (Session 3)
 Untangle error-home and type-home bleeds.
@@ -216,7 +216,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.4 | GAP | `row_count` width spec `uint64` vs Story+impl `uint32` | §5.3, Story 5.2 | open |
 | §2.5 | GAP | Front matter omits SPEC-003 / SPEC-006 deps | — | in-cluster B5 |
 | §2.6 | GAP | Snapshot→CommittedState restore API not named | SPEC-001 Story 8.3/8.4, Story 6.4 | open |
-| §2.7 | GAP | `SchemaRegistry.Version()` contract used but undefined | — | in-cluster A3 |
+| §2.7 | GAP | `SchemaRegistry.Version()` contract used but undefined | — | closed (A3) |
 | §2.8 | GAP | `durable_horizon` undefined when segments empty + snapshot exists | §6.x | open |
 | §2.9 | GAP | Per-TxID durability ack (`WaitUntilDurable`) not in §4.2 | — | in-cluster E6 |
 | §2.10 | GAP | `AppendMode` lives in Story 6.1 but not §6.4 | §6.4, EPICS.md | open |
@@ -283,7 +283,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §5.2 | GAP | No story owns `max_applied_tx_id` hand-off from SPEC-002 | new story | open |
 | §5.3 | GAP | No story owns dangling-client sweep on startup | overlaps §2.2 | open |
 | §5.4 | GAP | No story owns read-routing documentation placement | new story | open |
-| §5.5 | GAP | No story on reducer/schema registration ordering at engine-boot | — | in-cluster A4 |
+| §5.5 | GAP | No story on reducer/schema registration ordering at engine-boot | — | closed (A4) |
 
 #### SPEC-004 — Subscription Evaluator
 
@@ -301,7 +301,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.4 | GAP | `SubscriptionError` delivery + payload undefined | — | in-cluster E3 |
 | §2.5 | GAP | `ReducerCallResult` forward-decl shape unpinned | — | in-cluster E4 |
 | §2.6 | GAP | `FanOutSender` / `ClientSender` naming + method-surface split | — | in-cluster E5 |
-| §2.7 | GAP | `IndexResolver` no declared home | — | in-cluster A2 |
+| §2.7 | GAP | `IndexResolver` no declared home | — | closed (A2) |
 | §2.8 | GAP | `ErrJoinIndexUnresolved`/`ErrSendBufferFull`/`ErrSendConnGone` not in §11 | §11, Story 4.5, EPICS.md | open |
 | §2.9 | GAP | Story 5.2 `CollectCandidates` doc-only; live inlines tiering | Story 5.2, §6.x | open |
 | §2.10 | GAP | Caller-result delivery when caller's `Fanout` empty unspecified | Story 5.1 | open |
@@ -387,11 +387,11 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
-| §1.1 | CRIT | `SchemaLookup` interface no home | — | in-cluster A1 |
-| §1.2 | CRIT | `IndexResolver` interface no home | — | in-cluster A2 |
+| §1.1 | CRIT | `SchemaLookup` interface no home | — | closed (A1) |
+| §1.2 | CRIT | `IndexResolver` interface no home | — | closed (A2) |
 | §1.3 | CRIT | `ErrReducerArgsDecode` typed-adapter sentinel unowned | — | in-cluster B1 |
-| §1.4 | CRIT | Reducer registration / freeze lifecycle unspecified | — | in-cluster A4 |
-| §1.5 | CRIT | `SchemaRegistry.Version()` semantics undefined | — | in-cluster A3 |
+| §1.4 | CRIT | Reducer registration / freeze lifecycle unspecified | — | closed (A4) |
+| §1.5 | CRIT | `SchemaRegistry.Version()` semantics undefined | — | closed (A3) |
 | §2.1 | GAP | `ColumnSchema` inconsistent spec §8 vs live | — | in-cluster C2 |
 | §2.2 | GAP | `Nullable` preemptive-only but §9/§13 silent | — | in-cluster C2 |
 | §2.3 | GAP | Reducer-arg schema unreachable from `ReducerExport` | §8 / Story 6.x | open |
@@ -420,9 +420,9 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §4.7 | NIT | Story 5.3 TableID assignment determinism undocumented | Story 5.3 | open |
 | §4.8 | NIT | `validateStructure` doesn't check PK-vs-named-composite-participant | Story x | open |
 | §4.9 | NIT | `ExportSchema` lifecycle ordering regardless of version | Story 6.2 | open |
-| §5.1 | GAP | No story owns `SchemaLookup`/`IndexResolver` declaration | — | in-cluster A1/A2 |
+| §5.1 | GAP | No story owns `SchemaLookup`/`IndexResolver` declaration | — | closed (A1/A2) |
 | §5.2 | GAP | No story owns `ErrReservedReducerName` etc | overlaps §2.5 | open |
-| §5.3 | GAP | No story owns registration-order freeze | — | in-cluster A4 |
+| §5.3 | GAP | No story owns registration-order freeze | — | closed (A4) |
 | §5.4 | NIT | Epic 4 implementation order glosses Story 4.2 mixed-unique check | Epic 4 | open |
 | §5.5 | NIT | Story 6.3 acceptance lacks generated TS shape | Story 6.3 | open |
 
@@ -433,7 +433,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 | # | Scope | Inputs | Stop rule |
 |---|---|---|---|
 | 1 | This tracking doc (current) | full SPEC-AUDIT.md headings | tracking doc committed |
-| 2 | Cluster A — schema contracts (`SchemaLookup`, `IndexResolver`, `Version()`, freeze) | SPEC-006 §1.1–1.5; SPEC-002 §2.7; SPEC-003 §5.5; SPEC-004 §2.7/§2.14; SPEC-005 §4.2 | SPEC-006 §7 + §5 + §6.1 carry the four declarations; cross-refs added in SPEC-002/003/004/005 |
+| 2 | Cluster A — schema contracts (`SchemaLookup`, `IndexResolver`, `Version()`, freeze) | SPEC-006 §1.1–1.5; SPEC-002 §2.7; SPEC-003 §5.5; SPEC-004 §2.7/§2.14; SPEC-005 §4.2 | **(closed)** SPEC-006 §7 + §5 + §6.1 carry the four declarations; cross-refs added in SPEC-002/003/004/005 |
 | 3 | Cluster B — error sentinels + types canonicalization + Commit/TxID | SPEC-006 §1.3/§2.6; SPEC-001 §1.3/§2.3/§4.1/§4.2; SPEC-002 §1.2/§2.5/§4.2; SPEC-003 §1.1/§2.3/§4.1/§4.7; SPEC-005 §1.3/§2.2/§4.2; SPEC-004 §2.14 | Commit signature decided + propagated; types/ canonical home documented; front-matter deps fixed |
 | 4 | Cluster C — BSATN disclaimer + per-column trailer | SPEC-002 §2.3/§3.1/§6.1; SPEC-001 §4.6; SPEC-005 §4.1/§6.1; SPEC-006 §2.1/§2.2/§2.9; SPEC-003/004 clean-room caveats | Disclaimer in SPEC-002 §3.1 + cross-refs; ColumnSchema trailer policy decided |
 | 5 | Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init | SPEC-003 §1.5/§2.1/§2.6/§3.5; SPEC-005 §4.7; SPEC-006 §2.4/§3.2 | `init` adopt-or-defer landed; OnConnect/Disconnect command identity unified |
@@ -492,4 +492,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 2 (Cluster A — schema contracts).
+Cursor: Session 3 (Cluster B — error sentinels + canonical types + Commit/TxID).

@@ -625,6 +625,10 @@ type ClientSender interface {
 
 `OneOffQuery` uses `CommittedState.Snapshot()` directly (read-only, bypassing subscription registration ordering) to serve the query result. This is safe because `OneOffQuery` does not create persistent subscription state and therefore does not need atomic registration semantics.
 
+### SPEC-006 (Schema)
+
+Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names to IDs and validate column references before forwarding requests to the executor. They consume the `SchemaLookup` interface declared in SPEC-006 §7 — specifically `TableByName(name) (TableID, *TableSchema, bool)` and the column-metadata methods. The protocol package may declare its own narrower local interface for testing, but the canonical type lives in SPEC-006; `*SchemaRegistry` satisfies it directly. The handler receives the schema reference at upgrade time (see Story 3.x `UpgradeContext.Schema`); the registry is immutable for the engine's lifetime per SPEC-006 §5.1 freeze.
+
 ---
 
 ## 14. Error Catalog

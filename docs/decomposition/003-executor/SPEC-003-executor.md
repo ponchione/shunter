@@ -727,6 +727,8 @@ SPEC-006 must provide:
 - optional typed adapters around the raw `ReducerHandler` byte-oriented runtime signature
 - lifecycle reducer declaration
 
+The `*SchemaRegistry` value passed to `NewExecutor` is the canonical interface declared in SPEC-006 §7. It satisfies the narrower `SchemaLookup` and `IndexResolver` sub-interfaces that SPEC-004 and SPEC-005 consume, so the executor can pass the same value to subsystem constructors without adapters. Registry freeze and the full engine boot ordering are owned by SPEC-006 §5.1 / §5.2; the executor is constructed in step 4 of that sequence and may treat the registry as fully populated and immutable for its lifetime.
+
 ---
 
 ## 14. Open Questions

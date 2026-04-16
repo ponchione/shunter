@@ -290,6 +290,31 @@ func (b *Builder) Build(opts EngineOptions) (*Engine, error)
 
 `Engine.Start(ctx)` performs runtime initialization: open/recover the commit log, construct the committed store, start the executor and durability worker, restore scheduled reducers, and begin accepting protocol connections if `EnableProtocol` is true.
 
+### 5.1 Freeze Semantics
+
+`Build()` is the **freeze** point of the registration phase. Before `Build()`, every `Builder` mutator (`TableDef`, `Reducer`, `OnConnect`, `OnDisconnect`, `SchemaVersion`) is callable. After `Build()` returns successfully:
+
+- The returned `SchemaRegistry` is immutable for the lifetime of the process.
+- Subsequent calls to any `Builder` mutator on the same `Builder` instance return `ErrAlreadyBuilt` and do not mutate state. (`ErrAlreadyBuilt` is added to the §13 error catalog as part of Session 6 cleanup; see SPEC-006 audit §2.5.)
+- A second call to `Build()` on the same `Builder` returns `ErrAlreadyBuilt` rather than re-running validation or appending duplicate system tables.
+
+Implementations enforce freeze with a single boolean stored on `Builder`; thread-safety of mutator calls during the registration phase is the application's responsibility (registration is expected to run from a single goroutine at startup).
+
+### 5.2 Engine Boot Ordering
+
+The full engine bring-up sequence — the SPEC-003 audit §5.5 / SPEC-006 audit §1.4 ordering bleed-item — is:
+
+1. **Schema registration.** Application calls `NewBuilder()` and then `TableDef` / `SchemaVersion` to register all user tables and the schema version.
+2. **Reducer registration.** Application calls `Reducer`, `OnConnect`, and `OnDisconnect` for every handler.
+3. **Freeze.** Application calls `Build(opts)`. System tables are appended, IDs are assigned, validation runs, and `*Engine` is returned with an immutable `SchemaRegistry`. After this point the registry is the canonical schema for SPEC-001/002/003/004/005.
+4. **Subsystem construction.** `Engine.Start(ctx)` constructs `*store.CommittedState` (SPEC-001), the commit-log durability worker (SPEC-002), the executor (SPEC-003 — `NewExecutor` reads the frozen registry), the subscription manager (SPEC-004 — receives the registry as both `SchemaLookup` and `IndexResolver`), and the protocol layer (SPEC-005, when `EnableProtocol = true`).
+5. **Recovery.** Commit log is opened and recovery runs against the new `CommittedState` (SPEC-002 §6).
+6. **Scheduler replay.** The executor reads `sys_scheduled` rows from `CommittedState` and rearms timers (SPEC-003 §10.3).
+7. **Dangling-client sweep.** The executor reads `sys_clients` rows and synthesizes `OnDisconnect` calls for any client present in the table without a live connection (SPEC-003 §5.3 / audit §2.2).
+8. **Run.** Executor and durability worker enter their main loops; protocol layer begins accepting WebSocket upgrades.
+
+Steps 1–3 are the SPEC-006 territory. Steps 4–8 are owned by SPEC-002/003/005 and cross-referenced from this section so the freeze contract is unambiguous: every consumer in steps 4+ may treat `SchemaRegistry` as fully populated and immutable.
+
 ---
 
 ## 6. Schema Versioning
@@ -304,8 +329,12 @@ b.SchemaVersion(3)
 
 The version is a `uint32` chosen by the application developer. It is stored in every snapshot (SPEC-002 §5.3) and compared at startup against the version stored in the latest snapshot.
 
+**`SchemaRegistry.Version()` semantics.** `Version()` returns exactly the integer passed to `SchemaVersion()` at registration time. It is application-supplied, opaque to the engine, and never derived, hashed, or mutated by any subsystem after `Build()`. Two `SchemaRegistry` instances built from identical inputs return byte-equal `Version()` values; reload from snapshot does not alter the value.
+
+**Snapshot storage authority.** SPEC-002 §5.2 (snapshot header) and §5.3 (schema body) currently both store the version integer; in case of disagreement during recovery the snapshot header is authoritative. The dual-storage collapse and on-disk byte-layout consequences are tracked in SPEC-002 audit §2.7 / §4.1 (Session 8 cleanup).
+
 **Startup compatibility rule:** Recovery succeeds only if both of the following are true:
-1. the registered schema version equals the snapshot schema version
+1. the registered schema version (i.e. `SchemaRegistry.Version()`) equals the snapshot schema version stored in the snapshot header
 2. the embedded snapshot schema matches the registered schema exactly (table IDs, table names, column names/types/order, and index definitions)
 
 If either check fails, startup returns `ErrSchemaMismatch` with structural diff details.
@@ -329,17 +358,65 @@ Document this constraint prominently. Schema evolution support (add column with 
 
 ## 7. SchemaRegistry Interface
 
-`SchemaRegistry` is the interface consumed by SPEC-001, SPEC-002, and SPEC-003. It is produced by `Build`.
+The schema-consumer surface is layered. SPEC-006 owns three interfaces; each downstream spec consumes the smallest one that fits.
+
+- `SchemaLookup` — narrow read-only schema queries used by SPEC-004 (subscription validation) and SPEC-005 (protocol dispatch). Methods cover table existence, table-by-ID and table-by-name lookup, column metadata, and single-column index presence.
+- `IndexResolver` — single-method index-ID resolution used by SPEC-004 Tier-2 candidate collection.
+- `SchemaRegistry` — full surface used by SPEC-001/002/003 plus `Reducers()` / lifecycle handlers / `Version()`. Embeds `SchemaLookup` and `IndexResolver`.
+
+All three are produced by `Build()` and are safe for concurrent use; they are immutable after `Build()` returns (see §5 freeze rules).
 
 ```go
-// SchemaRegistry is a read-only view of all registered tables, indexes, and reducers.
-// It is safe for concurrent use. It is immutable after Build().
-type SchemaRegistry interface {
-    // Table returns the schema for the given table ID.
+// SchemaLookup is the narrow read-only schema surface consumed by
+// SPEC-004 (subscription/validate) and SPEC-005 (protocol/handle_subscribe,
+// protocol/upgrade). Concrete implementations may live in those packages
+// for testing, but the canonical declaration is here. SchemaRegistry
+// satisfies SchemaLookup.
+type SchemaLookup interface {
+    // Table returns the full schema for the given table ID.
     Table(id TableID) (*TableSchema, bool)
 
-    // TableByName returns the schema for the given table name.
-    TableByName(name string) (*TableSchema, bool)
+    // TableByName returns the table ID and full schema for the given name.
+    // The 3-tuple shape exists so that wire handlers can resolve a name
+    // to its TableID without a second lookup.
+    TableByName(name string) (TableID, *TableSchema, bool)
+
+    // TableExists reports whether the table ID is registered. Cheaper
+    // than Table() when the schema body is not needed.
+    TableExists(table TableID) bool
+
+    // TableName returns the declared table name, or empty string if the
+    // table ID is unknown. Used for wire/debug output.
+    TableName(table TableID) string
+
+    // ColumnExists reports whether the column index is valid for the table.
+    ColumnExists(table TableID, col ColID) bool
+
+    // ColumnType returns the ValueKind of the column. Behavior is undefined
+    // when ColumnExists returns false; callers must check first.
+    ColumnType(table TableID, col ColID) ValueKind
+
+    // HasIndex reports whether a single-column index on (table, col) exists.
+    // Used by SPEC-004 §7.1.1 join-side index validation.
+    HasIndex(table TableID, col ColID) bool
+}
+
+// IndexResolver maps (table, column) → index ID when a single-column index
+// on that column exists. Used by SPEC-004 Tier-2 candidate collection
+// (§5 / `subscription.PruningIndexes`) to resolve the right-hand side of a
+// join edge at evaluation time. SchemaRegistry satisfies IndexResolver;
+// the resolver may also be supplied independently for tests.
+type IndexResolver interface {
+    IndexIDForColumn(table TableID, col ColID) (IndexID, bool)
+}
+
+// SchemaRegistry is the full read-only view of all registered tables,
+// indexes, and reducers. It is consumed by SPEC-001 (store), SPEC-002
+// (snapshot/recovery), and SPEC-003 (executor reducer lookup). Immutable
+// after Build().
+type SchemaRegistry interface {
+    SchemaLookup
+    IndexResolver
 
     // Tables returns all registered table IDs in stable order.
     Tables() []TableID
@@ -347,7 +424,8 @@ type SchemaRegistry interface {
     // Reducer returns the handler for the given reducer name.
     Reducer(name string) (ReducerHandler, bool)
 
-    // Reducers returns all registered reducer names in stable order (excluding lifecycle).
+    // Reducers returns all registered reducer names in stable order
+    // (excluding lifecycle).
     Reducers() []string
 
     // OnConnect returns the OnConnect handler, or nil if not registered.
@@ -356,12 +434,14 @@ type SchemaRegistry interface {
     // OnDisconnect returns the OnDisconnect handler, or nil if not registered.
     OnDisconnect() func(*ReducerContext) error
 
-    // Version returns the schema version declared via SchemaVersion().
+    // Version returns the application-supplied schema version. See §6.1.
     Version() uint32
 }
 ```
 
 `TableID` is a stable `uint32` assigned deterministically by the builder. User tables receive IDs first in registration order. Built-in system tables are appended afterward in fixed order: `sys_clients`, then `sys_scheduled`. The same registration inputs therefore produce the same IDs across runs.
+
+**Consumer guidance.** Downstream packages should depend on the narrowest interface they need: predicate validation in `subscription/` should declare a local `SchemaLookup` interface satisfied by `SchemaRegistry`; protocol handlers needing only `TableByName` may declare a single-method local interface. The canonical type is the one declared here; local interfaces are documentation for consumer scope, not new types.
 
 ---
 

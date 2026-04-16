@@ -435,7 +435,7 @@ func OpenAndRecover(dir string, schema SchemaRegistry) (*CommittedState, TxID, e
 3. **Scan snapshot directory.** List snapshot subdirectories sorted by TX ID descending. Skip any with a `.lock` file. Only snapshots with `tx_id <= durable_horizon` are candidates.
 4. **Load snapshot** (if found):
    a. Read snapshot file and verify Blake3 hash
-   b. Compare embedded schema to `SchemaRegistry` (SPEC-006 §7) exactly: schema version (from `SchemaRegistry.Version()`), all table IDs, table names, column indices/names/types in declaration order, and index definitions (names, column references, Unique, Primary). If any field differs, return `ErrSchemaMismatch`.
+   b. Compare embedded schema to `SchemaRegistry` (SPEC-006 §7) exactly: schema version (from `SchemaRegistry.Version()` — semantics pinned in SPEC-006 §6.1; the snapshot header integer is authoritative when header and body disagree), all table IDs, table names, column indices/names/types in declaration order, and index definitions (names, column references, Unique, Primary). If any field differs, return `ErrSchemaMismatch`.
    c. Reconstruct table rows from snapshot contents
    d. Rebuild indexes from those rows
    e. Restore sequence counters from snapshot sequence entries

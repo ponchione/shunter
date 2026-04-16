@@ -663,6 +663,15 @@ The evaluator needs read-only access to committed state. These are provided by `
 
 `RowIterator` is `iter.Seq2[RowID, ProductValue]` (SPEC-001 §5.4). `Row` is replaced by `ProductValue` throughout.
 
+### 10.4 From Schema (SPEC-006)
+
+Predicate validation (`ValidatePredicate`, §3.3 / Story 1.2) and Tier-2 candidate collection (`PruningIndexes.CollectCandidatesForTable`, §5 / Story 2.4) consume schema-side surfaces declared in SPEC-006 §7:
+
+- `SchemaLookup` — narrow read-only methods (`Table`, `TableByName`, `TableExists`, `TableName`, `ColumnExists`, `ColumnType`, `HasIndex`). Used by `ValidatePredicate`. The `subscription` package may declare its own narrower local interface for testing, but the canonical type is the SPEC-006 declaration; `*SchemaRegistry` satisfies it directly.
+- `IndexResolver` — single method `IndexIDForColumn(table TableID, col ColID) (IndexID, bool)`. Supplied to `Manager` at construction (`NewManager(schema SchemaLookup, resolver IndexResolver, ...)`); `*SchemaRegistry` satisfies it. When the resolver returns `false` for a column that validation confirmed has an index, `Register()` returns `ErrJoinIndexUnresolved`.
+
+Both interfaces are produced by SPEC-006 `Build()` and are immutable for the engine's lifetime (SPEC-006 §5.1 freeze).
+
 ---
 
 ## 11. Error Handling
