@@ -1468,7 +1468,7 @@ These are correctness-fatal under concurrent load or restart and are the highest
 
 - **TD-053** [BUG] `executor/executor.go:208-218` — `handleCallReducer` writes to `cmd.ResponseCh` without checking `nil`. `dispatchSafely`'s panic path (line 175) checks `cmd.ResponseCh != nil`, proving nil is a contemplated input → guaranteed nil-panic on the happy path. Fix: early `if cmd.ResponseCh == nil { return }` or use a `respondReducer` helper mirroring `respondLifecycle`.
 
-- **TD-054** [BUG] `executor/executor.go:262` — `fmt.Errorf("%v: %w", panicked, ErrReducerPanic)` formats the panic value with `%v` (lossy: a panic with `error` value loses its chain). Fix: when `panicked` is itself an `error`, wrap it: `fmt.Errorf("reducer panicked: %w (sentinel: %w)", err, ErrReducerPanic)` or `errors.Join`.
+- **TD-054** [BUG][resolved] `executor/executor.go`, `executor/phase4_acceptance_test.go` — reducer panic handling now preserves the original panic error chain when the panic value is itself an `error` by joining it with `ErrReducerPanic`, instead of flattening it through `%v`. Regression coverage: `TestPhase4HandleCallReducerBeginExecuteCommitRollback` asserts both `errors.Is(resp.Error, ErrReducerPanic)` and `errors.Is(resp.Error, errReducerBoom)`.
 
 - **TD-055** [BUG] `executor/scheduler.go:115-127` — `Cancel` returns `false` when the schedule exists but `tx.Delete` failed, indistinguishable from "not found." Fix: change signature to `(bool, error)` or log the delete error before returning false.
 
