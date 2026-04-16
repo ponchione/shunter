@@ -167,7 +167,7 @@ Returns:
 - `[]byte`: optional BSATN-encoded reducer return value; nil means no return payload
 - `error`: aborts the transaction if non-nil
 
-SPEC-006 may provide typed registration helpers that decode arguments into Go structs and re-encode return values, but the executor runtime contract is byte-oriented and fully specified here.
+SPEC-006 may provide typed registration helpers that decode arguments into Go structs and re-encode return values, but the executor runtime contract is byte-oriented and fully specified here. Typed adapters are out of scope for v1 (SPEC-006 §4.3). The sentinel for typed-adapter argument-decode failures, reserved as `ErrReducerArgsDecode`, is owned by SPEC-006 rather than SPEC-003. SPEC-003 classifies any non-nil error returned by a `ReducerHandler` as `StatusFailedUser` (§11) regardless of sentinel identity; a future typed adapter does not require a dedicated executor-level catalog entry.
 
 ### 3.2 Reducer Registration
 
@@ -657,6 +657,8 @@ If a request names a lifecycle reducer and `Source != CallSourceLifecycle`, the 
 | `ErrReducerPanic` | Reducer panicked before commit |
 | `ErrCommitFailed` | Store commit rejected the transaction |
 | `ErrExecutorFatal` | Executor entered failed state after a post-commit fatal error |
+
+Any non-nil error returned by a reducer handler (including future typed-adapter decode failures wrapping SPEC-006's reserved `ErrReducerArgsDecode`) is classified as `StatusFailedUser` via the generic handler-error path. SPEC-003 does not declare a dedicated decode sentinel; see SPEC-006 §4.3 and §3.1 above.
 
 ---
 

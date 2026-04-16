@@ -245,6 +245,8 @@ type ReducerHandler func(ctx *ReducerContext, argBSATN []byte) ([]byte, error)
 
 Typed reducer helpers are explicitly out of the v1 engine contract. Any future typed wrapper must be layered on top of explicit BSATN codecs rather than assumed implicit reflection.
 
+v1 does not ship typed reducer adapters. The name `ErrReducerArgsDecode` is reserved for the future adapter layer's argument-decode sentinel, but no such sentinel is declared or produced by v1 code. SPEC-003 classifies any non-nil `ReducerHandler` error as `StatusFailedUser` via the generic handler-error path (§11) regardless of sentinel identity; once a typed adapter lands, it will wrap decode failures with `ErrReducerArgsDecode` and SPEC-003's classification stays unchanged.
+
 ---
 
 ## 5. Engine Builder
