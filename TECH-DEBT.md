@@ -1474,7 +1474,7 @@ These are correctness-fatal under concurrent load or restart and are the highest
 
 - **TD-056** [BUG] `executor/lifecycle.go:165-174` — `deleteSysClientsRow` ranges `tx.ScanTable` and calls `tx.Delete` *during* iteration; if `ScanTable` returns a live (non-snapshot) iterator, deleting the row mutates the underlying structure during traversal. Returning immediately after the first delete is the only thing that saves it. Fix: collect the rowID first, then delete, or document `ScanTable`'s mutation safety.
 
-- **TD-057** [BUG] `executor/registry.go:60-67` — `LookupLifecycle` does an O(n) scan; with two lifecycle slots and `Register` already knowing the kind, it's lossy: if two reducers somehow shared a kind, iteration order returns an arbitrary one. Fix: maintain a `lifecycle [2]*RegisteredReducer` array indexed by `LifecycleKind`, populated in `Register`.
+- **TD-057** [BUG][resolved] `executor/registry.go`, `executor/registry_td057_test.go` — `ReducerRegistry` now caches lifecycle reducers in direct indexed slots during `Register`, so `LookupLifecycle` no longer scans the full reducer map and returns the exact slot for each lifecycle kind. Regression coverage: `TestRegisterCachesLifecycleSlots`.
 
 - **TD-058** [BUG] `subscription/delta_dedup.go:18-66` — `ReconcileJoinDelta` tallies signed multiplicities asymmetrically across iteration order. SPEC-004 §6.3 requires net (inserts − deletes) per row across all 4+4 fragments; current code emits different fragments depending on whether `(insert, delete, insert)` or `(insert, insert, delete)` arrives. Fix: tally net counts (`net[key] += inserts; net[key] -= deletes`) in one pass, then emit `+net` to inserts or `-net` to deletes.
 

@@ -7,9 +7,10 @@ import (
 
 // ReducerRegistry holds registered reducers and lifecycle handlers.
 type ReducerRegistry struct {
-	mu       sync.RWMutex
-	reducers map[string]*RegisteredReducer
-	frozen   bool
+	mu        sync.RWMutex
+	reducers  map[string]*RegisteredReducer
+	lifecycle [LifecycleOnDisconnect + 1]*RegisteredReducer
+	frozen    bool
 }
 
 var lifecycleNames = map[string]LifecycleKind{
@@ -53,6 +54,9 @@ func (rr *ReducerRegistry) Register(r RegisteredReducer) error {
 	}
 
 	rr.reducers[r.Name] = &r
+	if r.Lifecycle != LifecycleNone {
+		rr.lifecycle[r.Lifecycle] = &r
+	}
 	return nil
 }
 
@@ -79,12 +83,14 @@ func (rr *ReducerRegistry) Lookup(name string) (*RegisteredReducer, bool) {
 func (rr *ReducerRegistry) LookupLifecycle(kind LifecycleKind) (*RegisteredReducer, bool) {
 	rr.mu.RLock()
 	defer rr.mu.RUnlock()
-	for _, r := range rr.reducers {
-		if r.Lifecycle == kind {
-			return cloneRegisteredReducer(r), true
-		}
+	if kind <= LifecycleNone || int(kind) >= len(rr.lifecycle) {
+		return nil, false
 	}
-	return nil, false
+	r := rr.lifecycle[kind]
+	if r == nil {
+		return nil, false
+	}
+	return cloneRegisteredReducer(r), true
 }
 
 // All returns all registered reducers.
