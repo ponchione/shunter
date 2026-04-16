@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E2`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 2 (cluster A — schema contracts).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 4 (cluster C — BSATN + per-column trailer).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -125,14 +125,14 @@ Single SPEC-006 §7 edit unblocks four downstream consumers.
 
 Edits landed in: `docs/decomposition/006-schema/SPEC-006-schema.md` §5/§5.1/§5.2/§6.1/§7; `docs/decomposition/006-schema/epic-5-validation-build/story-5.3-build-orchestration.md`; cross-refs in `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §6.1, `docs/decomposition/003-executor/SPEC-003-executor.md` §13.5, `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md` §10.4 (added), `docs/decomposition/005-protocol/SPEC-005-protocol.md` §13 (added SPEC-006 subsection).
 
-#### Cluster B — Error-sentinel ownership + canonical types (Session 3)
+#### Cluster B — Error-sentinel ownership + canonical types (closed Session 3)
 Untangle error-home and type-home bleeds.
 
-- **B1 `ErrReducerArgsDecode` / typed-adapter sentinel** — SPEC-006 §1.3, SPEC-003 §2.3. Add one normative line to SPEC-006 §4.3.
-- **B2 `ErrColumnNotFound` three-home** — SPEC-006 §2.6, SPEC-001 §2.3. Two live homes (`store/errors.go:12`, `subscription/errors.go:16`); SPEC-006 §13 owns.
-- **B3 `TxID` ownership + Commit signature** — SPEC-001 §1.3 (CRIT), SPEC-001 §4.1 (front matter), SPEC-001 §4.2 (returned twice), SPEC-002 §1.2 (TxID stamping), SPEC-002 §2.5 (front matter), SPEC-002 §4.2 (`uint64` leak), SPEC-003 §1.1 (Commit sig 3-way contradiction), SPEC-003 §4.1 (front matter mis-declares SPEC-002 dep), SPEC-005 §2.2 (TxID=0 sentinel). Pick Model A (executor allocates) or Model B (store allocates); coordinate edits across SPEC-001 §5.6/§6.1/§13, SPEC-002 §3.2/Story 6.3, SPEC-003 §4.4/§13.1/Story 4.3.
-- **B4 Canonical types-package home** — SPEC-005 §1.3 (Identity re-declared), SPEC-006 §8 drift (`ReducerHandler`/`ReducerContext` re-exported via `schema/types.go`). Pin `types/` as canonical home for `Identity`, `ConnectionID`, `TxID`, `ReducerHandler`, `ReducerContext`, `ValueKind`. Each spec drops local re-declaration and imports.
-- **B5 Front-matter dependency completeness** — SPEC-001 §4.1, SPEC-002 §2.5, SPEC-003 §4.1, SPEC-004 §2.14, SPEC-005 §4.2, SPEC-006 §2.13. Bookkeeping; bundle with B4.
+- **B1 `ErrReducerArgsDecode` / typed-adapter sentinel** — SPEC-006 §1.3, SPEC-003 §2.3. **Resolved:** SPEC-006 §4.3 reserves the name for a future typed-adapter layer and states v1 ships no such adapter. SPEC-003 §3.1 + §11 cross-ref the deferral; any non-nil handler error classifies as `StatusFailedUser` via the generic path.
+- **B2 `ErrColumnNotFound` three-home** — SPEC-006 §2.6, SPEC-001 §2.3. Two live homes (`store/errors.go:12`, `subscription/errors.go:16`); SPEC-006 §13 owns. **Resolved:** SPEC-006 §13 declares the canonical sentinel; SPEC-001 §9 / Story 2.4 re-export with cross-refs; SPEC-001 EPICS + SPEC-004 EPICS point back to SPEC-006.
+- **B3 `TxID` ownership + Commit signature** — SPEC-001 §1.3 (CRIT), SPEC-001 §4.1 (front matter), SPEC-001 §4.2 (returned twice), SPEC-002 §1.2 (TxID stamping), SPEC-002 §2.5 (front matter), SPEC-002 §4.2 (`uint64` leak), SPEC-003 §1.1 (Commit sig 3-way contradiction), SPEC-003 §4.1 (front matter mis-declares SPEC-002 dep), SPEC-005 §2.2 (TxID=0 sentinel). **Resolved (Model A):** executor owns the monotonic counter; `store.Commit` returns `(*Changeset, error)`; executor stamps `changeset.TxID` before the post-commit pipeline. SPEC-001 §5.6/§6.1/§11, Stories 6.1/6.2; SPEC-002 §3.3 + §6.1 step 6b + Story 6.3 (stamp on decode); SPEC-003 §4.4/§6/§13.1 + Story 4.3; SPEC-005 §8.7 cross-ref to SPEC-002 §3.5 `TxID(0)` reservation. Live drift flagged: `commitlog/durability.go:135` `EnqueueCommitted(txID uint64, …)` should take `types.TxID` — deferred to later drift session.
+- **B4 Canonical types-package home** — SPEC-005 §1.3 (Identity re-declared), SPEC-006 §8 drift (`ReducerHandler`/`ReducerContext` re-exported via `schema/types.go`). **Resolved:** `types/` is the canonical Go-package home for `RowID`/`Identity`/`ConnectionID`/`TxID`/`ColID`/`SubscriptionID`/`ScheduleID` (SPEC-001 §1.1, §2.4) and `ReducerHandler`/`ReducerContext`/`CallerContext`/`ReducerDB`/`ReducerScheduler` (SPEC-003 §3.1). `schema/` re-exports for builder ergonomics (SPEC-006 §1.1). SPEC-005 §15 OQ#4 closed; Story 2.1 retitled; Story 3.1 imports `ConnectionID` from `types/`.
+- **B5 Front-matter dependency completeness** — SPEC-001 §4.1, SPEC-002 §2.5, SPEC-003 §4.1, SPEC-004 §2.14, SPEC-005 §4.2, SPEC-006 §2.13. **Resolved:** each spec's `Depends on:` / `Depended on by:` lines now list every spec referenced in its body or stories. SPEC-004 gained the missing front-matter block outright.
 
 #### Cluster C — BSATN naming + per-column trailer (Session 4)
 SPEC-002 encoding edits drag SPEC-005/006 along.
@@ -171,12 +171,12 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 |---|---|---|---|---|
 | §1.1 | CRIT | Value equality / hash invariant broken for float ±0 | Story 1.1 | open |
 | §1.2 | CRIT | `CommittedReadView.IndexRange` lacks Bound semantics in `BTreeIndex` | Stories 3.3 / 5.3 / 7.1, §7.2 | open |
-| §1.3 | CRIT | TxID ownership contradictory | — | in-cluster B3 |
+| §1.3 | CRIT | TxID ownership contradictory | — | closed (B3) |
 | §1.4 | CRIT | Undelete-match rule contradicts §5.5 vs Story 5.4 | Story 5.4, §5.5, §6.2 | open |
 | §1.5 | CRIT | `AsBytes` return contract undefined; can break immutability | Story 1.1 | open |
 | §2.1 | GAP | Sequence recovery: replay does not advance `Sequence.next` | Story 8.2 (and SPEC-002 Story 6.4) | open |
 | §2.2 | GAP | `ErrTableNotFound` no production site | Story 5.4 / store boundary | open |
-| §2.3 | GAP | `ErrColumnNotFound` declared but unused | — | in-cluster B2 |
+| §2.3 | GAP | `ErrColumnNotFound` declared but unused | — | closed (B2) |
 | §2.4 | GAP | `ErrInvalidFloat` no production site (Story 1.1) | Story 1.1 | open |
 | §2.5 | GAP | Snapshot close state not enforced | Story 7.x snapshot lifecycle | open |
 | §2.6 | GAP | `StateView.SeekIndexRange` may be insufficient for SPEC-004 predicates | §7.2, Story 7.1 | open |
@@ -189,8 +189,8 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §3.4 | DIVERGE | Multi-column PK allowed | divergence block | open |
 | §3.5 | DIVERGE | Replay constraint violations fatal vs silent skip | divergence block | open |
 | §3.6 | DIVERGE | `Changeset` lacks `truncated`/`ephemeral`/`tx_offset` | divergence block | open |
-| §4.1 | NIT | SPEC-001 front matter omits SPEC-003 dep | — | in-cluster B5 |
-| §4.2 | NIT | Commit signature returns TxID twice | — | in-cluster B3 |
+| §4.1 | NIT | SPEC-001 front matter omits SPEC-003 dep | — | closed (B5) |
+| §4.2 | NIT | Commit signature returns TxID twice | — | closed (B3) |
 | §4.3 | NIT | `ColID` exists but schema uses raw `int` | schema sections | open |
 | §4.4 | NIT | Performance section title vs open-question framing | §perf | open |
 | §4.5 | NIT | Story 1.1 zero-initialized Value status | Story 1.1 | open |
@@ -207,14 +207,14 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
 | §1.1 | CRIT | `SnapshotInterval` default contradicts itself (§8 vs §5.6/Story 4.1) | §8, §5.6, Story 4.1 | open |
-| §1.2 | CRIT | Decoded `Changeset.TxID` never stamped | Story 3.2 / 6.3, §6.x | open (overlaps B3) |
+| §1.2 | CRIT | Decoded `Changeset.TxID` never stamped | Story 3.2 / 6.3, §6.x | closed (B3) |
 | §1.3 | CRIT | Snapshot file layout §5.2 omits per-table `nextID` | §5.2, Stories 5.2/5.3 | open |
 | §1.4 | CRIT | Recovery sequence-advance step undefined | Story 6.4 (or SPEC-001 Story 8.2) | open |
 | §2.1 | GAP | `ErrSnapshotInProgress` omitted from §9 catalog | §9 | open |
 | §2.2 | GAP | `ErrTruncatedRecord` omitted from §9 / §2.3 / §6.4 | §9, §2.3, §6.4 | open |
 | §2.3 | GAP | Schema snapshot §5.3 lacks per-column `Nullable`/`AutoIncrement` | — | in-cluster C2 |
 | §2.4 | GAP | `row_count` width spec `uint64` vs Story+impl `uint32` | §5.3, Story 5.2 | open |
-| §2.5 | GAP | Front matter omits SPEC-003 / SPEC-006 deps | — | in-cluster B5 |
+| §2.5 | GAP | Front matter omits SPEC-003 / SPEC-006 deps | — | closed (B5) |
 | §2.6 | GAP | Snapshot→CommittedState restore API not named | SPEC-001 Story 8.3/8.4, Story 6.4 | open |
 | §2.7 | GAP | `SchemaRegistry.Version()` contract used but undefined | — | closed (A3) |
 | §2.8 | GAP | `durable_horizon` undefined when segments empty + snapshot exists | §6.x | open |
@@ -231,7 +231,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §3.6 | DIVERGE | Single auto-increment sequence per table (implicit) | divergence block | open |
 | §3.7 | DIVERGE | No segment compression / sealed-immutable marker | divergence block | open |
 | §4.1 | NIT | `schema_version` stored twice (§5.2 vs §5.3) | §5.2 / §5.3 | open |
-| §4.2 | NIT | `TxID` leaks as bare `uint64` in Story 2.2 + impl | — | in-cluster B3/B4 |
+| §4.2 | NIT | `TxID` leaks as bare `uint64` in Story 2.2 + impl | — | closed (B3/B4) — spec aligned on `types.TxID`; live drift at `commitlog/durability.go:135` deferred to Session 12+ |
 | §4.3 | NIT | §9 catalog missing four error sentinels stories use | §9 | open |
 | §4.4 | NIT | `Record` struct docs imply CRC field but isn't | Story 2.x | open |
 | §4.5 | NIT | §4.4 atomic.Uint64 claim vs live mutex | §4.4 | open |
@@ -248,14 +248,14 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
-| §1.1 | CRIT | Commit signature contradicted three ways | — | in-cluster B3 |
+| §1.1 | CRIT | Commit signature contradicted three ways | — | closed (B3) |
 | §1.2 | CRIT | Scheduled-reducer firing has no carrier for `schedule_id`/`IntendedFireAt` | Story 1.2, §3.3 | open |
 | §1.3 | CRIT | DurabilityHandle contract mismatches §7 + SPEC-002 | — | in-cluster E6 |
 | §1.4 | CRIT | §5 post-commit step order vs Story 5.1 snapshot timing | §5.2, Story 5.1 | open |
 | §1.5 | CRIT | OnDisconnect cleanup tx unbounded TxID sink, no identity/CallSource/panic | — | in-cluster D2 |
 | §2.1 | GAP | `init` lifecycle absent | — | in-cluster D1 |
 | §2.2 | GAP | Dangling-client cleanup on restart undefined | new Epic 7 story | open |
-| §2.3 | GAP | Typed-adapter error mapping unowned | — | in-cluster B1 |
+| §2.3 | GAP | Typed-adapter error mapping unowned | — | closed (B1) |
 | §2.4 | GAP | Scheduler→executor wakeup ordering inconsistent | §5 / Story 5.1 | open |
 | §2.5 | GAP | Startup orchestration owner unspecified | new Epic 3 story | open (overlaps A4) |
 | §2.6 | GAP | OnConnect/OnDisconnect command identity vs §2.4 single-command | — | in-cluster D2 |
@@ -271,13 +271,13 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §3.4 | DIVERGE | Post-commit failure always fatal vs per-step recoverable | divergence block | open (E7) |
 | §3.5 | DIVERGE | Shunter owns `init` semantics via "no init" | — | in-cluster D1 |
 | §3.6 | DIVERGE | Scheduled-row mutation atomic with reducer writes vs pre-fire delete | divergence block | open |
-| §4.1 | NIT | Front matter misdeclares SPEC-002 as "depended on by" | — | in-cluster B5 |
+| §4.1 | NIT | Front matter misdeclares SPEC-002 as "depended on by" | — | closed (B5) |
 | §4.2 | NIT | `CallerContext.Timestamp` type vs SPEC-005 wire format | Story 1.x | open |
 | §4.3 | NIT | §11 catalog omits sentinels stories imply | §11 | open |
 | §4.4 | NIT | `Executor` struct names `store` but §13.1 names `CommittedState` | §13.1 / Story 3.1 | open |
 | §4.5 | NIT | `SubscriptionManager.Register` read-view ownership | Story 4.x | open |
 | §4.6 | NIT | `Executor.fatal` lock scope vs struct declaration | Story 3.1 | open |
-| §4.7 | NIT | `ScheduleID`/`SubscriptionID` no SPEC-005/SPEC-001 home cite | — | in-cluster B4 |
+| §4.7 | NIT | `ScheduleID`/`SubscriptionID` no SPEC-005/SPEC-001 home cite | — | closed (B4) |
 | §4.8 | NIT | Performance section title mirrors SPEC-001 §4.4 | §perf | open |
 | §4.9 | NIT | Story 1.3 `ResponseCh` on every command | Story 1.3 | open |
 | §5.2 | GAP | No story owns `max_applied_tx_id` hand-off from SPEC-002 | new story | open |
@@ -308,7 +308,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.11 | GAP | Initial row-limit meaning for joins undefined | §x, Story 4.x | open |
 | §2.12 | GAP | `PostCommitMeta.TxDurable` for empty-fanout transactions | — | in-cluster E1 |
 | §2.13 | GAP | `PruningIndexes.CollectCandidatesForTable` tier-2 silent skip when resolver nil | Story 2.4 | open |
-| §2.14 | GAP | SPEC-004 has no "Depends on" front matter | — | in-cluster B5 |
+| §2.14 | GAP | SPEC-004 has no "Depends on" front matter | — | closed (B5) |
 | §3.1 | DIVERGE | Go predicate builder vs SpacetimeDB SQL subset | divergence block | open |
 | §3.2 | DIVERGE | Bounded fan-out + disconnect-on-lag vs unbounded MPSC + lazy-mark | divergence block | open |
 | §3.3 | DIVERGE | No row-level security / per-client predicate filtering | divergence block | open |
@@ -334,12 +334,12 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 |---|---|---|---|---|
 | §1.1 | CRIT | §13 `ClientSender` missing `SendSubscriptionError` | — | in-cluster E3/E5 |
 | §1.2 | CRIT | §13 `FanOutMessage` desc stale vs SPEC-004 §8.1 | — | in-cluster E2 |
-| §1.3 | CRIT | `Identity` re-declared despite SPEC-001 §2.4 ownership | — | in-cluster B4 |
+| §1.3 | CRIT | `Identity` re-declared despite SPEC-001 §2.4 ownership | — | closed (B4) |
 | §1.4 | CRIT | `OutboundCh` close vs concurrent `Send` race | Stories 3.6, 5.1 | open |
 | §1.5 | CRIT | `ClientSender.Send(connID, any)` not in §13 | — | in-cluster E5 |
 | §1.6 | CRIT | §14 error catalog incomplete | §14 | open (overlaps E5) |
 | §2.1 | GAP | `SubscriptionUpdate` wire format drops `TableID` w/o cross-ref | §8.5, §7.1.1 | open |
-| §2.2 | GAP | `ReducerCallResult.TxID = 0` sentinel conflicts with SPEC-002 reservation | — | in-cluster B3 |
+| §2.2 | GAP | `ReducerCallResult.TxID = 0` sentinel conflicts with SPEC-002 reservation | — | closed (B3) |
 | §2.3 | GAP | Confirmed-read opt-in has no wire representation | new section | open |
 | §2.4 | GAP | `SubscriptionError.RequestID = 0` collides with client-chosen 0 | — | in-cluster E3 |
 | §2.5 | GAP | Anonymous-mode mint flooding unbounded | Story 1.x | open |
@@ -365,9 +365,9 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §3.10 | DIVERGE | No `OutOfEnergy` / `Energy` | divergence block | open |
 | §3.11 | DIVERGE | ConnectionId reuse on reconnect no server-side meaning | divergence block | open |
 | §4.1 | NIT | BSATN naming disclaimer missing | — | in-cluster C1 |
-| §4.2 | NIT | "Depends on:" front matter underclaims | — | in-cluster B5 |
+| §4.2 | NIT | "Depends on:" front matter underclaims | — | closed (B5) |
 | §4.3 | NIT | §9.1 names "pending removal" state Story 3.3 doesn't model | Story 3.3 / §9.1 | open |
-| §4.4 | NIT | §15 OQ #4 resolvable; should close | §15 | open |
+| §4.4 | NIT | §15 OQ #4 resolvable; should close | §15 | closed (B4) |
 | §4.5 | NIT | `CloseHandshakeTimeout` in §12 but §11.1 silent | §11.1 | open |
 | §4.6 | NIT | §8.5 `SubscriptionUpdate` shape comment refs nonexistent struct | §8.5 | open |
 | §4.7 | NIT | §5.2/§5.3 OnConnect/OnDisconnect described as reducers vs §2.4 | — | in-cluster D2 |
@@ -389,7 +389,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 |---|---|---|---|---|
 | §1.1 | CRIT | `SchemaLookup` interface no home | — | closed (A1) |
 | §1.2 | CRIT | `IndexResolver` interface no home | — | closed (A2) |
-| §1.3 | CRIT | `ErrReducerArgsDecode` typed-adapter sentinel unowned | — | in-cluster B1 |
+| §1.3 | CRIT | `ErrReducerArgsDecode` typed-adapter sentinel unowned | — | closed (B1) |
 | §1.4 | CRIT | Reducer registration / freeze lifecycle unspecified | — | closed (A4) |
 | §1.5 | CRIT | `SchemaRegistry.Version()` semantics undefined | — | closed (A3) |
 | §2.1 | GAP | `ColumnSchema` inconsistent spec §8 vs live | — | in-cluster C2 |
@@ -397,14 +397,14 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.3 | GAP | Reducer-arg schema unreachable from `ReducerExport` | §8 / Story 6.x | open |
 | §2.4 | GAP | `init` lifecycle not declared/deferred | — | in-cluster D1 |
 | §2.5 | GAP | `ErrReservedReducerName`/nil-handler/dup-lifecycle no sentinel | §13 | open |
-| §2.6 | GAP | `ErrColumnNotFound` defined three times | — | in-cluster B2 |
+| §2.6 | GAP | `ErrColumnNotFound` defined three times | — | closed (B2) |
 | §2.7 | GAP | No "v1 simplifications vs SpacetimeDB" block | divergence block | open |
 | §2.8 | GAP | `ScheduleID` width divergence | divergence block | open |
 | §2.9 | GAP | BSATN naming disclaimer not propagated | — | in-cluster C1 |
 | §2.10 | GAP | `Engine.Start(ctx)` contract vs live stub | §5, Story x | open (overlaps A4) |
 | §2.11 | GAP | Multi-column PK enforcement implicit | §x | open |
 | §2.12 | GAP | Named composite index uniqueness check not on builder path | Story x | open |
-| §2.13 | GAP | Front matter understates dependencies | — | in-cluster B5 |
+| §2.13 | GAP | Front matter understates dependencies | — | closed (B5) |
 | §2.14 | GAP | `cmd/shunter-codegen` does not exist | Story 6.3 / spec | open |
 | §3.1 | DIVERGE | Registration model: runtime reflect vs proc-macros | divergence block | open |
 | §3.2 | DIVERGE | Lifecycle reducer convention | divergence block (overlaps D1) | open |
@@ -434,7 +434,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 |---|---|---|---|
 | 1 | This tracking doc (current) | full SPEC-AUDIT.md headings | tracking doc committed |
 | 2 | Cluster A — schema contracts (`SchemaLookup`, `IndexResolver`, `Version()`, freeze) | SPEC-006 §1.1–1.5; SPEC-002 §2.7; SPEC-003 §5.5; SPEC-004 §2.7/§2.14; SPEC-005 §4.2 | **(closed)** SPEC-006 §7 + §5 + §6.1 carry the four declarations; cross-refs added in SPEC-002/003/004/005 |
-| 3 | Cluster B — error sentinels + types canonicalization + Commit/TxID | SPEC-006 §1.3/§2.6; SPEC-001 §1.3/§2.3/§4.1/§4.2; SPEC-002 §1.2/§2.5/§4.2; SPEC-003 §1.1/§2.3/§4.1/§4.7; SPEC-005 §1.3/§2.2/§4.2; SPEC-004 §2.14 | Commit signature decided + propagated; types/ canonical home documented; front-matter deps fixed |
+| 3 | Cluster B — error sentinels + types canonicalization + Commit/TxID | SPEC-006 §1.3/§2.6; SPEC-001 §1.3/§2.3/§4.1/§4.2; SPEC-002 §1.2/§2.5/§4.2; SPEC-003 §1.1/§2.3/§4.1/§4.7; SPEC-005 §1.3/§2.2/§4.2; SPEC-004 §2.14 | **(closed)** Model A pinned (executor allocates TxID, stamps `changeset.TxID`); `ErrReducerArgsDecode` deferred to SPEC-006; `ErrColumnNotFound` canonicalized in SPEC-006 §13; `types/` named as canonical Go-package home; front-matter deps completed across all six specs |
 | 4 | Cluster C — BSATN disclaimer + per-column trailer | SPEC-002 §2.3/§3.1/§6.1; SPEC-001 §4.6; SPEC-005 §4.1/§6.1; SPEC-006 §2.1/§2.2/§2.9; SPEC-003/004 clean-room caveats | Disclaimer in SPEC-002 §3.1 + cross-refs; ColumnSchema trailer policy decided |
 | 5 | Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init | SPEC-003 §1.5/§2.1/§2.6/§3.5; SPEC-005 §4.7; SPEC-006 §2.4/§3.2 | `init` adopt-or-defer landed; OnConnect/Disconnect command identity unified |
 | 6 | Cluster E — post-commit fan-out shapes (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, ClientSender, DurabilityHandle, eval-error vs fatal) | SPEC-002 §2.9; SPEC-003 §1.3/§3.4/§5.4; SPEC-004 §1.1/§1.3/§1.4/§2.3/§2.4/§2.5/§2.6/§2.12/§3.5/§4.1/§4.2; SPEC-005 §1.1/§1.2/§1.5/§1.6/§2.4/§3.9/§5.2 | Five type shapes pinned in §10 (SPEC-004) and §13 (SPEC-005); post-commit fatal-vs-recoverable resolved |
@@ -492,4 +492,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 3 (Cluster B — error sentinels + canonical types + Commit/TxID).
+Cursor: Session 4 (Cluster C — BSATN naming disclaimer + per-column `Nullable`/`AutoIncrement` trailer).
