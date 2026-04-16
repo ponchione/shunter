@@ -103,6 +103,11 @@ func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOpti
 // disconnected ConnectionIDs. The executor drains it after each commit.
 func (m *Manager) DroppedClients() <-chan types.ConnectionID { return m.dropped }
 
+// DroppedChanSend returns the write end of the dropped-client channel.
+// Used to wire the FanOutWorker to the same channel the Manager's
+// eval-error path writes to, so the executor drains one channel.
+func (m *Manager) DroppedChanSend() chan<- types.ConnectionID { return m.dropped }
+
 // signalDropped is used by the fan-out worker (or equivalents in tests) to
 // mark a connection as dropped. Non-blocking: if the channel is full the
 // drop is discarded — the executor is responsible for draining frequently.

@@ -600,3 +600,58 @@ func (s *orderTrackingSender) SendSubscriptionError(connID types.ConnectionID, s
 	}
 	return nil
 }
+
+func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
+	// Full pipeline: Manager.EvalAndBroadcast → inbox → FanOutWorker → mock sender.
+	// Uses existing test helpers: testSchema() (validate_test.go), simpleChangeset() (delta_view_test.go).
+	mock := &mockFanOutSender{}
+	fanoutCh := make(chan FanOutMessage, 64)
+
+	s := testSchema() // fakeSchema: table 1 (cols: 0=KindUint64, 1=KindString, idx on 0)
+	mgr := NewManager(s, s, WithFanOutInbox(fanoutCh))
+
+	worker := NewFanOutWorker(fanoutCh, mock, mgr.DroppedChanSend())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go worker.Run(ctx)
+
+	// Register AllRows subscription on table 1.
+	conn1 := cid(1)
+	_, err := mgr.Register(SubscriptionRegisterRequest{
+		ConnID:         conn1,
+		SubscriptionID: 10,
+		Predicate:      AllRows{Table: 1},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a commit: one insert to table 1.
+	cs := simpleChangeset(1,
+		[]types.ProductValue{{types.NewUint64(42), types.NewString("alice")}},
+		nil,
+	)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil)
+
+	// Wait for fan-out delivery.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.txCalls) != 1 {
+		t.Fatalf("txCalls = %d, want 1", len(mock.txCalls))
+	}
+	if mock.txCalls[0].ConnID != conn1 {
+		t.Fatalf("connID mismatch")
+	}
+	if mock.txCalls[0].TxID != 1 {
+		t.Fatalf("TxID = %d, want 1", mock.txCalls[0].TxID)
+	}
+	if len(mock.txCalls[0].Updates) == 0 {
+		t.Fatal("no updates delivered")
+	}
+	if mock.txCalls[0].Updates[0].SubscriptionID != 10 {
+		t.Fatalf("SubscriptionID = %d, want 10", mock.txCalls[0].Updates[0].SubscriptionID)
+	}
+}
