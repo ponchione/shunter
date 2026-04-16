@@ -339,18 +339,24 @@ Outcomes:
 On successful reducer return, the executor calls store commit.
 
 ```go
-changeset, txID, commitErr := store.Commit(committed, tx, schema)
+changeset, commitErr := store.Commit(committed, tx)
+if commitErr != nil {
+    // classify and respond per §4.6
+}
+txID := e.allocateTxID() // atomic increment of executor-owned counter (§13.2)
+changeset.TxID = txID
 ```
 
 Required invariant from SPEC-001:
 - `Commit` is atomic from the executor’s perspective: if it returns an error, committed state MUST remain unchanged.
+- `store.Commit` does NOT allocate or return `TxID` (Model A). The executor owns the monotonic counter and stamps `changeset.TxID` after commit returns, before handing the changeset to durability and subscription evaluation.
 
 Commit sequence:
 1. validate and finalize tx-local state
 2. apply committed-state mutations atomically
-3. assign `TxID`
-4. build read-only `Changeset`
-5. return
+3. store returns `(*Changeset, error)` with `changeset.TxID` zero-valued
+4. executor allocates `TxID` from its monotonic counter and stamps it on the returned changeset
+5. `Changeset` is then read-only for durability and subscription consumers
 
 ### 4.5 Rollback
 
@@ -436,13 +442,14 @@ Reason:
 Each committed transaction receives a monotonically increasing `TxID`.
 
 ```go
-type TxID uint64
+type TxID uint64 // declared in the `types/` Go package; SPEC-003 owns the contract
 ```
 
 Rules:
 - `TxID` starts at 1
 - `TxID(0)` means “no committed transaction” / bootstrap / initial state
 - `TxID` order is commit order as observed by the executor
+- The executor owns allocation (Model A). `store.Commit` returns `(*Changeset, error)`; the executor stamps `changeset.TxID` before the post-commit pipeline. SPEC-001 §5.6 and §6.1 describe the stamping contract.
 
 Uses:
 - commit log sequencing (SPEC-002)
@@ -684,9 +691,11 @@ The executor requires:
 
 ```go
 func NewTransaction(committed *CommittedState, schema SchemaRegistry) *Transaction
-func Commit(committed *CommittedState, tx *Transaction, schema SchemaRegistry) (changeset *Changeset, txID TxID, err error)
+func Commit(committed *CommittedState, tx *Transaction) (changeset *Changeset, err error)
 func (cs *CommittedState) Snapshot() CommittedReadView
 ```
+
+`Commit` returns `(*Changeset, error)` only. The executor allocates `TxID` (Model A; §4.4, §6, §13.2) and stamps `changeset.TxID` before the post-commit pipeline.
 
 Required store guarantees:
 - failed commit leaves committed state unchanged

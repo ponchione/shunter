@@ -9,13 +9,13 @@
 
 ## Summary
 
-Data structures for the net-effect output of a committed transaction, using the shared `TxID` type defined by SPEC-003.
+Data structures for the net-effect output of a committed transaction, using the shared `TxID` type defined by SPEC-003 and declared in the `types/` Go package (SPEC-001 §2.4).
 
 ## Deliverables
 
-- Shared `TxID` type imported from SPEC-003 §6
+- Shared `TxID` type imported from SPEC-003 §6; lives in the `types/` Go package
   - Do not define a new store-local `type TxID uint64` in this story; use the shared engine type so SPEC-001 and SPEC-002 point at one authoritative home
-  - Monotonically increasing per-database counter
+  - Monotonically increasing per-database counter, owned and advanced by the executor (Model A — see SPEC-001 §5.6, SPEC-003 §13.2). `Changeset.TxID` is stamped by the executor after `Commit` returns; the store never assigns it.
 
 - `Changeset` struct:
   ```go

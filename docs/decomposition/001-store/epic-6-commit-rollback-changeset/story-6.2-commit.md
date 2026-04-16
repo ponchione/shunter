@@ -13,7 +13,7 @@ Apply a transaction's mutations to committed state and produce a changeset. Atom
 
 ## Deliverables
 
-- `func Commit(committed *CommittedState, tx *Transaction, schema SchemaRegistry) (*Changeset, TxID, error)`
+- `func Commit(committed *CommittedState, tx *Transaction) (*Changeset, error)`
 
   **Algorithm:**
   1. Acquire write lock on CommittedState
@@ -32,11 +32,10 @@ Apply a transaction's mutations to committed state and produce a changeset. Atom
      c. Insert into rowHashIndex if applicable
      d. Populate `TableChangeset.TableID` and `TableChangeset.TableName` if not already set
      e. Append to changeset Inserts
-  5. Assign TxID (monotonic counter)
-  6. Build and return Changeset
-  7. Release write lock
+  5. Build and return Changeset with `TxID` zero-valued — the executor stamps it after return
+  6. Release write lock
 
-- TxID counter: stored on CommittedState or a separate allocator. Monotonically increasing, never reused.
+- **TxID allocation is not the store's responsibility** (Model A). The executor owns the monotonic `TxID` counter, restored from SPEC-002's `max_applied_tx_id` at recovery and advanced atomically per successful commit (SPEC-003 §13.2). `CommittedState` carries no TxID counter in v1.
 
 - **Atomicity invariant:** If Commit returns error, committed state MUST be unchanged. The intended implementation shape is validate-first, then mutate under the write lock; callers should not rely on compensating rollback of partially applied mutations as the primary design.
 
@@ -48,7 +47,7 @@ Apply a transaction's mutations to committed state and produce a changeset. Atom
 - [ ] Commit 5 deletes → rows removed from committed state, changeset has 5 Deletes
 - [ ] Commit mix: 3 deletes + 7 inserts → committed state correct, changeset correct
 - [ ] After commit, indexes reflect new state (seek finds inserted rows, doesn't find deleted)
-- [ ] TxID monotonically increases across commits
+- [ ] `Commit` returns `*Changeset, error` — no TxID in the signature; returned `changeset.TxID` is the zero value until stamped by the caller
 - [ ] Produced TableChangeset has correct TableID and TableName for each changed table
 - [ ] Delete-before-insert: update flow (delete old PK, insert new PK) succeeds
 - [ ] Atomicity: if failure occurs, committed state unchanged

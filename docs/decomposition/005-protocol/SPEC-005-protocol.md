@@ -434,7 +434,7 @@ Response to `CallReducer`. Sent only to the calling client.
 tag: 7
 request_id:       uint32 LE
 status:           uint8         — 0 = committed; 1 = failed_user; 2 = failed_panic; 3 = not_found
-tx_id:            uint64 LE     — corresponds to TxID (SPEC-003 §6); 0 if the reducer did not commit
+tx_id:            uint64 LE     — corresponds to TxID (SPEC-003 §6); 0 if the reducer did not commit (the "no committed transaction" sentinel is intentional; SPEC-002 §3.5 reserves `TxID(0)` — first committed TxID is 1)
 error:            string        — empty if status = 0
 energy:           uint64 LE     — reserved; always 0 in v1
 transaction_update: []SubscriptionUpdate   — same format as TransactionUpdate.updates

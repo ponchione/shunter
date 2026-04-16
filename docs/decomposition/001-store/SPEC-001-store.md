@@ -1,7 +1,7 @@
 # SPEC-001 — In-Memory Relational Store
 
 **Status:** Draft  
-**Depends on:** SPEC-006 (Schema Definition) for type and table registration APIs  
+**Depends on:** SPEC-006 (Schema Definition) for type and table registration APIs; SPEC-003 (Transaction Executor) for the shared `TxID` type consumed by `Commit` and embedded in `Changeset`  
 **Depended on by:** SPEC-003 (Transaction Executor), SPEC-004 (Subscription Evaluator)
 
 ---
@@ -461,10 +461,12 @@ func (t *Transaction) View() *StateView
 Commit is called by the Transaction Executor (SPEC-003) after a reducer returns successfully:
 
 ```go
-func Commit(committed *CommittedState, tx *Transaction, schema SchemaRegistry) (*Changeset, TxID, error)
+func Commit(committed *CommittedState, tx *Transaction) (*Changeset, error)
 ```
 
-The function body accesses `tx.tx` (the embedded `*TxState`) internally.
+The function body accesses `tx.tx` (the embedded `*TxState`) internally. The `SchemaRegistry` is reachable through `committed` when validation needs it.
+
+**TxID ownership (Model A).** The executor allocates and owns the monotonic `TxID` counter (see SPEC-003 §13.2 — recovered from SPEC-002's `max_applied_tx_id` at boot, advanced atomically per commit). `Commit` does not allocate or return a `TxID`. The caller assigns `changeset.TxID = callerSuppliedTxID` on the returned `Changeset` before handing it to durability (`DurabilityHandle.EnqueueCommitted`) or the subscription evaluator. SPEC-001 owns the `Changeset` type; SPEC-003 (`types/`) owns the `TxID` type; the `Changeset.TxID` field is stamped by the caller, not by the store.
 
 **Required invariant:** Commit is atomic from the executor's point of view. If `Commit` returns a non-nil error, committed state MUST be unchanged.
 
@@ -478,9 +480,9 @@ The function body accesses `tx.tx` (the embedded `*TxState`) internally.
 4. For each table with tx-local inserts:
    a. Insert rows into `committed.tables[tableID].rows` using their already-assigned provisional RowIDs
    b. Update all committed indexes and rowHash buckets
-5. Assign and return `TxID`
-6. Build and return `Changeset` (see §6)
-7. Release write lock
+5. Build the `Changeset` with `TxID` zero-valued (see §6.1)
+6. Release write lock
+7. Return `Changeset`; the caller stamps `changeset.TxID`
 
 Deletes are applied before inserts so that update/replace flows do not fail spuriously on uniqueness checks when a transaction removes an old key and inserts a replacement key in the same commit.
 
@@ -525,8 +527,10 @@ type Changeset struct {
     Tables  map[TableID]*TableChangeset
 }
 
-// TxID is defined in SPEC-003 §6. SPEC-001 imports it as a cross-spec dependency.
-// The dependency direction is acceptable because Commit already returns TxID.
+// TxID is declared by SPEC-003 (§6) and lives in the `types/` Go package (SPEC-001 §2.4).
+// SPEC-001 imports it as a cross-spec dependency. The executor allocates `TxID`
+// (Model A, see §5.6) and stamps `Changeset.TxID` after `Commit` returns; `Commit`
+// itself never assigns this field.
 
 type TableChangeset struct {
     TableID   TableID
@@ -691,10 +695,12 @@ The executor may rely on the following store guarantees:
 ```go
 // Exported by store:
 func NewTransaction(committed *CommittedState, schema SchemaRegistry) *Transaction
-func Commit(committed *CommittedState, tx *Transaction, schema SchemaRegistry) (*Changeset, TxID, error)
+func Commit(committed *CommittedState, tx *Transaction) (*Changeset, error)
 func Rollback(tx *Transaction)
 func (cs *CommittedState) Snapshot() CommittedReadView
 ```
+
+`Commit` does not allocate or return a `TxID`. The executor allocates `TxID` (Model A; see §5.6, SPEC-003 §13.2) and stamps `changeset.TxID` on the returned value before handing the `Changeset` to durability and the subscription evaluator.
 
 ### SPEC-004 (Subscription Evaluator)
 The evaluator receives a `*Changeset` from the executor after each commit. It also receives a committed read view for post-commit evaluation. Direct calls to `CommittedState.Snapshot()` are appropriate only for read-only operations that do not require atomic registration semantics.

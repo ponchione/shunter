@@ -169,6 +169,8 @@ Decoder rules:
 
 v1 scope rule: nullable/optional column values are out of scope for this encoding. SPEC-006 MUST reject nullable column declarations in v1 rather than inventing an implicit null sentinel here.
 
+**TxID stamping (producer side).** `Changeset.TxID` (SPEC-001 §6.1) is allocated and stamped by the executor (Model A; see SPEC-003 §4.4 and §13.2) before the changeset is handed to `DurabilityHandle.EnqueueCommitted`. The commit-log payload format in §3.2 does not repeat `TxID` inside the payload because the enclosing record framing already carries `tx_id`. Producers and decoders MUST keep the two in sync: on decode during recovery, `cs.TxID` MUST be set to the framing `tx_id` before handing the decoded changeset to `store.ApplyChangeset` so downstream consumers see a stamped value.
+
 ### 3.4 Schema-at-Commit-Time
 
 Recovery decodes records in log order. Column schema for each table must be known to validate row shape and value types.
@@ -445,7 +447,7 @@ func OpenAndRecover(dir string, schema SchemaRegistry) (*CommittedState, TxID, e
    - otherwise return `ErrMissingBaseSnapshot`; the log history has already been compacted and there is no safe base state to restore from
 6. **Replay log from `snapshot_tx_id + 1`:**
    a. Skip records with `tx_id <= snapshot_tx_id`
-   b. Decode `Changeset` from payload
+   b. Decode `Changeset` from payload and stamp `cs.TxID = record.tx_id` (payload does not carry TxID; see §3.3)
    c. Call `store.ApplyChangeset(committed, cs)` (SPEC-001 §5.8). Fatal error if it returns non-nil.
    d. Track `max_applied_tx_id`
 7. **Return** `(committed, max_applied_tx_id, nil)`. The executor resumes issuing TX IDs from `max_applied_tx_id + 1`.

@@ -13,9 +13,9 @@ On successful reducer return: commit transaction, assign TxID, hand off to post-
 
 ## Deliverables
 
-- Commit algorithm:
+- Commit algorithm (Model A: executor allocates TxID):
   ```go
-  changeset, commitErr := store.Commit(e.store, tx, schema)
+  changeset, commitErr := store.Commit(e.committed, tx)
   if commitErr != nil {
       // go to failure path (Story 4.4)
   }

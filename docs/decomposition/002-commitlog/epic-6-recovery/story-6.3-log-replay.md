@@ -21,6 +21,7 @@ Replay log records from snapshot_tx_id + 1 through durable horizon. Decode chang
      b. For each record:
         - Skip records with tx_id ≤ fromTxID
         - Decode payload to Changeset via `DecodeChangeset`
+        - Stamp `cs.TxID = record.tx_id` before apply (payload carries no TxID — SPEC-002 §3.3)
         - Call `store.ApplyChangeset(committed, cs)`
         - Fatal if ApplyChangeset returns error (corrupt log or schema mismatch)
         - Track max_applied_tx_id
