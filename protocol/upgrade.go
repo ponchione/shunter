@@ -41,6 +41,12 @@ type Server struct {
 	// Executor is set so RunLifecycle can register the admitted
 	// connection before the first server message is sent.
 	Conns *ConnManager
+	// Schema provides table name→ID resolution for Subscribe and
+	// OneOffQuery handlers. Required for dispatch to work.
+	Schema SchemaLookup
+	// State provides read-only snapshot access for OneOffQuery.
+	// Required for OneOffQuery to work.
+	State CommittedStateAccess
 	// Upgraded, when non-nil, overrides the built-in lifecycle and is
 	// called immediately after the WebSocket handshake completes. It
 	// is the extension point for tests that want to bypass OnConnect
@@ -171,23 +177,48 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		// this HTTP handler; the supervisor invokes Disconnect when
 		// the first of them exits (peer close, idle timeout, ws
 		// error), which drives the SPEC-005 §5.3 teardown once.
-		pumpDone := make(chan struct{})
+		dispatchDone := make(chan struct{})
 		keepaliveDone := make(chan struct{})
+		handlers := s.buildMessageHandlers()
 		go func() {
-			c.runReadPump(context.Background())
-			close(pumpDone)
+			c.runDispatchLoop(context.Background(), handlers)
+			close(dispatchDone)
 		}()
 		go func() {
 			c.runKeepalive(context.Background())
 			close(keepaliveDone)
 		}()
-		go c.superviseLifecycle(context.Background(), s.Executor, s.Conns, pumpDone, keepaliveDone)
+		go c.superviseLifecycle(context.Background(), s.Executor, s.Conns, dispatchDone, keepaliveDone)
 		return
 	}
 	// No Upgraded hook and no Executor wiring — close the connection
 	// so the client does not hang. Preserves pre-3.4 bring-up behavior
 	// when the embedder is still assembling its executor graph.
 	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+// buildMessageHandlers constructs the MessageHandlers that wire each
+// client message type to the appropriate handler function, closing over
+// the Server's dependencies (executor, schema, state).
+func (s *Server) buildMessageHandlers() *MessageHandlers {
+	return &MessageHandlers{
+		OnSubscribe: func(ctx context.Context, conn *Conn, msg *SubscribeMsg) {
+			if s.Schema != nil {
+				handleSubscribe(ctx, conn, msg, s.Executor, s.Schema)
+			}
+		},
+		OnUnsubscribe: func(ctx context.Context, conn *Conn, msg *UnsubscribeMsg) {
+			handleUnsubscribe(ctx, conn, msg, s.Executor)
+		},
+		OnCallReducer: func(ctx context.Context, conn *Conn, msg *CallReducerMsg) {
+			handleCallReducer(ctx, conn, msg, s.Executor)
+		},
+		OnOneOffQuery: func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg) {
+			if s.Schema != nil && s.State != nil {
+				handleOneOffQuery(ctx, conn, msg, s.State, s.Schema)
+			}
+		},
+	}
 }
 
 // extractToken pulls a JWT from either the Authorization: Bearer

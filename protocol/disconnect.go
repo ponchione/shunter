@@ -63,14 +63,14 @@ func (c *Conn) superviseLifecycle(
 	ctx context.Context,
 	inbox ExecutorInbox,
 	mgr *ConnManager,
-	readPumpDone <-chan struct{},
+	dispatchDone <-chan struct{},
 	keepaliveDone <-chan struct{},
 ) {
 	select {
-	case <-readPumpDone:
+	case <-dispatchDone:
 	case <-keepaliveDone:
 	}
 	c.Disconnect(ctx, inbox, mgr)
-	<-readPumpDone
+	<-dispatchDone
 	<-keepaliveDone
 }
