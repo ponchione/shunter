@@ -31,9 +31,11 @@ Decomposition docs: `docs/decomposition/005-protocol/epic-5-server-message-deliv
 
 | Epic | What | Status | Deps |
 |------|------|--------|------|
-| E6 remainder: Fan-Out & Delivery | `FanOutWorker` goroutine, per-connection assembly, backpressure/disconnect-on-lag, confirmed-read gating, `DroppedClients` signaling | Not implemented (`FanOutMessage` contract type only) | SPEC-004 E5 + SPEC-005 E5/E6 |
+| E6 remainder: Fan-Out & Delivery | `FanOutWorker` goroutine, per-connection assembly, backpressure/disconnect-on-lag, confirmed-read gating, `DroppedClients` signaling | **Done** (5f47d83–0619816) | SPEC-004 E5 + SPEC-005 E5/E6 |
 
 Decomposition docs: `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/`
+
+Note: CallerConnID/CallerResult/TxDurable wiring from the executor post-commit pipeline (SPEC-003 E5) is deferred — FanOutWorker logic is complete and tested but those fields are not yet populated by EvalAndBroadcast.
 
 ---
 
@@ -41,7 +43,7 @@ Decomposition docs: `docs/decomposition/004-subscriptions/epic-6-fanout-delivery
 
 ```
 commitlog E5 + E6 + E7    ← can start now (all upstream landed)
-subscription E6 remainder  ← can start now (protocol E5 + E6 done)
+subscription E6 remainder  ← DONE
 ```
 
 ## Parallelism
