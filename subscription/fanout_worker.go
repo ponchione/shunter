@@ -1,6 +1,12 @@
 package subscription
 
-import "github.com/ponchione/shunter/types"
+import (
+	"context"
+	"errors"
+	"log"
+
+	"github.com/ponchione/shunter/types"
+)
 
 // FanOutSender is the delivery contract used by the FanOutWorker to
 // push encoded messages to connected clients. Implemented by a
@@ -17,4 +23,68 @@ type FanOutSender interface {
 	SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error
 	// SendSubscriptionError delivers a SubscriptionError to a client.
 	SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error
+}
+
+// FanOutWorker receives computed deltas from the evaluation loop and
+// delivers them through the protocol layer. Runs on its own goroutine
+// separate from the executor (SPEC-004 §8.1 / Story 6.1).
+type FanOutWorker struct {
+	inbox          <-chan FanOutMessage
+	sender         FanOutSender
+	confirmedReads map[types.ConnectionID]bool
+	dropped        chan<- types.ConnectionID
+}
+
+// NewFanOutWorker creates a worker that reads from inbox and delivers
+// via sender. Dropped client IDs are signaled on dropped (shared with
+// the Manager's dropped channel so the executor drains one channel).
+func NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID) *FanOutWorker {
+	return &FanOutWorker{
+		inbox:          inbox,
+		sender:         sender,
+		confirmedReads: make(map[types.ConnectionID]bool),
+		dropped:        dropped,
+	}
+}
+
+// Run is the main delivery loop. Blocks until ctx is cancelled or
+// inbox is closed.
+func (w *FanOutWorker) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-w.inbox:
+			if !ok {
+				return
+			}
+			w.deliver(msg)
+		}
+	}
+}
+
+func (w *FanOutWorker) deliver(msg FanOutMessage) {
+	// Deliver standalone TransactionUpdate to all connections.
+	for connID, updates := range msg.Fanout {
+		if err := w.sender.SendTransactionUpdate(connID, msg.TxID, updates); err != nil {
+			w.handleSendError(connID, err)
+		}
+	}
+}
+
+func (w *FanOutWorker) handleSendError(connID types.ConnectionID, err error) {
+	if errors.Is(err, ErrSendBufferFull) {
+		w.markDropped(connID)
+	} else if !errors.Is(err, ErrSendConnGone) {
+		log.Printf("subscription: fanout delivery error for conn %x: %v", connID[:], err)
+	}
+}
+
+func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
+	delete(w.confirmedReads, connID)
+	select {
+	case w.dropped <- connID:
+	default:
+		log.Printf("subscription: dropped client channel full, skipping conn %x", connID[:])
+	}
 }
