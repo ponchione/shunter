@@ -1,7 +1,9 @@
 package commitlog
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -15,6 +17,7 @@ type CommitLogOptions struct {
 	MaxRowBytes           uint32
 	ChannelCapacity       int
 	DrainBatchSize        int
+	SnapshotInterval      uint64
 }
 
 // DefaultCommitLogOptions returns sensible defaults.
@@ -25,6 +28,7 @@ func DefaultCommitLogOptions() CommitLogOptions {
 		MaxRowBytes:           8 << 20,   // 8 MiB
 		ChannelCapacity:       256,
 		DrainBatchSize:        64,
+		SnapshotInterval:      0,
 	}
 }
 
@@ -48,8 +52,10 @@ type DurabilityWorker struct {
 }
 
 // NewDurabilityWorker creates and starts the worker.
+// If an active segment already exists for startTxID, it is reopened for appending.
+// Otherwise a new segment is created.
 func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*DurabilityWorker, error) {
-	seg, err := CreateSegment(dir, startTxID)
+	seg, err := openOrCreateSegment(dir, startTxID)
 	if err != nil {
 		return nil, err
 	}
@@ -60,8 +66,23 @@ func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*
 		dir:  dir,
 		seg:  seg,
 	}
+	if seg.lastTx > 0 {
+		dw.durable.Store(seg.lastTx)
+		dw.lastEnq = seg.lastTx
+	}
 	go dw.run()
 	return dw, nil
+}
+
+func openOrCreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
+	seg, err := OpenSegmentForAppend(dir, startTxID)
+	if err == nil {
+		return seg, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return CreateSegment(dir, startTxID)
+	}
+	return nil, err
 }
 
 // EnqueueCommitted sends a committed changeset for durability.

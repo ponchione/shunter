@@ -189,6 +189,58 @@ func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 	}, nil
 }
 
+// OpenSegmentForAppend opens an existing segment for appending.
+// It validates the header, scans all valid records to find the write position
+// and last TxID, truncates any partial trailing record, and returns a writer
+// positioned at the end.
+func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) {
+	path := filepath.Join(dir, SegmentFileName(startTxID))
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := ReadSegmentHeader(f); err != nil {
+		f.Close()
+		return nil, err
+	}
+
+	size := int64(SegmentHeaderSize)
+	var lastTx uint64
+
+	// Scan forward through valid records.
+	for {
+		rec, err := DecodeRecord(f, 0)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			// Partial/corrupt tail — truncate to last good position.
+			if truncErr := f.Truncate(size); truncErr != nil {
+				f.Close()
+				return nil, truncErr
+			}
+			break
+		}
+		size += int64(RecordOverhead + len(rec.Payload))
+		lastTx = rec.TxID
+	}
+
+	// Seek to write position.
+	if _, err := f.Seek(size, io.SeekStart); err != nil {
+		f.Close()
+		return nil, err
+	}
+
+	return &SegmentWriter{
+		file:    f,
+		bw:      bufio.NewWriter(f),
+		size:    size,
+		startTx: startTxID,
+		lastTx:  lastTx,
+	}, nil
+}
+
 // Append writes a record. TxID must be monotonically increasing.
 func (sw *SegmentWriter) Append(rec *Record) error {
 	if rec.TxID <= sw.lastTx && sw.lastTx > 0 {

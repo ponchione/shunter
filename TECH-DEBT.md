@@ -126,7 +126,7 @@ Suggested follow-up tests:
 
 ### TD-025: SPEC-002 E4 `NewDurabilityWorker` recreates/truncates an existing active segment instead of opening/resuming it
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-002 Epic 4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4h (`SPEC-002 E4: Durability Worker`)
@@ -437,15 +437,15 @@ Suggested follow-up tests:
 
 ### TD-020: SPEC-003 E3 `SubmitWithContext` ignores reject-on-full policy and returns context timeout instead of `ErrExecutorBusy`
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-003 Epic 3 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4d (`SPEC-003 E3: Executor Core`)
 
 Summary:
 - `Submit(...)` honors `rejectMode` and returns `ErrExecutorBusy` on a full inbox when configured to reject.
-- `SubmitWithContext(...)` does not mirror that behavior. It ignores `rejectMode` entirely and always waits on the send until either space becomes available or the caller context expires.
-- That means the two submission APIs diverge under the same executor configuration.
+- `SubmitWithContext(...)` now mirrors that reject-on-full behavior before falling back to the blocking context-aware path when reject mode is disabled.
+- A focused regression test now guards the reject-mode `SubmitWithContext(...)` contract.
 
 Why this matters:
 - Story 3.3 says `SubmitWithContext` is "same as Submit" plus caller-context cancellation while waiting.

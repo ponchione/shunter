@@ -351,6 +351,105 @@ func TestDurabilityWorkerCloseThenEnqueuePanics(t *testing.T) {
 	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
 }
 
+func TestDurabilityWorkerReopensExistingSegment(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 16
+
+	// Phase 1: create worker, write two records, close.
+	dw1, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw1.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{
+		0: {TableID: 0, TableName: "t", Inserts: []types.ProductValue{{types.NewUint64(1)}}},
+	}})
+	dw1.EnqueueCommitted(2, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{
+		0: {TableID: 0, TableName: "t", Inserts: []types.ProductValue{{types.NewUint64(2)}}},
+	}})
+	finalTx1, err1 := dw1.Close()
+	if err1 != nil {
+		t.Fatalf("close phase 1: %v", err1)
+	}
+	if finalTx1 != 2 {
+		t.Fatalf("phase 1 final tx = %d, want 2", finalTx1)
+	}
+
+	// Record size of segment after phase 1.
+	segPath := filepath.Join(dir, SegmentFileName(1))
+	info1, err := os.Stat(segPath)
+	if err != nil {
+		t.Fatalf("stat segment: %v", err)
+	}
+	sizeAfterPhase1 := info1.Size()
+
+	// Phase 2: reopen same dir+startTxID, write one more record.
+	dw2, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+
+	// Verify durable TxID reflects existing records.
+	if dw2.DurableTxID() != 2 {
+		t.Fatalf("reopened durable TxID = %d, want 2", dw2.DurableTxID())
+	}
+
+	dw2.EnqueueCommitted(3, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{
+		0: {TableID: 0, TableName: "t", Inserts: []types.ProductValue{{types.NewUint64(3)}}},
+	}})
+	finalTx2, err2 := dw2.Close()
+	if err2 != nil {
+		t.Fatalf("close phase 2: %v", err2)
+	}
+	if finalTx2 != 3 {
+		t.Fatalf("phase 2 final tx = %d, want 3", finalTx2)
+	}
+
+	// Verify segment grew (not truncated).
+	info2, _ := os.Stat(segPath)
+	if info2.Size() <= sizeAfterPhase1 {
+		t.Fatalf("segment truncated: size before=%d, after=%d", sizeAfterPhase1, info2.Size())
+	}
+
+	// Verify all 3 records readable.
+	sr, err := OpenSegment(segPath)
+	if err != nil {
+		t.Fatalf("open for read: %v", err)
+	}
+	defer sr.Close()
+	var txIDs []uint64
+	for {
+		rec, err := sr.Next(0)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatalf("read record: %v", err)
+		}
+		txIDs = append(txIDs, rec.TxID)
+	}
+	if len(txIDs) != 3 || txIDs[0] != 1 || txIDs[1] != 2 || txIDs[2] != 3 {
+		t.Fatalf("expected txIDs [1 2 3], got %v", txIDs)
+	}
+}
+
+func TestDurabilityWorkerCreatesNewSegmentWhenNoneExists(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dw.DurableTxID() != 0 {
+		t.Fatalf("fresh worker durable TxID = %d, want 0", dw.DurableTxID())
+	}
+	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
+	finalTx, _ := dw.Close()
+	if finalTx != 1 {
+		t.Fatalf("final tx = %d, want 1", finalTx)
+	}
+}
+
 func TestDurabilityWorkerBlocksOnFullChannel(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultCommitLogOptions()
