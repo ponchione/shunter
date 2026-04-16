@@ -644,7 +644,7 @@ On insert, if the row's sequence column is zero, it is replaced with the next se
 | Error | Condition |
 |---|---|
 | `ErrTableNotFound` | tableID references unknown table |
-| `ErrColumnNotFound` | column name/index out of range |
+| `ErrColumnNotFound` | re-exported from SPEC-006 §13 — column name lookup miss against the `SchemaRegistry`; SPEC-001 re-exports so store-layer integrity paths can construct and match the sentinel without importing SPEC-006 directly |
 | `ErrTypeMismatch` | column value has wrong type for column schema |
 | `ErrPrimaryKeyViolation` | insert would duplicate existing primary key |
 | `ErrUniqueConstraintViolation` | insert would duplicate unique index key (non-PK) |

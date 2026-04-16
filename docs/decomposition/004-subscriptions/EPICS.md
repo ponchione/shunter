@@ -221,7 +221,7 @@ Errors introduced where first needed:
 | `ErrUnindexedJoin` | Epic 1 (validation) |
 | `ErrInvalidPredicate` | Epic 1 (validation) |
 | `ErrTableNotFound` | Epic 1 (validation / registration path — predicate references nonexistent table) |
-| `ErrColumnNotFound` | Epic 1 (validation / registration path — predicate references nonexistent column) |
+| `ErrColumnNotFound` | Epic 1 (validation / registration path — predicate references nonexistent column). Canonical declaration in SPEC-006 §13; SPEC-004 consumes via `SchemaLookup`. |
 | `ErrInitialRowLimit` | Epic 4 (registration — initial snapshot too large) |
 | `ErrSubscriptionNotFound` | Epic 4 (unregister — unknown subscription ID) |
 | `ErrSubscriptionEval` | Epic 5 (evaluation — corrupted index or type mismatch) |

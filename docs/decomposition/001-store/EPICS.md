@@ -272,7 +272,7 @@ Errors are introduced where first needed, not as a separate epic:
 | Error | Introduced in |
 |---|---|
 | `ErrTableNotFound` | Epic 2 |
-| `ErrColumnNotFound` | Epic 2 |
+| `ErrColumnNotFound` | Epic 2 (re-export; canonical declaration in SPEC-006 §13) |
 | `ErrTypeMismatch` | Epic 2 |
 | `ErrRowShapeMismatch` | Epic 2 |
 | `ErrPrimaryKeyViolation` | Epic 4 |

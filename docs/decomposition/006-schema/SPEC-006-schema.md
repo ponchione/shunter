@@ -664,6 +664,9 @@ How `schema.json` is produced: the application binary exports its schema via a `
 | `ErrSchemaMismatch` | Schema version or structure differs from snapshot |
 | `ErrSchemaVersionNotSet` | `Build()` called without `SchemaVersion()` |
 | `ErrNoTables` | `Build()` called with no registered tables |
+| `ErrColumnNotFound` | Column reference resolves to a name not present on the named table |
+
+`ErrColumnNotFound` is the canonical schema-layer sentinel for column-name lookup misses against the `SchemaRegistry`. SPEC-001 and SPEC-004 re-export or reference it (SPEC-001 §9, SPEC-004 EPICS Epic 1); the declaration here is authoritative. Produced anywhere `SchemaRegistry.TableByName(...)` + column-name lookup fails: SPEC-004 predicate validation (Story 1.2), SPEC-004 subscription registration (Story 4.2), SPEC-001 integrity checks that reach the schema through the registry.
 
 ---
 

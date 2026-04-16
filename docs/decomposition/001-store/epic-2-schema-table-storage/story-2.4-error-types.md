@@ -18,7 +18,7 @@ Sentinel errors and structured error types:
 | Error | Type | Introduced |
 |---|---|---|
 | `ErrTableNotFound` | sentinel | table lookup miss |
-| `ErrColumnNotFound` | sentinel | column name lookup miss |
+| `ErrColumnNotFound` | sentinel (re-export) | see SPEC-006 §13 — canonical declaration is the schema layer; Story 2.4 re-exports for store callers so `errors.Is` matches across package boundaries |
 | `ErrTypeMismatch` | struct | wrong ValueKind for column |
 | `ErrRowShapeMismatch` | struct | row width != schema width |
 | `ErrNullNotAllowed` | sentinel | reserved, v1 no-op |
