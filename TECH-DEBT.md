@@ -1619,6 +1619,95 @@ Suggested follow-up tests:
 - `OpenSegmentForAppend(...)` still truncates a partial tail only when a valid prefix exists
 - `NewDurabilityWorkerWithResumePlan(...)` preserves the append-forbidden edge case instead of silently reopening it
 
+### TD-125: `ErrNullableColumn` sentinel + `Build()` enforcement not wired in live `schema/` package
+
+Status: open (Session 12+ drift)
+Severity: low
+First found: Lane B Session 4.5 reconciliation pass
+Spec ref: SPEC-006 §9 / §13, SPEC-001 §3.1, SPEC-001 Story 2.1, SPEC-006 Story 5.1
+
+Summary:
+- SPEC-006 §9 reserves the rule "`Build()` MUST return `ErrNullableColumn` when any `ColumnSchema.Nullable == true`" and §13 lists `ErrNullableColumn` in the error catalog.
+- Live `schema/errors.go` does not declare `ErrNullableColumn`. The builder API (`schema/builder.go`) has no `Nullable` input on `ColumnDefinition`, and `schema/build.go` constructs `ColumnSchema` without ever setting `Nullable`, so the rule has nothing to fire against.
+- `schema/validate_structure.go` has no Nullable check.
+
+Why this matters:
+- The v1 Nullable policy survives today by construction (the builder cannot produce a `Nullable = true` column), not by enforcement.
+- If the builder surface is ever extended to accept a `Nullable` input (e.g. for forward-compatibility testing, reflection-path tag mapping, or snapshot rebuild) without also landing the sentinel + validation, the policy silently breaks.
+- The spec lines have been softened in Session 4.5 to describe the target state honestly; closing the enforcement gap is the follow-up.
+
+Related code:
+- `schema/errors.go` — no `ErrNullableColumn` declaration
+- `schema/builder.go:38-43` — `ColumnDefinition` has no `Nullable` field
+- `schema/build.go:50-56` — `ColumnSchema` constructed without setting `Nullable`
+- `schema/validate_structure.go` — no `Nullable` check
+
+Related spec / decomposition docs:
+- `docs/decomposition/006-schema/SPEC-006-schema.md` §9 (Validation Rules), §13 (Error Catalog)
+- `docs/decomposition/006-schema/epic-5-validation-build/story-5.1-validation-rules.md`
+- `docs/decomposition/001-store/SPEC-001-store.md` §3.1 ColumnSchema
+- `docs/decomposition/001-store/epic-2-schema-table-storage/story-2.1-schema-structs.md`
+
+Recommended resolution:
+- Declare `ErrNullableColumn` in `schema/errors.go`.
+- Add the `Nullable` input path through `ColumnDefinition` / builder / reflection, route it into `ColumnSchema.Nullable`, and enforce the v1-rejection rule in `validateStructure(...)` so `Build()` returns `ErrNullableColumn` at the schema-build boundary.
+- Remove the "target state" softening language from SPEC-006 §9/§13, Story 5.1, SPEC-001 §3.1, Story 2.1 once enforcement lands.
+
+### TD-126: Snapshot-recovery `ErrSchemaMismatch` does not wrap `ErrNullableColumn` when recovery traces back to a stored nullable flag
+
+Status: open (Session 12+ drift)
+Severity: low
+First found: Lane B Session 4.5 reconciliation pass
+Spec ref: SPEC-006 §13, SPEC-002 §6.1, SPEC-002 Story 6.2
+
+Summary:
+- Earlier Session 4 edits asserted that snapshot-side rejection of `nullable = 1` would surface `ErrNullableColumn` wrapped as the cause of `ErrSchemaMismatch`.
+- Live recovery code (`commitlog/snapshot_select.go`, `commitlog/recovery.go`) returns `&SchemaMismatchError{Detail: fmt.Sprintf(...)}` with no `%w`-wrap of any schema-layer sentinel; the recovery layer does not import `ErrNullableColumn`.
+- Session 4.5 spec edits removed the "wrapped as the cause" language. This item tracks the code-side follow-up if wrapping is ever desired (it is not strictly needed — see TD-127's equality-mismatch mechanism).
+
+Why this matters:
+- Pure documentation drift would be harmless, but Session 4 spec edits had promised a property the code does not deliver. The spec has been softened; now the choice is "leave it" or "add wrapping later."
+- If wrapping is added, the recovery layer must import the schema-layer sentinel and use `fmt.Errorf("...: %w", ErrNullableColumn)` on the nullable-specific mismatch branch in `commitlog/snapshot_select.go`.
+
+Related code:
+- `commitlog/snapshot_select.go:107-108` — nullable mismatch returns `&SchemaMismatchError{Detail: ...}` with no sentinel wrap
+- `commitlog/recovery.go` — does not import schema error sentinels
+
+Related spec / decomposition docs:
+- `docs/decomposition/006-schema/SPEC-006-schema.md` §13 (`ErrNullableColumn` paragraph — "wrapped as the cause" clause removed Session 4.5)
+- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §6.1 step 4b
+
+Recommended resolution:
+- Option A (preferred while TD-125 is open): leave the recovery path as `SchemaMismatchError{Detail: ...}`; rely on the equality-mismatch mechanism described in TD-127.
+- Option B (if TD-125 lands and direct rejection is desired): wrap with `fmt.Errorf("%w: %s", ErrNullableColumn, detail)` on the nullable-specific branch at `commitlog/snapshot_select.go:107-108`, and update SPEC-006 §13 to re-add the direct-rejection guarantee.
+
+### TD-127: v1 snapshot rejection of `nullable = 1` relies on equality-mismatch coincidence, not an independent rule
+
+Status: open (Session 12+ drift)
+Severity: low
+First found: Lane B Session 4.5 reconciliation pass
+Spec ref: SPEC-002 §5.3, SPEC-002 §6.1 step 4b, SPEC-002 Story 6.2
+
+Summary:
+- Earlier Session 4 edits asserted that "v1 readers MUST reject any snapshot where a column has `nullable = 1`" as a direct recovery-side rule.
+- Live `commitlog/snapshot_select.go:107-108` only performs an equality check between `regCol.Nullable` and `snapCol.Nullable`. There is no standalone "reject if snapshot nullable = 1" branch.
+- Today the rejection works only because TD-125's gap forces registry `Nullable` to always be `false`, so the equality check always fires on `nullable = 1` snapshots. If TD-125 is ever resolved (builder starts accepting `Nullable = true`) without coordinating with this code, direct rejection is not there.
+
+Why this matters:
+- The two drift items are coupled. Closing TD-125 without closing TD-127 converts the v1 rejection guarantee from "always fires" into "fires only when the application's registry happens to also have `Nullable = false`."
+- Session 4.5 spec edits reframed SPEC-002 §5.3, §6.1 step 4b, and Story 6.2 acceptance to describe the indirect equality-mismatch mechanism honestly.
+
+Related code:
+- `commitlog/snapshot_select.go:107-108` — equality check only; no standalone nullable-rejection branch
+
+Related spec / decomposition docs:
+- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §5.3 (per-column trailer comment), §6.1 step 4b
+- `docs/decomposition/002-commitlog/epic-6-recovery/story-6.2-snapshot-selection.md` acceptance rows 3–4
+
+Recommended resolution:
+- If/when TD-125 lands, add an explicit "reject snapshot column with `nullable = 1`" branch in `commitlog/snapshot_select.go` before the equality check, so the v1 policy is enforced independent of registry state.
+- Update SPEC-002 §5.3 / §6.1 step 4b / Story 6.2 back to a direct-rejection wording at the same time.
+
 ---
 
 ## Code review audit (2026-04-15)

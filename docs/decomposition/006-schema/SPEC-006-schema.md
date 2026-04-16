@@ -504,7 +504,7 @@ A table has at most one `Primary` index, and in v1 that primary index must refer
 - Column name must be non-empty and unique within the table
 - Column name must match `[a-z][a-z0-9_]*` (automatically snake_cased from field name if not overridden)
 - Column type must be one of the supported Go types (§2)
-- Nullable columns are rejected in v1: `Build()` MUST return `ErrNullableColumn` (§13) when any `ColumnSchema.Nullable == true`. v1 does not silently coerce to false.
+- Nullable columns are reserved and MUST be `false` in v1. Because the v1 builder API (`ColumnDefinition` in `schema/builder.go`) exposes no way to set `Nullable = true`, freshly built registries cannot carry a nullable column and `Build()` therefore produces nullable-free `ColumnSchema` values by construction. The spec reserves `ErrNullableColumn` (§13) as the sentinel that `Build()` MUST return once the builder surface is extended to accept a `Nullable` input (tracked as Session 12+ drift; see TECH-DEBT). v1 does not silently coerce `Nullable = true` to `false`.
 
 **Index-level:**
 - Index name must be non-empty and unique within the table
@@ -674,11 +674,11 @@ How `schema.json` is produced: the application binary exports its schema via a `
 | `ErrSchemaVersionNotSet` | `Build()` called without `SchemaVersion()` |
 | `ErrNoTables` | `Build()` called with no registered tables |
 | `ErrColumnNotFound` | Column reference resolves to a name not present on the named table |
-| `ErrNullableColumn` | Column declared with `Nullable = true`; rejected under the v1 policy (§9) |
+| `ErrNullableColumn` | Reserved for the v1 Nullable-rejection rule (§9); not yet producible in live code — see Session 12+ drift note below |
 
 `ErrColumnNotFound` is the canonical schema-layer sentinel for column-name lookup misses against the `SchemaRegistry`. SPEC-001 and SPEC-004 re-export or reference it (SPEC-001 §9, SPEC-004 EPICS Epic 1); the declaration here is authoritative. Produced anywhere `SchemaRegistry.TableByName(...)` + column-name lookup fails: SPEC-004 predicate validation (Story 1.2), SPEC-004 subscription registration (Story 4.2), SPEC-001 integrity checks that reach the schema through the registry.
 
-`ErrNullableColumn` is the canonical sentinel for the v1 Nullable-rejection rule. `Build()` MUST return it when any registered column has `Nullable == true` (see §9 column-level validation). The sentinel also covers the recovery-path rejection in SPEC-002 §5.3 / Story 6.2: snapshots with `nullable = 1` in the per-column trailer are rejected by `ErrSchemaMismatch` (the recovery-layer error) with `ErrNullableColumn` wrapped as the cause when recovery traces back to a stored nullable flag. v1 does not silently coerce `Nullable = true` to `false` — callers MUST see an error at Build time.
+`ErrNullableColumn` is the reserved sentinel for the v1 Nullable-rejection rule. Once the builder surface is extended to accept a `Nullable` input, `Build()` MUST return it when any registered column has `Nullable == true` (see §9 column-level validation). In v1 the builder API cannot set `Nullable = true`, so the sentinel is declared for forward stability but is not yet produced by live code; closing that gap is tracked as a Session 12+ drift item (see TECH-DEBT). Recovery-layer rejection of snapshots with `nullable = 1` in the per-column trailer flows indirectly today: because registry `Nullable` is always `false` in v1 (§9), the per-column equality check in SPEC-002 §6.1 step 4b / Story 6.2 always fires with `ErrSchemaMismatch` when a snapshot carries `nullable = 1`. The recovery layer returns `ErrSchemaMismatch` with a descriptive detail string; no sentinel is attached to the cause chain. v1 does not silently coerce `Nullable = true` to `false` — the long-term contract is that callers see an error at Build time.
 
 ---
 

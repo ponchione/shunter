@@ -32,7 +32,7 @@ Define the metadata that describes a table's shape.
       Index         int        // position in Columns slice
       Name          string
       Type          ValueKind
-      Nullable      bool       // reserved; MUST be false in v1 (SPEC-006 §9 ErrNullableColumn)
+      Nullable      bool       // reserved; MUST be false in v1. SPEC-006 §9 reserves ErrNullableColumn for this rule; v1 builder cannot set Nullable=true so explicit rejection is pending (Session 12+ drift — see SPEC-006 §13 / TECH-DEBT).
       AutoIncrement bool       // per-column auto-increment flag; integer type + PrimaryKey/Unique enforced by SPEC-006 §9
   }
   ```
@@ -67,7 +67,7 @@ Define the metadata that describes a table's shape.
 - [ ] Duplicate column names → validation error
 - [ ] Duplicate index names → validation error
 - [ ] Non-contiguous or mismatched `ColumnSchema.Index` values → validation error
-- [ ] `ColumnSchema.Nullable = true` rejected at schema build time (delegated to SPEC-006 §9 / `ErrNullableColumn` for the full enforcement path; SPEC-001 stores the flag but does not independently coerce it)
+- [ ] `ColumnSchema.Nullable = true` target-state rejection at schema build time is delegated to SPEC-006 §9 / `ErrNullableColumn`. v1 builder does not expose a `Nullable` input, so explicit rejection is pending (Session 12+ drift — see SPEC-006 §13 / TECH-DEBT); SPEC-001 stores the flag but does not independently coerce it.
 - [ ] `ColumnSchema.AutoIncrement` round-trips through TableSchema without being stripped
 - [ ] TableID and IndexID usable as map keys
 - [ ] Table with primary index assigns `IndexID(0)` to that primary index
