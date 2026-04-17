@@ -561,7 +561,10 @@ type CommitLogOptions struct {
 
     // SnapshotInterval: call CreateSnapshot after this many commits.
     // 0 = never snapshot automatically.
-    // Default: 100_000.
+    // Default: 0 (no auto-snapshot). §5.6 explains why: synchronous
+    // snapshot creation holds CommittedState.mu for read for
+    // tens-to-hundreds of milliseconds, blocking commits. v1 recommends
+    // graceful-shutdown snapshotting only; auto-interval is opt-in.
     SnapshotInterval uint64
 }
 ```
