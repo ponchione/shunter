@@ -535,6 +535,8 @@ func ApplyChangeset(committed *CommittedState, cs *Changeset) error
 3. Release write lock
 4. Return error if any table is unknown or any row has wrong column count/type
 
+`ApplyChangeset` is not idempotent; SPEC-002's recovery path must replay each committed changeset exactly once. Re-replaying a changeset produces uniqueness-constraint violations by design (second insert collides with first; second delete hits missing row), which the fatal-on-constraint-violation rule above surfaces as a corrupt-log condition.
+
 ---
 
 ## 6. Changeset
