@@ -751,6 +751,8 @@ If delta computation fails for a subscription (e.g., corrupted index, type misma
 3. Unregister the affected subscription(s) / query state without disconnecting unrelated subscriptions on the same connection.
 4. Do **not** abort the evaluation loop — other subscriptions are unaffected.
 
+This recovery model is the contracted normal-return path from `SubscriptionManager.EvalAndBroadcast`. The contrasting fatal-panic rule in SPEC-003 §5.4 applies only when the evaluator or fan-out subsystem panics or violates an invariant (see §11.3). Per-query errors handled by this section are normal returns from the manager's perspective.
+
 ### 11.2 Registration Errors
 
 Returned to the caller synchronously:

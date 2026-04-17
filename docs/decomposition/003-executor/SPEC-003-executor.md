@@ -450,10 +450,13 @@ Therefore:
 - panics or unrecoverable internal errors after commit are executor-fatal errors
 
 Normative rule:
-- if durability handoff, subscription evaluation, or delta handoff panics after commit, the executor MUST transition the engine into a failed state and reject future write commands until restart
+- If the durability subsystem, the subscription manager, or the delta-handoff path **panics** or signals an invariant violation after commit, the executor MUST transition the engine into a failed state and reject future write commands until restart.
+- **Per-query evaluation errors are NOT fatal.** SPEC-004 §11.1 scopes these: a single subscription's delta computation failing (corrupted index, type mismatch, join-index resolution) is logged, surfaced to affected clients via `SubscriptionError`, and the offending query is unregistered — the executor continues. The post-commit pipeline as a whole does not fail; only that query's subscribers see failure.
+- The dividing line: if `SubscriptionManager.EvalAndBroadcast` returns normally, the executor continues. If it panics, the executor is fatal. Internal per-query failures that the manager catches and converts to `SubscriptionError` deliveries are normal returns.
 
 Reason:
-- post-commit failure leaves uncertain client-observable side effects; continuing as if nothing happened risks reordering or silent loss
+- post-commit subsystem failure leaves uncertain client-observable side effects; continuing as if nothing happened risks reordering or silent loss
+- per-query errors are localized and communicated to exactly the affected clients; they do not compromise the executor's ordering invariants
 
 ---
 
