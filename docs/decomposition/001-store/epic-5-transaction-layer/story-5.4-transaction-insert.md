@@ -31,9 +31,9 @@ Insert a row within a transaction. Allocates provisional RowID, validates schema
   1. Validate row against table schema (Story 2.3 `ValidateRow`)
   2. Check NaN in float columns (already enforced by Value construction, but belt-and-suspenders)
   3. **Undelete check** (set-semantics and PK tables):
-     - If an identical committed row exists in `tx.deletes`, cancel the delete and return the committed RowID
-     - For PK tables: match by PK value
-     - For no-PK tables: match by full row equality
+     - For PK tables: locate the candidate committed row via PK value, then require **full-row equality** (`ProductValue.Equal`) to trigger undelete. PK-match-without-row-equality is NOT an undelete — the delete stays in `tx.deletes` and the insert proceeds as a new tx-local row (old row lands in changeset Deletes, new row in Inserts). Without this, a reducer that deletes `(pk=5, name="a")` then inserts `(pk=5, name="b")` would silently collapse both into a no-op and subscribers never see the name change.
+     - For no-PK tables: match by full row equality directly against candidates in `tx.deletes`.
+     - On full-row-equal match: cancel that delete (remove the committed RowID from `tx.deletes[tableID]`) and return the committed RowID. No new tx-local row created.
   4. Check uniqueness against committed indexes (filtered by tx.deletes) + tx-local inserts
      - For each unique/PK index: extract key, seek committed index, check tx inserts
   5. Check set-semantics duplicate (no-PK tables) against committed rowHashIndex (filtered by tx.deletes) + tx-local inserts
@@ -56,6 +56,7 @@ Insert a row within a transaction. Allocates provisional RowID, validates schema
 - [ ] After undelete: RowID returned is the original committed RowID
 - [ ] After undelete: row no longer in tx.deletes
 - [ ] Provisional RowID > all committed RowIDs
+- [ ] PK table: delete committed `(pk=5, name="a")`, insert `(pk=5, name="b")` → no undelete; tx.deletes retains the committed RowID, tx.inserts gains the new row; commit emits both delete and insert
 
 ## Design Notes
 
