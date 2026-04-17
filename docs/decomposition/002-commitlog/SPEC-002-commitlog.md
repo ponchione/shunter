@@ -460,6 +460,7 @@ func OpenAndRecover(dir string, schema SchemaRegistry) (*CommittedState, TxID, e
 
 1. **Scan commit log segments first.** List `commitlog/` files sorted by name and validate that segment start TX IDs are strictly increasing.
 2. **Determine the durable replay horizon.** Scan segments in order and find the highest contiguous valid `tx_id` reachable from the earliest segment:
+   - if there are no segments, `durable_horizon = +∞` (any snapshot is eligible because there is no contradicting log history). Recovery proceeds with the snapshot as the final state and replays nothing; the executor resumes issuing TX IDs from `snapshot_tx_id + 1` (or returns `ErrNoData` if there is also no snapshot — see step 5)
    - validate segment header magic/version
    - validate each record framing and CRC
    - validate contiguous `tx_id` sequence across records and across segment boundaries
