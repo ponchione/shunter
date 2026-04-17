@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E6 remainder`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 5 (Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 6 (Cluster E — post-commit fan-out shapes).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -145,11 +145,13 @@ SPEC-002 encoding edits drag SPEC-005/006 along.
 - **C1 BSATN naming disclaimer** — SPEC-002 §3.1, SPEC-002 §6.1, SPEC-003 §6 (clean-room note), SPEC-004 §6 (caveat), SPEC-005 §4.1, SPEC-005 §6.1, SPEC-006 §2.9. **Resolved:** canonical disclaimer paragraph landed in SPEC-002 §3.1 as `BSATN naming disclaimer (canonical)`; §3.3 Canonical reference callout notes the name is non-standard with a back-reference. Cross-refs added at SPEC-003 §3.1 (under the `argBSATN` reducer signature), SPEC-004 §6 (row-payload note at the head of Delta Computation), SPEC-005 §3.1 (naming callout beneath the existing BSATN section), and SPEC-006 §1.2 (new "Wire encoding terminology" subsection). SPEC-003/004 have no dedicated clean-room sidebar at §6; the cross-refs land at the most natural encoding site in each.
 - **C2 `Nullable` / `AutoIncrement` per-column trailer** — SPEC-002 §2.3, SPEC-001 §4.6 (Nullable decorative), SPEC-006 §2.1 (ColumnSchema inconsistency), SPEC-006 §2.2 (Nullable v1 policy), SPEC-006 §8 drift (`schema/types.go:47` AutoIncrement). **Resolved (Option A — match live 3-byte trailer):** SPEC-002 §5.3 and Story 5.1 (schema snapshot codec) pin the per-column trailer at `(type_tag, nullable, auto_increment)`, all three bytes, matching `commitlog/snapshot_io.go:87`. SPEC-002 §6.1 step 4b and Story 6.2 (snapshot selection) add `Nullable` + `AutoIncrement` to the schema-equality check and reject snapshots with `nullable = 1`. SPEC-006 §8 `ColumnSchema` grows `AutoIncrement bool`; §9 column-level validation pins the v1 Nullable rule with `ErrNullableColumn`; §13 adds the `ErrNullableColumn` sentinel; Story 5.1 (validation rules) adds the acceptance. SPEC-001 §3.1 `ColumnSchema` aligns with SPEC-006 (five fields; cross-ref for canonical); Story 2.1 ColumnSchema block + acceptance updated. Option B (strip trailer / external SequenceSchema) explicitly not chosen — would require tearing out shipped schema format. **Session 4.5 repair pass:** three hallucinated claims (H1 `ErrNullableColumn` enforcement in `Build()`, H2 sentinel-wrapping on recovery, H3 direct `nullable = 1` rejection at snapshot select) softened to match live code; aspirational behavior logged as Session 12+ drift entries `TD-125` / `TD-126` / `TD-127`.
 
-#### Cluster D — Lifecycle reducer / OnConnect / OnDisconnect / init (Session 5 — newly identified)
-Cross-spec lifecycle model has three+ open seams.
+#### Cluster D — Lifecycle reducer / OnConnect / OnDisconnect / init (closed Session 5)
+Cross-spec lifecycle model had three+ open seams.
 
-- **D1 `init` lifecycle** — SPEC-003 §2.1, SPEC-003 §3.5, SPEC-006 §2.4. Adopt or formally defer.
-- **D2 OnConnect/OnDisconnect command identity** — SPEC-003 §1.5 (OnDisconnect tx unbounded), SPEC-003 §2.6 (single-command model conflict), SPEC-005 §4.7 (described as reducers vs §2.4 model). Decide: bespoke commands vs reducer-shaped commands; coordinate `OnConnectCmd`/`OnDisconnectCmd` (live `executor/command.go:61-79`) into spec.
+- **D1 `init` lifecycle** — SPEC-003 §2.1, SPEC-003 §3.5, SPEC-006 §2.4. Adopt or formally defer. **Resolved (defer):** SPEC-006 §9 Reducer-level rules now state v1 has no `init`/`update` lifecycle reducer — applications use a normal reducer invoked from deployment tooling; `init`/`update` names are NOT reserved in v1; reintroduction is a v2 target. SPEC-003 §10 preamble names the v1 lifecycle set as `OnConnect`/`OnDisconnect` only and cross-refs SPEC-006 §9.
+- **D2 OnConnect/OnDisconnect command identity** — SPEC-003 §1.5 (OnDisconnect tx unbounded), SPEC-003 §2.6 (single-command model conflict), SPEC-005 §4.7 (described as reducers vs §2.4 model). Decide: bespoke commands vs reducer-shaped commands; coordinate `OnConnectCmd`/`OnDisconnectCmd` (live `executor/command.go:61-79`) into spec. **Resolved (Option A — spec matches live bespoke commands):** SPEC-003 §2.4 now declares `OnConnectCmd` / `OnDisconnectCmd` as executor commands separate from `CallReducerCmd`; the trailing sentence is split (scheduled reducers keep using `CallReducerCmd` with `CallSourceScheduled`; lifecycle reducers use their own command types). SPEC-003 §10 preamble explains why (`sys_clients` insert / guaranteed cleanup tx are not expressible through `CallReducerCmd`). SPEC-003 §10.3 / §10.4 rewritten; §10.4 now pins the four contracts from SPEC-AUDIT SPEC-003 §1.5: (1) CallSource for cleanup = `CallSourceLifecycle` (reuse, not a new `CallSourceSystem`); (2) rolled-back reducer tx allocates no TxID, cleanup commit allocates exactly one — one TxID per failed OnDisconnect; (3) cleanup post-commit panics fall under §5.4 (fatal); (4) `OnDisconnectCmd` is NOT short-circuited when `e.fatal == true` — cleanup still attempts because leaking `sys_clients` rows is worse than rejecting writes; `CallReducerCmd` remains rejected in the same state. Story 7.3 acceptance criteria extended with the four pinned items. SPEC-005 §5.2/§5.3 rewritten to dispatch via `OnConnectCmd`/`OnDisconnectCmd` and cross-ref SPEC-003 §10.3/§10.4 instead of saying "the executor runs the OnConnect reducer".
+
+Edits landed in: `docs/decomposition/003-executor/SPEC-003-executor.md` §2.4/§10/§10.3/§10.4; `docs/decomposition/003-executor/epic-7-lifecycle-reducers/story-7.3-on-disconnect.md`; `docs/decomposition/005-protocol/SPEC-005-protocol.md` §5.2/§5.3; `docs/decomposition/006-schema/SPEC-006-schema.md` §9.
 
 #### Cluster E — Post-commit fan-out shapes (Session 6 — newly identified)
 Coordinated declaration across SPEC-003/004/005.
@@ -257,13 +259,13 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §1.2 | CRIT | Scheduled-reducer firing has no carrier for `schedule_id`/`IntendedFireAt` | Story 1.2, §3.3 | open |
 | §1.3 | CRIT | DurabilityHandle contract mismatches §7 + SPEC-002 | — | in-cluster E6 |
 | §1.4 | CRIT | §5 post-commit step order vs Story 5.1 snapshot timing | §5.2, Story 5.1 | open |
-| §1.5 | CRIT | OnDisconnect cleanup tx unbounded TxID sink, no identity/CallSource/panic | — | in-cluster D2 |
-| §2.1 | GAP | `init` lifecycle absent | — | in-cluster D1 |
+| §1.5 | CRIT | OnDisconnect cleanup tx unbounded TxID sink, no identity/CallSource/panic | — | closed (D2) |
+| §2.1 | GAP | `init` lifecycle absent | — | closed (D1) |
 | §2.2 | GAP | Dangling-client cleanup on restart undefined | new Epic 7 story | open |
 | §2.3 | GAP | Typed-adapter error mapping unowned | — | closed (B1) |
 | §2.4 | GAP | Scheduler→executor wakeup ordering inconsistent | §5 / Story 5.1 | open |
 | §2.5 | GAP | Startup orchestration owner unspecified | new Epic 3 story | open (overlaps A4) |
-| §2.6 | GAP | OnConnect/OnDisconnect command identity vs §2.4 single-command | — | in-cluster D2 |
+| §2.6 | GAP | OnConnect/OnDisconnect command identity vs §2.4 single-command | — | closed (D2) |
 | §2.7 | GAP | No pre-handler scheduled-row validation on firing | Story 6.x | open |
 | §2.8 | GAP | `Schedule`/`ScheduleRepeat` first-fire timing disagreement | Story 6.x | open |
 | §2.9 | GAP | `Rollback` not in SPEC-001 contract listed by §13.1 | §13.1 | open |
@@ -274,7 +276,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §3.2 | DIVERGE | Unbounded reducer dispatch queue vs bounded inbox | divergence block | open |
 | §3.3 | DIVERGE | Server-stamped timestamp at dequeue vs supplied-at-call | divergence block | open |
 | §3.4 | DIVERGE | Post-commit failure always fatal vs per-step recoverable | divergence block | open (E7) |
-| §3.5 | DIVERGE | Shunter owns `init` semantics via "no init" | — | in-cluster D1 |
+| §3.5 | DIVERGE | Shunter owns `init` semantics via "no init" | — | closed (D1) |
 | §3.6 | DIVERGE | Scheduled-row mutation atomic with reducer writes vs pre-fire delete | divergence block | open |
 | §4.1 | NIT | Front matter misdeclares SPEC-002 as "depended on by" | — | closed (B5) |
 | §4.2 | NIT | `CallerContext.Timestamp` type vs SPEC-005 wire format | Story 1.x | open |
@@ -375,7 +377,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §4.4 | NIT | §15 OQ #4 resolvable; should close | §15 | closed (B4) |
 | §4.5 | NIT | `CloseHandshakeTimeout` in §12 but §11.1 silent | §11.1 | open |
 | §4.6 | NIT | §8.5 `SubscriptionUpdate` shape comment refs nonexistent struct | §8.5 | open |
-| §4.7 | NIT | §5.2/§5.3 OnConnect/OnDisconnect described as reducers vs §2.4 | — | in-cluster D2 |
+| §4.7 | NIT | §5.2/§5.3 OnConnect/OnDisconnect described as reducers vs §2.4 | — | closed (D2) |
 | §4.8 | NIT | `ErrZeroConnectionID` listed but validation duplicated | §14 / Story 1.x | open |
 | §4.9 | NIT | `Energy` always 0 but no decode-side tolerance documented | §x | open |
 | §4.10 | NIT | `Conn.OutboundCh` close rule vs Story 3.6 (see §1.4) | overlaps §1.4 | open |
@@ -400,7 +402,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.1 | GAP | `ColumnSchema` inconsistent spec §8 vs live | — | closed (C2) |
 | §2.2 | GAP | `Nullable` preemptive-only but §9/§13 silent | — | closed (C2) |
 | §2.3 | GAP | Reducer-arg schema unreachable from `ReducerExport` | §8 / Story 6.x | open |
-| §2.4 | GAP | `init` lifecycle not declared/deferred | — | in-cluster D1 |
+| §2.4 | GAP | `init` lifecycle not declared/deferred | — | closed (D1) |
 | §2.5 | GAP | `ErrReservedReducerName`/nil-handler/dup-lifecycle no sentinel | §13 | open |
 | §2.6 | GAP | `ErrColumnNotFound` defined three times | — | closed (B2) |
 | §2.7 | GAP | No "v1 simplifications vs SpacetimeDB" block | divergence block | open |
@@ -412,7 +414,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.13 | GAP | Front matter understates dependencies | — | closed (B5) |
 | §2.14 | GAP | `cmd/shunter-codegen` does not exist | Story 6.3 / spec | open |
 | §3.1 | DIVERGE | Registration model: runtime reflect vs proc-macros | divergence block | open |
-| §3.2 | DIVERGE | Lifecycle reducer convention | divergence block (overlaps D1) | open |
+| §3.2 | DIVERGE | Lifecycle reducer convention | divergence block (overlaps D1) | closed (D1) |
 | §3.3 | DIVERGE | System tables minimal vs reflective | divergence block | open |
 | §3.4 | DIVERGE | No `SequenceSchema` — auto-increment is column flag | divergence block | open |
 | §3.5 | DIVERGE | Column-type enum vs `AlgebraicType` | divergence block | open |
@@ -441,7 +443,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 | 2 | Cluster A — schema contracts (`SchemaLookup`, `IndexResolver`, `Version()`, freeze) | SPEC-006 §1.1–1.5; SPEC-002 §2.7; SPEC-003 §5.5; SPEC-004 §2.7/§2.14; SPEC-005 §4.2 | **(closed)** SPEC-006 §7 + §5 + §6.1 carry the four declarations; cross-refs added in SPEC-002/003/004/005 |
 | 3 | Cluster B — error sentinels + types canonicalization + Commit/TxID | SPEC-006 §1.3/§2.6; SPEC-001 §1.3/§2.3/§4.1/§4.2; SPEC-002 §1.2/§2.5/§4.2; SPEC-003 §1.1/§2.3/§4.1/§4.7; SPEC-005 §1.3/§2.2/§4.2; SPEC-004 §2.14 | **(closed)** Model A pinned (executor allocates TxID, stamps `changeset.TxID`); `ErrReducerArgsDecode` deferred to SPEC-006; `ErrColumnNotFound` canonicalized in SPEC-006 §13; `types/` named as canonical Go-package home; front-matter deps completed across all six specs |
 | 4 | Cluster C — BSATN disclaimer + per-column trailer | SPEC-002 §2.3/§3.1/§6.1; SPEC-001 §4.6; SPEC-005 §4.1/§6.1; SPEC-006 §2.1/§2.2/§2.9; SPEC-003/004 clean-room caveats | **(closed)** SPEC-002 §3.1 carries canonical disclaimer; cross-refs in SPEC-003 §3.1 / SPEC-004 §6 / SPEC-005 §3.1 / SPEC-006 §1.2. Per-column trailer pinned at `(type_tag, nullable, auto_increment)` (Option A — match live); SPEC-006 §8 ColumnSchema gets `AutoIncrement`; `ErrNullableColumn` landed in §13 + Story 5.1 acceptance. |
-| 5 | Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init | SPEC-003 §1.5/§2.1/§2.6/§3.5; SPEC-005 §4.7; SPEC-006 §2.4/§3.2 | `init` adopt-or-defer landed; OnConnect/Disconnect command identity unified |
+| 5 | Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init | SPEC-003 §1.5/§2.1/§2.6/§3.5; SPEC-005 §4.7; SPEC-006 §2.4/§3.2 | **(closed)** SPEC-006 §9 defers `init`/`update` (not reserved; use deployment-time reducer; v2 target). SPEC-003 §2.4 declares `OnConnectCmd` / `OnDisconnectCmd` as bespoke commands (Option A — match live); §10.3/§10.4 rewritten; §10.4 pins the four SPEC-AUDIT §1.5 contracts (CallSource reuse of `CallSourceLifecycle`; one TxID per failed OnDisconnect; cleanup post-commit panics fatal per §5.4; cleanup runs even when `e.fatal`). Story 7.3 acceptance extended. SPEC-005 §5.2/§5.3 cross-ref `OnConnectCmd`/`OnDisconnectCmd`. |
 | 6 | Cluster E — post-commit fan-out shapes (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, ClientSender, DurabilityHandle, eval-error vs fatal) | SPEC-002 §2.9; SPEC-003 §1.3/§3.4/§5.4; SPEC-004 §1.1/§1.3/§1.4/§2.3/§2.4/§2.5/§2.6/§2.12/§3.5/§4.1/§4.2; SPEC-005 §1.1/§1.2/§1.5/§1.6/§2.4/§3.9/§5.2 | Five type shapes pinned in §10 (SPEC-004) and §13 (SPEC-005); post-commit fatal-vs-recoverable resolved |
 | 7 | SPEC-001 residue cleanup | SPEC-001 §1.1/1.2/1.4/1.5, §2.1/2.2/2.4–2.9, §3.x, §4.3–4.5/4.7–4.9, §5.2–5.4 | All "open" SPEC-001 rows resolved or explicitly deferred |
 | 8 | SPEC-002 residue cleanup | SPEC-002 §1.1/1.3/1.4, §2.1/2.2/2.4/2.6/2.8/2.10–2.13, §3.x, §4.1/4.3–4.8, §5.2–5.6 | All open SPEC-002 rows resolved/deferred |
@@ -497,4 +499,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 5 (Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init).
+Cursor: Session 6 (Cluster E — post-commit fan-out shapes).

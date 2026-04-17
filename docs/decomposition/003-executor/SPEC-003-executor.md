@@ -128,11 +128,27 @@ type DisconnectClientSubscriptionsCmd struct {
     ConnID     ConnectionID
     ResponseCh chan<- error
 }
+
+// OnConnectCmd and OnDisconnectCmd are bespoke lifecycle commands dispatched by
+// the protocol layer; see §10.3 / §10.4. They are NOT encoded as CallReducerCmd
+// because the sys_clients row insert (§10.3) and the guaranteed cleanup tx
+// (§10.4) are not expressible through the plain reducer-call path.
+type OnConnectCmd struct {
+    ConnID     ConnectionID
+    Identity   Identity
+    ResponseCh chan<- ReducerResponse
+}
+
+type OnDisconnectCmd struct {
+    ConnID     ConnectionID
+    Identity   Identity
+    ResponseCh chan<- ReducerResponse
+}
 ```
 
 `SubscriptionRegisterRequest` is defined in SPEC-004 §4.1.
 
-Scheduled reducers and lifecycle reducers use `CallReducerCmd` with an internal call source.
+Scheduled reducers use `CallReducerCmd` with `Source = CallSourceScheduled`. Lifecycle reducers (`OnConnect` / `OnDisconnect`) do not fit the `CallReducerCmd` shape and use their own command types above; `CallerContext.Source = CallSourceLifecycle` is stamped inside the executor (§10.3, §10.4). v1 has no `init`/`update` lifecycle command (see SPEC-006 §9).
 
 ### 2.5 Read-Only Access
 
@@ -590,6 +606,8 @@ This avoids unbounded drift under load.
 
 ## 10. Built-In Lifecycle Reducers
 
+The v1 lifecycle reducer set is exactly `OnConnect` and `OnDisconnect`. There is **no `init` or `update`** lifecycle hook; SPEC-006 §9 owns that deferral. Lifecycle reducers are dispatched via the bespoke `OnConnectCmd` / `OnDisconnectCmd` executor commands declared in §2.4 — not via `CallReducerCmd` — because the transaction shapes in §10.3 and §10.4 include synthetic `sys_clients` row writes that `CallReducerCmd` does not express.
+
 ### 10.1 Registration
 
 Applications may optionally register:
@@ -603,7 +621,7 @@ const (
 )
 ```
 
-The names `OnConnect` and `OnDisconnect` are reserved and may not be registered as normal public reducers.
+The names `OnConnect` and `OnDisconnect` are reserved and may not be registered as normal public reducers. Schema-level enforcement of this rule lives in SPEC-006 §9.
 
 ### 10.2 sys_clients Table
 
@@ -623,29 +641,44 @@ Rules:
 
 ### 10.3 OnConnect
 
-OnConnect is invoked by the protocol layer through an internal executor command before the client may issue normal reducer calls.
+OnConnect is dispatched by the protocol layer via `OnConnectCmd` (§2.4) before the client may issue normal reducer calls.
 
 Transaction semantics:
+- open a new transaction
 - insert `sys_clients` row
-- run OnConnect reducer if registered
+- run `OnConnect` reducer if registered, with `CallerContext.Source = CallSourceLifecycle`
 - if reducer commits, keep row and allow connection
 - if reducer returns error or panics, roll back both reducer changes and row insertion, then reject the connection
+- the commit allocates one `TxID` (no TxID is consumed on rollback; see §6)
+- on commit success, run the §5 post-commit pipeline with `source = CallSourceLifecycle` so subscribers see the `sys_clients` insert
 
 ### 10.4 OnDisconnect
 
-OnDisconnect is invoked by the protocol layer through an internal executor command after the client is considered gone.
+OnDisconnect is dispatched by the protocol layer via `OnDisconnectCmd` (§2.4) after the client is considered gone.
 
 Disconnect cannot be vetoed.
 
 Success path:
-- run OnDisconnect reducer
+- open a new transaction
+- run `OnDisconnect` reducer with `CallerContext.Source = CallSourceLifecycle`
 - delete `sys_clients` row in the same transaction
-- commit once
+- commit once; the commit allocates one `TxID` (§6)
+- run the §5 post-commit pipeline with `source = CallSourceLifecycle`
 
-Failure path:
-- if OnDisconnect returns error or panics, roll back reducer writes
-- then run a separate internal cleanup transaction that deletes the `sys_clients` row anyway
+Failure path (reducer returns error or panics):
+- roll back the reducer transaction (no `TxID` is allocated; in-progress sequence IDs from that tx are discarded per SPEC-001 normal rollback semantics)
 - log the reducer failure
+- open a **fresh cleanup transaction** that only deletes the `sys_clients` row
+- commit the cleanup transaction; the commit allocates one `TxID` — this is the sole `TxID` consumed by a failed OnDisconnect
+- run the §5 post-commit pipeline for the cleanup commit with `source = CallSourceLifecycle` so subscribers still see the `sys_clients` delete
+
+No reducer runs inside the cleanup transaction; `CallerContext.Source = CallSourceLifecycle` is stamped on the post-commit pipeline only.
+
+**Pinned contracts (resolving SPEC-AUDIT SPEC-003 §1.5):**
+1. **CallSource.** `CallSourceLifecycle` is reused for the cleanup post-commit pipeline. The enum describes how a surrounding reducer call was framed; the cleanup commit is framed as the tail of the same OnDisconnect operation, so reusing `CallSourceLifecycle` matches that framing rather than inventing a separate `CallSourceSystem` value.
+2. **TxID allocation.** A rolled-back reducer transaction allocates no `TxID` (stamping is tied to commit, §6). The cleanup commit allocates exactly one. Sequence-ID / ScheduleID gaps that the rolled-back reducer may have produced follow SPEC-001 normal rollback behavior — no compensating mechanism.
+3. **Cleanup panics.** A panic during the cleanup-commit's post-commit pipeline follows §5.4 and is executor-fatal — identical treatment to any other post-commit panic. A panic inside the cleanup transaction itself (pre-commit) is logged; the `sys_clients` row may leak until the next startup dangling-client sweep (SPEC-AUDIT SPEC-003 §2.2 tracks the sweep owner) but the executor continues.
+4. **Fatal-state interaction.** `OnDisconnectCmd` is **not** short-circuited when the executor has latched `fatal = true`. The cleanup commit MUST still attempt, because leaking live `sys_clients` rows is a worse outcome than rejecting new writes — subscribers to `sys_clients` would otherwise observe phantom connected clients indefinitely. `CallReducerCmd` remains short-circuited in fatal state (existing behavior, §5.4); only the lifecycle cleanup path opts in to this exception.
 
 This guarantees eventual client-row cleanup even when the reducer fails halfway through.
 

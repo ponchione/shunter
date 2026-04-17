@@ -522,6 +522,7 @@ A table has at most one `Primary` index, and in v1 that primary index must refer
 - Reducer name must be non-empty and unique
 - Reducer names `"OnConnect"` and `"OnDisconnect"` are reserved for lifecycle hooks
 - At most one `OnConnect`, at most one `OnDisconnect`
+- Shunter v1 has **no `init` or `update` lifecycle reducer**. SpacetimeDB exposes `#[reducer(init)]` / `#[reducer(update)]` for module first-boot and schema-migration hooks; Shunter defers this. Applications that need one-time bootstrap MUST invoke a normal reducer from deployment tooling — there is no runtime guarantee of once-only execution. The `init` and `update` names are **not reserved** in v1 (applications may register regular reducers with those names); reintroducing them as lifecycle hooks is a v2 target. Cross-ref: SPEC-003 §10 names the v1 lifecycle set as `OnConnect`/`OnDisconnect` only.
 
 **Schema-level:**
 - Built-in system tables (`sys_clients`, `sys_scheduled`) are registered automatically; user code must not register tables with those names

@@ -191,11 +191,11 @@ For production deployments, an external identity provider may sign tokens. The e
 
 ### 5.2 OnConnect Hook
 
-After the WebSocket opens and before `InitialConnection` is sent, the executor runs the `OnConnect` reducer (SPEC-003 §10.3). If `OnConnect` returns an error, the connection is closed with a Close frame (code 1008: Policy Violation). No `InitialConnection` is sent.
+After the WebSocket opens and before `InitialConnection` is sent, the protocol layer dispatches `OnConnectCmd` (SPEC-003 §2.4) into the executor, which runs the `OnConnect` lifecycle flow (SPEC-003 §10.3). Lifecycle dispatch does NOT use `CallReducerCmd`; the insert-then-reducer transaction shape is not expressible through the normal reducer-call path. If `OnConnect` returns an error, the connection is closed with a Close frame (code 1008: Policy Violation). No `InitialConnection` is sent.
 
 ### 5.3 OnDisconnect Hook
 
-When the connection closes (for any reason), the executor runs the `OnDisconnect` reducer. All subscriptions for the connection are removed before `OnDisconnect` runs. If `OnDisconnect` returns an error, the error is logged; the disconnect proceeds regardless.
+When the connection closes (for any reason), the protocol layer dispatches `OnDisconnectCmd` (SPEC-003 §2.4) into the executor, which runs the `OnDisconnect` lifecycle flow (SPEC-003 §10.4). All subscriptions for the connection are removed before `OnDisconnect` runs. If `OnDisconnect` returns an error, the error is logged and a fresh cleanup transaction still deletes the `sys_clients` row (SPEC-003 §10.4 failure path). The disconnect proceeds regardless of reducer outcome.
 
 ### 5.4 Keep-Alive
 

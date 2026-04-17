@@ -52,6 +52,26 @@ The `ExecutorCommand` interface and all concrete command types that flow through
   func (DisconnectClientSubscriptionsCmd) isExecutorCommand() {}
   ```
 
+- ```go
+  // Lifecycle dispatch commands (SPEC-003 §2.4 / §10.3 / §10.4).
+  // Bespoke because the sys_clients insert (OnConnect) and the
+  // guaranteed cleanup tx (OnDisconnect) are not expressible through
+  // CallReducerCmd.
+  type OnConnectCmd struct {
+      ConnID     ConnectionID
+      Identity   Identity
+      ResponseCh chan<- ReducerResponse
+  }
+  func (OnConnectCmd) isExecutorCommand() {}
+
+  type OnDisconnectCmd struct {
+      ConnID     ConnectionID
+      Identity   Identity
+      ResponseCh chan<- ReducerResponse
+  }
+  func (OnDisconnectCmd) isExecutorCommand() {}
+  ```
+
 ## Acceptance Criteria
 
 - [ ] All command types satisfy `ExecutorCommand` interface
@@ -59,9 +79,10 @@ The `ExecutorCommand` interface and all concrete command types that flow through
 - [ ] CallReducerCmd carries full ReducerRequest
 - [ ] RegisterSubscriptionCmd references SubscriptionRegisterRequest (SPEC-004 type)
 - [ ] UnregisterSubscriptionCmd and DisconnectClientSubscriptionsCmd carry ConnectionID
+- [ ] OnConnectCmd and OnDisconnectCmd carry ConnectionID + Identity and are distinct from CallReducerCmd
 
 ## Design Notes
 
 - `isExecutorCommand()` is unexported — prevents external packages from creating new command types.
-- Scheduled reducers and lifecycle reducers use `CallReducerCmd` with `CallSourceScheduled` or `CallSourceLifecycle` as the Source. No special command types needed.
+- Scheduled reducers use `CallReducerCmd` with `CallSourceScheduled` as the Source. Lifecycle reducers (`OnConnect` / `OnDisconnect`) do NOT fit the `CallReducerCmd` shape — the `sys_clients` row insert (§10.3) and the guaranteed cleanup tx (§10.4) are not expressible through the plain reducer-call path — so they use `OnConnectCmd` / `OnDisconnectCmd` and `CallerContext.Source = CallSourceLifecycle` is stamped inside the executor.
 - `SubscriptionRegisterRequest` and `SubscriptionRegisterResult` types come from SPEC-004. Use placeholder types or imports until SPEC-004 is implemented.
