@@ -627,6 +627,7 @@ func (cs *CommittedState) Snapshot() CommittedReadView
 type CommittedSnapshot struct {
     tables map[TableID]*Table    // shallow copy of table map at snapshot time
     mu     *sync.RWMutex         // held as read lock until Close()
+    closed atomic.Bool           // true after Close(); subsequent method calls panic
 }
 
 func (s *CommittedSnapshot) TableScan(tableID TableID) RowIterator
@@ -635,6 +636,8 @@ func (s *CommittedSnapshot) IndexRange(tableID TableID, indexID IndexID, lower, 
 func (s *CommittedSnapshot) RowCount(tableID TableID) uint64
 func (s *CommittedSnapshot) Close()
 ```
+
+Every read method (`TableScan`, `IndexScan`, `IndexRange`, `RowCount`) checks `closed.Load()` at entry and panics with a "snapshot used after Close" message if set. `Close()` sets `closed.Store(true)` before releasing the RLock; calling `Close()` twice panics (exactly-once contract). This is a correctness invariant, not a defensive check — reaching for a closed snapshot is a lifecycle bug.
 
 `IndexScan` implementation: extract the `IndexID` → `*Index` mapping from `TableSchema`, then call the existing `Index.Seek` logic, filtering results to rows matching `value`.
 

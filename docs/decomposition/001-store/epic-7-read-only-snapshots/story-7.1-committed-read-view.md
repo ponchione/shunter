@@ -29,6 +29,7 @@ Read-only point-in-time view of committed state. Used by subscription evaluator 
   type CommittedSnapshot struct {
       tables map[TableID]*Table   // shallow copy of table map at snapshot time
       mu     *sync.RWMutex        // held as read lock until Close()
+      closed atomic.Bool          // set on Close(); post-close method calls panic
   }
   ```
 
@@ -37,7 +38,9 @@ Read-only point-in-time view of committed state. Used by subscription evaluator 
   - Shallow-copies table map
   - Returns CommittedSnapshot holding the lock
 
-- `Close()` — releases RLock. Must be called exactly once.
+- `Close()` — sets `closed.Store(true)`, then releases RLock. Must be called exactly once; calling Close() a second time panics.
+
+- **Post-Close enforcement:** every read method (`TableScan`, `IndexScan`, `IndexRange`, `RowCount`) checks `closed.Load()` at entry and panics with "snapshot used after Close" if set. Mechanism pinned here because "methods panic after Close()" is an acceptance criterion that otherwise has no defined implementation path.
 
 - Snapshot usage contract owned by this story:
   - Callers must materialize any needed rows while the snapshot is open, then call `Close()` before network I/O, client encoding, waiting on channels, subscription-registration bookkeeping, or any other blocking work
