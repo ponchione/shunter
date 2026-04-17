@@ -79,7 +79,7 @@ The `Builder` struct and explicit registration methods. Accumulates tables and r
 - `TableDefinition`, `ColumnDefinition`, `IndexDefinition` types
 - `TableOption`, `WithTableName()` option
 - `SchemaVersion(v uint32) *Builder`
-- `EngineOptions` struct (DataDir, ExecutorQueueCapacity, DurabilityQueueCapacity, EnableProtocol)
+- `EngineOptions` struct (DataDir, ExecutorQueueCapacity, DurabilityQueueCapacity, EnableProtocol, StartupSnapshotSchema)
 - Reducer registration: `Reducer(name, handler)`, `OnConnect(handler)`, `OnDisconnect(handler)`
 - `ReducerHandler` type (byte-oriented handler from SPEC-003)
 
@@ -147,12 +147,12 @@ Validate all registrations, assign stable IDs, auto-register system tables, cons
 - **Validation rules (§9, error ownership in §13):**
   - Table-level: non-empty name, valid pattern `[A-Za-z][A-Za-z0-9_]*`, unique across tables, ≥1 column, ≤1 PK, autoincrement on integer only, autoincrement requires PK or unique
   - Column-level: non-empty name, valid pattern `[a-z][a-z0-9_]*`, unique within table, supported type, no nullable (v1)
-  - Index-level: non-empty name, unique within table, ≥1 column, valid column refs, declaration-order columns, PK single-column (v1), no mixed unique on composite, primarykey+index combo rejected
-  - Reducer-level: non-empty name, unique, reserved lifecycle names
+  - Index-level: non-empty name, unique within table, ≥1 column, valid column refs, declaration-order columns, PK single-column (v1), no mixed unique on same-table composite indexes, PK column excluded from explicit secondary indexes
+  - Reducer-level: non-empty name, unique, reserved lifecycle names, duplicate lifecycle registration rejected, nil handlers rejected
   - Schema-level: SchemaVersion set and >0, no user tables named `sys_*`
 - **System tables (§10):** auto-register `sys_clients` and `sys_scheduled` during Build
-- **Build orchestration (§5):** validate → register system tables → assign TableIDs (user tables in registration order, then `sys_clients`, then `sys_scheduled`) → assign IndexIDs → construct SchemaRegistry → return Engine; repeated `Build()` on the same builder returns a deterministic error
-- **SchemaRegistry (§7):** read-only interface: `Table(id)`, `TableByName(name)`, `Tables()`, `Reducer(name)`, `Reducers()`, `OnConnect()`, `OnDisconnect()`, `Version()`; immutable, concurrent-safe
+- **Build orchestration (§5):** validate → register system tables → assign TableIDs (user tables in registration order, then `sys_clients`, then `sys_scheduled`) → assign IndexIDs → construct SchemaRegistry → return Engine; repeated `Build()` on the same builder returns `ErrAlreadyBuilt`; `Start()` remains a schema-compatibility preflight, not full runtime bring-up
+- **SchemaRegistry (§7):** read-only interface: `Table(id)`, `TableByName(name)`, `Tables()`, `Reducer(name)`, `Reducers()`, `OnConnect()`, `OnDisconnect()`, `Version()`; immutable, concurrent-safe; table lookups return detached schema clones
 - **Schema versioning (§6):** at startup, compare registered version + full schema structure against snapshot; mismatch → `ErrSchemaMismatch` with diff details
 
 **Testable outcomes:**
@@ -164,11 +164,11 @@ Validate all registrations, assign stable IDs, auto-register system tables, cons
 - Build without `SchemaVersion()` → `ErrSchemaVersionNotSet`
 - Build with no tables → `ErrNoTables`
 - `sys_clients` and `sys_scheduled` present in registry after Build
-- `SchemaRegistry.Table(id)` returns correct schema
-- `SchemaRegistry.Tables()` returns user IDs then system IDs, stable order
+- `SchemaRegistry.Table(id)` returns the correct detached schema clone
+- `SchemaRegistry.Tables()` returns user IDs then system IDs in ID-assignment order
 - `SchemaRegistry.Reducer(name)` returns registered handler
-- Same registration inputs → same TableIDs across runs
-- Schema version mismatch at startup → `ErrSchemaMismatch`
+- Same registration order and inputs → same TableIDs across runs
+- Schema version mismatch at startup preflight → `ErrSchemaMismatch`
 - Matching schema + version → recovery proceeds
 
 **Dependencies:** Epic 3 (Builder state to validate). Epic 4 feeds additional reflection-path inputs through the same validation/build pipeline but is not a hard blocker for builder-path implementation.
@@ -187,9 +187,9 @@ Export registered schema for client code generation tools. Build-time concern, n
 - Export types: `SchemaExport`, `TableExport`, `ColumnExport`, `IndexExport`, `ReducerExport`
 - `Engine.ExportSchema() *SchemaExport` — walks SchemaRegistry, builds export structs
 - Column type as string (`"bool"`, `"int8"`, … `"bytes"`)
-- `ReducerExport.Lifecycle` flag for OnConnect/OnDisconnect
+- `ReducerExport.Lifecycle` flag for OnConnect/OnDisconnect plus the explicit v1 omission of reducer argument schemas
 - JSON serialization of `SchemaExport`
-- `shunter-codegen` CLI contract (§12.2): consume `schema.json`, validate `--lang/--schema/--out`, and generate build-time client artifacts
+- `shunter-codegen` CLI contract (§12.2): consume `schema.json`, validate `--lang/--schema/--out`, and generate build-time client artifacts; current repo status is contract-only, not an implemented command package
 
 **Testable outcomes:**
 - `ExportSchema()` includes all user tables and system tables
@@ -197,9 +197,10 @@ Export registered schema for client code generation tools. Build-time concern, n
 - Index export includes columns, uniqueness, primary flag
 - Lifecycle reducers marked with `Lifecycle: true`
 - Non-lifecycle reducers have `Lifecycle: false`
+- Reducer wrappers remain raw-byte (`Uint8Array`) surfaces in generated TypeScript because argument schemas are not exported in v1
 - JSON round-trip: marshal → unmarshal → equals original
 - Export includes schema version
-- `shunter-codegen --lang typescript --schema schema.json --out ./generated/` validates its contract inputs and reads `SchemaExport` JSON successfully
+- A future `shunter-codegen --lang typescript --schema schema.json --out ./generated/` implementation validates its contract inputs and reads `SchemaExport` JSON successfully
 
 **Dependencies:** Epic 5 (SchemaRegistry to export from)
 
@@ -239,7 +240,13 @@ Errors introduced where first needed:
 | `ErrAutoIncrementRequiresKey` | Epic 5 (table-level validation) |
 | `ErrAutoIncrementType` | Epic 5 (table-level validation) |
 | `ErrEmptyTableName` | Epic 5 (table-level validation) |
+| `ErrInvalidTableName` | Epic 5 (table-level validation) |
+| `ErrEmptyColumnName` | Epic 5 (column-level validation) |
 | `ErrInvalidColumnName` | Epic 5 (column-level validation) |
 | `ErrSchemaMismatch` | Epic 5 (schema version check) |
 | `ErrSchemaVersionNotSet` | Epic 5 (schema-level validation) |
 | `ErrNoTables` | Epic 5 (schema-level validation) |
+| `ErrReservedReducerName` | Epic 5 (reducer-level validation) |
+| `ErrNilReducerHandler` | Epic 5 (reducer-level validation) |
+| `ErrDuplicateLifecycleReducer` | Epic 5 (reducer-level validation) |
+| `ErrAlreadyBuilt` | Epic 5 (Build/freeze enforcement) |

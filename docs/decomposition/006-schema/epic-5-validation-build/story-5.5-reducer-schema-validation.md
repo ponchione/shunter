@@ -20,9 +20,9 @@ Validate reducer registrations and top-level schema configuration rules that are
   Reducer-level checks:
   - Reducer name must be non-empty
   - Reducer name must be unique → `ErrDuplicateReducerName`
-  - Reducer names `"OnConnect"` and `"OnDisconnect"` are reserved
-  - At most one `OnConnect` registration and at most one `OnDisconnect` registration
-  - Nil reducer/lifecycle handlers are rejected here, not at registration time
+  - Reducer names `"OnConnect"` and `"OnDisconnect"` are reserved → `ErrReservedReducerName`
+  - At most one `OnConnect` registration and at most one `OnDisconnect` registration → `ErrDuplicateLifecycleReducer`
+  - Nil reducer/lifecycle handlers are rejected here, not at registration time → `ErrNilReducerHandler`
 
   Schema-level checks:
   - `SchemaVersion` must have been called and must be greater than zero → `ErrSchemaVersionNotSet`
@@ -32,9 +32,9 @@ Validate reducer registrations and top-level schema configuration rules that are
 ## Acceptance Criteria
 
 - [ ] Reducer name `""` or duplicate reducer names → validation error / `ErrDuplicateReducerName` as appropriate
-- [ ] Registering a normal reducer with name `"OnConnect"` or `"OnDisconnect"` → validation error
-- [ ] Duplicate `OnConnect` or duplicate `OnDisconnect` registrations → validation error
-- [ ] Nil reducer or lifecycle handler → validation error
+- [ ] Registering a normal reducer with name `"OnConnect"` or `"OnDisconnect"` → `ErrReservedReducerName`
+- [ ] Duplicate `OnConnect` or duplicate `OnDisconnect` registrations → `ErrDuplicateLifecycleReducer`
+- [ ] Nil reducer or lifecycle handler → `ErrNilReducerHandler`
 - [ ] Missing `SchemaVersion()` or `SchemaVersion(0)` → `ErrSchemaVersionNotSet`
 - [ ] User table named `"sys_clients"` (or `"sys_scheduled"`) → `ErrReservedTableName`
 - [ ] No user tables registered → `ErrNoTables`
@@ -43,5 +43,6 @@ Validate reducer registrations and top-level schema configuration rules that are
 ## Design Notes
 
 - Registration methods stay lightweight; this story is where policy is enforced.
+- This story is the canonical owner for the reducer-oriented sentinels added in SPEC-006 §13: `ErrReservedReducerName`, `ErrNilReducerHandler`, and `ErrDuplicateLifecycleReducer`.
 - Splitting reducer/schema validation from structural validation keeps both stories implementable without turning either into a grab-bag.
 - `sys_*` name protection is kept with schema-level validation because it is about the global namespace, not any one table's internal structure.

@@ -15,7 +15,7 @@ Expose the developer-facing generic `RegisterTable[T]` API: validate the type pa
 
 - `func RegisterTable[T any](b *Builder, opts ...TableOption) error`:
   1. Verify `T` is a non-pointer struct type
-  2. Call `discoverFields(...)`
+  2. Call `discoverFields(t, t.Name())`
   3. Call `buildTableDefinition(...)`
   4. Call `b.TableDef(def, opts...)`
   5. Return nil on success or the first construction error on failure

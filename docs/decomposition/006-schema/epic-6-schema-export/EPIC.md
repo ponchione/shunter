@@ -30,5 +30,5 @@ Story 6.1 (Export types)
 |---|---|
 | 6.1 | `schema/export.go` |
 | 6.2 | `schema/export.go` (extend), `schema/export_test.go` |
-| 6.3 | `cmd/shunter-codegen/main.go`, `cmd/shunter-codegen/main_test.go` |
+| 6.3 | Future target: `cmd/shunter-codegen/main.go`, `cmd/shunter-codegen/main_test.go` (not present in the current docs-first repo) |
 | 6.4 | `schema/export_json_test.go`, `docs/codegen/schema-export-contract.md` |

@@ -21,7 +21,7 @@ Walk the immutable `SchemaRegistry` and produce a `SchemaExport` value suitable 
      - Build `TableExport` with name, columns, and indexes
   3. For each reducer name in `registry.Reducers()`:
      - Build `ReducerExport{Name: name, Lifecycle: false}`
-  4. Append lifecycle reducers when `OnConnect()` / `OnDisconnect()` are present
+  4. Append lifecycle reducers when `OnConnect()` / `OnDisconnect()` are present, always after normal reducers and in fixed order `OnConnect`, then `OnDisconnect`
   5. Return the export value
 
 ## Acceptance Criteria
@@ -31,11 +31,11 @@ Walk the immutable `SchemaRegistry` and produce a `SchemaExport` value suitable 
 - [ ] Column types are lowercase strings (`"uint64"`, `"string"`, `"bytes"`, etc.)
 - [ ] Index export uses column names, not numeric indices
 - [ ] Primary index is exported with `Primary: true` and `Unique: true`
-- [ ] Non-lifecycle reducers export with `Lifecycle: false`; registered lifecycle reducers export with `Lifecycle: true`
+- [ ] Non-lifecycle reducers export with `Lifecycle: false`; registered lifecycle reducers export with `Lifecycle: true` and appear after normal reducers in fixed order `OnConnect`, then `OnDisconnect`
 - [ ] Export version matches `SchemaRegistry.Version()`
 - [ ] Returned export is a detached value snapshot, not shared mutable registry state
 
 ## Design Notes
 
-- Export ordering mirrors `SchemaRegistry.Tables()` and `SchemaRegistry.Reducers()`, both of which are stable by design.
+- Export ordering mirrors `SchemaRegistry.Tables()` and `SchemaRegistry.Reducers()`, both of which are stable by design. Lifecycle reducers are appended afterward so byte-oriented reducer exports stay grouped separately from lifecycle hooks.
 - This story owns the in-memory value traversal only. JSON round-trip guarantees and CLI consumption live in Stories 6.4 and 6.3 respectively.

@@ -18,7 +18,7 @@
 
 ```
 Story 4.1 (Field discovery)
-  └── Story 4.2 (TableDefinition assembly)
+  └── Story 4.2 (TableDefinition assembly, including reflection-path mixed-unique consistency checks)
         └── Story 4.3 (RegisterTable integration)
 ```
 

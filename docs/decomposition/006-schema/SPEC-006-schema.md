@@ -38,6 +38,21 @@ Cross-spec engine identifier types (`RowID`, `Identity`, `ConnectionID`, `TxID`,
 
 Reducer arguments (`argBSATN []byte` in §4.3) and return values travel as BSATN bytes. BSATN is the binary encoding defined in SPEC-002 §3.3; the name is imported from SpacetimeDB and is non-standard — see the canonical disclaimer in **SPEC-002 §3.1**. SPEC-006 does not encode or decode BSATN itself; it only declares the byte-oriented handler surface.
 
+### 1.3 v1 simplifications vs SpacetimeDB
+
+Shunter is intentionally schema-simpler than SpacetimeDB in v1. The differences below are deliberate product-scope choices, not missing hidden machinery:
+
+| Topic | SpacetimeDB | Shunter v1 |
+|---|---|---|
+| Schema registration | Compile-time proc-macros (`#[table]`, `#[reducer]`) validate while producing a module definition | Runtime reflection over struct tags or explicit `TableDefinition`; validation runs at `Build()` |
+| Column type system | Recursive `AlgebraicType` with sum/product/array/option shapes | Flat scalar `ValueKind` set plus `[]byte`; no recursive type graph |
+| Schema introspection | Large reflective `st_*` system-table surface | Two runtime system tables only (`sys_clients`, `sys_scheduled`); schema introspection uses `SchemaRegistry` / `ExportSchema()` |
+| Auto-increment metadata | First-class sequence schema objects | Per-column `AutoIncrement bool`; sequence state lives in SPEC-001 store/runtime behavior |
+| Reducer argument metadata | Typed reducer argument schemas available to bindings/codegen | Byte-oriented reducer handlers only; reducer argument schemas are intentionally omitted from `ReducerExport` in v1 |
+| Schedule identifier width | `u32` schedule IDs | `uint64` `ScheduleID` / `schedule_id` for headroom |
+
+These simplifications are the baseline contract for the docs-first v1 plan. A future parity pass may revisit them, but implementers should not infer hidden proc-macro, `SequenceSchema`, or `AlgebraicType` machinery behind the current API.
+
 ---
 
 ## 2. Go Type Mapping
@@ -288,17 +303,18 @@ type EngineOptions struct {
     ExecutorQueueCapacity   int    // 0 = default from SPEC-003
     DurabilityQueueCapacity int    // 0 = default from SPEC-002
     EnableProtocol          bool   // false = build core engine only
+    StartupSnapshotSchema   *SnapshotSchema // optional schema-compat preflight input for Start(); see Story 5.6
 }
 
 // Build validates all registrations and constructs the Engine.
-// Returns an error if any registration is invalid, if SchemaVersion
-// was not set, or if a required subsystem is missing.
+// Returns an error if any registration is invalid or if SchemaVersion
+// was not set.
 func (b *Builder) Build(opts EngineOptions) (*Engine, error)
 ```
 
 `Build` performs all validation synchronously before returning. If `Build` returns nil error, the engine is structurally valid and has an immutable `SchemaRegistry`, but it has not yet opened files, recovered state, started goroutines, or accepted network traffic.
 
-`Engine.Start(ctx)` performs runtime initialization: open/recover the commit log, construct the committed store, start the executor and durability worker, restore scheduled reducers, and begin accepting protocol connections if `EnableProtocol` is true.
+`Engine.Start(ctx)` is intentionally narrow in SPEC-006 v1: it performs the startup schema-compatibility preflight from §6 / Story 5.6 against `EngineOptions.StartupSnapshotSchema` and returns `ErrSchemaMismatch` if the frozen registry and recovery-time snapshot schema disagree. Full runtime bring-up (commit-log open/recovery, store construction, executor/durability start, protocol listen) is owned by the downstream integration/runtime work described in §5.2 and the dependent specs, not by this schema spec alone.
 
 ### 5.1 Freeze Semantics
 
@@ -317,13 +333,14 @@ The full engine bring-up sequence — the SPEC-003 audit §5.5 / SPEC-006 audit 
 1. **Schema registration.** Application calls `NewBuilder()` and then `TableDef` / `SchemaVersion` to register all user tables and the schema version.
 2. **Reducer registration.** Application calls `Reducer`, `OnConnect`, and `OnDisconnect` for every handler.
 3. **Freeze.** Application calls `Build(opts)`. System tables are appended, IDs are assigned, validation runs, and `*Engine` is returned with an immutable `SchemaRegistry`. After this point the registry is the canonical schema for SPEC-001/002/003/004/005.
-4. **Subsystem construction.** `Engine.Start(ctx)` constructs `*store.CommittedState` (SPEC-001), the commit-log durability worker (SPEC-002), the executor (SPEC-003 — `NewExecutor` reads the frozen registry), the subscription manager (SPEC-004 — receives the registry as both `SchemaLookup` and `IndexResolver`), and the protocol layer (SPEC-005, when `EnableProtocol = true`).
-5. **Recovery.** Commit log is opened and recovery runs against the new `CommittedState` (SPEC-002 §6).
-6. **Scheduler replay.** The executor reads `sys_scheduled` rows from `CommittedState` and rearms timers (SPEC-003 §10.3).
-7. **Dangling-client sweep.** The executor reads `sys_clients` rows and synthesizes `OnDisconnect` calls for any client present in the table without a live connection (SPEC-003 §5.3 / audit §2.2).
-8. **Run.** Executor and durability worker enter their main loops; protocol layer begins accepting WebSocket upgrades.
+4. **Startup schema-compatibility preflight.** `Engine.Start(ctx)` compares the frozen registry against `opts.StartupSnapshotSchema` (when non-nil) and fails early with `ErrSchemaMismatch` on version or structure drift.
+5. **Subsystem construction.** The integration/runtime layer constructs `*store.CommittedState` (SPEC-001), the commit-log durability worker (SPEC-002), the executor (SPEC-003 — `NewExecutor` reads the frozen registry), the subscription manager (SPEC-004 — receives the registry as both `SchemaLookup` and `IndexResolver`), and the protocol layer (SPEC-005, when `EnableProtocol = true`).
+6. **Recovery.** Commit log is opened and recovery runs against the new `CommittedState` (SPEC-002 §6).
+7. **Scheduler replay.** The executor reads `sys_scheduled` rows from `CommittedState` and rearms timers (SPEC-003 §10.3).
+8. **Dangling-client sweep.** The executor reads `sys_clients` rows and synthesizes `OnDisconnect` calls for any client present in the table without a live connection (SPEC-003 §5.3 / audit §2.2).
+9. **Run.** Executor and durability worker enter their main loops; protocol layer begins accepting WebSocket upgrades.
 
-Steps 1–3 are the SPEC-006 territory. Steps 4–8 are owned by SPEC-002/003/005 and cross-referenced from this section so the freeze contract is unambiguous: every consumer in steps 4+ may treat `SchemaRegistry` as fully populated and immutable.
+Steps 1–4 are the SPEC-006 territory. Steps 5–9 are owned by SPEC-002/003/005 and cross-referenced from this section so the freeze contract is unambiguous: every consumer in steps 5+ may treat `SchemaRegistry` as fully populated and immutable.
 
 ---
 
@@ -428,14 +445,15 @@ type SchemaRegistry interface {
     SchemaLookup
     IndexResolver
 
-    // Tables returns all registered table IDs in stable order.
+    // Tables returns all registered table IDs in ID-assignment order:
+    // user tables first in registration order, then system tables.
     Tables() []TableID
 
     // Reducer returns the handler for the given reducer name.
     Reducer(name string) (ReducerHandler, bool)
 
-    // Reducers returns all registered reducer names in stable order
-    // (excluding lifecycle).
+    // Reducers returns all registered non-lifecycle reducer names in the
+    // registration order of the first call per name.
     Reducers() []string
 
     // OnConnect returns the OnConnect handler, or nil if not registered.
@@ -449,7 +467,11 @@ type SchemaRegistry interface {
 }
 ```
 
-`TableID` is a stable `uint32` assigned deterministically by the builder. User tables receive IDs first in registration order. Built-in system tables are appended afterward in fixed order: `sys_clients`, then `sys_scheduled`. The same registration inputs therefore produce the same IDs across runs.
+`Table()` and `TableByName()` return detached `TableSchema` clones rather than pointers into registry-owned backing storage. The registry's immutability already makes pointer returns safe, but v1 chooses detached reads so downstream packages cannot accidentally retain or mutate internal slices by alias. Hot-path implementations may keep unexported pointer-based helpers internally; the public registry contract remains clone-returning.
+
+`TableID` is a stable `uint32` assigned deterministically by the builder. User tables receive IDs first in registration order. Built-in system tables are appended afterward in fixed order: `sys_clients`, then `sys_scheduled`. `Tables()` returns IDs in that same order. The same registration inputs therefore produce the same IDs across runs.
+
+`Reducers()` order means the first-registration order of each distinct non-lifecycle reducer name. Re-registering an already-seen reducer name is invalid (`ErrDuplicateReducerName`) and does not create a second slot or change ordering.
 
 **Consumer guidance.** Downstream packages should depend on the narrowest interface they need: predicate validation in `subscription/` should declare a local `SchemaLookup` interface satisfied by `SchemaRegistry`; protocol handlers needing only `TableByName` may declare a single-method local interface. The canonical type is the one declared here; local interfaces are documentation for consumer scope, not new types.
 
@@ -480,11 +502,11 @@ type IndexSchema struct {
     Name    string
     Columns []int // column indices into TableSchema.Columns, in key order
     Unique  bool
-    Primary bool // at most one per table; implies Unique
+    Primary bool // at most one per table; implies Unique and len(Columns) == 1 in v1
 }
 ```
 
-A table has at most one `Primary` index, and in v1 that primary index must reference exactly one column. If no primary index is declared, the store uses set-semantics (see SPEC-001 §3.3).
+A table has at most one `Primary` index, and in v1 that primary index must reference exactly one column. If no primary index is declared, the store uses set-semantics (see SPEC-001 §3.3). The builder never synthesizes a multi-column primary index in v1, and post-`Build()` mutation of `IndexSchema` is out of scope.
 
 ---
 
@@ -493,7 +515,7 @@ A table has at most one `Primary` index, and in v1 that primary index must refer
 `Build()` enforces the following. Any violation is a returned error with a descriptive message:
 
 **Table-level:**
-- Table name must be non-empty, unique across all registered tables, and match `[A-Za-z][A-Za-z0-9_]*`
+- Table name must be non-empty (`ErrEmptyTableName`), unique across all registered tables (`ErrDuplicateTableName`), and match `[A-Za-z][A-Za-z0-9_]*` (`ErrInvalidTableName`)
 - At least one column required
 - At most one `primarykey` column per table
 - `autoincrement` only on integer-typed columns
@@ -513,15 +535,17 @@ A table has at most one `Primary` index, and in v1 that primary index must refer
 - Composite index columns must be in declaration order (builder path: explicit; reflection path: struct field order)
 - A multi-column index with `unique:true` enforces uniqueness on the combined key, not individual columns
 - Primary indexes must reference exactly one column in v1
-- Mixed `unique` vs non-`unique` declarations for the same named composite index are registration errors
+- Mixed `unique` vs non-`unique` declarations for the same named composite index within one table are registration errors
 - A single field may not combine `primarykey` with `index` or `index:<name>`
+- A primary-key column must not also appear in an explicit `IndexDefinition`
 - `-` may not be combined with any other directive
 - Duplicate directives on one field are registration errors
 
 **Reducer-level:**
-- Reducer name must be non-empty and unique
-- Reducer names `"OnConnect"` and `"OnDisconnect"` are reserved for lifecycle hooks
-- At most one `OnConnect`, at most one `OnDisconnect`
+- Reducer name must be non-empty and unique (`ErrDuplicateReducerName` on duplicates)
+- Reducer names `"OnConnect"` and `"OnDisconnect"` are reserved for lifecycle hooks (`ErrReservedReducerName`)
+- At most one `OnConnect`, at most one `OnDisconnect` (`ErrDuplicateLifecycleReducer`)
+- Nil reducer or lifecycle handlers are rejected by validation (`ErrNilReducerHandler`)
 - Shunter v1 has **no `init` or `update` lifecycle reducer**. SpacetimeDB exposes `#[reducer(init)]` / `#[reducer(update)]` for module first-boot and schema-migration hooks; Shunter defers this. Applications that need one-time bootstrap MUST invoke a normal reducer from deployment tooling — there is no runtime guarantee of once-only execution. The `init` and `update` names are **not reserved** in v1 (applications may register regular reducers with those names); reintroducing them as lifecycle hooks is a v2 target. Cross-ref: SPEC-003 §10 names the v1 lifecycle set as `OnConnect`/`OnDisconnect` only.
 
 **Schema-level:**
@@ -560,6 +584,8 @@ type sysScheduled struct {
 ```
 
 Managed by the scheduler. Entries are inserted when `SchedulerHandle.Schedule()` is called from reducer code. One-shot entries are deleted only when the scheduled reducer transaction commits successfully. Repeating entries stay in place and update `next_run_at_ns` on successful commit. On scheduled reducer failure or crash-before-commit, the row remains as the durable source of truth.
+
+`schedule_id` intentionally uses `uint64` / `ScheduleID` in Shunter v1 for extra headroom. SpacetimeDB uses a 32-bit schedule identifier; this spec does not attempt parity there.
 
 ---
 
@@ -635,13 +661,17 @@ type ReducerExport struct {
     Name      string
     Lifecycle bool // true for OnConnect / OnDisconnect
     // Args and return type are not introspectable in v1 (byte-oriented handler).
-    // Typed reducer call codegen requires separate reducer metadata (future work).
+    // ReducerExport therefore intentionally omits argument schemas; applications
+    // must document reducer bytes contracts out-of-band until a future metadata
+    // registration surface lands.
 }
 ```
 
+`ExportSchema()` emits all non-lifecycle reducers first in `SchemaRegistry.Reducers()` order, then lifecycle reducers in fixed order: `OnConnect`, then `OnDisconnect`, when present.
+
 ### 12.2 Codegen Tool
 
-`shunter-codegen` is invoked as:
+`shunter-codegen` is the planned build-time tool surface for this spec. The docs-first repo does not yet ship `cmd/shunter-codegen`; Story 6.3 defines the future contract so later implementation work has a pinned interface. When implemented, it is invoked as:
 
 ```
 shunter-codegen --lang typescript --schema schema.json --out ./generated/
@@ -649,6 +679,7 @@ shunter-codegen --lang typescript --schema schema.json --out ./generated/
 
 It reads a `SchemaExport` (serialized to JSON) and produces:
 - TypeScript: type definitions for all table row types, typed subscription helpers
+- Reducer call surfaces that expose names but still accept raw BSATN bytes (`Uint8Array` / equivalent) because reducer arg schemas are not exported in v1
 - Future: Go client types, C# types, etc.
 
 How `schema.json` is produced: the application binary exports its schema via a `--export-schema` flag or a `go generate` directive that calls `engine.ExportSchema()` and writes JSON. The exact mechanism is left to the application.
@@ -674,6 +705,12 @@ How `schema.json` is produced: the application binary exports its schema via a `
 | `ErrSchemaMismatch` | Schema version or structure differs from snapshot |
 | `ErrSchemaVersionNotSet` | `Build()` called without `SchemaVersion()` |
 | `ErrNoTables` | `Build()` called with no registered tables |
+| `ErrReservedReducerName` | A normal reducer is registered with reserved lifecycle name `OnConnect` or `OnDisconnect` |
+| `ErrNilReducerHandler` | A reducer or lifecycle handler is nil |
+| `ErrDuplicateLifecycleReducer` | A second `OnConnect` or `OnDisconnect` registration is supplied |
+| `ErrAlreadyBuilt` | `Build()` is called twice, or any builder mutator is called after `Build()` succeeds |
+| `ErrInvalidTableName` | Table name fails the `[A-Za-z][A-Za-z0-9_]*` pattern |
+| `ErrEmptyColumnName` | Column name is empty |
 | `ErrColumnNotFound` | Column reference resolves to a name not present on the named table |
 | `ErrNullableColumn` | Reserved for the v1 Nullable-rejection rule (§9); not yet producible in live code — see Session 12+ drift note below |
 

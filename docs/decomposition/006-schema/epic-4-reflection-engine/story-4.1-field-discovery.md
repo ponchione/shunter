@@ -23,7 +23,7 @@ Walk a Go struct's exported fields via `reflect`, resolve types, parse tags, han
   }
   ```
 
-- `func discoverFields(t reflect.Type) ([]fieldInfo, error)` — given a struct type:
+- `func discoverFields(t reflect.Type, prefix string) ([]fieldInfo, error)` — given a struct type plus the current dotted path prefix used for error reporting:
   1. Iterate exported fields in declaration order
   2. For each field:
      - Unexported field → skip silently
@@ -55,5 +55,5 @@ Walk a Go struct's exported fields via `reflect`, resolve types, parse tags, han
 ## Design Notes
 
 - `discoverFields` stops at ordered field metadata. It does not assemble indexes or call the builder.
-- The recursive embedding walk should retain enough path context for useful error messages (`Player.BaseEntity.ID`).
+- `prefix` is an internal recursion aid used solely to preserve dotted field paths in errors (`Player.BaseEntity.ID`). `RegisterTable[T]` seeds it with the root struct type name.
 - Field ordering follows `reflect.Type.Field(i)` order, which matches declaration order.

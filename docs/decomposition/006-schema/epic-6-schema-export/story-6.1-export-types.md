@@ -57,6 +57,8 @@ Serializable types that describe the registered schema for client code generatio
   }
   ```
 
+  `ReducerExport` intentionally omits reducer argument and return schemas in v1. Consumers must treat reducer calls as byte-oriented and obtain argument-shape documentation out-of-band until a future metadata-registration surface exists.
+
 ## Acceptance Criteria
 
 - [ ] All export types have JSON struct tags

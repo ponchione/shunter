@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E6 remainder`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 11 (SPEC-006 residue cleanup).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 12 (SPEC-001/002 drift batch).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -114,7 +114,7 @@ Expected deliverable for next agent
 Objective
 - Walk `SPEC-AUDIT.md` (~2564 lines, six top-level specs) and convert findings into spec/story edits across multiple ≤150k-token sessions.
 - This lane edits `docs/decomposition/**`, not `TECH-DEBT.md`. Live `store/`, `commitlog/`, `executor/`, `subscription/`, `protocol/`, `schema/`, `types/`, `bsatn/` only touched in dedicated drift sessions (Session 12+).
-- `SPEC-AUDIT.md` is source of truth; this section is the index. Cite finding IDs (e.g. `SPEC-006 §1.1`) so the audit can be re-read for full context. Session 10 closed/deferred every remaining SPEC-004 and SPEC-005 row; Session 11 moves to SPEC-006.
+- `SPEC-AUDIT.md` is source of truth; this section is the index. Cite finding IDs (e.g. `SPEC-006 §1.1`) so the audit can be re-read for full context. Session 11 closed/deferred every remaining SPEC-006 row; Session 12 moves to the first drift batch (SPEC-001/002).
 
 ### B.0 Operating rules
 
@@ -424,41 +424,41 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §1.5 | CRIT | `SchemaRegistry.Version()` semantics undefined | — | closed (A3) |
 | §2.1 | GAP | `ColumnSchema` inconsistent spec §8 vs live | — | closed (C2) |
 | §2.2 | GAP | `Nullable` preemptive-only but §9/§13 silent | — | closed (C2) |
-| §2.3 | GAP | Reducer-arg schema unreachable from `ReducerExport` | §8 / Story 6.x | open |
+| §2.3 | GAP | Reducer-arg schema unreachable from `ReducerExport` | SPEC-006 §12.1/§12.2; Epic 6 Stories 6.1/6.3 | closed |
 | §2.4 | GAP | `init` lifecycle not declared/deferred | — | closed (D1) |
-| §2.5 | GAP | `ErrReservedReducerName`/nil-handler/dup-lifecycle no sentinel | §13 | open |
+| §2.5 | GAP | `ErrReservedReducerName`/nil-handler/dup-lifecycle no sentinel | SPEC-006 §9/§13; Epic 5 Story 5.5 | closed |
 | §2.6 | GAP | `ErrColumnNotFound` defined three times | — | closed (B2) |
-| §2.7 | GAP | No "v1 simplifications vs SpacetimeDB" block | divergence block | open |
-| §2.8 | GAP | `ScheduleID` width divergence | divergence block | open |
+| §2.7 | GAP | No "v1 simplifications vs SpacetimeDB" block | SPEC-006 §1.3 | closed |
+| §2.8 | GAP | `ScheduleID` width divergence | SPEC-006 §1.3/§10.2 | closed |
 | §2.9 | GAP | BSATN naming disclaimer not propagated | — | closed (C1) |
-| §2.10 | GAP | `Engine.Start(ctx)` contract vs live stub | §5, Story x | open (overlaps A4) |
-| §2.11 | GAP | Multi-column PK enforcement implicit | §x | open |
-| §2.12 | GAP | Named composite index uniqueness check not on builder path | Story x | open |
+| §2.10 | GAP | `Engine.Start(ctx)` contract vs live stub | SPEC-006 §5/§5.2; Epic 5 Stories 5.3/5.6 | closed |
+| §2.11 | GAP | Multi-column PK enforcement implicit | SPEC-006 §8/§9; Epic 5 Stories 5.1/5.3 | closed |
+| §2.12 | GAP | Named composite index uniqueness check not on builder path | SPEC-006 §9; Epic 4 EPIC; Epic 5 Story 5.1 | closed |
 | §2.13 | GAP | Front matter understates dependencies | — | closed (B5) |
-| §2.14 | GAP | `cmd/shunter-codegen` does not exist | Story 6.3 / spec | open |
-| §3.1 | DIVERGE | Registration model: runtime reflect vs proc-macros | divergence block | open |
+| §2.14 | GAP | `cmd/shunter-codegen` does not exist | SPEC-006 §12.2; Epic 6 EPIC; Story 6.3 | closed |
+| §3.1 | DIVERGE | Registration model: runtime reflect vs proc-macros | SPEC-006 §1.3 | closed |
 | §3.2 | DIVERGE | Lifecycle reducer convention | divergence block (overlaps D1) | closed (D1) |
-| §3.3 | DIVERGE | System tables minimal vs reflective | divergence block | open |
-| §3.4 | DIVERGE | No `SequenceSchema` — auto-increment is column flag | divergence block | open |
-| §3.5 | DIVERGE | Column-type enum vs `AlgebraicType` | divergence block | open |
-| §4.1 | NIT | Story 5.4 `Table(id)` returns clone — perf vs immutability undocumented | Story 5.4 | open |
-| §4.2 | NIT | `Reducers()` ordering "stable" but ambiguous | §7 | open |
-| §4.3 | NIT | `SchemaRegistry.Tables()` ordering not in §7 | §7 | open |
-| §4.4 | NIT | Story 4.1 `discoverFields` signature drift | Story 4.1 | open |
-| §4.5 | NIT | Story 2.2 `ValidateTag` split vs ParseTag fold | Story 2.2 | open |
-| §4.6 | NIT | `DefaultIndexName` signature inconsistency | Story x | open |
-| §4.7 | NIT | Story 5.3 TableID assignment determinism undocumented | Story 5.3 | open |
-| §4.8 | NIT | `validateStructure` doesn't check PK-vs-named-composite-participant | Story x | open |
-| §4.9 | NIT | `ExportSchema` lifecycle ordering regardless of version | Story 6.2 | open |
+| §3.3 | DIVERGE | System tables minimal vs reflective | SPEC-006 §1.3 | closed |
+| §3.4 | DIVERGE | No `SequenceSchema` — auto-increment is column flag | SPEC-006 §1.3 | closed |
+| §3.5 | DIVERGE | Column-type enum vs `AlgebraicType` | SPEC-006 §1.3 | closed |
+| §4.1 | NIT | Story 5.4 `Table(id)` returns clone — perf vs immutability undocumented | SPEC-006 §7; Epic 5 Story 5.4 | closed |
+| §4.2 | NIT | `Reducers()` ordering "stable" but ambiguous | SPEC-006 §7; Epic 5 Story 5.4 | closed |
+| §4.3 | NIT | `SchemaRegistry.Tables()` ordering not in §7 | SPEC-006 §7; Epic 5 Story 5.4 | closed |
+| §4.4 | NIT | Story 4.1 `discoverFields` signature drift | Epic 4 Stories 4.1/4.3 | closed |
+| §4.5 | NIT | Story 2.2 `ValidateTag` split vs ParseTag fold | Epic 2 Story 2.2 | closed |
+| §4.6 | NIT | `DefaultIndexName` signature inconsistency | Epic 2 Story 2.2 | closed |
+| §4.7 | NIT | Story 5.3 TableID assignment determinism undocumented | Epic 5 Story 5.3; `docs/decomposition/006-schema/EPICS.md` | closed |
+| §4.8 | NIT | `validateStructure` doesn't check PK-vs-named-composite-participant | SPEC-006 §9; Epic 5 Story 5.1 | closed |
+| §4.9 | NIT | `ExportSchema` lifecycle ordering regardless of version | SPEC-006 §12.1; Epic 6 Story 6.2 | closed |
 | §5.1 | GAP | No story owns `SchemaLookup`/`IndexResolver` declaration | — | closed (A1/A2) |
-| §5.2 | GAP | No story owns `ErrReservedReducerName` etc | overlaps §2.5 | open |
+| §5.2 | GAP | No story owns `ErrReservedReducerName` etc | Epic 5 Story 5.5; SPEC-006 §13 | closed |
 | §5.3 | GAP | No story owns registration-order freeze | — | closed (A4) |
-| §5.4 | NIT | Epic 4 implementation order glosses Story 4.2 mixed-unique check | Epic 4 | open |
-| §5.5 | NIT | Story 6.3 acceptance lacks generated TS shape | Story 6.3 | open |
+| §5.4 | NIT | Epic 4 implementation order glosses Story 4.2 mixed-unique check | Epic 4 EPIC; Epic 5 Story 5.1 | closed |
+| §5.5 | NIT | Story 6.3 acceptance lacks generated TS shape | SPEC-006 §12.2; Epic 6 Story 6.3 | closed |
 
 ### B.3 Session cadence
 
-Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only (Sessions 2–10). Live-code drift reconciliation deferred to Sessions 12+.
+Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only (Sessions 2–11). Live-code drift reconciliation deferred to Sessions 12+.
 
 | # | Scope | Inputs | Stop rule |
 |---|---|---|---|
@@ -472,7 +472,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 | 8 | SPEC-002 residue cleanup | SPEC-002 §1.1/1.3/1.4, §2.1/2.2/2.4/2.6/2.8/2.10–2.13, §3.x, §4.1/4.3–4.8, §5.2–5.6 | **(closed)** All 30 open SPEC-002 rows resolved. CRIT: §1.1 SnapshotInterval default = 0 in §8; §1.3 nextID section in §5.2 layout; §1.4 sequence-advance cross-ref to SPEC-001 Story 8.2 in §6.1 + Story 6.4 (no separate post-replay sweep). GAPs: ErrSnapshotInProgress + ErrTruncatedRecord added to §9 + §2.3/§6.4 cross-refs (§2.1/§2.2/§4.3); row_count uint32 (§2.4); restore-API named (`InsertRow` is the bulk-restore primitive — SPEC-001 Story 8.3 + §11 + SPEC-002 Story 6.4) (§2.6/§5.6); durable_horizon = +∞ when segments empty (§2.8); AppendMode normative in §6.4 + EPICS dep arrow Epic 6→4 (§2.10/§4.6); schema-static encoder note Story 3.1 (§2.11/§5.2); snapshot retention deferred-v1 documented in §7 + §13 OQ#2 (§2.12/§5.4); graceful-shutdown ownership cross-ref to SPEC-003 in §5.6 + Story 5.2 (§2.13/§5.5). New §12 Divergences block (6 entries: offset index, single-TX/record, replay strictness, first TxID = 1, single sequence/table, no compression). NIT bundle: schema_version header authoritative note (§5.3), `stateMu` + waiters in §4.3 struct (§4.5), Record CRC docs Story 2.2 (§4.4), .log extension cross-ref §6.1 (§4.7), FsyncMode placeholder §8 (§4.8) with TD-128 logged for live wiring at `commitlog/durability.go:63`. |
 | 9 | SPEC-003 residue cleanup | SPEC-003 §1.2/1.4, §2.2/2.4/2.5/2.7–2.12, §3.x, §4.2–4.6/4.8/4.9, §5.2/5.4 | **(closed)** All 26 open SPEC-003 rows resolved. CRIT/GAP fixes: scheduled-call carrier fields (`ScheduleID`, `IntendedFireAt`) added to `ReducerRequest` (§1.2); post-commit snapshot timing pinned to after durability enqueue (§1.4); startup sequencing now has an owner via Epic 3 Story 3.6 plus a recovery-time dangling-client sweep via Epic 7 Story 7.5 (§2.2/§2.5/§5.2/§5.3); scheduler wakeup is downgraded from required correctness to optional latency optimization while scheduled-call response draining is explicitly owned (§2.4/§2.12); firing edge cases and `ScheduleRepeat = now + interval` are pinned in Stories 6.4/6.2 (§2.7/§2.8); `Rollback` re-added to the store contract (§2.9); `ErrReducerNotFound` / timestamp / nil-ResponseCh / read-view ownership / fatal-flag / naming nits closed across §3.3/§8/§11/§13 and Stories 1.2/1.3/3.1/3.4/4.1/5.1. New §12 divergence block documents five executor-specific divergences; performance section renamed to §17 `Performance Targets`. |
 | 10 | SPEC-004/005 residue cleanup | SPEC-004 §1.2/1.5/1.6, §2.1/2.2/2.8–2.11/2.13, §3.x, §4.3–4.9, §5.2–5.4; SPEC-005 §1.4/1.6, §2.1/2.3/2.5–2.15, §3.1–3.8/3.10/3.11, §4.3–4.6/4.8/4.9/4.11, §5.2–5.8 | All open SPEC-004 and SPEC-005 rows resolved/deferred |
-| 11 | SPEC-006 residue cleanup | SPEC-006 §2.3/2.5/2.7/2.8/2.10–2.12/2.14, §3.x, §4.1–4.9, §5.2/5.4/5.5 | All open SPEC-006 rows resolved/deferred |
+| 11 | SPEC-006 residue cleanup | SPEC-006 §2.3/2.5/2.7/2.8/2.10–2.12/2.14, §3.x, §4.1–4.9, §5.2/5.4/5.5 | **(closed)** All open SPEC-006 rows resolved in docs. Main spec: new §1.3 simplifications/divergence block, narrowed `Start()` preflight contract in §5/§5.2, single-column-PK invariant in §8/§9, `schedule_id` width note in §10.2, byte-oriented reducer export/codegen clarifications in §12, and reducer/schema sentinels in §13. Stories/epics: Story 5.5 now owns `ErrReservedReducerName` / nil-handler / duplicate-lifecycle sentinels; Story 5.4 pins clone-return + ordering semantics; Story 5.3 documents deterministic-registration responsibility and narrow `Start()` role; Story 5.1 / Epic 4 clarify same-table mixed-unique and PK-vs-explicit-index rules; Story 4.1/4.3 align `discoverFields(..., prefix)`; Story 2.2 picks ParseTag-folded validation + `DefaultIndexName` precedence; Story 6.1/6.2/6.3 + Epic 6 pin byte-oriented reducer export/codegen shape and mark `cmd/shunter-codegen` as forward contract only. |
 | 12+ | Spec-to-code drift batches (per-spec §8) | live impl files cited in SPEC-AUDIT.md §8 of each spec | drift either upstreamed into spec or impl realigned |
 
 ### B.4 Kickoff templates
@@ -522,4 +522,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 11 (SPEC-006 residue cleanup).
+Cursor: Session 12 (SPEC-001/002 drift batch).

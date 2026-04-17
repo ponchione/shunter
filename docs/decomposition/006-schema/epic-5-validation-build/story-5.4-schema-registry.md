@@ -21,11 +21,11 @@ Implement the `SchemaRegistry` interface — the read-only, concurrent-safe, imm
 
 ## Acceptance Criteria
 
-- [ ] `Table(id)` / `TableByName(name)` return the correct schema when present and `nil, false` when absent
-- [ ] `Tables()` returns user table IDs first, then system table IDs, in stable order
+- [ ] `Table(id)` / `TableByName(name)` return the correct schema clone when present and `nil, false` when absent
+- [ ] `Tables()` returns user table IDs first, then system table IDs, in ID-assignment order
 - [ ] `Tables()` returns a fresh slice each call so callers cannot mutate internal state
 - [ ] `Reducer(name)` returns the registered handler or `nil, false`
-- [ ] `Reducers()` returns names in registration order, excluding lifecycle reducers
+- [ ] `Reducers()` returns names in first-registration order, excluding lifecycle reducers
 - [ ] `OnConnect()` / `OnDisconnect()` return the registered lifecycle handler or nil
 - [ ] `Version()` returns the schema version
 - [ ] Registry is safe for concurrent reads because it is immutable after construction
@@ -33,5 +33,6 @@ Implement the `SchemaRegistry` interface — the read-only, concurrent-safe, imm
 ## Design Notes
 
 - Immutability is the concurrency strategy. No mutex is needed because nothing mutates after construction.
-- `Tables()` and `Reducers()` return fresh slices to preserve internal ordering invariants.
+- `Table(id)` / `TableByName(name)` return detached `TableSchema` clones so callers cannot alias registry-owned slices. `Tables()` and `Reducers()` return fresh slices for the same reason.
+- `Reducers()` ordering is the first-registration order of each distinct reducer name. Duplicate registrations are validation errors and do not create additional ordering slots.
 - The interface is intentionally narrow so downstream subsystems cannot depend on mutable builder internals.

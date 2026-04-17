@@ -13,7 +13,7 @@ Validate parsed tag directives for contradictions, duplicates, and illegal combi
 
 ## Deliverables
 
-- `ValidateTag(td *TagDirectives) error` — or integrate validation into `ParseTag` directly. Checks:
+- Validation is folded into `ParseTag` in v1 so callers get one parse+validate step. A separate exported `ValidateTag` helper is optional, but the normative contract is that `ParseTag` never returns an unchecked `TagDirectives` value. Required checks:
   1. `-` must appear alone: if `Exclude` is true, no other directive may be set → error
   2. Duplicate directives: detected during parse (same token twice in tag string) → error
   3. `primarykey` may not combine with `index` or `index:<name>` → error
@@ -40,6 +40,7 @@ Validate parsed tag directives for contradictions, duplicates, and illegal combi
 
 ## Design Notes
 
-- Validation may be folded into `ParseTag` so callers get a single call. The split in stories is for logical clarity — the implementation may combine parse + validate in one function.
+- Validation is intentionally folded into `ParseTag`; the story split exists only to keep parse grammar and policy rules readable in the docs.
 - The "mixed `unique` flags across fields for same named composite index" rule is a cross-field check and belongs in Epic 5 validation, not here. This story only validates per-field tag consistency.
 - Directive duplicate detection requires tracking which tokens have been seen during the comma-split loop.
+- When `isPK` is true, `DefaultIndexName` always returns `"pk"`; the `isUnique` argument is ignored because primary keys are unique by definition.

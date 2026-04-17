@@ -5,7 +5,7 @@
 **Depends on:** Story 5.4 (SchemaRegistry for comparison)
 **Blocks:** Nothing (terminal story)
 
-**Cross-spec:** Schema version is stored in snapshots per SPEC-002 §5.3. Comparison runs during `Engine.Start()`.
+**Cross-spec:** Schema version is stored in snapshots per SPEC-002 §5.3. Comparison runs during `Engine.Start()` as the narrow startup schema-compatibility preflight, not as the full runtime bring-up path.
 
 ---
 
@@ -38,5 +38,5 @@ At startup, compare the registered schema (version + full structure) against the
 ## Design Notes
 
 - v1 has no online schema migration. Mismatch means wipe data or migrate manually.
-- `Build()` remains pure registration-time validation; `Start()` owns runtime snapshot comparison.
+- `Build()` remains pure registration-time validation; `Start()` owns only the runtime snapshot comparison preflight. Commit-log open/recovery and executor/protocol startup are downstream integration concerns.
 - The `SnapshotSchema` types are defined here for the comparison interface. SPEC-002 owns the serialization format.
