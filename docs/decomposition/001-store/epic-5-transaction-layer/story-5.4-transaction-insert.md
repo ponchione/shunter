@@ -28,6 +28,7 @@ Insert a row within a transaction. Allocates provisional RowID, validates schema
 - `func (t *Transaction) Insert(tableID TableID, row ProductValue) (RowID, error)`
 
   **Algorithm:**
+  0. Look up table by `TableID` via `committed.Table(tableID)`. If not found, return `(0, ErrTableNotFound)`.
   1. Validate row against table schema (Story 2.3 `ValidateRow`)
   2. Check NaN in float columns (already enforced by Value construction, but belt-and-suspenders)
   3. **Undelete check** (set-semantics and PK tables):
@@ -45,6 +46,7 @@ Insert a row within a transaction. Allocates provisional RowID, validates schema
 ## Acceptance Criteria
 
 - [ ] Insert valid row → returns RowID, row visible via StateView
+- [ ] Insert with unknown TableID → `ErrTableNotFound`; no RowID allocated
 - [ ] Insert with schema mismatch → error, no RowID allocated
 - [ ] Insert duplicate PK (committed, not deleted) → `ErrPrimaryKeyViolation`
 - [ ] Insert duplicate PK (tx-local) → `ErrPrimaryKeyViolation`

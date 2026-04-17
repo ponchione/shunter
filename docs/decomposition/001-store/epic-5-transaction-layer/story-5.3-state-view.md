@@ -68,8 +68,10 @@ Merges committed state and tx-local state into a single read path. The "what doe
 - [ ] SeekIndexBounds with both Unbounded: same result as ScanTable filtered by index
 - [ ] Empty tx (no inserts/deletes): StateView behaves same as committed state
 - [ ] Nil tx.inserts/tx.deletes for a table: handled gracefully (no panic)
+- [ ] Unknown TableID: ScanTable returns empty iterator; GetRow returns (nil, false); SeekIndex/SeekIndexRange/SeekIndexBounds return empty iterators
 
 ## Design Notes
 
 - Linear scan of tx.inserts for SeekIndex/SeekIndexRange is O(n) in tx-local row count. Acceptable in v1 — most reducers insert small numbers of rows. Profiling may justify tx-local indexes in v2.
 - No duplicates possible between committed and tx-local results because RowID spaces are disjoint (monotonic counter, no reuse).
+- Unknown `TableID` passed to `GetRow`, `ScanTable`, `SeekIndex`, `SeekIndexRange`, or `SeekIndexBounds` yields an empty result (no error, no panic). Error-returning shape is reserved for the mutation-side `Transaction.Insert/Delete/Update` boundary (SPEC-001 §9 `ErrTableNotFound`).

@@ -35,7 +35,7 @@ The tagged union that represents a single column value.
   `NewBool(bool)`, `NewInt8(int8)` ... `NewString(string)`, `NewBytes([]byte)`
   - Signed integers (Int8–Int64) all stored in `i64`
   - Unsigned integers (Uint8–Uint64) all stored in `u64`
-  - `NewFloat32` / `NewFloat64` — reject NaN, return `(Value, error)`
+  - `NewFloat32` / `NewFloat64` — reject NaN, return `(Value, error)`. The error sentinel is `ErrInvalidFloat` (SPEC-001 §9); these constructors are its only producer.
   - `NewBytes` — **copies** input slice (immutability contract)
   - `NewString` — Go strings already immutable, no copy needed
 
@@ -52,8 +52,8 @@ The tagged union that represents a single column value.
 ## Acceptance Criteria
 
 - [ ] Construct each of 13 kinds, round-trip through accessor — value matches
-- [ ] `NewFloat32(NaN)` returns error
-- [ ] `NewFloat64(NaN)` returns error
+- [ ] `NewFloat32(NaN)` returns `ErrInvalidFloat`
+- [ ] `NewFloat64(NaN)` returns `ErrInvalidFloat`
 - [ ] `NewBytes(b)` — mutating original `b` does not affect stored Value
 - [ ] Accessor kind mismatch panics
 - [ ] `AsBytes` returns a non-nil slice whose length and content match the NewBytes input; its mutation is undefined behavior (contract: read-only)

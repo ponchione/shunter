@@ -16,6 +16,7 @@ Delete a row visible in the transaction view. Branches on whether the row is tx-
 - `func (t *Transaction) Delete(tableID TableID, rowID RowID) error`
 
   **Algorithm:**
+  0. Look up table by `TableID` via `committed.Table(tableID)`. If not found, return `ErrTableNotFound`.
   1. If rowID is in `tx.inserts[tableID]`:
      - Remove from tx.inserts (insert-then-delete collapses to no-op)
      - Return nil
@@ -34,6 +35,7 @@ Delete a row visible in the transaction view. Branches on whether the row is tx-
 - [ ] Delete tx-local row → removed from tx.inserts, no trace remains
 - [ ] Delete already-deleted committed row → `ErrRowNotFound`
 - [ ] Delete non-existent RowID → `ErrRowNotFound`
+- [ ] Delete with unknown TableID → `ErrTableNotFound`
 - [ ] After deleting tx-local row: RowID not in inserts or deletes
 - [ ] After deleting committed row: row still in committed state (unchanged), just hidden via tx.deletes
 - [ ] Insert then delete same row in TX → ScanTable shows neither

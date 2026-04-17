@@ -16,6 +16,7 @@ Update = Delete(old) + Insert(new), with undelete optimization when new row is i
 - `func (t *Transaction) Update(tableID TableID, rowID RowID, newRow ProductValue) (RowID, error)`
 
   **Algorithm:**
+  0. Look up table by `TableID` via `committed.Table(tableID)`. If not found, return `(0, ErrTableNotFound)`.
   1. Look up current row via StateView.GetRow — if not found, return `ErrRowNotFound`
   2. Delete(tableID, rowID) — remove old row
   3. Insert(tableID, newRow) — insert new row
@@ -32,6 +33,7 @@ Update = Delete(old) + Insert(new), with undelete optimization when new row is i
 - [ ] Update tx-local row with new value → old removed from inserts, new added, new RowID
 - [ ] Update to identical value (committed row) → collapses to no-op (undelete cancels the delete)
 - [ ] Update non-existent row → `ErrRowNotFound`, no state change
+- [ ] Update with unknown TableID → `ErrTableNotFound`, no state change
 - [ ] Update that would violate unique constraint → error, old row still visible (rollback)
 - [ ] Update that changes PK value → old key freed, new key checked for uniqueness
 - [ ] Update that changes non-indexed column → indexes unchanged for that column

@@ -672,6 +672,7 @@ On insert, if the row's sequence column is zero, it is replaced with the next se
 | `ErrTableNotFound` | tableID references unknown table |
 | `ErrColumnNotFound` | re-exported from SPEC-006 §13 — column name lookup miss against the `SchemaRegistry`; SPEC-001 re-exports so store-layer integrity paths can construct and match the sentinel without importing SPEC-006 directly |
 | `ErrTypeMismatch` | column value has wrong type for column schema |
+| `ErrRowShapeMismatch` | row column count does not match `TableSchema.Columns`; raised by Story 2.3 `ValidateRow` |
 | `ErrPrimaryKeyViolation` | insert would duplicate existing primary key |
 | `ErrUniqueConstraintViolation` | insert would duplicate unique index key (non-PK) |
 | `ErrDuplicateRow` | exact row already exists (set-semantics check, no PK) |
