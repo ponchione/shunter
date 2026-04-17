@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E6 remainder`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 10 (SPEC-004 + SPEC-005 residue cleanup).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 11 (SPEC-006 residue cleanup).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -114,7 +114,7 @@ Expected deliverable for next agent
 Objective
 - Walk `SPEC-AUDIT.md` (~2564 lines, six top-level specs) and convert findings into spec/story edits across multiple ≤150k-token sessions.
 - This lane edits `docs/decomposition/**`, not `TECH-DEBT.md`. Live `store/`, `commitlog/`, `executor/`, `subscription/`, `protocol/`, `schema/`, `types/`, `bsatn/` only touched in dedicated drift sessions (Session 11+).
-- `SPEC-AUDIT.md` is source of truth; this section is the index. Cite finding IDs (e.g. `SPEC-006 §1.1`) so the audit can be re-read for full context.
+- `SPEC-AUDIT.md` is source of truth; this section is the index. Cite finding IDs (e.g. `SPEC-006 §1.1`) so the audit can be re-read for full context. Session 10 closed/deferred every remaining SPEC-004 and SPEC-005 row; Session 11 moves to SPEC-006.
 
 ### B.0 Operating rules
 
@@ -320,42 +320,42 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
 | §1.1 | CRIT | `EvalAndBroadcast` cannot populate §8.1 `FanOutMessage` | — | closed (E1/E2) |
-| §1.2 | CRIT | `SubscriptionRegisterRequest` lacks client identity → §3.4 hashing unreachable | §4.1, Story 4.5 | open |
+| §1.2 | CRIT | `SubscriptionRegisterRequest` lacks client identity → §3.4 hashing unreachable | §3.4, §4.1, Story 4.2, Story 4.5 | closed |
 | §1.3 | CRIT | `FanOutMessage` shape omits `TxID` and `Errors` | — | closed (E2) |
 | §1.4 | CRIT | §11.1 per-sub eval-error recovery contradicts SPEC-003 §5.4 fatal | — | closed (E7) |
-| §1.5 | CRIT | `SubscriptionUpdate.TableID` undefined for joins | §10.2, Story 3.3 | open |
-| §1.6 | CRIT | Story 4.1 `subscribers` map cannot hold multi-sub-per-conn | Story 4.1 | open |
-| §2.1 | GAP | `CommittedReadView` lifetime across Register/EvalAndBroadcast unpinned | §10.1 | open |
-| §2.2 | GAP | `DroppedClients()` channel capacity/close/blocking/dedup missing | §8.5, Story 4.5 | open |
+| §1.5 | CRIT | `SubscriptionUpdate.TableID` undefined for joins | §10.2 | closed |
+| §1.6 | CRIT | Story 4.1 `subscribers` map cannot hold multi-sub-per-conn | Story 4.1 | closed |
+| §2.1 | GAP | `CommittedReadView` lifetime across Register/EvalAndBroadcast unpinned | §10.1, Story 5.1 | closed |
+| §2.2 | GAP | `DroppedClients()` channel capacity/close/blocking/dedup missing | §8.5, Story 4.5, Story 6.1 | closed |
 | §2.3 | GAP | Five types not declared in §10 (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, IndexResolver) | — | closed (A2/E1/E2/E3/E4) |
 | §2.4 | GAP | `SubscriptionError` delivery + payload undefined | — | closed (E3) |
 | §2.5 | GAP | `ReducerCallResult` forward-decl shape unpinned | — | closed (E4) |
 | §2.6 | GAP | `FanOutSender` / `ClientSender` naming + method-surface split | — | closed (E5) |
 | §2.7 | GAP | `IndexResolver` no declared home | — | closed (A2) |
-| §2.8 | GAP | `ErrJoinIndexUnresolved`/`ErrSendBufferFull`/`ErrSendConnGone` not in §11 | §11, Story 4.5, EPICS.md | open |
-| §2.9 | GAP | Story 5.2 `CollectCandidates` doc-only; live inlines tiering | Story 5.2, §6.x | open |
-| §2.10 | GAP | Caller-result delivery when caller's `Fanout` empty unspecified | Story 5.1 | open |
-| §2.11 | GAP | Initial row-limit meaning for joins undefined | §x, Story 4.x | open |
+| §2.8 | GAP | `ErrJoinIndexUnresolved`/`ErrSendBufferFull`/`ErrSendConnGone` not in §11 | §11, Story 4.5, EPICS.md | closed |
+| §2.9 | GAP | Story 5.2 `CollectCandidates` doc-only; live inlines tiering | Story 5.2 | closed |
+| §2.10 | GAP | Caller-result delivery when caller's `Fanout` empty unspecified | §7.2, Story 5.1 | closed |
+| §2.11 | GAP | Initial row-limit meaning for joins undefined | Story 4.2 | closed |
 | §2.12 | GAP | `PostCommitMeta.TxDurable` for empty-fanout transactions | — | closed (E1) |
-| §2.13 | GAP | `PruningIndexes.CollectCandidatesForTable` tier-2 silent skip when resolver nil | Story 2.4 | open |
+| §2.13 | GAP | `PruningIndexes.CollectCandidatesForTable` tier-2 silent skip when resolver nil | Story 2.4 | closed |
 | §2.14 | GAP | SPEC-004 has no "Depends on" front matter | — | closed (B5) |
-| §3.1 | DIVERGE | Go predicate builder vs SpacetimeDB SQL subset | divergence block | open |
-| §3.2 | DIVERGE | Bounded fan-out + disconnect-on-lag vs unbounded MPSC + lazy-mark | divergence block | open |
-| §3.3 | DIVERGE | No row-level security / per-client predicate filtering | divergence block | open |
-| §3.4 | DIVERGE | Post-fragment bag dedup vs in-fragment count tracking | divergence block | open |
+| §3.1 | DIVERGE | Go predicate builder vs SpacetimeDB SQL subset | §12.4 divergence block | closed |
+| §3.2 | DIVERGE | Bounded fan-out + disconnect-on-lag vs unbounded MPSC + lazy-mark | §12.4 divergence block | closed |
+| §3.3 | DIVERGE | No row-level security / per-client predicate filtering | §12.4 divergence block | closed |
+| §3.4 | DIVERGE | Post-fragment bag dedup vs in-fragment count tracking | §12.4 divergence block | closed |
 | §3.5 | DIVERGE | `PostCommitMeta.TxDurable` flows through subscription seam | — | closed (E1) |
 | §4.1 | NIT | §10.1 + Story 4.5 mirror wrong `EvalAndBroadcast` sig | — | closed (E1) |
 | §4.2 | NIT | §8.1 `ClientSender` vs live `FanOutSender` | — | closed (E5) |
-| §4.3 | NIT | §3.4 hash input vs Story 1.3 byte-append | §3.4, Story 1.3 | open |
-| §4.4 | NIT | `CommitFanout` ownership across channel | Story 5.1 | open |
-| §4.5 | NIT | `SubscriptionUpdate` carries `TableName` but `TableChangeset` already has | §10.2 | open |
-| §4.6 | NIT | §7 `EvalTransaction` vs §10.1 `EvalAndBroadcast` vs live naming | §7 / §10.1 | open |
-| §4.7 | NIT | `QueryHash` not listed in §10 type catalog | §10 | open |
-| §4.8 | NIT | §9.1 latency targets vs Story 5.4 benchmark labels | §9.1 / Story 5.4 | open |
-| §4.9 | NIT | `activeColumns` type mismatch §6.4 vs §7.2 | §6.4 / §7.2 | open |
-| §5.2 | GAP | No story owns Manager ↔ FanOutWorker wiring | new story | open |
-| §5.3 | GAP | No story for `activeColumns` policy on mid-eval unregister | new story | open |
-| §5.4 | GAP | No story for empty-fanout caller-response | overlaps §2.10 | open |
+| §4.3 | NIT | §3.4 hash input vs Story 1.3 byte-append | §3.4, Story 4.2 | closed |
+| §4.4 | NIT | `CommitFanout` ownership across channel | §8.1, Story 5.1 | closed |
+| §4.5 | NIT | `SubscriptionUpdate` carries `TableName` but `TableChangeset` already has | §10.2 | closed |
+| §4.6 | NIT | §7 `EvalTransaction` vs §10.1 `EvalAndBroadcast` vs live naming | §7 / §10.1 / Story 5.1 | closed |
+| §4.7 | NIT | `QueryHash` not listed in §10 type catalog | §10.2 | closed |
+| §4.8 | NIT | §9.1 latency targets vs Story 5.4 benchmark labels | §9.1 | closed |
+| §4.9 | NIT | `activeColumns` type mismatch §6.4 vs §7.2 | §7.2, Story 5.1 | closed |
+| §5.2 | GAP | No story owns Manager ↔ FanOutWorker wiring | §8.5, Story 6.1 | closed |
+| §5.3 | GAP | No story for `activeColumns` policy on mid-eval unregister | Story 5.1 | closed |
+| §5.4 | GAP | No story for empty-fanout caller-response | Story 5.1 | closed |
 | §5.5 | GAP | `SubscriptionError` delivery no owner story | — | closed (E3) |
 
 #### SPEC-005 — Client Protocol
@@ -365,53 +365,53 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §1.1 | CRIT | §13 `ClientSender` missing `SendSubscriptionError` | — | closed (E3/E5) |
 | §1.2 | CRIT | §13 `FanOutMessage` desc stale vs SPEC-004 §8.1 | — | closed (E2) |
 | §1.3 | CRIT | `Identity` re-declared despite SPEC-001 §2.4 ownership | — | closed (B4) |
-| §1.4 | CRIT | `OutboundCh` close vs concurrent `Send` race | Stories 3.6, 5.1 | open |
+| §1.4 | CRIT | `OutboundCh` close vs concurrent `Send` race | Stories 3.3, 3.6, 5.1 | closed |
 | §1.5 | CRIT | `ClientSender.Send(connID, any)` not in §13 | — | closed (E5) |
-| §1.6 | CRIT | §14 error catalog incomplete | §14 | open (overlaps E5) |
-| §2.1 | GAP | `SubscriptionUpdate` wire format drops `TableID` w/o cross-ref | §8.5, §7.1.1 | open |
+| §1.6 | CRIT | §14 error catalog incomplete | §14, EPICS.md | closed |
+| §2.1 | GAP | `SubscriptionUpdate` wire format drops `TableID` w/o cross-ref | §8.5, §7.1.1, Story 1.1 | closed |
 | §2.2 | GAP | `ReducerCallResult.TxID = 0` sentinel conflicts with SPEC-002 reservation | — | closed (B3) |
-| §2.3 | GAP | Confirmed-read opt-in has no wire representation | new section | open |
+| §2.3 | GAP | Confirmed-read opt-in has no wire representation | §13 + SPEC-004 Story 6.4 cross-ref | closed |
 | §2.4 | GAP | `SubscriptionError.RequestID = 0` collides with client-chosen 0 | — | closed (E3) |
-| §2.5 | GAP | Anonymous-mode mint flooding unbounded | Story 1.x | open |
-| §2.6 | GAP | OnConnect has no timeout, idle timer not started | Stories 3.x, 5.x | open |
-| §2.7 | GAP | Compression query-param accepted-values not normative | §3.3 | open |
-| §2.8 | GAP | Buffer-overflow Close-reason strings have no contract | §11.x | open |
-| §2.9 | GAP | `ExecutorInbox` referenced but never declared | §13 / new section | open |
-| §2.10 | GAP | `Predicate.Value` wire encoding undefined | §8.x | open |
-| §2.11 | GAP | Unsubscribe-while-pending diverges + race undocumented | Story 3.x | open |
-| §2.12 | GAP | Subscribe argument size / predicate count bounds undefined | §8.x | open |
-| §2.13 | GAP | Subscribe activation timing vs Story 5.2 unclear | Story 5.2 | open |
-| §2.14 | GAP | `SubscribeApplied`/`UnsubscribeApplied` activation vs E5 tracker removal | Stories 4.3 / 5.2 | open |
-| §2.15 | GAP | `PingInterval`/`IdleTimeout` silent during OnConnect | §12 / §11.1 | open |
-| §3.1 | DIVERGE | Subprotocol token `v1.bsatn.shunter` forks namespace | divergence block | open |
-| §3.2 | DIVERGE | Compression tag values collide with reference | divergence block | open |
-| §3.3 | DIVERGE | Outgoing buffer 256 vs SpacetimeDB 16384 | divergence block | open |
-| §3.4 | DIVERGE | No TransactionUpdate light/heavy split | divergence block | open |
-| §3.5 | DIVERGE | No SubscribeMulti/Single/QuerySetId | divergence block | open |
-| §3.6 | DIVERGE | No `CallReducer.flags` byte | divergence block | open |
-| §3.7 | DIVERGE | OneOffQuery uses structured predicates not SQL | divergence block | open |
-| §3.8 | DIVERGE | Close codes differ slightly | divergence block | open |
+| §2.5 | GAP | Anonymous-mode mint flooding unbounded | Story 2.x | deferred — needs concrete rate-limit / issuer-policy slice, not a docs-only wording tweak |
+| §2.6 | GAP | OnConnect has no timeout, idle timer not started | Stories 3.x, 5.x | deferred — needs transport/lifecycle sequencing contract beyond this residue pass |
+| §2.7 | GAP | Compression query-param accepted-values not normative | §2.3 / §3.3 | closed |
+| §2.8 | GAP | Buffer-overflow Close-reason strings have no contract | §11.1 | closed |
+| §2.9 | GAP | `ExecutorInbox` referenced but never declared | §13, Story 4.1 | closed |
+| §2.10 | GAP | `Predicate.Value` wire encoding undefined | §7.1.1, Story 1.1 | closed |
+| §2.11 | GAP | Unsubscribe-while-pending diverges + race undocumented | §9.1, Story 4.3 | closed |
+| §2.12 | GAP | Subscribe argument size / predicate count bounds undefined | §7.x | deferred — numeric limits need a dedicated protocol-limits decision |
+| §2.13 | GAP | Subscribe activation timing vs Story 5.2 unclear | §9.1, §9.4, Story 5.2 | closed |
+| §2.14 | GAP | `SubscribeApplied`/`UnsubscribeApplied` activation vs E5 tracker removal | §9.1, Stories 4.3 / 5.2 | closed |
+| §2.15 | GAP | `PingInterval`/`IdleTimeout` silent during OnConnect | §12 / §11.1 | deferred — needs explicit lifecycle-timer start policy with OnConnect timing |
+| §3.1 | DIVERGE | Subprotocol token `v1.bsatn.shunter` forks namespace | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.2 | DIVERGE | Compression tag values collide with reference | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.3 | DIVERGE | Outgoing buffer 256 vs SpacetimeDB 16384 | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.4 | DIVERGE | No TransactionUpdate light/heavy split | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.5 | DIVERGE | No SubscribeMulti/Single/QuerySetId | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.6 | DIVERGE | No `CallReducer.flags` byte | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.7 | DIVERGE | OneOffQuery uses structured predicates not SQL | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.8 | DIVERGE | Close codes differ slightly | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
 | §3.9 | DIVERGE | `ReducerCallResult.status` enum maps neither way | — | closed (E4) |
-| §3.10 | DIVERGE | No `OutOfEnergy` / `Energy` | divergence block | open |
-| §3.11 | DIVERGE | ConnectionId reuse on reconnect no server-side meaning | divergence block | open |
+| §3.10 | DIVERGE | No `OutOfEnergy` / `Energy` | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.11 | DIVERGE | ConnectionId reuse on reconnect no server-side meaning | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
 | §4.1 | NIT | BSATN naming disclaimer missing | — | closed (C1) |
 | §4.2 | NIT | "Depends on:" front matter underclaims | — | closed (B5) |
-| §4.3 | NIT | §9.1 names "pending removal" state Story 3.3 doesn't model | Story 3.3 / §9.1 | open |
+| §4.3 | NIT | §9.1 names "pending removal" state Story 3.3 doesn't model | §9.1, Story 3.3 | closed |
 | §4.4 | NIT | §15 OQ #4 resolvable; should close | §15 | closed (B4) |
-| §4.5 | NIT | `CloseHandshakeTimeout` in §12 but §11.1 silent | §11.1 | open |
-| §4.6 | NIT | §8.5 `SubscriptionUpdate` shape comment refs nonexistent struct | §8.5 | open |
+| §4.5 | NIT | `CloseHandshakeTimeout` in §12 but §11.1 silent | §11.1 / §12 | closed |
+| §4.6 | NIT | §8.5 `SubscriptionUpdate` shape comment refs nonexistent struct | §8.5 | closed |
 | §4.7 | NIT | §5.2/§5.3 OnConnect/OnDisconnect described as reducers vs §2.4 | — | closed (D2) |
-| §4.8 | NIT | `ErrZeroConnectionID` listed but validation duplicated | §14 / Story 1.x | open |
-| §4.9 | NIT | `Energy` always 0 but no decode-side tolerance documented | §x | open |
-| §4.10 | NIT | `Conn.OutboundCh` close rule vs Story 3.6 (see §1.4) | overlaps §1.4 | open |
-| §4.11 | NIT | `ConnectionID` hex-encoding format on wire underspecified | §x | open |
-| §5.2 | GAP | No story owns `SendSubscriptionError` fan-out | overlaps §1.1 | open |
-| §5.3 | GAP | No story for `OutboundCh` close-race sync | overlaps §1.4 | open |
-| §5.4 | GAP | No story for `ExecutorInbox` shape | overlaps §2.9 | open |
-| §5.5 | GAP | No story for `Predicate.Value` wire encoding | overlaps §2.10 | open |
-| §5.6 | GAP | No story for confirmed-read opt-in | overlaps §2.3 | open |
-| §5.7 | GAP | Story 5.2 `SendSubscribeApplied` disconnect-race | overlaps §2.13 | open |
-| §5.8 | GAP | Double-removal of subscription tracker entries | overlaps §2.14 | open |
+| §4.8 | NIT | `ErrZeroConnectionID` listed but validation duplicated | §14 / Story 3.x | deferred — minor catalog/ownership cleanup left for later protocol polish |
+| §4.9 | NIT | `Energy` always 0 but no decode-side tolerance documented | §8.7 | deferred — wire-compat tolerance wording left for later protocol polish |
+| §4.10 | NIT | `Conn.OutboundCh` close rule vs Story 3.6 (see §1.4) | overlaps §1.4 | closed |
+| §4.11 | NIT | `ConnectionID` hex-encoding format on wire underspecified | §2.x | deferred — needs a dedicated formatting clause (case/length examples) |
+| §5.2 | GAP | No story owns `SendSubscriptionError` fan-out | Story 5.1 | closed |
+| §5.3 | GAP | No story for `OutboundCh` close-race sync | Stories 3.3 / 3.6 / 5.1 | closed |
+| §5.4 | GAP | No story for `ExecutorInbox` shape | Story 4.1 | closed |
+| §5.5 | GAP | No story for `Predicate.Value` wire encoding | Story 1.1 | closed |
+| §5.6 | GAP | No story for confirmed-read opt-in | §13 + SPEC-004 Story 6.4 | closed |
+| §5.7 | GAP | Story 5.2 `SendSubscribeApplied` disconnect-race | Story 5.2 | closed |
+| §5.8 | GAP | Double-removal of subscription tracker entries | Stories 4.3 / 5.2 | closed |
 
 #### SPEC-006 — Schema Definition
 
@@ -458,7 +458,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 
 ### B.3 Session cadence
 
-Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only (Sessions 2–10). Live-code drift reconciliation deferred to Sessions 11+.
+Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only (Sessions 2–10). Live-code drift reconciliation deferred to Sessions 12+.
 
 | # | Scope | Inputs | Stop rule |
 |---|---|---|---|
@@ -501,7 +501,7 @@ Paste one of the following at the start of the named session.
 
 **Session 9 (SPEC-003 residue):** *(same template, SPEC-003 / `docs/decomposition/003-executor/**`)*
 
-**Session 10 (SPEC-004 + SPEC-005 residue):** *(same template, both 004-subscriptions and 005-protocol; coordinate the cross-spec NIT pairs flagged in §B.2)*
+**Session 10 (SPEC-004 + SPEC-005 residue):** *(completed — Session 10 closed/deferred all remaining SPEC-004 and SPEC-005 rows and advanced the cursor to Session 11)*
 
 **Session 11 (SPEC-006 residue):** *(same template, SPEC-006 / `docs/decomposition/006-schema/**`)*
 
@@ -522,4 +522,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 10 (SPEC-004 + SPEC-005 residue cleanup).
+Cursor: Session 11 (SPEC-006 residue cleanup).

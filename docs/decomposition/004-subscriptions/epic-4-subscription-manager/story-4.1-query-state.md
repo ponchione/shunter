@@ -18,7 +18,7 @@ Internal bookkeeping for active subscriptions. Maps query hashes to executable q
   type queryState struct {
       hash        QueryHash
       predicate   Predicate   // v1 executable plan: the validated predicate itself
-      subscribers map[ConnectionID]SubscriptionID
+      subscribers map[ConnectionID]map[SubscriptionID]struct{}
       refCount    int
   }
   ```
@@ -61,6 +61,7 @@ Internal bookkeeping for active subscriptions. Maps query hashes to executable q
 ## Design Notes
 
 - Three maps maintain O(1) lookups in all directions: hash→state, sub→hash, conn→subs. The cost is keeping them in sync on every add/remove.
-- `refCount` is redundant with `len(subscribers)` but kept explicit for clarity and to avoid map iteration just to check emptiness.
+- A connection may own multiple subscriptions that deduplicate to the same `QueryHash`, so `subscribers` is a nested set rather than a single `ConnectionID -> SubscriptionID` map.
+- `refCount` counts total subscriptions, not distinct connections. It is redundant with the total cardinality of the nested subscriber sets, but kept explicit for clarity and to avoid map iteration just to check emptiness.
 - No separate compiled-plan type in v1 — “compiled plan” is just the validated predicate itself. Story 4.2 still owns the registration-time compile step/order contract, but that compile step currently records the predicate rather than producing a distinct plan object.
 - Thread safety: the manager runs on the executor goroutine (single-threaded). No mutex needed on these structures.

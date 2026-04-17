@@ -23,19 +23,21 @@ The interface that the fan-out worker and executor call to deliver messages to c
   ```
 
 - `func NewClientSender(connManager *ConnManager) ClientSender` — implementation that looks up connections and enqueues serialized frames
+- `FanOutSenderAdapter` over `ClientSender` also owns the fan-out `SendSubscriptionError` path used by SPEC-004, routing it through `ClientSender.Send(connID, msg)` with the protocol wire `SubscriptionError`
 
 - Per-connection outbound writer goroutine:
   1. Read from `conn.OutboundCh`
   2. Write binary frame to WebSocket
-  3. Exit when channel is closed or connection is done
+  3. Exit when `conn.closed` fires and any best-effort flush is complete
 
 - `func (c *Conn) runOutboundWriter(ctx context.Context)` — the writer goroutine
 
 - Send path:
   1. Encode message to `[tag][body]` bytes (Epic 1 codecs)
   2. If compression enabled and message is gzip-eligible: wrap in compression envelope (Story 1.4)
-  3. Non-blocking send to `conn.OutboundCh`
-  4. If channel full → return `ErrClientBufferFull` (caller handles disconnect)
+  3. Check `conn.closed`; if already closed → return `ErrConnNotFound`
+  4. Non-blocking send to `conn.OutboundCh`
+  5. If channel full → return `ErrClientBufferFull` (caller handles disconnect)
 
 ## Acceptance Criteria
 
@@ -43,7 +45,7 @@ The interface that the fan-out worker and executor call to deliver messages to c
 - [ ] Compression enabled → message wrapped in compression envelope
 - [ ] Compression disabled → message sent as `[tag][body]`
 - [ ] Channel full → returns `ErrClientBufferFull` (does not block)
-- [ ] Connection not found → returns error
+- [ ] Closed / missing connection → returns `ErrConnNotFound`
 - [ ] Writer goroutine exits when connection closes (no leak)
 - [ ] Messages delivered in FIFO order (channel preserves order)
 
@@ -52,3 +54,4 @@ The interface that the fan-out worker and executor call to deliver messages to c
 - The non-blocking send is critical: the fan-out worker or executor must never block on a slow client. `ErrClientBufferFull` signals to the caller that the client should be disconnected (Epic 6).
 - Compression decision per message: small messages (< threshold) may skip compression even when negotiated. This is a future optimization; v1 can compress all or none per connection.
 - Design decision: `Send` is a protocol-layer convenience helper for direct response messages (`SubscribeApplied`, `UnsubscribeApplied`, `SubscriptionError`, `OneOffQueryResult`). The normative cross-subsystem contract in SPEC-005 §13 is the two typed methods above.
+- `Conn.OutboundCh` is never closed by disconnect. Shutdown is coordinated through `conn.closed`, which avoids the send-on-closed-channel race between concurrent sends and disconnect cleanup.

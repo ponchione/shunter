@@ -59,7 +59,7 @@ Foundation types for the wire protocol. Tag constants identify message types. Wi
   ```
   Wire format: `[row_count: uint32 LE] [for each row: [row_len: uint32 LE] [row_data: row_len bytes]]`
 
-- Protocol `SubscriptionUpdate` wire struct (derived from SPEC-004 §10.2 for wire delivery; protocol omits `TableID`, which is evaluator-internal):
+- Protocol `SubscriptionUpdate` wire struct (derived from SPEC-004 §10.2 for wire delivery; protocol omits `TableID`, which is evaluator-internal and not meaningful for protocol-v1 join-free subscriptions):
   ```go
   type SubscriptionUpdate struct {
       SubscriptionID uint32
@@ -88,3 +88,4 @@ Foundation types for the wire protocol. Tag constants identify message types. Wi
 - RowList uses per-row length prefix (4 bytes overhead per row). Simpler than SpacetimeDB's `RowSizeHint` union. A `FixedSizeRowList` variant (no per-row prefix for fixed-schema rows) deferred to v2.
 - Tags are separate namespaces for C2S and S2C. Tag value `1` means `Subscribe` when sent by client, `InitialConnection` when sent by server. No ambiguity because direction is always known.
 - `SubscriptionUpdate` wire struct defined here because it appears in both `TransactionUpdate` and `ReducerCallResult` messages.
+- Protocol v1 `Subscribe` rejects joins and other multi-table subscriptions. Therefore the wire `SubscriptionUpdate` shape is intentionally single-table: `table_name` is authoritative on the wire, while SPEC-004's internal `TableID` / join anchor remains an evaluator concern.

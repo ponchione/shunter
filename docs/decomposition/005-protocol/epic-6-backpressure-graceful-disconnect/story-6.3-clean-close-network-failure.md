@@ -26,7 +26,7 @@ Handle all disconnect scenarios: clean close from either side, server-initiated 
 
 - Close handshake timeout:
   - After sending Close frame, wait `CloseHandshakeTimeout` (default: 250ms) for echo
-  - If no echo received → forcefully close TCP connection
+  - If no echo received → forcefully tear down the Shunter-side connection state and close the WebSocket as best the transport allows
 
 - Network failure detection:
   - TCP drops without Close → detected by keep-alive (Story 3.5)
@@ -46,7 +46,7 @@ Handle all disconnect scenarios: clean close from either side, server-initiated 
 - [ ] Too many requests → `1008` Close with reason "too many requests"
 - [ ] Unknown tag → `1002` Close
 - [ ] Unknown compression tag or invalid gzip payload → `1002` Close
-- [ ] Close handshake timeout → TCP connection forcefully closed
+- [ ] Close handshake timeout → connection teardown proceeds without waiting indefinitely for peer echo
 - [ ] TCP drop without Close → detected within IdleTimeout
 - [ ] OnDisconnect fires for every disconnect path (clean, timeout, failure)
 - [ ] All subscriptions cleaned up for every disconnect path
@@ -56,7 +56,7 @@ Handle all disconnect scenarios: clean close from either side, server-initiated 
 ## Design Notes
 
 - Close codes are integers defined in RFC 6455. The spec maps specific server behaviors to specific codes. Do not invent new codes.
-- The close handshake timeout prevents a misbehaving client from holding the connection open by never echoing the Close frame.
+- The close handshake timeout prevents a misbehaving client from holding the connection open by never echoing the Close frame, even if the underlying transport library cannot guarantee an exact TCP hard-close deadline.
 - Graceful shutdown should drain in-flight messages before closing, but with a bounded timeout. The exact shutdown timeout is an operational concern, not specified.
 
 ## Implementation note (current transport limitation)

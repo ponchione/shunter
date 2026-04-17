@@ -1,4 +1,4 @@
-# Story 5.1: EvalTransaction Algorithm
+# Story 5.1: EvalAndBroadcast Algorithm
 
 **Epic:** [Epic 5 — Evaluation Loop](EPIC.md)
 **Spec ref:** SPEC-004 §7.1, §7.2, §10.1
@@ -20,7 +20,7 @@ The main algorithm called after every committed transaction. Orchestrates DeltaV
 
 - Algorithm (per §7.2):
   ```
-  1. If no active subscriptions → return immediately
+  1. If no active subscriptions and no caller reducer result is pending → return immediately
   2. Build DeltaView from changeset + committed state
      Build delta indexes for columns referenced by active subscriptions
   3. Collect candidate query hashes (delegate to Story 5.2)
@@ -30,12 +30,13 @@ The main algorithm called after every committed transaction. Orchestrates DeltaV
      c. Call appropriate delta evaluator (Epic 3)
      d. If delta is empty → skip
      e. For each subscriber: append SubscriptionUpdate to CommitFanout[connID]
-  5. Send FanOutMessage{TxDurable, Fanout} to fan-out worker inbox
+  5. Send `FanOutMessage{TxDurable, Fanout, Errors, CallerConnID, CallerResult}` to fan-out worker inbox
   ```
 
 - Early exit: `len(queryRegistry.byHash) == 0` → return immediately
 
 - Fanout assembly: `CommitFanout map[ConnectionID][]SubscriptionUpdate`
+- `activeColumns` for DeltaView construction is captured as `map[TableID][]ColID`, not `(table, index)` pairs
 
 - Error handling per subscription (§11.1): if delta evaluation fails, log error, send `SubscriptionError` to affected clients, unregister the affected subscription(s), and continue. Do not abort loop — other subscriptions unaffected.
 
@@ -59,5 +60,7 @@ The main algorithm called after every committed transaction. Orchestrates DeltaV
 - Runs on executor goroutine — no concurrency concerns for manager state access.
 - The DeltaView is built once and shared across all candidate evaluations.
 - Step 5 sends to a channel. If the fan-out worker is slow, this blocks the executor. That's by design (§8.1) — the executor waits only for channel admission, not for actual delivery.
-- `activeIndexes` for DeltaView construction: scan all active queries, collect the set of (table, index) pairs they reference. This is O(active queries) but runs once per transaction.
+- `activeColumns` for DeltaView construction: scan all active queries, collect the set of `(TableID, []ColID)` pairs they reference. This is O(active queries) but runs once per transaction.
+- `activeColumns` is captured once at DeltaView construction time. If evaluation of one candidate unregisters a subscription mid-loop, the current DeltaView is still valid; it may be over-indexed for the rest of that batch, but never under-indexed.
+- An empty `CommitFanout` does not suppress caller-result delivery. If `meta.CallerResult` is non-nil, the fan-out worker still receives a `FanOutMessage` so it can emit the caller's `ReducerCallResult` with an empty embedded `TransactionUpdate` when appropriate.
 - Respect SPEC-001 snapshot discipline: the supplied `CommittedReadView` must be used for in-process evaluation only and must not be retained into fan-out or durability waits.

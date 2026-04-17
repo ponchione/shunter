@@ -96,10 +96,10 @@ type Join struct {
 
 ### 3.4 Query Hash
 
-Each predicate is identified by a deterministic hash (blake3, 32 bytes). The hash is computed from the predicate's canonical serialized form:
+Each predicate is identified by a deterministic hash (blake3, 32 bytes). The hash is computed from one canonical byte stream:
 
-- **Non-parameterized predicates** (same for all clients): hash of the predicate structure.
-- **Parameterized predicates** (per-client values, e.g., "my messages"): hash of the predicate structure + client identity.
+- **Non-parameterized predicates** (same for all clients): the canonical predicate encoding only.
+- **Parameterized predicates** (per-client values, e.g., "my messages"): the canonical predicate encoding followed by the caller's `Identity` bytes.
 
 Two clients with structurally identical predicates and identical parameter values share the same query hash. This enables deduplication (Section 7).
 
@@ -115,6 +115,7 @@ Two clients with structurally identical predicates and identical parameter value
 type SubscriptionRegisterRequest struct {
     ConnID         ConnectionID
     SubscriptionID SubscriptionID
+    ClientIdentity *Identity      // nil for non-parameterized predicates
     Predicate      Predicate      // validated and compiled by the protocol layer
     RequestID      uint32         // echoed in SubscribeApplied
 }
@@ -133,7 +134,7 @@ Subscribe(connID ConnectionID, predicate) → (initialRows []ProductValue, subsc
 
 1. **Validate** the predicate: at most 2 tables, required indexes exist, column types match.
 2. **Compile** the predicate into execution plans (Section 6).
-3. **Compute query hash** from the predicate's canonical form.
+3. **Compute query hash** from the predicate's canonical form, appending `ClientIdentity` bytes when the predicate is parameterized.
 4. **Check deduplication**: if another subscription with the same hash exists, reuse its compiled plans.
 5. **Execute the initial query** against current committed state.
 6. **Register** the subscription in the manager's pruning indexes (Section 5).
@@ -407,9 +408,9 @@ The transaction executor (SPEC-003) calls the evaluator synchronously after comm
 ### 7.2 Algorithm
 
 ```
-EvalTransaction(changeset *Changeset) → CommitFanout:
+EvalAndBroadcast(changeset *Changeset, meta PostCommitMeta) → CommitFanout:
 
-  1. If no active subscriptions: return immediately.
+  1. If no active subscriptions and no caller reducer result is pending: return immediately.
 
   2. Build DeltaView from changeset + committed state.
      Build delta indexes for columns referenced by active subscriptions.
@@ -456,8 +457,10 @@ EvalTransaction(changeset *Changeset) → CommitFanout:
              Deletes:        deltaDeletes,
            })
 
-  5. Send FanOutMessage{TxDurable: durableNotify, Fanout: fanout} to FanOutWorker.inbox.
+  5. Send FanOutMessage{TxDurable: meta.TxDurable, Fanout: fanout, Errors: errors, CallerConnID: meta.CallerConnID, CallerResult: meta.CallerResult} to FanOutWorker.inbox.
 ```
+
+`activeColumns` is captured once when the `DeltaView` is constructed as `map[TableID][]ColID`. If a subscription is removed mid-evaluation because of an evaluation error, the current `DeltaView` remains valid; it may contain scratch indexes for columns that are no longer referenced, but those extra indexes are harmless and are discarded with the `DeltaView` at the end of the batch.
 
 ### 7.3 Row-Level vs Table-Level Candidate Collection
 
@@ -539,6 +542,8 @@ type FanOutMessage struct {
 }
 ```
 
+Ownership rule: once `FanOutMessage` is sent to `FanOutWorker.inbox`, ownership of `Fanout` and `Errors` transfers to the fan-out worker. The evaluator MUST NOT retain or mutate those maps after the send. The worker reads them without mutation.
+
 ### 8.2 Fan-Out Algorithm
 
 ```
@@ -584,9 +589,14 @@ Per-connection packaging:
 ### 8.5 Dropped Client Cleanup
 
 When a client is disconnected (network failure, lag disconnect, or explicit close):
-1. The fan-out worker marks the client as dropped and signals the `ConnectionID` on the shared channel returned by `SubscriptionManager.DroppedClients()`.
-2. The manager's evaluation-error path may write to the same channel; the executor still drains only one channel after each post-commit pipeline step.
-3. This two-phase approach avoids the fan-out goroutine needing write access to the subscription manager.
+1. The manager allocates one shared dropped-client channel and exposes its read side via `SubscriptionManager.DroppedClients()`.
+2. The channel is buffered (recommended default: 64 `ConnectionID`s) so senders can report drops without blocking the executor or fan-out worker on the common path.
+3. The fan-out worker marks the client as dropped and signals the `ConnectionID` on that shared channel.
+4. The manager's evaluation-error path may write to the same channel; the executor still drains only one channel after each post-commit pipeline step.
+5. Duplicate `ConnectionID`s are permitted. `DisconnectClient` is idempotent, so executor-side cleanup must tolerate seeing the same client more than once before the channel is drained.
+6. The channel stays open for the manager/fan-out lifetime and is only closed during subsystem shutdown after all producers have exited.
+
+This two-phase approach avoids the fan-out goroutine needing write access to the subscription manager while still giving the executor one canonical cleanup stream.
 
 ---
 
@@ -598,7 +608,7 @@ When a client is disconnected (network failure, lag disconnect, or explicit clos
 |--------|--------|-----------|
 | Evaluation latency (single-table, 1K subs) | < 1 ms | Pruning reduces to ~O(10) evals; each is a filter over a small changeset |
 | Evaluation latency (single-table, 10K subs) | < 5 ms | Same pruning benefit; linear in affected subs, not total |
-| Join fragment evaluation | < 10 ms per subscription | 8 fragments, each involving index lookups on delta + committed state |
+| Join fragment evaluation | < 10 ms per affected subscription | 8 fragments, each involving index lookups on delta + committed state |
 | Fan-out channel depth | Bounded, configurable | Default: 64 messages. Prevents unbounded memory growth |
 | Delta index construction | < 1 ms for typical transactions | Proportional to (changed_rows * indexed_columns) |
 
@@ -678,8 +688,8 @@ The evaluator produces per-client deltas:
 // One per subscription affected by a commit.
 type SubscriptionUpdate struct {
     SubscriptionID SubscriptionID  // which subscription this update is for
-    TableID        TableID
-    TableName      string
+    TableID        TableID         // for join subscriptions, use Join.Left as the canonical table anchor
+    TableName      string          // duplicates TableChangeset naming intentionally for protocol/logging convenience; for joins use a diagnostic-only composite label because protocol v1 never puts joined updates on the wire
     Inserts        []ProductValue
     Deletes        []ProductValue
 }
@@ -715,6 +725,11 @@ type ReducerCallResult struct {
     Energy            uint64
     TransactionUpdate []SubscriptionUpdate
 }
+
+// QueryHash is the 32-byte blake3 digest of the canonical predicate byte stream
+// described in §3.4. It is a public subscription-domain type even though it is
+// used mostly for deduplication, logging, and diagnostics rather than wire I/O.
+type QueryHash [32]byte
 ```
 
 Encoding of `[]ProductValue` into the wire `RowList` format and actual enqueueing to per-client outbound buffers happen in the protocol layer (SPEC-005 §3.4 / delivery contract), not in the evaluator.
@@ -758,10 +773,17 @@ This recovery model is the contracted normal-return path from `SubscriptionManag
 Returned to the caller synchronously:
 - Predicate references nonexistent table or column.
 - Join predicate references column without an index.
+- Join predicate was validated against schema metadata, but runtime `IndexResolver` could not produce the corresponding committed-state `IndexID` (`ErrJoinIndexUnresolved`).
 - Predicate involves >2 tables.
 - Row limit exceeded on initial snapshot (configurable).
 
-### 11.3 Invariant Violations
+### 11.3 Delivery Errors
+
+Returned by the `FanOutSender` seam to drive lag/disconnect behavior, not surfaced as registration failures:
+- `ErrSendBufferFull` — protocol sender could not enqueue to the target client's bounded outbound buffer.
+- `ErrSendConnGone` — target connection disappeared before delivery.
+
+### 11.4 Invariant Violations
 
 The following are bugs, not recoverable errors:
 - Delta dedup produces negative counts (impossible if IVM algebra is correct).
@@ -812,7 +834,14 @@ Should delta delivery wait for the transaction to be durable (fsync'd to commit 
 - **Yes (confirmed reads)**: Client only sees data that will survive a crash. Higher latency.
 - **No (fast reads)**: Client sees data immediately after in-memory commit. Lower latency, but client could see data that is lost on crash.
 
-**Recommendation**: Make this configurable per client. Default to fast reads. Clients that need strong consistency opt into confirmed reads. The fan-out worker supports this via executor-supplied durability-ready metadata — it either waits or skips.
+**v1 protocol contract:** the public WebSocket protocol (SPEC-005) does not expose a client-selectable confirmed-read flag, so v1 protocol clients always observe confirmed-read behavior. The fan-out worker still carries per-connection policy metadata so non-wire/internal callers can evolve independently, but public opt-in/opt-out negotiation is deferred.
+
+### 12.4 Divergence Notes vs SpacetimeDB
+
+- **Predicate surface:** v1 public subscriptions are exposed through a Go predicate model and a protocol-level structured equality subset, not SpacetimeDB's SQL-first subscription surface.
+- **Backpressure:** Shunter bounds fan-out and outbound buffers and disconnects lagging clients rather than using an unbounded queue with lazy dropped-client cleanup.
+- **Row-level security:** v1 applies no extra SchemaViewer-style per-caller filtering beyond the submitted predicate. Applications that need additional filtering must enforce it before registration or at reducer boundaries.
+- **Join-delta execution:** Shunter materializes the 4+4 join fragments and deduplicates post-hoc; it does not use SpacetimeDB's in-fragment count tracking implementation.
 
 ---
 

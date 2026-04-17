@@ -41,20 +41,24 @@ Public type/interface contract consumed by the executor (SPEC-003). Error types 
 - Error types:
   - `ErrTooManyTables` — predicate spans >2 tables
   - `ErrUnindexedJoin` — join column lacks index
+  - `ErrJoinIndexUnresolved` — join was schema-valid but runtime `IndexResolver` could not resolve the needed committed-state index ID
   - `ErrInvalidPredicate` — type mismatch or structural error
   - `ErrTableNotFound` — predicate references missing table
   - `ErrColumnNotFound` — predicate references missing column
   - `ErrInitialRowLimit` — initial snapshot too large
   - `ErrSubscriptionNotFound` — unknown subscription ID
   - `ErrSubscriptionEval` — evaluation failure (corrupted index, type mismatch)
+  - `ErrSendBufferFull` — fan-out delivery could not enqueue to the target client
+  - `ErrSendConnGone` — target connection disappeared before delivery completed
 
-- `DroppedClients()` returns a receive-only channel. Fan-out goroutine sends; executor drains.
+- `DroppedClients()` returns a receive-only channel. Fan-out goroutine and manager evaluation-error cleanup may both send; executor drains the single shared stream.
 
 ## Acceptance Criteria
 
 - [ ] All error types are distinct via `errors.Is`
 - [ ] `SubscriptionManager` interface compilable with concrete implementation
 - [ ] `CommitFanout` correctly keyed by ConnectionID
+- [ ] `SubscriptionRegisterRequest` carries `ClientIdentity` for parameterized-hash computation
 - [ ] `SubscriptionUpdate` carries SubscriptionID, TableID, TableName, Inserts, Deletes
 - [ ] `TransactionUpdate` groups updates by TxID
 - [ ] v1 update granularity is row-level full-row inserts/deletes only
@@ -64,5 +68,7 @@ Public type/interface contract consumed by the executor (SPEC-003). Error types 
 
 - This story defines the shared contract only. Implementation is spread across Stories 4.2–4.4 (register/unregister/disconnect) and Story 5.1 (EvalAndBroadcast implementation).
 - `ErrTableNotFound` and `ErrColumnNotFound` are introduced by predicate validation (Story 1.2) and reused here; this story should not be read as re-introducing them.
+- `ErrJoinIndexUnresolved` belongs to the registration/evaluation boundary, not pure schema validation: the schema can prove an index exists conceptually while the runtime `IndexResolver` still fails to produce the concrete committed-state `IndexID` the evaluator needs.
 - `EvalAndBroadcast` has no return value — it sends results via the fan-out channel, not via return. Errors during evaluation are handled per-subscription (§11.1), not propagated to caller.
+- The shared dropped-client channel is non-blocking from the executor's point of view because it is buffered. Duplicate connection IDs are permitted; executor-side disconnect cleanup must be idempotent.
 - Invariant violations (§11.3) are panics, not error types. Negative dedup counts, orphaned query hashes, subscriber/client map inconsistencies — these are bugs.

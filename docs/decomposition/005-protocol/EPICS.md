@@ -144,7 +144,7 @@ Parse incoming binary frames and route to subsystems.
 Outbound message construction and delivery to WebSocket connections.
 
 **Scope:**
-- `ClientSender` interface (§13): `SendTransactionUpdate(connID, *TransactionUpdate) error`, `SendReducerResult(connID, *ReducerCallResult) error`
+- `ClientSender` interface (§13): `Send(connID, msg any) error`, `SendTransactionUpdate(connID, *TransactionUpdate) error`, `SendReducerResult(connID, *ReducerCallResult) error`
 - Per-connection outbound writer: serialize message, apply optional compression, write to WebSocket
 - **SubscribeApplied** delivery: initial rows as RowList, consistent snapshot
 - **UnsubscribeApplied** delivery: optionally include dropped rows (`send_dropped`)
@@ -188,7 +188,7 @@ Buffer management, disconnect semantics, reconnection.
 **Scope:**
 - **Outgoing backpressure (§10.1):** per-client buffer of `OutgoingBufferMessages` (default: 256); on overflow → enqueue Close `1008` "send buffer full", close connection; overflow-causing message not delivered
 - **Incoming backpressure (§10.2):** per-connection queue of `IncomingQueueMessages` (default: 64); on overflow → Close `1008` "too many requests"; overflow-causing message not processed
-- **Clean close (§11.1):** either side sends Close frame; server codes: `1000` (shutdown), `1008` (policy), `1011` (internal error); close handshake timeout
+- **Clean close (§11.1):** either side sends Close frame; server codes: `1000` (shutdown), `1008` (policy), `1011` (internal error); close handshake timeout with bounded Shunter-side teardown even if transport force-close is best-effort
 - **Network failure detection (§11.2):** TCP drop without Close → detected via Ping timeout (idle timeout 30s); cleanup subscriptions + sys_clients row, run `OnDisconnect`
 - **Reconnection semantics (§11.3):** client presents same token → same Identity; re-subscribes from scratch (no server-side subscription state from previous connection); `tx_id` for diagnostics only, no gap-fill in v1
 
@@ -250,3 +250,7 @@ Errors introduced where first needed:
 | `ErrReducerNotFound` | Epic 4 (call reducer — surfaced from SPEC-003) |
 | `ErrLifecycleReducer` | Epic 4 (call reducer — OnConnect/OnDisconnect blocked) |
 | `ErrClientBufferFull` | Epic 6 (outgoing backpressure) |
+| `ErrConnNotFound` | Epic 5/6 boundary (send attempted after connection disappeared) |
+| `ErrTextFrameReceived` | Epic 4 (frame-reader protocol violation) |
+| `ErrMaxMessageSize` | Epic 4 (incoming frame exceeded configured read limit) |
+| `ErrTooManyRequests` | Epic 6 (incoming backpressure) |

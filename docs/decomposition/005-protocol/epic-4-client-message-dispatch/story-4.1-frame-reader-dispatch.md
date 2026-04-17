@@ -31,6 +31,13 @@ Read loop that receives binary WebSocket frames, decodes the tag byte, and dispa
   }
   ```
 
+- `ExecutorInbox` interface consumed by dispatch handlers:
+  ```go
+  type ExecutorInbox interface {
+      Submit(ctx context.Context, cmd ExecutorCommand) error
+  }
+  ```
+
 - Error handling in read loop:
   - `ErrUnknownMessageTag` → Close `1002` (protocol error), log tag value
   - `ErrMalformedMessage` → Close `1002`, log details

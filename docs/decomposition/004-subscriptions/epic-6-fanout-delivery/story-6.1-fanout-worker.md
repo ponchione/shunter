@@ -28,6 +28,7 @@ Separate goroutine that receives computed deltas and delivers them through the p
   type FanOutMessage struct {
       TxDurable    <-chan TxID
       Fanout       CommitFanout
+      Errors       map[ConnectionID][]SubscriptionError
       CallerConnID *ConnectionID
       CallerResult *ReducerCallResult
   }
@@ -40,6 +41,7 @@ Separate goroutine that receives computed deltas and delivers them through the p
 - `Run(ctx context.Context)` — main loop:
   ```
   for msg := range inbox:
+    deliver msg.Errors first
     optionally wait for TxDurable (Story 6.4)
     for each connID in msg.Fanout:
       build TransactionUpdate or caller reducer-result delivery (Story 6.2)
@@ -65,5 +67,5 @@ Separate goroutine that receives computed deltas and delivers them through the p
 - The inbox channel is the handoff point. The executor blocks only on channel send, not on delivery. If inbox is full, executor blocks — this is backpressure from fan-out to executor, separate from client backpressure.
 - `FanOutSender`, `ReducerCallResult`, and outbound buffering are protocol-owned contracts from SPEC-005. In the live implementation, `protocol.FanOutSenderAdapter` wraps the protocol `ClientSender` and exposes the three fan-out-facing methods SPEC-004 needs: `SendTransactionUpdate`, `SendReducerResult`, and `SendSubscriptionError`.
 - `confirmedReads` reads happen inside the fan-out loop, but exported mutators (`SetConfirmedReads`, `RemoveClient`) are called from runtime/tests outside that loop. Guard the map with a mutex or an equivalent ownership handoff; do not assume single-goroutine access for those mutators.
-- `dropped` channel is shared with the manager's evaluation-error path so the executor drains one channel after each post-commit step.
+- `dropped` channel is shared with the manager's evaluation-error path so the executor drains one channel after each post-commit step. Duplicate connection IDs are allowed; executor-side disconnect cleanup is idempotent.
 - `TxDurable` is executor-supplied post-commit metadata backed by the durability subsystem. The fan-out worker consumes readiness; it does not depend directly on the exported SPEC-002 `DurabilityHandle` surface.

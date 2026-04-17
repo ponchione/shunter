@@ -17,7 +17,7 @@ Full registration flow from validated predicate to initial rows returned. Runs i
 
 - Registration steps (per §4.1):
   1. **Validate** predicate via `ValidatePredicate` (Story 1.2)
-  2. **Compute query hash** via `ComputeQueryHash` (Story 1.3)
+  2. **Compute query hash** via `ComputeQueryHash` (Story 1.3), appending `req.ClientIdentity` bytes when the predicate is parameterized
   3. **Compile** executable plan
      - v1: compiled plan = the validated predicate itself, recorded in query state
   4. **Check dedup**: if `queryRegistry.getQuery(hash)` exists, reuse existing executable state
@@ -31,6 +31,7 @@ Full registration flow from validated predicate to initial rows returned. Runs i
   - Single-table: `TableScan` or `IndexScan` + filter
   - Join: full join execution against committed state (not incremental — this is the bootstrap)
   - Optional row limit: if initial result exceeds configurable max → `ErrInitialRowLimit`
+  - For join subscriptions, the row limit applies to the fully materialized joined result set returned to the client (each joined output row counts once)
 
 - `SubscriptionRegisterRequest` and `SubscriptionRegisterResult` types are declared canonically in Story 4.5 and used here as the behavior owner for registration
 

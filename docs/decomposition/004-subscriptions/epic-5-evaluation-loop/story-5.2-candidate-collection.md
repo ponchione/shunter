@@ -13,7 +13,7 @@ Given a changeset, determine which query hashes might be affected. Consults all 
 
 ## Deliverables
 
-- `CollectCandidates(indexes *PruningIndexes, changeset *Changeset, committed CommittedReadView) map[QueryHash]struct{}`
+- `(*Manager).collectCandidates(indexes *PruningIndexes, changeset *Changeset, committed CommittedReadView, resolver IndexResolver) map[QueryHash]struct{}`
 
 - Low-level helper owned by Story 2.4 remains per-table:
   - `CollectCandidatesForTable(indexes *PruningIndexes, table TableID, rows []ProductValue, committed CommittedReadView, resolver IndexResolver) []QueryHash` — `resolver` supplies the Tier 2 RHS `IndexID` for the join-edge scan; nil skips Tier 2.
@@ -63,3 +63,4 @@ Given a changeset, determine which query hashes might be affected. Consults all 
 - Tier 2 lookup requires an index scan on committed state to find the RHS row. This is an extra read per changed row per join edge. For most workloads, join edges are few, so this is acceptable.
 - The candidate set uses `map[QueryHash]struct{}` — Go's idiomatic set. Map reuse across transactions (§9.2) applies here.
 - Story 2.4 owns the per-table tier-union helper; this story owns the whole-changeset orchestration and batching logic.
+- The top-level whole-changeset orchestration lives on `Manager` so it can use the already-wired `IndexResolver` directly instead of pretending the evaluator is a free function with no runtime context.

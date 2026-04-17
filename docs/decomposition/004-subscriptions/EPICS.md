@@ -175,14 +175,14 @@ Decoupled delivery goroutine that sends computed deltas to client connections wi
 
 **Scope:**
 - `FanOutWorker` struct: inbox channel, client connection map
-- `FanOutMessage`: `TxDurable <-chan TxID` + `CommitFanout`
-- Fan-out algorithm: wait for durability (if confirmed reads), iterate per-connection entries, build `TransactionUpdate`, send to client outbound channel
+- `FanOutMessage`: `TxDurable <-chan TxID` + `CommitFanout` + per-connection `SubscriptionError` batches + caller-result metadata
+- Fan-out algorithm: deliver errors first, wait for durability for protocol-visible recipients, iterate per-connection entries, build `TransactionUpdate`, send to client outbound channel
 - Per-connection aggregation: multiple `SubscriptionUpdate` entries preserved per subscription, not merged
 - Caller client special case: reducer result metadata alongside delta
 - Backpressure: non-blocking send to bounded client buffer; buffer full → disconnect client (v1)
-- `DroppedClients()` channel: fan-out signals dropped ConnectionIDs, executor drains after each commit
+- `DroppedClients()` channel: fan-out and manager evaluation-error cleanup share one buffered stream; executor drains after each commit
 - Fan-out channel depth: bounded, configurable (default 64)
-- Confirmed reads vs fast reads: configurable per client via TxDurable wait
+- Protocol-v1 confirmed reads: public websocket delivery always waits on `TxDurable`; non-wire fast-read policy is deferred
 
 **Testable outcomes:**
 - FanOutMessage sent → each connection receives its TransactionUpdate
@@ -190,7 +190,7 @@ Decoupled delivery goroutine that sends computed deltas to client connections wi
 - Slow client (full buffer) → disconnected
 - Disconnected client → ConnectionID appears on DroppedClients channel
 - Confirmed reads: delivery waits for TxDurable signal
-- Fast reads: delivery proceeds without waiting
+- Caller-only result delivery still works when `CommitFanout` is empty
 - Fan-out does not block executor goroutine
 - Channel depth bounds memory growth
 
@@ -225,3 +225,6 @@ Errors introduced where first needed:
 | `ErrInitialRowLimit` | Epic 4 (registration — initial snapshot too large) |
 | `ErrSubscriptionNotFound` | Epic 4 (unregister — unknown subscription ID) |
 | `ErrSubscriptionEval` | Epic 5 (evaluation — corrupted index or type mismatch) |
+| `ErrJoinIndexUnresolved` | Epic 4 (registration/eval seam — runtime resolver could not produce required join index ID) |
+| `ErrSendBufferFull` | Epic 6 (fan-out delivery → bounded protocol buffer overflow) |
+| `ErrSendConnGone` | Epic 6 (fan-out delivery → target connection disappeared) |

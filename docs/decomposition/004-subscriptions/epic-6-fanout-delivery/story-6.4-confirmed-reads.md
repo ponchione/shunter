@@ -9,34 +9,32 @@
 
 ## Summary
 
-Optional per-client durability wait. Confirmed-read clients see data only after fsync. Fast-read clients see data immediately.
+Durability wait for public protocol delivery. In protocol v1, all WebSocket clients observe confirmed-read behavior because the wire protocol exposes no opt-in/opt-out flag.
 
 ## Deliverables
 
 - `TxDurable` handling in fan-out loop:
   ```go
-  if anyClientRequiresConfirmedReads(msg.Fanout) {
+  if anyRecipientRequiresConfirmedReads(msg.Fanout, msg.CallerConnID, msg.CallerResult) {
       <-msg.TxDurable  // block until transaction is durable
   }
   ```
 
-- Per-connection confirmed-read policy tracked by fan-out worker metadata
+- Public protocol v1 rule: WebSocket clients always require confirmed reads. Per-connection policy tracking remains an internal extension point, not a negotiated wire feature.
 
-- Optimization: only wait for `TxDurable` if at least one client in this fanout batch requires confirmed reads. If all clients are fast-read, skip the wait entirely.
+- Optimization hook: internal/non-wire callers may still skip the wait when no recipient requires confirmed reads.
 
 - `TxDurable` is executor-supplied post-commit metadata backed by the durability subsystem. The fan-out worker waits on readiness but does not depend directly on the exported SPEC-002 `DurabilityHandle` API.
 
 ## Acceptance Criteria
 
-- [ ] All fast-read clients → no TxDurable wait, immediate delivery
-- [ ] One confirmed-read client in batch → wait for TxDurable before delivering to all
+- [ ] Public protocol batch → wait for TxDurable before delivery
 - [ ] TxDurable channel becomes ready → delivery proceeds
 - [ ] TxDurable already ready (fast fsync) → no blocking
-- [ ] Mix of confirmed and fast clients → both receive after durability wait
+- [ ] Caller-only batch with empty fanout still waits when protocol delivery requires confirmed reads
 
 ## Design Notes
 
-- Current design waits for durability before delivering to *any* client in the batch if *any* client requires confirmed reads. This is simpler than splitting delivery into two phases (fast clients first, confirmed clients after durability).
-- v2 optimization: split delivery — send to fast-read clients immediately, queue confirmed-read clients until TxDurable fires. Adds complexity for marginal latency benefit.
-- Default recommendation (§12.3): fast reads. Confirmed reads are opt-in per client.
+- Current design waits for durability before delivering to *any* protocol-visible recipient in the batch. This is simpler than splitting delivery into two phases.
+- v2 optimization: add a wire-level confirmed-read flag (or a server policy knob) and split delivery for fast-read clients if the latency trade-off proves worthwhile.
 - If the durability worker is behind (batching fsyncs), this wait time includes that latency. The fan-out goroutine is blocked but the executor is not — the executor already sent the FanOutMessage and moved on.

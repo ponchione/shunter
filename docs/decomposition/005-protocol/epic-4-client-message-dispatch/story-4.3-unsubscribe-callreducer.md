@@ -43,6 +43,6 @@ Two handlers grouped together because they share the same E4 shape: validate loc
 
 ## Design Notes
 
-- Unsubscribe for a pending subscription is rejected because SPEC-005 §9.1 defines `ErrSubscriptionNotFound` for any subscription_id that is not active. The client should wait for `SubscribeApplied` before unsubscribing. If the subscription fails, `SubscriptionError` will be sent and the ID released.
+- Unsubscribe for a pending subscription is rejected because SPEC-005 §9.1 defines `ErrSubscriptionNotFound` for any subscription_id that is not active. The client should wait for `SubscribeApplied` before unsubscribing. If the subscription fails, `SubscriptionError` will be sent and the ID released. Tracker removal is single-owner: unsubscribe removes active entries, while pending-path cleanup is handled by error/disconnect discard logic rather than a second blind delete.
 - Lifecycle reducers are blocked at the protocol layer, not the executor. The executor should never receive a `CallReducerCmd` for `OnConnect`/`OnDisconnect`.
 - `CallReducerMsg.Args` is forwarded as raw bytes. Type validation happens in the executor.

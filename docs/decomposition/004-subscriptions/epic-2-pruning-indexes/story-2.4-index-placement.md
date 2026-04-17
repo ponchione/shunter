@@ -29,7 +29,7 @@ Route each `(query, table)` pair to exactly one pruning tier. A subscription tou
 
 - `RemoveSubscription(indexes *PruningIndexes, pred Predicate, hash QueryHash)` — reverse of placement, removes from the correct tier for each table
 
-- `CollectCandidatesForTable(indexes *PruningIndexes, table TableID, rows []ProductValue, committed CommittedReadView, resolver IndexResolver) []QueryHash` — union results from all three tiers for a changed table. `resolver` is consulted for Tier 2 RHS index lookup; when nil, Tier 2 is skipped (test paths exercising only Tier 1/3)
+- `CollectCandidatesForTable(indexes *PruningIndexes, table TableID, rows []ProductValue, committed CommittedReadView, resolver IndexResolver) []QueryHash` — union results from all three tiers for a changed table. `resolver` is consulted for Tier 2 RHS index lookup. Nil resolver is allowed only for narrow Tier-1/Tier-3 test paths; production evaluation supplies a resolver.
 
 ## Acceptance Criteria
 
@@ -48,4 +48,5 @@ Route each `(query, table)` pair to exactly one pruning tier. A subscription tou
 - Placement decision is per `(query, table)` pair, not per query. A join subscription may use ValueIndex for one side and JoinEdgeIndex for the other.
 - "Filterable edge" means the join has a `ColEq` filter on one side that can be used to parameterize the JoinEdge lookup. A join with only `ColRange` or no filter falls through to Tier 3.
 - `CollectCandidatesForTable` is the low-level entry point used by the evaluation loop (Epic 5). Story 5.2 wraps it for whole-changeset orchestration so the evaluator doesn't need to know about tier internals.
+- If `PlaceSubscription` chose Tier 2 for a `(query, table)` pair, production evaluation MUST be able to resolve the corresponding RHS join index at runtime. A resolver miss after successful placement is not a benign false negative; it is `ErrJoinIndexUnresolved` / an invariant violation for the registration+evaluation pipeline and must not be silently skipped.
 - Deduplication in `CollectCandidates`: a query touching two tables may be returned from two different tier lookups for the same changeset. The output should be a set (no duplicate hashes).

@@ -15,7 +15,7 @@ Deliver the four response messages that are direct replies to client requests: S
 
 - `func SendSubscribeApplied(sender ClientSender, connID ConnectionID, msg *SubscribeApplied) error`:
   - Verify the connection is still open and the `subscription_id` is still pending; if the connection closed or the subscription was already discarded, drop the result
-  - Activate subscription in tracker (pending → active)
+  - Activate subscription in tracker (pending → active) immediately before successful delivery commitment
   - Send via `sender.Send`
 
 - `func SendUnsubscribeApplied(sender ClientSender, connID ConnectionID, msg *UnsubscribeApplied) error`:
@@ -48,5 +48,5 @@ Deliver the four response messages that are direct replies to client requests: S
 
 - These are 1:1 responses (one client message → one server response). No fan-out or broadcast involved.
 - `SubscribeApplied` contains a consistent snapshot of matching rows. The executor ensures this by running subscription registration within the commit serialization window (SPEC-003 §2.5).
-- The pending-subscription discard rule from SPEC-005 §9.1 is enforced here at the activation point: a late registration result must not resurrect a subscription after disconnect.
-- `SubscriptionError` makes the `subscription_id` immediately reusable. The client can send a new `Subscribe` with the same ID right away.
+- The pending-subscription discard rule from SPEC-005 §9.1 is enforced here at the activation point: a late registration result must not resurrect a subscription after disconnect or explicit unsubscribe while still pending.
+- `SubscriptionError` makes the `subscription_id` immediately reusable. The client can send a new `Subscribe` with the same ID right away. Tracker cleanup is idempotent: if disconnect or pending-discard already released the ID, response handling must treat the second removal as a no-op rather than a new state transition.

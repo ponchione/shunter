@@ -63,6 +63,8 @@ GET /subscribe?token=<jwt>
 
 `connection_id` is a client-supplied 16-byte identifier, hex-encoded. If absent, the server generates one randomly. `connection_id` all-zeros is reserved and rejected with 400. Clients may reuse a previous `connection_id` on reconnect to signal intent to resume (future session-resume feature; no semantic effect in v1).
 
+`compression` accepts exactly `none` or `gzip`. Any other query value is rejected during upgrade with `400`.
+
 ---
 
 ## 3. Wire Encoding
@@ -256,7 +258,7 @@ Query:
 
 Predicate:
   column : string
-  value  : Value     — (SPEC-001 §2.2 Value encoding)
+  value  : Value     — canonical SPEC-001 §2.2 Value encoding carried in BSATN for the wire message body
 ```
 
 Normalization into the SPEC-004 model:
@@ -406,6 +408,8 @@ updates:  []SubscriptionUpdate {
 - `inserts RowList` ← encoded from `SubscriptionUpdate.Inserts []ProductValue`
 - `deletes RowList` ← encoded from `SubscriptionUpdate.Deletes []ProductValue`
 
+This wire form is intentionally single-table only. Protocol v1 `Subscribe` rejects joins and multi-table subscriptions (§7.1.1), so joined `SubscriptionUpdate` values never appear on the wire; the evaluator's internal `TableID` anchor for joins remains an internal-only concern.
+
 The `tx_id` is a monotonically increasing commit identifier. Clients MAY persist it for diagnostics and coarse reconnect bookkeeping, but **v1 provides no resume-from-tx_id mechanism**. A client that disconnects must re-subscribe and rebuild state from a fresh `SubscribeApplied`.
 
 `inserts` and `deletes` are defined in terms of the subscription result set, not physical storage operations:
@@ -475,8 +479,6 @@ Implementation note: the committed delta pipeline computes per-connection update
     ↓ SubscribeApplied
 [active: receiving TransactionUpdates]
     ↓ Unsubscribe(subscription_id)
-[pending removal]
-    ↓ UnsubscribeApplied
 [not subscribed]
 
 [pending or active]
@@ -492,6 +494,8 @@ State rules:
 - a `subscription_id` is reserved as soon as `Subscribe` is accepted for processing; a second `Subscribe` with the same ID while pending or active MUST fail with `SubscriptionError`
 - `Unsubscribe` for a pending or unknown `subscription_id` returns `ErrSubscriptionNotFound`
 - if the client disconnects while a subscription is pending, the registration result is discarded and the subscription never becomes active
+- once `SubscribeApplied` is emitted, the subscription transitions from pending → active atomically with tracker activation; a later disconnect cannot resurrect it
+- `UnsubscribeApplied` is a confirmation message for a removal that has already been applied in the tracker/executor pipeline; there is no separate long-lived "pending removal" state in v1
 
 ### 9.2 Client-Maintained State
 
@@ -515,6 +519,7 @@ The executor serializes subscription registration with commits (SPEC-003 §2.5).
 Ordering guarantee on one connection:
 - `SubscribeApplied(subscription_id)` MUST be delivered before any `TransactionUpdate` that references that `subscription_id`
 - for a reducer call made by this same connection, `ReducerCallResult(tx_id)` replaces the caller's standalone `TransactionUpdate(tx_id)` rather than racing with it
+- if the client disconnects or unsubscribes while a subscription is still pending, a later `SubscribeApplied` result is discarded rather than activating stale state
 
 ---
 
@@ -546,8 +551,10 @@ Either side may send a WebSocket Close frame. The receiver echoes a Close frame.
 
 Server-initiated closes:
 - `1000` (Normal Closure): graceful engine shutdown
-- `1008` (Policy Violation): authentication failure, buffer overflow, too many requests
+- `1008` (Policy Violation): authentication failure, buffer overflow (`"send buffer full"`), too many requests (`"too many requests"`), OnConnect rejection
 - `1011` (Internal Error): unexpected server error
+
+`Conn.OutboundCh` MUST NOT be closed as part of disconnect. Shutdown is signaled through `Conn.closed`; senders check that signal before enqueueing. This avoids the send-on-closed-channel race between concurrent `Send(...)` and disconnect. The writer goroutine exits on `Conn.closed` and may best-effort flush already queued frames before the underlying WebSocket closes.
 
 ### 11.2 Network Failure
 
@@ -576,6 +583,9 @@ type ProtocolOptions struct {
 
     // CloseHandshakeTimeout: wait for Close echo before forceful close.
     // Default: 250ms.
+    // This is a Shunter-side teardown bound, not a guarantee that the transport
+    // library can always force-close the underlying TCP socket at that exact
+    // deadline once a Close handshake is already in flight.
     CloseHandshakeTimeout time.Duration
 
     // OutgoingBufferMessages: max queued outgoing messages per client.
@@ -606,18 +616,27 @@ The protocol layer sends commands to the executor via its inbox (`ExecutorComman
 
 The executor sends `ReducerCallResult` back to the protocol layer via the `ResponseCh` embedded in `CallReducerCmd`.
 
+```go
+type ExecutorInbox interface {
+    Submit(ctx context.Context, cmd ExecutorCommand) error
+}
+```
+
 ### SPEC-004 (Subscription Evaluator)
 
-After each commit, the subscription evaluator does **not** write to sockets directly. Instead, it sends a `FanOutMessage` to the fan-out worker. The `FanOutMessage` Go shape (carrying `TxDurable`, `Fanout`, `Errors`, `CallerResult`) is declared in SPEC-004 §8.1; SPEC-005 does not redeclare the struct. `CommitFanout` is defined in SPEC-004 §7 as `map[ConnectionID][]SubscriptionUpdate`. `SubscriptionUpdate` is defined in SPEC-004 §10.2.
+After each commit, the subscription evaluator does **not** write to sockets directly. Instead, it sends a `FanOutMessage` to the fan-out worker. The `FanOutMessage` Go shape (carrying `TxDurable`, `Fanout`, `Errors`, `CallerConnID`, `CallerResult`) is declared in SPEC-004 §8.1; SPEC-005 does not redeclare the struct. `CommitFanout` is defined in SPEC-004 §7 as `map[ConnectionID][]SubscriptionUpdate`. `SubscriptionUpdate` is defined in SPEC-004 §10.2.
 
 Delivery contract:
-1. evaluator computes `CommitFanout` for the committed transaction and sends `FanOutMessage{TxDurable, Fanout}` to the fan-out worker inbox
+1. evaluator computes `CommitFanout` for the committed transaction and sends `FanOutMessage{TxDurable, Fanout, Errors, CallerConnID, CallerResult}` to the fan-out worker inbox
 2. the fan-out worker treats each `CommitFanout[connID]` entry as the `[]SubscriptionUpdate` payload for one `TransactionUpdate`
-3. if the commit originated from `CallReducer`, the protocol/executor integration identifies the caller's `ConnectionID` and routes that connection's update slice into `ReducerCallResult.transaction_update` instead of also sending a standalone `TransactionUpdate`
-4. all remaining connection entries are delivered as standalone `TransactionUpdate` messages
-5. protocol layer serializes, optionally compresses, and enqueues those messages to websocket connections
+3. any `SubscriptionError` entries in `FanOutMessage.Errors` are delivered before normal updates for the same batch
+4. if the commit originated from `CallReducer`, the fan-out/protocol integration routes the caller connection's update slice into `ReducerCallResult.transaction_update` instead of also sending a standalone `TransactionUpdate`
+5. all remaining connection entries are delivered as standalone `TransactionUpdate` messages
+6. protocol layer serializes, optionally compresses, and enqueues those messages to websocket connections
 
 The fan-out worker constructs `TransactionUpdate{TxID: ..., Updates: updates}` from the `CommitFanout` entries before calling `SendTransactionUpdate`.
+
+Protocol v1 exposes no wire-level confirmed-read flag. WebSocket clients therefore observe confirmed-read delivery for all post-commit messages; the fan-out worker waits on `TxDurable` before protocol-visible delivery.
 
 ```go
 type ClientSender interface {
@@ -664,6 +683,10 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 | `ErrReducerNotFound` | CallReducer named a reducer not registered |
 | `ErrLifecycleReducer` | CallReducer named a lifecycle reducer (OnConnect/OnDisconnect) |
 | `ErrClientBufferFull` | Server cannot send to this client (triggers disconnect) |
+| `ErrConnNotFound` | Delivery target connection disappeared before send |
+| `ErrTextFrameReceived` | Client sent a WebSocket text frame |
+| `ErrMaxMessageSize` | Incoming frame exceeded configured read limit |
+| `ErrTooManyRequests` | Incoming in-flight queue would exceed `IncomingQueueMessages` |
 | `ErrZeroConnectionID` | Client-supplied connection_id is all zeros |
 
 ---

@@ -21,7 +21,7 @@ Per-connection state struct that tracks identity, subscriptions, compression mod
       Token          string        // JWT for this connection (minted or validated)
       Compression    bool          // true if gzip negotiated
       Subscriptions  *SubscriptionTracker
-      OutboundCh     chan []byte   // buffered; capacity = OutgoingBufferMessages
+      OutboundCh     chan []byte   // buffered; capacity = OutgoingBufferMessages; never closed directly
       ws             *websocket.Conn // underlying WebSocket
       opts           *ProtocolOptions
       closeOnce      sync.Once
@@ -77,4 +77,4 @@ Per-connection state struct that tracks identity, subscriptions, compression mod
 - `SubscriptionTracker` is goroutine-safe (mutex-protected) because the read loop (incoming messages) and delivery goroutine (outgoing messages) both touch subscription state.
 - The `subscription_id` is client-chosen (uint32). The tracker only enforces uniqueness within this connection.
 - `OutboundCh` is the bounded channel that the backpressure system (Epic 6) monitors. The outbound writer goroutine reads from this channel and writes to the WebSocket.
-- `closed` channel is used for coordinating shutdown across the read loop, write loop, and keepalive goroutine.
+- `closed` channel is used for coordinating shutdown across the read loop, write loop, keepalive goroutine, and outbound senders. Disconnect signals `closed`; it does not close `OutboundCh`.
