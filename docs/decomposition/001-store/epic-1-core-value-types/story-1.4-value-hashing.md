@@ -18,8 +18,8 @@ Hash function for set-semantics duplicate detection.
     - Bool: kind byte + 0x00 or 0x01
     - Signed ints: kind byte + 8-byte big-endian of `i64`
     - Unsigned ints: kind byte + 8-byte big-endian of `u64`
-    - Float32: kind byte + 4-byte `math.Float32bits` encoding
-    - Float64: kind byte + 8-byte `math.Float64bits` encoding
+    - Float32: kind byte + 4-byte `math.Float32bits` encoding of the value after canonicalizing `-0.0 → +0.0` (`if v == 0 { v = 0 }` before taking bits). Required because `Float32bits(-0.0) != Float32bits(+0.0)` but Story 1.2 Equal returns true for the pair — the Equal→Hash contract would otherwise break (a set-semantics duplicate that differs only by ±0 would land in a different bucket and not be detected).
+    - Float64: same canonicalization before `math.Float64bits`.
     - String: kind byte + raw UTF-8 bytes
     - Bytes: kind byte + raw bytes
 
@@ -32,6 +32,8 @@ Hash function for set-semantics duplicate detection.
 - [ ] String("abc") and Bytes([]byte("abc")) produce different hashes
 - [ ] Empty string and empty bytes produce different hashes
 - [ ] Hashing is deterministic across calls
+- [ ] `Float32(-0.0).Hash64() == Float32(+0.0).Hash64()`
+- [ ] `Float64(-0.0).Hash64() == Float64(+0.0).Hash64()`
 
 ## Design Notes
 

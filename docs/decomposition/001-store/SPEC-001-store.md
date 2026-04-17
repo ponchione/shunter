@@ -107,7 +107,7 @@ type Value struct {
 - Hash over `(kind, canonical payload bytes)`.
 - Strings hash their UTF-8 bytes.
 - Bytes hash raw byte contents.
-- Floats hash a canonical bit encoding of the exact stored value.
+- Floats hash a canonical bit encoding after canonicalizing `-0.0 → +0.0` so that the Equal→Hash contract holds for signed zero (IEEE `-0.0 == +0.0`, so hashes must collide).
 
 **Recommendation:** Store rows as `ProductValue` (decoded) in the in-memory store rather than as raw BSATN bytes. This simplifies index key extraction, predicate evaluation, and delta delivery. BSATN encoding happens at the boundary: when writing to the commit log or sending to clients.
 
