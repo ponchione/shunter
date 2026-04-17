@@ -39,7 +39,7 @@ Insert a row within a transaction. Allocates provisional RowID, validates schema
      - For each unique/PK index: extract key, seek committed index, check tx inserts
   5. Check set-semantics duplicate (no-PK tables) against committed rowHashIndex (filtered by tx.deletes) + tx-local inserts
   6. Allocate provisional RowID from table's counter
-  7. Store in tx.inserts
+  7. Store in tx.inserts. The provided `ProductValue` must either (a) have been constructed through `NewBytes` for all Bytes columns (which copies input — see Story 1.1), or (b) be sourced from a code path the caller can prove has exclusive ownership of any Bytes backing memory. The store does not re-copy at the Insert boundary; the Value API's unexported `buf` is the single copy point. BSATN decode paths (SPEC-002 replay, SPEC-005 reducer argument decode) MUST route Bytes columns through `NewBytes` to enter the store safely.
 
 - `func (t *Transaction) View() *StateView`
 
@@ -65,3 +65,4 @@ Insert a row within a transaction. Allocates provisional RowID, validates schema
 - Undelete is the trickiest part. When a committed row is deleted then re-inserted with identical value, the delete is canceled rather than creating a new tx-local row. This ensures the changeset collapses to no-op at commit time.
 - Constraint checking must consider both layers: committed (minus deletes) and tx-local inserts. A unique key that exists in committed state but is deleted in this tx should NOT block a new insert with that key.
 - `ErrRowNotFound` is NOT returned by Insert — that's a Delete/Update concern (Story 5.5).
+- Bytes ownership: the SPEC-001 §2.2 contract ("the store must copy caller-provided byte slices on insert unless it can prove exclusive ownership") is implemented by funneling all Value construction through `NewBytes` at serialization boundaries. Insert itself does not copy, because the Value struct's unexported `buf` prevents a caller from constructing a mutable-aliasing Value without going through the constructor (closes SPEC-AUDIT SPEC-001 §5.3).

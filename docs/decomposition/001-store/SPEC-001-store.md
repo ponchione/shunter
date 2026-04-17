@@ -492,6 +492,8 @@ The function body accesses `tx.tx` (the embedded `*TxState`) internally. The `Sc
 
 **Required invariant:** Commit is atomic from the executor's point of view. If `Commit` returns a non-nil error, committed state MUST be unchanged.
 
+**Post-return safety.** The returned `*Changeset` is safe to use after `Commit` returns and the write lock has been released. Its `ProductValue` entries are either freshly allocated copies (deleted rows, materialized from committed state before removal) or rows inserted at commit time whose backing pointers are now stable in committed state. SPEC-002 (commit log) and SPEC-004 (subscription evaluator) may consume the same `*Changeset` concurrently on separate goroutines; neither is permitted to mutate any `Value.buf`. See §6.3.
+
 **Algorithm:**
 1. Acquire write lock on CommittedState
 2. Validate that all remaining commit-time checks still pass against the current committed state
@@ -588,6 +590,8 @@ The `Changeset` is passed to:
 2. **Commit Log** (SPEC-002) — to serialize and persist the transaction
 
 Both receive the same `Changeset` value. It is read-only after creation.
+
+**Concurrency contract.** Consumers may read the `Changeset` concurrently from separate goroutines; no consumer may mutate any field, including `Value.buf` on any `ProductValue` entry. `ProductValue` rows in `Inserts` may alias committed-state backing memory; rows in `Deletes` are freshly allocated copies taken at delete time. Consumer mutation is a correctness bug, not merely a performance concern — the Value API's unexported `buf` field prevents accidental mutation, and callers that bypass the API (unsafe pointer tricks, reflection) are out of contract.
 
 ---
 

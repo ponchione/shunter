@@ -58,3 +58,4 @@ Apply a transaction's mutations to committed state and produce a changeset. Atom
 
 - Commit-time failure is rare in v1 because constraint checks already happened during the transaction. The main failure mode would be a bug or invariant violation. Still, atomicity must be preserved.
 - The write lock blocks all concurrent snapshots. This is acceptable in v1 because commits should be fast (small changesets). Long-running commits would require a different concurrency model (v2).
+- After the write lock releases, the returned `*Changeset` is safe to share with post-commit consumers on separate goroutines. Deleted-row `ProductValue` entries are copied out of committed state before the delete removes them, so they remain valid after the lock release; inserted-row entries point into committed storage whose Values are immutable. See SPEC-001 §5.6 "Post-return safety" + §6.3 concurrency contract.

@@ -25,7 +25,7 @@ The commit log (SPEC-002) needs to persist and restore:
 
 - **Restore functions** for recovery:
   - `func (t *Table) SetNextID(id uint64)` — called after replaying all changesets
-  - `func (t *Table) SetSequenceValue(val uint64)` — restore sequence counter
+  - `func (t *Table) SetSequenceValue(val uint64)` — restore sequence counter. Sets the counter to `max(current, val)`, matching `SetNextID` semantics. Rationale: if replay has already advanced the sequence past the snapshot-stored value (see Story 8.2 sequence-advance-on-replay step), the higher value wins.
 
 - Cross-spec contract note:
   - SPEC-002 snapshot/recovery stories that serialize committed store state must depend on these accessors explicitly, because future RowID allocation after restore is undefined unless `nextID` is restored alongside sequence state
@@ -40,9 +40,12 @@ The commit log (SPEC-002) needs to persist and restore:
 - [ ] SetSequenceValue followed by Sequence.Next() → returns the set value
 - [ ] Round-trip: export state → new empty table → restore state → insert → IDs continue correctly
 - [ ] Round-trip: export → restore → auto-increment values continue without gap or reuse
+- [ ] SetSequenceValue with val < current → counter unchanged
+- [ ] SetSequenceValue with val > current → counter set to val
+- [ ] Round-trip snapshot-restore → replay → SetSequenceValue → counter reflects max of snapshot value and replay-advanced value
 
 ## Design Notes
 
 - This story defines the contract between SPEC-001 (store) and SPEC-002 (commit log) for snapshot/recovery. The actual serialization format is SPEC-002's concern.
 - These are simple getter/setter methods. The complexity lives in SPEC-002's snapshot writer and recovery reader.
-- SetNextID must set the counter to at least the provided value. If current counter is already higher (from ApplyChangeset allocations), keep the higher value.
+- `SetNextID` and `SetSequenceValue` both take `max(current, provided)`. Symmetric by design: if ApplyChangeset has already advanced the counter during replay, the restore setter must not rewind it.

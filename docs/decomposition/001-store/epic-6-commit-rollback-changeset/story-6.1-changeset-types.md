@@ -50,4 +50,5 @@ Data structures for the net-effect output of a committed transaction, using the 
 ## Design Notes
 
 - Changeset is immutable after creation. Consumers (SPEC-002 commit log, SPEC-004 subscription evaluator) receive the same value. No defensive copying needed — just don't mutate.
+- Concurrency: SPEC-003's post-commit pipeline hands the Changeset to SPEC-002 and SPEC-004 simultaneously. Both consumers read-only. `ProductValue` rows in `Inserts` may alias committed-state backing memory; rows in `Deletes` are freshly allocated copies. The Value API's unexported `buf` field prevents accidental mutation; callers bypassing the API are out of contract.
 - No separate `Updates` list in v1. SPEC-004 derives update semantics by comparing insert/delete rows against subscription predicates.
