@@ -45,7 +45,7 @@ The full startup recovery sequence. Orchestrates segment scanning, snapshot sele
 - [ ] No segments + no snapshots → `ErrNoData`
 - [ ] Schema registered on CommittedState matches input SchemaRegistry
 - [ ] Indexes rebuilt correctly after snapshot restore
-- [ ] Sequences restored from snapshot, then advanced by replay
+- [ ] Sequences restored from snapshot, then advanced by replay (mechanism: SPEC-001 Story 8.2 `ApplyChangeset` advances `Sequence.next` per insert; SPEC-001 Story 8.3 `SetSequenceValue` uses `max(current, provided)` so snapshot restore never rewinds replay-advanced values)
 - [ ] nextID restored from snapshot/export state so future RowID allocation resumes without collision
 - [ ] Returns correct max TxID for executor to resume from
 - [ ] Crash during snapshot (.lock) + valid prior snapshot → recovery succeeds
@@ -57,3 +57,4 @@ The full startup recovery sequence. Orchestrates segment scanning, snapshot sele
 - Index rebuild is the most expensive recovery step for large datasets. O(N × I) where N = row count, I = indexes per table. For 1M rows with 4 indexes, that's 4M index insertions. Acceptable at startup.
 - Keep the recovery contract deterministic: if no segments and no snapshots exist, return `ErrNoData`.
 - This is an integration story — it orchestrates Stories 6.1–6.3. Most logic is already implemented; this story wires them together and handles edge cases.
+- Sequence-advance ownership: SPEC-001 Story 8.2 `ApplyChangeset` is the single point that advances `Sequence.next` during replay. Story 6.4 does not run a separate post-replay sweep. The snapshot-restore order (load snapshot sequences via `SetSequenceValue` → replay → values further advanced by `ApplyChangeset`) and `SetSequenceValue`'s `max()` semantics together guarantee post-recovery `next` ≥ any value previously emitted, regardless of which side (snapshot or replay) saw the larger value.

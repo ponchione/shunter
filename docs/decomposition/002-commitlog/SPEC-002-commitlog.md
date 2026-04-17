@@ -478,7 +478,7 @@ func OpenAndRecover(dir string, schema SchemaRegistry) (*CommittedState, TxID, e
 6. **Replay log from `snapshot_tx_id + 1`:**
    a. Skip records with `tx_id <= snapshot_tx_id`
    b. Decode `Changeset` from payload and stamp `cs.TxID = record.tx_id` (payload does not carry TxID; see §3.3)
-   c. Call `store.ApplyChangeset(committed, cs)` (SPEC-001 §5.8). Fatal error if it returns non-nil.
+   c. Call `store.ApplyChangeset(committed, cs)` (SPEC-001 §5.8). Fatal error if it returns non-nil. `ApplyChangeset` itself advances each table's `Sequence.next` to `max(current, observed+1)` for any auto-increment column value seen on insert (SPEC-001 Story 8.2 algorithm step 2c) — recovery does not need a separate post-replay sweep. Snapshot-restored sequence values are reconciled against replay-advanced values via `SetSequenceValue`'s `max(current, provided)` rule (SPEC-001 Story 8.3).
    d. Track `max_applied_tx_id`
 7. **Return** `(committed, max_applied_tx_id, nil)`. The executor resumes issuing TX IDs from `max_applied_tx_id + 1`.
 
