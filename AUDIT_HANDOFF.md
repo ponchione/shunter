@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E6 remainder`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 8 (SPEC-002 residue cleanup).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 9 (SPEC-003 residue cleanup).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -236,43 +236,43 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
-| §1.1 | CRIT | `SnapshotInterval` default contradicts itself (§8 vs §5.6/Story 4.1) | §8, §5.6, Story 4.1 | open |
+| §1.1 | CRIT | `SnapshotInterval` default contradicts itself (§8 vs §5.6/Story 4.1) | §8, §5.6, Story 4.1 | closed |
 | §1.2 | CRIT | Decoded `Changeset.TxID` never stamped | Story 3.2 / 6.3, §6.x | closed (B3) |
-| §1.3 | CRIT | Snapshot file layout §5.2 omits per-table `nextID` | §5.2, Stories 5.2/5.3 | open |
-| §1.4 | CRIT | Recovery sequence-advance step undefined | Story 6.4 (or SPEC-001 Story 8.2) | open |
-| §2.1 | GAP | `ErrSnapshotInProgress` omitted from §9 catalog | §9 | open |
-| §2.2 | GAP | `ErrTruncatedRecord` omitted from §9 / §2.3 / §6.4 | §9, §2.3, §6.4 | open |
+| §1.3 | CRIT | Snapshot file layout §5.2 omits per-table `nextID` | §5.2, Stories 5.2/5.3 | closed |
+| §1.4 | CRIT | Recovery sequence-advance step undefined | Story 6.4 (or SPEC-001 Story 8.2) | closed |
+| §2.1 | GAP | `ErrSnapshotInProgress` omitted from §9 catalog | §9 | closed |
+| §2.2 | GAP | `ErrTruncatedRecord` omitted from §9 / §2.3 / §6.4 | §9, §2.3, §6.4 | closed |
 | §2.3 | GAP | Schema snapshot §5.3 lacks per-column `Nullable`/`AutoIncrement` | — | closed (C2) |
-| §2.4 | GAP | `row_count` width spec `uint64` vs Story+impl `uint32` | §5.3, Story 5.2 | open |
+| §2.4 | GAP | `row_count` width spec `uint64` vs Story+impl `uint32` | §5.3, Story 5.2 | closed |
 | §2.5 | GAP | Front matter omits SPEC-003 / SPEC-006 deps | — | closed (B5) |
-| §2.6 | GAP | Snapshot→CommittedState restore API not named | SPEC-001 Story 8.3/8.4, Story 6.4 | open |
+| §2.6 | GAP | Snapshot→CommittedState restore API not named | SPEC-001 Story 8.3/8.4, Story 6.4 | closed |
 | §2.7 | GAP | `SchemaRegistry.Version()` contract used but undefined | — | closed (A3) |
-| §2.8 | GAP | `durable_horizon` undefined when segments empty + snapshot exists | §6.x | open |
+| §2.8 | GAP | `durable_horizon` undefined when segments empty + snapshot exists | §6.x | closed |
 | §2.9 | GAP | Per-TxID durability ack (`WaitUntilDurable`) not in §4.2 | — | closed (E6) |
-| §2.10 | GAP | `AppendMode` lives in Story 6.1 but not §6.4 | §6.4, EPICS.md | open |
-| §2.11 | GAP | No story owns "schema is static for data-dir lifetime" invariant | new write-path story | open |
-| §2.12 | GAP | Snapshot retention deferred but no story owns | new story | open |
-| §2.13 | GAP | Graceful-shutdown snapshot orchestration unowned | new story | open |
+| §2.10 | GAP | `AppendMode` lives in Story 6.1 but not §6.4 | §6.4, EPICS.md | closed |
+| §2.11 | GAP | No story owns "schema is static for data-dir lifetime" invariant | Story 3.1 (changeset encoder) — Design Notes ownership | closed |
+| §2.12 | GAP | Snapshot retention deferred but no story owns | §7 + §13 OQ#2 deferred-v1 paragraph | closed |
+| §2.13 | GAP | Graceful-shutdown snapshot orchestration unowned | §5.6 + Story 5.2 cross-ref to SPEC-003 | closed |
 | §3.1 | DIVERGE | "BSATN" name imported but encoding is rewrite | — | closed (C1) |
-| §3.2 | DIVERGE | No offset index file; recovery linear-scan | divergence block | open |
-| §3.3 | DIVERGE | Single TX per record vs 1–65535-TX commits | divergence block | open |
-| §3.4 | DIVERGE | Replay strictness — `ApplyChangeset` errors fatal | divergence block | open |
-| §3.5 | DIVERGE | First TxID is 1, not 0 | divergence block | open |
-| §3.6 | DIVERGE | Single auto-increment sequence per table (implicit) | divergence block | open |
-| §3.7 | DIVERGE | No segment compression / sealed-immutable marker | divergence block | open |
-| §4.1 | NIT | `schema_version` stored twice (§5.2 vs §5.3) | §5.2 / §5.3 | open |
+| §3.2 | DIVERGE | No offset index file; recovery linear-scan | §12.1 divergence block | closed |
+| §3.3 | DIVERGE | Single TX per record vs 1–65535-TX commits | §12.2 divergence block | closed |
+| §3.4 | DIVERGE | Replay strictness — `ApplyChangeset` errors fatal | §12.3 divergence block | closed |
+| §3.5 | DIVERGE | First TxID is 1, not 0 | §12.4 divergence block | closed |
+| §3.6 | DIVERGE | Single auto-increment sequence per table (implicit) | §12.5 divergence block | closed |
+| §3.7 | DIVERGE | No segment compression / sealed-immutable marker | §12.6 divergence block | closed |
+| §4.1 | NIT | `schema_version` stored twice (§5.2 vs §5.3) | §5.3 header-authoritative note | closed |
 | §4.2 | NIT | `TxID` leaks as bare `uint64` in Story 2.2 + impl | — | closed (B3/B4) — spec aligned on `types.TxID`; live drift at `commitlog/durability.go:135` deferred to Session 12+ |
-| §4.3 | NIT | §9 catalog missing four error sentinels stories use | §9 | open |
-| §4.4 | NIT | `Record` struct docs imply CRC field but isn't | Story 2.x | open |
-| §4.5 | NIT | §4.4 atomic.Uint64 claim vs live mutex | §4.4 | open |
-| §4.6 | NIT | EPICS.md dep graph omits recovery → durability AppendMode | EPICS.md | open |
-| §4.7 | NIT | §2.1 `.log` extension vs §6.1 segment naming | §2.1 / §6.1 | open |
-| §4.8 | NIT | §8 lacks fsync-policy knob; §12 OQ #3 hints | §8 / §12 | open |
-| §5.2 | GAP | §5.2 has no story for `nextID` section | new story | open |
-| §5.3 | GAP | Sequence-advance-on-replay no story | overlaps §1.4 / §2.1 | open |
-| §5.4 | GAP | Snapshot retention no story | overlaps §2.12 | open |
-| §5.5 | GAP | Graceful-shutdown snapshot orchestration no story | overlaps §2.13 | open |
-| §5.6 | GAP | Snapshot→CommittedState bulk-restore no owner | overlaps §2.6 | open |
+| §4.3 | NIT | §9 catalog missing four error sentinels stories use | §9 (ErrSnapshotInProgress + ErrTruncatedRecord) | closed |
+| §4.4 | NIT | `Record` struct docs imply CRC field but isn't | Story 2.2 Design Notes | closed |
+| §4.5 | NIT | §4.4 atomic.Uint64 claim vs live mutex | §4.3 struct softened to stateMu + atomic split | closed |
+| §4.6 | NIT | EPICS.md dep graph omits recovery → durability AppendMode | EPICS.md (Epic 6 → Epic 4 arrow added with §2.10) | closed |
+| §4.7 | NIT | §2.1 `.log` extension vs §6.1 segment naming | §6.1 step 1 cross-ref | closed |
+| §4.8 | NIT | §8 lacks fsync-policy knob; §12 OQ #3 hints | §8 FsyncMode placeholder + TD-128 (live wiring deferred Session 12+) | closed |
+| §5.2 | GAP | §5.2 has no story for `nextID` section | overlaps §1.3 — closed via §5.2 layout edit | closed |
+| §5.3 | GAP | Sequence-advance-on-replay no story | overlaps §1.4 — closed via §6.1 step 6c cross-ref to SPEC-001 Story 8.2 | closed |
+| §5.4 | GAP | Snapshot retention no story | overlaps §2.12 — closed via §7 deferred-v1 paragraph | closed |
+| §5.5 | GAP | Graceful-shutdown snapshot orchestration no story | overlaps §2.13 — closed via §5.6 + Story 5.2 cross-ref to SPEC-003 | closed |
+| §5.6 | GAP | Snapshot→CommittedState bulk-restore no owner | overlaps §2.6 — closed via SPEC-001 Story 8.3 + §11 + Story 6.4 (`InsertRow` is the bulk-restore primitive) | closed |
 
 #### SPEC-003 — Transaction Executor
 
@@ -469,7 +469,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 | 5 | Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init | SPEC-003 §1.5/§2.1/§2.6/§3.5; SPEC-005 §4.7; SPEC-006 §2.4/§3.2 | **(closed)** SPEC-006 §9 defers `init`/`update` (not reserved; use deployment-time reducer; v2 target). SPEC-003 §2.4 declares `OnConnectCmd` / `OnDisconnectCmd` as bespoke commands (Option A — match live); §10.3/§10.4 rewritten; §10.4 pins the four SPEC-AUDIT §1.5 contracts (CallSource reuse of `CallSourceLifecycle`; one TxID per failed OnDisconnect; cleanup post-commit panics fatal per §5.4; cleanup runs even when `e.fatal`). Story 7.3 acceptance extended. SPEC-005 §5.2/§5.3 cross-ref `OnConnectCmd`/`OnDisconnectCmd`. |
 | 6 | Cluster E — post-commit fan-out shapes (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, ClientSender, DurabilityHandle, eval-error vs fatal) | SPEC-002 §2.9; SPEC-003 §1.3/§3.4/§5.4; SPEC-004 §1.1/§1.3/§1.4/§2.3/§2.4/§2.5/§2.6/§2.12/§3.5/§4.1/§4.2; SPEC-005 §1.1/§1.2/§1.5/§1.6/§2.4/§3.9/§5.2 | **(closed)** Five shapes canonicalized: PostCommitMeta (SPEC-004 §10.1), FanOutMessage (SPEC-004 §8.1), SubscriptionError (SPEC-004 §10.2 Go / SPEC-005 §8.4 wire), ReducerCallResult (SPEC-004 §10.2 Go forward-decl / SPEC-005 §8.7 wire), ClientSender+FanOutSender (SPEC-005 §13 with `Send(connID, any)` + adapter pattern / SPEC-004 §8.1). E6 `WaitUntilDurable` added to SPEC-002 §4.2 + SPEC-003 §7. E7 per-query recovery (SPEC-004 §11.1) vs fatal-panic (SPEC-003 §5.4) dividing line pinned. SPEC-003 §8 `EvalAndBroadcast` signature aligned to 4-arg `PostCommitMeta` form. Audit §2.4 `request_id = 0` collision closed; §3.9 status-enum DIVERGE landed inline at SPEC-005 §8.7. |
 | 7 | SPEC-001 residue cleanup | SPEC-001 §1.1/1.2/1.4/1.5, §2.1/2.2/2.4–2.9, §3.x, §4.3–4.5/4.7–4.9, §5.2–5.4 | **(closed)** All 23 open SPEC-001 rows resolved. CRIT fixes: float ±0 hash canonicalization (Story 1.4 + §2.2), Bound-parameterized `SeekBounds` in Story 3.3 + `SeekIndexBounds` in Story 5.3 + §4.6/§5.4 (closes §1.2 + §2.6), undelete requires full-row equality (Story 5.4), `AsBytes` alias contract (Story 1.1). GAPs: ErrTableNotFound/ErrInvalidFloat/ErrRowShapeMismatch each bound to a named producer; snapshot close enforcement via `closed atomic.Bool` (Story 7.1 + §7.2); `ApplyChangeset` non-idempotent + sequence-advance-on-replay (Story 8.2 + §5.8); post-return safety + `*Changeset` concurrency contract (§5.6/§6.3 + Stories 6.1/6.2); Bytes-copy boundary pinned to `NewBytes` (Story 5.4 + §2.2); `SetSequenceValue` symmetric `max()` (Story 8.3). New §12 "Divergences from SpacetimeDB" with six entries (Open Questions → §13, Verification → §14). NIT bundle: ColID rationale (§2.5), §10 renamed "Performance Targets", ValueKind(0) = Invalid (Story 1.1), IndexID 0 reservation for no-PK tables (§4.2 + Story 2.1), Epic 7 blocks text, §11 Snapshot relocated to SPEC-002/SPEC-004 subsections. |
-| 8 | SPEC-002 residue cleanup | SPEC-002 §1.1/1.3/1.4, §2.1/2.2/2.4/2.6/2.8/2.10–2.13, §3.x, §4.1/4.3–4.8, §5.2–5.6 | All open SPEC-002 rows resolved/deferred |
+| 8 | SPEC-002 residue cleanup | SPEC-002 §1.1/1.3/1.4, §2.1/2.2/2.4/2.6/2.8/2.10–2.13, §3.x, §4.1/4.3–4.8, §5.2–5.6 | **(closed)** All 30 open SPEC-002 rows resolved. CRIT: §1.1 SnapshotInterval default = 0 in §8; §1.3 nextID section in §5.2 layout; §1.4 sequence-advance cross-ref to SPEC-001 Story 8.2 in §6.1 + Story 6.4 (no separate post-replay sweep). GAPs: ErrSnapshotInProgress + ErrTruncatedRecord added to §9 + §2.3/§6.4 cross-refs (§2.1/§2.2/§4.3); row_count uint32 (§2.4); restore-API named (`InsertRow` is the bulk-restore primitive — SPEC-001 Story 8.3 + §11 + SPEC-002 Story 6.4) (§2.6/§5.6); durable_horizon = +∞ when segments empty (§2.8); AppendMode normative in §6.4 + EPICS dep arrow Epic 6→4 (§2.10/§4.6); schema-static encoder note Story 3.1 (§2.11/§5.2); snapshot retention deferred-v1 documented in §7 + §13 OQ#2 (§2.12/§5.4); graceful-shutdown ownership cross-ref to SPEC-003 in §5.6 + Story 5.2 (§2.13/§5.5). New §12 Divergences block (6 entries: offset index, single-TX/record, replay strictness, first TxID = 1, single sequence/table, no compression). NIT bundle: schema_version header authoritative note (§5.3), `stateMu` + waiters in §4.3 struct (§4.5), Record CRC docs Story 2.2 (§4.4), .log extension cross-ref §6.1 (§4.7), FsyncMode placeholder §8 (§4.8) with TD-128 logged for live wiring at `commitlog/durability.go:63`. |
 | 9 | SPEC-003 residue cleanup | SPEC-003 §1.2/1.4, §2.2/2.4/2.5/2.7–2.12, §3.x, §4.2–4.6/4.8/4.9, §5.2/5.4 | All open SPEC-003 rows resolved/deferred |
 | 10 | SPEC-004/005 residue cleanup | SPEC-004 §1.2/1.5/1.6, §2.1/2.2/2.8–2.11/2.13, §3.x, §4.3–4.9, §5.2–5.4; SPEC-005 §1.4/1.6, §2.1/2.3/2.5–2.15, §3.1–3.8/3.10/3.11, §4.3–4.6/4.8/4.9/4.11, §5.2–5.8 | All open SPEC-004 and SPEC-005 rows resolved/deferred |
 | 11 | SPEC-006 residue cleanup | SPEC-006 §2.3/2.5/2.7/2.8/2.10–2.12/2.14, §3.x, §4.1–4.9, §5.2/5.4/5.5 | All open SPEC-006 rows resolved/deferred |
@@ -522,4 +522,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 8 (SPEC-002 residue cleanup).
+Cursor: Session 9 (SPEC-003 residue cleanup).
