@@ -19,13 +19,19 @@ Bounded range iteration and full ordered scan over the B-tree.
   - Yields RowIDs for all keys in range, in key order
   - Within same key, RowIDs in ascending order
 
+- `func (idx *BTreeIndex) SeekBounds(low, high Bound) iter.Seq[RowID]`
+  - Bound-parameterized range scan for callers that need explicit inclusive/exclusive control per endpoint (SPEC-001 §7.2 `CommittedReadView.IndexRange`, SPEC-004 predicate scans on string/bytes/float keys where "strictly greater than v" cannot be expressed through `*IndexKey` alone).
+  - `Bound.Unbounded = true` → no limit on that side; `Bound.Value` ignored.
+  - `Bound.Inclusive = true` → closed endpoint (`<=` / `>=`); `Inclusive = false` → open (`<` / `>`).
+  - Yields RowIDs in key order; within same key, RowIDs in ascending order.
+
 - `func (idx *BTreeIndex) Scan() iter.Seq[RowID]`
   - Full ordered iteration over all keys
   - Equivalent to `SeekRange(nil, nil)`
 
-- Range boundary semantics follow Bound type from Story 3.1:
-  - When using `*IndexKey` (nil = unbounded), the range is `[low, high)` — low inclusive, high exclusive
-  - This matches spec §4.6: `SeekRange returns all RowIDs with key in [low, high)`
+- Range boundary semantics:
+  - `SeekRange(low, high *IndexKey)` is the half-open `[low, high)` convenience wrapper: `nil` low/high = unbounded; matches spec §4.6 `SeekRange returns all RowIDs with key in [low, high)`.
+  - `SeekBounds(low, high Bound)` is the general primitive; `SeekRange(a, b)` is equivalent to `SeekBounds(Bound{Value: *a, Inclusive: true}, Bound{Value: *b, Inclusive: false})` with nil endpoints mapping to `Bound{Unbounded: true}`.
 
 ## Acceptance Criteria
 
@@ -38,8 +44,11 @@ Bounded range iteration and full ordered scan over the B-tree.
 - [ ] Keys yielded in comparator order
 - [ ] Scan over 10k entries yields all in order
 - [ ] Iterator is lazy (doesn't materialize full result)
+- [ ] SeekBounds with `Bound{Value: v, Inclusive: false}` on both sides yields keys in `(low, high)`
+- [ ] SeekBounds with one `Bound{Unbounded: true}` endpoint yields unbounded-on-that-side
+- [ ] SeekBounds and SeekRange produce identical results for the half-open case (`Inclusive: true` low, `Inclusive: false` high)
 
 ## Design Notes
 
 - `iter.Seq[RowID]` (Go 1.23+ range-over-func) is the right return type. Callers can break early without materializing the full scan.
-- The `[low, high)` half-open convention matches the spec. If Bound-based semantics (inclusive/exclusive per endpoint) are needed later, add a `SeekBounds(low, high Bound)` variant in a future story.
+- The `[low, high)` half-open `SeekRange` stays as a convenience wrapper. `SeekBounds` is the v1 primitive for callers that need explicit inclusive/exclusive control — SPEC-004 predicate scans on string/bytes/float keys cannot express "strictly greater than v" through `*IndexKey` alone (SPEC-AUDIT SPEC-001 §1.2).

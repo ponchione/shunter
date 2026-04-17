@@ -322,7 +322,14 @@ func (idx *Index) Seek(key IndexKey) []RowID
 // SeekRange returns all RowIDs with key in [low, high).
 // A nil low bound means unbounded below.
 // A nil high bound means unbounded above.
+// Half-open convenience wrapper over SeekBounds.
 func (idx *Index) SeekRange(low, high *IndexKey) iter.Seq[RowID]
+
+// SeekBounds returns all RowIDs with key in the range specified by Bound
+// semantics (§4.4). Used by CommittedReadView.IndexRange (§7.2) and SPEC-004
+// predicate scans that require exclusive endpoints on string/bytes/float keys
+// where "strictly greater than v" cannot be expressed via *IndexKey alone.
+func (idx *Index) SeekBounds(low, high Bound) iter.Seq[RowID]
 
 // Scan iterates all RowIDs in key order.
 func (idx *Index) Scan() iter.Seq[RowID]
@@ -401,8 +408,14 @@ func (sv *StateView) ScanTable(tableID TableID) iter.Seq2[RowID, ProductValue]
 // Includes tx-local inserted rows that match the key.
 func (sv *StateView) SeekIndex(tableID TableID, indexID IndexID, key IndexKey) iter.Seq[RowID]
 
-// SeekIndexRange performs a range scan.
+// SeekIndexRange performs a half-open [low, high) range scan.
 func (sv *StateView) SeekIndexRange(tableID TableID, indexID IndexID, low, high *IndexKey) iter.Seq[RowID]
+
+// SeekIndexBounds performs a range scan with Bound endpoints (§4.4).
+// Required for SPEC-004 predicate scans that need exclusive endpoints on
+// non-integer keys; delegates to the committed index's SeekBounds and filters
+// tx-local inserts by Bound comparison.
+func (sv *StateView) SeekIndexBounds(tableID TableID, indexID IndexID, low, high Bound) iter.Seq[RowID]
 ```
 
 **GetRow implementation:**
@@ -424,6 +437,10 @@ func (sv *StateView) SeekIndexRange(tableID TableID, indexID IndexID, low, high 
 **SeekIndexRange implementation:**
 1. Query the committed B-tree range and filter deleted RowIDs
 2. Linear-scan tx-local inserts and include any row whose extracted key lies in `[low, high)` using the same comparator as the committed index
+
+**SeekIndexBounds implementation:**
+1. Query the committed index via `Index.SeekBounds(low, high)` and filter deleted RowIDs
+2. Linear-scan tx-local inserts and include any row whose extracted key satisfies both `Bound` endpoints per §4.4 (inclusive/exclusive/unbounded)
 
 ### 5.5 Transaction API
 

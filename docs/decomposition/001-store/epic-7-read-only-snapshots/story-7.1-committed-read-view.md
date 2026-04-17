@@ -50,7 +50,7 @@ Read-only point-in-time view of committed state. Used by subscription evaluator 
   - Call Index.Seek, resolve RowIDs to rows
 
 - `IndexRange` — range scan using Bound semantics
-  - Call Index.SeekRange with Bound-derived low/high keys
+  - Calls `Index.SeekBounds(lower, upper)` — the Bound-parameterized primitive delivered in Story 3.3 as a v1 deliverable. Required because `SeekRange`'s half-open `[low, high)` cannot express "strictly greater than v" on string/bytes/float keys (SPEC-AUDIT SPEC-001 §1.2).
   - Resolve RowIDs to rows
 
 - `RowCount` — returns `len(table.rows)`

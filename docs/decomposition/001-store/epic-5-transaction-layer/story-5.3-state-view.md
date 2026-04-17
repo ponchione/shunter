@@ -47,6 +47,11 @@ Merges committed state and tx-local state into a single read path. The "what doe
   1. Query committed B-tree range, filter deletes
   2. Linear-scan tx.inserts, include rows whose extracted key falls in [low, high)
 
+- `func (sv *StateView) SeekIndexBounds(tableID TableID, indexID IndexID, low, high Bound) iter.Seq[RowID]`
+  1. Query committed index via `BTreeIndex.SeekBounds(low, high)` (Story 3.3), filter deletes
+  2. Linear-scan tx.inserts, include rows whose extracted key satisfies both `Bound` endpoints per SPEC-001 §4.4 (inclusive/exclusive/unbounded)
+  3. Required by SPEC-004 predicate scans that need exclusive endpoints on non-integer keys; `SeekIndexRange` remains the half-open convenience wrapper (SPEC-AUDIT SPEC-001 §1.2/§2.6)
+
 ## Acceptance Criteria
 
 - [ ] GetRow: committed row visible when not deleted
@@ -59,6 +64,8 @@ Merges committed state and tx-local state into a single read path. The "what doe
 - [ ] SeekIndex: tx-local rows matching key included
 - [ ] SeekIndex: tx-local rows NOT matching key excluded
 - [ ] SeekIndexRange: committed range filtered, tx-local range matched
+- [ ] SeekIndexBounds with exclusive low / inclusive high: boundary rows handled per Bound semantics (committed + tx-local)
+- [ ] SeekIndexBounds with both Unbounded: same result as ScanTable filtered by index
 - [ ] Empty tx (no inserts/deletes): StateView behaves same as committed state
 - [ ] Nil tx.inserts/tx.deletes for a table: handled gracefully (no panic)
 
