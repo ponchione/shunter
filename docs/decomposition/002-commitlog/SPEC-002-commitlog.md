@@ -636,7 +636,49 @@ Recovery applies replayed `Changeset` values to `CommittedState`. The snapshot w
 
 ---
 
-## 12. Open Questions
+## 12. Divergences from SpacetimeDB
+
+Shunter's clean-room spec intentionally departs from SpacetimeDB in several places. Each divergence below is grounded in `reference/SpacetimeDB/` behavior but is an explicit v1 choice. Future specs or implementations should not "add parity" without revisiting the tradeoff documented here. (§3.1 — BSATN naming — is documented inline at §3.1 / §3.3 as the canonical disclaimer; not repeated here.)
+
+### 12.1 No offset index file; recovery performs a linear scan
+
+SpacetimeDB maintains a per-segment offset index (`tx_offset → byte_pos`) so replay can seek in O(log) instead of scanning. Shunter has no offset index. Story 6.3 `ReplayLog` skips records by decoding framing and discarding when `tx_id ≤ fromTxID`; cost is O(total records since log origin), not O(records after snapshot).
+
+Rationale: the recovery-time target in §10 (`< 5 s` for snapshot + 10k log records) is achievable without an index, and v1 prioritizes a single canonical replay path over a second indexed path that would have to be kept in sync. Revisit if recovery latency shows up as a bottleneck under long-history workloads with infrequent snapshots — in that case, an offset-index sidecar file (one per segment) is the cheapest fix.
+
+### 12.2 Single TX per record vs SpacetimeDB 1–65535-TX commits
+
+Shunter writes exactly one transaction per log record. SpacetimeDB's commit-record framing supports 1–65535 transactions per record (an `n` field that Shunter omits — see §2.3 "Why no `n`").
+
+Rationale: per-record framing overhead (18 bytes) is small relative to per-transaction payload size (typical: ≥256 B); batching only helps when payloads are tiny. v1 prioritizes format simplicity over a throughput optimization that requires a second decode path. Revisit if profiling shows fsync is amortized away and record framing is now the bottleneck.
+
+### 12.3 Replay strictness — any `ApplyChangeset` error is fatal
+
+Story 6.3 (`ReplayLog`) treats any `ApplyChangeset` error during replay as fatal. SPEC-002 §6.5 is symmetric for log-history conditions (gaps, overlaps, out-of-order). SpacetimeDB's `replay_insert` tolerates idempotent duplicates for system-meta rows.
+
+Rationale: fail-fast during recovery surfaces corrupt-log / schema-mismatch conditions immediately rather than masking them. Shunter has no system-meta tables that need duplicate-tolerance (system tables in v1 are deferred to SPEC-006 §3.3). The cost is that idempotent re-replay after a crash-during-replay will abort; paired with SPEC-001 §2.7 (`ApplyChangeset` is not idempotent) and SPEC-002's exactly-once replay guarantee, this is the intended shape.
+
+### 12.4 First TxID is 1, not 0
+
+The first committed transaction has `tx_id = 1`. `tx_id = 0` is reserved as the pre-commit sentinel returned by `DurableTxID()` before any fsync lands and surfaced through SPEC-005 `ReducerCallResult.TxID = 0` for failed-before-allocation cases (SPEC-005 §2.2 / §8.7). SpacetimeDB's `tx_offset` starts at 0.
+
+Rationale: keeping `0` as a "no transaction" sentinel makes uninitialized-reads loud throughout the system (executor dequeue, durability handle, wire protocol, fan-out metadata). Cost is one offset bit of address space, which is irrelevant at v1 scale.
+
+### 12.5 Single auto-increment sequence per table (implicit)
+
+§5.2 sequences section stores one `(table_id, next_id)` pair per table; Story 5.3 `Sequences map[TableID]uint64`; SPEC-001 Story 8.1/8.3 models `Table.SequenceValue() (uint64, bool)` as a single counter. SpacetimeDB's `st_sequence` system table supports multiple sequences per table (one per auto-increment column).
+
+Rationale: SPEC-006 §9 declares at most one `AutoIncrement` column per table in v1. Multi-sequence support requires schema changes to expose multiple counters per table and snapshot-format changes to serialize them. Both deferred. When v2 adds either, `(table_id, next_id)` becomes `(table_id, sequence_id, next_id)`.
+
+### 12.6 No segment compression / sealed-immutable marker
+
+Shunter has no segment compression and no sealed-immutable bit. Compaction (§7) is delete-only — segments fully covered by a snapshot are removed, never compressed. SpacetimeDB can mark sealed segments immutable and zstd-compress them.
+
+Rationale: v1 deferred snapshot compression (§13 OQ#5) for the same reason — disk is cheap, and the format-stability cost of adding compression before the uncompressed format is proven outweighs the I/O savings at v1 scale. When compression lands, sealed segments and snapshots can share the same compression layer.
+
+---
+
+## 13. Open Questions
 
 1. **Snapshot creation timing.** v1 permits synchronous snapshot creation. If production latency shows this is too expensive, v2 should introduce an async snapshot path with explicit copy-on-write/read-view rules.
 
@@ -650,7 +692,7 @@ Recovery applies replayed `Changeset` values to `CommittedState`. The snapshot w
 
 ---
 
-## 13. Verification
+## 14. Verification
 
 | Test | What it verifies |
 |---|---|
