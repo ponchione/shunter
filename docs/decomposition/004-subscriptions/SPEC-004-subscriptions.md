@@ -691,6 +691,9 @@ type TransactionUpdate struct {
 }
 
 // SubscriptionError is the client-facing evaluation-failure payload.
+// The wire projection (SPEC-005 §8.4) carries only `SubscriptionID`
+// and `Message`; `QueryHash` and `Predicate` are retained in the Go
+// value for server-side logging and are not sent to clients.
 type SubscriptionError struct {
     SubscriptionID SubscriptionID
     QueryHash      QueryHash
@@ -740,7 +743,7 @@ Both interfaces are produced by SPEC-006 `Build()` and are immutable for the eng
 
 If delta computation fails for a subscription (e.g., corrupted index, type mismatch):
 1. Log the error with the subscription's query hash and SQL/predicate representation.
-2. Send a `SubscriptionError` message to all clients subscribed to that query.
+2. Emit the error through the `FanOutSender.SendSubscriptionError` seam (§8.1) for each affected client. The protocol adapter (SPEC-005 §13) translates this into a wire-format `SubscriptionError` delivered via `ClientSender.Send`; the wire `request_id` is `0` for these spontaneous failures (see SPEC-005 §8.4 `request_id` semantics).
 3. Unregister the affected subscription(s) / query state without disconnecting unrelated subscriptions on the same connection.
 4. Do **not** abort the evaluation loop — other subscriptions are unaffected.
 

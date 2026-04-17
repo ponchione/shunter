@@ -381,6 +381,10 @@ error:           string        — diagnostic message; not machine-parseable
 
 On receiving this, the client must discard all cached rows for `subscription_id`. The `subscription_id` may be reused immediately.
 
+**Go↔wire mapping.** The subscription evaluator's internal `SubscriptionError` Go value (SPEC-004 §10.2) carries additional diagnostic fields (`QueryHash`, `Predicate`) that are not on the wire; the protocol adapter projects Go→wire by emitting `error = Message`. Only `subscription_id` and `error` round-trip.
+
+**`request_id = 0` semantics.** A `SubscriptionError` with `request_id = 0` is a spontaneous post-register failure (eval-time error, join-index resolution, etc.) that is not correlated with any pending `Subscribe` RPC. A `SubscriptionError` with `request_id != 0` MUST echo the `request_id` of the triggering `Subscribe`. Clients that choose `request_id = 0` on `Subscribe` accept that correlated registration failures and spontaneous failures are indistinguishable; recommend `request_id >= 1` for robust client-side correlation.
+
 ### 8.5 TransactionUpdate
 
 Sent after every committed transaction that affects at least one of this client's subscriptions.
