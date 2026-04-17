@@ -116,6 +116,27 @@ Objective
 - This lane edits `docs/decomposition/**`, not `TECH-DEBT.md`. Live `store/`, `commitlog/`, `executor/`, `subscription/`, `protocol/`, `schema/`, `types/`, `bsatn/` only touched in dedicated drift sessions (Session 11+).
 - `SPEC-AUDIT.md` is source of truth; this section is the index. Cite finding IDs (e.g. `SPEC-006 §1.1`) so the audit can be re-read for full context.
 
+### B.0 Operating rules
+
+Every Lane B session MUST honor these. They are not negotiable mid-session.
+
+- **Shell:** prefix every shell/git command with `rtk` per `RTK.md`. (Lane A §"Shell rule" applies to the whole file.)
+- **Clean-room:** do not open `reference/SpacetimeDB/` unless the session kickoff prompt explicitly allows it. Lane B is spec-vs-spec reconciliation, not clean-room research.
+- **Live code is off-limits.** `store/`, `commitlog/`, `executor/`, `subscription/`, `protocol/`, `schema/`, `types/`, `bsatn/` only change in Sessions 12+ drift batches. If a Lane B edit's spec contract outruns live code, pick one:
+  - **Soften the spec** to match live, OR
+  - **Leave the aspirational contract in the spec and log a Session 12+ drift item in `TECH-DEBT.md`.**
+
+  Precedent: Session 4.5 repair pass landed `TD-125` / `TD-126` / `TD-127` when three Cluster C spec claims had outrun `commitlog/` behavior. Session 6 required no new drift entries — live led the spec.
+- **Pick one lane per session.** If you are kicked off for Lane B, do not touch Lane A artifacts (`TECH-DEBT.md` items, `REMAINING.md`, live-code audits), and vice versa.
+- **Commits:**
+  - Commit at logical boundaries without re-asking.
+  - One commit per resolved finding / closed cluster / tracking-doc refresh — small, reviewable bundles; do not stack a whole session into one commit.
+  - Message style: `docs: close Lane B <cluster> — <summary>` for cluster closes; `docs: Lane B <cluster> — <finding summary>` for mid-cluster landings. HEREDOC body. Standard `Co-Authored-By: Claude Opus 4.7 (1M context)` trailer.
+  - Prefer `rtk git add <explicit paths>` over `rtk git add -A`.
+- **Dirty-state discipline:** if the tree has unrelated dirty state at session start, leave it alone inside the session; commit it as a separate follow-up commit right after your session lands. Never leave unrelated dirt across multiple sessions.
+- **Working-plans convention:** session plans live under `.hermes/plans/<UTC-timestamp>-<name>.md` and are deliberately untracked. Do not commit them. The `.hermes/plans/` directory is intentionally outside git; use it as a scratch pad for plan-writing-skill output.
+- **Option decisions are locked.** Prior-session resolutions (Clusters A–E) are recorded inline with each cluster's "Resolved:" note in §B.1. Do not revisit them in later sessions unless the audit surfaces a genuinely new contradiction — in which case open a new cluster letter per §B.5 procedure.
+
 ### B.1 Bleed-item clusters
 
 Bleed-items are findings that span ≥2 specs and share one fix. Resolve clusters first; per-spec residue afterward.
