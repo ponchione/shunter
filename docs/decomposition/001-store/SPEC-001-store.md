@@ -754,7 +754,51 @@ For snapshot/recovery coupling, the commit log may rely on the store exposing en
 
 ---
 
-## 12. Open Questions
+## 12. Divergences from SpacetimeDB
+
+Shunter's clean-room spec intentionally departs from SpacetimeDB in several places. Each entry below is grounded in `reference/SpacetimeDB/` behavior but is an explicit v1 choice. Future specs or implementations MUST NOT "add parity" without revisiting the tradeoff documented here.
+
+### 12.1 NaN rejected at construction vs total-ordering via `decorum::Total`
+
+SpacetimeDB admits NaN via a total-ordering wrapper (`decorum::Total<f32>` / `decorum::Total<f64>`), assigning it a fixed ordinal position so `AlgebraicValue` derives `Eq`/`Ord`/`Hash` uniformly. Shunter v1 rejects NaN at `NewFloat32` / `NewFloat64` (§2.1 + Story 1.1), returning `ErrInvalidFloat`.
+
+Rationale: v1 wants bit-by-bit determinism without importing a decorum-style wrapper. Legitimate NaN-producing payloads (sensor telemetry, ML outputs) must be sanitized at the boundary. Revisit if workloads demand stored NaN.
+
+### 12.2 No composite types; RowID is stable; rows stored decoded
+
+Shunter v1 supports only flat scalar + String + Bytes columns (§2.1). No `Sum` (tagged unions / `Option`-like Nullability), no `Array`, no nested `Product`. Rows are stored decoded as `ProductValue` in `map[RowID]ProductValue` (§3.2); `RowID` is a per-table `uint64` that is never reused within a process lifetime (§2.3).
+
+SpacetimeDB supports `Sum`, `Array`, and `Product` nesting, stores rows as BFLATN-packed pages with a content-addressed blob store for large var-len data, and reuses row pointers across delete/insert cycles (page+offset volatility).
+
+Rationale: the subscription evaluator needs fast predicate evaluation against decoded row values, and v1 targets in-memory workloads where RAM overhead of decoded rows is acceptable. A future schema layer adding `Option<T>` must revisit `Nullable`, `ValueKind`, and `ProductValue` simultaneously.
+
+### 12.3 `rowHashIndex` scoped to "no PK" vs SpacetimeDB "no unique index"
+
+Shunter's `rowHashIndex` (§3.3) is created only when no primary key exists. A table with a unique-but-not-primary index pays for both the unique-index lookup and a row-hash lookup on every insert. SpacetimeDB maintains its equivalent (`pointer_map`) iff no unique index of any kind exists.
+
+Rationale: the `rowHashIndex` condition in v1 is stated in terms of the primary key because the builder API (SPEC-006) makes primary-key presence the primary signal. Strictly redundant but not incorrect. A perf pass may tighten the condition to "no unique index of any kind" without a spec edit; flagged here so the tightening is deliberate.
+
+### 12.4 Multi-column primary key allowed
+
+`IndexSchema.Columns []int` with `Primary bool` (§3.1) permits any number of columns in a primary key. SpacetimeDB's `TableSchema.primary_key` is `Option<ColId>` — explicitly single-column.
+
+Rationale: v1 supports composite PKs because the subscription predicate layer (SPEC-004) already assumes compound-key equality is expressible; restricting the store to single-column PKs would force awkward synthetic-ID workarounds for natural composite keys (e.g., `(tenant_id, entity_id)`). SPEC-006 schema validation and SPEC-004 predicate-equality both honor the compound form.
+
+### 12.5 Replay constraint violations are fatal vs SpacetimeDB silent skip
+
+`ApplyChangeset` treats any constraint violation during recovery as fatal (§5.8 + Story 8.2). SpacetimeDB's `replay_insert` silently ignores duplicates for system-meta rows and is generally tolerant during replay.
+
+Rationale: fail-fast during recovery surfaces corrupt-log / schema-mismatch conditions immediately rather than masking them. Paired with §2.7 (ApplyChangeset is not idempotent) and SPEC-002's exactly-once replay guarantee, this is the intended shape. The cost is that idempotent re-replay after a crash-during-replay aborts rather than resumes.
+
+### 12.6 `Changeset` has no `truncated` / `ephemeral` / `tx_offset` flags
+
+Shunter's `Changeset` carries `{TxID, Tables}` only (§6.1). SpacetimeDB's `TxData` additionally carries `truncated: bool` (whole-table clear), `ephemeral: bool` (view-only table, skip durability), and `tx_offset: Option<u64>` (commitlog cursor).
+
+Rationale: v1 has no `TRUNCATE` reducer (truncation decomposes to per-row deletes), no ephemeral tables (all tables are durable), and the commitlog owns its own cursor bookkeeping (SPEC-002 — `tx_offset` is not part of the store↔evaluator contract). Revisit if SPEC-004 grows ephemeral subscription-only tables or SPEC-002 exposes a TRUNCATE fast-path.
+
+---
+
+## 13. Open Questions
 
 1. **In-TX index for large insert batches**: If a reducer inserts 10k rows and immediately queries them by secondary index, the linear-scan TxState becomes expensive. Add an opt-in TX-local index per table in v2 when profiling reveals the need.
 
@@ -766,7 +810,7 @@ For snapshot/recovery coupling, the commit log may rely on the store exposing en
 
 ---
 
-## 13. Verification
+## 14. Verification
 
 Each of the following must be testable independently of other subsystems.
 
