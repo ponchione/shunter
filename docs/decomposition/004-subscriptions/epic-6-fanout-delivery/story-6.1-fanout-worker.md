@@ -2,7 +2,7 @@
 
 **Epic:** [Epic 6 — Fan-Out & Delivery](EPIC.md)
 **Spec ref:** SPEC-004 §8.1, §8.2
-**Depends on:** Epic 5 (produces FanOutMessage), SPEC-005 (ClientSender / delivery contract)
+**Depends on:** Epic 5 (produces FanOutMessage), SPEC-005 (protocol delivery contract adapted into `FanOutSender`)
 **Blocks:** Stories 6.2, 6.3, 6.4
 
 ---
@@ -17,7 +17,7 @@ Separate goroutine that receives computed deltas and delivers them through the p
   ```go
   type FanOutWorker struct {
       inbox          chan FanOutMessage
-      sender         ClientSender
+      sender         FanOutSender
       confirmedReads map[ConnectionID]bool
       dropped        chan ConnectionID
   }
@@ -33,8 +33,9 @@ Separate goroutine that receives computed deltas and delivers them through the p
   }
   ```
 
-- `NewFanOutWorker(inboxSize int) *FanOutWorker`
-  - `inboxSize` default: 64 (§8.4)
+- `NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- ConnectionID) *FanOutWorker`
+  - caller owns inbox allocation; recommended default capacity remains 64 (§8.4)
+  - `dropped` is typically the manager-owned shared dropped-client channel
 
 - `Run(ctx context.Context)` — main loop:
   ```
@@ -62,7 +63,7 @@ Separate goroutine that receives computed deltas and delivers them through the p
 ## Design Notes
 
 - The inbox channel is the handoff point. The executor blocks only on channel send, not on delivery. If inbox is full, executor blocks — this is backpressure from fan-out to executor, separate from client backpressure.
-- `ClientSender`, `ReducerCallResult`, and outbound buffering are protocol-owned contracts from SPEC-005. This story uses them; it does not define protocol internals.
-- `confirmedReads` map is accessed only from the fan-out goroutine — no mutex needed.
-- `dropped` channel is read by the executor goroutine. Non-blocking reads via `DroppedClients()`.
+- `FanOutSender`, `ReducerCallResult`, and outbound buffering are protocol-owned contracts from SPEC-005. In the live implementation, `protocol.FanOutSenderAdapter` wraps the protocol `ClientSender` and exposes the three fan-out-facing methods SPEC-004 needs: `SendTransactionUpdate`, `SendReducerResult`, and `SendSubscriptionError`.
+- `confirmedReads` reads happen inside the fan-out loop, but exported mutators (`SetConfirmedReads`, `RemoveClient`) are called from runtime/tests outside that loop. Guard the map with a mutex or an equivalent ownership handoff; do not assume single-goroutine access for those mutators.
+- `dropped` channel is shared with the manager's evaluation-error path so the executor drains one channel after each post-commit step.
 - `TxDurable` is executor-supplied post-commit metadata backed by the durability subsystem. The fan-out worker consumes readiness; it does not depend directly on the exported SPEC-002 `DurabilityHandle` surface.

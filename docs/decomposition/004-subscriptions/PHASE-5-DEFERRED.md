@@ -24,24 +24,38 @@ Scope fixed in the 2026-04-14 follow-up session:
   with a note that it is not consulted by validation, only by eval/wire-side
   callers (§E)
 
-Everything below remains deferred.
+Everything below remains deferred except where explicitly marked fixed.
 
 ---
 
 ## Intentional cross-phase deferrals
 
-### 1. Epic 6 remainder waits on SPEC-005 `ClientSender`
+### 1. Epic 6 remainder — FIXED 2026-04-16
 
-Still deferred by execution order:
-- fan-out worker delivery loop
-- per-connection `TransactionUpdate` / reducer-result assembly
-- backpressure handling
-- confirmed-read durability gating
+The former Phase 8 deferral is now implemented and verified.
+
+Landed runtime pieces:
+- `FanOutWorker` delivery loop with protocol-backed `FanOutSender`
+- per-connection `TransactionUpdate` assembly with caller diversion into `ReducerCallResult`
+- disconnect-on-lag handling via `ErrSendBufferFull` / dropped-client signaling
+- confirmed-read durability gating via `PostCommitMeta.TxDurable`
 - protocol integration / wire encoding of `SubscriptionError`
+- executor follow-through for external-caller metadata only
+- commitlog readiness channels via `WaitUntilDurable(txID)`
 
-Dependency source:
-- `docs/EXECUTION-ORDER.md` (Phase 8)
-- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/EPIC.md`
+Validation run for the completion pass:
+- `rtk go test ./subscription/... ./protocol/... ./executor/... ./commitlog/...`
+- `rtk go test -race ./subscription/... ./protocol/... ./executor/...`
+- `rtk go vet ./subscription/... ./protocol/... ./executor/... ./commitlog/...`
+
+Primary files:
+- `subscription/fanout_worker.go`
+- `subscription/fanout.go`
+- `subscription/eval.go`
+- `executor/executor.go`
+- `commitlog/durability.go`
+- `protocol/fanout_adapter.go`
+- `protocol/send_reducer_result.go`
 
 ### 2. Story 5.3 memoized encoding remains a hook only
 
@@ -164,12 +178,9 @@ Open extensions (not story blockers):
 
 ---
 
-## Recommended next-order after 2026-04-14 session
+## Recommended next-order after the 2026-04-16 completion pass
 
-1. Complete Epic 3.5 allocation-discipline work (§C; only relevant if
-   Phase 6 or Phase 8 surfaces allocation pressure).
-2. Start Phase 6 — SPEC-003 E5 post-commit pipeline. Gate satisfied: Phase
-   4 durability worker, Phase 5 subscription manager/eval, and SPEC-001 E7
-   committed snapshots are all in place.
-3. Resume Epic 6 only after SPEC-005 `ClientSender` / backpressure contracts
-   land (Phase 7).
+1. Complete Epic 3.5 allocation-discipline work (§C) if profiling shows
+   subscription-core pressure on the hot path.
+2. Keep any future SPEC-004 work focused on doc/audit reconciliation rather
+   than fan-out runtime wiring; Epic 6 remainder is complete.

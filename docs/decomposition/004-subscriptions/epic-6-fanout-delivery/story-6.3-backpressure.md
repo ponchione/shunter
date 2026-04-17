@@ -15,8 +15,8 @@ Protocol-layer send remains non-blocking from the subscription subsystem's persp
 
 - Protocol send through SPEC-005 sender contract:
   ```go
-  err := sender.SendTransactionUpdate(connID, &txUpdate)
-  if errors.Is(err, ErrClientBufferFull) {
+  err := sender.SendTransactionUpdate(connID, txID, updates)
+  if errors.Is(err, ErrSendBufferFull) {
       markDropped(connID)
   } else if err != nil {
       return err
@@ -51,4 +51,4 @@ Protocol-layer send remains non-blocking from the subscription subsystem's persp
 - v2 optimization: drop updates + “resync required” flag on next successful send. Not implemented in v1.
 - The `dropped` channel has its own bound. If the executor is slow to drain, the fan-out worker logs a warning but does not block. In pathological cases, clients may be disconnected but their subscriptions not cleaned up until the executor catches up. This is safe — stale subscriptions just produce unused deltas until cleaned.
 - Two-phase cleanup avoids the fan-out goroutine needing write access to subscription manager state (§8.5).
-- SPEC-005 owns the actual outbound queue and the `ErrClientBufferFull` signal. This story owns the subscription-side response to that signal.
+- SPEC-005 owns the actual outbound queue and emits protocol-layer errors such as `ErrClientBufferFull` / `ErrConnNotFound`; the SPEC-004 boundary maps those to `ErrSendBufferFull` / `ErrSendConnGone` so the subscription worker can react without importing protocol.

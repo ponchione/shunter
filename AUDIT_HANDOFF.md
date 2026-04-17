@@ -1,7 +1,7 @@
 # Audit Handoff
 
 > **Two lanes coexist in this file.**
-> **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E4`.
+> **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E6 remainder`.
 > **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 5 (Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
@@ -10,9 +10,9 @@
 Objective
 - Continue the code-vs-spec audit from `docs/EXECUTION-ORDER.md`.
 - Keep appending grounded findings to root `TECH-DEBT.md`.
-- The audit trail is now advanced through `SPEC-004 E3`.
+- The audit trail is now advanced through `SPEC-004 E5`.
 - `REMAINING.md` currently says all tracked implementation slices are complete; keep this lane audit-only unless a tiny doc correction is required.
-- Latest newly logged audit findings are now `TD-116` and `TD-117` from the `SPEC-004 E3` pass.
+- Latest newly logged audit findings are now `TD-123` and `TD-124` from the `SPEC-004 E5` pass.
 
 Required reading order
 1. `AGENTS.md`
@@ -57,25 +57,27 @@ Already audited in sequence:
 - `SPEC-004 E1`
 - `SPEC-004 E2`
 - `SPEC-004 E3`
+- `SPEC-004 E4`
+- `SPEC-004 E6.1-enabling contract slice`
+- `SPEC-004 E5`
 
 Next execution-order slice
-- `SPEC-004 E4: Subscription Manager`
+- `SPEC-004 E6 remainder: Fan-Out & Delivery`
 
 Recommended next reading
 - `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md`
-- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/EPIC.md`
-- all Epic 4 story docs
+- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/EPIC.md`
+- all remaining Epic 6 story docs after 6.1
 - live files likely to matter:
-  - `subscription/manager.go`
-  - `subscription/register.go`
-  - `subscription/unregister.go`
-  - `subscription/query_state.go`
-  - `subscription/manager_test.go`
-  - other manager/query-registry tests under `subscription/*_test.go`
+  - `subscription/fanout_worker.go`
+  - `subscription/fanout_worker_test.go`
+  - `subscription/fanout.go`
+  - `subscription/eval.go`
+  - any delivery/error/backpressure-related tests under `subscription/*_test.go`
 
 Newest findings added this pass
-- `TD-116`: Story 3.5 allocation-discipline contract is only partially implemented
-- `TD-117`: Epic 3 story docs are stale on the live delta-helper signatures
+- `TD-123`: Story 5.3 memoized encoding is still placeholder-only; no real encode-once reuse path exists
+- `TD-124`: Story 5.2 still documents a standalone `CollectCandidates(...)` helper the package does not expose
 
 Important open themes to keep in mind
 - Passing tests mean operational health only, not spec completeness.
@@ -100,7 +102,7 @@ Useful verification commands already used
 - earlier focused passes recorded in `TECH-DEBT.md`
 
 Expected deliverable for next agent
-- Audit `SPEC-004 E4`
+- Audit the remaining `SPEC-004 E6` fan-out/delivery slice
 - append any new grounded debt items to `TECH-DEBT.md`
 - update the phase plan/note block
 - report the next slice after that

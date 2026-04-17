@@ -40,7 +40,9 @@ Current planned audit sequence follows `docs/EXECUTION-ORDER.md` Phase 1 foundat
 28. `SPEC-004 E2` Pruning Indexes — audited
 29. `SPEC-004 E3` DeltaView & Delta Computation — audited
 30. `SPEC-004 E4` Subscription Manager — audited
-31. `SPEC-004 E6.1-enabling contract slice` — next audit slice
+31. `SPEC-004 E6.1-enabling contract slice` — audited
+32. `SPEC-004 E5` Evaluation Loop — audited
+33. `SPEC-004 E6 remainder` — next audit slice
 
 Audit notes:
 - `SPEC-006 E2` (`schema/tag.go`, `schema/tag_test.go`) appears operationally aligned with the tag-parser stories. No new debt logged from that slice at this time.
@@ -72,6 +74,8 @@ Audit notes:
 - `SPEC-004 E2` pruning indexes appear operationally aligned (`subscription/value_index.go`, `join_edge_index.go`, `table_index.go`, `placement.go`, related tests). Tier 1/2/3 structures, placement, cleanup, and candidate-union behavior are present; I did not log a new debt item from this slice.
 - `SPEC-004 E3` delta computation is mostly present (`subscription/delta_view.go`, `delta_single.go`, `delta_join.go`, `delta_dedup.go`, related tests), but one real implementation gap remains and one story-surface doc drift is logged below: Story 3.5's allocation-discipline contract is only partially implemented, and Story 3.2/3.3 helper signatures are stale relative to the live API.
 - `SPEC-004 E4` subscription-manager behavior is operationally present (`subscription/manager.go`, `query_state.go`, `register.go`, `unregister.go`, `disconnect.go`, related tests), but the decomposition/spec docs are now stale in three places: Story 4.1 still models subscriber bookkeeping as one-subscription-per-connection, SPEC-004 §4.1 omits the `ClientIdentity` required for parameterized query hashes, and Story 4.5 / SPEC-004 §10.1 still publish the pre-`PostCommitMeta` `EvalAndBroadcast` signature.
+- `SPEC-004 E6.1-enabling contract slice` is operationally present (`subscription/fanout.go`, `fanout_worker.go`, related tests), but the live narrowed contract has moved past Story 6.1 / SPEC-004 §8.1 in two concrete doc-drift areas: the documented `FanOutWorker` constructor/ownership surface no longer matches the code, and the documented `FanOutMessage` shape omits live fields now required by delivery/tests (`TxID`, `Errors`).
+- `SPEC-004 E5` evaluation-loop behavior is mostly present (`subscription/eval.go`, `eval_test.go`, `property_test.go`, `bench_test.go`), but one real implementation gap and one helper-surface doc drift remain: Story 5.3's memoized-encoding contract is still placeholder-only, and Story 5.2 still documents a standalone `CollectCandidates(...)` helper that the package does not expose.
 - Verification runs completed during audit:
   - `rtk go test ./schema`
   - `rtk go test ./schema ./executor`
@@ -178,6 +182,328 @@ Current observed behavior:
 
 Recommended resolution:
 - Update Stories 3.2 and 3.3 to describe the current helper signatures and `JoinFragments`/`CommittedIndexSeek` naming.
+
+---
+
+### TD-118: SPEC-004 E4 Story 4.1 still documents subscriber/query-registry shapes that cannot represent the live multi-subscription model
+
+Status: doc-drift
+Severity: medium
+First found: SPEC-004 Epic 4 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5d (`SPEC-004 E4: Subscription Manager`)
+
+Summary:
+- Story 4.1 still documents `queryState.subscribers map[ConnectionID]SubscriptionID` and `queryRegistry.bySub map[SubscriptionID]QueryHash`.
+- Those shapes cannot represent two independent subscriptions from the same connection to the same query hash, and they also cannot distinguish the same numeric `SubscriptionID` reused on different connections.
+- Live code instead keys subscribers per connection and per subscription ID, and keys the reverse lookup by `(connID, subID)`.
+
+Why this matters:
+- This is story-surface drift, not a runtime bug.
+- The live manager behavior is coherent and covered by tests, but Story 4.1 still describes a narrower state model than the code actually exposes.
+- Future implementation or audit work would incorrectly conclude that same-connection duplicate subscriptions are unsupported even though they are explicitly tested today.
+
+Related code:
+- `subscription/query_state.go:7-29`
+  - live `queryState.subscribers` is `map[ConnectionID]map[SubscriptionID]struct{}` and `queryRegistry.bySub` is keyed by `subscriptionRef{connID, subID}`
+- `subscription/query_state.go:59-77`
+  - `addSubscriber(...)` records multiple subscription IDs per connection and increments `refCount` per subscription
+- `subscription/query_state.go:83-117`
+  - `removeSubscriber(...)` removes by `(connID, subID)` and only drops the per-connection entry when its subscription set becomes empty
+- `subscription/query_state_test.go:35-52`
+  - same connection can hold multiple subscription IDs for one query hash
+- `subscription/manager_test.go:123-136`
+  - same numeric `SubscriptionID` can be reused across different connections
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.1-query-state.md:16-33`
+  - still documents single-`SubscriptionID` subscriber entries and `bySub map[SubscriptionID]QueryHash`
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.1-query-state.md:51-58`
+  - acceptance criteria only model one subscription per connection
+
+Current observed behavior:
+- Live package and repo verification pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+
+Recommended resolution:
+- Update Story 4.1 so `queryState.subscribers` and `queryRegistry.bySub` match the live `(connID, subID)`-aware shapes, and expand the acceptance criteria to cover same-connection multi-subscription tracking and same-`SubscriptionID` reuse across different connections.
+
+### TD-119: SPEC-004 §4.1 registration docs omit the client identity that the live query-hash path requires for parameterized subscriptions
+
+Status: doc-drift
+Severity: medium
+First found: SPEC-004 Epic 4 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5d (`SPEC-004 E4: Subscription Manager`)
+
+Summary:
+- SPEC-004 §3.4 says parameterized predicates hash the predicate structure plus client identity.
+- But the canonical `SubscriptionRegisterRequest` shown in SPEC-004 §4.1 exposes only `ConnID`, `SubscriptionID`, `Predicate`, and `RequestID`.
+- Live code adds `ClientIdentity *types.Identity` to `SubscriptionRegisterRequest`, and registration passes that field into `ComputeQueryHash(...)`.
+
+Why this matters:
+- This is a spec-surface drift item, not an implementation bug.
+- Without a client-identity field on the registration request, the documented Epic 4 registration flow cannot actually produce the per-client query hashes that SPEC-004 §3.4 promises.
+- The live implementation and tests already rely on the stronger request shape, so the docs are now the stale surface.
+
+Related code:
+- `subscription/manager.go:11-17`
+  - live `SubscriptionRegisterRequest` includes `ClientIdentity *types.Identity`
+- `subscription/register.go:19`
+  - `Register(...)` computes the hash with `ComputeQueryHash(req.Predicate, req.ClientIdentity)`
+- `subscription/manager_test.go:85-120`
+  - distinct `ClientIdentity` values produce distinct registered query hashes
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:99-104`
+  - §3.4 says parameterized predicates include client identity in the query hash
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:113-120`
+  - §4.1 request struct omits any client-identity field
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.2-register.md:18-29`
+  - registration steps depend on the canonical request type but do not mention carrying client identity into hash computation
+
+Current observed behavior:
+- Live package and repo verification pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+
+Recommended resolution:
+- Update SPEC-004 §4.1 and Story 4.2 so the canonical registration request includes optional client identity, and explicitly tie that field to the parameterized-query-hash path described in §3.4.
+
+### TD-120: SPEC-004 E4 still documents the pre-`PostCommitMeta` `SubscriptionManager.EvalAndBroadcast` interface
+
+Status: doc-drift
+Severity: medium
+First found: SPEC-004 Epic 4 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5d (`SPEC-004 E4: Subscription Manager`)
+
+Summary:
+- Story 4.5 and SPEC-004 §10.1 still publish `EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView)`.
+- Live `SubscriptionManager` now requires `EvalAndBroadcast(txID, changeset, view, meta PostCommitMeta)`, and the concrete manager uses that metadata when assembling `FanOutMessage`.
+- The documented Epic 4 interface therefore no longer matches the executor-facing boundary implemented in `subscription/manager.go` and `subscription/eval.go`.
+
+Why this matters:
+- This is interface-surface drift, not a package-runtime failure.
+- The live post-commit path already depends on metadata such as durability state and caller result/context, so consumers written against the published E4 interface would not match the real boundary.
+- Keeping Story 4.5 stale makes later SPEC-004 E5/E6 audit work harder because the documented seam is now one generation behind the code.
+
+Related code:
+- `subscription/manager.go:47-55`
+  - live `SubscriptionManager` interface includes `EvalAndBroadcast(..., meta PostCommitMeta)`
+- `subscription/eval.go:25-38`
+  - `EvalAndBroadcast(...)` consumes `meta.TxDurable`, `meta.CallerConnID`, and `meta.CallerResult` when constructing `FanOutMessage`
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:616-621`
+  - §10.1 still documents the older three-argument `EvalAndBroadcast` signature
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.5-manager-interface.md:16-24`
+  - Story 4.5 repeats the older interface shape
+
+Current observed behavior:
+- Live package and repo verification pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+
+Recommended resolution:
+- Update Story 4.5 and SPEC-004 §10.1 so the manager interface matches the live `PostCommitMeta`-carrying contract, or explicitly defer that richer executor/subscription seam if the project intends to keep Epic 4 narrower.
+
+---
+
+### TD-121: SPEC-004 E6.1 story docs still publish a `FanOutWorker` constructor/API surface that no longer matches the live narrowed contract
+
+Status: doc-drift
+Severity: medium
+First found: SPEC-004 E6.1-enabling contract audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5e (`SPEC-004 E6.1-enabling contract slice`)
+
+Summary:
+- Story 6.1 still documents `NewFanOutWorker(inboxSize int) *FanOutWorker`, a worker-owned `dropped chan ConnectionID`, and a `DroppedClients() <-chan ConnectionID` method.
+- Live code split ownership differently: the manager owns the dropped-client channel, and `NewFanOutWorker` requires the inbox, sender, and dropped-channel sink to be injected explicitly.
+- The documented Story 6.1 constructor/method surface therefore does not compile against the current package API.
+
+Why this matters:
+- This is a public API/story-surface drift item, not a runtime correctness bug.
+- The execution-order doc explicitly narrowed this stop to an E6.1-enabling contract slice, but Story 6.1 still reads like the older standalone worker-owns-everything design.
+- Future work following the current story literally would build against the wrong constructor and channel-ownership model.
+
+Related code:
+- `subscription/fanout_worker.go:32-49`
+  - live `FanOutWorker` stores injected `<-chan FanOutMessage`, `FanOutSender`, and `chan<- ConnectionID`; it does not own an internally created dropped channel
+- `subscription/fanout_worker.go:43-49`
+  - live constructor is `NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID)`
+- `subscription/manager.go:102-109`
+  - manager owns the dropped-client channel and exposes read/send ends via `DroppedClients()` / `DroppedChanSend()`
+- `subscription/fanout_worker_test.go:698-707`
+  - acceptance-style wiring uses `mgr.DroppedChanSend()` when constructing the worker
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md:16-24`
+  - still documents the older struct shape with `dropped chan ConnectionID`
+- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md:36-50`
+  - still documents `NewFanOutWorker(inboxSize int)` and a worker `DroppedClients()` method
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:571-574`
+  - §8.5 says the dropped-client channel is obtained from `SubscriptionManager.DroppedClients()` rather than from the worker itself
+
+Current observed behavior:
+- Focused compile-only repro against the Story 6.1 constructor/method surface failed:
+  - `rtk go test ./.tmp_spec004_e61_api`
+  - observed errors:
+    - `not enough arguments in call to subscription.NewFanOutWorker`
+    - `w.DroppedClients undefined (type *subscription.FanOutWorker has no field or method DroppedClients)`
+- Live package and repo verification pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+
+Recommended resolution:
+- Update Story 6.1 so constructor and dropped-channel ownership match the live injected-worker design and the execution-order's narrowed E6.1 contract slice.
+
+### TD-122: SPEC-004 §8.1 / Story 6.1 still document an older `FanOutMessage` shape that omits live `TxID` and `Errors` fields
+
+Status: doc-drift
+Severity: medium
+First found: SPEC-004 E6.1-enabling contract audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5e (`SPEC-004 E6.1-enabling contract slice`)
+
+Summary:
+- SPEC-004 §8.1 and Story 6.1 still document `FanOutMessage{TxDurable, Fanout, CallerConnID, CallerResult}`.
+- Live `subscription.FanOutMessage` also carries `TxID` and `Errors map[ConnectionID][]SubscriptionError`.
+- The worker and tests actively use those fields: `TxID` is passed into `SendTransactionUpdate(...)`, and `Errors` are delivered before updates.
+
+Why this matters:
+- This is contract-surface drift, not a runtime failure.
+- Story 5.1 / E6.1 are supposed to agree on the minimal handoff seam between evaluation and fan-out, but the docs currently omit fields already required by the real delivery path.
+- The missing `TxID` field especially means the documented handoff cannot describe how standalone `TransactionUpdate` messages are assembled in live code.
+
+Related code:
+- `subscription/fanout.go:12-35`
+  - live `FanOutMessage` includes `TxID`, `TxDurable`, `Fanout`, `Errors`, `CallerConnID`, and `CallerResult`
+- `subscription/eval.go:31-38`
+  - `EvalAndBroadcast(...)` populates `TxID`, `TxDurable`, `Fanout`, `Errors`, `CallerConnID`, and `CallerResult`
+- `subscription/fanout_worker.go:107-144`
+  - worker delivers `Errors` first, uses `msg.TxID` for `SendTransactionUpdate(...)`, and uses caller metadata for reducer-result diversion
+- `subscription/fanout_worker_test.go:581-675`
+  - tests cover `SubscriptionError` delivery and error-before-update ordering
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:510-525`
+  - §8.1 still omits `TxID` and `Errors` from `FanOutMessage`
+- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md:26-34`
+  - Story 6.1 repeats the older four-field shape
+- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.1-eval-transaction.md:20-33`
+  - Story 5.1 still summarizes step 5 as `FanOutMessage{TxDurable, Fanout}`
+
+Current observed behavior:
+- Live package and repo verification pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+- Focused worker tests exercise the extra fields:
+  - `rtk go test ./subscription`
+
+Recommended resolution:
+- Update SPEC-004 §8.1, Story 6.1, and Story 5.1 so the documented fan-out handoff contract includes `TxID` and per-connection `Errors`, and describe the current error-before-update delivery ordering.
+
+---
+
+### TD-123: SPEC-004 E5 Story 5.3 memoized-encoding contract is still only a placeholder cache, not a real encoding-reuse path
+
+Status: open
+Severity: medium
+First found: SPEC-004 Epic 5 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5f (`SPEC-004 E5: Evaluation Loop`)
+
+Summary:
+- Story 5.3 requires real per-query memoization so shared-query recipients encode each wire format once per evaluation cycle and reuse the encoded bytes across clients.
+- Live code defines `memoizedResult`, allocates a `memo map[QueryHash]*memoizedResult`, and stores an empty cache entry per affected query hash.
+- But nothing ever writes encoded bytes into that cache, nothing ever reads from it, and no tests exercise any actual "encode once, share many" behavior.
+
+Why this matters:
+- This is a real implementation gap, not just story drift.
+- Story 5.3 is the mechanism behind SPEC-004 §7.4's O(1) per-query encoding claim when many clients share a query.
+- Today the evaluation loop only preserves a placeholder seam; it does not implement the promised reuse behavior.
+
+Related code:
+- `subscription/eval.go:11-18`
+  - `memoizedResult` exists only as a two-field struct comment/placeholder
+- `subscription/eval.go:51-54`
+  - evaluation allocates `memo := make(map[QueryHash]*memoizedResult)` and immediately discards it via `_ = memo`
+- `subscription/eval.go:69`
+  - each candidate query gets `memo[hash] = &memoizedResult{}` but the cache entry is never populated or consumed
+- no separate `memoized.go` or protocol-facing encoding reuse helper exists under `subscription/`
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:477-486`
+  - §7.4 says shared-query deltas are computed once and encoded once per wire format
+- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.3-memoized-encoding.md:16-39`
+  - Story 5.3 requires lazy binary/JSON encoding, per-eval-cycle cache lifecycle, and shared-byte reuse across clients
+- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/EPIC.md:17-18`
+  - Epic 5 still lists Story 5.3 as part of the evaluation-loop deliverables
+
+Current observed behavior:
+- Focused evaluation/property tests pass:
+  - `rtk go test ./subscription -run 'TestIVMInvariantPropertySingleTable|TestPruningSafetyProperty|TestRegistrationSymmetryProperty'`
+- Full package and repo verification pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+- No focused tests currently verify Story 5.3's required encode-once reuse behavior.
+
+Recommended resolution options:
+1. Preferred code + test fix:
+   - implement a real per-query memoization layer at the evaluation/fan-out seam so the first client of a format populates cached bytes and later clients reuse them
+   - add focused tests proving two same-query clients trigger one binary encoding, mixed-format clients trigger one encoding per format, and cache state does not leak across transactions
+2. Alternative doc fix:
+   - if protocol-owned encoding reuse is intentionally deferred beyond SPEC-004 E5, narrow Story 5.3 / §7.4 so this slice no longer claims the behavior is implemented here
+   - that would be a real narrowing of the current performance contract
+
+Suggested follow-up tests:
+- two same-query binary recipients cause exactly one binary encode operation
+- one binary plus one JSON recipient cause exactly one encode per format
+- a second transaction with different rows does not reuse stale cached bytes from the prior transaction
+
+### TD-124: SPEC-004 E5 Story 5.2 still documents a standalone `CollectCandidates(...)` helper that the package does not expose
+
+Status: doc-drift
+Severity: low
+First found: SPEC-004 Epic 5 audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5f (`SPEC-004 E5: Evaluation Loop`)
+
+Summary:
+- Story 5.2 documents a package-level `CollectCandidates(indexes *PruningIndexes, changeset *Changeset, committed CommittedReadView) map[QueryHash]struct{}` helper.
+- Live code implements the whole-changeset candidate walk as the unexported method `(*Manager).collectCandidates(...)` inside `subscription/eval.go`.
+- The behavior is present, but the documented helper/API surface is not.
+
+Why this matters:
+- This is helper-surface drift, not a runtime correctness bug.
+- The live implementation still performs batched Tier 1 lookup, Tier 2 join-edge probing, and Tier 3 fallback unioning, and the evaluation loop uses that behavior successfully.
+- But anyone following Story 5.2 literally would expect a reusable package-level helper that does not currently compile.
+
+Related code:
+- `subscription/eval.go:158-230`
+  - live whole-changeset candidate collection is `func (m *Manager) collectCandidates(...) map[QueryHash]struct{}`
+- `subscription/eval.go:167-188`
+  - batched Tier 1 distinct-value collection is implemented
+- `subscription/eval.go:190-223`
+  - Tier 2 join-edge probing against committed state is implemented
+- `subscription/eval.go:225-230`
+  - Tier 3 fallback union is implemented
+- `subscription/bench_test.go:204-224`
+  - benchmarks call the private `mgr.collectCandidates(...)` helper directly from package tests
+
+Related spec / decomposition docs:
+- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.2-candidate-collection.md:16-20`
+  - still documents exported/package-level `CollectCandidates(...)` plus the lower-level per-table helper
+- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.2-candidate-collection.md:47-58`
+  - acceptance criteria are written against the helper behavior rather than the private manager method
+
+Current observed behavior:
+- Compile-only repro against the documented helper surface failed:
+  - `rtk go test ./.tmp_spec004_e5_candidates_api`
+  - observed error:
+    - `undefined: subscription.CollectCandidates`
+- Live package and repo verification pass:
+  - `rtk go test ./subscription`
+  - `rtk go test ./...`
+
+Recommended resolution:
+- Either expose the documented `CollectCandidates(...)` helper, or update Story 5.2 so it describes the current manager-owned candidate-collection entrypoint instead of a nonexistent package-level API.
 
 ---
 

@@ -500,11 +500,21 @@ type FanOutWorker struct {
     // Receives computed deltas from the executor.
     inbox chan FanOutMessage
 
-    // Protocol-owned sender used to enqueue outbound messages.
-    sender ClientSender
+    // Narrow fan-out delivery seam backed by the protocol layer.
+    // A protocol adapter may wrap SPEC-005's ClientSender to satisfy this.
+    sender FanOutSender
 
     // Per-connection delivery policy needed by the fan-out worker.
     confirmedReads map[ConnectionID]bool
+}
+
+// FanOutSender is the subscription-side delivery contract.
+// SPEC-005 owns concrete websocket/outbound-buffer behavior; SPEC-004
+// consumes that behavior through this narrow interface.
+type FanOutSender interface {
+    SendTransactionUpdate(connID ConnectionID, txID TxID, updates []SubscriptionUpdate) error
+    SendReducerResult(connID ConnectionID, result *ReducerCallResult) error
+    SendSubscriptionError(connID ConnectionID, subID SubscriptionID, message string) error
 }
 
 type FanOutMessage struct {
@@ -516,6 +526,10 @@ type FanOutMessage struct {
 
     // Fanout contains per-connection subscription updates for this commit.
     Fanout CommitFanout
+
+    // Errors contains per-connection subscription-evaluation failures that
+    // must be delivered before normal updates for the same batch.
+    Errors map[ConnectionID][]SubscriptionError
 
     // Optional caller metadata for reducer-originated commits. When present, the
     // caller's per-connection update is routed into ReducerCallResult instead of
@@ -529,6 +543,7 @@ type FanOutMessage struct {
 
 ```
 For each FanOutMessage received:
+  0. Deliver any queued SubscriptionError entries in msg.Errors.
   1. Wait for TxDurable (if confirmed reads required by any client).
   2. Read the pre-grouped CommitFanout entries keyed by ConnectionID.
      A connection may have multiple subscriptions affected by one transaction.
@@ -536,7 +551,7 @@ For each FanOutMessage received:
      Build a TransactionUpdate message containing `Updates []SubscriptionUpdate`
      for that connection only. Preserve one update entry per affected subscription;
      do not merge entries across distinct SubscriptionIDs.
-     Send via the protocol layer (SPEC-005).
+     Send via the protocol layer.
   4. Special case: if this commit came from `CallReducer`, the caller connection's
      update slice is routed into `ReducerCallResult.transaction_update` instead of
      also receiving a standalone `TransactionUpdate` for the same `tx_id`.
@@ -569,8 +584,8 @@ Per-connection packaging:
 ### 8.5 Dropped Client Cleanup
 
 When a client is disconnected (network failure, lag disconnect, or explicit close):
-1. The fan-out goroutine marks the client as **dropped** and signals the dropped `ConnectionID` on the channel returned by `SubscriptionManager.DroppedClients()`.
-2. The fan-out goroutine signals dropped client IDs on the channel returned by `DroppedClients()`. The executor drains this channel after each post-commit pipeline step.
+1. The fan-out worker marks the client as dropped and signals the `ConnectionID` on the shared channel returned by `SubscriptionManager.DroppedClients()`.
+2. The manager's evaluation-error path may write to the same channel; the executor still drains only one channel after each post-commit pipeline step.
 3. This two-phase approach avoids the fan-out goroutine needing write access to the subscription manager.
 
 ---
@@ -619,8 +634,17 @@ type SubscriptionManager interface {
     Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)
     Unregister(connID ConnectionID, subscriptionID SubscriptionID) error
     DisconnectClient(connID ConnectionID) error
-    EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView)
+    EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)
     DroppedClients() <-chan ConnectionID   // non-blocking; executor drains after each commit
+}
+
+// PostCommitMeta carries executor-owned delivery metadata into the
+// subscription fan-out seam. Zero value means ordinary non-caller,
+// fast-read delivery.
+type PostCommitMeta struct {
+    TxDurable    <-chan TxID
+    CallerConnID *ConnectionID
+    CallerResult *ReducerCallResult
 }
 
 // Changeset and TableChangeset are defined in SPEC-001 §6.1.
@@ -656,10 +680,29 @@ type TransactionUpdate struct {
     TxID    TxID
     Updates []SubscriptionUpdate  // one entry per affected subscription
 }
+
+// SubscriptionError is the client-facing evaluation-failure payload.
+type SubscriptionError struct {
+    SubscriptionID SubscriptionID
+    QueryHash      QueryHash
+    Predicate      string
+    Message        string
+}
+
+// ReducerCallResult is forward-declared here to document the caller-diversion
+// seam. SPEC-005 §8.7 owns the concrete wire shape.
+type ReducerCallResult struct {
+    RequestID         uint32
+    Status            uint8
+    TxID              TxID
+    Error             string
+    Energy            uint64
+    TransactionUpdate []SubscriptionUpdate
+}
 ```
 
 Encoding of `[]ProductValue` into the wire `RowList` format and actual enqueueing to per-client outbound buffers happen in the protocol layer (SPEC-005 §3.4 / delivery contract), not in the evaluator.
-The fan-out worker talks to the protocol layer through its sender/delivery contract (`ClientSender` in SPEC-005 terminology); it does not manipulate websocket connection internals directly.
+The fan-out worker talks to the protocol layer through the narrow `FanOutSender` seam described in §8.1; protocol may satisfy that seam via an adapter over its broader `ClientSender` surface.
 
 ### 10.3 From In-Memory Store (SPEC-001)
 
