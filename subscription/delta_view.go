@@ -38,15 +38,8 @@ func NewDeltaView(
 	changeset *store.Changeset,
 	activeColumns map[TableID][]ColID,
 ) *DeltaView {
-	dv := &DeltaView{
-		committed: committed,
-		inserts:   make(map[TableID][]types.ProductValue),
-		deletes:   make(map[TableID][]types.ProductValue),
-		deltaIdx: DeltaIndexes{
-			insertIdx: make(map[TableID]map[ColID]map[string][]int),
-			deleteIdx: make(map[TableID]map[ColID]map[string][]int),
-		},
-	}
+	dv := acquireDeltaView()
+	dv.committed = committed
 	if changeset == nil {
 		return dv
 	}
@@ -55,13 +48,13 @@ func NewDeltaView(
 			continue
 		}
 		if len(tc.Inserts) > 0 {
-			ins := make([]types.ProductValue, len(tc.Inserts))
-			copy(ins, tc.Inserts)
+			ins := acquireProductValueSlice(len(tc.Inserts))
+			ins = append(ins, tc.Inserts...)
 			dv.inserts[tid] = ins
 		}
 		if len(tc.Deletes) > 0 {
-			del := make([]types.ProductValue, len(tc.Deletes))
-			copy(del, tc.Deletes)
+			del := acquireProductValueSlice(len(tc.Deletes))
+			del = append(del, tc.Deletes...)
 			dv.deletes[tid] = del
 		}
 	}
@@ -71,11 +64,20 @@ func NewDeltaView(
 	return dv
 }
 
+// Release returns the DeltaView's scratch allocations to the internal pools.
+// The DeltaView and any slices returned from it must not be used afterwards.
+func (dv *DeltaView) Release() {
+	if dv == nil {
+		return
+	}
+	releaseDeltaView(dv)
+}
+
 func (dv *DeltaView) buildDeltaIndex(table TableID, cols []ColID) {
 	if ins := dv.inserts[table]; len(ins) > 0 {
-		byCol := make(map[ColID]map[string][]int, len(cols))
+		byCol := acquireTableDeltaIndex()
 		for _, col := range cols {
-			byVal := make(map[string][]int)
+			byVal := acquireValuePositionIndex()
 			for i, row := range ins {
 				if int(col) >= len(row) {
 					continue
@@ -88,9 +90,9 @@ func (dv *DeltaView) buildDeltaIndex(table TableID, cols []ColID) {
 		dv.deltaIdx.insertIdx[table] = byCol
 	}
 	if del := dv.deletes[table]; len(del) > 0 {
-		byCol := make(map[ColID]map[string][]int, len(cols))
+		byCol := acquireTableDeltaIndex()
 		for _, col := range cols {
-			byVal := make(map[string][]int)
+			byVal := acquireValuePositionIndex()
 			for i, row := range del {
 				if int(col) >= len(row) {
 					continue

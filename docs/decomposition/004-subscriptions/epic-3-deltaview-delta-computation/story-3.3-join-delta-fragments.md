@@ -13,9 +13,12 @@ Incremental view maintenance for two-table join subscriptions. Expands `(T1 + dT
 
 ## Deliverables
 
-- `EvalJoinDeltaFragments(dv *DeltaView, join *Join) (insertFragments, deleteFragments [][]ProductValue)`
-  - Returns 4 insert fragment result sets and 4 delete fragment result sets
-  - Each fragment is a `[]ProductValue` of joined rows
+- `type JoinFragments struct { Inserts [4][]ProductValue; Deletes [4][]ProductValue }`
+  - fixed 8-fragment output in I1..I4 / D1..D4 order
+
+- `EvalJoinDeltaFragments(dv *DeltaView, join *Join, resolver IndexResolver) JoinFragments`
+  - returns all 8 fragment result sets in one named struct rather than two parallel slices
+  - `resolver` supplies committed-side join-column `IndexID` values for the committed probes used by the T' fragments
 
 - Fragment definitions (per §6.2):
   ```
@@ -40,8 +43,8 @@ Incremental view maintenance for two-table join subscriptions. Expands `(T1 + dT
   5. Produce joined output row
 
 - Use `DeltaView.DeltaIndexScan` for delta-side lookups
-- Use `DeltaView.CommittedIndexScan` for committed-side lookups
-- For fragments referencing T' (post-transaction state): use committed scan, but results include delta rows (the DeltaView handles this)
+- Use `DeltaView.CommittedIndexSeek` plus `CommittedView().GetRow(...)` for committed-side lookups
+- For fragments referencing T' (post-transaction state): use committed seek/materialization on the post-commit view already attached to `DeltaView`
 
 ## Acceptance Criteria
 

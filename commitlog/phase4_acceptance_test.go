@@ -731,6 +731,21 @@ func TestDurabilityWorkerResumePlanAppendForbiddenFailsClosed(t *testing.T) {
 	}
 }
 
+func TestDurabilityWorkerResumePlanAppendInPlaceCorruptFirstRecordFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := makeScanTestSegment(t, dir, 1, 1)
+	corruptScanTestRecordCRCByte(t, path, 0, 0)
+
+	_, err := NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{SegmentStartTx: 1, NextTxID: 2, AppendMode: AppendInPlace}, DefaultCommitLogOptions())
+	if err == nil {
+		t.Fatal("expected append-in-place reopen on corrupt-first-record segment to fail")
+	}
+	var checksumErr *ChecksumMismatchError
+	if !errors.As(err, &checksumErr) {
+		t.Fatalf("expected checksum mismatch error, got %T (%v)", err, err)
+	}
+}
+
 func TestDurabilityWorkerBlocksOnFullChannel(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultCommitLogOptions()

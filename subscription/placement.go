@@ -84,7 +84,22 @@ func CollectCandidatesForTable(
 	committed store.CommittedReadView,
 	resolver IndexResolver,
 ) []QueryHash {
-	set := make(map[QueryHash]struct{})
+	st := acquireCandidateScratch()
+	defer releaseCandidateScratch(st)
+	return collectCandidatesForTableInto(idx, table, rows, committed, resolver, st.candidates)
+}
+
+func collectCandidatesForTableInto(
+	idx *PruningIndexes,
+	table TableID,
+	rows []types.ProductValue,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	set map[QueryHash]struct{},
+) []QueryHash {
+	for h := range set {
+		delete(set, h)
+	}
 
 	// Tier 1: equality-indexed subscriptions.
 	for _, col := range idx.Value.TrackedColumns(table) {

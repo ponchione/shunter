@@ -19,9 +19,9 @@ import (
 // target connection has already disconnected.
 type FanOutSender interface {
 	// SendTransactionUpdate delivers a TransactionUpdate to one client.
-	SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate) error
+	SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error
 	// SendReducerResult delivers a ReducerCallResult to the caller client.
-	SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error
+	SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error
 	// SendSubscriptionError delivers a SubscriptionError to a client.
 	SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error
 }
@@ -95,6 +95,8 @@ func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout) bool {
 }
 
 func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
+	memo := NewEncodingMemo()
+
 	// Confirmed-read gating (Story 6.4).
 	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout) {
 		select {
@@ -125,7 +127,7 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		if msg.CallerConnID != nil && connID == *msg.CallerConnID {
 			continue
 		}
-		if err := w.sender.SendTransactionUpdate(connID, msg.TxID, updates); err != nil {
+		if err := w.sender.SendTransactionUpdate(connID, msg.TxID, updates, memo); err != nil {
 			w.handleSendError(connID, err)
 		}
 	}
@@ -138,7 +140,7 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		} else {
 			result.TransactionUpdate = nil
 		}
-		if err := w.sender.SendReducerResult(*msg.CallerConnID, &result); err != nil {
+		if err := w.sender.SendReducerResult(*msg.CallerConnID, &result, memo); err != nil {
 			w.handleSendError(*msg.CallerConnID, err)
 		}
 	}

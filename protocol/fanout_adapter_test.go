@@ -200,6 +200,7 @@ func TestFanOutSenderAdapter_SendTransactionUpdate(t *testing.T) {
 			TableName:      "t1",
 			Inserts:        []types.ProductValue{{types.NewUint32(42)}},
 		}},
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -217,6 +218,7 @@ func TestFanOutSenderAdapter_BufferFull_MapsError(t *testing.T) {
 	err := adapter.SendTransactionUpdate(
 		connID(1), types.TxID(1),
 		[]subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "t"}},
+		nil,
 	)
 	if !errors.Is(err, subscription.ErrSendBufferFull) {
 		t.Fatalf("err = %v, want ErrSendBufferFull", err)
@@ -229,6 +231,7 @@ func TestFanOutSenderAdapter_ConnNotFound_MapsError(t *testing.T) {
 	err := adapter.SendTransactionUpdate(
 		connID(1), types.TxID(1),
 		[]subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "t"}},
+		nil,
 	)
 	if !errors.Is(err, subscription.ErrSendConnGone) {
 		t.Fatalf("err = %v, want ErrSendConnGone", err)
@@ -248,7 +251,7 @@ func TestFanOutSenderAdapter_RowPayloadRoundTrip(t *testing.T) {
 			{types.NewUint32(7), types.NewString("gone")},
 		},
 	}}
-	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(22), updates); err != nil {
+	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(22), updates, nil); err != nil {
 		t.Fatal(err)
 	}
 	mock.mu.Lock()
@@ -296,7 +299,7 @@ func TestFanOutSenderAdapter_SendReducerResultSuccessPath(t *testing.T) {
 			Inserts:        []types.ProductValue{{types.NewUint32(1)}},
 		}},
 	}
-	if err := adapter.SendReducerResult(connID(1), result); err != nil {
+	if err := adapter.SendReducerResult(connID(1), result, nil); err != nil {
 		t.Fatal(err)
 	}
 	mock.mu.Lock()
@@ -330,5 +333,57 @@ func TestFanOutSenderAdapter_SendSubscriptionErrorSuccessPath(t *testing.T) {
 	}
 	if msg.SubscriptionID != 77 || msg.Error != "boom" {
 		t.Fatalf("subscription error = %+v", msg)
+	}
+}
+
+func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossTransactionUpdateCalls(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	memo := subscription.NewEncodingMemo()
+
+	sharedRows := []types.ProductValue{{types.NewUint32(42), types.NewString("shared")}}
+	calls := 0
+	oldEncodeRows := encodeRowsUnmemoized
+	encodeRowsUnmemoized = func(rows []types.ProductValue) ([]byte, error) {
+		calls++
+		return oldEncodeRows(rows)
+	}
+	defer func() { encodeRowsUnmemoized = oldEncodeRows }()
+
+	updates1 := []subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "players", Inserts: sharedRows}}
+	updates2 := []subscription.SubscriptionUpdate{{SubscriptionID: 2, TableName: "players", Inserts: sharedRows}}
+	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(55), updates1, memo); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.SendTransactionUpdate(connID(2), types.TxID(55), updates2, memo); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("encodeRows calls = %d, want 1 shared binary encode", calls)
+	}
+}
+
+func TestFanOutSenderAdapter_MemoCacheDoesNotLeakAcrossTransactions(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	sharedRows := []types.ProductValue{{types.NewUint32(7), types.NewString("fresh")}}
+
+	calls := 0
+	oldEncodeRows := encodeRowsUnmemoized
+	encodeRowsUnmemoized = func(rows []types.ProductValue) ([]byte, error) {
+		calls++
+		return oldEncodeRows(rows)
+	}
+	defer func() { encodeRowsUnmemoized = oldEncodeRows }()
+
+	updates := []subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "players", Inserts: sharedRows}}
+	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(60), updates, subscription.NewEncodingMemo()); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(61), updates, subscription.NewEncodingMemo()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("encodeRows calls = %d, want 2 across separate delivery batches", calls)
 	}
 }

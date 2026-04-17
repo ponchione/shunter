@@ -72,10 +72,10 @@ Audit notes:
 - `SPEC-002 E7` log compaction appears operationally aligned (`commitlog/compaction.go`, `compaction_test.go`) with the current compaction stories. I did not log a new compaction debt item from that slice.
 - `SPEC-004 E1` predicate/query-hash foundations appear operationally aligned (`subscription/predicate.go`, `validate.go`, `hash.go`, `register.go`, related tests). The sealed predicate interface was also verified via an external compile-only repro that failed with `unexported method sealed`. I did not log a new debt item from this slice.
 - `SPEC-004 E2` pruning indexes appear operationally aligned (`subscription/value_index.go`, `join_edge_index.go`, `table_index.go`, `placement.go`, related tests). Tier 1/2/3 structures, placement, cleanup, and candidate-union behavior are present; I did not log a new debt item from this slice.
-- `SPEC-004 E3` delta computation is mostly present (`subscription/delta_view.go`, `delta_single.go`, `delta_join.go`, `delta_dedup.go`, related tests), but one real implementation gap remains and one story-surface doc drift is logged below: Story 3.5's allocation-discipline contract is only partially implemented, and Story 3.2/3.3 helper signatures are stale relative to the live API.
-- `SPEC-004 E4` subscription-manager behavior is operationally present (`subscription/manager.go`, `query_state.go`, `register.go`, `unregister.go`, `disconnect.go`, related tests), but the decomposition/spec docs are now stale in three places: Story 4.1 still models subscriber bookkeeping as one-subscription-per-connection, SPEC-004 §4.1 omits the `ClientIdentity` required for parameterized query hashes, and Story 4.5 / SPEC-004 §10.1 still publish the pre-`PostCommitMeta` `EvalAndBroadcast` signature.
-- `SPEC-004 E6.1-enabling contract slice` is operationally present (`subscription/fanout.go`, `fanout_worker.go`, related tests), but the live narrowed contract has moved past Story 6.1 / SPEC-004 §8.1 in two concrete doc-drift areas: the documented `FanOutWorker` constructor/ownership surface no longer matches the code, and the documented `FanOutMessage` shape omits live fields now required by delivery/tests (`TxID`, `Errors`).
-- `SPEC-004 E5` evaluation-loop behavior is mostly present (`subscription/eval.go`, `eval_test.go`, `property_test.go`, `bench_test.go`), but one real implementation gap and one helper-surface doc drift remain: Story 5.3's memoized-encoding contract is still placeholder-only, and Story 5.2 still documents a standalone `CollectCandidates(...)` helper that the package does not expose.
+- `SPEC-004 E3` delta computation is mostly present (`subscription/delta_view.go`, `delta_single.go`, `delta_join.go`, `delta_dedup.go`, related tests), but one real implementation gap remains: Story 3.5's allocation-discipline contract is only partially implemented. The earlier Story 3.2/3.3 helper-signature doc drift has now been reconciled.
+- `SPEC-004 E4` subscription-manager behavior is operationally present (`subscription/manager.go`, `query_state.go`, `register.go`, `unregister.go`, `disconnect.go`, related tests). The earlier Story 4.1 query-state drift, registration-request `ClientIdentity` drift, and `PostCommitMeta` interface drift have now been reconciled.
+- `SPEC-004 E6.1-enabling contract slice` is operationally present (`subscription/fanout.go`, `fanout_worker.go`, related tests). The earlier Story 6.1 constructor/ownership drift and `FanOutMessage`-shape drift have now been reconciled.
+- `SPEC-004 E5` evaluation-loop behavior is operationally present (`subscription/eval.go`, `eval_test.go`, `property_test.go`, `bench_test.go`), including the landed Story 5.2/5.3 follow-through on helper-surface docs and memoized encoding.
 - Verification runs completed during audit:
   - `rtk go test ./schema`
   - `rtk go test ./schema ./executor`
@@ -88,114 +88,51 @@ Audit notes:
 
 ### TD-116: SPEC-004 E3 Story 3.5 allocation-discipline contract is only partially implemented
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-004 Epic 3 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5c (`SPEC-004 E3: DeltaView & Delta Computation`)
 
-Summary:
-- SPEC-004 §9.2 and Story 3.5 require three hot-path reuse layers: pooled `[]byte` buffers, pooled/reused `DeltaView.inserts` / `DeltaView.deletes` slices, and reuse of both candidate hash sets and bag-dedup maps across transactions.
-- Live code only implements the bag-dedup scratch-map reuse portion (`dedupPool`) plus the shared canonical encoder pool used for row/hash key encoding.
-- `NewDeltaView(...)` still allocates fresh maps and fresh insert/delete slices per transaction, and candidate collection still allocates a fresh `map[QueryHash]struct{}` every call.
+Resolution:
+- `subscription/delta_pool.go` now owns the missing hot-path scratch pools: 4 KiB `[]byte` buffers, candidate scratch maps, reusable `[]ProductValue` slices, pooled DeltaView instances, and pooled delta-index maps.
+- `subscription/delta_view.go` now builds DeltaViews from pooled scratch and exposes `(*DeltaView).Release()` so insert/delete row backing storage and delta-index maps are returned after evaluation/benchmark use.
+- `subscription/eval.go` now reuses one candidate scratch allocation per evaluation cycle via `collectCandidatesInto(...)`, and `subscription/placement.go` routes the per-table helper through the same pooled candidate-set pattern.
+- `subscription/hash.go` and `subscription/delta_dedup.go` now route canonical row/hash encoding through the pooled 4 KiB buffer lifecycle, dropping oversized buffers instead of retaining them.
+- Focused regression tests now verify buffer reuse, oversized-buffer drop behavior, candidate-map reuse, and sequential DeltaView backing-slice reuse.
 
-Why this matters:
-- Story 3.5 is the explicit performance/GC-discipline layer for the delta hot path.
-- The repo now claims the Epic 3 slice is complete in `REMAINING.md`, but the allocation-discipline part of the spec is only partially present.
-- This is not just missing benchmark coverage; the requested reuse mechanisms are materially absent in live code.
-
-Related code:
-- `subscription/delta_view.go:41-48`
-  - `NewDeltaView(...)` allocates new `inserts`, `deletes`, and `DeltaIndexes` maps on every construction
-- `subscription/delta_view.go:57-65`
-  - per-table insert/delete row slices are copied into freshly allocated slices each transaction
-- `subscription/placement.go:87`
-  - `CollectCandidatesForTable(...)` allocates a fresh candidate set map every call
-- `subscription/delta_pool.go:19-44`
-  - only the bag-dedup scratch maps are pooled and cleared for reuse
-- `subscription/hash.go:39-41`
-  - canonical encoder pooling exists, but Story 3.5's broader DeltaView/candidate reuse contract is still missing
-
-Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:582-589`
-  - §9.2 requires buffer pooling, DeltaView slice reuse, candidate-hashset reuse, and bag-dedup map reuse
-- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.5-allocation-discipline.md:16-29`
-  - Story 3.5 assigns pooled buffers, DeltaView slice reuse, and map reuse as deliverables
-- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.5-allocation-discipline.md:33-38`
-  - acceptance criteria require reuse behavior, not just correctness
-
-Current observed behavior:
-- Package and repo tests still pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
-- No focused tests currently verify Story 3.5's required reuse behavior.
-
-Recommended resolution options:
-1. Preferred code + test fix:
-   - add reusable DeltaView slice/map scratch ownership for inserts/deletes and active delta indexes
-   - reuse candidate hash sets in the evaluation path rather than allocating a fresh set per call
-   - add focused reuse/benchmark tests covering DeltaView slices, candidate sets, and oversized-buffer behavior
-2. Alternative doc fix:
-   - if the project intentionally wants only bag-dedup pooling in v1, narrow §9.2 and Story 3.5 so they no longer promise DeltaView and candidate-set reuse
-   - this would be a real reduction in the currently documented performance contract
-
-Suggested follow-up tests:
-- sequential `NewDeltaView(...)` calls reuse retained-capacity insert/delete backing storage
-- candidate set reuse across repeated `CollectCandidatesForTable(...)` evaluations
-- buffer-pool behavior for normal vs oversized row-key/delta-encoding buffers
+Verification:
+- `rtk go test ./subscription`
+- `rtk go test ./...`
 
 ### TD-117: SPEC-004 E3 story docs are stale on the public helper signatures used for delta evaluation
 
-Status: doc-drift
+Status: resolved
 Severity: low
 First found: SPEC-004 Epic 3 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5c (`SPEC-004 E3: DeltaView & Delta Computation`)
 
-Summary:
-- Story 3.2 still documents `MatchRow(pred Predicate, row ProductValue) bool`, but the live exported helper is `MatchRow(pred Predicate, table TableID, row ProductValue) bool` so cross-table leaves can be treated as "no constraint" during join-filter evaluation.
-- Story 3.3 still documents `EvalJoinDeltaFragments(dv *DeltaView, join *Join) (insertFragments, deleteFragments [][]ProductValue)` plus committed-side `CommittedIndexScan`, but the live API returns a `JoinFragments` struct and requires an `IndexResolver` for committed-side index lookup; the committed-view helper is named `CommittedIndexSeek`.
+Resolution:
+- Story 3.2 now documents the live exported helper signature `MatchRow(pred Predicate, table TableID, row ProductValue) bool` and explains the cross-table "no constraint" behavior used by join-filter evaluation.
+- Story 3.3 now documents the live `JoinFragments` return struct plus `EvalJoinDeltaFragments(dv *DeltaView, join *Join, resolver IndexResolver) JoinFragments` signature.
+- Story 3.3 also now refers to `DeltaView.CommittedIndexSeek` plus committed-row materialization instead of the stale `CommittedIndexScan` name.
 
-Why this matters:
-- This is story-surface drift, not a runtime bug.
-- The live API shape is coherent and used by tests/callers, but the decomposition docs no longer describe it accurately.
-- Future audit or implementation work will waste time reconciling signatures that have already evolved.
-
-Related code:
-- `subscription/delta_single.go:23-58`
-  - live `MatchRow(pred Predicate, table TableID, row types.ProductValue) bool`
-- `subscription/delta_join.go:8-22`
-  - live `JoinFragments` return type and `EvalJoinDeltaFragments(dv, join, resolver)` signature
-- `subscription/delta_view.go:157-163`
-  - committed-side helper is `CommittedIndexSeek(...)`
-
-Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.2-single-table-delta.md:27`
-  - still documents `MatchRow(pred Predicate, row ProductValue) bool`
-- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.3-join-delta-fragments.md:16-17`
-  - still documents the older two-slice return signature without resolver input
-- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.3-join-delta-fragments.md:42-44`
-  - still refers to `CommittedIndexScan`
-
-Current observed behavior:
-- Live package and repo verification pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
-
-Recommended resolution:
-- Update Stories 3.2 and 3.3 to describe the current helper signatures and `JoinFragments`/`CommittedIndexSeek` naming.
+Verification:
+- re-read patched decomposition docs against `subscription/delta_single.go`, `subscription/delta_join.go`, and `subscription/delta_view.go`
+- no code changes required
 
 ---
 
 ### TD-118: SPEC-004 E4 Story 4.1 still documents subscriber/query-registry shapes that cannot represent the live multi-subscription model
 
-Status: doc-drift
+Status: resolved
 Severity: medium
 First found: SPEC-004 Epic 4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5d (`SPEC-004 E4: Subscription Manager`)
 
 Summary:
-- Story 4.1 still documents `queryState.subscribers map[ConnectionID]SubscriptionID` and `queryRegistry.bySub map[SubscriptionID]QueryHash`.
-- Those shapes cannot represent two independent subscriptions from the same connection to the same query hash, and they also cannot distinguish the same numeric `SubscriptionID` reused on different connections.
-- Live code instead keys subscribers per connection and per subscription ID, and keys the reverse lookup by `(connID, subID)`.
+- Story 4.1 had documented `queryState.subscribers` correctly as a nested per-connection subscription set, but `queryRegistry.bySub` and related acceptance criteria still treated `SubscriptionID` as globally unique.
+- That shape could not represent two different connections reusing the same numeric `SubscriptionID`, and it underspecified the reverse-lookup contract the manager actually needs.
+- The decomposition docs now model reverse lookup as `(connID, subID)`-aware and explicitly cover same-connection multi-subscription tracking plus cross-connection `SubscriptionID` reuse.
 
 Why this matters:
 - This is story-surface drift, not a runtime bug.
@@ -215,30 +152,34 @@ Related code:
   - same numeric `SubscriptionID` can be reused across different connections
 
 Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.1-query-state.md:16-33`
-  - still documents single-`SubscriptionID` subscriber entries and `bySub map[SubscriptionID]QueryHash`
-- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.1-query-state.md:51-58`
-  - acceptance criteria only model one subscription per connection
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.1-query-state.md:16-78`
+  - now documents `subscriptionRef{connID, subID}`, a per-connection `byConn` set, and acceptance criteria for same-connection multi-subscription tracking plus cross-connection `SubscriptionID` reuse
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.3-unregister.md:27-41`
+  - unregister cleanup now explicitly preserves other connections that reuse the same numeric `SubscriptionID`
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.4-disconnect-client.md:24-36`
+  - disconnect cleanup now describes removing `(connID, subID)` reverse-lookup entries for the dropped connection
 
 Current observed behavior:
-- Live package and repo verification pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
+- Story 4.1 now documents `subscriptionRef{connID, subID}` for reverse lookups, a per-connection subscription set in `byConn`, and acceptance criteria covering both same-connection multi-subscription tracking and same-`SubscriptionID` reuse across different connections.
+- Stories 4.3 and 4.4 now describe unregister/disconnect cleanup in `(connID, subID)` terms instead of implying global `SubscriptionID` uniqueness.
+- Verification for this docs-only resolution:
+  - re-read the patched Story 4.1 / 4.3 / 4.4 docs against the TD-118 evidence and acceptance intent
+  - `rtk grep -n "map\[SubscriptionID\]QueryHash|subID → queryHash|byConn, bySub" docs/decomposition/004-subscriptions/epic-4-subscription-manager`
 
 Recommended resolution:
-- Update Story 4.1 so `queryState.subscribers` and `queryRegistry.bySub` match the live `(connID, subID)`-aware shapes, and expand the acceptance criteria to cover same-connection multi-subscription tracking and same-`SubscriptionID` reuse across different connections.
+- Resolved by updating Story 4.1's `queryRegistry`/acceptance-criteria surface and tightening the Story 4.3/4.4 cleanup language to the `(connID, subID)`-aware model.
 
 ### TD-119: SPEC-004 §4.1 registration docs omit the client identity that the live query-hash path requires for parameterized subscriptions
 
-Status: doc-drift
+Status: resolved
 Severity: medium
 First found: SPEC-004 Epic 4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5d (`SPEC-004 E4: Subscription Manager`)
 
 Summary:
 - SPEC-004 §3.4 says parameterized predicates hash the predicate structure plus client identity.
-- But the canonical `SubscriptionRegisterRequest` shown in SPEC-004 §4.1 exposes only `ConnID`, `SubscriptionID`, `Predicate`, and `RequestID`.
-- Live code adds `ClientIdentity *types.Identity` to `SubscriptionRegisterRequest`, and registration passes that field into `ComputeQueryHash(...)`.
+- The registration surface had drifted so the canonical request no longer carried that identity through the documented §4.1 / Story 4.2 flow, even though live code expected `ClientIdentity *types.Identity`.
+- The docs now restore that field and tie it directly to `ComputeQueryHash(...)` for parameterized subscriptions.
 
 Why this matters:
 - This is a spec-surface drift item, not an implementation bug.
@@ -254,32 +195,34 @@ Related code:
   - distinct `ClientIdentity` values produce distinct registered query hashes
 
 Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:99-104`
-  - §3.4 says parameterized predicates include client identity in the query hash
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:113-120`
-  - §4.1 request struct omits any client-identity field
-- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.2-register.md:18-29`
-  - registration steps depend on the canonical request type but do not mention carrying client identity into hash computation
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:112-145`
+  - §4.1 now includes `ClientIdentity *Identity` on `SubscriptionRegisterRequest` and explicitly appends `ClientIdentity` bytes during query-hash computation for parameterized predicates
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.2-register.md:16-37`
+  - registration steps now compute the hash with `req.ClientIdentity` and treat the request/result types as the canonical registration contract
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.5-manager-interface.md:29-31,61`
+  - Story 4.5 keeps the canonical request type declaration tied to registration behavior and explicitly requires `SubscriptionRegisterRequest` to carry `ClientIdentity`
 
 Current observed behavior:
-- Live package and repo verification pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
+- SPEC-004 §4.1 now documents `ClientIdentity *Identity` on `SubscriptionRegisterRequest` and ties parameterized query hashing directly to that field.
+- Story 4.2 now computes `ComputeQueryHash` with `req.ClientIdentity`, and Story 4.5's acceptance criteria require the request type to carry `ClientIdentity` for parameterized-hash computation.
+- Verification for this docs-only resolution:
+  - re-read the patched SPEC-004 §4.1 and Story 4.2 / 4.5 registration surfaces against the TD-119 evidence
+  - `rtk grep -n "ClientIdentity|client identity" docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.2-register.md docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.5-manager-interface.md`
 
 Recommended resolution:
-- Update SPEC-004 §4.1 and Story 4.2 so the canonical registration request includes optional client identity, and explicitly tie that field to the parameterized-query-hash path described in §3.4.
+- Resolved by restoring `ClientIdentity` to the canonical SPEC-004 §4.1 registration request and aligning Story 4.2 / Story 4.5 so the parameterized query-hash path is explicitly modeled end-to-end.
 
 ### TD-120: SPEC-004 E4 still documents the pre-`PostCommitMeta` `SubscriptionManager.EvalAndBroadcast` interface
 
-Status: doc-drift
+Status: resolved
 Severity: medium
 First found: SPEC-004 Epic 4 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5d (`SPEC-004 E4: Subscription Manager`)
 
 Summary:
-- Story 4.5 and SPEC-004 §10.1 still publish `EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView)`.
-- Live `SubscriptionManager` now requires `EvalAndBroadcast(txID, changeset, view, meta PostCommitMeta)`, and the concrete manager uses that metadata when assembling `FanOutMessage`.
-- The documented Epic 4 interface therefore no longer matches the executor-facing boundary implemented in `subscription/manager.go` and `subscription/eval.go`.
+- The Epic 4 manager-interface docs had drifted behind the live executor/subscription seam.
+- Live `SubscriptionManager` requires `EvalAndBroadcast(txID, changeset, view, meta PostCommitMeta)`, and the concrete manager uses that metadata when assembling `FanOutMessage`.
+- The docs now publish the same `PostCommitMeta`-carrying interface in both SPEC-004 §10.1 and Story 4.5.
 
 Why this matters:
 - This is interface-surface drift, not a package-runtime failure.
@@ -293,32 +236,34 @@ Related code:
   - `EvalAndBroadcast(...)` consumes `meta.TxDurable`, `meta.CallerConnID`, and `meta.CallerResult` when constructing `FanOutMessage`
 
 Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:616-621`
-  - §10.1 still documents the older three-argument `EvalAndBroadcast` signature
-- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.5-manager-interface.md:16-24`
-  - Story 4.5 repeats the older interface shape
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:642-667`
+  - §10.1 now documents `EvalAndBroadcast(txID, changeset, view, meta PostCommitMeta)` and declares the `PostCommitMeta` struct directly beneath the interface
+- `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.5-manager-interface.md:16-25`
+  - Story 4.5 now repeats the same `EvalAndBroadcast(..., meta PostCommitMeta)` interface shape
 
 Current observed behavior:
-- Live package and repo verification pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
+- SPEC-004 §10.1 and Story 4.5 both now publish `EvalAndBroadcast(..., meta PostCommitMeta)`.
+- SPEC-004 §10.1 also declares `PostCommitMeta { TxDurable, CallerConnID, CallerResult }`, matching the live manager/eval seam used to assemble `FanOutMessage`.
+- Verification for this docs-only resolution:
+  - re-read the patched SPEC-004 §10.1 and Story 4.5 surfaces against the TD-120 evidence
+  - `rtk grep -n "EvalAndBroadcast\(|PostCommitMeta" docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.5-manager-interface.md`
 
 Recommended resolution:
-- Update Story 4.5 and SPEC-004 §10.1 so the manager interface matches the live `PostCommitMeta`-carrying contract, or explicitly defer that richer executor/subscription seam if the project intends to keep Epic 4 narrower.
+- Resolved by aligning Story 4.5 and SPEC-004 §10.1 to the live `PostCommitMeta`-carrying `SubscriptionManager` interface.
 
 ---
 
 ### TD-121: SPEC-004 E6.1 story docs still publish a `FanOutWorker` constructor/API surface that no longer matches the live narrowed contract
 
-Status: doc-drift
+Status: resolved
 Severity: medium
 First found: SPEC-004 E6.1-enabling contract audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5e (`SPEC-004 E6.1-enabling contract slice`)
 
 Summary:
-- Story 6.1 still documents `NewFanOutWorker(inboxSize int) *FanOutWorker`, a worker-owned `dropped chan ConnectionID`, and a `DroppedClients() <-chan ConnectionID` method.
-- Live code split ownership differently: the manager owns the dropped-client channel, and `NewFanOutWorker` requires the inbox, sender, and dropped-channel sink to be injected explicitly.
-- The documented Story 6.1 constructor/method surface therefore does not compile against the current package API.
+- Story 6.1 had drifted behind the live narrowed worker contract.
+- Live code injects the inbox, sender, and manager-owned dropped-client write channel, and it does not expose a worker `DroppedClients()` method.
+- The story now matches that injected-worker ownership model instead of the older standalone worker-owns-everything shape.
 
 Why this matters:
 - This is a public API/story-surface drift item, not a runtime correctness bug.
@@ -336,37 +281,32 @@ Related code:
   - acceptance-style wiring uses `mgr.DroppedChanSend()` when constructing the worker
 
 Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md:16-24`
-  - still documents the older struct shape with `dropped chan ConnectionID`
-- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md:36-50`
-  - still documents `NewFanOutWorker(inboxSize int)` and a worker `DroppedClients()` method
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:571-574`
-  - §8.5 says the dropped-client channel is obtained from `SubscriptionManager.DroppedClients()` rather than from the worker itself
+- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md:16-23,37-39,51-70`
+  - Story 6.1 now models `inbox <-chan FanOutMessage`, `dropped chan<- ConnectionID`, the injected `NewFanOutWorker(...)` constructor, and manager-owned dropped-client drain semantics without a worker `DroppedClients()` method
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:589-599`
+  - §8.5 continues to declare the manager-owned shared dropped-client channel and executor-side single-stream drain model
 
 Current observed behavior:
-- Focused compile-only repro against the Story 6.1 constructor/method surface failed:
-  - `rtk go test ./.tmp_spec004_e61_api`
-  - observed errors:
-    - `not enough arguments in call to subscription.NewFanOutWorker`
-    - `w.DroppedClients undefined (type *subscription.FanOutWorker has no field or method DroppedClients)`
-- Live package and repo verification pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
+- Story 6.1 now documents the injected `NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- ConnectionID)` constructor and removes the nonexistent worker `DroppedClients()` API.
+- The story also now matches the live directional channel ownership: read-only inbox, write-only dropped-client sink, manager-owned executor drain.
+- Verification for this docs-only resolution:
+  - re-read patched Story 6.1 against `subscription/fanout_worker.go` and `subscription/manager.go`
+  - `rtk grep -n "DroppedClients\(|NewFanOutWorker\(|dropped chan|worker-owned|inboxSize int" docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md`
 
 Recommended resolution:
-- Update Story 6.1 so constructor and dropped-channel ownership match the live injected-worker design and the execution-order's narrowed E6.1 contract slice.
+- Resolved by aligning Story 6.1 to the live injected-worker constructor and manager-owned dropped-channel contract.
 
 ### TD-122: SPEC-004 §8.1 / Story 6.1 still document an older `FanOutMessage` shape that omits live `TxID` and `Errors` fields
 
-Status: doc-drift
+Status: resolved
 Severity: medium
 First found: SPEC-004 E6.1-enabling contract audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5e (`SPEC-004 E6.1-enabling contract slice`)
 
 Summary:
-- SPEC-004 §8.1 and Story 6.1 still document `FanOutMessage{TxDurable, Fanout, CallerConnID, CallerResult}`.
-- Live `subscription.FanOutMessage` also carries `TxID` and `Errors map[ConnectionID][]SubscriptionError`.
-- The worker and tests actively use those fields: `TxID` is passed into `SendTransactionUpdate(...)`, and `Errors` are delivered before updates.
+- The E6.1 fan-out handoff docs had drifted behind the live delivery seam.
+- Live `subscription.FanOutMessage` carries `TxID`, `TxDurable`, `Fanout`, `Errors`, `CallerConnID`, and `CallerResult`, and the worker delivers `Errors` before normal updates while using `msg.TxID` for standalone `TransactionUpdate` delivery.
+- SPEC-004 §8.1, Story 6.1, and Story 5.1 now publish that same handoff shape and ordering.
 
 Why this matters:
 - This is contract-surface drift, not a runtime failure.
@@ -384,126 +324,58 @@ Related code:
   - tests cover `SubscriptionError` delivery and error-before-update ordering
 
 Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:510-525`
-  - §8.1 still omits `TxID` and `Errors` from `FanOutMessage`
-- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md:26-34`
-  - Story 6.1 repeats the older four-field shape
-- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.1-eval-transaction.md:20-33`
-  - Story 5.1 still summarizes step 5 as `FanOutMessage{TxDurable, Fanout}`
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:460,501-545,552-565`
+  - Section 7 now sends `FanOutMessage{TxID, TxDurable, Fanout, Errors, CallerConnID, CallerResult}`, and §8.1 declares `FanOutMessage` with `TxID` plus `Errors` and states that `SubscriptionError` entries are delivered before normal updates
+- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md:26-50`
+  - Story 6.1 now repeats the six-field `FanOutMessage` shape and describes building `TransactionUpdate` for `msg.TxID` after delivering `msg.Errors` first
+- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.1-eval-transaction.md:21-34`
+  - Story 5.1 now summarizes step 5 as `FanOutMessage{TxID, TxDurable, Fanout, Errors, CallerConnID, CallerResult}` and notes error-before-update delivery ordering
 
 Current observed behavior:
-- Live package and repo verification pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
-- Focused worker tests exercise the extra fields:
-  - `rtk go test ./subscription`
+- SPEC-004 §8.1, Story 6.1, and Story 5.1 now all include `TxID` and `Errors` in the documented fan-out handoff shape.
+- The spec/story text now also states that `SubscriptionError` entries are delivered before normal updates for the same batch and that standalone `TransactionUpdate` assembly uses `msg.TxID`.
+- Verification for this docs-only resolution:
+  - re-read patched SPEC-004 §8.1 and Stories 6.1 / 5.1 against `subscription/fanout.go`, `subscription/eval.go`, and `subscription/fanout_worker.go`
+  - `rtk grep -n "FanOutMessage|Errors before normal updates|msg.TxID|FanOutMessage\{TxID" docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.1-eval-transaction.md`
 
 Recommended resolution:
-- Update SPEC-004 §8.1, Story 6.1, and Story 5.1 so the documented fan-out handoff contract includes `TxID` and per-connection `Errors`, and describe the current error-before-update delivery ordering.
+- Resolved by aligning SPEC-004 §8.1, Story 6.1, and Story 5.1 to the live `FanOutMessage` shape and error-before-update delivery ordering.
 
 ---
 
 ### TD-123: SPEC-004 E5 Story 5.3 memoized-encoding contract is still only a placeholder cache, not a real encoding-reuse path
 
-Status: open
+Status: resolved
 Severity: medium
 First found: SPEC-004 Epic 5 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5f (`SPEC-004 E5: Evaluation Loop`)
 
-Summary:
-- Story 5.3 requires real per-query memoization so shared-query recipients encode each wire format once per evaluation cycle and reuse the encoded bytes across clients.
-- Live code defines `memoizedResult`, allocates a `memo map[QueryHash]*memoizedResult`, and stores an empty cache entry per affected query hash.
-- But nothing ever writes encoded bytes into that cache, nothing ever reads from it, and no tests exercise any actual "encode once, share many" behavior.
+Resolution:
+- The placeholder evaluation-loop cache is now backed by a real per-delivery-batch memoization path across the fan-out/protocol seam.
+- `subscription` now owns an explicit `EncodingMemo` lifecycle object; `FanOutWorker.deliver(...)` creates one memo per `FanOutMessage` and passes it through all update/result sends for that batch.
+- `protocol/FanOutSenderAdapter` now memoizes binary row-list encoding by shared `[]ProductValue` slice identity, so shared-query recipients reuse encoded row payload bytes even when per-recipient `SubscriptionID` values differ.
+- Empty row-list payloads are handled without redundant encoding work, and separate delivery batches receive fresh memos so cached bytes do not leak across transactions.
 
-Why this matters:
-- This is a real implementation gap, not just story drift.
-- Story 5.3 is the mechanism behind SPEC-004 §7.4's O(1) per-query encoding claim when many clients share a query.
-- Today the evaluation loop only preserves a placeholder seam; it does not implement the promised reuse behavior.
-
-Related code:
-- `subscription/eval.go:11-18`
-  - `memoizedResult` exists only as a two-field struct comment/placeholder
-- `subscription/eval.go:51-54`
-  - evaluation allocates `memo := make(map[QueryHash]*memoizedResult)` and immediately discards it via `_ = memo`
-- `subscription/eval.go:69`
-  - each candidate query gets `memo[hash] = &memoizedResult{}` but the cache entry is never populated or consumed
-- no separate `memoized.go` or protocol-facing encoding reuse helper exists under `subscription/`
-
-Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:477-486`
-  - §7.4 says shared-query deltas are computed once and encoded once per wire format
-- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.3-memoized-encoding.md:16-39`
-  - Story 5.3 requires lazy binary/JSON encoding, per-eval-cycle cache lifecycle, and shared-byte reuse across clients
-- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/EPIC.md:17-18`
-  - Epic 5 still lists Story 5.3 as part of the evaluation-loop deliverables
-
-Current observed behavior:
-- Focused evaluation/property tests pass:
-  - `rtk go test ./subscription -run 'TestIVMInvariantPropertySingleTable|TestPruningSafetyProperty|TestRegistrationSymmetryProperty'`
-- Full package and repo verification pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
-- No focused tests currently verify Story 5.3's required encode-once reuse behavior.
-
-Recommended resolution options:
-1. Preferred code + test fix:
-   - implement a real per-query memoization layer at the evaluation/fan-out seam so the first client of a format populates cached bytes and later clients reuse them
-   - add focused tests proving two same-query clients trigger one binary encoding, mixed-format clients trigger one encoding per format, and cache state does not leak across transactions
-2. Alternative doc fix:
-   - if protocol-owned encoding reuse is intentionally deferred beyond SPEC-004 E5, narrow Story 5.3 / §7.4 so this slice no longer claims the behavior is implemented here
-   - that would be a real narrowing of the current performance contract
-
-Suggested follow-up tests:
-- two same-query binary recipients cause exactly one binary encode operation
-- one binary plus one JSON recipient cause exactly one encode per format
-- a second transaction with different rows does not reuse stale cached bytes from the prior transaction
+Verification:
+- `rtk go test ./protocol -run 'TestFanOutSenderAdapter_MemoizesRowEncodingAcrossTransactionUpdateCalls|TestFanOutSenderAdapter_MemoCacheDoesNotLeakAcrossTransactions'`
+- `rtk go test ./subscription ./protocol`
+- `rtk go test ./...`
 
 ### TD-124: SPEC-004 E5 Story 5.2 still documents a standalone `CollectCandidates(...)` helper that the package does not expose
 
-Status: doc-drift
+Status: resolved
 Severity: low
 First found: SPEC-004 Epic 5 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 5 / Step 5f (`SPEC-004 E5: Evaluation Loop`)
 
-Summary:
-- Story 5.2 documents a package-level `CollectCandidates(indexes *PruningIndexes, changeset *Changeset, committed CommittedReadView) map[QueryHash]struct{}` helper.
-- Live code implements the whole-changeset candidate walk as the unexported method `(*Manager).collectCandidates(...)` inside `subscription/eval.go`.
-- The behavior is present, but the documented helper/API surface is not.
+Resolution:
+- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.2-candidate-collection.md` now describes the live manager-owned whole-changeset entrypoint: `(*Manager).collectCandidates(changeset *Changeset, committed CommittedReadView) map[QueryHash]struct{}`.
+- The story now explicitly states that `PruningIndexes` and `IndexResolver` come from the wired `Manager`, while `CollectCandidatesForTable(...)` remains the lower-level per-table helper owned by Story 2.4.
+- This reconciles the decomposition with `subscription/eval.go` and removes the nonexistent package-level helper claim.
 
-Why this matters:
-- This is helper-surface drift, not a runtime correctness bug.
-- The live implementation still performs batched Tier 1 lookup, Tier 2 join-edge probing, and Tier 3 fallback unioning, and the evaluation loop uses that behavior successfully.
-- But anyone following Story 5.2 literally would expect a reusable package-level helper that does not currently compile.
-
-Related code:
-- `subscription/eval.go:158-230`
-  - live whole-changeset candidate collection is `func (m *Manager) collectCandidates(...) map[QueryHash]struct{}`
-- `subscription/eval.go:167-188`
-  - batched Tier 1 distinct-value collection is implemented
-- `subscription/eval.go:190-223`
-  - Tier 2 join-edge probing against committed state is implemented
-- `subscription/eval.go:225-230`
-  - Tier 3 fallback union is implemented
-- `subscription/bench_test.go:204-224`
-  - benchmarks call the private `mgr.collectCandidates(...)` helper directly from package tests
-
-Related spec / decomposition docs:
-- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.2-candidate-collection.md:16-20`
-  - still documents exported/package-level `CollectCandidates(...)` plus the lower-level per-table helper
-- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.2-candidate-collection.md:47-58`
-  - acceptance criteria are written against the helper behavior rather than the private manager method
-
-Current observed behavior:
-- Compile-only repro against the documented helper surface failed:
-  - `rtk go test ./.tmp_spec004_e5_candidates_api`
-  - observed error:
-    - `undefined: subscription.CollectCandidates`
-- Live package and repo verification pass:
-  - `rtk go test ./subscription`
-  - `rtk go test ./...`
-
-Recommended resolution:
-- Either expose the documented `CollectCandidates(...)` helper, or update Story 5.2 so it describes the current manager-owned candidate-collection entrypoint instead of a nonexistent package-level API.
+Verification:
+- `rtk go test ./subscription ./protocol`
+- `rtk go test ./...`
 
 ---
 
@@ -1836,114 +1708,37 @@ Current observed behavior:
 
 ### TD-114: SPEC-002 E6 active-tail CRC mismatch after a valid prefix is treated as a hard failure instead of a truncation horizon
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-002 Epic 6 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4i (`SPEC-002 E6: Recovery`)
 
-Summary:
-- SPEC-002 recovery explicitly allows a crash-truncated active-tail record to surface as either EOF/truncation or a CRC mismatch, and says recovery should stop at the last valid contiguous record.
-- Live scanning only classifies `ErrTruncatedRecord` as a resumable damaged tail. A checksum mismatch in the active tail, even after a valid prefix, is still returned as a hard error.
-- The current tests lock in that stricter behavior by asserting checksum mismatches after a valid prefix must fail recovery.
+Resolution:
+- `commitlog/segment_scan.go` now treats active-tail checksum mismatches the same as truncated tail damage when at least one valid record precedes the damage.
+- `ScanSegments(...)` now stops at the last valid contiguous record, returns that horizon, and marks the last segment `AppendByFreshNextSegment` for both short-read and CRC-mismatch damaged tails.
+- First-record corruption in the active segment and checksum mismatches in sealed segments remain hard failures.
+- Regression coverage now locks both payload-byte and CRC-byte active-tail corruption after a valid prefix to the fresh-next-segment path.
 
-Why this matters:
-- This rejects a recovery case the spec calls out as valid crash fallout.
-- Operators can lose an otherwise recoverable log suffix if the partial crash write manifests as a bad CRC instead of a short read.
-- The implementation/test contract currently disagrees with SPEC-002's stated replay-horizon rule.
-
-Related code:
-- `commitlog/segment_scan.go:160-163`
-  - `scanNextRecord(...)` returns `ChecksumMismatchError` when the tail CRC does not match
-- `commitlog/segment_scan.go:176-178`
-  - `canTreatAsDamagedTail(...)` only treats `ErrTruncatedRecord` as resumable damaged tail
-- `commitlog/segment_scan.go:199-209`
-  - `scanOneSegment(...)` therefore hard-fails on active-tail checksum mismatches even after a valid prefix
-- `commitlog/segment_scan_test.go:171-185`
-  - `TestScanSegmentsChecksumMismatchAfterValidPrefixIsHardError` asserts the hard-error behavior
-- `commitlog/recovery_test.go:186-204`
-  - `TestOpenAndRecoverDetailedCorruptActiveSegmentAfterValidPrefixFails` also locks in the same failure mode
-
-Related spec / decomposition docs:
-- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md:433-434`
-  - startup recovery allows the active tail to stop at the last valid contiguous record on a truncated record or CRC-mismatched partial tail write
-- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md:478-484`
-  - §6.4 says truncated tail writes may surface as CRC mismatch or EOF and should use the prior valid prefix as the replay horizon
-- `docs/decomposition/002-commitlog/epic-6-recovery/story-6.1-segment-scanning.md:48-54`
-  - Story 6.1 assigns truncated-tail handling and fresh-next-segment append classification to segment scanning
-
-Current observed behavior:
-- Verification still passes because the tests encode the stricter live behavior:
-  - `rtk go test ./commitlog`
-  - `rtk go test ./...`
-
-Recommended resolution options:
-1. Preferred code + test fix:
-   - extend damaged-tail classification to treat an active-tail `ChecksumMismatchError` after at least one valid record as `AppendByFreshNextSegment`
-   - keep checksum mismatches in sealed segments or at the first record of the active segment as hard failures
-   - update recovery tests to distinguish resumable partial-tail CRC corruption from fatal non-tail corruption
-2. Alternative doc fix:
-   - if the project intentionally wants any checksum mismatch to be fatal, update SPEC-002 §6.1/§6.4 and Story 6.1 to drop the CRC-mismatched-partial-tail recovery rule
-   - this would be a real narrowing of the current recovery contract
-
-Suggested follow-up tests:
-- active-segment checksum mismatch after a valid prefix yields `AppendByFreshNextSegment` and horizon=`last_valid_tx`
-- sealed-segment checksum mismatch remains fatal
-- first-record checksum mismatch in the active segment remains fatal / append-forbidden
+Verification:
+- `rtk go test ./commitlog`
+- `rtk go test ./...`
 
 ### TD-115: SPEC-002 E6 append-open truncates first-record corruption instead of failing closed
 
-Status: open
+Status: resolved
 Severity: high
 First found: SPEC-002 Epic 6 audit
 Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 4 / Step 4i (`SPEC-002 E6: Recovery`)
 
-Summary:
-- SPEC-002 says that if the first record in the last segment is corrupt and there is no valid prefix, reopening for append is a hard recovery error.
-- Live `OpenSegmentForAppend(...)` truncates the file back to the last good offset on any decode error, including corruption in the first record immediately after the header.
-- A focused runtime repro showed `OpenSegmentForAppend(...)` returning success and shrinking a corrupt one-record segment from 27 bytes back to the 8-byte header instead of erroring.
+Resolution:
+- `commitlog/segment.go` now makes `OpenSegmentForAppend(...)` fail closed when decode damage appears before any valid record in the segment.
+- Truncate-and-resume behavior is now limited to damaged tails with a valid prefix; corrupt-first-record / no-valid-prefix cases return the underlying decode error and preserve the file contents.
+- The durability resume path preserves that fail-closed behavior because `NewDurabilityWorkerWithResumePlan(...)` still uses `OpenSegmentForAppend(...)` for `AppendInPlace` resumes.
+- Regression coverage now proves: corrupt-first-record reopen fails without truncation, damaged tails after a valid prefix still truncate to the last good offset, and append-in-place durability reopen fails closed on corrupt-first-record segments.
 
-Why this matters:
-- This is exactly the spec's "must fail closed" edge case for resume handling.
-- Silent truncation can discard the only durable record in the active segment instead of forcing operator intervention.
-- `NewDurabilityWorkerWithResumePlan(...)` uses this append-open path for `AppendInPlace`, so the helper behavior is part of the recovery resume surface.
-
-Related code:
-- `commitlog/segment.go:196-241`
-  - `OpenSegmentForAppend(...)` truncates to `size` on any `DecodeRecord` error and then returns a writable segment
-- `commitlog/durability.go:109-116`
-  - `openSegmentForResumePlan(...)` uses `openOrCreateSegment(...)` / `OpenSegmentForAppend(...)` for `AppendInPlace` recovery resumes
-- `commitlog/durability.go:98-107`
-  - `openOrCreateSegment(...)` treats any successful append-open as reusable active tail state
-
-Related spec / decomposition docs:
-- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md:484`
-  - first-record corruption in the last segment with no valid prefix is a hard error until operator intervention or reset
-- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md:625`
-  - verification checklist includes "Corrupt first record in active tail segment and reopen for append | Hard-error edge case on resume"
-- `docs/decomposition/002-commitlog/epic-6-recovery/story-6.4-open-and-recover.md:26-29,53`
-  - Story 6.4 requires append-open behavior to follow the scan result and treat append-forbidden cases as hard recovery failures
-
-Current observed behavior:
-- Package and repo tests still pass:
-  - `rtk go test ./commitlog`
-  - `rtk go test ./...`
-- Targeted runtime repro from the audit:
-  - `rtk go run /tmp/commitlog_open_append_repro.go`
-  - observed output before cleanup: `err=<nil> before=27 after=8 statErr=<nil>`
-  - the corrupt segment was truncated to header-only size instead of returning an error
-
-Recommended resolution options:
-1. Preferred code fix:
-   - make `OpenSegmentForAppend(...)` distinguish "damaged tail after a valid prefix" from "corrupt first record / no valid prefix"
-   - only truncate-and-resume when a valid prefix exists; otherwise return a hard error
-   - add focused tests for first-record corruption and valid-prefix truncation separately
-2. Alternative design guard:
-   - if direct append-open is no longer intended as a public recovery helper, narrow its callers and make the function fail closed by default unless recovery explicitly authorizes truncation from prior scan metadata
-
-Suggested follow-up tests:
-- `OpenSegmentForAppend(...)` on corrupt-first-record segment returns an error and does not truncate the file
-- `OpenSegmentForAppend(...)` still truncates a partial tail only when a valid prefix exists
-- `NewDurabilityWorkerWithResumePlan(...)` preserves the append-forbidden edge case instead of silently reopening it
+Verification:
+- `rtk go test ./commitlog`
+- `rtk go test ./...`
 
 ### TD-125: `ErrNullableColumn` sentinel + `Build()` enforcement not wired in live `schema/` package
 

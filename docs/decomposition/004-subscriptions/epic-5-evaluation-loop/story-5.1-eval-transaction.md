@@ -30,7 +30,8 @@ The main algorithm called after every committed transaction. Orchestrates DeltaV
      c. Call appropriate delta evaluator (Epic 3)
      d. If delta is empty → skip
      e. For each subscriber: append SubscriptionUpdate to CommitFanout[connID]
-  5. Send `FanOutMessage{TxDurable, Fanout, Errors, CallerConnID, CallerResult}` to fan-out worker inbox
+  5. Send `FanOutMessage{TxID, TxDurable, Fanout, Errors, CallerConnID, CallerResult}` to fan-out worker inbox
+     - fan-out delivers `Errors` before normal updates for the same batch
   ```
 
 - Early exit: `len(queryRegistry.byHash) == 0` → return immediately

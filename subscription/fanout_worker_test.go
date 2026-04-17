@@ -33,13 +33,13 @@ type errCall struct {
 	Msg    string
 }
 
-func (m *mockFanOutSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate) error {
+func (m *mockFanOutSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.txCalls = append(m.txCalls, txCall{ConnID: connID, TxID: txID, Updates: updates})
 	return m.sendErr
 }
-func (m *mockFanOutSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
+func (m *mockFanOutSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.resCalls = append(m.resCalls, resCall{ConnID: connID, Result: result})
@@ -371,7 +371,7 @@ type selectiveFailSender struct {
 	okCount int
 }
 
-func (s *selectiveFailSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate) error {
+func (s *selectiveFailSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if connID == s.fail {
@@ -380,7 +380,7 @@ func (s *selectiveFailSender) SendTransactionUpdate(connID types.ConnectionID, t
 	s.okCount++
 	return nil
 }
-func (s *selectiveFailSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
+func (s *selectiveFailSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error {
 	return nil
 }
 func (s *selectiveFailSender) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {
@@ -679,13 +679,13 @@ type orderTrackingSender struct {
 	onErr func(types.ConnectionID)
 }
 
-func (s *orderTrackingSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate) error {
+func (s *orderTrackingSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error {
 	if s.onTx != nil {
 		s.onTx(connID)
 	}
 	return nil
 }
-func (s *orderTrackingSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
+func (s *orderTrackingSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error {
 	return nil
 }
 func (s *orderTrackingSender) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {

@@ -13,7 +13,9 @@ Given a changeset, determine which query hashes might be affected. Consults all 
 
 ## Deliverables
 
-- `(*Manager).collectCandidates(indexes *PruningIndexes, changeset *Changeset, committed CommittedReadView, resolver IndexResolver) map[QueryHash]struct{}`
+- `(*Manager).collectCandidates(changeset *Changeset, committed CommittedReadView) map[QueryHash]struct{}`
+  - manager-owned whole-changeset orchestration used by `EvalAndBroadcast(...)`
+  - pulls `PruningIndexes` and `IndexResolver` from the already-wired manager instead of pretending candidate collection is a free function with explicit index/resolver parameters
 
 - Low-level helper owned by Story 2.4 remains per-table:
   - `CollectCandidatesForTable(indexes *PruningIndexes, table TableID, rows []ProductValue, committed CommittedReadView, resolver IndexResolver) []QueryHash` — `resolver` supplies the Tier 2 RHS `IndexID` for the join-edge scan; nil skips Tier 2.

@@ -152,35 +152,47 @@ func TestScanSegmentsCorruptFirstRecordActiveSegment(t *testing.T) {
 	}
 }
 
-func TestScanSegmentsCorruptActiveSegmentAfterValidPrefixIsHardError(t *testing.T) {
+func TestScanSegmentsCorruptActiveSegmentAfterValidPrefixUsesFreshNextSegment(t *testing.T) {
 	dir := t.TempDir()
 
 	path := makeScanTestSegment(t, dir, 1, 1, 2, 3)
 	corruptScanTestRecordPayloadByte(t, path, 2, 0)
 
-	_, _, err := ScanSegments(dir)
-	if err == nil {
-		t.Fatal("expected hard error for non-tail corruption in active segment")
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatalf("ScanSegments() error = %v", err)
 	}
-	var checksumErr *ChecksumMismatchError
-	if !errors.As(err, &checksumErr) {
-		t.Fatalf("expected checksum mismatch error, got %T (%v)", err, err)
+	if len(segments) != 1 {
+		t.Fatalf("len(segments) = %d, want 1", len(segments))
+	}
+	assertSegmentInfo(t, segments[0], path, 1, 2, true)
+	if horizon != 2 {
+		t.Fatalf("horizon = %d, want 2", horizon)
+	}
+	if segments[0].AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("append mode = %d, want %d", segments[0].AppendMode, AppendByFreshNextSegment)
 	}
 }
 
-func TestScanSegmentsChecksumMismatchAfterValidPrefixIsHardError(t *testing.T) {
+func TestScanSegmentsChecksumMismatchAfterValidPrefixUsesFreshNextSegment(t *testing.T) {
 	dir := t.TempDir()
 
 	path := makeScanTestSegment(t, dir, 1, 1, 2, 3)
 	corruptScanTestRecordCRCByte(t, path, 2, 0)
 
-	_, _, err := ScanSegments(dir)
-	if err == nil {
-		t.Fatal("expected hard error for checksum mismatch in active segment")
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatalf("ScanSegments() error = %v", err)
 	}
-	var checksumErr *ChecksumMismatchError
-	if !errors.As(err, &checksumErr) {
-		t.Fatalf("expected checksum mismatch error, got %T (%v)", err, err)
+	if len(segments) != 1 {
+		t.Fatalf("len(segments) = %d, want 1", len(segments))
+	}
+	assertSegmentInfo(t, segments[0], path, 1, 2, true)
+	if horizon != 2 {
+		t.Fatalf("horizon = %d, want 2", horizon)
+	}
+	if segments[0].AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("append mode = %d, want %d", segments[0].AppendMode, AppendByFreshNextSegment)
 	}
 }
 

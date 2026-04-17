@@ -69,11 +69,8 @@ func ReconcileJoinDelta(insertFragments, deleteFragments [][]types.ProductValue)
 // as a map key. The length prefix prevents ambiguity across rows of
 // different column counts. Not a wire format.
 func encodeRowKey(row types.ProductValue) string {
-	enc := encoderPool.Get().(*canonicalEncoder)
-	defer func() {
-		enc.reset()
-		encoderPool.Put(enc)
-	}()
+	enc := acquireCanonicalEncoder()
+	defer releaseCanonicalEncoder(enc)
 	enc.writeU32(uint32(len(row)))
 	for _, v := range row {
 		encodeValue(enc, v)

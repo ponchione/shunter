@@ -197,7 +197,8 @@ func BenchmarkDeltaIndexConstruction(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = NewDeltaView(nil, cs, active)
+		dv := NewDeltaView(nil, cs, active)
+		dv.Release()
 	}
 }
 
@@ -219,8 +220,10 @@ func BenchmarkCandidateCollection(b *testing.B) {
 	cs := simpleChangeset(1, rows, nil)
 	b.ResetTimer()
 	b.ReportAllocs()
+	st := acquireCandidateScratch()
+	defer releaseCandidateScratch(st)
 	for i := 0; i < b.N; i++ {
-		_ = mgr.collectCandidates(cs, nil)
+		_ = mgr.collectCandidatesInto(cs, nil, st)
 	}
 	_ = fmt.Sprint
 }

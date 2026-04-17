@@ -24,7 +24,8 @@ For `V = filter(T)`: apply filter to inserted rows → delta inserts, apply filt
   - `And`: both sub-predicates match
   - `AllRows`: always matches
 
-- `MatchRow(pred Predicate, row ProductValue) bool` — exported for reuse in join fragment evaluation
+- `MatchRow(pred Predicate, table TableID, row ProductValue) bool` — exported for reuse in join fragment evaluation
+  - predicate leaves that reference a different table are treated as "no constraint" for that row, so join-filter evaluation can call `MatchRow(...)` once per side without spurious cross-table failures
 
 ## Acceptance Criteria
 
@@ -42,5 +43,6 @@ For `V = filter(T)`: apply filter to inserted rows → delta inserts, apply filt
 ## Design Notes
 
 - `MatchRow` is a simple recursive evaluator over the predicate tree. For single-table predicates, the predicate references one table, and the row comes from that table's changeset.
+- The exported `table` argument is intentional: join-filter evaluation reuses `MatchRow(...)` against each side of a joined pair, and cross-table leaves should act like "no constraint" rather than immediate failure.
 - Performance: filter evaluation is O(changed_rows) per subscription. Pruning (Epic 2) ensures this function is only called for subscriptions that are likely affected.
 - `ColRange` with unbounded lower or upper works as expected: unbounded lower means no minimum, unbounded upper means no maximum.

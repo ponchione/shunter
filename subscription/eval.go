@@ -46,7 +46,10 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 
 	activeCols := m.collectActiveColumns()
 	dv := NewDeltaView(view, changeset, activeCols)
-	candidates := m.collectCandidates(changeset, view)
+	defer dv.Release()
+	candidateScratch := acquireCandidateScratch()
+	defer releaseCandidateScratch(candidateScratch)
+	candidates := m.collectCandidatesInto(changeset, view, candidateScratch)
 
 	fanout := CommitFanout{}
 	errs := make(map[types.ConnectionID][]SubscriptionError)
@@ -155,10 +158,26 @@ func (m *Manager) collectActiveColumns() map[TableID][]ColID {
 
 // collectCandidates walks the changeset and returns the union of candidate
 // query hashes across all three pruning tiers (SPEC-004 §7.2 step 3 / §7.3).
-// Batched Tier 1 optimization: collect distinct values per tracked column,
-// one lookup per distinct value.
 func (m *Manager) collectCandidates(cs *store.Changeset, view store.CommittedReadView) map[QueryHash]struct{} {
-	cands := make(map[QueryHash]struct{})
+	st := acquireCandidateScratch()
+	defer releaseCandidateScratch(st)
+	out := m.collectCandidatesInto(cs, view, st)
+	copied := make(map[QueryHash]struct{}, len(out))
+	for h := range out {
+		copied[h] = struct{}{}
+	}
+	return copied
+}
+
+// collectCandidatesInto walks the changeset and populates the provided scratch
+// maps with the union of candidate query hashes across all three pruning tiers
+// (SPEC-004 §7.2 step 3 / §7.3). Batched Tier 1 optimization: collect distinct
+// values per tracked column, one lookup per distinct value.
+func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.CommittedReadView, st *candidateScratch) map[QueryHash]struct{} {
+	cands := st.candidates
+	for h := range cands {
+		delete(cands, h)
+	}
 	for tid, tc := range cs.Tables {
 		if tc == nil {
 			continue
@@ -166,7 +185,10 @@ func (m *Manager) collectCandidates(cs *store.Changeset, view store.CommittedRea
 
 		// Tier 1: batched value-index lookup.
 		for _, col := range m.indexes.Value.TrackedColumns(tid) {
-			distinct := make(map[string]Value)
+			distinct := st.distinct
+			for k := range distinct {
+				delete(distinct, k)
+			}
 			collectDistinct := func(rows []types.ProductValue) {
 				for _, row := range rows {
 					if int(col) >= len(row) {

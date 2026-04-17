@@ -207,6 +207,7 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 
 	size := int64(SegmentHeaderSize)
 	var lastTx uint64
+	var recordCount int
 
 	// Scan forward through valid records.
 	for {
@@ -215,7 +216,11 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 			if err == io.EOF {
 				break
 			}
-			// Partial/corrupt tail — truncate to last good position.
+			if recordCount == 0 || !isDamagedTailError(err) {
+				f.Close()
+				return nil, err
+			}
+			// Partial/corrupt tail after a valid prefix — truncate to last good position.
 			if truncErr := f.Truncate(size); truncErr != nil {
 				f.Close()
 				return nil, truncErr
@@ -224,6 +229,7 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 		}
 		size += int64(RecordOverhead + len(rec.Payload))
 		lastTx = rec.TxID
+		recordCount++
 	}
 
 	// Seek to write position.

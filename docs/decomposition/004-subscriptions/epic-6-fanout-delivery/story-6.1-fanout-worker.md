@@ -16,16 +16,17 @@ Separate goroutine that receives computed deltas and delivers them through the p
 - `FanOutWorker` struct:
   ```go
   type FanOutWorker struct {
-      inbox          chan FanOutMessage
+      inbox          <-chan FanOutMessage
       sender         FanOutSender
       confirmedReads map[ConnectionID]bool
-      dropped        chan ConnectionID
+      dropped        chan<- ConnectionID
   }
   ```
 
 - `FanOutMessage` struct:
   ```go
   type FanOutMessage struct {
+      TxID         TxID
       TxDurable    <-chan TxID
       Fanout       CommitFanout
       Errors       map[ConnectionID][]SubscriptionError
@@ -44,13 +45,13 @@ Separate goroutine that receives computed deltas and delivers them through the p
     deliver msg.Errors first
     optionally wait for TxDurable (Story 6.4)
     for each connID in msg.Fanout:
-      build TransactionUpdate or caller reducer-result delivery (Story 6.2)
+      build TransactionUpdate for msg.TxID or caller reducer-result delivery (Story 6.2)
       send via protocol layer (with backpressure, Story 6.3)
   ```
 
 - `SetConfirmedReads(connID ConnectionID, enabled bool)`
 - `RemoveClient(connID ConnectionID)`
-- `DroppedClients() <-chan ConnectionID`
+- no worker-owned `DroppedClients()` method in the live narrowed contract; the executor drains the manager-owned shared channel via `SubscriptionManager.DroppedClients()` while the worker receives only the write end at construction time
 
 ## Acceptance Criteria
 
@@ -60,12 +61,12 @@ Separate goroutine that receives computed deltas and delivers them through the p
 - [ ] Context cancellation → worker exits cleanly
 - [ ] Confirmed-read policy can be set/cleared per connection
 - [ ] Caller connection can be routed to reducer-result delivery path instead of standalone TransactionUpdate
-- [ ] DroppedClients channel available for executor drain
+- [ ] Worker accepts the manager-owned dropped-client channel write end at construction time; executor drain still happens through `SubscriptionManager.DroppedClients()`
 
 ## Design Notes
 
 - The inbox channel is the handoff point. The executor blocks only on channel send, not on delivery. If inbox is full, executor blocks — this is backpressure from fan-out to executor, separate from client backpressure.
 - `FanOutSender`, `ReducerCallResult`, and outbound buffering are protocol-owned contracts from SPEC-005. In the live implementation, `protocol.FanOutSenderAdapter` wraps the protocol `ClientSender` and exposes the three fan-out-facing methods SPEC-004 needs: `SendTransactionUpdate`, `SendReducerResult`, and `SendSubscriptionError`.
 - `confirmedReads` reads happen inside the fan-out loop, but exported mutators (`SetConfirmedReads`, `RemoveClient`) are called from runtime/tests outside that loop. Guard the map with a mutex or an equivalent ownership handoff; do not assume single-goroutine access for those mutators.
-- `dropped` channel is shared with the manager's evaluation-error path so the executor drains one channel after each post-commit step. Duplicate connection IDs are allowed; executor-side disconnect cleanup is idempotent.
+- `dropped` channel is shared with the manager's evaluation-error path so the executor drains one manager-owned channel after each post-commit step. The worker is only given the write end; duplicate connection IDs are allowed, and executor-side disconnect cleanup is idempotent.
 - `TxDurable` is executor-supplied post-commit metadata backed by the durability subsystem. The fan-out worker consumes readiness; it does not depend directly on the exported SPEC-002 `DurabilityHandle` surface.

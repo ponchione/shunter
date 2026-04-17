@@ -173,8 +173,16 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 	return rec, nil
 }
 
+func isDamagedTailError(err error) bool {
+	if errors.Is(err, ErrTruncatedRecord) {
+		return true
+	}
+	var checksumErr *ChecksumMismatchError
+	return errors.As(err, &checksumErr)
+}
+
 func canTreatAsDamagedTail(err error, isLast bool, recordCount int) bool {
-	return isLast && recordCount > 0 && errors.Is(err, ErrTruncatedRecord)
+	return isLast && recordCount > 0 && isDamagedTailError(err)
 }
 
 func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {

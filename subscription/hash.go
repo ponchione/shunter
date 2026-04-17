@@ -44,6 +44,22 @@ type canonicalEncoder struct {
 	buf []byte
 }
 
+func acquireCanonicalEncoder() *canonicalEncoder {
+	enc := encoderPool.Get().(*canonicalEncoder)
+	if enc.buf == nil {
+		enc.buf = acquirePooledBuffer()
+	} else {
+		enc.buf = enc.buf[:0]
+	}
+	return enc
+}
+
+func releaseCanonicalEncoder(enc *canonicalEncoder) {
+	releasePooledBuffer(enc.buf)
+	enc.buf = nil
+	encoderPool.Put(enc)
+}
+
 func (e *canonicalEncoder) reset() { e.buf = e.buf[:0] }
 
 func (e *canonicalEncoder) writeByte(b byte) { e.buf = append(e.buf, b) }
@@ -68,11 +84,8 @@ func ComputeQueryHash(pred Predicate, clientID *types.Identity) QueryHash {
 	if pred == nil {
 		panic("subscription: ComputeQueryHash on nil predicate")
 	}
-	enc := encoderPool.Get().(*canonicalEncoder)
-	defer func() {
-		enc.reset()
-		encoderPool.Put(enc)
-	}()
+	enc := acquireCanonicalEncoder()
+	defer releaseCanonicalEncoder(enc)
 	encodePredicate(enc, pred)
 	if clientID != nil {
 		enc.buf = append(enc.buf, clientID[:]...)

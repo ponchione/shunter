@@ -31,7 +31,7 @@ Remove a client from a subscription. Clean up query state and pruning indexes wh
 - [ ] Unregister unknown subscriptionID → `ErrSubscriptionNotFound`
 - [ ] After unregister, subscription no longer appears in candidate collection
 - [ ] Ref count decremented correctly
-- [ ] byConn and bySub reverse lookups cleaned up
+- [ ] byConn and `(connID, subID)` reverse lookups cleaned up without disturbing another connection that reuses the same numeric `SubscriptionID`
 - [ ] v1 does not emit the optional final delta on unsubscribe; behavior is explicitly deferred rather than silently omitted
 
 ## Design Notes

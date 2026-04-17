@@ -148,6 +148,60 @@ func TestSegmentFileName(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentForAppendCorruptFirstRecordFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := makeScanTestSegment(t, dir, 1, 1)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corruptScanTestRecordCRCByte(t, path, 0, 0)
+
+	_, err = OpenSegmentForAppend(dir, 1)
+	if err == nil {
+		t.Fatal("expected corrupt-first-record reopen to fail")
+	}
+	var checksumErr *ChecksumMismatchError
+	if !errors.As(err, &checksumErr) {
+		t.Fatalf("expected checksum mismatch error, got %T (%v)", err, err)
+	}
+	after, statErr := os.Stat(path)
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if after.Size() != before.Size() {
+		t.Fatalf("segment size changed after failed reopen: before=%d after=%d", before.Size(), after.Size())
+	}
+}
+
+func TestOpenSegmentForAppendTruncatesDamagedTailAfterValidPrefix(t *testing.T) {
+	dir := t.TempDir()
+	path := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	wantSize := int64(scanTestRecordOffset(t, path, 2))
+	corruptScanTestRecordCRCByte(t, path, 2, 0)
+
+	sw, err := OpenSegmentForAppend(dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sw.lastTx != 2 {
+		t.Fatalf("lastTx = %d, want 2", sw.lastTx)
+	}
+	if sw.size != wantSize {
+		t.Fatalf("size = %d, want %d", sw.size, wantSize)
+	}
+	if err := sw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != wantSize {
+		t.Fatalf("truncated size = %d, want %d", info.Size(), wantSize)
+	}
+}
+
 // --- Changeset codec tests ---
 
 func testSchema() (*schema.Engine, schema.SchemaRegistry) {

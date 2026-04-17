@@ -183,7 +183,7 @@ func TestOpenAndRecoverNoData(t *testing.T) {
 	}
 }
 
-func TestOpenAndRecoverDetailedCorruptActiveSegmentAfterValidPrefixFails(t *testing.T) {
+func TestOpenAndRecoverDetailedCorruptActiveSegmentAfterValidPrefixStartsFreshNextSegment(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
 	path := writeReplaySegment(t, root, 1,
@@ -193,13 +193,19 @@ func TestOpenAndRecoverDetailedCorruptActiveSegmentAfterValidPrefixFails(t *test
 	)
 	corruptScanTestRecordPayloadByte(t, path, 2, 0)
 
-	_, _, _, err := OpenAndRecoverDetailed(root, reg)
-	if err == nil {
-		t.Fatal("expected recovery failure for corrupt active segment after valid prefix")
+	recovered, maxTxID, plan, err := OpenAndRecoverDetailed(root, reg)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var checksumErr *ChecksumMismatchError
-	if !errors.As(err, &checksumErr) {
-		t.Fatalf("expected checksum mismatch error, got %T (%v)", err, err)
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+	if plan.AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("appendMode = %d, want %d", plan.AppendMode, AppendByFreshNextSegment)
+	}
+	if plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want segmentStartTx=3 nextTxID=3", plan)
 	}
 }
 

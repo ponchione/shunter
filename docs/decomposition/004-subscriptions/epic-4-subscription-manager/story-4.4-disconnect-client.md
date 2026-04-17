@@ -27,7 +27,7 @@ When a client connection drops, remove all its subscriptions in one batch. Equiv
 - [ ] Shared query (2 clients): disconnect one → query state alive for other
 - [ ] Shared query (2 clients): disconnect both → query state fully removed
 - [ ] Unknown connID → no error (idempotent), log warning
-- [ ] After disconnect, no residual entries in byConn, bySub for that connection
+- [ ] After disconnect, no residual entries in byConn or `(connID, subID)` reverse lookups for that connection
 - [ ] Pruning indexes cleaned for queries that lost their last subscriber
 
 ## Design Notes

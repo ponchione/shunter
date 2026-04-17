@@ -457,7 +457,7 @@ EvalAndBroadcast(changeset *Changeset, meta PostCommitMeta) → CommitFanout:
              Deletes:        deltaDeletes,
            })
 
-  5. Send FanOutMessage{TxDurable: meta.TxDurable, Fanout: fanout, Errors: errors, CallerConnID: meta.CallerConnID, CallerResult: meta.CallerResult} to FanOutWorker.inbox.
+  5. Send FanOutMessage{TxID: txID, TxDurable: meta.TxDurable, Fanout: fanout, Errors: errors, CallerConnID: meta.CallerConnID, CallerResult: meta.CallerResult} to FanOutWorker.inbox.
 ```
 
 `activeColumns` is captured once when the `DeltaView` is constructed as `map[TableID][]ColID`. If a subscription is removed mid-evaluation because of an evaluation error, the current `DeltaView` remains valid; it may contain scratch indexes for columns that are no longer referenced, but those extra indexes are harmless and are discarded with the `DeltaView` at the end of the batch.
@@ -501,7 +501,7 @@ The evaluation loop (Section 7) produces a `CommitFanout` synchronously on the e
 ```go
 type FanOutWorker struct {
     // Receives computed deltas from the executor.
-    inbox chan FanOutMessage
+    inbox <-chan FanOutMessage
 
     // Narrow fan-out delivery seam backed by the protocol layer.
     // A protocol adapter may wrap SPEC-005's ClientSender to satisfy this.
@@ -509,6 +509,9 @@ type FanOutWorker struct {
 
     // Per-connection delivery policy needed by the fan-out worker.
     confirmedReads map[ConnectionID]bool
+
+    // Write end of the manager-owned dropped-client stream.
+    dropped chan<- ConnectionID
 }
 
 // FanOutSender is the subscription-side delivery contract.
@@ -521,6 +524,9 @@ type FanOutSender interface {
 }
 
 type FanOutMessage struct {
+    // TxID identifies the committed transaction whose updates are being delivered.
+    TxID TxID
+
     // TxDurable becomes ready when the transaction is durable.
     // Fan-out waits for readiness before sending if the client requires confirmed reads.
     // This readiness channel is supplied by the executor's post-commit pipeline and is
@@ -548,18 +554,18 @@ Ownership rule: once `FanOutMessage` is sent to `FanOutWorker.inbox`, ownership 
 
 ```
 For each FanOutMessage received:
-  0. Deliver any queued SubscriptionError entries in msg.Errors.
+  0. Deliver any queued SubscriptionError entries in msg.Errors before normal updates.
   1. Wait for TxDurable (if confirmed reads required by any client).
   2. Read the pre-grouped CommitFanout entries keyed by ConnectionID.
      A connection may have multiple subscriptions affected by one transaction.
   3. For each connection:
-     Build a TransactionUpdate message containing `Updates []SubscriptionUpdate`
+     Build a TransactionUpdate message for `msg.TxID` containing `Updates []SubscriptionUpdate`
      for that connection only. Preserve one update entry per affected subscription;
      do not merge entries across distinct SubscriptionIDs.
      Send via the protocol layer.
   4. Special case: if this commit came from `CallReducer`, the caller connection's
      update slice is routed into `ReducerCallResult.transaction_update` instead of
-     also receiving a standalone `TransactionUpdate` for the same `tx_id`.
+     also receiving a standalone TransactionUpdate for the same `tx_id`.
 ```
 
 ### 8.3 Aggregation
