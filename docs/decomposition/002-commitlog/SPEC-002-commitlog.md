@@ -511,11 +511,13 @@ Schema evolution is out of scope for v1. Document this clearly.
 
 A truncated tail record (partial write at crash time) is reported by the segment reader as `ErrTruncatedRecord` (§9, Story 2.4) — a sentinel distinct from `ErrChecksumMismatch`. Recovery uses all prior valid records and treats the first `ErrTruncatedRecord` on the active tail segment as the replay horizon. A `ErrChecksumMismatch` in a sealed (non-tail) segment is fatal per §6.5.
 
-Resume rules:
-- the implementation MUST locate the last valid contiguous record before resuming writes
-- if the invalid data is only in the writable tail segment and at least one valid record precedes it, the implementation MAY resume by creating a fresh next segment starting at `last_valid_tx_id + 1`
-- the implementation MUST NOT assume it can safely overwrite arbitrary trailing bytes in-place without first proving the write position
-- if the first record in the last segment is corrupt and there is no prior valid prefix in that segment, opening for append is a hard error until operator intervention or explicit reset
+Resume rules — recovery classifies the active tail segment into one of three append modes (`AppendMode` enum, declared in Story 6.1; consumed by Story 4.3 segment rotation):
+
+- `AppendInPlace` — clean tail (every record valid through end of file). Durability worker opens the tail file for append starting after the last valid record. The implementation MUST locate the last valid contiguous record before resuming writes.
+- `AppendByFreshNextSegment` — damaged tail with a valid prefix (at least one record valid, then `ErrTruncatedRecord` or trailing garbage). Durability worker MUST create a fresh next segment starting at `last_valid_tx_id + 1` rather than appending into the damaged file. The implementation MUST NOT assume it can safely overwrite arbitrary trailing bytes in-place.
+- `AppendForbidden` — first record in the active tail segment is corrupt with no valid prefix. Opening for append is a hard recovery error until operator intervention or explicit reset.
+
+Recovery (Story 6.4) computes the mode via `ScanSegments` (Story 6.1) and hands it to the durability worker startup (Story 4.3) as part of the `RecoveryResumePlan`. The Epic 6 → Epic 4 hand-off is normative.
 
 ### 6.5 History Gap Handling
 

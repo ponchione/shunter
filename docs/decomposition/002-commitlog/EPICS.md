@@ -200,7 +200,7 @@ SPEC-001 Epic 1 (Value types)
         └── Epic 3: Changeset Codec
         └── Epic 5: Snapshot I/O
 Epic 2: Record Format & Segment I/O
-  └── Epic 4: Durability Worker ← Epic 3
+  └── Epic 4: Durability Worker ← Epic 3, Epic 6 (RecoveryResumePlan / AppendMode hand-off)
   └── Epic 6: Recovery ← Epic 3, Epic 5
   └── Epic 7: Log Compaction ← Epic 5
 ```
