@@ -15,6 +15,7 @@
 | 3.3 | [story-3.3-submit-methods.md](story-3.3-submit-methods.md) | Blocking submit, ErrExecutorBusy reject policy, backpressure |
 | 3.4 | [story-3.4-command-dispatch.md](story-3.4-command-dispatch.md) | dispatch() type switch, subscription command handlers, direct-snapshot read boundary |
 | 3.5 | [story-3.5-shutdown.md](story-3.5-shutdown.md) | Close inbox, drain, ErrExecutorShutdown, durability teardown ordering |
+| 3.6 | [story-3.6-startup-orchestration.md](story-3.6-startup-orchestration.md) | Recovery hand-off, scheduler replay, dangling-client sweep, and first-accept gating |
 
 ## Implementation Order
 
@@ -27,6 +28,8 @@ Story 3.1 (Struct + constructor)
                X
               / \
              Story 3.5 (Shutdown)
+               \
+                └── Story 3.6 (Startup orchestration)
 ```
 
 ## Suggested Files
@@ -35,3 +38,4 @@ Story 3.1 (Struct + constructor)
 |---|---|
 | 3.1–3.3, 3.5 | `executor/executor.go`, `executor/executor_test.go` |
 | 3.4 | `executor/dispatch.go` |
+| 3.6 | `engine/startup.go`, `executor/executor.go`, integration startup tests |

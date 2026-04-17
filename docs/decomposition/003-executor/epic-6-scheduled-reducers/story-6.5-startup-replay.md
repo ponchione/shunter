@@ -25,6 +25,7 @@ On executor startup, scan sys_scheduled to populate the timer with all pending w
   - Trigger initial timer scan
 
 - Called during executor startup, after recovery but before accepting external commands.
+- Story 3.6 owns the larger startup sequence; this story owns only the scheduler-replay step within that sequence.
 
 ## Acceptance Criteria
 

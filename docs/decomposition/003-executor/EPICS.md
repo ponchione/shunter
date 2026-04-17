@@ -61,7 +61,7 @@ Registration system for reducers and lifecycle hooks. Immutable after engine sta
 The executor goroutine, bounded inbox, command dispatch routing, and shutdown.
 
 **Scope:**
-- `Executor` struct: inbox channel, registry, store, durability handle, subscription manager, TxID counter, fatal state flag
+- `Executor` struct: inbox channel, registry, committed-state handle, durability handle, subscription manager, TxID counter, fatal state flag
 - `NewExecutor()` constructor with configurable inbox capacity and TxID initialization from recovery
 - `run(ctx)` goroutine: receive from inbox with context cancellation, process one command at a time
 - `dispatchSafely()` top-level panic recovery envelope
@@ -70,6 +70,7 @@ The executor goroutine, bounded inbox, command dispatch routing, and shutdown.
 - Explicit read-routing boundary: registration-sensitive reads stay executor-serialized; purely observational reads may use direct snapshots out-of-band
 - Submit methods: blocking send, optional `ErrExecutorBusy` on full inbox
 - Shutdown: close inbox, drain remaining, reject after close with `ErrExecutorShutdown`, then tear down durability only after admissions stop and drain completes
+- Startup orchestration: recovery TxID hand-off, scheduler replay, dangling-client sweep, and first-accept gating
 
 **Testable outcomes:**
 - Submit command, executor processes it
@@ -81,6 +82,7 @@ The executor goroutine, bounded inbox, command dispatch routing, and shutdown.
 - RegisterSubscriptionCmd acquires snapshot and calls SubscriptionManager.Register atomically
 - Purely observational reads are documented to use direct snapshots rather than executor commands
 - Durability shutdown happens only after the executor stops admitting new write commands and drains queued work
+- Recovery hand-off and startup sequencing are documented so no external command can interleave ahead of scheduler replay or dangling-client cleanup
 
 **Dependencies:** Epic 1 (types, commands, interfaces), Epic 2 (registry)
 
@@ -164,10 +166,11 @@ Durable scheduled reducers: `sys_scheduled` system table, transactional schedule
 - `sys_scheduled` built-in table: `schedule_id` (autoincrement PK), `reducer_name`, `args`, `next_run_at_ns`, `repeat_ns`
 - `SchedulerHandle` implementation: `Schedule()`, `ScheduleRepeat()`, `Cancel()`
 - Schedule/cancel are transactional — mutations to `sys_scheduled` roll back if surrounding reducer rolls back
-- Timer goroutine: scan `sys_scheduled` for due rows, enqueue internal `CallReducerCmd` with `CallSourceScheduled`
+- Timer goroutine: scan `sys_scheduled` for due rows, enqueue internal `CallReducerCmd` with `CallSourceScheduled` plus `ScheduleID` / `IntendedFireAt`
 - One-shot success: execute reducer + delete `sys_scheduled` row in same transaction, single commit
 - Repeating success: execute reducer + advance `next_run_at_ns` by interval (fixed-rate from intended fire time, not completion time)
 - Failure: transaction rolls back, `sys_scheduled` row unchanged, retry after restart or rescan
+- Broken schedule rows (missing reducer / future typed-adapter decode failure) are retried until operator intervention; v1 does not quarantine them automatically
 - Startup replay: on executor start, scan `sys_scheduled` to populate timer with pending wakeups
 - Crash semantics: at-least-once relative to durable state (not exactly-once)
 
@@ -205,6 +208,7 @@ OnConnect/OnDisconnect lifecycle hooks, `sys_clients` system table, and direct i
 - Direct invocation protection: external call to lifecycle reducer name → `ErrLifecycleReducer` before transaction begin; implementation lives in Epic 4 and Epic 7 adds lifecycle-context integration verification
 - `sys_clients` changes appear in normal changesets and trigger subscription deltas
 - Disconnect cannot be vetoed by the reducer
+- Startup dangling-client sweep removes crash-leftover `sys_clients` rows before first accept
 
 **Testable outcomes:**
 - OnConnect commits → `sys_clients` row present, connection accepted
@@ -214,6 +218,7 @@ OnConnect/OnDisconnect lifecycle hooks, `sys_clients` system table, and direct i
 - External `CallReducerCmd` naming "OnConnect" → `ErrLifecycleReducer`
 - `sys_clients` insert/delete appears in changeset, triggers subscription eval
 - No registered OnConnect reducer → still inserts `sys_clients` row and commits
+- Restart with stale `sys_clients` rows → startup sweep cleans them before first accept
 
 **Dependencies:** Epic 4 (transaction lifecycle), Epic 5 (post-commit pipeline for lifecycle commits)
 

@@ -214,6 +214,10 @@ type ReducerRequest struct {
     Args        []byte
     Caller      CallerContext
     Source      CallSource
+    ScheduleID  ScheduleID // populated iff Source == CallSourceScheduled
+    // IntendedFireAt is the scheduler's target fire time in Unix nanoseconds.
+    // Populated iff Source == CallSourceScheduled.
+    IntendedFireAt int64
 }
 
 type CallerContext struct {
@@ -245,7 +249,7 @@ const (
 )
 ```
 
-The executor, not the caller, sets `Caller.Timestamp` when the command is dequeued. Caller-provided timestamps must be ignored.
+The executor, not the caller, sets `Caller.Timestamp` when the command is dequeued. Caller-provided timestamps must be ignored. For serialization, logging, and protocol/wire surfaces, only the UTC wall-clock portion of `time.Time` is meaningful; Go's monotonic component is process-local and must be discarded outside the executor process.
 
 ### 3.4 ReducerContext
 
@@ -425,7 +429,7 @@ Therefore:
 
 The executor MUST pass a stable committed read view to the subscription subsystem.
 
-`CommittedReadView` is defined in SPEC-001 §7.2. The executor acquires a snapshot immediately after commit and holds it for the duration of subscription evaluation, then closes it before dequeueing the next command.
+`CommittedReadView` is defined in SPEC-001 §7.2. The executor acquires a snapshot after `EnqueueCommitted` returns (queue admission only) and before `EvalAndBroadcast`, then closes it before the reducer response is sent.
 
 The view must remain valid for the full duration of subscription evaluation.
 
@@ -541,6 +545,7 @@ type SubscriptionManager interface {
 
 Rules:
 - `Register` MUST be called from an executor command so initial query execution and registration are atomic with commit ordering
+- the `CommittedReadView` passed to `Register` is owned by the caller for the duration of the call only; `SubscriptionManager` MUST NOT retain it past return and MUST copy any snapshot-derived state it wants to keep
 - `EvalAndBroadcast` runs synchronously inside the post-commit pipeline
 - The executor MUST populate `meta.TxDurable` with a non-nil channel obtained from `DurabilityHandle.WaitUntilDurable(txID)` for every post-commit invocation (see SPEC-004 §10.1 for the TxDurable-on-empty-fanout rule)
 - `DisconnectClient` removes all subscriptions for a client when the protocol layer reports disconnect
@@ -581,6 +586,8 @@ type SchedulerHandle interface {
 
 Scheduling and cancellation are transactional DB mutations. If the surrounding reducer rolls back, schedule changes roll back too.
 
+`ScheduleRepeat` has one first-fire policy in v1: the first firing occurs at `now + interval`. There is no separate first-fire timestamp parameter in v1; a future `ScheduleRepeatAt(...)`-style variant is deferred.
+
 ### 9.4 Firing Semantics
 
 When a schedule becomes due, the scheduler enqueues an internal reducer call into the executor inbox.
@@ -601,6 +608,11 @@ Failure path:
 - if reducer returns error or panics, the transaction rolls back
 - `sys_scheduled` remains unchanged
 - the schedule is retried after restart or explicit rescan
+
+Scheduler pickup latency:
+- v1 correctness does not depend on an explicit post-commit scheduler wakeup hook
+- newly inserted `sys_scheduled` rows MUST be observed on the scheduler's next committed-state rescan even if no `Notify()` path is wired
+- an implementation MAY add a non-blocking wakeup/notify optimization to reduce latency, but that optimization is not part of the minimum v1 correctness contract
 
 Crash semantics:
 - exactly-once execution is not guaranteed across crash because commits may be visible in memory before durable persistence
@@ -694,7 +706,18 @@ No reducer runs inside the cleanup transaction; `CallerContext.Source = CallSour
 
 This guarantees eventual client-row cleanup even when the reducer fails halfway through.
 
-### 10.5 Direct Invocation Protection
+### 10.6 Startup Dangling-Client Sweep
+
+After recovery reconstructs committed state and after the scheduler replays `sys_scheduled`, the engine MUST sweep any surviving `sys_clients` rows before it accepts external commands.
+
+Sweep contract:
+- read committed `sys_clients` rows from recovered state
+- for each surviving row, enqueue or invoke the OnDisconnect cleanup path so the row is deleted through the normal lifecycle semantics
+- complete the sweep before the first external reducer or subscription-registration command is admitted
+
+This is the recovery-side complement to §10.4's guaranteed cleanup rule. If the process crashes while clients are connected, the next startup MUST not leave phantom connected clients in `sys_clients` indefinitely.
+
+### 10.7 Direct Invocation Protection
 
 External callers may not invoke lifecycle reducers by name.
 
@@ -716,19 +739,33 @@ If a request names a lifecycle reducer and `Source != CallSourceLifecycle`, the 
 
 Any non-nil error returned by a reducer handler (including future typed-adapter decode failures wrapping SPEC-006's reserved `ErrReducerArgsDecode`) is classified as `StatusFailedUser` via the generic handler-error path. SPEC-003 does not declare a dedicated decode sentinel; see SPEC-006 §4.3 and §3.1 above.
 
+Additional catalog rules:
+- `ErrReducerNotFound` is returned before transaction begin and is surfaced with `StatusFailedInternal` in the reducer-response path. v1 treats an unknown reducer name as a deployed-schema / caller-contract mismatch rather than a store invariant violation.
+- No dedicated sentinel is provided for misuse of a per-call `SchedulerHandle` after the reducer returns, or for attempted schema mutation under a running executor. Those are programming/engine-contract violations handled by freeze-time rules and general implementation logging rather than executor-level runtime classification.
+
 ---
 
-## 12. Performance Constraints
+## 12. Divergences from SpacetimeDB
 
-These are engineering targets, not correctness requirements.
+### 12.1 Fixed-rate repeat semantics vs explicit reducer-driven reschedule
 
-| Operation | Target |
-|---|---|
-| Dequeue + begin empty transaction | < 5 µs |
-| Empty reducer dispatch | < 10 µs |
-| Commit of 100 inserts, excluding subscription eval | < 500 µs |
-| Rollback of failed reducer | < 20 µs |
-| Schedule wakeup to executor enqueue | < 10 ms |
+Unlike SpacetimeDB's explicit-reschedule model, Shunter's `ScheduleRepeat` is system-managed: repeating schedules advance automatically from `intended_fire_time + repeat_ns`. Reducers do not need to re-register themselves after each firing; they stop the repeat by calling `Cancel(scheduleID)` or by removing the row through normal transactional logic.
+
+### 12.2 Bounded executor inbox vs unbounded dispatch queue
+
+SpacetimeDB uses an effectively unbounded reducer-dispatch queue. Shunter bounds the executor inbox and exposes backpressure / reject-on-full policy explicitly. This prevents OOM-under-flood at the cost of caller-visible blocking or `ErrExecutorBusy` responses.
+
+### 12.3 Dequeue-time timestamp stamping vs enqueue-time caller stamping
+
+Shunter stamps `CallerContext.Timestamp` when the command is dequeued, not when it is submitted. This keeps timestamps aligned with executor ordering rather than caller clock or queue residence time.
+
+### 12.4 Post-commit panic fatality with localized per-query recovery
+
+v1 treats any post-commit panic or invariant-violation signal from durability, snapshot acquisition, or the subscription manager as executor-fatal. The one deliberate exception is SPEC-004's localized per-query evaluation errors: if the manager catches an individual query failure, converts it into `SubscriptionError`, and returns normally, the executor continues. This is stricter than SpacetimeDB's more selective recovery behavior.
+
+### 12.5 Scheduled-row mutation is atomic with reducer writes
+
+Shunter deletes or advances `sys_scheduled` in the same transaction as the scheduled reducer's writes. A failed reducer therefore leaves the row pending for retry instead of losing the scheduled invocation. The tradeoff is that a persistently failing scheduled reducer can consume executor time on every rescan until an operator fixes the reducer or cancels the schedule.
 
 ---
 
@@ -741,6 +778,7 @@ The executor requires:
 ```go
 func NewTransaction(committed *CommittedState, schema SchemaRegistry) *Transaction
 func Commit(committed *CommittedState, tx *Transaction) (changeset *Changeset, err error)
+func Rollback(tx *Transaction)
 func (cs *CommittedState) Snapshot() CommittedReadView
 ```
 
@@ -748,6 +786,7 @@ func (cs *CommittedState) Snapshot() CommittedReadView
 
 Required store guarantees:
 - failed commit leaves committed state unchanged
+- `Rollback(tx)` discards transaction-local state immediately; the executor MUST call it on every pre-commit failure path rather than relying on GC alone
 - snapshot/read-view lifetime is explicit and releasable
 - snapshot operations are read-only and safe for subscription evaluation
 
@@ -760,7 +799,7 @@ SPEC-002 must implement:
 - durable tx tracking
 - crash recovery from last durable tx, not last in-memory committed tx
 
-SPEC-002 provides `max_applied_tx_id` from `OpenAndRecover`. The executor stores this value and increments it atomically on each successful commit to assign the next TxID.
+SPEC-002 provides `max_applied_tx_id` from `OpenAndRecover`. The engine's startup path MUST pass that recovered value into executor construction/initialization before first accept. Scheduler replay and the §10.6 dangling-client sweep both happen after recovery and before the executor begins admitting external commands.
 
 ### 13.3 SPEC-004 (Subscriptions)
 
@@ -787,7 +826,7 @@ SPEC-006 must provide:
 - optional typed adapters around the raw `ReducerHandler` byte-oriented runtime signature
 - lifecycle reducer declaration
 
-The `*SchemaRegistry` value passed to `NewExecutor` is the canonical interface declared in SPEC-006 §7. It satisfies the narrower `SchemaLookup` and `IndexResolver` sub-interfaces that SPEC-004 and SPEC-005 consume, so the executor can pass the same value to subsystem constructors without adapters. Registry freeze and the full engine boot ordering are owned by SPEC-006 §5.1 / §5.2; the executor is constructed in step 4 of that sequence and may treat the registry as fully populated and immutable for its lifetime.
+The `*SchemaRegistry` value passed to `NewExecutor` is the canonical interface declared in SPEC-006 §7. It satisfies the narrower `SchemaLookup` and `IndexResolver` sub-interfaces that SPEC-004 and SPEC-005 consume, so the executor can pass the same value to subsystem constructors without adapters. Registry freeze and the full engine boot ordering are owned by SPEC-006 §5.1 / §5.2; the executor begins admitting external work only after recovery, scheduler replay, and the §10.6 dangling-client sweep complete.
 
 ---
 
@@ -845,3 +884,17 @@ Minimum verification matrix:
 - Scheduled reducers are durable and not deleted until successful transaction commit
 - OnDisconnect cannot veto disconnect; cleanup is guaranteed even after reducer failure
 - Reducer panics before commit are recoverable; post-commit panics are executor-fatal
+
+---
+
+## 17. Performance Targets
+
+These are engineering targets, not correctness requirements.
+
+| Operation | Target |
+|---|---|
+| Dequeue + begin empty transaction | < 5 µs |
+| Empty reducer dispatch | < 10 µs |
+| Commit of 100 inserts, excluding subscription eval | < 500 µs |
+| Rollback of failed reducer | < 20 µs |
+| Schedule wakeup to executor enqueue | < 10 ms |

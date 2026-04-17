@@ -16,7 +16,7 @@ OnConnect is an internal executor command from the protocol layer. Inserts sys_c
 - ```go
   func (e *Executor) handleOnConnect(connID ConnectionID, identity Identity)
   ```
-  Called internally (not via public Submit — uses `CallReducerCmd` with `CallSourceLifecycle`).
+  Called internally from `OnConnectCmd` dispatch (not via public Submit of a `CallReducerCmd`).
 
 - Transaction flow:
   1. Begin transaction

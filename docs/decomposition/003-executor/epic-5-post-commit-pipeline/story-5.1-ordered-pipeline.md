@@ -18,7 +18,7 @@ The strict post-commit step ordering: durability handoff, snapshot acquisition, 
   ```
   Steps in exact order:
   1. `e.durability.EnqueueCommitted(txID, changeset)` — queue admission, not fsync
-  2. `view := e.store.Snapshot()` — acquire stable committed read view
+  2. `view := e.committed.Snapshot()` — acquire stable committed read view
   3. `e.subs.EvalAndBroadcast(txID, changeset, view, meta)` — synchronous subscription evaluation; `meta` is a `subscription.PostCommitMeta` built from `DurabilityHandle.WaitUntilDurable(txID)`, caller conn (if any), and `CallerResult` placeholder (§5, SPEC-004 §10.1)
   4. `view.Close()` — release read view
   5. Send `ReducerResponse{Status: StatusCommitted, TxID: txID, ReturnBSATN: ret}` on `responseCh`
@@ -51,4 +51,5 @@ The strict post-commit step ordering: durability handoff, snapshot acquisition, 
 - v1 tradeoff: synchronous evaluation is correct but limits throughput. For SodorYard's target workload (<10 subscriptions, <20ms evaluation) this is acceptable. High-subscription workloads would need async delta pipelines — out of scope for v1.
 - EnqueueCommitted may block if durability worker is backpressured. This is intentional: the executor must not drop committed changesets.
 - The snapshot is acquired AFTER durability handoff so that durability gets the changeset as early as possible. The snapshot itself reads committed state which already reflects the commit.
+- This story's ordered pipeline intentionally does NOT require a scheduler wakeup/notify step. Scheduled-row pickup correctness is owned by committed-state rescans (Epic 6); an implementation may add a non-blocking notify optimization, but post-commit ordering does not depend on it.
 - The important semantic edge is "visible/acknowledged" vs "durable". This story owns that distinction because it is created by the post-commit ordering itself.

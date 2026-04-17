@@ -49,7 +49,7 @@ The executor goroutine: receive commands from inbox, process one at a time with 
 - [ ] Panic in dispatch → executor survives, processes next command
 - [ ] Panic recovery sends error response to command's ResponseCh if present
 - [ ] No goroutine leak after Run returns
-- [ ] **Benchmark:** dequeue + begin empty transaction < 5 µs (§12)
+- [ ] **Benchmark:** dequeue + begin empty transaction < 5 µs (§17)
 
 ## Design Notes
 

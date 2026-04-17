@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E6 remainder`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 9 (SPEC-003 residue cleanup).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 10 (SPEC-004 + SPEC-005 residue cleanup).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -279,40 +279,40 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
 | §1.1 | CRIT | Commit signature contradicted three ways | — | closed (B3) |
-| §1.2 | CRIT | Scheduled-reducer firing has no carrier for `schedule_id`/`IntendedFireAt` | Story 1.2, §3.3 | open |
+| §1.2 | CRIT | Scheduled-reducer firing has no carrier for `schedule_id`/`IntendedFireAt` | `SPEC-003 §3.3`; Story 1.2; Story 6.3 | closed |
 | §1.3 | CRIT | DurabilityHandle contract mismatches §7 + SPEC-002 | — | closed (E6) |
-| §1.4 | CRIT | §5 post-commit step order vs Story 5.1 snapshot timing | §5.2, Story 5.1 | open |
+| §1.4 | CRIT | §5 post-commit step order vs Story 5.1 snapshot timing | `SPEC-003 §5.2`; Story 5.1 | closed |
 | §1.5 | CRIT | OnDisconnect cleanup tx unbounded TxID sink, no identity/CallSource/panic | — | closed (D2) |
 | §2.1 | GAP | `init` lifecycle absent | — | closed (D1) |
-| §2.2 | GAP | Dangling-client cleanup on restart undefined | new Epic 7 story | open |
+| §2.2 | GAP | Dangling-client cleanup on restart undefined | `SPEC-003 §10.6`; Epic 7 EPIC; Story 7.5; Story 3.6 | closed |
 | §2.3 | GAP | Typed-adapter error mapping unowned | — | closed (B1) |
-| §2.4 | GAP | Scheduler→executor wakeup ordering inconsistent | §5 / Story 5.1 | open |
-| §2.5 | GAP | Startup orchestration owner unspecified | new Epic 3 story | open (overlaps A4) |
+| §2.4 | GAP | Scheduler→executor wakeup ordering inconsistent | `SPEC-003 §9.4`; Story 5.1; Story 6.2; Story 6.3 | closed |
+| §2.5 | GAP | Startup orchestration owner unspecified | Epic 3 EPIC; Story 3.1; Story 3.6; `SPEC-003 §13.2/§13.5` | closed |
 | §2.6 | GAP | OnConnect/OnDisconnect command identity vs §2.4 single-command | — | closed (D2) |
-| §2.7 | GAP | No pre-handler scheduled-row validation on firing | Story 6.x | open |
-| §2.8 | GAP | `Schedule`/`ScheduleRepeat` first-fire timing disagreement | Story 6.x | open |
-| §2.9 | GAP | `Rollback` not in SPEC-001 contract listed by §13.1 | §13.1 | open |
-| §2.10 | GAP | `ErrReducerNotFound` status classification inconsistent | §11 | open |
-| §2.11 | GAP | Inbox close-vs-shutdown-flag race not described | Story 3.3 / 3.5 | open |
-| §2.12 | GAP | No guidance for scheduler-response dump channel | Story 6.3 | open |
-| §3.1 | DIVERGE | Fixed-rate repeat vs SpacetimeDB explicit-reschedule | divergence block | open |
-| §3.2 | DIVERGE | Unbounded reducer dispatch queue vs bounded inbox | divergence block | open |
-| §3.3 | DIVERGE | Server-stamped timestamp at dequeue vs supplied-at-call | divergence block | open |
-| §3.4 | DIVERGE | Post-commit failure always fatal vs per-step recoverable | divergence block | open (E7) |
+| §2.7 | GAP | No pre-handler scheduled-row validation on firing | Story 6.4 | closed |
+| §2.8 | GAP | `Schedule`/`ScheduleRepeat` first-fire timing disagreement | `SPEC-003 §9.3`; Story 6.2 | closed |
+| §2.9 | GAP | `Rollback` not in SPEC-001 contract listed by §13.1 | `SPEC-003 §13.1`; Story 4.4 | closed |
+| §2.10 | GAP | `ErrReducerNotFound` status classification inconsistent | `SPEC-003 §11`; Story 4.1 | closed |
+| §2.11 | GAP | Inbox close-vs-shutdown-flag race not described | Story 3.1; Story 3.3; Story 3.5 | closed |
+| §2.12 | GAP | No guidance for scheduler-response dump channel | Story 1.3; Story 6.3 | closed |
+| §3.1 | DIVERGE | Fixed-rate repeat vs SpacetimeDB explicit-reschedule | `SPEC-003 §12.1` | closed |
+| §3.2 | DIVERGE | Unbounded reducer dispatch queue vs bounded inbox | `SPEC-003 §12.2` | closed |
+| §3.3 | DIVERGE | Server-stamped timestamp at dequeue vs supplied-at-call | `SPEC-003 §3.3/§12.3`; Story 1.2 | closed |
+| §3.4 | DIVERGE | Post-commit failure always fatal vs per-step recoverable | `SPEC-003 §12.4` | closed (E7 + divergence note) |
 | §3.5 | DIVERGE | Shunter owns `init` semantics via "no init" | — | closed (D1) |
-| §3.6 | DIVERGE | Scheduled-row mutation atomic with reducer writes vs pre-fire delete | divergence block | open |
+| §3.6 | DIVERGE | Scheduled-row mutation atomic with reducer writes vs pre-fire delete | `SPEC-003 §12.5`; Story 6.4 | closed |
 | §4.1 | NIT | Front matter misdeclares SPEC-002 as "depended on by" | — | closed (B5) |
-| §4.2 | NIT | `CallerContext.Timestamp` type vs SPEC-005 wire format | Story 1.x | open |
-| §4.3 | NIT | §11 catalog omits sentinels stories imply | §11 | open |
-| §4.4 | NIT | `Executor` struct names `store` but §13.1 names `CommittedState` | §13.1 / Story 3.1 | open |
-| §4.5 | NIT | `SubscriptionManager.Register` read-view ownership | Story 4.x | open |
-| §4.6 | NIT | `Executor.fatal` lock scope vs struct declaration | Story 3.1 | open |
+| §4.2 | NIT | `CallerContext.Timestamp` type vs SPEC-005 wire format | `SPEC-003 §3.3`; Story 1.2 | closed |
+| §4.3 | NIT | §11 catalog omits sentinels stories imply | `SPEC-003 §11` | closed |
+| §4.4 | NIT | `Executor` struct names `store` but §13.1 names `CommittedState` | `SPEC-003 §13.1`; Story 3.1; Story 4.1; Story 5.1 | closed |
+| §4.5 | NIT | `SubscriptionManager.Register` read-view ownership | `SPEC-003 §8`; Story 3.4 | closed |
+| §4.6 | NIT | `Executor.fatal` lock scope vs struct declaration | Story 3.1 | closed |
 | §4.7 | NIT | `ScheduleID`/`SubscriptionID` no SPEC-005/SPEC-001 home cite | — | closed (B4) |
-| §4.8 | NIT | Performance section title mirrors SPEC-001 §4.4 | §perf | open |
-| §4.9 | NIT | Story 1.3 `ResponseCh` on every command | Story 1.3 | open |
-| §5.2 | GAP | No story owns `max_applied_tx_id` hand-off from SPEC-002 | new story | open |
-| §5.3 | GAP | No story owns dangling-client sweep on startup | overlaps §2.2 | open |
-| §5.4 | GAP | No story owns read-routing documentation placement | new story | open |
+| §4.8 | NIT | Performance section title mirrors SPEC-001 §4.4 | `SPEC-003 §17`; benchmark refs in Stories 3.2/4.1/4.3/4.4/6.3 | closed |
+| §4.9 | NIT | Story 1.3 `ResponseCh` on every command | Story 1.3 | closed |
+| §5.2 | GAP | No story owns `max_applied_tx_id` hand-off from SPEC-002 | Story 3.6; `SPEC-003 §13.2` | closed |
+| §5.3 | GAP | No story owns dangling-client sweep on startup | Story 7.5; Story 3.6; Epic 7 EPIC; `SPEC-003 §10.6` | closed |
+| §5.4 | GAP | No story owns read-routing documentation placement | Story 3.4 | closed |
 | §5.5 | GAP | No story on reducer/schema registration ordering at engine-boot | — | closed (A4) |
 
 #### SPEC-004 — Subscription Evaluator
@@ -470,7 +470,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 | 6 | Cluster E — post-commit fan-out shapes (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, ClientSender, DurabilityHandle, eval-error vs fatal) | SPEC-002 §2.9; SPEC-003 §1.3/§3.4/§5.4; SPEC-004 §1.1/§1.3/§1.4/§2.3/§2.4/§2.5/§2.6/§2.12/§3.5/§4.1/§4.2; SPEC-005 §1.1/§1.2/§1.5/§1.6/§2.4/§3.9/§5.2 | **(closed)** Five shapes canonicalized: PostCommitMeta (SPEC-004 §10.1), FanOutMessage (SPEC-004 §8.1), SubscriptionError (SPEC-004 §10.2 Go / SPEC-005 §8.4 wire), ReducerCallResult (SPEC-004 §10.2 Go forward-decl / SPEC-005 §8.7 wire), ClientSender+FanOutSender (SPEC-005 §13 with `Send(connID, any)` + adapter pattern / SPEC-004 §8.1). E6 `WaitUntilDurable` added to SPEC-002 §4.2 + SPEC-003 §7. E7 per-query recovery (SPEC-004 §11.1) vs fatal-panic (SPEC-003 §5.4) dividing line pinned. SPEC-003 §8 `EvalAndBroadcast` signature aligned to 4-arg `PostCommitMeta` form. Audit §2.4 `request_id = 0` collision closed; §3.9 status-enum DIVERGE landed inline at SPEC-005 §8.7. |
 | 7 | SPEC-001 residue cleanup | SPEC-001 §1.1/1.2/1.4/1.5, §2.1/2.2/2.4–2.9, §3.x, §4.3–4.5/4.7–4.9, §5.2–5.4 | **(closed)** All 23 open SPEC-001 rows resolved. CRIT fixes: float ±0 hash canonicalization (Story 1.4 + §2.2), Bound-parameterized `SeekBounds` in Story 3.3 + `SeekIndexBounds` in Story 5.3 + §4.6/§5.4 (closes §1.2 + §2.6), undelete requires full-row equality (Story 5.4), `AsBytes` alias contract (Story 1.1). GAPs: ErrTableNotFound/ErrInvalidFloat/ErrRowShapeMismatch each bound to a named producer; snapshot close enforcement via `closed atomic.Bool` (Story 7.1 + §7.2); `ApplyChangeset` non-idempotent + sequence-advance-on-replay (Story 8.2 + §5.8); post-return safety + `*Changeset` concurrency contract (§5.6/§6.3 + Stories 6.1/6.2); Bytes-copy boundary pinned to `NewBytes` (Story 5.4 + §2.2); `SetSequenceValue` symmetric `max()` (Story 8.3). New §12 "Divergences from SpacetimeDB" with six entries (Open Questions → §13, Verification → §14). NIT bundle: ColID rationale (§2.5), §10 renamed "Performance Targets", ValueKind(0) = Invalid (Story 1.1), IndexID 0 reservation for no-PK tables (§4.2 + Story 2.1), Epic 7 blocks text, §11 Snapshot relocated to SPEC-002/SPEC-004 subsections. |
 | 8 | SPEC-002 residue cleanup | SPEC-002 §1.1/1.3/1.4, §2.1/2.2/2.4/2.6/2.8/2.10–2.13, §3.x, §4.1/4.3–4.8, §5.2–5.6 | **(closed)** All 30 open SPEC-002 rows resolved. CRIT: §1.1 SnapshotInterval default = 0 in §8; §1.3 nextID section in §5.2 layout; §1.4 sequence-advance cross-ref to SPEC-001 Story 8.2 in §6.1 + Story 6.4 (no separate post-replay sweep). GAPs: ErrSnapshotInProgress + ErrTruncatedRecord added to §9 + §2.3/§6.4 cross-refs (§2.1/§2.2/§4.3); row_count uint32 (§2.4); restore-API named (`InsertRow` is the bulk-restore primitive — SPEC-001 Story 8.3 + §11 + SPEC-002 Story 6.4) (§2.6/§5.6); durable_horizon = +∞ when segments empty (§2.8); AppendMode normative in §6.4 + EPICS dep arrow Epic 6→4 (§2.10/§4.6); schema-static encoder note Story 3.1 (§2.11/§5.2); snapshot retention deferred-v1 documented in §7 + §13 OQ#2 (§2.12/§5.4); graceful-shutdown ownership cross-ref to SPEC-003 in §5.6 + Story 5.2 (§2.13/§5.5). New §12 Divergences block (6 entries: offset index, single-TX/record, replay strictness, first TxID = 1, single sequence/table, no compression). NIT bundle: schema_version header authoritative note (§5.3), `stateMu` + waiters in §4.3 struct (§4.5), Record CRC docs Story 2.2 (§4.4), .log extension cross-ref §6.1 (§4.7), FsyncMode placeholder §8 (§4.8) with TD-128 logged for live wiring at `commitlog/durability.go:63`. |
-| 9 | SPEC-003 residue cleanup | SPEC-003 §1.2/1.4, §2.2/2.4/2.5/2.7–2.12, §3.x, §4.2–4.6/4.8/4.9, §5.2/5.4 | All open SPEC-003 rows resolved/deferred |
+| 9 | SPEC-003 residue cleanup | SPEC-003 §1.2/1.4, §2.2/2.4/2.5/2.7–2.12, §3.x, §4.2–4.6/4.8/4.9, §5.2/5.4 | **(closed)** All 26 open SPEC-003 rows resolved. CRIT/GAP fixes: scheduled-call carrier fields (`ScheduleID`, `IntendedFireAt`) added to `ReducerRequest` (§1.2); post-commit snapshot timing pinned to after durability enqueue (§1.4); startup sequencing now has an owner via Epic 3 Story 3.6 plus a recovery-time dangling-client sweep via Epic 7 Story 7.5 (§2.2/§2.5/§5.2/§5.3); scheduler wakeup is downgraded from required correctness to optional latency optimization while scheduled-call response draining is explicitly owned (§2.4/§2.12); firing edge cases and `ScheduleRepeat = now + interval` are pinned in Stories 6.4/6.2 (§2.7/§2.8); `Rollback` re-added to the store contract (§2.9); `ErrReducerNotFound` / timestamp / nil-ResponseCh / read-view ownership / fatal-flag / naming nits closed across §3.3/§8/§11/§13 and Stories 1.2/1.3/3.1/3.4/4.1/5.1. New §12 divergence block documents five executor-specific divergences; performance section renamed to §17 `Performance Targets`. |
 | 10 | SPEC-004/005 residue cleanup | SPEC-004 §1.2/1.5/1.6, §2.1/2.2/2.8–2.11/2.13, §3.x, §4.3–4.9, §5.2–5.4; SPEC-005 §1.4/1.6, §2.1/2.3/2.5–2.15, §3.1–3.8/3.10/3.11, §4.3–4.6/4.8/4.9/4.11, §5.2–5.8 | All open SPEC-004 and SPEC-005 rows resolved/deferred |
 | 11 | SPEC-006 residue cleanup | SPEC-006 §2.3/2.5/2.7/2.8/2.10–2.12/2.14, §3.x, §4.1–4.9, §5.2/5.4/5.5 | All open SPEC-006 rows resolved/deferred |
 | 12+ | Spec-to-code drift batches (per-spec §8) | live impl files cited in SPEC-AUDIT.md §8 of each spec | drift either upstreamed into spec or impl realigned |
@@ -522,4 +522,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 9 (SPEC-003 residue cleanup).
+Cursor: Session 10 (SPEC-004 + SPEC-005 residue cleanup).

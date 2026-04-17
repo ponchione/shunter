@@ -1,7 +1,7 @@
 # Story 7.4: Direct Invocation Protection (Verification)
 
 **Epic:** [Epic 7 — Lifecycle Reducers & Client Management](EPIC.md)  
-**Spec ref:** SPEC-003 §10.5  
+**Spec ref:** SPEC-003 §10.7  
 **Depends on:** Story 4.1 (implements the guard), Stories 7.2, 7.3  
 **Blocks:** Nothing
 

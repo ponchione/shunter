@@ -14,6 +14,7 @@ Handle all non-commit outcomes: reducer error, reducer panic, and commit failure
 ## Deliverables
 
 - **Reducer error path** (`err != nil` from handler):
+  - `store.Rollback(tx)`
   - Discard transaction (no committed state mutation)
   - Send response:
     ```go
@@ -24,6 +25,7 @@ Handle all non-commit outcomes: reducer error, reducer panic, and commit failure
     ```
 
 - **Reducer panic path** (`panicked != nil`):
+  - `store.Rollback(tx)`
   - Discard transaction
   - Send response:
     ```go
@@ -34,6 +36,7 @@ Handle all non-commit outcomes: reducer error, reducer panic, and commit failure
     ```
 
 - **Commit failure path** (`commitErr != nil` from store.Commit):
+  - `store.Rollback(tx)` is still called to release transaction-local state even though committed state is already guaranteed unchanged
   - Committed state unchanged (store guarantee)
   - Classify error:
     - User-visible constraint violation → `StatusFailedUser`
@@ -62,10 +65,10 @@ Handle all non-commit outcomes: reducer error, reducer panic, and commit failure
 - [ ] No subscription evaluation on any failure path
 - [ ] Transaction is not retained after rollback (no memory leak)
 - [ ] Malformed reducer args surfaced by a typed adapter produce `StatusFailedUser` and leave state unchanged
-- [ ] **Benchmark:** rollback of failed reducer < 20 µs (§12)
+- [ ] **Benchmark:** rollback of failed reducer < 20 µs (§17)
 
 ## Design Notes
 
-- Rollback is implicit: transaction-local state is garbage collected. No explicit undo log or compensating writes.
+- Rollback is explicit at the store boundary: call `store.Rollback(tx)` on every pre-commit failure path so any transaction-local allocations, sequence reservations, and iterator state are released promptly. There is still no undo log against committed state.
 - Distinguishing user-visible vs internal commit failures: SPEC-001 errors like `ErrPrimaryKeyViolation` and `ErrUniqueConstraintViolation` are user-visible (StatusFailedUser). Everything else is internal (StatusFailedInternal). The executor can use `errors.Is` checks against known SPEC-001 user-visible errors.
 - Panic value is formatted with `%v` and wrapped with `ErrReducerPanic` sentinel for `errors.Is` matching.

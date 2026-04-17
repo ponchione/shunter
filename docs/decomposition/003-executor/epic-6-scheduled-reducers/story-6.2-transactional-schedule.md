@@ -17,7 +17,7 @@ SchedulerHandle implementation: Schedule, ScheduleRepeat, and Cancel as transact
   type schedulerHandle struct {
       tx          *Transaction
       tableID     TableID
-      timerNotify func()  // signal timer to rescan after commit
+      timerNotify func()  // optional signal to reduce rescan latency after commit
   }
   ```
 
@@ -35,7 +35,7 @@ SchedulerHandle implementation: Schedule, ScheduleRepeat, and Cancel as transact
   func (h *schedulerHandle) ScheduleRepeat(reducerName string, args []byte, interval time.Duration) (ScheduleID, error)
   ```
   - Insert row with:
-    - `next_run_at_ns` = now + interval (or first fire time)
+    - `next_run_at_ns` = now + interval
     - `repeat_ns` = interval.Nanoseconds()
 
 - ```go
@@ -61,6 +61,7 @@ SchedulerHandle implementation: Schedule, ScheduleRepeat, and Cancel as transact
 
 ## Design Notes
 
-- `timerNotify` is called after the surrounding transaction commits (not during Schedule/Cancel). The post-commit pipeline or the executor itself calls it. This is wired in Story 6.3.
+- A post-commit wakeup/notify hook is an optional latency optimization, not a correctness requirement. The minimum v1 contract is that committed-state rescans eventually observe newly inserted or cancelled schedules.
 - The SchedulerHandle is constructed per-reducer-invocation as part of ReducerContext (Story 4.1). It holds a reference to the active transaction.
 - Validation (e.g., reducer name exists) could be done here or deferred to firing time. v1 recommendation: validate at schedule time for better DX.
+- `ScheduleRepeat` has one first-fire policy in v1: `now + interval`. A separate "first fire at X, then repeat every interval" API is deferred.

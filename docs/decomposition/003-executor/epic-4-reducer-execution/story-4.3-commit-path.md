@@ -42,7 +42,7 @@ On successful reducer return: commit transaction, assign TxID, hand off to post-
 - [ ] Changeset carries correct TxID
 - [ ] Committed state reflects transaction mutations after Commit
 - [ ] Post-commit pipeline receives changeset and TxID
-- [ ] **Benchmark:** commit of 100 inserts (excluding subscription eval) < 500 µs (§12)
+- [ ] **Benchmark:** commit of 100 inserts (excluding subscription eval) < 500 µs (§17)
 
 ## Design Notes
 

@@ -16,6 +16,7 @@ Graceful executor shutdown: stop accepting new commands, drain remaining, termin
 - ```go
   func (e *Executor) Shutdown()
   ```
+  - Acquire `e.submitMu.Lock()` before flipping the shutdown flag and before closing `e.inbox`; release only after the close is visible to Submit paths
   - Set shutdown flag (prevents new Submit calls)
   - Close `e.inbox` channel
   - Wait for `Run` goroutine to finish (via done channel or WaitGroup)

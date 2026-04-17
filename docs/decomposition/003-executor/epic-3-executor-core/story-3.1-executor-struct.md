@@ -17,12 +17,13 @@ Executor struct holding all owned state. Constructor with configurable inbox cap
   type Executor struct {
       inbox       chan ExecutorCommand
       registry    *ReducerRegistry
-      store       *CommittedState       // from SPEC-001
+      committed   *CommittedState       // from SPEC-001
       durability  DurabilityHandle
       subs        SubscriptionManager
       scheduler   *Scheduler            // from Epic 6; nil until wired
       nextTxID    TxID
-      fatal       bool                  // true after post-commit panic
+      fatal       atomic.Bool           // true after post-commit panic
+      submitMu    sync.RWMutex          // closes the Submit/Shutdown race
       rejectMode  bool                  // true = ErrExecutorBusy; false = block
   }
   ```
@@ -59,6 +60,7 @@ Executor struct holding all owned state. Constructor with configurable inbox cap
 
 ## Design Notes
 
-- `fatal` flag is checked at the top of every dispatch. Set by Epic 5 (post-commit pipeline) on unrecoverable error.
+- `fatal` is an atomically readable flag checked at the top of dispatch and Submit. Epic 5 sets it on unrecoverable post-commit failure.
+- `submitMu` is the synchronization point that closes the flag-check / channel-close race between Story 3.3 Submit paths and Story 3.5 shutdown.
 - `scheduler` is nil initially; wired in Epic 6. The executor doesn't depend on it for basic operation.
-- SPEC-002 `OpenAndRecover` returns `maxAppliedTxID`. That value is passed as `recoveredTxID` here.
+- SPEC-002 `OpenAndRecover` returns `maxAppliedTxID`. That value is passed into executor construction/initialization before first accept; Story 3.6 owns the broader startup sequence that wires recovery, scheduler replay, dangling-client sweep, and run-loop start together.

@@ -38,10 +38,12 @@ Type definitions for the reducer runtime: handler signature, registration struct
 
 - ```go
   type ReducerRequest struct {
-      ReducerName string
-      Args        []byte
-      Caller      CallerContext
-      Source      CallSource
+      ReducerName    string
+      Args           []byte
+      Caller         CallerContext
+      Source         CallSource
+      ScheduleID     ScheduleID // populated iff Source == CallSourceScheduled
+      IntendedFireAt int64      // unix nanos; populated iff Source == CallSourceScheduled
   }
   ```
 
@@ -69,10 +71,12 @@ Type definitions for the reducer runtime: handler signature, registration struct
 - [ ] RegisteredReducer has Name, Handler, and Lifecycle fields
 - [ ] CallerContext.ConnectionID is zero-value for internal callers
 - [ ] ReducerResponse carries Status, Error, optional ReturnBSATN, and TxID
+- [ ] ReducerRequest carries `ScheduleID` and `IntendedFireAt` for scheduled calls; both stay zero-valued for non-scheduled sources
 - [ ] ReducerContext references Transaction and SchedulerHandle (interfaces from SPEC-001 and Story 1.4)
 
 ## Design Notes
 
 - ReducerContext is valid only during synchronous reducer invocation. Enforcement is by contract, not runtime check.
-- CallerContext.Timestamp is set by the executor at dequeue time (Epic 4), not by the caller. Caller-supplied timestamps are ignored.
+- CallerContext.Timestamp is set by the executor at dequeue time (Epic 4), not by the caller. Caller-supplied timestamps are ignored. Only the UTC wall-clock portion is meaningful on the wire or in logs; Go's monotonic component is process-local and must be stripped outside the executor process.
+- For `CallSourceScheduled`, the scheduler populates both `ScheduleID` and `IntendedFireAt` so the executor can mutate the correct `sys_scheduled` row with fixed-rate semantics. Other call sources leave those fields zero-valued.
 - `Identity` and `ConnectionID` are declared in `types/types.go` (SPEC-001 §2.4, §1.1). This story imports them; no placeholder aliases are needed once Story 1.6 of SPEC-001 has landed.

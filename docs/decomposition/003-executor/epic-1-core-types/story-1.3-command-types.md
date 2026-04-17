@@ -75,7 +75,7 @@ The `ExecutorCommand` interface and all concrete command types that flow through
 ## Acceptance Criteria
 
 - [ ] All command types satisfy `ExecutorCommand` interface
-- [ ] Each command type has a `ResponseCh` for async result delivery
+- [ ] Each command type has an optional `ResponseCh` for async result delivery; nil is permitted when the caller intentionally discards the response
 - [ ] CallReducerCmd carries full ReducerRequest
 - [ ] RegisterSubscriptionCmd references SubscriptionRegisterRequest (SPEC-004 type)
 - [ ] UnregisterSubscriptionCmd and DisconnectClientSubscriptionsCmd carry ConnectionID
@@ -86,3 +86,4 @@ The `ExecutorCommand` interface and all concrete command types that flow through
 - `isExecutorCommand()` is unexported — prevents external packages from creating new command types.
 - Scheduled reducers use `CallReducerCmd` with `CallSourceScheduled` as the Source. Lifecycle reducers (`OnConnect` / `OnDisconnect`) do NOT fit the `CallReducerCmd` shape — the `sys_clients` row insert (§10.3) and the guaranteed cleanup tx (§10.4) are not expressible through the plain reducer-call path — so they use `OnConnectCmd` / `OnDisconnectCmd` and `CallerContext.Source = CallSourceLifecycle` is stamped inside the executor.
 - `SubscriptionRegisterRequest` and `SubscriptionRegisterResult` types come from SPEC-004. Use placeholder types or imports until SPEC-004 is implemented.
+- `ResponseCh` may be nil. In that case the executor silently drops the response after completing the command. Callers that require result delivery or visibility into failures MUST supply a channel and drain it.
