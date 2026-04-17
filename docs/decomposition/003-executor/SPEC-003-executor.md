@@ -493,6 +493,13 @@ type DurabilityHandle interface {
     // DurableTxID returns the highest tx known durable on disk.
     DurableTxID() TxID
 
+    // WaitUntilDurable returns a channel that receives txID when
+    // the transaction is durably persisted. Used by the subscription
+    // fan-out worker (SPEC-004 §8) to gate confirmed-read delivery.
+    // If txID == 0, returns nil. If txID is already durable, the
+    // returned channel is pre-filled and closed (non-blocking).
+    WaitUntilDurable(txID TxID) <-chan TxID
+
     // Close stops new admissions, drains queued work, performs a final fsync,
     // and shuts down the durability worker.
     // Returns the final durable TxID and any latched fatal error.
@@ -505,6 +512,7 @@ Contract:
 - queue admission MAY block when the durability worker is backpressured
 - once `EnqueueCommitted` returns, durability owns the changeset
 - if durability has already latched a fatal error, `EnqueueCommitted` MUST panic immediately
+- `WaitUntilDurable(0)` returns nil; `WaitUntilDurable(txID>0)` never blocks and always returns a channel (ready or pending); the channel receives exactly one value and is closed
 - executor shutdown must stop accepting new write commands before the durability subsystem is torn down
 - `Close` is for shutdown/lifecycle management, not for the post-commit hot path
 

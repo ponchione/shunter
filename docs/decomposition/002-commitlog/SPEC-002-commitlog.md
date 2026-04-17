@@ -218,12 +218,22 @@ type DurabilityHandle interface {
     // Returns 0 if nothing has been fsynced yet.
     DurableTxID() TxID
 
+    // WaitUntilDurable returns a channel that receives txID when the
+    // transaction is durably persisted. If txID == 0, returns nil.
+    // If txID is already durable, the returned channel is pre-filled
+    // and closed. Used by the subscription fan-out worker to implement
+    // confirmed-read delivery (SPEC-004 §8) via
+    // `PostCommitMeta.TxDurable` / `FanOutMessage.TxDurable`.
+    WaitUntilDurable(txID TxID) <-chan TxID
+
     // Close stops new admissions, drains queued work, performs a final fsync,
     // and shuts down the durability worker.
     // Returns the final durable TxID and any latched fatal error.
     Close() (TxID, error)
 }
 ```
+
+The executor's post-commit hot path only consumes `EnqueueCommitted` and `WaitUntilDurable`; `DurableTxID` and `Close` are lifecycle methods owned by the commit-log subsystem. SPEC-003 §7 declares the same handle shape — both specs agree on the full four-method contract.
 
 ### 4.3 Internal Channel
 

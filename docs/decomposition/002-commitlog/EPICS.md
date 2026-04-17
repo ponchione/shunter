@@ -87,7 +87,7 @@ Encode/decode Changeset as the log record payload. Bridges SPEC-001 Changeset ty
 Async goroutine that decouples commit from disk write. Batch-then-sync for throughput.
 
 **Scope:**
-- `DurabilityHandle` interface: EnqueueCommitted, DurableTxID, Close
+- `DurabilityHandle` interface: EnqueueCommitted, DurableTxID, WaitUntilDurable, Close
 - `durabilityWorker` struct: bounded channel, atomic durable TxID, fatal error latch
 - Write loop: drain batch, encode, write records, fsync, update durable
 - Segment rotation when size exceeds MaxSegmentSize

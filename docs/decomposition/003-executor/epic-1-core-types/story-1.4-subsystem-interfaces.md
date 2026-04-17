@@ -17,12 +17,14 @@ Interfaces the executor consumes from other subsystems: durability, subscription
   type DurabilityHandle interface {
       EnqueueCommitted(txID TxID, changeset *Changeset)
       DurableTxID() TxID
+      WaitUntilDurable(txID TxID) <-chan TxID
       Close() (TxID, error)
   }
   ```
   - `EnqueueCommitted` blocks only for bounded-queue backpressure, not fsync
   - Must not drop accepted commits silently
   - If durability has latched a fatal error, `EnqueueCommitted` must panic immediately
+  - `WaitUntilDurable` is consumed by the subscription fan-out worker (SPEC-004 §8) to gate confirmed-read delivery; `WaitUntilDurable(0)` returns nil
   - Implemented by SPEC-002
 
 - ```go
@@ -51,7 +53,7 @@ Interfaces the executor consumes from other subsystems: durability, subscription
 
 ## Acceptance Criteria
 
-- [ ] DurabilityHandle has EnqueueCommitted, DurableTxID, Close methods
+- [ ] DurabilityHandle has EnqueueCommitted, DurableTxID, WaitUntilDurable, Close methods
 - [ ] SubscriptionManager has Register, Unregister, DisconnectClient, EvalAndBroadcast, DroppedClients methods
 - [ ] SchedulerHandle has Schedule, ScheduleRepeat, Cancel methods
 - [ ] All interfaces compile against their method signatures

@@ -18,6 +18,7 @@ The public interface and internal struct for the async durability goroutine.
   type DurabilityHandle interface {
       EnqueueCommitted(txID TxID, changeset *Changeset)
       DurableTxID() TxID
+      WaitUntilDurable(txID TxID) <-chan TxID
       Close() (TxID, error)
   }
   ```
@@ -69,6 +70,7 @@ The public interface and internal struct for the async durability goroutine.
 - [ ] Returned handle satisfies DurabilityHandle interface
 - [ ] Channel created with configured capacity
 - [ ] DurableTxID initially returns 0 (or startTxID - 1 if resuming)
+- [ ] WaitUntilDurable(0) returns nil; WaitUntilDurable(txID>0) returns a non-nil channel
 - [ ] DefaultCommitLogOptions returns spec-documented defaults
 - [ ] Worker goroutine is running after construction
 
