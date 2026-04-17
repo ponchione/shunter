@@ -705,7 +705,22 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 
 ---
 
-## 16. Verification
+## 16. Divergences from SpacetimeDB
+
+- **Protocol identifier:** Shunter uses the explicit subprotocol token `v1.bsatn.shunter` (§2.2) instead of SpacetimeDB's protocol namespace. This makes version/encoding selection explicit at the WebSocket handshake boundary.
+- **Compression envelope tags:** Shunter reserves `0x00` = explicit uncompressed envelope and `0x01` = gzip (§3.3). These values are Shunter-specific and are not byte-compatible with SpacetimeDB's compression-tag conventions.
+- **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `256` (§10.1, §12), rather than SpacetimeDB's much larger default buffering. Shunter chooses earlier disconnect-on-lag to keep memory bounded.
+- **TransactionUpdate shape:** v1 sends one `TransactionUpdate` form with full `SubscriptionUpdate` payloads (§8.5); it does not split delivery into separate light/heavy transaction-update variants.
+- **Subscription RPC surface:** v1 exposes only `Subscribe`, `Unsubscribe`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no `SubscribeMulti`, `SubscribeSingle`, or `QuerySetId` protocol family.
+- **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args}` only (§7.3). There is no extra flags byte in the request frame.
+- **OneOffQuery language:** v1 `OneOffQuery` uses the same structured predicate subset as `Subscribe` (§7.4 / §7.1.1), not SpacetimeDB's SQL-oriented query text.
+- **Close-code policy:** Shunter's documented close behavior is limited to `1000`, `1008`, and `1011` with Shunter-specific reasons for policy failures (§11.1). It does not try to mirror SpacetimeDB's full close-code/reason matrix.
+- **Energy model:** v1 has no `OutOfEnergy` outcome. `ReducerCallResult.energy` is reserved and always `0`, and the status enum remains `{committed, failed_user, failed_panic, not_found}` (§8.7).
+- **ConnectionID reuse semantics:** reusing `connection_id` on reconnect is only a client hint for future resume features; it has no server-side resume semantics in v1 (§2.3, §11.3).
+
+---
+
+## 17. Verification
 
 | Test | What it verifies |
 |---|---|

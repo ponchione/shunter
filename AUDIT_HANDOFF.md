@@ -113,7 +113,7 @@ Expected deliverable for next agent
 
 Objective
 - Walk `SPEC-AUDIT.md` (~2564 lines, six top-level specs) and convert findings into spec/story edits across multiple ≤150k-token sessions.
-- This lane edits `docs/decomposition/**`, not `TECH-DEBT.md`. Live `store/`, `commitlog/`, `executor/`, `subscription/`, `protocol/`, `schema/`, `types/`, `bsatn/` only touched in dedicated drift sessions (Session 11+).
+- This lane edits `docs/decomposition/**`, not `TECH-DEBT.md`. Live `store/`, `commitlog/`, `executor/`, `subscription/`, `protocol/`, `schema/`, `types/`, `bsatn/` only touched in dedicated drift sessions (Session 12+).
 - `SPEC-AUDIT.md` is source of truth; this section is the index. Cite finding IDs (e.g. `SPEC-006 §1.1`) so the audit can be re-read for full context. Session 10 closed/deferred every remaining SPEC-004 and SPEC-005 row; Session 11 moves to SPEC-006.
 
 ### B.0 Operating rules
@@ -383,17 +383,17 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.13 | GAP | Subscribe activation timing vs Story 5.2 unclear | §9.1, §9.4, Story 5.2 | closed |
 | §2.14 | GAP | `SubscribeApplied`/`UnsubscribeApplied` activation vs E5 tracker removal | §9.1, Stories 4.3 / 5.2 | closed |
 | §2.15 | GAP | `PingInterval`/`IdleTimeout` silent during OnConnect | §12 / §11.1 | deferred — needs explicit lifecycle-timer start policy with OnConnect timing |
-| §3.1 | DIVERGE | Subprotocol token `v1.bsatn.shunter` forks namespace | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
-| §3.2 | DIVERGE | Compression tag values collide with reference | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
-| §3.3 | DIVERGE | Outgoing buffer 256 vs SpacetimeDB 16384 | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
-| §3.4 | DIVERGE | No TransactionUpdate light/heavy split | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
-| §3.5 | DIVERGE | No SubscribeMulti/Single/QuerySetId | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
-| §3.6 | DIVERGE | No `CallReducer.flags` byte | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
-| §3.7 | DIVERGE | OneOffQuery uses structured predicates not SQL | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
-| §3.8 | DIVERGE | Close codes differ slightly | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.1 | DIVERGE | Subprotocol token `v1.bsatn.shunter` forks namespace | SPEC-005 §16 divergence block | closed |
+| §3.2 | DIVERGE | Compression tag values collide with reference | SPEC-005 §16 divergence block | closed |
+| §3.3 | DIVERGE | Outgoing buffer 256 vs SpacetimeDB 16384 | SPEC-005 §16 divergence block | closed |
+| §3.4 | DIVERGE | No TransactionUpdate light/heavy split | SPEC-005 §16 divergence block | closed |
+| §3.5 | DIVERGE | No SubscribeMulti/Single/QuerySetId | SPEC-005 §16 divergence block | closed |
+| §3.6 | DIVERGE | No `CallReducer.flags` byte | SPEC-005 §16 divergence block | closed |
+| §3.7 | DIVERGE | OneOffQuery uses structured predicates not SQL | SPEC-005 §16 divergence block | closed |
+| §3.8 | DIVERGE | Close codes differ slightly | SPEC-005 §16 divergence block | closed |
 | §3.9 | DIVERGE | `ReducerCallResult.status` enum maps neither way | — | closed (E4) |
-| §3.10 | DIVERGE | No `OutOfEnergy` / `Energy` | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
-| §3.11 | DIVERGE | ConnectionId reuse on reconnect no server-side meaning | divergence block | deferred — divergence-block cleanup not completed in Session 10 |
+| §3.10 | DIVERGE | No `OutOfEnergy` / `Energy` | SPEC-005 §16 divergence block | closed |
+| §3.11 | DIVERGE | ConnectionId reuse on reconnect no server-side meaning | SPEC-005 §16 divergence block | closed |
 | §4.1 | NIT | BSATN naming disclaimer missing | — | closed (C1) |
 | §4.2 | NIT | "Depends on:" front matter underclaims | — | closed (B5) |
 | §4.3 | NIT | §9.1 names "pending removal" state Story 3.3 doesn't model | §9.1, Story 3.3 | closed |
