@@ -339,6 +339,12 @@ Snapshot file (snapshots/{tx_id}/snapshot):
       next_id        : uint64 LE
   ]
 
+  next_id_count      : uint32 LE
+  [ for each table with internal RowID allocation state, sorted by table_id ascending:
+      table_id       : uint32 LE
+      next_id        : uint64 LE   — value of Table.NextID() at snapshot time (SPEC-001 Story 8.3)
+  ]
+
   table_count        : uint32 LE
   [ for each table, sorted by table_id ascending:
       table_id       : uint32 LE
@@ -352,6 +358,7 @@ Snapshot file (snapshots/{tx_id}/snapshot):
 
 Notes:
 - Internal `RowID` values are not stored. SPEC-001 defines them as non-stable internal identifiers; recovery rebuilds them.
+- Per-table `next_id` (RowID allocation cursor) is serialized between sequences and tables so post-recovery `Table.AllocRowID()` resumes without collision. Source: SPEC-001 Story 8.3 `Table.NextID()` / `Table.SetNextID()` accessors. Distinct from the auto-increment sequence section above (which serializes user-visible auto-increment values via SPEC-001 Story 8.3 `Table.SequenceValue()` / `Table.SetSequenceValue()`).
 - Indexes are rebuilt from rows after recovery; they are not serialized into the snapshot.
 - Deterministic ordering is required so that repeated snapshots of the same logical state produce byte-stable contents aside from the outer hash field.
 
