@@ -446,6 +446,8 @@ v1 policy: the **recommended default is `SnapshotInterval = 0`** (no automatic i
 
 **When to override:** Applications that require bounded recovery time and cannot guarantee graceful shutdown (e.g., processes that may be killed abruptly) may set `SnapshotInterval > 0` to trigger periodic snapshots, accepting the commit-latency cost. When using periodic mode, the executor MUST quiesce (stop accepting new writes) for the full duration of snapshot creation.
 
+**Graceful-shutdown orchestration owner:** SPEC-002 exposes `CreateSnapshot` and `DurabilityHandle.Close` as the two shutdown-relevant calls, but the engine-level ordering — quiesce executor → flush in-flight commits to durable → final `CreateSnapshot` → `DurabilityHandle.Close` — is owned by SPEC-003 (Transaction Executor shutdown sequence; tracked via SPEC-003 audit §2.5 and Session 9). Story 5.2 implements `CreateSnapshot` correctness; sequencing it relative to executor lifecycle is not a SPEC-002 concern.
+
 **Async snapshot path:** Deferred to v2. Requires explicit copy-on-write or epoch-based read-view semantics so commits can continue during serialization.
 
 ---
@@ -544,6 +546,8 @@ After a snapshot is successfully created at `snapshot_tx_id`:
 
 **Safety:** Do not delete segments until the snapshot is fully written and fsynced.
 
+**Snapshot retention (deferred v1):** This spec defines no automatic snapshot retention policy. After a snapshot lands and compaction sweeps superseded segments, the snapshot directory itself is never deleted by the engine. Operators are expected to prune `snapshots/{tx_id}/` directories out-of-band. Consequence: with `SnapshotInterval > 0`, snapshot directories accumulate without bound, and each is a full copy (no object dedup in v1). Retention policy choice (count-based / age-based / size-based) is tracked in Open Questions "Multiple snapshot retention"; a Story under Epic 7 will own it once the policy is chosen. Until then, leaving snapshots in place is the documented v1 behavior.
+
 ---
 
 ## 8. Configuration
@@ -636,7 +640,7 @@ Recovery applies replayed `Changeset` values to `CommittedState`. The snapshot w
 
 1. **Snapshot creation timing.** v1 permits synchronous snapshot creation. If production latency shows this is too expensive, v2 should introduce an async snapshot path with explicit copy-on-write/read-view rules.
 
-2. **Multiple snapshot retention.** v1 should keep at least the newest two successful snapshots. Whether retention should be count-based, age-based, or size-based is deferred.
+2. **Multiple snapshot retention.** v1 should keep at least the newest two successful snapshots. Whether retention should be count-based, age-based, or size-based is deferred. v1 ships no automatic retention; see §7 "Snapshot retention (deferred v1)" for the documented consequence (operator-managed directory pruning until a policy lands). When chosen, the policy gets a dedicated Story under Epic 7.
 
 3. **Write-ahead guarantee level.** v1 durability is batch-fsync. A strict per-transaction sync mode may be added later if an operator-facing durability/latency tradeoff is required.
 

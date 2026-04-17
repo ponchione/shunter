@@ -53,3 +53,4 @@ Encode a Changeset to the binary payload format used inside log records.
 
 - Pre-compute total size for single allocation if practical. Otherwise `bytes.Buffer` is fine.
 - Deterministic table ordering enables byte-stable output for testing. Not required for correctness but simplifies verification.
+- Schema-static invariant (SPEC-002 §3.4): the encoder assumes the schema registry is static for the data-dir lifetime. Mutating the registry mid-session (between snapshot writes or between commits) produces undefined output and is unsupported in v1. SPEC-002 has no schema-change record type (§3.4 + Open Questions "Record-type expansion"); enforcement is implicit — the application owns not mutating a frozen registry. SPEC-006 §5.1 `Build()=freeze` is the structural guarantee; the encoder is the load-bearing consumer.

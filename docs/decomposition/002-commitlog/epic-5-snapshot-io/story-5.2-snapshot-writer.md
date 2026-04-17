@@ -70,3 +70,4 @@ Write a full-state snapshot to disk with Blake3 integrity, lockfile protocol, an
 - Blake3 hash: write content to buffer, compute hash, splice hash into header, then write to file. Alternatively, write to file with placeholder, seek back and patch. Buffer approach is simpler for v1.
 - RowIDs are NOT stored. They're internal and rebuilt during recovery.
 - SPEC-001 still requires snapshot/recovery to preserve each table's future internal RowID allocator position (`nextID`). This story therefore owns serializing allocation state even though individual row IDs are not persisted.
+- Graceful-shutdown ordering is owned by SPEC-003, not this story. SPEC-002 §5.6 pins the two-call contract (final `CreateSnapshot` → `DurabilityHandle.Close`); the engine-level orchestration that decides when to fire it (executor quiesce + in-flight flush) lands in SPEC-003 Session 9.
