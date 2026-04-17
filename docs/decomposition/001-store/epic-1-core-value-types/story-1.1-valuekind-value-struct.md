@@ -42,6 +42,8 @@ The tagged union that represents a single column value.
 - Accessor per kind:
   `AsBool() bool`, `AsInt8() int8`, etc.
   - Panic on kind mismatch (caller bug, not user error)
+  - `AsBytes() []byte` returns a slice aliasing the Value's internal `buf`. Callers MUST NOT mutate the returned slice. The immutability invariant in SPEC-001 §2.2 depends on the Value having been constructed through `NewBytes` (which copies input) and never handed a mutable view afterwards. If a caller needs a mutable copy, use `append([]byte(nil), v.AsBytes()...)`.
+  - `AsString() string` returns the stored string directly (Go strings are already immutable; no aliasing concern).
 
 - `Kind() ValueKind` method
 
@@ -54,6 +56,7 @@ The tagged union that represents a single column value.
 - [ ] `NewFloat64(NaN)` returns error
 - [ ] `NewBytes(b)` — mutating original `b` does not affect stored Value
 - [ ] Accessor kind mismatch panics
+- [ ] `AsBytes` returns a non-nil slice whose length and content match the NewBytes input; its mutation is undefined behavior (contract: read-only)
 
 ## Design Notes
 
