@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E6 remainder`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 7 (SPEC-001 residue cleanup).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 8 (SPEC-002 residue cleanup).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -199,38 +199,38 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
-| §1.1 | CRIT | Value equality / hash invariant broken for float ±0 | Story 1.1 | open |
-| §1.2 | CRIT | `CommittedReadView.IndexRange` lacks Bound semantics in `BTreeIndex` | Stories 3.3 / 5.3 / 7.1, §7.2 | open |
+| §1.1 | CRIT | Value equality / hash invariant broken for float ±0 | Story 1.1 | closed |
+| §1.2 | CRIT | `CommittedReadView.IndexRange` lacks Bound semantics in `BTreeIndex` | Stories 3.3 / 5.3 / 7.1, §7.2 | closed |
 | §1.3 | CRIT | TxID ownership contradictory | — | closed (B3) |
-| §1.4 | CRIT | Undelete-match rule contradicts §5.5 vs Story 5.4 | Story 5.4, §5.5, §6.2 | open |
-| §1.5 | CRIT | `AsBytes` return contract undefined; can break immutability | Story 1.1 | open |
-| §2.1 | GAP | Sequence recovery: replay does not advance `Sequence.next` | Story 8.2 (and SPEC-002 Story 6.4) | open |
-| §2.2 | GAP | `ErrTableNotFound` no production site | Story 5.4 / store boundary | open |
+| §1.4 | CRIT | Undelete-match rule contradicts §5.5 vs Story 5.4 | Story 5.4, §5.5, §6.2 | closed |
+| §1.5 | CRIT | `AsBytes` return contract undefined; can break immutability | Story 1.1 | closed |
+| §2.1 | GAP | Sequence recovery: replay does not advance `Sequence.next` | Story 8.2 (and SPEC-002 Story 6.4) | closed |
+| §2.2 | GAP | `ErrTableNotFound` no production site | Story 5.4 / store boundary | closed |
 | §2.3 | GAP | `ErrColumnNotFound` declared but unused | — | closed (B2) |
-| §2.4 | GAP | `ErrInvalidFloat` no production site (Story 1.1) | Story 1.1 | open |
-| §2.5 | GAP | Snapshot close state not enforced | Story 7.x snapshot lifecycle | open |
-| §2.6 | GAP | `StateView.SeekIndexRange` may be insufficient for SPEC-004 predicates | §7.2, Story 7.1 | open |
-| §2.7 | GAP | `ApplyChangeset` idempotency / partial-replay undefined | §6.x, replay story | open |
-| §2.8 | GAP | Row-shape validation error name unreferenced in §9 | §9 | open |
-| §2.9 | GAP | Write-lock vs read-lock scope restated inconsistently | §6.2 / §7.x | open |
-| §3.1 | DIVERGE | NaN rejected vs SpacetimeDB total-ordering | §1 or §12 divergence block | open |
-| §3.2 | DIVERGE | No composite types; RowID stable; rows decoded in memory | divergence block | open |
-| §3.3 | DIVERGE | `rowHashIndex` "no PK" vs SpacetimeDB "no unique index" | divergence block | open |
-| §3.4 | DIVERGE | Multi-column PK allowed | divergence block | open |
-| §3.5 | DIVERGE | Replay constraint violations fatal vs silent skip | divergence block | open |
-| §3.6 | DIVERGE | `Changeset` lacks `truncated`/`ephemeral`/`tx_offset` | divergence block | open |
+| §2.4 | GAP | `ErrInvalidFloat` no production site (Story 1.1) | Story 1.1 | closed |
+| §2.5 | GAP | Snapshot close state not enforced | Story 7.x snapshot lifecycle | closed |
+| §2.6 | GAP | `StateView.SeekIndexRange` may be insufficient for SPEC-004 predicates | §7.2, Story 7.1 | closed |
+| §2.7 | GAP | `ApplyChangeset` idempotency / partial-replay undefined | §6.x, replay story | closed |
+| §2.8 | GAP | Row-shape validation error name unreferenced in §9 | §9 | closed |
+| §2.9 | GAP | Write-lock vs read-lock scope restated inconsistently | §6.2 / §7.x | closed |
+| §3.1 | DIVERGE | NaN rejected vs SpacetimeDB total-ordering | §12.1 divergence block | closed |
+| §3.2 | DIVERGE | No composite types; RowID stable; rows decoded in memory | §12.2 divergence block | closed |
+| §3.3 | DIVERGE | `rowHashIndex` "no PK" vs SpacetimeDB "no unique index" | §12.3 divergence block | closed |
+| §3.4 | DIVERGE | Multi-column PK allowed | §12.4 divergence block | closed |
+| §3.5 | DIVERGE | Replay constraint violations fatal vs silent skip | §12.5 divergence block | closed |
+| §3.6 | DIVERGE | `Changeset` lacks `truncated`/`ephemeral`/`tx_offset` | §12.6 divergence block | closed |
 | §4.1 | NIT | SPEC-001 front matter omits SPEC-003 dep | — | closed (B5) |
 | §4.2 | NIT | Commit signature returns TxID twice | — | closed (B3) |
-| §4.3 | NIT | `ColID` exists but schema uses raw `int` | schema sections | open |
-| §4.4 | NIT | Performance section title vs open-question framing | §perf | open |
-| §4.5 | NIT | Story 1.1 zero-initialized Value status | Story 1.1 | open |
+| §4.3 | NIT | `ColID` exists but schema uses raw `int` | schema sections | closed |
+| §4.4 | NIT | Performance section title vs open-question framing | §10 renamed | closed |
+| §4.5 | NIT | Story 1.1 zero-initialized Value status | Story 1.1 | closed |
 | §4.6 | NIT | `Nullable` decorative but not marked | — | closed (C2) |
-| §4.7 | NIT | Primary IndexID=0 rule ambiguous for no-PK tables | §index section | open |
-| §4.8 | NIT | Epic 7 blocks "Nothing" but other specs consume it | EPICS.md | open |
-| §4.9 | NIT | §11 executor contract restates `(cs).Snapshot()` outside Epic-7 | §11 | open |
-| §5.2 | GAP | §6.3 consumers receive same Changeset — no concurrency contract | §6.3 | open |
-| §5.3 | GAP | No story covers `Bytes` copy at Insert boundary | Story 5.4 | open |
-| §5.4 | GAP | Story 8.3 `SetNextID` / `SetSequenceValue` semantics asymmetric | Story 8.3 | open |
+| §4.7 | NIT | Primary IndexID=0 rule ambiguous for no-PK tables | §4.2 + Story 2.1 | closed |
+| §4.8 | NIT | Epic 7 blocks "Nothing" but other specs consume it | epic-7 EPIC.md | closed |
+| §4.9 | NIT | §11 executor contract restates `(cs).Snapshot()` outside Epic-7 | §11 | closed |
+| §5.2 | GAP | §6.3 consumers receive same Changeset — no concurrency contract | §6.3 | closed |
+| §5.3 | GAP | No story covers `Bytes` copy at Insert boundary | Story 5.4 | closed |
+| §5.4 | GAP | Story 8.3 `SetNextID` / `SetSequenceValue` semantics asymmetric | Story 8.3 | closed |
 
 #### SPEC-002 — Commit Log
 
@@ -468,7 +468,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 | 4 | Cluster C — BSATN disclaimer + per-column trailer | SPEC-002 §2.3/§3.1/§6.1; SPEC-001 §4.6; SPEC-005 §4.1/§6.1; SPEC-006 §2.1/§2.2/§2.9; SPEC-003/004 clean-room caveats | **(closed)** SPEC-002 §3.1 carries canonical disclaimer; cross-refs in SPEC-003 §3.1 / SPEC-004 §6 / SPEC-005 §3.1 / SPEC-006 §1.2. Per-column trailer pinned at `(type_tag, nullable, auto_increment)` (Option A — match live); SPEC-006 §8 ColumnSchema gets `AutoIncrement`; `ErrNullableColumn` landed in §13 + Story 5.1 acceptance. |
 | 5 | Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init | SPEC-003 §1.5/§2.1/§2.6/§3.5; SPEC-005 §4.7; SPEC-006 §2.4/§3.2 | **(closed)** SPEC-006 §9 defers `init`/`update` (not reserved; use deployment-time reducer; v2 target). SPEC-003 §2.4 declares `OnConnectCmd` / `OnDisconnectCmd` as bespoke commands (Option A — match live); §10.3/§10.4 rewritten; §10.4 pins the four SPEC-AUDIT §1.5 contracts (CallSource reuse of `CallSourceLifecycle`; one TxID per failed OnDisconnect; cleanup post-commit panics fatal per §5.4; cleanup runs even when `e.fatal`). Story 7.3 acceptance extended. SPEC-005 §5.2/§5.3 cross-ref `OnConnectCmd`/`OnDisconnectCmd`. |
 | 6 | Cluster E — post-commit fan-out shapes (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, ClientSender, DurabilityHandle, eval-error vs fatal) | SPEC-002 §2.9; SPEC-003 §1.3/§3.4/§5.4; SPEC-004 §1.1/§1.3/§1.4/§2.3/§2.4/§2.5/§2.6/§2.12/§3.5/§4.1/§4.2; SPEC-005 §1.1/§1.2/§1.5/§1.6/§2.4/§3.9/§5.2 | **(closed)** Five shapes canonicalized: PostCommitMeta (SPEC-004 §10.1), FanOutMessage (SPEC-004 §8.1), SubscriptionError (SPEC-004 §10.2 Go / SPEC-005 §8.4 wire), ReducerCallResult (SPEC-004 §10.2 Go forward-decl / SPEC-005 §8.7 wire), ClientSender+FanOutSender (SPEC-005 §13 with `Send(connID, any)` + adapter pattern / SPEC-004 §8.1). E6 `WaitUntilDurable` added to SPEC-002 §4.2 + SPEC-003 §7. E7 per-query recovery (SPEC-004 §11.1) vs fatal-panic (SPEC-003 §5.4) dividing line pinned. SPEC-003 §8 `EvalAndBroadcast` signature aligned to 4-arg `PostCommitMeta` form. Audit §2.4 `request_id = 0` collision closed; §3.9 status-enum DIVERGE landed inline at SPEC-005 §8.7. |
-| 7 | SPEC-001 residue cleanup | SPEC-001 §1.1/1.2/1.4/1.5, §2.1/2.2/2.4–2.9, §3.x, §4.3–4.5/4.7–4.9, §5.2–5.4 | All "open" SPEC-001 rows resolved or explicitly deferred |
+| 7 | SPEC-001 residue cleanup | SPEC-001 §1.1/1.2/1.4/1.5, §2.1/2.2/2.4–2.9, §3.x, §4.3–4.5/4.7–4.9, §5.2–5.4 | **(closed)** All 23 open SPEC-001 rows resolved. CRIT fixes: float ±0 hash canonicalization (Story 1.4 + §2.2), Bound-parameterized `SeekBounds` in Story 3.3 + `SeekIndexBounds` in Story 5.3 + §4.6/§5.4 (closes §1.2 + §2.6), undelete requires full-row equality (Story 5.4), `AsBytes` alias contract (Story 1.1). GAPs: ErrTableNotFound/ErrInvalidFloat/ErrRowShapeMismatch each bound to a named producer; snapshot close enforcement via `closed atomic.Bool` (Story 7.1 + §7.2); `ApplyChangeset` non-idempotent + sequence-advance-on-replay (Story 8.2 + §5.8); post-return safety + `*Changeset` concurrency contract (§5.6/§6.3 + Stories 6.1/6.2); Bytes-copy boundary pinned to `NewBytes` (Story 5.4 + §2.2); `SetSequenceValue` symmetric `max()` (Story 8.3). New §12 "Divergences from SpacetimeDB" with six entries (Open Questions → §13, Verification → §14). NIT bundle: ColID rationale (§2.5), §10 renamed "Performance Targets", ValueKind(0) = Invalid (Story 1.1), IndexID 0 reservation for no-PK tables (§4.2 + Story 2.1), Epic 7 blocks text, §11 Snapshot relocated to SPEC-002/SPEC-004 subsections. |
 | 8 | SPEC-002 residue cleanup | SPEC-002 §1.1/1.3/1.4, §2.1/2.2/2.4/2.6/2.8/2.10–2.13, §3.x, §4.1/4.3–4.8, §5.2–5.6 | All open SPEC-002 rows resolved/deferred |
 | 9 | SPEC-003 residue cleanup | SPEC-003 §1.2/1.4, §2.2/2.4/2.5/2.7–2.12, §3.x, §4.2–4.6/4.8/4.9, §5.2/5.4 | All open SPEC-003 rows resolved/deferred |
 | 10 | SPEC-004/005 residue cleanup | SPEC-004 §1.2/1.5/1.6, §2.1/2.2/2.8–2.11/2.13, §3.x, §4.3–4.9, §5.2–5.4; SPEC-005 §1.4/1.6, §2.1/2.3/2.5–2.15, §3.1–3.8/3.10/3.11, §4.3–4.6/4.8/4.9/4.11, §5.2–5.8 | All open SPEC-004 and SPEC-005 rows resolved/deferred |
@@ -522,4 +522,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 7 (SPEC-001 residue cleanup).
+Cursor: Session 8 (SPEC-002 residue cleanup).
