@@ -2,7 +2,7 @@
 
 > **Two lanes coexist in this file.**
 > **Lane A (below)** — original per-slice code-vs-spec audit feeding `TECH-DEBT.md`. Slice cursor: `SPEC-004 E6 remainder`.
-> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 6 (Cluster E — post-commit fan-out shapes).
+> **Lane B (bottom of file, "## Spec-Audit Reconciliation Lane")** — multi-session reconciliation of `SPEC-AUDIT.md` findings into spec/story edits. Cursor: Session 7 (SPEC-001 residue cleanup).
 > Future sessions pick the lane that matches the kickoff prompt; do not interleave.
 
 ## Lane A — Per-Slice Code-vs-Spec Audit (TECH-DEBT.md feed)
@@ -153,16 +153,18 @@ Cross-spec lifecycle model had three+ open seams.
 
 Edits landed in: `docs/decomposition/003-executor/SPEC-003-executor.md` §2.4/§10/§10.3/§10.4; `docs/decomposition/003-executor/epic-7-lifecycle-reducers/story-7.3-on-disconnect.md`; `docs/decomposition/005-protocol/SPEC-005-protocol.md` §5.2/§5.3; `docs/decomposition/006-schema/SPEC-006-schema.md` §9.
 
-#### Cluster E — Post-commit fan-out shapes (Session 6 — newly identified)
-Coordinated declaration across SPEC-003/004/005.
+#### Cluster E — Post-commit fan-out shapes (closed Session 6)
+Coordinated declaration across SPEC-002/003/004/005.
 
-- **E1 `PostCommitMeta` shape** — SPEC-003 §1.3, SPEC-004 §1.1, SPEC-004 §2.3, SPEC-004 §2.12, SPEC-004 §3.5.
-- **E2 `FanOutMessage` shape** — SPEC-004 §1.3, SPEC-004 §2.3, SPEC-005 §1.2.
-- **E3 `SubscriptionError` shape + delivery** — SPEC-004 §2.4, SPEC-005 §1.1, SPEC-005 §2.4 (request_id=0 collision), SPEC-005 §5.2.
-- **E4 `ReducerCallResult`** — SPEC-004 §2.5, SPEC-005 §3.9 (status enum DIVERGE), SPEC-005 §2.2 (TxID=0 sentinel — overlaps B3).
-- **E5 `ClientSender`/`FanOutSender` interface naming + `Send(connID, any)`** — SPEC-004 §2.6, SPEC-005 §1.1, SPEC-005 §1.5. Live: `protocol/sender.go:30`, `protocol/fanout_adapter.go:16-47`.
-- **E6 `DurabilityHandle` contract + `WaitUntilDurable`** — SPEC-002 §2.9, SPEC-003 §1.3. Live: `executor/interfaces.go:21`, `commitlog/durability.go:181`.
-- **E7 Per-subscription eval-error vs SPEC-003 fatal post-commit** — SPEC-004 §1.4, contradicts SPEC-003 §5.4 / §3.4.
+- **E1 `PostCommitMeta` shape** — **Resolved:** canonical declaration at SPEC-004 §10.1 (unchanged shape `{TxDurable, CallerConnID, CallerResult}`). SPEC-003 §8 `SubscriptionManager.EvalAndBroadcast` signature aligned to 4-arg form (was 3-arg; live already had 4). Stories 4.5, 5.1 (subscriptions), 1.4, 5.1 (executor), executor EPICS step list updated. Audit §2.12 closed: SPEC-004 §10.1 now pins TxDurable-on-empty-fanout contract (non-nil for every production post-commit invocation; `nil` reserved for test paths).
+- **E2 `FanOutMessage` shape** — **Resolved:** canonical at SPEC-004 §8.1 (unchanged). SPEC-005 §13 adds a cross-ref sentence declaring SPEC-004 §8.1 authoritative and noting SPEC-005 does not redeclare the Go struct.
+- **E3 `SubscriptionError` shape + delivery** — **Resolved:** Go shape at SPEC-004 §10.2, wire at SPEC-005 §8.4. SPEC-005 §8.4 gains Go↔wire mapping paragraph and pins `request_id = 0` semantics (spontaneous post-register failures; correlated failures echo triggering `request_id != 0`; clients using `request_id = 0` accept correlated/spontaneous indistinguishability — recommend `>= 1`). SPEC-004 §11.1 step 2 now names the delivery path: `FanOutSender.SendSubscriptionError` → protocol adapter → `ClientSender.Send` with `request_id = 0`. Audit §2.4 closed.
+- **E4 `ReducerCallResult`** — **Resolved:** wire authoritative at SPEC-005 §8.7; Go forward-decl at SPEC-004 §10.2 now explicitly names §8.7 as authority and names the protocol-adapter encoder (`FanOutSenderAdapter.SendReducerResult`). SPEC-005 §8.7 gains inline status-enum Divergence-from-SpacetimeDB note closing audit §3.9 (flat `uint8` {0,1,2,3} = committed/failed_user/failed_panic/not_found vs tagged-union {Committed, Failed, OutOfEnergy}; `not_found` is first-class because Shunter's registry model treats it distinctly; no energy model in v1).
+- **E5 `ClientSender`/`FanOutSender` naming + `Send(connID, any)`** — **Resolved:** SPEC-005 §13 `ClientSender` now declares `Send(connID, msg any) error` (closes audit §1.5 gap). SPEC-005 §13 also gains a normative paragraph documenting the distinct-contracts split (ClientSender is protocol-owned cross-subsystem surface; FanOutSender is subscription-side seam) and the `FanOutSenderAdapter` pattern mapping protocol errors (`ErrClientBufferFull`, `ErrConnNotFound`) to subscription sentinels (`ErrSendBufferFull`, `ErrSendConnGone`). SPEC-004 §10.2 cross-refs the adapter.
+- **E6 `DurabilityHandle` contract + `WaitUntilDurable`** — **Resolved (add-to-spec, not remove-from-impl):** SPEC-002 §4.2 and SPEC-003 §7 `DurabilityHandle` interfaces both gain `WaitUntilDurable(txID TxID) <-chan TxID` as the fourth method. Contract: `WaitUntilDurable(0)` returns nil; `WaitUntilDurable(txID>0)` returns a channel that receives exactly one value and is closed. SPEC-002 §4.2 notes executor's narrow consumer only uses `EnqueueCommitted` + `WaitUntilDurable`; full handle is commitlog-lifecycle-owned. Stories 4.1 (commitlog), 1.4 (executor), SPEC-002 EPICS scope list updated. Audit §2.9 closed.
+- **E7 Per-subscription eval-error vs SPEC-003 fatal post-commit** — **Resolved:** SPEC-003 §5.4 normative rule rewritten with two bullets + dividing-line rule: fatal = panic/invariant-violation from subsystem; recoverable = per-query eval error caught by the manager and converted to `SubscriptionError`. `EvalAndBroadcast` normal return ⇒ executor continues; panic ⇒ executor fatal. SPEC-004 §11.1 gains a trailing paragraph cross-referencing §5.4 and §11.3 to make the contract symmetric. Audit §1.4 closed.
+
+Edits landed in: `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §4.2, `docs/decomposition/002-commitlog/EPICS.md`, `docs/decomposition/002-commitlog/epic-4-durability-worker/story-4.1-durability-handle.md`; `docs/decomposition/003-executor/SPEC-003-executor.md` §5.4/§7/§8, `docs/decomposition/003-executor/EPICS.md`, `docs/decomposition/003-executor/epic-1-core-types/story-1.4-subsystem-interfaces.md`, `docs/decomposition/003-executor/epic-5-post-commit-pipeline/story-5.1-ordered-pipeline.md`; `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md` §10.1/§10.2/§11.1, `docs/decomposition/004-subscriptions/epic-4-subscription-manager/story-4.5-manager-interface.md`, `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.1-eval-transaction.md`; `docs/decomposition/005-protocol/SPEC-005-protocol.md` §8.4/§8.7/§13.
 
 #### Cluster F — front matter only (rolled into B5)
 Dropped as standalone; tracked under B5.
@@ -225,7 +227,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §2.6 | GAP | Snapshot→CommittedState restore API not named | SPEC-001 Story 8.3/8.4, Story 6.4 | open |
 | §2.7 | GAP | `SchemaRegistry.Version()` contract used but undefined | — | closed (A3) |
 | §2.8 | GAP | `durable_horizon` undefined when segments empty + snapshot exists | §6.x | open |
-| §2.9 | GAP | Per-TxID durability ack (`WaitUntilDurable`) not in §4.2 | — | in-cluster E6 |
+| §2.9 | GAP | Per-TxID durability ack (`WaitUntilDurable`) not in §4.2 | — | closed (E6) |
 | §2.10 | GAP | `AppendMode` lives in Story 6.1 but not §6.4 | §6.4, EPICS.md | open |
 | §2.11 | GAP | No story owns "schema is static for data-dir lifetime" invariant | new write-path story | open |
 | §2.12 | GAP | Snapshot retention deferred but no story owns | new story | open |
@@ -257,7 +259,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 |---|---|---|---|---|
 | §1.1 | CRIT | Commit signature contradicted three ways | — | closed (B3) |
 | §1.2 | CRIT | Scheduled-reducer firing has no carrier for `schedule_id`/`IntendedFireAt` | Story 1.2, §3.3 | open |
-| §1.3 | CRIT | DurabilityHandle contract mismatches §7 + SPEC-002 | — | in-cluster E6 |
+| §1.3 | CRIT | DurabilityHandle contract mismatches §7 + SPEC-002 | — | closed (E6) |
 | §1.4 | CRIT | §5 post-commit step order vs Story 5.1 snapshot timing | §5.2, Story 5.1 | open |
 | §1.5 | CRIT | OnDisconnect cleanup tx unbounded TxID sink, no identity/CallSource/panic | — | closed (D2) |
 | §2.1 | GAP | `init` lifecycle absent | — | closed (D1) |
@@ -296,33 +298,33 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
-| §1.1 | CRIT | `EvalAndBroadcast` cannot populate §8.1 `FanOutMessage` | — | in-cluster E1/E2 |
+| §1.1 | CRIT | `EvalAndBroadcast` cannot populate §8.1 `FanOutMessage` | — | closed (E1/E2) |
 | §1.2 | CRIT | `SubscriptionRegisterRequest` lacks client identity → §3.4 hashing unreachable | §4.1, Story 4.5 | open |
-| §1.3 | CRIT | `FanOutMessage` shape omits `TxID` and `Errors` | — | in-cluster E2 |
-| §1.4 | CRIT | §11.1 per-sub eval-error recovery contradicts SPEC-003 §5.4 fatal | — | in-cluster E7 |
+| §1.3 | CRIT | `FanOutMessage` shape omits `TxID` and `Errors` | — | closed (E2) |
+| §1.4 | CRIT | §11.1 per-sub eval-error recovery contradicts SPEC-003 §5.4 fatal | — | closed (E7) |
 | §1.5 | CRIT | `SubscriptionUpdate.TableID` undefined for joins | §10.2, Story 3.3 | open |
 | §1.6 | CRIT | Story 4.1 `subscribers` map cannot hold multi-sub-per-conn | Story 4.1 | open |
 | §2.1 | GAP | `CommittedReadView` lifetime across Register/EvalAndBroadcast unpinned | §10.1 | open |
 | §2.2 | GAP | `DroppedClients()` channel capacity/close/blocking/dedup missing | §8.5, Story 4.5 | open |
-| §2.3 | GAP | Five types not declared in §10 (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, IndexResolver) | — | in-cluster A2/E1/E2/E3/E4 |
-| §2.4 | GAP | `SubscriptionError` delivery + payload undefined | — | in-cluster E3 |
-| §2.5 | GAP | `ReducerCallResult` forward-decl shape unpinned | — | in-cluster E4 |
-| §2.6 | GAP | `FanOutSender` / `ClientSender` naming + method-surface split | — | in-cluster E5 |
+| §2.3 | GAP | Five types not declared in §10 (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, IndexResolver) | — | closed (A2/E1/E2/E3/E4) |
+| §2.4 | GAP | `SubscriptionError` delivery + payload undefined | — | closed (E3) |
+| §2.5 | GAP | `ReducerCallResult` forward-decl shape unpinned | — | closed (E4) |
+| §2.6 | GAP | `FanOutSender` / `ClientSender` naming + method-surface split | — | closed (E5) |
 | §2.7 | GAP | `IndexResolver` no declared home | — | closed (A2) |
 | §2.8 | GAP | `ErrJoinIndexUnresolved`/`ErrSendBufferFull`/`ErrSendConnGone` not in §11 | §11, Story 4.5, EPICS.md | open |
 | §2.9 | GAP | Story 5.2 `CollectCandidates` doc-only; live inlines tiering | Story 5.2, §6.x | open |
 | §2.10 | GAP | Caller-result delivery when caller's `Fanout` empty unspecified | Story 5.1 | open |
 | §2.11 | GAP | Initial row-limit meaning for joins undefined | §x, Story 4.x | open |
-| §2.12 | GAP | `PostCommitMeta.TxDurable` for empty-fanout transactions | — | in-cluster E1 |
+| §2.12 | GAP | `PostCommitMeta.TxDurable` for empty-fanout transactions | — | closed (E1) |
 | §2.13 | GAP | `PruningIndexes.CollectCandidatesForTable` tier-2 silent skip when resolver nil | Story 2.4 | open |
 | §2.14 | GAP | SPEC-004 has no "Depends on" front matter | — | closed (B5) |
 | §3.1 | DIVERGE | Go predicate builder vs SpacetimeDB SQL subset | divergence block | open |
 | §3.2 | DIVERGE | Bounded fan-out + disconnect-on-lag vs unbounded MPSC + lazy-mark | divergence block | open |
 | §3.3 | DIVERGE | No row-level security / per-client predicate filtering | divergence block | open |
 | §3.4 | DIVERGE | Post-fragment bag dedup vs in-fragment count tracking | divergence block | open |
-| §3.5 | DIVERGE | `PostCommitMeta.TxDurable` flows through subscription seam | — | in-cluster E1 |
-| §4.1 | NIT | §10.1 + Story 4.5 mirror wrong `EvalAndBroadcast` sig | — | in-cluster E1 |
-| §4.2 | NIT | §8.1 `ClientSender` vs live `FanOutSender` | — | in-cluster E5 |
+| §3.5 | DIVERGE | `PostCommitMeta.TxDurable` flows through subscription seam | — | closed (E1) |
+| §4.1 | NIT | §10.1 + Story 4.5 mirror wrong `EvalAndBroadcast` sig | — | closed (E1) |
+| §4.2 | NIT | §8.1 `ClientSender` vs live `FanOutSender` | — | closed (E5) |
 | §4.3 | NIT | §3.4 hash input vs Story 1.3 byte-append | §3.4, Story 1.3 | open |
 | §4.4 | NIT | `CommitFanout` ownership across channel | Story 5.1 | open |
 | §4.5 | NIT | `SubscriptionUpdate` carries `TableName` but `TableChangeset` already has | §10.2 | open |
@@ -333,22 +335,22 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §5.2 | GAP | No story owns Manager ↔ FanOutWorker wiring | new story | open |
 | §5.3 | GAP | No story for `activeColumns` policy on mid-eval unregister | new story | open |
 | §5.4 | GAP | No story for empty-fanout caller-response | overlaps §2.10 | open |
-| §5.5 | GAP | `SubscriptionError` delivery no owner story | — | in-cluster E3 |
+| §5.5 | GAP | `SubscriptionError` delivery no owner story | — | closed (E3) |
 
 #### SPEC-005 — Client Protocol
 
 | ID | Sev | Summary | Files to edit | Status |
 |---|---|---|---|---|
-| §1.1 | CRIT | §13 `ClientSender` missing `SendSubscriptionError` | — | in-cluster E3/E5 |
-| §1.2 | CRIT | §13 `FanOutMessage` desc stale vs SPEC-004 §8.1 | — | in-cluster E2 |
+| §1.1 | CRIT | §13 `ClientSender` missing `SendSubscriptionError` | — | closed (E3/E5) |
+| §1.2 | CRIT | §13 `FanOutMessage` desc stale vs SPEC-004 §8.1 | — | closed (E2) |
 | §1.3 | CRIT | `Identity` re-declared despite SPEC-001 §2.4 ownership | — | closed (B4) |
 | §1.4 | CRIT | `OutboundCh` close vs concurrent `Send` race | Stories 3.6, 5.1 | open |
-| §1.5 | CRIT | `ClientSender.Send(connID, any)` not in §13 | — | in-cluster E5 |
+| §1.5 | CRIT | `ClientSender.Send(connID, any)` not in §13 | — | closed (E5) |
 | §1.6 | CRIT | §14 error catalog incomplete | §14 | open (overlaps E5) |
 | §2.1 | GAP | `SubscriptionUpdate` wire format drops `TableID` w/o cross-ref | §8.5, §7.1.1 | open |
 | §2.2 | GAP | `ReducerCallResult.TxID = 0` sentinel conflicts with SPEC-002 reservation | — | closed (B3) |
 | §2.3 | GAP | Confirmed-read opt-in has no wire representation | new section | open |
-| §2.4 | GAP | `SubscriptionError.RequestID = 0` collides with client-chosen 0 | — | in-cluster E3 |
+| §2.4 | GAP | `SubscriptionError.RequestID = 0` collides with client-chosen 0 | — | closed (E3) |
 | §2.5 | GAP | Anonymous-mode mint flooding unbounded | Story 1.x | open |
 | §2.6 | GAP | OnConnect has no timeout, idle timer not started | Stories 3.x, 5.x | open |
 | §2.7 | GAP | Compression query-param accepted-values not normative | §3.3 | open |
@@ -368,7 +370,7 @@ Status legend: `open` (default), `in-cluster` (resolved via cluster — listed f
 | §3.6 | DIVERGE | No `CallReducer.flags` byte | divergence block | open |
 | §3.7 | DIVERGE | OneOffQuery uses structured predicates not SQL | divergence block | open |
 | §3.8 | DIVERGE | Close codes differ slightly | divergence block | open |
-| §3.9 | DIVERGE | `ReducerCallResult.status` enum maps neither way | — | in-cluster E4 |
+| §3.9 | DIVERGE | `ReducerCallResult.status` enum maps neither way | — | closed (E4) |
 | §3.10 | DIVERGE | No `OutOfEnergy` / `Energy` | divergence block | open |
 | §3.11 | DIVERGE | ConnectionId reuse on reconnect no server-side meaning | divergence block | open |
 | §4.1 | NIT | BSATN naming disclaimer missing | — | closed (C1) |
@@ -444,7 +446,7 @@ Each session targets ≤150k tokens. Edits land on `docs/decomposition/**` only 
 | 3 | Cluster B — error sentinels + types canonicalization + Commit/TxID | SPEC-006 §1.3/§2.6; SPEC-001 §1.3/§2.3/§4.1/§4.2; SPEC-002 §1.2/§2.5/§4.2; SPEC-003 §1.1/§2.3/§4.1/§4.7; SPEC-005 §1.3/§2.2/§4.2; SPEC-004 §2.14 | **(closed)** Model A pinned (executor allocates TxID, stamps `changeset.TxID`); `ErrReducerArgsDecode` deferred to SPEC-006; `ErrColumnNotFound` canonicalized in SPEC-006 §13; `types/` named as canonical Go-package home; front-matter deps completed across all six specs |
 | 4 | Cluster C — BSATN disclaimer + per-column trailer | SPEC-002 §2.3/§3.1/§6.1; SPEC-001 §4.6; SPEC-005 §4.1/§6.1; SPEC-006 §2.1/§2.2/§2.9; SPEC-003/004 clean-room caveats | **(closed)** SPEC-002 §3.1 carries canonical disclaimer; cross-refs in SPEC-003 §3.1 / SPEC-004 §6 / SPEC-005 §3.1 / SPEC-006 §1.2. Per-column trailer pinned at `(type_tag, nullable, auto_increment)` (Option A — match live); SPEC-006 §8 ColumnSchema gets `AutoIncrement`; `ErrNullableColumn` landed in §13 + Story 5.1 acceptance. |
 | 5 | Cluster D — lifecycle reducer / OnConnect / OnDisconnect / init | SPEC-003 §1.5/§2.1/§2.6/§3.5; SPEC-005 §4.7; SPEC-006 §2.4/§3.2 | **(closed)** SPEC-006 §9 defers `init`/`update` (not reserved; use deployment-time reducer; v2 target). SPEC-003 §2.4 declares `OnConnectCmd` / `OnDisconnectCmd` as bespoke commands (Option A — match live); §10.3/§10.4 rewritten; §10.4 pins the four SPEC-AUDIT §1.5 contracts (CallSource reuse of `CallSourceLifecycle`; one TxID per failed OnDisconnect; cleanup post-commit panics fatal per §5.4; cleanup runs even when `e.fatal`). Story 7.3 acceptance extended. SPEC-005 §5.2/§5.3 cross-ref `OnConnectCmd`/`OnDisconnectCmd`. |
-| 6 | Cluster E — post-commit fan-out shapes (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, ClientSender, DurabilityHandle, eval-error vs fatal) | SPEC-002 §2.9; SPEC-003 §1.3/§3.4/§5.4; SPEC-004 §1.1/§1.3/§1.4/§2.3/§2.4/§2.5/§2.6/§2.12/§3.5/§4.1/§4.2; SPEC-005 §1.1/§1.2/§1.5/§1.6/§2.4/§3.9/§5.2 | Five type shapes pinned in §10 (SPEC-004) and §13 (SPEC-005); post-commit fatal-vs-recoverable resolved |
+| 6 | Cluster E — post-commit fan-out shapes (PostCommitMeta, FanOutMessage, SubscriptionError, ReducerCallResult, ClientSender, DurabilityHandle, eval-error vs fatal) | SPEC-002 §2.9; SPEC-003 §1.3/§3.4/§5.4; SPEC-004 §1.1/§1.3/§1.4/§2.3/§2.4/§2.5/§2.6/§2.12/§3.5/§4.1/§4.2; SPEC-005 §1.1/§1.2/§1.5/§1.6/§2.4/§3.9/§5.2 | **(closed)** Five shapes canonicalized: PostCommitMeta (SPEC-004 §10.1), FanOutMessage (SPEC-004 §8.1), SubscriptionError (SPEC-004 §10.2 Go / SPEC-005 §8.4 wire), ReducerCallResult (SPEC-004 §10.2 Go forward-decl / SPEC-005 §8.7 wire), ClientSender+FanOutSender (SPEC-005 §13 with `Send(connID, any)` + adapter pattern / SPEC-004 §8.1). E6 `WaitUntilDurable` added to SPEC-002 §4.2 + SPEC-003 §7. E7 per-query recovery (SPEC-004 §11.1) vs fatal-panic (SPEC-003 §5.4) dividing line pinned. SPEC-003 §8 `EvalAndBroadcast` signature aligned to 4-arg `PostCommitMeta` form. Audit §2.4 `request_id = 0` collision closed; §3.9 status-enum DIVERGE landed inline at SPEC-005 §8.7. |
 | 7 | SPEC-001 residue cleanup | SPEC-001 §1.1/1.2/1.4/1.5, §2.1/2.2/2.4–2.9, §3.x, §4.3–4.5/4.7–4.9, §5.2–5.4 | All "open" SPEC-001 rows resolved or explicitly deferred |
 | 8 | SPEC-002 residue cleanup | SPEC-002 §1.1/1.3/1.4, §2.1/2.2/2.4/2.6/2.8/2.10–2.13, §3.x, §4.1/4.3–4.8, §5.2–5.6 | All open SPEC-002 rows resolved/deferred |
 | 9 | SPEC-003 residue cleanup | SPEC-003 §1.2/1.4, §2.2/2.4/2.5/2.7–2.12, §3.x, §4.2–4.6/4.8/4.9, §5.2/5.4 | All open SPEC-003 rows resolved/deferred |
@@ -499,4 +501,4 @@ When a new bleed-item surfaces during a session:
 - Add it as a new cluster letter in §B.1 with cited finding IDs.
 - Push affected spec residue rows from `open` to `in-cluster <letter>`.
 
-Cursor: Session 6 (Cluster E — post-commit fan-out shapes).
+Cursor: Session 7 (SPEC-001 residue cleanup).
