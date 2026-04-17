@@ -767,6 +767,17 @@ For snapshot/recovery coupling, the commit log may rely on the store exposing en
 - per-table `nextID`
 - per-table sequence state (`Sequence.next`) for any auto-increment column
 
+Bulk-restore surface (consumed by SPEC-002 Story 6.4 recovery; declared in SPEC-001 Story 8.3):
+
+```go
+func (cs *CommittedState) RegisterTable(schema *TableSchema) error
+func (t *Table) InsertRow(id RowID, row ProductValue) error
+func (t *Table) SetNextID(id uint64)
+func (t *Table) SetSequenceValue(val uint64)
+```
+
+Recovery uses `RegisterTable` once per snapshot table, then loops `InsertRow` over snapshot rows (each call also rebuilds index entries via Story 4.2 `insertIntoIndexes`), then calls `SetNextID` and `SetSequenceValue` from the snapshot's allocation/sequence sections. No dedicated `RestoreRow` or `RebuildIndexes` methods exist — `InsertRow` is the single entry point.
+
 ---
 
 ## 12. Divergences from SpacetimeDB

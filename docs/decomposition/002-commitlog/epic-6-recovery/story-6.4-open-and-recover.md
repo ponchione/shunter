@@ -18,8 +18,8 @@ The full startup recovery sequence. Orchestrates segment scanning, snapshot sele
   **Algorithm:**
   1. Scan segments → `ScanSegments(dir)` → segment list + durable horizon
   2. Select snapshot → `SelectSnapshot(dir, durableHorizon, schema)` → snapshot data or nil
-  3. Build initial CommittedState:
-     - If snapshot: register tables from schema, populate rows from snapshot, restore sequences, restore per-table `nextID`, rebuild indexes
+  3. Build initial CommittedState (using SPEC-001 Story 8.3 bulk-restore surface):
+     - If snapshot: for each table in the snapshot — `committed.RegisterTable(schema)`; for each row in the snapshot — `table.InsertRow(allocatedID, row)` (which also rebuilds index entries via SPEC-001 Story 4.2 `insertIntoIndexes`); `table.SetSequenceValue(snapshot.Sequences[tableID])`; `table.SetNextID(snapshot.NextIDs[tableID])`. No separate `RebuildIndexes` step is required because `InsertRow` handles indexes per-row.
      - If no snapshot and segments begin at tx 1: register tables from schema (empty state)
      - If no snapshot and there are no segments and no snapshots: return `ErrNoData`
    4. Replay log → `ReplayLog(committed, segments, snapshotTxID, schema)` → max_applied_tx_id
@@ -33,8 +33,8 @@ The full startup recovery sequence. Orchestrates segment scanning, snapshot sele
      - Executor resumes issuing TX IDs from `max_applied_tx_id + 1`
 
 - Index rebuild after snapshot load:
-  - For each table: iterate all restored rows, insert into all indexes
-  - This is O(rows × indexes) but only happens once at startup
+  - Indexes are rebuilt incidentally during snapshot restore: SPEC-001 Story 2.2 `Table.InsertRow` calls `insertIntoIndexes` (Story 4.2) on every row, so the per-row restore loop already populates all indexes.
+  - Cost is O(rows × indexes) but happens only once at startup as part of the restore loop, not as a second pass.
 
 ## Acceptance Criteria
 
@@ -54,7 +54,7 @@ The full startup recovery sequence. Orchestrates segment scanning, snapshot sele
 
 ## Design Notes
 
-- Index rebuild is the most expensive recovery step for large datasets. O(N × I) where N = row count, I = indexes per table. For 1M rows with 4 indexes, that's 4M index insertions. Acceptable at startup.
+- Index rebuild during recovery is the most expensive restore step for large datasets. Cost is O(N × I) where N = row count, I = indexes per table. For 1M rows with 4 indexes, that is 4M `insertIntoIndexes` calls, all fired from the per-row `InsertRow` loop. Acceptable at startup. SPEC-001 Story 8.3 names the surface; this story names the orchestration.
 - Keep the recovery contract deterministic: if no segments and no snapshots exist, return `ErrNoData`.
 - This is an integration story — it orchestrates Stories 6.1–6.3. Most logic is already implemented; this story wires them together and handles edge cases.
 - Sequence-advance ownership: SPEC-001 Story 8.2 `ApplyChangeset` is the single point that advances `Sequence.next` during replay. Story 6.4 does not run a separate post-replay sweep. The snapshot-restore order (load snapshot sequences via `SetSequenceValue` → replay → values further advanced by `ApplyChangeset`) and `SetSequenceValue`'s `max()` semantics together guarantee post-recovery `next` ≥ any value previously emitted, regardless of which side (snapshot or replay) saw the larger value.
