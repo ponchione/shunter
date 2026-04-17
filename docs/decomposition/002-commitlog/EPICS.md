@@ -221,6 +221,7 @@ Errors introduced where first needed:
 | `ErrBadFlags` | Epic 2 |
 | `ErrUnknownRecordType` | Epic 2 |
 | `ErrChecksumMismatch` | Epic 2 |
+| `ErrTruncatedRecord` | Epic 2 |
 | `ErrRecordTooLarge` | Epic 2 |
 | `ErrRowTooLarge` | Epic 3 |
 | `ErrDurabilityFailed` | Epic 4 |

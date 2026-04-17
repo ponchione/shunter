@@ -87,6 +87,7 @@ Invariants:
 - `flags` MUST be zero in v1; non-zero values are rejected with `ErrBadFlags`.
 - `data_len` MUST be less than or equal to `MaxRecordPayloadBytes` (default 64 MiB). Larger values are rejected before allocation with `ErrRecordTooLarge`.
 - A record is valid only if all framing bytes, the full payload, and the trailing CRC are present.
+- Truncated tail records (partial framing, partial payload, or missing CRC at file end) are reported as `ErrTruncatedRecord` (§9), distinct from `ErrChecksumMismatch`. Recovery (§6.4) treats `ErrTruncatedRecord` on the active tail segment as the replay horizon; `ErrChecksumMismatch` in any sealed segment is fatal.
 
 **Why no epoch field:** SpacetimeDB includes an epoch for multi-master failover. Shunter is single-node; epoch is omitted.
 
@@ -507,7 +508,7 @@ Schema evolution is out of scope for v1. Document this clearly.
 
 ### 6.4 Truncated Record and Resume Handling
 
-A truncated tail record (partial write at crash time) produces a CRC mismatch or EOF while reading framing/payload. Recovery uses all prior valid records and treats the first invalid tail record as the replay horizon.
+A truncated tail record (partial write at crash time) is reported by the segment reader as `ErrTruncatedRecord` (§9, Story 2.4) — a sentinel distinct from `ErrChecksumMismatch`. Recovery uses all prior valid records and treats the first `ErrTruncatedRecord` on the active tail segment as the replay horizon. A `ErrChecksumMismatch` in a sealed (non-tail) segment is fatal per §6.5.
 
 Resume rules:
 - the implementation MUST locate the last valid contiguous record before resuming writes
@@ -587,6 +588,7 @@ type CommitLogOptions struct {
 | `ErrBadFlags` | Record flags are non-zero in v1 |
 | `ErrUnknownRecordType` | Record type is not defined in this format version |
 | `ErrChecksumMismatch` | Record CRC32C does not match |
+| `ErrTruncatedRecord` | Partial record at segment tail (incomplete header, payload, or CRC). Distinguishes recoverable truncated tail from fatal mid-segment corruption. Raised by Story 2.4 SegmentReader.Next; consumed by Story 6.1 ScanSegments. |
 | `ErrRecordTooLarge` | `data_len` exceeds `MaxRecordPayloadBytes` |
 | `ErrRowTooLarge` | `row_len` exceeds `MaxRowBytes` |
 | `ErrUnknownValueTag` | Row encoding contains an unknown tag |
@@ -595,6 +597,7 @@ type CommitLogOptions struct {
 | `ErrRowLengthMismatch` | Decoder under- or over-consumes bytes within a row frame |
 | `ErrInvalidUTF8` | Encoded string value is not valid UTF-8 |
 | `ErrSnapshotIncomplete` | Snapshot directory has a `.lock` file |
+| `ErrSnapshotInProgress` | `CreateSnapshot` invoked while another snapshot is already running (Story 5.2 / Story 5.4 exclusivity). |
 | `ErrSnapshotHashMismatch` | Snapshot Blake3 hash does not match content |
 | `ErrSchemaMismatch` | Snapshot schema differs from registered schema |
 | `ErrHistoryGap` | Recovery found a missing/overlapping/out-of-order TX range |
