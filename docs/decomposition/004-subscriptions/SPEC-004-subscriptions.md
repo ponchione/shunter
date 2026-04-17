@@ -702,7 +702,11 @@ type SubscriptionError struct {
 }
 
 // ReducerCallResult is forward-declared here to document the caller-diversion
-// seam. SPEC-005 §8.7 owns the concrete wire shape.
+// seam. SPEC-005 §8.7 owns the concrete wire shape; the Go fields here are
+// a one-to-one mapping of those wire fields (see §8.7 for LE widths and
+// status-enum values). The subscription evaluator never constructs the wire
+// form directly — the protocol adapter (SPEC-005 §13
+// `FanOutSenderAdapter.SendReducerResult`) encodes it.
 type ReducerCallResult struct {
     RequestID         uint32
     Status            uint8

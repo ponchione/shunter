@@ -452,6 +452,8 @@ transaction_update: []SubscriptionUpdate   — same format as TransactionUpdate.
 
 The embedded `transaction_update` is the subset of the transaction's deltas that matches this client's active subscriptions. It is included here rather than as a separate `TransactionUpdate` message to guarantee that the client receives its own reducer's effects atomically with the result.
 
+**Divergence from SpacetimeDB (status enum).** SpacetimeDB's wire protocol encodes `status` as a tagged union of `{Committed, Failed(msg), OutOfEnergy}`. Shunter uses a flat `uint8` enum: `0 = committed`, `1 = failed_user`, `2 = failed_panic`, `3 = not_found`. Rationale: v1 has no energy model (`energy` above is reserved and always 0), and `not_found` (unregistered reducer name) is a first-class outcome distinct from runtime failure — the flat enum preserves that distinction without a tagged-union encoding. Reference: SPEC-AUDIT SPEC-005 §3.9.
+
 Rules:
 - if `status != 0`, `transaction_update` MUST be empty
 - if the reducer committed but this client had no active matching subscriptions, `transaction_update` MUST be empty
