@@ -19,7 +19,7 @@ The strict post-commit step ordering: durability handoff, snapshot acquisition, 
   Steps in exact order:
   1. `e.durability.EnqueueCommitted(txID, changeset)` — queue admission, not fsync
   2. `view := e.store.Snapshot()` — acquire stable committed read view
-  3. `e.subs.EvalAndBroadcast(txID, changeset, view)` — synchronous subscription evaluation
+  3. `e.subs.EvalAndBroadcast(txID, changeset, view, meta)` — synchronous subscription evaluation; `meta` is a `subscription.PostCommitMeta` built from `DurabilityHandle.WaitUntilDurable(txID)`, caller conn (if any), and `CallerResult` placeholder (§5, SPEC-004 §10.1)
   4. `view.Close()` — release read view
   5. Send `ReducerResponse{Status: StatusCommitted, TxID: txID, ReturnBSATN: ret}` on `responseCh`
   6. Drain dropped clients (Story 5.2)

@@ -32,7 +32,7 @@ Interfaces the executor consumes from other subsystems: durability, subscription
       Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)
       Unregister(connID ConnectionID, subscriptionID SubscriptionID) error
       DisconnectClient(connID ConnectionID) error
-      EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView)
+      EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)
       DroppedClients() <-chan ConnectionID
   }
   ```

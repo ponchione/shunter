@@ -647,6 +647,15 @@ type PostCommitMeta struct {
     CallerResult *ReducerCallResult
 }
 
+// TxDurable contract:
+// - Non-nil for every post-commit invocation the executor makes, regardless of
+//   whether Fanout is empty. The executor allocates the channel from
+//   DurabilityHandle.WaitUntilDurable(txID) (SPEC-002 §4.2 / SPEC-003 §7)
+//   before calling EvalAndBroadcast. An empty-fanout transaction may still
+//   need durability gating for a caller-reducer's ReducerCallResult.
+// - TxDurable == nil is reserved for the zero-value PostCommitMeta used by
+//   tests that bypass the executor; production code paths never observe it.
+
 // Changeset and TableChangeset are defined in SPEC-001 §6.1.
 // The evaluator receives *Changeset from the executor after each commit.
 // Relevant fields:

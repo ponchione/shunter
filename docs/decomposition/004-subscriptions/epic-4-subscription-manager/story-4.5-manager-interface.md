@@ -19,7 +19,7 @@ Public type/interface contract consumed by the executor (SPEC-003). Error types 
       Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)
       Unregister(connID ConnectionID, subscriptionID SubscriptionID) error
       DisconnectClient(connID ConnectionID) error
-      EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView)
+      EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)
       DroppedClients() <-chan ConnectionID
   }
   ```

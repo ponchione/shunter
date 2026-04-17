@@ -13,9 +13,10 @@ The main algorithm called after every committed transaction. Orchestrates DeltaV
 
 ## Deliverables
 
-- `EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView)`
+- `EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)`
   - Called synchronously on executor goroutine (§7.1)
   - Changeset is read-only — must not mutate
+  - `meta` carries `TxDurable`, `CallerConnID`, `CallerResult` (§10.1)
 
 - Algorithm (per §7.2):
   ```

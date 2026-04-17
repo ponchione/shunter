@@ -529,16 +529,17 @@ type SubscriptionManager interface {
     Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)
     Unregister(connID ConnectionID, subscriptionID SubscriptionID) error
     DisconnectClient(connID ConnectionID) error
-    EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView)
+    EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)
     DroppedClients() <-chan ConnectionID   // non-blocking; executor drains after each commit
 }
 ```
 
-`SubscriptionRegisterRequest` and `SubscriptionRegisterResult` are defined in SPEC-004 §4.1.
+`SubscriptionRegisterRequest` and `SubscriptionRegisterResult` are defined in SPEC-004 §4.1. `PostCommitMeta` is declared in SPEC-004 §10.1 and carries executor-owned delivery metadata (`TxDurable`, `CallerConnID`, `CallerResult`) into the evaluator.
 
 Rules:
 - `Register` MUST be called from an executor command so initial query execution and registration are atomic with commit ordering
 - `EvalAndBroadcast` runs synchronously inside the post-commit pipeline
+- The executor MUST populate `meta.TxDurable` with a non-nil channel obtained from `DurabilityHandle.WaitUntilDurable(txID)` for every post-commit invocation (see SPEC-004 §10.1 for the TxDurable-on-empty-fanout rule)
 - `DisconnectClient` removes all subscriptions for a client when the protocol layer reports disconnect
 
 ---

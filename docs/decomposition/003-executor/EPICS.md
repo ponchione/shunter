@@ -129,7 +129,7 @@ Ordered post-commit steps: durability handoff, snapshot, subscription evaluation
 - Post-commit step ordering (must be exact):
   1. `DurabilityHandle.EnqueueCommitted(txID, changeset)`
   2. Acquire `CommittedReadView` via `CommittedState.Snapshot()`
-  3. `SubscriptionManager.EvalAndBroadcast(txID, changeset, view)`
+  3. `SubscriptionManager.EvalAndBroadcast(txID, changeset, view, meta)`
   4. Close snapshot
   5. Send `ReducerResponse` to caller
   6. Non-blocking drain of `SubscriptionManager.DroppedClients()` → call `DisconnectClient` for each
