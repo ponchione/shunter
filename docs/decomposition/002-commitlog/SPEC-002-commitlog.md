@@ -349,7 +349,7 @@ Snapshot file (snapshots/{tx_id}/snapshot):
   table_count        : uint32 LE
   [ for each table, sorted by table_id ascending:
       table_id       : uint32 LE
-      row_count      : uint64 LE
+      row_count      : uint32 LE   — v1 ceiling: 4_294_967_295 rows per table; matches every other count field in this layout
       [ for each row in deterministic primary-key order:
           row_len    : uint32 LE
           row_data   : [row_len]byte   — ProductValue (same encoding as §3.3)
