@@ -2,7 +2,7 @@
 
 **Parent:** [SPEC-001-store.md](../SPEC-001-store.md) §7  
 **Blocked by:** Epic 4 (Indexes), Epic 6 (Commit)  
-**Blocks:** Nothing (consumed by SPEC-004 subscription evaluator)
+**Blocks:** Nothing. Consumed by SPEC-003 (post-commit snapshot acquisition for subscription fan-out), SPEC-004 (subscription initial-state delivery), and SPEC-005 (one-off queries).
 
 ---
 

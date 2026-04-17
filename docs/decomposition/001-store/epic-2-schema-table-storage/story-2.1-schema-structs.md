@@ -55,8 +55,8 @@ Define the metadata that describes a table's shape.
   - Primary implies Unique
   - No duplicate column names
   - No duplicate index names
-  - If a primary index exists, its `IndexID` is `0`
-  - Remaining index IDs are assigned in declaration order from the `TableSchema.Indexes` slice
+  - If a primary index exists, its `IndexID` is `0`. On tables with no primary index, `IndexID 0` is unused; the first declared secondary index gets `IndexID 1`, and subsequent secondary indexes continue in declaration order from 1.
+  - "IndexID == 0 ⇒ primary or absent" is a stable invariant across all tables (SPEC-001 §4.2).
 
 ## Acceptance Criteria
 
@@ -72,3 +72,4 @@ Define the metadata that describes a table's shape.
 - [ ] TableID and IndexID usable as map keys
 - [ ] Table with primary index assigns `IndexID(0)` to that primary index
 - [ ] Table with additional indexes assigns subsequent `IndexID` values in declaration order
+- [ ] No-PK table: first declared secondary index gets `IndexID 1`, not `IndexID 0`

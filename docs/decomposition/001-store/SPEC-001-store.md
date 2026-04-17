@@ -149,6 +149,8 @@ type ColID int
 
 `ColID` is the zero-based column index within a `TableSchema.Columns` slice. It is the same integer as `ColumnSchema.Index`. The named type exists to distinguish it from raw `int` in function signatures. SPEC-004 uses `ColID` in predicate types.
 
+The schema structs in §3.1 use raw `int` for column indices to match idiomatic Go slice indexing; `ColID` is the typed alias used by SPEC-004 predicate signatures where column identity is load-bearing. Both are the same integer. Do not re-type `ColumnSchema.Index` or `IndexSchema.Columns[]` to `ColID` — that churn is out of scope for v1 (SPEC-AUDIT SPEC-001 §4.3).
+
 ---
 
 ## 3. Table Structure
@@ -247,8 +249,10 @@ type Index struct {
 
 // IndexID is a stable uint32 that identifies an index within a table.
 // Assigned by the store in the order IndexSchema entries appear in TableSchema.Indexes.
-// IndexID 0 is always the primary index if one exists; subsequent IDs are assigned in
-// declaration order.
+// IndexID 0 is reserved for the primary index. On tables with no primary key, IndexID 0
+// is unused; the first declared secondary index receives IndexID 1, and subsequent
+// secondary indexes get IDs in declaration order starting from 1. This keeps
+// "IndexID == 0 ⇒ primary or absent" a stable invariant across all tables.
 type IndexID uint32
 
 // IndexKey is the materialized key for one index entry.
@@ -691,7 +695,7 @@ On insert, if the row's sequence column is zero, it is replaced with the next se
 
 ---
 
-## 10. Performance Constraints
+## 10. Performance Targets
 
 These are aspirational microbenchmark targets for a first implementation, not contractual SLAs. They should be used to detect major regressions and obvious design mistakes, then recalibrated once a real implementation exists:
 
@@ -729,10 +733,11 @@ The executor may rely on the following store guarantees:
 func NewTransaction(committed *CommittedState, schema SchemaRegistry) *Transaction
 func Commit(committed *CommittedState, tx *Transaction) (*Changeset, error)
 func Rollback(tx *Transaction)
-func (cs *CommittedState) Snapshot() CommittedReadView
 ```
 
 `Commit` does not allocate or return a `TxID`. The executor allocates `TxID` (Model A; see §5.6, SPEC-003 §13.2) and stamps `changeset.TxID` on the returned value before handing the `Changeset` to durability and the subscription evaluator.
+
+`CommittedState.Snapshot()` is not part of the executor's core surface. It is a read-only concurrency primitive used by SPEC-002 (commit-log snapshot creation) and SPEC-004 (subscription initial-state delivery); see those subsections below.
 
 ### SPEC-004 (Subscription Evaluator)
 The evaluator receives a `*Changeset` from the executor after each commit. It also receives a committed read view for post-commit evaluation. Direct calls to `CommittedState.Snapshot()` are appropriate only for read-only operations that do not require atomic registration semantics.
@@ -744,8 +749,18 @@ The evaluator may rely on the following:
 - no separate update list exists in v1; update detection is derived from row values and subscription predicate semantics
 - snapshot scans and index seeks see only committed state, never tx-local state
 
+```go
+// Exported by store (used by SPEC-004 for subscription initial-state delivery):
+func (cs *CommittedState) Snapshot() CommittedReadView
+```
+
 ### SPEC-002 (Commit Log)
 The commit log receives a `*Changeset` and serializes it for durability. It also drives snapshot creation using `CommittedState.Snapshot()`.
+
+```go
+// Exported by store (used by SPEC-002 for snapshot creation):
+func (cs *CommittedState) Snapshot() CommittedReadView
+```
 
 For snapshot/recovery coupling, the commit log may rely on the store exposing enough state to reconstruct future RowID and sequence allocation:
 - all committed table rows
