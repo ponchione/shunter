@@ -61,3 +61,4 @@ Record structure: tx_id + record_type + flags + data_len + payload + CRC32C. Enc
 
 - `ErrRecordTooLarge` check happens BEFORE allocating the payload buffer. Prevents OOM from malformed data_len.
 - CRC32C chosen for hardware acceleration on modern CPUs (SSE 4.2). Go's `hash/crc32` uses hardware when available.
+- The `Record` struct is the in-memory form. On-disk framing prepends `crc` computed at write time (`ComputeRecordCRC`) and verified on read. CRC is intentionally not a struct field: storing it would let callers fabricate inconsistent values; recomputing on read is cheap (CRC32C is hardware-accelerated) and ties integrity to the on-disk bytes rather than a Go-side claim.

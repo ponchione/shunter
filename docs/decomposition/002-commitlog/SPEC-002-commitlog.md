@@ -240,11 +240,13 @@ The executor's post-commit hot path only consumes `EnqueueCommitted` and `WaitUn
 
 ```go
 type durabilityWorker struct {
-    ch        chan durabilityItem    // bounded; capacity = ChannelCapacity (default 256)
-    durable   atomic.Uint64          // last fsynced TxID; read by DurableTxID()
-    fatalErr  atomic.Pointer[error]  // nil until first fatal write/sync/rotate error
-    closing   atomic.Bool            // true after Close begins
-    done      chan struct{}          // closed when goroutine exits
+    ch        chan durabilityItem        // bounded; capacity = ChannelCapacity (default 256)
+    durable   atomic.Uint64              // last fsynced TxID; read by DurableTxID() lock-free
+    stateMu   sync.Mutex                 // guards waiters, fatalErr, closing
+    waiters   map[TxID][]chan TxID       // pending WaitUntilDurable subscribers (§4.2)
+    fatalErr  error                      // first latched fatal write/sync/rotate error
+    closing   bool                       // true after Close begins
+    done      chan struct{}              // closed when goroutine exits
 }
 ```
 
@@ -266,7 +268,9 @@ loop:
 
 **Why batch-then-sync:** One `fsync` call per batch amortizes the ~5 ms disk seek cost across multiple transactions. At 1000 TPS with 64-item batches, each fsync covers ~64 transactions, reducing disk pressure to ~15 fsyncs/second.
 
-**Why `atomic.Uint64` for durable offset:** The executor reads `DurableTxID()` from its own goroutine. Atomic read/write avoids a mutex for this single integer.
+**Why `atomic.Uint64` for durable offset:** The executor reads `DurableTxID()` from its own goroutine. Atomic read/write avoids a mutex for this single integer on the hot path.
+
+**Why `stateMu` for waiters / fatalErr / closing:** `WaitUntilDurable` (§4.2) needs a per-TxID subscriber map; `fatalErr` and `closing` are read by both the worker goroutine and external callers (`EnqueueCommitted`, `Close`). One mutex covers all three because they are touched together at lifecycle boundaries (fatal latch, close drain, waiter signal). Hot-path commits do not contend on `stateMu` — only `durable` (atomic) is touched per-batch.
 
 ### 4.5 Segment Rotation
 
@@ -408,6 +412,8 @@ table_count    : uint32 LE
 ]
 ```
 
+Note on `schema_version` storage: this field is also written into the snapshot file header (§5.2) before the Blake3 hash. The header copy is authoritative when the two disagree, allowing recovery to short-circuit a schema-mismatched snapshot before recomputing Blake3 (Cluster A A3 / SPEC-006 §6.1). The body copy here is part of the schema codec output to keep `EncodeSchemaSnapshot` self-contained for unit testing; recovery prefers the header.
+
 ### 5.4 Snapshot Integrity
 
 The 32-byte Blake3 hash covers every byte after the hash field, from `schema_len` to end of file. On read, recompute and compare. A mismatch means the snapshot is corrupt; do not use it.
@@ -460,7 +466,7 @@ v1 policy: the **recommended default is `SnapshotInterval = 0`** (no automatic i
 func OpenAndRecover(dir string, schema SchemaRegistry) (*CommittedState, TxID, error)
 ```
 
-1. **Scan commit log segments first.** List `commitlog/` files sorted by name and validate that segment start TX IDs are strictly increasing.
+1. **Scan commit log segments first.** List `commitlog/*.log` files (the `.log` extension is the segment-file convention pinned in §2.1 directory layout) sorted by name and validate that segment start TX IDs are strictly increasing.
 2. **Determine the durable replay horizon.** Scan segments in order and find the highest contiguous valid `tx_id` reachable from the earliest segment:
    - if there are no segments, `durable_horizon = +∞` (any snapshot is eligible because there is no contradicting log history). Recovery proceeds with the snapshot as the final state and replays nothing; the executor resumes issuing TX IDs from `snapshot_tx_id + 1` (or returns `ErrNoData` if there is also no snapshot — see step 5)
    - validate segment header magic/version
@@ -553,6 +559,13 @@ After a snapshot is successfully created at `snapshot_tx_id`:
 ## 8. Configuration
 
 ```go
+type FsyncMode uint8
+
+const (
+    FsyncBatch FsyncMode = 0  // v1 default; see §4.4
+    FsyncPerTx FsyncMode = 1  // reserved for v2; rejected by v1 NewDurabilityWorker
+)
+
 type CommitLogOptions struct {
     // MaxSegmentSize: rotate to a new segment file after this many bytes.
     // Default: 512 MiB.
@@ -573,6 +586,14 @@ type CommitLogOptions struct {
     // DrainBatchSize: max records to drain before calling fsync.
     // Default: 64.
     DrainBatchSize int
+
+    // FsyncMode: how aggressively the durability worker fsyncs.
+    // v1 ships only Batch (drain a batch of up to DrainBatchSize records,
+    // then one fsync). PerTx (fsync after every record) is reserved for v2
+    // when the durability/latency knob in §13 OQ#3 lands.
+    // Default: Batch. Setting any other value in v1 returns ErrUnknownFsyncMode
+    // at handle construction.
+    FsyncMode FsyncMode
 
     // SnapshotInterval: call CreateSnapshot after this many commits.
     // 0 = never snapshot automatically.

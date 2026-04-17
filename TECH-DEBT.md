@@ -2034,6 +2034,37 @@ Recommended resolution:
 - If/when TD-125 lands, add an explicit "reject snapshot column with `nullable = 1`" branch in `commitlog/snapshot_select.go` before the equality check, so the v1 policy is enforced independent of registry state.
 - Update SPEC-002 §5.3 / §6.1 step 4b / Story 6.2 back to a direct-rejection wording at the same time.
 
+### TD-128: `FsyncMode` enum + `ErrUnknownFsyncMode` rejection not wired in live `commitlog/` durability worker
+
+Status: open (Session 12+ drift)
+Severity: low
+First found: Lane B Session 8 reconciliation pass
+Spec ref: SPEC-002 §8 (CommitLogOptions), SPEC-002 §13 OQ#3 (Write-ahead guarantee level), SPEC-002 §4.4
+
+Summary:
+- Session 8 added a forward-compat `FsyncMode` enum to SPEC-002 §8 with two values (`FsyncBatch = 0` v1 default; `FsyncPerTx = 1` reserved for v2). The spec also pins "Setting any other value in v1 returns `ErrUnknownFsyncMode` at handle construction."
+- Live `commitlog/durability.go:42-58` `DurabilityWorker` struct and `commitlog/durability.go:63` `NewDurabilityWorker` carry no `FsyncMode` field and perform no validation. `commitlog/errors.go` does not declare `ErrUnknownFsyncMode`.
+- Today the gap is invisible because no live caller sets `FsyncMode` (the field doesn't exist). Zero-value behavior matches `FsyncBatch` (Story 4.2 batch-then-sync write loop), so the v1 contract holds in practice.
+
+Why this matters:
+- The spec declares both a forward-compat reservation (`FsyncPerTx = 1` is a v2 target) and a rejection rule for unknown values. If `CommitLogOptions` later grows the field but `NewDurabilityWorker` doesn't add the validation, a caller passing `FsyncPerTx` in v1 would silently get batch behavior — a contract violation.
+- The placeholder is purely additive to the spec; the only drift is the missing rejection branch in the constructor.
+
+Related code:
+- `commitlog/durability.go:42-58` — `DurabilityWorker` struct has no `FsyncMode` field
+- `commitlog/durability.go:63` — `NewDurabilityWorker` does not validate `opts.FsyncMode`
+- `commitlog/errors.go` — no `ErrUnknownFsyncMode` declaration
+
+Related spec / decomposition docs:
+- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §8 (`FsyncMode` enum + `CommitLogOptions.FsyncMode` field), §4.4 (write loop is `FsyncBatch`-shaped), §13 OQ#3 (durability/latency knob)
+- `docs/decomposition/002-commitlog/epic-4-durability-worker/story-4.1-durability-handle.md` (CommitLogOptions deliverable)
+
+Recommended resolution:
+- Add `FsyncMode FsyncMode` field to `CommitLogOptions` in `commitlog/durability.go`.
+- Declare `ErrUnknownFsyncMode` in `commitlog/errors.go`.
+- In `NewDurabilityWorker`, validate `opts.FsyncMode == FsyncBatch` (the only v1-supported value) and return `ErrUnknownFsyncMode` for anything else, including `FsyncPerTx` until v2 implements it.
+- Update Story 4.1 `DefaultCommitLogOptions` to set `FsyncMode: FsyncBatch` explicitly (zero-value works but explicit is clearer).
+
 ---
 
 ## Code review audit (2026-04-15)
