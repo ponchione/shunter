@@ -602,7 +602,7 @@ The executor sends `ReducerCallResult` back to the protocol layer via the `Respo
 
 ### SPEC-004 (Subscription Evaluator)
 
-After each commit, the subscription evaluator does **not** write to sockets directly. Instead, it sends a `FanOutMessage` to the fan-out worker. `CommitFanout` is defined in SPEC-004 §7 as `map[ConnectionID][]SubscriptionUpdate`. `SubscriptionUpdate` is defined in SPEC-004 §10.2.
+After each commit, the subscription evaluator does **not** write to sockets directly. Instead, it sends a `FanOutMessage` to the fan-out worker. The `FanOutMessage` Go shape (carrying `TxDurable`, `Fanout`, `Errors`, `CallerResult`) is declared in SPEC-004 §8.1; SPEC-005 does not redeclare the struct. `CommitFanout` is defined in SPEC-004 §7 as `map[ConnectionID][]SubscriptionUpdate`. `SubscriptionUpdate` is defined in SPEC-004 §10.2.
 
 Delivery contract:
 1. evaluator computes `CommitFanout` for the committed transaction and sends `FanOutMessage{TxDurable, Fanout}` to the fan-out worker inbox
@@ -615,6 +615,14 @@ The fan-out worker constructs `TransactionUpdate{TxID: ..., Updates: updates}` f
 
 ```go
 type ClientSender interface {
+    // Send encodes msg and enqueues the frame on the connection's
+    // outbound channel. Used for direct server→client response
+    // messages that do not have a dedicated typed method:
+    // SubscribeApplied, UnsubscribeApplied, SubscriptionError,
+    // OneOffQueryResult. Returns ErrClientBufferFull if the client's
+    // outgoing buffer is full.
+    Send(connID ConnectionID, msg any) error
+
     // SendTransactionUpdate queues a standalone post-commit delta for a client.
     // Returns ErrClientBufferFull if the client's outgoing buffer is full.
     SendTransactionUpdate(connID ConnectionID, update *TransactionUpdate) error
@@ -624,6 +632,8 @@ type ClientSender interface {
     SendReducerResult(connID ConnectionID, result *ReducerCallResult) error
 }
 ```
+
+**Relationship to SPEC-004 `FanOutSender`.** SPEC-004 §8.1 declares a narrower `FanOutSender` (three methods: `SendTransactionUpdate`, `SendReducerResult`, `SendSubscriptionError`) that the subscription fan-out worker talks to. The protocol layer satisfies that contract with a thin adapter (`FanOutSenderAdapter`) over `ClientSender`, routing `SendSubscriptionError` through the generic `Send(connID, msg)` path with a protocol-wire `SubscriptionError` value (SPEC-005 §8.4). The two interfaces are intentionally distinct: `ClientSender` is the cross-subsystem delivery surface owned by the protocol package; `FanOutSender` is the subscription-side seam that hides protocol-package concerns from the subscription package. Delivery errors (`ErrClientBufferFull`, `ErrConnNotFound`) are mapped by the adapter to subscription-layer sentinels (`ErrSendBufferFull`, `ErrSendConnGone`) so the fan-out worker reacts without importing protocol types.
 
 ### SPEC-001 (In-Memory Store)
 

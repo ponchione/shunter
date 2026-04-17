@@ -711,7 +711,7 @@ type ReducerCallResult struct {
 ```
 
 Encoding of `[]ProductValue` into the wire `RowList` format and actual enqueueing to per-client outbound buffers happen in the protocol layer (SPEC-005 §3.4 / delivery contract), not in the evaluator.
-The fan-out worker talks to the protocol layer through the narrow `FanOutSender` seam described in §8.1; protocol may satisfy that seam via an adapter over its broader `ClientSender` surface.
+The fan-out worker talks to the protocol layer through the narrow `FanOutSender` seam described in §8.1; protocol satisfies that seam via a `FanOutSenderAdapter` over its broader `ClientSender` surface (SPEC-005 §13). The adapter converts subscription-domain values (`[]SubscriptionUpdate`, `*ReducerCallResult`, raw message strings) into protocol-wire structs before calling `ClientSender`; `SendSubscriptionError` is routed through `ClientSender.Send(connID, msg)` with a wire `SubscriptionError`. Delivery errors are mapped back to `ErrSendBufferFull` / `ErrSendConnGone` subscription-layer sentinels so the fan-out worker can react without importing protocol types.
 
 ### 10.3 From In-Memory Store (SPEC-001)
 
