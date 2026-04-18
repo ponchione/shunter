@@ -99,7 +99,11 @@ type CallReducerRequest struct {
 	RequestID   uint32
 	ReducerName string
 	Args        []byte
-	ResponseCh  chan<- TransactionUpdate
+	// Flags mirrors the wire `CallReducerFlags` byte. The executor / fan-out
+	// seam reads this to decide whether to suppress the caller's
+	// successful-commit heavy echo (`CallReducerFlagsNoSuccessNotify`).
+	Flags      byte
+	ResponseCh chan<- TransactionUpdate
 }
 
 // RunLifecycle drives SPEC-005 §5.1–§5.2 admission for one connection:

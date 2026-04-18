@@ -64,6 +64,7 @@ type postCommitOptions struct {
 	source          CallSource
 	callerConnID    *types.ConnectionID
 	callerRequestID uint32
+	callerFlags     byte
 }
 
 // NewExecutor creates an executor. Registry must be frozen.
@@ -404,6 +405,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		connID := req.Caller.ConnectionID
 		opts.callerConnID = &connID
 		opts.callerRequestID = req.RequestID
+		opts.callerFlags = req.Flags
 	}
 	e.postCommit(txID, changeset, ret, cmd.ResponseCh, opts)
 }
@@ -469,6 +471,7 @@ func (e *Executor) postCommit(
 		meta.CallerOutcome = &subscription.CallerOutcome{
 			Kind:      subscription.CallerOutcomeCommitted,
 			RequestID: opts.callerRequestID,
+			Flags:     opts.callerFlags,
 		}
 	}
 	e.subs.EvalAndBroadcast(txID, changeset, view, meta)

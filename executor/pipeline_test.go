@@ -546,6 +546,48 @@ func TestPostCommitExternalReducerPropagatesCallerMetadata(t *testing.T) {
 	_ = resp
 }
 
+// TestPostCommitPropagatesCallerFlags pins the Phase 1.5 sub-slice:
+// an external reducer call carrying CallReducerFlags::NoSuccessNotify
+// (byte = 1) must surface that flag on CallerOutcome.Flags so the
+// fan-out worker can skip the caller's heavy echo on successful commits.
+func TestPostCommitPropagatesCallerFlags(t *testing.T) {
+	h := newPipelineHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	ch := make(chan ReducerResponse, 1)
+	if err := h.exec.Submit(CallReducerCmd{
+		Request: ReducerRequest{
+			ReducerName: "InsertPlayer",
+			Source:      CallSourceExternal,
+			RequestID:   88,
+			Flags:       1, // CallReducerFlagsNoSuccessNotify
+			Caller:      types.CallerContext{ConnectionID: types.ConnectionID{9}},
+		},
+		ResponseCh: ch,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp := <-ch
+	if resp.Status != StatusCommitted {
+		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
+	}
+
+	h.subs.mu.Lock()
+	defer h.subs.mu.Unlock()
+	if len(h.subs.metas) != 1 {
+		t.Fatalf("metas=%d want 1", len(h.subs.metas))
+	}
+	meta := h.subs.metas[0]
+	if meta.CallerOutcome == nil {
+		t.Fatal("CallerOutcome = nil")
+	}
+	if meta.CallerOutcome.Flags != 1 {
+		t.Fatalf("CallerOutcome.Flags=%d want 1 (NoSuccessNotify)", meta.CallerOutcome.Flags)
+	}
+}
+
 func TestPostCommitLifecycleLeavesCallerMetadataNil(t *testing.T) {
 	h := newPipelineHarness(t)
 	changeset := &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}}

@@ -90,4 +90,16 @@ type CallerOutcome struct {
 	Timestamp                  int64
 	EnergyQuantaUsed           uint64
 	TotalHostExecutionDuration int64
+	// Flags mirrors the `CallReducerFlags` byte received on the wire.
+	// The fan-out worker reads this to suppress the caller's successful
+	// heavy echo when `CallerOutcomeFlagNoSuccessNotify` is set.
+	Flags byte
 }
+
+// CallerOutcome flag values mirror the wire `CallReducerFlags` byte. Keeping
+// the constants in the subscription package lets the fan-out worker
+// switch on outcome.Flags without importing the protocol layer.
+const (
+	CallerOutcomeFlagFullUpdate     byte = 0
+	CallerOutcomeFlagNoSuccessNotify byte = 1
+)

@@ -16,6 +16,10 @@ type ReducerRequest struct {
 	Caller      types.CallerContext
 	RequestID   uint32
 	Source      CallSource
+	// Flags mirrors the wire `CallReducerFlags` byte. Propagated into
+	// `subscription.CallerOutcome.Flags` so the fan-out worker can honor
+	// caller opt-outs such as `NoSuccessNotify`.
+	Flags byte
 	// ScheduleID and IntendedFireAt are populated when Source ==
 	// CallSourceScheduled. IntendedFireAt is the sys_scheduled row's
 	// next_run_at_ns at enqueue time; firing uses it so repeat

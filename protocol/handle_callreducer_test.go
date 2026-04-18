@@ -372,6 +372,33 @@ func TestHandleCallReducer_OnDisconnect(t *testing.T) {
 	}
 }
 
+// TestHandleCallReducer_ForwardsFlags_NoSuccessNotify pins that the
+// NoSuccessNotify wire flag is forwarded onto CallReducerRequest.Flags
+// so downstream seams (executor, fanout worker) can honor the caller's
+// opt-out. Phase 1.5 sub-slice.
+func TestHandleCallReducer_ForwardsFlags_NoSuccessNotify(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockDispatchExecutor{}
+
+	msg := &CallReducerMsg{
+		RequestID:   50,
+		ReducerName: "DoThing",
+		Args:        []byte{0x02},
+		Flags:       CallReducerFlagsNoSuccessNotify,
+	}
+	handleCallReducer(context.Background(), conn, msg, exec)
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if exec.callReducerReq == nil {
+		t.Fatal("executor.CallReducer was not called")
+	}
+	if exec.callReducerReq.Flags != CallReducerFlagsNoSuccessNotify {
+		t.Errorf("CallReducerRequest.Flags = %d, want %d (NoSuccessNotify)",
+			exec.callReducerReq.Flags, CallReducerFlagsNoSuccessNotify)
+	}
+}
+
 func TestHandleCallReducer_ExecutorReject(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{callReducerErr: errors.New("reducer crashed")}
