@@ -1,15 +1,19 @@
 Continue Shunter in a fresh agent session.
 
 Phase 1 wire-level protocol parity is closed.
-Phase 1.5 first end-to-end delivery parity slice — the `TransactionUpdate` /
-`ReducerCallResult` outcome-model split — is also closed. Do not re-open
-any P0-PROTOCOL-00* slice and do not re-litigate the outcome-model decision.
+Phase 1.5 end-to-end delivery parity — the `TransactionUpdate` /
+`ReducerCallResult` envelope split AND the `CallReducer.flags`
+(`NoSuccessNotify`) sub-slice — is closed. Do not re-open any
+P0-PROTOCOL-00* slice and do not re-litigate the outcome-model decision.
 
 Primary decision
 - Treat `docs/spacetimedb-parity-roadmap.md` as the active development driver.
-- Treat Phase 0, Phase 1, and the Phase 1.5 envelope split as materially landed.
-- The next narrow slice is the remaining Phase 1.5 sub-slice: `CallReducer.flags`.
-  The handoff below points at the specific deferral rows.
+- Treat Phase 0, Phase 1, and Phase 1.5 (envelope split + `CallReducer.flags`) as materially landed.
+- The next narrow slices are the remaining Phase 1.5 metadata follow-ups
+  (`CallerIdentity`, `ReducerID`, `ReducerName`/`Args`, `Timestamp`,
+  `EnergyQuantaUsed`, `TotalHostExecutionDuration`) or, if those are
+  deferred further, Phase 2 Slice 1 (SQL `OneOffQuery`) or Phase 2
+  Slice 2 (`SubscribeMulti` / `QueryId`).
 
 What landed last session (Phase 1.5 envelope split)
 - Heavy `TransactionUpdate{Status, CallerIdentity, CallerConnectionID, ReducerCall,
@@ -49,40 +53,51 @@ Pinned parity tests (do not flip without a named parity reason)
   - `TestPhase15UpdateStatusVariants`
   - `TestPhase15TagReducerCallResultReserved`
   - `TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants` (still open; Phase 2 Slice 2)
-  - `TestPhase1DeferralCallReducerNoFlagsField` (still open; next sub-slice)
+  - `TestPhase15CallReducerFlagsField` (closed sub-slice — positive-shape pin)
   - `TestPhase1DeferralOneOffQueryStructuredNotSQL` (still open; Phase 2 Slice 1)
 - `subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout`
 - `subscription/phase0_parity_test.go::TestPhase0ParityCanonicalReducerDeliveryFlow`
 
 Phase 1.5 deferrals still open (each independently landable)
-1. `CallReducer.flags` — notably `NoSuccessfulUpdate` to suppress caller-echo
-   delivery. Flip `TestPhase1DeferralCallReducerNoFlagsField` when the field
-   lands on the wire; wire suppression into the fan-out worker's caller-dispatch
-   branch; add a parity test for the suppressed caller-echo path.
-2. `TransactionUpdate.CallerIdentity` population — today zeroed at the executor
+1. `TransactionUpdate.CallerIdentity` population — today zeroed at the executor
    seam. Source is the originating `CallReducerCmd.Caller.Identity`; thread it
    into `PostCommitMeta.CallerOutcome.CallerIdentity`. Phase 3 runtime-parity
    concern, but structurally small.
-3. `TransactionUpdate.ReducerCall.ReducerID` — look up the reducer's numeric ID
+2. `TransactionUpdate.ReducerCall.ReducerID` — look up the reducer's numeric ID
    from the reducer registry (`schema/` or `executor/registry.go`) and
    populate it in `CallerOutcome.ReducerID`.
-4. `TransactionUpdate.ReducerCall.ReducerName` / `Args` — currently zeroed.
+3. `TransactionUpdate.ReducerCall.ReducerName` / `Args` — currently zeroed.
    Thread from the originating `CallReducerCmd`.
-5. `Timestamp` (reducer start time, nanoseconds) — record in the executor
+4. `Timestamp` (reducer start time, nanoseconds) — record in the executor
    before dispatch; pass via `PostCommitMeta.CallerOutcome.Timestamp`.
-6. `TotalHostExecutionDuration` — measure from dispatch to post-commit in the
+5. `TotalHostExecutionDuration` — measure from dispatch to post-commit in the
    executor; pass via `CallerOutcome`.
-7. `EnergyQuantaUsed` — no energy model; keep zero and mark as a permanent
+6. `EnergyQuantaUsed` — no energy model; keep zero and mark as a permanent
    deferral unless the workload requires it.
-8. Finer `StatusFailed` classification — Shunter's former
+7. Finer `StatusFailed` classification — Shunter's former
    `failed_user` / `failed_panic` / `not_found` distinctions collapsed into a
    single `StatusFailed.Error` message in Phase 1.5. Phase 3 may want to
    preserve the classification separately (or pin the collapse as permanent).
 
-Suggested next slice: `CallReducer.flags`
-- Scope is genuinely narrow (one uint8 on one client message).
-- Closes one of the Phase 1.5 deferrals with clear parity tests.
-- Does not touch the executor's commit path, so fits in one session easily.
+Recently landed (Phase 1.5 `CallReducer.flags` sub-slice)
+- `CallReducerMsg.Flags byte` on the wire (reference `CallReducerFlags`:
+  `FullUpdate=0`, `NoSuccessNotify=1`). Encoder appends a trailing u8 after
+  `Args`; decoder rejects out-of-range bytes as `ErrMalformedMessage`.
+- Flags propagates through `protocol.CallReducerRequest.Flags` →
+  `executor.ReducerRequest.Flags` → `postCommitOptions.callerFlags` →
+  `subscription.CallerOutcome.Flags`.
+- `subscription/fanout_worker.go::deliver` now suppresses the caller's
+  heavy `TransactionUpdate` when `CallerOutcomeCommitted` +
+  `CallerOutcomeFlagNoSuccessNotify`. Failure / out-of-energy outcomes
+  are never suppressed. Confirmed-read gating treats the caller as
+  absent when suppressed.
+
+Suggested next slice
+- Either (a) bundle the remaining stubbed caller-metadata fields
+  (`CallerIdentity`, `ReducerID`, `ReducerName`, `Args`, `Timestamp`,
+  `TotalHostExecutionDuration`) into one Phase 1.5 metadata-wiring
+  commit, or (b) move to Phase 2 Slice 1 (`OneOffQuery` SQL front door)
+  or Phase 2 Slice 2 (`SubscribeMulti` / `QueryId`).
 
 Required reading order
 1. `AGENTS.md`
@@ -94,19 +109,9 @@ Required reading order
 7. `docs/spacetimedb-parity-roadmap.md`
 8. `docs/parity-phase0-ledger.md`
 9. `docs/parity-phase1.5-outcome-model.md`
-10. `SPEC-AUDIT.md` §3.4, §3.9, §3.5 (`CallReducer.flags`), and §2.10 / §2.12
-    for the newly-closed rows.
+10. `SPEC-AUDIT.md` §3.4, §3.6, §3.9, §2.10 / §2.12 for the closed rows.
 11. `TECH-DEBT.md` (scan for protocol / subscription entries that reference the
     renamed seam; most should be stale and no-ops).
-
-Primary source files to inspect when wiring `CallReducer.flags`
-- `protocol/client_messages.go` (add `Flags uint8`)
-- `protocol/tags.go` (no tag change needed)
-- `protocol/handle_callreducer.go`
-- `protocol/lifecycle.go` (`CallReducerRequest.Flags`)
-- `subscription/fanout_worker.go` (caller-dispatch suppression)
-- `subscription/fanout.go` (`CallerOutcome.Flags` or separate meta field)
-- `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs` (flags spec)
 
 Hard rules
 - Use RTK for every shell/git command.

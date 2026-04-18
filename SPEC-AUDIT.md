@@ -1863,13 +1863,12 @@ Fix: cross-reference SPEC-004 §3.2 in §10 or §12; add a line noting the v1 bu
 
 Fix: add a §15 Open Question or §3 divergence note: "SpacetimeDB's multi-query subscription set grouping is not exposed in v1. A future extension may introduce a `SubscribeMulti`-style set; reserve `subscription_id` namespace accordingly."
 
-### 3.6 [DIVERGE] No `CallReducer.flags` byte (NoSuccessfulUpdate, etc.) [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralCallReducerNoFlagsField]
+### 3.6 [RESOLVED] `CallReducer.flags` byte adopted (NoSuccessNotify) [CLOSED Phase 1.5 sub-slice — pinned by protocol/parity_message_family_test.go::TestPhase15CallReducerFlagsField]
 
-- SpacetimeDB `CallReducer` carries `flags: CallReducerFlags` (`crates/client-api-messages/src/websocket/v1.rs:55`; e.g., `NoSuccessfulUpdate` to suppress echoing the caller's `TransactionUpdate`).
-- Shunter `CallReducerMsg` (§7.3) carries only `request_id`, `reducer_name`, `args`. No flags.
-- Consequence: a client that wants to issue a fire-and-forget reducer (no caller-echo) cannot opt out; the `ReducerCallResult.TransactionUpdate` always embeds matching subscription deltas.
-
-Fix: defer explicitly ("v1 reducer calls always deliver caller deltas via `ReducerCallResult.transaction_update`; suppressing that echo is out of scope for v1").
+- `CallReducerMsg` now carries a trailing `Flags byte` matching reference `CallReducerFlags` (`reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs` — `FullUpdate=0`, `NoSuccessNotify=1`). Encoder appends a single u8 after `Args`; decoder reads it and rejects out-of-range values with `ErrMalformedMessage` (matches the reference `impl_deserialize!` behavior).
+- Flags propagates through `protocol.CallReducerRequest.Flags` → `executor.ReducerRequest.Flags` → `executor.postCommitOptions.callerFlags` → `subscription.CallerOutcome.Flags`.
+- `subscription/fanout_worker.go::deliver` consumes `CallerOutcome.Flags`: on `CallerOutcomeCommitted` + `CallerOutcomeFlagNoSuccessNotify` it suppresses the caller's heavy envelope and treats the caller as absent for confirmed-read gating. Non-caller light deliveries remain unaffected. Failure / out-of-energy outcomes are never suppressed — callers still observe non-success states.
+- Pins: `TestPhase15CallReducerFlagsField`, `TestCallReducerFlagsNoSuccessNotifyRoundTrip`, `TestCallReducerFlagsInvalidByteRejected`, `TestHandleCallReducer_ForwardsFlags_NoSuccessNotify`, `TestPostCommitPropagatesCallerFlags`, `TestFanOutWorker_NoSuccessNotify_SuppressesCallerHeavy_OnCommitted`, `TestFanOutWorker_NoSuccessNotify_EmptyFanout_NoDelivery`, `TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnFailed`, `TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnOutOfEnergy`.
 
 ### 3.7 [DIVERGE] OneOffQuery uses structured predicates, not SQL string [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralOneOffQueryStructuredNotSQL]
 
