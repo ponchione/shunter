@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,8 +111,14 @@ func TestPhase1ParityBrotliFrameClosesWithReason(t *testing.T) {
 	readCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer rCancel()
 	_, _, err := clientWS.Read(readCtx)
-	ce := websocket.CloseStatus(err)
-	if ce != websocket.StatusProtocolError {
-		t.Errorf("close code = %d, want %d (1002)", ce, websocket.StatusProtocolError)
+	var ce websocket.CloseError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected CloseError, got %v (%T)", err, err)
+	}
+	if ce.Code != websocket.StatusProtocolError {
+		t.Errorf("close code = %d, want %d (1002)", ce.Code, websocket.StatusProtocolError)
+	}
+	if !strings.Contains(ce.Reason, "brotli") {
+		t.Errorf("close reason = %q, want contains %q", ce.Reason, "brotli")
 	}
 }
