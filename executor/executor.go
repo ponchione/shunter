@@ -65,6 +65,16 @@ type postCommitOptions struct {
 	callerConnID    *types.ConnectionID
 	callerRequestID uint32
 	callerFlags     byte
+	// Caller metadata populated for CallSourceExternal so the heavy
+	// TransactionUpdate envelope can carry the reference
+	// CallerIdentity / ReducerCallInfo fields. startTime captures the
+	// reducer-dispatch instant (Unix ns) — postCommit reads both
+	// Timestamp and wall-clock TotalHostExecutionDuration from it.
+	callerIdentity types.Identity
+	reducerName    string
+	reducerID      uint32
+	args           []byte
+	startTime      time.Time
 }
 
 // NewExecutor creates an executor. Registry must be frozen.
@@ -292,6 +302,7 @@ func sendReducerResponse(ch chan<- ReducerResponse, resp ReducerResponse) bool {
 
 func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	req := cmd.Request
+	start := time.Now()
 	if req.Source != CallSourceLifecycle {
 		if _, reserved := lifecycleNames[req.ReducerName]; reserved {
 			sendReducerResponse(cmd.ResponseCh, ReducerResponse{
@@ -406,6 +417,11 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		opts.callerConnID = &connID
 		opts.callerRequestID = req.RequestID
 		opts.callerFlags = req.Flags
+		opts.callerIdentity = req.Caller.Identity
+		opts.reducerName = req.ReducerName
+		opts.reducerID = rr.ID
+		opts.args = req.Args
+		opts.startTime = start
 	}
 	e.postCommit(txID, changeset, ret, cmd.ResponseCh, opts)
 }
@@ -469,9 +485,15 @@ func (e *Executor) postCommit(
 		// the executor surface does not yet carry those fields to the
 		// post-commit seam.
 		meta.CallerOutcome = &subscription.CallerOutcome{
-			Kind:      subscription.CallerOutcomeCommitted,
-			RequestID: opts.callerRequestID,
-			Flags:     opts.callerFlags,
+			Kind:                       subscription.CallerOutcomeCommitted,
+			RequestID:                  opts.callerRequestID,
+			Flags:                      opts.callerFlags,
+			CallerIdentity:             opts.callerIdentity,
+			ReducerName:                opts.reducerName,
+			ReducerID:                  opts.reducerID,
+			Args:                       opts.args,
+			Timestamp:                  opts.startTime.UnixNano(),
+			TotalHostExecutionDuration: time.Since(opts.startTime).Nanoseconds(),
 		}
 	}
 	e.subs.EvalAndBroadcast(txID, changeset, view, meta)

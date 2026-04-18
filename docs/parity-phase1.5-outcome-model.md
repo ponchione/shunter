@@ -65,17 +65,24 @@ Adopted now (closes Phase 1.5):
 
 Deferred explicitly (numeric / observability fields, not envelope shape):
 
-- `Timestamp` — server-side reducer start time. **Stubbed as zero** in
-  Phase 1.5. Real source lives in the executor and ties into Phase 3
-  runtime parity. Reference outcome being matched: `i64` nanoseconds
-  since Unix epoch.
+- `Timestamp` — server-side reducer start time. **Landed** in the
+  Phase 1.5 caller-metadata sub-slice. Source is `time.Now().UnixNano()`
+  captured at reducer dispatch. Pinned by
+  `executor/caller_metadata_test.go::TestCallerOutcomeCarriesTimestampAndDuration`.
 - `EnergyQuantaUsed` — energy accounting. **Stubbed as zero** in Phase
   1.5. Shunter has no energy model; this is a permanent stub unless an
   energy/quota subsystem is introduced. Marked as a long-term deferral
   keyed on a future Phase 3 / Phase 5 decision.
-- `TotalHostExecutionDuration` — measured reducer wall time. **Stubbed
-  as zero** in Phase 1.5. Trivial to wire from the executor; deferred to
-  Phase 3 runtime parity to keep the slice scoped.
+- `TotalHostExecutionDuration` — measured reducer wall time. **Landed**
+  in the Phase 1.5 caller-metadata sub-slice. Measured from dispatch to
+  `postCommit` with `time.Since(start).Nanoseconds()`. Pinned by
+  `executor/caller_metadata_test.go::TestCallerOutcomeCarriesTimestampAndDuration`.
+- `CallerIdentity`, `ReducerCall.{ReducerName, ReducerID, Args}` —
+  **Landed** in the Phase 1.5 caller-metadata sub-slice. Identity and
+  `ReducerName` / `Args` thread from `CallReducerCmd.Request`;
+  `ReducerID` is assigned monotonically at `ReducerRegistry.Register`
+  and read back via `Lookup`. Pinned by
+  `executor/caller_metadata_test.go`.
 - `OutOfEnergy` arm — present in the tagged union for shape parity but
   never emitted by the executor in Phase 1.5. No energy model exists.
   Phase 3 runtime parity decides whether the arm is ever produced or

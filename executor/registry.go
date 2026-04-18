@@ -10,6 +10,7 @@ type ReducerRegistry struct {
 	mu        sync.RWMutex
 	reducers  map[string]*RegisteredReducer
 	lifecycle [LifecycleOnDisconnect + 1]*RegisteredReducer
+	nextID    uint32
 	frozen    bool
 }
 
@@ -53,6 +54,8 @@ func (rr *ReducerRegistry) Register(r RegisteredReducer) error {
 		return fmt.Errorf("executor: duplicate reducer %q", r.Name)
 	}
 
+	r.ID = rr.nextID
+	rr.nextID++
 	rr.reducers[r.Name] = &r
 	if r.Lifecycle != LifecycleNone {
 		rr.lifecycle[r.Lifecycle] = &r

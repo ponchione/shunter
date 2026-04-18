@@ -28,7 +28,7 @@ These are the strongest existing protocol-boundary tests that now serve as the P
 
 | Scenario | Current status | Authoritative files/tests | Reference outcome being matched | Next slice note |
 |---|---|---|---|---|
-| `P0-DELIVERY-001` canonical reducer delivery flow (`connect -> subscribe -> call reducer -> caller heavy -> non-caller light -> durability-gated delivery`) | `closed` | `protocol/handle_callreducer_test.go`, `protocol/send_txupdate_test.go`, `protocol/fanout_adapter_test.go`, `subscription/fanout_worker_test.go`, `subscription/phase0_parity_test.go` | Caller observes the heavy `TransactionUpdate` with `StatusCommitted` / `StatusFailed` / `StatusOutOfEnergy`; non-callers with row-touches observe `TransactionUpdateLight` carrying the caller's `request_id`; the current public-protocol path waits on `TxDurable` before heavy/light delivery, and the caller's row delta is embedded in `StatusCommitted.Update`. | Phase 1.5 outcome-model decision landed (`docs/parity-phase1.5-outcome-model.md`). Next Phase 1.5 sub-slices: `CallReducer.flags` (notably `NoSuccessfulUpdate`); caller-identity / reducer-id / timestamp / duration / energy metadata wiring (currently stubbed zero). |
+| `P0-DELIVERY-001` canonical reducer delivery flow (`connect -> subscribe -> call reducer -> caller heavy -> non-caller light -> durability-gated delivery`) | `closed` | `protocol/handle_callreducer_test.go`, `protocol/send_txupdate_test.go`, `protocol/fanout_adapter_test.go`, `subscription/fanout_worker_test.go`, `subscription/phase0_parity_test.go`, `executor/caller_metadata_test.go` | Caller observes the heavy `TransactionUpdate` with `StatusCommitted` / `StatusFailed` / `StatusOutOfEnergy`; non-callers with row-touches observe `TransactionUpdateLight` carrying the caller's `request_id`; the current public-protocol path waits on `TxDurable` before heavy/light delivery, and the caller's row delta is embedded in `StatusCommitted.Update`. Caller metadata (`CallerIdentity`, `ReducerCall.{ReducerName,ReducerID,Args}`, `Timestamp`, `TotalHostExecutionDuration`) is populated from the executor seam. | Phase 1.5 outcome-model decision landed (`docs/parity-phase1.5-outcome-model.md`); `CallReducer.flags` / `NoSuccessNotify` sub-slice is closed; caller-metadata wiring sub-slice closed. Remaining Phase 1.5 deferral: `EnergyQuantaUsed` is a permanent zero — no energy model. |
 | `P0-DELIVERY-002` no-active-subscription / empty-fanout caller outcome | `closed` | `subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout`, `subscription/eval.go` | A reducer-originated commit with no active subscriptions or an empty changeset still delivers the caller's heavy `TransactionUpdate` envelope; `EvalAndBroadcast` only short-circuits when there is neither caller metadata nor row-touches. | Closed Phase 1.5 — see the decision doc for the explicit guard. |
 
 ## Scheduler / recovery parity scenarios
@@ -43,10 +43,7 @@ These are the strongest existing protocol-boundary tests that now serve as the P
 
 Phases 1 and 1.5 (envelope split + `CallReducer.flags`) are closed.
 
-Remaining Phase 1.5 follow-ups (each independently landable):
-- populate `TransactionUpdate.CallerIdentity` (currently zeroed — Phase 3 carries the identity source from the executor commit seam)
-- populate `TransactionUpdate.ReducerCall.ReducerID` from the reducer registry
-- populate `TransactionUpdate.ReducerCall.ReducerName` / `Args` (currently zeroed at the executor seam)
-- emit server-side `Timestamp`, `EnergyQuantaUsed`, `TotalHostExecutionDuration` (currently all zero; see the decision doc)
+Remaining Phase 1.5 follow-ups:
+- `EnergyQuantaUsed` stays zero; Shunter has no energy model. Marked permanent deferral unless an energy/quota subsystem is introduced.
 
-After Phase 1.5 is fully drained: Phase 2 (`SubscribeMulti` / SQL OneOffQuery / `QueryId` / lag policy) and Phase 4 (`P0-RECOVERY-002`) are the next anchor scenarios.
+With caller-metadata wiring closed, Phase 1.5 is fully drained except the permanent energy deferral. Phase 2 (`SubscribeMulti` / SQL OneOffQuery / `QueryId` / lag policy) and Phase 4 (`P0-RECOVERY-002`) are the next anchor scenarios.

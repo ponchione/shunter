@@ -3,10 +3,14 @@ package executor
 import "github.com/ponchione/shunter/types"
 
 // RegisteredReducer pairs a reducer name with its handler and lifecycle role.
+// ID is assigned monotonically by the registry at Register time so the
+// Phase 1.5 heavy TransactionUpdate envelope can carry the reference
+// ReducerCallInfo.ReducerId field (u32).
 type RegisteredReducer struct {
 	Name      string
 	Handler   types.ReducerHandler
 	Lifecycle LifecycleKind
+	ID        uint32
 }
 
 // ReducerRequest is the input to a reducer call.
