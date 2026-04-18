@@ -30,7 +30,7 @@ func TestIncomingBackpressure_WithinLimitAllProcessed(t *testing.T) {
 
 	for i := uint32(0); i < 4; i++ {
 		frame, _ := EncodeClientMessage(SubscribeMsg{
-			RequestID: i, SubscriptionID: i + 100,
+			RequestID: i, QueryID: i + 100,
 			Query: Query{TableName: "t"},
 		})
 		wCtx, wCancel := context.WithTimeout(ctx, time.Second)
@@ -75,7 +75,7 @@ func TestIncomingBackpressure_ExceedLimitCloses1008(t *testing.T) {
 	// Send 3 messages: first 2 acquire semaphore, third exceeds.
 	for i := uint32(0); i < 3; i++ {
 		frame, _ := EncodeClientMessage(SubscribeMsg{
-			RequestID: i, SubscriptionID: i + 100,
+			RequestID: i, QueryID: i + 100,
 			Query: Query{TableName: "t"},
 		})
 		wCtx, wCancel := context.WithTimeout(ctx, time.Second)
@@ -118,7 +118,7 @@ func TestIncomingBackpressure_RapidBurstWithinLimit(t *testing.T) {
 
 	for i := uint32(0); i < 8; i++ {
 		frame, _ := EncodeClientMessage(SubscribeMsg{
-			RequestID: i, SubscriptionID: i + 200,
+			RequestID: i, QueryID: i + 200,
 			Query: Query{TableName: "t"},
 		})
 		wCtx, wCancel := context.WithTimeout(ctx, time.Second)
@@ -150,7 +150,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	handlers := &MessageHandlers{
 		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
 			mu.Lock()
-			ids = append(ids, msg.SubscriptionID)
+			ids = append(ids, msg.QueryID)
 			mu.Unlock()
 			<-block
 		},
@@ -162,7 +162,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	_ = runDispatchAsync(conn, ctx, handlers)
 
 	frame1, _ := EncodeClientMessage(SubscribeMsg{
-		RequestID: 1, SubscriptionID: 100,
+		RequestID: 1, QueryID: 100,
 		Query: Query{TableName: "t"},
 	})
 	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
@@ -172,7 +172,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	frame2, _ := EncodeClientMessage(SubscribeMsg{
-		RequestID: 2, SubscriptionID: 200,
+		RequestID: 2, QueryID: 200,
 		Query: Query{TableName: "t"},
 	})
 	wCtx2, wCancel2 := context.WithTimeout(ctx, time.Second)
@@ -200,9 +200,9 @@ func TestIncomingBackpressure_NilHandlerDoesNotLeakSemaphoreToken(t *testing.T) 
 	done := runDispatchAsync(conn, ctx, &MessageHandlers{})
 
 	frame, _ := EncodeClientMessage(SubscribeMsg{
-		RequestID:      1,
-		SubscriptionID: 100,
-		Query:          Query{TableName: "t"},
+		RequestID: 1,
+		QueryID:   100,
+		Query:     Query{TableName: "t"},
 	})
 	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
 	if err := clientWS.Write(wCtx, websocket.MessageBinary, frame); err != nil {

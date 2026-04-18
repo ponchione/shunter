@@ -67,7 +67,7 @@ func handleSubscribe(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
-	subID := msg.SubscriptionID
+	subID := msg.QueryID
 
 	if err := conn.Subscriptions.Reserve(subID); err != nil {
 		sendError(conn, SubscriptionError{

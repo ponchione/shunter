@@ -74,7 +74,7 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	handlers := &MessageHandlers{
 		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
 			mu.Lock()
-			gotSubID = msg.SubscriptionID
+			gotSubID = msg.QueryID
 			mu.Unlock()
 			close(called)
 		},
@@ -86,8 +86,8 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 
 	// Build and send a valid Subscribe frame.
 	subMsg := SubscribeMsg{
-		RequestID:      1,
-		SubscriptionID: 42,
+		RequestID: 1,
+		QueryID:   42,
 		Query: Query{
 			TableName:  "users",
 			Predicates: nil,
@@ -234,8 +234,8 @@ func TestDispatchLoop_NilHandlerCloses(t *testing.T) {
 
 	// Send a valid Subscribe frame — but OnSubscribe is nil.
 	subMsg := SubscribeMsg{
-		RequestID:      1,
-		SubscriptionID: 10,
+		RequestID: 1,
+		QueryID:   10,
 		Query: Query{
 			TableName:  "items",
 			Predicates: nil,
@@ -306,8 +306,8 @@ func TestDispatchLoop_MarksActivity(t *testing.T) {
 	done := runDispatchAsync(conn, ctx, handlers)
 
 	subMsg := SubscribeMsg{
-		RequestID:      1,
-		SubscriptionID: 7,
+		RequestID: 1,
+		QueryID:   7,
 		Query: Query{
 			TableName:  "events",
 			Predicates: nil,

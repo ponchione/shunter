@@ -10,25 +10,30 @@ import (
 )
 
 // SubscribeMsg is the client-side Subscribe message (SPEC-005 §7.1).
+// QueryID mirrors reference `SubscribeSingle.query_id: QueryId` — a
+// client-allocated identifier used to correlate the subscribe with its
+// later Unsubscribe. The Multi / Single variant split remains deferred
+// (see `TestPhase2DeferralSubscribeNoMultiOrSingleVariants`).
 type SubscribeMsg struct {
-	RequestID      uint32
-	SubscriptionID uint32
-	Query          Query
+	RequestID uint32
+	QueryID   uint32
+	Query     Query
 }
 
 // UnsubscribeMsg is the client-side Unsubscribe message (SPEC-005 §7.2).
+// QueryID mirrors reference `Unsubscribe.query_id: QueryId`.
 type UnsubscribeMsg struct {
-	RequestID      uint32
-	SubscriptionID uint32
-	SendDropped    bool
+	RequestID   uint32
+	QueryID     uint32
+	SendDropped bool
 }
 
 // CallReducerMsg is the client-side CallReducer message (SPEC-005 §7.3).
 // Args is the raw BSATN-encoded ProductValue; protocol does not
 // validate argument types — that's the executor's job (SPEC-003).
 //
-// Flags is a single-byte discriminant matching reference
-// `CallReducerFlags` (`reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`).
+// Flags is a single-byte discriminant matching the reference
+// `CallReducerFlags` behavior.
 // Only two values are defined today; see the constants below.
 type CallReducerMsg struct {
 	RequestID   uint32
@@ -68,14 +73,14 @@ func EncodeClientMessage(m any) ([]byte, error) {
 	case SubscribeMsg:
 		buf.WriteByte(TagSubscribe)
 		writeUint32(&buf, msg.RequestID)
-		writeUint32(&buf, msg.SubscriptionID)
+		writeUint32(&buf, msg.QueryID)
 		if err := encodeQuery(&buf, msg.Query); err != nil {
 			return nil, err
 		}
 	case UnsubscribeMsg:
 		buf.WriteByte(TagUnsubscribe)
 		writeUint32(&buf, msg.RequestID)
-		writeUint32(&buf, msg.SubscriptionID)
+		writeUint32(&buf, msg.QueryID)
 		if msg.SendDropped {
 			buf.WriteByte(1)
 		} else {
@@ -136,7 +141,7 @@ func decodeSubscribe(body []byte) (SubscribeMsg, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.SubscriptionID, off, err = readUint32(body, off); err != nil {
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
 	q, _, err := decodeQuery(body, off)
@@ -154,7 +159,7 @@ func decodeUnsubscribe(body []byte) (UnsubscribeMsg, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.SubscriptionID, off, err = readUint32(body, off); err != nil {
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
 	if len(body)-off < 1 {

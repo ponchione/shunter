@@ -90,17 +90,43 @@ func TestPhase15TagReducerCallResultReserved(t *testing.T) {
 	}
 }
 
-// TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants pins the
-// deferral: Shunter uses a single Subscribe message with a structured
-// query list; reference/SpacetimeDB exposes SubscribeSingle /
-// SubscribeMulti variants with a QueryId. Flip when grouping lands.
-func TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants(t *testing.T) {
+// TestPhase2SubscribeCarriesQueryID pins the Phase 2 Slice 2 opener:
+// SubscribeMsg now carries a QueryID field matching the reference
+// `query_id: QueryId` on `SubscribeSingle` / `SubscribeMulti`. The
+// Multi / Single variant split remains deferred — see
+// TestPhase2DeferralSubscribeNoMultiOrSingleVariants below.
+func TestPhase2SubscribeCarriesQueryID(t *testing.T) {
 	fields := msgFieldNames(SubscribeMsg{})
-	want := []string{"RequestID", "SubscriptionID", "Query"}
+	want := []string{"RequestID", "QueryID", "Query"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeMsg fields = %v, want %v (deferral: no QueryId / Multi / Single variants)",
+		t.Fatalf("SubscribeMsg fields = %v, want %v (Phase 2: QueryID field landed)",
 			fields, want)
 	}
+}
+
+// TestPhase2UnsubscribeCarriesQueryID pins the Phase 2 Slice 2 opener
+// on Unsubscribe: reference `Unsubscribe` carries `query_id: QueryId`.
+func TestPhase2UnsubscribeCarriesQueryID(t *testing.T) {
+	fields := msgFieldNames(UnsubscribeMsg{})
+	want := []string{"RequestID", "QueryID", "SendDropped"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("UnsubscribeMsg fields = %v, want %v (Phase 2: QueryID field landed)",
+			fields, want)
+	}
+}
+
+// TestPhase2DeferralSubscribeNoMultiOrSingleVariants pins the still-open
+// deferral: reference exposes `SubscribeSingle` / `SubscribeMulti` as
+// separate envelopes with batch registration semantics. Shunter still
+// exposes a single Subscribe envelope per query. Flip when the
+// Multi / Single split lands.
+func TestPhase2DeferralSubscribeNoMultiOrSingleVariants(t *testing.T) {
+	if TagSubscribe == 0 {
+		t.Fatal("TagSubscribe should stay defined for the single-envelope path")
+	}
+	// No SubscribeMultiMsg / SubscribeSingleMsg types exist yet. When
+	// they land, replace this test with positive shape pins on those
+	// envelopes.
 }
 
 // TestPhase15CallReducerFlagsField pins the Phase 1.5 sub-slice closure:

@@ -11,7 +11,7 @@ func handleUnsubscribe(
 	msg *UnsubscribeMsg,
 	executor ExecutorInbox,
 ) {
-	subID := msg.SubscriptionID
+	subID := msg.QueryID
 
 	if !conn.Subscriptions.IsActive(subID) {
 		sendError(conn, SubscriptionError{

@@ -230,8 +230,8 @@ func TestHandleSubscribe_Valid(t *testing.T) {
 	)
 
 	msg := &SubscribeMsg{
-		RequestID:      10,
-		SubscriptionID: 7,
+		RequestID: 10,
+		QueryID:   7,
 		Query: Query{
 			TableName: "users",
 			Predicates: []Predicate{
@@ -290,9 +290,9 @@ func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
 	)
 
 	msg := &SubscribeMsg{
-		RequestID:      10,
-		SubscriptionID: 7,
-		Query:          Query{TableName: "users"},
+		RequestID: 10,
+		QueryID:   7,
+		Query:     Query{TableName: "users"},
 	}
 
 	handleSubscribe(context.Background(), conn, msg, executor, sl)
@@ -331,9 +331,9 @@ func TestHandleSubscribe_DuplicateID(t *testing.T) {
 	}
 
 	msg := &SubscribeMsg{
-		RequestID:      1,
-		SubscriptionID: 42,
-		Query:          Query{TableName: "users"},
+		RequestID: 1,
+		QueryID:   42,
+		Query:     Query{TableName: "users"},
 	}
 
 	handleSubscribe(context.Background(), conn, msg, executor, sl)
@@ -362,9 +362,9 @@ func TestHandleSubscribe_UnknownTable(t *testing.T) {
 	sl := newMockSchema("users", 1) // only "users" exists
 
 	msg := &SubscribeMsg{
-		RequestID:      5,
-		SubscriptionID: 99,
-		Query:          Query{TableName: "nonexistent"},
+		RequestID: 5,
+		QueryID:   99,
+		Query:     Query{TableName: "nonexistent"},
 	}
 
 	handleSubscribe(context.Background(), conn, msg, executor, sl)
@@ -399,9 +399,9 @@ func TestHandleSubscribe_ExecutorReject(t *testing.T) {
 	)
 
 	msg := &SubscribeMsg{
-		RequestID:      3,
-		SubscriptionID: 50,
-		Query:          Query{TableName: "users"},
+		RequestID: 3,
+		QueryID:   50,
+		Query:     Query{TableName: "users"},
 	}
 
 	handleSubscribe(context.Background(), conn, msg, executor, sl)

@@ -10,8 +10,8 @@ import (
 
 func TestSubscribeRoundTripEmptyPredicates(t *testing.T) {
 	in := SubscribeMsg{
-		RequestID:      42,
-		SubscriptionID: 7,
+		RequestID: 42,
+		QueryID:   7,
 		Query: Query{
 			TableName:  "accounts",
 			Predicates: nil,
@@ -33,7 +33,7 @@ func TestSubscribeRoundTripEmptyPredicates(t *testing.T) {
 		t.Errorf("tag = %d, want TagSubscribe", tag)
 	}
 	got := out.(SubscribeMsg)
-	if got.RequestID != in.RequestID || got.SubscriptionID != in.SubscriptionID {
+	if got.RequestID != in.RequestID || got.QueryID != in.QueryID {
 		t.Errorf("ids mismatch: got %+v, want %+v", got, in)
 	}
 	if got.Query.TableName != in.Query.TableName {
@@ -46,8 +46,8 @@ func TestSubscribeRoundTripEmptyPredicates(t *testing.T) {
 
 func TestSubscribeRoundTripMultiplePredicates(t *testing.T) {
 	in := SubscribeMsg{
-		RequestID:      1,
-		SubscriptionID: 2,
+		RequestID: 1,
+		QueryID:   2,
 		Query: Query{
 			TableName: "t",
 			Predicates: []Predicate{
@@ -80,7 +80,7 @@ func TestSubscribeRoundTripMultiplePredicates(t *testing.T) {
 }
 
 func TestUnsubscribeRoundTripSendDroppedFalse(t *testing.T) {
-	in := UnsubscribeMsg{RequestID: 11, SubscriptionID: 22, SendDropped: false}
+	in := UnsubscribeMsg{RequestID: 11, QueryID: 22, SendDropped: false}
 	frame, _ := EncodeClientMessage(in)
 	_, out, err := DecodeClientMessage(frame)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestUnsubscribeRoundTripSendDroppedFalse(t *testing.T) {
 }
 
 func TestUnsubscribeRoundTripSendDroppedTrue(t *testing.T) {
-	in := UnsubscribeMsg{RequestID: 11, SubscriptionID: 22, SendDropped: true}
+	in := UnsubscribeMsg{RequestID: 11, QueryID: 22, SendDropped: true}
 	frame, _ := EncodeClientMessage(in)
 	_, out, err := DecodeClientMessage(frame)
 	if err != nil {

@@ -17,7 +17,7 @@ It is best described as:
 
 As of the current audit pass:
 - Broad verification: `rtk go test ./...`
-- Result: `Go test: 953 passed in 9 packages`
+- Result: `Go test: 955 passed in 9 packages`
 - Code inventory (main package pass over `auth`, `bsatn`, `commitlog`, `executor`, `protocol`, `schema`, `store`, `subscription`, `types`): `209` Go files, `34807` lines of Go code
 - `REMAINING.md` says all currently tracked execution-order implementation slices are complete
 - `TECH-DEBT.md` still carries a large unresolved bullet backlog
@@ -109,7 +109,7 @@ Current important differences include:
 - brotli remains a reserved-but-unsupported compression tag even though the wire-byte numbering now matches the reference
 - outgoing buffer defaults differ sharply
 - `TransactionUpdate` heavy/light split and `UpdateStatus` outcome model match the Phase 1.5 parity target; caller metadata (`CallerIdentity`, `ReducerCall.ReducerName` / `ReducerID` / `Args`, `Timestamp`, `TotalHostExecutionDuration`) is now populated from the executor seam. `EnergyQuantaUsed` remains a permanent zero (no energy model)
-- no SubscribeMulti / SubscribeSingle / QuerySetId surface
+- `SubscribeMsg` / `UnsubscribeMsg` now carry `QueryID` (reference `query_id: QueryId`); no `SubscribeMulti` / `SubscribeSingle` variant split yet
 - `CallReducer.flags` now carries `FullUpdate=0` / `NoSuccessNotify=1`; remaining divergence is the still-open SQL/query surface around other message families
 - one-off query shape differs
 
