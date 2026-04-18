@@ -29,8 +29,7 @@ type resCall struct {
 }
 type errCall struct {
 	ConnID types.ConnectionID
-	SubID  types.SubscriptionID
-	Msg    string
+	Err    SubscriptionError
 }
 
 func (m *mockFanOutSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error {
@@ -45,10 +44,10 @@ func (m *mockFanOutSender) SendReducerResult(connID types.ConnectionID, result *
 	m.resCalls = append(m.resCalls, resCall{ConnID: connID, Result: result})
 	return m.sendErr
 }
-func (m *mockFanOutSender) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {
+func (m *mockFanOutSender) SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.errCalls = append(m.errCalls, errCall{ConnID: connID, SubID: subID, Msg: message})
+	m.errCalls = append(m.errCalls, errCall{ConnID: connID, Err: subErr})
 	return m.sendErr
 }
 
@@ -383,11 +382,11 @@ func (s *selectiveFailSender) SendTransactionUpdate(connID types.ConnectionID, t
 func (s *selectiveFailSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error {
 	return nil
 }
-func (s *selectiveFailSender) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {
+func (s *selectiveFailSender) SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error {
 	return nil
 }
 
-func TestFanOutWorker_FastRead_NoWait(t *testing.T) {
+func TestFanOutWorker_PublicProtocolDefault_WaitsForDurability(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
@@ -397,8 +396,7 @@ func TestFanOutWorker_FastRead_NoWait(t *testing.T) {
 	defer cancel()
 	go w.Run(ctx)
 
-	// TxDurable never signals — if worker waits, test will timeout.
-	durableCh := make(chan types.TxID)
+	durableCh := make(chan types.TxID, 1)
 	inbox <- FanOutMessage{
 		TxID:      types.TxID(1),
 		TxDurable: durableCh,
@@ -408,12 +406,22 @@ func TestFanOutWorker_FastRead_NoWait(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Millisecond)
+	mock.mu.Lock()
+	preCount := len(mock.txCalls)
+	mock.mu.Unlock()
+	if preCount != 0 {
+		t.Fatalf("txCalls = %d before TxDurable, want 0", preCount)
+	}
+
+	durableCh <- types.TxID(1)
+
+	time.Sleep(50 * time.Millisecond)
 	cancel()
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 	if len(mock.txCalls) != 1 {
-		t.Fatalf("txCalls = %d, want 1 (fast-read should not wait)", len(mock.txCalls))
+		t.Fatalf("txCalls = %d after TxDurable, want 1", len(mock.txCalls))
 	}
 }
 
@@ -457,6 +465,48 @@ func TestFanOutWorker_ConfirmedRead_Waits(t *testing.T) {
 	defer mock.mu.Unlock()
 	if len(mock.txCalls) != 1 {
 		t.Fatalf("txCalls = %d after TxDurable, want 1", len(mock.txCalls))
+	}
+}
+
+func TestFanOutWorker_ConfirmedReadCallerOnly_Waits(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+	caller := cid(1)
+	w.SetConfirmedReads(caller, true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	durableCh := make(chan types.TxID, 1)
+	result := &ReducerCallResult{RequestID: 9, Status: 0, TxID: types.TxID(1)}
+	inbox <- FanOutMessage{
+		TxID:         types.TxID(1),
+		TxDurable:    durableCh,
+		Fanout:       CommitFanout{},
+		CallerConnID: &caller,
+		CallerResult: result,
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	mock.mu.Lock()
+	preCount := len(mock.resCalls)
+	mock.mu.Unlock()
+	if preCount != 0 {
+		t.Fatalf("resCalls = %d before TxDurable, want 0", preCount)
+	}
+
+	durableCh <- types.TxID(1)
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.resCalls) != 1 {
+		t.Fatalf("resCalls = %d after TxDurable, want 1", len(mock.resCalls))
 	}
 }
 
@@ -611,8 +661,8 @@ func TestFanOutWorker_SubscriptionErrorDelivery(t *testing.T) {
 	if len(mock.errCalls) != 2 {
 		t.Fatalf("errCalls = %d, want 2", len(mock.errCalls))
 	}
-	if mock.errCalls[0].SubID != 5 || mock.errCalls[1].SubID != 6 {
-		t.Fatalf("errCalls SubIDs = %d, %d; want 5, 6", mock.errCalls[0].SubID, mock.errCalls[1].SubID)
+	if mock.errCalls[0].Err.SubscriptionID != 5 || mock.errCalls[1].Err.SubscriptionID != 6 {
+		t.Fatalf("errCalls SubIDs = %d, %d; want 5, 6", mock.errCalls[0].Err.SubscriptionID, mock.errCalls[1].Err.SubscriptionID)
 	}
 	if len(mock.txCalls) != 1 {
 		t.Fatalf("txCalls = %d, want 1", len(mock.txCalls))
@@ -688,7 +738,7 @@ func (s *orderTrackingSender) SendTransactionUpdate(connID types.ConnectionID, t
 func (s *orderTrackingSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error {
 	return nil
 }
-func (s *orderTrackingSender) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {
+func (s *orderTrackingSender) SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error {
 	if s.onErr != nil {
 		s.onErr(connID)
 	}

@@ -51,11 +51,27 @@ func (s *connManagerSender) Send(connID types.ConnectionID, msg any) error {
 }
 
 func (s *connManagerSender) SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error {
-	return s.enqueue(connID, *update)
+	conn := s.mgr.Get(connID)
+	if conn == nil {
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	}
+	if err := validateActiveSubscriptionUpdates(conn, update.TxID, update.Updates); err != nil {
+		return err
+	}
+	return s.enqueueOnConn(conn, connID, *update)
 }
 
 func (s *connManagerSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
-	return s.enqueue(connID, *result)
+	conn := s.mgr.Get(connID)
+	if conn == nil {
+		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
+	}
+	if result != nil && result.Status == 0 {
+		if err := validateActiveSubscriptionUpdates(conn, result.TxID, result.TransactionUpdate); err != nil {
+			return err
+		}
+	}
+	return s.enqueueOnConn(conn, connID, *result)
 }
 
 // enqueue encodes msg, wraps it in the connection's compression
@@ -65,6 +81,10 @@ func (s *connManagerSender) enqueue(connID types.ConnectionID, msg any) error {
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
+	return s.enqueueOnConn(conn, connID, msg)
+}
+
+func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID, msg any) error {
 
 	frame, err := EncodeServerMessage(msg)
 	if err != nil {

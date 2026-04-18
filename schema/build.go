@@ -51,6 +51,7 @@ func (b *Builder) Build(opts EngineOptions) (*Engine, error) {
 				Index:         j,
 				Name:          cd.Name,
 				Type:          cd.Type,
+				Nullable:      cd.Nullable,
 				AutoIncrement: cd.AutoIncrement,
 			}
 		}

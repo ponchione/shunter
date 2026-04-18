@@ -163,14 +163,13 @@ func TestCloseAll_EmptyManagerNoOp(t *testing.T) {
 	}
 }
 
-func TestCloseWithHandshake_UnresponsivePeerReturnsAfterTimeoutButDoesNotGuaranteeTransportForceClose(t *testing.T) {
-	conn, _, cleanup := loopbackConn(t, DefaultProtocolOptions())
+func TestCloseWithHandshake_HardTeardownOnTimeout(t *testing.T) {
+	conn, clientWS, cleanup := loopbackConn(t, DefaultProtocolOptions())
 	defer cleanup()
 
-	// Client does NOT read — close handshake will time out from the
-	// caller's perspective. Under coder/websocket this only guarantees
-	// bounded helper return latency, not immediate forced transport
-	// teardown.
+	// Client does NOT read — close handshake will time out. Backed by the
+	// Shunter fork of coder/websocket (SPEC-WS-FORK-001), this guarantees
+	// both a bounded helper return and forced transport teardown.
 	timeout := 100 * time.Millisecond
 	start := time.Now()
 
@@ -187,7 +186,16 @@ func TestCloseWithHandshake_UnresponsivePeerReturnsAfterTimeoutButDoesNotGuarant
 	}
 
 	elapsed := time.Since(start)
-	if elapsed > 500*time.Millisecond {
-		t.Errorf("closeWithHandshake took %v, expected ~%v", elapsed, timeout)
+	if elapsed > timeout+400*time.Millisecond {
+		t.Errorf("closeWithHandshake took %v, expected ~%v + unwind budget", elapsed, timeout)
 	}
+
+	// Transport must be dead: Write fails.
+	wctx, wcancel := context.WithTimeout(context.Background(), time.Second)
+	defer wcancel()
+	if werr := conn.ws.Write(wctx, websocket.MessageText, []byte("x")); werr == nil {
+		t.Fatal("expected transport to be dead after closeWithHandshake timeout, Write succeeded")
+	}
+
+	_ = clientWS
 }

@@ -10,9 +10,13 @@ type queryState struct {
 	// subscribers is keyed first by connection and then by subscription ID so
 	// one connection may hold multiple independent subscriptions to the same
 	// query hash.
-	subscribers map[types.ConnectionID]map[types.SubscriptionID]struct{}
+	subscribers map[types.ConnectionID]map[types.SubscriptionID]subscriptionDeliveryMeta
 	// refCount counts total attached subscriptions, not distinct connections.
 	refCount int
+}
+
+type subscriptionDeliveryMeta struct {
+	RequestID uint32
 }
 
 type subscriptionRef struct {
@@ -44,7 +48,7 @@ func (r *queryRegistry) createQueryState(hash QueryHash, pred Predicate) *queryS
 	qs := &queryState{
 		hash:        hash,
 		predicate:   pred,
-		subscribers: make(map[types.ConnectionID]map[types.SubscriptionID]struct{}),
+		subscribers: make(map[types.ConnectionID]map[types.SubscriptionID]subscriptionDeliveryMeta),
 	}
 	r.byHash[hash] = qs
 	return qs
@@ -57,7 +61,7 @@ func (r *queryRegistry) removeQueryState(hash QueryHash) {
 }
 
 // addSubscriber attaches a client to an existing query state.
-func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID, subID types.SubscriptionID) {
+func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID, subID types.SubscriptionID, requestID uint32) {
 	qs, ok := r.byHash[hash]
 	if !ok {
 		panic("subscription: addSubscriber on unknown hash")
@@ -68,10 +72,10 @@ func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID,
 	}
 	perConn, ok := qs.subscribers[connID]
 	if !ok {
-		perConn = make(map[types.SubscriptionID]struct{})
+		perConn = make(map[types.SubscriptionID]subscriptionDeliveryMeta)
 		qs.subscribers[connID] = perConn
 	}
-	perConn[subID] = struct{}{}
+	perConn[subID] = subscriptionDeliveryMeta{RequestID: requestID}
 	r.bySub[ref] = hash
 	r.byConn[connID] = append(r.byConn[connID], subID)
 	qs.refCount++

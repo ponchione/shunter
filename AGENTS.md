@@ -8,9 +8,9 @@ Read in this order:
 
 ## Repo Reality
 
-- This repo is docs-only right now.
-- The implementation plan already exists in `docs/EXECUTION-ORDER.md` and `docs/decomposition/`.
-- Do not act like there is an established codebase yet.
+- This repo is no longer docs-only. It contains substantial Go implementation across the core subsystem packages.
+- The implementation plan still lives in `docs/EXECUTION-ORDER.md` and `docs/decomposition/`, but those docs must now be checked against live code.
+- Do not act like there is no codebase; do not assume the docs are perfectly current either.
 
 ## Agent Rules
 

@@ -93,8 +93,9 @@ func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.Conne
 	}
 	var doomed []doomedSub
 	for connID, subIDs := range qs.subscribers {
-		for subID := range subIDs {
+		for subID, delivery := range subIDs {
 			out[connID] = append(out[connID], SubscriptionError{
+				RequestID:      delivery.RequestID,
 				SubscriptionID: subID,
 				QueryHash:      qs.hash,
 				Predicate:      predRepr,

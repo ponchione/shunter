@@ -39,7 +39,7 @@ Deliver the four response messages that are direct replies to client requests: S
 - [ ] UnsubscribeApplied with `send_dropped=0`: no rows
 - [ ] UnsubscribeApplied: subscription removed from tracker
 - [ ] SubscriptionError: subscription_id released, immediately reusable
-- [ ] SubscriptionError: `request_id` echoed (0 if error during re-evaluation)
+- [ ] SubscriptionError: `request_id` echoed when known; `0` only for genuinely uncorrelated spontaneous failures
 - [ ] OneOffQueryResult success: rows present, error empty
 - [ ] OneOffQueryResult error: error present, rows absent
 - [ ] All messages delivered via ClientSender (buffered, non-blocking)

@@ -14,6 +14,7 @@ var (
 	ErrSnapshotInProgress  = errors.New("commitlog: snapshot write already in progress")
 	ErrMissingBaseSnapshot = errors.New("commitlog: no valid base snapshot for log replay")
 	ErrNoData              = errors.New("commitlog: no snapshot or log data found")
+	ErrUnknownFsyncMode    = errors.New("commitlog: unknown fsync mode")
 )
 
 type BadVersionError struct{ Got byte }
@@ -85,8 +86,16 @@ func (e *HistoryGapError) Error() string {
 
 type SchemaMismatchError struct {
 	Detail string
+	Cause  error
 }
 
 func (e *SchemaMismatchError) Error() string {
 	return fmt.Sprintf("commitlog: schema mismatch: %s", e.Detail)
+}
+
+func (e *SchemaMismatchError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }

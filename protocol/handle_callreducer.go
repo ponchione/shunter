@@ -38,4 +38,5 @@ func handleCallReducer(
 		})
 		return
 	}
+	watchReducerResponse(conn, respCh)
 }

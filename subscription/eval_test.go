@@ -127,7 +127,7 @@ func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T)
 	inbox := make(chan FanOutMessage, 2)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	c := types.ConnectionID{1}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 10, Predicate: AllRows{Table: 1}}, nil)
+	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 10, RequestID: 77, Predicate: AllRows{Table: 1}}, nil)
 	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 11, Predicate: AllRows{Table: 2}}, nil)
 
 	var logs bytes.Buffer
@@ -149,6 +149,9 @@ func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T)
 		t.Fatalf("subscription errors for conn = %v, want 1", msg.Errors)
 	}
 	errMsg := msg.Errors[c][0]
+	if errMsg.RequestID != 77 {
+		t.Fatalf("RequestID = %d, want 77", errMsg.RequestID)
+	}
 	if errMsg.QueryHash != ComputeQueryHash(AllRows{Table: 1}, nil) {
 		t.Fatalf("error hash = %s", errMsg.QueryHash)
 	}

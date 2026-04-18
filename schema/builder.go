@@ -39,6 +39,7 @@ type ColumnDefinition struct {
 	Name          string
 	Type          ValueKind
 	PrimaryKey    bool
+	Nullable      bool
 	AutoIncrement bool
 }
 

@@ -40,10 +40,11 @@ func (a *FanOutSenderAdapter) SendReducerResult(connID types.ConnectionID, resul
 	return mapDeliveryError(a.sender.SendReducerResult(connID, pr))
 }
 
-func (a *FanOutSenderAdapter) SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error {
+func (a *FanOutSenderAdapter) SendSubscriptionError(connID types.ConnectionID, subErr subscription.SubscriptionError) error {
 	return mapDeliveryError(a.sender.Send(connID, SubscriptionError{
-		SubscriptionID: uint32(subID),
-		Error:          message,
+		RequestID:      subErr.RequestID,
+		SubscriptionID: uint32(subErr.SubscriptionID),
+		Error:          subErr.Message,
 	}))
 }
 

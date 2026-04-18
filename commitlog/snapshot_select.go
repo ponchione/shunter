@@ -104,6 +104,9 @@ func compareTableSchema(registered schema.TableSchema, snapshot schema.TableSche
 		if regCol.Type != snapCol.Type {
 			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %q type mismatch: snapshot=%v registry=%v", registered.Name, regCol.Name, snapCol.Type, regCol.Type)}
 		}
+		if snapCol.Nullable {
+			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %q nullable must be false in v1 snapshots", registered.Name, regCol.Name), Cause: schema.ErrNullableColumn}
+		}
 		if regCol.Nullable != snapCol.Nullable {
 			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %q nullable mismatch: snapshot=%t registry=%t", registered.Name, regCol.Name, snapCol.Nullable, regCol.Nullable)}
 		}

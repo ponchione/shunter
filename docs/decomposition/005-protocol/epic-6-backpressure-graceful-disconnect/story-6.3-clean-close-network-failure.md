@@ -59,9 +59,11 @@ Handle all disconnect scenarios: clean close from either side, server-initiated 
 - The close handshake timeout prevents a misbehaving client from holding the connection open by never echoing the Close frame, even if the underlying transport library cannot guarantee an exact TCP hard-close deadline.
 - Graceful shutdown should drain in-flight messages before closing, but with a bounded timeout. The exact shutdown timeout is an operational concern, not specified.
 
-## Implementation note (current transport limitation)
+## Implementation
 
-- With `github.com/coder/websocket` v1.8.14, the protocol layer can bound its own wait for a close handshake, but cannot reliably guarantee "start Close, then forcibly tear down TCP exactly at `CloseHandshakeTimeout`" using only the library's public API.
-- In a live experiment, calling `Conn.CloseNow()` after `Conn.Close()` had already started did not preempt the in-flight close handshake wait.
-- So the current implementation should be documented as: best-effort Close-frame initiation plus bounded Shunter-side teardown latency, not a proven exact transport force-close guarantee.
-- Treat this as an explicit follow-up design issue for future transport/library discussion, not as a silent spec assumption.
+Uses `github.com/coder/websocket.Conn.CloseWithContext` via the Shunter fork
+of coder/websocket. The helper `closeWithHandshake` in `protocol/close.go`
+wraps it with `CloseHandshakeTimeout`. Transport death is guaranteed within
+`CloseHandshakeTimeout` + a small unwind budget.
+
+See [SPEC-WS-FORK-001](../../../../SPEC-WS-FORK-001-v2-close-with-context.md).

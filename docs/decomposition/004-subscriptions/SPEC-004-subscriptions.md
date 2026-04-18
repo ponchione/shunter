@@ -520,7 +520,7 @@ type FanOutWorker struct {
 type FanOutSender interface {
     SendTransactionUpdate(connID ConnectionID, txID TxID, updates []SubscriptionUpdate) error
     SendReducerResult(connID ConnectionID, result *ReducerCallResult) error
-    SendSubscriptionError(connID ConnectionID, subID SubscriptionID, message string) error
+    SendSubscriptionError(connID ConnectionID, subErr SubscriptionError) error
 }
 
 type FanOutMessage struct {
@@ -711,6 +711,7 @@ type TransactionUpdate struct {
 // and `Message`; `QueryHash` and `Predicate` are retained in the Go
 // value for server-side logging and are not sent to clients.
 type SubscriptionError struct {
+    RequestID      uint32
     SubscriptionID SubscriptionID
     QueryHash      QueryHash
     Predicate      string
@@ -739,7 +740,7 @@ type QueryHash [32]byte
 ```
 
 Encoding of `[]ProductValue` into the wire `RowList` format and actual enqueueing to per-client outbound buffers happen in the protocol layer (SPEC-005 §3.4 / delivery contract), not in the evaluator.
-The fan-out worker talks to the protocol layer through the narrow `FanOutSender` seam described in §8.1; protocol satisfies that seam via a `FanOutSenderAdapter` over its broader `ClientSender` surface (SPEC-005 §13). The adapter converts subscription-domain values (`[]SubscriptionUpdate`, `*ReducerCallResult`, raw message strings) into protocol-wire structs before calling `ClientSender`; `SendSubscriptionError` is routed through `ClientSender.Send(connID, msg)` with a wire `SubscriptionError`. Delivery errors are mapped back to `ErrSendBufferFull` / `ErrSendConnGone` subscription-layer sentinels so the fan-out worker can react without importing protocol types.
+The fan-out worker talks to the protocol layer through the narrow `FanOutSender` seam described in §8.1; protocol satisfies that seam via a `FanOutSenderAdapter` over its broader `ClientSender` surface (SPEC-005 §13). The adapter converts subscription-domain values (`[]SubscriptionUpdate`, `*ReducerCallResult`, full `SubscriptionError` payloads) into protocol-wire structs before calling `ClientSender`; `SendSubscriptionError` is routed through `ClientSender.Send(connID, msg)` with a wire `SubscriptionError` that preserves `RequestID` when the failure can still be correlated to the original subscribe request. Delivery errors are mapped back to `ErrSendBufferFull` / `ErrSendConnGone` subscription-layer sentinels so the fan-out worker can react without importing protocol types.
 
 ### 10.3 From In-Memory Store (SPEC-001)
 
@@ -768,7 +769,7 @@ Both interfaces are produced by SPEC-006 `Build()` and are immutable for the eng
 
 If delta computation fails for a subscription (e.g., corrupted index, type mismatch):
 1. Log the error with the subscription's query hash and SQL/predicate representation.
-2. Emit the error through the `FanOutSender.SendSubscriptionError` seam (§8.1) for each affected client. The protocol adapter (SPEC-005 §13) translates this into a wire-format `SubscriptionError` delivered via `ClientSender.Send`; the wire `request_id` is `0` for these spontaneous failures (see SPEC-005 §8.4 `request_id` semantics).
+2. Emit the error through the `FanOutSender.SendSubscriptionError` seam (§8.1) for each affected client. The protocol adapter (SPEC-005 §13) translates this into a wire-format `SubscriptionError` delivered via `ClientSender.Send`; if the failed subscription still has an originating subscribe `RequestID`, preserve it on the wire, otherwise use `request_id = 0` for genuinely uncorrelated spontaneous failures (see SPEC-005 §8.4 `request_id` semantics).
 3. Unregister the affected subscription(s) / query state without disconnecting unrelated subscriptions on the same connection.
 4. Do **not** abort the evaluation loop — other subscriptions are unaffected.
 

@@ -54,6 +54,9 @@ func validateStructure(b *Builder) []error {
 			if !isValidValueKind(c.Type) {
 				errs = append(errs, fmt.Errorf("table %q column %q: invalid ValueKind %v", t.Name, c.Name, c.Type))
 			}
+			if c.Nullable {
+				errs = append(errs, fmt.Errorf("table %q column %q: %w", t.Name, c.Name, ErrNullableColumn))
+			}
 
 			if c.PrimaryKey {
 				pkCount++

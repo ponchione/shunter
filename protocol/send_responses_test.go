@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ponchione/shunter/types"
@@ -89,6 +90,32 @@ func TestSendSubscribeAppliedDiscardsAfterDisconnect(t *testing.T) {
 	case <-c.OutboundCh:
 		t.Fatal("frame should not be enqueued for removed subscription")
 	default:
+	}
+}
+
+func TestSendSubscribeAppliedSendFailureDoesNotLeaveSubscriptionActive(t *testing.T) {
+	c, _ := testConn(false)
+	c.Subscriptions.Reserve(10)
+
+	sender := assertingSender{
+		sendFn: func(msg any) error {
+			if _, ok := msg.(SubscribeApplied); !ok {
+				t.Fatalf("expected SubscribeApplied, got %T", msg)
+			}
+			if !c.Subscriptions.IsActive(10) {
+				t.Fatal("subscription should be active at send attempt")
+			}
+			return ErrConnNotFound
+		},
+	}
+
+	msg := &SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	err := SendSubscribeApplied(sender, c, msg)
+	if !errors.Is(err, ErrConnNotFound) {
+		t.Fatalf("err = %v, want ErrConnNotFound", err)
+	}
+	if c.Subscriptions.IsActiveOrPending(10) {
+		t.Fatal("subscription 10 should be released after failed SubscribeApplied delivery")
 	}
 }
 

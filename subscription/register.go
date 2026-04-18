@@ -31,7 +31,7 @@ func (m *Manager) Register(req SubscriptionRegisterRequest, view store.Committed
 		qs = m.registry.createQueryState(hash, req.Predicate)
 		PlaceSubscription(m.indexes, req.Predicate, hash)
 	}
-	m.registry.addSubscriber(hash, req.ConnID, req.SubscriptionID)
+	m.registry.addSubscriber(hash, req.ConnID, req.SubscriptionID, req.RequestID)
 	_ = qs
 
 	return SubscriptionRegisterResult{

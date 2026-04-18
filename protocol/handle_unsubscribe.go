@@ -39,4 +39,5 @@ func handleUnsubscribe(
 	}
 
 	_ = conn.Subscriptions.Remove(subID)
+	watchUnsubscribeResponse(conn, respCh)
 }

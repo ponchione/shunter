@@ -1,0 +1,73 @@
+package commitlog
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/ponchione/shunter/schema"
+)
+
+func TestSelectSnapshotNullableColumnWrapsErrNullableColumn(t *testing.T) {
+	root := t.TempDir()
+	reg := buildSelectionRegistry(t, selectionRegistryConfig{})
+	cs := buildSelectionCommittedState(t, reg)
+	nullableSnapshotReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+		players := tables[0]
+		players.Columns[1].Nullable = true
+		tables[0] = players
+	})
+	writeSelectionSnapshot(t, root, nullableSnapshotReg, cs, 5)
+
+	_, err := SelectSnapshot(root, 5, reg)
+	var mismatch *SchemaMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected SchemaMismatchError, got %v", err)
+	}
+	if !errors.Is(err, schema.ErrNullableColumn) {
+		t.Fatalf("expected nullable snapshot mismatch to wrap ErrNullableColumn, got %v", err)
+	}
+}
+
+func TestSelectSnapshotRejectsNullableSnapshotEvenWhenRegistryAlsoNullable(t *testing.T) {
+	root := t.TempDir()
+	reg := buildSelectionRegistry(t, selectionRegistryConfig{})
+	cs := buildSelectionCommittedState(t, reg)
+	nullableReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+		players := tables[0]
+		players.Columns[1].Nullable = true
+		tables[0] = players
+	})
+	writeSelectionSnapshot(t, root, nullableReg, cs, 5)
+
+	_, err := SelectSnapshot(root, 5, nullableReg)
+	var mismatch *SchemaMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected SchemaMismatchError, got %v", err)
+	}
+	if !errors.Is(err, schema.ErrNullableColumn) {
+		t.Fatalf("expected direct nullable rejection, got %v", err)
+	}
+}
+
+func TestNewDurabilityWorkerRejectsUnknownFsyncMode(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.FsyncMode = FsyncPerTx
+
+	_, err := NewDurabilityWorker(dir, 1, opts)
+	if !errors.Is(err, ErrUnknownFsyncMode) {
+		t.Fatalf("expected ErrUnknownFsyncMode, got %v", err)
+	}
+}
+
+func TestNewDurabilityWorkerWithResumePlanRejectsUnknownFsyncMode(t *testing.T) {
+	dir := t.TempDir()
+	plan := RecoveryResumePlan{SegmentStartTx: 1, NextTxID: 1, AppendMode: AppendInPlace}
+	opts := DefaultCommitLogOptions()
+	opts.FsyncMode = FsyncMode(99)
+
+	_, err := NewDurabilityWorkerWithResumePlan(dir, plan, opts)
+	if !errors.Is(err, ErrUnknownFsyncMode) {
+		t.Fatalf("expected ErrUnknownFsyncMode, got %v", err)
+	}
+}

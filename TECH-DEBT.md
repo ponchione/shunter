@@ -1742,125 +1742,192 @@ Verification:
 
 ### TD-125: `ErrNullableColumn` sentinel + `Build()` enforcement not wired in live `schema/` package
 
-Status: open (Session 12+ drift)
+Status: resolved
 Severity: low
 First found: Lane B Session 4.5 reconciliation pass
 Spec ref: SPEC-006 §9 / §13, SPEC-001 §3.1, SPEC-001 Story 2.1, SPEC-006 Story 5.1
 
-Summary:
-- SPEC-006 §9 reserves the rule "`Build()` MUST return `ErrNullableColumn` when any `ColumnSchema.Nullable == true`" and §13 lists `ErrNullableColumn` in the error catalog.
-- Live `schema/errors.go` does not declare `ErrNullableColumn`. The builder API (`schema/builder.go`) has no `Nullable` input on `ColumnDefinition`, and `schema/build.go` constructs `ColumnSchema` without ever setting `Nullable`, so the rule has nothing to fire against.
-- `schema/validate_structure.go` has no Nullable check.
+Resolution:
+- `schema/errors.go` now declares `ErrNullableColumn`.
+- `schema.ColumnDefinition` now carries a `Nullable` field, `schema/build.go` propagates it into `ColumnSchema.Nullable`, and `schema/reflect_build.go` explicitly sets reflection-path columns to `Nullable: false`.
+- `schema/validate_structure.go` now enforces the v1 rule at build time, so any table definition containing `Nullable: true` fails `Build()` with `ErrNullableColumn`.
+- Focused regression coverage now verifies that the builder path rejects nullable columns instead of relying on construction-time omission.
 
-Why this matters:
-- The v1 Nullable policy survives today by construction (the builder cannot produce a `Nullable = true` column), not by enforcement.
-- If the builder surface is ever extended to accept a `Nullable` input (e.g. for forward-compatibility testing, reflection-path tag mapping, or snapshot rebuild) without also landing the sentinel + validation, the policy silently breaks.
-- The spec lines have been softened in Session 4.5 to describe the target state honestly; closing the enforcement gap is the follow-up.
-
-Related code:
-- `schema/errors.go` — no `ErrNullableColumn` declaration
-- `schema/builder.go:38-43` — `ColumnDefinition` has no `Nullable` field
-- `schema/build.go:50-56` — `ColumnSchema` constructed without setting `Nullable`
-- `schema/validate_structure.go` — no `Nullable` check
-
-Related spec / decomposition docs:
-- `docs/decomposition/006-schema/SPEC-006-schema.md` §9 (Validation Rules), §13 (Error Catalog)
-- `docs/decomposition/006-schema/epic-5-validation-build/story-5.1-validation-rules.md`
-- `docs/decomposition/001-store/SPEC-001-store.md` §3.1 ColumnSchema
-- `docs/decomposition/001-store/epic-2-schema-table-storage/story-2.1-schema-structs.md`
-
-Recommended resolution:
-- Declare `ErrNullableColumn` in `schema/errors.go`.
-- Add the `Nullable` input path through `ColumnDefinition` / builder / reflection, route it into `ColumnSchema.Nullable`, and enforce the v1-rejection rule in `validateStructure(...)` so `Build()` returns `ErrNullableColumn` at the schema-build boundary.
-- Remove the "target state" softening language from SPEC-006 §9/§13, Story 5.1, SPEC-001 §3.1, Story 2.1 once enforcement lands.
+Verification:
+- `rtk go test ./schema -run TestBuildRejectsNullableColumn`
+- `rtk go test ./schema ./commitlog`
+- `rtk go test ./...`
 
 ### TD-126: Snapshot-recovery `ErrSchemaMismatch` does not wrap `ErrNullableColumn` when recovery traces back to a stored nullable flag
 
-Status: open (Session 12+ drift)
+Status: resolved
 Severity: low
 First found: Lane B Session 4.5 reconciliation pass
 Spec ref: SPEC-006 §13, SPEC-002 §6.1, SPEC-002 Story 6.2
 
-Summary:
-- Earlier Session 4 edits asserted that snapshot-side rejection of `nullable = 1` would surface `ErrNullableColumn` wrapped as the cause of `ErrSchemaMismatch`.
-- Live recovery code (`commitlog/snapshot_select.go`, `commitlog/recovery.go`) returns `&SchemaMismatchError{Detail: fmt.Sprintf(...)}` with no `%w`-wrap of any schema-layer sentinel; the recovery layer does not import `ErrNullableColumn`.
-- Session 4.5 spec edits removed the "wrapped as the cause" language. This item tracks the code-side follow-up if wrapping is ever desired (it is not strictly needed — see TD-127's equality-mismatch mechanism).
+Resolution:
+- `commitlog.SchemaMismatchError` now carries an optional wrapped cause via `Unwrap()`.
+- `commitlog/snapshot_select.go` now returns a `SchemaMismatchError` that wraps `schema.ErrNullableColumn` when recovery encounters a snapshot column with `nullable = 1`.
+- Focused regression coverage now verifies both `errors.As(..., *SchemaMismatchError)` and `errors.Is(..., schema.ErrNullableColumn)` on nullable-snapshot rejection.
 
-Why this matters:
-- Pure documentation drift would be harmless, but Session 4 spec edits had promised a property the code does not deliver. The spec has been softened; now the choice is "leave it" or "add wrapping later."
-- If wrapping is added, the recovery layer must import the schema-layer sentinel and use `fmt.Errorf("...: %w", ErrNullableColumn)` on the nullable-specific mismatch branch in `commitlog/snapshot_select.go`.
-
-Related code:
-- `commitlog/snapshot_select.go:107-108` — nullable mismatch returns `&SchemaMismatchError{Detail: ...}` with no sentinel wrap
-- `commitlog/recovery.go` — does not import schema error sentinels
-
-Related spec / decomposition docs:
-- `docs/decomposition/006-schema/SPEC-006-schema.md` §13 (`ErrNullableColumn` paragraph — "wrapped as the cause" clause removed Session 4.5)
-- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §6.1 step 4b
-
-Recommended resolution:
-- Option A (preferred while TD-125 is open): leave the recovery path as `SchemaMismatchError{Detail: ...}`; rely on the equality-mismatch mechanism described in TD-127.
-- Option B (if TD-125 lands and direct rejection is desired): wrap with `fmt.Errorf("%w: %s", ErrNullableColumn, detail)` on the nullable-specific branch at `commitlog/snapshot_select.go:107-108`, and update SPEC-006 §13 to re-add the direct-rejection guarantee.
+Verification:
+- `rtk go test ./commitlog -run TestSelectSnapshotNullableColumnWrapsErrNullableColumn`
+- `rtk go test ./schema ./commitlog`
+- `rtk go test ./...`
 
 ### TD-127: v1 snapshot rejection of `nullable = 1` relies on equality-mismatch coincidence, not an independent rule
 
-Status: open (Session 12+ drift)
+Status: resolved
 Severity: low
 First found: Lane B Session 4.5 reconciliation pass
 Spec ref: SPEC-002 §5.3, SPEC-002 §6.1 step 4b, SPEC-002 Story 6.2
 
-Summary:
-- Earlier Session 4 edits asserted that "v1 readers MUST reject any snapshot where a column has `nullable = 1`" as a direct recovery-side rule.
-- Live `commitlog/snapshot_select.go:107-108` only performs an equality check between `regCol.Nullable` and `snapCol.Nullable`. There is no standalone "reject if snapshot nullable = 1" branch.
-- Today the rejection works only because TD-125's gap forces registry `Nullable` to always be `false`, so the equality check always fires on `nullable = 1` snapshots. If TD-125 is ever resolved (builder starts accepting `Nullable = true`) without coordinating with this code, direct rejection is not there.
+Resolution:
+- `commitlog/snapshot_select.go` now rejects `snapCol.Nullable == true` before the general registry-vs-snapshot equality check.
+- That direct branch makes the v1 policy independent of registry state, so nullable snapshots are still rejected even if a future/fake registry also reports `Nullable: true`.
+- Focused regression coverage now proves the direct-rejection path by selecting a nullable snapshot against a registry intentionally mutated to the same nullable shape; recovery still fails with `ErrNullableColumn`.
 
-Why this matters:
-- The two drift items are coupled. Closing TD-125 without closing TD-127 converts the v1 rejection guarantee from "always fires" into "fires only when the application's registry happens to also have `Nullable = false`."
-- Session 4.5 spec edits reframed SPEC-002 §5.3, §6.1 step 4b, and Story 6.2 acceptance to describe the indirect equality-mismatch mechanism honestly.
-
-Related code:
-- `commitlog/snapshot_select.go:107-108` — equality check only; no standalone nullable-rejection branch
-
-Related spec / decomposition docs:
-- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §5.3 (per-column trailer comment), §6.1 step 4b
-- `docs/decomposition/002-commitlog/epic-6-recovery/story-6.2-snapshot-selection.md` acceptance rows 3–4
-
-Recommended resolution:
-- If/when TD-125 lands, add an explicit "reject snapshot column with `nullable = 1`" branch in `commitlog/snapshot_select.go` before the equality check, so the v1 policy is enforced independent of registry state.
-- Update SPEC-002 §5.3 / §6.1 step 4b / Story 6.2 back to a direct-rejection wording at the same time.
+Verification:
+- `rtk go test ./commitlog -run TestSelectSnapshotRejectsNullableSnapshotEvenWhenRegistryAlsoNullable`
+- `rtk go test ./schema ./commitlog`
+- `rtk go test ./...`
 
 ### TD-128: `FsyncMode` enum + `ErrUnknownFsyncMode` rejection not wired in live `commitlog/` durability worker
 
-Status: open (Session 12+ drift)
+Status: resolved
 Severity: low
 First found: Lane B Session 8 reconciliation pass
 Spec ref: SPEC-002 §8 (CommitLogOptions), SPEC-002 §13 OQ#3 (Write-ahead guarantee level), SPEC-002 §4.4
 
-Summary:
-- Session 8 added a forward-compat `FsyncMode` enum to SPEC-002 §8 with two values (`FsyncBatch = 0` v1 default; `FsyncPerTx = 1` reserved for v2). The spec also pins "Setting any other value in v1 returns `ErrUnknownFsyncMode` at handle construction."
-- Live `commitlog/durability.go:42-58` `DurabilityWorker` struct and `commitlog/durability.go:63` `NewDurabilityWorker` carry no `FsyncMode` field and perform no validation. `commitlog/errors.go` does not declare `ErrUnknownFsyncMode`.
-- Today the gap is invisible because no live caller sets `FsyncMode` (the field doesn't exist). Zero-value behavior matches `FsyncBatch` (Story 4.2 batch-then-sync write loop), so the v1 contract holds in practice.
+Resolution:
+- `commitlog/durability.go` now declares the spec-facing `FsyncMode` enum and adds `CommitLogOptions.FsyncMode` with `DefaultCommitLogOptions()` defaulting to `FsyncBatch`.
+- `commitlog/errors.go` now declares `ErrUnknownFsyncMode`.
+- `NewDurabilityWorkerWithResumePlan(...)` now validates `opts.FsyncMode` at construction time and rejects every v1 mode except `FsyncBatch`, including reserved `FsyncPerTx`.
+- Focused regression coverage now verifies both plain and resume-plan worker constructors reject unsupported fsync modes with `ErrUnknownFsyncMode`.
 
-Why this matters:
-- The spec declares both a forward-compat reservation (`FsyncPerTx = 1` is a v2 target) and a rejection rule for unknown values. If `CommitLogOptions` later grows the field but `NewDurabilityWorker` doesn't add the validation, a caller passing `FsyncPerTx` in v1 would silently get batch behavior — a contract violation.
-- The placeholder is purely additive to the spec; the only drift is the missing rejection branch in the constructor.
+Verification:
+- `rtk go test ./commitlog -run 'TestNewDurabilityWorkerRejectsUnknownFsyncMode|TestNewDurabilityWorkerWithResumePlanRejectsUnknownFsyncMode'`
+- `rtk go test ./schema ./commitlog`
+- `rtk go test ./...`
 
-Related code:
-- `commitlog/durability.go:42-58` — `DurabilityWorker` struct has no `FsyncMode` field
-- `commitlog/durability.go:63` — `NewDurabilityWorker` does not validate `opts.FsyncMode`
-- `commitlog/errors.go` — no `ErrUnknownFsyncMode` declaration
+### TD-129: SPEC-004 E6 confirmed-read gating skips caller-only reducer-result delivery
 
-Related spec / decomposition docs:
-- `docs/decomposition/002-commitlog/SPEC-002-commitlog.md` §8 (`FsyncMode` enum + `CommitLogOptions.FsyncMode` field), §4.4 (write loop is `FsyncBatch`-shaped), §13 OQ#3 (durability/latency knob)
-- `docs/decomposition/002-commitlog/epic-4-durability-worker/story-4.1-durability-handle.md` (CommitLogOptions deliverable)
+Status: resolved
+Severity: medium
+First found: SPEC-004 E6 remainder audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 8 / Step 8a (`SPEC-004 E6 remainder: Fan-Out & Delivery`)
 
-Recommended resolution:
-- Add `FsyncMode FsyncMode` field to `CommitLogOptions` in `commitlog/durability.go`.
-- Declare `ErrUnknownFsyncMode` in `commitlog/errors.go`.
-- In `NewDurabilityWorker`, validate `opts.FsyncMode == FsyncBatch` (the only v1-supported value) and return `ErrUnknownFsyncMode` for anything else, including `FsyncPerTx` until v2 implements it.
-- Update Story 4.1 `DefaultCommitLogOptions` to set `FsyncMode: FsyncBatch` explicitly (zero-value works but explicit is clearer).
+Resolution:
+- `subscription/fanout_worker.go` now treats the caller connection as a confirmed-read recipient when `CallerConnID` and `CallerResult` are present, even if `msg.Fanout` is empty.
+- Confirmed-read gating now waits on `TxDurable` for caller-only reducer-result delivery batches, matching Story 6.4's caller-only acceptance criterion instead of only scanning non-caller fanout recipients.
+- Focused regression coverage now proves the worker blocks reducer-result delivery until durability is signaled for caller-only confirmed-read batches.
 
----
+Verification:
+- `rtk go test ./subscription -run 'TestFanOutWorker_ConfirmedRead_Waits|TestFanOutWorker_ConfirmedReadCallerOnly_Waits'`
+- `rtk go test ./subscription ./protocol`
+- `rtk go test ./...`
+
+### TD-130: protocol fanout adapter path bypasses active-subscription ordering guard
+
+Status: resolved
+Severity: medium
+First found: SPEC-004 E6 remainder / SPEC-005 Epic 5 follow-through audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 8 / Step 8a (`SPEC-004 E6 remainder: Fan-Out & Delivery`)
+
+Resolution:
+- `protocol/sender.go` now enforces the protocol ordering invariant at the typed sender boundary: `SendTransactionUpdate` validates every referenced subscription is `SubActive`, and `SendReducerResult` does the same for embedded committed caller updates.
+- This closes the live gap where `protocol.FanOutSenderAdapter` could bypass `DeliverTransactionUpdate(...)` / `DeliverReducerCallResult(...)` helper validation and enqueue updates for pending subscriptions directly through `ClientSender`.
+- Focused regression coverage now proves adapter-driven transaction updates and reducer-call results both reject pending subscriptions with `ErrSubscriptionNotActive`.
+
+Verification:
+- `rtk go test ./protocol -run 'TestFanOutSenderAdapter_SendTransactionUpdateRejectsPendingSubscription|TestFanOutSenderAdapter_SendReducerResultRejectsPendingSubscription'`
+- `rtk go test ./protocol ./subscription`
+- `rtk go test ./...`
+
+### TD-131: FanOutWorker defaults to fast-read delivery instead of protocol-v1 confirmed reads
+
+Status: resolved
+Severity: medium
+First found: SPEC-004 E6 remainder audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 8 / Step 8a (`SPEC-004 E6 remainder: Fan-Out & Delivery`)
+
+Resolution:
+- `subscription/fanout_worker.go` now treats every protocol-visible recipient as confirmed-read by default whenever `TxDurable` is present: any non-empty `Fanout` batch or caller-result batch waits for durability readiness before delivery.
+- This aligns the live worker with Story 6.4 / SPEC-005's protocol-v1 rule that WebSocket clients always observe confirmed-read behavior because there is no negotiated wire-level fast-read mode.
+- Nil `TxDurable` still skips the wait for test/internal zero-value paths, preserving the documented internal escape hatch without making public protocol delivery fast-read by default.
+- Focused regression coverage now verifies the default public-protocol path waits for `TxDurable` even without explicit per-connection opt-in.
+
+Verification:
+- `rtk go test ./subscription -run 'TestFanOutWorker_PublicProtocolDefault_WaitsForDurability|TestFanOutWorker_ConfirmedRead_Waits|TestFanOutWorker_ConfirmedReadCallerOnly_Waits|TestFanOutWorker_NilTxDurable_Skips'`
+- `rtk go test ./subscription ./protocol`
+- `rtk go test ./...`
+
+### TD-132: fanout-path SubscriptionError delivery dropped subscribe request correlation and emitted wire `request_id = 0`
+
+Status: resolved
+Severity: medium
+First found: SPEC-004 E6 / SPEC-005 delivery-seam audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 8 / Step 8a (`SPEC-004 E6 remainder: Fan-Out & Delivery`)
+
+Resolution:
+- `subscription/query_state.go` now stores per-subscription delivery metadata, including the original subscribe `RequestID`, instead of only tracking a bare membership set.
+- `subscription/register.go` persists that `RequestID` when a subscription is registered, and `subscription/eval.go` now re-emits it in queued `SubscriptionError` batches when reevaluation fails.
+- `subscription/fanout_worker.go` / `protocol/fanout_adapter.go` now pass the full `subscription.SubscriptionError` payload across the fanout seam, so the protocol wire `SubscriptionError` keeps the original request correlation instead of silently zeroing it.
+- Focused regression coverage now proves both the subscription reevaluation path and the protocol adapter preserve the original subscribe request identity.
+
+Verification:
+- `rtk go test ./protocol ./subscription -run 'TestFanOutSenderAdapter_SendSubscriptionErrorPreservesRequestID|TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection'`
+- `rtk go test ./protocol ./subscription`
+- `rtk go test ./...`
+
+### TD-133: SPEC-004 / SPEC-005 docs lagged the live SubscriptionError request-correlation seam after TD-132
+
+Status: resolved
+Severity: low
+First found: SPEC-004 E6 / SPEC-005 delivery-seam audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 8 / Step 8a (`SPEC-004 E6 remainder: Fan-Out & Delivery`)
+
+Resolution:
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md` now documents the live `FanOutSender.SendSubscriptionError(connID, subErr SubscriptionError)` seam, includes `RequestID` on the subscription-side `SubscriptionError` shape, and clarifies that reevaluation errors preserve request identity when still known.
+- `docs/decomposition/004-subscriptions/epic-6-fanout-delivery/story-6.1-fanout-worker.md` now explains that the fanout-side subscription-error seam carries the full payload rather than only `(subID, message)`.
+- `docs/decomposition/005-protocol/SPEC-005-protocol.md` and Story 5.2 now describe `request_id = 0` as the genuinely uncorrelated case, not the blanket reevaluation case.
+
+Verification:
+- `rtk grep -n "SendSubscriptionError|RequestID|uncorrelated spontaneous" docs/decomposition/004-subscriptions docs/decomposition/005-protocol`
+- `rtk go test ./...`
+
+### TD-134: SendSubscribeApplied could leave a subscription spuriously active after delivery failed
+
+Status: resolved
+Severity: medium
+First found: SPEC-005 Epic 5 response-delivery audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 7 / Step 7e (`SPEC-005 E5: server message delivery / ClientSender`)
+
+Resolution:
+- `protocol/send_responses.go` now removes the subscription tracker entry if `SendSubscribeApplied` fails after activation, so a failed delivery cannot leave the connection thinking the subscription became active when no `SubscribeApplied` ever committed to the wire.
+- Focused regression coverage now proves failed `SubscribeApplied` delivery returns the send error and releases the subscription instead of leaving it active.
+
+Verification:
+- `rtk go test ./protocol -run 'TestSendSubscribeApplied'`
+- `rtk go test ./protocol`
+- `rtk go test ./...`
+
+### TD-135: accepted protocol commands allocated response channels but never delivered async executor results
+
+Status: resolved
+Severity: medium
+First found: SPEC-005 Epic 4/5 dispatch-to-delivery seam audit
+Execution-order slice: `docs/EXECUTION-ORDER.md` Phase 7 / Steps 7d-7e (`SPEC-005 E4/E5`)
+
+Resolution:
+- `protocol/handle_subscribe.go`, `protocol/handle_unsubscribe.go`, and `protocol/handle_callreducer.go` now attach async response watchers after successful executor submission.
+- New `protocol/async_responses.go` provides a conn-local sender plus watcher helpers that turn executor response-channel results into actual outbound `SubscribeApplied`, `UnsubscribeApplied`, `SubscriptionError`, and `ReducerCallResult` messages.
+- Focused regression coverage now proves accepted subscribe/unsubscribe/reducer commands no longer stop at channel allocation and instead deliver their async executor responses onto the connection's outbound queue.
+
+Verification:
+- `rtk go test ./protocol -run 'TestHandleSubscribe_DeliversAsyncSubscribeApplied|TestHandleUnsubscribe_DeliversAsyncUnsubscribeApplied|TestHandleCallReducer_DeliversAsyncReducerResult'`
+- `rtk go test ./protocol`
+- `rtk go test ./...`
 
 ## Code review audit (2026-04-15)
 

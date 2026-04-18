@@ -9,3 +9,5 @@ require (
 )
 
 require github.com/klauspost/cpuid/v2 v2.0.9 // indirect
+
+replace github.com/coder/websocket => github.com/ponchione/websocket v1.8.14-shunter.1

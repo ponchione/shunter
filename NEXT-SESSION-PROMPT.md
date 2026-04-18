@@ -1,106 +1,137 @@
 Continue Shunter in a fresh agent session.
 
-This is not a docs-softening pass and not a new broad audit-from-scratch pass.
+This is not another Phase 0 harness session.
+Do not restart the parity audit, do not rebuild the ledger, and do not spend the session on broad runtime debt cleanup.
 
 Primary decision
-- Treat the reconciled specs/epics/stories in `docs/decomposition/**` as the intended source of truth.
-- Do not update specs downward to match stale code unless you find a clear internal contradiction in the docs themselves.
-- Do not start a new broad code-audit pass yet; that would mostly rediscover already-tracked mismatches.
-- Best next course of action: execute a narrow implementation-reconciliation slice against the highest-severity open runtime debt.
+- Treat `docs/spacetimedb-parity-roadmap.md` as the active development driver.
+- Treat Phase 0 as materially landed for now.
+- Start with Phase 1: wire-level protocol envelope parity.
+- Keep Phase 1.5 and later phases visible, but do not jump ahead unless a tiny protocol slice forces it.
+
+What landed last session
+- Added `docs/parity-phase0-ledger.md` as the concrete Phase 0 companion ledger.
+- Patched `docs/spacetimedb-parity-roadmap.md` so the roadmap points at that ledger.
+- Added `subscription/phase0_parity_test.go` with `TestPhase0ParityCanonicalReducerDeliveryFlow`.
+- Verified:
+  - `rtk go test ./subscription -run TestPhase0ParityCanonicalReducerDeliveryFlow`
+  - `rtk go test ./subscription ./protocol ./executor ./commitlog ./store`
+  - `rtk go test ./...`
+- Latest broad result at handoff time: `920 passed in 9 packages`.
+
+Why the next slice is Phase 1
+- The Phase 0 target is now explicit enough that the next session should stop building harnesses and start closing the most visible parity differences.
+- The ledger already maps the strongest existing protocol tests into a conformance bucket.
+- The canonical cross-seam delivery scenario already exists and can anchor follow-on work.
+- The best next leverage is now wire-level protocol parity, exactly as the roadmap says.
 
 Chosen next slice
-- SPEC-002 E6 recovery hardening
-- Fix `TD-114` and `TD-115` from `TECH-DEBT.md`
-- Scope: active-tail corruption / append-reopen recovery behavior only
-
-Why this is the best next move
-- `REMAINING.md` says all tracked implementation slices are already complete, so the highest-value work is reconciliation/fix work, not more decomposition writing.
-- `AUDIT_HANDOFF.md` Lane B has already carried the spec-audit insight propagation through Session 11. The docs pass is effectively complete enough to guide implementation.
-- `TECH-DEBT.md` already contains concrete, grounded implementation mismatches. Starting another full audit pass now would duplicate work instead of reducing risk.
-- `TD-114` and `TD-115` are both high-severity, in the same narrow recovery slice, and directly affect fail-closed / recoverable-tail behavior.
+- Phase 1 — wire-level protocol envelope parity
+- Start with the protocol boundary, not query/runtime/store semantics.
 
 Required reading order
 1. `AGENTS.md`
 2. `RTK.md`
 3. `docs/project-brief.md`
 4. `docs/EXECUTION-ORDER.md`
-5. `REMAINING.md`
-6. `TECH-DEBT.md`
-   - `TD-114`
-   - `TD-115`
-7. `docs/decomposition/002-commitlog/SPEC-002-commitlog.md`
-   - recovery sections around replay horizon, damaged tail, and append-open behavior
-8. `docs/decomposition/002-commitlog/epic-6-recovery/EPIC.md`
-9. `docs/decomposition/002-commitlog/epic-6-recovery/story-6.1-segment-scanning.md`
-10. `docs/decomposition/002-commitlog/epic-6-recovery/story-6.4-open-and-recover.md`
+5. `README.md`
+6. `docs/current-status.md`
+7. `docs/spacetimedb-parity-roadmap.md`
+   - especially Phase 1, Phase 1.5, Immediate next slices, and Rules for implementation work
+8. `docs/parity-phase0-ledger.md`
+9. `SPEC-AUDIT.md`
+10. `TECH-DEBT.md`
+
+Then inspect these live protocol files first
+- `protocol/options.go`
+- `protocol/upgrade.go`
+- `protocol/tags.go`
+- `protocol/wire_types.go`
+- `protocol/compression.go`
+- `protocol/sender.go`
+- `protocol/server_messages.go`
+- `protocol/client_messages.go`
+- `protocol/dispatch.go`
+- `protocol/close.go`
+- `protocol/disconnect.go`
+- `protocol/lifecycle.go`
+- `protocol/conn.go`
+
+And these tests first
+- `protocol/upgrade_test.go`
+- `protocol/lifecycle_test.go`
+- `protocol/dispatch_test.go`
+- `protocol/compression_test.go`
+- `protocol/send_txupdate_test.go`
+- `protocol/send_reducer_result_test.go`
+- `protocol/reconnect_test.go`
+- `protocol/backpressure_in_test.go`
+- `protocol/backpressure_out_test.go`
+- `protocol/close_test.go`
+- `subscription/phase0_parity_test.go`
 
 Hard rules
 - Use RTK for every shell/git command.
-- Stay narrowly inside the recovery/append-open slice.
-- Regression-first: add or update focused tests before or alongside code changes.
-- Do not broaden into a docs drift cleanup pass.
-- Do not soften specs to match live behavior unless you find a true doc contradiction that blocks implementation.
+- Stay in Phase 1.
+- Do not re-open Phase 0 except for tiny maintenance edits if a just-landed protocol change makes the ledger stale.
+- Do not widen into broad query-surface, scheduler, or recovery implementation.
+- Every new test/doc artifact must name the external behavior being matched.
+- Follow strict TDD for any new behavior change: failing test first, watch it fail, minimal fix, rerun focused tests, then broader verification.
 
 Implementation target
-Bring code into line with the intended recovery contract already reflected in the updated docs.
+Make the protocol boundary less observably different from SpacetimeDB.
 
-1. `TD-114`
-- Active-tail checksum mismatch after a valid prefix should be treated like damaged partial tail state.
-- Recovery should stop at the last valid contiguous record.
-- Resume mode should become `AppendByFreshNextSegment`, not a hard failure.
-- Keep sealed-segment checksum mismatches fatal.
-- Keep first-record corruption in the active segment fatal when there is no valid prefix.
+Priority order inside Phase 1
+1. Subprotocol decision
+- Decide whether Shunter should accept the reference protocol identifiers directly or intentionally retain the Shunter token for now.
+- If you do not close this fully, make the retained divergence explicit in docs/tests.
 
-2. `TD-115`
-- `OpenSegmentForAppend(...)` must fail closed on corrupt-first-record / no-valid-prefix cases.
-- Do not silently truncate a segment back to header-only size when the first record is corrupt.
-- Only allow truncate-and-resume behavior when a valid prefix exists.
-- Preserve the append-forbidden edge case through the durability resume path.
+2. Compression-envelope/tag parity
+- Tighten the current compression envelope/tag behavior toward the intended parity target.
+- Keep the protocol-boundary tests as the source of truth.
 
-Likely files to inspect/change
-- `commitlog/segment_scan.go`
-- `commitlog/segment_scan_test.go`
-- `commitlog/segment.go`
-- `commitlog/recovery.go`
-- `commitlog/recovery_test.go`
-- `commitlog/durability.go`
-- related focused tests under `commitlog/*_test.go`
+3. Handshake / close-code alignment
+- Tighten upgrade rejection, policy/protocol close paths, and lifecycle shutdown semantics.
+
+4. Message-family cleanup at the frame boundary
+- Reduce obviously Shunter-specific frame/message-family behavior where that difference is visible before deeper runtime semantics.
 
 Suggested execution plan
-1. Read `TD-114` and `TD-115` in full.
-2. Read the SPEC-002 recovery stories listed above.
-3. Add failing regression tests for:
-   - active-segment checksum mismatch after a valid prefix => fresh-next-segment / valid replay horizon
-   - sealed-segment checksum mismatch => still fatal
-   - active-segment first-record corruption => hard error, append forbidden
-   - `OpenSegmentForAppend(...)` does not truncate corrupt-first-record segments
-   - durability resume path preserves append-forbidden behavior
-4. Implement the minimum code changes to satisfy those tests.
-5. Run focused tests, then broader package/repo verification.
-6. Update `TECH-DEBT.md` statuses/details for `TD-114` / `TD-115` if fixed.
-7. End with a short note naming the next best implementation-reconciliation slice.
+1. Re-read the Phase 1 section of `docs/spacetimedb-parity-roadmap.md` and the protocol rows in `docs/parity-phase0-ledger.md`.
+2. Inventory the exact current protocol divergences from `SPEC-AUDIT.md`.
+3. Pick one narrow Phase 1 slice only.
+4. Add a failing protocol-boundary test first.
+5. Implement the minimum code change.
+6. Rerun the focused protocol tests.
+7. Rerun `rtk go test ./protocol`.
+8. If the change touches cross-seam delivery behavior, rerun `rtk go test ./subscription` too.
+9. Finish with `rtk go test ./...`.
+10. Update the handoff docs again so the next session starts at the next unresolved parity slice rather than repeating work.
 
-Verification commands
-- `rtk go test ./commitlog`
+Suggested verification commands
+- `rtk go test ./protocol -run <focused test>`
+- `rtk go test ./protocol`
+- `rtk go test ./subscription`
 - `rtk go test ./...`
-- while iterating, if helpful:
-  - `rtk go test ./commitlog -run 'TestScanSegments|TestOpenAndRecover|TestOpenSegmentForAppend'`
 
-Expected deliverable
-- code + tests landing the recovery behavior required by `TD-114` and `TD-115`
-- `TECH-DEBT.md` updated if either item is resolved
-- concise note on the next best slice after this one
+What success looks like next session
+- At least one real Phase 1 protocol divergence is closed or made explicitly intentional.
+- The change is locked by protocol-boundary tests, not just helper tests.
+- `docs/spacetimedb-parity-roadmap.md` / `docs/parity-phase0-ledger.md` stay honest about what is now open vs closed.
+- The next handoff clearly points either to the next Phase 1 sub-slice or, if Phase 1 is surprisingly finished, to Phase 1.5.
 
-What not to do in this session
-- do not start Lane B Session 12 docs drift triage
-- do not start Lane A’s remaining broad audit slice
-- do not rewrite docs to match stale code
-- do not widen into unrelated commitlog cleanup
+What not to do next session
+- do not spend the session rebuilding the Phase 0 harness
+- do not pivot into SQL/query-surface work
+- do not pivot into scheduler/recovery implementation yet
+- do not use TECH-DEBT cleanup as the main objective
+- do not make broad refactors without a named parity behavior to justify them
 
-Decision for future sessions after this one
-- If `TD-114`/`TD-115` land cleanly, continue implementation reconciliation on the next highest-value open runtime debt, not a fresh broad audit.
-- Only return to docs work if you discover an actual contradiction in the reconciled specs, or after a code fix materially changes the intended contract.
+Best current next implementation slice
+- `Phase 1 — wire-level protocol envelope parity`
+- strongest likely first target:
+  - subprotocol decision and/or compression-envelope/tag parity
 
 Stop rule
-- Stop when both debt items are either fixed with regression coverage, or one is fixed and the other is blocked by a clearly identified design constraint backed by test evidence.
-- Do not pivot into a new audit pass.
+- Stop when one narrow Phase 1 parity slice is truly landed, tested, and documented.
+- Do not broaden into Phase 1.5 in the same session unless the protocol slice is genuinely complete and verified.

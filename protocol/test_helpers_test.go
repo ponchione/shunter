@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // testConnDirect builds a *Conn without a real WebSocket, suitable for
@@ -41,5 +42,25 @@ func drainServerMsg(t *testing.T, conn *Conn) (uint8, any) {
 	default:
 		t.Fatal("expected a message on OutboundCh but channel was empty")
 		return 0, nil
+	}
+}
+
+func drainServerMsgEventually(t *testing.T, conn *Conn) (uint8, any) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case frame := <-conn.OutboundCh:
+			tag, msg, err := DecodeServerMessage(frame)
+			if err != nil {
+				t.Fatalf("DecodeServerMessage: %v", err)
+			}
+			return tag, msg
+		case <-deadline:
+			t.Fatal("expected a message on OutboundCh but channel stayed empty")
+			return 0, nil
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 }

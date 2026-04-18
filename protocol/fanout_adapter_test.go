@@ -190,6 +190,31 @@ func connID(b byte) types.ConnectionID {
 	return id
 }
 
+func TestFanOutSenderAdapter_SendTransactionUpdateRejectsPendingSubscription(t *testing.T) {
+	conn, id := testConn(false)
+	mgr := NewConnManager()
+	mgr.Add(conn)
+	sender := NewClientSender(mgr, &fakeInbox{})
+	adapter := NewFanOutSenderAdapter(sender)
+
+	if err := conn.Subscriptions.Reserve(5); err != nil {
+		t.Fatal(err)
+	}
+
+	err := adapter.SendTransactionUpdate(
+		id, types.TxID(100),
+		[]subscription.SubscriptionUpdate{{
+			SubscriptionID: 5,
+			TableName:      "t1",
+			Inserts:        []types.ProductValue{{types.NewUint32(42)}},
+		}},
+		nil,
+	)
+	if !errors.Is(err, ErrSubscriptionNotActive) {
+		t.Fatalf("err = %v, want ErrSubscriptionNotActive", err)
+	}
+}
+
 func TestFanOutSenderAdapter_SendTransactionUpdate(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)
@@ -316,10 +341,36 @@ func TestFanOutSenderAdapter_SendReducerResultSuccessPath(t *testing.T) {
 	}
 }
 
-func TestFanOutSenderAdapter_SendSubscriptionErrorSuccessPath(t *testing.T) {
+func TestFanOutSenderAdapter_SendReducerResultRejectsPendingSubscription(t *testing.T) {
+	conn, id := testConn(false)
+	mgr := NewConnManager()
+	mgr.Add(conn)
+	sender := NewClientSender(mgr, &fakeInbox{})
+	adapter := NewFanOutSenderAdapter(sender)
+
+	if err := conn.Subscriptions.Reserve(7); err != nil {
+		t.Fatal(err)
+	}
+
+	result := &subscription.ReducerCallResult{
+		RequestID: 9,
+		Status:    0,
+		TxID:      types.TxID(44),
+		TransactionUpdate: []subscription.SubscriptionUpdate{{
+			SubscriptionID: 7,
+			TableName:      "players",
+			Inserts:        []types.ProductValue{{types.NewUint32(1)}},
+		}},
+	}
+	if err := adapter.SendReducerResult(id, result, nil); !errors.Is(err, ErrSubscriptionNotActive) {
+		t.Fatalf("err = %v, want ErrSubscriptionNotActive", err)
+	}
+}
+
+func TestFanOutSenderAdapter_SendSubscriptionErrorPreservesRequestID(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)
-	if err := adapter.SendSubscriptionError(connID(3), 77, "boom"); err != nil {
+	if err := adapter.SendSubscriptionError(connID(3), subscription.SubscriptionError{RequestID: 55, SubscriptionID: 77, Message: "boom"}); err != nil {
 		t.Fatal(err)
 	}
 	mock.mu.Lock()
@@ -330,6 +381,9 @@ func TestFanOutSenderAdapter_SendSubscriptionErrorSuccessPath(t *testing.T) {
 	msg, ok := mock.genericMsgs[0].(SubscriptionError)
 	if !ok {
 		t.Fatalf("message type = %T, want SubscriptionError", mock.genericMsgs[0])
+	}
+	if msg.RequestID != 55 {
+		t.Fatalf("RequestID = %d, want 55", msg.RequestID)
 	}
 	if msg.SubscriptionID != 77 || msg.Error != "boom" {
 		t.Fatalf("subscription error = %+v", msg)

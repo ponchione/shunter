@@ -23,7 +23,7 @@ type FanOutSender interface {
 	// SendReducerResult delivers a ReducerCallResult to the caller client.
 	SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error
 	// SendSubscriptionError delivers a SubscriptionError to a client.
-	SendSubscriptionError(connID types.ConnectionID, subID types.SubscriptionID, message string) error
+	SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error
 }
 
 // FanOutWorker receives computed deltas from the evaluation loop and
@@ -83,13 +83,22 @@ func (w *FanOutWorker) RemoveClient(connID types.ConnectionID) {
 	delete(w.confirmedReads, connID)
 }
 
-func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout) bool {
+func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout, callerConnID *types.ConnectionID, callerResult *ReducerCallResult) bool {
+	if len(fanout) > 0 {
+		return true
+	}
+	if callerConnID != nil && callerResult != nil {
+		return true
+	}
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	for connID := range fanout {
 		if w.confirmedReads[connID] {
 			return true
 		}
+	}
+	if callerConnID != nil && callerResult != nil && w.confirmedReads[*callerConnID] {
+		return true
 	}
 	return false
 }
@@ -98,7 +107,7 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	memo := NewEncodingMemo()
 
 	// Confirmed-read gating (Story 6.4).
-	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout) {
+	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout, msg.CallerConnID, msg.CallerResult) {
 		select {
 		case <-ctx.Done():
 			return
@@ -109,7 +118,7 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// Deliver subscription errors first (before updates).
 	for connID, errs := range msg.Errors {
 		for _, se := range errs {
-			if err := w.sender.SendSubscriptionError(connID, se.SubscriptionID, se.Message); err != nil {
+			if err := w.sender.SendSubscriptionError(connID, se); err != nil {
 				w.handleSendError(connID, err)
 			}
 		}

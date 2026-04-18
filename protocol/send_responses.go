@@ -12,14 +12,16 @@ import "github.com/ponchione/shunter/types"
 // contract guarantees exactly one call per subscription registration.
 //
 // If Send fails (e.g. ErrClientBufferFull), the error propagates to
-// the caller, who is responsible for triggering a disconnect. The
-// disconnect path calls RemoveAll, which cleans up the pending entry.
+// the caller. The tracker entry is removed so a late failed delivery
+// cannot leave the subscription spuriously active after the result was
+// never committed to the wire.
 func SendSubscribeApplied(sender ClientSender, conn *Conn, msg *SubscribeApplied) error {
 	if !conn.Subscriptions.IsPending(msg.SubscriptionID) {
 		return nil
 	}
 	conn.Subscriptions.Activate(msg.SubscriptionID)
 	if err := sender.Send(conn.ID, *msg); err != nil {
+		_ = conn.Subscriptions.Remove(msg.SubscriptionID)
 		return err
 	}
 	return nil

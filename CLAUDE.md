@@ -4,7 +4,11 @@ Read `RTK.md` first for command rules, then `docs/project-brief.md`, then `docs/
 
 ## Current Repo State
 
-This repo is still docs-first. There is no implementation code yet. The working source of truth is the docs tree: project brief, spec docs, decomposition epics/stories, and execution order.
+This repo started docs-first, but it now contains substantial implementation code alongside the planning docs. The working source of truth is split across:
+- the docs tree for intended contracts, sequencing, and clean-room rationale
+- the live Go packages for current operational reality
+
+Do not treat this as spec-only anymore. Read the docs first, then verify against the code.
 
 ## What to Use
 

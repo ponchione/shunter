@@ -282,6 +282,42 @@ func TestHandleSubscribe_Valid(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeMsg{
+		RequestID:      10,
+		SubscriptionID: 7,
+		Query:          Query{TableName: "users"},
+	}
+
+	handleSubscribe(context.Background(), conn, msg, executor, sl)
+
+	req := executor.getRegisterReq()
+	if req == nil || req.ResponseCh == nil {
+		t.Fatal("executor did not receive subscribe response channel")
+	}
+	req.ResponseCh <- SubscriptionCommandResponse{
+		Applied: &SubscribeApplied{RequestID: 10, SubscriptionID: 7, TableName: "users", Rows: []byte{}},
+	}
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscribeApplied {
+		t.Fatalf("tag = %d, want %d (TagSubscribeApplied)", tag, TagSubscribeApplied)
+	}
+	applied := decoded.(SubscribeApplied)
+	if applied.RequestID != 10 || applied.SubscriptionID != 7 {
+		t.Fatalf("SubscribeApplied = %+v", applied)
+	}
+	if !conn.Subscriptions.IsActive(7) {
+		t.Fatal("subscription 7 should be active after async SubscribeApplied delivery")
+	}
+}
+
 func TestHandleSubscribe_DuplicateID(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -302,7 +338,7 @@ func TestHandleSubscribe_DuplicateID(t *testing.T) {
 
 	handleSubscribe(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
@@ -333,7 +369,7 @@ func TestHandleSubscribe_UnknownTable(t *testing.T) {
 
 	handleSubscribe(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
@@ -370,7 +406,7 @@ func TestHandleSubscribe_ExecutorReject(t *testing.T) {
 
 	handleSubscribe(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}

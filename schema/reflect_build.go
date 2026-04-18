@@ -20,6 +20,7 @@ func buildTableDefinition(typeName string, fields []fieldInfo, opts ...TableOpti
 			Name:          f.ColumnName,
 			Type:          f.Type,
 			PrimaryKey:    f.Tags.PrimaryKey,
+			Nullable:      false,
 			AutoIncrement: f.Tags.AutoIncrement,
 		}
 	}

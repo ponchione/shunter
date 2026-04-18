@@ -10,6 +10,7 @@ var (
 	ErrAutoIncrementRequiresKey = errors.New("autoincrement requires primarykey or unique")
 	ErrSequenceOverflow         = errors.New("autoincrement sequence overflow")
 	ErrInvalidColumnName        = errors.New("invalid column name")
+	ErrNullableColumn          = errors.New("nullable columns are not supported in v1")
 	ErrDuplicateReducerName     = errors.New("duplicate reducer name")
 	ErrSchemaVersionNotSet      = errors.New("SchemaVersion must be called with a value > 0")
 	ErrReservedTableName        = errors.New("table name is reserved for system tables")

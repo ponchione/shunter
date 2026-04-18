@@ -122,4 +122,5 @@ func handleSubscribe(
 	}
 
 	releaseOnError = false
+	watchSubscribeResponse(conn, respCh)
 }

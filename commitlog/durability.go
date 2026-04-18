@@ -11,6 +11,13 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+type FsyncMode uint8
+
+const (
+	FsyncBatch FsyncMode = 0
+	FsyncPerTx FsyncMode = 1
+)
+
 // CommitLogOptions configures the durability worker.
 type CommitLogOptions struct {
 	MaxSegmentSize        int64
@@ -18,6 +25,7 @@ type CommitLogOptions struct {
 	MaxRowBytes           uint32
 	ChannelCapacity       int
 	DrainBatchSize        int
+	FsyncMode             FsyncMode
 	SnapshotInterval      uint64
 }
 
@@ -29,6 +37,7 @@ func DefaultCommitLogOptions() CommitLogOptions {
 		MaxRowBytes:           8 << 20,   // 8 MiB
 		ChannelCapacity:       256,
 		DrainBatchSize:        64,
+		FsyncMode:             FsyncBatch,
 		SnapshotInterval:      0,
 	}
 }
@@ -68,9 +77,19 @@ func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*
 	}, opts)
 }
 
+func validateFsyncMode(mode FsyncMode) error {
+	if mode != FsyncBatch {
+		return fmt.Errorf("%w: %d", ErrUnknownFsyncMode, mode)
+	}
+	return nil
+}
+
 // NewDurabilityWorkerWithResumePlan creates and starts the worker using the
 // append strategy chosen during recovery.
 func NewDurabilityWorkerWithResumePlan(dir string, plan RecoveryResumePlan, opts CommitLogOptions) (*DurabilityWorker, error) {
+	if err := validateFsyncMode(opts.FsyncMode); err != nil {
+		return nil, err
+	}
 	seg, durableTxID, err := openSegmentForResumePlan(dir, plan)
 	if err != nil {
 		return nil, err

@@ -100,6 +100,11 @@ func TestSendTransactionUpdateTyped(t *testing.T) {
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
+	if err := c.Subscriptions.Reserve(1); err != nil {
+		t.Fatal(err)
+	}
+	c.Subscriptions.Activate(1)
+
 	update := &TransactionUpdate{TxID: 42, Updates: []SubscriptionUpdate{
 		{SubscriptionID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
 	}}

@@ -100,6 +100,36 @@ func TestHandleUnsubscribe_Active(t *testing.T) {
 	}
 }
 
+func TestHandleUnsubscribe_DeliversAsyncUnsubscribeApplied(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockDispatchExecutor{}
+
+	if err := conn.Subscriptions.Reserve(42); err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	conn.Subscriptions.Activate(42)
+
+	msg := &UnsubscribeMsg{RequestID: 1, SubscriptionID: 42}
+	handleUnsubscribe(context.Background(), conn, msg, exec)
+
+	exec.mu.Lock()
+	respCh := exec.unregisterReq.ResponseCh
+	exec.mu.Unlock()
+	if respCh == nil {
+		t.Fatal("missing unsubscribe response channel")
+	}
+	respCh <- UnsubscribeCommandResponse{Applied: &UnsubscribeApplied{RequestID: 1, SubscriptionID: 42}}
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagUnsubscribeApplied {
+		t.Fatalf("tag = %d, want %d (TagUnsubscribeApplied)", tag, TagUnsubscribeApplied)
+	}
+	applied := decoded.(UnsubscribeApplied)
+	if applied.RequestID != 1 || applied.SubscriptionID != 42 {
+		t.Fatalf("UnsubscribeApplied = %+v", applied)
+	}
+}
+
 func TestHandleUnsubscribe_Pending(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{}
@@ -118,7 +148,7 @@ func TestHandleUnsubscribe_Pending(t *testing.T) {
 	}
 
 	// Error should have been sent.
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
@@ -141,7 +171,7 @@ func TestHandleUnsubscribe_NotFound(t *testing.T) {
 	msg := &UnsubscribeMsg{RequestID: 3, SubscriptionID: 999}
 	handleUnsubscribe(context.Background(), conn, msg, exec)
 
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
@@ -175,7 +205,7 @@ func TestHandleUnsubscribe_ExecutorReject(t *testing.T) {
 		t.Error("subscription 7 removed despite executor rejection")
 	}
 
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
@@ -238,6 +268,35 @@ func TestHandleCallReducer_Valid(t *testing.T) {
 	}
 }
 
+func TestHandleCallReducer_DeliversAsyncReducerResult(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockDispatchExecutor{}
+
+	msg := &CallReducerMsg{
+		RequestID:   10,
+		ReducerName: "AddUser",
+		Args:        []byte{0xCA, 0xFE},
+	}
+	handleCallReducer(context.Background(), conn, msg, exec)
+
+	exec.mu.Lock()
+	respCh := exec.callReducerReq.ResponseCh
+	exec.mu.Unlock()
+	if respCh == nil {
+		t.Fatal("missing reducer response channel")
+	}
+	respCh <- ReducerCallResult{RequestID: 10, Status: 0, TxID: 77}
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagReducerCallResult {
+		t.Fatalf("tag = %d, want %d (TagReducerCallResult)", tag, TagReducerCallResult)
+	}
+	result := decoded.(ReducerCallResult)
+	if result.RequestID != 10 || result.TxID != 77 || result.Status != 0 {
+		t.Fatalf("ReducerCallResult = %+v", result)
+	}
+}
+
 func TestHandleCallReducer_OnConnect(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{}
@@ -256,7 +315,7 @@ func TestHandleCallReducer_OnConnect(t *testing.T) {
 	}
 	exec.mu.Unlock()
 
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagReducerCallResult {
 		t.Fatalf("tag = %d, want %d (TagReducerCallResult)", tag, TagReducerCallResult)
 	}
@@ -290,7 +349,7 @@ func TestHandleCallReducer_OnDisconnect(t *testing.T) {
 	}
 	exec.mu.Unlock()
 
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagReducerCallResult {
 		t.Fatalf("tag = %d, want %d (TagReducerCallResult)", tag, TagReducerCallResult)
 	}
@@ -314,7 +373,7 @@ func TestHandleCallReducer_ExecutorReject(t *testing.T) {
 	}
 	handleCallReducer(context.Background(), conn, msg, exec)
 
-	tag, decoded := drainServerMsg(t, conn)
+	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagReducerCallResult {
 		t.Fatalf("tag = %d, want %d (TagReducerCallResult)", tag, TagReducerCallResult)
 	}
