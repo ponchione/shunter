@@ -71,9 +71,9 @@ func handleSubscribe(
 
 	if err := conn.Subscriptions.Reserve(subID); err != nil {
 		sendError(conn, SubscriptionError{
-			RequestID:      msg.RequestID,
-			SubscriptionID: subID,
-			Error:          err.Error(),
+			RequestID: msg.RequestID,
+			QueryID:   subID,
+			Error:     err.Error(),
 		})
 		return
 	}
@@ -88,9 +88,9 @@ func handleSubscribe(
 	tableID, ts, ok := sl.TableByName(msg.Query.TableName)
 	if !ok {
 		sendError(conn, SubscriptionError{
-			RequestID:      msg.RequestID,
-			SubscriptionID: subID,
-			Error:          fmt.Sprintf("unknown table %q", msg.Query.TableName),
+			RequestID: msg.RequestID,
+			QueryID:   subID,
+			Error:     fmt.Sprintf("unknown table %q", msg.Query.TableName),
 		})
 		return
 	}
@@ -98,9 +98,9 @@ func handleSubscribe(
 	pred, err := NormalizePredicates(tableID, ts, msg.Query.Predicates)
 	if err != nil {
 		sendError(conn, SubscriptionError{
-			RequestID:      msg.RequestID,
-			SubscriptionID: subID,
-			Error:          err.Error(),
+			RequestID: msg.RequestID,
+			QueryID:   subID,
+			Error:     err.Error(),
 		})
 		return
 	}
@@ -114,9 +114,9 @@ func handleSubscribe(
 		ResponseCh:     respCh,
 	}); err != nil {
 		sendError(conn, SubscriptionError{
-			RequestID:      msg.RequestID,
-			SubscriptionID: subID,
-			Error:          "executor unavailable: " + err.Error(),
+			RequestID: msg.RequestID,
+			QueryID:   subID,
+			Error:     "executor unavailable: " + err.Error(),
 		})
 		return
 	}

@@ -350,7 +350,7 @@ func TestFanOutSenderAdapter_SendSubscriptionErrorPreservesRequestID(t *testing.
 	if msg.RequestID != 55 {
 		t.Fatalf("RequestID = %d, want 55", msg.RequestID)
 	}
-	if msg.SubscriptionID != 77 || msg.Error != "boom" {
+	if msg.QueryID != 77 || msg.Error != "boom" {
 		t.Fatalf("subscription error = %+v", msg)
 	}
 }

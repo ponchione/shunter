@@ -115,6 +115,44 @@ func TestPhase2UnsubscribeCarriesQueryID(t *testing.T) {
 	}
 }
 
+// TestPhase2SubscribeAppliedCarriesQueryID pins the Phase 2 Slice 2
+// follow-through: the response envelope `SubscribeApplied` now carries
+// a QueryID field matching reference `SubscribeApplied.query_id: QueryId`
+// (reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs).
+// The client/server naming asymmetry is closed.
+func TestPhase2SubscribeAppliedCarriesQueryID(t *testing.T) {
+	fields := msgFieldNames(SubscribeApplied{})
+	want := []string{"RequestID", "QueryID", "TableName", "Rows"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("SubscribeApplied fields = %v, want %v (Phase 2: QueryID response envelope)",
+			fields, want)
+	}
+}
+
+// TestPhase2UnsubscribeAppliedCarriesQueryID pins the response-side rename
+// for `UnsubscribeApplied`. Reference: `UnsubscribeApplied.query_id: QueryId`.
+func TestPhase2UnsubscribeAppliedCarriesQueryID(t *testing.T) {
+	fields := msgFieldNames(UnsubscribeApplied{})
+	want := []string{"RequestID", "QueryID", "HasRows", "Rows"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("UnsubscribeApplied fields = %v, want %v (Phase 2: QueryID response envelope)",
+			fields, want)
+	}
+}
+
+// TestPhase2SubscriptionErrorCarriesQueryID pins the response-side rename
+// for `SubscriptionError`. Reference: `SubscriptionError.query_id: Option<u32>`.
+// Shunter always populates QueryID in Phase 2 because every error is
+// correlated with a specific query.
+func TestPhase2SubscriptionErrorCarriesQueryID(t *testing.T) {
+	fields := msgFieldNames(SubscriptionError{})
+	want := []string{"RequestID", "QueryID", "Error"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("SubscriptionError fields = %v, want %v (Phase 2: QueryID response envelope)",
+			fields, want)
+	}
+}
+
 // TestPhase2DeferralSubscribeNoMultiOrSingleVariants pins the still-open
 // deferral: reference exposes `SubscribeSingle` / `SubscribeMulti` as
 // separate envelopes with batch registration semantics. Shunter still

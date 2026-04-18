@@ -16,12 +16,12 @@ import "github.com/ponchione/shunter/types"
 // cannot leave the subscription spuriously active after the result was
 // never committed to the wire.
 func SendSubscribeApplied(sender ClientSender, conn *Conn, msg *SubscribeApplied) error {
-	if !conn.Subscriptions.IsPending(msg.SubscriptionID) {
+	if !conn.Subscriptions.IsPending(msg.QueryID) {
 		return nil
 	}
-	conn.Subscriptions.Activate(msg.SubscriptionID)
+	conn.Subscriptions.Activate(msg.QueryID)
 	if err := sender.Send(conn.ID, *msg); err != nil {
-		_ = conn.Subscriptions.Remove(msg.SubscriptionID)
+		_ = conn.Subscriptions.Remove(msg.QueryID)
 		return err
 	}
 	return nil
@@ -30,14 +30,14 @@ func SendSubscribeApplied(sender ClientSender, conn *Conn, msg *SubscribeApplied
 // SendUnsubscribeApplied delivers an UnsubscribeApplied message and
 // removes the subscription from the tracker.
 func SendUnsubscribeApplied(sender ClientSender, conn *Conn, msg *UnsubscribeApplied) error {
-	_ = conn.Subscriptions.Remove(msg.SubscriptionID)
+	_ = conn.Subscriptions.Remove(msg.QueryID)
 	return sender.Send(conn.ID, *msg)
 }
 
 // SendSubscriptionError delivers a SubscriptionError and releases the
 // subscription_id so it is immediately reusable (SPEC-005 §8.4).
 func SendSubscriptionError(sender ClientSender, conn *Conn, msg *SubscriptionError) error {
-	_ = conn.Subscriptions.Remove(msg.SubscriptionID)
+	_ = conn.Subscriptions.Remove(msg.QueryID)
 	return sender.Send(conn.ID, *msg)
 }
 

@@ -15,9 +15,9 @@ func handleUnsubscribe(
 
 	if !conn.Subscriptions.IsActive(subID) {
 		sendError(conn, SubscriptionError{
-			RequestID:      msg.RequestID,
-			SubscriptionID: subID,
-			Error:          fmt.Sprintf("%v: id=%d", ErrSubscriptionNotFound, subID),
+			RequestID: msg.RequestID,
+			QueryID:   subID,
+			Error:     fmt.Sprintf("%v: id=%d", ErrSubscriptionNotFound, subID),
 		})
 		return
 	}
@@ -31,9 +31,9 @@ func handleUnsubscribe(
 		ResponseCh:     respCh,
 	}); err != nil {
 		sendError(conn, SubscriptionError{
-			RequestID:      msg.RequestID,
-			SubscriptionID: subID,
-			Error:          "executor unavailable: " + err.Error(),
+			RequestID: msg.RequestID,
+			QueryID:   subID,
+			Error:     "executor unavailable: " + err.Error(),
 		})
 		return
 	}

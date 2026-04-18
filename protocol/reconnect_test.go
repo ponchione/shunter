@@ -106,7 +106,7 @@ func TestReconnectAfterBufferOverflow(t *testing.T) {
 		t.Error("reconnected connection not in manager")
 	}
 	s := NewClientSender(mgr, inbox)
-	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	if err := s.Send(c2.ID, msg); err != nil {
 		t.Fatalf("send after reconnect: %v", err)
 	}

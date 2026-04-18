@@ -302,7 +302,7 @@ func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
 		t.Fatal("executor did not receive subscribe response channel")
 	}
 	req.ResponseCh <- SubscriptionCommandResponse{
-		Applied: &SubscribeApplied{RequestID: 10, SubscriptionID: 7, TableName: "users", Rows: []byte{}},
+		Applied: &SubscribeApplied{RequestID: 10, QueryID: 7, TableName: "users", Rows: []byte{}},
 	}
 
 	tag, decoded := drainServerMsgEventually(t, conn)
@@ -310,7 +310,7 @@ func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscribeApplied)", tag, TagSubscribeApplied)
 	}
 	applied := decoded.(SubscribeApplied)
-	if applied.RequestID != 10 || applied.SubscriptionID != 7 {
+	if applied.RequestID != 10 || applied.QueryID != 7 {
 		t.Fatalf("SubscribeApplied = %+v", applied)
 	}
 	if !conn.Subscriptions.IsActive(7) {
@@ -343,8 +343,8 @@ func TestHandleSubscribe_DuplicateID(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.SubscriptionID != 42 {
-		t.Errorf("SubscriptionError.SubscriptionID = %d, want 42", se.SubscriptionID)
+	if se.QueryID != 42 {
+		t.Errorf("SubscriptionError.QueryID = %d, want 42", se.QueryID)
 	}
 	if se.RequestID != 1 {
 		t.Errorf("SubscriptionError.RequestID = %d, want 1", se.RequestID)
@@ -374,8 +374,8 @@ func TestHandleSubscribe_UnknownTable(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.SubscriptionID != 99 {
-		t.Errorf("SubscriptionError.SubscriptionID = %d, want 99", se.SubscriptionID)
+	if se.QueryID != 99 {
+		t.Errorf("SubscriptionError.QueryID = %d, want 99", se.QueryID)
 	}
 
 	// Subscription must have been released.
@@ -411,8 +411,8 @@ func TestHandleSubscribe_ExecutorReject(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.SubscriptionID != 50 {
-		t.Errorf("SubscriptionError.SubscriptionID = %d, want 50", se.SubscriptionID)
+	if se.QueryID != 50 {
+		t.Errorf("SubscriptionError.QueryID = %d, want 50", se.QueryID)
 	}
 	if se.RequestID != 3 {
 		t.Errorf("SubscriptionError.RequestID = %d, want 3", se.RequestID)

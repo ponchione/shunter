@@ -1859,7 +1859,7 @@ Fix: cross-reference SPEC-004 §3.2 in §10 or §12; add a line noting the v1 bu
 ### 3.5 [DIVERGE] No SubscribeMulti / SubscribeSingle / QuerySetId [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase2DeferralSubscribeNoMultiOrSingleVariants]
 
 - SpacetimeDB v1/v2 support `SubscribeMulti(query_id, query_strings)` and `SubscribeSingle(query_id, query_string)` where `query_id` is a u32 (`QuerySetId`) grouping multiple queries into one logical set (`crates/client-api-messages/src/websocket/v1.rs:60-62` and `v2.rs:20`).
-- Shunter has already landed the client-side `QueryID` field on `SubscribeMsg` / `UnsubscribeMsg`, but it still exposes only one query per subscribe envelope and does not implement the reference `SubscribeMulti` / `SubscribeSingle` split or multi-query set grouping semantics.
+- Shunter has already landed the client-side `QueryID` field on `SubscribeMsg` / `UnsubscribeMsg`, and the matching response envelopes (`SubscribeApplied` / `UnsubscribeApplied` / `SubscriptionError`) now also carry `QueryID` matching reference `query_id: QueryId` (pinned by `TestPhase2SubscribeAppliedCarriesQueryID`, `TestPhase2UnsubscribeAppliedCarriesQueryID`, `TestPhase2SubscriptionErrorCarriesQueryID`). Client/server naming asymmetry is closed. Shunter still exposes only one query per subscribe envelope and does not implement the reference `SubscribeMulti` / `SubscribeSingle` split or multi-query set grouping semantics.
 
 Fix: add a §15 Open Question or §3 divergence note: "SpacetimeDB's multi-query subscription set grouping is not exposed in v1. A future extension may introduce a `SubscribeMulti`-style set; reserve `subscription_id` namespace accordingly."
 

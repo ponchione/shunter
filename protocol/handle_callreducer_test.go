@@ -118,14 +118,14 @@ func TestHandleUnsubscribe_DeliversAsyncUnsubscribeApplied(t *testing.T) {
 	if respCh == nil {
 		t.Fatal("missing unsubscribe response channel")
 	}
-	respCh <- UnsubscribeCommandResponse{Applied: &UnsubscribeApplied{RequestID: 1, SubscriptionID: 42}}
+	respCh <- UnsubscribeCommandResponse{Applied: &UnsubscribeApplied{RequestID: 1, QueryID: 42}}
 
 	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagUnsubscribeApplied {
 		t.Fatalf("tag = %d, want %d (TagUnsubscribeApplied)", tag, TagUnsubscribeApplied)
 	}
 	applied := decoded.(UnsubscribeApplied)
-	if applied.RequestID != 1 || applied.SubscriptionID != 42 {
+	if applied.RequestID != 1 || applied.QueryID != 42 {
 		t.Fatalf("UnsubscribeApplied = %+v", applied)
 	}
 }
@@ -156,8 +156,8 @@ func TestHandleUnsubscribe_Pending(t *testing.T) {
 	if se.RequestID != 2 {
 		t.Errorf("RequestID = %d, want 2", se.RequestID)
 	}
-	if se.SubscriptionID != 10 {
-		t.Errorf("SubscriptionID = %d, want 10", se.SubscriptionID)
+	if se.QueryID != 10 {
+		t.Errorf("QueryID = %d, want 10", se.QueryID)
 	}
 	if !strings.Contains(se.Error, "subscription_id not found") {
 		t.Errorf("Error = %q, want to contain 'subscription_id not found'", se.Error)
@@ -179,8 +179,8 @@ func TestHandleUnsubscribe_NotFound(t *testing.T) {
 	if se.RequestID != 3 {
 		t.Errorf("RequestID = %d, want 3", se.RequestID)
 	}
-	if se.SubscriptionID != 999 {
-		t.Errorf("SubscriptionID = %d, want 999", se.SubscriptionID)
+	if se.QueryID != 999 {
+		t.Errorf("QueryID = %d, want 999", se.QueryID)
 	}
 	if !strings.Contains(se.Error, "subscription_id not found") {
 		t.Errorf("Error = %q, want to contain 'subscription_id not found'", se.Error)

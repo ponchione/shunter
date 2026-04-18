@@ -65,11 +65,11 @@ func watchSubscribeResponse(conn *Conn, respCh <-chan SubscriptionCommandRespons
 		switch {
 		case resp.Applied != nil:
 			if err := SendSubscribeApplied(sender, conn, resp.Applied); err != nil {
-				log.Printf("protocol: async SubscribeApplied delivery failed for conn %x sub=%d: %v", conn.ID[:], resp.Applied.SubscriptionID, err)
+				log.Printf("protocol: async SubscribeApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Applied.QueryID, err)
 			}
 		case resp.Error != nil:
 			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: async SubscriptionError delivery failed for conn %x sub=%d: %v", conn.ID[:], resp.Error.SubscriptionID, err)
+				log.Printf("protocol: async SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
 			}
 		}
 	}()
@@ -85,11 +85,11 @@ func watchUnsubscribeResponse(conn *Conn, respCh <-chan UnsubscribeCommandRespon
 		switch {
 		case resp.Applied != nil:
 			if err := SendUnsubscribeApplied(sender, conn, resp.Applied); err != nil {
-				log.Printf("protocol: async UnsubscribeApplied delivery failed for conn %x sub=%d: %v", conn.ID[:], resp.Applied.SubscriptionID, err)
+				log.Printf("protocol: async UnsubscribeApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Applied.QueryID, err)
 			}
 		case resp.Error != nil:
 			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: async unsubscribe SubscriptionError delivery failed for conn %x sub=%d: %v", conn.ID[:], resp.Error.SubscriptionID, err)
+				log.Printf("protocol: async unsubscribe SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
 			}
 		}
 	}()

@@ -34,7 +34,7 @@ func TestSendSubscribeAppliedActivatesSubscription(t *testing.T) {
 
 	c.Subscriptions.Reserve(10)
 
-	msg := &SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := &SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	if err := SendSubscribeApplied(s, c, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestSendSubscribeAppliedActivatesBeforeSend(t *testing.T) {
 		},
 	}
 
-	msg := &SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := &SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	if err := SendSubscribeApplied(sender, c, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestSendSubscribeAppliedDiscardsAfterDisconnect(t *testing.T) {
 	c.Subscriptions.Reserve(10)
 	c.Subscriptions.Remove(10)
 
-	msg := &SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := &SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	err := SendSubscribeApplied(s, c, msg)
 	if err != nil {
 		t.Fatal("should silently discard, not error")
@@ -109,7 +109,7 @@ func TestSendSubscribeAppliedSendFailureDoesNotLeaveSubscriptionActive(t *testin
 		},
 	}
 
-	msg := &SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := &SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	err := SendSubscribeApplied(sender, c, msg)
 	if !errors.Is(err, ErrConnNotFound) {
 		t.Fatalf("err = %v, want ErrConnNotFound", err)
@@ -128,7 +128,7 @@ func TestSendUnsubscribeAppliedRemovesSubscription(t *testing.T) {
 	c.Subscriptions.Reserve(10)
 	c.Subscriptions.Activate(10)
 
-	msg := &UnsubscribeApplied{RequestID: 1, SubscriptionID: 10}
+	msg := &UnsubscribeApplied{RequestID: 1, QueryID: 10}
 	if err := SendUnsubscribeApplied(s, c, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestSendSubscriptionErrorReleasesID(t *testing.T) {
 
 	c.Subscriptions.Reserve(10)
 
-	msg := &SubscriptionError{RequestID: 1, SubscriptionID: 10, Error: "bad predicate"}
+	msg := &SubscriptionError{RequestID: 1, QueryID: 10, Error: "bad predicate"}
 	if err := SendSubscriptionError(s, c, msg); err != nil {
 		t.Fatal(err)
 	}

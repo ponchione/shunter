@@ -6,13 +6,20 @@ Phase 1.5 end-to-end delivery parity — the `TransactionUpdate` /
 (`NoSuccessNotify`) sub-slice — is closed. Do not re-open any
 P0-PROTOCOL-00* slice and do not re-litigate the outcome-model decision.
 
+Phase 2 Slice 2 `QueryID` naming parity is closed on both request
+envelopes (`SubscribeMsg` / `UnsubscribeMsg`) and response envelopes
+(`SubscribeApplied` / `UnsubscribeApplied` / `SubscriptionError`).
+Client/server naming asymmetry is closed.
+
 Primary decision
 - Treat `docs/spacetimedb-parity-roadmap.md` as the active development driver.
-- Treat Phase 0, Phase 1, and Phase 1.5 (envelope split + `CallReducer.flags`) as materially landed.
-- The next narrow parity slices are Phase 2 query-surface work
-  (`OneOffQuery` SQL front door and the remaining `SubscribeMulti` /
-  `SubscribeSingle` split / `QueryId` follow-through) or Phase 4
-  recovery parity (`P0-RECOVERY-002`).
+- Treat Phase 0, Phase 1, Phase 1.5 (envelope split + `CallReducer.flags`),
+  and Phase 2 Slice 2 `QueryID` naming parity (request + response envelopes)
+  as materially landed.
+- The next narrow parity slices are Phase 2 `SubscribeMulti` /
+  `SubscribeSingle` variant split and multi-query set grouping, Phase 2
+  Slice 1 (`OneOffQuery` SQL front door), or Phase 4 recovery parity
+  (`P0-RECOVERY-002`).
 
 What landed last session (Phase 1.5 envelope split)
 - Heavy `TransactionUpdate{Status, CallerIdentity, CallerConnectionID, ReducerCall,
@@ -52,7 +59,12 @@ Pinned parity tests (do not flip without a named parity reason)
   - `TestPhase15ReducerCallInfoShape`
   - `TestPhase15UpdateStatusVariants`
   - `TestPhase15TagReducerCallResultReserved`
-  - `TestPhase2DeferralSubscribeNoMultiOrSingleVariants` (still open; Phase 2 Slice 2)
+  - `TestPhase2SubscribeCarriesQueryID` (closed Phase 2 Slice 2 request side)
+  - `TestPhase2UnsubscribeCarriesQueryID` (closed Phase 2 Slice 2 request side)
+  - `TestPhase2SubscribeAppliedCarriesQueryID` (closed Phase 2 Slice 2 response side)
+  - `TestPhase2UnsubscribeAppliedCarriesQueryID` (closed Phase 2 Slice 2 response side)
+  - `TestPhase2SubscriptionErrorCarriesQueryID` (closed Phase 2 Slice 2 response side)
+  - `TestPhase2DeferralSubscribeNoMultiOrSingleVariants` (still open; `SubscribeMulti` / `SubscribeSingle` variant split)
   - `TestPhase15CallReducerFlagsField` (closed sub-slice — positive-shape pin)
   - `TestPhase1DeferralOneOffQueryStructuredNotSQL` (still open; Phase 2 Slice 1)
 - `subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout`
@@ -80,10 +92,11 @@ Recently landed (Phase 1.5 `CallReducer.flags` sub-slice)
   absent when suppressed.
 
 Suggested next slice
-- Phase 2 Slice 1 (`OneOffQuery` SQL front door), Phase 2 Slice 2
-  server-response `QueryID` follow-through plus the remaining
-  `SubscribeMulti` / `SubscribeSingle` split, or Phase 4
-  `P0-RECOVERY-002` if recovery parity is the priority.
+- `SubscribeMulti` / `SubscribeSingle` variant split with multi-query set
+  grouping (the remaining Phase 2 Slice 2 work now that `QueryID` naming
+  parity is closed on both request and response envelopes), Phase 2
+  Slice 1 (`OneOffQuery` SQL front door), or Phase 4 `P0-RECOVERY-002`
+  if recovery parity is the priority.
 
 Required reading order
 1. `AGENTS.md`

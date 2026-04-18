@@ -109,7 +109,7 @@ Current important differences include:
 - brotli remains a reserved-but-unsupported compression tag even though the wire-byte numbering now matches the reference
 - outgoing buffer defaults differ sharply
 - `TransactionUpdate` heavy/light split and `UpdateStatus` outcome model match the Phase 1.5 parity target; caller metadata (`CallerIdentity`, `ReducerCall.ReducerName` / `ReducerID` / `Args`, `Timestamp`, `TotalHostExecutionDuration`) is now populated from the executor seam. `EnergyQuantaUsed` remains a permanent zero (no energy model)
-- `SubscribeMsg` / `UnsubscribeMsg` now carry `QueryID` (reference `query_id: QueryId`); no `SubscribeMulti` / `SubscribeSingle` variant split yet
+- `SubscribeMsg` / `UnsubscribeMsg` and their response envelopes (`SubscribeApplied` / `UnsubscribeApplied` / `SubscriptionError`) now carry `QueryID` (reference `query_id: QueryId`); client/server naming asymmetry closed. No `SubscribeMulti` / `SubscribeSingle` variant split yet
 - `CallReducer.flags` now carries `FullUpdate=0` / `NoSuccessNotify=1`; remaining divergence is the still-open SQL/query surface around other message families
 - one-off query shape differs
 

@@ -27,7 +27,7 @@ func TestSendEnqueuesFrame(t *testing.T) {
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	if err := s.Send(id, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestSendWithCompressionWrapsEnvelope(t *testing.T) {
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	if err := s.Send(id, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestSendBufferFull(t *testing.T) {
 	s := NewClientSender(mgr, &fakeInbox{})
 
 	// Fill buffer.
-	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	_ = s.Send(id, msg)
 
 	// Second send should return buffer-full.

@@ -21,7 +21,7 @@ func TestOutgoingBackpressure_BufferFullDisconnects(t *testing.T) {
 	mgr.Add(conn)
 	s := NewClientSender(mgr, inbox)
 
-	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 
 	// Fill the buffer.
 	if err := s.Send(conn.ID, msg); err != nil {
@@ -53,7 +53,7 @@ func TestOutgoingBackpressure_OverflowMessageNotDelivered(t *testing.T) {
 	mgr.Add(conn)
 	s := NewClientSender(mgr, inbox)
 
-	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	_ = s.Send(conn.ID, msg) // fills buffer
 
 	// Overflow.
@@ -77,7 +77,7 @@ func TestOutgoingBackpressure_FurtherSendsAfterDisconnect(t *testing.T) {
 	mgr.Add(conn)
 	s := NewClientSender(mgr, inbox)
 
-	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	_ = s.Send(conn.ID, msg)
 
 	// Overflow triggers disconnect.
@@ -118,7 +118,7 @@ func TestOutgoingBackpressure_SendConcurrentWithDisconnectDoesNotPanic(t *testin
 	mgr.Add(conn)
 	s := NewClientSender(mgr, inbox)
 
-	msg := SubscribeApplied{RequestID: 1, SubscriptionID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

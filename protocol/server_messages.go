@@ -26,24 +26,33 @@ type InitialConnection struct {
 	Token        string
 }
 
+// SubscribeApplied is the server response to a client Subscribe. QueryID
+// mirrors reference `SubscribeApplied.query_id: QueryId`
+// (reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs).
 type SubscribeApplied struct {
-	RequestID      uint32
-	SubscriptionID uint32
-	TableName      string
-	Rows           []byte // encoded RowList
+	RequestID uint32
+	QueryID   uint32
+	TableName string
+	Rows      []byte // encoded RowList
 }
 
+// UnsubscribeApplied is the server response to a client Unsubscribe.
+// QueryID mirrors reference `UnsubscribeApplied.query_id: QueryId`.
 type UnsubscribeApplied struct {
-	RequestID      uint32
-	SubscriptionID uint32
-	HasRows        bool
-	Rows           []byte // encoded RowList; only present if HasRows
+	RequestID uint32
+	QueryID   uint32
+	HasRows   bool
+	Rows      []byte // encoded RowList; only present if HasRows
 }
 
+// SubscriptionError is the server-emitted failure envelope for any
+// subscription-lifecycle error. QueryID mirrors reference
+// `SubscriptionError.query_id: Option<u32>`; Shunter always populates it
+// because every error in Phase 2 is correlated with a specific query.
 type SubscriptionError struct {
-	RequestID      uint32
-	SubscriptionID uint32
-	Error          string
+	RequestID uint32
+	QueryID   uint32
+	Error     string
 }
 
 // TransactionUpdate is the heavy caller-bound envelope (Phase 1.5).
@@ -133,13 +142,13 @@ func EncodeServerMessage(m any) ([]byte, error) {
 	case SubscribeApplied:
 		buf.WriteByte(TagSubscribeApplied)
 		writeUint32(&buf, msg.RequestID)
-		writeUint32(&buf, msg.SubscriptionID)
+		writeUint32(&buf, msg.QueryID)
 		writeString(&buf, msg.TableName)
 		writeBytes(&buf, msg.Rows)
 	case UnsubscribeApplied:
 		buf.WriteByte(TagUnsubscribeApplied)
 		writeUint32(&buf, msg.RequestID)
-		writeUint32(&buf, msg.SubscriptionID)
+		writeUint32(&buf, msg.QueryID)
 		if msg.HasRows {
 			buf.WriteByte(1)
 			writeBytes(&buf, msg.Rows)
@@ -149,7 +158,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 	case SubscriptionError:
 		buf.WriteByte(TagSubscriptionError)
 		writeUint32(&buf, msg.RequestID)
-		writeUint32(&buf, msg.SubscriptionID)
+		writeUint32(&buf, msg.QueryID)
 		writeString(&buf, msg.Error)
 	case TransactionUpdate:
 		buf.WriteByte(TagTransactionUpdate)
@@ -240,7 +249,7 @@ func decodeSubscribeApplied(body []byte) (SubscribeApplied, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.SubscriptionID, off, err = readUint32(body, off); err != nil {
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
 	if m.TableName, off, err = readString(body, off); err != nil {
@@ -259,7 +268,7 @@ func decodeUnsubscribeApplied(body []byte) (UnsubscribeApplied, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.SubscriptionID, off, err = readUint32(body, off); err != nil {
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
 	if len(body)-off < 1 {
@@ -282,7 +291,7 @@ func decodeSubscriptionError(body []byte) (SubscriptionError, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.SubscriptionID, off, err = readUint32(body, off); err != nil {
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
 	if m.Error, _, err = readString(body, off); err != nil {
