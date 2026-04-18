@@ -8,24 +8,31 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func waitForPhase0Delivery(t *testing.T, mock *mockFanOutSender, wantRes, wantTx int) {
+func waitForPhase0Delivery(t *testing.T, mock *mockFanOutSender, wantHeavy, wantLight int) {
 	t.Helper()
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		mock.mu.Lock()
-		gotRes := len(mock.resCalls)
-		gotTx := len(mock.txCalls)
+		gotH := len(mock.heavyCalls)
+		gotL := len(mock.lightCalls)
 		mock.mu.Unlock()
-		if gotRes == wantRes && gotTx == wantTx {
+		if gotH == wantHeavy && gotL == wantLight {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	t.Fatalf("timed out waiting for delivery counts: got res=%d tx=%d, want res=%d tx=%d", len(mock.resCalls), len(mock.txCalls), wantRes, wantTx)
+	t.Fatalf("timed out waiting for delivery counts: got heavy=%d light=%d, want heavy=%d light=%d",
+		len(mock.heavyCalls), len(mock.lightCalls), wantHeavy, wantLight)
 }
 
+// TestPhase0ParityCanonicalReducerDeliveryFlow is the `P0-DELIVERY-001`
+// scenario lock — connect → subscribe → reducer → caller heavy →
+// non-caller light, with confirmed-read gating on TxDurable. Phase 1.5
+// flipped the caller-side envelope from `ReducerCallResult` to the
+// reference heavy `TransactionUpdate` (see
+// `docs/parity-phase1.5-outcome-model.md`).
 func TestPhase0ParityCanonicalReducerDeliveryFlow(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
@@ -41,11 +48,6 @@ func TestPhase0ParityCanonicalReducerDeliveryFlow(t *testing.T) {
 	go w.Run(ctx)
 
 	durableCh := make(chan types.TxID, 1)
-	callerResult := &ReducerCallResult{
-		RequestID: 77,
-		Status:    0,
-		TxID:      types.TxID(44),
-	}
 	inbox <- FanOutMessage{
 		TxID:      types.TxID(44),
 		TxDurable: durableCh,
@@ -53,15 +55,16 @@ func TestPhase0ParityCanonicalReducerDeliveryFlow(t *testing.T) {
 			caller: {{SubscriptionID: 1, TableName: "widgets", Inserts: []types.ProductValue{{types.NewUint32(10)}}}},
 			other:  {{SubscriptionID: 2, TableName: "widgets", Inserts: []types.ProductValue{{types.NewUint32(20)}}}},
 		},
-		CallerConnID: &caller,
-		CallerResult: callerResult,
+		CallerConnID:  &caller,
+		CallerOutcome: committedOutcome(77),
 	}
 
 	time.Sleep(30 * time.Millisecond)
 	mock.mu.Lock()
-	if len(mock.resCalls) != 0 || len(mock.txCalls) != 0 {
+	if len(mock.heavyCalls) != 0 || len(mock.lightCalls) != 0 {
 		mock.mu.Unlock()
-		t.Fatalf("delivery should wait for confirmed-read durability; got res=%d tx=%d before durable", len(mock.resCalls), len(mock.txCalls))
+		t.Fatalf("delivery should wait for confirmed-read durability; got heavy=%d light=%d before durable",
+			len(mock.heavyCalls), len(mock.lightCalls))
 	}
 	mock.mu.Unlock()
 
@@ -71,29 +74,32 @@ func TestPhase0ParityCanonicalReducerDeliveryFlow(t *testing.T) {
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 
-	if mock.resCalls[0].ConnID != caller {
-		t.Fatalf("caller result connID = %x, want caller %x", mock.resCalls[0].ConnID, caller)
+	if mock.heavyCalls[0].ConnID != caller {
+		t.Fatalf("caller heavy connID = %x, want caller %x", mock.heavyCalls[0].ConnID, caller)
 	}
-	if mock.resCalls[0].Result.RequestID != 77 || mock.resCalls[0].Result.TxID != 44 {
-		t.Fatalf("caller result = %+v, want request_id=77 tx_id=44", *mock.resCalls[0].Result)
+	if mock.heavyCalls[0].Outcome.RequestID != 77 {
+		t.Fatalf("caller heavy RequestID = %d, want 77", mock.heavyCalls[0].Outcome.RequestID)
 	}
-	if len(mock.resCalls[0].Result.TransactionUpdate) != 1 {
-		t.Fatalf("caller embedded updates = %d, want 1", len(mock.resCalls[0].Result.TransactionUpdate))
+	if mock.heavyCalls[0].Outcome.Kind != CallerOutcomeCommitted {
+		t.Fatalf("caller heavy Kind = %d, want CallerOutcomeCommitted", mock.heavyCalls[0].Outcome.Kind)
 	}
-	if mock.resCalls[0].Result.TransactionUpdate[0].SubscriptionID != 1 {
-		t.Fatalf("caller embedded sub_id = %d, want 1", mock.resCalls[0].Result.TransactionUpdate[0].SubscriptionID)
+	if len(mock.heavyCalls[0].CallerUpdates) != 1 {
+		t.Fatalf("caller embedded updates = %d, want 1", len(mock.heavyCalls[0].CallerUpdates))
+	}
+	if mock.heavyCalls[0].CallerUpdates[0].SubscriptionID != 1 {
+		t.Fatalf("caller embedded sub_id = %d, want 1", mock.heavyCalls[0].CallerUpdates[0].SubscriptionID)
 	}
 
-	if mock.txCalls[0].ConnID != other {
-		t.Fatalf("non-caller update connID = %x, want other %x", mock.txCalls[0].ConnID, other)
+	if mock.lightCalls[0].ConnID != other {
+		t.Fatalf("non-caller light connID = %x, want other %x", mock.lightCalls[0].ConnID, other)
 	}
-	if mock.txCalls[0].TxID != 44 {
-		t.Fatalf("non-caller tx_id = %d, want 44", mock.txCalls[0].TxID)
+	if mock.lightCalls[0].RequestID != 77 {
+		t.Fatalf("non-caller light RequestID = %d, want 77 (propagated from caller outcome)", mock.lightCalls[0].RequestID)
 	}
-	if len(mock.txCalls[0].Updates) != 1 {
-		t.Fatalf("non-caller updates len = %d, want 1", len(mock.txCalls[0].Updates))
+	if len(mock.lightCalls[0].Updates) != 1 {
+		t.Fatalf("non-caller updates len = %d, want 1", len(mock.lightCalls[0].Updates))
 	}
-	if mock.txCalls[0].Updates[0].SubscriptionID != 2 {
-		t.Fatalf("non-caller sub_id = %d, want 2", mock.txCalls[0].Updates[0].SubscriptionID)
+	if mock.lightCalls[0].Updates[0].SubscriptionID != 2 {
+		t.Fatalf("non-caller sub_id = %d, want 2", mock.lightCalls[0].Updates[0].SubscriptionID)
 	}
 }

@@ -5,12 +5,15 @@ import "github.com/ponchione/shunter/types"
 // FanOutMessage is the handoff payload between the executor's evaluation
 // loop and the fan-out worker (SPEC-004 §8.1 / Story 6.1).
 //
-// This file is the minimal E6.1 "contract slice" that Story 5.1 depends on.
-// The fan-out worker, backpressure policy, and actual protocol delivery live
-// in Epic 6's remaining stories and Phase 8 of the execution plan — none of
-// them land here.
+// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
+// when the commit originated from a caller-addressable reducer call,
+// `CallerConnID` and `CallerOutcome` are populated so the fan-out
+// worker can deliver the heavy `TransactionUpdate` envelope to the
+// caller and the light envelope to non-callers. The previous
+// `CallerResult` forward-declaration was replaced by `CallerOutcome`.
 type FanOutMessage struct {
-	// TxID identifies the transaction this payload came from.
+	// TxID identifies the transaction this payload came from. Zero for
+	// synthetic caller-outcome deliveries with no underlying commit.
 	TxID types.TxID
 
 	// TxDurable becomes ready when the transaction is durable. The fan-out
@@ -27,21 +30,24 @@ type FanOutMessage struct {
 	// is owned by the deferred Epic 6 / SPEC-005 integration path.
 	Errors map[types.ConnectionID][]SubscriptionError
 
-	// CallerConnID and CallerResult are optional metadata for reducer-
-	// originated commits. When present, the caller connection's update
-	// slice is routed into the ReducerCallResult path in the delivery
-	// layer instead of emitting a standalone TransactionUpdate.
+	// CallerConnID, when non-nil, identifies the caller connection. The
+	// fan-out worker routes this connection's delivery into the heavy
+	// envelope regardless of whether the evaluator produced any row-touches.
 	CallerConnID *types.ConnectionID
-	CallerResult *ReducerCallResult
+
+	// CallerOutcome carries the caller-visible reducer outcome and the
+	// metadata required to assemble the heavy `TransactionUpdate`
+	// envelope. Populated if and only if `CallerConnID` is non-nil.
+	CallerOutcome *CallerOutcome
 }
 
 // PostCommitMeta carries executor-owned delivery metadata into the
 // subscription fan-out seam. Zero value means ordinary non-caller,
 // fast-read delivery.
 type PostCommitMeta struct {
-	TxDurable    <-chan types.TxID
-	CallerConnID *types.ConnectionID
-	CallerResult *ReducerCallResult
+	TxDurable     <-chan types.TxID
+	CallerConnID  *types.ConnectionID
+	CallerOutcome *CallerOutcome
 }
 
 // SubscriptionError is the protocol-facing evaluation-failure payload queued
@@ -55,14 +61,33 @@ type SubscriptionError struct {
 	Message        string
 }
 
-// ReducerCallResult is the caller-side response envelope used by fan-out
-// delivery. This forward declaration matches the protocol-owned shape from
-// SPEC-005 §8.7 closely enough for the subscription/protocol seam.
-type ReducerCallResult struct {
-	RequestID         uint32
-	Status            uint8
-	TxID              types.TxID
-	Error             string
-	Energy            uint64
-	TransactionUpdate []SubscriptionUpdate
+// CallerOutcomeKind is the discriminant for `CallerOutcome`. It maps
+// directly onto the reference `UpdateStatus` tagged union. See
+// `docs/parity-phase1.5-outcome-model.md`.
+type CallerOutcomeKind uint8
+
+const (
+	CallerOutcomeCommitted CallerOutcomeKind = iota
+	CallerOutcomeFailed
+	CallerOutcomeOutOfEnergy
+)
+
+// CallerOutcome carries the caller-visible reducer outcome plus the
+// metadata required by the protocol layer to assemble the heavy
+// `TransactionUpdate` envelope. The `Kind` field selects the
+// `UpdateStatus` arm on the wire. `Error` is only read when Kind is
+// `CallerOutcomeFailed`. Row deltas are not carried here — they are
+// produced by the evaluator and delivered alongside the outcome by the
+// fan-out worker / adapter.
+type CallerOutcome struct {
+	Kind                       CallerOutcomeKind
+	Error                      string
+	CallerIdentity             [32]byte
+	ReducerName                string
+	ReducerID                  uint32
+	Args                       []byte
+	RequestID                  uint32
+	Timestamp                  int64
+	EnergyQuantaUsed           uint64
+	TotalHostExecutionDuration int64
 }

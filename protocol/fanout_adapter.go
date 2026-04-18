@@ -13,7 +13,15 @@ import (
 
 // FanOutSenderAdapter wraps a ClientSender to implement
 // subscription.FanOutSender. Converts subscription-domain types to
-// protocol wire format before delivery (SPEC-004 §8 / Story 6.1).
+// protocol wire format before delivery.
+//
+// Phase 1.5 outcome-model split (`docs/parity-phase1.5-outcome-model.md`):
+//   - Caller receives the heavy `TransactionUpdate` via
+//     SendTransactionUpdateHeavy. Caller's visible row delta is carried
+//     inside `StatusCommitted.Update` (or omitted for `StatusFailed` /
+//     `StatusOutOfEnergy`).
+//   - Non-callers whose rows were touched receive
+//     `TransactionUpdateLight` via SendTransactionUpdateLight.
 type FanOutSenderAdapter struct {
 	sender ClientSender
 }
@@ -22,22 +30,47 @@ func NewFanOutSenderAdapter(sender ClientSender) *FanOutSenderAdapter {
 	return &FanOutSenderAdapter{sender: sender}
 }
 
-func (a *FanOutSenderAdapter) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []subscription.SubscriptionUpdate, memo *subscription.EncodingMemo) error {
+// SendTransactionUpdateHeavy delivers the caller's heavy
+// `TransactionUpdate`. For `StatusCommitted` outcomes the caller's
+// visible row delta is encoded into `StatusCommitted.Update`. For
+// `StatusFailed` / `StatusOutOfEnergy` outcomes the update slice is
+// ignored to match the reference wire contract.
+func (a *FanOutSenderAdapter) SendTransactionUpdateHeavy(
+	connID types.ConnectionID,
+	outcome subscription.CallerOutcome,
+	callerUpdates []subscription.SubscriptionUpdate,
+	memo *subscription.EncodingMemo,
+) error {
+	status, err := buildUpdateStatus(outcome, callerUpdates, memo)
+	if err != nil {
+		return fmt.Errorf("encode caller outcome: %w", err)
+	}
+	msg := &TransactionUpdate{
+		Status:                     status,
+		CallerIdentity:             outcome.CallerIdentity,
+		CallerConnectionID:         connID,
+		ReducerCall:                reducerCallInfoFrom(outcome),
+		Timestamp:                  outcome.Timestamp,
+		EnergyQuantaUsed:           outcome.EnergyQuantaUsed,
+		TotalHostExecutionDuration: outcome.TotalHostExecutionDuration,
+	}
+	return mapDeliveryError(a.sender.SendTransactionUpdate(connID, msg))
+}
+
+// SendTransactionUpdateLight delivers the delta-only envelope to
+// non-callers whose rows were touched.
+func (a *FanOutSenderAdapter) SendTransactionUpdateLight(
+	connID types.ConnectionID,
+	requestID uint32,
+	updates []subscription.SubscriptionUpdate,
+	memo *subscription.EncodingMemo,
+) error {
 	encoded, err := encodeSubscriptionUpdatesMemoized(updates, memo)
 	if err != nil {
 		return fmt.Errorf("encode updates: %w", err)
 	}
-	msg := &TransactionUpdate{TxID: uint64(txID), Updates: encoded}
-	return mapDeliveryError(a.sender.SendTransactionUpdate(connID, msg))
-}
-
-func (a *FanOutSenderAdapter) SendReducerResult(connID types.ConnectionID, result *subscription.ReducerCallResult, memo *subscription.EncodingMemo) error {
-	callerUpdates := result.TransactionUpdate
-	pr, err := encodeReducerCallResultMemoized(result, callerUpdates, memo)
-	if err != nil {
-		return fmt.Errorf("encode reducer result: %w", err)
-	}
-	return mapDeliveryError(a.sender.SendReducerResult(connID, pr))
+	msg := &TransactionUpdateLight{RequestID: requestID, Update: encoded}
+	return mapDeliveryError(a.sender.SendTransactionUpdateLight(connID, msg))
 }
 
 func (a *FanOutSenderAdapter) SendSubscriptionError(connID types.ConnectionID, subErr subscription.SubscriptionError) error {
@@ -143,25 +176,32 @@ func encodeRows(rows []types.ProductValue) ([]byte, error) {
 	return EncodeRowList(encoded), nil
 }
 
-func encodeReducerCallResultMemoized(sr *subscription.ReducerCallResult, callerUpdates []subscription.SubscriptionUpdate, memo *subscription.EncodingMemo) (*ReducerCallResult, error) {
-	var encodedUpdates []SubscriptionUpdate
-	if sr.Status == 0 {
-		var err error
-		encodedUpdates, err = encodeSubscriptionUpdatesMemoized(callerUpdates, memo)
+func buildUpdateStatus(
+	outcome subscription.CallerOutcome,
+	callerUpdates []subscription.SubscriptionUpdate,
+	memo *subscription.EncodingMemo,
+) (UpdateStatus, error) {
+	switch outcome.Kind {
+	case subscription.CallerOutcomeCommitted:
+		encoded, err := encodeSubscriptionUpdatesMemoized(callerUpdates, memo)
 		if err != nil {
 			return nil, err
 		}
+		return StatusCommitted{Update: encoded}, nil
+	case subscription.CallerOutcomeFailed:
+		return StatusFailed{Error: outcome.Error}, nil
+	case subscription.CallerOutcomeOutOfEnergy:
+		return StatusOutOfEnergy{}, nil
+	default:
+		return nil, fmt.Errorf("unknown CallerOutcome kind %d", outcome.Kind)
 	}
-	return &ReducerCallResult{
-		RequestID:         sr.RequestID,
-		Status:            sr.Status,
-		TxID:              uint64(sr.TxID),
-		Error:             sr.Error,
-		Energy:            0, // v1: always zero (SPEC-005 §8.7)
-		TransactionUpdate: encodedUpdates,
-	}, nil
 }
 
-func encodeReducerCallResult(sr *subscription.ReducerCallResult, callerUpdates []subscription.SubscriptionUpdate) (*ReducerCallResult, error) {
-	return encodeReducerCallResultMemoized(sr, callerUpdates, nil)
+func reducerCallInfoFrom(outcome subscription.CallerOutcome) ReducerCallInfo {
+	return ReducerCallInfo{
+		ReducerName: outcome.ReducerName,
+		ReducerID:   outcome.ReducerID,
+		Args:        outcome.Args,
+		RequestID:   outcome.RequestID,
+	}
 }

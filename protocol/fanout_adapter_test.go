@@ -85,76 +85,15 @@ func TestEncodeSubscriptionUpdate_MultiRow(t *testing.T) {
 	}
 }
 
-func TestEncodeReducerCallResult_Committed(t *testing.T) {
-	sr := &subscription.ReducerCallResult{
-		RequestID: 5,
-		Status:    0,
-		TxID:      types.TxID(100),
-		Error:     "",
-		Energy:    999,
-	}
-	callerUpdates := []subscription.SubscriptionUpdate{{
-		SubscriptionID: 1,
-		TableName:      "t1",
-		Inserts:        []types.ProductValue{{types.NewUint32(1)}},
-	}}
-	pr, err := encodeReducerCallResult(sr, callerUpdates)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pr.RequestID != 5 {
-		t.Fatalf("RequestID = %d, want 5", pr.RequestID)
-	}
-	if pr.Status != 0 {
-		t.Fatalf("Status = %d, want 0", pr.Status)
-	}
-	if pr.TxID != 100 {
-		t.Fatalf("TxID = %d, want 100", pr.TxID)
-	}
-	if pr.Energy != 0 {
-		t.Fatalf("Energy = %d, want 0 (v1)", pr.Energy)
-	}
-	if len(pr.TransactionUpdate) != 1 {
-		t.Fatalf("TransactionUpdate len = %d, want 1", len(pr.TransactionUpdate))
-	}
-}
-
-func TestEncodeReducerCallResult_Failed(t *testing.T) {
-	sr := &subscription.ReducerCallResult{
-		RequestID: 3,
-		Status:    1,
-		TxID:      types.TxID(50),
-		Error:     "panic",
-	}
-	callerUpdates := []subscription.SubscriptionUpdate{{
-		SubscriptionID: 1,
-		TableName:      "t1",
-		Inserts:        []types.ProductValue{{types.NewUint32(1)}},
-	}}
-	pr, err := encodeReducerCallResult(sr, callerUpdates)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pr.Status != 1 {
-		t.Fatalf("Status = %d, want 1", pr.Status)
-	}
-	if pr.Error != "panic" {
-		t.Fatalf("Error = %q, want %q", pr.Error, "panic")
-	}
-	if len(pr.TransactionUpdate) != 0 {
-		t.Fatalf("TransactionUpdate len = %d, want 0 for failed status", len(pr.TransactionUpdate))
-	}
-}
-
-// --- Adapter integration tests ---
+// --- Adapter integration tests (Phase 1.5 envelope split) ---
 
 type mockClientSender struct {
-	mu             sync.Mutex
-	calls          []senderCall
-	sendErr        error
-	txUpdates      []*TransactionUpdate
-	reducerResults []*ReducerCallResult
-	genericMsgs    []any
+	mu          sync.Mutex
+	calls       []senderCall
+	sendErr     error
+	heavyCalls  []*TransactionUpdate
+	lightCalls  []*TransactionUpdateLight
+	genericMsgs []any
 }
 
 type senderCall struct {
@@ -173,14 +112,14 @@ func (m *mockClientSender) SendTransactionUpdate(connID types.ConnectionID, upda
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, senderCall{method: "SendTransactionUpdate", connID: connID})
-	m.txUpdates = append(m.txUpdates, update)
+	m.heavyCalls = append(m.heavyCalls, update)
 	return m.sendErr
 }
-func (m *mockClientSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
+func (m *mockClientSender) SendTransactionUpdateLight(connID types.ConnectionID, update *TransactionUpdateLight) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls = append(m.calls, senderCall{method: "SendReducerResult", connID: connID})
-	m.reducerResults = append(m.reducerResults, result)
+	m.calls = append(m.calls, senderCall{method: "SendTransactionUpdateLight", connID: connID})
+	m.lightCalls = append(m.lightCalls, update)
 	return m.sendErr
 }
 
@@ -190,7 +129,7 @@ func connID(b byte) types.ConnectionID {
 	return id
 }
 
-func TestFanOutSenderAdapter_SendTransactionUpdateRejectsPendingSubscription(t *testing.T) {
+func TestFanOutSenderAdapter_SendTransactionUpdateLightRejectsPendingSubscription(t *testing.T) {
 	conn, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(conn)
@@ -201,8 +140,8 @@ func TestFanOutSenderAdapter_SendTransactionUpdateRejectsPendingSubscription(t *
 		t.Fatal(err)
 	}
 
-	err := adapter.SendTransactionUpdate(
-		id, types.TxID(100),
+	err := adapter.SendTransactionUpdateLight(
+		id, 7,
 		[]subscription.SubscriptionUpdate{{
 			SubscriptionID: 5,
 			TableName:      "t1",
@@ -215,11 +154,11 @@ func TestFanOutSenderAdapter_SendTransactionUpdateRejectsPendingSubscription(t *
 	}
 }
 
-func TestFanOutSenderAdapter_SendTransactionUpdate(t *testing.T) {
+func TestFanOutSenderAdapter_SendTransactionUpdateLight(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)
-	err := adapter.SendTransactionUpdate(
-		connID(1), types.TxID(100),
+	err := adapter.SendTransactionUpdateLight(
+		connID(1), 11,
 		[]subscription.SubscriptionUpdate{{
 			SubscriptionID: 5,
 			TableName:      "t1",
@@ -232,16 +171,19 @@ func TestFanOutSenderAdapter_SendTransactionUpdate(t *testing.T) {
 	}
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.calls) != 1 || mock.calls[0].method != "SendTransactionUpdate" {
-		t.Fatalf("calls = %+v, want 1 SendTransactionUpdate", mock.calls)
+	if len(mock.calls) != 1 || mock.calls[0].method != "SendTransactionUpdateLight" {
+		t.Fatalf("calls = %+v, want 1 SendTransactionUpdateLight", mock.calls)
+	}
+	if mock.lightCalls[0].RequestID != 11 {
+		t.Fatalf("RequestID = %d, want 11", mock.lightCalls[0].RequestID)
 	}
 }
 
 func TestFanOutSenderAdapter_BufferFull_MapsError(t *testing.T) {
 	mock := &mockClientSender{sendErr: ErrClientBufferFull}
 	adapter := NewFanOutSenderAdapter(mock)
-	err := adapter.SendTransactionUpdate(
-		connID(1), types.TxID(1),
+	err := adapter.SendTransactionUpdateLight(
+		connID(1), 1,
 		[]subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "t"}},
 		nil,
 	)
@@ -253,8 +195,8 @@ func TestFanOutSenderAdapter_BufferFull_MapsError(t *testing.T) {
 func TestFanOutSenderAdapter_ConnNotFound_MapsError(t *testing.T) {
 	mock := &mockClientSender{sendErr: ErrConnNotFound}
 	adapter := NewFanOutSenderAdapter(mock)
-	err := adapter.SendTransactionUpdate(
-		connID(1), types.TxID(1),
+	err := adapter.SendTransactionUpdateLight(
+		connID(1), 1,
 		[]subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "t"}},
 		nil,
 	)
@@ -276,17 +218,17 @@ func TestFanOutSenderAdapter_RowPayloadRoundTrip(t *testing.T) {
 			{types.NewUint32(7), types.NewString("gone")},
 		},
 	}}
-	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(22), updates, nil); err != nil {
+	if err := adapter.SendTransactionUpdateLight(connID(1), 22, updates, nil); err != nil {
 		t.Fatal(err)
 	}
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.txUpdates) != 1 {
-		t.Fatalf("txUpdates=%d want 1", len(mock.txUpdates))
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls=%d want 1", len(mock.lightCalls))
 	}
-	got := mock.txUpdates[0]
-	if len(got.Updates) != 1 {
-		t.Fatalf("encoded updates=%d want 1", len(got.Updates))
+	got := mock.lightCalls[0]
+	if len(got.Update) != 1 {
+		t.Fatalf("encoded updates=%d want 1", len(got.Update))
 	}
 	checkRows := func(name string, rows []types.ProductValue, encoded []byte) {
 		decoded, err := DecodeRowList(encoded)
@@ -306,42 +248,69 @@ func TestFanOutSenderAdapter_RowPayloadRoundTrip(t *testing.T) {
 			}
 		}
 	}
-	checkRows("inserts", updates[0].Inserts, got.Updates[0].Inserts)
-	checkRows("deletes", updates[0].Deletes, got.Updates[0].Deletes)
+	checkRows("inserts", updates[0].Inserts, got.Update[0].Inserts)
+	checkRows("deletes", updates[0].Deletes, got.Update[0].Deletes)
 }
 
-func TestFanOutSenderAdapter_SendReducerResultSuccessPath(t *testing.T) {
+func TestFanOutSenderAdapter_SendTransactionUpdateHeavyCommitted(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)
-	result := &subscription.ReducerCallResult{
+	outcome := subscription.CallerOutcome{
+		Kind:      subscription.CallerOutcomeCommitted,
 		RequestID: 9,
-		Status:    0,
-		TxID:      types.TxID(44),
-		Energy:    999,
-		TransactionUpdate: []subscription.SubscriptionUpdate{{
-			SubscriptionID: 1,
-			TableName:      "players",
-			Inserts:        []types.ProductValue{{types.NewUint32(1)}},
-		}},
 	}
-	if err := adapter.SendReducerResult(connID(1), result, nil); err != nil {
+	callerUpdates := []subscription.SubscriptionUpdate{{
+		SubscriptionID: 1,
+		TableName:      "players",
+		Inserts:        []types.ProductValue{{types.NewUint32(1)}},
+	}}
+	if err := adapter.SendTransactionUpdateHeavy(connID(1), outcome, callerUpdates, nil); err != nil {
 		t.Fatal(err)
 	}
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.reducerResults) != 1 {
-		t.Fatalf("reducerResults=%d want 1", len(mock.reducerResults))
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls=%d want 1", len(mock.heavyCalls))
 	}
-	got := mock.reducerResults[0]
-	if got.RequestID != 9 || got.TxID != 44 || got.Energy != 0 {
-		t.Fatalf("encoded reducer result = %+v", got)
+	got := mock.heavyCalls[0]
+	committed, ok := got.Status.(StatusCommitted)
+	if !ok {
+		t.Fatalf("Status = %T, want StatusCommitted", got.Status)
 	}
-	if len(got.TransactionUpdate) != 1 {
-		t.Fatalf("TransactionUpdate len=%d want 1", len(got.TransactionUpdate))
+	if len(committed.Update) != 1 {
+		t.Fatalf("committed updates=%d want 1", len(committed.Update))
+	}
+	if got.ReducerCall.RequestID != 9 {
+		t.Fatalf("ReducerCall.RequestID = %d, want 9", got.ReducerCall.RequestID)
 	}
 }
 
-func TestFanOutSenderAdapter_SendReducerResultRejectsPendingSubscription(t *testing.T) {
+func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	outcome := subscription.CallerOutcome{
+		Kind:      subscription.CallerOutcomeFailed,
+		RequestID: 3,
+		Error:     "panic",
+	}
+	if err := adapter.SendTransactionUpdateHeavy(connID(1), outcome, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls=%d want 1", len(mock.heavyCalls))
+	}
+	failed, ok := mock.heavyCalls[0].Status.(StatusFailed)
+	if !ok {
+		t.Fatalf("Status = %T, want StatusFailed", mock.heavyCalls[0].Status)
+	}
+	if failed.Error != "panic" {
+		t.Fatalf("StatusFailed.Error = %q, want %q", failed.Error, "panic")
+	}
+}
+
+func TestFanOutSenderAdapter_SendTransactionUpdateHeavyRejectsPendingSubscription(t *testing.T) {
 	conn, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(conn)
@@ -352,17 +321,13 @@ func TestFanOutSenderAdapter_SendReducerResultRejectsPendingSubscription(t *test
 		t.Fatal(err)
 	}
 
-	result := &subscription.ReducerCallResult{
-		RequestID: 9,
-		Status:    0,
-		TxID:      types.TxID(44),
-		TransactionUpdate: []subscription.SubscriptionUpdate{{
-			SubscriptionID: 7,
-			TableName:      "players",
-			Inserts:        []types.ProductValue{{types.NewUint32(1)}},
-		}},
-	}
-	if err := adapter.SendReducerResult(id, result, nil); !errors.Is(err, ErrSubscriptionNotActive) {
+	outcome := subscription.CallerOutcome{Kind: subscription.CallerOutcomeCommitted, RequestID: 9}
+	callerUpdates := []subscription.SubscriptionUpdate{{
+		SubscriptionID: 7,
+		TableName:      "players",
+		Inserts:        []types.ProductValue{{types.NewUint32(1)}},
+	}}
+	if err := adapter.SendTransactionUpdateHeavy(id, outcome, callerUpdates, nil); !errors.Is(err, ErrSubscriptionNotActive) {
 		t.Fatalf("err = %v, want ErrSubscriptionNotActive", err)
 	}
 }
@@ -390,7 +355,7 @@ func TestFanOutSenderAdapter_SendSubscriptionErrorPreservesRequestID(t *testing.
 	}
 }
 
-func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossTransactionUpdateCalls(t *testing.T) {
+func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossLightCalls(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)
 	memo := subscription.NewEncodingMemo()
@@ -406,10 +371,10 @@ func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossTransactionUpdateCalls(t *
 
 	updates1 := []subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "players", Inserts: sharedRows}}
 	updates2 := []subscription.SubscriptionUpdate{{SubscriptionID: 2, TableName: "players", Inserts: sharedRows}}
-	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(55), updates1, memo); err != nil {
+	if err := adapter.SendTransactionUpdateLight(connID(1), 55, updates1, memo); err != nil {
 		t.Fatal(err)
 	}
-	if err := adapter.SendTransactionUpdate(connID(2), types.TxID(55), updates2, memo); err != nil {
+	if err := adapter.SendTransactionUpdateLight(connID(2), 55, updates2, memo); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {
@@ -431,10 +396,10 @@ func TestFanOutSenderAdapter_MemoCacheDoesNotLeakAcrossTransactions(t *testing.T
 	defer func() { encodeRowsUnmemoized = oldEncodeRows }()
 
 	updates := []subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "players", Inserts: sharedRows}}
-	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(60), updates, subscription.NewEncodingMemo()); err != nil {
+	if err := adapter.SendTransactionUpdateLight(connID(1), 60, updates, subscription.NewEncodingMemo()); err != nil {
 		t.Fatal(err)
 	}
-	if err := adapter.SendTransactionUpdate(connID(1), types.TxID(61), updates, subscription.NewEncodingMemo()); err != nil {
+	if err := adapter.SendTransactionUpdateLight(connID(1), 61, updates, subscription.NewEncodingMemo()); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {

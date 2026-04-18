@@ -458,11 +458,17 @@ func (e *Executor) postCommit(
 	if opts.source == CallSourceExternal && opts.callerConnID != nil {
 		callerConnID := *opts.callerConnID
 		meta.CallerConnID = &callerConnID
-		meta.CallerResult = &subscription.ReducerCallResult{
+		// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
+		// caller metadata is populated on every admitted commit so the
+		// fan-out worker can assemble the heavy `TransactionUpdate`
+		// envelope. Numeric metadata (Timestamp, Energy, Duration) is
+		// stubbed as zero in Phase 1.5; CallerIdentity / ReducerName /
+		// Args wiring is deferred to the Phase 3 runtime-parity slice —
+		// the executor surface does not yet carry those fields to the
+		// post-commit seam.
+		meta.CallerOutcome = &subscription.CallerOutcome{
+			Kind:      subscription.CallerOutcomeCommitted,
 			RequestID: opts.callerRequestID,
-			Status:    0,
-			TxID:      txID,
-			Energy:    0,
 		}
 	}
 	e.subs.EvalAndBroadcast(txID, changeset, view, meta)

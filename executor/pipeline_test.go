@@ -534,15 +534,16 @@ func TestPostCommitExternalReducerPropagatesCallerMetadata(t *testing.T) {
 	if meta.CallerConnID == nil || *meta.CallerConnID != (types.ConnectionID{9}) {
 		t.Fatalf("CallerConnID=%v want %v", meta.CallerConnID, types.ConnectionID{9})
 	}
-	if meta.CallerResult == nil {
-		t.Fatal("CallerResult = nil, want populated result")
+	if meta.CallerOutcome == nil {
+		t.Fatal("CallerOutcome = nil, want populated outcome")
 	}
-	if meta.CallerResult.RequestID != 77 {
-		t.Fatalf("CallerResult.RequestID=%d want 77", meta.CallerResult.RequestID)
+	if meta.CallerOutcome.RequestID != 77 {
+		t.Fatalf("CallerOutcome.RequestID=%d want 77", meta.CallerOutcome.RequestID)
 	}
-	if meta.CallerResult.Status != 0 || meta.CallerResult.TxID != resp.TxID {
-		t.Fatalf("CallerResult=%+v want committed result for tx %d", *meta.CallerResult, resp.TxID)
+	if meta.CallerOutcome.Kind != subscription.CallerOutcomeCommitted {
+		t.Fatalf("CallerOutcome.Kind=%d want CallerOutcomeCommitted", meta.CallerOutcome.Kind)
 	}
+	_ = resp
 }
 
 func TestPostCommitLifecycleLeavesCallerMetadataNil(t *testing.T) {
@@ -556,7 +557,7 @@ func TestPostCommitLifecycleLeavesCallerMetadataNil(t *testing.T) {
 		t.Fatalf("metas=%d want 1", len(h.subs.metas))
 	}
 	meta := h.subs.metas[0]
-	if meta.CallerConnID != nil || meta.CallerResult != nil {
+	if meta.CallerConnID != nil || meta.CallerOutcome != nil {
 		t.Fatalf("lifecycle meta should not fabricate caller fields: %+v", meta)
 	}
 }

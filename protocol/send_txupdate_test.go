@@ -7,7 +7,13 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestDeliverTransactionUpdateSingleConn(t *testing.T) {
+// Phase 1.5 outcome-model split: this file exercises the
+// `DeliverTransactionUpdateLight` helper used for non-caller
+// subscribers. Caller-heavy delivery is exercised through the fanout
+// adapter tests in `fanout_adapter_test.go` and the fanout worker tests
+// in `subscription/`.
+
+func TestDeliverTransactionUpdateLightSingleConn(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -22,7 +28,7 @@ func TestDeliverTransactionUpdateSingleConn(t *testing.T) {
 		},
 	}
 
-	errs := DeliverTransactionUpdate(s, mgr, 42, fanout)
+	errs := DeliverTransactionUpdateLight(s, mgr, 42, fanout)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -32,16 +38,16 @@ func TestDeliverTransactionUpdateSingleConn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tu := msg.(TransactionUpdate)
-	if tu.TxID != 42 {
-		t.Fatalf("TxID = %d, want 42", tu.TxID)
+	tu := msg.(TransactionUpdateLight)
+	if tu.RequestID != 42 {
+		t.Fatalf("RequestID = %d, want 42", tu.RequestID)
 	}
-	if len(tu.Updates) != 1 {
-		t.Fatalf("Updates len = %d, want 1", len(tu.Updates))
+	if len(tu.Update) != 1 {
+		t.Fatalf("Update len = %d, want 1", len(tu.Update))
 	}
 }
 
-func TestDeliverTransactionUpdateMultiConn(t *testing.T) {
+func TestDeliverTransactionUpdateLightMultiConn(t *testing.T) {
 	c1, id1 := testConn(false)
 	opts := DefaultProtocolOptions()
 	c2 := &Conn{
@@ -67,7 +73,7 @@ func TestDeliverTransactionUpdateMultiConn(t *testing.T) {
 		id2: {{SubscriptionID: 2, TableName: "t", Inserts: []byte{0x02}}},
 	}
 
-	errs := DeliverTransactionUpdate(s, mgr, 99, fanout)
+	errs := DeliverTransactionUpdateLight(s, mgr, 99, fanout)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -84,7 +90,7 @@ func TestDeliverTransactionUpdateMultiConn(t *testing.T) {
 	}
 }
 
-func TestDeliverTransactionUpdateSkipsDisconnected(t *testing.T) {
+func TestDeliverTransactionUpdateLightSkipsDisconnected(t *testing.T) {
 	mgr := NewConnManager()
 	s := NewClientSender(mgr, &fakeInbox{})
 
@@ -92,13 +98,13 @@ func TestDeliverTransactionUpdateSkipsDisconnected(t *testing.T) {
 		{99}: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
 	}
 
-	errs := DeliverTransactionUpdate(s, mgr, 1, fanout)
+	errs := DeliverTransactionUpdateLight(s, mgr, 1, fanout)
 	if len(errs) != 0 {
 		t.Fatalf("disconnected conn should be skipped, not error: %v", errs)
 	}
 }
 
-func TestDeliverTransactionUpdateSkipsEmptyUpdates(t *testing.T) {
+func TestDeliverTransactionUpdateLightSkipsEmptyUpdates(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -108,7 +114,7 @@ func TestDeliverTransactionUpdateSkipsEmptyUpdates(t *testing.T) {
 		id: {},
 	}
 
-	errs := DeliverTransactionUpdate(s, mgr, 1, fanout)
+	errs := DeliverTransactionUpdateLight(s, mgr, 1, fanout)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -119,7 +125,7 @@ func TestDeliverTransactionUpdateSkipsEmptyUpdates(t *testing.T) {
 	}
 }
 
-func TestDeliverTransactionUpdateRejectsPendingSubscription(t *testing.T) {
+func TestDeliverTransactionUpdateLightRejectsPendingSubscription(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -131,7 +137,7 @@ func TestDeliverTransactionUpdateRejectsPendingSubscription(t *testing.T) {
 		id: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
 	}
 
-	errs := DeliverTransactionUpdate(s, mgr, 7, fanout)
+	errs := DeliverTransactionUpdateLight(s, mgr, 7, fanout)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 invariant error, got %d", len(errs))
 	}
@@ -145,7 +151,7 @@ func TestDeliverTransactionUpdateRejectsPendingSubscription(t *testing.T) {
 	}
 }
 
-func TestDeliverTransactionUpdateBufferFull(t *testing.T) {
+func TestDeliverTransactionUpdateLightBufferFull(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.OutgoingBufferMessages = 1
 	id := types.ConnectionID{1}
@@ -170,7 +176,7 @@ func TestDeliverTransactionUpdateBufferFull(t *testing.T) {
 		id: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
 	}
 
-	errs := DeliverTransactionUpdate(s, mgr, 1, fanout)
+	errs := DeliverTransactionUpdateLight(s, mgr, 1, fanout)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 buffer-full error, got %d", len(errs))
 	}

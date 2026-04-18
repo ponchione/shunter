@@ -22,7 +22,7 @@ func (s assertingSender) SendTransactionUpdate(_ types.ConnectionID, _ *Transact
 	return nil
 }
 
-func (s assertingSender) SendReducerResult(_ types.ConnectionID, _ *ReducerCallResult) error {
+func (s assertingSender) SendTransactionUpdateLight(_ types.ConnectionID, _ *TransactionUpdateLight) error {
 	return nil
 }
 

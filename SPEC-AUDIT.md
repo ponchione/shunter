@@ -1377,13 +1377,11 @@ Fix: add all three sentinels to §11 (splitting into §11.2 registration, §11.3
 
 Fix: reconcile. Either (a) remove the top-level `CollectCandidates` from Story 5.2, document that Manager owns tier orchestration inline, and keep `CollectCandidatesForTable` as a shared entry point for external test callers; or (b) rewire the live `Manager.collectCandidates` to call the shared helpers with explicit resolver plumbing.
 
-### 2.10 [GAP] Caller-result delivery when caller's `Fanout` slice is empty is unspecified
+### 2.10 [RESOLVED] Caller-result delivery on empty fanout [CLOSED Phase 1.5 — pinned by subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout]
 
-- §8.2 step 4: "Special case: if this commit came from `CallReducer`, the caller connection's update slice is routed into `ReducerCallResult.transaction_update` instead of also receiving a standalone `TransactionUpdate`."
-- Implicit assumption: `msg.Fanout[*CallerConnID]` is non-nil. What happens for a reducer call that mutated nothing (or mutated rows no subscription covers): the caller is not present in `Fanout`, but `ReducerCallResult` must still be delivered with a success status.
-- Live `subscription/fanout_worker.go:118-143`: `callerUpdates = msg.Fanout[*msg.CallerConnID]` returns nil, then `result.TransactionUpdate = callerUpdates` (nil) if `Status == 0`, `nil` otherwise, then `SendReducerResult` is invoked regardless. Also, when `Status != 0`, `TransactionUpdate = nil` — failed reducer carries no updates. Neither policy is stated in §8.2.
-
-Fix: §8.2 must spell out: "Caller reducer delivery happens even when `CommitFanout[CallerConnID]` is empty; when present, the caller's subscription updates are attached to `ReducerCallResult.TransactionUpdate` on Status==0; on non-success Status the caller's subscription updates (if any) are dropped."
+- Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`) promoted the caller outcome to a heavy `TransactionUpdate` envelope routed through the fan-out seam.
+- Dispatch rule (`subscription/fanout_worker.go`): whenever `CallerConnID` is set, the worker always delivers the heavy envelope, regardless of whether `Fanout[CallerConnID]` is populated. On `CallerOutcomeCommitted` the caller's visible row delta (possibly empty) is embedded in `StatusCommitted.Update`; on `CallerOutcomeFailed` the update slice is omitted per reference.
+- Eval-loop guard (`subscription/eval.go`): early-return on "no active subscriptions" / "empty changeset" is skipped whenever caller metadata is present, so the caller's envelope is never silently dropped.
 
 ### 2.11 [GAP] Initial row limit's meaning for joins undefined
 
@@ -1393,15 +1391,10 @@ Fix: §8.2 must spell out: "Caller reducer delivery happens even when `CommitFan
 
 Fix: Story 4.2 should state "row limit applies to the materialized result set as returned to the client (joined rows count once)."
 
-### 2.12 [GAP] `PostCommitMeta.TxDurable` for empty-fanout transactions — still mandatory?
+### 2.12 [RESOLVED] `EvalAndBroadcast` empty-fanout early-return no longer drops caller outcome [CLOSED Phase 1.5 — pinned by subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout and subscription/phase0_parity_test.go::TestPhase0ParityCanonicalReducerDeliveryFlow]
 
-- §7.2 step 5 sends `FanOutMessage` regardless. Story 5.1 step 5 same.
-- But step 1 "If no active subscriptions: return immediately." So an empty-fanout case still results in zero `FanOutMessage` sent.
-- §8.2 step 1: "Wait for `TxDurable` (if confirmed reads required by any client)." When the fan-out map is empty, there are no clients — the wait is a no-op. Fine.
-- The caller case: a reducer call with no subscriptions active still needs `ReducerCallResult` delivered. If `EvalAndBroadcast` early-returns with "no active subscriptions", the caller never gets its reducer response via fan-out.
-- Live `subscription/eval.go:26`: `if !m.registry.hasActive() || changeset == nil || changeset.IsEmpty() { return }` — the caller-side `ReducerCallResult` is silently dropped in this branch because `FanOutMessage` is never constructed.
-
-Fix: §7.2 step 1 must state: "When no subscriptions are active **and no caller reducer result is pending**, return without sending `FanOutMessage`. Otherwise a `FanOutMessage` with empty `Fanout` and populated `CallerResult` must be emitted so the caller's response still goes out." Or: move caller-response delivery out of the subscription seam into an executor-only path (then §8.2 step 4 should be demoted to a cross-reference).
+- `subscription/eval.go:EvalAndBroadcast` now treats "no active subscriptions" / "empty changeset" as an early-return only when there is also no caller metadata. When `PostCommitMeta.CallerConnID` + `CallerOutcome` are set, a `FanOutMessage` is always emitted with empty `Fanout` so the worker can still deliver the caller's heavy envelope.
+- See the Phase 1.5 outcome-model decision doc for the broader context.
 
 ### 2.13 [GAP] `PruningIndexes.CollectCandidatesForTable` tier-2 silent skip when resolver is nil
 
@@ -1856,13 +1849,12 @@ Fix: 2.6 above covers the timeout. Also explicitly state in Story 3.5 "keep-aliv
 
 Fix: cross-reference SPEC-004 §3.2 in §10 or §12; add a line noting the v1 buffer budget is deliberately tight.
 
-### 3.4 [DIVERGE] No TransactionUpdate light/heavy split [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralTransactionUpdateNoHeavyLightSplit]
+### 3.4 [RESOLVED] TransactionUpdate light/heavy split adopted [CLOSED Phase 1.5 — pinned by protocol/parity_message_family_test.go::TestPhase15TransactionUpdateHeavyShape / TestPhase15TransactionUpdateLightShape / TestPhase15UpdateStatusVariants]
 
-- SpacetimeDB v1 distinguishes `TransactionUpdate` (heavy, caller metadata) vs `TransactionUpdateLight` (deltas only, non-caller broadcast) via `ClientConfig.tx_update_full` (`crates/client-api-messages/src/websocket/v1.rs:281-283`).
-- Shunter has a single `TransactionUpdate` shape — strictly delta-only, no reducer metadata — and routes caller-specific delivery through a dedicated `ReducerCallResult` tag (§8.7). SPEC-004 audit §3.2 flagged the absence of light/heavy distinction.
-- Shunter's design is cleaner (one tag, one shape) but means the caller's reducer metadata is delivered entirely via `ReducerCallResult`, and non-callers never see any reducer metadata at all.
-
-Fix: add a one-line note to §8.5 or §12 explaining the divergence: "SpacetimeDB distinguishes heavy/light TransactionUpdate variants by client preference. Shunter emits a single delta-only TransactionUpdate and routes caller-specific reducer metadata via ReducerCallResult (§8.7); non-callers never observe reducer metadata."
+- Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`) adopted the reference heavy/light envelope split.
+- Live code: callers receive heavy `TransactionUpdate{Status UpdateStatus, CallerIdentity, CallerConnectionID, ReducerCall ReducerCallInfo, Timestamp, EnergyQuantaUsed, TotalHostExecutionDuration}`; non-callers whose rows were touched receive `TransactionUpdateLight{RequestID, Update}`.
+- Numeric metadata (`Timestamp`, `EnergyQuantaUsed`, `TotalHostExecutionDuration`) is stubbed as zero in Phase 1.5 and flagged for Phase 3 runtime parity — see the decision doc.
+- `ReducerCallResult` envelope was removed from the wire surface; `TagReducerCallResult` byte stays reserved and the decoder rejects it (`TestPhase15TagReducerCallResultReserved`).
 
 ### 3.5 [DIVERGE] No SubscribeMulti / SubscribeSingle / QuerySetId [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants]
 
@@ -1894,15 +1886,11 @@ Fix: already covered by §7.1 equality-only design decision; add one line to §7
 - Phase 1 parity audit (Step 3.2) confirmed all call sites use the correct code for their condition: `1000` graceful, `1002` malformed/unknown-tag, `1008` auth-failure/backpressure/flood/idle-timeout, `1011` unexpected server error. No drift found.
 - `protocol/parity_close_codes_test.go` `TestPhase1ParityCloseCodeConstants` now pins all four constants against `websocket.Status*` values; `TestPhase1ParityHandshakeRejectionStatuses` pins the HTTP status codes for each rejection class. See ledger P0-PROTOCOL-003.
 
-### 3.9 [DIVERGE] `ReducerCallResult.status` enum maps to neither UpdateStatus nor ReducerOutcome [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralReducerCallResultFlatStatus]
+### 3.9 [RESOLVED] `UpdateStatus` tagged union adopted [CLOSED Phase 1.5 — pinned by protocol/parity_message_family_test.go::TestPhase15UpdateStatusVariants]
 
-- Shunter: `0=committed, 1=failed_user, 2=failed_panic, 3=not_found` (§8.7).
-- SpacetimeDB v1 `UpdateStatus`: `Committed / Failed(String) / OutOfEnergy`.
-- SpacetimeDB v2 `ReducerOutcome`: `Ok(ReducerOk) / OkEmpty / Err(Bytes) / InternalError(String)`.
-- Shunter's status=3 (`not_found`) does not exist in either reference variant; in reference this would be a `CloseFrame(Error)` (v1 behavior per message_handlers_v1.rs) or `ReducerOutcome::InternalError` (v2).
-- Shunter's status=2 (`failed_panic`) maps to SpacetimeDB's `InternalError` but is semantically narrower (specifically "Go panic" per SPEC-003).
-
-Fix: add a §8.7 divergence note: "Status enum is Shunter-specific; `not_found` is surfaced as a reducer-call result in Shunter rather than a connection-level error."
+- Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`) replaced the former flat `ReducerCallResult.Status uint8` with the reference three-arm `UpdateStatus` tagged union carried by heavy `TransactionUpdate`.
+- Variants: `StatusCommitted{Update []SubscriptionUpdate}` / `StatusFailed{Error string}` / `StatusOutOfEnergy{}`.
+- Phase 1.5 explicit deferrals: `StatusOutOfEnergy` is present for shape parity but never emitted — Shunter has no energy model (Phase 3 / Phase 5 decision). `StatusFailed.Error` collapses Shunter's former `failed_user` / `failed_panic` / `not_found` into a single message (Phase 3 runtime-parity concern for finer classification). Pre-acceptance rejections (lifecycle-reducer-name collision, executor-unavailable) are emitted as `StatusFailed` envelopes synthesized by `protocol/handle_callreducer.go`.
 
 ### 3.10 [DIVERGE] No `OutOfEnergy` / `Energy` semantics
 
@@ -2028,14 +2016,14 @@ Already flagged as CRITICAL; noted here as a consistency issue between Story 3.6
 
 Overall: clean. SPEC-005 decomposition is Go-typed and prose-original. No Rust identifiers, no SpacetimeDB file paths, no verbatim copied doc text. Subprotocol token `v1.bsatn.shunter` deliberately forks the `*.spacetimedb` namespace.
 
-Type and method names (`ConnectionID`, `Identity`, `ProtocolOptions`, `Conn`, `ConnManager`, `ClientSender`, `SubscriptionTracker`, `InitialConnection`, `SubscribeApplied`, `TransactionUpdate`, `ReducerCallResult`, `OneOffQueryResult`, `SubscriptionError`, `RowList`, `Predicate`, `Query`) are idiomatic Go; the concept names largely parallel SpacetimeDB's Rust/protobuf surface but use different granularity, different wire layouts, and different defaults.
+Type and method names (`ConnectionID`, `Identity`, `ProtocolOptions`, `Conn`, `ConnManager`, `ClientSender`, `SubscriptionTracker`, `InitialConnection`, `SubscribeApplied`, `TransactionUpdate`, `TransactionUpdateLight`, `UpdateStatus`, `ReducerCallInfo`, `OneOffQueryResult`, `SubscriptionError`, `RowList`, `Predicate`, `Query`) are idiomatic Go; the concept names largely parallel SpacetimeDB's Rust/protobuf surface but use different granularity, different wire layouts, and different defaults.
 
 Concept → name map against reference:
 
 - `ClientConnectionSender` (`crates/core/src/client/client_connection.rs:265`) → `ClientSender` + `Conn` (Shunter splits the send-facing interface from per-connection state).
 - `ClientConfig { tx_update_full, confirmed_reads }` → `ProtocolOptions` (no per-client toggles; see 2.3 / 3.4).
 - `IdentityToken` (v1) / `InitialConnection` (v2) → `InitialConnection` (Shunter matches the v2 name even though the rest of the protocol uses v1-ish semantics).
-- `TransactionUpdate` (heavy) + `TransactionUpdateLight` → single `TransactionUpdate` + dedicated `ReducerCallResult` (see 3.4).
+- `TransactionUpdate` (heavy) + `TransactionUpdateLight` → adopted in Phase 1.5 (see 3.4); `ReducerCallResult` envelope removed from the wire surface.
 - `SubscribeMulti` / `SubscribeSingle` / `QuerySetId` → `Subscribe` + `subscription_id` (single-predicate; see 3.5).
 - `CallReducer` + `flags: CallReducerFlags` → `CallReducer` without flags (see 3.6).
 - `UpdateStatus` / `ReducerOutcome` → `Status uint8` (see 3.9).

@@ -6,24 +6,87 @@ import (
 )
 
 // These tests are *pins*, not parity implementations. Each pins the
-// current Phase 1 deferral so the divergence is explicit and a later
-// phase can flip the test when the divergence is closed. Each test
-// documents the reference outcome in its own comment; the test body
-// asserts the current (not the target) shape.
+// current message-family shape so the divergence is either explicit or
+// closed. The Phase 1.5 outcome-model decision flipped the
+// TransactionUpdate / ReducerCallResult pins to assert the new heavy /
+// light / `UpdateStatus` shape; see `docs/parity-phase1.5-outcome-model.md`.
 
-// TestPhase1DeferralTransactionUpdateNoHeavyLightSplit pins the
-// intentional deferral: Shunter has a single TransactionUpdate shape,
-// whereas reference/SpacetimeDB distinguishes TransactionUpdate (heavy)
-// vs TransactionUpdateLight (delta-only). Flip this test when the
-// split lands.
-func TestPhase1DeferralTransactionUpdateNoHeavyLightSplit(t *testing.T) {
+// TestPhase15TransactionUpdateHeavyShape pins the Phase 1.5 adoption
+// of the reference heavy `TransactionUpdate` envelope. Reference:
+// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`
+// `pub struct TransactionUpdate<F: WebsocketFormat>`.
+func TestPhase15TransactionUpdateHeavyShape(t *testing.T) {
 	fields := msgFieldNames(TransactionUpdate{})
-	// Current shape: TxID, Updates. No caller-side reducer metadata
-	// on the wire object.
-	want := []string{"TxID", "Updates"}
+	want := []string{
+		"Status",
+		"CallerIdentity",
+		"CallerConnectionID",
+		"ReducerCall",
+		"Timestamp",
+		"EnergyQuantaUsed",
+		"TotalHostExecutionDuration",
+	}
 	if !reflect.DeepEqual(fields, want) {
-		t.Errorf("TransactionUpdate fields = %v, want %v (reference has heavy/light split — deferral)",
+		t.Errorf("TransactionUpdate fields = %v, want %v (Phase 1.5 heavy envelope)",
 			fields, want)
+	}
+}
+
+// TestPhase15TransactionUpdateLightShape pins the Phase 1.5 adoption
+// of the reference delta-only envelope. Reference:
+// `pub struct TransactionUpdateLight<F: WebsocketFormat>`.
+func TestPhase15TransactionUpdateLightShape(t *testing.T) {
+	fields := msgFieldNames(TransactionUpdateLight{})
+	want := []string{"RequestID", "Update"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Errorf("TransactionUpdateLight fields = %v, want %v (Phase 1.5 light envelope)",
+			fields, want)
+	}
+}
+
+// TestPhase15ReducerCallInfoShape pins the embedded metadata carried by
+// heavy `TransactionUpdate`. Reference: `pub struct ReducerCallInfo<F>`.
+func TestPhase15ReducerCallInfoShape(t *testing.T) {
+	fields := msgFieldNames(ReducerCallInfo{})
+	want := []string{"ReducerName", "ReducerID", "Args", "RequestID"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Errorf("ReducerCallInfo fields = %v, want %v (Phase 1.5 reducer-call metadata)",
+			fields, want)
+	}
+}
+
+// TestPhase15UpdateStatusVariants pins the three-arm tagged-union
+// `UpdateStatus`. Reference: `pub enum UpdateStatus<F> { Committed,
+// Failed, OutOfEnergy }`. `OutOfEnergy` is present for shape parity but
+// is never emitted by Shunter in Phase 1.5 — see
+// `docs/parity-phase1.5-outcome-model.md`.
+func TestPhase15UpdateStatusVariants(t *testing.T) {
+	var _ UpdateStatus = StatusCommitted{}
+	var _ UpdateStatus = StatusFailed{}
+	var _ UpdateStatus = StatusOutOfEnergy{}
+
+	if got := msgFieldNames(StatusCommitted{}); !reflect.DeepEqual(got, []string{"Update"}) {
+		t.Errorf("StatusCommitted fields = %v, want [Update]", got)
+	}
+	if got := msgFieldNames(StatusFailed{}); !reflect.DeepEqual(got, []string{"Error"}) {
+		t.Errorf("StatusFailed fields = %v, want [Error]", got)
+	}
+	if got := msgFieldNames(StatusOutOfEnergy{}); !reflect.DeepEqual(got, []string{}) {
+		t.Errorf("StatusOutOfEnergy fields = %v, want []", got)
+	}
+}
+
+// TestPhase15TagReducerCallResultReserved pins that
+// `TagReducerCallResult` is reserved — no encoder emits it and the
+// decoder rejects it. The tag byte is not reused so a future
+// reintroduction cannot silently collide.
+func TestPhase15TagReducerCallResultReserved(t *testing.T) {
+	if TagReducerCallResult == 0 {
+		t.Fatal("TagReducerCallResult should remain defined as a reserved value, not zero")
+	}
+	_, _, err := DecodeServerMessage([]byte{TagReducerCallResult})
+	if err == nil {
+		t.Errorf("DecodeServerMessage(TagReducerCallResult) succeeded, want unknown-tag error")
 	}
 }
 
@@ -31,9 +94,6 @@ func TestPhase1DeferralTransactionUpdateNoHeavyLightSplit(t *testing.T) {
 // deferral: Shunter uses a single Subscribe message with a structured
 // query list; reference/SpacetimeDB exposes SubscribeSingle /
 // SubscribeMulti variants with a QueryId. Flip when grouping lands.
-//
-// Note: Shunter's type is SubscribeMsg (not SubscribeMessage) — the
-// plan guessed SubscribeMessage; the real name is SubscribeMsg.
 func TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants(t *testing.T) {
 	fields := msgFieldNames(SubscribeMsg{})
 	want := []string{"RequestID", "SubscriptionID", "Query"}
@@ -46,9 +106,6 @@ func TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants(t *testing.T) {
 // TestPhase1DeferralCallReducerNoFlagsField pins the deferral:
 // reference/SpacetimeDB CallReducer carries a flags field
 // (e.g., NoSuccessfulUpdate). Shunter does not. Flip when flags land.
-//
-// Note: Shunter's type is CallReducerMsg (not CallReducerMessage) — the
-// plan guessed CallReducerMessage; the real name is CallReducerMsg.
 func TestPhase1DeferralCallReducerNoFlagsField(t *testing.T) {
 	fields := msgFieldNames(CallReducerMsg{})
 	want := []string{"RequestID", "ReducerName", "Args"}
@@ -61,9 +118,6 @@ func TestPhase1DeferralCallReducerNoFlagsField(t *testing.T) {
 // TestPhase1DeferralOneOffQueryStructuredNotSQL pins the deferral:
 // reference uses a SQL string; Shunter uses structured predicates.
 // Flip when the SQL front door lands (Phase 2 Slice 1).
-//
-// Note: Shunter's type is OneOffQueryMsg (not OneOffQueryMessage) — the
-// plan guessed OneOffQueryMessage; the real name is OneOffQueryMsg.
 func TestPhase1DeferralOneOffQueryStructuredNotSQL(t *testing.T) {
 	fields := msgFieldNames(OneOffQueryMsg{})
 	want := []string{"RequestID", "TableName", "Predicates"}
@@ -73,25 +127,11 @@ func TestPhase1DeferralOneOffQueryStructuredNotSQL(t *testing.T) {
 	}
 }
 
-// TestPhase1DeferralReducerCallResultFlatStatus pins the deferral:
-// reference uses a tagged union (UpdateStatus); Shunter uses a flat
-// uint8. Flip when the enum is restructured.
-func TestPhase1DeferralReducerCallResultFlatStatus(t *testing.T) {
-	statusField, ok := reflect.TypeOf(ReducerCallResult{}).FieldByName("Status")
-	if !ok {
-		t.Fatal("ReducerCallResult missing Status field")
-	}
-	if statusField.Type != reflect.TypeOf(uint8(0)) {
-		t.Errorf("ReducerCallResult.Status type = %v, want exact uint8 (deferral)",
-			statusField.Type)
-	}
-}
-
 func msgFieldNames(v any) []string {
 	t := reflect.TypeOf(v)
-	names := make([]string, t.NumField())
+	names := make([]string, 0, t.NumField())
 	for i := 0; i < t.NumField(); i++ {
-		names[i] = t.Field(i).Name
+		names = append(names, t.Field(i).Name)
 	}
 	return names
 }

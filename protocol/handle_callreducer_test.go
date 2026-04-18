@@ -268,7 +268,7 @@ func TestHandleCallReducer_Valid(t *testing.T) {
 	}
 }
 
-func TestHandleCallReducer_DeliversAsyncReducerResult(t *testing.T) {
+func TestHandleCallReducer_DeliversAsyncHeavyTransactionUpdate(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{}
 
@@ -285,15 +285,24 @@ func TestHandleCallReducer_DeliversAsyncReducerResult(t *testing.T) {
 	if respCh == nil {
 		t.Fatal("missing reducer response channel")
 	}
-	respCh <- ReducerCallResult{RequestID: 10, Status: 0, TxID: 77}
+	respCh <- TransactionUpdate{
+		Status: StatusCommitted{},
+		ReducerCall: ReducerCallInfo{
+			ReducerName: "AddUser",
+			RequestID:   10,
+		},
+	}
 
 	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagReducerCallResult {
-		t.Fatalf("tag = %d, want %d (TagReducerCallResult)", tag, TagReducerCallResult)
+	if tag != TagTransactionUpdate {
+		t.Fatalf("tag = %d, want %d (TagTransactionUpdate)", tag, TagTransactionUpdate)
 	}
-	result := decoded.(ReducerCallResult)
-	if result.RequestID != 10 || result.TxID != 77 || result.Status != 0 {
-		t.Fatalf("ReducerCallResult = %+v", result)
+	tu := decoded.(TransactionUpdate)
+	if tu.ReducerCall.RequestID != 10 {
+		t.Fatalf("TransactionUpdate.ReducerCall.RequestID = %d, want 10", tu.ReducerCall.RequestID)
+	}
+	if _, ok := tu.Status.(StatusCommitted); !ok {
+		t.Fatalf("Status = %T, want StatusCommitted", tu.Status)
 	}
 }
 
@@ -316,18 +325,19 @@ func TestHandleCallReducer_OnConnect(t *testing.T) {
 	exec.mu.Unlock()
 
 	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagReducerCallResult {
-		t.Fatalf("tag = %d, want %d (TagReducerCallResult)", tag, TagReducerCallResult)
+	if tag != TagTransactionUpdate {
+		t.Fatalf("tag = %d, want %d (TagTransactionUpdate)", tag, TagTransactionUpdate)
 	}
-	rcr := decoded.(ReducerCallResult)
-	if rcr.RequestID != 20 {
-		t.Errorf("RequestID = %d, want 20", rcr.RequestID)
+	tu := decoded.(TransactionUpdate)
+	if tu.ReducerCall.RequestID != 20 {
+		t.Errorf("ReducerCall.RequestID = %d, want 20", tu.ReducerCall.RequestID)
 	}
-	if rcr.Status != 3 {
-		t.Errorf("Status = %d, want 3 (not_found)", rcr.Status)
+	failed, ok := tu.Status.(StatusFailed)
+	if !ok {
+		t.Fatalf("Status = %T, want StatusFailed", tu.Status)
 	}
-	if !strings.Contains(rcr.Error, "lifecycle reducer") {
-		t.Errorf("Error = %q, want to contain 'lifecycle reducer'", rcr.Error)
+	if !strings.Contains(failed.Error, "lifecycle reducer") {
+		t.Errorf("StatusFailed.Error = %q, want to contain 'lifecycle reducer'", failed.Error)
 	}
 }
 
@@ -350,15 +360,15 @@ func TestHandleCallReducer_OnDisconnect(t *testing.T) {
 	exec.mu.Unlock()
 
 	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagReducerCallResult {
-		t.Fatalf("tag = %d, want %d (TagReducerCallResult)", tag, TagReducerCallResult)
+	if tag != TagTransactionUpdate {
+		t.Fatalf("tag = %d, want %d (TagTransactionUpdate)", tag, TagTransactionUpdate)
 	}
-	rcr := decoded.(ReducerCallResult)
-	if rcr.RequestID != 30 {
-		t.Errorf("RequestID = %d, want 30", rcr.RequestID)
+	tu := decoded.(TransactionUpdate)
+	if tu.ReducerCall.RequestID != 30 {
+		t.Errorf("ReducerCall.RequestID = %d, want 30", tu.ReducerCall.RequestID)
 	}
-	if rcr.Status != 3 {
-		t.Errorf("Status = %d, want 3 (not_found)", rcr.Status)
+	if _, ok := tu.Status.(StatusFailed); !ok {
+		t.Fatalf("Status = %T, want StatusFailed", tu.Status)
 	}
 }
 
@@ -374,20 +384,21 @@ func TestHandleCallReducer_ExecutorReject(t *testing.T) {
 	handleCallReducer(context.Background(), conn, msg, exec)
 
 	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagReducerCallResult {
-		t.Fatalf("tag = %d, want %d (TagReducerCallResult)", tag, TagReducerCallResult)
+	if tag != TagTransactionUpdate {
+		t.Fatalf("tag = %d, want %d (TagTransactionUpdate)", tag, TagTransactionUpdate)
 	}
-	rcr := decoded.(ReducerCallResult)
-	if rcr.RequestID != 40 {
-		t.Errorf("RequestID = %d, want 40", rcr.RequestID)
+	tu := decoded.(TransactionUpdate)
+	if tu.ReducerCall.RequestID != 40 {
+		t.Errorf("ReducerCall.RequestID = %d, want 40", tu.ReducerCall.RequestID)
 	}
-	if rcr.Status != 3 {
-		t.Errorf("Status = %d, want 3 (not_found)", rcr.Status)
+	failed, ok := tu.Status.(StatusFailed)
+	if !ok {
+		t.Fatalf("Status = %T, want StatusFailed", tu.Status)
 	}
-	if !strings.Contains(rcr.Error, "executor unavailable") {
-		t.Errorf("Error = %q, want to contain 'executor unavailable'", rcr.Error)
+	if !strings.Contains(failed.Error, "executor unavailable") {
+		t.Errorf("StatusFailed.Error = %q, want to contain 'executor unavailable'", failed.Error)
 	}
-	if !strings.Contains(rcr.Error, "reducer crashed") {
-		t.Errorf("Error = %q, want to contain underlying cause 'reducer crashed'", rcr.Error)
+	if !strings.Contains(failed.Error, "reducer crashed") {
+		t.Errorf("StatusFailed.Error = %q, want to contain underlying cause 'reducer crashed'", failed.Error)
 	}
 }

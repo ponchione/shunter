@@ -6,22 +6,30 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestReducerCallResultMatchesProtocolShape(t *testing.T) {
-	result := ReducerCallResult{
+// TestCallerOutcomeShape pins the Phase 1.5 forward-declared shape that
+// the protocol-side adapter consumes when assembling the heavy
+// `TransactionUpdate` envelope. See `docs/parity-phase1.5-outcome-model.md`.
+func TestCallerOutcomeShape(t *testing.T) {
+	outcome := CallerOutcome{
+		Kind:      CallerOutcomeFailed,
 		RequestID: 7,
-		Status:    1,
-		TxID:      types.TxID(9),
 		Error:     "boom",
-		Energy:    0,
-		TransactionUpdate: []SubscriptionUpdate{{
-			SubscriptionID: 10,
-			TableID:        1,
-		}},
 	}
-	if result.RequestID != 7 || result.Status != 1 || result.TxID != 9 {
-		t.Fatalf("unexpected reducer result: %+v", result)
+	if outcome.Kind != CallerOutcomeFailed || outcome.RequestID != 7 || outcome.Error != "boom" {
+		t.Fatalf("unexpected outcome: %+v", outcome)
 	}
-	if len(result.TransactionUpdate) != 1 {
-		t.Fatalf("transaction_update = %v, want 1 entry", result.TransactionUpdate)
+}
+
+// TestPostCommitMetaCarriesCallerOutcome pins that the executor's
+// post-commit handoff struct still carries `CallerOutcome` after the
+// Phase 1.5 rename from `CallerResult`.
+func TestPostCommitMetaCarriesCallerOutcome(t *testing.T) {
+	caller := types.ConnectionID{1}
+	meta := PostCommitMeta{
+		CallerConnID:  &caller,
+		CallerOutcome: &CallerOutcome{Kind: CallerOutcomeCommitted, RequestID: 1},
+	}
+	if meta.CallerOutcome == nil || meta.CallerOutcome.RequestID != 1 {
+		t.Fatalf("unexpected meta: %+v", meta)
 	}
 }

@@ -81,13 +81,25 @@ type UnregisterSubscriptionRequest struct {
 
 // CallReducerRequest carries the fields for a reducer invocation
 // (SPEC-003 §10.3).
+//
+// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
+// the caller-visible reducer outcome is delivered as a heavy
+// `TransactionUpdate` envelope through the subscription fan-out seam.
+// ResponseCh carries that heavy envelope — the executor populates it
+// once the reducer has been admitted, executed, and (on success) its
+// fan-out evaluation has finished, so the envelope's
+// `StatusCommitted.Update` reflects the caller's visible row delta.
+// Pre-acceptance rejections (lifecycle-reducer-name collision,
+// executor-unavailable) are surfaced via the `error` return of
+// `ExecutorInbox.CallReducer` — the protocol layer synthesizes a
+// heavy envelope with `StatusFailed` in that case.
 type CallReducerRequest struct {
 	ConnID      types.ConnectionID
 	Identity    types.Identity
 	RequestID   uint32
 	ReducerName string
 	Args        []byte
-	ResponseCh  chan<- ReducerCallResult
+	ResponseCh  chan<- TransactionUpdate
 }
 
 // RunLifecycle drives SPEC-005 §5.1–§5.2 admission for one connection:

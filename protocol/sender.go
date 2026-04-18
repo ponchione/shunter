@@ -22,16 +22,22 @@ var ErrConnNotFound = errors.New("protocol: connection not found")
 // ClientSender is the cross-subsystem contract for delivering server
 // messages to connected clients (SPEC-005 §13). The fan-out worker
 // (SPEC-004 E6) and executor response paths call these methods.
+//
+// Phase 1.5 outcome-model split (`docs/parity-phase1.5-outcome-model.md`):
+// callers receive the heavy `TransactionUpdate` via SendTransactionUpdate;
+// non-caller subscribers receive `TransactionUpdateLight` via
+// SendTransactionUpdateLight. The removed `SendReducerResult` is
+// replaced by the heavy-envelope path.
 type ClientSender interface {
 	// Send encodes msg and enqueues the frame on the connection's
 	// outbound channel. Used for direct response messages
 	// (SubscribeApplied, UnsubscribeApplied, SubscriptionError,
 	// OneOffQueryResult).
 	Send(connID types.ConnectionID, msg any) error
-	// SendTransactionUpdate delivers a TransactionUpdate to one connection.
+	// SendTransactionUpdate delivers the heavy caller-bound envelope.
 	SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error
-	// SendReducerResult delivers a ReducerCallResult to the calling connection.
-	SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error
+	// SendTransactionUpdateLight delivers the non-caller delta-only envelope.
+	SendTransactionUpdateLight(connID types.ConnectionID, update *TransactionUpdateLight) error
 }
 
 // NewClientSender returns a ClientSender backed by mgr for connection
@@ -55,23 +61,23 @@ func (s *connManagerSender) SendTransactionUpdate(connID types.ConnectionID, upd
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
-	if err := validateActiveSubscriptionUpdates(conn, update.TxID, update.Updates); err != nil {
-		return err
+	if committed, ok := update.Status.(StatusCommitted); ok {
+		if err := validateActiveSubscriptionUpdates(conn, committed.Update); err != nil {
+			return err
+		}
 	}
 	return s.enqueueOnConn(conn, connID, *update)
 }
 
-func (s *connManagerSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
+func (s *connManagerSender) SendTransactionUpdateLight(connID types.ConnectionID, update *TransactionUpdateLight) error {
 	conn := s.mgr.Get(connID)
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
-	if result != nil && result.Status == 0 {
-		if err := validateActiveSubscriptionUpdates(conn, result.TxID, result.TransactionUpdate); err != nil {
-			return err
-		}
+	if err := validateActiveSubscriptionUpdates(conn, update.Update); err != nil {
+		return err
 	}
-	return s.enqueueOnConn(conn, connID, *result)
+	return s.enqueueOnConn(conn, connID, *update)
 }
 
 // enqueue encodes msg, wraps it in the connection's compression

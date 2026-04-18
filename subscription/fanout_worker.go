@@ -14,14 +14,21 @@ import (
 // protocol-backed adapter wired at server startup (SPEC-004 §8 /
 // Story 6.1).
 //
+// Phase 1.5 outcome-model split (`docs/parity-phase1.5-outcome-model.md`):
+//   - `SendTransactionUpdateHeavy` delivers the caller-bound envelope
+//     with caller metadata and, for `CallerOutcomeCommitted`, the
+//     caller's visible row delta.
+//   - `SendTransactionUpdateLight` delivers the delta-only envelope to
+//     non-callers whose rows were touched.
+//
 // Errors: implementations must return ErrSendBufferFull when the
 // client's outbound buffer is full, and ErrSendConnGone when the
 // target connection has already disconnected.
 type FanOutSender interface {
-	// SendTransactionUpdate delivers a TransactionUpdate to one client.
-	SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error
-	// SendReducerResult delivers a ReducerCallResult to the caller client.
-	SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error
+	// SendTransactionUpdateHeavy delivers the caller-bound heavy envelope.
+	SendTransactionUpdateHeavy(connID types.ConnectionID, outcome CallerOutcome, callerUpdates []SubscriptionUpdate, memo *EncodingMemo) error
+	// SendTransactionUpdateLight delivers the non-caller delta-only envelope.
+	SendTransactionUpdateLight(connID types.ConnectionID, requestID uint32, updates []SubscriptionUpdate, memo *EncodingMemo) error
 	// SendSubscriptionError delivers a SubscriptionError to a client.
 	SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error
 }
@@ -83,11 +90,11 @@ func (w *FanOutWorker) RemoveClient(connID types.ConnectionID) {
 	delete(w.confirmedReads, connID)
 }
 
-func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout, callerConnID *types.ConnectionID, callerResult *ReducerCallResult) bool {
+func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout, callerConnID *types.ConnectionID, callerOutcome *CallerOutcome) bool {
 	if len(fanout) > 0 {
 		return true
 	}
-	if callerConnID != nil && callerResult != nil {
+	if callerConnID != nil && callerOutcome != nil {
 		return true
 	}
 	w.mu.RLock()
@@ -97,7 +104,7 @@ func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout, callerConnID *types
 			return true
 		}
 	}
-	if callerConnID != nil && callerResult != nil && w.confirmedReads[*callerConnID] {
+	if callerConnID != nil && callerOutcome != nil && w.confirmedReads[*callerConnID] {
 		return true
 	}
 	return false
@@ -106,8 +113,10 @@ func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout, callerConnID *types
 func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	memo := NewEncodingMemo()
 
-	// Confirmed-read gating (Story 6.4).
-	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout, msg.CallerConnID, msg.CallerResult) {
+	// Confirmed-read gating (Story 6.4). The heavy envelope is the
+	// caller-visible commit confirmation, so it participates in
+	// confirmed-read gating just like a non-caller light delivery.
+	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout, msg.CallerConnID, msg.CallerOutcome) {
 		select {
 		case <-ctx.Done():
 			return
@@ -131,25 +140,30 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		callerUpdates = msg.Fanout[*msg.CallerConnID]
 	}
 
-	// Deliver standalone TransactionUpdate to non-caller connections.
+	// Deliver TransactionUpdateLight to non-caller connections that had
+	// row-touches. The light envelope carries the original caller's
+	// request_id so non-callers can correlate their fanout updates with
+	// the commit that produced them.
+	var lightRequestID uint32
+	if msg.CallerOutcome != nil {
+		lightRequestID = msg.CallerOutcome.RequestID
+	}
 	for connID, updates := range msg.Fanout {
 		if msg.CallerConnID != nil && connID == *msg.CallerConnID {
 			continue
 		}
-		if err := w.sender.SendTransactionUpdate(connID, msg.TxID, updates, memo); err != nil {
+		if err := w.sender.SendTransactionUpdateLight(connID, lightRequestID, updates, memo); err != nil {
 			w.handleSendError(connID, err)
 		}
 	}
 
-	// Deliver ReducerCallResult to caller.
-	if msg.CallerConnID != nil && msg.CallerResult != nil {
-		result := *msg.CallerResult
-		if result.Status == 0 {
-			result.TransactionUpdate = callerUpdates
-		} else {
-			result.TransactionUpdate = nil
-		}
-		if err := w.sender.SendReducerResult(*msg.CallerConnID, &result, memo); err != nil {
+	// Deliver heavy TransactionUpdate to caller. Phase 1.5 invariant:
+	// when CallerConnID is set the caller ALWAYS receives a heavy
+	// envelope — success with possibly-empty update, failure, or
+	// out-of-energy — so the caller never silently loses its outcome
+	// even on empty changesets or no-active-subscription paths.
+	if msg.CallerConnID != nil && msg.CallerOutcome != nil {
+		if err := w.sender.SendTransactionUpdateHeavy(*msg.CallerConnID, *msg.CallerOutcome, callerUpdates, memo); err != nil {
 			w.handleSendError(*msg.CallerConnID, err)
 		}
 	}

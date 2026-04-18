@@ -94,7 +94,7 @@ func TestSendBufferFull(t *testing.T) {
 	}
 }
 
-func TestSendTransactionUpdateTyped(t *testing.T) {
+func TestSendTransactionUpdateTypedHeavy(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -105,9 +105,12 @@ func TestSendTransactionUpdateTyped(t *testing.T) {
 	}
 	c.Subscriptions.Activate(1)
 
-	update := &TransactionUpdate{TxID: 42, Updates: []SubscriptionUpdate{
-		{SubscriptionID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
-	}}
+	update := &TransactionUpdate{
+		Status: StatusCommitted{Update: []SubscriptionUpdate{
+			{SubscriptionID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
+		}},
+		ReducerCall: ReducerCallInfo{ReducerName: "x", RequestID: 9},
+	}
 	if err := s.SendTransactionUpdate(id, update); err != nil {
 		t.Fatal(err)
 	}
@@ -120,19 +123,29 @@ func TestSendTransactionUpdateTyped(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected TransactionUpdate, got %T", msg)
 	}
-	if tu.TxID != 42 {
-		t.Fatalf("TxID = %d, want 42", tu.TxID)
+	if tu.ReducerCall.RequestID != 9 {
+		t.Fatalf("ReducerCall.RequestID = %d, want 9", tu.ReducerCall.RequestID)
 	}
 }
 
-func TestSendReducerResultTyped(t *testing.T) {
+func TestSendTransactionUpdateTypedLight(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	result := &ReducerCallResult{RequestID: 5, Status: 0, TxID: 99}
-	if err := s.SendReducerResult(id, result); err != nil {
+	if err := c.Subscriptions.Reserve(1); err != nil {
+		t.Fatal(err)
+	}
+	c.Subscriptions.Activate(1)
+
+	update := &TransactionUpdateLight{
+		RequestID: 42,
+		Update: []SubscriptionUpdate{
+			{SubscriptionID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
+		},
+	}
+	if err := s.SendTransactionUpdateLight(id, update); err != nil {
 		t.Fatal(err)
 	}
 	frame := <-c.OutboundCh
@@ -140,11 +153,11 @@ func TestSendReducerResultTyped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rcr, ok := msg.(ReducerCallResult)
+	tu, ok := msg.(TransactionUpdateLight)
 	if !ok {
-		t.Fatalf("expected ReducerCallResult, got %T", msg)
+		t.Fatalf("expected TransactionUpdateLight, got %T", msg)
 	}
-	if rcr.RequestID != 5 {
-		t.Fatalf("RequestID = %d, want 5", rcr.RequestID)
+	if tu.RequestID != 42 {
+		t.Fatalf("RequestID = %d, want 42", tu.RequestID)
 	}
 }

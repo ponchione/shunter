@@ -7,11 +7,11 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// ErrSubscriptionNotActive is returned when a TransactionUpdate fanout
-// references a subscription_id that has not yet reached SubActive on
-// the target connection. This is a protocol pipeline invariant
-// violation: SubscribeApplied must be delivered before any update for
-// that subscription.
+// ErrSubscriptionNotActive is returned when a `TransactionUpdate` /
+// `TransactionUpdateLight` fanout references a subscription_id that has
+// not yet reached SubActive on the target connection. This is a
+// protocol pipeline invariant violation: SubscribeApplied must be
+// delivered before any update for that subscription.
 var ErrSubscriptionNotActive = errors.New("protocol: subscription not active for transaction update")
 
 // DeliveryError pairs a connection ID with the error encountered
@@ -22,15 +22,15 @@ type DeliveryError struct {
 	Err    error
 }
 
-// DeliverTransactionUpdate sends a TransactionUpdate to every
-// connection in fanout. Connections not found in the ConnManager are
-// skipped (disconnected since evaluation). Empty update slices are
-// skipped (no message sent). Buffer-full errors are collected and
-// returned so the caller can trigger disconnects.
-func DeliverTransactionUpdate(
+// DeliverTransactionUpdateLight sends a non-caller `TransactionUpdateLight`
+// to every connection in fanout (Phase 1.5). Connections not found in
+// the ConnManager are skipped (disconnected since evaluation). Empty
+// update slices are skipped. Buffer-full errors are collected so the
+// caller can trigger disconnects.
+func DeliverTransactionUpdateLight(
 	sender ClientSender,
 	mgr *ConnManager,
-	txID uint64,
+	requestID uint32,
 	fanout map[types.ConnectionID][]SubscriptionUpdate,
 ) []DeliveryError {
 	var errs []DeliveryError
@@ -42,22 +42,22 @@ func DeliverTransactionUpdate(
 		if conn == nil {
 			continue
 		}
-		if err := validateActiveSubscriptionUpdates(conn, txID, updates); err != nil {
+		if err := validateActiveSubscriptionUpdates(conn, updates); err != nil {
 			errs = append(errs, DeliveryError{ConnID: connID, Err: err})
 			continue
 		}
-		msg := &TransactionUpdate{TxID: txID, Updates: updates}
-		if err := sender.SendTransactionUpdate(connID, msg); err != nil {
+		msg := &TransactionUpdateLight{RequestID: requestID, Update: updates}
+		if err := sender.SendTransactionUpdateLight(connID, msg); err != nil {
 			errs = append(errs, DeliveryError{ConnID: connID, Err: err})
 		}
 	}
 	return errs
 }
 
-func validateActiveSubscriptionUpdates(conn *Conn, txID uint64, updates []SubscriptionUpdate) error {
+func validateActiveSubscriptionUpdates(conn *Conn, updates []SubscriptionUpdate) error {
 	for _, update := range updates {
 		if !conn.Subscriptions.IsActive(update.SubscriptionID) {
-			return fmt.Errorf("%w: conn=%x tx=%d subscription_id=%d", ErrSubscriptionNotActive, conn.ID[:], txID, update.SubscriptionID)
+			return fmt.Errorf("%w: conn=%x subscription_id=%d", ErrSubscriptionNotActive, conn.ID[:], update.SubscriptionID)
 		}
 	}
 	return nil

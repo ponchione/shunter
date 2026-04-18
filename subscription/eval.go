@@ -21,20 +21,37 @@ type memoizedResult struct {
 // Fills a CommitFanout and hands it to the fan-out worker inbox.
 //
 // Called synchronously on the executor goroutine; changeset is read-only.
-// When no subscriptions are active the function returns immediately.
+//
+// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
+// a caller-addressable commit MUST NOT short-circuit on "no active
+// subscriptions" or "empty changeset" — the caller still needs its
+// heavy `TransactionUpdate` envelope to observe the reducer outcome.
+// The function therefore only skips when there is neither caller
+// metadata nor any non-caller recipient work to do.
 func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta PostCommitMeta) {
-	if !m.registry.hasActive() || changeset == nil || changeset.IsEmpty() {
+	hasCaller := meta.CallerConnID != nil && meta.CallerOutcome != nil
+	nothingToEvaluate := !m.registry.hasActive() || changeset == nil || changeset.IsEmpty()
+	if nothingToEvaluate && !hasCaller {
 		return
 	}
-	fanout, errs := m.evaluate(txID, changeset, view)
+	var (
+		fanout CommitFanout
+		errs   map[types.ConnectionID][]SubscriptionError
+	)
+	if !nothingToEvaluate {
+		fanout, errs = m.evaluate(txID, changeset, view)
+	} else {
+		fanout = CommitFanout{}
+		errs = make(map[types.ConnectionID][]SubscriptionError)
+	}
 	if m.inbox != nil {
 		m.inbox <- FanOutMessage{
-			TxID:         txID,
-			TxDurable:    meta.TxDurable,
-			Fanout:       fanout,
-			Errors:       errs,
-			CallerConnID: meta.CallerConnID,
-			CallerResult: meta.CallerResult,
+			TxID:          txID,
+			TxDurable:     meta.TxDurable,
+			Fanout:        fanout,
+			Errors:        errs,
+			CallerConnID:  meta.CallerConnID,
+			CallerOutcome: meta.CallerOutcome,
 		}
 	}
 }

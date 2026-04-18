@@ -112,55 +112,110 @@ func TestSubscriptionErrorRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTransactionUpdateEmptyUpdates(t *testing.T) {
-	in := TransactionUpdate{TxID: 42, Updates: nil}
-	frame, _ := EncodeServerMessage(in)
+func TestTransactionUpdateHeavyCommittedRoundTrip(t *testing.T) {
+	rl := EncodeRowList([][]byte{{0x01}})
+	in := TransactionUpdate{
+		Status: StatusCommitted{Update: []SubscriptionUpdate{
+			{SubscriptionID: 1, TableName: "a", Inserts: rl, Deletes: nil},
+			{SubscriptionID: 2, TableName: "b", Inserts: nil, Deletes: rl},
+		}},
+		ReducerCall: ReducerCallInfo{ReducerName: "doit", ReducerID: 5, Args: []byte{0xCA}, RequestID: 7},
+	}
+	in.CallerConnectionID[0] = 0xAB
+	in.CallerIdentity[0] = 0xCD
+	frame, err := EncodeServerMessage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := out.(TransactionUpdate)
-	if got.TxID != in.TxID {
-		t.Errorf("TxID mismatch")
+	committed, ok := got.Status.(StatusCommitted)
+	if !ok {
+		t.Fatalf("Status = %T, want StatusCommitted", got.Status)
 	}
-	if len(got.Updates) != 0 {
-		t.Errorf("expected 0 updates, got %d", len(got.Updates))
+	if len(committed.Update) != 2 {
+		t.Fatalf("committed updates count = %d, want 2", len(committed.Update))
+	}
+	if got.ReducerCall.ReducerName != "doit" || got.ReducerCall.RequestID != 7 {
+		t.Errorf("ReducerCall mismatch: %+v", got.ReducerCall)
+	}
+	if got.CallerConnectionID[0] != 0xAB || got.CallerIdentity[0] != 0xCD {
+		t.Error("caller bytes not round-tripped")
+	}
+	if !bytes.Equal(committed.Update[0].Inserts, rl) {
+		t.Error("update[0] inserts differ")
+	}
+	_ = in.Timestamp
+}
+
+func TestTransactionUpdateHeavyFailedRoundTrip(t *testing.T) {
+	in := TransactionUpdate{
+		Status:      StatusFailed{Error: "boom"},
+		ReducerCall: ReducerCallInfo{ReducerName: "doit", RequestID: 3},
+	}
+	frame, err := EncodeServerMessage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := DecodeServerMessage(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.(TransactionUpdate)
+	failed, ok := got.Status.(StatusFailed)
+	if !ok {
+		t.Fatalf("Status = %T, want StatusFailed", got.Status)
+	}
+	if failed.Error != "boom" {
+		t.Errorf("Error = %q, want 'boom'", failed.Error)
 	}
 }
 
-func TestTransactionUpdateMultipleUpdates(t *testing.T) {
-	rl := EncodeRowList([][]byte{{0x01}})
+func TestTransactionUpdateHeavyOutOfEnergyRoundTrip(t *testing.T) {
 	in := TransactionUpdate{
-		TxID: 100,
-		Updates: []SubscriptionUpdate{
-			{SubscriptionID: 1, TableName: "a", Inserts: rl, Deletes: nil},
-			{SubscriptionID: 2, TableName: "b", Inserts: nil, Deletes: rl},
-			{SubscriptionID: 3, TableName: "c", Inserts: rl, Deletes: rl},
-		},
+		Status:      StatusOutOfEnergy{},
+		ReducerCall: ReducerCallInfo{ReducerName: "doit", RequestID: 1},
 	}
-	frame, _ := EncodeServerMessage(in)
+	frame, err := EncodeServerMessage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := out.(TransactionUpdate)
-	if got.TxID != 100 {
-		t.Errorf("TxID = %d, want 100", got.TxID)
+	if _, ok := got.Status.(StatusOutOfEnergy); !ok {
+		t.Fatalf("Status = %T, want StatusOutOfEnergy", got.Status)
 	}
-	if len(got.Updates) != 3 {
-		t.Fatalf("updates count = %d, want 3", len(got.Updates))
+}
+
+func TestTransactionUpdateLightRoundTrip(t *testing.T) {
+	rl := EncodeRowList([][]byte{{0x01}})
+	in := TransactionUpdateLight{
+		RequestID: 7,
+		Update: []SubscriptionUpdate{
+			{SubscriptionID: 1, TableName: "a", Inserts: rl},
+			{SubscriptionID: 2, TableName: "b", Deletes: rl},
+		},
 	}
-	for i, want := range in.Updates {
-		if got.Updates[i].SubscriptionID != want.SubscriptionID ||
-			got.Updates[i].TableName != want.TableName {
-			t.Errorf("update[%d] ids/name mismatch", i)
-		}
-		if !bytes.Equal(got.Updates[i].Inserts, want.Inserts) {
-			t.Errorf("update[%d] inserts differ", i)
-		}
-		if !bytes.Equal(got.Updates[i].Deletes, want.Deletes) {
-			t.Errorf("update[%d] deletes differ", i)
-		}
+	frame, err := EncodeServerMessage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := DecodeServerMessage(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.(TransactionUpdateLight)
+	if got.RequestID != 7 {
+		t.Errorf("RequestID = %d, want 7", got.RequestID)
+	}
+	if len(got.Update) != 2 {
+		t.Fatalf("Update count = %d, want 2", len(got.Update))
 	}
 }
 
@@ -200,56 +255,17 @@ func TestOneOffQueryResultError(t *testing.T) {
 	}
 }
 
-func TestReducerCallResultCommittedWithUpdates(t *testing.T) {
-	rl := EncodeRowList([][]byte{{0x42}})
-	in := ReducerCallResult{
-		RequestID: 7,
-		Status:    0,
-		TxID:      200,
-		Energy:    0,
-		TransactionUpdate: []SubscriptionUpdate{
-			{SubscriptionID: 9, TableName: "x", Inserts: rl, Deletes: nil},
-		},
+// TagReducerCallResult is reserved in Phase 1.5. The decoder must
+// reject it as unknown so a future reintroduction cannot silently
+// collide with the removed shape. See
+// `docs/parity-phase1.5-outcome-model.md`.
+func TestTagReducerCallResultIsReserved(t *testing.T) {
+	_, _, err := DecodeServerMessage([]byte{TagReducerCallResult})
+	if err == nil {
+		t.Fatal("DecodeServerMessage(TagReducerCallResult) succeeded, want unknown-tag error")
 	}
-	frame, _ := EncodeServerMessage(in)
-	_, out, err := DecodeServerMessage(frame)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := out.(ReducerCallResult)
-	if got.RequestID != in.RequestID || got.Status != 0 || got.TxID != 200 {
-		t.Errorf("field mismatch: %+v", got)
-	}
-	if got.Error != "" {
-		t.Errorf("Error should be empty on committed, got %q", got.Error)
-	}
-	if len(got.TransactionUpdate) != 1 {
-		t.Fatalf("updates count = %d, want 1", len(got.TransactionUpdate))
-	}
-	if !bytes.Equal(got.TransactionUpdate[0].Inserts, rl) {
-		t.Errorf("updates[0].Inserts differ")
-	}
-}
-
-func TestReducerCallResultFailedEmptyUpdates(t *testing.T) {
-	in := ReducerCallResult{
-		RequestID: 7,
-		Status:    1, // failed_user
-		TxID:      0,
-		Error:     "reducer rejected input",
-		// TransactionUpdate empty per spec when Status != 0
-	}
-	frame, _ := EncodeServerMessage(in)
-	_, out, err := DecodeServerMessage(frame)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := out.(ReducerCallResult)
-	if got.Status != 1 || got.Error != in.Error {
-		t.Errorf("field mismatch: %+v", got)
-	}
-	if len(got.TransactionUpdate) != 0 {
-		t.Errorf("updates should be empty on failure, got %d", len(got.TransactionUpdate))
+	if !errors.Is(err, ErrUnknownMessageTag) {
+		t.Errorf("err = %v, want ErrUnknownMessageTag", err)
 	}
 }
 

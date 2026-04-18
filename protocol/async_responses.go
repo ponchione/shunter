@@ -48,11 +48,11 @@ func (s connOnlySender) SendTransactionUpdate(connID types.ConnectionID, update 
 	return s.Send(connID, *update)
 }
 
-func (s connOnlySender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult) error {
-	if result == nil {
+func (s connOnlySender) SendTransactionUpdateLight(connID types.ConnectionID, update *TransactionUpdateLight) error {
+	if update == nil {
 		return nil
 	}
-	return s.Send(connID, *result)
+	return s.Send(connID, *update)
 }
 
 func watchSubscribeResponse(conn *Conn, respCh <-chan SubscriptionCommandResponse) {
@@ -95,15 +95,23 @@ func watchUnsubscribeResponse(conn *Conn, respCh <-chan UnsubscribeCommandRespon
 	}()
 }
 
-func watchReducerResponse(conn *Conn, respCh <-chan ReducerCallResult) {
+// watchReducerResponse listens for the executor's heavy
+// `TransactionUpdate` envelope and delivers it on the caller's outbound
+// channel. Phase 1.5: the envelope is already fully populated by the
+// executor / fan-out seam; this watcher only owns transport delivery.
+func watchReducerResponse(conn *Conn, respCh <-chan TransactionUpdate) {
 	go func() {
 		resp, ok := <-respCh
 		if !ok {
 			return
 		}
 		sender := connOnlySender{conn: conn}
-		if err := sender.SendReducerResult(conn.ID, &resp); err != nil {
-			log.Printf("protocol: async ReducerCallResult delivery failed for conn %x request=%d: %v", conn.ID[:], resp.RequestID, err)
+		if err := sender.SendTransactionUpdate(conn.ID, &resp); err != nil {
+			logReducerDeliveryError(conn, resp.ReducerCall.RequestID, err)
 		}
 	}()
+}
+
+func logReducerDeliveryError(conn *Conn, requestID uint32, err error) {
+	log.Printf("protocol: reducer-result delivery failed for conn %x request=%d: %v", conn.ID[:], requestID, err)
 }

@@ -11,37 +11,38 @@ import (
 
 // mockFanOutSender records delivery calls for test assertions.
 type mockFanOutSender struct {
-	mu       sync.Mutex
-	txCalls  []txCall
-	resCalls []resCall
-	errCalls []errCall
-	sendErr  error
+	mu        sync.Mutex
+	lightCalls []lightCall
+	heavyCalls []heavyCall
+	errCalls  []errCall
+	sendErr   error
 }
 
-type txCall struct {
-	ConnID  types.ConnectionID
-	TxID    types.TxID
-	Updates []SubscriptionUpdate
+type lightCall struct {
+	ConnID    types.ConnectionID
+	RequestID uint32
+	Updates   []SubscriptionUpdate
 }
-type resCall struct {
-	ConnID types.ConnectionID
-	Result *ReducerCallResult
+type heavyCall struct {
+	ConnID        types.ConnectionID
+	Outcome       CallerOutcome
+	CallerUpdates []SubscriptionUpdate
 }
 type errCall struct {
 	ConnID types.ConnectionID
 	Err    SubscriptionError
 }
 
-func (m *mockFanOutSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error {
+func (m *mockFanOutSender) SendTransactionUpdateHeavy(connID types.ConnectionID, outcome CallerOutcome, callerUpdates []SubscriptionUpdate, memo *EncodingMemo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.txCalls = append(m.txCalls, txCall{ConnID: connID, TxID: txID, Updates: updates})
+	m.heavyCalls = append(m.heavyCalls, heavyCall{ConnID: connID, Outcome: outcome, CallerUpdates: callerUpdates})
 	return m.sendErr
 }
-func (m *mockFanOutSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error {
+func (m *mockFanOutSender) SendTransactionUpdateLight(connID types.ConnectionID, requestID uint32, updates []SubscriptionUpdate, memo *EncodingMemo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.resCalls = append(m.resCalls, resCall{ConnID: connID, Result: result})
+	m.lightCalls = append(m.lightCalls, lightCall{ConnID: connID, RequestID: requestID, Updates: updates})
 	return m.sendErr
 }
 func (m *mockFanOutSender) SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error {
@@ -55,6 +56,10 @@ func cid(b byte) types.ConnectionID {
 	var id types.ConnectionID
 	id[0] = b
 	return id
+}
+
+func committedOutcome(requestID uint32) *CallerOutcome {
+	return &CallerOutcome{Kind: CallerOutcomeCommitted, RequestID: requestID}
 }
 
 func TestFanOutWorker_NonCallerDelivery(t *testing.T) {
@@ -81,16 +86,11 @@ func TestFanOutWorker_NonCallerDelivery(t *testing.T) {
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.txCalls) != 2 {
-		t.Fatalf("txCalls = %d, want 2", len(mock.txCalls))
+	if len(mock.lightCalls) != 2 {
+		t.Fatalf("lightCalls = %d, want 2", len(mock.lightCalls))
 	}
-	for _, c := range mock.txCalls {
-		if c.TxID != 10 {
-			t.Fatalf("TxID = %d, want 10", c.TxID)
-		}
-	}
-	if len(mock.resCalls) != 0 {
-		t.Fatalf("resCalls = %d, want 0 (no caller)", len(mock.resCalls))
+	if len(mock.heavyCalls) != 0 {
+		t.Fatalf("heavyCalls = %d, want 0 (no caller)", len(mock.heavyCalls))
 	}
 }
 
@@ -167,6 +167,9 @@ func TestFanOutWorker_ClosedInbox(t *testing.T) {
 	}
 }
 
+// TestFanOutWorker_CallerDiversion verifies the Phase 1.5 split: caller
+// receives the heavy envelope with the caller's row delta embedded in
+// CallerUpdates; non-callers receive the light envelope.
 func TestFanOutWorker_CallerDiversion(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
@@ -178,19 +181,14 @@ func TestFanOutWorker_CallerDiversion(t *testing.T) {
 	go w.Run(ctx)
 
 	caller, other := cid(1), cid(2)
-	callerResult := &ReducerCallResult{
-		RequestID: 7,
-		Status:    0,
-		TxID:      types.TxID(20),
-	}
 	inbox <- FanOutMessage{
 		TxID: types.TxID(20),
 		Fanout: CommitFanout{
 			caller: {{SubscriptionID: 1, TableName: "t1", Inserts: []types.ProductValue{{types.NewUint32(10)}}}},
 			other:  {{SubscriptionID: 2, TableName: "t1", Inserts: []types.ProductValue{{types.NewUint32(20)}}}},
 		},
-		CallerConnID: &caller,
-		CallerResult: callerResult,
+		CallerConnID:  &caller,
+		CallerOutcome: committedOutcome(7),
 	}
 
 	time.Sleep(50 * time.Millisecond)
@@ -199,30 +197,35 @@ func TestFanOutWorker_CallerDiversion(t *testing.T) {
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 
-	// Caller gets ReducerCallResult, not TransactionUpdate.
-	if len(mock.resCalls) != 1 {
-		t.Fatalf("resCalls = %d, want 1", len(mock.resCalls))
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls = %d, want 1", len(mock.heavyCalls))
 	}
-	if mock.resCalls[0].ConnID != caller {
+	if mock.heavyCalls[0].ConnID != caller {
 		t.Fatalf("caller connID mismatch")
 	}
-	if mock.resCalls[0].Result.RequestID != 7 {
-		t.Fatalf("RequestID = %d, want 7", mock.resCalls[0].Result.RequestID)
+	if mock.heavyCalls[0].Outcome.RequestID != 7 {
+		t.Fatalf("RequestID = %d, want 7", mock.heavyCalls[0].Outcome.RequestID)
 	}
-	// Caller's updates embedded in the result
-	if len(mock.resCalls[0].Result.TransactionUpdate) != 1 {
-		t.Fatalf("caller TransactionUpdate len = %d, want 1", len(mock.resCalls[0].Result.TransactionUpdate))
+	if len(mock.heavyCalls[0].CallerUpdates) != 1 {
+		t.Fatalf("caller updates = %d, want 1", len(mock.heavyCalls[0].CallerUpdates))
 	}
 
-	// Other connection gets standalone TransactionUpdate.
-	if len(mock.txCalls) != 1 {
-		t.Fatalf("txCalls = %d, want 1", len(mock.txCalls))
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls = %d, want 1", len(mock.lightCalls))
 	}
-	if mock.txCalls[0].ConnID != other {
+	if mock.lightCalls[0].ConnID != other {
 		t.Fatalf("non-caller connID mismatch")
+	}
+	if mock.lightCalls[0].RequestID != 7 {
+		t.Fatalf("light RequestID = %d, want 7 (propagated from caller outcome)", mock.lightCalls[0].RequestID)
 	}
 }
 
+// TestFanOutWorker_CallerDiversion_FailedStatus verifies that a failed
+// reducer still delivers the heavy envelope to the caller; non-caller
+// fanout is still delivered because the row-touches may have been
+// preserved for other reducers. Phase 1.5 collapses all failure modes
+// (user, panic, not_found) onto `CallerOutcomeFailed`.
 func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
@@ -234,19 +237,17 @@ func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
 	go w.Run(ctx)
 
 	caller := cid(1)
-	callerResult := &ReducerCallResult{
-		RequestID: 3,
-		Status:    1, // failed
-		TxID:      types.TxID(30),
-		Error:     "panic in reducer",
-	}
 	inbox <- FanOutMessage{
 		TxID: types.TxID(30),
 		Fanout: CommitFanout{
 			caller: {{SubscriptionID: 1, TableName: "t1"}},
 		},
 		CallerConnID: &caller,
-		CallerResult: callerResult,
+		CallerOutcome: &CallerOutcome{
+			Kind:      CallerOutcomeFailed,
+			RequestID: 3,
+			Error:     "panic in reducer",
+		},
 	}
 
 	time.Sleep(50 * time.Millisecond)
@@ -255,19 +256,55 @@ func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 
-	if len(mock.resCalls) != 1 {
-		t.Fatalf("resCalls = %d, want 1", len(mock.resCalls))
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls = %d, want 1", len(mock.heavyCalls))
 	}
-	// Failed status: result delivered with error, no TransactionUpdate embedded.
-	if mock.resCalls[0].Result.Status != 1 {
-		t.Fatalf("Status = %d, want 1", mock.resCalls[0].Result.Status)
+	if mock.heavyCalls[0].Outcome.Kind != CallerOutcomeFailed {
+		t.Fatalf("outcome Kind = %d, want CallerOutcomeFailed", mock.heavyCalls[0].Outcome.Kind)
 	}
-	if mock.resCalls[0].Result.TransactionUpdate != nil {
-		t.Fatalf("TransactionUpdate should be nil for failed status")
+	if len(mock.lightCalls) != 0 {
+		t.Fatalf("lightCalls = %d, want 0 (only caller, no non-caller recipients)", len(mock.lightCalls))
 	}
-	// Caller NOT in txCalls.
-	if len(mock.txCalls) != 0 {
-		t.Fatalf("txCalls = %d, want 0 (failed reducer, no standalone delivery)", len(mock.txCalls))
+}
+
+// TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout is the
+// Phase 1.5 `P0-DELIVERY-002` pin: even when no subscriptions are active
+// and the fanout is empty, a reducer-originated commit must still
+// deliver the caller's heavy envelope so the caller observes its outcome.
+func TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	caller := cid(1)
+	inbox <- FanOutMessage{
+		TxID:          types.TxID(42),
+		Fanout:        CommitFanout{}, // no subscriptions touched
+		CallerConnID:  &caller,
+		CallerOutcome: committedOutcome(99),
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls = %d, want 1 (caller must observe outcome even with empty fanout)", len(mock.heavyCalls))
+	}
+	if mock.heavyCalls[0].Outcome.RequestID != 99 {
+		t.Fatalf("heavy RequestID = %d, want 99", mock.heavyCalls[0].Outcome.RequestID)
+	}
+	if len(mock.heavyCalls[0].CallerUpdates) != 0 {
+		t.Fatalf("caller updates = %d, want 0", len(mock.heavyCalls[0].CallerUpdates))
+	}
+	if len(mock.lightCalls) != 0 {
+		t.Fatalf("lightCalls = %d, want 0", len(mock.lightCalls))
 	}
 }
 
@@ -370,16 +407,16 @@ type selectiveFailSender struct {
 	okCount int
 }
 
-func (s *selectiveFailSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error {
+func (s *selectiveFailSender) SendTransactionUpdateHeavy(connID types.ConnectionID, outcome CallerOutcome, callerUpdates []SubscriptionUpdate, memo *EncodingMemo) error {
+	return nil
+}
+func (s *selectiveFailSender) SendTransactionUpdateLight(connID types.ConnectionID, requestID uint32, updates []SubscriptionUpdate, memo *EncodingMemo) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if connID == s.fail {
 		return ErrSendBufferFull
 	}
 	s.okCount++
-	return nil
-}
-func (s *selectiveFailSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error {
 	return nil
 }
 func (s *selectiveFailSender) SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error {
@@ -407,10 +444,10 @@ func TestFanOutWorker_PublicProtocolDefault_WaitsForDurability(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	mock.mu.Lock()
-	preCount := len(mock.txCalls)
+	preCount := len(mock.lightCalls)
 	mock.mu.Unlock()
 	if preCount != 0 {
-		t.Fatalf("txCalls = %d before TxDurable, want 0", preCount)
+		t.Fatalf("lightCalls = %d before TxDurable, want 0", preCount)
 	}
 
 	durableCh <- types.TxID(1)
@@ -420,8 +457,8 @@ func TestFanOutWorker_PublicProtocolDefault_WaitsForDurability(t *testing.T) {
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.txCalls) != 1 {
-		t.Fatalf("txCalls = %d after TxDurable, want 1", len(mock.txCalls))
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls = %d after TxDurable, want 1", len(mock.lightCalls))
 	}
 }
 
@@ -446,16 +483,14 @@ func TestFanOutWorker_ConfirmedRead_Waits(t *testing.T) {
 		},
 	}
 
-	// No delivery yet — waiting for TxDurable.
 	time.Sleep(50 * time.Millisecond)
 	mock.mu.Lock()
-	preCount := len(mock.txCalls)
+	preCount := len(mock.lightCalls)
 	mock.mu.Unlock()
 	if preCount != 0 {
-		t.Fatalf("txCalls = %d before TxDurable, want 0", preCount)
+		t.Fatalf("lightCalls = %d before TxDurable, want 0", preCount)
 	}
 
-	// Signal durability.
 	durableCh <- types.TxID(1)
 
 	time.Sleep(50 * time.Millisecond)
@@ -463,11 +498,14 @@ func TestFanOutWorker_ConfirmedRead_Waits(t *testing.T) {
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.txCalls) != 1 {
-		t.Fatalf("txCalls = %d after TxDurable, want 1", len(mock.txCalls))
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls = %d after TxDurable, want 1", len(mock.lightCalls))
 	}
 }
 
+// TestFanOutWorker_ConfirmedReadCallerOnly_Waits verifies Phase 1.5
+// confirmed-read gating for caller-only batches: a heavy delivery with
+// no non-caller fanout still waits for TxDurable before delivery.
 func TestFanOutWorker_ConfirmedReadCallerOnly_Waits(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
@@ -481,21 +519,20 @@ func TestFanOutWorker_ConfirmedReadCallerOnly_Waits(t *testing.T) {
 	go w.Run(ctx)
 
 	durableCh := make(chan types.TxID, 1)
-	result := &ReducerCallResult{RequestID: 9, Status: 0, TxID: types.TxID(1)}
 	inbox <- FanOutMessage{
-		TxID:         types.TxID(1),
-		TxDurable:    durableCh,
-		Fanout:       CommitFanout{},
-		CallerConnID: &caller,
-		CallerResult: result,
+		TxID:          types.TxID(1),
+		TxDurable:     durableCh,
+		Fanout:        CommitFanout{},
+		CallerConnID:  &caller,
+		CallerOutcome: committedOutcome(9),
 	}
 
 	time.Sleep(50 * time.Millisecond)
 	mock.mu.Lock()
-	preCount := len(mock.resCalls)
+	preCount := len(mock.heavyCalls)
 	mock.mu.Unlock()
 	if preCount != 0 {
-		t.Fatalf("resCalls = %d before TxDurable, want 0", preCount)
+		t.Fatalf("heavyCalls = %d before TxDurable, want 0", preCount)
 	}
 
 	durableCh <- types.TxID(1)
@@ -505,8 +542,8 @@ func TestFanOutWorker_ConfirmedReadCallerOnly_Waits(t *testing.T) {
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.resCalls) != 1 {
-		t.Fatalf("resCalls = %d after TxDurable, want 1", len(mock.resCalls))
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls = %d after TxDurable, want 1", len(mock.heavyCalls))
 	}
 }
 
@@ -522,7 +559,6 @@ func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
 	defer cancel()
 	go w.Run(ctx)
 
-	// TxDurable is nil — treat as already durable.
 	inbox <- FanOutMessage{
 		TxID: types.TxID(1),
 		Fanout: CommitFanout{
@@ -535,8 +571,8 @@ func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.txCalls) != 1 {
-		t.Fatalf("txCalls = %d, want 1 (nil TxDurable = already durable)", len(mock.txCalls))
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls = %d, want 1 (nil TxDurable = already durable)", len(mock.lightCalls))
 	}
 }
 
@@ -578,7 +614,7 @@ func TestFanOutWorker_DeliverDoesNotMutateFanout(t *testing.T) {
 		TxID:          5,
 		Fanout:        fanout,
 		CallerConnID:  &caller,
-		CallerResult:  &ReducerCallResult{RequestID: 1, Status: 0, TxID: 5},
+		CallerOutcome: committedOutcome(1),
 	})
 	if _, ok := fanout[caller]; !ok {
 		t.Fatal("deliver mutated original fanout map by removing caller entry")
@@ -664,8 +700,8 @@ func TestFanOutWorker_SubscriptionErrorDelivery(t *testing.T) {
 	if mock.errCalls[0].Err.SubscriptionID != 5 || mock.errCalls[1].Err.SubscriptionID != 6 {
 		t.Fatalf("errCalls SubIDs = %d, %d; want 5, 6", mock.errCalls[0].Err.SubscriptionID, mock.errCalls[1].Err.SubscriptionID)
 	}
-	if len(mock.txCalls) != 1 {
-		t.Fatalf("txCalls = %d, want 1", len(mock.txCalls))
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls = %d, want 1", len(mock.lightCalls))
 	}
 }
 
@@ -678,7 +714,7 @@ func TestFanOutWorker_ErrorsDeliveredBeforeUpdates(t *testing.T) {
 	var order []call
 
 	sender := &orderTrackingSender{
-		onTx: func(connID types.ConnectionID) {
+		onLight: func(connID types.ConnectionID) {
 			mu.Lock()
 			order = append(order, call{kind: "tx", conn: connID})
 			mu.Unlock()
@@ -725,17 +761,17 @@ func TestFanOutWorker_ErrorsDeliveredBeforeUpdates(t *testing.T) {
 }
 
 type orderTrackingSender struct {
-	onTx  func(types.ConnectionID)
-	onErr func(types.ConnectionID)
+	onLight func(types.ConnectionID)
+	onErr   func(types.ConnectionID)
 }
 
-func (s *orderTrackingSender) SendTransactionUpdate(connID types.ConnectionID, txID types.TxID, updates []SubscriptionUpdate, memo *EncodingMemo) error {
-	if s.onTx != nil {
-		s.onTx(connID)
-	}
+func (s *orderTrackingSender) SendTransactionUpdateHeavy(connID types.ConnectionID, outcome CallerOutcome, callerUpdates []SubscriptionUpdate, memo *EncodingMemo) error {
 	return nil
 }
-func (s *orderTrackingSender) SendReducerResult(connID types.ConnectionID, result *ReducerCallResult, memo *EncodingMemo) error {
+func (s *orderTrackingSender) SendTransactionUpdateLight(connID types.ConnectionID, requestID uint32, updates []SubscriptionUpdate, memo *EncodingMemo) error {
+	if s.onLight != nil {
+		s.onLight(connID)
+	}
 	return nil
 }
 func (s *orderTrackingSender) SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error {
@@ -747,11 +783,10 @@ func (s *orderTrackingSender) SendSubscriptionError(connID types.ConnectionID, s
 
 func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
 	// Full pipeline: Manager.EvalAndBroadcast → inbox → FanOutWorker → mock sender.
-	// Uses existing test helpers: testSchema() (validate_test.go), simpleChangeset() (delta_view_test.go).
 	mock := &mockFanOutSender{}
 	fanoutCh := make(chan FanOutMessage, 64)
 
-	s := testSchema() // fakeSchema: table 1 (cols: 0=KindUint64, 1=KindString, idx on 0)
+	s := testSchema()
 	mgr := NewManager(s, s, WithFanOutInbox(fanoutCh))
 
 	worker := NewFanOutWorker(fanoutCh, mock, mgr.DroppedChanSend())
@@ -759,7 +794,6 @@ func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
 	defer cancel()
 	go worker.Run(ctx)
 
-	// Register AllRows subscription on table 1.
 	conn1 := cid(1)
 	_, err := mgr.Register(SubscriptionRegisterRequest{
 		ConnID:         conn1,
@@ -770,32 +804,27 @@ func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Simulate a commit: one insert to table 1.
 	cs := simpleChangeset(1,
 		[]types.ProductValue{{types.NewUint64(42), types.NewString("alice")}},
 		nil,
 	)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 
-	// Wait for fan-out delivery.
 	time.Sleep(100 * time.Millisecond)
 	cancel()
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	if len(mock.txCalls) != 1 {
-		t.Fatalf("txCalls = %d, want 1", len(mock.txCalls))
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls = %d, want 1", len(mock.lightCalls))
 	}
-	if mock.txCalls[0].ConnID != conn1 {
+	if mock.lightCalls[0].ConnID != conn1 {
 		t.Fatalf("connID mismatch")
 	}
-	if mock.txCalls[0].TxID != 1 {
-		t.Fatalf("TxID = %d, want 1", mock.txCalls[0].TxID)
-	}
-	if len(mock.txCalls[0].Updates) == 0 {
+	if len(mock.lightCalls[0].Updates) == 0 {
 		t.Fatal("no updates delivered")
 	}
-	if mock.txCalls[0].Updates[0].SubscriptionID != 10 {
-		t.Fatalf("SubscriptionID = %d, want 10", mock.txCalls[0].Updates[0].SubscriptionID)
+	if mock.lightCalls[0].Updates[0].SubscriptionID != 10 {
+		t.Fatalf("SubscriptionID = %d, want 10", mock.lightCalls[0].Updates[0].SubscriptionID)
 	}
 }

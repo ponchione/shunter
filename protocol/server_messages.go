@@ -7,6 +7,18 @@ import (
 )
 
 // Server→client message types (SPEC-005 §8).
+//
+// Phase 1.5 outcome-model decision is pinned in
+// `docs/parity-phase1.5-outcome-model.md` and
+// `protocol/parity_message_family_test.go`:
+//   - `TransactionUpdate` is the heavy caller-bound envelope matching
+//     `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`.
+//   - `TransactionUpdateLight` is the delta-only envelope delivered to
+//     non-callers whose subscribed rows were touched.
+//   - `ReducerCallResult` is removed from the wire surface; `TagReducerCallResult`
+//     stays reserved (unused) so the byte cannot silently be reallocated.
+//   - `UpdateStatus` is a three-arm tagged union. `OutOfEnergy` is present for
+//     shape parity but is never emitted by the Phase 1.5 executor.
 
 type InitialConnection struct {
 	Identity     [32]byte
@@ -34,9 +46,63 @@ type SubscriptionError struct {
 	Error          string
 }
 
+// TransactionUpdate is the heavy caller-bound envelope (Phase 1.5).
+// Non-callers receive `TransactionUpdateLight` instead. Numeric metadata
+// (`Timestamp`, `EnergyQuantaUsed`, `TotalHostExecutionDuration`) is
+// stubbed as zero in Phase 1.5 — see the decision doc.
 type TransactionUpdate struct {
-	TxID    uint64
-	Updates []SubscriptionUpdate
+	Status                     UpdateStatus
+	CallerIdentity             [32]byte
+	CallerConnectionID         [16]byte
+	ReducerCall                ReducerCallInfo
+	Timestamp                  int64 // nanoseconds since Unix epoch; Phase 1.5 stubs as zero
+	EnergyQuantaUsed           uint64
+	TotalHostExecutionDuration int64 // nanoseconds; Phase 1.5 stubs as zero
+}
+
+// TransactionUpdateLight is the delta-only envelope delivered to
+// non-caller subscribers whose rows were touched (Phase 1.5).
+type TransactionUpdateLight struct {
+	RequestID uint32
+	Update    []SubscriptionUpdate
+}
+
+// UpdateStatus is the three-arm tagged union carried by
+// `TransactionUpdate.Status`. Implementations: `StatusCommitted`,
+// `StatusFailed`, `StatusOutOfEnergy`.
+type UpdateStatus interface {
+	isUpdateStatus()
+}
+
+// StatusCommitted signals reducer success and carries the caller's
+// visible row-delta slice (may be empty).
+type StatusCommitted struct {
+	Update []SubscriptionUpdate
+}
+
+// StatusFailed signals reducer-side failure or pre-commit rejection.
+// Error is a human-readable message; Phase 1.5 collapses user-error,
+// panic, and not-found into this single arm — see the decision doc.
+type StatusFailed struct {
+	Error string
+}
+
+// StatusOutOfEnergy is present for shape parity but is never emitted
+// by the Phase 1.5 executor. Flipping this deferral is a Phase 3
+// runtime-parity concern.
+type StatusOutOfEnergy struct{}
+
+func (StatusCommitted) isUpdateStatus()   {}
+func (StatusFailed) isUpdateStatus()      {}
+func (StatusOutOfEnergy) isUpdateStatus() {}
+
+// ReducerCallInfo mirrors the reference-side metadata embedded in every
+// heavy `TransactionUpdate`.
+type ReducerCallInfo struct {
+	ReducerName string
+	ReducerID   uint32
+	Args        []byte
+	RequestID   uint32
 }
 
 type OneOffQueryResult struct {
@@ -46,14 +112,12 @@ type OneOffQueryResult struct {
 	Error     string // present when Status == 1
 }
 
-type ReducerCallResult struct {
-	RequestID         uint32
-	Status            uint8 // 0=committed, 1=failed_user, 2=failed_panic, 3=not_found
-	TxID              uint64
-	Error             string
-	Energy            uint64 // reserved, v1 encodes 0
-	TransactionUpdate []SubscriptionUpdate
-}
+// UpdateStatus tag bytes on the wire.
+const (
+	updateStatusTagCommitted   uint8 = 0
+	updateStatusTagFailed      uint8 = 1
+	updateStatusTagOutOfEnergy uint8 = 2
+)
 
 // EncodeServerMessage produces the uncompressed wire frame
 // [tag byte] [BSATN body]. Compression envelope wrapping is Story 1.4.
@@ -88,8 +152,19 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		writeString(&buf, msg.Error)
 	case TransactionUpdate:
 		buf.WriteByte(TagTransactionUpdate)
-		writeUint64(&buf, msg.TxID)
-		writeSubscriptionUpdates(&buf, msg.Updates)
+		if err := writeUpdateStatus(&buf, msg.Status); err != nil {
+			return nil, err
+		}
+		buf.Write(msg.CallerIdentity[:])
+		buf.Write(msg.CallerConnectionID[:])
+		writeReducerCallInfo(&buf, msg.ReducerCall)
+		writeInt64(&buf, msg.Timestamp)
+		writeUint64(&buf, msg.EnergyQuantaUsed)
+		writeInt64(&buf, msg.TotalHostExecutionDuration)
+	case TransactionUpdateLight:
+		buf.WriteByte(TagTransactionUpdateLight)
+		writeUint32(&buf, msg.RequestID)
+		writeSubscriptionUpdates(&buf, msg.Update)
 	case OneOffQueryResult:
 		buf.WriteByte(TagOneOffQueryResult)
 		writeUint32(&buf, msg.RequestID)
@@ -99,14 +174,6 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		} else {
 			writeString(&buf, msg.Error)
 		}
-	case ReducerCallResult:
-		buf.WriteByte(TagReducerCallResult)
-		writeUint32(&buf, msg.RequestID)
-		buf.WriteByte(msg.Status)
-		writeUint64(&buf, msg.TxID)
-		writeString(&buf, msg.Error)
-		writeUint64(&buf, msg.Energy)
-		writeSubscriptionUpdates(&buf, msg.TransactionUpdate)
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnknownMessageTag, m)
 	}
@@ -115,6 +182,8 @@ func EncodeServerMessage(m any) ([]byte, error) {
 
 // DecodeServerMessage parses a server frame back into the concrete
 // message type. Provided for symmetry and client-side / test use.
+// TagReducerCallResult is reserved and rejected here — see
+// `docs/parity-phase1.5-outcome-model.md`.
 func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	if len(frame) < 1 {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)
@@ -137,11 +206,11 @@ func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	case TagTransactionUpdate:
 		msg, err := decodeTransactionUpdate(body)
 		return tag, msg, err
+	case TagTransactionUpdateLight:
+		msg, err := decodeTransactionUpdateLight(body)
+		return tag, msg, err
 	case TagOneOffQueryResult:
 		msg, err := decodeOneOffQueryResult(body)
-		return tag, msg, err
-	case TagReducerCallResult:
-		msg, err := decodeReducerCallResult(body)
 		return tag, msg, err
 	default:
 		return 0, nil, fmt.Errorf("%w: tag=%d", ErrUnknownMessageTag, tag)
@@ -223,16 +292,47 @@ func decodeSubscriptionError(body []byte) (SubscriptionError, error) {
 
 func decodeTransactionUpdate(body []byte) (TransactionUpdate, error) {
 	var m TransactionUpdate
+	status, off, err := readUpdateStatus(body, 0)
+	if err != nil {
+		return m, err
+	}
+	m.Status = status
+	if len(body)-off < 32+16 {
+		return m, fmt.Errorf("%w: TransactionUpdate caller fields truncated", ErrMalformedMessage)
+	}
+	copy(m.CallerIdentity[:], body[off:off+32])
+	off += 32
+	copy(m.CallerConnectionID[:], body[off:off+16])
+	off += 16
+	rci, off, err := readReducerCallInfo(body, off)
+	if err != nil {
+		return m, err
+	}
+	m.ReducerCall = rci
+	if m.Timestamp, off, err = readInt64(body, off); err != nil {
+		return m, err
+	}
+	if m.EnergyQuantaUsed, off, err = readUint64(body, off); err != nil {
+		return m, err
+	}
+	if m.TotalHostExecutionDuration, _, err = readInt64(body, off); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+func decodeTransactionUpdateLight(body []byte) (TransactionUpdateLight, error) {
+	var m TransactionUpdateLight
 	var off int
 	var err error
-	if m.TxID, off, err = readUint64(body, 0); err != nil {
+	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
 	ups, _, err := readSubscriptionUpdates(body, off)
 	if err != nil {
 		return m, err
 	}
-	m.Updates = ups
+	m.Update = ups
 	return m, nil
 }
 
@@ -260,36 +360,76 @@ func decodeOneOffQueryResult(body []byte) (OneOffQueryResult, error) {
 	return m, nil
 }
 
-func decodeReducerCallResult(body []byte) (ReducerCallResult, error) {
-	var m ReducerCallResult
-	var off int
-	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
+func writeUpdateStatus(buf *bytes.Buffer, s UpdateStatus) error {
+	switch v := s.(type) {
+	case StatusCommitted:
+		buf.WriteByte(updateStatusTagCommitted)
+		writeSubscriptionUpdates(buf, v.Update)
+	case StatusFailed:
+		buf.WriteByte(updateStatusTagFailed)
+		writeString(buf, v.Error)
+	case StatusOutOfEnergy:
+		buf.WriteByte(updateStatusTagOutOfEnergy)
+	case nil:
+		return fmt.Errorf("%w: nil UpdateStatus", ErrMalformedMessage)
+	default:
+		return fmt.Errorf("%w: unknown UpdateStatus %T", ErrMalformedMessage, s)
 	}
-	if len(body)-off < 1 {
-		return m, fmt.Errorf("%w: ReducerCallResult status", ErrMalformedMessage)
-	}
-	m.Status = body[off]
-	off++
-	if m.TxID, off, err = readUint64(body, off); err != nil {
-		return m, err
-	}
-	if m.Error, off, err = readString(body, off); err != nil {
-		return m, err
-	}
-	if m.Energy, off, err = readUint64(body, off); err != nil {
-		return m, err
-	}
-	ups, _, err := readSubscriptionUpdates(body, off)
-	if err != nil {
-		return m, err
-	}
-	m.TransactionUpdate = ups
-	return m, nil
+	return nil
 }
 
-// --- SubscriptionUpdate array + uint64 primitives ---
+func readUpdateStatus(body []byte, off int) (UpdateStatus, int, error) {
+	if len(body)-off < 1 {
+		return nil, off, fmt.Errorf("%w: UpdateStatus tag truncated", ErrMalformedMessage)
+	}
+	tag := body[off]
+	off++
+	switch tag {
+	case updateStatusTagCommitted:
+		ups, off, err := readSubscriptionUpdates(body, off)
+		if err != nil {
+			return nil, off, err
+		}
+		return StatusCommitted{Update: ups}, off, nil
+	case updateStatusTagFailed:
+		s, off, err := readString(body, off)
+		if err != nil {
+			return nil, off, err
+		}
+		return StatusFailed{Error: s}, off, nil
+	case updateStatusTagOutOfEnergy:
+		return StatusOutOfEnergy{}, off, nil
+	default:
+		return nil, off, fmt.Errorf("%w: UpdateStatus tag=%d", ErrMalformedMessage, tag)
+	}
+}
+
+func writeReducerCallInfo(buf *bytes.Buffer, rci ReducerCallInfo) {
+	writeString(buf, rci.ReducerName)
+	writeUint32(buf, rci.ReducerID)
+	writeBytes(buf, rci.Args)
+	writeUint32(buf, rci.RequestID)
+}
+
+func readReducerCallInfo(body []byte, off int) (ReducerCallInfo, int, error) {
+	var m ReducerCallInfo
+	var err error
+	if m.ReducerName, off, err = readString(body, off); err != nil {
+		return m, off, err
+	}
+	if m.ReducerID, off, err = readUint32(body, off); err != nil {
+		return m, off, err
+	}
+	if m.Args, off, err = readBytes(body, off); err != nil {
+		return m, off, err
+	}
+	if m.RequestID, off, err = readUint32(body, off); err != nil {
+		return m, off, err
+	}
+	return m, off, nil
+}
+
+// --- SubscriptionUpdate array + integer primitives ---
 
 func writeSubscriptionUpdates(buf *bytes.Buffer, ups []SubscriptionUpdate) {
 	writeUint32(buf, uint32(len(ups)))
@@ -337,4 +477,13 @@ func readUint64(body []byte, off int) (uint64, int, error) {
 		return 0, off, fmt.Errorf("%w: uint64 truncated at offset %d", ErrMalformedMessage, off)
 	}
 	return binary.LittleEndian.Uint64(body[off : off+8]), off + 8, nil
+}
+
+func writeInt64(buf *bytes.Buffer, v int64) {
+	writeUint64(buf, uint64(v))
+}
+
+func readInt64(body []byte, off int) (int64, int, error) {
+	v, off, err := readUint64(body, off)
+	return int64(v), off, err
 }
