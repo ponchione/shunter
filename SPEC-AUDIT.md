@@ -1886,13 +1886,13 @@ Fix: defer explicitly ("v1 reducer calls always deliver caller deltas via `Reduc
 
 Fix: already covered by §7.1 equality-only design decision; add one line to §7.4 noting the same rationale applies.
 
-### 3.8 [DIVERGE] Close codes differ slightly
+### 3.8 [CLOSED] Close codes parity-pinned
 
-- Shunter server uses `1000 / 1002 / 1008 / 1011` (Story 6.3, §11.1).
-- SpacetimeDB uses `1001 Away` for engine shutdown, `1002 Error` for protocol errors, `1008 Again/Policy Violation` for too-many-requests; rarely `1011` (reference briefing §3).
-- Shunter picks `1000` (Normal) for graceful shutdown where SpacetimeDB picks `1001` (Away). RFC 6455 reads `1000` as "normal, initiated by this endpoint without a specific reason" vs `1001` as "going away".
-
-Fix: either mirror SpacetimeDB (`1001` for shutdown) or document the intentional choice: "`1000` is used for graceful shutdown because the close is initiated by the server, not because the server is being relocated; SpacetimeDB uses `1001` (Away)."
+- Shunter uses `1000 / 1002 / 1008 / 1011` (Story 6.3, §11.1).
+- SpacetimeDB uses `1001 Away` for engine shutdown, `1002 Error` for protocol errors, `1008 Again/Policy Violation` for too-many-requests; rarely `1011`.
+- Shunter picks `1000` (Normal) for graceful shutdown where SpacetimeDB picks `1001` (Away). This is an intentional documented divergence: `1000` is used because the close is server-initiated without relocation semantics; `1001` implies the server is "going away" in the sense of being relocated.
+- Phase 1 parity audit (Step 3.2) confirmed all call sites use the correct code for their condition: `1000` graceful, `1002` malformed/unknown-tag, `1008` auth-failure/backpressure/flood/idle-timeout, `1011` unexpected server error. No drift found.
+- `protocol/parity_close_codes_test.go` `TestPhase1ParityCloseCodeConstants` now pins all four constants against `websocket.Status*` values; `TestPhase1ParityHandshakeRejectionStatuses` pins the HTTP status codes for each rejection class. See ledger P0-PROTOCOL-003.
 
 ### 3.9 [DIVERGE] `ReducerCallResult.status` enum maps to neither UpdateStatus nor ReducerOutcome
 
