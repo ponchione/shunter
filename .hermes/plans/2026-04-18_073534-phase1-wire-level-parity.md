@@ -243,7 +243,7 @@ Leave `clientOffersSubprotocol` in place — other tests/integrations likely cal
 
 - [ ] **Step 1.4: Run focused tests**
 
-Run: `rtk go test ./protocol -run TestPhase1ParitySubprotocol -v`
+Run: `rtk go test ./protocol -run 'TestPhase1ParityReferenceSubprotocol|TestPhase1ParityLegacyShunterSubprotocolStillAccepted|TestPhase1ParityReferenceSubprotocolPreferred' -v`
 Expected: PASS (reference accepted, legacy still accepted).
 
 - [ ] **Step 1.5: Run broader protocol tests**

@@ -35,13 +35,11 @@ func TestPhase1DeferralTransactionUpdateNoHeavyLightSplit(t *testing.T) {
 // Note: Shunter's type is SubscribeMsg (not SubscribeMessage) — the
 // plan guessed SubscribeMessage; the real name is SubscribeMsg.
 func TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants(t *testing.T) {
-	if TagSubscribe != 1 {
-		t.Errorf("TagSubscribe = %d, want 1 (Phase 1 deferral: no Multi/Single split)",
-			TagSubscribe)
-	}
 	fields := msgFieldNames(SubscribeMsg{})
-	if containsMsg(fields, "QueryId") {
-		t.Fatal("SubscribeMsg has QueryId — deferral has been closed; update this test and the P0-PROTOCOL-004 ledger row")
+	want := []string{"RequestID", "SubscriptionID", "Query"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("SubscribeMsg fields = %v, want %v (deferral: no QueryId / Multi / Single variants)",
+			fields, want)
 	}
 }
 
@@ -53,8 +51,10 @@ func TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants(t *testing.T) {
 // plan guessed CallReducerMessage; the real name is CallReducerMsg.
 func TestPhase1DeferralCallReducerNoFlagsField(t *testing.T) {
 	fields := msgFieldNames(CallReducerMsg{})
-	if containsMsg(fields, "Flags") {
-		t.Fatal("CallReducerMsg has Flags — deferral closed; update this test and the P0-PROTOCOL-004 ledger row")
+	want := []string{"RequestID", "ReducerName", "Args"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("CallReducerMsg fields = %v, want %v (deferral: no Flags field)",
+			fields, want)
 	}
 }
 
@@ -66,8 +66,10 @@ func TestPhase1DeferralCallReducerNoFlagsField(t *testing.T) {
 // plan guessed OneOffQueryMessage; the real name is OneOffQueryMsg.
 func TestPhase1DeferralOneOffQueryStructuredNotSQL(t *testing.T) {
 	fields := msgFieldNames(OneOffQueryMsg{})
-	if containsMsg(fields, "QueryString") || containsMsg(fields, "SQL") {
-		t.Fatal("OneOffQueryMsg carries a SQL string — deferral closed; update this test and the P0-PROTOCOL-004 ledger row")
+	want := []string{"RequestID", "TableName", "Predicates"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("OneOffQueryMsg fields = %v, want %v (deferral: structured predicates, not SQL string)",
+			fields, want)
 	}
 }
 
@@ -75,10 +77,13 @@ func TestPhase1DeferralOneOffQueryStructuredNotSQL(t *testing.T) {
 // reference uses a tagged union (UpdateStatus); Shunter uses a flat
 // uint8. Flip when the enum is restructured.
 func TestPhase1DeferralReducerCallResultFlatStatus(t *testing.T) {
-	var r ReducerCallResult
-	if reflect.TypeOf(r.Status).Kind() != reflect.Uint8 {
-		t.Errorf("ReducerCallResult.Status kind = %v, want Uint8 (deferral)",
-			reflect.TypeOf(r.Status).Kind())
+	statusField, ok := reflect.TypeOf(ReducerCallResult{}).FieldByName("Status")
+	if !ok {
+		t.Fatal("ReducerCallResult missing Status field")
+	}
+	if statusField.Type != reflect.TypeOf(uint8(0)) {
+		t.Errorf("ReducerCallResult.Status type = %v, want exact uint8 (deferral)",
+			statusField.Type)
 	}
 }
 
@@ -89,13 +94,4 @@ func msgFieldNames(v any) []string {
 		names[i] = t.Field(i).Name
 	}
 	return names
-}
-
-func containsMsg(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }

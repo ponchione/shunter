@@ -719,7 +719,7 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 - **Subscription RPC surface:** v1 exposes only `Subscribe`, `Unsubscribe`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no `SubscribeMulti`, `SubscribeSingle`, or `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args}` only (§7.3). There is no extra flags byte in the request frame.
 - **OneOffQuery language:** v1 `OneOffQuery` uses the same structured predicate subset as `Subscribe` (§7.4 / §7.1.1), not SpacetimeDB's SQL-oriented query text.
-- **Close-code policy:** Shunter's documented close behavior is limited to `1000`, `1008`, and `1011` with Shunter-specific reasons for policy failures (§11.1). It does not try to mirror SpacetimeDB's full close-code/reason matrix.
+- **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror SpacetimeDB's full close-code/reason matrix.
 - **Energy model:** v1 has no `OutOfEnergy` outcome. `ReducerCallResult.energy` is reserved and always `0`, and the status enum remains `{committed, failed_user, failed_panic, not_found}` (§8.7).
 - **ConnectionID reuse semantics:** reusing `connection_id` on reconnect is only a client hint for future resume features; it has no server-side resume semantics in v1 (§2.3, §11.3).
 

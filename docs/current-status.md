@@ -105,8 +105,8 @@ Current important differences include:
 - some delivery metadata is threaded through different seams
 
 ### Protocol
-- forked subprotocol namespace
-- compression-tag behavior differs
+- legacy dual-subprotocol admission remains as a compatibility deferral (`v1.bsatn.spacetimedb` preferred; `v1.bsatn.shunter` still accepted)
+- brotli remains a reserved-but-unsupported compression tag even though the wire-byte numbering now matches the reference
 - outgoing buffer defaults differ sharply
 - no TransactionUpdate light/heavy split
 - no SubscribeMulti / SubscribeSingle / QuerySetId surface
