@@ -8,15 +8,25 @@ import (
 	"io"
 )
 
-// Compression byte values (SPEC-005 §3.3).
+// Compression byte values (SPEC-005 §3.3, parity-aligned with
+// reference/SpacetimeDB
+// crates/client-api-messages/src/websocket/common.rs
+// SERVER_MSG_COMPRESSION_TAG_*).
 const (
-	CompressionNone uint8 = 0x00
-	CompressionGzip uint8 = 0x01
+	CompressionNone   uint8 = 0x00
+	CompressionBrotli uint8 = 0x01 // reserved; ErrBrotliUnsupported.
+	CompressionGzip   uint8 = 0x02
 )
 
 // ErrUnknownCompressionTag is returned when the compression byte is
-// not `0x00` or `0x01`.
+// not a recognized value.
 var ErrUnknownCompressionTag = errors.New("protocol: unknown compression tag")
+
+// ErrBrotliUnsupported is returned when a peer requests brotli
+// compression. The tag is recognized (Phase 1 parity) but Shunter does
+// not implement brotli; callers should treat it as a distinct protocol
+// deferral rather than an unknown tag.
+var ErrBrotliUnsupported = errors.New("protocol: brotli compression unsupported")
 
 // ErrDecompressionFailed is returned when gzip decompression fails.
 var ErrDecompressionFailed = errors.New("protocol: decompression failed")
@@ -58,6 +68,8 @@ func WrapCompressed(tag uint8, body []byte, mode uint8) ([]byte, error) {
 		out[1] = tag
 		copy(out[2:], body)
 		return out, nil
+	case CompressionBrotli:
+		return nil, ErrBrotliUnsupported
 	case CompressionGzip:
 		var buf bytes.Buffer
 		buf.WriteByte(CompressionGzip)
@@ -89,6 +101,8 @@ func UnwrapCompressed(frame []byte) (uint8, []byte, error) {
 	switch mode {
 	case CompressionNone:
 		return tag, payload, nil
+	case CompressionBrotli:
+		return 0, nil, ErrBrotliUnsupported
 	case CompressionGzip:
 		gr, err := gzip.NewReader(bytes.NewReader(payload))
 		if err != nil {

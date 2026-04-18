@@ -110,13 +110,15 @@ When compression is enabled for a connection and the server chooses to compress 
 
 Where `compressed_body` is the gzip-compressed form of the BSATN body bytes only. The message tag itself is never compressed.
 
-Compression values:
+Compression values (parity-aligned with reference SERVER_MSG_COMPRESSION_TAG_*):
 - `0x00` = uncompressed body, but explicit compression envelope present for this message: `[0x00][tag][body]`
-- `0x01` = gzip-compressed body: `[0x01][tag][gzip(body)]`
+- `0x01` = brotli (reserved; Shunter does not implement — returns `ErrBrotliUnsupported` and closes with 1002 reason `brotli unsupported`; implementation deferred to Phase 2+)
+- `0x02` = gzip-compressed body: `[0x02][tag][gzip(body)]`
 
 If compression is negotiated as `none`, the explicit compression byte is omitted entirely and all server messages use `[tag][body]`.
 
 Error handling:
+- Brotli tag (`0x01`) → protocol error (`1002`) with reason `brotli unsupported` and close
 - Unknown compression tag → protocol error (`1002`) and close
 - Decompression failure → protocol error (`1002`) and close
 
@@ -711,7 +713,7 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 ## 16. Divergences from SpacetimeDB
 
 - **Protocol identifier:** Shunter admits both `v1.bsatn.spacetimedb` (reference, preferred) and `v1.bsatn.shunter` (legacy, retained — see §2.2). This closes the Phase 1 subprotocol parity gap; the legacy token is an intentional deferral until existing Shunter-token clients are cut over.
-- **Compression envelope tags:** Shunter reserves `0x00` = explicit uncompressed envelope and `0x01` = gzip (§3.3). These values are Shunter-specific and are not byte-compatible with SpacetimeDB's compression-tag conventions.
+- **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). These values are now parity-aligned with SpacetimeDB's SERVER_MSG_COMPRESSION_TAG_* constants. Brotli implementation is deferred to Phase 2+.
 - **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `256` (§10.1, §12), rather than SpacetimeDB's much larger default buffering. Shunter chooses earlier disconnect-on-lag to keep memory bounded.
 - **TransactionUpdate shape:** v1 sends one `TransactionUpdate` form with full `SubscriptionUpdate` payloads (§8.5); it does not split delivery into separate light/heavy transaction-update variants.
 - **Subscription RPC surface:** v1 exposes only `Subscribe`, `Unsubscribe`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no `SubscribeMulti`, `SubscribeSingle`, or `QuerySetId` protocol family.

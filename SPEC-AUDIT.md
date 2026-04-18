@@ -2077,7 +2077,7 @@ SPEC-005 is the most visible external consumer of the "BSATN" name (wire encodin
 9. Document `Predicate.Value` wire encoding (2.10). One-element ProductValue is the cheapest rule.
 10. Extend "Depends on:" front matter (4.2).
 11. Add BSATN naming disclaimer to §3.1 once SPEC-002 lands (4.1 / 6.1).
-12. Document compression tag divergence from SpacetimeDB (3.2).
+12. [CLOSED] Compression tag numbering aligned; brotli retained as explicit deferred-tag per `ErrBrotliUnsupported`.
 13. Fix `SubscriptionError.request_id = 0` sentinel clash with client-chosen 0 (2.4).
 14. Resolve double-removal of subscription tracker entries across Stories 4.3 / 5.2 (2.14).
 15. Add `ConnectTimeout` option or document the unbounded-OnConnect wait (2.6 / 2.15).

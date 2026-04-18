@@ -52,7 +52,7 @@ func TestSendWithCompressionWrapsEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	frame := <-c.OutboundCh
-	// Compression-enabled frames start with compression byte (0x00 or 0x01).
+	// Compression-enabled frames start with compression byte (0x00 or 0x02).
 	if frame[0] != CompressionNone && frame[0] != CompressionGzip {
 		t.Fatalf("expected compression envelope, got first byte %d", frame[0])
 	}

@@ -70,7 +70,8 @@ func TestUnwrapCompressedGzipRoundTrip(t *testing.T) {
 }
 
 func TestUnwrapCompressedUnknownByte(t *testing.T) {
-	frame := []byte{0x02, TagSubscribeApplied, 0x01}
+	// 0x03 is out-of-range (0x00=none, 0x01=brotli-reserved, 0x02=gzip).
+	frame := []byte{0x03, TagSubscribeApplied, 0x01}
 	_, _, err := UnwrapCompressed(frame)
 	if !errors.Is(err, ErrUnknownCompressionTag) {
 		t.Errorf("got %v, want ErrUnknownCompressionTag", err)

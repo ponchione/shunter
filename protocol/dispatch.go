@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/coder/websocket"
@@ -91,7 +92,11 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 			var unwrapErr error
 			tag, body, unwrapErr = UnwrapCompressed(frame)
 			if unwrapErr != nil {
-				closeProtocolError(c, "malformed message")
+				if errors.Is(unwrapErr, ErrBrotliUnsupported) {
+					closeProtocolError(c, "brotli unsupported")
+				} else {
+					closeProtocolError(c, "malformed message")
+				}
 				return
 			}
 			// Reconstruct frame as [tag][body] for DecodeClientMessage.
