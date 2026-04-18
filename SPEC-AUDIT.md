@@ -1856,7 +1856,7 @@ Fix: 2.6 above covers the timeout. Also explicitly state in Story 3.5 "keep-aliv
 
 Fix: cross-reference SPEC-004 §3.2 in §10 or §12; add a line noting the v1 buffer budget is deliberately tight.
 
-### 3.4 [DIVERGE] No TransactionUpdate light/heavy split
+### 3.4 [DIVERGE] No TransactionUpdate light/heavy split [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralTransactionUpdateNoHeavyLightSplit]
 
 - SpacetimeDB v1 distinguishes `TransactionUpdate` (heavy, caller metadata) vs `TransactionUpdateLight` (deltas only, non-caller broadcast) via `ClientConfig.tx_update_full` (`crates/client-api-messages/src/websocket/v1.rs:281-283`).
 - Shunter has a single `TransactionUpdate` shape — strictly delta-only, no reducer metadata — and routes caller-specific delivery through a dedicated `ReducerCallResult` tag (§8.7). SPEC-004 audit §3.2 flagged the absence of light/heavy distinction.
@@ -1864,14 +1864,14 @@ Fix: cross-reference SPEC-004 §3.2 in §10 or §12; add a line noting the v1 bu
 
 Fix: add a one-line note to §8.5 or §12 explaining the divergence: "SpacetimeDB distinguishes heavy/light TransactionUpdate variants by client preference. Shunter emits a single delta-only TransactionUpdate and routes caller-specific reducer metadata via ReducerCallResult (§8.7); non-callers never observe reducer metadata."
 
-### 3.5 [DIVERGE] No SubscribeMulti / SubscribeSingle / QuerySetId
+### 3.5 [DIVERGE] No SubscribeMulti / SubscribeSingle / QuerySetId [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants]
 
 - SpacetimeDB v1/v2 support `SubscribeMulti(query_id, query_strings)` and `SubscribeSingle(query_id, query_string)` where `query_id` is a u32 (`QuerySetId`) grouping multiple queries into one logical set (`crates/client-api-messages/src/websocket/v1.rs:60-62` and `v2.rs:20`).
 - Shunter exposes only `Subscribe(subscription_id, query)` — one predicate per subscription, no set grouping. `subscription_id` and `QuerySetId` are semantically similar but Shunter's is single-predicate.
 
 Fix: add a §15 Open Question or §3 divergence note: "SpacetimeDB's multi-query subscription set grouping is not exposed in v1. A future extension may introduce a `SubscribeMulti`-style set; reserve `subscription_id` namespace accordingly."
 
-### 3.6 [DIVERGE] No `CallReducer.flags` byte (NoSuccessfulUpdate, etc.)
+### 3.6 [DIVERGE] No `CallReducer.flags` byte (NoSuccessfulUpdate, etc.) [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralCallReducerNoFlagsField]
 
 - SpacetimeDB `CallReducer` carries `flags: CallReducerFlags` (`crates/client-api-messages/src/websocket/v1.rs:55`; e.g., `NoSuccessfulUpdate` to suppress echoing the caller's `TransactionUpdate`).
 - Shunter `CallReducerMsg` (§7.3) carries only `request_id`, `reducer_name`, `args`. No flags.
@@ -1879,7 +1879,7 @@ Fix: add a §15 Open Question or §3 divergence note: "SpacetimeDB's multi-query
 
 Fix: defer explicitly ("v1 reducer calls always deliver caller deltas via `ReducerCallResult.transaction_update`; suppressing that echo is out of scope for v1").
 
-### 3.7 [DIVERGE] OneOffQuery uses structured predicates, not SQL string
+### 3.7 [DIVERGE] OneOffQuery uses structured predicates, not SQL string [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralOneOffQueryStructuredNotSQL]
 
 - §7.4: `OneOffQueryMsg{request_id, table_name, predicates []Predicate}` — structured, same shape as Subscribe.
 - SpacetimeDB: `OneOffQuery{request_id, query_string: Box<str>}` — SQL string (`v1.rs:237-250`, `v2.rs:101-109`).
@@ -1894,7 +1894,7 @@ Fix: already covered by §7.1 equality-only design decision; add one line to §7
 - Phase 1 parity audit (Step 3.2) confirmed all call sites use the correct code for their condition: `1000` graceful, `1002` malformed/unknown-tag, `1008` auth-failure/backpressure/flood/idle-timeout, `1011` unexpected server error. No drift found.
 - `protocol/parity_close_codes_test.go` `TestPhase1ParityCloseCodeConstants` now pins all four constants against `websocket.Status*` values; `TestPhase1ParityHandshakeRejectionStatuses` pins the HTTP status codes for each rejection class. See ledger P0-PROTOCOL-003.
 
-### 3.9 [DIVERGE] `ReducerCallResult.status` enum maps to neither UpdateStatus nor ReducerOutcome
+### 3.9 [DIVERGE] `ReducerCallResult.status` enum maps to neither UpdateStatus nor ReducerOutcome [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralReducerCallResultFlatStatus]
 
 - Shunter: `0=committed, 1=failed_user, 2=failed_panic, 3=not_found` (§8.7).
 - SpacetimeDB v1 `UpdateStatus`: `Committed / Failed(String) / OutOfEnergy`.
