@@ -1762,11 +1762,11 @@ Fix: add a `ConnectTimeout` option (default matches `IdleTimeout`) to `ProtocolO
 
 ### 2.7 [GAP] Compression query-param accepted-values list is not normative
 
-- §2.3 endpoint shows `compression=<none|gzip>` in the example, but §3.3 Compression values are only `0x00`/`0x01` (Gzip). No explicit enum of HTTP-level accepted strings.
+- §2.3 endpoint shows `compression=<none|gzip>` in the example, but §3.3 compression tag values are now `None=0x00`, `Brotli=0x01` (reserved/deferred), `Gzip=0x02`. No explicit enum of HTTP-level accepted strings.
 - Story 3.2 step 4 says "accept `none` (default) or `gzip`; reject unknown with `400`" — Story-level, not spec-level.
-- Adding Brotli (§15 not listed) or any other codec later requires both spec updates and handler updates.
+- Adding Brotli (deferred via `ErrBrotliUnsupported`) or any other codec later requires both spec updates and handler updates.
 
-Fix: §2.3 should include the complete accepted list ("`none` | `gzip`; reject others with `400`"). Add a line to §3.3 tying the query-param value to the on-wire compression byte.
+Fix: §2.3 should include the complete accepted list ("`none` | `gzip`; reject others with `400`"). Add a line to §3.3 tying the query-param value to the on-wire compression byte and citing the tag-numbering alignment with §12 of this audit.
 
 ### 2.8 [GAP] Buffer-overflow Close-reason strings have no reserved contract
 
@@ -1844,14 +1844,9 @@ Fix: 2.6 above covers the timeout. Also explicitly state in Story 3.5 "keep-aliv
 
 **[RETAINED-DEFERRAL]** Shunter admits both `v1.bsatn.spacetimedb` (reference, preferred) and `v1.bsatn.shunter` (legacy). Reference admission closes the Phase 1 parity gap; legacy retention is intentional until existing Shunter-token clients are cut over.
 
-### 3.2 [DIVERGE] Compression tag values collide with reference
+### 3.2 [CLOSED] Compression tag values — see §12
 
-- Shunter: `None=0x00`, `Gzip=0x01` (§3.3).
-- SpacetimeDB: `None=0x00`, `Brotli=0x01`, `Gzip=0x02` (`crates/client-api-messages/src/websocket/common.rs:35-54`).
-- Shunter has no Brotli and assigns `0x01` to Gzip — the same tag SpacetimeDB uses for Brotli. Byte-level incompatibility; intentional.
-- Live `protocol/sender.go:74` always sends `[0x00][tag][body]` when compression is enabled, never gzips — matches spec §3.3 "Implement compression as optional in v1. Default to none."
-
-Fix: document the tag-value divergence explicitly in §3.3 ("tag values differ from SpacetimeDB; Brotli is out of scope for v1").
+**[CLOSED]** Tag numbering aligned with SpacetimeDB (`None=0x00`, `Brotli=0x01` reserved, `Gzip=0x02`). Brotli is retained as an explicit deferred tag via `ErrBrotliUnsupported`. See §12 of this audit for full resolution record.
 
 ### 3.3 [DIVERGE] Outgoing buffer capacity 256 vs SpacetimeDB 16,384
 
