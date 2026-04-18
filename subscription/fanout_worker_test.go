@@ -308,6 +308,166 @@ func TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout(t *testing.T) {
 	}
 }
 
+// TestFanOutWorker_NoSuccessNotify_SuppressesCallerHeavy_OnCommitted
+// pins the Phase 1.5 sub-slice: when the caller set
+// CallReducerFlags::NoSuccessNotify and the outcome is committed, the
+// caller's heavy envelope is skipped entirely. Caller observes nothing;
+// non-caller recipients still receive their light envelopes.
+func TestFanOutWorker_NoSuccessNotify_SuppressesCallerHeavy_OnCommitted(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	caller, other := cid(1), cid(2)
+	inbox <- FanOutMessage{
+		TxID: types.TxID(40),
+		Fanout: CommitFanout{
+			caller: {{SubscriptionID: 1, TableName: "t1"}},
+			other:  {{SubscriptionID: 2, TableName: "t1"}},
+		},
+		CallerConnID: &caller,
+		CallerOutcome: &CallerOutcome{
+			Kind:      CallerOutcomeCommitted,
+			RequestID: 4,
+			Flags:     CallerOutcomeFlagNoSuccessNotify,
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.heavyCalls) != 0 {
+		t.Fatalf("heavyCalls = %d, want 0 (NoSuccessNotify suppresses caller-echo on commit)", len(mock.heavyCalls))
+	}
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls = %d, want 1 (non-caller still gets light)", len(mock.lightCalls))
+	}
+	if mock.lightCalls[0].ConnID != other {
+		t.Fatalf("light recipient = %x, want %x", mock.lightCalls[0].ConnID[:], other[:])
+	}
+}
+
+// TestFanOutWorker_NoSuccessNotify_EmptyFanout_NoDelivery pins that a
+// caller-only batch with NoSuccessNotify + committed performs no delivery
+// at all — no heavy to caller, no light to anyone.
+func TestFanOutWorker_NoSuccessNotify_EmptyFanout_NoDelivery(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	caller := cid(1)
+	inbox <- FanOutMessage{
+		TxID:         types.TxID(41),
+		Fanout:       CommitFanout{},
+		CallerConnID: &caller,
+		CallerOutcome: &CallerOutcome{
+			Kind:      CallerOutcomeCommitted,
+			RequestID: 5,
+			Flags:     CallerOutcomeFlagNoSuccessNotify,
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.heavyCalls) != 0 {
+		t.Fatalf("heavyCalls = %d, want 0", len(mock.heavyCalls))
+	}
+	if len(mock.lightCalls) != 0 {
+		t.Fatalf("lightCalls = %d, want 0", len(mock.lightCalls))
+	}
+}
+
+// TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnFailed pins that
+// the flag only suppresses the success echo: a failed reducer still
+// delivers the heavy envelope so the caller observes the failure.
+func TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnFailed(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	caller := cid(1)
+	inbox <- FanOutMessage{
+		TxID:         types.TxID(42),
+		Fanout:       CommitFanout{},
+		CallerConnID: &caller,
+		CallerOutcome: &CallerOutcome{
+			Kind:      CallerOutcomeFailed,
+			RequestID: 6,
+			Error:     "boom",
+			Flags:     CallerOutcomeFlagNoSuccessNotify,
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls = %d, want 1 (failure always delivered even with NoSuccessNotify)", len(mock.heavyCalls))
+	}
+	if mock.heavyCalls[0].Outcome.Kind != CallerOutcomeFailed {
+		t.Fatalf("outcome Kind = %d, want CallerOutcomeFailed", mock.heavyCalls[0].Outcome.Kind)
+	}
+}
+
+// TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnOutOfEnergy pins
+// that out-of-energy outcomes still deliver the heavy envelope.
+func TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnOutOfEnergy(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	caller := cid(1)
+	inbox <- FanOutMessage{
+		TxID:         types.TxID(43),
+		Fanout:       CommitFanout{},
+		CallerConnID: &caller,
+		CallerOutcome: &CallerOutcome{
+			Kind:      CallerOutcomeOutOfEnergy,
+			RequestID: 7,
+			Flags:     CallerOutcomeFlagNoSuccessNotify,
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls = %d, want 1 (out-of-energy always delivered)", len(mock.heavyCalls))
+	}
+	if mock.heavyCalls[0].Outcome.Kind != CallerOutcomeOutOfEnergy {
+		t.Fatalf("outcome Kind = %d, want CallerOutcomeOutOfEnergy", mock.heavyCalls[0].Outcome.Kind)
+	}
+}
+
 func TestFanOutWorker_BufferFull_DropsClient(t *testing.T) {
 	mock := &mockFanOutSender{sendErr: ErrSendBufferFull}
 	inbox := make(chan FanOutMessage, 1)

@@ -113,10 +113,32 @@ func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout, callerConnID *types
 func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	memo := NewEncodingMemo()
 
+	// Phase 1.5 CallReducerFlags::NoSuccessNotify: when the caller opted
+	// out of the success echo and the outcome committed, suppress the
+	// caller's heavy delivery entirely. Failure / out-of-energy
+	// outcomes still flow so the caller observes non-success states.
+	// Mirrors reference/SpacetimeDB behavior of dropping the caller
+	// from the fan-out recipient set entirely in that case.
+	callerSuppressed := msg.CallerConnID != nil && msg.CallerOutcome != nil &&
+		msg.CallerOutcome.Kind == CallerOutcomeCommitted &&
+		msg.CallerOutcome.Flags == CallerOutcomeFlagNoSuccessNotify
+
+	// Compute the effective caller for downstream gating + delivery
+	// decisions. When suppressed, treat the caller as absent so
+	// confirmed-read gating does not block on a delivery that will not
+	// happen and so the non-caller light loop skips the caller's
+	// fanout entry as usual.
+	effCallerConnID := msg.CallerConnID
+	effCallerOutcome := msg.CallerOutcome
+	if callerSuppressed {
+		effCallerConnID = nil
+		effCallerOutcome = nil
+	}
+
 	// Confirmed-read gating (Story 6.4). The heavy envelope is the
 	// caller-visible commit confirmation, so it participates in
 	// confirmed-read gating just like a non-caller light delivery.
-	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout, msg.CallerConnID, msg.CallerOutcome) {
+	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout, effCallerConnID, effCallerOutcome) {
 		select {
 		case <-ctx.Done():
 			return
@@ -161,10 +183,12 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// when CallerConnID is set the caller ALWAYS receives a heavy
 	// envelope — success with possibly-empty update, failure, or
 	// out-of-energy — so the caller never silently loses its outcome
-	// even on empty changesets or no-active-subscription paths.
-	if msg.CallerConnID != nil && msg.CallerOutcome != nil {
-		if err := w.sender.SendTransactionUpdateHeavy(*msg.CallerConnID, *msg.CallerOutcome, callerUpdates, memo); err != nil {
-			w.handleSendError(*msg.CallerConnID, err)
+	// even on empty changesets or no-active-subscription paths. The
+	// NoSuccessNotify caller-echo opt-out (above) is the one exception:
+	// effCallerConnID / effCallerOutcome are nil in that case.
+	if effCallerConnID != nil && effCallerOutcome != nil {
+		if err := w.sender.SendTransactionUpdateHeavy(*effCallerConnID, *effCallerOutcome, callerUpdates, memo); err != nil {
+			w.handleSendError(*effCallerConnID, err)
 		}
 	}
 }
