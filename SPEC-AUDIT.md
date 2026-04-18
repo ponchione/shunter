@@ -1840,13 +1840,9 @@ Fix: 2.6 above covers the timeout. Also explicitly state in Story 3.5 "keep-aliv
 
 ## 3. Divergences from SpacetimeDB (should be documented)
 
-### 3.1 [DIVERGE] Subprotocol token `v1.bsatn.shunter` forks the namespace
+### 3.1 [RETAINED-DEFERRAL] Subprotocol token dual admission
 
-- Shunter: single subprotocol `v1.bsatn.shunter` (`SPEC-005-protocol.md` §2.2).
-- SpacetimeDB: three tokens with preference order `v2.bsatn.spacetimedb > v1.bsatn.spacetimedb > v1.json.spacetimedb` (`crates/client-api/src/routes/subscribe.rs:153-175`; reference briefing §1).
-- Shunter intentionally replaces the vendor segment and drops the JSON and v2 paths. Clean-room correct and wire-incompatible by construction.
-
-Fix: add a §2.2 note: "Protocol identifier is Shunter-specific. Clients cannot negotiate SpacetimeDB's `v1.json.spacetimedb` or `*.spacetimedb` tokens against this server; interop with SpacetimeDB clients is out of scope for v1."
+**[RETAINED-DEFERRAL]** Shunter admits both `v1.bsatn.spacetimedb` (reference, preferred) and `v1.bsatn.shunter` (legacy). Reference admission closes the Phase 1 parity gap; legacy retention is intentional until existing Shunter-token clients are cut over.
 
 ### 3.2 [DIVERGE] Compression tag values collide with reference
 

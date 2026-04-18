@@ -42,13 +42,16 @@ Shunter uses WebSocket (RFC 6455) over HTTP/1.1 or HTTP/2. All application messa
 
 ### 2.2 Protocol Identifier
 
-Shunter defines one protocol version: `v1.bsatn.shunter`
+Shunter admits two subprotocol tokens. The reference token is preferred when a client offers both.
 
-The client includes this string in the `Sec-WebSocket-Protocol` request header. The server echoes it in the response header if accepted. If the server does not support the requested protocol, it closes the connection with status 400.
+- `v1.bsatn.spacetimedb` — SpacetimeDB reference token (preferred, Phase 1 parity target).
+- `v1.bsatn.shunter` — Shunter-native token, retained for backward compatibility. **[RETAINED-DEFERRAL]** This token is accepted until existing Shunter-token clients are cut over.
+
+The client includes one or both tokens in the `Sec-WebSocket-Protocol` request header. The server echoes the selected token in the response header. If the client offers neither token, the server closes the connection with status 400.
 
 ```
-Client: Sec-WebSocket-Protocol: v1.bsatn.shunter
-Server: Sec-WebSocket-Protocol: v1.bsatn.shunter
+Client: Sec-WebSocket-Protocol: v1.bsatn.spacetimedb
+Server: Sec-WebSocket-Protocol: v1.bsatn.spacetimedb
 ```
 
 ### 2.3 Endpoint
@@ -707,7 +710,7 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 
 ## 16. Divergences from SpacetimeDB
 
-- **Protocol identifier:** Shunter uses the explicit subprotocol token `v1.bsatn.shunter` (§2.2) instead of SpacetimeDB's protocol namespace. This makes version/encoding selection explicit at the WebSocket handshake boundary.
+- **Protocol identifier:** Shunter admits both `v1.bsatn.spacetimedb` (reference, preferred) and `v1.bsatn.shunter` (legacy, retained — see §2.2). This closes the Phase 1 subprotocol parity gap; the legacy token is an intentional deferral until existing Shunter-token clients are cut over.
 - **Compression envelope tags:** Shunter reserves `0x00` = explicit uncompressed envelope and `0x01` = gzip (§3.3). These values are Shunter-specific and are not byte-compatible with SpacetimeDB's compression-tag conventions.
 - **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `256` (§10.1, §12), rather than SpacetimeDB's much larger default buffering. Shunter chooses earlier disconnect-on-lag to keep memory bounded.
 - **TransactionUpdate shape:** v1 sends one `TransactionUpdate` form with full `SubscriptionUpdate` payloads (§8.5); it does not split delivery into separate light/heavy transaction-update variants.

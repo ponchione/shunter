@@ -12,10 +12,22 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// SubprotocolV1 is the sole WebSocket subprotocol string accepted by
-// the v1 server (SPEC-005 §2.2). Clients must list it in their
-// Sec-WebSocket-Protocol request header.
+// SubprotocolV1 is the Shunter-native WebSocket subprotocol token,
+// retained for backward compatibility while Phase 1 parity work
+// introduces the reference token. See docs/parity-phase0-ledger.md
+// P0-PROTOCOL-001 for the retention rationale.
 const SubprotocolV1 = "v1.bsatn.shunter"
+
+// SubprotocolReference is the SpacetimeDB reference WebSocket
+// subprotocol token (SPEC-005 §2.2 parity target). A client that
+// offers this token MUST be admitted as a Phase 1 parity requirement.
+const SubprotocolReference = "v1.bsatn.spacetimedb"
+
+// acceptedSubprotocols lists every token the server admits, in the
+// order preferred when multiple are offered. The reference token is
+// preferred so a client offering both negotiates the parity-aligned
+// identifier.
+var acceptedSubprotocols = []string{SubprotocolReference, SubprotocolV1}
 
 // Server is the HTTP-level entry point for WebSocket upgrades. One
 // Server serves many concurrent connections; HandleSubscribe is
@@ -124,15 +136,20 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. subprotocol check — client MUST offer v1.bsatn.shunter.
-	if !clientOffersSubprotocol(r, SubprotocolV1) {
-		http.Error(w, "Sec-WebSocket-Protocol must include "+SubprotocolV1, http.StatusBadRequest)
+	// 4. subprotocol check — client MUST offer at least one of the
+	// accepted tokens. Reference token is preferred.
+	selected, ok := negotiateSubprotocol(r, acceptedSubprotocols)
+	if !ok {
+		http.Error(w,
+			"Sec-WebSocket-Protocol must include "+SubprotocolReference+
+				" or "+SubprotocolV1,
+			http.StatusBadRequest)
 		return
 	}
 
 	// 5. Upgrade.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		Subprotocols: []string{SubprotocolV1},
+		Subprotocols: []string{selected},
 	})
 	if err != nil {
 		// websocket.Accept has already written an HTTP response at
@@ -273,16 +290,24 @@ func parseCompressionParam(raw string) (uint8, error) {
 	}
 }
 
-// clientOffersSubprotocol reports whether the request's
-// Sec-WebSocket-Protocol header lists want among its values.
-// WebSocket allows a comma-separated list here; any match suffices.
-func clientOffersSubprotocol(r *http.Request, want string) bool {
-	for _, hv := range r.Header.Values("Sec-WebSocket-Protocol") {
-		for _, sp := range strings.Split(hv, ",") {
-			if strings.TrimSpace(sp) == want {
-				return true
+// negotiateSubprotocol inspects Sec-WebSocket-Protocol and returns the
+// first token from preferred that the client also offered. Falls back
+// to false when no overlap exists.
+func negotiateSubprotocol(r *http.Request, preferred []string) (string, bool) {
+	header := r.Header.Values("Sec-WebSocket-Protocol")
+	offered := make(map[string]struct{}, len(header))
+	for _, line := range header {
+		for _, raw := range strings.Split(line, ",") {
+			tok := strings.TrimSpace(raw)
+			if tok != "" {
+				offered[tok] = struct{}{}
 			}
 		}
 	}
-	return false
+	for _, want := range preferred {
+		if _, ok := offered[want]; ok {
+			return want, true
+		}
+	}
+	return "", false
 }
