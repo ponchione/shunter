@@ -1853,13 +1853,13 @@ Fix: cross-reference SPEC-004 §3.2 in §10 or §12; add a line noting the v1 bu
 
 - Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`) adopted the reference heavy/light envelope split.
 - Live code: callers receive heavy `TransactionUpdate{Status UpdateStatus, CallerIdentity, CallerConnectionID, ReducerCall ReducerCallInfo, Timestamp, EnergyQuantaUsed, TotalHostExecutionDuration}`; non-callers whose rows were touched receive `TransactionUpdateLight{RequestID, Update}`.
-- Numeric metadata (`Timestamp`, `EnergyQuantaUsed`, `TotalHostExecutionDuration`) is stubbed as zero in Phase 1.5 and flagged for Phase 3 runtime parity — see the decision doc.
+- `Timestamp` and `TotalHostExecutionDuration` are now populated from the executor seam (`executor/executor.go`, `executor/caller_metadata_test.go`). `EnergyQuantaUsed` remains zero in Phase 1.5 because Shunter still has no energy model; the remaining runtime-parity question is whether a real energy/quota subsystem ever lands.
 - `ReducerCallResult` envelope was removed from the wire surface; `TagReducerCallResult` byte stays reserved and the decoder rejects it (`TestPhase15TagReducerCallResultReserved`).
 
-### 3.5 [DIVERGE] No SubscribeMulti / SubscribeSingle / QuerySetId [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants]
+### 3.5 [DIVERGE] No SubscribeMulti / SubscribeSingle / QuerySetId [TRACKED — pinned by protocol/parity_message_family_test.go::TestPhase2DeferralSubscribeNoMultiOrSingleVariants]
 
 - SpacetimeDB v1/v2 support `SubscribeMulti(query_id, query_strings)` and `SubscribeSingle(query_id, query_string)` where `query_id` is a u32 (`QuerySetId`) grouping multiple queries into one logical set (`crates/client-api-messages/src/websocket/v1.rs:60-62` and `v2.rs:20`).
-- Shunter exposes only `Subscribe(subscription_id, query)` — one predicate per subscription, no set grouping. `subscription_id` and `QuerySetId` are semantically similar but Shunter's is single-predicate.
+- Shunter has already landed the client-side `QueryID` field on `SubscribeMsg` / `UnsubscribeMsg`, but it still exposes only one query per subscribe envelope and does not implement the reference `SubscribeMulti` / `SubscribeSingle` split or multi-query set grouping semantics.
 
 Fix: add a §15 Open Question or §3 divergence note: "SpacetimeDB's multi-query subscription set grouping is not exposed in v1. A future extension may introduce a `SubscribeMulti`-style set; reserve `subscription_id` namespace accordingly."
 
@@ -2023,9 +2023,9 @@ Concept → name map against reference:
 - `ClientConfig { tx_update_full, confirmed_reads }` → `ProtocolOptions` (no per-client toggles; see 2.3 / 3.4).
 - `IdentityToken` (v1) / `InitialConnection` (v2) → `InitialConnection` (Shunter matches the v2 name even though the rest of the protocol uses v1-ish semantics).
 - `TransactionUpdate` (heavy) + `TransactionUpdateLight` → adopted in Phase 1.5 (see 3.4); `ReducerCallResult` envelope removed from the wire surface.
-- `SubscribeMulti` / `SubscribeSingle` / `QuerySetId` → `Subscribe` + `subscription_id` (single-predicate; see 3.5).
-- `CallReducer` + `flags: CallReducerFlags` → `CallReducer` without flags (see 3.6).
-- `UpdateStatus` / `ReducerOutcome` → `Status uint8` (see 3.9).
+- `SubscribeMulti` / `SubscribeSingle` / `QuerySetId` → single-query `Subscribe` / `Unsubscribe` with landed client-side `QueryID`, but no `SubscribeMulti` / `SubscribeSingle` split or multi-query set grouping yet (see 3.5).
+- `CallReducer` + `flags: CallReducerFlags` → `CallReducer` with landed `Flags byte` parity (`FullUpdate=0`, `NoSuccessNotify=1`; see 3.6).
+- `UpdateStatus` / `ReducerOutcome` → Phase 1.5 adopted `UpdateStatus` on heavy `TransactionUpdate`; Shunter still diverges on some failure semantics, but no longer uses the old flat `Status uint8` wire shape for reducer outcomes (see 3.4 / 3.9).
 - `BsatnRowList{size_hint, rows_data}` (`crates/client-api-messages/src/websocket/common.rs:59-156`) → `RowList` with per-row length prefix (Shunter's form is simpler; already documented as v1 choice in §3.4).
 - `CloseCode::Away/Error/Again` (`tungstenite::protocol::frame::coding::CloseCode`) → `1000 / 1002 / 1008 / 1011` (see 3.8).
 - `SpacetimeCreds` / `SpacetimeIdentityClaims` (`crates/client-api/src/auth.rs:66-199`) → `JWTConfig` / `Claims` / `AuthMode`.

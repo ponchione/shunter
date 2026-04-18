@@ -9,11 +9,10 @@ P0-PROTOCOL-00* slice and do not re-litigate the outcome-model decision.
 Primary decision
 - Treat `docs/spacetimedb-parity-roadmap.md` as the active development driver.
 - Treat Phase 0, Phase 1, and Phase 1.5 (envelope split + `CallReducer.flags`) as materially landed.
-- The next narrow slices are the remaining Phase 1.5 metadata follow-ups
-  (`CallerIdentity`, `ReducerID`, `ReducerName`/`Args`, `Timestamp`,
-  `EnergyQuantaUsed`, `TotalHostExecutionDuration`) or, if those are
-  deferred further, Phase 2 Slice 1 (SQL `OneOffQuery`) or Phase 2
-  Slice 2 (`SubscribeMulti` / `QueryId`).
+- The next narrow parity slices are Phase 2 query-surface work
+  (`OneOffQuery` SQL front door and the remaining `SubscribeMulti` /
+  `SubscribeSingle` split / `QueryId` follow-through) or Phase 4
+  recovery parity (`P0-RECOVERY-002`).
 
 What landed last session (Phase 1.5 envelope split)
 - Heavy `TransactionUpdate{Status, CallerIdentity, CallerConnectionID, ReducerCall,
@@ -40,10 +39,11 @@ What landed last session (Phase 1.5 envelope split)
   for pre-acceptance rejections (lifecycle-reducer-name collision, executor-unavailable).
 - `CallReducerRequest.ResponseCh` is now `chan<- TransactionUpdate` (heavy).
 - `docs/parity-phase1.5-outcome-model.md` records the decision and the explicit
-  deferrals (all numeric metadata is stubbed zero; Shunter's former
-  `failed_user` / `failed_panic` / `not_found` flat statuses are collapsed onto
-  `StatusFailed`; `StatusOutOfEnergy` is shape-only).
-- Latest broad verification: `940 passed in 9 packages`.
+  deferrals (`EnergyQuantaUsed` remains zero because Shunter has no energy
+  model; Shunter's former `failed_user` / `failed_panic` / `not_found`
+  flat statuses are collapsed onto `StatusFailed`; `StatusOutOfEnergy`
+  is shape-only).
+- Latest broad verification: `955 passed in 9 packages`.
 
 Pinned parity tests (do not flip without a named parity reason)
 - `protocol/parity_message_family_test.go`:
@@ -52,29 +52,16 @@ Pinned parity tests (do not flip without a named parity reason)
   - `TestPhase15ReducerCallInfoShape`
   - `TestPhase15UpdateStatusVariants`
   - `TestPhase15TagReducerCallResultReserved`
-  - `TestPhase1DeferralSubscribeNoQueryIdOrMultiVariants` (still open; Phase 2 Slice 2)
+  - `TestPhase2DeferralSubscribeNoMultiOrSingleVariants` (still open; Phase 2 Slice 2)
   - `TestPhase15CallReducerFlagsField` (closed sub-slice — positive-shape pin)
   - `TestPhase1DeferralOneOffQueryStructuredNotSQL` (still open; Phase 2 Slice 1)
 - `subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout`
 - `subscription/phase0_parity_test.go::TestPhase0ParityCanonicalReducerDeliveryFlow`
 
-Phase 1.5 deferrals still open (each independently landable)
-1. `TransactionUpdate.CallerIdentity` population — today zeroed at the executor
-   seam. Source is the originating `CallReducerCmd.Caller.Identity`; thread it
-   into `PostCommitMeta.CallerOutcome.CallerIdentity`. Phase 3 runtime-parity
-   concern, but structurally small.
-2. `TransactionUpdate.ReducerCall.ReducerID` — look up the reducer's numeric ID
-   from the reducer registry (`schema/` or `executor/registry.go`) and
-   populate it in `CallerOutcome.ReducerID`.
-3. `TransactionUpdate.ReducerCall.ReducerName` / `Args` — currently zeroed.
-   Thread from the originating `CallReducerCmd`.
-4. `Timestamp` (reducer start time, nanoseconds) — record in the executor
-   before dispatch; pass via `PostCommitMeta.CallerOutcome.Timestamp`.
-5. `TotalHostExecutionDuration` — measure from dispatch to post-commit in the
-   executor; pass via `CallerOutcome`.
-6. `EnergyQuantaUsed` — no energy model; keep zero and mark as a permanent
-   deferral unless the workload requires it.
-7. Finer `StatusFailed` classification — Shunter's former
+Phase 1.5 deferrals still open
+1. `EnergyQuantaUsed` — no energy model; keep zero and treat it as a
+   permanent deferral unless an energy/quota subsystem is introduced.
+2. Finer `StatusFailed` classification — Shunter's former
    `failed_user` / `failed_panic` / `not_found` distinctions collapsed into a
    single `StatusFailed.Error` message in Phase 1.5. Phase 3 may want to
    preserve the classification separately (or pin the collapse as permanent).
@@ -93,11 +80,10 @@ Recently landed (Phase 1.5 `CallReducer.flags` sub-slice)
   absent when suppressed.
 
 Suggested next slice
-- Either (a) bundle the remaining stubbed caller-metadata fields
-  (`CallerIdentity`, `ReducerID`, `ReducerName`, `Args`, `Timestamp`,
-  `TotalHostExecutionDuration`) into one Phase 1.5 metadata-wiring
-  commit, or (b) move to Phase 2 Slice 1 (`OneOffQuery` SQL front door)
-  or Phase 2 Slice 2 (`SubscribeMulti` / `QueryId`).
+- Phase 2 Slice 1 (`OneOffQuery` SQL front door), Phase 2 Slice 2
+  server-response `QueryID` follow-through plus the remaining
+  `SubscribeMulti` / `SubscribeSingle` split, or Phase 4
+  `P0-RECOVERY-002` if recovery parity is the priority.
 
 Required reading order
 1. `AGENTS.md`

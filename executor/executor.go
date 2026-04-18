@@ -476,14 +476,13 @@ func (e *Executor) postCommit(
 	if opts.source == CallSourceExternal && opts.callerConnID != nil {
 		callerConnID := *opts.callerConnID
 		meta.CallerConnID = &callerConnID
-		// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
-		// caller metadata is populated on every admitted commit so the
+		// Phase 1.5 outcome-model decision
+		// (`docs/parity-phase1.5-outcome-model.md`): populate the
+		// caller-visible metadata on every admitted external commit so the
 		// fan-out worker can assemble the heavy `TransactionUpdate`
-		// envelope. Numeric metadata (Timestamp, Energy, Duration) is
-		// stubbed as zero in Phase 1.5; CallerIdentity / ReducerName /
-		// Args wiring is deferred to the Phase 3 runtime-parity slice —
-		// the executor surface does not yet carry those fields to the
-		// post-commit seam.
+		// envelope. `EnergyQuantaUsed` remains zero because Shunter has no
+		// energy model; the other caller metadata fields are threaded from
+		// the executor request / registry / timing seam here.
 		meta.CallerOutcome = &subscription.CallerOutcome{
 			Kind:                       subscription.CallerOutcomeCommitted,
 			RequestID:                  opts.callerRequestID,

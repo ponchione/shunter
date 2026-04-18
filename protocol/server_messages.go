@@ -47,17 +47,18 @@ type SubscriptionError struct {
 }
 
 // TransactionUpdate is the heavy caller-bound envelope (Phase 1.5).
-// Non-callers receive `TransactionUpdateLight` instead. Numeric metadata
-// (`Timestamp`, `EnergyQuantaUsed`, `TotalHostExecutionDuration`) is
-// stubbed as zero in Phase 1.5 — see the decision doc.
+// Non-callers receive `TransactionUpdateLight` instead. `Timestamp` and
+// `TotalHostExecutionDuration` are populated from the executor seam;
+// `EnergyQuantaUsed` remains zero because Shunter has no energy model —
+// see the decision doc.
 type TransactionUpdate struct {
 	Status                     UpdateStatus
 	CallerIdentity             [32]byte
 	CallerConnectionID         [16]byte
 	ReducerCall                ReducerCallInfo
-	Timestamp                  int64 // nanoseconds since Unix epoch; Phase 1.5 stubs as zero
+	Timestamp                  int64 // nanoseconds since Unix epoch
 	EnergyQuantaUsed           uint64
-	TotalHostExecutionDuration int64 // nanoseconds; Phase 1.5 stubs as zero
+	TotalHostExecutionDuration int64 // nanoseconds
 }
 
 // TransactionUpdateLight is the delta-only envelope delivered to

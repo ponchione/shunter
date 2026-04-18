@@ -117,8 +117,8 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// out of the success echo and the outcome committed, suppress the
 	// caller's heavy delivery entirely. Failure / out-of-energy
 	// outcomes still flow so the caller observes non-success states.
-	// Mirrors reference/SpacetimeDB behavior of dropping the caller
-	// from the fan-out recipient set entirely in that case.
+	// Mirrors the reference behavior of dropping the caller from the
+	// fan-out recipient set entirely in that case.
 	callerSuppressed := msg.CallerConnID != nil && msg.CallerOutcome != nil &&
 		msg.CallerOutcome.Kind == CallerOutcomeCommitted &&
 		msg.CallerOutcome.Flags == CallerOutcomeFlagNoSuccessNotify
