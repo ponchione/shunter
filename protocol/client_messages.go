@@ -26,11 +26,33 @@ type UnsubscribeMsg struct {
 // CallReducerMsg is the client-side CallReducer message (SPEC-005 §7.3).
 // Args is the raw BSATN-encoded ProductValue; protocol does not
 // validate argument types — that's the executor's job (SPEC-003).
+//
+// Flags is a single-byte discriminant matching reference
+// `CallReducerFlags` (`reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`).
+// Only two values are defined today; see the constants below.
 type CallReducerMsg struct {
 	RequestID   uint32
 	ReducerName string
 	Args        []byte
+	Flags       byte
 }
+
+// CallReducer flags (reference `CallReducerFlags`). The wire byte is a
+// single u8 trailing `Args`. Values outside the defined set are
+// rejected as malformed.
+const (
+	// CallReducerFlagsFullUpdate is the default: the caller is notified of
+	// a successful reducer completion via the heavy `TransactionUpdate`
+	// envelope regardless of whether the caller subscribed to any
+	// relevant query.
+	CallReducerFlagsFullUpdate byte = 0
+	// CallReducerFlagsNoSuccessNotify opts the caller out of the success
+	// caller-echo. On `StatusCommitted` the fan-out worker skips the
+	// caller's heavy delivery entirely. Failure envelopes
+	// (`StatusFailed`, `StatusOutOfEnergy`) are still delivered so the
+	// caller observes non-success outcomes.
+	CallReducerFlagsNoSuccessNotify byte = 1
+)
 
 // OneOffQueryMsg is the client-side OneOffQuery message (SPEC-005 §7.4).
 type OneOffQueryMsg struct {
@@ -64,6 +86,7 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		writeUint32(&buf, msg.RequestID)
 		writeString(&buf, msg.ReducerName)
 		writeBytes(&buf, msg.Args)
+		buf.WriteByte(msg.Flags)
 	case OneOffQueryMsg:
 		buf.WriteByte(TagOneOffQuery)
 		writeUint32(&buf, msg.RequestID)
@@ -151,8 +174,17 @@ func decodeCallReducer(body []byte) (CallReducerMsg, error) {
 	if m.ReducerName, off, err = readString(body, off); err != nil {
 		return m, err
 	}
-	if m.Args, _, err = readBytes(body, off); err != nil {
+	if m.Args, off, err = readBytes(body, off); err != nil {
 		return m, err
+	}
+	if len(body)-off < 1 {
+		return m, fmt.Errorf("%w: CallReducer flags byte truncated", ErrMalformedMessage)
+	}
+	m.Flags = body[off]
+	switch m.Flags {
+	case CallReducerFlagsFullUpdate, CallReducerFlagsNoSuccessNotify:
+	default:
+		return m, fmt.Errorf("%w: invalid CallReducer flags byte %d", ErrMalformedMessage, m.Flags)
 	}
 	return m, nil
 }

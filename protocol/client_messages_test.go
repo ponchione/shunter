@@ -110,6 +110,7 @@ func TestCallReducerRoundTrip(t *testing.T) {
 		RequestID:   99,
 		ReducerName: "transfer",
 		Args:        []byte{0xde, 0xad, 0xbe, 0xef},
+		Flags:       CallReducerFlagsFullUpdate,
 	}
 	frame, _ := EncodeClientMessage(in)
 	_, out, err := DecodeClientMessage(frame)
@@ -122,6 +123,47 @@ func TestCallReducerRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(got.Args, in.Args) {
 		t.Errorf("args mismatch: got % x, want % x", got.Args, in.Args)
+	}
+	if got.Flags != in.Flags {
+		t.Errorf("flags mismatch: got %d, want %d", got.Flags, in.Flags)
+	}
+}
+
+// TestCallReducerFlagsNoSuccessNotifyRoundTrip pins that the NoSuccessNotify
+// flag byte round-trips on the wire as a single trailing u8 after Args.
+func TestCallReducerFlagsNoSuccessNotifyRoundTrip(t *testing.T) {
+	in := CallReducerMsg{
+		RequestID:   7,
+		ReducerName: "fire_and_forget",
+		Args:        []byte{0x01},
+		Flags:       CallReducerFlagsNoSuccessNotify,
+	}
+	frame, _ := EncodeClientMessage(in)
+	// Trailing byte of the frame must be the flags byte.
+	if frame[len(frame)-1] != byte(CallReducerFlagsNoSuccessNotify) {
+		t.Fatalf("trailing byte = %d, want %d (flags)", frame[len(frame)-1], CallReducerFlagsNoSuccessNotify)
+	}
+	_, out, err := DecodeClientMessage(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.(CallReducerMsg)
+	if got.Flags != CallReducerFlagsNoSuccessNotify {
+		t.Fatalf("Flags = %d, want %d (NoSuccessNotify)", got.Flags, CallReducerFlagsNoSuccessNotify)
+	}
+}
+
+// TestCallReducerFlagsInvalidByteRejected pins that the decoder rejects
+// flag bytes outside the defined range (0, 1). Matches reference
+// impl_deserialize! behavior returning "invalid call reducer flag".
+func TestCallReducerFlagsInvalidByteRejected(t *testing.T) {
+	// Encode a valid message, mutate the trailing flags byte to 99.
+	in := CallReducerMsg{RequestID: 1, ReducerName: "x", Args: nil, Flags: 0}
+	frame, _ := EncodeClientMessage(in)
+	frame[len(frame)-1] = 99
+	_, _, err := DecodeClientMessage(frame)
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage for out-of-range flags byte", err)
 	}
 }
 
