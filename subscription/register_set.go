@@ -9,8 +9,8 @@ import (
 
 // dropSub removes a single (connID, subID) registry entry and, on
 // last-ref, also evicts the query state + pruning-index placement.
-// Mirrors Unregister's semantics — the plain registry.unregisterSingle
-// only touches the registry maps and would leak PruningIndexes rows.
+// Mirrors Unregister's semantics; unlike the legacy Unregister path,
+// it also evicts PruningIndexes rows so no placement leaks on rollback.
 func (m *Manager) dropSub(connID types.ConnectionID, subID types.SubscriptionID) {
 	hash, found := m.registry.hashForSub(connID, subID)
 	if !found {
@@ -65,8 +65,8 @@ func (m *Manager) RegisterSet(
 		rows, err := m.initialQuery(p, view)
 		if err != nil {
 			// Unwind any partial state, including pruning-index placement
-			// (mirror legacy Unregister semantics — plain unregisterSingle
-			// only touches the registry maps).
+			// (mirror legacy Unregister semantics — dropSub handles both
+			// registry maps and PruningIndexes eviction).
 			for _, sid := range allocated {
 				m.dropSub(req.ConnID, sid)
 			}

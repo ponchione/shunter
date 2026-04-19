@@ -141,19 +141,6 @@ func (r *queryRegistry) subscriptionsForConn(connID types.ConnectionID) []types.
 // hasActive reports whether any query is registered.
 func (r *queryRegistry) hasActive() bool { return len(r.byHash) > 0 }
 
-// unregisterSingle removes a single internal sub. Lightweight wrapper
-// over removeSubscriber that also trims query state on last-ref.
-func (r *queryRegistry) unregisterSingle(connID types.ConnectionID, subID types.SubscriptionID) error {
-	hash, last, ok := r.removeSubscriber(connID, subID)
-	if !ok {
-		return ErrSubscriptionNotFound
-	}
-	if last {
-		r.removeQueryState(hash)
-	}
-	return nil
-}
-
 // hashForSub returns the QueryHash a given (conn, sub) is attached to.
 func (r *queryRegistry) hashForSub(connID types.ConnectionID, subID types.SubscriptionID) (QueryHash, bool) {
 	h, ok := r.bySub[subscriptionRef{connID: connID, subID: subID}]
