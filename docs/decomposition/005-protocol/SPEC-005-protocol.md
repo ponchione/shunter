@@ -499,7 +499,7 @@ Implementation note: the committed delta pipeline computes per-connection update
 
 State rules (see `docs/adr/2026-04-19-subscription-admission-model.md` for the landed manager-authoritative Shape 1 rationale):
 - a `subscription_id` is reserved as soon as `Subscribe` is accepted for processing; a second `Subscribe` with the same ID while pending or active MUST fail with `SubscriptionError` (manager-authoritative: rejected by the subscription manager's `(ConnID, QueryID)` registry, not a protocol-layer tracker)
-- `Unsubscribe` for a pending or unknown `subscription_id` returns `ErrSubscriptionNotFound`
+- `Unsubscribe` for a `subscription_id` that is not currently registered under the connection's live `(ConnID, QueryID)` set registry returns `ErrSubscriptionNotFound`
 - if the client disconnects while a subscription is pending, the registration result is discarded and the subscription never becomes active: the executor invokes the registration `Reply` closure synchronously, but the closure's `connOnlySender` short-circuits on a closed `<-conn.closed` channel and returns `ErrConnNotFound`; no Applied envelope ever reaches `OutboundCh`
 - once `SubscribeApplied` is enqueued on the connection's outbound queue during registration, any subsequent `TransactionUpdate` for that `subscription_id` is guaranteed to be delivered after it. The ordering is preserved by the per-connection `OutboundCh` FIFO: the executor's register handler synchronously enqueues the Applied envelope before returning, and any later fan-out delivery on the same executor goroutine enqueues strictly after it. No separate tracker state machine or activation gate is involved, so no stale activation can survive a disconnect
 - `UnsubscribeApplied` is a confirmation message for a removal that has already been applied in the executor / subscription-manager pipeline; there is no separate long-lived "pending removal" state in v1
@@ -526,7 +526,7 @@ The executor serializes subscription registration with commits (SPEC-003 §2.5).
 Ordering guarantee on one connection:
 - `SubscribeApplied(subscription_id)` MUST be delivered before any `TransactionUpdate` that references that `subscription_id`
 - for a reducer call made by this same connection, `ReducerCallResult(tx_id)` replaces the caller's standalone `TransactionUpdate(tx_id)` rather than racing with it
-- if the client disconnects or unsubscribes while a subscription is still pending, a later `SubscribeApplied` result is discarded rather than activating stale state
+- if the client disconnects or removes the `(ConnID, QueryID)` entry before a queued `SubscribeApplied` is delivered, that later registration result is discarded rather than activating stale state
 
 ---
 
@@ -625,7 +625,12 @@ The executor sends `ReducerCallResult` back to the protocol layer via the `Respo
 
 ```go
 type ExecutorInbox interface {
-    Submit(ctx context.Context, cmd ExecutorCommand) error
+    OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
+    OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
+    DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
+    RegisterSubscriptionSet(ctx context.Context, req RegisterSubscriptionSetRequest) error
+    UnregisterSubscriptionSet(ctx context.Context, req UnregisterSubscriptionSetRequest) error
+    CallReducer(ctx context.Context, req CallReducerRequest) error
 }
 ```
 
@@ -718,7 +723,7 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 - **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). These values are now parity-aligned with SpacetimeDB's SERVER_MSG_COMPRESSION_TAG_* constants. Brotli implementation is deferred to Phase 2+.
 - **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `256` (§10.1, §12), rather than SpacetimeDB's much larger default buffering. Shunter chooses earlier disconnect-on-lag to keep memory bounded.
 - **TransactionUpdate shape:** v1 sends one `TransactionUpdate` form with full `SubscriptionUpdate` payloads (§8.5); it does not split delivery into separate light/heavy transaction-update variants.
-- **Subscription RPC surface:** v1 exposes only `Subscribe`, `Unsubscribe`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no `SubscribeMulti`, `SubscribeSingle`, or `QuerySetId` protocol family.
+- **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args}` only (§7.3). There is no extra flags byte in the request frame.
 - **OneOffQuery language:** v1 `OneOffQuery` uses the same structured predicate subset as `Subscribe` (§7.4 / §7.1.1), not SpacetimeDB's SQL-oriented query text.
 - **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror SpacetimeDB's full close-code/reason matrix.

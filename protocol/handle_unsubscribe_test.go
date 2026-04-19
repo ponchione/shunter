@@ -42,7 +42,7 @@ func TestHandleUnsubscribeSingleSuccess(t *testing.T) {
 	}
 }
 
-func TestHandleUnsubscribeSingle_DeliversAsyncUnsubscribeApplied(t *testing.T) {
+func TestHandleUnsubscribeSingle_DeliversUnsubscribeAppliedViaReplyClosure(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{}
 
@@ -124,7 +124,7 @@ func TestHandleUnsubscribeMultiSuccess(t *testing.T) {
 	}
 }
 
-func TestHandleUnsubscribeMulti_DeliversAsyncMultiApplied(t *testing.T) {
+func TestHandleUnsubscribeMulti_DeliversMultiAppliedViaReplyClosure(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{}
 

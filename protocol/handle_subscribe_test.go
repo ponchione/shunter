@@ -285,7 +285,7 @@ func TestHandleSubscribeSingleSuccess(t *testing.T) {
 	}
 }
 
-func TestHandleSubscribeSingle_DeliversAsyncSubscribeApplied(t *testing.T) {
+func TestHandleSubscribeSingle_DeliversSubscribeAppliedViaReplyClosure(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("users", 1,
@@ -416,7 +416,7 @@ func TestHandleSubscribeMultiSuccess(t *testing.T) {
 	}
 }
 
-func TestHandleSubscribeMulti_DeliversAsyncMultiApplied(t *testing.T) {
+func TestHandleSubscribeMulti_DeliversMultiAppliedViaReplyClosure(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}
 	sl := newMockSchema("users", 1,
