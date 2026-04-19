@@ -290,3 +290,66 @@ func TestEncodeServerMessageUnknownType(t *testing.T) {
 		t.Errorf("got %v, want ErrUnknownMessageTag", err)
 	}
 }
+
+func TestSubscribeMultiAppliedRoundTrip(t *testing.T) {
+	orig := SubscribeMultiApplied{
+		RequestID: 1,
+		QueryID:   2,
+		Update: []SubscriptionUpdate{
+			{SubscriptionID: 10, TableName: "users", Inserts: []byte{0x01}},
+			{SubscriptionID: 11, TableName: "orders", Inserts: []byte{0x02}},
+		},
+	}
+	frame, err := EncodeServerMessage(orig)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	tag, decoded, err := DecodeServerMessage(frame)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if tag != TagSubscribeMultiApplied {
+		t.Fatalf("tag = %d, want %d", tag, TagSubscribeMultiApplied)
+	}
+	got, ok := decoded.(SubscribeMultiApplied)
+	if !ok {
+		t.Fatalf("decoded type = %T", decoded)
+	}
+	if got.RequestID != 1 || got.QueryID != 2 || len(got.Update) != 2 {
+		t.Fatalf("decoded = %+v", got)
+	}
+	if got.Update[0].SubscriptionID != 10 || got.Update[0].TableName != "users" {
+		t.Fatalf("update[0] = %+v", got.Update[0])
+	}
+	if got.Update[1].SubscriptionID != 11 || got.Update[1].TableName != "orders" {
+		t.Fatalf("update[1] = %+v", got.Update[1])
+	}
+}
+
+func TestUnsubscribeMultiAppliedRoundTrip(t *testing.T) {
+	orig := UnsubscribeMultiApplied{
+		RequestID: 5,
+		QueryID:   9,
+		Update: []SubscriptionUpdate{
+			{SubscriptionID: 10, TableName: "users", Deletes: []byte{0x03}},
+		},
+	}
+	frame, err := EncodeServerMessage(orig)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	tag, decoded, err := DecodeServerMessage(frame)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if tag != TagUnsubscribeMultiApplied {
+		t.Fatalf("tag = %d, want %d", tag, TagUnsubscribeMultiApplied)
+	}
+	got, ok := decoded.(UnsubscribeMultiApplied)
+	if !ok || got.RequestID != 5 || got.QueryID != 9 || len(got.Update) != 1 {
+		t.Fatalf("decoded = %+v", decoded)
+	}
+	if got.Update[0].SubscriptionID != 10 || got.Update[0].TableName != "users" {
+		t.Fatalf("update[0] = %+v", got.Update[0])
+	}
+}

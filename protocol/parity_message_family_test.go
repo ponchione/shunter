@@ -215,6 +215,30 @@ func TestPhase2UnsubscribeMultiShape(t *testing.T) {
 	}
 }
 
+// TestPhase2SubscribeMultiAppliedShape pins the set-scoped applied
+// envelope. Reference: SubscribeMultiApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380.
+// TotalHostExecutionDurationMicros is absent — tracked by
+// TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration.
+func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
+	fields := msgFieldNames(SubscribeMultiApplied{})
+	want := []string{"RequestID", "QueryID", "Update"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("SubscribeMultiApplied fields = %v, want %v", fields, want)
+	}
+}
+
+// TestPhase2UnsubscribeMultiAppliedShape pins the set-scoped applied
+// envelope. Reference: UnsubscribeMultiApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394.
+func TestPhase2UnsubscribeMultiAppliedShape(t *testing.T) {
+	fields := msgFieldNames(UnsubscribeMultiApplied{})
+	want := []string{"RequestID", "QueryID", "Update"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("UnsubscribeMultiApplied fields = %v, want %v", fields, want)
+	}
+}
+
 func msgFieldNames(v any) []string {
 	t := reflect.TypeOf(v)
 	names := make([]string, 0, t.NumField())

@@ -55,6 +55,27 @@ type SubscriptionError struct {
 	Error     string
 }
 
+// SubscribeMultiApplied is the server response to a SubscribeMulti.
+// Update is a merged initial snapshot, one SubscriptionUpdate per
+// (allocated internal SubscriptionID, table) pair, with Inserts
+// populated and Deletes empty. Reference: SubscribeMultiApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380.
+type SubscribeMultiApplied struct {
+	RequestID uint32
+	QueryID   uint32
+	Update    []SubscriptionUpdate
+}
+
+// UnsubscribeMultiApplied is the server response to an UnsubscribeMulti.
+// Update carries Deletes-populated entries for rows that were still
+// live at unsubscribe time. Reference: UnsubscribeMultiApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394.
+type UnsubscribeMultiApplied struct {
+	RequestID uint32
+	QueryID   uint32
+	Update    []SubscriptionUpdate
+}
+
 // TransactionUpdate is the heavy caller-bound envelope (Phase 1.5).
 // Non-callers receive `TransactionUpdateLight` instead. `Timestamp` and
 // `TotalHostExecutionDuration` are populated from the executor seam;
@@ -184,6 +205,16 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		} else {
 			writeString(&buf, msg.Error)
 		}
+	case SubscribeMultiApplied:
+		buf.WriteByte(TagSubscribeMultiApplied)
+		writeUint32(&buf, msg.RequestID)
+		writeUint32(&buf, msg.QueryID)
+		writeSubscriptionUpdates(&buf, msg.Update)
+	case UnsubscribeMultiApplied:
+		buf.WriteByte(TagUnsubscribeMultiApplied)
+		writeUint32(&buf, msg.RequestID)
+		writeUint32(&buf, msg.QueryID)
+		writeSubscriptionUpdates(&buf, msg.Update)
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnknownMessageTag, m)
 	}
@@ -221,6 +252,12 @@ func DecodeServerMessage(frame []byte) (uint8, any, error) {
 		return tag, msg, err
 	case TagOneOffQueryResult:
 		msg, err := decodeOneOffQueryResult(body)
+		return tag, msg, err
+	case TagSubscribeMultiApplied:
+		msg, err := decodeSubscribeMultiApplied(body)
+		return tag, msg, err
+	case TagUnsubscribeMultiApplied:
+		msg, err := decodeUnsubscribeMultiApplied(body)
 		return tag, msg, err
 	default:
 		return 0, nil, fmt.Errorf("%w: tag=%d", ErrUnknownMessageTag, tag)
@@ -367,6 +404,42 @@ func decodeOneOffQueryResult(body []byte) (OneOffQueryResult, error) {
 			return m, err
 		}
 	}
+	return m, nil
+}
+
+func decodeSubscribeMultiApplied(body []byte) (SubscribeMultiApplied, error) {
+	var m SubscribeMultiApplied
+	var off int
+	var err error
+	if m.RequestID, off, err = readUint32(body, 0); err != nil {
+		return m, err
+	}
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
+		return m, err
+	}
+	ups, _, err := readSubscriptionUpdates(body, off)
+	if err != nil {
+		return m, err
+	}
+	m.Update = ups
+	return m, nil
+}
+
+func decodeUnsubscribeMultiApplied(body []byte) (UnsubscribeMultiApplied, error) {
+	var m UnsubscribeMultiApplied
+	var off int
+	var err error
+	if m.RequestID, off, err = readUint32(body, 0); err != nil {
+		return m, err
+	}
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
+		return m, err
+	}
+	ups, _, err := readSubscriptionUpdates(body, off)
+	if err != nil {
+		return m, err
+	}
+	m.Update = ups
 	return m, nil
 }
 

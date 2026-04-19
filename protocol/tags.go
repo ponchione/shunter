@@ -32,4 +32,6 @@ const (
 	TagOneOffQueryResult      uint8 = 6
 	TagReducerCallResult      uint8 = 7 // RESERVED — formerly ReducerCallResult, removed Phase 1.5
 	TagTransactionUpdateLight uint8 = 8
+	TagSubscribeMultiApplied   uint8 = 9  // Phase 2 Slice 2 variant split
+	TagUnsubscribeMultiApplied uint8 = 10 // Phase 2 Slice 2 variant split
 )
