@@ -32,13 +32,17 @@ func handleSubscribeMulti(
 		preds = append(preds, p)
 	}
 
+	// Transitional: Task 2 exposes Reply; the watcher goroutine remains
+	// until Task 3 removes it. The closure forwards the executor's reply
+	// onto the existing buffered respCh so the watcher path is unchanged.
 	respCh := make(chan SubscriptionSetCommandResponse, 1)
+	reply := func(resp SubscriptionSetCommandResponse) { respCh <- resp }
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
 		ConnID:     conn.ID,
 		QueryID:    msg.QueryID,
 		RequestID:  msg.RequestID,
 		Predicates: preds,
-		ResponseCh: respCh,
+		Reply:      reply,
 	}); submitErr != nil {
 		sendError(conn, SubscriptionError{
 			RequestID: msg.RequestID,

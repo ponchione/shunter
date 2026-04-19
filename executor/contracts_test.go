@@ -162,18 +162,27 @@ func TestEpic1CommandShapesMatchSpec(t *testing.T) {
 		ConnID:  types.ConnectionID{1},
 		QueryID: 2,
 	}
-	regCmd := RegisterSubscriptionSetCmd{Request: regReq, ResponseCh: make(chan subscription.SubscriptionSetRegisterResult, 1)}
+	regCmd := RegisterSubscriptionSetCmd{
+		Request: regReq,
+		Reply:   func(subscription.SubscriptionSetRegisterResult, error) {},
+	}
 	if regCmd.Request.ConnID != regReq.ConnID || regCmd.Request.QueryID != regReq.QueryID {
 		t.Fatalf("RegisterSubscriptionSetCmd.Request = %+v, want %+v", regCmd.Request, regReq)
 	}
+	if regCmd.Reply == nil {
+		t.Fatal("RegisterSubscriptionSetCmd.Reply should be non-nil")
+	}
 
 	unregCmd := UnregisterSubscriptionSetCmd{
-		ConnID:     types.ConnectionID{3},
-		QueryID:    4,
-		ResponseCh: make(chan UnregisterSubscriptionSetResponse, 1),
+		ConnID:  types.ConnectionID{3},
+		QueryID: 4,
+		Reply:   func(subscription.SubscriptionSetUnregisterResult, error) {},
 	}
 	if unregCmd.ConnID != (types.ConnectionID{3}) || unregCmd.QueryID != 4 {
 		t.Fatalf("UnregisterSubscriptionSetCmd = %+v", unregCmd)
+	}
+	if unregCmd.Reply == nil {
+		t.Fatal("UnregisterSubscriptionSetCmd.Reply should be non-nil")
 	}
 
 	disconnectCmd := DisconnectClientSubscriptionsCmd{

@@ -250,17 +250,29 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 	res, err := e.subs.RegisterSet(cmd.Request, view)
 	if err != nil {
 		log.Printf("executor: RegisterSubscriptionSet failed: %v", err)
-		cmd.ResponseCh <- subscription.SubscriptionSetRegisterResult{}
+		if cmd.Reply != nil {
+			// Synchronous invocation on the executor goroutine so the
+			// caller's Applied/Error enqueue strictly precedes any
+			// subsequent fan-out for the same connection (ADR §9.4).
+			cmd.Reply(subscription.SubscriptionSetRegisterResult{}, err)
+		}
 		return
 	}
-	cmd.ResponseCh <- res
+	if cmd.Reply != nil {
+		cmd.Reply(res, nil)
+	}
 }
 
 func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSetCmd) {
 	view := e.snapshotFn()
 	defer view.Close()
 	res, err := e.subs.UnregisterSet(cmd.ConnID, cmd.QueryID, view)
-	cmd.ResponseCh <- UnregisterSubscriptionSetResponse{Result: res, Err: err}
+	if cmd.Reply != nil {
+		// Synchronous invocation on the executor goroutine so the
+		// caller's Applied/Error enqueue strictly precedes any
+		// subsequent fan-out for the same connection (ADR §9.4).
+		cmd.Reply(res, err)
+	}
 }
 
 func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) {

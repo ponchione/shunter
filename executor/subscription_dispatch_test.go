@@ -92,12 +92,28 @@ func TestDispatchRegisterSubscriptionSet(t *testing.T) {
 			subscription.AllRows{Table: 1},
 		},
 	}
-	respCh := make(chan subscription.SubscriptionSetRegisterResult, 1)
-	exec.dispatch(RegisterSubscriptionSetCmd{Request: req, ResponseCh: respCh})
+	var (
+		gotResult subscription.SubscriptionSetRegisterResult
+		gotErr    error
+		called    bool
+	)
+	exec.dispatch(RegisterSubscriptionSetCmd{
+		Request: req,
+		Reply: func(r subscription.SubscriptionSetRegisterResult, err error) {
+			called = true
+			gotResult = r
+			gotErr = err
+		},
+	})
 
-	resp := <-respCh
-	if resp.QueryID != 42 {
-		t.Fatalf("resp.QueryID = %d, want 42", resp.QueryID)
+	if !called {
+		t.Fatal("Reply was not invoked")
+	}
+	if gotErr != nil {
+		t.Fatalf("Reply got err = %v, want nil", gotErr)
+	}
+	if gotResult.QueryID != 42 {
+		t.Fatalf("Reply got QueryID = %d, want 42", gotResult.QueryID)
 	}
 	if !fakeSubs.registerSetCalled {
 		t.Fatal("fakeSubs.RegisterSet was not called")
@@ -124,16 +140,24 @@ func TestDispatchUnregisterSubscriptionSet(t *testing.T) {
 		return tracked
 	}
 
-	respCh := make(chan UnregisterSubscriptionSetResponse, 1)
+	var (
+		gotErr error
+		called bool
+	)
 	exec.dispatch(UnregisterSubscriptionSetCmd{
-		ConnID:     types.ConnectionID{9},
-		QueryID:    42,
-		ResponseCh: respCh,
+		ConnID:  types.ConnectionID{9},
+		QueryID: 42,
+		Reply: func(_ subscription.SubscriptionSetUnregisterResult, err error) {
+			called = true
+			gotErr = err
+		},
 	})
 
-	resp := <-respCh
-	if resp.Err != nil {
-		t.Fatalf("unexpected err: %v", resp.Err)
+	if !called {
+		t.Fatal("Reply was not invoked")
+	}
+	if gotErr != nil {
+		t.Fatalf("unexpected err: %v", gotErr)
 	}
 	if !fakeSubs.unregisterSetCalled {
 		t.Fatal("fakeSubs.UnregisterSet was not called")
@@ -162,19 +186,33 @@ func TestDispatchRegisterSubscriptionSetClosesSnapshotOnError(t *testing.T) {
 		return tracked
 	}
 
-	respCh := make(chan subscription.SubscriptionSetRegisterResult, 1)
+	var (
+		gotResult subscription.SubscriptionSetRegisterResult
+		gotErr    error
+		called    bool
+	)
 	exec.dispatch(RegisterSubscriptionSetCmd{
 		Request: subscription.SubscriptionSetRegisterRequest{
 			ConnID:     types.ConnectionID{9},
 			QueryID:    42,
 			Predicates: []subscription.Predicate{subscription.AllRows{Table: 1}},
 		},
-		ResponseCh: respCh,
+		Reply: func(r subscription.SubscriptionSetRegisterResult, err error) {
+			called = true
+			gotResult = r
+			gotErr = err
+		},
 	})
-	resp := <-respCh
-	// On error, handler sends zero-value result and returns.
-	if resp.QueryID != 0 {
-		t.Fatalf("error response should be zero-value, got %+v", resp)
+	if !called {
+		t.Fatal("Reply was not invoked on error path")
+	}
+	// On error, handler hands a zero-value result to Reply together
+	// with the underlying error.
+	if gotErr == nil || gotErr.Error() != "synthetic" {
+		t.Fatalf("Reply err = %v, want synthetic", gotErr)
+	}
+	if gotResult.QueryID != 0 {
+		t.Fatalf("error response should be zero-value, got %+v", gotResult)
 	}
 	if tracked == nil || !tracked.closed {
 		t.Fatal("snapshot should be closed on error path")
@@ -194,15 +232,23 @@ func TestDispatchUnregisterSubscriptionSetCarriesError(t *testing.T) {
 		return tracked
 	}
 
-	respCh := make(chan UnregisterSubscriptionSetResponse, 1)
+	var (
+		gotErr error
+		called bool
+	)
 	exec.dispatch(UnregisterSubscriptionSetCmd{
-		ConnID:     types.ConnectionID{9},
-		QueryID:    42,
-		ResponseCh: respCh,
+		ConnID:  types.ConnectionID{9},
+		QueryID: 42,
+		Reply: func(_ subscription.SubscriptionSetUnregisterResult, err error) {
+			called = true
+			gotErr = err
+		},
 	})
-	resp := <-respCh
-	if resp.Err == nil || resp.Err.Error() != "synthetic" {
-		t.Fatalf("resp.Err = %v, want synthetic", resp.Err)
+	if !called {
+		t.Fatal("Reply was not invoked on error path")
+	}
+	if gotErr == nil || gotErr.Error() != "synthetic" {
+		t.Fatalf("Reply err = %v, want synthetic", gotErr)
 	}
 	if tracked == nil || !tracked.closed {
 		t.Fatal("snapshot should be closed even on error path")

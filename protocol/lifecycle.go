@@ -52,22 +52,33 @@ type ExecutorInbox interface {
 // not depend on the subscription package. The adapter casts each element to
 // subscription.Predicate on the way through. A Single-path submission
 // forwards len==1; a Multi-path submission forwards len==N.
+//
+// Reply is a protocol-side closure invoked synchronously on the
+// executor goroutine once the register outcome is known. It carries
+// exactly one populated arm of SubscriptionSetCommandResponse
+// (SingleApplied / MultiApplied / Error) and typically enqueues the
+// corresponding wire frame onto the caller's OutboundCh. Synchronous
+// invocation on the executor goroutine is what enforces ADR §9.4
+// per-connection FIFO between Applied and subsequent fan-out.
 type RegisterSubscriptionSetRequest struct {
 	ConnID     types.ConnectionID
 	QueryID    uint32
 	RequestID  uint32
 	Predicates []any // []subscription.Predicate
-	ResponseCh chan<- SubscriptionSetCommandResponse
+	Reply      func(SubscriptionSetCommandResponse)
 }
 
 // UnregisterSubscriptionSetRequest drops every internal subscription
 // registered under (ConnID, QueryID) atomically. Used by both Single
 // and Multi unsubscribe paths.
+//
+// Reply mirrors RegisterSubscriptionSetRequest.Reply for the
+// unsubscribe outcome envelope.
 type UnregisterSubscriptionSetRequest struct {
-	ConnID     types.ConnectionID
-	QueryID    uint32
-	RequestID  uint32
-	ResponseCh chan<- UnsubscribeSetCommandResponse
+	ConnID    types.ConnectionID
+	QueryID   uint32
+	RequestID uint32
+	Reply     func(UnsubscribeSetCommandResponse)
 }
 
 // SubscriptionSetCommandResponse is the async result envelope from the

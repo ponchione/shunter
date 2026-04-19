@@ -16,12 +16,16 @@ func handleUnsubscribeMulti(
 	msg *UnsubscribeMultiMsg,
 	executor ExecutorInbox,
 ) {
+	// Transitional: Task 2 exposes Reply; the watcher goroutine remains
+	// until Task 3 removes it. The closure forwards the executor's reply
+	// onto the existing buffered respCh so the watcher path is unchanged.
 	respCh := make(chan UnsubscribeSetCommandResponse, 1)
+	reply := func(resp UnsubscribeSetCommandResponse) { respCh <- resp }
 	if err := executor.UnregisterSubscriptionSet(ctx, UnregisterSubscriptionSetRequest{
-		ConnID:     conn.ID,
-		QueryID:    msg.QueryID,
-		RequestID:  msg.RequestID,
-		ResponseCh: respCh,
+		ConnID:    conn.ID,
+		QueryID:   msg.QueryID,
+		RequestID: msg.RequestID,
+		Reply:     reply,
 	}); err != nil {
 		sendError(conn, SubscriptionError{
 			RequestID: msg.RequestID,

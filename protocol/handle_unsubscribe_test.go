@@ -30,8 +30,8 @@ func TestHandleUnsubscribeSingleSuccess(t *testing.T) {
 	if exec.unregisterSetReq.RequestID != 1 {
 		t.Errorf("RequestID = %d, want 1", exec.unregisterSetReq.RequestID)
 	}
-	if exec.unregisterSetReq.ResponseCh == nil {
-		t.Error("ResponseCh = nil, want non-nil unsubscribe response channel")
+	if exec.unregisterSetReq.Reply == nil {
+		t.Error("Reply = nil, want non-nil unsubscribe reply closure")
 	}
 
 	// No error message should have been sent.
@@ -57,14 +57,14 @@ func TestHandleUnsubscribeSingle_DeliversAsyncUnsubscribeApplied(t *testing.T) {
 	handleUnsubscribeSingle(context.Background(), conn, msg, exec)
 
 	exec.mu.Lock()
-	respCh := exec.unregisterSetReq.ResponseCh
+	reply := exec.unregisterSetReq.Reply
 	exec.mu.Unlock()
-	if respCh == nil {
-		t.Fatal("missing unsubscribe response channel")
+	if reply == nil {
+		t.Fatal("missing unsubscribe reply closure")
 	}
-	respCh <- UnsubscribeSetCommandResponse{
+	reply(UnsubscribeSetCommandResponse{
 		SingleApplied: &UnsubscribeSingleApplied{RequestID: 1, QueryID: 42},
-	}
+	})
 
 	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagUnsubscribeSingleApplied {
@@ -119,8 +119,8 @@ func TestHandleUnsubscribeMultiSuccess(t *testing.T) {
 	if exec.unregisterSetReq.RequestID != 21 {
 		t.Errorf("RequestID = %d, want 21", exec.unregisterSetReq.RequestID)
 	}
-	if exec.unregisterSetReq.ResponseCh == nil {
-		t.Error("ResponseCh = nil, want non-nil unsubscribe response channel")
+	if exec.unregisterSetReq.Reply == nil {
+		t.Error("Reply = nil, want non-nil unsubscribe reply closure")
 	}
 
 	// No error message should have been sent.
@@ -139,14 +139,14 @@ func TestHandleUnsubscribeMulti_DeliversAsyncMultiApplied(t *testing.T) {
 	handleUnsubscribeMulti(context.Background(), conn, msg, exec)
 
 	exec.mu.Lock()
-	respCh := exec.unregisterSetReq.ResponseCh
+	reply := exec.unregisterSetReq.Reply
 	exec.mu.Unlock()
-	if respCh == nil {
-		t.Fatal("missing unsubscribe response channel")
+	if reply == nil {
+		t.Fatal("missing unsubscribe reply closure")
 	}
-	respCh <- UnsubscribeSetCommandResponse{
+	reply(UnsubscribeSetCommandResponse{
 		MultiApplied: &UnsubscribeMultiApplied{RequestID: 22, QueryID: 88},
-	}
+	})
 
 	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagUnsubscribeMultiApplied {

@@ -20,9 +20,17 @@ func (CallReducerCmd) isExecutorCommand() {}
 
 // RegisterSubscriptionSetCmd requests atomic set-scoped subscription
 // registration. Part of the Phase 2 Slice 2 variant split.
+//
+// Reply is invoked synchronously on the executor goroutine (before the
+// dispatch loop pulls the next command) with the register outcome. Err
+// is non-nil only on register failure; on success Result carries the
+// populated result. Callers supply a closure that enqueues the
+// appropriate wire frame onto the target connection's OutboundCh — per
+// ADR §9.4 this enqueue strictly precedes any subsequent fan-out for
+// the same connection on the executor goroutine.
 type RegisterSubscriptionSetCmd struct {
-	Request    subscription.SubscriptionSetRegisterRequest
-	ResponseCh chan<- subscription.SubscriptionSetRegisterResult
+	Request subscription.SubscriptionSetRegisterRequest
+	Reply   func(subscription.SubscriptionSetRegisterResult, error)
 }
 
 func (RegisterSubscriptionSetCmd) isExecutorCommand() {}
@@ -30,20 +38,18 @@ func (RegisterSubscriptionSetCmd) isExecutorCommand() {}
 // UnregisterSubscriptionSetCmd removes every subscription registered
 // under one (ConnID, QueryID) key.
 // Part of the Phase 2 Slice 2 variant split.
+//
+// Reply is invoked synchronously on the executor goroutine with the
+// unregister outcome. Err is non-nil on failure; on success Result
+// carries the populated result. See RegisterSubscriptionSetCmd for the
+// ordering contract.
 type UnregisterSubscriptionSetCmd struct {
-	ConnID     types.ConnectionID
-	QueryID    uint32
-	ResponseCh chan<- UnregisterSubscriptionSetResponse
+	ConnID  types.ConnectionID
+	QueryID uint32
+	Reply   func(subscription.SubscriptionSetUnregisterResult, error)
 }
 
 func (UnregisterSubscriptionSetCmd) isExecutorCommand() {}
-
-// UnregisterSubscriptionSetResponse carries either the final delta
-// (on success) or an error.
-type UnregisterSubscriptionSetResponse struct {
-	Result subscription.SubscriptionSetUnregisterResult
-	Err    error
-}
 
 // DisconnectClientSubscriptionsCmd removes all subscriptions for one client.
 type DisconnectClientSubscriptionsCmd struct {

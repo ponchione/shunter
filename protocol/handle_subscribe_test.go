@@ -278,8 +278,8 @@ func TestHandleSubscribeSingleSuccess(t *testing.T) {
 	if len(req.Predicates) != 1 {
 		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
 	}
-	if req.ResponseCh == nil {
-		t.Error("ResponseCh = nil, want non-nil subscribe response channel")
+	if req.Reply == nil {
+		t.Error("Reply = nil, want non-nil subscribe reply closure")
 	}
 
 	colEq, ok := req.Predicates[0].(subscription.ColEq)
@@ -312,12 +312,12 @@ func TestHandleSubscribeSingle_DeliversAsyncSubscribeApplied(t *testing.T) {
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	req := executor.getRegisterSetReq()
-	if req == nil || req.ResponseCh == nil {
-		t.Fatal("executor did not receive subscribe response channel")
+	if req == nil || req.Reply == nil {
+		t.Fatal("executor did not receive subscribe reply closure")
 	}
-	req.ResponseCh <- SubscriptionSetCommandResponse{
+	req.Reply(SubscriptionSetCommandResponse{
 		SingleApplied: &SubscribeSingleApplied{RequestID: 10, QueryID: 7, TableName: "users", Rows: []byte{}},
-	}
+	})
 
 	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscribeSingleApplied {
@@ -422,8 +422,8 @@ func TestHandleSubscribeMultiSuccess(t *testing.T) {
 	if req.RequestID != 11 {
 		t.Errorf("RequestID = %d, want 11", req.RequestID)
 	}
-	if req.ResponseCh == nil {
-		t.Error("ResponseCh = nil, want non-nil subscribe response channel")
+	if req.Reply == nil {
+		t.Error("Reply = nil, want non-nil subscribe reply closure")
 	}
 }
 
@@ -444,12 +444,12 @@ func TestHandleSubscribeMulti_DeliversAsyncMultiApplied(t *testing.T) {
 	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
 
 	req := exec.getRegisterSetReq()
-	if req == nil || req.ResponseCh == nil {
-		t.Fatal("executor did not receive subscribe response channel")
+	if req == nil || req.Reply == nil {
+		t.Fatal("executor did not receive subscribe reply closure")
 	}
-	req.ResponseCh <- SubscriptionSetCommandResponse{
+	req.Reply(SubscriptionSetCommandResponse{
 		MultiApplied: &SubscribeMultiApplied{RequestID: 12, QueryID: 88},
-	}
+	})
 
 	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscribeMultiApplied {
