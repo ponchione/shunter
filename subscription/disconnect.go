@@ -11,5 +11,6 @@ func (m *Manager) DisconnectClient(connID types.ConnectionID) error {
 		// Ignore not-found to keep DisconnectClient idempotent.
 		_ = m.Unregister(connID, s)
 	}
+	delete(m.querySets, connID)
 	return nil
 }

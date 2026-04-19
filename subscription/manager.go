@@ -1,9 +1,17 @@
 package subscription
 
 import (
+	"errors"
+
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
+
+// ErrQueryIDAlreadyLive is returned by RegisterSet when the given
+// (ConnID, QueryID) pair already names a live set. Reference behavior:
+// add_subscription_multi try_insert at
+// reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1050.
+var ErrQueryIDAlreadyLive = errors.New("subscription: query id already live on connection")
 
 // SubscriptionRegisterRequest carries the validated subscription parameters
 // from the protocol layer to the executor and then to the subscription
@@ -11,9 +19,9 @@ import (
 type SubscriptionRegisterRequest struct {
 	ConnID         types.ConnectionID
 	SubscriptionID types.SubscriptionID
-	Predicate      Predicate        // validated and compiled by the protocol layer
-	ClientIdentity *types.Identity  // nil for non-parameterized subscriptions
-	RequestID      uint32           // echoed in SubscribeApplied
+	Predicate      Predicate       // validated and compiled by the protocol layer
+	ClientIdentity *types.Identity // nil for non-parameterized subscriptions
+	RequestID      uint32          // echoed in SubscribeApplied
 }
 
 // SubscriptionRegisterResult is returned by Register after the initial query
@@ -21,6 +29,32 @@ type SubscriptionRegisterRequest struct {
 type SubscriptionRegisterResult struct {
 	SubscriptionID types.SubscriptionID
 	InitialRows    []types.ProductValue // all rows matching the predicate at registration time
+}
+
+// SubscriptionSetRegisterRequest is the set-based register request.
+// Predicates may have length >= 1; length 1 is the Single path.
+type SubscriptionSetRegisterRequest struct {
+	ConnID         types.ConnectionID
+	QueryID        uint32
+	Predicates     []Predicate
+	ClientIdentity *types.Identity
+	RequestID      uint32
+}
+
+// SubscriptionSetRegisterResult carries the merged initial snapshot.
+// Update entries have Inserts populated and Deletes empty; one entry
+// per (allocated internal SubscriptionID, table) pair.
+type SubscriptionSetRegisterResult struct {
+	QueryID uint32
+	Update  []SubscriptionUpdate
+}
+
+// SubscriptionSetUnregisterResult carries the final-delta rows that
+// were still live at unsubscribe time. Update entries have Deletes
+// populated and Inserts empty.
+type SubscriptionSetUnregisterResult struct {
+	QueryID uint32
+	Update  []SubscriptionUpdate
 }
 
 // SubscriptionUpdate is the per-subscription component of a transaction
@@ -49,6 +83,8 @@ type CommitFanout map[types.ConnectionID][]SubscriptionUpdate
 type SubscriptionManager interface {
 	Register(req SubscriptionRegisterRequest, view store.CommittedReadView) (SubscriptionRegisterResult, error)
 	Unregister(connID types.ConnectionID, subscriptionID types.SubscriptionID) error
+	RegisterSet(req SubscriptionSetRegisterRequest, view store.CommittedReadView) (SubscriptionSetRegisterResult, error)
+	UnregisterSet(connID types.ConnectionID, queryID uint32, view store.CommittedReadView) (SubscriptionSetUnregisterResult, error)
 	DisconnectClient(connID types.ConnectionID) error
 	EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta PostCommitMeta)
 	DroppedClients() <-chan types.ConnectionID
@@ -57,12 +93,14 @@ type SubscriptionManager interface {
 // Manager is the default SubscriptionManager implementation.
 // It is single-goroutine safe (the executor drives it).
 type Manager struct {
-	schema   SchemaLookup
-	resolver IndexResolver
-	registry *queryRegistry
-	indexes  *PruningIndexes
-	inbox    chan<- FanOutMessage
-	dropped  chan types.ConnectionID
+	schema    SchemaLookup
+	resolver  IndexResolver
+	registry  *queryRegistry
+	indexes   *PruningIndexes
+	inbox     chan<- FanOutMessage
+	dropped   chan types.ConnectionID
+	querySets map[types.ConnectionID]map[uint32][]types.SubscriptionID
+	nextSubID types.SubscriptionID
 
 	// InitialRowLimit caps the initial-query row count returned to the
 	// client. Zero means unlimited.
@@ -87,11 +125,12 @@ func WithFanOutInbox(inbox chan<- FanOutMessage) ManagerOption {
 // NewManager constructs a Manager.
 func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOption) *Manager {
 	m := &Manager{
-		schema:   schema,
-		resolver: resolver,
-		registry: newQueryRegistry(),
-		indexes:  NewPruningIndexes(),
-		dropped:  make(chan types.ConnectionID, 64),
+		schema:    schema,
+		resolver:  resolver,
+		registry:  newQueryRegistry(),
+		indexes:   NewPruningIndexes(),
+		dropped:   make(chan types.ConnectionID, 64),
+		querySets: make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
 	}
 	for _, opt := range opts {
 		opt(m)
