@@ -5,7 +5,14 @@
 **Depends on:** Story 4.1
 **Blocks:** Epic 5 (response delivery)
 
-**Cross-spec:** SPEC-003 (executor inbox: `UnregisterSubscriptionCmd`, `CallReducerCmd`)
+**Cross-spec:** SPEC-003 (executor inbox: `UnregisterSubscriptionSetCmd`, `CallReducerCmd`)
+
+> **Updated 2026-04-19 (Phase 2 Slice 2).** `Unsubscribe` was split
+> into `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg` and the executor
+> command is now `UnregisterSubscriptionSetCmd` keyed by
+> `(ConnID, QueryID)`. References below still using the pre-split
+> symbol names are historical; see
+> `docs/superpowers/plans/2026-04-18-subscribe-multi-single-split.md`.
 
 ---
 
@@ -33,7 +40,7 @@ Two handlers grouped together because they share the same E4 shape: validate loc
 
 ## Acceptance Criteria
 
-- [ ] Unsubscribe active subscription → `UnregisterSubscriptionCmd` sent, subscription removed from tracker
+- [ ] Unsubscribe active subscription → `UnregisterSubscriptionSetCmd` sent, subscription removed from tracker
 - [ ] Unsubscribe pending subscription → `ErrSubscriptionNotFound` (cannot unsubscribe what has not become active)
 - [ ] Unsubscribe unknown subscription_id → `ErrSubscriptionNotFound`
 - [ ] CallReducer valid name → `CallReducerCmd` sent to executor

@@ -11,11 +11,18 @@
 
 Full registration flow from validated predicate to initial rows returned. Runs inside executor command — no gap between initial query and delta activation.
 
+> **Updated 2026-04-19 (Phase 2 Slice 2).** The entry point is
+> `RegisterSet(req SubscriptionSetRegisterRequest, view) (SubscriptionSetRegisterResult, error)`.
+> One `QueryID` names a set with `Predicates []Predicate` (length 1 =
+> Single path). The steps below are executed for each predicate in
+> the set; the merged initial snapshot is returned as
+> `SubscriptionSetRegisterResult{QueryID, Update []SubscriptionUpdate}`.
+
 ## Deliverables
 
-- `Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)`
+- `RegisterSet(req SubscriptionSetRegisterRequest, view CommittedReadView) (SubscriptionSetRegisterResult, error)`
 
-- Registration steps (per §4.1):
+- Registration steps (per §4.1, executed for each predicate in the set):
   1. **Validate** predicate via `ValidatePredicate` (Story 1.2)
   2. **Compute query hash** via `ComputeQueryHash` (Story 1.3), appending `req.ClientIdentity` bytes when the predicate is parameterized
   3. **Compile** executable plan
@@ -25,7 +32,7 @@ Full registration flow from validated predicate to initial rows returned. Runs i
   6. **Create/reuse query state** in registry
   7. **Place in pruning indexes** via `PlaceSubscription` (Story 2.4)
   8. **Add subscriber** to query state
-  9. **Return** `SubscriptionRegisterResult{SubscriptionID, InitialRows}`
+  9. **Merge** into the set result; on success return `SubscriptionSetRegisterResult{QueryID, Update []SubscriptionUpdate}`. On duplicate `(ConnID, QueryID)` return `ErrQueryIDAlreadyLive`.
 
 - Initial query execution:
   - Single-table: `TableScan` or `IndexScan` + filter
@@ -33,7 +40,7 @@ Full registration flow from validated predicate to initial rows returned. Runs i
   - Optional row limit: if initial result exceeds configurable max → `ErrInitialRowLimit`
   - For join subscriptions, the row limit applies to the fully materialized joined result set returned to the client (each joined output row counts once)
 
-- `SubscriptionRegisterRequest` and `SubscriptionRegisterResult` types are declared canonically in Story 4.5 and used here as the behavior owner for registration
+- `SubscriptionSetRegisterRequest` and `SubscriptionSetRegisterResult` types are declared canonically in Story 4.5 and used here as the behavior owner for registration
 
 ## Acceptance Criteria
 

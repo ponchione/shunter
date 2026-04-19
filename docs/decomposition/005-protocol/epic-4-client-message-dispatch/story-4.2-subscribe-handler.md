@@ -5,7 +5,16 @@
 **Depends on:** Story 4.1
 **Blocks:** Epic 5 (subscription state for routing)
 
-**Cross-spec:** SPEC-003 (executor inbox: `RegisterSubscriptionCmd`), SPEC-004 (predicate model: `AllRows`, `ColEq`, `And`)
+**Cross-spec:** SPEC-003 (executor inbox: `RegisterSubscriptionSetCmd`), SPEC-004 (predicate model: `AllRows`, `ColEq`, `And`)
+
+> **Updated 2026-04-19 (Phase 2 Slice 2).** The single `Subscribe` /
+> `SubscribeMsg` entry point was split into `SubscribeSingleMsg` +
+> `SubscribeMultiMsg` with a one-QueryID-per-query-set grouping model,
+> and the executor command is now `RegisterSubscriptionSetCmd`
+> carrying `Predicates []Predicate` (length 1 for Single, >=1 for
+> Multi). References below still using the pre-split symbol names are
+> historical; see
+> `docs/superpowers/plans/2026-04-18-subscribe-multi-single-split.md`.
 
 ---
 
@@ -25,7 +34,7 @@ Parse and validate `Subscribe` messages. Normalize the structured query into the
      - `[]` → `AllRows(table_id)`
      - `[P1]` → `ColEq(table_id, col_id, value)`
      - `[P1, P2, ...]` → left-associative `And` tree: `And{And{P1, P2}, P3}`
-  7. Send `RegisterSubscriptionCmd` to executor inbox with callback for `SubscribeApplied` or `SubscriptionError`
+  7. Send `RegisterSubscriptionSetCmd` to executor inbox with callback for `SubscribeSingleApplied` / `SubscribeMultiApplied` or `SubscriptionError`
 
 - `SchemaLookup` interface — resolves table names to IDs and column names to IDs:
   ```go
@@ -50,7 +59,7 @@ Parse and validate `Subscribe` messages. Normalize the structured query into the
 - [ ] Single predicate → normalized to `ColEq`
 - [ ] Three predicates `[P1, P2, P3]` → `And{And{ColEq(P1), ColEq(P2)}, ColEq(P3)}`
 - [ ] Range predicate → `SubscriptionError` (not v1)
-- [ ] `RegisterSubscriptionCmd` sent to executor on success
+- [ ] `RegisterSubscriptionSetCmd` sent to executor on success
 - [ ] Executor responds with error → `SubscriptionError` sent, subscription_id released
 
 ## Design Notes

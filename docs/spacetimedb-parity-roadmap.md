@@ -111,15 +111,15 @@ Do not spend primary effort on cleanup before the parity target is nailed down.
 These currently prevent Shunter from being credibly described as an operational SpacetimeDB implementation.
 
 ### A1. Protocol surface is not wire-close enough
-Evidence from `SPEC-AUDIT.md` protocol divergence block:
-- Shunter uses a forked subprotocol token (`v1.bsatn.shunter`)
-- compression tags differ
-- no TransactionUpdate heavy/light split
-- no SubscribeMulti / SubscribeSingle / QuerySetId grouping
-- no `CallReducer.flags`
-- one-off query uses structured predicates instead of SQL string
-- close-code behavior differs in some paths
-- reducer-call result status enum differs materially
+Evidence from `SPEC-AUDIT.md` protocol divergence block (updated as slices land):
+- subprotocol token: `v1.bsatn.spacetimedb` preferred; `v1.bsatn.shunter` still accepted (Phase 1 closed with a legacy-compatibility deferral)
+- compression tags: tag numbering parity-aligned (Phase 1 closed; brotli is a recognized-but-deferred tag)
+- `TransactionUpdate` heavy/light split: closed Phase 1.5
+- `SubscribeMulti` / `SubscribeSingle` variant split + one-QueryID-per-query-set grouping: closed Phase 2 Slice 2
+- `CallReducer.flags` (`FullUpdate` / `NoSuccessNotify`): closed Phase 1.5
+- one-off query still uses structured predicates instead of SQL string (Phase 2 Slice 1 open)
+- close-code behavior: closed Phase 1
+- reducer-call result status enum: closed Phase 1.5 (`UpdateStatus` tagged union)
 
 Impact:
 - client interoperability and client-side expectation parity are poor
@@ -420,9 +420,8 @@ Primary files:
 - `subscription/validate.go`
 - `subscription/register.go`
 
-#### 2. Add query-set grouping semantics
-Current single-subscription model is weaker than SpacetimeDB’s set/grouping story.
-Add grouping at the registration and fanout layers without breaking the internal evaluator.
+#### 2. Add query-set grouping semantics — closed Phase 2 Slice 2
+`SubscribeMulti` / `SubscribeSingle` variant split landed; one-QueryID-per-query-set grouping semantics now match the reference. Positive pins: `TestPhase2Subscribe{Single,Multi}Shape`, `TestPhase2Unsubscribe{Single,Multi}Shape`, `TestPhase2Subscribe{Single,Multi}AppliedShape`, `TestPhase2Unsubscribe{Single,Multi}AppliedShape`, `TestPhase2TagByteStability`. Set-based manager API (`RegisterSet` / `UnregisterSet`) + set-based executor commands (`RegisterSubscriptionSetCmd` / `UnregisterSubscriptionSetCmd`). Remaining Phase 2 Slice 2 deferrals: `TotalHostExecutionDurationMicros` on applied envelopes, `SubscriptionError.TableID` / optional-field shape, SQL-string form for `SubscribeMulti.Queries` (paired with Phase 2 Slice 1).
 
 Primary files:
 - `protocol/wire_types.go`

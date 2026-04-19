@@ -110,14 +110,14 @@ Parse incoming binary frames and route to subsystems.
 **Scope:**
 - Incoming frame reader: read binary frame, reject text frames with Close
 - Tag dispatch loop: decode tag byte, route to handler, unknown tag → protocol error `1002`
-- **Subscribe handler (§7.1):** decode `Subscribe`, validate `Query` (table exists, columns exist, no duplicate subscription_id, v1 predicate subset only), normalize predicates to SPEC-004 model (`AllRows` / `ColEq` / left-associative `And` tree), send `RegisterSubscriptionCmd` to executor inbox
-- **Unsubscribe handler (§7.2):** decode `Unsubscribe`, validate subscription_id is active or pending, send `UnregisterSubscriptionCmd` to executor
+- **Subscribe handlers (§7.1):** decode `SubscribeSingleMsg` / `SubscribeMultiMsg`, validate `Query` (table exists, columns exist, no duplicate `query_id`, v1 predicate subset only), normalize predicates to SPEC-004 model (`AllRows` / `ColEq` / left-associative `And` tree), send `RegisterSubscriptionSetCmd` to executor inbox (predicate list length 1 for Single, >=1 for Multi)
+- **Unsubscribe handlers (§7.2):** decode `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg`, validate `query_id` names a live set on this connection, send `UnregisterSubscriptionSetCmd` to executor
 - **CallReducer handler (§7.3):** decode `CallReducer`, reject lifecycle reducer names (`OnConnect`, `OnDisconnect`), send `CallReducerCmd` to executor inbox with `ResponseCh`
 - **OneOffQuery handler (§7.4):** decode `OneOffQuery`, execute read-only query against `CommittedState.Snapshot()`, return `OneOffQueryResult`
 - Per-connection subscription state machine (§9.1): track pending/active/removed states per `subscription_id`; `subscription_id` reserved on accept, reusable after error or unsubscribe
 
 **Testable outcomes:**
-- Valid Subscribe → `RegisterSubscriptionCmd` sent to executor
+- Valid SubscribeSingle / SubscribeMulti → `RegisterSubscriptionSetCmd` sent to executor
 - Subscribe with nonexistent table → `SubscriptionError`
 - Subscribe with nonexistent column → `SubscriptionError`
 - Subscribe with duplicate active subscription_id → `SubscriptionError`
@@ -148,14 +148,14 @@ Outbound message construction and delivery to WebSocket connections.
 - Per-connection outbound writer: serialize message, apply optional compression, write to WebSocket
 - **SubscribeApplied** delivery: initial rows as RowList, consistent snapshot
 - **UnsubscribeApplied** delivery: optionally include dropped rows (`send_dropped`)
-- **SubscriptionError** delivery: diagnostic message, subscription_id now dead
+- **SubscriptionError** delivery: diagnostic message, `query_id` now dead on the wire (projected from the internal Go `SubscriptionID`)
 - **OneOffQueryResult** delivery: success with RowList or error with message
 - **TransactionUpdate** construction from `CommitFanout` (SPEC-004 §7): iterate `map[ConnectionID][]SubscriptionUpdate`, build `TransactionUpdate{TxID, Updates}`, send per connection
 - **ReducerCallResult** with embedded `transaction_update`:
   - Caller connection's update slice diverted from standalone `TransactionUpdate` into `ReducerCallResult`
   - Caller MUST NOT receive separate `TransactionUpdate` for same `tx_id`
   - If `status != 0`, embedded update MUST be empty
-- Per-connection ordering guarantee: `SubscribeApplied(id)` delivered before any `TransactionUpdate` referencing that `id`
+- Per-connection ordering guarantee: `SubscribeApplied(query_id)` delivered before any `TransactionUpdate` referencing that logical subscription
 
 **Testable outcomes:**
 - SubscribeApplied contains correct initial rows

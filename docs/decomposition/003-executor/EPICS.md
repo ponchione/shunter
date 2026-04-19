@@ -15,7 +15,7 @@ All foundational types, interfaces, and error sentinels the executor is built on
 - `CallSource`, `ReducerStatus`, `LifecycleKind` enums
 - `ReducerHandler` function type (raw byte-oriented runtime signature)
 - `RegisteredReducer`, `CallerContext`, `ReducerRequest`, `ReducerResponse`, `ReducerContext` structs
-- `ExecutorCommand` interface + `CallReducerCmd`, `RegisterSubscriptionCmd`, `UnregisterSubscriptionCmd`, `DisconnectClientSubscriptionsCmd` command types
+- `ExecutorCommand` interface + `CallReducerCmd`, `RegisterSubscriptionSetCmd`, `UnregisterSubscriptionSetCmd`, `DisconnectClientSubscriptionsCmd` command types
 - `DurabilityHandle`, `SubscriptionManager`, `SchedulerHandle` interfaces
 - Error sentinels: `ErrReducerNotFound`, `ErrLifecycleReducer`, `ErrExecutorBusy`, `ErrExecutorShutdown`, `ErrReducerPanic`, `ErrCommitFailed`, `ErrExecutorFatal`
 
@@ -79,7 +79,7 @@ The executor goroutine, bounded inbox, command dispatch routing, and shutdown.
 - Submit after shutdown — `ErrExecutorShutdown`
 - Close inbox — run loop terminates cleanly without spin
 - Panic in dispatchSafely — executor goroutine survives, continues processing
-- RegisterSubscriptionCmd acquires snapshot and calls SubscriptionManager.Register atomically
+- RegisterSubscriptionSetCmd acquires snapshot and calls SubscriptionManager.RegisterSet atomically
 - Purely observational reads are documented to use direct snapshots rather than executor commands
 - Durability shutdown happens only after the executor stops admitting new write commands and drains queued work
 - Recovery hand-off and startup sequencing are documented so no external command can interleave ahead of scheduler replay or dangling-client cleanup

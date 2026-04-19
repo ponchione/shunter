@@ -27,21 +27,27 @@ The `ExecutorCommand` interface and all concrete command types that flow through
   func (CallReducerCmd) isExecutorCommand() {}
   ```
 
+> **Updated 2026-04-19 (Phase 2 Slice 2).** The single-subscription
+> commands `RegisterSubscriptionCmd` / `UnregisterSubscriptionCmd`
+> were replaced by the set-based commands below. One `QueryID`
+> identifies a subscription set (`Predicates` length >= 1; length 1
+> is the Single path).
+
 - ```go
-  type RegisterSubscriptionCmd struct {
-      Request    SubscriptionRegisterRequest  // defined in SPEC-004 §4.1
-      ResponseCh chan<- SubscriptionRegisterResult
+  type RegisterSubscriptionSetCmd struct {
+      Request    SubscriptionSetRegisterRequest  // defined in SPEC-004 §4.1
+      ResponseCh chan<- SubscriptionSetRegisterResult
   }
-  func (RegisterSubscriptionCmd) isExecutorCommand() {}
+  func (RegisterSubscriptionSetCmd) isExecutorCommand() {}
   ```
 
 - ```go
-  type UnregisterSubscriptionCmd struct {
-      ConnID         ConnectionID
-      SubscriptionID SubscriptionID
-      ResponseCh     chan<- error
+  type UnregisterSubscriptionSetCmd struct {
+      ConnID     ConnectionID
+      QueryID    uint32
+      ResponseCh chan<- SubscriptionSetUnregisterResult
   }
-  func (UnregisterSubscriptionCmd) isExecutorCommand() {}
+  func (UnregisterSubscriptionSetCmd) isExecutorCommand() {}
   ```
 
 - ```go
@@ -77,13 +83,13 @@ The `ExecutorCommand` interface and all concrete command types that flow through
 - [ ] All command types satisfy `ExecutorCommand` interface
 - [ ] Each command type has an optional `ResponseCh` for async result delivery; nil is permitted when the caller intentionally discards the response
 - [ ] CallReducerCmd carries full ReducerRequest
-- [ ] RegisterSubscriptionCmd references SubscriptionRegisterRequest (SPEC-004 type)
-- [ ] UnregisterSubscriptionCmd and DisconnectClientSubscriptionsCmd carry ConnectionID
+- [ ] RegisterSubscriptionSetCmd references SubscriptionSetRegisterRequest (SPEC-004 type)
+- [ ] UnregisterSubscriptionSetCmd carries ConnectionID + QueryID; DisconnectClientSubscriptionsCmd carries ConnectionID
 - [ ] OnConnectCmd and OnDisconnectCmd carry ConnectionID + Identity and are distinct from CallReducerCmd
 
 ## Design Notes
 
 - `isExecutorCommand()` is unexported — prevents external packages from creating new command types.
 - Scheduled reducers use `CallReducerCmd` with `CallSourceScheduled` as the Source. Lifecycle reducers (`OnConnect` / `OnDisconnect`) do NOT fit the `CallReducerCmd` shape — the `sys_clients` row insert (§10.3) and the guaranteed cleanup tx (§10.4) are not expressible through the plain reducer-call path — so they use `OnConnectCmd` / `OnDisconnectCmd` and `CallerContext.Source = CallSourceLifecycle` is stamped inside the executor.
-- `SubscriptionRegisterRequest` and `SubscriptionRegisterResult` types come from SPEC-004. Use placeholder types or imports until SPEC-004 is implemented.
+- `SubscriptionSetRegisterRequest`, `SubscriptionSetRegisterResult`, and `SubscriptionSetUnregisterResult` types come from SPEC-004. Use placeholder types or imports until SPEC-004 is implemented.
 - `ResponseCh` may be nil. In that case the executor silently drops the response after completing the command. Callers that require result delivery or visibility into failures MUST supply a channel and drain it.

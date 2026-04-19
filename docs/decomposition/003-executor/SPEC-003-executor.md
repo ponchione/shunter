@@ -113,15 +113,17 @@ type CallReducerCmd struct {
     ResponseCh chan<- ReducerResponse
 }
 
-type RegisterSubscriptionCmd struct {
-    Request    SubscriptionRegisterRequest
-    ResponseCh chan<- SubscriptionRegisterResult
+// Updated 2026-04-19 (Phase 2 Slice 2): set-based commands replace the
+// former single-subscription RegisterSubscriptionCmd / UnregisterSubscriptionCmd.
+type RegisterSubscriptionSetCmd struct {
+    Request    SubscriptionSetRegisterRequest
+    ResponseCh chan<- SubscriptionSetRegisterResult
 }
 
-type UnregisterSubscriptionCmd struct {
-    ConnID         ConnectionID
-    SubscriptionID SubscriptionID
-    ResponseCh     chan<- error
+type UnregisterSubscriptionSetCmd struct {
+    ConnID     ConnectionID
+    QueryID    uint32
+    ResponseCh chan<- SubscriptionSetUnregisterResult
 }
 
 type DisconnectClientSubscriptionsCmd struct {
@@ -146,7 +148,7 @@ type OnDisconnectCmd struct {
 }
 ```
 
-`SubscriptionRegisterRequest` is defined in SPEC-004 §4.1.
+`SubscriptionSetRegisterRequest`, `SubscriptionSetRegisterResult`, and `SubscriptionSetUnregisterResult` are defined in SPEC-004 §4.1.
 
 Scheduled reducers use `CallReducerCmd` with `Source = CallSourceScheduled`. Lifecycle reducers (`OnConnect` / `OnDisconnect`) do not fit the `CallReducerCmd` shape and use their own command types above; `CallerContext.Source = CallSourceLifecycle` is stamped inside the executor (§10.3, §10.4). v1 has no `init`/`update` lifecycle command (see SPEC-006 §9).
 
@@ -532,20 +534,22 @@ This intentionally avoids a post-commit recoverable error path. A live executor 
 The executor depends on a subscription manager, not just a post-commit callback.
 
 ```go
+// Updated 2026-04-19 (Phase 2 Slice 2): set-based RegisterSet / UnregisterSet
+// replace the former single-subscription Register / Unregister.
 type SubscriptionManager interface {
-    Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)
-    Unregister(connID ConnectionID, subscriptionID SubscriptionID) error
+    RegisterSet(req SubscriptionSetRegisterRequest, view CommittedReadView) (SubscriptionSetRegisterResult, error)
+    UnregisterSet(connID ConnectionID, queryID uint32, view CommittedReadView) (SubscriptionSetUnregisterResult, error)
     DisconnectClient(connID ConnectionID) error
     EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)
     DroppedClients() <-chan ConnectionID   // non-blocking; executor drains after each commit
 }
 ```
 
-`SubscriptionRegisterRequest` and `SubscriptionRegisterResult` are defined in SPEC-004 §4.1. `PostCommitMeta` is declared in SPEC-004 §10.1 and carries executor-owned delivery metadata (`TxDurable`, `CallerConnID`, `CallerResult`) into the evaluator.
+`SubscriptionSetRegisterRequest`, `SubscriptionSetRegisterResult`, and `SubscriptionSetUnregisterResult` are defined in SPEC-004 §4.1. `PostCommitMeta` is declared in SPEC-004 §10.1 and carries executor-owned delivery metadata (`TxDurable`, `CallerConnID`, `CallerOutcome`) into the evaluator.
 
 Rules:
-- `Register` MUST be called from an executor command so initial query execution and registration are atomic with commit ordering
-- the `CommittedReadView` passed to `Register` is owned by the caller for the duration of the call only; `SubscriptionManager` MUST NOT retain it past return and MUST copy any snapshot-derived state it wants to keep
+- `RegisterSet` MUST be called from an executor command so initial query execution and registration are atomic with commit ordering
+- the `CommittedReadView` passed to `RegisterSet` is owned by the caller for the duration of the call only; `SubscriptionManager` MUST NOT retain it past return and MUST copy any snapshot-derived state it wants to keep
 - `EvalAndBroadcast` runs synchronously inside the post-commit pipeline
 - The executor MUST populate `meta.TxDurable` with a non-nil channel obtained from `DurabilityHandle.WaitUntilDurable(txID)` for every post-commit invocation (see SPEC-004 §10.1 for the TxDurable-on-empty-fanout rule)
 - `DisconnectClient` removes all subscriptions for a client when the protocol layer reports disconnect

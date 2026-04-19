@@ -1943,6 +1943,8 @@ rtk git commit -m "parity: remove legacy single-subscription API; set-based path
 
 ## Task 10: Host adapter — wire `RegisterSubscriptionSet` / `UnregisterSubscriptionSet` through to the executor
 
+> **Status: skipped (2026-04-19).** No host adapter exists in-repo — `protocol.ExecutorInbox` is implemented only by test fakes, and there is no `cmd/` binary or production implementer. Host-side wiring is downstream/external. When a host binary is introduced, its adapter must implement `RegisterSubscriptionSet` / `UnregisterSubscriptionSet` on `protocol.ExecutorInbox`, casting `[]any` to `[]subscription.Predicate` on the way through and submitting `executor.RegisterSubscriptionSetCmd` / `executor.UnregisterSubscriptionSetCmd` to the executor inbox. Recorded as follow-up.
+
 If a host adapter implements the `protocol.ExecutorInbox` interface (typically in a cmd/ or internal/ package; search for the struct that satisfies it), update it to submit the new executor commands.
 
 **Files:**

@@ -25,29 +25,29 @@ BSATN encode for all seven server→client message types. Each message encodes t
 - `SubscribeApplied`:
   ```go
   type SubscribeApplied struct {
-      RequestID      uint32
-      SubscriptionID uint32
-      TableName      string
-      Rows           []byte // encoded RowList
+      RequestID uint32
+      QueryID   uint32
+      TableName string
+      Rows      []byte // encoded RowList
   }
   ```
 
 - `UnsubscribeApplied`:
   ```go
   type UnsubscribeApplied struct {
-      RequestID      uint32
-      SubscriptionID uint32
-      HasRows        bool   // wire: uint8
-      Rows           []byte // encoded RowList; present if HasRows
+      RequestID uint32
+      QueryID   uint32
+      HasRows   bool   // wire: uint8
+      Rows      []byte // encoded RowList; present if HasRows
   }
   ```
 
 - `SubscriptionError`:
   ```go
   type SubscriptionError struct {
-      RequestID      uint32
-      SubscriptionID uint32
-      Error          string
+      RequestID uint32
+      QueryID   uint32
+      Error     string
   }
   ```
 

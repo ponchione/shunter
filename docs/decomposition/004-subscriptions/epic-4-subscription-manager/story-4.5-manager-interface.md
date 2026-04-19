@@ -13,11 +13,20 @@ Public type/interface contract consumed by the executor (SPEC-003). Error types 
 
 ## Deliverables
 
+> **Superseded wording — updated 2026-04-19 (Phase 2 Slice 2).** The former
+> single-subscription `Register` / `Unregister` methods and their
+> `SubscriptionRegisterRequest` / `SubscriptionRegisterResult` types were
+> removed. The current manager contract is set-based
+> (`RegisterSet` / `UnregisterSet`) keyed by `(ConnID, QueryID)` with
+> `Predicates []Predicate` per set (length 1 = Single path). See
+> `docs/superpowers/plans/2026-04-18-subscribe-multi-single-split.md`
+> for the full rationale.
+
 - `SubscriptionManager` interface:
   ```go
   type SubscriptionManager interface {
-      Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)
-      Unregister(connID ConnectionID, subscriptionID SubscriptionID) error
+      RegisterSet(req SubscriptionSetRegisterRequest, view CommittedReadView) (SubscriptionSetRegisterResult, error)
+      UnregisterSet(connID ConnectionID, queryID uint32, view CommittedReadView) (SubscriptionSetUnregisterResult, error)
       DisconnectClient(connID ConnectionID) error
       EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)
       DroppedClients() <-chan ConnectionID
@@ -26,9 +35,11 @@ Public type/interface contract consumed by the executor (SPEC-003). Error types 
 
 - `SubscriptionID` type (if not already defined in SPEC-003 types)
 
-- `SubscriptionRegisterRequest` struct (§4.1) — canonical type declaration used by Story 4.2
+- `SubscriptionSetRegisterRequest` struct — canonical type declaration used by Story 4.2 (`ConnID`, `QueryID`, `Predicates []Predicate`, `ClientIdentity *Identity`, `RequestID uint32`)
 
-- `SubscriptionRegisterResult` struct (§4.1) — canonical type declaration used by Story 4.2
+- `SubscriptionSetRegisterResult` struct — canonical type declaration used by Story 4.2 (`QueryID`, `Update []SubscriptionUpdate` merged initial snapshot)
+
+- `SubscriptionSetUnregisterResult` struct — final-delta rows still live at unsubscribe (`QueryID`, `Update []SubscriptionUpdate` with `Deletes` populated)
 
 - `SubscriptionUpdate` struct (§10.2)
 
@@ -47,6 +58,7 @@ Public type/interface contract consumed by the executor (SPEC-003). Error types 
   - `ErrColumnNotFound` — predicate references missing column
   - `ErrInitialRowLimit` — initial snapshot too large
   - `ErrSubscriptionNotFound` — unknown subscription ID
+  - `ErrQueryIDAlreadyLive` — `(ConnID, QueryID)` pair already names a live set on `RegisterSet` (reference: `add_subscription_multi try_insert`)
   - `ErrSubscriptionEval` — evaluation failure (corrupted index, type mismatch)
   - `ErrSendBufferFull` — fan-out delivery could not enqueue to the target client
   - `ErrSendConnGone` — target connection disappeared before delivery completed
@@ -58,7 +70,7 @@ Public type/interface contract consumed by the executor (SPEC-003). Error types 
 - [ ] All error types are distinct via `errors.Is`
 - [ ] `SubscriptionManager` interface compilable with concrete implementation
 - [ ] `CommitFanout` correctly keyed by ConnectionID
-- [ ] `SubscriptionRegisterRequest` carries `ClientIdentity` for parameterized-hash computation
+- [ ] `SubscriptionSetRegisterRequest` carries `ClientIdentity` for parameterized-hash computation
 - [ ] `SubscriptionUpdate` carries SubscriptionID, TableID, TableName, Inserts, Deletes
 - [ ] `TransactionUpdate` groups updates by TxID
 - [ ] v1 update granularity is row-level full-row inserts/deletes only

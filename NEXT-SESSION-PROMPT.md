@@ -6,51 +6,54 @@ Phase 1.5 end-to-end delivery parity — the `TransactionUpdate` /
 (`NoSuccessNotify`) sub-slice — is closed. Do not re-open any
 P0-PROTOCOL-00* slice and do not re-litigate the outcome-model decision.
 
-Phase 2 Slice 2 `QueryID` naming parity is closed on both request
-envelopes (`SubscribeMsg` / `UnsubscribeMsg`) and response envelopes
-(`SubscribeApplied` / `UnsubscribeApplied` / `SubscriptionError`).
-Client/server naming asymmetry is closed.
+Phase 2 Slice 2 is closed. `QueryID` naming parity landed on both
+request envelopes (`SubscribeMsg` / `UnsubscribeMsg`) and response
+envelopes (`SubscribeApplied` / `UnsubscribeApplied` /
+`SubscriptionError`), and the `SubscribeMulti` / `SubscribeSingle`
+variant split landed with one-QueryID-per-query-set grouping semantics
+that match the reference.
 
 Primary decision
 - Treat `docs/spacetimedb-parity-roadmap.md` as the active development driver.
 - Treat Phase 0, Phase 1, Phase 1.5 (envelope split + `CallReducer.flags`),
-  and Phase 2 Slice 2 `QueryID` naming parity (request + response envelopes)
-  as materially landed.
-- The next narrow parity slices are Phase 2 `SubscribeMulti` /
-  `SubscribeSingle` variant split and multi-query set grouping, Phase 2
-  Slice 1 (`OneOffQuery` SQL front door), or Phase 4 recovery parity
-  (`P0-RECOVERY-002`).
+  and Phase 2 Slice 2 (QueryID naming + SubscribeMulti/SubscribeSingle
+  variant split) as materially landed.
+- The next narrow parity slices are Phase 2 Slice 1 (`OneOffQuery` SQL
+  front door), Phase 2 lag / slow-client policy, or Phase 4 recovery
+  parity (`P0-RECOVERY-002`).
 
-What landed last session (Phase 1.5 envelope split)
-- Heavy `TransactionUpdate{Status, CallerIdentity, CallerConnectionID, ReducerCall,
-  Timestamp, EnergyQuantaUsed, TotalHostExecutionDuration}` added to the wire surface.
-- Delta-only `TransactionUpdateLight{RequestID, Update}` added for non-caller delivery.
-- `UpdateStatus` tagged union (`StatusCommitted{Update}`, `StatusFailed{Error}`,
-  `StatusOutOfEnergy{}`) replaces the former flat `uint8` status.
-- `ReducerCallInfo{ReducerName, ReducerID, Args, RequestID}` embedded in heavy.
-- `ReducerCallResult` removed from the wire surface; `TagReducerCallResult` stays
-  reserved and the decoder rejects it.
-- Dispatch rules (`subscription/fanout_worker.go`):
-  - caller always receives the heavy envelope when `CallerConnID` is set —
-    including when `Fanout[CallerConnID]` is empty and when no subscriptions
-    are active (the `P0-DELIVERY-002` pin).
-  - non-callers whose rows were touched receive the light envelope carrying
-    the caller's `request_id`.
-  - confirmed-read gating continues to wait on `TxDurable` for any heavy or
-    light delivery.
-- `subscription.PostCommitMeta.CallerResult` was renamed to `CallerOutcome`;
-  `subscription.ReducerCallResult` forward-declaration was replaced by
-  `subscription.CallerOutcome{Kind, Error, CallerIdentity, ReducerName,
-  ReducerID, Args, RequestID, Timestamp, EnergyQuantaUsed, TotalHostExecutionDuration}`.
-- `protocol/handle_callreducer.go` now synthesizes heavy `StatusFailed` envelopes
-  for pre-acceptance rejections (lifecycle-reducer-name collision, executor-unavailable).
-- `CallReducerRequest.ResponseCh` is now `chan<- TransactionUpdate` (heavy).
-- `docs/parity-phase1.5-outcome-model.md` records the decision and the explicit
-  deferrals (`EnergyQuantaUsed` remains zero because Shunter has no energy
-  model; Shunter's former `failed_user` / `failed_panic` / `not_found`
-  flat statuses are collapsed onto `StatusFailed`; `StatusOutOfEnergy`
-  is shape-only).
-- Latest broad verification: `955 passed in 9 packages`.
+What landed last session (Phase 2 Slice 2 variant split)
+- New client-side envelopes: `SubscribeSingleMsg` (renamed from the
+  former `SubscribeMsg`) and `SubscribeMultiMsg{RequestID, QueryID,
+  Queries []Predicate}`; mirror unsubscribe envelopes
+  `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg`.
+- New server-side envelopes: `SubscribeSingleApplied` /
+  `UnsubscribeSingleApplied` (renamed from the former Applied pair)
+  and `SubscribeMultiApplied` / `UnsubscribeMultiApplied` that scope
+  the delivered rows to the full multi-query set keyed by `QueryID`.
+- Set-based subscription-manager API: `RegisterSet` /
+  `UnregisterSet` on `subscription.SubscriptionManager`, consuming
+  `SubscriptionSetRegisterRequest` / `SubscriptionSetRegisterResult` /
+  `SubscriptionSetUnregisterResult`. The former `Register` /
+  `Unregister` methods and their request/result types were removed.
+- Set-based executor commands: `executor.RegisterSubscriptionSetCmd` /
+  `executor.UnregisterSubscriptionSetCmd` replace the former
+  single-subscription commands.
+- Protocol handlers split: `handleSubscribeSingle` /
+  `handleSubscribeMulti` / `handleUnsubscribeSingle` /
+  `handleUnsubscribeMulti` dispatch on the new envelope tags; the
+  single-path keeps one predicate in the set, the multi-path submits
+  the whole predicate list atomically.
+- `ErrQueryIDAlreadyLive` is returned by `RegisterSet` when a client
+  reuses a live `(ConnID, QueryID)` pair (reference behavior:
+  `add_subscription_multi try_insert` at
+  `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1050`).
+- Task 10 (host adapter wiring through `protocol.ExecutorInbox`) was
+  intentionally skipped: no host adapter exists in-repo — the
+  interface is implemented only by test fakes, and there is no `cmd/`
+  binary. Host-side wiring is a downstream follow-up when the host
+  binary is introduced.
+- Latest broad verification target: `983 passed in 9 packages`.
 
 Pinned parity tests (do not flip without a named parity reason)
 - `protocol/parity_message_family_test.go`:
@@ -59,16 +62,42 @@ Pinned parity tests (do not flip without a named parity reason)
   - `TestPhase15ReducerCallInfoShape`
   - `TestPhase15UpdateStatusVariants`
   - `TestPhase15TagReducerCallResultReserved`
+  - `TestPhase15CallReducerFlagsField` (closed sub-slice — positive-shape pin)
   - `TestPhase2SubscribeCarriesQueryID` (closed Phase 2 Slice 2 request side)
   - `TestPhase2UnsubscribeCarriesQueryID` (closed Phase 2 Slice 2 request side)
   - `TestPhase2SubscribeAppliedCarriesQueryID` (closed Phase 2 Slice 2 response side)
   - `TestPhase2UnsubscribeAppliedCarriesQueryID` (closed Phase 2 Slice 2 response side)
   - `TestPhase2SubscriptionErrorCarriesQueryID` (closed Phase 2 Slice 2 response side)
-  - `TestPhase2DeferralSubscribeNoMultiOrSingleVariants` (still open; `SubscribeMulti` / `SubscribeSingle` variant split)
-  - `TestPhase15CallReducerFlagsField` (closed sub-slice — positive-shape pin)
+  - `TestPhase2SubscribeSingleShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2SubscribeMultiShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2UnsubscribeSingleShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2UnsubscribeMultiShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2SubscribeSingleAppliedShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2UnsubscribeSingleAppliedShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2SubscribeMultiAppliedShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2UnsubscribeMultiAppliedShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2TagByteStability` (tag-byte stability pin)
+  - `TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration` (still open; applied envelope lacks `TotalHostExecutionDurationMicros`)
+  - `TestPhase2DeferralSubscriptionErrorNoTableID` (still open; `SubscriptionError.TableID` / optional-field shape)
+  - `TestPhase2DeferralSubscribeMultiQueriesStructured` (still open; `SubscribeMulti.Queries` is a structured predicate list, not a SQL string list — paired with Phase 2 Slice 1)
   - `TestPhase1DeferralOneOffQueryStructuredNotSQL` (still open; Phase 2 Slice 1)
 - `subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout`
 - `subscription/phase0_parity_test.go::TestPhase0ParityCanonicalReducerDeliveryFlow`
+
+Phase 2 deferrals still open
+1. `OneOffQuery` SQL front door (Phase 2 Slice 1) — pinned by
+   `TestPhase1DeferralOneOffQueryStructuredNotSQL` and
+   `TestPhase2DeferralSubscribeMultiQueriesStructured`.
+2. `TotalHostExecutionDurationMicros` on applied envelopes — pinned
+   by `TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration`.
+3. `SubscriptionError.TableID` / optional-field shape — pinned by
+   `TestPhase2DeferralSubscriptionErrorNoTableID`.
+4. Lag / slow-client policy — Shunter's bounded disconnect-on-lag
+   fanout still diverges from the reference queueing model; pinned
+   as an explicit deferral pending the Phase 2 policy decision.
+5. Host adapter wiring on `protocol.ExecutorInbox` — no host binary
+   exists in-repo; recorded as a downstream follow-up when a host
+   binary introduces a production implementer of the inbox.
 
 Phase 1.5 deferrals still open
 1. `EnergyQuantaUsed` — no energy model; keep zero and treat it as a
@@ -78,25 +107,14 @@ Phase 1.5 deferrals still open
    single `StatusFailed.Error` message in Phase 1.5. Phase 3 may want to
    preserve the classification separately (or pin the collapse as permanent).
 
-Recently landed (Phase 1.5 `CallReducer.flags` sub-slice)
-- `CallReducerMsg.Flags byte` on the wire (reference `CallReducerFlags`:
-  `FullUpdate=0`, `NoSuccessNotify=1`). Encoder appends a trailing u8 after
-  `Args`; decoder rejects out-of-range bytes as `ErrMalformedMessage`.
-- Flags propagates through `protocol.CallReducerRequest.Flags` →
-  `executor.ReducerRequest.Flags` → `postCommitOptions.callerFlags` →
-  `subscription.CallerOutcome.Flags`.
-- `subscription/fanout_worker.go::deliver` now suppresses the caller's
-  heavy `TransactionUpdate` when `CallerOutcomeCommitted` +
-  `CallerOutcomeFlagNoSuccessNotify`. Failure / out-of-energy outcomes
-  are never suppressed. Confirmed-read gating treats the caller as
-  absent when suppressed.
-
 Suggested next slice
-- `SubscribeMulti` / `SubscribeSingle` variant split with multi-query set
-  grouping (the remaining Phase 2 Slice 2 work now that `QueryID` naming
-  parity is closed on both request and response envelopes), Phase 2
-  Slice 1 (`OneOffQuery` SQL front door), or Phase 4 `P0-RECOVERY-002`
-  if recovery parity is the priority.
+- Phase 2 Slice 1 (`OneOffQuery` SQL front door) — the remaining
+  Phase 2 protocol-surface parity anchor now that the variant split
+  is closed. Would also let `TestPhase2DeferralSubscribeMultiQueriesStructured`
+  and `TestPhase1DeferralOneOffQueryStructuredNotSQL` flip from
+  deferral pins to positive pins.
+- Or Phase 4 `P0-RECOVERY-002` (TxID / nextID / sequence invariants
+  across snapshot + replay) if recovery parity is the priority.
 
 Required reading order
 1. `AGENTS.md`

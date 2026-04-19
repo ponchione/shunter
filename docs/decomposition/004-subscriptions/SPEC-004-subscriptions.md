@@ -109,22 +109,29 @@ Two clients with structurally identical predicates and identical parameter value
 
 ### 4.1 Registration
 
+> **Updated 2026-04-19 (Phase 2 Slice 2).** The registration surface is
+> set-based: one `QueryID` names a query set whose `Predicates` list
+> has length >= 1 (length 1 = Single path). The former single-
+> subscription `Register` entry point and its
+> `SubscriptionRegisterRequest` / `SubscriptionRegisterResult` types
+> were removed.
+
 ```go
-// SubscriptionRegisterRequest carries the validated subscription parameters from the
-// protocol layer to the executor and then to the subscription manager.
-type SubscriptionRegisterRequest struct {
+// SubscriptionSetRegisterRequest carries the validated subscription-set parameters
+// from the protocol layer to the executor and then to the subscription manager.
+type SubscriptionSetRegisterRequest struct {
     ConnID         ConnectionID
-    SubscriptionID SubscriptionID
+    QueryID        uint32         // client-chosen set identifier (one per SubscribeMulti/Single)
     ClientIdentity *Identity      // nil for non-parameterized predicates
-    Predicate      Predicate      // validated and compiled by the protocol layer
-    RequestID      uint32         // echoed in SubscribeApplied
+    Predicates     []Predicate    // length >= 1; length 1 is the Single path
+    RequestID      uint32         // echoed in SubscribeSingleApplied / SubscribeMultiApplied
 }
 
-// SubscriptionRegisterResult is returned by Register after the initial query executes
-// and the subscription is fully registered.
-type SubscriptionRegisterResult struct {
-    SubscriptionID SubscriptionID
-    InitialRows    []ProductValue // all rows matching the predicate at registration time
+// SubscriptionSetRegisterResult is returned by RegisterSet after the initial query
+// executes and the subscription set is fully registered.
+type SubscriptionSetRegisterResult struct {
+    QueryID uint32
+    Update  []SubscriptionUpdate // merged initial snapshot; one entry per (internal SubscriptionID, table)
 }
 ```
 
@@ -647,8 +654,8 @@ The subscription subsystem is called from executor commands. It must support bot
 
 ```go
 type SubscriptionManager interface {
-    Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)
-    Unregister(connID ConnectionID, subscriptionID SubscriptionID) error
+    RegisterSet(req SubscriptionSetRegisterRequest, view CommittedReadView) (SubscriptionSetRegisterResult, error)
+    UnregisterSet(connID ConnectionID, queryID uint32, view CommittedReadView) (SubscriptionSetUnregisterResult, error)
     DisconnectClient(connID ConnectionID) error
     EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)
     DroppedClients() <-chan ConnectionID   // non-blocking; executor drains after each commit

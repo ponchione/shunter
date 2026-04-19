@@ -28,15 +28,17 @@ Interfaces the executor consumes from other subsystems: durability, subscription
   - Implemented by SPEC-002
 
 - ```go
+  // Updated 2026-04-19 (Phase 2 Slice 2): set-based registration replaces
+  // the former single-subscription Register / Unregister entry points.
   type SubscriptionManager interface {
-      Register(req SubscriptionRegisterRequest, view CommittedReadView) (SubscriptionRegisterResult, error)
-      Unregister(connID ConnectionID, subscriptionID SubscriptionID) error
+      RegisterSet(req SubscriptionSetRegisterRequest, view CommittedReadView) (SubscriptionSetRegisterResult, error)
+      UnregisterSet(connID ConnectionID, queryID uint32, view CommittedReadView) (SubscriptionSetUnregisterResult, error)
       DisconnectClient(connID ConnectionID) error
       EvalAndBroadcast(txID TxID, changeset *Changeset, view CommittedReadView, meta PostCommitMeta)
       DroppedClients() <-chan ConnectionID
   }
   ```
-  - `Register` must be called from executor command (atomic with commit ordering)
+  - `RegisterSet` must be called from executor command (atomic with commit ordering)
   - `EvalAndBroadcast` runs synchronously in post-commit pipeline
   - `DroppedClients` returns a channel for non-blocking drain
   - Implemented by SPEC-004
@@ -54,7 +56,7 @@ Interfaces the executor consumes from other subsystems: durability, subscription
 ## Acceptance Criteria
 
 - [ ] DurabilityHandle has EnqueueCommitted, DurableTxID, WaitUntilDurable, Close methods
-- [ ] SubscriptionManager has Register, Unregister, DisconnectClient, EvalAndBroadcast, DroppedClients methods
+- [ ] SubscriptionManager has RegisterSet, UnregisterSet, DisconnectClient, EvalAndBroadcast, DroppedClients methods
 - [ ] SchedulerHandle has Schedule, ScheduleRepeat, Cancel methods
 - [ ] All interfaces compile against their method signatures
 - [ ] Changeset and CommittedReadView types referenced from SPEC-001

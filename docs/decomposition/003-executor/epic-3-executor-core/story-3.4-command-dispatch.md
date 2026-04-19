@@ -13,30 +13,34 @@ The `dispatch()` type switch routing commands to handlers. Includes subscription
 
 ## Deliverables
 
+> **Updated 2026-04-19 (Phase 2 Slice 2).** Dispatch routes the set-based
+> subscription commands instead of the former single-subscription
+> commands.
+
 - ```go
   func (e *Executor) dispatch(cmd ExecutorCommand)
   ```
   Complete type switch:
   - `CallReducerCmd` → `e.handleCallReducer(cmd)` (stub here, implemented in Epic 4)
-  - `RegisterSubscriptionCmd` → `e.handleRegisterSubscription(cmd)`
-  - `UnregisterSubscriptionCmd` → `e.handleUnregisterSubscription(cmd)`
+  - `RegisterSubscriptionSetCmd` → `e.handleRegisterSubscriptionSet(cmd)`
+  - `UnregisterSubscriptionSetCmd` → `e.handleUnregisterSubscriptionSet(cmd)`
   - `DisconnectClientSubscriptionsCmd` → `e.handleDisconnectClientSubscriptions(cmd)`
   - Unknown command type → log error, no-op
 
 - ```go
-  func (e *Executor) handleRegisterSubscription(cmd RegisterSubscriptionCmd)
+  func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
   ```
   - Acquire `CommittedReadView` via `e.committed.Snapshot()`
-  - Call `e.subs.Register(cmd.Request, view)`
+  - Call `e.subs.RegisterSet(cmd.Request, view)`
   - `SubscriptionManager` may use `view` only for the duration of the call; any retained state must be copied before return
   - Close snapshot
   - Send result on `cmd.ResponseCh`
 
 - ```go
-  func (e *Executor) handleUnregisterSubscription(cmd UnregisterSubscriptionCmd)
+  func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSetCmd)
   ```
-  - Call `e.subs.Unregister(cmd.ConnID, cmd.SubscriptionID)`
-  - Send error on `cmd.ResponseCh`
+  - Call `e.subs.UnregisterSet(cmd.ConnID, cmd.QueryID, view)`
+  - Send result on `cmd.ResponseCh`
 
 - ```go
   func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd)
@@ -45,23 +49,23 @@ The `dispatch()` type switch routing commands to handlers. Includes subscription
   - Send error on `cmd.ResponseCh`
 
 - Executor/package docs on read routing (this story is the authoritative owner for that documentation boundary):
-  - reads that must be atomic with subscription registration or commit ordering go through `RegisterSubscriptionCmd`
+  - reads that must be atomic with subscription registration or commit ordering go through `RegisterSubscriptionSetCmd`
   - purely observational reads that do not need atomic registration semantics stay outside the executor queue and use direct `CommittedState.Snapshot()` by design
 
 ## Acceptance Criteria
 
 - [ ] CallReducerCmd routed to handleCallReducer
-- [ ] RegisterSubscriptionCmd acquires snapshot, calls Register, closes snapshot, sends result
-- [ ] UnregisterSubscriptionCmd calls Unregister, sends error
+- [ ] RegisterSubscriptionSetCmd acquires snapshot, calls RegisterSet, closes snapshot, sends result
+- [ ] UnregisterSubscriptionSetCmd calls UnregisterSet, sends result
 - [ ] DisconnectClientSubscriptionsCmd calls DisconnectClient, sends error
-- [ ] Register uses committed read view (not tx-local state)
-- [ ] Snapshot closed even if Register returns error
+- [ ] RegisterSet uses committed read view (not tx-local state)
+- [ ] Snapshot closed even if RegisterSet returns error
 - [ ] Unknown command type logged, not panicked
 - [ ] Executor read-routing docs distinguish atomic registration reads from allowed direct-snapshot observational reads
 
 ## Design Notes
 
-- RegisterSubscription acquires a snapshot inside the executor goroutine, guaranteeing atomicity with commit ordering. Between dequeue and snapshot acquisition, no other command runs — this is the §2.5 atomicity guarantee.
+- RegisterSubscriptionSet acquires a snapshot inside the executor goroutine, guaranteeing atomicity with commit ordering. Between dequeue and snapshot acquisition, no other command runs — this is the §2.5 atomicity guarantee.
 - Subscription commands do not create transactions. They are read-only or metadata operations delegated to SubscriptionManager.
 - This story is the canonical home for SPEC-003's read-routing rule. Other stories may cross-reference it, but they should not restate a competing policy.
 - SPEC-003 explicitly allows direct snapshots for purely observational reads. This story should document that boundary so implementers do not accidentally funnel all reads through the executor.

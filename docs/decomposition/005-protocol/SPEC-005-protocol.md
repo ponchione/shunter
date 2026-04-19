@@ -355,11 +355,13 @@ Subscription registered successfully. Contains all currently matching rows.
 
 ```
 tag: 2
-request_id:      uint32 LE
-subscription_id: uint32 LE
-table_name:      string
-rows:            RowList       — all rows matching the query at subscribe time
+request_id: uint32 LE
+query_id:   uint32 LE
+table_name: string
+rows:       RowList       — all rows matching the query at subscribe time
 ```
+
+`query_id` mirrors the reference `QueryId` naming used by the subscribe / unsubscribe envelopes. In Shunter Phase 2, it still identifies one logical subscription on the connection.
 
 The rows in `SubscribeApplied` represent a consistent snapshot. They are the starting state the client should use to populate its local cache.
 
@@ -369,26 +371,26 @@ Subscription removed.
 
 ```
 tag: 3
-request_id:      uint32 LE
-subscription_id: uint32 LE
-has_rows:        uint8              — 0 = no rows; 1 = rows follow
-rows:            RowList (if has_rows = 1)   — rows that were in the result set at unsubscribe time
+request_id: uint32 LE
+query_id:   uint32 LE
+has_rows:   uint8              — 0 = no rows; 1 = rows follow
+rows:       RowList (if has_rows = 1)   — rows that were in the result set at unsubscribe time
 ```
 
 ### 8.4 SubscriptionError
 
-Subscription failed. The subscription with the given `subscription_id` is now dead.
+Subscription failed. The subscription identified by `query_id` is now dead.
 
 ```
 tag: 4
-request_id:      uint32 LE    — echoes Subscribe request_id when still known; 0 only for genuinely uncorrelated spontaneous failures
-subscription_id: uint32 LE
-error:           string        — diagnostic message; not machine-parseable
+request_id: uint32 LE    — echoes Subscribe request_id when still known; 0 only for genuinely uncorrelated spontaneous failures
+query_id:   uint32 LE
+error:      string        — diagnostic message; not machine-parseable
 ```
 
-On receiving this, the client must discard all cached rows for `subscription_id`. The `subscription_id` may be reused immediately.
+On receiving this, the client must discard all cached rows for `query_id`. The `query_id` may be reused immediately.
 
-**Go↔wire mapping.** The subscription evaluator's internal `SubscriptionError` Go value (SPEC-004 §10.2) carries `RequestID` plus additional diagnostic fields (`QueryHash`, `Predicate`) that are not otherwise on the wire; the protocol adapter projects Go→wire by emitting `request_id = RequestID` and `error = Message`.
+**Go↔wire mapping.** The subscription evaluator's internal `SubscriptionError` Go value (SPEC-004 §10.2) still carries a typed Go `SubscriptionID` plus additional diagnostic fields (`QueryHash`, `Predicate`) that are not otherwise on the wire; the protocol adapter projects Go→wire by emitting `request_id = RequestID`, `query_id = SubscriptionID`, and `error = Message`.
 
 **`request_id = 0` semantics.** A `SubscriptionError` with `request_id = 0` is a spontaneous failure where the server no longer has any originating subscribe request identity to report. A `SubscriptionError` with `request_id != 0` MUST echo the `request_id` of the triggering `Subscribe`, including post-register reevaluation failures when the subscription tracker still retains that metadata. Clients that choose `request_id = 0` on `Subscribe` accept that correlated failures and genuinely uncorrelated failures are indistinguishable; recommend `request_id >= 1` for robust client-side correlation.
 
@@ -615,8 +617,8 @@ type ProtocolOptions struct {
 
 The protocol layer sends commands to the executor via its inbox (`ExecutorCommand`):
 - `CallReducerCmd` — for `CallReducer` messages
-- `RegisterSubscriptionCmd` — for `Subscribe` messages  
-- `UnregisterSubscriptionCmd` — for `Unsubscribe` messages
+- `RegisterSubscriptionSetCmd` — for `SubscribeSingleMsg` / `SubscribeMultiMsg` messages (Phase 2 Slice 2 rename from the former `RegisterSubscriptionCmd`)
+- `UnregisterSubscriptionSetCmd` — for `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg` messages (Phase 2 Slice 2 rename from the former `UnregisterSubscriptionCmd`)
 - `DisconnectClientSubscriptionsCmd` — on client disconnect
 
 The executor sends `ReducerCallResult` back to the protocol layer via the `ResponseCh` embedded in `CallReducerCmd`.
