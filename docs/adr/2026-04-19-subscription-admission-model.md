@@ -1,6 +1,6 @@
 # ADR: Subscription admission model — manager-authoritative, synchronous Applied enqueue
 
-- Status: Proposed (2026-04-19)
+- Status: Accepted (2026-04-19) — implemented on branch `worktree-group-b-admission-followthrough`; TD-136, TD-137, TD-138, TD-140 closed as resolved.
 - Tech-debt linkage: TD-140 (decision), TD-136 + TD-137 (fixes unblocked by
   this decision), TD-138 + TD-139 (parallel cleanup, Group C, not
   addressed here)
