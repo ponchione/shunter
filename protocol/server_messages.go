@@ -223,6 +223,10 @@ func EncodeServerMessage(m any) ([]byte, error) {
 
 // DecodeServerMessage parses a server frame back into the concrete
 // message type. Provided for symmetry and client-side / test use.
+// The returned any is one of InitialConnection, SubscribeApplied,
+// UnsubscribeApplied, SubscriptionError, TransactionUpdate,
+// OneOffQueryResult, TransactionUpdateLight, SubscribeMultiApplied,
+// UnsubscribeMultiApplied — matching the tag byte.
 // TagReducerCallResult is reserved and rejected here — see
 // `docs/parity-phase1.5-outcome-model.md`.
 func DecodeServerMessage(frame []byte) (uint8, any, error) {

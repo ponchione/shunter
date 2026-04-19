@@ -24,14 +24,14 @@ const (
 //     The tag byte is intentionally not reused so a future reintroduction
 //     cannot silently collide with the removed shape.
 const (
-	TagInitialConnection      uint8 = 1
-	TagSubscribeApplied       uint8 = 2
-	TagUnsubscribeApplied     uint8 = 3
-	TagSubscriptionError      uint8 = 4
-	TagTransactionUpdate      uint8 = 5
-	TagOneOffQueryResult      uint8 = 6
-	TagReducerCallResult      uint8 = 7 // RESERVED — formerly ReducerCallResult, removed Phase 1.5
-	TagTransactionUpdateLight uint8 = 8
+	TagInitialConnection       uint8 = 1
+	TagSubscribeApplied        uint8 = 2
+	TagUnsubscribeApplied      uint8 = 3
+	TagSubscriptionError       uint8 = 4
+	TagTransactionUpdate       uint8 = 5
+	TagOneOffQueryResult       uint8 = 6
+	TagReducerCallResult       uint8 = 7  // RESERVED — formerly ReducerCallResult, removed Phase 1.5
+	TagTransactionUpdateLight  uint8 = 8
 	TagSubscribeMultiApplied   uint8 = 9  // Phase 2 Slice 2 variant split
 	TagUnsubscribeMultiApplied uint8 = 10 // Phase 2 Slice 2 variant split
 )
