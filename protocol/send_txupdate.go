@@ -1,15 +1,8 @@
 package protocol
 
 import (
-	"errors"
-
 	"github.com/ponchione/shunter/types"
 )
-
-// ErrSubscriptionNotActive remains defined temporarily for older tests
-// that still reference the removed admission gate. The gate itself is no
-// longer used in production delivery after TD-137 / TD-140.
-var ErrSubscriptionNotActive = errors.New("protocol: subscription not active for transaction update")
 
 // DeliveryError pairs a connection ID with the error encountered during
 // delivery. Used by callers to trigger disconnect for buffer-full
