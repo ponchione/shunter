@@ -26,19 +26,24 @@ type InitialConnection struct {
 	Token        string
 }
 
-// SubscribeApplied is the server response to a client Subscribe. QueryID
-// mirrors reference `SubscribeApplied.query_id: QueryId`
-// (reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs).
-type SubscribeApplied struct {
+// SubscribeSingleApplied is the server response to a SubscribeSingle.
+// Part of the Phase 2 Slice 2 variant split — SubscribeMultiApplied
+// carries the merged delta for a multi-query set. Reference:
+// SubscribeApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317.
+type SubscribeSingleApplied struct {
 	RequestID uint32
 	QueryID   uint32
 	TableName string
 	Rows      []byte // encoded RowList
 }
 
-// UnsubscribeApplied is the server response to a client Unsubscribe.
-// QueryID mirrors reference `UnsubscribeApplied.query_id: QueryId`.
-type UnsubscribeApplied struct {
+// UnsubscribeSingleApplied is the server response to an UnsubscribeSingle.
+// Part of the Phase 2 Slice 2 variant split — UnsubscribeMultiApplied
+// carries the merged delta for a multi-query set. Reference:
+// UnsubscribeApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331.
+type UnsubscribeSingleApplied struct {
 	RequestID uint32
 	QueryID   uint32
 	HasRows   bool
@@ -160,14 +165,14 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		buf.Write(msg.Identity[:])
 		buf.Write(msg.ConnectionID[:])
 		writeString(&buf, msg.Token)
-	case SubscribeApplied:
-		buf.WriteByte(TagSubscribeApplied)
+	case SubscribeSingleApplied:
+		buf.WriteByte(TagSubscribeSingleApplied)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
 		writeString(&buf, msg.TableName)
 		writeBytes(&buf, msg.Rows)
-	case UnsubscribeApplied:
-		buf.WriteByte(TagUnsubscribeApplied)
+	case UnsubscribeSingleApplied:
+		buf.WriteByte(TagUnsubscribeSingleApplied)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
 		if msg.HasRows {
@@ -223,8 +228,8 @@ func EncodeServerMessage(m any) ([]byte, error) {
 
 // DecodeServerMessage parses a server frame back into the concrete
 // message type. Provided for symmetry and client-side / test use.
-// The returned any is one of InitialConnection, SubscribeApplied,
-// UnsubscribeApplied, SubscriptionError, TransactionUpdate,
+// The returned any is one of InitialConnection, SubscribeSingleApplied,
+// UnsubscribeSingleApplied, SubscriptionError, TransactionUpdate,
 // OneOffQueryResult, TransactionUpdateLight, SubscribeMultiApplied,
 // UnsubscribeMultiApplied — matching the tag byte.
 // TagReducerCallResult is reserved and rejected here — see
@@ -239,11 +244,11 @@ func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	case TagInitialConnection:
 		msg, err := decodeInitialConnection(body)
 		return tag, msg, err
-	case TagSubscribeApplied:
-		msg, err := decodeSubscribeApplied(body)
+	case TagSubscribeSingleApplied:
+		msg, err := decodeSubscribeSingleApplied(body)
 		return tag, msg, err
-	case TagUnsubscribeApplied:
-		msg, err := decodeUnsubscribeApplied(body)
+	case TagUnsubscribeSingleApplied:
+		msg, err := decodeUnsubscribeSingleApplied(body)
 		return tag, msg, err
 	case TagSubscriptionError:
 		msg, err := decodeSubscriptionError(body)
@@ -283,8 +288,8 @@ func decodeInitialConnection(body []byte) (InitialConnection, error) {
 	return m, nil
 }
 
-func decodeSubscribeApplied(body []byte) (SubscribeApplied, error) {
-	var m SubscribeApplied
+func decodeSubscribeSingleApplied(body []byte) (SubscribeSingleApplied, error) {
+	var m SubscribeSingleApplied
 	var off int
 	var err error
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
@@ -302,8 +307,8 @@ func decodeSubscribeApplied(body []byte) (SubscribeApplied, error) {
 	return m, nil
 }
 
-func decodeUnsubscribeApplied(body []byte) (UnsubscribeApplied, error) {
-	var m UnsubscribeApplied
+func decodeUnsubscribeSingleApplied(body []byte) (UnsubscribeSingleApplied, error) {
+	var m UnsubscribeSingleApplied
 	var off int
 	var err error
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
@@ -313,7 +318,7 @@ func decodeUnsubscribeApplied(body []byte) (UnsubscribeApplied, error) {
 		return m, err
 	}
 	if len(body)-off < 1 {
-		return m, fmt.Errorf("%w: UnsubscribeApplied has_rows", ErrMalformedMessage)
+		return m, fmt.Errorf("%w: UnsubscribeSingleApplied has_rows", ErrMalformedMessage)
 	}
 	m.HasRows = body[off] != 0
 	off++

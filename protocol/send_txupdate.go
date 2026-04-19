@@ -10,7 +10,7 @@ import (
 // ErrSubscriptionNotActive is returned when a `TransactionUpdate` /
 // `TransactionUpdateLight` fanout references a subscription_id that has
 // not yet reached SubActive on the target connection. This is a
-// protocol pipeline invariant violation: SubscribeApplied must be
+// protocol pipeline invariant violation: SubscribeSingleApplied must be
 // delivered before any update for that subscription.
 var ErrSubscriptionNotActive = errors.New("protocol: subscription not active for transaction update")
 

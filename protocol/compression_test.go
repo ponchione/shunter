@@ -8,8 +8,8 @@ import (
 
 func TestEncodeFrameCompressionDisabled(t *testing.T) {
 	body := []byte{0x01, 0x02, 0x03}
-	frame := EncodeFrame(TagSubscribeApplied, body, false, CompressionNone)
-	want := append([]byte{TagSubscribeApplied}, body...)
+	frame := EncodeFrame(TagSubscribeSingleApplied, body, false, CompressionNone)
+	want := append([]byte{TagSubscribeSingleApplied}, body...)
 	if !bytes.Equal(frame, want) {
 		t.Errorf("disabled frame = % x, want % x", frame, want)
 	}
@@ -41,13 +41,13 @@ func TestEncodeFrameEnabledModeGzip(t *testing.T) {
 
 func TestUnwrapCompressedNoneEnvelope(t *testing.T) {
 	body := []byte{0x01, 0x02, 0x03}
-	frame := []byte{CompressionNone, TagSubscribeApplied, 0x01, 0x02, 0x03}
+	frame := []byte{CompressionNone, TagSubscribeSingleApplied, 0x01, 0x02, 0x03}
 	tag, got, err := UnwrapCompressed(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tag != TagSubscribeApplied {
-		t.Errorf("tag = %d, want TagSubscribeApplied", tag)
+	if tag != TagSubscribeSingleApplied {
+		t.Errorf("tag = %d, want TagSubscribeSingleApplied", tag)
 	}
 	if !bytes.Equal(got, body) {
 		t.Errorf("body = % x, want % x", got, body)
@@ -71,7 +71,7 @@ func TestUnwrapCompressedGzipRoundTrip(t *testing.T) {
 
 func TestUnwrapCompressedUnknownByte(t *testing.T) {
 	// 0x03 is out-of-range (0x00=none, 0x01=brotli-reserved, 0x02=gzip).
-	frame := []byte{0x03, TagSubscribeApplied, 0x01}
+	frame := []byte{0x03, TagSubscribeSingleApplied, 0x01}
 	_, _, err := UnwrapCompressed(frame)
 	if !errors.Is(err, ErrUnknownCompressionTag) {
 		t.Errorf("got %v, want ErrUnknownCompressionTag", err)
@@ -89,12 +89,12 @@ func TestUnwrapCompressedGzipInvalid(t *testing.T) {
 
 func TestUnwrapCompressedEmptyBodyGzip(t *testing.T) {
 	// gzip of empty body round-trips.
-	frame := EncodeFrame(TagSubscribeApplied, nil, true, CompressionGzip)
+	frame := EncodeFrame(TagSubscribeSingleApplied, nil, true, CompressionGzip)
 	tag, body, err := UnwrapCompressed(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tag != TagSubscribeApplied {
+	if tag != TagSubscribeSingleApplied {
 		t.Errorf("tag mismatch")
 	}
 	if len(body) != 0 {

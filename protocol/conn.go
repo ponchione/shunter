@@ -21,14 +21,14 @@ const (
 	// SubPending: Subscribe accepted, initial evaluation not yet
 	// complete.
 	SubPending SubscriptionState = iota
-	// SubActive: SubscribeApplied has been sent; subsequent
+	// SubActive: SubscribeSingleApplied has been sent; subsequent
 	// TransactionUpdate messages will reference this id.
 	SubActive
 )
 
 // SubscriptionTracker enforces per-connection uniqueness of
 // subscription_ids and their state machine. Reserved during
-// Subscribe handling; activated when SubscribeApplied is delivered;
+// Subscribe handling; activated when SubscribeSingleApplied is delivered;
 // removed on Unsubscribe / SubscriptionError / disconnect.
 type SubscriptionTracker struct {
 	mu   sync.Mutex

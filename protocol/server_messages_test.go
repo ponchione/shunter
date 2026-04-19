@@ -43,9 +43,9 @@ func TestInitialConnectionRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSubscribeAppliedRoundTrip(t *testing.T) {
+func TestSubscribeSingleAppliedRoundTrip(t *testing.T) {
 	rows := EncodeRowList([][]byte{{0x01}, {0x02, 0x03}})
-	in := SubscribeApplied{
+	in := SubscribeSingleApplied{
 		RequestID: 123,
 		QueryID:   456,
 		TableName: "players",
@@ -56,7 +56,7 @@ func TestSubscribeAppliedRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.(SubscribeApplied)
+	got := out.(SubscribeSingleApplied)
 	if got.RequestID != in.RequestID || got.QueryID != in.QueryID ||
 		got.TableName != in.TableName {
 		t.Errorf("field mismatch: got %+v, want %+v", got, in)
@@ -66,14 +66,14 @@ func TestSubscribeAppliedRoundTrip(t *testing.T) {
 	}
 }
 
-func TestUnsubscribeAppliedHasRowsFalse(t *testing.T) {
-	in := UnsubscribeApplied{RequestID: 1, QueryID: 2, HasRows: false}
+func TestUnsubscribeSingleAppliedHasRowsFalse(t *testing.T) {
+	in := UnsubscribeSingleApplied{RequestID: 1, QueryID: 2, HasRows: false}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.(UnsubscribeApplied)
+	got := out.(UnsubscribeSingleApplied)
 	if got.HasRows {
 		t.Errorf("HasRows = true, want false")
 	}
@@ -82,15 +82,15 @@ func TestUnsubscribeAppliedHasRowsFalse(t *testing.T) {
 	}
 }
 
-func TestUnsubscribeAppliedHasRowsTrue(t *testing.T) {
+func TestUnsubscribeSingleAppliedHasRowsTrue(t *testing.T) {
 	rows := EncodeRowList([][]byte{{0xaa}})
-	in := UnsubscribeApplied{RequestID: 1, QueryID: 2, HasRows: true, Rows: rows}
+	in := UnsubscribeSingleApplied{RequestID: 1, QueryID: 2, HasRows: true, Rows: rows}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.(UnsubscribeApplied)
+	got := out.(UnsubscribeSingleApplied)
 	if !got.HasRows {
 		t.Error("HasRows = false, want true")
 	}

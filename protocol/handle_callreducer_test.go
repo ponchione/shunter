@@ -118,15 +118,15 @@ func TestHandleUnsubscribe_DeliversAsyncUnsubscribeApplied(t *testing.T) {
 	if respCh == nil {
 		t.Fatal("missing unsubscribe response channel")
 	}
-	respCh <- UnsubscribeCommandResponse{Applied: &UnsubscribeApplied{RequestID: 1, QueryID: 42}}
+	respCh <- UnsubscribeCommandResponse{Applied: &UnsubscribeSingleApplied{RequestID: 1, QueryID: 42}}
 
 	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagUnsubscribeApplied {
-		t.Fatalf("tag = %d, want %d (TagUnsubscribeApplied)", tag, TagUnsubscribeApplied)
+	if tag != TagUnsubscribeSingleApplied {
+		t.Fatalf("tag = %d, want %d (TagUnsubscribeSingleApplied)", tag, TagUnsubscribeSingleApplied)
 	}
-	applied := decoded.(UnsubscribeApplied)
+	applied := decoded.(UnsubscribeSingleApplied)
 	if applied.RequestID != 1 || applied.QueryID != 42 {
-		t.Fatalf("UnsubscribeApplied = %+v", applied)
+		t.Fatalf("UnsubscribeSingleApplied = %+v", applied)
 	}
 }
 

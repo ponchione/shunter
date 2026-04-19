@@ -113,28 +113,25 @@ func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeAppliedCarriesQueryID pins the Phase 2 Slice 2
-// follow-through: the response envelope `SubscribeApplied` now carries
-// a QueryID field matching reference `SubscribeApplied.query_id: QueryId`
-// (reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs).
-// The client/server naming asymmetry is closed.
-func TestPhase2SubscribeAppliedCarriesQueryID(t *testing.T) {
-	fields := msgFieldNames(SubscribeApplied{})
+// TestPhase2SubscribeSingleAppliedShape pins the renamed single-applied
+// envelope. Reference: SubscribeApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317.
+func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
+	fields := msgFieldNames(SubscribeSingleApplied{})
 	want := []string{"RequestID", "QueryID", "TableName", "Rows"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeApplied fields = %v, want %v (Phase 2: QueryID response envelope)",
-			fields, want)
+		t.Fatalf("SubscribeSingleApplied fields = %v, want %v", fields, want)
 	}
 }
 
-// TestPhase2UnsubscribeAppliedCarriesQueryID pins the response-side rename
-// for `UnsubscribeApplied`. Reference: `UnsubscribeApplied.query_id: QueryId`.
-func TestPhase2UnsubscribeAppliedCarriesQueryID(t *testing.T) {
-	fields := msgFieldNames(UnsubscribeApplied{})
+// TestPhase2UnsubscribeSingleAppliedShape pins the renamed
+// single-applied envelope. Reference: UnsubscribeApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331.
+func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
+	fields := msgFieldNames(UnsubscribeSingleApplied{})
 	want := []string{"RequestID", "QueryID", "HasRows", "Rows"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("UnsubscribeApplied fields = %v, want %v (Phase 2: QueryID response envelope)",
-			fields, want)
+		t.Fatalf("UnsubscribeSingleApplied fields = %v, want %v", fields, want)
 	}
 }
 

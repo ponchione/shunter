@@ -2,8 +2,8 @@ package protocol
 
 import "github.com/ponchione/shunter/types"
 
-// SendSubscribeApplied delivers a SubscribeApplied message and
-// transitions the subscription from pending → active. If the
+// SendSubscribeSingleApplied delivers a SubscribeSingleApplied message
+// and transitions the subscription from pending → active. If the
 // subscription was already removed (disconnect race), the result is
 // silently discarded per SPEC-005 §9.1.
 //
@@ -15,7 +15,7 @@ import "github.com/ponchione/shunter/types"
 // the caller. The tracker entry is removed so a late failed delivery
 // cannot leave the subscription spuriously active after the result was
 // never committed to the wire.
-func SendSubscribeApplied(sender ClientSender, conn *Conn, msg *SubscribeApplied) error {
+func SendSubscribeSingleApplied(sender ClientSender, conn *Conn, msg *SubscribeSingleApplied) error {
 	if !conn.Subscriptions.IsPending(msg.QueryID) {
 		return nil
 	}
@@ -27,9 +27,9 @@ func SendSubscribeApplied(sender ClientSender, conn *Conn, msg *SubscribeApplied
 	return nil
 }
 
-// SendUnsubscribeApplied delivers an UnsubscribeApplied message and
-// removes the subscription from the tracker.
-func SendUnsubscribeApplied(sender ClientSender, conn *Conn, msg *UnsubscribeApplied) error {
+// SendUnsubscribeSingleApplied delivers an UnsubscribeSingleApplied
+// message and removes the subscription from the tracker.
+func SendUnsubscribeSingleApplied(sender ClientSender, conn *Conn, msg *UnsubscribeSingleApplied) error {
 	_ = conn.Subscriptions.Remove(msg.QueryID)
 	return sender.Send(conn.ID, *msg)
 }

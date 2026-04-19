@@ -31,7 +31,7 @@ var ErrConnNotFound = errors.New("protocol: connection not found")
 type ClientSender interface {
 	// Send encodes msg and enqueues the frame on the connection's
 	// outbound channel. Used for direct response messages
-	// (SubscribeApplied, UnsubscribeApplied, SubscriptionError,
+	// (SubscribeSingleApplied, UnsubscribeSingleApplied, SubscriptionError,
 	// OneOffQueryResult).
 	Send(connID types.ConnectionID, msg any) error
 	// SendTransactionUpdate delivers the heavy caller-bound envelope.

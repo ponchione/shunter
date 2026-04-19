@@ -26,7 +26,7 @@ func (s assertingSender) SendTransactionUpdateLight(_ types.ConnectionID, _ *Tra
 	return nil
 }
 
-func TestSendSubscribeAppliedActivatesSubscription(t *testing.T) {
+func TestSendSubscribeSingleAppliedActivatesSubscription(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -34,8 +34,8 @@ func TestSendSubscribeAppliedActivatesSubscription(t *testing.T) {
 
 	c.Subscriptions.Reserve(10)
 
-	msg := &SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
-	if err := SendSubscribeApplied(s, c, msg); err != nil {
+	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
+	if err := SendSubscribeSingleApplied(s, c, msg); err != nil {
 		t.Fatal(err)
 	}
 
@@ -50,14 +50,14 @@ func TestSendSubscribeAppliedActivatesSubscription(t *testing.T) {
 	}
 }
 
-func TestSendSubscribeAppliedActivatesBeforeSend(t *testing.T) {
+func TestSendSubscribeSingleAppliedActivatesBeforeSend(t *testing.T) {
 	c, _ := testConn(false)
 	c.Subscriptions.Reserve(10)
 
 	sender := assertingSender{
 		sendFn: func(msg any) error {
-			if _, ok := msg.(SubscribeApplied); !ok {
-				t.Fatalf("expected SubscribeApplied, got %T", msg)
+			if _, ok := msg.(SubscribeSingleApplied); !ok {
+				t.Fatalf("expected SubscribeSingleApplied, got %T", msg)
 			}
 			if !c.Subscriptions.IsActive(10) {
 				t.Fatal("subscription should be active before send")
@@ -66,13 +66,13 @@ func TestSendSubscribeAppliedActivatesBeforeSend(t *testing.T) {
 		},
 	}
 
-	msg := &SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
-	if err := SendSubscribeApplied(sender, c, msg); err != nil {
+	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
+	if err := SendSubscribeSingleApplied(sender, c, msg); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestSendSubscribeAppliedDiscardsAfterDisconnect(t *testing.T) {
+func TestSendSubscribeSingleAppliedDiscardsAfterDisconnect(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -81,8 +81,8 @@ func TestSendSubscribeAppliedDiscardsAfterDisconnect(t *testing.T) {
 	c.Subscriptions.Reserve(10)
 	c.Subscriptions.Remove(10)
 
-	msg := &SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
-	err := SendSubscribeApplied(s, c, msg)
+	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
+	err := SendSubscribeSingleApplied(s, c, msg)
 	if err != nil {
 		t.Fatal("should silently discard, not error")
 	}
@@ -93,14 +93,14 @@ func TestSendSubscribeAppliedDiscardsAfterDisconnect(t *testing.T) {
 	}
 }
 
-func TestSendSubscribeAppliedSendFailureDoesNotLeaveSubscriptionActive(t *testing.T) {
+func TestSendSubscribeSingleAppliedSendFailureDoesNotLeaveSubscriptionActive(t *testing.T) {
 	c, _ := testConn(false)
 	c.Subscriptions.Reserve(10)
 
 	sender := assertingSender{
 		sendFn: func(msg any) error {
-			if _, ok := msg.(SubscribeApplied); !ok {
-				t.Fatalf("expected SubscribeApplied, got %T", msg)
+			if _, ok := msg.(SubscribeSingleApplied); !ok {
+				t.Fatalf("expected SubscribeSingleApplied, got %T", msg)
 			}
 			if !c.Subscriptions.IsActive(10) {
 				t.Fatal("subscription should be active at send attempt")
@@ -109,17 +109,17 @@ func TestSendSubscribeAppliedSendFailureDoesNotLeaveSubscriptionActive(t *testin
 		},
 	}
 
-	msg := &SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
-	err := SendSubscribeApplied(sender, c, msg)
+	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
+	err := SendSubscribeSingleApplied(sender, c, msg)
 	if !errors.Is(err, ErrConnNotFound) {
 		t.Fatalf("err = %v, want ErrConnNotFound", err)
 	}
 	if c.Subscriptions.IsActiveOrPending(10) {
-		t.Fatal("subscription 10 should be released after failed SubscribeApplied delivery")
+		t.Fatal("subscription 10 should be released after failed SubscribeSingleApplied delivery")
 	}
 }
 
-func TestSendUnsubscribeAppliedRemovesSubscription(t *testing.T) {
+func TestSendUnsubscribeSingleAppliedRemovesSubscription(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -128,8 +128,8 @@ func TestSendUnsubscribeAppliedRemovesSubscription(t *testing.T) {
 	c.Subscriptions.Reserve(10)
 	c.Subscriptions.Activate(10)
 
-	msg := &UnsubscribeApplied{RequestID: 1, QueryID: 10}
-	if err := SendUnsubscribeApplied(s, c, msg); err != nil {
+	msg := &UnsubscribeSingleApplied{RequestID: 1, QueryID: 10}
+	if err := SendUnsubscribeSingleApplied(s, c, msg); err != nil {
 		t.Fatal(err)
 	}
 

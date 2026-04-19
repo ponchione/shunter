@@ -27,7 +27,7 @@ func TestSendEnqueuesFrame(t *testing.T) {
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	if err := s.Send(id, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestSendWithCompressionWrapsEnvelope(t *testing.T) {
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	if err := s.Send(id, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestSendConnNotFound(t *testing.T) {
 	mgr := NewConnManager()
 	s := NewClientSender(mgr, &fakeInbox{})
 	id := types.ConnectionID{99}
-	err := s.Send(id, SubscribeApplied{})
+	err := s.Send(id, SubscribeSingleApplied{})
 	if !errors.Is(err, ErrConnNotFound) {
 		t.Fatalf("expected ErrConnNotFound, got %v", err)
 	}
@@ -84,7 +84,7 @@ func TestSendBufferFull(t *testing.T) {
 	s := NewClientSender(mgr, &fakeInbox{})
 
 	// Fill buffer.
-	msg := SubscribeApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
+	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	_ = s.Send(id, msg)
 
 	// Second send should return buffer-full.

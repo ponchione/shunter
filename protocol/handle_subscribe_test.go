@@ -302,19 +302,19 @@ func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
 		t.Fatal("executor did not receive subscribe response channel")
 	}
 	req.ResponseCh <- SubscriptionCommandResponse{
-		Applied: &SubscribeApplied{RequestID: 10, QueryID: 7, TableName: "users", Rows: []byte{}},
+		Applied: &SubscribeSingleApplied{RequestID: 10, QueryID: 7, TableName: "users", Rows: []byte{}},
 	}
 
 	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscribeApplied {
-		t.Fatalf("tag = %d, want %d (TagSubscribeApplied)", tag, TagSubscribeApplied)
+	if tag != TagSubscribeSingleApplied {
+		t.Fatalf("tag = %d, want %d (TagSubscribeSingleApplied)", tag, TagSubscribeSingleApplied)
 	}
-	applied := decoded.(SubscribeApplied)
+	applied := decoded.(SubscribeSingleApplied)
 	if applied.RequestID != 10 || applied.QueryID != 7 {
-		t.Fatalf("SubscribeApplied = %+v", applied)
+		t.Fatalf("SubscribeSingleApplied = %+v", applied)
 	}
 	if !conn.Subscriptions.IsActive(7) {
-		t.Fatal("subscription 7 should be active after async SubscribeApplied delivery")
+		t.Fatal("subscription 7 should be active after async SubscribeSingleApplied delivery")
 	}
 }
 

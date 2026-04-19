@@ -47,15 +47,15 @@ type ExecutorInbox interface {
 // channel to the executor seam; E5 watches it and turns accepted-command
 // outcomes into wire responses.
 type SubscriptionCommandResponse struct {
-	Applied *SubscribeApplied
+	Applied *SubscribeSingleApplied
 	Error   *SubscriptionError
 }
 
 // UnsubscribeCommandResponse is the protocol-side async result envelope
 // for a submitted unsubscribe command. E5 watches it to deliver the
-// eventual UnsubscribeApplied / SubscriptionError message.
+// eventual UnsubscribeSingleApplied / SubscriptionError message.
 type UnsubscribeCommandResponse struct {
-	Applied *UnsubscribeApplied
+	Applied *UnsubscribeSingleApplied
 	Error   *SubscriptionError
 }
 
@@ -70,7 +70,7 @@ type RegisterSubscriptionRequest struct {
 }
 
 // UnregisterSubscriptionRequest carries the unsubscribe fields the
-// executor / delivery path needs to produce UnsubscribeApplied later.
+// executor / delivery path needs to produce UnsubscribeSingleApplied later.
 type UnregisterSubscriptionRequest struct {
 	ConnID         types.ConnectionID
 	SubscriptionID uint32
