@@ -72,7 +72,7 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	called := make(chan struct{})
 
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			gotSubID = msg.QueryID
 			mu.Unlock()
@@ -128,7 +128,7 @@ func TestDispatchLoop_TextFrameCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			t.Error("OnSubscribe should not be called for text frame")
 		},
 	}
@@ -263,7 +263,7 @@ func TestDispatchLoop_MalformedBodyCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			t.Error("OnSubscribe should not be called for malformed body")
 		},
 	}
@@ -291,7 +291,7 @@ func TestDispatchLoop_MarksActivity(t *testing.T) {
 
 	handled := make(chan struct{})
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			close(handled)
 		},
 	}

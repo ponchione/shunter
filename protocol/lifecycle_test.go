@@ -73,6 +73,14 @@ func (f *fakeInbox) UnregisterSubscription(_ context.Context, _ UnregisterSubscr
 	return nil
 }
 
+func (f *fakeInbox) RegisterSubscriptionSet(_ context.Context, _ RegisterSubscriptionSetRequest) error {
+	return nil
+}
+
+func (f *fakeInbox) UnregisterSubscriptionSet(_ context.Context, _ UnregisterSubscriptionSetRequest) error {
+	return nil
+}
+
 func (f *fakeInbox) CallReducer(_ context.Context, _ CallReducerRequest) error {
 	return nil
 }

@@ -17,7 +17,7 @@ func TestIncomingBackpressure_WithinLimitAllProcessed(t *testing.T) {
 	var mu sync.Mutex
 	var count int
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			count++
 			mu.Unlock()
@@ -62,7 +62,7 @@ func TestIncomingBackpressure_ExceedLimitCloses1008(t *testing.T) {
 	// Handlers block forever so inflight never decreases.
 	block := make(chan struct{})
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			<-block
 		},
 	}
@@ -105,7 +105,7 @@ func TestIncomingBackpressure_RapidBurstWithinLimit(t *testing.T) {
 	var mu sync.Mutex
 	var count int
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			count++
 			mu.Unlock()
@@ -148,7 +148,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	var ids []uint32
 	block := make(chan struct{})
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			ids = append(ids, msg.QueryID)
 			mu.Unlock()

@@ -12,10 +12,12 @@ import (
 // the host. A nil field means the message type is not supported on this
 // connection -- the dispatch loop closes with 1002 if it encounters one.
 type MessageHandlers struct {
-	OnSubscribe   func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg)
-	OnUnsubscribe func(ctx context.Context, conn *Conn, msg *UnsubscribeSingleMsg)
-	OnCallReducer func(ctx context.Context, conn *Conn, msg *CallReducerMsg)
-	OnOneOffQuery func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg)
+	OnSubscribeSingle   func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg)
+	OnSubscribeMulti    func(ctx context.Context, conn *Conn, msg *SubscribeMultiMsg)
+	OnUnsubscribeSingle func(ctx context.Context, conn *Conn, msg *UnsubscribeSingleMsg)
+	OnUnsubscribeMulti  func(ctx context.Context, conn *Conn, msg *UnsubscribeMultiMsg)
+	OnCallReducer       func(ctx context.Context, conn *Conn, msg *CallReducerMsg)
+	OnOneOffQuery       func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg)
 }
 
 // sendError encodes a server message, wraps it in the connection's
@@ -116,17 +118,29 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		var run func()
 		switch m := msg.(type) {
 		case SubscribeSingleMsg:
-			if handlers.OnSubscribe == nil {
+			if handlers.OnSubscribeSingle == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			run = func() { handlers.OnSubscribe(ctx, c, &m) }
+			run = func() { handlers.OnSubscribeSingle(ctx, c, &m) }
+		case SubscribeMultiMsg:
+			if handlers.OnSubscribeMulti == nil {
+				closeProtocolError(c, "unsupported message type")
+				return
+			}
+			run = func() { handlers.OnSubscribeMulti(ctx, c, &m) }
 		case UnsubscribeSingleMsg:
-			if handlers.OnUnsubscribe == nil {
+			if handlers.OnUnsubscribeSingle == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			run = func() { handlers.OnUnsubscribe(ctx, c, &m) }
+			run = func() { handlers.OnUnsubscribeSingle(ctx, c, &m) }
+		case UnsubscribeMultiMsg:
+			if handlers.OnUnsubscribeMulti == nil {
+				closeProtocolError(c, "unsupported message type")
+				return
+			}
+			run = func() { handlers.OnUnsubscribeMulti(ctx, c, &m) }
 		case CallReducerMsg:
 			if handlers.OnCallReducer == nil {
 				closeProtocolError(c, "unsupported message type")

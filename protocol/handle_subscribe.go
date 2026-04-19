@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/ponchione/shunter/schema"
@@ -15,6 +14,18 @@ import (
 // validate table + column references before forwarding to the executor.
 type SchemaLookup interface {
 	TableByName(name string) (schema.TableID, *schema.TableSchema, bool)
+}
+
+// compileQuery resolves a wire Query against the schema and returns the
+// compiled subscription predicate. Errors carry context suitable for
+// SubscriptionError.Error. Shared between handleSubscribeSingle and
+// handleSubscribeMulti.
+func compileQuery(q Query, sl SchemaLookup) (subscription.Predicate, error) {
+	tableID, ts, ok := sl.TableByName(q.TableName)
+	if !ok {
+		return nil, fmt.Errorf("unknown table %q", q.TableName)
+	}
+	return NormalizePredicates(tableID, ts, q.Predicates)
 }
 
 // NormalizePredicates converts a slice of wire-level Predicate (column
@@ -53,74 +64,4 @@ func NormalizePredicates(
 		result = subscription.And{Left: result, Right: eqs[i]}
 	}
 	return result, nil
-}
-
-// handleSubscribe processes an incoming SubscribeSingleMsg: reserves the
-// subscription id on the connection, resolves and validates the query
-// against the schema, normalizes predicates, and submits the
-// subscription to the executor. On any failure the subscription is
-// released and a SubscriptionError is sent to the client.
-func handleSubscribe(
-	ctx context.Context,
-	conn *Conn,
-	msg *SubscribeSingleMsg,
-	executor ExecutorInbox,
-	sl SchemaLookup,
-) {
-	subID := msg.QueryID
-
-	if err := conn.Subscriptions.Reserve(subID); err != nil {
-		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   subID,
-			Error:     err.Error(),
-		})
-		return
-	}
-
-	releaseOnError := true
-	defer func() {
-		if releaseOnError {
-			_ = conn.Subscriptions.Remove(subID)
-		}
-	}()
-
-	tableID, ts, ok := sl.TableByName(msg.Query.TableName)
-	if !ok {
-		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   subID,
-			Error:     fmt.Sprintf("unknown table %q", msg.Query.TableName),
-		})
-		return
-	}
-
-	pred, err := NormalizePredicates(tableID, ts, msg.Query.Predicates)
-	if err != nil {
-		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   subID,
-			Error:     err.Error(),
-		})
-		return
-	}
-
-	respCh := make(chan SubscriptionCommandResponse, 1)
-	if err := executor.RegisterSubscription(ctx, RegisterSubscriptionRequest{
-		ConnID:         conn.ID,
-		SubscriptionID: subID,
-		RequestID:      msg.RequestID,
-		Predicate:      pred,
-		ResponseCh:     respCh,
-	}); err != nil {
-		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   subID,
-			Error:     "executor unavailable: " + err.Error(),
-		})
-		return
-	}
-
-	releaseOnError = false
-	watchSubscribeResponse(conn, respCh)
 }

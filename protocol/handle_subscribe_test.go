@@ -40,12 +40,20 @@ func newMockSchema(name string, id schema.TableID, cols ...schema.ColumnSchema) 
 	}
 }
 
-// mockSubExecutor records RegisterSubscription calls and implements
-// the full ExecutorInbox interface with stubs for the remaining methods.
+// mockSubExecutor records RegisterSubscription / RegisterSubscriptionSet /
+// UnregisterSubscriptionSet calls and implements the full ExecutorInbox
+// interface with stubs for the remaining methods.
 type mockSubExecutor struct {
-	mu          sync.Mutex
+	mu sync.Mutex
+	// Legacy single-path bookkeeping (kept until Task 9 removes the
+	// old RegisterSubscription/UnregisterSubscription seams).
 	registerReq *RegisterSubscriptionRequest
 	registerErr error
+	// Set-path bookkeeping (Task 8 split).
+	registerSetReq     *RegisterSubscriptionSetRequest
+	registerSetErr     error
+	unregisterSetReq   *UnregisterSubscriptionSetRequest
+	unregisterSetErr   error
 }
 
 func (m *mockSubExecutor) OnConnect(_ context.Context, _ types.ConnectionID, _ types.Identity) error {
@@ -71,6 +79,20 @@ func (m *mockSubExecutor) UnregisterSubscription(_ context.Context, _ Unregister
 	return nil
 }
 
+func (m *mockSubExecutor) RegisterSubscriptionSet(_ context.Context, req RegisterSubscriptionSetRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.registerSetReq = &req
+	return m.registerSetErr
+}
+
+func (m *mockSubExecutor) UnregisterSubscriptionSet(_ context.Context, req UnregisterSubscriptionSetRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.unregisterSetReq = &req
+	return m.unregisterSetErr
+}
+
 func (m *mockSubExecutor) CallReducer(_ context.Context, _ CallReducerRequest) error {
 	return nil
 }
@@ -79,6 +101,18 @@ func (m *mockSubExecutor) getRegisterReq() *RegisterSubscriptionRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.registerReq
+}
+
+func (m *mockSubExecutor) getRegisterSetReq() *RegisterSubscriptionSetRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.registerSetReq
+}
+
+func (m *mockSubExecutor) getUnregisterSetReq() *UnregisterSubscriptionSetRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.unregisterSetReq
 }
 
 // --- NormalizePredicates tests ---
@@ -219,9 +253,9 @@ func TestNormalizePredicates_UnknownColumn(t *testing.T) {
 	}
 }
 
-// --- handleSubscribe tests ---
+// --- handleSubscribeSingle tests ---
 
-func TestHandleSubscribe_Valid(t *testing.T) {
+func TestHandleSubscribeSingleSuccess(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("users", 1,
@@ -240,7 +274,7 @@ func TestHandleSubscribe_Valid(t *testing.T) {
 		},
 	}
 
-	handleSubscribe(context.Background(), conn, msg, executor, sl)
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	// No error sent to client.
 	select {
@@ -249,45 +283,47 @@ func TestHandleSubscribe_Valid(t *testing.T) {
 	default:
 	}
 
-	// Subscription is tracked (pending).
-	if !conn.Subscriptions.IsActiveOrPending(7) {
-		t.Error("subscription 7 not tracked after successful handleSubscribe")
-	}
-
-	// Executor received the request.
-	req := executor.getRegisterReq()
+	// Executor received the set-based request.
+	req := executor.getRegisterSetReq()
 	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscription call")
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
 	}
 	if req.ConnID != conn.ID {
 		t.Errorf("ConnID mismatch")
 	}
-	if req.SubscriptionID != 7 {
-		t.Errorf("SubscriptionID = %d, want 7", req.SubscriptionID)
+	if req.QueryID != 7 {
+		t.Errorf("QueryID = %d, want 7", req.QueryID)
 	}
 	if req.RequestID != 10 {
 		t.Errorf("RequestID = %d, want 10", req.RequestID)
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
 	}
 	if req.ResponseCh == nil {
 		t.Error("ResponseCh = nil, want non-nil subscribe response channel")
 	}
 
-	// Predicate should be ColEq for "name" column.
-	colEq, ok := req.Predicate.(subscription.ColEq)
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
 	if !ok {
-		t.Fatalf("Predicate type = %T, want ColEq", req.Predicate)
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
 	}
 	if colEq.Column != 1 {
-		t.Errorf("Predicate.Column = %d, want 1", colEq.Column)
+		t.Errorf("Predicates[0].Column = %d, want 1", colEq.Column)
 	}
 }
 
-func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
+func TestHandleSubscribeSingle_DeliversAsyncSubscribeApplied(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("users", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
 	)
+
+	// Reserve so SendSubscribeSingleApplied's IsPending guard passes.
+	if err := conn.Subscriptions.Reserve(7); err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
 
 	msg := &SubscribeSingleMsg{
 		RequestID: 10,
@@ -295,14 +331,14 @@ func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
 		Query:     Query{TableName: "users"},
 	}
 
-	handleSubscribe(context.Background(), conn, msg, executor, sl)
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	req := executor.getRegisterReq()
+	req := executor.getRegisterSetReq()
 	if req == nil || req.ResponseCh == nil {
 		t.Fatal("executor did not receive subscribe response channel")
 	}
-	req.ResponseCh <- SubscriptionCommandResponse{
-		Applied: &SubscribeSingleApplied{RequestID: 10, QueryID: 7, TableName: "users", Rows: []byte{}},
+	req.ResponseCh <- SubscriptionSetCommandResponse{
+		SingleApplied: &SubscribeSingleApplied{RequestID: 10, QueryID: 7, TableName: "users", Rows: []byte{}},
 	}
 
 	tag, decoded := drainServerMsgEventually(t, conn)
@@ -313,50 +349,9 @@ func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
 	if applied.RequestID != 10 || applied.QueryID != 7 {
 		t.Fatalf("SubscribeSingleApplied = %+v", applied)
 	}
-	if !conn.Subscriptions.IsActive(7) {
-		t.Fatal("subscription 7 should be active after async SubscribeSingleApplied delivery")
-	}
 }
 
-func TestHandleSubscribe_DuplicateID(t *testing.T) {
-	conn := testConnDirect(nil)
-	executor := &mockSubExecutor{}
-	sl := newMockSchema("users", 1,
-		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
-	)
-
-	// Reserve the ID first so the second call collides.
-	if err := conn.Subscriptions.Reserve(42); err != nil {
-		t.Fatalf("pre-reserve: %v", err)
-	}
-
-	msg := &SubscribeSingleMsg{
-		RequestID: 1,
-		QueryID:   42,
-		Query:     Query{TableName: "users"},
-	}
-
-	handleSubscribe(context.Background(), conn, msg, executor, sl)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	if se.QueryID != 42 {
-		t.Errorf("SubscriptionError.QueryID = %d, want 42", se.QueryID)
-	}
-	if se.RequestID != 1 {
-		t.Errorf("SubscriptionError.RequestID = %d, want 1", se.RequestID)
-	}
-
-	// Executor must not have been called.
-	if req := executor.getRegisterReq(); req != nil {
-		t.Error("executor should not be called on duplicate subscription ID")
-	}
-}
-
-func TestHandleSubscribe_UnknownTable(t *testing.T) {
+func TestHandleSubscribeSingle_UnknownTable(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("users", 1) // only "users" exists
@@ -367,7 +362,7 @@ func TestHandleSubscribe_UnknownTable(t *testing.T) {
 		Query:     Query{TableName: "nonexistent"},
 	}
 
-	handleSubscribe(context.Background(), conn, msg, executor, sl)
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
@@ -378,21 +373,16 @@ func TestHandleSubscribe_UnknownTable(t *testing.T) {
 		t.Errorf("SubscriptionError.QueryID = %d, want 99", se.QueryID)
 	}
 
-	// Subscription must have been released.
-	if conn.Subscriptions.IsActiveOrPending(99) {
-		t.Error("subscription 99 should be released after unknown table error")
-	}
-
 	// Executor must not have been called.
-	if req := executor.getRegisterReq(); req != nil {
+	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called for unknown table")
 	}
 }
 
-func TestHandleSubscribe_ExecutorReject(t *testing.T) {
+func TestHandleSubscribeSingle_ExecutorReject(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{
-		registerErr: errors.New("queue full"),
+		registerSetErr: errors.New("queue full"),
 	}
 	sl := newMockSchema("users", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
@@ -404,7 +394,7 @@ func TestHandleSubscribe_ExecutorReject(t *testing.T) {
 		Query:     Query{TableName: "users"},
 	}
 
-	handleSubscribe(context.Background(), conn, msg, executor, sl)
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
 	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
@@ -417,9 +407,135 @@ func TestHandleSubscribe_ExecutorReject(t *testing.T) {
 	if se.RequestID != 3 {
 		t.Errorf("SubscriptionError.RequestID = %d, want 3", se.RequestID)
 	}
+}
 
-	// Subscription must have been released.
-	if conn.Subscriptions.IsActiveOrPending(50) {
-		t.Error("subscription 50 should be released after executor rejection")
+// --- handleSubscribeMulti tests ---
+
+func TestHandleSubscribeMultiSuccess(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	sl := &mockSchemaLookup{
+		tables: map[string]struct {
+			id     schema.TableID
+			schema *schema.TableSchema
+		}{
+			"users":  {id: 1, schema: &schema.TableSchema{ID: 1, Name: "users"}},
+			"orders": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "orders"}},
+		},
+	}
+
+	msg := &SubscribeMultiMsg{
+		RequestID: 11,
+		QueryID:   77,
+		Queries: []Query{
+			{TableName: "users"},
+			{TableName: "orders"},
+		},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	req := exec.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if req.QueryID != 77 || len(req.Predicates) != 2 {
+		t.Fatalf("req = %+v, want QueryID=77 len(Predicates)=2", req)
+	}
+	if req.RequestID != 11 {
+		t.Errorf("RequestID = %d, want 11", req.RequestID)
+	}
+	if req.ResponseCh == nil {
+		t.Error("ResponseCh = nil, want non-nil subscribe response channel")
+	}
+}
+
+func TestHandleSubscribeMulti_DeliversAsyncMultiApplied(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeMultiMsg{
+		RequestID: 12,
+		QueryID:   88,
+		Queries: []Query{
+			{TableName: "users"},
+		},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	req := exec.getRegisterSetReq()
+	if req == nil || req.ResponseCh == nil {
+		t.Fatal("executor did not receive subscribe response channel")
+	}
+	req.ResponseCh <- SubscriptionSetCommandResponse{
+		MultiApplied: &SubscribeMultiApplied{RequestID: 12, QueryID: 88},
+	}
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscribeMultiApplied {
+		t.Fatalf("tag = %d, want %d (TagSubscribeMultiApplied)", tag, TagSubscribeMultiApplied)
+	}
+	applied := decoded.(SubscribeMultiApplied)
+	if applied.RequestID != 12 || applied.QueryID != 88 {
+		t.Fatalf("SubscribeMultiApplied = %+v", applied)
+	}
+}
+
+func TestHandleSubscribeMulti_UnknownTable(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	sl := newMockSchema("users", 1)
+
+	msg := &SubscribeMultiMsg{
+		RequestID: 13,
+		QueryID:   99,
+		Queries: []Query{
+			{TableName: "users"},
+			{TableName: "missing"},
+		},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.QueryID != 99 {
+		t.Errorf("QueryID = %d, want 99", se.QueryID)
+	}
+	if req := exec.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when any query is invalid")
+	}
+}
+
+func TestHandleSubscribeMulti_ExecutorReject(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{registerSetErr: errors.New("queue full")}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeMultiMsg{
+		RequestID: 14,
+		QueryID:   100,
+		Queries: []Query{
+			{TableName: "users"},
+		},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.QueryID != 100 {
+		t.Errorf("QueryID = %d, want 100", se.QueryID)
+	}
+	if se.RequestID != 14 {
+		t.Errorf("RequestID = %d, want 14", se.RequestID)
 	}
 }

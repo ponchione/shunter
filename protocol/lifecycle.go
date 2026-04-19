@@ -37,8 +37,15 @@ type ExecutorInbox interface {
 	OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
+	// Legacy single-subscription seam. Task 9 removes these in favor of
+	// the set-based methods below.
 	RegisterSubscription(ctx context.Context, req RegisterSubscriptionRequest) error
 	UnregisterSubscription(ctx context.Context, req UnregisterSubscriptionRequest) error
+	// Set-based seam (Phase 2 Slice 2 variant split). Single and Multi
+	// subscribe/unsubscribe paths both route through these — Single
+	// forwards a one-entry Predicates slice, Multi forwards N.
+	RegisterSubscriptionSet(ctx context.Context, req RegisterSubscriptionSetRequest) error
+	UnregisterSubscriptionSet(ctx context.Context, req UnregisterSubscriptionSetRequest) error
 	CallReducer(ctx context.Context, req CallReducerRequest) error
 }
 
@@ -77,6 +84,48 @@ type UnregisterSubscriptionRequest struct {
 	RequestID      uint32
 	SendDropped    bool
 	ResponseCh     chan<- UnsubscribeCommandResponse
+}
+
+// RegisterSubscriptionSetRequest carries the fields the executor needs to
+// register a set of predicates under one QueryID. Predicates is a slice of
+// subscription.Predicate values typed as `any` to avoid a protocol →
+// subscription import cycle; the executor adapter casts on the way
+// through. A Single-path submission forwards len==1; a Multi-path
+// submission forwards len==N.
+type RegisterSubscriptionSetRequest struct {
+	ConnID     types.ConnectionID
+	QueryID    uint32
+	RequestID  uint32
+	Predicates []any // []subscription.Predicate
+	ResponseCh chan<- SubscriptionSetCommandResponse
+}
+
+// UnregisterSubscriptionSetRequest drops every internal subscription
+// registered under (ConnID, QueryID) atomically. Used by both Single
+// and Multi unsubscribe paths.
+type UnregisterSubscriptionSetRequest struct {
+	ConnID     types.ConnectionID
+	QueryID    uint32
+	RequestID  uint32
+	ResponseCh chan<- UnsubscribeSetCommandResponse
+}
+
+// SubscriptionSetCommandResponse is the async result envelope from the
+// executor for a set-based subscribe. Exactly one of MultiApplied,
+// SingleApplied, or Error is set — the watcher routes the corresponding
+// wire message out on the connection.
+type SubscriptionSetCommandResponse struct {
+	MultiApplied  *SubscribeMultiApplied
+	SingleApplied *SubscribeSingleApplied
+	Error         *SubscriptionError
+}
+
+// UnsubscribeSetCommandResponse mirrors SubscriptionSetCommandResponse
+// for the unsubscribe path. Exactly one field is populated.
+type UnsubscribeSetCommandResponse struct {
+	MultiApplied  *UnsubscribeMultiApplied
+	SingleApplied *UnsubscribeSingleApplied
+	Error         *SubscriptionError
 }
 
 // CallReducerRequest carries the fields for a reducer invocation

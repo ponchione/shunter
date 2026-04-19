@@ -189,7 +189,7 @@ func TestDispatchLoopMarksActivityOnInboundFrame(t *testing.T) {
 
 	handled := make(chan struct{})
 	handlers := &MessageHandlers{
-		OnSubscribe: func(_ context.Context, _ *Conn, _ *SubscribeSingleMsg) {
+		OnSubscribeSingle: func(_ context.Context, _ *Conn, _ *SubscribeSingleMsg) {
 			close(handled)
 		},
 	}

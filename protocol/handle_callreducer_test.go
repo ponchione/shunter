@@ -11,13 +11,22 @@ import (
 )
 
 // mockDispatchExecutor is a test double for ExecutorInbox that records
-// unsubscribe and call-reducer interactions.
+// unsubscribe and call-reducer interactions. It backs both the unsubscribe
+// handler tests (which exercise the set-based seam) and the call-reducer
+// tests in this file.
 type mockDispatchExecutor struct {
-	mu             sync.Mutex
-	unregisterReq  *UnregisterSubscriptionRequest
-	unregisterErr  error
-	callReducerReq *CallReducerRequest
-	callReducerErr error
+	mu sync.Mutex
+	// Legacy single-seam bookkeeping (kept until Task 9 removes the old
+	// UnregisterSubscription inbox method).
+	unregisterReq *UnregisterSubscriptionRequest
+	unregisterErr error
+	// Set-seam bookkeeping (Task 8 split).
+	registerSetReq   *RegisterSubscriptionSetRequest
+	registerSetErr   error
+	unregisterSetReq *UnregisterSubscriptionSetRequest
+	unregisterSetErr error
+	callReducerReq   *CallReducerRequest
+	callReducerErr   error
 }
 
 func (m *mockDispatchExecutor) OnConnect(_ context.Context, _ types.ConnectionID, _ types.Identity) error {
@@ -43,182 +52,25 @@ func (m *mockDispatchExecutor) UnregisterSubscription(_ context.Context, req Unr
 	return m.unregisterErr
 }
 
+func (m *mockDispatchExecutor) RegisterSubscriptionSet(_ context.Context, req RegisterSubscriptionSetRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.registerSetReq = &req
+	return m.registerSetErr
+}
+
+func (m *mockDispatchExecutor) UnregisterSubscriptionSet(_ context.Context, req UnregisterSubscriptionSetRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.unregisterSetReq = &req
+	return m.unregisterSetErr
+}
+
 func (m *mockDispatchExecutor) CallReducer(_ context.Context, req CallReducerRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.callReducerReq = &req
 	return m.callReducerErr
-}
-
-// --- Unsubscribe tests ---
-
-func TestHandleUnsubscribe_Active(t *testing.T) {
-	conn := testConnDirect(nil)
-	exec := &mockDispatchExecutor{}
-
-	// Reserve and activate a subscription so IsActive returns true.
-	if err := conn.Subscriptions.Reserve(42); err != nil {
-		t.Fatalf("Reserve: %v", err)
-	}
-	conn.Subscriptions.Activate(42)
-
-	msg := &UnsubscribeSingleMsg{RequestID: 1, QueryID: 42}
-	handleUnsubscribe(context.Background(), conn, msg, exec)
-
-	// Subscription must be removed from tracker.
-	if conn.Subscriptions.IsActiveOrPending(42) {
-		t.Error("subscription 42 still tracked after unsubscribe")
-	}
-
-	// Executor must have received the unregister call.
-	exec.mu.Lock()
-	defer exec.mu.Unlock()
-	if exec.unregisterReq == nil {
-		t.Fatal("UnregisterSubscription request was not recorded")
-	}
-	if exec.unregisterReq.ConnID != conn.ID {
-		t.Errorf("UnregisterSubscription connID = %x, want %x", exec.unregisterReq.ConnID, conn.ID)
-	}
-	if exec.unregisterReq.SubscriptionID != 42 {
-		t.Errorf("UnregisterSubscription subID = %d, want 42", exec.unregisterReq.SubscriptionID)
-	}
-	if exec.unregisterReq.RequestID != 1 {
-		t.Errorf("UnregisterSubscription requestID = %d, want 1", exec.unregisterReq.RequestID)
-	}
-	if exec.unregisterReq.SendDropped {
-		t.Error("SendDropped = true, want false")
-	}
-	if exec.unregisterReq.ResponseCh == nil {
-		t.Error("ResponseCh = nil, want non-nil unsubscribe response channel")
-	}
-
-	// No error message should have been sent.
-	select {
-	case <-conn.OutboundCh:
-		t.Error("unexpected message on OutboundCh for successful unsubscribe")
-	default:
-	}
-}
-
-func TestHandleUnsubscribe_DeliversAsyncUnsubscribeApplied(t *testing.T) {
-	conn := testConnDirect(nil)
-	exec := &mockDispatchExecutor{}
-
-	if err := conn.Subscriptions.Reserve(42); err != nil {
-		t.Fatalf("Reserve: %v", err)
-	}
-	conn.Subscriptions.Activate(42)
-
-	msg := &UnsubscribeSingleMsg{RequestID: 1, QueryID: 42}
-	handleUnsubscribe(context.Background(), conn, msg, exec)
-
-	exec.mu.Lock()
-	respCh := exec.unregisterReq.ResponseCh
-	exec.mu.Unlock()
-	if respCh == nil {
-		t.Fatal("missing unsubscribe response channel")
-	}
-	respCh <- UnsubscribeCommandResponse{Applied: &UnsubscribeSingleApplied{RequestID: 1, QueryID: 42}}
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagUnsubscribeSingleApplied {
-		t.Fatalf("tag = %d, want %d (TagUnsubscribeSingleApplied)", tag, TagUnsubscribeSingleApplied)
-	}
-	applied := decoded.(UnsubscribeSingleApplied)
-	if applied.RequestID != 1 || applied.QueryID != 42 {
-		t.Fatalf("UnsubscribeSingleApplied = %+v", applied)
-	}
-}
-
-func TestHandleUnsubscribe_Pending(t *testing.T) {
-	conn := testConnDirect(nil)
-	exec := &mockDispatchExecutor{}
-
-	// Reserve but do NOT activate — subscription is pending.
-	if err := conn.Subscriptions.Reserve(10); err != nil {
-		t.Fatalf("Reserve: %v", err)
-	}
-
-	msg := &UnsubscribeSingleMsg{RequestID: 2, QueryID: 10}
-	handleUnsubscribe(context.Background(), conn, msg, exec)
-
-	// Pending subscription must NOT be removed.
-	if !conn.Subscriptions.IsActiveOrPending(10) {
-		t.Error("pending subscription 10 was removed; should still be tracked")
-	}
-
-	// Error should have been sent.
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	if se.RequestID != 2 {
-		t.Errorf("RequestID = %d, want 2", se.RequestID)
-	}
-	if se.QueryID != 10 {
-		t.Errorf("QueryID = %d, want 10", se.QueryID)
-	}
-	if !strings.Contains(se.Error, "subscription_id not found") {
-		t.Errorf("Error = %q, want to contain 'subscription_id not found'", se.Error)
-	}
-}
-
-func TestHandleUnsubscribe_NotFound(t *testing.T) {
-	conn := testConnDirect(nil)
-	exec := &mockDispatchExecutor{}
-
-	msg := &UnsubscribeSingleMsg{RequestID: 3, QueryID: 999}
-	handleUnsubscribe(context.Background(), conn, msg, exec)
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	if se.RequestID != 3 {
-		t.Errorf("RequestID = %d, want 3", se.RequestID)
-	}
-	if se.QueryID != 999 {
-		t.Errorf("QueryID = %d, want 999", se.QueryID)
-	}
-	if !strings.Contains(se.Error, "subscription_id not found") {
-		t.Errorf("Error = %q, want to contain 'subscription_id not found'", se.Error)
-	}
-}
-
-func TestHandleUnsubscribe_ExecutorReject(t *testing.T) {
-	conn := testConnDirect(nil)
-	exec := &mockDispatchExecutor{unregisterErr: errors.New("db down")}
-
-	// Reserve and activate so the handler reaches the executor call.
-	if err := conn.Subscriptions.Reserve(7); err != nil {
-		t.Fatalf("Reserve: %v", err)
-	}
-	conn.Subscriptions.Activate(7)
-
-	msg := &UnsubscribeSingleMsg{RequestID: 4, QueryID: 7}
-	handleUnsubscribe(context.Background(), conn, msg, exec)
-
-	// Subscription must still be tracked (executor rejected the removal).
-	if !conn.Subscriptions.IsActiveOrPending(7) {
-		t.Error("subscription 7 removed despite executor rejection")
-	}
-
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
-	}
-	se := decoded.(SubscriptionError)
-	if se.RequestID != 4 {
-		t.Errorf("RequestID = %d, want 4", se.RequestID)
-	}
-	if !strings.Contains(se.Error, "executor unavailable") {
-		t.Errorf("Error = %q, want to contain 'executor unavailable'", se.Error)
-	}
-	if !strings.Contains(se.Error, "db down") {
-		t.Errorf("Error = %q, want to contain underlying cause 'db down'", se.Error)
-	}
 }
 
 // --- CallReducer tests ---

@@ -376,11 +376,17 @@ func TestUpgradeCompressionUnknownRejected(t *testing.T) {
 func TestBuildMessageHandlers_NilWhenDependenciesMissing(t *testing.T) {
 	s := &Server{}
 	h := s.buildMessageHandlers()
-	if h.OnSubscribe != nil {
-		t.Fatal("OnSubscribe should be nil when schema/executor are missing")
+	if h.OnSubscribeSingle != nil {
+		t.Fatal("OnSubscribeSingle should be nil when schema/executor are missing")
 	}
-	if h.OnUnsubscribe != nil {
-		t.Fatal("OnUnsubscribe should be nil when executor is missing")
+	if h.OnSubscribeMulti != nil {
+		t.Fatal("OnSubscribeMulti should be nil when schema/executor are missing")
+	}
+	if h.OnUnsubscribeSingle != nil {
+		t.Fatal("OnUnsubscribeSingle should be nil when executor is missing")
+	}
+	if h.OnUnsubscribeMulti != nil {
+		t.Fatal("OnUnsubscribeMulti should be nil when executor is missing")
 	}
 	if h.OnCallReducer != nil {
 		t.Fatal("OnCallReducer should be nil when executor is missing")
@@ -393,11 +399,17 @@ func TestBuildMessageHandlers_NilWhenDependenciesMissing(t *testing.T) {
 func TestBuildMessageHandlers_WiresOnlySatisfiedDependencies(t *testing.T) {
 	s := &Server{Executor: &fakeInbox{}}
 	h := s.buildMessageHandlers()
-	if h.OnSubscribe != nil {
-		t.Fatal("OnSubscribe should stay nil until schema is wired")
+	if h.OnSubscribeSingle != nil {
+		t.Fatal("OnSubscribeSingle should stay nil until schema is wired")
 	}
-	if h.OnUnsubscribe == nil {
-		t.Fatal("OnUnsubscribe should be wired when executor is present")
+	if h.OnSubscribeMulti != nil {
+		t.Fatal("OnSubscribeMulti should stay nil until schema is wired")
+	}
+	if h.OnUnsubscribeSingle == nil {
+		t.Fatal("OnUnsubscribeSingle should be wired when executor is present")
+	}
+	if h.OnUnsubscribeMulti == nil {
+		t.Fatal("OnUnsubscribeMulti should be wired when executor is present")
 	}
 	if h.OnCallReducer == nil {
 		t.Fatal("OnCallReducer should be wired when executor is present")
