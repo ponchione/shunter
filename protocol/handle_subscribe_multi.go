@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"log"
 )
 
 // handleSubscribeMulti processes an incoming SubscribeMultiMsg. Every
@@ -9,8 +10,11 @@ import (
 // aborts the entire batch and emits a SubscriptionError (atomic
 // admission per SPEC-005 §7.1b). On success the N predicates are
 // forwarded to the executor under a single QueryID via the set-based
-// seam, and the async watcher emits either a SubscribeMultiApplied or a
-// SubscriptionError on the connection's outbound channel.
+// seam. The executor invokes the Reply closure synchronously on its
+// own goroutine; the closure enqueues either a SubscribeMultiApplied
+// or a SubscriptionError onto the connection's outbound channel.
+// Synchronous dispatch here is what enforces ADR §9.4 FIFO between
+// Applied and any subsequent fan-out.
 func handleSubscribeMulti(
 	ctx context.Context,
 	conn *Conn,
@@ -32,11 +36,21 @@ func handleSubscribeMulti(
 		preds = append(preds, p)
 	}
 
-	// Transitional: Task 2 exposes Reply; the watcher goroutine remains
-	// until Task 3 removes it. The closure forwards the executor's reply
-	// onto the existing buffered respCh so the watcher path is unchanged.
-	respCh := make(chan SubscriptionSetCommandResponse, 1)
-	reply := func(resp SubscriptionSetCommandResponse) { respCh <- resp }
+	sender := connOnlySender{conn: conn}
+	reply := func(resp SubscriptionSetCommandResponse) {
+		switch {
+		case resp.Error != nil:
+			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
+				log.Printf("protocol: SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
+			}
+		case resp.MultiApplied != nil:
+			if err := SendSubscribeMultiApplied(sender, conn, resp.MultiApplied); err != nil {
+				log.Printf("protocol: SubscribeMultiApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.MultiApplied.QueryID, err)
+			}
+		default:
+			log.Printf("protocol: malformed SubscriptionSetCommandResponse (req=%d query=%d)", msg.RequestID, msg.QueryID)
+		}
+	}
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
 		ConnID:     conn.ID,
 		QueryID:    msg.QueryID,
@@ -51,6 +65,4 @@ func handleSubscribeMulti(
 		})
 		return
 	}
-
-	watchSubscribeSetResponse(conn, respCh, false /* single */, msg.RequestID, msg.QueryID)
 }

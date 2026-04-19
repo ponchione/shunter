@@ -2,25 +2,37 @@ package protocol
 
 import (
 	"context"
+	"log"
 )
 
 // handleUnsubscribeSingle processes an incoming UnsubscribeSingleMsg.
 // The wire QueryID is forwarded to the executor via the set-based
 // unsubscribe seam; the executor is responsible for producing the
 // final UnsubscribeSingleApplied (or SubscriptionError) once the drop
-// has been applied. The legacy "reserved but unknown to executor"
-// guard moves into the executor alongside the set registry.
+// has been applied. The executor invokes the Reply closure
+// synchronously on its own goroutine; the closure enqueues the result
+// onto the connection's outbound channel.
 func handleUnsubscribeSingle(
 	ctx context.Context,
 	conn *Conn,
 	msg *UnsubscribeSingleMsg,
 	executor ExecutorInbox,
 ) {
-	// Transitional: Task 2 exposes Reply; the watcher goroutine remains
-	// until Task 3 removes it. The closure forwards the executor's reply
-	// onto the existing buffered respCh so the watcher path is unchanged.
-	respCh := make(chan UnsubscribeSetCommandResponse, 1)
-	reply := func(resp UnsubscribeSetCommandResponse) { respCh <- resp }
+	sender := connOnlySender{conn: conn}
+	reply := func(resp UnsubscribeSetCommandResponse) {
+		switch {
+		case resp.Error != nil:
+			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
+				log.Printf("protocol: unsubscribe SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
+			}
+		case resp.SingleApplied != nil:
+			if err := SendUnsubscribeSingleApplied(sender, conn, resp.SingleApplied); err != nil {
+				log.Printf("protocol: UnsubscribeSingleApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.SingleApplied.QueryID, err)
+			}
+		default:
+			log.Printf("protocol: malformed UnsubscribeSetCommandResponse (req=%d query=%d)", msg.RequestID, msg.QueryID)
+		}
+	}
 	if err := executor.UnregisterSubscriptionSet(ctx, UnregisterSubscriptionSetRequest{
 		ConnID:    conn.ID,
 		QueryID:   msg.QueryID,
@@ -34,6 +46,4 @@ func handleUnsubscribeSingle(
 		})
 		return
 	}
-
-	watchUnsubscribeSetResponse(conn, respCh, true /* single */, msg.RequestID, msg.QueryID)
 }

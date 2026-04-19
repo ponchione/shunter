@@ -2,14 +2,17 @@ package protocol
 
 import (
 	"context"
+	"log"
 )
 
 // handleSubscribeSingle processes an incoming SubscribeSingleMsg. It
 // resolves and validates the wire query against the schema, normalizes
 // predicates, and submits the subscription to the executor via the
-// set-based seam (len(Predicates)==1). The async watcher emits either a
-// SubscribeSingleApplied or a SubscriptionError on the connection's
-// outbound channel.
+// set-based seam (len(Predicates)==1). The executor invokes the Reply
+// closure synchronously on its own goroutine; the closure enqueues
+// either a SubscribeSingleApplied or a SubscriptionError onto the
+// connection's outbound channel. Synchronous dispatch here is what
+// enforces ADR §9.4 FIFO between Applied and any subsequent fan-out.
 func handleSubscribeSingle(
 	ctx context.Context,
 	conn *Conn,
@@ -27,11 +30,21 @@ func handleSubscribeSingle(
 		return
 	}
 
-	// Transitional: Task 2 exposes Reply; the watcher goroutine remains
-	// until Task 3 removes it. The closure forwards the executor's reply
-	// onto the existing buffered respCh so the watcher path is unchanged.
-	respCh := make(chan SubscriptionSetCommandResponse, 1)
-	reply := func(resp SubscriptionSetCommandResponse) { respCh <- resp }
+	sender := connOnlySender{conn: conn}
+	reply := func(resp SubscriptionSetCommandResponse) {
+		switch {
+		case resp.Error != nil:
+			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
+				log.Printf("protocol: SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
+			}
+		case resp.SingleApplied != nil:
+			if err := SendSubscribeSingleApplied(sender, conn, resp.SingleApplied); err != nil {
+				log.Printf("protocol: SubscribeSingleApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.SingleApplied.QueryID, err)
+			}
+		default:
+			log.Printf("protocol: malformed SubscriptionSetCommandResponse (req=%d query=%d)", msg.RequestID, msg.QueryID)
+		}
+	}
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
 		ConnID:     conn.ID,
 		QueryID:    msg.QueryID,
@@ -46,6 +59,4 @@ func handleSubscribeSingle(
 		})
 		return
 	}
-
-	watchSubscribeSetResponse(conn, respCh, true /* single */, msg.RequestID, msg.QueryID)
 }
