@@ -17,7 +17,7 @@ func TestIncomingBackpressure_WithinLimitAllProcessed(t *testing.T) {
 	var mu sync.Mutex
 	var count int
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
+		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			count++
 			mu.Unlock()
@@ -29,7 +29,7 @@ func TestIncomingBackpressure_WithinLimitAllProcessed(t *testing.T) {
 	done := runDispatchAsync(conn, ctx, handlers)
 
 	for i := uint32(0); i < 4; i++ {
-		frame, _ := EncodeClientMessage(SubscribeMsg{
+		frame, _ := EncodeClientMessage(SubscribeSingleMsg{
 			RequestID: i, QueryID: i + 100,
 			Query: Query{TableName: "t"},
 		})
@@ -62,7 +62,7 @@ func TestIncomingBackpressure_ExceedLimitCloses1008(t *testing.T) {
 	// Handlers block forever so inflight never decreases.
 	block := make(chan struct{})
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
+		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			<-block
 		},
 	}
@@ -74,7 +74,7 @@ func TestIncomingBackpressure_ExceedLimitCloses1008(t *testing.T) {
 
 	// Send 3 messages: first 2 acquire semaphore, third exceeds.
 	for i := uint32(0); i < 3; i++ {
-		frame, _ := EncodeClientMessage(SubscribeMsg{
+		frame, _ := EncodeClientMessage(SubscribeSingleMsg{
 			RequestID: i, QueryID: i + 100,
 			Query: Query{TableName: "t"},
 		})
@@ -105,7 +105,7 @@ func TestIncomingBackpressure_RapidBurstWithinLimit(t *testing.T) {
 	var mu sync.Mutex
 	var count int
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
+		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			count++
 			mu.Unlock()
@@ -117,7 +117,7 @@ func TestIncomingBackpressure_RapidBurstWithinLimit(t *testing.T) {
 	done := runDispatchAsync(conn, ctx, handlers)
 
 	for i := uint32(0); i < 8; i++ {
-		frame, _ := EncodeClientMessage(SubscribeMsg{
+		frame, _ := EncodeClientMessage(SubscribeSingleMsg{
 			RequestID: i, QueryID: i + 200,
 			Query: Query{TableName: "t"},
 		})
@@ -148,7 +148,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	var ids []uint32
 	block := make(chan struct{})
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
+		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			ids = append(ids, msg.QueryID)
 			mu.Unlock()
@@ -161,7 +161,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	defer cancel()
 	_ = runDispatchAsync(conn, ctx, handlers)
 
-	frame1, _ := EncodeClientMessage(SubscribeMsg{
+	frame1, _ := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 1, QueryID: 100,
 		Query: Query{TableName: "t"},
 	})
@@ -171,7 +171,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	frame2, _ := EncodeClientMessage(SubscribeMsg{
+	frame2, _ := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 2, QueryID: 200,
 		Query: Query{TableName: "t"},
 	})
@@ -199,7 +199,7 @@ func TestIncomingBackpressure_NilHandlerDoesNotLeakSemaphoreToken(t *testing.T) 
 	defer cancel()
 	done := runDispatchAsync(conn, ctx, &MessageHandlers{})
 
-	frame, _ := EncodeClientMessage(SubscribeMsg{
+	frame, _ := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   100,
 		Query:     Query{TableName: "t"},

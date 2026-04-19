@@ -8,7 +8,7 @@ import (
 func handleUnsubscribe(
 	ctx context.Context,
 	conn *Conn,
-	msg *UnsubscribeMsg,
+	msg *UnsubscribeSingleMsg,
 	executor ExecutorInbox,
 ) {
 	subID := msg.QueryID

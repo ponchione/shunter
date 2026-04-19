@@ -189,7 +189,7 @@ func TestDispatchLoopMarksActivityOnInboundFrame(t *testing.T) {
 
 	handled := make(chan struct{})
 	handlers := &MessageHandlers{
-		OnSubscribe: func(_ context.Context, _ *Conn, _ *SubscribeMsg) {
+		OnSubscribe: func(_ context.Context, _ *Conn, _ *SubscribeSingleMsg) {
 			close(handled)
 		},
 	}
@@ -202,7 +202,7 @@ func TestDispatchLoopMarksActivityOnInboundFrame(t *testing.T) {
 
 	// Client sends a valid Subscribe frame. The dispatch loop routes it
 	// and must still MarkActivity before handler dispatch.
-	frame, err := EncodeClientMessage(SubscribeMsg{
+	frame, err := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   1,
 		Query:     Query{TableName: "events"},

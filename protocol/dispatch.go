@@ -12,8 +12,8 @@ import (
 // the host. A nil field means the message type is not supported on this
 // connection -- the dispatch loop closes with 1002 if it encounters one.
 type MessageHandlers struct {
-	OnSubscribe   func(ctx context.Context, conn *Conn, msg *SubscribeMsg)
-	OnUnsubscribe func(ctx context.Context, conn *Conn, msg *UnsubscribeMsg)
+	OnSubscribe   func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg)
+	OnUnsubscribe func(ctx context.Context, conn *Conn, msg *UnsubscribeSingleMsg)
 	OnCallReducer func(ctx context.Context, conn *Conn, msg *CallReducerMsg)
 	OnOneOffQuery func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg)
 }
@@ -115,13 +115,13 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 
 		var run func()
 		switch m := msg.(type) {
-		case SubscribeMsg:
+		case SubscribeSingleMsg:
 			if handlers.OnSubscribe == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
 			run = func() { handlers.OnSubscribe(ctx, c, &m) }
-		case UnsubscribeMsg:
+		case UnsubscribeSingleMsg:
 			if handlers.OnUnsubscribe == nil {
 				closeProtocolError(c, "unsupported message type")
 				return

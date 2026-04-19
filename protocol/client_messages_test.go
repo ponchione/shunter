@@ -9,7 +9,7 @@ import (
 )
 
 func TestSubscribeRoundTripEmptyPredicates(t *testing.T) {
-	in := SubscribeMsg{
+	in := SubscribeSingleMsg{
 		RequestID: 42,
 		QueryID:   7,
 		Query: Query{
@@ -21,18 +21,18 @@ func TestSubscribeRoundTripEmptyPredicates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if frame[0] != TagSubscribe {
-		t.Errorf("tag = %d, want TagSubscribe", frame[0])
+	if frame[0] != TagSubscribeSingle {
+		t.Errorf("tag = %d, want TagSubscribeSingle", frame[0])
 	}
 
 	tag, out, err := DecodeClientMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tag != TagSubscribe {
-		t.Errorf("tag = %d, want TagSubscribe", tag)
+	if tag != TagSubscribeSingle {
+		t.Errorf("tag = %d, want TagSubscribeSingle", tag)
 	}
-	got := out.(SubscribeMsg)
+	got := out.(SubscribeSingleMsg)
 	if got.RequestID != in.RequestID || got.QueryID != in.QueryID {
 		t.Errorf("ids mismatch: got %+v, want %+v", got, in)
 	}
@@ -45,7 +45,7 @@ func TestSubscribeRoundTripEmptyPredicates(t *testing.T) {
 }
 
 func TestSubscribeRoundTripMultiplePredicates(t *testing.T) {
-	in := SubscribeMsg{
+	in := SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   2,
 		Query: Query{
@@ -65,7 +65,7 @@ func TestSubscribeRoundTripMultiplePredicates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.(SubscribeMsg)
+	got := out.(SubscribeSingleMsg)
 	if len(got.Query.Predicates) != 3 {
 		t.Fatalf("got %d predicates, want 3", len(got.Query.Predicates))
 	}
@@ -80,26 +80,26 @@ func TestSubscribeRoundTripMultiplePredicates(t *testing.T) {
 }
 
 func TestUnsubscribeRoundTripSendDroppedFalse(t *testing.T) {
-	in := UnsubscribeMsg{RequestID: 11, QueryID: 22, SendDropped: false}
+	in := UnsubscribeSingleMsg{RequestID: 11, QueryID: 22, SendDropped: false}
 	frame, _ := EncodeClientMessage(in)
 	_, out, err := DecodeClientMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.(UnsubscribeMsg)
+	got := out.(UnsubscribeSingleMsg)
 	if got != in {
 		t.Errorf("got %+v, want %+v", got, in)
 	}
 }
 
 func TestUnsubscribeRoundTripSendDroppedTrue(t *testing.T) {
-	in := UnsubscribeMsg{RequestID: 11, QueryID: 22, SendDropped: true}
+	in := UnsubscribeSingleMsg{RequestID: 11, QueryID: 22, SendDropped: true}
 	frame, _ := EncodeClientMessage(in)
 	_, out, err := DecodeClientMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.(UnsubscribeMsg)
+	got := out.(UnsubscribeSingleMsg)
 	if got != in {
 		t.Errorf("got %+v, want %+v", got, in)
 	}
@@ -225,8 +225,8 @@ func TestDecodeClientMessageEmptyFrame(t *testing.T) {
 }
 
 func TestDecodeClientMessageTruncatedBody(t *testing.T) {
-	// Tag=TagSubscribe, but body stops after only 2 bytes of request_id.
-	frame := []byte{TagSubscribe, 0x01, 0x02}
+	// Tag=TagSubscribeSingle, but body stops after only 2 bytes of request_id.
+	frame := []byte{TagSubscribeSingle, 0x01, 0x02}
 	_, _, err := DecodeClientMessage(frame)
 	if !errors.Is(err, ErrMalformedMessage) {
 		t.Errorf("got %v, want ErrMalformedMessage", err)

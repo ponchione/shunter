@@ -72,7 +72,7 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	called := make(chan struct{})
 
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
+		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			gotSubID = msg.QueryID
 			mu.Unlock()
@@ -85,7 +85,7 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	done := runDispatchAsync(conn, ctx, handlers)
 
 	// Build and send a valid Subscribe frame.
-	subMsg := SubscribeMsg{
+	subMsg := SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   42,
 		Query: Query{
@@ -128,7 +128,7 @@ func TestDispatchLoop_TextFrameCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
+		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			t.Error("OnSubscribe should not be called for text frame")
 		},
 	}
@@ -233,7 +233,7 @@ func TestDispatchLoop_NilHandlerCloses(t *testing.T) {
 	done := runDispatchAsync(conn, ctx, handlers)
 
 	// Send a valid Subscribe frame — but OnSubscribe is nil.
-	subMsg := SubscribeMsg{
+	subMsg := SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   10,
 		Query: Query{
@@ -263,7 +263,7 @@ func TestDispatchLoop_MalformedBodyCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
+		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			t.Error("OnSubscribe should not be called for malformed body")
 		},
 	}
@@ -275,7 +275,7 @@ func TestDispatchLoop_MalformedBodyCloses(t *testing.T) {
 	// Valid Subscribe tag but truncated body (only 2 bytes after tag).
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
 	defer writeCancel()
-	if err := client.Write(writeCtx, websocket.MessageBinary, []byte{TagSubscribe, 0x01, 0x02}); err != nil {
+	if err := client.Write(writeCtx, websocket.MessageBinary, []byte{TagSubscribeSingle, 0x01, 0x02}); err != nil {
 		t.Fatalf("client write: %v", err)
 	}
 
@@ -291,7 +291,7 @@ func TestDispatchLoop_MarksActivity(t *testing.T) {
 
 	handled := make(chan struct{})
 	handlers := &MessageHandlers{
-		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeMsg) {
+		OnSubscribe: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			close(handled)
 		},
 	}
@@ -305,7 +305,7 @@ func TestDispatchLoop_MarksActivity(t *testing.T) {
 
 	done := runDispatchAsync(conn, ctx, handlers)
 
-	subMsg := SubscribeMsg{
+	subMsg := SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   7,
 		Query: Query{

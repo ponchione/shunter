@@ -75,7 +75,7 @@ func TestPhase1ParityCompressionBrotliReservedRejected(t *testing.T) {
 	// A frame arriving with 0x01 from a peer must decode to the same
 	// reserved-unsupported error so the dispatch loop can close with
 	// a specific reason.
-	frame := []byte{CompressionBrotli, TagSubscribe, 0xAA}
+	frame := []byte{CompressionBrotli, TagSubscribeSingle, 0xAA}
 	_, _, derr := UnwrapCompressed(frame)
 	if !errors.Is(derr, ErrBrotliUnsupported) {
 		t.Errorf("UnwrapCompressed brotli err = %v, want ErrBrotliUnsupported",
@@ -99,7 +99,7 @@ func TestPhase1ParityBrotliFrameClosesWithReason(t *testing.T) {
 
 	// Send binary frame with brotli compression byte (0x01).
 	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
-	_ = clientWS.Write(wCtx, websocket.MessageBinary, []byte{CompressionBrotli, TagSubscribe, 0x00})
+	_ = clientWS.Write(wCtx, websocket.MessageBinary, []byte{CompressionBrotli, TagSubscribeSingle, 0x00})
 	wCancel()
 
 	select {

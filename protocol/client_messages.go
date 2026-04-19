@@ -9,20 +9,30 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// SubscribeMsg is the client-side Subscribe message (SPEC-005 §7.1).
-// QueryID mirrors reference `SubscribeSingle.query_id: QueryId` — a
-// client-allocated identifier used to correlate the subscribe with its
-// later Unsubscribe. The Multi / Single variant split remains deferred
-// (see `TestPhase2DeferralSubscribeNoMultiOrSingleVariants`).
-type SubscribeMsg struct {
+// SubscribeSingleMsg is the client-side single-envelope Subscribe
+// message (SPEC-005 §7.1). QueryID mirrors reference
+// `SubscribeSingle.query_id: QueryId` — a client-allocated identifier
+// used to correlate the subscribe with its later Unsubscribe.
+//
+// Part of the Phase 2 Slice 2 variant split. SubscribeMultiMsg
+// carries a list of queries under one QueryID; this type carries
+// exactly one. Reference: SubscribeSingle at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:189.
+type SubscribeSingleMsg struct {
 	RequestID uint32
 	QueryID   uint32
 	Query     Query
 }
 
-// UnsubscribeMsg is the client-side Unsubscribe message (SPEC-005 §7.2).
-// QueryID mirrors reference `Unsubscribe.query_id: QueryId`.
-type UnsubscribeMsg struct {
+// UnsubscribeSingleMsg is the client-side single-envelope Unsubscribe
+// message (SPEC-005 §7.2). QueryID mirrors reference
+// `Unsubscribe.query_id: QueryId`.
+//
+// Part of the Phase 2 Slice 2 variant split. UnsubscribeMultiMsg
+// drops every query under a given QueryID; this type drops exactly
+// one. Reference: Unsubscribe at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218.
+type UnsubscribeSingleMsg struct {
 	RequestID   uint32
 	QueryID     uint32
 	SendDropped bool
@@ -90,15 +100,15 @@ type UnsubscribeMultiMsg struct {
 func EncodeClientMessage(m any) ([]byte, error) {
 	var buf bytes.Buffer
 	switch msg := m.(type) {
-	case SubscribeMsg:
-		buf.WriteByte(TagSubscribe)
+	case SubscribeSingleMsg:
+		buf.WriteByte(TagSubscribeSingle)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
 		if err := encodeQuery(&buf, msg.Query); err != nil {
 			return nil, err
 		}
-	case UnsubscribeMsg:
-		buf.WriteByte(TagUnsubscribe)
+	case UnsubscribeSingleMsg:
+		buf.WriteByte(TagUnsubscribeSingle)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
 		if msg.SendDropped {
@@ -140,7 +150,7 @@ func EncodeClientMessage(m any) ([]byte, error) {
 }
 
 // DecodeClientMessage parses a wire frame into its concrete message
-// type. The returned any is one of SubscribeMsg, UnsubscribeMsg,
+// type. The returned any is one of SubscribeSingleMsg, UnsubscribeSingleMsg,
 // CallReducerMsg, OneOffQueryMsg, SubscribeMultiMsg, UnsubscribeMultiMsg
 // — matching the tag byte.
 func DecodeClientMessage(frame []byte) (uint8, any, error) {
@@ -150,11 +160,11 @@ func DecodeClientMessage(frame []byte) (uint8, any, error) {
 	tag := frame[0]
 	body := frame[1:]
 	switch tag {
-	case TagSubscribe:
-		msg, err := decodeSubscribe(body)
+	case TagSubscribeSingle:
+		msg, err := decodeSubscribeSingle(body)
 		return tag, msg, err
-	case TagUnsubscribe:
-		msg, err := decodeUnsubscribe(body)
+	case TagUnsubscribeSingle:
+		msg, err := decodeUnsubscribeSingle(body)
 		return tag, msg, err
 	case TagCallReducer:
 		msg, err := decodeCallReducer(body)
@@ -175,8 +185,8 @@ func DecodeClientMessage(frame []byte) (uint8, any, error) {
 
 // --- Per-message decoders ---
 
-func decodeSubscribe(body []byte) (SubscribeMsg, error) {
-	var m SubscribeMsg
+func decodeSubscribeSingle(body []byte) (SubscribeSingleMsg, error) {
+	var m SubscribeSingleMsg
 	var off int
 	var err error
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
@@ -193,8 +203,8 @@ func decodeSubscribe(body []byte) (SubscribeMsg, error) {
 	return m, nil
 }
 
-func decodeUnsubscribe(body []byte) (UnsubscribeMsg, error) {
-	var m UnsubscribeMsg
+func decodeUnsubscribeSingle(body []byte) (UnsubscribeSingleMsg, error) {
+	var m UnsubscribeSingleMsg
 	var off int
 	var err error
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {

@@ -62,7 +62,7 @@ func TestHandleUnsubscribe_Active(t *testing.T) {
 	}
 	conn.Subscriptions.Activate(42)
 
-	msg := &UnsubscribeMsg{RequestID: 1, QueryID: 42}
+	msg := &UnsubscribeSingleMsg{RequestID: 1, QueryID: 42}
 	handleUnsubscribe(context.Background(), conn, msg, exec)
 
 	// Subscription must be removed from tracker.
@@ -109,7 +109,7 @@ func TestHandleUnsubscribe_DeliversAsyncUnsubscribeApplied(t *testing.T) {
 	}
 	conn.Subscriptions.Activate(42)
 
-	msg := &UnsubscribeMsg{RequestID: 1, QueryID: 42}
+	msg := &UnsubscribeSingleMsg{RequestID: 1, QueryID: 42}
 	handleUnsubscribe(context.Background(), conn, msg, exec)
 
 	exec.mu.Lock()
@@ -139,7 +139,7 @@ func TestHandleUnsubscribe_Pending(t *testing.T) {
 		t.Fatalf("Reserve: %v", err)
 	}
 
-	msg := &UnsubscribeMsg{RequestID: 2, QueryID: 10}
+	msg := &UnsubscribeSingleMsg{RequestID: 2, QueryID: 10}
 	handleUnsubscribe(context.Background(), conn, msg, exec)
 
 	// Pending subscription must NOT be removed.
@@ -168,7 +168,7 @@ func TestHandleUnsubscribe_NotFound(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{}
 
-	msg := &UnsubscribeMsg{RequestID: 3, QueryID: 999}
+	msg := &UnsubscribeSingleMsg{RequestID: 3, QueryID: 999}
 	handleUnsubscribe(context.Background(), conn, msg, exec)
 
 	tag, decoded := drainServerMsgEventually(t, conn)
@@ -197,7 +197,7 @@ func TestHandleUnsubscribe_ExecutorReject(t *testing.T) {
 	}
 	conn.Subscriptions.Activate(7)
 
-	msg := &UnsubscribeMsg{RequestID: 4, QueryID: 7}
+	msg := &UnsubscribeSingleMsg{RequestID: 4, QueryID: 7}
 	handleUnsubscribe(context.Background(), conn, msg, exec)
 
 	// Subscription must still be tracked (executor rejected the removal).

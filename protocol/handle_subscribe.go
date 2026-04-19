@@ -55,7 +55,7 @@ func NormalizePredicates(
 	return result, nil
 }
 
-// handleSubscribe processes an incoming SubscribeMsg: reserves the
+// handleSubscribe processes an incoming SubscribeSingleMsg: reserves the
 // subscription id on the connection, resolves and validates the query
 // against the schema, normalizes predicates, and submits the
 // subscription to the executor. On any failure the subscription is
@@ -63,7 +63,7 @@ func NormalizePredicates(
 func handleSubscribe(
 	ctx context.Context,
 	conn *Conn,
-	msg *SubscribeMsg,
+	msg *SubscribeSingleMsg,
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {

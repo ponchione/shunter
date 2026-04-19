@@ -223,12 +223,12 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) buildMessageHandlers() *MessageHandlers {
 	handlers := &MessageHandlers{}
 	if s.Executor != nil && s.Schema != nil {
-		handlers.OnSubscribe = func(ctx context.Context, conn *Conn, msg *SubscribeMsg) {
+		handlers.OnSubscribe = func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg) {
 			handleSubscribe(ctx, conn, msg, s.Executor, s.Schema)
 		}
 	}
 	if s.Executor != nil {
-		handlers.OnUnsubscribe = func(ctx context.Context, conn *Conn, msg *UnsubscribeMsg) {
+		handlers.OnUnsubscribe = func(ctx context.Context, conn *Conn, msg *UnsubscribeSingleMsg) {
 			handleUnsubscribe(ctx, conn, msg, s.Executor)
 		}
 		handlers.OnCallReducer = func(ctx context.Context, conn *Conn, msg *CallReducerMsg) {

@@ -99,7 +99,7 @@ func TestUnknownCompressionTag_Closes1002(t *testing.T) {
 
 	// Send binary frame with invalid compression byte (0xFF).
 	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
-	_ = clientWS.Write(wCtx, websocket.MessageBinary, []byte{0xFF, TagSubscribe, 0x00})
+	_ = clientWS.Write(wCtx, websocket.MessageBinary, []byte{0xFF, TagSubscribeSingle, 0x00})
 	wCancel()
 
 	select {

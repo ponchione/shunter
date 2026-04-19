@@ -90,28 +90,26 @@ func TestPhase15TagReducerCallResultReserved(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeCarriesQueryID pins the Phase 2 Slice 2 opener:
-// SubscribeMsg now carries a QueryID field matching the reference
-// `query_id: QueryId` on `SubscribeSingle` / `SubscribeMulti`. The
-// Multi / Single variant split remains deferred — see
-// TestPhase2DeferralSubscribeNoMultiOrSingleVariants below.
-func TestPhase2SubscribeCarriesQueryID(t *testing.T) {
-	fields := msgFieldNames(SubscribeMsg{})
+// TestPhase2SubscribeSingleShape pins the renamed single-envelope. The
+// QueryID field already landed; the rename closes the Single/Multi
+// variant split on the client side. Reference: SubscribeSingle at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:189.
+func TestPhase2SubscribeSingleShape(t *testing.T) {
+	fields := msgFieldNames(SubscribeSingleMsg{})
 	want := []string{"RequestID", "QueryID", "Query"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeMsg fields = %v, want %v (Phase 2: QueryID field landed)",
-			fields, want)
+		t.Fatalf("SubscribeSingleMsg fields = %v, want %v", fields, want)
 	}
 }
 
-// TestPhase2UnsubscribeCarriesQueryID pins the Phase 2 Slice 2 opener
-// on Unsubscribe: reference `Unsubscribe` carries `query_id: QueryId`.
-func TestPhase2UnsubscribeCarriesQueryID(t *testing.T) {
-	fields := msgFieldNames(UnsubscribeMsg{})
+// TestPhase2UnsubscribeSingleShape pins the renamed single-envelope.
+// Reference: Unsubscribe at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218.
+func TestPhase2UnsubscribeSingleShape(t *testing.T) {
+	fields := msgFieldNames(UnsubscribeSingleMsg{})
 	want := []string{"RequestID", "QueryID", "SendDropped"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("UnsubscribeMsg fields = %v, want %v (Phase 2: QueryID field landed)",
-			fields, want)
+		t.Fatalf("UnsubscribeSingleMsg fields = %v, want %v", fields, want)
 	}
 }
 
@@ -153,14 +151,14 @@ func TestPhase2SubscriptionErrorCarriesQueryID(t *testing.T) {
 	}
 }
 
-// TestPhase2DeferralSubscribeNoMultiOrSingleVariants pins the still-open
-// portion of the variant split: `SubscribeMultiMsg` landed in Task 1 (see
-// `TestPhase2SubscribeMultiShape`), but `SubscribeSingleMsg` is still
-// named `SubscribeMsg` until Task 3's rename. Full removal of this pin
-// is Task 5.
+// TestPhase2DeferralSubscribeNoMultiOrSingleVariants is a
+// placeholder until Task 5 removes it. The variant split is complete
+// on the client side now that SubscribeSingleMsg / SubscribeMultiMsg
+// both exist. Task 4 lands the server-side rename;
+// Task 5 removes this test once the matching response pins land.
 func TestPhase2DeferralSubscribeNoMultiOrSingleVariants(t *testing.T) {
-	if TagSubscribe == 0 {
-		t.Fatal("TagSubscribe should stay defined until Task 3 renames it to TagSubscribeSingle")
+	if TagSubscribeSingle == 0 {
+		t.Fatal("TagSubscribeSingle should stay defined for the single-envelope path")
 	}
 }
 

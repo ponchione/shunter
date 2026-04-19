@@ -3,7 +3,7 @@ package protocol
 import "testing"
 
 func TestClientTagsDistinct(t *testing.T) {
-	tags := []uint8{TagSubscribe, TagUnsubscribe, TagCallReducer, TagOneOffQuery}
+	tags := []uint8{TagSubscribeSingle, TagUnsubscribeSingle, TagCallReducer, TagOneOffQuery}
 	seen := map[uint8]bool{}
 	for _, tag := range tags {
 		if seen[tag] {
@@ -12,7 +12,7 @@ func TestClientTagsDistinct(t *testing.T) {
 		seen[tag] = true
 	}
 	// Spec-pinned values (SPEC-005 §6).
-	if TagSubscribe != 1 || TagUnsubscribe != 2 || TagCallReducer != 3 || TagOneOffQuery != 4 {
+	if TagSubscribeSingle != 1 || TagUnsubscribeSingle != 2 || TagCallReducer != 3 || TagOneOffQuery != 4 {
 		t.Errorf("C2S tag values drifted from SPEC-005 §6")
 	}
 }

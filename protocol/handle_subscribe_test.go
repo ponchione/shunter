@@ -229,7 +229,7 @@ func TestHandleSubscribe_Valid(t *testing.T) {
 		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
 	)
 
-	msg := &SubscribeMsg{
+	msg := &SubscribeSingleMsg{
 		RequestID: 10,
 		QueryID:   7,
 		Query: Query{
@@ -289,7 +289,7 @@ func TestHandleSubscribe_DeliversAsyncSubscribeApplied(t *testing.T) {
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
 	)
 
-	msg := &SubscribeMsg{
+	msg := &SubscribeSingleMsg{
 		RequestID: 10,
 		QueryID:   7,
 		Query:     Query{TableName: "users"},
@@ -330,7 +330,7 @@ func TestHandleSubscribe_DuplicateID(t *testing.T) {
 		t.Fatalf("pre-reserve: %v", err)
 	}
 
-	msg := &SubscribeMsg{
+	msg := &SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   42,
 		Query:     Query{TableName: "users"},
@@ -361,7 +361,7 @@ func TestHandleSubscribe_UnknownTable(t *testing.T) {
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("users", 1) // only "users" exists
 
-	msg := &SubscribeMsg{
+	msg := &SubscribeSingleMsg{
 		RequestID: 5,
 		QueryID:   99,
 		Query:     Query{TableName: "nonexistent"},
@@ -398,7 +398,7 @@ func TestHandleSubscribe_ExecutorReject(t *testing.T) {
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
 	)
 
-	msg := &SubscribeMsg{
+	msg := &SubscribeSingleMsg{
 		RequestID: 3,
 		QueryID:   50,
 		Query:     Query{TableName: "users"},

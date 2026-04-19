@@ -6,12 +6,12 @@ package protocol
 
 // Client→server message tags (SPEC-005 §6).
 const (
-	TagSubscribe        uint8 = 1
-	TagUnsubscribe      uint8 = 2
-	TagCallReducer      uint8 = 3
-	TagOneOffQuery      uint8 = 4
-	TagSubscribeMulti   uint8 = 5 // Phase 2 Slice 2 variant split
-	TagUnsubscribeMulti uint8 = 6 // Phase 2 Slice 2 variant split
+	TagSubscribeSingle   uint8 = 1 // renamed from TagSubscribe (Phase 2 Slice 2 variant split)
+	TagUnsubscribeSingle uint8 = 2 // renamed from TagUnsubscribe (Phase 2 Slice 2 variant split)
+	TagCallReducer       uint8 = 3
+	TagOneOffQuery       uint8 = 4
+	TagSubscribeMulti    uint8 = 5
+	TagUnsubscribeMulti  uint8 = 6
 )
 
 // Server→client message tags (SPEC-005 §6).
