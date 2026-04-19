@@ -46,11 +46,12 @@ type ExecutorInbox interface {
 }
 
 // RegisterSubscriptionSetRequest carries the fields the executor needs to
-// register a set of predicates under one QueryID. Predicates is a slice of
-// subscription.Predicate values typed as `any` to avoid a protocol →
-// subscription import cycle; the executor adapter casts on the way
-// through. A Single-path submission forwards len==1; a Multi-path
-// submission forwards len==N.
+// register a set of predicates under one QueryID. Predicates is []any (not
+// []subscription.Predicate) because the host-owned executor adapter — the
+// concrete ExecutorInbox implementation — may live in a package that should
+// not depend on the subscription package. The adapter casts each element to
+// subscription.Predicate on the way through. A Single-path submission
+// forwards len==1; a Multi-path submission forwards len==N.
 type RegisterSubscriptionSetRequest struct {
 	ConnID     types.ConnectionID
 	QueryID    uint32

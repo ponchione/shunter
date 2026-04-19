@@ -196,9 +196,8 @@ func (m *Manager) RegisterSet(
 		hash := ComputeQueryHash(p, req.ClientIdentity)
 		rows, err := m.initialQuery(p, view)
 		if err != nil {
-			// Unwind any partial state, including pruning-index placement
-			// (mirror legacy Unregister semantics — dropSub handles both
-			// registry maps and PruningIndexes eviction).
+			// Unwind any partial state. dropSub handles registry maps + PruningIndexes
+			// eviction on last-ref; each allocated sub is dropped independently.
 			for _, sid := range allocated {
 				m.dropSub(req.ConnID, sid)
 			}

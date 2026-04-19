@@ -149,6 +149,38 @@ func TestDispatchUnregisterSubscriptionSet(t *testing.T) {
 	}
 }
 
+func TestDispatchRegisterSubscriptionSetClosesSnapshotOnError(t *testing.T) {
+	exec, _ := setupExecutor()
+	fakeSubs := &registerDispatchSubs{
+		registerSetErr: errors.New("synthetic"),
+	}
+	exec.subs = fakeSubs
+
+	var tracked *trackingSnapshot
+	exec.snapshotFn = func() store.CommittedReadView {
+		tracked = &trackingSnapshot{CommittedReadView: exec.committed.Snapshot()}
+		return tracked
+	}
+
+	respCh := make(chan subscription.SubscriptionSetRegisterResult, 1)
+	exec.dispatch(RegisterSubscriptionSetCmd{
+		Request: subscription.SubscriptionSetRegisterRequest{
+			ConnID:     types.ConnectionID{9},
+			QueryID:    42,
+			Predicates: []subscription.Predicate{subscription.AllRows{Table: 1}},
+		},
+		ResponseCh: respCh,
+	})
+	resp := <-respCh
+	// On error, handler sends zero-value result and returns.
+	if resp.QueryID != 0 {
+		t.Fatalf("error response should be zero-value, got %+v", resp)
+	}
+	if tracked == nil || !tracked.closed {
+		t.Fatal("snapshot should be closed on error path")
+	}
+}
+
 func TestDispatchUnregisterSubscriptionSetCarriesError(t *testing.T) {
 	exec, _ := setupExecutor()
 	fakeSubs := &registerDispatchSubs{

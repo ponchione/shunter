@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"strings"
 	"testing"
@@ -309,6 +310,35 @@ func TestEvalChangesetNotMutated(t *testing.T) {
 	<-inbox
 	if len(cs.Tables[1].Inserts) != lenBefore {
 		t.Fatalf("changeset mutated: before=%d after=%d", lenBefore, len(cs.Tables[1].Inserts))
+	}
+}
+
+func TestEvalErrorDropCullsQuerySets(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 2)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	c := types.ConnectionID{1}
+	qid := uint32(10)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     c,
+		QueryID:    qid,
+		RequestID:  77,
+		Predicates: []Predicate{AllRows{Table: 1}},
+	}, nil)
+
+	// Trigger eval error by nil-ing the schema (same technique as
+	// TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection).
+	mgr.schema = nil
+	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("x")}}, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
+	<-inbox // drain the FanOutMessage
+
+	if _, still := mgr.querySets[c][qid]; still {
+		t.Fatalf("querySets[%v][%d] should be deleted after eval-error drop", c, qid)
+	}
+	mgr.schema = s // restore so UnregisterSet can run
+	if _, err := mgr.UnregisterSet(c, qid, nil); !errors.Is(err, ErrSubscriptionNotFound) {
+		t.Fatalf("second UnregisterSet err = %v, want ErrSubscriptionNotFound", err)
 	}
 }
 
