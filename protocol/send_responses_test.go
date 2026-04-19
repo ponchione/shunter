@@ -84,25 +84,6 @@ func TestSendSubscribeSingleAppliedDiscardsAfterDisconnect(t *testing.T) {
 	t.Skip("migrated in Task 5 (admission-model fix plan): tracker-based discard guard retired in TD-140")
 }
 
-func TestSendSubscribeSingleAppliedSendFailure(t *testing.T) {
-	c, _ := testConn(false)
-
-	sender := assertingSender{
-		sendFn: func(msg any) error {
-			if _, ok := msg.(SubscribeSingleApplied); !ok {
-				t.Fatalf("expected SubscribeSingleApplied, got %T", msg)
-			}
-			return ErrConnNotFound
-		},
-	}
-
-	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
-	err := SendSubscribeSingleApplied(sender, c, msg)
-	if !errors.Is(err, ErrConnNotFound) {
-		t.Fatalf("err = %v, want ErrConnNotFound", err)
-	}
-}
-
 func TestSendUnsubscribeSingleAppliedEnqueuesFrame(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()

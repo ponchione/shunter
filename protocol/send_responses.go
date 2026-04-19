@@ -22,9 +22,10 @@ func SendUnsubscribeSingleApplied(sender ClientSender, conn *Conn, msg *Unsubscr
 }
 
 // SendSubscribeMultiApplied delivers a SubscribeMultiApplied message.
-// Phase 2 Slice 2: connection-level subscription tracking stays on the
-// Single path only; Multi admission bookkeeping lives in the executor's
-// set registry (Task 7), so this helper is a straight transport push.
+// Phase 2 Slice 2 admission-model slice (TD-140): connection-level
+// subscription tracking is gone on both Single and Multi paths —
+// subscription.Manager owns admission, set-level teardown bookkeeping
+// lives in the executor. This helper is a straight transport push.
 func SendSubscribeMultiApplied(sender ClientSender, conn *Conn, msg *SubscribeMultiApplied) error {
 	return sender.Send(conn.ID, *msg)
 }
