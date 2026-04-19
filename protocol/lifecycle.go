@@ -81,10 +81,12 @@ type UnregisterSubscriptionSetRequest struct {
 	Reply     func(UnsubscribeSetCommandResponse)
 }
 
-// SubscriptionSetCommandResponse is the async result envelope from the
-// executor for a set-based subscribe. Exactly one of MultiApplied,
-// SingleApplied, or Error is set — the watcher routes the corresponding
-// wire message out on the connection.
+// SubscriptionSetCommandResponse is the result envelope the executor
+// hands to the protocol-side Reply closure for a set-based subscribe.
+// Exactly one of MultiApplied, SingleApplied, or Error is set — the
+// Reply closure inspects the populated arm and enqueues the
+// corresponding wire message on the connection's OutboundCh
+// synchronously, preserving ADR §9.4 FIFO ordering.
 type SubscriptionSetCommandResponse struct {
 	MultiApplied  *SubscribeMultiApplied
 	SingleApplied *SubscribeSingleApplied
