@@ -144,6 +144,58 @@ func TestUnregisterSetDropsAllInSet(t *testing.T) {
 	}
 }
 
+// TestRegisterSetUnwindsPartialStateOnInitialQueryError — exercises the
+// atomic unwind when initialQuery fails partway through a Multi set.
+// With InitialRowLimit(1), the second predicate trips ErrInitialRowLimit
+// after the first has already placed itself on the registry and indexes;
+// the unwind must drop every trace — including the PruningIndexes rows
+// that plain unregisterSingle would leave behind. Reference:
+// rollback-on-failure parallel to
+// reference/SpacetimeDB/.../module_subscription_manager.rs:1023.
+func TestRegisterSetUnwindsPartialStateOnInitialQueryError(t *testing.T) {
+	s := testSchema()
+	// Table(1) has 1 row so the first predicate finishes under the
+	// InitialRowLimit cap; Table(2) has 2 rows so the second predicate
+	// overruns and trips ErrInitialRowLimit after the first has already
+	// placed itself on the registry + indexes.
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+		},
+		2: {
+			{types.NewUint64(10), types.NewInt32(1)},
+			{types.NewUint64(20), types.NewInt32(2)},
+		},
+	})
+	mgr := NewManager(s, s)
+	mgr.InitialRowLimit = 1
+	req := SubscriptionSetRegisterRequest{
+		ConnID:  types.ConnectionID{1},
+		QueryID: 1,
+		Predicates: []Predicate{
+			AllRows{Table: 1},
+			AllRows{Table: 2},
+		},
+	}
+	_, err := mgr.RegisterSet(req, view)
+	if err == nil {
+		t.Fatal("RegisterSet should fail once initial-row limit is exceeded")
+	}
+	if !errors.Is(err, ErrInitialRowLimit) {
+		t.Fatalf("err = %v, want ErrInitialRowLimit", err)
+	}
+	if _, ok := mgr.querySets[req.ConnID]; ok {
+		t.Fatalf("querySets not cleared on unwind: %+v", mgr.querySets)
+	}
+	if mgr.registry.hasActive() {
+		t.Fatalf("registry should be clear after unwind")
+	}
+	if !mgr.indexes.TestOnlyIsEmpty() {
+		t.Fatalf("pruning indexes not cleared on unwind: value=%+v joinedge=%+v table=%+v",
+			mgr.indexes.Value, mgr.indexes.JoinEdge, mgr.indexes.Table)
+	}
+}
+
 // TestDisconnectClientClearsQuerySets — DisconnectClient drops the
 // entire (ConnID, *) bucket.
 func TestDisconnectClientClearsQuerySets(t *testing.T) {

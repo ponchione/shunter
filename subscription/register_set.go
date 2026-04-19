@@ -7,6 +7,23 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+// dropSub removes a single (connID, subID) registry entry and, on
+// last-ref, also evicts the query state + pruning-index placement.
+// Mirrors Unregister's semantics — the plain registry.unregisterSingle
+// only touches the registry maps and would leak PruningIndexes rows.
+func (m *Manager) dropSub(connID types.ConnectionID, subID types.SubscriptionID) {
+	hash, found := m.registry.hashForSub(connID, subID)
+	if !found {
+		return
+	}
+	qs := m.registry.getQuery(hash)
+	_, last, _ := m.registry.removeSubscriber(connID, subID)
+	if last && qs != nil {
+		RemoveSubscription(m.indexes, qs.predicate, hash)
+		m.registry.removeQueryState(hash)
+	}
+}
+
 // RegisterSet atomically registers 1..N predicates under a single
 // (ConnID, QueryID) key. Reference: add_subscription_multi at
 // reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1023.
@@ -47,9 +64,11 @@ func (m *Manager) RegisterSet(
 		hash := ComputeQueryHash(p, req.ClientIdentity)
 		rows, err := m.initialQuery(p, view)
 		if err != nil {
-			// Unwind any partial state.
+			// Unwind any partial state, including pruning-index placement
+			// (mirror legacy Unregister semantics — plain unregisterSingle
+			// only touches the registry maps).
 			for _, sid := range allocated {
-				_ = m.registry.unregisterSingle(req.ConnID, sid)
+				m.dropSub(req.ConnID, sid)
 			}
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("initial query: %w", err)
 		}
@@ -85,6 +104,8 @@ func (m *Manager) RegisterSet(
 // UnregisterSet drops every internal subscription registered under
 // (ConnID, QueryID). Reference: remove_subscription at
 // reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:841.
+// If view is nil, no final-delta rows are computed and Update is empty —
+// suitable for disconnect-time cleanup.
 func (m *Manager) UnregisterSet(
 	connID types.ConnectionID,
 	queryID uint32,
@@ -107,6 +128,7 @@ func (m *Manager) UnregisterSet(
 		}
 		if view != nil {
 			rows, err := m.initialQuery(qs.predicate, view)
+			// Final-delta errors are non-fatal — the subscription still drops.
 			if err == nil && len(rows) > 0 {
 				tables := qs.predicate.Tables()
 				var tableID TableID
@@ -121,7 +143,7 @@ func (m *Manager) UnregisterSet(
 				})
 			}
 		}
-		_ = m.registry.unregisterSingle(connID, sid)
+		m.dropSub(connID, sid)
 	}
 	delete(byQ, queryID)
 	if len(byQ) == 0 {

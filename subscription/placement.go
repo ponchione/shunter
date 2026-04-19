@@ -21,6 +21,25 @@ func NewPruningIndexes() *PruningIndexes {
 	}
 }
 
+// TestOnlyIsEmpty reports whether every underlying tier is devoid of
+// placement entries. Used by unwind tests to assert no stale index rows
+// survive a failed RegisterSet. Not part of the production contract.
+func (p *PruningIndexes) TestOnlyIsEmpty() bool {
+	if p == nil {
+		return true
+	}
+	if len(p.Value.args) != 0 || len(p.Value.cols) != 0 {
+		return false
+	}
+	if len(p.JoinEdge.edges) != 0 || len(p.JoinEdge.byTable) != 0 {
+		return false
+	}
+	if len(p.Table.tables) != 0 {
+		return false
+	}
+	return true
+}
+
 // IndexResolver maps (table, column) → indexID when an index on that single
 // column exists. Used by Tier 2 candidate collection to resolve the RHS row
 // for a join edge.
