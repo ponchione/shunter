@@ -392,7 +392,7 @@ On receiving this, the client must discard all cached rows for `query_id`. The `
 
 **Go↔wire mapping.** The subscription evaluator's internal `SubscriptionError` Go value (SPEC-004 §10.2) still carries a typed Go `SubscriptionID` plus additional diagnostic fields (`QueryHash`, `Predicate`) that are not otherwise on the wire; the protocol adapter projects Go→wire by emitting `request_id = RequestID`, `query_id = SubscriptionID`, and `error = Message`.
 
-**`request_id = 0` semantics.** A `SubscriptionError` with `request_id = 0` is a spontaneous failure where the server no longer has any originating subscribe request identity to report. A `SubscriptionError` with `request_id != 0` MUST echo the `request_id` of the triggering `Subscribe`, including post-register reevaluation failures when the subscription tracker still retains that metadata. Clients that choose `request_id = 0` on `Subscribe` accept that correlated failures and genuinely uncorrelated failures are indistinguishable; recommend `request_id >= 1` for robust client-side correlation.
+**`request_id = 0` semantics.** A `SubscriptionError` with `request_id = 0` is a spontaneous failure where the server no longer has any originating subscribe request identity to report. A `SubscriptionError` with `request_id != 0` MUST echo the `request_id` of the triggering `Subscribe`, including post-register reevaluation failures when the subscription manager still retains that metadata. Clients that choose `request_id = 0` on `Subscribe` accept that correlated failures and genuinely uncorrelated failures are indistinguishable; recommend `request_id >= 1` for robust client-side correlation.
 
 ### 8.5 TransactionUpdate
 
@@ -498,11 +498,11 @@ Implementation note: the committed delta pipeline computes per-connection update
 ```
 
 State rules:
-- a `subscription_id` is reserved as soon as `Subscribe` is accepted for processing; a second `Subscribe` with the same ID while pending or active MUST fail with `SubscriptionError`
+- a `subscription_id` is reserved as soon as `Subscribe` is accepted for processing; a second `Subscribe` with the same ID while pending or active MUST fail with `SubscriptionError` (manager-authoritative: rejected by the subscription manager's `(ConnID, QueryID)` registry, not a protocol-layer tracker)
 - `Unsubscribe` for a pending or unknown `subscription_id` returns `ErrSubscriptionNotFound`
-- if the client disconnects while a subscription is pending, the registration result is discarded and the subscription never becomes active
-- once `SubscribeApplied` is emitted, the subscription transitions from pending → active atomically with tracker activation; a later disconnect cannot resurrect it
-- `UnsubscribeApplied` is a confirmation message for a removal that has already been applied in the tracker/executor pipeline; there is no separate long-lived "pending removal" state in v1
+- if the client disconnects while a subscription is pending, the registration result is discarded and the subscription never becomes active: the executor invokes the registration `Reply` closure synchronously, but the closure's `connOnlySender` short-circuits on a closed `<-conn.closed` channel and returns `ErrConnNotFound`; no Applied envelope ever reaches `OutboundCh`
+- once `SubscribeApplied` is enqueued on the connection's outbound queue during registration, any subsequent `TransactionUpdate` for that `subscription_id` is guaranteed to be delivered after it. The ordering is preserved by the per-connection `OutboundCh` FIFO: the executor's register handler synchronously enqueues the Applied envelope before returning, and any later fan-out delivery on the same executor goroutine enqueues strictly after it. No separate tracker state machine or activation gate is involved, so no stale activation can survive a disconnect
+- `UnsubscribeApplied` is a confirmation message for a removal that has already been applied in the executor / subscription-manager pipeline; there is no separate long-lived "pending removal" state in v1
 
 ### 9.2 Client-Maintained State
 
