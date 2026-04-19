@@ -4,18 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"testing"
-
-	"github.com/ponchione/shunter/types"
 )
 
-func TestSubscribeRoundTripEmptyPredicates(t *testing.T) {
+func TestSubscribeSingleRoundTripSQLEmpty(t *testing.T) {
 	in := SubscribeSingleMsg{
-		RequestID: 42,
-		QueryID:   7,
-		Query: Query{
-			TableName:  "accounts",
-			Predicates: nil,
-		},
+		RequestID:   42,
+		QueryID:     7,
+		QueryString: "SELECT * FROM accounts",
 	}
 	frame, err := EncodeClientMessage(in)
 	if err != nil {
@@ -33,29 +28,16 @@ func TestSubscribeRoundTripEmptyPredicates(t *testing.T) {
 		t.Errorf("tag = %d, want TagSubscribeSingle", tag)
 	}
 	got := out.(SubscribeSingleMsg)
-	if got.RequestID != in.RequestID || got.QueryID != in.QueryID {
-		t.Errorf("ids mismatch: got %+v, want %+v", got, in)
-	}
-	if got.Query.TableName != in.Query.TableName {
-		t.Errorf("table_name mismatch: got %q, want %q", got.Query.TableName, in.Query.TableName)
-	}
-	if len(got.Query.Predicates) != 0 {
-		t.Errorf("expected 0 predicates, got %d", len(got.Query.Predicates))
+	if got != in {
+		t.Errorf("round-trip mismatch: got %+v, want %+v", got, in)
 	}
 }
 
-func TestSubscribeRoundTripMultiplePredicates(t *testing.T) {
+func TestSubscribeSingleRoundTripSQLWithPredicates(t *testing.T) {
 	in := SubscribeSingleMsg{
-		RequestID: 1,
-		QueryID:   2,
-		Query: Query{
-			TableName: "t",
-			Predicates: []Predicate{
-				{Column: "a", Value: types.NewUint64(100)},
-				{Column: "b", Value: types.NewString("hello")},
-				{Column: "c", Value: types.NewBool(true)},
-			},
-		},
+		RequestID:   1,
+		QueryID:     2,
+		QueryString: "SELECT * FROM t WHERE a = 100 AND b = 'hello' AND c = true",
 	}
 	frame, err := EncodeClientMessage(in)
 	if err != nil {
@@ -66,16 +48,8 @@ func TestSubscribeRoundTripMultiplePredicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.(SubscribeSingleMsg)
-	if len(got.Query.Predicates) != 3 {
-		t.Fatalf("got %d predicates, want 3", len(got.Query.Predicates))
-	}
-	for i, want := range in.Query.Predicates {
-		if got.Query.Predicates[i].Column != want.Column {
-			t.Errorf("pred[%d].Column = %q, want %q", i, got.Query.Predicates[i].Column, want.Column)
-		}
-		if !got.Query.Predicates[i].Value.Equal(want.Value) {
-			t.Errorf("pred[%d].Value mismatch", i)
-		}
+	if got.QueryString != in.QueryString {
+		t.Errorf("QueryString mismatch: got %q, want %q", got.QueryString, in.QueryString)
 	}
 }
 
@@ -180,13 +154,10 @@ func TestCallReducerEmptyArgs(t *testing.T) {
 	}
 }
 
-func TestOneOffQueryRoundTrip(t *testing.T) {
+func TestOneOffQueryRoundTripSQL(t *testing.T) {
 	in := OneOffQueryMsg{
-		RequestID: 5,
-		TableName: "players",
-		Predicates: []Predicate{
-			{Column: "level", Value: types.NewUint32(42)},
-		},
+		RequestID:   5,
+		QueryString: "SELECT * FROM players WHERE level = 42",
 	}
 	frame, _ := EncodeClientMessage(in)
 	_, out, err := DecodeClientMessage(frame)
@@ -194,14 +165,8 @@ func TestOneOffQueryRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.(OneOffQueryMsg)
-	if got.RequestID != in.RequestID || got.TableName != in.TableName {
-		t.Errorf("field mismatch: got %+v, want %+v", got, in)
-	}
-	if len(got.Predicates) != 1 {
-		t.Fatalf("predicate count = %d, want 1", len(got.Predicates))
-	}
-	if got.Predicates[0].Column != "level" || !got.Predicates[0].Value.Equal(types.NewUint32(42)) {
-		t.Errorf("predicate mismatch: %+v", got.Predicates[0])
+	if got != in {
+		t.Errorf("round-trip mismatch: got %+v, want %+v", got, in)
 	}
 }
 
@@ -241,13 +206,13 @@ func TestEncodeClientMessageUnknownType(t *testing.T) {
 	}
 }
 
-func TestSubscribeMultiRoundTrip(t *testing.T) {
+func TestSubscribeMultiRoundTripSQL(t *testing.T) {
 	orig := SubscribeMultiMsg{
 		RequestID: 42,
 		QueryID:   7,
-		Queries: []Query{
-			{TableName: "users"},
-			{TableName: "orders", Predicates: []Predicate{{Column: "id", Value: types.NewUint32(9)}}},
+		QueryStrings: []string{
+			"SELECT * FROM users",
+			"SELECT * FROM orders WHERE id = 9",
 		},
 	}
 	frame, err := EncodeClientMessage(orig)
@@ -268,11 +233,8 @@ func TestSubscribeMultiRoundTrip(t *testing.T) {
 	if got.RequestID != orig.RequestID || got.QueryID != orig.QueryID {
 		t.Fatalf("ids = %+v, want %+v", got, orig)
 	}
-	if len(got.Queries) != 2 || got.Queries[0].TableName != "users" || got.Queries[1].TableName != "orders" {
-		t.Fatalf("queries = %+v, want %+v", got.Queries, orig.Queries)
-	}
-	if len(got.Queries[1].Predicates) != 1 || got.Queries[1].Predicates[0].Column != "id" {
-		t.Fatalf("predicate mismatch on queries[1]: %+v", got.Queries[1].Predicates)
+	if len(got.QueryStrings) != 2 || got.QueryStrings[0] != orig.QueryStrings[0] || got.QueryStrings[1] != orig.QueryStrings[1] {
+		t.Fatalf("query strings = %+v, want %+v", got.QueryStrings, orig.QueryStrings)
 	}
 }
 

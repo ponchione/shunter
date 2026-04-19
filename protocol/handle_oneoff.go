@@ -24,7 +24,11 @@ type colMatcher struct {
 
 // handleOneOffQuery executes a one-off table scan with optional
 // equality predicates against committed state and sends the result
-// back to the client (SPEC-005 S7.4).
+// back to the client (SPEC-005 §7.4).
+//
+// The wire carries a SQL string (Phase 2 Slice 1) which is parsed and
+// coerced against the schema before the existing snapshot-scan path
+// runs.
 func handleOneOffQuery(
 	ctx context.Context,
 	conn *Conn,
@@ -32,29 +36,28 @@ func handleOneOffQuery(
 	stateAccess CommittedStateAccess,
 	sl SchemaLookup,
 ) {
-	tableID, ts, ok := sl.TableByName(msg.TableName)
-	if !ok {
+	q, err := parseQueryString(msg.QueryString, sl)
+	if err != nil {
 		sendError(conn, OneOffQueryResult{
 			RequestID: msg.RequestID,
 			Status:    1,
-			Error:     fmt.Sprintf("unknown table %q", msg.TableName),
+			Error:     err.Error(),
 		})
 		return
 	}
 
-	for _, p := range msg.Predicates {
-		if _, colOK := ts.Column(p.Column); !colOK {
-			sendError(conn, OneOffQueryResult{
-				RequestID: msg.RequestID,
-				Status:    1,
-				Error:     fmt.Sprintf("unknown column %q on table %q", p.Column, ts.Name),
-			})
-			return
-		}
+	tableID, ts, ok := sl.TableByName(q.TableName)
+	if !ok {
+		sendError(conn, OneOffQueryResult{
+			RequestID: msg.RequestID,
+			Status:    1,
+			Error:     fmt.Sprintf("unknown table %q", q.TableName),
+		})
+		return
 	}
 
-	matchers := make([]colMatcher, 0, len(msg.Predicates))
-	for _, p := range msg.Predicates {
+	matchers := make([]colMatcher, 0, len(q.Predicates))
+	for _, p := range q.Predicates {
 		col, _ := ts.Column(p.Column)
 		matchers = append(matchers, colMatcher{colIdx: col.Index, value: p.Value})
 	}

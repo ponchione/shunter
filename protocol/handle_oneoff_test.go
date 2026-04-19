@@ -123,11 +123,8 @@ func TestHandleOneOffQuery_Valid(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID: 10,
-		TableName: "users",
-		Predicates: []Predicate{
-			{Column: "id", Value: types.NewUint32(2)},
-		},
+		RequestID:   10,
+		QueryString: "SELECT * FROM users WHERE id = 2",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
@@ -175,11 +172,8 @@ func TestHandleOneOffQuery_NoMatches(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID: 20,
-		TableName: "users",
-		Predicates: []Predicate{
-			{Column: "id", Value: types.NewUint32(999)},
-		},
+		RequestID:   20,
+		QueryString: "SELECT * FROM users WHERE id = 999",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
@@ -225,9 +219,8 @@ func TestHandleOneOffQuery_EmptyPredicates(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID:  30,
-		TableName:  "items",
-		Predicates: nil, // no predicates — return all rows
+		RequestID:   30,
+		QueryString: "SELECT * FROM items",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
@@ -261,8 +254,8 @@ func TestHandleOneOffQuery_UnknownTable(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID: 40,
-		TableName: "nonexistent",
+		RequestID:   40,
+		QueryString: "SELECT * FROM nonexistent",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
@@ -296,11 +289,8 @@ func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID: 50,
-		TableName: "users",
-		Predicates: []Predicate{
-			{Column: "bogus_col", Value: types.NewUint32(1)},
-		},
+		RequestID:   50,
+		QueryString: "SELECT * FROM users WHERE bogus_col = 1",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)

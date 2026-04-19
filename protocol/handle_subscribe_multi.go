@@ -22,8 +22,17 @@ func handleSubscribeMulti(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
-	preds := make([]any, 0, len(msg.Queries))
-	for _, q := range msg.Queries {
+	preds := make([]any, 0, len(msg.QueryStrings))
+	for _, qs := range msg.QueryStrings {
+		q, err := parseQueryString(qs, sl)
+		if err != nil {
+			sendError(conn, SubscriptionError{
+				RequestID: msg.RequestID,
+				QueryID:   msg.QueryID,
+				Error:     err.Error(),
+			})
+			return
+		}
 		p, err := compileQuery(q, sl)
 		if err != nil {
 			sendError(conn, SubscriptionError{

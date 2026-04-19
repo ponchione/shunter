@@ -117,7 +117,7 @@ Evidence from `SPEC-AUDIT.md` protocol divergence block (updated as slices land)
 - `TransactionUpdate` heavy/light split: closed Phase 1.5
 - `SubscribeMulti` / `SubscribeSingle` variant split + one-QueryID-per-query-set grouping: closed Phase 2 Slice 2
 - `CallReducer.flags` (`FullUpdate` / `NoSuccessNotify`): closed Phase 1.5
-- one-off query still uses structured predicates instead of SQL string (Phase 2 Slice 1 open)
+- one-off query SQL-string flip: closed Phase 2 Slice 1b (2026-04-19); `OneOffQueryMsg.RequestID uint32` ↔ reference `message_id: Box<[u8]>` remains open as Slice 1c
 - close-code behavior: closed Phase 1
 - reducer-call result status enum: closed Phase 1.5 (`UpdateStatus` tagged union)
 

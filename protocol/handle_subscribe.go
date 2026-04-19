@@ -3,6 +3,7 @@ package protocol
 import (
 	"fmt"
 
+	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
@@ -26,6 +27,35 @@ func compileQuery(q Query, sl SchemaLookup) (subscription.Predicate, error) {
 		return nil, fmt.Errorf("unknown table %q", q.TableName)
 	}
 	return NormalizePredicates(tableID, ts, q.Predicates)
+}
+
+// parseQueryString turns a client-supplied SQL string into the internal
+// Query form used by compileQuery. It resolves the table against the
+// schema and coerces each literal against the matching column kind.
+// Errors carry context suitable for SubscriptionError.Error /
+// OneOffQueryResult.Error.
+func parseQueryString(qs string, sl SchemaLookup) (Query, error) {
+	stmt, err := sql.Parse(qs)
+	if err != nil {
+		return Query{}, fmt.Errorf("parse: %v", err)
+	}
+	_, ts, ok := sl.TableByName(stmt.Table)
+	if !ok {
+		return Query{}, fmt.Errorf("unknown table %q", stmt.Table)
+	}
+	q := Query{TableName: stmt.Table}
+	for _, f := range stmt.Filters {
+		col, ok := ts.Column(f.Column)
+		if !ok {
+			return Query{}, fmt.Errorf("unknown column %q on table %q", f.Column, ts.Name)
+		}
+		v, err := sql.Coerce(f.Literal, col.Type)
+		if err != nil {
+			return Query{}, fmt.Errorf("coerce column %q: %v", f.Column, err)
+		}
+		q.Predicates = append(q.Predicates, Predicate{Column: f.Column, Value: v})
+	}
+	return q, nil
 }
 
 // NormalizePredicates converts a slice of wire-level Predicate (column

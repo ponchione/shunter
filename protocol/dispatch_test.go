@@ -88,10 +88,7 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	subMsg := SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   42,
-		Query: Query{
-			TableName:  "users",
-			Predicates: nil,
-		},
+		QueryString: "SELECT * FROM users",
 	}
 	frame, err := EncodeClientMessage(subMsg)
 	if err != nil {
@@ -236,10 +233,7 @@ func TestDispatchLoop_NilHandlerCloses(t *testing.T) {
 	subMsg := SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   10,
-		Query: Query{
-			TableName:  "items",
-			Predicates: nil,
-		},
+		QueryString: "SELECT * FROM items",
 	}
 	frame, err := EncodeClientMessage(subMsg)
 	if err != nil {
@@ -308,10 +302,7 @@ func TestDispatchLoop_MarksActivity(t *testing.T) {
 	subMsg := SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   7,
-		Query: Query{
-			TableName:  "events",
-			Predicates: nil,
-		},
+		QueryString: "SELECT * FROM events",
 	}
 	frame, err := EncodeClientMessage(subMsg)
 	if err != nil {

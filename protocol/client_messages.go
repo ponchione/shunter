@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-
-	"github.com/ponchione/shunter/bsatn"
-	"github.com/ponchione/shunter/types"
 )
 
 // SubscribeSingleMsg is the client-side single-envelope Subscribe
@@ -17,11 +14,14 @@ import (
 // Part of the Phase 2 Slice 2 variant split. SubscribeMultiMsg
 // carries a list of queries under one QueryID; this type carries
 // exactly one. Reference: SubscribeSingle at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:189.
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:189
+// (`query: Box<str>`). Phase 2 Slice 1 flipped the wire from a
+// structured Query to a SQL string; the handler parses with
+// query/sql.Parse.
 type SubscribeSingleMsg struct {
-	RequestID uint32
-	QueryID   uint32
-	Query     Query
+	RequestID   uint32
+	QueryID     uint32
+	QueryString string
 }
 
 // UnsubscribeSingleMsg is the client-side single-envelope Unsubscribe
@@ -70,22 +70,28 @@ const (
 )
 
 // OneOffQueryMsg is the client-side OneOffQuery message (SPEC-005 §7.4).
+// Reference: OneOffQuery at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:247
+// (`{ message_id: Box<[u8]>, query_string: Box<str> }`).
+//
+// Phase 2 Slice 1 flipped `TableName + Predicates` → `QueryString`.
+// The `message_id: Box<[u8]>` ↔ `RequestID: uint32` divergence is
+// deferred to Phase 2 Slice 1c.
 type OneOffQueryMsg struct {
-	RequestID  uint32
-	TableName  string
-	Predicates []Predicate
+	RequestID   uint32
+	QueryString string
 }
 
 // SubscribeMultiMsg is the client-side SubscribeMulti message
 // (SPEC-005 §7.1b). Reference: SubscribeMulti at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:203.
-// Queries is a structured predicate list — the SQL-string form is
-// deferred alongside OneOffQuery (see
-// TestPhase2DeferralSubscribeMultiQueriesStructured).
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:203
+// (`query_strings: Box<[Box<str>]>`). Phase 2 Slice 1 flipped the
+// structured predicate list to a SQL string list on the wire; handlers
+// parse each string with query/sql.Parse.
 type SubscribeMultiMsg struct {
-	RequestID uint32
-	QueryID   uint32
-	Queries   []Query
+	RequestID    uint32
+	QueryID      uint32
+	QueryStrings []string
 }
 
 // UnsubscribeMultiMsg drops every query registered under the given
@@ -104,9 +110,7 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		buf.WriteByte(TagSubscribeSingle)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
-		if err := encodeQuery(&buf, msg.Query); err != nil {
-			return nil, err
-		}
+		writeString(&buf, msg.QueryString)
 	case UnsubscribeSingleMsg:
 		buf.WriteByte(TagUnsubscribeSingle)
 		writeUint32(&buf, msg.RequestID)
@@ -125,19 +129,14 @@ func EncodeClientMessage(m any) ([]byte, error) {
 	case OneOffQueryMsg:
 		buf.WriteByte(TagOneOffQuery)
 		writeUint32(&buf, msg.RequestID)
-		writeString(&buf, msg.TableName)
-		if err := encodePredicates(&buf, msg.Predicates); err != nil {
-			return nil, err
-		}
+		writeString(&buf, msg.QueryString)
 	case SubscribeMultiMsg:
 		buf.WriteByte(TagSubscribeMulti)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
-		writeUint32(&buf, uint32(len(msg.Queries)))
-		for _, q := range msg.Queries {
-			if err := encodeQuery(&buf, q); err != nil {
-				return nil, err
-			}
+		writeUint32(&buf, uint32(len(msg.QueryStrings)))
+		for _, qs := range msg.QueryStrings {
+			writeString(&buf, qs)
 		}
 	case UnsubscribeMultiMsg:
 		buf.WriteByte(TagUnsubscribeMulti)
@@ -195,11 +194,9 @@ func decodeSubscribeSingle(body []byte) (SubscribeSingleMsg, error) {
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	q, _, err := decodeQuery(body, off)
-	if err != nil {
+	if m.QueryString, _, err = readString(body, off); err != nil {
 		return m, err
 	}
-	m.Query = q
 	return m, nil
 }
 
@@ -252,14 +249,9 @@ func decodeOneOffQuery(body []byte) (OneOffQueryMsg, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.TableName, off, err = readString(body, off); err != nil {
+	if m.QueryString, _, err = readString(body, off); err != nil {
 		return m, err
 	}
-	preds, _, err := decodePredicates(body, off)
-	if err != nil {
-		return m, err
-	}
-	m.Predicates = preds
 	return m, nil
 }
 
@@ -277,14 +269,14 @@ func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 	if err != nil {
 		return m, err
 	}
-	m.Queries = make([]Query, 0, count)
+	m.QueryStrings = make([]string, 0, count)
 	for i := uint32(0); i < count; i++ {
-		q, next, qerr := decodeQuery(body, off)
-		if qerr != nil {
-			return m, qerr
+		s, next, serr := readString(body, off)
+		if serr != nil {
+			return m, serr
 		}
 		off = next
-		m.Queries = append(m.Queries, q)
+		m.QueryStrings = append(m.QueryStrings, s)
 	}
 	return m, nil
 }
@@ -300,75 +292,6 @@ func decodeUnsubscribeMulti(body []byte) (UnsubscribeMultiMsg, error) {
 		return m, err
 	}
 	return m, nil
-}
-
-// --- Query / Predicate codecs ---
-
-func encodeQuery(buf *bytes.Buffer, q Query) error {
-	writeString(buf, q.TableName)
-	return encodePredicates(buf, q.Predicates)
-}
-
-func decodeQuery(body []byte, off int) (Query, int, error) {
-	var q Query
-	var err error
-	if q.TableName, off, err = readString(body, off); err != nil {
-		return q, off, err
-	}
-	preds, off, err := decodePredicates(body, off)
-	if err != nil {
-		return q, off, err
-	}
-	q.Predicates = preds
-	return q, off, nil
-}
-
-func encodePredicates(buf *bytes.Buffer, preds []Predicate) error {
-	writeUint32(buf, uint32(len(preds)))
-	for _, p := range preds {
-		writeString(buf, p.Column)
-		if err := bsatn.EncodeValue(buf, p.Value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func decodePredicates(body []byte, off int) ([]Predicate, int, error) {
-	count, off, err := readUint32(body, off)
-	if err != nil {
-		return nil, off, err
-	}
-	preds := make([]Predicate, 0, count)
-	for i := uint32(0); i < count; i++ {
-		var p Predicate
-		if p.Column, off, err = readString(body, off); err != nil {
-			return nil, off, err
-		}
-		v, n, err := decodeValue(body, off)
-		if err != nil {
-			return nil, off, err
-		}
-		off += n
-		p.Value = v
-		preds = append(preds, p)
-	}
-	return preds, off, nil
-}
-
-// decodeValue parses a BSATN value from body[off:], returning the Value
-// and the number of bytes consumed.
-func decodeValue(body []byte, off int) (types.Value, int, error) {
-	if len(body)-off < 1 {
-		return types.Value{}, 0, fmt.Errorf("%w: Value tag truncated", ErrMalformedMessage)
-	}
-	r := bytes.NewReader(body[off:])
-	v, err := bsatn.DecodeValue(r)
-	if err != nil {
-		return types.Value{}, 0, fmt.Errorf("%w: %v", ErrMalformedMessage, err)
-	}
-	consumed := len(body[off:]) - r.Len()
-	return v, consumed, nil
 }
 
 // --- Framing primitives ---

@@ -90,15 +90,16 @@ func TestPhase15TagReducerCallResultReserved(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeSingleShape pins the renamed single-envelope. The
-// QueryID field already landed; the rename closes the Single/Multi
-// variant split on the client side. Reference: SubscribeSingle at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:189.
+// TestPhase2SubscribeSingleShape pins the Phase 2 Slice 1 SQL-string
+// shape. Reference: SubscribeSingle { query: Box<str>, request_id,
+// query_id } at reference/SpacetimeDB/crates/client-api-messages/src/
+// websocket/v1.rs:189. The structured `Query` form was flipped to a
+// `QueryString` in Phase 2 Slice 1.
 func TestPhase2SubscribeSingleShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeSingleMsg{})
-	want := []string{"RequestID", "QueryID", "Query"}
+	want := []string{"RequestID", "QueryID", "QueryString"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeSingleMsg fields = %v, want %v", fields, want)
+		t.Fatalf("SubscribeSingleMsg fields = %v, want %v (Phase 2 Slice 1 SQL-string flip)", fields, want)
 	}
 }
 
@@ -161,28 +162,30 @@ func TestPhase15CallReducerFlagsField(t *testing.T) {
 	}
 }
 
-// TestPhase1DeferralOneOffQueryStructuredNotSQL pins the deferral:
-// reference uses a SQL string; Shunter uses structured predicates.
-// Flip when the SQL front door lands (Phase 2 Slice 1).
-func TestPhase1DeferralOneOffQueryStructuredNotSQL(t *testing.T) {
+// TestPhase2Slice1OneOffQuerySQLShape pins the Phase 2 Slice 1 flip:
+// reference OneOffQuery carries `message_id: Box<[u8]>, query_string:
+// Box<str>` (v1.rs:247). Shunter now carries a SQL string on the wire
+// and parses it at handler entry. The `message_id` bytes flip is
+// tracked separately as Slice 1c (RequestID stays u32 for now).
+func TestPhase2Slice1OneOffQuerySQLShape(t *testing.T) {
 	fields := msgFieldNames(OneOffQueryMsg{})
-	want := []string{"RequestID", "TableName", "Predicates"}
+	want := []string{"RequestID", "QueryString"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("OneOffQueryMsg fields = %v, want %v (deferral: structured predicates, not SQL string)",
+		t.Fatalf("OneOffQueryMsg fields = %v, want %v (Phase 2 Slice 1 SQL-string flip)",
 			fields, want)
 	}
 }
 
-// TestPhase2SubscribeMultiShape pins the new Phase 2 Slice 2 envelope.
-// Reference: SubscribeMulti { query_strings, request_id, query_id } at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:203.
-// Shunter carries structured Queries (see
-// TestPhase2DeferralSubscribeMultiQueriesStructured).
+// TestPhase2SubscribeMultiShape pins the Phase 2 Slice 1 SQL-string
+// list. Reference: SubscribeMulti { query_strings: Box<[Box<str>]>,
+// request_id, query_id } at reference/SpacetimeDB/crates/
+// client-api-messages/src/websocket/v1.rs:203. The structured Queries
+// list was flipped to QueryStrings in Phase 2 Slice 1.
 func TestPhase2SubscribeMultiShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeMultiMsg{})
-	want := []string{"RequestID", "QueryID", "Queries"}
+	want := []string{"RequestID", "QueryID", "QueryStrings"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeMultiMsg fields = %v, want %v (Phase 2 Slice 2 variant split)",
+		t.Fatalf("SubscribeMultiMsg fields = %v, want %v (Phase 2 Slice 1 SQL-string flip)",
 			fields, want)
 	}
 }
@@ -259,19 +262,18 @@ func TestPhase2DeferralSubscriptionErrorNoTableID(t *testing.T) {
 	}
 }
 
-// TestPhase2DeferralSubscribeMultiQueriesStructured pins the scope
-// boundary with Phase 2 Slice 1. Reference SubscribeMulti carries
-// query_strings: Box<[Box<str>]> (v1.rs:205); Shunter carries
-// structured Queries []Query. Flip when the SQL front door lands.
-func TestPhase2DeferralSubscribeMultiQueriesStructured(t *testing.T) {
+// TestPhase2Slice1SubscribeMultiQueryStringsList pins the positive
+// shape after Phase 2 Slice 1: `query_strings: Box<[Box<str>]>` on the
+// reference (v1.rs:205) maps to a Go `[]string` carrying SQL strings.
+func TestPhase2Slice1SubscribeMultiQueryStringsList(t *testing.T) {
 	m := SubscribeMultiMsg{}
-	qf, ok := reflect.TypeOf(m).FieldByName("Queries")
+	qf, ok := reflect.TypeOf(m).FieldByName("QueryStrings")
 	if !ok {
-		t.Fatal("SubscribeMultiMsg.Queries missing")
+		t.Fatal("SubscribeMultiMsg.QueryStrings missing")
 	}
-	if qf.Type.Elem().Name() != "Query" {
-		t.Fatalf("SubscribeMultiMsg.Queries elem = %s, want Query (structured)",
-			qf.Type.Elem().Name())
+	if qf.Type.Kind().String() != "slice" || qf.Type.Elem().Kind().String() != "string" {
+		t.Fatalf("SubscribeMultiMsg.QueryStrings type = %s, want []string",
+			qf.Type.String())
 	}
 }
 

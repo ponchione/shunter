@@ -13,14 +13,24 @@ envelopes (`SubscribeApplied` / `UnsubscribeApplied` /
 variant split landed with one-QueryID-per-query-set grouping semantics
 that match the reference.
 
+Phase 2 Slice 1b is closed (2026-04-19). The SQL-string wire flip
+landed for `OneOffQueryMsg`, `SubscribeSingleMsg`, and
+`SubscribeMultiMsg`; handlers parse with the new `query/sql` package
+(minimum-viable `SELECT * FROM T [WHERE col = lit ...]` grammar) and
+coerce literals against the column kind. Both previous Phase 2
+structured-vs-SQL deferral pins flipped to positive shape pins.
+`OneOffQuery.message_id: Box<[u8]>` ↔ `RequestID: uint32` is the
+remaining wire divergence, deferred to Slice 1c.
+
 Primary decision
 - Treat `docs/spacetimedb-parity-roadmap.md` as the active development driver.
 - Treat Phase 0, Phase 1, Phase 1.5 (envelope split + `CallReducer.flags`),
-  and Phase 2 Slice 2 (QueryID naming + SubscribeMulti/SubscribeSingle
-  variant split) as materially landed.
-- The next narrow parity slices are Phase 2 Slice 1 (`OneOffQuery` SQL
-  front door), Phase 2 lag / slow-client policy, or Phase 4 recovery
-  parity (`P0-RECOVERY-002`).
+  Phase 2 Slice 2 (QueryID naming + SubscribeMulti/SubscribeSingle
+  variant split), and Phase 2 Slice 1b (SQL front door) as materially
+  landed.
+- The next narrow parity slices are Phase 2 Slice 1c
+  (`OneOffQuery.message_id: Box<[u8]>`), Phase 2 lag / slow-client
+  policy, or Phase 4 recovery parity (`P0-RECOVERY-002`).
 
 What landed last session (Phase 2 Slice 2 variant split)
 - New client-side envelopes: `SubscribeSingleMsg` (renamed from the
@@ -53,7 +63,8 @@ What landed last session (Phase 2 Slice 2 variant split)
   interface is implemented only by test fakes, and there is no `cmd/`
   binary. Host-side wiring is a downstream follow-up when the host
   binary is introduced.
-- Latest broad verification target: `983 passed in 9 packages`.
+- Latest broad verification target: `1029 passed in 10 packages`
+  (Phase 2 Slice 1b close, with new `query/sql` package).
 
 Pinned parity tests (do not flip without a named parity reason)
 - `protocol/parity_message_family_test.go`:
@@ -68,8 +79,8 @@ Pinned parity tests (do not flip without a named parity reason)
   - `TestPhase2SubscribeAppliedCarriesQueryID` (closed Phase 2 Slice 2 response side)
   - `TestPhase2UnsubscribeAppliedCarriesQueryID` (closed Phase 2 Slice 2 response side)
   - `TestPhase2SubscriptionErrorCarriesQueryID` (closed Phase 2 Slice 2 response side)
-  - `TestPhase2SubscribeSingleShape` (closed Phase 2 Slice 2 variant split)
-  - `TestPhase2SubscribeMultiShape` (closed Phase 2 Slice 2 variant split)
+  - `TestPhase2SubscribeSingleShape` (closed Phase 2 Slice 1 SQL-string flip; was Slice 2 variant split)
+  - `TestPhase2SubscribeMultiShape` (closed Phase 2 Slice 1 SQL-string flip; was Slice 2 variant split)
   - `TestPhase2UnsubscribeSingleShape` (closed Phase 2 Slice 2 variant split)
   - `TestPhase2UnsubscribeMultiShape` (closed Phase 2 Slice 2 variant split)
   - `TestPhase2SubscribeSingleAppliedShape` (closed Phase 2 Slice 2 variant split)
@@ -77,10 +88,10 @@ Pinned parity tests (do not flip without a named parity reason)
   - `TestPhase2SubscribeMultiAppliedShape` (closed Phase 2 Slice 2 variant split)
   - `TestPhase2UnsubscribeMultiAppliedShape` (closed Phase 2 Slice 2 variant split)
   - `TestPhase2TagByteStability` (tag-byte stability pin)
+  - `TestPhase2Slice1OneOffQuerySQLShape` (closed Phase 2 Slice 1b; OneOffQueryMsg SQL-string)
+  - `TestPhase2Slice1SubscribeMultiQueryStringsList` (closed Phase 2 Slice 1b; SubscribeMultiMsg.QueryStrings []string)
   - `TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration` (still open; applied envelope lacks `TotalHostExecutionDurationMicros`)
   - `TestPhase2DeferralSubscriptionErrorNoTableID` (still open; `SubscriptionError.TableID` / optional-field shape)
-  - `TestPhase2DeferralSubscribeMultiQueriesStructured` (still open; `SubscribeMulti.Queries` is a structured predicate list, not a SQL string list — paired with Phase 2 Slice 1)
-  - `TestPhase1DeferralOneOffQueryStructuredNotSQL` (still open; Phase 2 Slice 1)
 - `subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout`
 - `subscription/phase0_parity_test.go::TestPhase0ParityCanonicalReducerDeliveryFlow`
 
@@ -119,9 +130,9 @@ OneOffQuery SQL (Phase 2 Slice 1) or P0-RECOVERY-002.
   cleanly fixing C1 and C2. See `TECH-DEBT.md` TD-140 for options.
 
 Phase 2 deferrals still open
-1. `OneOffQuery` SQL front door (Phase 2 Slice 1) — pinned by
-   `TestPhase1DeferralOneOffQueryStructuredNotSQL` and
-   `TestPhase2DeferralSubscribeMultiQueriesStructured`.
+1. `OneOffQuery.message_id: Box<[u8]>` vs `RequestID: uint32`
+   (Phase 2 Slice 1c). The SQL-string flip closed Slice 1b; only the
+   message-id wire-shape divergence remains on OneOffQuery.
 2. `TotalHostExecutionDurationMicros` on applied envelopes — pinned
    by `TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration`.
 3. `SubscriptionError.TableID` / optional-field shape — pinned by
@@ -132,6 +143,11 @@ Phase 2 deferrals still open
 5. Host adapter wiring on `protocol.ExecutorInbox` — no host binary
    exists in-repo; recorded as a downstream follow-up when a host
    binary introduces a production implementer of the inbox.
+6. SQL grammar beyond the minimum surface (projection other than `*`,
+   comparison operators other than `=`, `OR`, `JOIN`, `ORDER BY`,
+   `LIMIT`, qualified columns, aggregates). The query/sql parser
+   rejects these with `ErrUnsupportedSQL`; widen only when a pinned
+   parity scenario demands it.
 
 Phase 1.5 deferrals still open
 1. `EnergyQuantaUsed` — no energy model; keep zero and treat it as a
@@ -142,14 +158,15 @@ Phase 1.5 deferrals still open
    preserve the classification separately (or pin the collapse as permanent).
 
 Suggested next slice
-- Phase 2 Slice 1 (`OneOffQuery` SQL front door) — the remaining
-  Phase 2 protocol-surface parity anchor now that the variant split
-  is closed. Would also let `TestPhase2DeferralSubscribeMultiQueriesStructured`
-  and `TestPhase1DeferralOneOffQueryStructuredNotSQL` flip from
-  deferral pins to positive pins. Does NOT depend on C1/C2/F1-F3.
-- Or Phase 4 `P0-RECOVERY-002` (TxID / nextID / sequence invariants
+- Phase 2 Slice 1c (`OneOffQuery.message_id: Box<[u8]>`) — narrow
+  wire-shape flip. Pin: new `TestPhase2Slice1COneOffQueryMessageIDBytes`
+  asserting `MessageID []byte` replaces `RequestID uint32`. Does NOT
+  depend on C1/C2/F1-F3.
+- Phase 4 `P0-RECOVERY-002` (TxID / nextID / sequence invariants
   across snapshot + replay) if recovery parity is the priority. Does
   NOT depend on C1/C2/F1-F3.
+- Phase 2 lag / slow-client policy decision (emulate reference
+  queueing vs. keep bounded fail-fast as permanent divergence).
 - Host-adapter slice — BLOCKED on C1+C2 (TD-136, TD-137) and the
   F3 admission-model decision (TD-140). Do not start host-adapter
   wiring until those are resolved.
@@ -177,5 +194,5 @@ Hard rules
 - Do not pivot into SQL/query work, scheduler work, or broad tech-debt cleanup.
 
 Stop rule
-- Stop when one narrow Phase 1.5 sub-slice is landed, tested, and documented.
-- Do not broaden into Phase 2 in the same session.
+- Stop when one narrow Phase 2 sub-slice is landed, tested, and documented.
+- Do not widen the query/sql grammar beyond a specific pinned parity scenario.

@@ -20,7 +20,16 @@ func handleSubscribeSingle(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
-	pred, err := compileQuery(msg.Query, sl)
+	q, err := parseQueryString(msg.QueryString, sl)
+	if err != nil {
+		sendError(conn, SubscriptionError{
+			RequestID: msg.RequestID,
+			QueryID:   msg.QueryID,
+			Error:     err.Error(),
+		})
+		return
+	}
+	pred, err := compileQuery(q, sl)
 	if err != nil {
 		sendError(conn, SubscriptionError{
 			RequestID: msg.RequestID,

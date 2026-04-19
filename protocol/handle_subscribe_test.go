@@ -236,14 +236,9 @@ func TestHandleSubscribeSingleSuccess(t *testing.T) {
 	)
 
 	msg := &SubscribeSingleMsg{
-		RequestID: 10,
-		QueryID:   7,
-		Query: Query{
-			TableName: "users",
-			Predicates: []Predicate{
-				{Column: "name", Value: types.NewString("alice")},
-			},
-		},
+		RequestID:   10,
+		QueryID:     7,
+		QueryString: "SELECT * FROM users WHERE name = 'alice'",
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
@@ -293,9 +288,9 @@ func TestHandleSubscribeSingle_DeliversSubscribeAppliedViaReplyClosure(t *testin
 	)
 
 	msg := &SubscribeSingleMsg{
-		RequestID: 10,
-		QueryID:   7,
-		Query:     Query{TableName: "users"},
+		RequestID:   10,
+		QueryID:     7,
+		QueryString: "SELECT * FROM users",
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
@@ -324,9 +319,9 @@ func TestHandleSubscribeSingle_UnknownTable(t *testing.T) {
 	sl := newMockSchema("users", 1) // only "users" exists
 
 	msg := &SubscribeSingleMsg{
-		RequestID: 5,
-		QueryID:   99,
-		Query:     Query{TableName: "nonexistent"},
+		RequestID:   5,
+		QueryID:     99,
+		QueryString: "SELECT * FROM nonexistent",
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
@@ -356,9 +351,9 @@ func TestHandleSubscribeSingle_ExecutorReject(t *testing.T) {
 	)
 
 	msg := &SubscribeSingleMsg{
-		RequestID: 3,
-		QueryID:   50,
-		Query:     Query{TableName: "users"},
+		RequestID:   3,
+		QueryID:     50,
+		QueryString: "SELECT * FROM users",
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
@@ -394,9 +389,9 @@ func TestHandleSubscribeMultiSuccess(t *testing.T) {
 	msg := &SubscribeMultiMsg{
 		RequestID: 11,
 		QueryID:   77,
-		Queries: []Query{
-			{TableName: "users"},
-			{TableName: "orders"},
+		QueryStrings: []string{
+			"SELECT * FROM users",
+			"SELECT * FROM orders",
 		},
 	}
 	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
@@ -424,11 +419,9 @@ func TestHandleSubscribeMulti_DeliversMultiAppliedViaReplyClosure(t *testing.T) 
 	)
 
 	msg := &SubscribeMultiMsg{
-		RequestID: 12,
-		QueryID:   88,
-		Queries: []Query{
-			{TableName: "users"},
-		},
+		RequestID:    12,
+		QueryID:      88,
+		QueryStrings: []string{"SELECT * FROM users"},
 	}
 	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
 
@@ -458,9 +451,9 @@ func TestHandleSubscribeMulti_UnknownTable(t *testing.T) {
 	msg := &SubscribeMultiMsg{
 		RequestID: 13,
 		QueryID:   99,
-		Queries: []Query{
-			{TableName: "users"},
-			{TableName: "missing"},
+		QueryStrings: []string{
+			"SELECT * FROM users",
+			"SELECT * FROM missing",
 		},
 	}
 	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
@@ -486,11 +479,9 @@ func TestHandleSubscribeMulti_ExecutorReject(t *testing.T) {
 	)
 
 	msg := &SubscribeMultiMsg{
-		RequestID: 14,
-		QueryID:   100,
-		Queries: []Query{
-			{TableName: "users"},
-		},
+		RequestID:    14,
+		QueryID:      100,
+		QueryStrings: []string{"SELECT * FROM users"},
 	}
 	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
 

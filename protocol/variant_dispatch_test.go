@@ -13,9 +13,9 @@ func TestHandleSubscribeSingleSetsSingleVariant(t *testing.T) {
 	sl := newMockSchema("users", 1, schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32})
 
 	handleSubscribeSingle(context.Background(), conn, &SubscribeSingleMsg{
-		RequestID: 1,
-		QueryID:   2,
-		Query:     Query{TableName: "users"},
+		RequestID:   1,
+		QueryID:     2,
+		QueryString: "SELECT * FROM users",
 	}, executor, sl)
 
 	req := executor.getRegisterSetReq()
@@ -33,9 +33,9 @@ func TestHandleSubscribeMultiSetsMultiVariant(t *testing.T) {
 	sl := newMockSchema("users", 1, schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32})
 
 	handleSubscribeMulti(context.Background(), conn, &SubscribeMultiMsg{
-		RequestID: 1,
-		QueryID:   2,
-		Queries:   []Query{{TableName: "users"}},
+		RequestID:    1,
+		QueryID:      2,
+		QueryStrings: []string{"SELECT * FROM users"},
 	}, executor, sl)
 
 	req := executor.getRegisterSetReq()

@@ -203,9 +203,9 @@ func TestDispatchLoopMarksActivityOnInboundFrame(t *testing.T) {
 	// Client sends a valid Subscribe frame. The dispatch loop routes it
 	// and must still MarkActivity before handler dispatch.
 	frame, err := EncodeClientMessage(SubscribeSingleMsg{
-		RequestID: 1,
-		QueryID:   1,
-		Query:     Query{TableName: "events"},
+		RequestID:   1,
+		QueryID:     1,
+		QueryString: "SELECT * FROM events",
 	})
 	if err != nil {
 		t.Fatalf("encode subscribe: %v", err)

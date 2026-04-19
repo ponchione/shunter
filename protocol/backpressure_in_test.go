@@ -31,7 +31,7 @@ func TestIncomingBackpressure_WithinLimitAllProcessed(t *testing.T) {
 	for i := uint32(0); i < 4; i++ {
 		frame, _ := EncodeClientMessage(SubscribeSingleMsg{
 			RequestID: i, QueryID: i + 100,
-			Query: Query{TableName: "t"},
+			QueryString: "SELECT * FROM t",
 		})
 		wCtx, wCancel := context.WithTimeout(ctx, time.Second)
 		if err := clientWS.Write(wCtx, websocket.MessageBinary, frame); err != nil {
@@ -76,7 +76,7 @@ func TestIncomingBackpressure_ExceedLimitCloses1008(t *testing.T) {
 	for i := uint32(0); i < 3; i++ {
 		frame, _ := EncodeClientMessage(SubscribeSingleMsg{
 			RequestID: i, QueryID: i + 100,
-			Query: Query{TableName: "t"},
+			QueryString: "SELECT * FROM t",
 		})
 		wCtx, wCancel := context.WithTimeout(ctx, time.Second)
 		_ = clientWS.Write(wCtx, websocket.MessageBinary, frame)
@@ -119,7 +119,7 @@ func TestIncomingBackpressure_RapidBurstWithinLimit(t *testing.T) {
 	for i := uint32(0); i < 8; i++ {
 		frame, _ := EncodeClientMessage(SubscribeSingleMsg{
 			RequestID: i, QueryID: i + 200,
-			Query: Query{TableName: "t"},
+			QueryString: "SELECT * FROM t",
 		})
 		wCtx, wCancel := context.WithTimeout(ctx, time.Second)
 		_ = clientWS.Write(wCtx, websocket.MessageBinary, frame)
@@ -163,7 +163,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 
 	frame1, _ := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 1, QueryID: 100,
-		Query: Query{TableName: "t"},
+		QueryString: "SELECT * FROM t",
 	})
 	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
 	_ = clientWS.Write(wCtx, websocket.MessageBinary, frame1)
@@ -173,7 +173,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 
 	frame2, _ := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 2, QueryID: 200,
-		Query: Query{TableName: "t"},
+		QueryString: "SELECT * FROM t",
 	})
 	wCtx2, wCancel2 := context.WithTimeout(ctx, time.Second)
 	_ = clientWS.Write(wCtx2, websocket.MessageBinary, frame2)
@@ -202,7 +202,7 @@ func TestIncomingBackpressure_NilHandlerDoesNotLeakSemaphoreToken(t *testing.T) 
 	frame, _ := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 1,
 		QueryID:   100,
-		Query:     Query{TableName: "t"},
+		QueryString: "SELECT * FROM t",
 	})
 	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
 	if err := clientWS.Write(wCtx, websocket.MessageBinary, frame); err != nil {
