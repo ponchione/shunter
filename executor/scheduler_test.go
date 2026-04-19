@@ -188,7 +188,7 @@ func TestSchedulerHandleCommitPersistsRow(t *testing.T) {
 	rr.Register(RegisteredReducer{
 		Name: "sched",
 		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
-		h := ctx.Scheduler
+			h := ctx.Scheduler
 			_, err := h.Schedule("tick", nil, time.Unix(42, 0))
 			return nil, err
 		}),

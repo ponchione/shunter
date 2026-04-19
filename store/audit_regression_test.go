@@ -15,7 +15,7 @@ func buildNoPKState(t *testing.T) (*CommittedState, schema.SchemaRegistry) {
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
-		Name: "logs",
+		Name:    "logs",
 		Columns: []schema.ColumnDefinition{{Name: "msg", Type: types.KindString}},
 	})
 	e, err := b.Build(schema.EngineOptions{})

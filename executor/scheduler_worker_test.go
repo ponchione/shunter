@@ -206,7 +206,7 @@ func TestSchedulerRunCancelsWhileEnqueueBlocked(t *testing.T) {
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
-		Name: "noop",
+		Name:    "noop",
 		Columns: []schema.ColumnDefinition{{Name: "id", Type: types.KindUint64, PrimaryKey: true}},
 	})
 	eng, err := b.Build(schema.EngineOptions{})

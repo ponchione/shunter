@@ -10,9 +10,9 @@ import (
 
 // Transaction provides read-write access to the store within a reducer.
 type Transaction struct {
-	committed *CommittedState
-	tx        *TxState
-	registry  schema.SchemaRegistry
+	committed  *CommittedState
+	tx         *TxState
+	registry   schema.SchemaRegistry
 	rolledBack bool
 }
 

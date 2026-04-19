@@ -139,11 +139,11 @@ func TestSelectSnapshotSchemaMismatchExtraIndex(t *testing.T) {
 }
 
 type selectionRegistryConfig struct {
-	tableName       string
-	extraTableName  string
-	nameType        schema.ValueKind
-	extraNameIndex  bool
-	version         uint32
+	tableName      string
+	extraTableName string
+	nameType       schema.ValueKind
+	extraNameIndex bool
+	version        uint32
 }
 
 func buildSelectionRegistry(t *testing.T, cfg selectionRegistryConfig) schema.SchemaRegistry {
@@ -242,7 +242,7 @@ func writeSelectionSegmentRange(t *testing.T, root string, reg schema.SchemaRegi
 			cs.Tables[0] = &store.TableChangeset{
 				TableID:   0,
 				TableName: "players",
-				Inserts: []types.ProductValue{{types.NewUint64(txID), types.NewString("user")}},
+				Inserts:   []types.ProductValue{{types.NewUint64(txID), types.NewString("user")}},
 			}
 		}
 		payload, err := EncodeChangeset(cs)
@@ -320,7 +320,7 @@ func (r selectionSchemaRegistry) Tables() []schema.TableID {
 }
 
 func (r selectionSchemaRegistry) Reducer(string) (schema.ReducerHandler, bool) { return nil, false }
-func (r selectionSchemaRegistry) Reducers() []string                      { return nil }
+func (r selectionSchemaRegistry) Reducers() []string                           { return nil }
 func (r selectionSchemaRegistry) OnConnect() func(*schema.ReducerContext) error {
 	return nil
 }

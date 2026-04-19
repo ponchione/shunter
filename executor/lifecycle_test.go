@@ -16,15 +16,15 @@ import (
 // lifecycleHarness builds an executor with sys_clients wired plus optional
 // OnConnect / OnDisconnect handlers.
 type lifecycleHarness struct {
-	exec        *Executor
-	dur         *fakeDurability
-	subs        *fakeSubs
-	rec         *recorder
-	cs          *store.CommittedState
-	reg         schema.SchemaRegistry
-	sysClients  schema.TableID
-	onConnect   *recordedHandler
-	onDisconn   *recordedHandler
+	exec       *Executor
+	dur        *fakeDurability
+	subs       *fakeSubs
+	rec        *recorder
+	cs         *store.CommittedState
+	reg        schema.SchemaRegistry
+	sysClients schema.TableID
+	onConnect  *recordedHandler
+	onDisconn  *recordedHandler
 }
 
 type recordedHandler struct {

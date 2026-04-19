@@ -3,11 +3,11 @@ package executor
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-	"strings"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"

@@ -43,13 +43,13 @@ func TestPhase1ParityHandshakeRejectionStatuses(t *testing.T) {
 	//   (1) auth  →  (2) connection_id  →  (3) compression  →  (4) subprotocol
 	// This table covers one representative failure from each class.
 	cases := []struct {
-		name        string
-		useAuth     bool // inject a valid token before dialing
-		serverMode  string // "strict" | "anonymous"
-		extraQuery  string
-		skipProto   bool
-		authHeader  string
-		wantStatus  int
+		name       string
+		useAuth    bool   // inject a valid token before dialing
+		serverMode string // "strict" | "anonymous"
+		extraQuery string
+		skipProto  bool
+		authHeader string
+		wantStatus int
 	}{
 		// Auth guard — strict server, no token.
 		{

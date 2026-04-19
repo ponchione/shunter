@@ -6,7 +6,7 @@ import (
 )
 
 type AllTypes struct {
-	A bool    `shunter:"primarykey"`
+	A bool `shunter:"primarykey"`
 	B int8
 	C uint8
 	D int16
@@ -124,7 +124,7 @@ type ExcludedEmbedded struct {
 
 type ExcludedEmbeddedPtr struct {
 	*Base `shunter:"-"`
-	Name string
+	Name  string
 }
 
 func TestDiscoverFieldsExcludedEmbeddedStructSkipsAnonymousField(t *testing.T) {
