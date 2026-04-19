@@ -497,7 +497,7 @@ Implementation note: the committed delta pipeline computes per-connection update
 [not subscribed]
 ```
 
-State rules:
+State rules (see `docs/adr/2026-04-19-subscription-admission-model.md` for the landed manager-authoritative Shape 1 rationale):
 - a `subscription_id` is reserved as soon as `Subscribe` is accepted for processing; a second `Subscribe` with the same ID while pending or active MUST fail with `SubscriptionError` (manager-authoritative: rejected by the subscription manager's `(ConnID, QueryID)` registry, not a protocol-layer tracker)
 - `Unsubscribe` for a pending or unknown `subscription_id` returns `ErrSubscriptionNotFound`
 - if the client disconnects while a subscription is pending, the registration result is discarded and the subscription never becomes active: the executor invokes the registration `Reply` closure synchronously, but the closure's `connOnlySender` short-circuits on a closed `<-conn.closed` channel and returns `ErrConnNotFound`; no Applied envelope ever reaches `OutboundCh`
