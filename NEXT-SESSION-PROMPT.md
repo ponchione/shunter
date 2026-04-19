@@ -84,6 +84,40 @@ Pinned parity tests (do not flip without a named parity reason)
 - `subscription/fanout_worker_test.go::TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout`
 - `subscription/phase0_parity_test.go::TestPhase0ParityCanonicalReducerDeliveryFlow`
 
+Latent blockers before any host-adapter slice
+
+These were surfaced in the Phase 2 Slice 2 final review (2026-04-19) and
+recorded in `TECH-DEBT.md` as TD-136 through TD-140. They are latent
+because no production host binary exercises the end-to-end path in-tree
+(Task 10 of the Phase 2 Slice 2 plan was intentionally skipped). They
+MUST be resolved before a host-adapter slice; they do NOT block
+OneOffQuery SQL (Phase 2 Slice 1) or P0-RECOVERY-002.
+
+- **C1 / TD-136** — `handleSubscribeSingle` missing `Reserve(queryID)` call.
+  `SendSubscribeSingleApplied` guards delivery behind
+  `conn.Subscriptions.IsPending(msg.QueryID)`; without the Reserve the
+  applied envelope silently early-returns. Files:
+  `protocol/handle_subscribe_single.go`, `protocol/send_responses.go:19`.
+
+- **C2 / TD-137** — `SubscriptionUpdate.SubscriptionID` vs tracker ID-space
+  mismatch. Manager allocates internal `SubscriptionID` via `nextSubID++`
+  (`subscription/register_set.go`); tracker admission in
+  `protocol/send_txupdate.go:57-64` still reads that field — disagrees with
+  the QueryID stored by Reserve. Every `TransactionUpdateLight` would be
+  rejected. Files: `protocol/send_txupdate.go:57-64`,
+  `subscription/register_set.go`.
+
+- **F1 / TD-138** — `RegisterSubscriptionSetCmd` error-envelope asymmetry vs
+  `UnregisterSubscriptionSetCmd`. Add `RegisterSubscriptionSetResponse{Result, Err}`.
+
+- **F2 / TD-139** — `protocol.RegisterSubscriptionSetRequest.Predicates []any`
+  type safety. Thin type alias or shared interface would restore compile-time
+  safety. Consolidate with F1.
+
+- **F3 / TD-140** — Architectural decision: choose one authoritative admission
+  model (per-connection tracker vs executor set-registry). Prerequisites for
+  cleanly fixing C1 and C2. See `TECH-DEBT.md` TD-140 for options.
+
 Phase 2 deferrals still open
 1. `OneOffQuery` SQL front door (Phase 2 Slice 1) — pinned by
    `TestPhase1DeferralOneOffQueryStructuredNotSQL` and
@@ -112,9 +146,13 @@ Suggested next slice
   Phase 2 protocol-surface parity anchor now that the variant split
   is closed. Would also let `TestPhase2DeferralSubscribeMultiQueriesStructured`
   and `TestPhase1DeferralOneOffQueryStructuredNotSQL` flip from
-  deferral pins to positive pins.
+  deferral pins to positive pins. Does NOT depend on C1/C2/F1-F3.
 - Or Phase 4 `P0-RECOVERY-002` (TxID / nextID / sequence invariants
-  across snapshot + replay) if recovery parity is the priority.
+  across snapshot + replay) if recovery parity is the priority. Does
+  NOT depend on C1/C2/F1-F3.
+- Host-adapter slice — BLOCKED on C1+C2 (TD-136, TD-137) and the
+  F3 admission-model decision (TD-140). Do not start host-adapter
+  wiring until those are resolved.
 
 Required reading order
 1. `AGENTS.md`

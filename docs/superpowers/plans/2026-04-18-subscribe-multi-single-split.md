@@ -2107,6 +2107,12 @@ Expected: only the Phase-2-Slice-2 edits from this plan are in the diff. Any res
 
 ---
 
+## Post-merge follow-ups (surfaced in final review 2026-04-19)
+
+The slice merged structurally complete (983 tests pass, `go vet` clean), but a whole-slice final review surfaced two latent P1 bugs (C1: `handleSubscribeSingle` missing `Reserve(queryID)` causing silent `SendSubscribeSingleApplied` early-return; C2: `SubscriptionUpdate.SubscriptionID` vs tracker ID-space mismatch causing every `TransactionUpdateLight` to be rejected post-host-adapter) and three follow-ups (F1: `RegisterSubscriptionSetCmd` error-envelope asymmetry; F2: `Predicates []any` type safety on `RegisterSubscriptionSetRequest`; F3: architectural decision on which admission model is authoritative). All five items are explicitly recorded by name in `TECH-DEBT.md` (TD-136 through TD-140) and their host-adapter prerequisites are noted in `NEXT-SESSION-PROMPT.md`; see those files for full detail and fix direction.
+
+---
+
 ## Self-Review Checklist (completed at plan-write time)
 
 - Every spec section §1–§12 has a task. §1 → Tasks 1–8. §2 → Tasks 1, 3, 4 (non-goals enforced by leaving them out). §3 → Tasks 1–5. §4 → Tasks 6–10. §5 → Task 8. §6 → covered by the "unchanged" note in Task 8 design (no code change, verified by the broad sweep in Task 12). §7.1 → Tasks 1–5. §7.2 → Task 5. §7.3 → Task 5. §8 → Task 6 (test file `register_set_test.go`). §9 → Tasks 1, 2 codec round-trips. §10 → Task 11. §11 → Task 5. §12 → plan respects audit direction by every task = one commit, failing test first.
