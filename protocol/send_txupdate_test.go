@@ -116,17 +116,6 @@ func TestDeliverTransactionUpdateLightSkipsEmptyUpdates(t *testing.T) {
 	}
 }
 
-func TestDeliverTransactionUpdateLightRejectsPendingSubscription(t *testing.T) {
-	// Phase 2 Slice 2 (TD-140): the per-update IsActive(SubscriptionID)
-	// gate inside DeliverTransactionUpdateLight has been retired —
-	// admission is owned by subscription.Manager.querySets, and fan-out
-	// enumerates only live subs, so this "pending subscription update
-	// should not be delivered" contract is now enforced upstream rather
-	// than by the transport. Task 5 of the admission-model fix plan
-	// migrates the semantic assertion to a manager-level test.
-	t.Skip("migrated in Task 5 (admission-model fix plan): per-update IsActive gate retired in TD-140")
-}
-
 func TestDeliverTransactionUpdateLightBufferFull(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.OutgoingBufferMessages = 1

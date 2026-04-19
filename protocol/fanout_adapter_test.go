@@ -129,13 +129,6 @@ func connID(b byte) types.ConnectionID {
 	return id
 }
 
-func TestFanOutSenderAdapter_SendTransactionUpdateLightRejectsPendingSubscription(t *testing.T) {
-	// Phase 2 Slice 2 (TD-140): per-connection IsActive admission gate
-	// retired; fan-out owns admission via subscription.Manager.querySets.
-	// Task 5 migrates this contract to a manager-level test.
-	t.Skip("migrated in Task 5 (admission-model fix plan): IsActive gate retired in TD-140")
-}
-
 func TestFanOutSenderAdapter_SendTransactionUpdateLight(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)
@@ -290,13 +283,6 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 	if failed.Error != "panic" {
 		t.Fatalf("StatusFailed.Error = %q, want %q", failed.Error, "panic")
 	}
-}
-
-func TestFanOutSenderAdapter_SendTransactionUpdateHeavyRejectsPendingSubscription(t *testing.T) {
-	// Phase 2 Slice 2 (TD-140): per-connection IsActive admission gate
-	// retired; fan-out owns admission via subscription.Manager.querySets.
-	// Task 5 migrates this contract to a manager-level test.
-	t.Skip("migrated in Task 5 (admission-model fix plan): IsActive gate retired in TD-140")
 }
 
 func TestFanOutSenderAdapter_SendSubscriptionErrorPreservesRequestID(t *testing.T) {

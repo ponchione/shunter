@@ -31,9 +31,9 @@ func (s assertingSender) SendTransactionUpdateLight(_ types.ConnectionID, _ *Tra
 // pushes now. The tests below verify the transport-level surface
 // (frame enqueue + error propagation). Semantic tests that used to
 // assert tracker state transitions (pending → active, release-on-error,
-// etc.) are migrated by Task 5 of the admission-model fix plan; in the
-// meantime a single skip-with-reason survivor carries forward the
-// transport-only slice of the original intent.
+// etc.) are retired — admission is owned by subscription.Manager.querySets
+// and the disconnect-race path is covered end-to-end by
+// TestDisconnectBetweenRegisterAndReply in admission_ordering_test.go.
 
 func TestSendSubscribeSingleAppliedEnqueuesFrame(t *testing.T) {
 	c, _ := testConn(false)
@@ -70,18 +70,6 @@ func TestSendSubscribeSingleAppliedPropagatesSendError(t *testing.T) {
 	if !errors.Is(err, ErrConnNotFound) {
 		t.Fatalf("err = %v, want ErrConnNotFound", err)
 	}
-}
-
-func TestSendSubscribeSingleAppliedDiscardsAfterDisconnect(t *testing.T) {
-	// Post-TD-140 this test's pre-removal intent ("SendSubscribeSingleApplied
-	// must silently discard once the subscription_id has been released
-	// from the per-conn tracker") is moot: the per-conn tracker is gone,
-	// and `subscription.Manager.UnregisterSet` is the only way for the
-	// id to disappear before delivery. The disconnect-race path is now
-	// covered end-to-end by TestDisconnectBetweenRegisterAndReply in
-	// admission_ordering_test.go. Task 5 will finalize the migration of
-	// the remaining send_responses_test tests.
-	t.Skip("migrated in Task 5 (admission-model fix plan): tracker-based discard guard retired in TD-140")
 }
 
 func TestSendUnsubscribeSingleAppliedEnqueuesFrame(t *testing.T) {

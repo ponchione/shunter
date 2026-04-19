@@ -87,12 +87,6 @@ func (m *mockSubExecutor) getRegisterSetReq() *RegisterSubscriptionSetRequest {
 	return m.registerSetReq
 }
 
-func (m *mockSubExecutor) getUnregisterSetReq() *UnregisterSubscriptionSetRequest {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.unregisterSetReq
-}
-
 // --- NormalizePredicates tests ---
 
 func TestNormalizePredicates_Empty(t *testing.T) {
