@@ -37,9 +37,11 @@ type ExecutorInbox interface {
 	OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
-	// Legacy single-subscription seam. Task 9 removes these in favor of
-	// the set-based methods below.
+	// Deprecated: removed in Task 9 alongside RegisterSubscriptionRequest /
+	// UnregisterSubscriptionRequest and the old handle_subscribe / handle_unsubscribe
+	// files. Present now only because Task 8 kept the legacy seam for compilation parity.
 	RegisterSubscription(ctx context.Context, req RegisterSubscriptionRequest) error
+	// Deprecated: removed in Task 9. See RegisterSubscription.
 	UnregisterSubscription(ctx context.Context, req UnregisterSubscriptionRequest) error
 	// Set-based seam (Phase 2 Slice 2 variant split). Single and Multi
 	// subscribe/unsubscribe paths both route through these — Single
@@ -49,6 +51,9 @@ type ExecutorInbox interface {
 	CallReducer(ctx context.Context, req CallReducerRequest) error
 }
 
+// Deprecated: removed in Task 9 alongside the legacy RegisterSubscription inbox
+// seam. Present now only because Task 8 kept it for compilation parity.
+//
 // SubscriptionCommandResponse is the protocol-side async result envelope
 // for a submitted subscribe command. E4 only allocates and hands this
 // channel to the executor seam; E5 watches it and turns accepted-command
@@ -58,6 +63,9 @@ type SubscriptionCommandResponse struct {
 	Error   *SubscriptionError
 }
 
+// Deprecated: removed in Task 9 alongside the legacy UnregisterSubscription inbox
+// seam. Present now only because Task 8 kept it for compilation parity.
+//
 // UnsubscribeCommandResponse is the protocol-side async result envelope
 // for a submitted unsubscribe command. E5 watches it to deliver the
 // eventual UnsubscribeSingleApplied / SubscriptionError message.
@@ -66,6 +74,8 @@ type UnsubscribeCommandResponse struct {
 	Error   *SubscriptionError
 }
 
+// Deprecated: removed in Task 9. Use RegisterSubscriptionSetRequest instead.
+//
 // RegisterSubscriptionRequest carries the fields the executor needs to
 // register and evaluate a new subscription (SPEC-004 §2.1).
 type RegisterSubscriptionRequest struct {
@@ -76,6 +86,8 @@ type RegisterSubscriptionRequest struct {
 	ResponseCh     chan<- SubscriptionCommandResponse
 }
 
+// Deprecated: removed in Task 9. Use UnregisterSubscriptionSetRequest instead.
+//
 // UnregisterSubscriptionRequest carries the unsubscribe fields the
 // executor / delivery path needs to produce UnsubscribeSingleApplied later.
 type UnregisterSubscriptionRequest struct {

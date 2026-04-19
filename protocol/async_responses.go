@@ -55,6 +55,9 @@ func (s connOnlySender) SendTransactionUpdateLight(connID types.ConnectionID, up
 	return s.Send(connID, *update)
 }
 
+// Deprecated: legacy single-path watcher. Removed in Task 9 alongside the
+// old RegisterSubscription/UnregisterSubscription inbox seam. Present
+// now only because Task 8 kept the legacy types for compilation parity.
 func watchSubscribeResponse(conn *Conn, respCh <-chan SubscriptionCommandResponse) {
 	go func() {
 		resp, ok := <-respCh
@@ -75,6 +78,9 @@ func watchSubscribeResponse(conn *Conn, respCh <-chan SubscriptionCommandRespons
 	}()
 }
 
+// Deprecated: legacy single-path watcher. Removed in Task 9 alongside the
+// old RegisterSubscription/UnregisterSubscription inbox seam. Present
+// now only because Task 8 kept the legacy types for compilation parity.
 func watchUnsubscribeResponse(conn *Conn, respCh <-chan UnsubscribeCommandResponse) {
 	go func() {
 		resp, ok := <-respCh

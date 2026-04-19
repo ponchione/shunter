@@ -1844,7 +1844,7 @@ Now that every caller can drive the set API, remove:
 - Delete: `subscription/register.go` (merged into `register_set.go`)
 - Delete: `subscription/unregister.go`
 - Delete: `protocol/handle_subscribe.go` (old entry point)
-- Delete: `protocol/handle_unsubscribe.go`
+- Delete: `protocol/handle_unsubscribe.go` (already deleted in Task 8 commit d2e3caa)
 - Modify: `subscription/manager.go`, `subscription/eval.go`, all `subscription/*_test.go`, `subscription/bench_test.go`
 - Modify: `executor/command.go`, `executor/executor.go`, `executor/*_test.go`
 - Modify: `protocol/lifecycle.go`, `protocol/*_test.go`
