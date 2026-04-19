@@ -208,10 +208,10 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) {
 	log.Printf("executor: panic during dispatch: %v\n%s", r, debug.Stack())
 	// Send error response if possible.
 	if c, ok := cmd.(CallReducerCmd); ok {
-		sendReducerResponse(c.ResponseCh, ReducerResponse{
+		sendCallReducerResponse(c, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  fmt.Errorf("reducer panicked: %v", r),
-		})
+		}, nil)
 	}
 }
 
@@ -222,7 +222,7 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 	if e.fatal.Load() {
 		switch c := cmd.(type) {
 		case CallReducerCmd:
-			sendReducerResponse(c.ResponseCh, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal})
+			sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal}, nil)
 		}
 		return
 	}
@@ -315,15 +315,32 @@ func sendReducerResponse(ch chan<- ReducerResponse, resp ReducerResponse) bool {
 	return true
 }
 
+func sendProtocolCallReducerResponse(ch chan<- ProtocolCallReducerResponse, resp ProtocolCallReducerResponse) bool {
+	if ch == nil {
+		return true
+	}
+	ch <- resp
+	return true
+}
+
+func sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, committed *CommittedCallerPayload) bool {
+	responded := sendReducerResponse(cmd.ResponseCh, resp)
+	protocolResponded := sendProtocolCallReducerResponse(cmd.ProtocolResponseCh, ProtocolCallReducerResponse{
+		Reducer:   resp,
+		Committed: committed,
+	})
+	return responded && protocolResponded
+}
+
 func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	req := cmd.Request
 	start := time.Now()
 	if req.Source != CallSourceLifecycle {
 		if _, reserved := lifecycleNames[req.ReducerName]; reserved {
-			sendReducerResponse(cmd.ResponseCh, ReducerResponse{
+			sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  ErrLifecycleReducer,
-			})
+			}, nil)
 			return
 		}
 	}
@@ -331,10 +348,10 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	// Lookup reducer.
 	rr, ok := e.registry.Lookup(req.ReducerName)
 	if !ok {
-		sendReducerResponse(cmd.ResponseCh, ReducerResponse{
+		sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  fmt.Errorf("%w: %s", ErrReducerNotFound, req.ReducerName),
-		})
+		}, nil)
 		return
 	}
 
@@ -374,19 +391,19 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 			}
 			return fmt.Errorf("%v: %w", r, ErrReducerPanic)
 		}(panicked)
-		sendReducerResponse(cmd.ResponseCh, ReducerResponse{
+		sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  panicErr,
-		})
+		}, nil)
 		return
 	}
 
 	if reducerErr != nil {
 		store.Rollback(tx)
-		sendReducerResponse(cmd.ResponseCh, ReducerResponse{
+		sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedUser,
 			Error:  reducerErr,
-		})
+		}, nil)
 		return
 	}
 
@@ -399,10 +416,10 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	if req.Source == CallSourceScheduled {
 		if err := e.advanceOrDeleteSchedule(tx, req.ScheduleID, req.IntendedFireAt); err != nil {
 			store.Rollback(tx)
-			sendReducerResponse(cmd.ResponseCh, ReducerResponse{
+			sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  fmt.Errorf("schedule advance: %w", err),
-			})
+			}, nil)
 			return
 		}
 	}
@@ -415,10 +432,10 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		if isUserCommitError(err) {
 			status = StatusFailedUser
 		}
-		sendReducerResponse(cmd.ResponseCh, ReducerResponse{
+		sendCallReducerResponse(cmd, ReducerResponse{
 			Status: status,
 			Error:  fmt.Errorf("commit: %w", err),
-		})
+		}, nil)
 		return
 	}
 	txID := types.TxID(e.nextTxID)
@@ -438,7 +455,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		opts.args = req.Args
 		opts.startTime = start
 	}
-	e.postCommit(txID, changeset, ret, cmd.ResponseCh, opts)
+	e.postCommit(txID, changeset, ret, cmd, opts)
 }
 
 // postCommit runs the ordered post-commit pipeline (SPEC-003 §5.1–§5.4,
@@ -464,10 +481,11 @@ func (e *Executor) postCommit(
 	txID types.TxID,
 	changeset *store.Changeset,
 	ret []byte,
-	responseCh chan<- ReducerResponse,
+	cmd CallReducerCmd,
 	opts postCommitOptions,
 ) {
-	responded := responseCh == nil
+	responded := cmd.ResponseCh == nil && cmd.ProtocolResponseCh == nil
+	var committedPayload *CommittedCallerPayload
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -478,11 +496,11 @@ func (e *Executor) postCommit(
 		if responded {
 			return
 		}
-		responseCh <- ReducerResponse{
+		sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  fmt.Errorf("%w: post-commit panic: %v", ErrExecutorFatal, r),
 			TxID:   txID,
-		}
+		}, nil)
 	}()
 
 	e.durability.EnqueueCommitted(txID, changeset)
@@ -490,15 +508,7 @@ func (e *Executor) postCommit(
 	meta := subscription.PostCommitMeta{TxDurable: e.durability.WaitUntilDurable(txID)}
 	if opts.source == CallSourceExternal && opts.callerConnID != nil {
 		callerConnID := *opts.callerConnID
-		meta.CallerConnID = &callerConnID
-		// Phase 1.5 outcome-model decision
-		// (`docs/parity-phase1.5-outcome-model.md`): populate the
-		// caller-visible metadata on every admitted external commit so the
-		// fan-out worker can assemble the heavy `TransactionUpdate`
-		// envelope. `EnergyQuantaUsed` remains zero because Shunter has no
-		// energy model; the other caller metadata fields are threaded from
-		// the executor request / registry / timing seam here.
-		meta.CallerOutcome = &subscription.CallerOutcome{
+		callerOutcome := subscription.CallerOutcome{
 			Kind:                       subscription.CallerOutcomeCommitted,
 			RequestID:                  opts.callerRequestID,
 			Flags:                      opts.callerFlags,
@@ -509,15 +519,32 @@ func (e *Executor) postCommit(
 			Timestamp:                  opts.startTime.UnixNano(),
 			TotalHostExecutionDuration: time.Since(opts.startTime).Nanoseconds(),
 		}
+		if cmd.ProtocolResponseCh != nil {
+			// For protocol-originated reducer calls the protocol inbox adapter owns
+			// the caller-visible heavy reply. Keep the caller out of light fan-out,
+			// capture its authoritative update slice from evaluation, but do not
+			// export CallerOutcome into the fan-out worker or it will deliver a
+			// second heavy envelope for the same commit.
+			meta.CallerConnID = &callerConnID
+			committedPayload = &CommittedCallerPayload{Outcome: callerOutcome}
+			meta.CaptureCallerUpdates = func(updates []subscription.SubscriptionUpdate) {
+				committedPayload.Updates = append([]subscription.SubscriptionUpdate(nil), updates...)
+			}
+		} else {
+			// Non-protocol external callers keep the original fan-out-owned caller
+			// heavy delivery path.
+			meta.CallerConnID = &callerConnID
+			meta.CallerOutcome = &callerOutcome
+		}
 	}
 	e.subs.EvalAndBroadcast(txID, changeset, view, meta)
 	view.Close()
 
-	responded = sendReducerResponse(responseCh, ReducerResponse{
+	responded = sendCallReducerResponse(cmd, ReducerResponse{
 		Status:      StatusCommitted,
 		ReturnBSATN: ret,
 		TxID:        txID,
-	})
+	}, committedPayload)
 
 	// Step 6 (Story 5.2): non-blocking drop-client drain. Runs after
 	// response delivery, before the next command is dequeued. A failing

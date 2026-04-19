@@ -49,6 +49,7 @@ func handleSubscribeSingle(
 		ConnID:     conn.ID,
 		QueryID:    msg.QueryID,
 		RequestID:  msg.RequestID,
+		Variant:    SubscriptionSetVariantSingle,
 		Predicates: []any{pred},
 		Reply:      reply,
 	}); submitErr != nil {

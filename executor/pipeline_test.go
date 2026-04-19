@@ -590,10 +590,50 @@ func TestPostCommitPropagatesCallerFlags(t *testing.T) {
 	}
 }
 
+func TestPostCommit_ProtocolOwnedRepliesDoNotExportCallerHeavyFanoutMetadata(t *testing.T) {
+	h := newPipelineHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	respCh := make(chan ProtocolCallReducerResponse, 1)
+	if err := h.exec.Submit(CallReducerCmd{
+		Request: ReducerRequest{
+			ReducerName: "InsertPlayer",
+			Source:      CallSourceExternal,
+			RequestID:   90,
+			Caller:      types.CallerContext{ConnectionID: types.ConnectionID{9}},
+		},
+		ProtocolResponseCh: respCh,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp := <-respCh
+	if resp.Committed == nil {
+		t.Fatal("Committed payload = nil")
+	}
+
+	h.subs.mu.Lock()
+	defer h.subs.mu.Unlock()
+	if len(h.subs.metas) != 1 {
+		t.Fatalf("metas=%d want 1", len(h.subs.metas))
+	}
+	meta := h.subs.metas[0]
+	if meta.CallerConnID == nil {
+		t.Fatal("CallerConnID = nil")
+	}
+	if meta.CallerOutcome != nil {
+		t.Fatalf("CallerOutcome should be nil when protocol adapter owns the reply: %+v", meta.CallerOutcome)
+	}
+	if meta.CaptureCallerUpdates == nil {
+		t.Fatal("CaptureCallerUpdates = nil")
+	}
+}
+
 func TestPostCommitLifecycleLeavesCallerMetadataNil(t *testing.T) {
 	h := newPipelineHarness(t)
 	changeset := &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}}
-	h.exec.postCommit(types.TxID(55), changeset, nil, nil, postCommitOptions{source: CallSourceLifecycle})
+	h.exec.postCommit(types.TxID(55), changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
 
 	h.subs.mu.Lock()
 	defer h.subs.mu.Unlock()
@@ -611,7 +651,7 @@ func TestPostCommitPropagatesDurabilityReadinessChannel(t *testing.T) {
 	waitCh := make(chan types.TxID)
 	h.dur.waitCh = waitCh
 	changeset := &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}}
-	h.exec.postCommit(types.TxID(66), changeset, nil, nil, postCommitOptions{source: CallSourceLifecycle})
+	h.exec.postCommit(types.TxID(66), changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
 
 	h.subs.mu.Lock()
 	defer h.subs.mu.Unlock()

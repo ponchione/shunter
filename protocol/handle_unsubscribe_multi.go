@@ -38,6 +38,7 @@ func handleUnsubscribeMulti(
 		ConnID:    conn.ID,
 		QueryID:   msg.QueryID,
 		RequestID: msg.RequestID,
+		Variant:   SubscriptionSetVariantMulti,
 		Reply:     reply,
 	}); err != nil {
 		sendError(conn, SubscriptionError{

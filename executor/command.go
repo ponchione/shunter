@@ -12,11 +12,29 @@ type ExecutorCommand interface {
 
 // CallReducerCmd requests a reducer invocation.
 type CallReducerCmd struct {
-	Request    ReducerRequest
-	ResponseCh chan<- ReducerResponse
+	Request            ReducerRequest
+	ResponseCh         chan<- ReducerResponse
+	ProtocolResponseCh chan<- ProtocolCallReducerResponse
 }
 
 func (CallReducerCmd) isExecutorCommand() {}
+
+// CommittedCallerPayload carries the adapter-specific committed reducer-call
+// data the protocol edge needs to build an honest heavy TransactionUpdate.
+// Generic executor callers keep using ReducerResponse.
+type CommittedCallerPayload struct {
+	Outcome subscription.CallerOutcome
+	Updates []subscription.SubscriptionUpdate
+}
+
+// ProtocolCallReducerResponse complements ReducerResponse for the protocol
+// adapter path. Committed is populated only for committed external reducer
+// calls after synchronous post-commit evaluation has produced the real
+// caller-visible update slice.
+type ProtocolCallReducerResponse struct {
+	Reducer   ReducerResponse
+	Committed *CommittedCallerPayload
+}
 
 // RegisterSubscriptionSetCmd requests atomic set-scoped subscription
 // registration. Part of the Phase 2 Slice 2 variant split.

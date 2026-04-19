@@ -7,10 +7,13 @@ import "github.com/ponchione/shunter/types"
 //
 // Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
 // when the commit originated from a caller-addressable reducer call,
-// `CallerConnID` and `CallerOutcome` are populated so the fan-out
-// worker can deliver the heavy `TransactionUpdate` envelope to the
-// caller and the light envelope to non-callers. The previous
-// `CallerResult` forward-declaration was replaced by `CallerOutcome`.
+// `CallerConnID` identifies the caller so the fan-out worker can keep that
+// connection out of non-caller light delivery. `CallerOutcome` is populated
+// only when the fan-out worker itself owns the caller's heavy
+// `TransactionUpdate` envelope; protocol-originated reducer replies may carry
+// `CallerConnID` with a nil `CallerOutcome` because the protocol inbox adapter
+// owns the heavy reply directly while still reusing evaluator-derived caller
+// updates.
 type FanOutMessage struct {
 	// TxID identifies the transaction this payload came from. Zero for
 	// synthetic caller-outcome deliveries with no underlying commit.
@@ -37,7 +40,10 @@ type FanOutMessage struct {
 
 	// CallerOutcome carries the caller-visible reducer outcome and the
 	// metadata required to assemble the heavy `TransactionUpdate`
-	// envelope. Populated if and only if `CallerConnID` is non-nil.
+	// envelope when the fan-out worker owns caller-heavy delivery. Nil is
+	// allowed when some other seam (for example the protocol inbox
+	// adapter) owns the caller's heavy reply and FanOutMessage only needs
+	// CallerConnID to suppress the caller's light echo.
 	CallerOutcome *CallerOutcome
 }
 
@@ -48,6 +54,12 @@ type PostCommitMeta struct {
 	TxDurable     <-chan types.TxID
 	CallerConnID  *types.ConnectionID
 	CallerOutcome *CallerOutcome
+	// CaptureCallerUpdates, when non-nil, receives the authoritative
+	// caller-visible update slice extracted from the same per-connection
+	// fanout map entry that would be delivered to the caller connection.
+	// EvalAndBroadcast invokes it synchronously on the executor goroutine
+	// before enqueueing the FanOutMessage.
+	CaptureCallerUpdates func([]SubscriptionUpdate)
 }
 
 // SubscriptionError is the protocol-facing evaluation-failure payload queued
@@ -100,6 +112,6 @@ type CallerOutcome struct {
 // the constants in the subscription package lets the fan-out worker
 // switch on outcome.Flags without importing the protocol layer.
 const (
-	CallerOutcomeFlagFullUpdate     byte = 0
+	CallerOutcomeFlagFullUpdate      byte = 0
 	CallerOutcomeFlagNoSuccessNotify byte = 1
 )

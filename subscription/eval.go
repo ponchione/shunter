@@ -29,7 +29,7 @@ type memoizedResult struct {
 // The function therefore only skips when there is neither caller
 // metadata nor any non-caller recipient work to do.
 func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta PostCommitMeta) {
-	hasCaller := meta.CallerConnID != nil && meta.CallerOutcome != nil
+	hasCaller := meta.CallerConnID != nil && (meta.CallerOutcome != nil || meta.CaptureCallerUpdates != nil)
 	nothingToEvaluate := !m.registry.hasActive() || changeset == nil || changeset.IsEmpty()
 	if nothingToEvaluate && !hasCaller {
 		return
@@ -43,6 +43,18 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	} else {
 		fanout = CommitFanout{}
 		errs = make(map[types.ConnectionID][]SubscriptionError)
+	}
+	if meta.CaptureCallerUpdates != nil {
+		var callerUpdates []SubscriptionUpdate
+		if meta.CallerConnID != nil {
+			callerUpdates = fanout[*meta.CallerConnID]
+		}
+		if len(callerUpdates) > 0 {
+			copied := append([]SubscriptionUpdate(nil), callerUpdates...)
+			meta.CaptureCallerUpdates(copied)
+		} else {
+			meta.CaptureCallerUpdates(nil)
+		}
 	}
 	if m.inbox != nil {
 		m.inbox <- FanOutMessage{

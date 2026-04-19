@@ -59,7 +59,7 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) {
 	e.nextTxID++
 	changeset.TxID = txID
 
-	e.postCommit(txID, changeset, nil, cmd.ResponseCh, postCommitOptions{source: CallSourceLifecycle})
+	e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle})
 }
 
 // handleOnDisconnect runs the OnDisconnect pipeline (SPEC-003 §10.4, Story 7.3):
@@ -111,7 +111,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
 
 	// Even when the reducer failed, the cleanup commit still runs the
 	// post-commit pipeline so subscribers see the sys_clients delete.
-	e.postCommit(txID, changeset, nil, cmd.ResponseCh, postCommitOptions{source: CallSourceLifecycle})
+	e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle})
 }
 
 // runLifecycleReducer invokes a lifecycle reducer with panic recovery and

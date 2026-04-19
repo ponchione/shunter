@@ -20,6 +20,34 @@ func TestEvalNoActiveSubsReturnsImmediately(t *testing.T) {
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 }
 
+func TestEvalCapturesCallerUpdatesFromFanoutEntry(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{1}
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    10,
+		Predicates: []Predicate{AllRows{Table: 1}},
+	}, nil)
+	var captured []SubscriptionUpdate
+	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{
+		CallerConnID: &connID,
+		CaptureCallerUpdates: func(updates []SubscriptionUpdate) {
+			captured = updates
+		},
+	})
+	msg := <-inbox
+	want := msg.Fanout[connID]
+	if len(captured) != len(want) {
+		t.Fatalf("captured len=%d want %d", len(captured), len(want))
+	}
+	if len(captured) == 0 || captured[0].SubscriptionID != want[0].SubscriptionID {
+		t.Fatalf("captured=%v want %v", captured, want)
+	}
+}
+
 func TestEvalSingleTableColEqMatches(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)

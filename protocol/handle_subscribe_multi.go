@@ -55,6 +55,7 @@ func handleSubscribeMulti(
 		ConnID:     conn.ID,
 		QueryID:    msg.QueryID,
 		RequestID:  msg.RequestID,
+		Variant:    SubscriptionSetVariantMulti,
 		Predicates: preds,
 		Reply:      reply,
 	}); submitErr != nil {

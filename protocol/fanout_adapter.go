@@ -41,11 +41,28 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateHeavy(
 	callerUpdates []subscription.SubscriptionUpdate,
 	memo *subscription.EncodingMemo,
 ) error {
-	status, err := buildUpdateStatus(outcome, callerUpdates, memo)
+	msg, err := BuildTransactionUpdateHeavy(connID, outcome, callerUpdates, memo)
 	if err != nil {
 		return fmt.Errorf("encode caller outcome: %w", err)
 	}
-	msg := &TransactionUpdate{
+	return mapDeliveryError(a.sender.SendTransactionUpdate(connID, &msg))
+}
+
+// BuildTransactionUpdateHeavy is the canonical heavy-envelope assembler for
+// committed caller responses. Both the protocol inbox adapter and the fan-out
+// adapter route committed reducer results through this helper so the wire shape
+// is derived from one path.
+func BuildTransactionUpdateHeavy(
+	connID types.ConnectionID,
+	outcome subscription.CallerOutcome,
+	callerUpdates []subscription.SubscriptionUpdate,
+	memo *subscription.EncodingMemo,
+) (TransactionUpdate, error) {
+	status, err := buildUpdateStatus(outcome, callerUpdates, memo)
+	if err != nil {
+		return TransactionUpdate{}, err
+	}
+	return TransactionUpdate{
 		Status:                     status,
 		CallerIdentity:             outcome.CallerIdentity,
 		CallerConnectionID:         connID,
@@ -53,8 +70,7 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateHeavy(
 		Timestamp:                  outcome.Timestamp,
 		EnergyQuantaUsed:           outcome.EnergyQuantaUsed,
 		TotalHostExecutionDuration: outcome.TotalHostExecutionDuration,
-	}
-	return mapDeliveryError(a.sender.SendTransactionUpdate(connID, msg))
+	}, nil
 }
 
 // SendTransactionUpdateLight delivers the delta-only envelope to

@@ -37,6 +37,7 @@ func handleUnsubscribeSingle(
 		ConnID:    conn.ID,
 		QueryID:   msg.QueryID,
 		RequestID: msg.RequestID,
+		Variant:   SubscriptionSetVariantSingle,
 		Reply:     reply,
 	}); err != nil {
 		sendError(conn, SubscriptionError{

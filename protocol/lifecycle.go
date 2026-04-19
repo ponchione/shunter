@@ -45,6 +45,18 @@ type ExecutorInbox interface {
 	CallReducer(ctx context.Context, req CallReducerRequest) error
 }
 
+// SubscriptionSetVariant records which wire family produced a set-based
+// subscription request. The executor-side register/unregister commands are
+// shared across Single and Multi, but the protocol reply envelope must echo
+// the originating variant so the adapter can populate the correct Applied arm.
+type SubscriptionSetVariant uint8
+
+const (
+	SubscriptionSetVariantUnknown SubscriptionSetVariant = iota
+	SubscriptionSetVariantSingle
+	SubscriptionSetVariantMulti
+)
+
 // RegisterSubscriptionSetRequest carries the fields the executor needs to
 // register a set of predicates under one QueryID. Predicates is []any (not
 // []subscription.Predicate) because the host-owned executor adapter — the
@@ -64,6 +76,7 @@ type RegisterSubscriptionSetRequest struct {
 	ConnID     types.ConnectionID
 	QueryID    uint32
 	RequestID  uint32
+	Variant    SubscriptionSetVariant
 	Predicates []any // []subscription.Predicate
 	Reply      func(SubscriptionSetCommandResponse)
 }
@@ -78,6 +91,7 @@ type UnregisterSubscriptionSetRequest struct {
 	ConnID    types.ConnectionID
 	QueryID   uint32
 	RequestID uint32
+	Variant   SubscriptionSetVariant
 	Reply     func(UnsubscribeSetCommandResponse)
 }
 
@@ -107,14 +121,17 @@ type UnsubscribeSetCommandResponse struct {
 // Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
 // the caller-visible reducer outcome is delivered as a heavy
 // `TransactionUpdate` envelope through the subscription fan-out seam.
-// ResponseCh carries that heavy envelope — the executor populates it
-// once the reducer has been admitted, executed, and (on success) its
-// fan-out evaluation has finished, so the envelope's
-// `StatusCommitted.Update` reflects the caller's visible row delta.
-// Pre-acceptance rejections (lifecycle-reducer-name collision,
-// executor-unavailable) are surfaced via the `error` return of
-// `ExecutorInbox.CallReducer` — the protocol layer synthesizes a
-// heavy envelope with `StatusFailed` in that case.
+// ResponseCh carries that final heavy envelope back to the protocol
+// handler, but the envelope is assembled by the executor's protocol
+// adapter: committed responses use the shared heavy-envelope builder fed
+// by the evaluator's authoritative caller-visible update slice; failed /
+// pre-commit responses synthesize only the failure shell. When
+// `CallReducerFlagsNoSuccessNotify` suppresses a committed success echo,
+// the adapter closes ResponseCh without sending so the protocol watcher
+// can exit cleanly. Pre-acceptance rejections (lifecycle-reducer-name
+// collision, executor-unavailable) are surfaced via the `error` return of
+// `ExecutorInbox.CallReducer` — the protocol layer synthesizes a heavy
+// envelope with `StatusFailed` in that case.
 type CallReducerRequest struct {
 	ConnID      types.ConnectionID
 	Identity    types.Identity
@@ -125,7 +142,7 @@ type CallReducerRequest struct {
 	// seam reads this to decide whether to suppress the caller's
 	// successful-commit heavy echo (`CallReducerFlagsNoSuccessNotify`).
 	Flags      byte
-	ResponseCh chan<- TransactionUpdate
+	ResponseCh chan TransactionUpdate
 }
 
 // RunLifecycle drives SPEC-005 §5.1–§5.2 admission for one connection:
