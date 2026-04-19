@@ -66,6 +66,26 @@ type OneOffQueryMsg struct {
 	Predicates []Predicate
 }
 
+// SubscribeMultiMsg is the client-side SubscribeMulti message
+// (SPEC-005 §7.1b). Reference: SubscribeMulti at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:203.
+// Queries is a structured predicate list — the SQL-string form is
+// deferred alongside OneOffQuery (see
+// TestPhase2DeferralSubscribeMultiQueriesStructured).
+type SubscribeMultiMsg struct {
+	RequestID uint32
+	QueryID   uint32
+	Queries   []Query
+}
+
+// UnsubscribeMultiMsg drops every query registered under the given
+// QueryID in one call. Reference: UnsubscribeMulti at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:229.
+type UnsubscribeMultiMsg struct {
+	RequestID uint32
+	QueryID   uint32
+}
+
 // EncodeClientMessage produces a wire frame: [tag byte] [BSATN body].
 func EncodeClientMessage(m any) ([]byte, error) {
 	var buf bytes.Buffer
@@ -99,6 +119,20 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		if err := encodePredicates(&buf, msg.Predicates); err != nil {
 			return nil, err
 		}
+	case SubscribeMultiMsg:
+		buf.WriteByte(TagSubscribeMulti)
+		writeUint32(&buf, msg.RequestID)
+		writeUint32(&buf, msg.QueryID)
+		writeUint32(&buf, uint32(len(msg.Queries)))
+		for _, q := range msg.Queries {
+			if err := encodeQuery(&buf, q); err != nil {
+				return nil, err
+			}
+		}
+	case UnsubscribeMultiMsg:
+		buf.WriteByte(TagUnsubscribeMulti)
+		writeUint32(&buf, msg.RequestID)
+		writeUint32(&buf, msg.QueryID)
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnknownMessageTag, m)
 	}
@@ -126,6 +160,12 @@ func DecodeClientMessage(frame []byte) (uint8, any, error) {
 		return tag, msg, err
 	case TagOneOffQuery:
 		msg, err := decodeOneOffQuery(body)
+		return tag, msg, err
+	case TagSubscribeMulti:
+		msg, err := decodeSubscribeMulti(body)
+		return tag, msg, err
+	case TagUnsubscribeMulti:
+		msg, err := decodeUnsubscribeMulti(body)
 		return tag, msg, err
 	default:
 		return 0, nil, fmt.Errorf("%w: tag=%d", ErrUnknownMessageTag, tag)
@@ -209,6 +249,45 @@ func decodeOneOffQuery(body []byte) (OneOffQueryMsg, error) {
 		return m, err
 	}
 	m.Predicates = preds
+	return m, nil
+}
+
+func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
+	var m SubscribeMultiMsg
+	var off int
+	var err error
+	if m.RequestID, off, err = readUint32(body, 0); err != nil {
+		return m, err
+	}
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
+		return m, err
+	}
+	count, off, err := readUint32(body, off)
+	if err != nil {
+		return m, err
+	}
+	m.Queries = make([]Query, 0, count)
+	for i := uint32(0); i < count; i++ {
+		q, next, qerr := decodeQuery(body, off)
+		if qerr != nil {
+			return m, qerr
+		}
+		off = next
+		m.Queries = append(m.Queries, q)
+	}
+	return m, nil
+}
+
+func decodeUnsubscribeMulti(body []byte) (UnsubscribeMultiMsg, error) {
+	var m UnsubscribeMultiMsg
+	var off int
+	var err error
+	if m.RequestID, off, err = readUint32(body, 0); err != nil {
+		return m, err
+	}
+	if m.QueryID, _, err = readUint32(body, off); err != nil {
+		return m, err
+	}
 	return m, nil
 }
 

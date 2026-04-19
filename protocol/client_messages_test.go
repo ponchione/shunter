@@ -240,3 +240,53 @@ func TestEncodeClientMessageUnknownType(t *testing.T) {
 		t.Errorf("got %v, want ErrUnknownMessageTag", err)
 	}
 }
+
+func TestSubscribeMultiRoundTrip(t *testing.T) {
+	orig := SubscribeMultiMsg{
+		RequestID: 42,
+		QueryID:   7,
+		Queries: []Query{
+			{TableName: "users"},
+			{TableName: "orders", Predicates: []Predicate{{Column: "id", Value: types.NewUint32(9)}}},
+		},
+	}
+	frame, err := EncodeClientMessage(orig)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	tag, decoded, err := DecodeClientMessage(frame)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if tag != TagSubscribeMulti {
+		t.Fatalf("tag = %d, want %d", tag, TagSubscribeMulti)
+	}
+	got, ok := decoded.(SubscribeMultiMsg)
+	if !ok {
+		t.Fatalf("decoded type = %T, want SubscribeMultiMsg", decoded)
+	}
+	if got.RequestID != orig.RequestID || got.QueryID != orig.QueryID {
+		t.Fatalf("ids = %+v, want %+v", got, orig)
+	}
+	if len(got.Queries) != 2 || got.Queries[0].TableName != "users" || got.Queries[1].TableName != "orders" {
+		t.Fatalf("queries = %+v, want %+v", got.Queries, orig.Queries)
+	}
+}
+
+func TestUnsubscribeMultiRoundTrip(t *testing.T) {
+	orig := UnsubscribeMultiMsg{RequestID: 3, QueryID: 99}
+	frame, err := EncodeClientMessage(orig)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	tag, decoded, err := DecodeClientMessage(frame)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if tag != TagUnsubscribeMulti {
+		t.Fatalf("tag = %d, want %d", tag, TagUnsubscribeMulti)
+	}
+	if got, ok := decoded.(UnsubscribeMultiMsg); !ok || got != orig {
+		t.Fatalf("decoded = %+v, want %+v", decoded, orig)
+	}
+}

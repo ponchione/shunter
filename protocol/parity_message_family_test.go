@@ -192,6 +192,32 @@ func TestPhase1DeferralOneOffQueryStructuredNotSQL(t *testing.T) {
 	}
 }
 
+// TestPhase2SubscribeMultiShape pins the new Phase 2 Slice 2 envelope.
+// Reference: SubscribeMulti { query_strings, request_id, query_id } at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:203.
+// Shunter carries structured Queries (see
+// TestPhase2DeferralSubscribeMultiQueriesStructured).
+func TestPhase2SubscribeMultiShape(t *testing.T) {
+	fields := msgFieldNames(SubscribeMultiMsg{})
+	want := []string{"RequestID", "QueryID", "Queries"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("SubscribeMultiMsg fields = %v, want %v (Phase 2 Slice 2 variant split)",
+			fields, want)
+	}
+}
+
+// TestPhase2UnsubscribeMultiShape pins the new Phase 2 Slice 2 envelope.
+// Reference: UnsubscribeMulti { request_id, query_id } at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:229.
+func TestPhase2UnsubscribeMultiShape(t *testing.T) {
+	fields := msgFieldNames(UnsubscribeMultiMsg{})
+	want := []string{"RequestID", "QueryID"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("UnsubscribeMultiMsg fields = %v, want %v (Phase 2 Slice 2 variant split)",
+			fields, want)
+	}
+}
+
 func msgFieldNames(v any) []string {
 	t := reflect.TypeOf(v)
 	names := make([]string, 0, t.NumField())
