@@ -33,6 +33,8 @@ type DurabilityHandle interface {
 type SubscriptionManager interface {
 	Register(req SubscriptionRegisterRequest, view store.CommittedReadView) (SubscriptionRegisterResult, error)
 	Unregister(connID types.ConnectionID, subscriptionID types.SubscriptionID) error
+	RegisterSet(req subscription.SubscriptionSetRegisterRequest, view store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error)
+	UnregisterSet(connID types.ConnectionID, queryID uint32, view store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error)
 	EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta subscription.PostCommitMeta)
 	DroppedClients() <-chan types.ConnectionID
 	DisconnectClient(connID types.ConnectionID) error

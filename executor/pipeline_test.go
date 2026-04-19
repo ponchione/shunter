@@ -91,6 +91,14 @@ func (f *fakeSubs) Register(SubscriptionRegisterRequest, store.CommittedReadView
 
 func (f *fakeSubs) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
 
+func (f *fakeSubs) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
+	return subscription.SubscriptionSetRegisterResult{}, nil
+}
+
+func (f *fakeSubs) UnregisterSet(types.ConnectionID, uint32, store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error) {
+	return subscription.SubscriptionSetUnregisterResult{}, nil
+}
+
 func (f *fakeSubs) EvalAndBroadcast(txID types.TxID, cs *store.Changeset, view store.CommittedReadView, meta subscription.PostCommitMeta) {
 	f.rec.add("eval-start")
 	if f.onEval != nil {

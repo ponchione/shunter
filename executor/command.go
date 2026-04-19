@@ -46,6 +46,33 @@ type UnregisterSubscriptionCmd struct {
 
 func (UnregisterSubscriptionCmd) isExecutorCommand() {}
 
+// RegisterSubscriptionSetCmd requests atomic set-scoped subscription
+// registration. Reference-aligned replacement for RegisterSubscriptionCmd.
+// Part of the Phase 2 Slice 2 variant split.
+type RegisterSubscriptionSetCmd struct {
+	Request    subscription.SubscriptionSetRegisterRequest
+	ResponseCh chan<- subscription.SubscriptionSetRegisterResult
+}
+
+func (RegisterSubscriptionSetCmd) isExecutorCommand() {}
+
+// UnregisterSubscriptionSetCmd removes every subscription registered
+// under one (ConnID, QueryID) key.
+type UnregisterSubscriptionSetCmd struct {
+	ConnID     types.ConnectionID
+	QueryID    uint32
+	ResponseCh chan<- UnregisterSubscriptionSetResponse
+}
+
+func (UnregisterSubscriptionSetCmd) isExecutorCommand() {}
+
+// UnregisterSubscriptionSetResponse carries either the final delta
+// (on success) or an error.
+type UnregisterSubscriptionSetResponse struct {
+	Result subscription.SubscriptionSetUnregisterResult
+	Err    error
+}
+
 // DisconnectClientSubscriptionsCmd removes all subscriptions for one client.
 type DisconnectClientSubscriptionsCmd struct {
 	ConnID     types.ConnectionID

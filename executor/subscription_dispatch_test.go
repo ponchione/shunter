@@ -19,6 +19,18 @@ type registerDispatchSubs struct {
 	unregisterErr    error
 	disconnectConnID types.ConnectionID
 	disconnectErr    error
+
+	registerSetCalled    bool
+	registerSetReq       subscription.SubscriptionSetRegisterRequest
+	registerSetView      store.CommittedReadView
+	registerSetResult    subscription.SubscriptionSetRegisterResult
+	registerSetErr       error
+	unregisterSetCalled  bool
+	unregisterSetConn    types.ConnectionID
+	unregisterSetQueryID uint32
+	unregisterSetView    store.CommittedReadView
+	unregisterSetResult  subscription.SubscriptionSetUnregisterResult
+	unregisterSetErr     error
 }
 
 func (f *registerDispatchSubs) Register(req subscription.SubscriptionRegisterRequest, view store.CommittedReadView) (subscription.SubscriptionRegisterResult, error) {
@@ -30,6 +42,19 @@ func (f *registerDispatchSubs) Unregister(connID types.ConnectionID, subscriptio
 	f.unregisterConnID = connID
 	f.unregisterSubID = subscriptionID
 	return f.unregisterErr
+}
+func (f *registerDispatchSubs) RegisterSet(req subscription.SubscriptionSetRegisterRequest, view store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
+	f.registerSetCalled = true
+	f.registerSetReq = req
+	f.registerSetView = view
+	return f.registerSetResult, f.registerSetErr
+}
+func (f *registerDispatchSubs) UnregisterSet(connID types.ConnectionID, queryID uint32, view store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error) {
+	f.unregisterSetCalled = true
+	f.unregisterSetConn = connID
+	f.unregisterSetQueryID = queryID
+	f.unregisterSetView = view
+	return f.unregisterSetResult, f.unregisterSetErr
 }
 func (f *registerDispatchSubs) DisconnectClient(connID types.ConnectionID) error {
 	f.disconnectConnID = connID
@@ -134,4 +159,81 @@ func TestUnregisterAndDisconnectSubscriptionDispatchDelegate(t *testing.T) {
 
 func mkReducerRow(id uint64, name string) types.ProductValue {
 	return types.ProductValue{types.NewUint64(id), types.NewString(name)}
+}
+
+func TestDispatchRegisterSubscriptionSet(t *testing.T) {
+	exec, _ := setupExecutor()
+	fakeSubs := &registerDispatchSubs{
+		registerSetResult: subscription.SubscriptionSetRegisterResult{QueryID: 42},
+	}
+	exec.subs = fakeSubs
+
+	var tracked *trackingSnapshot
+	exec.snapshotFn = func() store.CommittedReadView {
+		tracked = &trackingSnapshot{CommittedReadView: exec.committed.Snapshot()}
+		return tracked
+	}
+
+	req := subscription.SubscriptionSetRegisterRequest{
+		ConnID:  types.ConnectionID{9},
+		QueryID: 42,
+		Predicates: []subscription.Predicate{
+			subscription.AllRows{Table: 1},
+		},
+	}
+	respCh := make(chan subscription.SubscriptionSetRegisterResult, 1)
+	exec.dispatch(RegisterSubscriptionSetCmd{Request: req, ResponseCh: respCh})
+
+	resp := <-respCh
+	if resp.QueryID != 42 {
+		t.Fatalf("resp.QueryID = %d, want 42", resp.QueryID)
+	}
+	if !fakeSubs.registerSetCalled {
+		t.Fatal("fakeSubs.RegisterSet was not called")
+	}
+	if fakeSubs.registerSetReq.QueryID != 42 || len(fakeSubs.registerSetReq.Predicates) != 1 {
+		t.Fatalf("fakeSubs.registerSetReq = %+v", fakeSubs.registerSetReq)
+	}
+	if tracked == nil || !tracked.closed {
+		t.Fatal("register-set snapshot should be closed")
+	}
+	if fakeSubs.registerSetView != tracked {
+		t.Fatal("register-set should receive the acquired snapshot view")
+	}
+}
+
+func TestDispatchUnregisterSubscriptionSet(t *testing.T) {
+	exec, _ := setupExecutor()
+	fakeSubs := &registerDispatchSubs{}
+	exec.subs = fakeSubs
+
+	var tracked *trackingSnapshot
+	exec.snapshotFn = func() store.CommittedReadView {
+		tracked = &trackingSnapshot{CommittedReadView: exec.committed.Snapshot()}
+		return tracked
+	}
+
+	respCh := make(chan UnregisterSubscriptionSetResponse, 1)
+	exec.dispatch(UnregisterSubscriptionSetCmd{
+		ConnID:     types.ConnectionID{9},
+		QueryID:    42,
+		ResponseCh: respCh,
+	})
+
+	resp := <-respCh
+	if resp.Err != nil {
+		t.Fatalf("unexpected err: %v", resp.Err)
+	}
+	if !fakeSubs.unregisterSetCalled {
+		t.Fatal("fakeSubs.UnregisterSet was not called")
+	}
+	if fakeSubs.unregisterSetConn != (types.ConnectionID{9}) || fakeSubs.unregisterSetQueryID != 42 {
+		t.Fatalf("fakeSubs got conn=%x query=%d", fakeSubs.unregisterSetConn, fakeSubs.unregisterSetQueryID)
+	}
+	if tracked == nil || !tracked.closed {
+		t.Fatal("unregister-set snapshot should be closed")
+	}
+	if fakeSubs.unregisterSetView != tracked {
+		t.Fatal("unregister-set should receive the acquired snapshot view")
+	}
 }

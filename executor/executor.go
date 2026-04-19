@@ -233,6 +233,10 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 		e.handleRegisterSubscription(c)
 	case UnregisterSubscriptionCmd:
 		e.handleUnregisterSubscription(c)
+	case RegisterSubscriptionSetCmd:
+		e.handleRegisterSubscriptionSet(c)
+	case UnregisterSubscriptionSetCmd:
+		e.handleUnregisterSubscriptionSet(c)
 	case DisconnectClientSubscriptionsCmd:
 		e.handleDisconnectClientSubscriptions(c)
 	case OnConnectCmd:
@@ -258,6 +262,25 @@ func (e *Executor) handleRegisterSubscription(cmd RegisterSubscriptionCmd) {
 
 func (e *Executor) handleUnregisterSubscription(cmd UnregisterSubscriptionCmd) {
 	cmd.ResponseCh <- e.subs.Unregister(cmd.ConnID, cmd.SubscriptionID)
+}
+
+func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd) {
+	view := e.snapshotFn()
+	defer view.Close()
+	res, err := e.subs.RegisterSet(cmd.Request, view)
+	if err != nil {
+		log.Printf("executor: RegisterSubscriptionSet failed: %v", err)
+		cmd.ResponseCh <- subscription.SubscriptionSetRegisterResult{}
+		return
+	}
+	cmd.ResponseCh <- res
+}
+
+func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSetCmd) {
+	view := e.snapshotFn()
+	defer view.Close()
+	res, err := e.subs.UnregisterSet(cmd.ConnID, cmd.QueryID, view)
+	cmd.ResponseCh <- UnregisterSubscriptionSetResponse{Result: res, Err: err}
 }
 
 func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) {
@@ -538,6 +561,12 @@ func (noopSubs) Register(SubscriptionRegisterRequest, store.CommittedReadView) (
 	return SubscriptionRegisterResult{}, nil
 }
 func (noopSubs) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
+func (noopSubs) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
+	return subscription.SubscriptionSetRegisterResult{}, nil
+}
+func (noopSubs) UnregisterSet(types.ConnectionID, uint32, store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error) {
+	return subscription.SubscriptionSetUnregisterResult{}, nil
+}
 func (noopSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
 func (noopSubs) DroppedClients() <-chan types.ConnectionID { return nil }

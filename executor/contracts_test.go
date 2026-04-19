@@ -155,6 +155,16 @@ func TestEpic1CommandTypesImplementExecutorCommand(t *testing.T) {
 	if _, ok := cmd.(DisconnectClientSubscriptionsCmd); !ok {
 		t.Fatal("DisconnectClientSubscriptionsCmd should satisfy ExecutorCommand")
 	}
+
+	cmd = RegisterSubscriptionSetCmd{}
+	if _, ok := cmd.(RegisterSubscriptionSetCmd); !ok {
+		t.Fatal("RegisterSubscriptionSetCmd should satisfy ExecutorCommand")
+	}
+
+	cmd = UnregisterSubscriptionSetCmd{}
+	if _, ok := cmd.(UnregisterSubscriptionSetCmd); !ok {
+		t.Fatal("UnregisterSubscriptionSetCmd should satisfy ExecutorCommand")
+	}
 }
 
 func TestEpic1CommandShapesMatchSpec(t *testing.T) {
@@ -247,6 +257,12 @@ func (stubSubscriptionManager) Register(SubscriptionRegisterRequest, store.Commi
 	return SubscriptionRegisterResult{}, nil
 }
 func (stubSubscriptionManager) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
+func (stubSubscriptionManager) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
+	return subscription.SubscriptionSetRegisterResult{}, nil
+}
+func (stubSubscriptionManager) UnregisterSet(types.ConnectionID, uint32, store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error) {
+	return subscription.SubscriptionSetUnregisterResult{}, nil
+}
 func (stubSubscriptionManager) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
 func (stubSubscriptionManager) DroppedClients() <-chan types.ConnectionID { return nil }
