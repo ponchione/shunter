@@ -16,10 +16,10 @@ func BenchmarkEvalEqualitySubs1K(b *testing.B) {
 	inbox := make(chan FanOutMessage, 1024)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	for i := 0; i < 1000; i++ {
-		_, err := mgr.Register(SubscriptionRegisterRequest{
-			ConnID:         types.ConnectionID{byte(i % 256)},
-			SubscriptionID: types.SubscriptionID(i),
-			Predicate:      ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(i))},
+		_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     types.ConnectionID{byte(i % 256)},
+			QueryID:    uint32(i),
+			Predicates: []Predicate{ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(i))}},
 		}, nil)
 		if err != nil {
 			b.Fatal(err)
@@ -44,10 +44,10 @@ func BenchmarkEvalEqualitySubs10K(b *testing.B) {
 	inbox := make(chan FanOutMessage, 1024)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	for i := 0; i < 10000; i++ {
-		_, err := mgr.Register(SubscriptionRegisterRequest{
-			ConnID:         types.ConnectionID{byte(i % 256)},
-			SubscriptionID: types.SubscriptionID(i),
-			Predicate:      ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(i))},
+		_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     types.ConnectionID{byte(i % 256)},
+			QueryID:    uint32(i),
+			Predicates: []Predicate{ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(i))}},
 		}, nil)
 		if err != nil {
 			b.Fatal(err)
@@ -73,13 +73,13 @@ func BenchmarkRegisterUnregister(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, err := mgr.Register(SubscriptionRegisterRequest{
-			ConnID: types.ConnectionID{1}, SubscriptionID: types.SubscriptionID(i), Predicate: pred,
+		_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID: types.ConnectionID{1}, QueryID: uint32(i), Predicates: []Predicate{pred},
 		}, nil)
 		if err != nil {
 			b.Fatal(err)
 		}
-		if err := mgr.Unregister(types.ConnectionID{1}, types.SubscriptionID(i)); err != nil {
+		if _, err := mgr.UnregisterSet(types.ConnectionID{1}, uint32(i), nil); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -94,8 +94,8 @@ func BenchmarkFanOut1KClientsSameQuery(b *testing.B) {
 		c := types.ConnectionID{}
 		c[0] = byte(i)
 		c[1] = byte(i >> 8)
-		_, _ = mgr.Register(SubscriptionRegisterRequest{
-			ConnID: c, SubscriptionID: types.SubscriptionID(i), Predicate: pred,
+		_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID: c, QueryID: uint32(i), Predicates: []Predicate{pred},
 		}, nil)
 	}
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
@@ -139,10 +139,10 @@ func BenchmarkJoinFragmentEval(b *testing.B) {
 	inbox := make(chan FanOutMessage, 1024)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	join := Join{Left: joinLHS, Right: joinRHS, LeftCol: 0, RightCol: 1}
-	if _, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: join,
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{join},
 	}, committed); err != nil {
-		b.Fatalf("Register = %v", err)
+		b.Fatalf("RegisterSet = %v", err)
 	}
 
 	// Changeset: 10 inserts on each side that fan out into joined rows. The
@@ -207,9 +207,9 @@ func BenchmarkCandidateCollection(b *testing.B) {
 	s := benchSchema()
 	mgr := NewManager(s, s)
 	for i := 0; i < 1000; i++ {
-		_, _ = mgr.Register(SubscriptionRegisterRequest{
-			ConnID: types.ConnectionID{1}, SubscriptionID: types.SubscriptionID(i),
-			Predicate: ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(i))},
+		_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID: types.ConnectionID{1}, QueryID: uint32(i),
+			Predicates: []Predicate{ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(i))}},
 		}, nil)
 	}
 	// Build a 10-row changeset with repeat values.

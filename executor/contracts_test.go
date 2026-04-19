@@ -141,16 +141,6 @@ func TestEpic1CommandTypesImplementExecutorCommand(t *testing.T) {
 		t.Fatal("CallReducerCmd should satisfy ExecutorCommand")
 	}
 
-	cmd = RegisterSubscriptionCmd{}
-	if _, ok := cmd.(RegisterSubscriptionCmd); !ok {
-		t.Fatal("RegisterSubscriptionCmd should satisfy ExecutorCommand")
-	}
-
-	cmd = UnregisterSubscriptionCmd{}
-	if _, ok := cmd.(UnregisterSubscriptionCmd); !ok {
-		t.Fatal("UnregisterSubscriptionCmd should satisfy ExecutorCommand")
-	}
-
 	cmd = DisconnectClientSubscriptionsCmd{}
 	if _, ok := cmd.(DisconnectClientSubscriptionsCmd); !ok {
 		t.Fatal("DisconnectClientSubscriptionsCmd should satisfy ExecutorCommand")
@@ -168,22 +158,22 @@ func TestEpic1CommandTypesImplementExecutorCommand(t *testing.T) {
 }
 
 func TestEpic1CommandShapesMatchSpec(t *testing.T) {
-	regReq := subscription.SubscriptionRegisterRequest{
-		ConnID:         types.ConnectionID{1},
-		SubscriptionID: types.SubscriptionID(2),
+	regReq := subscription.SubscriptionSetRegisterRequest{
+		ConnID:  types.ConnectionID{1},
+		QueryID: 2,
 	}
-	regCmd := RegisterSubscriptionCmd{Request: regReq, ResponseCh: make(chan SubscriptionRegisterResult, 1)}
-	if regCmd.Request.ConnID != regReq.ConnID || regCmd.Request.SubscriptionID != regReq.SubscriptionID {
-		t.Fatalf("RegisterSubscriptionCmd.Request = %+v, want %+v", regCmd.Request, regReq)
+	regCmd := RegisterSubscriptionSetCmd{Request: regReq, ResponseCh: make(chan subscription.SubscriptionSetRegisterResult, 1)}
+	if regCmd.Request.ConnID != regReq.ConnID || regCmd.Request.QueryID != regReq.QueryID {
+		t.Fatalf("RegisterSubscriptionSetCmd.Request = %+v, want %+v", regCmd.Request, regReq)
 	}
 
-	unregCmd := UnregisterSubscriptionCmd{
-		ConnID:         types.ConnectionID{3},
-		SubscriptionID: types.SubscriptionID(4),
-		ResponseCh:     make(chan error, 1),
+	unregCmd := UnregisterSubscriptionSetCmd{
+		ConnID:     types.ConnectionID{3},
+		QueryID:    4,
+		ResponseCh: make(chan UnregisterSubscriptionSetResponse, 1),
 	}
-	if unregCmd.ConnID != (types.ConnectionID{3}) || unregCmd.SubscriptionID != 4 {
-		t.Fatalf("UnregisterSubscriptionCmd = %+v", unregCmd)
+	if unregCmd.ConnID != (types.ConnectionID{3}) || unregCmd.QueryID != 4 {
+		t.Fatalf("UnregisterSubscriptionSetCmd = %+v", unregCmd)
 	}
 
 	disconnectCmd := DisconnectClientSubscriptionsCmd{
@@ -249,14 +239,10 @@ func (stubScheduler) Cancel(types.ScheduleID) (bool, error) { return true, nil }
 type stubDurability struct{}
 
 func (stubDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
-func (stubDurability) WaitUntilDurable(types.TxID) <-chan types.TxID  { return nil }
+func (stubDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
 
 type stubSubscriptionManager struct{}
 
-func (stubSubscriptionManager) Register(SubscriptionRegisterRequest, store.CommittedReadView) (SubscriptionRegisterResult, error) {
-	return SubscriptionRegisterResult{}, nil
-}
-func (stubSubscriptionManager) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
 func (stubSubscriptionManager) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
 	return subscription.SubscriptionSetRegisterResult{}, nil
 }

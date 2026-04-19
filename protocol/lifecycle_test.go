@@ -65,14 +65,6 @@ func (f *fakeInbox) DisconnectClientSubscriptions(_ context.Context, connID type
 	return f.disconnectSubsErr
 }
 
-func (f *fakeInbox) RegisterSubscription(_ context.Context, _ RegisterSubscriptionRequest) error {
-	return nil
-}
-
-func (f *fakeInbox) UnregisterSubscription(_ context.Context, _ UnregisterSubscriptionRequest) error {
-	return nil
-}
-
 func (f *fakeInbox) RegisterSubscriptionSet(_ context.Context, _ RegisterSubscriptionSetRequest) error {
 	return nil
 }

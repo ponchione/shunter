@@ -142,13 +142,17 @@ func runIVMInvariantIteration(t *testing.T, seed uint64) {
 
 	inbox := make(chan FanOutMessage, 4)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	res, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: pred,
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
 	}, sPre)
 	if err != nil {
-		t.Fatalf("Register: %v", err)
+		t.Fatalf("RegisterSet: %v", err)
 	}
-	rPre := cloneRows(res.InitialRows)
+	var rPreRows []types.ProductValue
+	for _, u := range res.Update {
+		rPreRows = append(rPreRows, u.Inserts...)
+	}
+	rPre := cloneRows(rPreRows)
 
 	insN := r.IntN(5)
 	delN := r.IntN(3)
@@ -178,13 +182,17 @@ func runIVMInvariantIteration(t *testing.T, seed uint64) {
 	incremental := applyDelta(rPre, dIns, dDel)
 
 	mgr2 := NewManager(s, s)
-	res2, err := mgr2.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 20, Predicate: pred,
+	res2, err := mgr2.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 20, Predicates: []Predicate{pred},
 	}, sPost)
 	if err != nil {
-		t.Fatalf("fresh Register: %v", err)
+		t.Fatalf("fresh RegisterSet: %v", err)
 	}
-	rFresh := cloneRows(res2.InitialRows)
+	var rFreshRows []types.ProductValue
+	for _, u := range res2.Update {
+		rFreshRows = append(rFreshRows, u.Inserts...)
+	}
+	rFresh := cloneRows(rFreshRows)
 
 	if !bagEqual(incremental, rFresh) {
 		t.Fatalf("IVM invariant violated\nseed=%d target=%d\ninitRows=%v\ninserts=%v deletes=%v\nrPre=%v\ndIns=%v dDel=%v\nincremental=%v rFresh=%v",
@@ -218,8 +226,8 @@ func runPruningSafetyIteration(t *testing.T, seed uint64) {
 
 	numSubs := r.IntN(8) + 2
 	type subEntry struct {
-		subID types.SubscriptionID
-		pred  Predicate
+		queryID uint32
+		pred    Predicate
 	}
 	subs := make([]subEntry, numSubs)
 	for i := 0; i < numSubs; i++ {
@@ -237,8 +245,8 @@ func runPruningSafetyIteration(t *testing.T, seed uint64) {
 			p = AllRows{Table: 1}
 		}
 		subs[i] = subEntry{
-			subID: types.SubscriptionID(100 + i),
-			pred:  p,
+			queryID: uint32(100 + i),
+			pred:    p,
 		}
 	}
 
@@ -246,10 +254,10 @@ func runPruningSafetyIteration(t *testing.T, seed uint64) {
 	conn := types.ConnectionID{1}
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	for _, e := range subs {
-		if _, err := mgr.Register(SubscriptionRegisterRequest{
-			ConnID: conn, SubscriptionID: e.subID, Predicate: e.pred,
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID: conn, QueryID: e.queryID, Predicates: []Predicate{e.pred},
 		}, sPre); err != nil {
-			t.Fatalf("Register(%v): %v", e.pred, err)
+			t.Fatalf("RegisterSet(%v): %v", e.pred, err)
 		}
 	}
 
@@ -395,11 +403,13 @@ func runRegistrationSymmetryIteration(t *testing.T, seed uint64) {
 	idMax := 16
 	n := r.IntN(12) + 1
 	type entry struct {
-		connID types.ConnectionID
-		subID  types.SubscriptionID
-		pred   Predicate
+		connID  types.ConnectionID
+		queryID uint32
+		pred    Predicate
 	}
 	entries := make([]entry, n)
+	// (connID, queryID) must be unique per connection; use i as the key so
+	// RegisterSet cannot collide even when the same connID is reused.
 	for i := range entries {
 		var p Predicate
 		switch r.IntN(3) {
@@ -415,22 +425,22 @@ func runRegistrationSymmetryIteration(t *testing.T, seed uint64) {
 			p = AllRows{Table: 1}
 		}
 		entries[i] = entry{
-			connID: types.ConnectionID{byte(r.IntN(4))},
-			subID:  types.SubscriptionID(1000 + i),
-			pred:   p,
+			connID:  types.ConnectionID{byte(r.IntN(4)), byte(i)},
+			queryID: uint32(1000 + i),
+			pred:    p,
 		}
-		if _, err := mgr.Register(SubscriptionRegisterRequest{
-			ConnID: entries[i].connID, SubscriptionID: entries[i].subID, Predicate: entries[i].pred,
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID: entries[i].connID, QueryID: entries[i].queryID, Predicates: []Predicate{entries[i].pred},
 		}, nil); err != nil {
-			t.Fatalf("Register: %v", err)
+			t.Fatalf("RegisterSet: %v", err)
 		}
 	}
 
 	order := r.Perm(len(entries))
 	for _, idx := range order {
 		e := entries[idx]
-		if err := mgr.Unregister(e.connID, e.subID); err != nil {
-			t.Fatalf("Unregister(%v,%v): %v", e.connID, e.subID, err)
+		if _, err := mgr.UnregisterSet(e.connID, e.queryID, nil); err != nil {
+			t.Fatalf("UnregisterSet(%v,%v): %v", e.connID, e.queryID, err)
 		}
 	}
 

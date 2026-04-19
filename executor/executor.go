@@ -229,10 +229,6 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 	switch c := cmd.(type) {
 	case CallReducerCmd:
 		e.handleCallReducer(c)
-	case RegisterSubscriptionCmd:
-		e.handleRegisterSubscription(c)
-	case UnregisterSubscriptionCmd:
-		e.handleUnregisterSubscription(c)
 	case RegisterSubscriptionSetCmd:
 		e.handleRegisterSubscriptionSet(c)
 	case UnregisterSubscriptionSetCmd:
@@ -246,22 +242,6 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 	default:
 		log.Printf("executor: unknown command type %T", cmd)
 	}
-}
-
-func (e *Executor) handleRegisterSubscription(cmd RegisterSubscriptionCmd) {
-	view := e.snapshotFn()
-	defer view.Close()
-	result, err := e.subs.Register(cmd.Request, view)
-	if err != nil {
-		log.Printf("executor: RegisterSubscription failed: %v", err)
-		cmd.ResponseCh <- SubscriptionRegisterResult{}
-		return
-	}
-	cmd.ResponseCh <- result
-}
-
-func (e *Executor) handleUnregisterSubscription(cmd UnregisterSubscriptionCmd) {
-	cmd.ResponseCh <- e.subs.Unregister(cmd.ConnID, cmd.SubscriptionID)
 }
 
 func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd) {
@@ -553,14 +533,10 @@ func isUserCommitError(err error) bool {
 type noopDurability struct{}
 
 func (noopDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
-func (noopDurability) WaitUntilDurable(types.TxID) <-chan types.TxID  { return nil }
+func (noopDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
 
 type noopSubs struct{}
 
-func (noopSubs) Register(SubscriptionRegisterRequest, store.CommittedReadView) (SubscriptionRegisterResult, error) {
-	return SubscriptionRegisterResult{}, nil
-}
-func (noopSubs) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
 func (noopSubs) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
 	return subscription.SubscriptionSetRegisterResult{}, nil
 }

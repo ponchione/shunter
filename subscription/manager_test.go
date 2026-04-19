@@ -39,17 +39,17 @@ func TestRegisterReturnsInitialRows(t *testing.T) {
 		},
 	})
 	mgr := NewManager(s, s)
-	req := SubscriptionRegisterRequest{
-		ConnID:         types.ConnectionID{1},
-		SubscriptionID: types.SubscriptionID(10),
-		Predicate:      AllRows{Table: 1},
+	req := SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    10,
+		Predicates: []Predicate{AllRows{Table: 1}},
 	}
-	res, err := mgr.Register(req, view)
+	res, err := mgr.RegisterSet(req, view)
 	if err != nil {
-		t.Fatalf("Register = %v", err)
+		t.Fatalf("RegisterSet = %v", err)
 	}
-	if len(res.InitialRows) != 2 {
-		t.Fatalf("InitialRows = %v, want 2", res.InitialRows)
+	if len(res.Update) != 1 || len(res.Update[0].Inserts) != 2 {
+		t.Fatalf("InitialRows update = %+v, want 2 inserts", res.Update)
 	}
 }
 
@@ -60,14 +60,14 @@ func TestRegisterDedupSharesQueryState(t *testing.T) {
 	})
 	mgr := NewManager(s, s)
 	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: pred,
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
 	}, view)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{2}, SubscriptionID: 11, Predicate: pred,
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 11, Predicates: []Predicate{pred},
 	}, view)
 	if err != nil {
 		t.Fatal(err)
@@ -88,19 +88,19 @@ func TestRegisterParameterizedHashUsesClientIdentity(t *testing.T) {
 	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	idA := &types.Identity{1}
 	idB := &types.Identity{2}
-	_, err := mgr.Register(SubscriptionRegisterRequest{
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
 		ConnID:         types.ConnectionID{1},
-		SubscriptionID: 10,
-		Predicate:      pred,
+		QueryID:        10,
+		Predicates:     []Predicate{pred},
 		ClientIdentity: idA,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = mgr.Register(SubscriptionRegisterRequest{
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
 		ConnID:         types.ConnectionID{2},
-		SubscriptionID: 11,
-		Predicate:      pred,
+		QueryID:        11,
+		Predicates:     []Predicate{pred},
 		ClientIdentity: idB,
 	}, nil)
 	if err != nil {
@@ -120,15 +120,19 @@ func TestRegisterParameterizedHashUsesClientIdentity(t *testing.T) {
 	}
 }
 
-func TestRegisterAllowsSameSubscriptionIDAcrossConnections(t *testing.T) {
+func TestRegisterAllowsSameQueryIDAcrossConnections(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
 	pred := AllRows{Table: 1}
-	if _, err := mgr.Register(SubscriptionRegisterRequest{ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: pred}, nil); err != nil {
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.Register(SubscriptionRegisterRequest{ConnID: types.ConnectionID{2}, SubscriptionID: 10, Predicate: pred}, nil); err != nil {
-		t.Fatalf("second connection should be able to reuse subscription ID 10: %v", err)
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 10, Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("second connection should be able to reuse query ID 10: %v", err)
 	}
 	if qs := mgr.registry.getQuery(ComputeQueryHash(pred, nil)); qs == nil || qs.refCount != 2 {
 		t.Fatalf("shared query state refCount = %v, want 2", qs)
@@ -144,8 +148,8 @@ func TestRegisterThreeTableError(t *testing.T) {
 		Right: ColEq{Table: 2, Column: 0, Value: types.NewUint64(2)}}
 	p := And{Left: inner, Right: ColEq{Table: 3, Column: 0, Value: types.NewUint64(3)}}
 	mgr := NewManager(s, s)
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: p,
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{p},
 	}, nil)
 	if !errors.Is(err, ErrTooManyTables) {
 		t.Fatalf("want ErrTooManyTables, got %v", err)
@@ -158,8 +162,8 @@ func TestRegisterUnindexedJoinError(t *testing.T) {
 	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
 	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
 	mgr := NewManager(s, s)
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: p,
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{p},
 	}, nil)
 	if !errors.Is(err, ErrUnindexedJoin) {
 		t.Fatalf("want ErrUnindexedJoin, got %v", err)
@@ -179,8 +183,8 @@ func TestRegisterJoinNilResolverFails(t *testing.T) {
 	})
 	mgr := NewManager(s, nil) // no resolver
 	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: p,
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{p},
 	}, view)
 	if !errors.Is(err, ErrJoinIndexUnresolved) {
 		t.Fatalf("want ErrJoinIndexUnresolved, got %v", err)
@@ -207,8 +211,8 @@ func TestRegisterJoinResolverMissingIndexFails(t *testing.T) {
 	})
 	mgr := NewManager(s, stubNoopResolver{})
 	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: p,
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{p},
 	}, view)
 	if !errors.Is(err, ErrJoinIndexUnresolved) {
 		t.Fatalf("want ErrJoinIndexUnresolved, got %v", err)
@@ -225,17 +229,17 @@ func TestRegisterJoinBootstrapFallsBackToLeftIndex(t *testing.T) {
 	})
 	mgr := NewManager(s, s)
 	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
-	got, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: p,
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{p},
 	}, view)
 	if err != nil {
-		t.Fatalf("Register = %v", err)
+		t.Fatalf("RegisterSet = %v", err)
 	}
-	if len(got.InitialRows) != 1 {
-		t.Fatalf("initial rows = %v, want 1 joined row", got.InitialRows)
+	if len(got.Update) != 1 || len(got.Update[0].Inserts) != 1 {
+		t.Fatalf("initial rows = %v, want 1 joined row", got.Update)
 	}
-	if len(got.InitialRows[0]) != 4 {
-		t.Fatalf("joined row = %v, want concatenated lhs+rhs columns", got.InitialRows[0])
+	if len(got.Update[0].Inserts[0]) != 4 {
+		t.Fatalf("joined row = %v, want concatenated lhs+rhs columns", got.Update[0].Inserts[0])
 	}
 }
 
@@ -249,8 +253,8 @@ func TestRegisterInitialRowLimit(t *testing.T) {
 		},
 	})
 	mgr := NewManager(s, s, WithInitialRowLimit(1))
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: AllRows{Table: 1},
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}},
 	}, view)
 	if !errors.Is(err, ErrInitialRowLimit) {
 		t.Fatalf("want ErrInitialRowLimit, got %v", err)
@@ -260,9 +264,9 @@ func TestRegisterInitialRowLimit(t *testing.T) {
 func TestRegisterAppearsInPruningIndexes(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10,
-		Predicate: ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)},
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -276,13 +280,13 @@ func TestUnregisterNotLast(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
 	pred := AllRows{Table: 1}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: pred,
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
 	}, nil)
-	_, _ = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{2}, SubscriptionID: 11, Predicate: pred,
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 11, Predicates: []Predicate{pred},
 	}, nil)
-	if err := mgr.Unregister(types.ConnectionID{1}, types.SubscriptionID(10)); err != nil {
+	if _, err := mgr.UnregisterSet(types.ConnectionID{1}, 10, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Query state should still be alive.
@@ -295,10 +299,10 @@ func TestUnregisterLastCleansIndexes(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
 	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: pred,
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
 	}, nil)
-	if err := mgr.Unregister(types.ConnectionID{1}, types.SubscriptionID(10)); err != nil {
+	if _, err := mgr.UnregisterSet(types.ConnectionID{1}, 10, nil); err != nil {
 		t.Fatal(err)
 	}
 	if mgr.registry.hasActive() {
@@ -321,8 +325,8 @@ func TestUnregisterLastCleansJoinEdgeIndexes(t *testing.T) {
 		RightCol: 0,
 		Filter:   ColEq{Table: 2, Column: 1, Value: types.NewInt32(7)},
 	}
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: pred,
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +334,7 @@ func TestUnregisterLastCleansJoinEdgeIndexes(t *testing.T) {
 	if len(mgr.indexes.JoinEdge.edges) == 0 || len(mgr.indexes.JoinEdge.byTable) == 0 {
 		t.Fatalf("expected join-edge placement, got edges=%v byTable=%v", mgr.indexes.JoinEdge.edges, mgr.indexes.JoinEdge.byTable)
 	}
-	if err := mgr.Unregister(types.ConnectionID{1}, types.SubscriptionID(10)); err != nil {
+	if _, err := mgr.UnregisterSet(types.ConnectionID{1}, 10, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(mgr.indexes.JoinEdge.edges) != 0 || len(mgr.indexes.JoinEdge.byTable) != 0 {
@@ -341,7 +345,7 @@ func TestUnregisterLastCleansJoinEdgeIndexes(t *testing.T) {
 func TestUnregisterUnknown(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
-	err := mgr.Unregister(types.ConnectionID{1}, types.SubscriptionID(999))
+	_, err := mgr.UnregisterSet(types.ConnectionID{1}, 999, nil)
 	if !errors.Is(err, ErrSubscriptionNotFound) {
 		t.Fatalf("want ErrSubscriptionNotFound, got %v", err)
 	}
@@ -351,9 +355,9 @@ func TestDisconnectClientRemovesAll(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
 	c := types.ConnectionID{1}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 10, Predicate: AllRows{Table: 1}}, nil)
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 11, Predicate: AllRows{Table: 2}}, nil)
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 12, Predicate: ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 11, Predicates: []Predicate{AllRows{Table: 2}}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 12, Predicates: []Predicate{ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)}}}, nil)
 	if err := mgr.DisconnectClient(c); err != nil {
 		t.Fatal(err)
 	}
@@ -371,8 +375,8 @@ func TestDisconnectSharedQuerySurvives(t *testing.T) {
 	cA := types.ConnectionID{1}
 	cB := types.ConnectionID{2}
 	pred := AllRows{Table: 1}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: cA, SubscriptionID: 10, Predicate: pred}, nil)
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: cB, SubscriptionID: 11, Predicate: pred}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: cA, QueryID: 10, Predicates: []Predicate{pred}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: cB, QueryID: 11, Predicates: []Predicate{pred}}, nil)
 	_ = mgr.DisconnectClient(cA)
 	if !mgr.registry.hasActive() {
 		t.Fatal("queryState should remain for client B")

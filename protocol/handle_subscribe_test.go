@@ -40,20 +40,15 @@ func newMockSchema(name string, id schema.TableID, cols ...schema.ColumnSchema) 
 	}
 }
 
-// mockSubExecutor records RegisterSubscription / RegisterSubscriptionSet /
-// UnregisterSubscriptionSet calls and implements the full ExecutorInbox
-// interface with stubs for the remaining methods.
+// mockSubExecutor records RegisterSubscriptionSet / UnregisterSubscriptionSet
+// calls and implements the full ExecutorInbox interface with stubs for the
+// remaining methods.
 type mockSubExecutor struct {
-	mu sync.Mutex
-	// Legacy single-path bookkeeping (kept until Task 9 removes the
-	// old RegisterSubscription/UnregisterSubscription seams).
-	registerReq *RegisterSubscriptionRequest
-	registerErr error
-	// Set-path bookkeeping (Task 8 split).
-	registerSetReq     *RegisterSubscriptionSetRequest
-	registerSetErr     error
-	unregisterSetReq   *UnregisterSubscriptionSetRequest
-	unregisterSetErr   error
+	mu               sync.Mutex
+	registerSetReq   *RegisterSubscriptionSetRequest
+	registerSetErr   error
+	unregisterSetReq *UnregisterSubscriptionSetRequest
+	unregisterSetErr error
 }
 
 func (m *mockSubExecutor) OnConnect(_ context.Context, _ types.ConnectionID, _ types.Identity) error {
@@ -65,17 +60,6 @@ func (m *mockSubExecutor) OnDisconnect(_ context.Context, _ types.ConnectionID, 
 }
 
 func (m *mockSubExecutor) DisconnectClientSubscriptions(_ context.Context, _ types.ConnectionID) error {
-	return nil
-}
-
-func (m *mockSubExecutor) RegisterSubscription(_ context.Context, req RegisterSubscriptionRequest) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.registerReq = &req
-	return m.registerErr
-}
-
-func (m *mockSubExecutor) UnregisterSubscription(_ context.Context, _ UnregisterSubscriptionRequest) error {
 	return nil
 }
 
@@ -95,12 +79,6 @@ func (m *mockSubExecutor) UnregisterSubscriptionSet(_ context.Context, req Unreg
 
 func (m *mockSubExecutor) CallReducer(_ context.Context, _ CallReducerRequest) error {
 	return nil
-}
-
-func (m *mockSubExecutor) getRegisterReq() *RegisterSubscriptionRequest {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.registerReq
 }
 
 func (m *mockSubExecutor) getRegisterSetReq() *RegisterSubscriptionSetRequest {

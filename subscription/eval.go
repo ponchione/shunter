@@ -122,7 +122,7 @@ func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.Conne
 		}
 	}
 	for _, sub := range doomed {
-		_ = m.Unregister(sub.connID, sub.subID)
+		m.removeDroppedSub(sub.connID, sub.subID)
 	}
 }
 

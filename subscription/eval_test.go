@@ -23,10 +23,11 @@ func TestEvalSingleTableColEqMatches(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	_, _ = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10,
-		Predicate: ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)},
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}},
 	}, nil)
+	wantSubID := mgr.querySets[types.ConnectionID{1}][10][0]
 
 	cs := simpleChangeset(1,
 		[]types.ProductValue{
@@ -44,8 +45,8 @@ func TestEvalSingleTableColEqMatches(t *testing.T) {
 		if len(u.Inserts) != 1 {
 			t.Fatalf("Inserts = %v, want 1", u.Inserts)
 		}
-		if u.SubscriptionID != types.SubscriptionID(10) {
-			t.Fatalf("SubscriptionID = %d", u.SubscriptionID)
+		if u.SubscriptionID != wantSubID {
+			t.Fatalf("SubscriptionID = %d, want %d", u.SubscriptionID, wantSubID)
 		}
 	default:
 		t.Fatal("no fanout message received")
@@ -56,9 +57,9 @@ func TestEvalSkipsUnaffectedTables(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	_, _ = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10,
-		Predicate: AllRows{Table: 2},
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{AllRows{Table: 2}},
 	}, nil)
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("a")}}, nil)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
@@ -79,8 +80,10 @@ func TestEvalTwoSubscribersSharedQuery(t *testing.T) {
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: pred}, nil)
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: types.ConnectionID{2}, SubscriptionID: 11, Predicate: pred}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: types.ConnectionID{2}, QueryID: 11, Predicates: []Predicate{pred}}, nil)
+	want1 := mgr.querySets[types.ConnectionID{1}][10][0]
+	want2 := mgr.querySets[types.ConnectionID{2}][11][0]
 
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
@@ -91,8 +94,8 @@ func TestEvalTwoSubscribersSharedQuery(t *testing.T) {
 	}
 	got1 := msg.Fanout[types.ConnectionID{1}][0].SubscriptionID
 	got2 := msg.Fanout[types.ConnectionID{2}][0].SubscriptionID
-	if got1 != types.SubscriptionID(10) || got2 != types.SubscriptionID(11) {
-		t.Fatalf("subIDs wrong: %d %d", got1, got2)
+	if got1 != want1 || got2 != want2 {
+		t.Fatalf("subIDs wrong: got (%d,%d) want (%d,%d)", got1, got2, want1, want2)
 	}
 }
 
@@ -102,8 +105,10 @@ func TestEvalSameConnectionSameQueryProducesIndependentUpdates(t *testing.T) {
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	c := types.ConnectionID{1}
 	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 10, Predicate: pred}, nil)
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 11, Predicate: pred}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 10, Predicates: []Predicate{pred}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 11, Predicates: []Predicate{pred}}, nil)
+	wantA := mgr.querySets[c][10][0]
+	wantB := mgr.querySets[c][11][0]
 
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
@@ -117,8 +122,8 @@ func TestEvalSameConnectionSameQueryProducesIndependentUpdates(t *testing.T) {
 	for _, u := range updates {
 		seen[u.SubscriptionID] = true
 	}
-	if !seen[10] || !seen[11] {
-		t.Fatalf("expected updates for subIDs 10 and 11, got %v", updates)
+	if !seen[wantA] || !seen[wantB] {
+		t.Fatalf("expected updates for subIDs %d and %d, got %v", wantA, wantB, updates)
 	}
 }
 
@@ -127,8 +132,9 @@ func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T)
 	inbox := make(chan FanOutMessage, 2)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	c := types.ConnectionID{1}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 10, RequestID: 77, Predicate: AllRows{Table: 1}}, nil)
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 11, Predicate: AllRows{Table: 2}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 10, RequestID: 77, Predicates: []Predicate{AllRows{Table: 1}}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 11, Predicates: []Predicate{AllRows{Table: 2}}}, nil)
+	wantHealthy := mgr.querySets[c][11][0]
 
 	var logs bytes.Buffer
 	oldOut := log.Writer()
@@ -188,8 +194,8 @@ func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T)
 	mgr.EvalAndBroadcast(types.TxID(2), cs2, nil, PostCommitMeta{})
 	msg2 := <-inbox
 	updates := msg2.Fanout[c]
-	if len(updates) != 1 || updates[0].SubscriptionID != 11 {
-		t.Fatalf("healthy subscription should remain active, got %v", updates)
+	if len(updates) != 1 || updates[0].SubscriptionID != wantHealthy {
+		t.Fatalf("healthy subscription should remain active, got %v (want subID=%d)", updates, wantHealthy)
 	}
 }
 
@@ -200,9 +206,9 @@ func TestEvalBatchedTier1SingleLookup(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	_, _ = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10,
-		Predicate: ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)},
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}},
 	}, nil)
 	ins := make([]types.ProductValue, 100)
 	for i := range ins {
@@ -231,11 +237,11 @@ func TestEvalJoinSubscription(t *testing.T) {
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	join := Join{Left: joinLHS, Right: joinRHS, LeftCol: 0, RightCol: 1}
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10, Predicate: join,
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{join},
 	}, committed)
 	if err != nil {
-		t.Fatalf("Register = %v", err)
+		t.Fatalf("RegisterSet = %v", err)
 	}
 
 	// Insert a second row in T2 pointing at the existing T1 row.
@@ -269,11 +275,11 @@ func TestEvalPruningFallbackVsBaseline(t *testing.T) {
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	// ColRange subs land in Tier 3 (range predicates have no equality).
-	_, _ = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10,
-		Predicate: ColRange{Table: 1, Column: 0,
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{ColRange{Table: 1, Column: 0,
 			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
-			Upper: Bound{Value: types.NewUint64(100), Inclusive: true}},
+			Upper: Bound{Value: types.NewUint64(100), Inclusive: true}}},
 	}, nil)
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(50), types.NewString("in")}}, nil)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
@@ -288,9 +294,9 @@ func TestEvalChangesetNotMutated(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	_, _ = mgr.Register(SubscriptionRegisterRequest{
-		ConnID: types.ConnectionID{1}, SubscriptionID: 10,
-		Predicate: AllRows{Table: 1},
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{AllRows{Table: 1}},
 	}, nil)
 
 	original := []types.ProductValue{
@@ -312,8 +318,8 @@ func TestEvalMultipleTableUpdatesGrouped(t *testing.T) {
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	c := types.ConnectionID{1}
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 10, Predicate: AllRows{Table: 1}}, nil)
-	_, _ = mgr.Register(SubscriptionRegisterRequest{ConnID: c, SubscriptionID: 11, Predicate: AllRows{Table: 2}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 10, Predicates: []Predicate{AllRows{Table: 1}}}, nil)
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 11, Predicates: []Predicate{AllRows{Table: 2}}}, nil)
 
 	cs := &store.Changeset{
 		TxID: 1,

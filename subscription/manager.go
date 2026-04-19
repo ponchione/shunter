@@ -13,24 +13,6 @@ import (
 // reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1050.
 var ErrQueryIDAlreadyLive = errors.New("subscription: query id already live on connection")
 
-// SubscriptionRegisterRequest carries the validated subscription parameters
-// from the protocol layer to the executor and then to the subscription
-// manager (SPEC-004 §4.1).
-type SubscriptionRegisterRequest struct {
-	ConnID         types.ConnectionID
-	SubscriptionID types.SubscriptionID
-	Predicate      Predicate       // validated and compiled by the protocol layer
-	ClientIdentity *types.Identity // nil for non-parameterized subscriptions
-	RequestID      uint32          // echoed in SubscribeApplied
-}
-
-// SubscriptionRegisterResult is returned by Register after the initial query
-// executes and the subscription is fully registered.
-type SubscriptionRegisterResult struct {
-	SubscriptionID types.SubscriptionID
-	InitialRows    []types.ProductValue // all rows matching the predicate at registration time
-}
-
 // SubscriptionSetRegisterRequest is the set-based register request.
 // Predicates may have length >= 1; length 1 is the Single path.
 type SubscriptionSetRegisterRequest struct {
@@ -81,8 +63,6 @@ type CommitFanout map[types.ConnectionID][]SubscriptionUpdate
 // SubscriptionManager is the contract consumed by the executor
 // (SPEC-004 §10.1). All methods run on the executor goroutine.
 type SubscriptionManager interface {
-	Register(req SubscriptionRegisterRequest, view store.CommittedReadView) (SubscriptionRegisterResult, error)
-	Unregister(connID types.ConnectionID, subscriptionID types.SubscriptionID) error
 	RegisterSet(req SubscriptionSetRegisterRequest, view store.CommittedReadView) (SubscriptionSetRegisterResult, error)
 	UnregisterSet(connID types.ConnectionID, queryID uint32, view store.CommittedReadView) (SubscriptionSetUnregisterResult, error)
 	DisconnectClient(connID types.ConnectionID) error

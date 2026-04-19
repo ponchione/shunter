@@ -5,16 +5,6 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// SubscriptionRegisterRequest aliases the canonical SPEC-004 registration
-// request so executor command contracts can reference the subscription-owned
-// type without duplicating its shape.
-type SubscriptionRegisterRequest = subscription.SubscriptionRegisterRequest
-
-// SubscriptionRegisterResult aliases the canonical SPEC-004 registration
-// result so executor command contracts can reference the subscription-owned
-// type without duplicating its shape.
-type SubscriptionRegisterResult = subscription.SubscriptionRegisterResult
-
 // ExecutorCommand is the interface for all executor inbox commands.
 type ExecutorCommand interface {
 	isExecutorCommand()
@@ -28,27 +18,8 @@ type CallReducerCmd struct {
 
 func (CallReducerCmd) isExecutorCommand() {}
 
-// RegisterSubscriptionCmd requests atomic subscription registration through the
-// executor queue.
-type RegisterSubscriptionCmd struct {
-	Request    SubscriptionRegisterRequest
-	ResponseCh chan<- SubscriptionRegisterResult
-}
-
-func (RegisterSubscriptionCmd) isExecutorCommand() {}
-
-// UnregisterSubscriptionCmd removes one connection-owned subscription.
-type UnregisterSubscriptionCmd struct {
-	ConnID         types.ConnectionID
-	SubscriptionID types.SubscriptionID
-	ResponseCh     chan<- error
-}
-
-func (UnregisterSubscriptionCmd) isExecutorCommand() {}
-
 // RegisterSubscriptionSetCmd requests atomic set-scoped subscription
-// registration. Reference-aligned replacement for RegisterSubscriptionCmd.
-// Part of the Phase 2 Slice 2 variant split.
+// registration. Part of the Phase 2 Slice 2 variant split.
 type RegisterSubscriptionSetCmd struct {
 	Request    subscription.SubscriptionSetRegisterRequest
 	ResponseCh chan<- subscription.SubscriptionSetRegisterResult

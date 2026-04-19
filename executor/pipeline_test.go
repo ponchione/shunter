@@ -39,9 +39,9 @@ type fakeDurability struct {
 	rec      *recorder
 	txIDs    []types.TxID
 	payloads []*store.Changeset
-	block    chan struct{}      // if set, EnqueueCommitted waits on it
-	waitCh   <-chan types.TxID  // optional readiness channel returned by WaitUntilDurable
-	panicOn  bool               // panic when EnqueueCommitted is called
+	block    chan struct{}     // if set, EnqueueCommitted waits on it
+	waitCh   <-chan types.TxID // optional readiness channel returned by WaitUntilDurable
+	panicOn  bool              // panic when EnqueueCommitted is called
 	mu       sync.Mutex
 }
 
@@ -74,9 +74,9 @@ func (f *fakeDurability) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
 type fakeSubs struct {
 	rec      *recorder
 	txIDs    []types.TxID
-	viewSaw   []store.CommittedReadView
-	metas     []subscription.PostCommitMeta
-	block     chan struct{}
+	viewSaw  []store.CommittedReadView
+	metas    []subscription.PostCommitMeta
+	block    chan struct{}
 	onEval   func(view store.CommittedReadView)
 	mu       sync.Mutex
 	dropped  chan types.ConnectionID // DroppedClients() source; nil when unset
@@ -84,12 +84,6 @@ type fakeSubs struct {
 	discErr  func(types.ConnectionID) error
 	panicOn  bool
 }
-
-func (f *fakeSubs) Register(SubscriptionRegisterRequest, store.CommittedReadView) (SubscriptionRegisterResult, error) {
-	return SubscriptionRegisterResult{}, nil
-}
-
-func (f *fakeSubs) Unregister(types.ConnectionID, types.SubscriptionID) error { return nil }
 
 func (f *fakeSubs) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
 	return subscription.SubscriptionSetRegisterResult{}, nil

@@ -55,52 +55,6 @@ func (s connOnlySender) SendTransactionUpdateLight(connID types.ConnectionID, up
 	return s.Send(connID, *update)
 }
 
-// Deprecated: legacy single-path watcher. Removed in Task 9 alongside the
-// old RegisterSubscription/UnregisterSubscription inbox seam. Present
-// now only because Task 8 kept the legacy types for compilation parity.
-func watchSubscribeResponse(conn *Conn, respCh <-chan SubscriptionCommandResponse) {
-	go func() {
-		resp, ok := <-respCh
-		if !ok {
-			return
-		}
-		sender := connOnlySender{conn: conn}
-		switch {
-		case resp.Applied != nil:
-			if err := SendSubscribeSingleApplied(sender, conn, resp.Applied); err != nil {
-				log.Printf("protocol: async SubscribeSingleApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Applied.QueryID, err)
-			}
-		case resp.Error != nil:
-			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: async SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
-			}
-		}
-	}()
-}
-
-// Deprecated: legacy single-path watcher. Removed in Task 9 alongside the
-// old RegisterSubscription/UnregisterSubscription inbox seam. Present
-// now only because Task 8 kept the legacy types for compilation parity.
-func watchUnsubscribeResponse(conn *Conn, respCh <-chan UnsubscribeCommandResponse) {
-	go func() {
-		resp, ok := <-respCh
-		if !ok {
-			return
-		}
-		sender := connOnlySender{conn: conn}
-		switch {
-		case resp.Applied != nil:
-			if err := SendUnsubscribeSingleApplied(sender, conn, resp.Applied); err != nil {
-				log.Printf("protocol: async UnsubscribeSingleApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Applied.QueryID, err)
-			}
-		case resp.Error != nil:
-			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: async unsubscribe SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
-			}
-		}
-	}()
-}
-
 // watchSubscribeSetResponse listens for the executor's
 // SubscriptionSetCommandResponse. On success it emits the appropriate
 // applied envelope (SingleApplied or MultiApplied); on error it emits

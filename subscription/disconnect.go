@@ -3,13 +3,13 @@ package subscription
 import "github.com/ponchione/shunter/types"
 
 // DisconnectClient removes every subscription for the given connection
-// (SPEC-004 §4.3). Equivalent to calling Unregister for each, but allows
-// an implementation to batch pruning index updates in the future.
+// (SPEC-004 §4.3). Drops registry entries plus pruning-index placements
+// via dropSub; the querySets bucket for this ConnID is evicted wholesale
+// at the end since every internal subID in it is being dropped.
 func (m *Manager) DisconnectClient(connID types.ConnectionID) error {
 	subs := m.registry.subscriptionsForConn(connID)
 	for _, s := range subs {
-		// Ignore not-found to keep DisconnectClient idempotent.
-		_ = m.Unregister(connID, s)
+		m.dropSub(connID, s)
 	}
 	delete(m.querySets, connID)
 	return nil

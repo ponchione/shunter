@@ -955,14 +955,15 @@ func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
 	go worker.Run(ctx)
 
 	conn1 := cid(1)
-	_, err := mgr.Register(SubscriptionRegisterRequest{
-		ConnID:         conn1,
-		SubscriptionID: 10,
-		Predicate:      AllRows{Table: 1},
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     conn1,
+		QueryID:    10,
+		Predicates: []Predicate{AllRows{Table: 1}},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantSubID := mgr.querySets[conn1][10][0]
 
 	cs := simpleChangeset(1,
 		[]types.ProductValue{{types.NewUint64(42), types.NewString("alice")}},
@@ -984,7 +985,7 @@ func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
 	if len(mock.lightCalls[0].Updates) == 0 {
 		t.Fatal("no updates delivered")
 	}
-	if mock.lightCalls[0].Updates[0].SubscriptionID != 10 {
-		t.Fatalf("SubscriptionID = %d, want 10", mock.lightCalls[0].Updates[0].SubscriptionID)
+	if mock.lightCalls[0].Updates[0].SubscriptionID != wantSubID {
+		t.Fatalf("SubscriptionID = %d, want %d", mock.lightCalls[0].Updates[0].SubscriptionID, wantSubID)
 	}
 }

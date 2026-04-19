@@ -31,8 +31,6 @@ type DurabilityHandle interface {
 // Story 5.2). The drain is non-blocking: a nil channel or empty channel
 // exits immediately.
 type SubscriptionManager interface {
-	Register(req SubscriptionRegisterRequest, view store.CommittedReadView) (SubscriptionRegisterResult, error)
-	Unregister(connID types.ConnectionID, subscriptionID types.SubscriptionID) error
 	RegisterSet(req subscription.SubscriptionSetRegisterRequest, view store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error)
 	UnregisterSet(connID types.ConnectionID, queryID uint32, view store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error)
 	EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta subscription.PostCommitMeta)

@@ -15,12 +15,7 @@ import (
 // handler tests (which exercise the set-based seam) and the call-reducer
 // tests in this file.
 type mockDispatchExecutor struct {
-	mu sync.Mutex
-	// Legacy single-seam bookkeeping (kept until Task 9 removes the old
-	// UnregisterSubscription inbox method).
-	unregisterReq *UnregisterSubscriptionRequest
-	unregisterErr error
-	// Set-seam bookkeeping (Task 8 split).
+	mu               sync.Mutex
 	registerSetReq   *RegisterSubscriptionSetRequest
 	registerSetErr   error
 	unregisterSetReq *UnregisterSubscriptionSetRequest
@@ -39,17 +34,6 @@ func (m *mockDispatchExecutor) OnDisconnect(_ context.Context, _ types.Connectio
 
 func (m *mockDispatchExecutor) DisconnectClientSubscriptions(_ context.Context, _ types.ConnectionID) error {
 	return nil
-}
-
-func (m *mockDispatchExecutor) RegisterSubscription(_ context.Context, _ RegisterSubscriptionRequest) error {
-	return nil
-}
-
-func (m *mockDispatchExecutor) UnregisterSubscription(_ context.Context, req UnregisterSubscriptionRequest) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.unregisterReq = &req
-	return m.unregisterErr
 }
 
 func (m *mockDispatchExecutor) RegisterSubscriptionSet(_ context.Context, req RegisterSubscriptionSetRequest) error {
