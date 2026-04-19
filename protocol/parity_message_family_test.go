@@ -148,17 +148,6 @@ func TestPhase2SubscriptionErrorCarriesQueryID(t *testing.T) {
 	}
 }
 
-// TestPhase2DeferralSubscribeNoMultiOrSingleVariants is a
-// placeholder until Task 5 removes it. The variant split is complete
-// on the client side now that SubscribeSingleMsg / SubscribeMultiMsg
-// both exist. Task 4 lands the server-side rename;
-// Task 5 removes this test once the matching response pins land.
-func TestPhase2DeferralSubscribeNoMultiOrSingleVariants(t *testing.T) {
-	if TagSubscribeSingle == 0 {
-		t.Fatal("TagSubscribeSingle should stay defined for the single-envelope path")
-	}
-}
-
 // TestPhase15CallReducerFlagsField pins the Phase 1.5 sub-slice closure:
 // reference/SpacetimeDB CallReducer carries a flags byte
 // (CallReducerFlags::NoSuccessNotify) that lets callers opt out of the
@@ -231,6 +220,91 @@ func TestPhase2UnsubscribeMultiAppliedShape(t *testing.T) {
 	want := []string{"RequestID", "QueryID", "Update"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("UnsubscribeMultiApplied fields = %v, want %v", fields, want)
+	}
+}
+
+// TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration pins the
+// still-open deferral: reference carries
+// total_host_execution_duration_micros: u64 on SubscribeApplied,
+// SubscribeMultiApplied, UnsubscribeApplied, UnsubscribeMultiApplied
+// (v1.rs:321/335/384/399). Shunter does not. Flip when the host
+// execution duration slice lands.
+func TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration(t *testing.T) {
+	for _, v := range []any{
+		SubscribeSingleApplied{},
+		SubscribeMultiApplied{},
+		UnsubscribeSingleApplied{},
+		UnsubscribeMultiApplied{},
+	} {
+		for _, f := range msgFieldNames(v) {
+			if f == "TotalHostExecutionDurationMicros" {
+				t.Fatalf("%T.TotalHostExecutionDurationMicros unexpectedly present", v)
+			}
+		}
+	}
+}
+
+// TestPhase2DeferralSubscriptionErrorNoTableID pins the three-field
+// shape. Reference SubscriptionError carries
+// total_host_execution_duration_micros, Option<request_id>,
+// Option<query_id>, Option<TableId>, error (v1.rs:350). Shunter
+// always populates RequestID/QueryID and omits TableID + duration.
+// Flip when any of these close.
+func TestPhase2DeferralSubscriptionErrorNoTableID(t *testing.T) {
+	fields := msgFieldNames(SubscriptionError{})
+	want := []string{"RequestID", "QueryID", "Error"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("SubscriptionError fields = %v, want %v (deferral)",
+			fields, want)
+	}
+}
+
+// TestPhase2DeferralSubscribeMultiQueriesStructured pins the scope
+// boundary with Phase 2 Slice 1. Reference SubscribeMulti carries
+// query_strings: Box<[Box<str>]> (v1.rs:205); Shunter carries
+// structured Queries []Query. Flip when the SQL front door lands.
+func TestPhase2DeferralSubscribeMultiQueriesStructured(t *testing.T) {
+	m := SubscribeMultiMsg{}
+	qf, ok := reflect.TypeOf(m).FieldByName("Queries")
+	if !ok {
+		t.Fatal("SubscribeMultiMsg.Queries missing")
+	}
+	if qf.Type.Elem().Name() != "Query" {
+		t.Fatalf("SubscribeMultiMsg.Queries elem = %s, want Query (structured)",
+			qf.Type.Elem().Name())
+	}
+}
+
+// TestPhase2TagByteStability pins the Phase 2 Slice 2 tag layout.
+// Older bytes (1-8) stay fixed; 9/10 are the new multi-applied tags.
+// 5/6 are the new multi request tags.
+func TestPhase2TagByteStability(t *testing.T) {
+	cases := []struct {
+		name string
+		got  uint8
+		want uint8
+	}{
+		{"TagSubscribeSingle", TagSubscribeSingle, 1},
+		{"TagUnsubscribeSingle", TagUnsubscribeSingle, 2},
+		{"TagCallReducer", TagCallReducer, 3},
+		{"TagOneOffQuery", TagOneOffQuery, 4},
+		{"TagSubscribeMulti", TagSubscribeMulti, 5},
+		{"TagUnsubscribeMulti", TagUnsubscribeMulti, 6},
+		{"TagInitialConnection", TagInitialConnection, 1},
+		{"TagSubscribeSingleApplied", TagSubscribeSingleApplied, 2},
+		{"TagUnsubscribeSingleApplied", TagUnsubscribeSingleApplied, 3},
+		{"TagSubscriptionError", TagSubscriptionError, 4},
+		{"TagTransactionUpdate", TagTransactionUpdate, 5},
+		{"TagOneOffQueryResult", TagOneOffQueryResult, 6},
+		{"TagReducerCallResult", TagReducerCallResult, 7},
+		{"TagTransactionUpdateLight", TagTransactionUpdateLight, 8},
+		{"TagSubscribeMultiApplied", TagSubscribeMultiApplied, 9},
+		{"TagUnsubscribeMultiApplied", TagUnsubscribeMultiApplied, 10},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", c.name, c.got, c.want)
+		}
 	}
 }
 
