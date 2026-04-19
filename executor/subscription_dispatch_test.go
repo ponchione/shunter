@@ -237,3 +237,31 @@ func TestDispatchUnregisterSubscriptionSet(t *testing.T) {
 		t.Fatal("unregister-set should receive the acquired snapshot view")
 	}
 }
+
+func TestDispatchUnregisterSubscriptionSetCarriesError(t *testing.T) {
+	exec, _ := setupExecutor()
+	fakeSubs := &registerDispatchSubs{
+		unregisterSetErr: errors.New("synthetic"),
+	}
+	exec.subs = fakeSubs
+
+	var tracked *trackingSnapshot
+	exec.snapshotFn = func() store.CommittedReadView {
+		tracked = &trackingSnapshot{CommittedReadView: exec.committed.Snapshot()}
+		return tracked
+	}
+
+	respCh := make(chan UnregisterSubscriptionSetResponse, 1)
+	exec.dispatch(UnregisterSubscriptionSetCmd{
+		ConnID:     types.ConnectionID{9},
+		QueryID:    42,
+		ResponseCh: respCh,
+	})
+	resp := <-respCh
+	if resp.Err == nil || resp.Err.Error() != "synthetic" {
+		t.Fatalf("resp.Err = %v, want synthetic", resp.Err)
+	}
+	if tracked == nil || !tracked.closed {
+		t.Fatal("snapshot should be closed even on error path")
+	}
+}

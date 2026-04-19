@@ -58,6 +58,7 @@ func (RegisterSubscriptionSetCmd) isExecutorCommand() {}
 
 // UnregisterSubscriptionSetCmd removes every subscription registered
 // under one (ConnID, QueryID) key.
+// Part of the Phase 2 Slice 2 variant split.
 type UnregisterSubscriptionSetCmd struct {
 	ConnID     types.ConnectionID
 	QueryID    uint32
