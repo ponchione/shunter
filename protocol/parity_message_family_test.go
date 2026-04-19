@@ -154,17 +154,14 @@ func TestPhase2SubscriptionErrorCarriesQueryID(t *testing.T) {
 }
 
 // TestPhase2DeferralSubscribeNoMultiOrSingleVariants pins the still-open
-// deferral: reference exposes `SubscribeSingle` / `SubscribeMulti` as
-// separate envelopes with batch registration semantics. Shunter still
-// exposes a single Subscribe envelope per query. Flip when the
-// Multi / Single split lands.
+// portion of the variant split: `SubscribeMultiMsg` landed in Task 1 (see
+// `TestPhase2SubscribeMultiShape`), but `SubscribeSingleMsg` is still
+// named `SubscribeMsg` until Task 3's rename. Full removal of this pin
+// is Task 5.
 func TestPhase2DeferralSubscribeNoMultiOrSingleVariants(t *testing.T) {
 	if TagSubscribe == 0 {
-		t.Fatal("TagSubscribe should stay defined for the single-envelope path")
+		t.Fatal("TagSubscribe should stay defined until Task 3 renames it to TagSubscribeSingle")
 	}
-	// No SubscribeMultiMsg / SubscribeSingleMsg types exist yet. When
-	// they land, replace this test with positive shape pins on those
-	// envelopes.
 }
 
 // TestPhase15CallReducerFlagsField pins the Phase 1.5 sub-slice closure:

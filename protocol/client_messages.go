@@ -141,7 +141,8 @@ func EncodeClientMessage(m any) ([]byte, error) {
 
 // DecodeClientMessage parses a wire frame into its concrete message
 // type. The returned any is one of SubscribeMsg, UnsubscribeMsg,
-// CallReducerMsg, OneOffQueryMsg — matching the tag byte.
+// CallReducerMsg, OneOffQueryMsg, SubscribeMultiMsg, UnsubscribeMultiMsg
+// — matching the tag byte.
 func DecodeClientMessage(frame []byte) (uint8, any, error) {
 	if len(frame) < 1 {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)

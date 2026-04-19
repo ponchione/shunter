@@ -271,6 +271,9 @@ func TestSubscribeMultiRoundTrip(t *testing.T) {
 	if len(got.Queries) != 2 || got.Queries[0].TableName != "users" || got.Queries[1].TableName != "orders" {
 		t.Fatalf("queries = %+v, want %+v", got.Queries, orig.Queries)
 	}
+	if len(got.Queries[1].Predicates) != 1 || got.Queries[1].Predicates[0].Column != "id" {
+		t.Fatalf("predicate mismatch on queries[1]: %+v", got.Queries[1].Predicates)
+	}
 }
 
 func TestUnsubscribeMultiRoundTrip(t *testing.T) {
