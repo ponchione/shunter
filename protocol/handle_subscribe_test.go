@@ -298,11 +298,6 @@ func TestHandleSubscribeSingle_DeliversAsyncSubscribeApplied(t *testing.T) {
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
 	)
 
-	// Reserve so SendSubscribeSingleApplied's IsPending guard passes.
-	if err := conn.Subscriptions.Reserve(7); err != nil {
-		t.Fatalf("Reserve: %v", err)
-	}
-
 	msg := &SubscribeSingleMsg{
 		RequestID: 10,
 		QueryID:   7,

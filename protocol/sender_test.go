@@ -11,12 +11,11 @@ func testConn(compression bool) (*Conn, types.ConnectionID) {
 	id := types.ConnectionID{1}
 	opts := DefaultProtocolOptions()
 	c := &Conn{
-		ID:            id,
-		Compression:   compression,
-		Subscriptions: NewSubscriptionTracker(),
-		OutboundCh:    make(chan []byte, opts.OutgoingBufferMessages),
-		opts:          &opts,
-		closed:        make(chan struct{}),
+		ID:          id,
+		Compression: compression,
+		OutboundCh:  make(chan []byte, opts.OutgoingBufferMessages),
+		opts:        &opts,
+		closed:      make(chan struct{}),
 	}
 	return c, id
 }
@@ -73,11 +72,10 @@ func TestSendBufferFull(t *testing.T) {
 	opts.OutgoingBufferMessages = 1
 	id := types.ConnectionID{1}
 	c := &Conn{
-		ID:            id,
-		Subscriptions: NewSubscriptionTracker(),
-		OutboundCh:    make(chan []byte, 1),
-		opts:          &opts,
-		closed:        make(chan struct{}),
+		ID:         id,
+		OutboundCh: make(chan []byte, 1),
+		opts:       &opts,
+		closed:     make(chan struct{}),
 	}
 	mgr := NewConnManager()
 	mgr.Add(c)
@@ -99,11 +97,6 @@ func TestSendTransactionUpdateTypedHeavy(t *testing.T) {
 	mgr := NewConnManager()
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
-
-	if err := c.Subscriptions.Reserve(1); err != nil {
-		t.Fatal(err)
-	}
-	c.Subscriptions.Activate(1)
 
 	update := &TransactionUpdate{
 		Status: StatusCommitted{Update: []SubscriptionUpdate{
@@ -133,11 +126,6 @@ func TestSendTransactionUpdateTypedLight(t *testing.T) {
 	mgr := NewConnManager()
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
-
-	if err := c.Subscriptions.Reserve(1); err != nil {
-		t.Fatal(err)
-	}
-	c.Subscriptions.Activate(1)
 
 	update := &TransactionUpdateLight{
 		RequestID: 42,

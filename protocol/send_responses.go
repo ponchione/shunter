@@ -14,9 +14,10 @@ func SendSubscribeSingleApplied(sender ClientSender, conn *Conn, msg *SubscribeS
 }
 
 // SendUnsubscribeSingleApplied delivers an UnsubscribeSingleApplied
-// message and removes the subscription from the tracker.
+// message. Phase 2 Slice 2 (TD-140): per-connection admission
+// bookkeeping is gone — subscription.Manager owns the authoritative
+// set of live query IDs, so this is a straight transport push.
 func SendUnsubscribeSingleApplied(sender ClientSender, conn *Conn, msg *UnsubscribeSingleApplied) error {
-	_ = conn.Subscriptions.Remove(msg.QueryID)
 	return sender.Send(conn.ID, *msg)
 }
 
@@ -34,10 +35,13 @@ func SendUnsubscribeMultiApplied(sender ClientSender, conn *Conn, msg *Unsubscri
 	return sender.Send(conn.ID, *msg)
 }
 
-// SendSubscriptionError delivers a SubscriptionError and releases the
-// subscription_id so it is immediately reusable (SPEC-005 §8.4).
+// SendSubscriptionError delivers a SubscriptionError. Phase 2 Slice 2
+// (TD-140): per-connection admission bookkeeping is gone —
+// subscription.Manager owns the authoritative set of live query IDs,
+// and a failed Register never admits the id, so there is nothing to
+// release here. SPEC-005 §8.4 reusability is still provided by the
+// manager on failure.
 func SendSubscriptionError(sender ClientSender, conn *Conn, msg *SubscriptionError) error {
-	_ = conn.Subscriptions.Remove(msg.QueryID)
 	return sender.Send(conn.ID, *msg)
 }
 

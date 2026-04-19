@@ -46,13 +46,6 @@ func TestHandleUnsubscribeSingle_DeliversAsyncUnsubscribeApplied(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{}
 
-	// Reserve+activate so the outbound SendUnsubscribeSingleApplied
-	// path's Remove call is clean.
-	if err := conn.Subscriptions.Reserve(42); err != nil {
-		t.Fatalf("Reserve: %v", err)
-	}
-	conn.Subscriptions.Activate(42)
-
 	msg := &UnsubscribeSingleMsg{RequestID: 1, QueryID: 42}
 	handleUnsubscribeSingle(context.Background(), conn, msg, exec)
 

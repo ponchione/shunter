@@ -2,8 +2,6 @@ package protocol
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,135 +11,24 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// SubscriptionState is the per-connection subscription-id state
-// machine from SPEC-005 §9.1.
-type SubscriptionState uint8
-
-const (
-	// SubPending: Subscribe accepted, initial evaluation not yet
-	// complete.
-	SubPending SubscriptionState = iota
-	// SubActive: SubscribeSingleApplied has been sent; subsequent
-	// TransactionUpdate messages will reference this id.
-	SubActive
-)
-
-// SubscriptionTracker enforces per-connection uniqueness of
-// subscription_ids and their state machine. Reserved during
-// Subscribe handling; activated when SubscribeSingleApplied is delivered;
-// removed on Unsubscribe / SubscriptionError / disconnect.
-type SubscriptionTracker struct {
-	mu   sync.Mutex
-	subs map[uint32]SubscriptionState
-}
-
-// NewSubscriptionTracker returns an empty tracker.
-func NewSubscriptionTracker() *SubscriptionTracker {
-	return &SubscriptionTracker{subs: make(map[uint32]SubscriptionState)}
-}
-
-// ErrDuplicateSubscriptionID is returned when Reserve sees a
-// subscription_id that is already pending or active on this
-// connection (SPEC-005 §9.1 rule: ids cannot collide within an
-// active connection).
-var ErrDuplicateSubscriptionID = errors.New("protocol: duplicate subscription_id")
-
-// ErrSubscriptionNotFound is returned when Remove or Activate is
-// called with a subscription_id that is not tracked.
-var ErrSubscriptionNotFound = errors.New("protocol: subscription_id not found")
-
-// Reserve marks id as pending. Returns ErrDuplicateSubscriptionID if
-// the id is already pending or active on this connection.
-func (t *SubscriptionTracker) Reserve(id uint32) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if _, ok := t.subs[id]; ok {
-		return fmt.Errorf("%w: id=%d", ErrDuplicateSubscriptionID, id)
-	}
-	t.subs[id] = SubPending
-	return nil
-}
-
-// Activate transitions id from SubPending to SubActive. A no-op if
-// already active; not an error.
-func (t *SubscriptionTracker) Activate(id uint32) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if _, ok := t.subs[id]; ok {
-		t.subs[id] = SubActive
-	}
-}
-
-// Remove clears id from the tracker. Returns ErrSubscriptionNotFound
-// if the id was not tracked.
-func (t *SubscriptionTracker) Remove(id uint32) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if _, ok := t.subs[id]; !ok {
-		return fmt.Errorf("%w: id=%d", ErrSubscriptionNotFound, id)
-	}
-	delete(t.subs, id)
-	return nil
-}
-
-// IsActive reports whether id is tracked and in the SubActive state.
-func (t *SubscriptionTracker) IsActive(id uint32) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	st, ok := t.subs[id]
-	return ok && st == SubActive
-}
-
-// IsPending reports whether id is tracked and in the SubPending state.
-func (t *SubscriptionTracker) IsPending(id uint32) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	st, ok := t.subs[id]
-	return ok && st == SubPending
-}
-
-// IsActiveOrPending reports whether id is currently tracked.
-func (t *SubscriptionTracker) IsActiveOrPending(id uint32) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	_, ok := t.subs[id]
-	return ok
-}
-
-// RemoveAll clears the tracker and returns the list of ids that were
-// tracked. Used on disconnect to hand off the full set to the
-// executor's DisconnectClient cleanup path.
-func (t *SubscriptionTracker) RemoveAll() []uint32 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	out := make([]uint32, 0, len(t.subs))
-	for id := range t.subs {
-		out = append(out, id)
-	}
-	t.subs = make(map[uint32]SubscriptionState)
-	return out
-}
-
-// state is a test accessor for the raw state map. Kept internal to
-// the package so callers go through the state-machine methods above.
-func (t *SubscriptionTracker) state(id uint32) (SubscriptionState, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	st, ok := t.subs[id]
-	return st, ok
-}
-
 // Conn is per-connection server-side state for one WebSocket client
-// (SPEC-005 §5.1). Subscription tracker, outbound queue, and
+// (SPEC-005 §5.1). Outbound queue, keep-alive bookkeeping, and
 // transport references all live here; the read loop, write loop, and
 // keep-alive goroutine share ownership.
+//
+// Phase 2 Slice 2 admission-model slice (TD-140): per-connection
+// subscription-id admission bookkeeping has been retired. The
+// subscription.Manager's querySets map is the single source of truth
+// for active query IDs, and SPEC-005 §9.4 in-flight ordering is
+// preserved by the synchronous Reply closure invoked inside the
+// executor main-loop goroutine plus per-connection OutboundCh FIFO.
+// See docs/adr/2026-04-19-subscription-admission-model.md.
 type Conn struct {
 	ID          types.ConnectionID
 	Identity    types.Identity
 	Token       string // validated or minted JWT for this connection
 	Compression bool   // true when gzip was negotiated at upgrade
 
-	Subscriptions *SubscriptionTracker
 	// OutboundCh is the bounded per-connection outbound queue. The
 	// backpressure design (SPEC-005 §10.1, Epic 6) uses the
 	// fullness of this channel to decide between enqueue and close.
@@ -183,18 +70,17 @@ func NewConn(
 ) *Conn {
 	readCtx, cancelRead := context.WithCancel(context.Background())
 	c := &Conn{
-		ID:            id,
-		Identity:      identity,
-		Token:         token,
-		Compression:   compression,
-		Subscriptions: NewSubscriptionTracker(),
-		OutboundCh:    make(chan []byte, opts.OutgoingBufferMessages),
-		inflightSem:   make(chan struct{}, opts.IncomingQueueMessages),
-		ws:            ws,
-		opts:          opts,
-		readCtx:       readCtx,
-		cancelRead:    cancelRead,
-		closed:        make(chan struct{}),
+		ID:          id,
+		Identity:    identity,
+		Token:       token,
+		Compression: compression,
+		OutboundCh:  make(chan []byte, opts.OutgoingBufferMessages),
+		inflightSem: make(chan struct{}, opts.IncomingQueueMessages),
+		ws:          ws,
+		opts:        opts,
+		readCtx:     readCtx,
+		cancelRead:  cancelRead,
+		closed:      make(chan struct{}),
 	}
 	c.MarkActivity()
 	return c

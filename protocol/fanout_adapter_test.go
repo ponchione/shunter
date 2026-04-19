@@ -130,28 +130,10 @@ func connID(b byte) types.ConnectionID {
 }
 
 func TestFanOutSenderAdapter_SendTransactionUpdateLightRejectsPendingSubscription(t *testing.T) {
-	conn, id := testConn(false)
-	mgr := NewConnManager()
-	mgr.Add(conn)
-	sender := NewClientSender(mgr, &fakeInbox{})
-	adapter := NewFanOutSenderAdapter(sender)
-
-	if err := conn.Subscriptions.Reserve(5); err != nil {
-		t.Fatal(err)
-	}
-
-	err := adapter.SendTransactionUpdateLight(
-		id, 7,
-		[]subscription.SubscriptionUpdate{{
-			SubscriptionID: 5,
-			TableName:      "t1",
-			Inserts:        []types.ProductValue{{types.NewUint32(42)}},
-		}},
-		nil,
-	)
-	if !errors.Is(err, ErrSubscriptionNotActive) {
-		t.Fatalf("err = %v, want ErrSubscriptionNotActive", err)
-	}
+	// Phase 2 Slice 2 (TD-140): per-connection IsActive admission gate
+	// retired; fan-out owns admission via subscription.Manager.querySets.
+	// Task 5 migrates this contract to a manager-level test.
+	t.Skip("migrated in Task 5 (admission-model fix plan): IsActive gate retired in TD-140")
 }
 
 func TestFanOutSenderAdapter_SendTransactionUpdateLight(t *testing.T) {
@@ -311,25 +293,10 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 }
 
 func TestFanOutSenderAdapter_SendTransactionUpdateHeavyRejectsPendingSubscription(t *testing.T) {
-	conn, id := testConn(false)
-	mgr := NewConnManager()
-	mgr.Add(conn)
-	sender := NewClientSender(mgr, &fakeInbox{})
-	adapter := NewFanOutSenderAdapter(sender)
-
-	if err := conn.Subscriptions.Reserve(7); err != nil {
-		t.Fatal(err)
-	}
-
-	outcome := subscription.CallerOutcome{Kind: subscription.CallerOutcomeCommitted, RequestID: 9}
-	callerUpdates := []subscription.SubscriptionUpdate{{
-		SubscriptionID: 7,
-		TableName:      "players",
-		Inserts:        []types.ProductValue{{types.NewUint32(1)}},
-	}}
-	if err := adapter.SendTransactionUpdateHeavy(id, outcome, callerUpdates, nil); !errors.Is(err, ErrSubscriptionNotActive) {
-		t.Fatalf("err = %v, want ErrSubscriptionNotActive", err)
-	}
+	// Phase 2 Slice 2 (TD-140): per-connection IsActive admission gate
+	// retired; fan-out owns admission via subscription.Manager.querySets.
+	// Task 5 migrates this contract to a manager-level test.
+	t.Skip("migrated in Task 5 (admission-model fix plan): IsActive gate retired in TD-140")
 }
 
 func TestFanOutSenderAdapter_SendSubscriptionErrorPreservesRequestID(t *testing.T) {

@@ -19,9 +19,6 @@ func TestDeliverTransactionUpdateLightSingleConn(t *testing.T) {
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	c.Subscriptions.Reserve(1)
-	c.Subscriptions.Activate(1)
-
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
 		id: {
 			{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}, Deletes: []byte{}},
@@ -51,22 +48,16 @@ func TestDeliverTransactionUpdateLightMultiConn(t *testing.T) {
 	c1, id1 := testConn(false)
 	opts := DefaultProtocolOptions()
 	c2 := &Conn{
-		ID:            types.ConnectionID{2},
-		Subscriptions: NewSubscriptionTracker(),
-		OutboundCh:    make(chan []byte, 256),
-		opts:          &opts,
-		closed:        make(chan struct{}),
+		ID:         types.ConnectionID{2},
+		OutboundCh: make(chan []byte, 256),
+		opts:       &opts,
+		closed:     make(chan struct{}),
 	}
 	id2 := c2.ID
 	mgr := NewConnManager()
 	mgr.Add(c1)
 	mgr.Add(c2)
 	s := NewClientSender(mgr, &fakeInbox{})
-
-	c1.Subscriptions.Reserve(1)
-	c1.Subscriptions.Activate(1)
-	c2.Subscriptions.Reserve(2)
-	c2.Subscriptions.Activate(2)
 
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
 		id1: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
@@ -126,29 +117,14 @@ func TestDeliverTransactionUpdateLightSkipsEmptyUpdates(t *testing.T) {
 }
 
 func TestDeliverTransactionUpdateLightRejectsPendingSubscription(t *testing.T) {
-	c, id := testConn(false)
-	mgr := NewConnManager()
-	mgr.Add(c)
-	s := NewClientSender(mgr, &fakeInbox{})
-
-	c.Subscriptions.Reserve(1)
-
-	fanout := map[types.ConnectionID][]SubscriptionUpdate{
-		id: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
-	}
-
-	errs := DeliverTransactionUpdateLight(s, mgr, 7, fanout)
-	if len(errs) != 1 {
-		t.Fatalf("expected 1 invariant error, got %d", len(errs))
-	}
-	if !errors.Is(errs[0].Err, ErrSubscriptionNotActive) {
-		t.Fatalf("expected ErrSubscriptionNotActive, got %v", errs[0].Err)
-	}
-	select {
-	case <-c.OutboundCh:
-		t.Fatal("pending subscription update should not be delivered")
-	default:
-	}
+	// Phase 2 Slice 2 (TD-140): the per-update IsActive(SubscriptionID)
+	// gate inside DeliverTransactionUpdateLight has been retired —
+	// admission is owned by subscription.Manager.querySets, and fan-out
+	// enumerates only live subs, so this "pending subscription update
+	// should not be delivered" contract is now enforced upstream rather
+	// than by the transport. Task 5 of the admission-model fix plan
+	// migrates the semantic assertion to a manager-level test.
+	t.Skip("migrated in Task 5 (admission-model fix plan): per-update IsActive gate retired in TD-140")
 }
 
 func TestDeliverTransactionUpdateLightBufferFull(t *testing.T) {
@@ -156,18 +132,14 @@ func TestDeliverTransactionUpdateLightBufferFull(t *testing.T) {
 	opts.OutgoingBufferMessages = 1
 	id := types.ConnectionID{1}
 	c := &Conn{
-		ID:            id,
-		Subscriptions: NewSubscriptionTracker(),
-		OutboundCh:    make(chan []byte, 1),
-		opts:          &opts,
-		closed:        make(chan struct{}),
+		ID:         id,
+		OutboundCh: make(chan []byte, 1),
+		opts:       &opts,
+		closed:     make(chan struct{}),
 	}
 	mgr := NewConnManager()
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
-
-	c.Subscriptions.Reserve(1)
-	c.Subscriptions.Activate(1)
 
 	// Fill buffer.
 	c.OutboundCh <- []byte{0xFF}

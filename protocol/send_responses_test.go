@@ -26,21 +26,24 @@ func (s assertingSender) SendTransactionUpdateLight(_ types.ConnectionID, _ *Tra
 	return nil
 }
 
-func TestSendSubscribeSingleAppliedActivatesSubscription(t *testing.T) {
+// Phase 2 Slice 2 admission-model slice (TD-140): the SendSubscribe /
+// SendUnsubscribe / SendSubscriptionError helpers are straight transport
+// pushes now. The tests below verify the transport-level surface
+// (frame enqueue + error propagation). Semantic tests that used to
+// assert tracker state transitions (pending → active, release-on-error,
+// etc.) are migrated by Task 5 of the admission-model fix plan; in the
+// meantime a single skip-with-reason survivor carries forward the
+// transport-only slice of the original intent.
+
+func TestSendSubscribeSingleAppliedEnqueuesFrame(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	c.Subscriptions.Reserve(10)
-
 	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
 	if err := SendSubscribeSingleApplied(s, c, msg); err != nil {
 		t.Fatal(err)
-	}
-
-	if !c.Subscriptions.IsActive(10) {
-		t.Fatal("subscription 10 should be active")
 	}
 
 	select {
@@ -50,60 +53,13 @@ func TestSendSubscribeSingleAppliedActivatesSubscription(t *testing.T) {
 	}
 }
 
-func TestSendSubscribeSingleAppliedActivatesBeforeSend(t *testing.T) {
+func TestSendSubscribeSingleAppliedPropagatesSendError(t *testing.T) {
 	c, _ := testConn(false)
-	c.Subscriptions.Reserve(10)
 
 	sender := assertingSender{
 		sendFn: func(msg any) error {
 			if _, ok := msg.(SubscribeSingleApplied); !ok {
 				t.Fatalf("expected SubscribeSingleApplied, got %T", msg)
-			}
-			if !c.Subscriptions.IsActive(10) {
-				t.Fatal("subscription should be active before send")
-			}
-			return nil
-		},
-	}
-
-	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
-	if err := SendSubscribeSingleApplied(sender, c, msg); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSendSubscribeSingleAppliedDiscardsAfterDisconnect(t *testing.T) {
-	c, _ := testConn(false)
-	mgr := NewConnManager()
-	mgr.Add(c)
-	s := NewClientSender(mgr, &fakeInbox{})
-
-	c.Subscriptions.Reserve(10)
-	c.Subscriptions.Remove(10)
-
-	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
-	err := SendSubscribeSingleApplied(s, c, msg)
-	if err != nil {
-		t.Fatal("should silently discard, not error")
-	}
-	select {
-	case <-c.OutboundCh:
-		t.Fatal("frame should not be enqueued for removed subscription")
-	default:
-	}
-}
-
-func TestSendSubscribeSingleAppliedSendFailureDoesNotLeaveSubscriptionActive(t *testing.T) {
-	c, _ := testConn(false)
-	c.Subscriptions.Reserve(10)
-
-	sender := assertingSender{
-		sendFn: func(msg any) error {
-			if _, ok := msg.(SubscribeSingleApplied); !ok {
-				t.Fatalf("expected SubscribeSingleApplied, got %T", msg)
-			}
-			if !c.Subscriptions.IsActive(10) {
-				t.Fatal("subscription should be active at send attempt")
 			}
 			return ErrConnNotFound
 		},
@@ -114,49 +70,72 @@ func TestSendSubscribeSingleAppliedSendFailureDoesNotLeaveSubscriptionActive(t *
 	if !errors.Is(err, ErrConnNotFound) {
 		t.Fatalf("err = %v, want ErrConnNotFound", err)
 	}
-	if c.Subscriptions.IsActiveOrPending(10) {
-		t.Fatal("subscription 10 should be released after failed SubscribeSingleApplied delivery")
+}
+
+func TestSendSubscribeSingleAppliedDiscardsAfterDisconnect(t *testing.T) {
+	// Post-TD-140 this test's pre-removal intent ("SendSubscribeSingleApplied
+	// must silently discard once the subscription_id has been released
+	// from the per-conn tracker") is moot: the per-conn tracker is gone,
+	// and `subscription.Manager.UnregisterSet` is the only way for the
+	// id to disappear before delivery. The disconnect-race path is now
+	// covered end-to-end by TestDisconnectBetweenRegisterAndReply in
+	// admission_ordering_test.go. Task 5 will finalize the migration of
+	// the remaining send_responses_test tests.
+	t.Skip("migrated in Task 5 (admission-model fix plan): tracker-based discard guard retired in TD-140")
+}
+
+func TestSendSubscribeSingleAppliedSendFailure(t *testing.T) {
+	c, _ := testConn(false)
+
+	sender := assertingSender{
+		sendFn: func(msg any) error {
+			if _, ok := msg.(SubscribeSingleApplied); !ok {
+				t.Fatalf("expected SubscribeSingleApplied, got %T", msg)
+			}
+			return ErrConnNotFound
+		},
+	}
+
+	msg := &SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: []byte{}}
+	err := SendSubscribeSingleApplied(sender, c, msg)
+	if !errors.Is(err, ErrConnNotFound) {
+		t.Fatalf("err = %v, want ErrConnNotFound", err)
 	}
 }
 
-func TestSendUnsubscribeSingleAppliedRemovesSubscription(t *testing.T) {
+func TestSendUnsubscribeSingleAppliedEnqueuesFrame(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
-
-	c.Subscriptions.Reserve(10)
-	c.Subscriptions.Activate(10)
 
 	msg := &UnsubscribeSingleApplied{RequestID: 1, QueryID: 10}
 	if err := SendUnsubscribeSingleApplied(s, c, msg); err != nil {
 		t.Fatal(err)
 	}
 
-	if c.Subscriptions.IsActiveOrPending(10) {
-		t.Fatal("subscription 10 should be removed")
+	select {
+	case <-c.OutboundCh:
+	default:
+		t.Fatal("no UnsubscribeSingleApplied frame enqueued")
 	}
 }
 
-func TestSendSubscriptionErrorReleasesID(t *testing.T) {
+func TestSendSubscriptionErrorEnqueuesFrame(t *testing.T) {
 	c, _ := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
-
-	c.Subscriptions.Reserve(10)
 
 	msg := &SubscriptionError{RequestID: 1, QueryID: 10, Error: "bad predicate"}
 	if err := SendSubscriptionError(s, c, msg); err != nil {
 		t.Fatal(err)
 	}
 
-	if c.Subscriptions.IsActiveOrPending(10) {
-		t.Fatal("subscription 10 should be released")
-	}
-
-	if err := c.Subscriptions.Reserve(10); err != nil {
-		t.Fatalf("subscription 10 should be reusable: %v", err)
+	select {
+	case <-c.OutboundCh:
+	default:
+		t.Fatal("no SubscriptionError frame enqueued")
 	}
 }
 

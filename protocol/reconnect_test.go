@@ -52,8 +52,13 @@ func TestReconnectSameIdentity(t *testing.T) {
 	}
 }
 
-// TestReconnectNoSubscriptionCarryover verifies that subscriptions
-// do not carry over from a previous connection (Story 6.4 AC 2).
+// TestReconnectNoSubscriptionCarryover verifies that reconnect yields a
+// distinct Conn object with its own fresh OutboundCh (Story 6.4 AC 2).
+// Per-connection subscription admission bookkeeping has been retired
+// (TD-140); subscription lifetime is bounded by the subscription
+// Manager's querySets, which the executor's DisconnectClientSubscriptions
+// path clears on disconnect. This test's job here is to confirm the
+// transport surface itself does not leak between connections.
 func TestReconnectNoSubscriptionCarryover(t *testing.T) {
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()
@@ -63,11 +68,6 @@ func TestReconnectNoSubscriptionCarryover(t *testing.T) {
 	defer cleanup1()
 	mgr.Add(c1)
 
-	_ = c1.Subscriptions.Reserve(100)
-	c1.Subscriptions.Activate(100)
-	_ = c1.Subscriptions.Reserve(200)
-	c1.Subscriptions.Activate(200)
-
 	c1.Disconnect(context.Background(), CloseNormal, "", inbox, mgr)
 
 	c2, _, cleanup2 := loopbackConn(t, opts)
@@ -75,11 +75,16 @@ func TestReconnectNoSubscriptionCarryover(t *testing.T) {
 	c2.Identity = c1.Identity
 	mgr.Add(c2)
 
-	if c2.Subscriptions.IsActiveOrPending(100) {
-		t.Error("subscription 100 carried over — should not")
+	if c2 == c1 {
+		t.Fatal("reconnect returned the same *Conn pointer; want a fresh connection state")
 	}
-	if c2.Subscriptions.IsActiveOrPending(200) {
-		t.Error("subscription 200 carried over — should not")
+	if c2.OutboundCh == c1.OutboundCh {
+		t.Error("reconnect reused OutboundCh; want a fresh outbound queue")
+	}
+	select {
+	case <-c2.OutboundCh:
+		t.Error("fresh Conn OutboundCh had a pre-existing frame")
+	default:
 	}
 }
 
