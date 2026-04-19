@@ -61,11 +61,6 @@ func (s *connManagerSender) SendTransactionUpdate(connID types.ConnectionID, upd
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
 	}
-	if committed, ok := update.Status.(StatusCommitted); ok {
-		if err := validateActiveSubscriptionUpdates(conn, committed.Update); err != nil {
-			return err
-		}
-	}
 	return s.enqueueOnConn(conn, connID, *update)
 }
 
@@ -73,9 +68,6 @@ func (s *connManagerSender) SendTransactionUpdateLight(connID types.ConnectionID
 	conn := s.mgr.Get(connID)
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
-	}
-	if err := validateActiveSubscriptionUpdates(conn, update.Update); err != nil {
-		return err
 	}
 	return s.enqueueOnConn(conn, connID, *update)
 }
