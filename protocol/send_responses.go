@@ -2,29 +2,15 @@ package protocol
 
 import "github.com/ponchione/shunter/types"
 
-// SendSubscribeSingleApplied delivers a SubscribeSingleApplied message
-// and transitions the subscription from pending → active. If the
-// subscription was already removed (disconnect race), the result is
-// silently discarded per SPEC-005 §9.1.
-//
-// The guard uses IsActiveOrPending because the only case we need to
-// discard is "subscription removed by disconnect." The upstream
-// contract guarantees exactly one call per subscription registration.
-//
-// If Send fails (e.g. ErrClientBufferFull), the error propagates to
-// the caller. The tracker entry is removed so a late failed delivery
-// cannot leave the subscription spuriously active after the result was
-// never committed to the wire.
+// SendSubscribeSingleApplied delivers a SubscribeSingleApplied message.
+// Phase 2 Slice 2 admission-model slice (TD-140): wire-id admission
+// bookkeeping is no longer maintained on the protocol connection —
+// subscription.Manager.querySets is the single source of truth, and
+// §9.4 ordering is preserved by the synchronous Reply closure invoked
+// inside the executor main-loop goroutine plus per-connection
+// OutboundCh FIFO. See docs/adr/2026-04-19-subscription-admission-model.md.
 func SendSubscribeSingleApplied(sender ClientSender, conn *Conn, msg *SubscribeSingleApplied) error {
-	if !conn.Subscriptions.IsPending(msg.QueryID) {
-		return nil
-	}
-	conn.Subscriptions.Activate(msg.QueryID)
-	if err := sender.Send(conn.ID, *msg); err != nil {
-		_ = conn.Subscriptions.Remove(msg.QueryID)
-		return err
-	}
-	return nil
+	return sender.Send(conn.ID, *msg)
 }
 
 // SendUnsubscribeSingleApplied delivers an UnsubscribeSingleApplied
