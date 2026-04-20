@@ -47,7 +47,7 @@ Specifically:
 - there is no `main` package or polished runnable example server at the repo root
 - there is no stable public embedding story documented end-to-end
 - there is no README-driven quickstart that proves "build app, define schema, run server, connect client"
-- there is still active audit/debt reconciliation work in `TECH-DEBT.md`
+- there is still active debt reconciliation work in `TECH-DEBT.md`
 
 Also important: the current `schema.Engine.Start(...)` is not a full unified runtime bootstrap. It currently performs startup schema compatibility checks, but this repo does not yet present a single polished engine package that wires every subsystem into one obvious developer-facing API.
 
@@ -95,11 +95,11 @@ That gap is exactly what this README is trying to close.
 If you want orientation instead of another audit spiral, read in this order:
 1. `README.md` — this file
 2. `docs/current-status.md` — blunt completion/parity snapshot
-3. `docs/spacetimedb-parity-roadmap.md` — development driver for closing the gap to operational parity
-4. `docs/project-brief.md` — original thesis and architecture intent
-5. `docs/EXECUTION-ORDER.md` — implementation sequencing and dependency map
-6. `REMAINING.md` — high-level remaining tracked implementation work
-7. `TECH-DEBT.md` — audit findings, drift, and reconciliation history
+3. `docs/project-brief.md` — original thesis and architecture intent
+4. `docs/EXECUTION-ORDER.md` — implementation sequencing and dependency map
+5. `docs/spacetimedb-parity-roadmap.md` — active parity development driver
+6. `docs/parity-phase0-ledger.md` — named parity scenarios and pinned tests
+7. `TECH-DEBT.md` — live debt and follow-up ledger
 
 Then inspect the main implementation packages:
 - `schema/`

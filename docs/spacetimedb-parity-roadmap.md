@@ -68,9 +68,9 @@ If Shunter produces a different externally meaningful result, that is not parity
 Broad evidence from the current audit pass:
 - `rtk go test ./...` passes: `919 passed in 9 packages`
 - implementation footprint: `209` Go files, `34807` lines of Go code in the main package pass (`auth`, `bsatn`, `commitlog`, `executor`, `protocol`, `schema`, `store`, `subscription`, `types`)
-- `REMAINING.md` says all currently tracked execution-order implementation slices are complete
+- the big execution-order implementation slices for commitlog recovery, protocol delivery, and subscription fanout are already present in live code
 - `TECH-DEBT.md` still carries unresolved hardening and contract issues
-- `SPEC-AUDIT.md` records explicit divergences from SpacetimeDB across the major specs
+- `docs/parity-phase0-ledger.md` and `docs/parity-phase1.5-outcome-model.md` record the parity decisions and pinned scenarios already closed
 
 Working verdict:
 - architecture implementation: substantial and real
@@ -85,10 +85,11 @@ Shunter is much closer to “independent Go implementation of the same broad arc
 ## Source material for this roadmap
 
 This roadmap is grounded primarily in:
-- `SPEC-AUDIT.md` — explicit divergence inventory by subsystem
 - `TECH-DEBT.md` — live code hardening / correctness backlog
-- `REMAINING.md` — implementation-slice completion ledger
 - `docs/current-status.md` — current blunt summary
+- `docs/parity-phase0-ledger.md` — parity scenario ledger and pinned tests
+- `docs/parity-phase1.5-outcome-model.md` — heavy/light delivery outcome decision and remaining deferrals
+- `docs/adr/2026-04-19-subscription-admission-model.md` — current subscription-admission authority decision
 - live packages under `protocol/`, `subscription/`, `executor/`, `commitlog/`, `store/`, `schema/`, `types/`, `bsatn/`
 
 ## Priority rule
@@ -111,7 +112,7 @@ Do not spend primary effort on cleanup before the parity target is nailed down.
 These currently prevent Shunter from being credibly described as an operational SpacetimeDB implementation.
 
 ### A1. Protocol surface is not wire-close enough
-Evidence from `SPEC-AUDIT.md` protocol divergence block (updated as slices land):
+Grounded current protocol divergences and closures:
 - subprotocol token: `v1.bsatn.spacetimedb` preferred; `v1.bsatn.shunter` still accepted (Phase 1 closed with a legacy-compatibility deferral)
 - compression tags: tag numbering parity-aligned (Phase 1 closed; brotli is a recognized-but-deferred tag)
 - `TransactionUpdate` heavy/light split: closed Phase 1.5
@@ -149,7 +150,7 @@ Primary code surfaces:
 - `protocol/upgrade.go`
 
 ### A2. Subscription/query model still diverges too much
-Evidence from `SPEC-AUDIT.md` subscription divergence block:
+Grounded current subscription/runtime-visible divergences:
 - Go predicate builder instead of SQL subset surface
 - bounded disconnect-on-lag fanout policy differs from SpacetimeDB’s queueing/slow-client model
 - no row-level security / per-client filtering model
@@ -183,7 +184,7 @@ Primary code surfaces:
 - `executor/lifecycle.go`
 
 ### A3. Recovery/store behavior still differs in ways users can feel
-Evidence from `SPEC-AUDIT.md` store/commitlog divergence blocks:
+Grounded current store/commitlog/runtime-visible divergences:
 - Shunter value model is simpler
 - Shunter commitlog/recovery is a rewrite and not format-compatible
 - no offset index file
@@ -682,7 +683,7 @@ Prefer:
 Whenever a divergence is intentionally closed or intentionally retained:
 - update this roadmap
 - update `docs/current-status.md` if the overall status changes
-- update `SPEC-AUDIT.md` / `TECH-DEBT.md` if the live truth changes
+- update `docs/parity-phase0-ledger.md`, `docs/current-status.md`, and `TECH-DEBT.md` if the live truth changes
 
 ## Rule 4: do not silently widen scope
 Non-goals unless explicitly promoted:

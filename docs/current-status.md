@@ -19,16 +19,16 @@ As of the current audit pass:
 - Broad verification: `rtk go test ./...`
 - Result: `Go test: 955 passed in 9 packages`
 - Code inventory (main package pass over `auth`, `bsatn`, `commitlog`, `executor`, `protocol`, `schema`, `store`, `subscription`, `types`): `209` Go files, `34807` lines of Go code
-- `REMAINING.md` says all currently tracked execution-order implementation slices are complete
+- the execution-order implementation slices that mattered most for commitlog, protocol, and fanout integration are already landed in code
 - `TECH-DEBT.md` still carries a large unresolved bullet backlog
-- `SPEC-AUDIT.md` records explicit divergences from SpacetimeDB across all major specs
+- `docs/spacetimedb-parity-roadmap.md` and `docs/parity-phase0-ledger.md` now carry the live parity view and next-slice framing
 
 ## Completion by lens
 
 ### 1. Execution-order completion
 Status: effectively complete
 
-The implementation-plan ledger in `REMAINING.md` says all currently tracked implementation slices are done:
+The earlier implementation-plan pass is effectively complete for the major execution-order slices that used to be tracked separately:
 - commit log snapshot/recovery/compaction
 - protocol server-message delivery / backpressure / reconnect work
 - subscription fan-out integration
@@ -73,11 +73,11 @@ Shunter is clearly modeled on the same high-level architecture:
 - subscription delta fan-out
 - persistent protocol connections
 
-But `SPEC-AUDIT.md` also records many intentional divergences. The clean-room effort is real; exact behavioral emulation is not finished.
+But the live parity docs still record many intentional or currently accepted divergences. The clean-room effort is real; exact behavioral emulation is not finished.
 
 ## Where it is still materially different from SpacetimeDB
 
-The divergence sections in `SPEC-AUDIT.md` matter because they answer the parity question directly.
+The parity roadmap and ledger matter because they answer the parity question directly and name the still-open externally visible gaps.
 Current important differences include:
 
 ### Store / value model
@@ -203,4 +203,4 @@ Do not treat it as either:
 It is in the middle:
 real enough to continue, incomplete enough that the next work should be parity-driven and deliberate.
 
-For the concrete development driver, read `docs/spacetimedb-parity-roadmap.md`.
+For the concrete development driver, read `docs/spacetimedb-parity-roadmap.md`, then `docs/parity-phase0-ledger.md`.

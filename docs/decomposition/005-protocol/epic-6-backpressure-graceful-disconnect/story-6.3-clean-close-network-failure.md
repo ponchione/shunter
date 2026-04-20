@@ -66,4 +66,8 @@ of coder/websocket. The helper `closeWithHandshake` in `protocol/close.go`
 wraps it with `CloseHandshakeTimeout`. Transport death is guaranteed within
 `CloseHandshakeTimeout` + a small unwind budget.
 
-See [SPEC-WS-FORK-001](../../../../SPEC-WS-FORK-001-v2-close-with-context.md).
+The historical fork spec previously linked from this story was a root-level
+planning artifact and has been retired. The authoritative contract for this
+story is now the live implementation in `protocol/close.go` plus the parity
+and close-behavior tests under `protocol/close_test.go` and
+`protocol/parity_close_codes_test.go`.

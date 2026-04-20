@@ -92,8 +92,8 @@ Deferred explicitly (numeric / observability fields, not envelope shape):
   reducer-side failures into a single `Failed(Box<str>)` arm and routes
   not-found / executor-unavailable through other layers. Phase 1.5 maps
   Shunter's three flat statuses onto `Failed` with the existing error
-  text; the lost distinction is captured in `SPEC-AUDIT.md` and
-  reconsidered as part of Phase 3 reducer-outcome parity.
+  text; the lost distinction is now tracked as an explicit Phase 3
+  reducer-outcome follow-up in `docs/spacetimedb-parity-roadmap.md`.
 - Reducer-call rejection paths that today never reach the commit seam
   (`handle_callreducer.go`: lifecycle-reducer-name rejection, executor
   unavailable) — Phase 1.5 emits a synthetic heavy `TransactionUpdate`
@@ -146,5 +146,6 @@ Does not unblock:
   `ReducerCallResultFlatStatus`) flip when this decision lands.
 - `docs/parity-phase0-ledger.md` — `P0-DELIVERY-001` row updated to
   point at this decision.
-- `SPEC-AUDIT.md` — protocol divergence rows for `TransactionUpdate`
-  shape, `ReducerCallResult` removal, and remaining stub fields updated.
+- `docs/spacetimedb-parity-roadmap.md` — roadmap-level summary of the
+  remaining protocol-shape and stub-field deferrals after the Phase 1.5
+  decision.
