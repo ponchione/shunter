@@ -164,12 +164,17 @@ func joinDriveDelta(
 
 // tryJoinFilter applies Join.Filter (if any) to the pair of rows and returns
 // a concatenated joined row when the filter passes, or nil.
+//
+// Each side is evaluated with its relation-instance alias so a self-join can
+// constrain only the tagged side. For distinct-table joins both aliases
+// default to zero and filter leaves default to zero, so the alias comparison
+// in MatchRowSide is trivially true — behavior is unchanged.
 func tryJoinFilter(lrow types.ProductValue, ltable TableID, rrow types.ProductValue, rtable TableID, join *Join) types.ProductValue {
 	if join.Filter != nil {
-		if !MatchRow(join.Filter, ltable, lrow) {
+		if !MatchRowSide(join.Filter, ltable, join.LeftAlias, lrow) {
 			return nil
 		}
-		if !MatchRow(join.Filter, rtable, rrow) {
+		if !MatchRowSide(join.Filter, rtable, join.RightAlias, rrow) {
 			return nil
 		}
 	}

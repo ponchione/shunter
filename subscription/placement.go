@@ -50,7 +50,17 @@ type IndexResolver interface {
 // PlaceSubscription routes each (query, table) pair to exactly one tier
 // following the §5.4 invariant. A two-table subscription may land in
 // different tiers for each table.
+//
+// Self-joins (Join.Left == Join.Right) always fall through to Tier 3 for
+// their shared table: filter leaves are alias-tagged and apply to only one
+// side of a joined pair, so Tier 1 / Tier 2 lookups keyed on the leaf value
+// would prune out legitimate candidates whose insertion plays the other
+// (unconstrained) side.
 func PlaceSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
+	if j, ok := pred.(Join); ok && j.Left == j.Right {
+		idx.Table.Add(j.Left, hash)
+		return
+	}
 	join := findJoin(pred)
 	for _, t := range pred.Tables() {
 		colEqs := findColEqs(pred, t)
@@ -72,6 +82,10 @@ func PlaceSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
 
 // RemoveSubscription reverses PlaceSubscription.
 func RemoveSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
+	if j, ok := pred.(Join); ok && j.Left == j.Right {
+		idx.Table.Remove(j.Left, hash)
+		return
+	}
 	join := findJoin(pred)
 	for _, t := range pred.Tables() {
 		colEqs := findColEqs(pred, t)
@@ -194,6 +208,13 @@ func walkColEqs(pred Predicate, t TableID, out *[]ColEq) {
 		if p.Right != nil {
 			walkColEqs(p.Right, t, out)
 		}
+	case Or:
+		if p.Left != nil {
+			walkColEqs(p.Left, t, out)
+		}
+		if p.Right != nil {
+			walkColEqs(p.Right, t, out)
+		}
 	case Join:
 		if p.Filter != nil {
 			walkColEqs(p.Filter, t, out)
@@ -207,6 +228,11 @@ func findJoin(pred Predicate) *Join {
 	case Join:
 		return &p
 	case And:
+		if j := findJoin(p.Left); j != nil {
+			return j
+		}
+		return findJoin(p.Right)
+	case Or:
 		if j := findJoin(p.Left); j != nil {
 			return j
 		}

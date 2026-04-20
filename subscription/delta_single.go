@@ -25,13 +25,31 @@ func EvalSingleTableDelta(dv *DeltaView, pred Predicate, table TableID) (inserts
 // Predicate leaves that reference a different table are treated as "no
 // constraint on this row" (return true). This lets callers reuse MatchRow
 // to evaluate a join's Filter against each side of a joined pair.
+//
+// Callers outside a self-join context use this form: side alias defaults to
+// zero and filter leaves default to zero, so the alias comparison in
+// MatchRowSide is trivially true.
 func MatchRow(pred Predicate, table TableID, row types.ProductValue) bool {
+	return MatchRowSide(pred, table, 0, row)
+}
+
+// MatchRowSide evaluates pred against a row coming from (table, sideAlias).
+// The sideAlias distinguishes two relation instances that share the same
+// TableID in a self-join: tryJoinFilter passes Join.LeftAlias for the
+// left-side row and Join.RightAlias for the right-side row. Filter leaves
+// whose Alias field does not match sideAlias are treated as "no constraint
+// on this row", mirroring the existing cross-table pass-through for the
+// Table field.
+func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.ProductValue) bool {
 	if pred == nil {
 		return true
 	}
 	switch p := pred.(type) {
 	case ColEq:
 		if p.Table != table {
+			return true
+		}
+		if p.Alias != sideAlias {
 			return true
 		}
 		if int(p.Column) >= len(row) {
@@ -42,6 +60,9 @@ func MatchRow(pred Predicate, table TableID, row types.ProductValue) bool {
 		if p.Table != table {
 			return true
 		}
+		if p.Alias != sideAlias {
+			return true
+		}
 		if int(p.Column) >= len(row) {
 			return false
 		}
@@ -50,17 +71,24 @@ func MatchRow(pred Predicate, table TableID, row types.ProductValue) bool {
 		if p.Table != table {
 			return true
 		}
+		if p.Alias != sideAlias {
+			return true
+		}
 		if int(p.Column) >= len(row) {
 			return false
 		}
 		return matchBounds(row[p.Column], p.Lower, p.Upper)
 	case And:
-		return MatchRow(p.Left, table, row) && MatchRow(p.Right, table, row)
+		return MatchRowSide(p.Left, table, sideAlias, row) && MatchRowSide(p.Right, table, sideAlias, row)
+	case Or:
+		return MatchRowSide(p.Left, table, sideAlias, row) || MatchRowSide(p.Right, table, sideAlias, row)
 	case AllRows:
 		return true
 	case Join:
 		// A Join is a structural predicate, not a row-level filter.
 		// Treat as pass; the join-delta evaluator handles it directly.
+		return true
+	case CrossJoinProjected:
 		return true
 	}
 	return false

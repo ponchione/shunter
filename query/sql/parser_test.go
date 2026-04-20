@@ -195,6 +195,267 @@ func TestParseWhereNotEqualOperators(t *testing.T) {
 	}
 }
 
+func TestParseWhereOrPredicates(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users WHERE id = 1 OR id = 2")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	orPred, ok := stmt.Predicate.(OrPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want OrPredicate", stmt.Predicate)
+	}
+	left, ok := orPred.Left.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Left type = %T, want ComparisonPredicate", orPred.Left)
+	}
+	right, ok := orPred.Right.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Right type = %T, want ComparisonPredicate", orPred.Right)
+	}
+	if left.Filter.Column != "id" || right.Filter.Column != "id" {
+		t.Fatalf("unexpected OR columns: left=%q right=%q", left.Filter.Column, right.Filter.Column)
+	}
+	if left.Filter.Literal.Int != 1 || right.Filter.Literal.Int != 2 {
+		t.Fatalf("unexpected OR literal ints: left=%d right=%d", left.Filter.Literal.Int, right.Filter.Literal.Int)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %v, want nil/empty for OR tree", stmt.Filters)
+	}
+}
+
+func TestParseJoinQualifiedProjectionOnAndWhere(t *testing.T) {
+	stmt, err := Parse("SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Orders" {
+		t.Fatalf("Table = %q, want Orders", stmt.Table)
+	}
+	if stmt.ProjectedTable != "Orders" {
+		t.Fatalf("ProjectedTable = %q, want Orders", stmt.ProjectedTable)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.LeftTable != "Orders" || stmt.Join.RightTable != "Inventory" {
+		t.Fatalf("join tables = %q/%q, want Orders/Inventory", stmt.Join.LeftTable, stmt.Join.RightTable)
+	}
+	if stmt.Join.LeftOn.Table != "Orders" || stmt.Join.LeftOn.Column != "product_id" {
+		t.Fatalf("left ON = %+v, want Orders.product_id", stmt.Join.LeftOn)
+	}
+	if stmt.Join.RightOn.Table != "Inventory" || stmt.Join.RightOn.Column != "id" {
+		t.Fatalf("right ON = %+v, want Inventory.id", stmt.Join.RightOn)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "Inventory" || cmp.Filter.Column != "quantity" {
+		t.Fatalf("WHERE filter = %+v, want Inventory.quantity", cmp.Filter)
+	}
+	if cmp.Filter.Op != "<" || cmp.Filter.Literal.Int != 10 {
+		t.Fatalf("WHERE filter op/literal = %+v, want < 10", cmp.Filter)
+	}
+	if len(stmt.Filters) != 1 {
+		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
+	}
+}
+
+func TestParseJoinQualifiedProjectionOnRightTable(t *testing.T) {
+	stmt, err := Parse("SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Orders" {
+		t.Fatalf("Table = %q, want Orders", stmt.Table)
+	}
+	if stmt.ProjectedTable != "Inventory" {
+		t.Fatalf("ProjectedTable = %q, want Inventory", stmt.ProjectedTable)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.LeftTable != "Orders" || stmt.Join.RightTable != "Inventory" {
+		t.Fatalf("join tables = %q/%q, want Orders/Inventory", stmt.Join.LeftTable, stmt.Join.RightTable)
+	}
+	if stmt.Join.LeftOn.Table != "Orders" || stmt.Join.LeftOn.Column != "product_id" {
+		t.Fatalf("left ON = %+v, want Orders.product_id", stmt.Join.LeftOn)
+	}
+	if stmt.Join.RightOn.Table != "Inventory" || stmt.Join.RightOn.Column != "id" {
+		t.Fatalf("right ON = %+v, want Inventory.id", stmt.Join.RightOn)
+	}
+	if stmt.Predicate != nil {
+		t.Fatalf("Predicate = %T, want nil", stmt.Predicate)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters len = %d, want 0", len(stmt.Filters))
+	}
+}
+
+func TestParseJoinQualifiedProjectionOnRightTableWithLeftFilter(t *testing.T) {
+	stmt, err := Parse("SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE o.id = 1")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Orders" {
+		t.Fatalf("Table = %q, want Orders", stmt.Table)
+	}
+	if stmt.ProjectedTable != "Inventory" {
+		t.Fatalf("ProjectedTable = %q, want Inventory", stmt.ProjectedTable)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "Orders" || cmp.Filter.Column != "id" {
+		t.Fatalf("WHERE filter = %+v, want Orders.id", cmp.Filter)
+	}
+	if cmp.Filter.Op != "=" || cmp.Filter.Literal.Int != 1 {
+		t.Fatalf("WHERE filter op/literal = %+v, want = 1", cmp.Filter)
+	}
+	if len(stmt.Filters) != 1 {
+		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
+	}
+}
+
+func TestParseRejectsAliasedBaseTableProjection(t *testing.T) {
+	_, err := Parse("SELECT users.* FROM users AS item")
+	if err == nil {
+		t.Fatal("expected error for base-table projection after alias")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseRejectsAliasedBaseTableQualifiedWhere(t *testing.T) {
+	_, err := Parse("SELECT item.* FROM users AS item WHERE users.id = 1")
+	if err == nil {
+		t.Fatal("expected error for base-table qualified WHERE after alias")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseRejectsAliasedBaseTableJoinProjection(t *testing.T) {
+	_, err := Parse("SELECT Orders.* FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err == nil {
+		t.Fatal("expected error for base-table projection after join alias")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseJoinQualifiedProjectionOnCrossJoin(t *testing.T) {
+	stmt, err := Parse("SELECT o.* FROM Orders o JOIN Inventory product")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Orders" {
+		t.Fatalf("Table = %q, want Orders", stmt.Table)
+	}
+	if stmt.ProjectedTable != "Orders" {
+		t.Fatalf("ProjectedTable = %q, want Orders", stmt.ProjectedTable)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.HasOn {
+		t.Fatal("Join.HasOn = true, want false for cross join")
+	}
+}
+
+func TestParseRejectsUnaliasedSelfCrossJoin(t *testing.T) {
+	_, err := Parse("SELECT t.* FROM t JOIN t")
+	if err == nil {
+		t.Fatal("expected error for unaliased self cross join")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseAliasedSelfCrossJoinProjection(t *testing.T) {
+	stmt, err := Parse("SELECT a.* FROM t AS a JOIN t AS b")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.LeftTable != "t" || stmt.Join.RightTable != "t" {
+		t.Fatalf("join tables = %q/%q, want t/t", stmt.Join.LeftTable, stmt.Join.RightTable)
+	}
+	if stmt.Join.HasOn {
+		t.Fatal("Join.HasOn = true, want false for cross join")
+	}
+	if stmt.Join.LeftAlias != "a" || stmt.Join.RightAlias != "b" {
+		t.Fatalf("join aliases = %q/%q, want a/b", stmt.Join.LeftAlias, stmt.Join.RightAlias)
+	}
+}
+
+func TestParseAliasedSelfEquiJoinProjection(t *testing.T) {
+	stmt, err := Parse("SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" || stmt.ProjectedTable != "t" {
+		t.Fatalf("Table/Projected = %q/%q, want t/t", stmt.Table, stmt.ProjectedTable)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.LeftTable != "t" || stmt.Join.RightTable != "t" {
+		t.Fatalf("join tables = %q/%q, want t/t", stmt.Join.LeftTable, stmt.Join.RightTable)
+	}
+	if !stmt.Join.HasOn {
+		t.Fatal("Join.HasOn = false, want true")
+	}
+	if stmt.Join.LeftAlias != "a" || stmt.Join.RightAlias != "b" {
+		t.Fatalf("join aliases = %q/%q, want a/b", stmt.Join.LeftAlias, stmt.Join.RightAlias)
+	}
+	if stmt.Join.LeftOn.Column != "u32" || stmt.Join.RightOn.Column != "u32" {
+		t.Fatalf("ON cols = %q/%q, want u32/u32", stmt.Join.LeftOn.Column, stmt.Join.RightOn.Column)
+	}
+	if stmt.Join.LeftOn.Table != "t" || stmt.Join.RightOn.Table != "t" {
+		t.Fatalf("ON tables = %q/%q, want t/t", stmt.Join.LeftOn.Table, stmt.Join.RightOn.Table)
+	}
+	if stmt.Join.LeftOn.Alias != "a" || stmt.Join.RightOn.Alias != "b" {
+		t.Fatalf("ON aliases = %q/%q, want a/b", stmt.Join.LeftOn.Alias, stmt.Join.RightOn.Alias)
+	}
+}
+
+func TestParseRejectsSameAliasBothSidesOfEquiJoin(t *testing.T) {
+	_, err := Parse("SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = a.u32")
+	if err == nil {
+		t.Fatal("expected error when both ON qualifiers reference the same alias")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseRejectsJoinBareStarProjection(t *testing.T) {
+	_, err := Parse("SELECT * FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err == nil {
+		t.Fatal("expected error for bare * projection on join")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
 func TestParseRejectsUnsupported(t *testing.T) {
 	cases := []struct {
 		name string
@@ -202,8 +463,6 @@ func TestParseRejectsUnsupported(t *testing.T) {
 	}{
 		{"projection", "SELECT id FROM users"},
 		{"qualified_projection_wrong_alias", "SELECT other.* FROM users AS item"},
-		{"join", "SELECT * FROM a JOIN b ON a.id = b.id"},
-		{"or", "SELECT * FROM users WHERE id = 1 OR id = 2"},
 		{"order_by", "SELECT * FROM users ORDER BY id"},
 		{"limit", "SELECT * FROM users LIMIT 10"},
 		{"trailing_garbage", "SELECT * FROM users foo bar"},

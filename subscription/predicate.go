@@ -42,9 +42,18 @@ type Predicate interface {
 // ColEq matches rows where a column equals a literal value.
 //
 //	Example: messages.channel_id = 42
+//
+// Alias is the relation-instance tag that disambiguates which side of a
+// self-join the leaf applies to. For distinct-table joins and single-table
+// predicates it is left at its zero default — the Table check in MatchRow is
+// sufficient to route the leaf to the correct side. For self-join filters
+// (Join.Left == Join.Right) compile stamps 0 when the leaf names the left
+// alias and 1 when it names the right alias, mirroring Join.LeftAlias /
+// Join.RightAlias.
 type ColEq struct {
 	Table  TableID
 	Column ColID
+	Alias  uint8
 	Value  Value
 }
 
@@ -54,9 +63,12 @@ func (p ColEq) Tables() []TableID { return []TableID{p.Table} }
 // ColNe matches rows where a column does not equal a literal value.
 //
 //	Example: messages.channel_id != 42
+//
+// See ColEq for the meaning of Alias.
 type ColNe struct {
 	Table  TableID
 	Column ColID
+	Alias  uint8
 	Value  Value
 }
 
@@ -66,15 +78,18 @@ func (p ColNe) Tables() []TableID { return []TableID{p.Table} }
 // ColRange matches rows where a column falls within a range.
 //
 //	Example: events.timestamp >= 1000 AND events.timestamp < 2000
+//
+// See ColEq for the meaning of Alias.
 type ColRange struct {
 	Table  TableID
 	Column ColID
+	Alias  uint8
 	Lower  Bound
 	Upper  Bound
 }
 
-func (ColRange) sealed()              {}
-func (p ColRange) Tables() []TableID  { return []TableID{p.Table} }
+func (ColRange) sealed()             {}
+func (p ColRange) Tables() []TableID { return []TableID{p.Table} }
 
 // And combines two predicates; both must match.
 type And struct {
@@ -84,17 +99,34 @@ type And struct {
 
 func (And) sealed() {}
 
+// Or combines two predicates; either may match.
+type Or struct {
+	Left  Predicate
+	Right Predicate
+}
+
+func (Or) sealed() {}
+
 // Tables returns the deduplicated union of left and right tables.
 // Order is stable: left tables first, then any right-only tables.
 // Nil children contribute no tables so malformed trees caught by
 // ValidatePredicate do not panic here.
 func (p And) Tables() []TableID {
+	return unionPredicateTables(p.Left, p.Right)
+}
+
+// Tables returns the deduplicated union of left and right tables.
+func (p Or) Tables() []TableID {
+	return unionPredicateTables(p.Left, p.Right)
+}
+
+func unionPredicateTables(leftPred, rightPred Predicate) []TableID {
 	var left, right []TableID
-	if p.Left != nil {
-		left = p.Left.Tables()
+	if leftPred != nil {
+		left = leftPred.Tables()
 	}
-	if p.Right != nil {
-		right = p.Right.Tables()
+	if rightPred != nil {
+		right = rightPred.Tables()
 	}
 	out := make([]TableID, 0, len(left)+len(right))
 	seen := make(map[TableID]struct{}, len(left)+len(right))
@@ -125,16 +157,45 @@ func (p AllRows) Tables() []TableID  { return []TableID{p.Table} }
 
 // Join matches rows from two tables joined on a column pair,
 // with an optional filter on either side.
+//
+// LeftAlias and RightAlias are opaque relation-instance tags that distinguish
+// the two sides when Left == Right (aliased self-join). For distinct-table
+// joins they are left at their zero default — Left != Right is sufficient to
+// disambiguate the sides. Validation rejects Left == Right with equal
+// aliases, since that would describe a degenerate single-relation join.
 type Join struct {
-	Left     TableID
-	Right    TableID
-	LeftCol  ColID
-	RightCol ColID
-	Filter   Predicate // optional additional filter (may be nil)
+	Left       TableID
+	Right      TableID
+	LeftCol    ColID
+	RightCol   ColID
+	LeftAlias  uint8
+	RightAlias uint8
+	Filter     Predicate // optional additional filter (may be nil)
 }
 
-func (Join) sealed()             {}
-func (p Join) Tables() []TableID { return []TableID{p.Left, p.Right} }
+func (Join) sealed() {}
+func (p Join) Tables() []TableID {
+	if p.Left == p.Right {
+		return []TableID{p.Left}
+	}
+	return []TableID{p.Left, p.Right}
+}
+
+// CrossJoinProjected matches all rows from Projected when Other is non-empty.
+// It is the narrow runtime form for SQL cross-join projection such as
+// `SELECT t.* FROM t JOIN s`.
+type CrossJoinProjected struct {
+	Projected TableID
+	Other     TableID
+}
+
+func (CrossJoinProjected) sealed() {}
+func (p CrossJoinProjected) Tables() []TableID {
+	if p.Projected == p.Other {
+		return []TableID{p.Projected}
+	}
+	return []TableID{p.Projected, p.Other}
+}
 
 // Bound describes one end of a ColRange. If Unbounded is true, Value and
 // Inclusive are ignored and the range is open on that side.

@@ -31,6 +31,14 @@ func TestQueryHashColNeDiffersFromColEq(t *testing.T) {
 	}
 }
 
+func TestQueryHashOrDiffersFromAnd(t *testing.T) {
+	left := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	right := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}
+	if ComputeQueryHash(And{Left: left, Right: right}, nil) == ComputeQueryHash(Or{Left: left, Right: right}, nil) {
+		t.Fatal("And and Or should hash differently")
+	}
+}
+
 func TestQueryHashSameClient(t *testing.T) {
 	p := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	id := types.Identity{1, 2, 3}

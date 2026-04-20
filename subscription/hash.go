@@ -26,8 +26,10 @@ const (
 	tagColNe    byte = 0x02
 	tagColRange byte = 0x03
 	tagAnd      byte = 0x04
-	tagAllRows  byte = 0x05
-	tagJoin     byte = 0x06
+	tagAllRows   byte = 0x05
+	tagJoin      byte = 0x06
+	tagOr        byte = 0x07
+	tagCrossJoin byte = 0x08
 )
 
 // Within a canonical Bound encoding.
@@ -101,20 +103,27 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 		e.writeByte(tagColEq)
 		e.writeU32(uint32(p.Table))
 		e.writeU32(uint32(p.Column))
+		e.writeByte(p.Alias)
 		encodeValue(e, p.Value)
 	case ColNe:
 		e.writeByte(tagColNe)
 		e.writeU32(uint32(p.Table))
 		e.writeU32(uint32(p.Column))
+		e.writeByte(p.Alias)
 		encodeValue(e, p.Value)
 	case ColRange:
 		e.writeByte(tagColRange)
 		e.writeU32(uint32(p.Table))
 		e.writeU32(uint32(p.Column))
+		e.writeByte(p.Alias)
 		encodeBound(e, p.Lower)
 		encodeBound(e, p.Upper)
 	case And:
 		e.writeByte(tagAnd)
+		encodePredicate(e, p.Left)
+		encodePredicate(e, p.Right)
+	case Or:
+		e.writeByte(tagOr)
 		encodePredicate(e, p.Left)
 		encodePredicate(e, p.Right)
 	case AllRows:
@@ -126,12 +135,18 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 		e.writeU32(uint32(p.Right))
 		e.writeU32(uint32(p.LeftCol))
 		e.writeU32(uint32(p.RightCol))
+		e.writeByte(p.LeftAlias)
+		e.writeByte(p.RightAlias)
 		if p.Filter == nil {
 			e.writeByte(0)
 		} else {
 			e.writeByte(1)
 			encodePredicate(e, p.Filter)
 		}
+	case CrossJoinProjected:
+		e.writeByte(tagCrossJoin)
+		e.writeU32(uint32(p.Projected))
+		e.writeU32(uint32(p.Other))
 	default:
 		// Sealed interface — no external impls reach this point.
 		panic("subscription: unknown predicate type")

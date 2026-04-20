@@ -84,6 +84,22 @@ func TestMatchRowAnd(t *testing.T) {
 	}
 }
 
+func TestMatchRowOr(t *testing.T) {
+	p := Or{
+		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},
+		Right: ColEq{Table: 1, Column: 1, Value: types.NewString("b")},
+	}
+	if !MatchRow(p, 1, types.ProductValue{types.NewUint64(1), types.NewString("a")}) {
+		t.Fatal("left clause should match")
+	}
+	if !MatchRow(p, 1, types.ProductValue{types.NewUint64(2), types.NewString("b")}) {
+		t.Fatal("right clause should match")
+	}
+	if MatchRow(p, 1, types.ProductValue{types.NewUint64(2), types.NewString("a")}) {
+		t.Fatal("neither clause should match")
+	}
+}
+
 func TestMatchRowAllRowsAlways(t *testing.T) {
 	p := AllRows{Table: 1}
 	if !MatchRow(p, 1, types.ProductValue{types.NewUint64(1)}) {

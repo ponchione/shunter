@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ponchione/shunter/bsatn"
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
@@ -37,7 +38,7 @@ func handleOneOffQuery(
 	stateAccess CommittedStateAccess,
 	sl SchemaLookup,
 ) {
-	q, err := parseQueryString(msg.QueryString, sl)
+	compiled, err := compileSQLQueryString(msg.QueryString, sl)
 	if err != nil {
 		sendError(conn, OneOffQueryResult{
 			MessageID: msg.MessageID,
@@ -47,42 +48,44 @@ func handleOneOffQuery(
 		return
 	}
 
-	tableID, _, ok := sl.TableByName(q.TableName)
+	tableID, _, ok := sl.TableByName(compiled.TableName)
 	if !ok {
 		sendError(conn, OneOffQueryResult{
 			MessageID: msg.MessageID,
 			Status:    1,
-			Error:     fmt.Sprintf("unknown table %q", q.TableName),
+			Error:     fmt.Sprintf("unknown table %q", compiled.TableName),
 		})
 		return
 	}
 
-	pred, err := compileQuery(q, sl)
-	if err != nil {
-		sendError(conn, OneOffQueryResult{
-			MessageID: msg.MessageID,
-			Status:    1,
-			Error:     err.Error(),
-		})
-		return
-	}
+	pred := compiled.Predicate
 
 	view := stateAccess.Snapshot()
-	var rows [][]byte
-	for _, pv := range view.TableScan(tableID) {
-		if subscription.MatchRow(pred, tableID, pv) {
-			var buf bytes.Buffer
-			if err := bsatn.EncodeProductValue(&buf, pv); err != nil {
-				view.Close()
-				sendError(conn, OneOffQueryResult{
-					MessageID: msg.MessageID,
-					Status:    1,
-					Error:     "encode error: " + err.Error(),
-				})
-				return
+	var matchedRows []types.ProductValue
+	if joinPred, ok := pred.(subscription.Join); ok {
+		matchedRows = evaluateOneOffJoin(view, tableID, joinPred)
+	} else if crossPred, ok := pred.(subscription.CrossJoinProjected); ok {
+		matchedRows = evaluateOneOffCrossJoin(view, tableID, crossPred)
+	} else {
+		for _, pv := range view.TableScan(tableID) {
+			if subscription.MatchRow(pred, tableID, pv) {
+				matchedRows = append(matchedRows, pv)
 			}
-			rows = append(rows, buf.Bytes())
 		}
+	}
+	var rows [][]byte
+	for _, pv := range matchedRows {
+		var buf bytes.Buffer
+		if err := bsatn.EncodeProductValue(&buf, pv); err != nil {
+			view.Close()
+			sendError(conn, OneOffQueryResult{
+				MessageID: msg.MessageID,
+				Status:    1,
+				Error:     "encode error: " + err.Error(),
+			})
+			return
+		}
+		rows = append(rows, buf.Bytes())
 	}
 	view.Close()
 
@@ -105,4 +108,66 @@ func matchesAll(pv types.ProductValue, matchers []colMatcher) bool {
 		}
 	}
 	return true
+}
+
+func evaluateOneOffJoin(view store.CommittedReadView, projectedTable schema.TableID, join subscription.Join) []types.ProductValue {
+	projectLeft := projectedTable == join.Left
+	var projectedJoinCol, otherJoinCol types.ColID
+	var otherTable schema.TableID
+	if projectLeft {
+		projectedJoinCol = join.LeftCol
+		otherJoinCol = join.RightCol
+		otherTable = join.Right
+	} else {
+		projectedJoinCol = join.RightCol
+		otherJoinCol = join.LeftCol
+		otherTable = join.Left
+	}
+	var rows []types.ProductValue
+	for _, projectedRow := range view.TableScan(projectedTable) {
+		if int(projectedJoinCol) >= len(projectedRow) {
+			continue
+		}
+		matched := false
+		for _, otherRow := range view.TableScan(otherTable) {
+			if int(otherJoinCol) >= len(otherRow) {
+				continue
+			}
+			if !projectedRow[projectedJoinCol].Equal(otherRow[otherJoinCol]) {
+				continue
+			}
+			if join.Filter != nil {
+				var leftRow, rightRow types.ProductValue
+				if projectLeft {
+					leftRow, rightRow = projectedRow, otherRow
+				} else {
+					leftRow, rightRow = otherRow, projectedRow
+				}
+				if !subscription.MatchRowSide(join.Filter, join.Left, join.LeftAlias, leftRow) ||
+					!subscription.MatchRowSide(join.Filter, join.Right, join.RightAlias, rightRow) {
+					continue
+				}
+			}
+			matched = true
+			break
+		}
+		if matched {
+			rows = append(rows, projectedRow)
+		}
+	}
+	return rows
+}
+
+func evaluateOneOffCrossJoin(view store.CommittedReadView, projectedTable schema.TableID, cross subscription.CrossJoinProjected) []types.ProductValue {
+	if projectedTable != cross.Projected {
+		return nil
+	}
+	if view.RowCount(cross.Other) == 0 {
+		return nil
+	}
+	var rows []types.ProductValue
+	for _, row := range view.TableScan(projectedTable) {
+		rows = append(rows, row)
+	}
+	return rows
 }

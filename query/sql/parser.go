@@ -3,15 +3,16 @@
 //
 // Grammar:
 //
-//	stmt   = "SELECT" ( "*" | ident "." "*" ) "FROM" ident [ [ "AS" ] ident ] [ where ] [ ";" ]
-//	where  = "WHERE" cmp ( "AND" cmp )*
+//	stmt   = "SELECT" ( "*" | ident "." "*" ) "FROM" ident [ [ "AS" ] ident ] [ [ "INNER" ] "JOIN" ident [ [ "AS" ] ident ] "ON" qcol "=" qcol ] [ where ] [ ";" ]
+//	where  = "WHERE" cmp ( ( "AND" | "OR" ) cmp )*
 //	cmp    = colref op literal
-//	colref = ident | ident "." ident   // only when qualifier matches FROM table or alias
+//	colref = ident | ident "." ident
+//	qcol   = ident "." ident
 //	op     = "=" | "<" | ">" | "<=" | ">=" | "!=" | "<>"
 //	literal = integer | bool | string
 //	ident   = [A-Za-z_][A-Za-z0-9_]*
 //
-// Anything outside this grammar (projection other than "*", OR, JOIN,
+// Anything outside this grammar (projection other than "*", unsupported JOIN forms,
 // ORDER BY, LIMIT, aggregates,
 // subqueries, mismatched qualified columns, etc.) is rejected with
 // ErrUnsupportedSQL.
@@ -49,16 +50,85 @@ type Literal struct {
 }
 
 // Filter is a single column comparison against a literal value.
+//
+// Alias preserves the exact qualifier token the user wrote (e.g. "a", "b",
+// or the base table name in an unaliased single-table query). Compile paths
+// map it to a relation-instance tag so self-join WHERE filters can be routed
+// to the side the user named. Empty means the column reference was bare and
+// the caller may fall back to the default relation.
 type Filter struct {
+	Table   string
 	Column  string
+	Alias   string
 	Op      string
 	Literal Literal
 }
 
+// ColumnRef is a qualified column reference resolved to its owning table
+// and to the relation-instance alias the qualifier named. Alias is the
+// exact identifier the user typed (or the base table name when no alias
+// was declared); it distinguishes two aliased instances of the same
+// underlying table.
+type ColumnRef struct {
+	Table  string
+	Column string
+	Alias  string
+}
+
+// JoinClause is the parsed two-table join metadata for a narrow join-backed SQL slice.
+// LeftAlias / RightAlias carry the relation-instance identity separately from the
+// physical table name so callers can detect aliased self-joins.
+type JoinClause struct {
+	LeftTable  string
+	RightTable string
+	LeftAlias  string
+	RightAlias string
+	HasOn      bool
+	LeftOn     ColumnRef
+	RightOn    ColumnRef
+}
+
+// Predicate is the structured WHERE tree for parsed SQL.
+type Predicate interface {
+	isPredicate()
+}
+
+// ComparisonPredicate is a single column comparison leaf.
+type ComparisonPredicate struct {
+	Filter Filter
+}
+
+func (ComparisonPredicate) isPredicate() {}
+
+// AndPredicate combines two child predicates with AND.
+type AndPredicate struct {
+	Left  Predicate
+	Right Predicate
+}
+
+func (AndPredicate) isPredicate() {}
+
+// OrPredicate combines two child predicates with OR.
+type OrPredicate struct {
+	Left  Predicate
+	Right Predicate
+}
+
+func (OrPredicate) isPredicate() {}
+
 // Statement is the parsed output.
 type Statement struct {
-	Table   string
-	Filters []Filter
+	Table          string
+	ProjectedTable string
+	Join           *JoinClause
+	Predicate      Predicate
+	Filters        []Filter
+}
+
+type relationBindings struct {
+	defaultTable   string
+	requireQualify bool
+	byQualifier    map[string]string
 }
 
 // Parse parses the minimum-viable SELECT surface.
@@ -247,20 +317,43 @@ func (p *parser) parseStatement() (Statement, error) {
 	}
 	p.advance()
 	tableName := tableTok.text
-	qualifiers, err := p.parseRelationQualifiers(tableName)
+	leftQualifiers, err := p.parseRelationQualifiers(tableName)
 	if err != nil {
 		return Statement{}, err
 	}
-	if projectionQualifier != "" && !matchesQualifier(projectionQualifier, qualifiers) {
-		return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match table %q", projectionQualifier, tableName))
-	}
-	stmt := Statement{Table: tableName}
-	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "WHERE") {
+	stmt := Statement{Table: tableName, ProjectedTable: tableName}
+	bindings := relationBindings{defaultTable: tableName, byQualifier: singleQualifierMap(tableName, leftQualifiers)}
+	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "INNER") {
 		p.advance()
-		filters, err := p.parseWhere(qualifiers)
+	}
+	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "JOIN") {
+		join, rightQualifiers, err := p.parseJoinClause(tableName, leftQualifiers)
 		if err != nil {
 			return Statement{}, err
 		}
+		stmt.Join = join
+		bindings = relationBindings{
+			requireQualify: true,
+			byQualifier:    joinQualifierMap(tableName, leftQualifiers, join.RightTable, rightQualifiers),
+		}
+		if projectionQualifier == "" {
+			return Statement{}, p.unsupported("join queries require a qualified projection")
+		}
+		projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier)
+		if !ok {
+			return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match joined relations", projectionQualifier))
+		}
+		stmt.ProjectedTable = projectedTable
+	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
+		return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match table %q", projectionQualifier, tableName))
+	}
+	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "WHERE") {
+		p.advance()
+		pred, filters, err := p.parseWhere(bindings)
+		if err != nil {
+			return Statement{}, err
+		}
+		stmt.Predicate = pred
 		stmt.Filters = filters
 	}
 	if p.peek().kind == tokSemicolon {
@@ -295,23 +388,22 @@ func (p *parser) parseProjection() (string, error) {
 }
 
 func (p *parser) parseRelationQualifiers(tableName string) ([]string, error) {
-	qualifiers := []string{tableName}
 	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "AS") {
 		p.advance()
 		alias, err := p.parseAlias()
 		if err != nil {
 			return nil, err
 		}
-		return append(qualifiers, alias), nil
+		return []string{alias}, nil
 	}
 	if p.peek().kind == tokIdent && !isReserved(p.peek().text) {
 		alias, err := p.parseAlias()
 		if err != nil {
 			return nil, err
 		}
-		return append(qualifiers, alias), nil
+		return []string{alias}, nil
 	}
-	return qualifiers, nil
+	return []string{tableName}, nil
 }
 
 func (p *parser) parseAlias() (string, error) {
@@ -323,37 +415,166 @@ func (p *parser) parseAlias() (string, error) {
 	return t.text, nil
 }
 
-func (p *parser) parseWhere(qualifiers []string) ([]Filter, error) {
-	var filters []Filter
-	f, err := p.parseComparison(qualifiers)
-	if err != nil {
-		return nil, err
+func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*JoinClause, []string, error) {
+	if err := p.expectKeyword("JOIN"); err != nil {
+		return nil, nil, err
 	}
-	filters = append(filters, f)
-	for p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "AND") {
-		p.advance()
-		f, err := p.parseComparison(qualifiers)
-		if err != nil {
-			return nil, err
-		}
-		filters = append(filters, f)
+	rightTok := p.peek()
+	if rightTok.kind != tokIdent || isReserved(rightTok.text) {
+		return nil, nil, p.unsupported("expected joined table name")
+	}
+	p.advance()
+	rightTable := rightTok.text
+	rightQualifiers, err := p.parseRelationQualifiers(rightTable)
+	if err != nil {
+		return nil, nil, err
+	}
+	leftAlias := leftQualifiers[0]
+	rightAlias := rightQualifiers[0]
+	if strings.EqualFold(leftTable, rightTable) && strings.EqualFold(leftAlias, rightAlias) {
+		return nil, nil, p.unsupported("self join requires aliases")
+	}
+	if !(p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "ON")) {
+		return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil
+	}
+	if err := p.expectKeyword("ON"); err != nil {
+		return nil, nil, err
+	}
+	lookup := joinQualifierMap(leftTable, leftQualifiers, rightTable, rightQualifiers)
+	leftOn, err := p.parseQualifiedColumnRef(lookup)
+	if err != nil {
+		return nil, nil, err
+	}
+	op, err := p.parseOperator()
+	if err != nil {
+		return nil, nil, err
+	}
+	if op != "=" {
+		return nil, nil, p.unsupported("JOIN ON only supports '='")
+	}
+	rightOn, err := p.parseQualifiedColumnRef(lookup)
+	if err != nil {
+		return nil, nil, err
+	}
+	if strings.EqualFold(leftOn.Alias, rightOn.Alias) {
+		return nil, nil, p.unsupported("JOIN ON must compare columns from different relations")
+	}
+	if strings.EqualFold(leftOn.Alias, rightAlias) && strings.EqualFold(rightOn.Alias, leftAlias) {
+		leftOn, rightOn = rightOn, leftOn
+	}
+	if !strings.EqualFold(leftOn.Alias, leftAlias) || !strings.EqualFold(rightOn.Alias, rightAlias) {
+		return nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
+	}
+	return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}, rightQualifiers, nil
+}
+
+func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, error) {
+	qualifierTok := p.peek()
+	if qualifierTok.kind != tokIdent || isReserved(qualifierTok.text) {
+		return ColumnRef{}, p.unsupported("expected qualified column reference")
+	}
+	p.advance()
+	if p.peek().kind != tokDot {
+		return ColumnRef{}, p.unsupported("expected qualified column reference")
+	}
+	p.advance()
+	columnTok := p.peek()
+	if columnTok.kind != tokIdent || isReserved(columnTok.text) {
+		return ColumnRef{}, p.unsupported("expected column name after qualifier")
+	}
+	p.advance()
+	tableName, ok := resolveQualifier(qualifierTok.text, lookup)
+	if !ok {
+		return ColumnRef{}, p.unsupported(fmt.Sprintf("qualified column %q does not match relation", qualifierTok.text))
+	}
+	return ColumnRef{Table: tableName, Column: columnTok.text, Alias: qualifierTok.text}, nil
+}
+
+func (p *parser) parseWhere(bindings relationBindings) (Predicate, []Filter, error) {
+	pred, err := p.parseDisjunction(bindings)
+	if err != nil {
+		return nil, nil, err
 	}
 	if p.peek().kind == tokIdent {
 		kw := strings.ToUpper(p.peek().text)
-		if kw == "OR" || kw == "ORDER" || kw == "LIMIT" || kw == "GROUP" || kw == "HAVING" || kw == "JOIN" {
-			return nil, p.unsupported(fmt.Sprintf("%s not supported", kw))
+		if kw == "ORDER" || kw == "LIMIT" || kw == "GROUP" || kw == "HAVING" || kw == "JOIN" {
+			return nil, nil, p.unsupported(fmt.Sprintf("%s not supported", kw))
 		}
 	}
-	return filters, nil
+	filters, _ := flattenAndFilters(pred)
+	return pred, filters, nil
 }
 
-func (p *parser) parseComparison(qualifiers []string) (Filter, error) {
+func (p *parser) parseDisjunction(bindings relationBindings) (Predicate, error) {
+	left, err := p.parseConjunction(bindings)
+	if err != nil {
+		return nil, err
+	}
+	for p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "OR") {
+		p.advance()
+		right, err := p.parseConjunction(bindings)
+		if err != nil {
+			return nil, err
+		}
+		left = OrPredicate{Left: left, Right: right}
+	}
+	return left, nil
+}
+
+func (p *parser) parseConjunction(bindings relationBindings) (Predicate, error) {
+	left, err := p.parseComparisonPredicate(bindings)
+	if err != nil {
+		return nil, err
+	}
+	for p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "AND") {
+		p.advance()
+		right, err := p.parseComparisonPredicate(bindings)
+		if err != nil {
+			return nil, err
+		}
+		left = AndPredicate{Left: left, Right: right}
+	}
+	return left, nil
+}
+
+func (p *parser) parseComparisonPredicate(bindings relationBindings) (Predicate, error) {
+	f, err := p.parseComparison(bindings)
+	if err != nil {
+		return nil, err
+	}
+	return ComparisonPredicate{Filter: f}, nil
+}
+
+func flattenAndFilters(pred Predicate) ([]Filter, bool) {
+	switch p := pred.(type) {
+	case nil:
+		return nil, true
+	case ComparisonPredicate:
+		return []Filter{p.Filter}, true
+	case AndPredicate:
+		left, ok := flattenAndFilters(p.Left)
+		if !ok {
+			return nil, false
+		}
+		right, ok := flattenAndFilters(p.Right)
+		if !ok {
+			return nil, false
+		}
+		return append(left, right...), true
+	default:
+		return nil, false
+	}
+}
+
+func (p *parser) parseComparison(bindings relationBindings) (Filter, error) {
 	t := p.peek()
 	if t.kind != tokIdent || isReserved(t.text) {
 		return Filter{}, p.unsupported(fmt.Sprintf("expected column name, got %q", t.text))
 	}
 	p.advance()
 	columnName := t.text
+	tableName := bindings.defaultTable
+	alias := ""
 	if p.peek().kind == tokDot {
 		qualifier := columnName
 		p.advance()
@@ -361,14 +582,19 @@ func (p *parser) parseComparison(qualifiers []string) (Filter, error) {
 		if t.kind != tokIdent || isReserved(t.text) {
 			return Filter{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
 		}
-		if !matchesQualifier(qualifier, qualifiers) {
+		resolved, ok := resolveQualifier(qualifier, bindings.byQualifier)
+		if !ok {
 			return Filter{}, p.unsupported(fmt.Sprintf("qualified column %q does not match relation", qualifier))
 		}
+		tableName = resolved
 		columnName = t.text
+		alias = qualifier
 		p.advance()
 		if p.peek().kind == tokDot {
 			return Filter{}, p.unsupported("qualified column names not supported")
 		}
+	} else if bindings.requireQualify {
+		return Filter{}, p.unsupported("join WHERE columns must be qualified")
 	}
 	op, err := p.parseOperator()
 	if err != nil {
@@ -378,7 +604,7 @@ func (p *parser) parseComparison(qualifiers []string) (Filter, error) {
 	if err != nil {
 		return Filter{}, err
 	}
-	return Filter{Column: columnName, Op: op, Literal: lit}, nil
+	return Filter{Table: tableName, Column: columnName, Alias: alias, Op: op, Literal: lit}, nil
 }
 
 func (p *parser) parseOperator() (string, error) {
@@ -453,10 +679,32 @@ func matchesQualifier(candidate string, qualifiers []string) bool {
 var reservedWords = map[string]struct{}{
 	"SELECT": {}, "FROM": {}, "WHERE": {}, "AND": {}, "OR": {},
 	"ORDER": {}, "BY": {}, "LIMIT": {}, "GROUP": {}, "HAVING": {},
-	"JOIN": {}, "ON": {}, "AS": {},
+	"JOIN": {}, "ON": {}, "AS": {}, "INNER": {},
 }
 
 func isReserved(s string) bool {
 	_, ok := reservedWords[strings.ToUpper(s)]
 	return ok
 }
+
+func singleQualifierMap(tableName string, qualifiers []string) map[string]string {
+	out := make(map[string]string, len(qualifiers))
+	for _, qualifier := range qualifiers {
+		out[strings.ToUpper(qualifier)] = tableName
+	}
+	return out
+}
+
+func joinQualifierMap(leftTable string, leftQualifiers []string, rightTable string, rightQualifiers []string) map[string]string {
+	out := singleQualifierMap(leftTable, leftQualifiers)
+	for _, qualifier := range rightQualifiers {
+		out[strings.ToUpper(qualifier)] = rightTable
+	}
+	return out
+}
+
+func resolveQualifier(qualifier string, lookup map[string]string) (string, bool) {
+	resolved, ok := lookup[strings.ToUpper(qualifier)]
+	return resolved, ok
+}
+

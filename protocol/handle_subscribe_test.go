@@ -475,6 +475,55 @@ func TestHandleSubscribeSingle_NotEqualComparison(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_OrComparison(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("metrics", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "score", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   16,
+		QueryID:     13,
+		QueryString: "SELECT * FROM metrics WHERE score = 9 OR score = 11",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	orPred, ok := req.Predicates[0].(subscription.Or)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Or", req.Predicates[0])
+	}
+	left, ok := orPred.Left.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0].Left type = %T, want ColEq", orPred.Left)
+	}
+	right, ok := orPred.Right.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0].Right type = %T, want ColEq", orPred.Right)
+	}
+	if !left.Value.Equal(types.NewUint32(9)) || !right.Value.Equal(types.NewUint32(11)) {
+		t.Fatalf("unexpected OR values: left=%v right=%v", left.Value, right.Value)
+	}
+	if left.Column != 1 || right.Column != 1 {
+		t.Fatalf("unexpected OR column ids: left=%d right=%d", left.Column, right.Column)
+	}
+}
+
 func TestHandleSubscribeSingle_QualifiedStarAlias(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -523,6 +572,266 @@ func TestHandleSubscribeSingle_QualifiedStarAlias(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_JoinFilterOnRightTable(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   17,
+		QueryID:     14,
+		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	orders, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	inventory, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	if joinPred.Left != orders.ID || joinPred.Right != inventory.ID {
+		t.Fatalf("join tables = %d/%d, want %d/%d", joinPred.Left, joinPred.Right, orders.ID, inventory.ID)
+	}
+	if joinPred.LeftCol != 1 || joinPred.RightCol != 0 {
+		t.Fatalf("join cols = %d/%d, want 1/0", joinPred.LeftCol, joinPred.RightCol)
+	}
+	rng, ok := joinPred.Filter.(subscription.ColRange)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want ColRange", joinPred.Filter)
+	}
+	if rng.Table != inventory.ID || rng.Column != 1 {
+		t.Fatalf("range table/column = %d/%d, want %d/1", rng.Table, rng.Column, inventory.ID)
+	}
+	if !rng.Upper.Value.Equal(types.NewUint32(10)) || rng.Upper.Inclusive || rng.Upper.Unbounded {
+		t.Fatalf("upper bound = %+v, want exclusive bounded 10", rng.Upper)
+	}
+}
+
+func TestHandleSubscribeSingle_JoinProjectionOnRightTable(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   18,
+		QueryID:     15,
+		QueryString: "SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	orders, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	inventory, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	if joinPred.Left != orders.ID || joinPred.Right != inventory.ID {
+		t.Fatalf("join tables = %d/%d, want %d/%d", joinPred.Left, joinPred.Right, orders.ID, inventory.ID)
+	}
+	if joinPred.LeftCol != 1 || joinPred.RightCol != 0 {
+		t.Fatalf("join cols = %d/%d, want 1/0", joinPred.LeftCol, joinPred.RightCol)
+	}
+	if joinPred.Filter != nil {
+		t.Fatalf("Join.Filter = %T, want nil", joinPred.Filter)
+	}
+}
+
+func TestHandleSubscribeSingle_JoinProjectionOnRightTableWithLeftFilter(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   19,
+		QueryID:     16,
+		QueryString: "SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE o.id = 1",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	orders, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	inventory, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	if joinPred.Left != orders.ID || joinPred.Right != inventory.ID {
+		t.Fatalf("join tables = %d/%d, want %d/%d", joinPred.Left, joinPred.Right, orders.ID, inventory.ID)
+	}
+	colEq, ok := joinPred.Filter.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want ColEq", joinPred.Filter)
+	}
+	if colEq.Table != orders.ID || colEq.Column != 0 {
+		t.Fatalf("filter table/column = %d/%d, want %d/0", colEq.Table, colEq.Column, orders.ID)
+	}
+	if !colEq.Value.Equal(types.NewUint32(1)) {
+		t.Fatalf("filter value = %v, want 1", colEq.Value)
+	}
+}
+
+func TestHandleSubscribeSingle_CrossJoinProjection(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{RequestID: 21, QueryID: 18, QueryString: "SELECT o.* FROM Orders o JOIN Inventory product"}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	pred, ok := req.Predicates[0].(subscription.CrossJoinProjected)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want CrossJoinProjected", req.Predicates[0])
+	}
+	orders, _ := eng.Registry().TableByName("Orders")
+	inventory, _ := eng.Registry().TableByName("Inventory")
+	if pred.Projected != orders.ID || pred.Other != inventory.ID {
+		t.Fatalf("cross join predicate = %+v, want projected Orders other Inventory", pred)
+	}
+}
+
 func TestHandleSubscribeSingle_DeliversSubscribeAppliedViaReplyClosure(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -553,6 +862,195 @@ func TestHandleSubscribeSingle_DeliversSubscribeAppliedViaReplyClosure(t *testin
 	applied := decoded.(SubscribeSingleApplied)
 	if applied.RequestID != 10 || applied.QueryID != 7 {
 		t.Fatalf("SubscribeSingleApplied = %+v", applied)
+	}
+}
+
+func TestHandleSubscribeSingle_AliasedBaseTableQualifiedWhereRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   20,
+		QueryID:     17,
+		QueryString: "SELECT item.* FROM users AS item WHERE users.id = 1",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.QueryID != 17 {
+		t.Fatalf("SubscriptionError.QueryID = %d, want 17", se.QueryID)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatal("executor should not be called for aliased base-table qualified WHERE")
+	}
+}
+
+func TestHandleSubscribeSingle_AliasedSelfCrossJoin(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{RequestID: 23, QueryID: 24, QueryString: "SELECT a.* FROM t AS a JOIN t AS b"}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	pred, ok := req.Predicates[0].(subscription.CrossJoinProjected)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want CrossJoinProjected", req.Predicates[0])
+	}
+	tTable, _ := eng.Registry().TableByName("t")
+	if pred.Projected != tTable.ID || pred.Other != tTable.ID {
+		t.Fatalf("self cross join predicate = %+v, want projected/other both t", pred)
+	}
+}
+
+func TestHandleSubscribeSingle_AliasedSelfEquiJoin(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{RequestID: 30, QueryID: 31, QueryString: "SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32"}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	pred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	tTable, _ := eng.Registry().TableByName("t")
+	if pred.Left != tTable.ID || pred.Right != tTable.ID {
+		t.Fatalf("self equi-join predicate = %+v, want Left/Right both t", pred)
+	}
+	if pred.LeftAlias == pred.RightAlias {
+		t.Fatalf("self-join aliases must differ, got Left=%d Right=%d", pred.LeftAlias, pred.RightAlias)
+	}
+	if pred.Filter != nil {
+		t.Fatalf("Filter = %+v, want nil", pred.Filter)
+	}
+}
+
+func TestHandleSubscribeSingle_AliasedSelfEquiJoinWithWhere(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{RequestID: 32, QueryID: 33, QueryString: "SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1"}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	pred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	tTable, _ := eng.Registry().TableByName("t")
+	if pred.Left != tTable.ID || pred.Right != tTable.ID {
+		t.Fatalf("self equi-join predicate = %+v, want Left/Right both t", pred)
+	}
+	if pred.LeftAlias == pred.RightAlias {
+		t.Fatalf("self-join aliases must differ, got Left=%d Right=%d", pred.LeftAlias, pred.RightAlias)
+	}
+	filter, ok := pred.Filter.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Filter type = %T, want ColEq", pred.Filter)
+	}
+	if filter.Table != tTable.ID || filter.Column != 0 {
+		t.Fatalf("Filter target = %+v, want table=t column=id", filter)
+	}
+	if filter.Alias != pred.LeftAlias {
+		t.Fatalf("Filter.Alias = %d, want %d (a-side = LeftAlias)", filter.Alias, pred.LeftAlias)
+	}
+	if !filter.Value.Equal(types.NewUint32(1)) {
+		t.Fatalf("Filter.Value = %v, want uint32(1)", filter.Value)
+	}
+}
+
+func TestHandleSubscribeSingle_UnaliasedSelfCrossJoinRejected(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{RequestID: 22, QueryID: 19, QueryString: "SELECT t.* FROM t JOIN t"}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.QueryID != 19 {
+		t.Fatalf("SubscriptionError.QueryID = %d, want 19", se.QueryID)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatal("executor should not be called for unaliased self cross join")
 	}
 }
 

@@ -52,6 +52,14 @@ func validate(pred Predicate, s SchemaLookup) error {
 			return err
 		}
 		return validate(p.Right, s)
+	case Or:
+		if p.Left == nil || p.Right == nil {
+			return fmt.Errorf("%w: Or with nil child", ErrInvalidPredicate)
+		}
+		if err := validate(p.Left, s); err != nil {
+			return err
+		}
+		return validate(p.Right, s)
 	case AllRows:
 		if !s.TableExists(p.Table) {
 			return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
@@ -59,6 +67,8 @@ func validate(pred Predicate, s SchemaLookup) error {
 		return nil
 	case Join:
 		return validateJoin(p, s)
+	case CrossJoinProjected:
+		return validateCrossJoinProjected(p, s)
 	default:
 		return fmt.Errorf("%w: unsupported predicate %T", ErrInvalidPredicate, pred)
 	}
@@ -116,6 +126,9 @@ func validateJoin(p Join, s SchemaLookup) error {
 	if !s.TableExists(p.Right) {
 		return fmt.Errorf("%w: join right table %d", ErrTableNotFound, p.Right)
 	}
+	if p.Left == p.Right && p.LeftAlias == p.RightAlias {
+		return fmt.Errorf("%w: self-join requires distinct relation aliases (table %d)", ErrInvalidPredicate, p.Left)
+	}
 	if !s.ColumnExists(p.Left, p.LeftCol) {
 		return fmt.Errorf("%w: join left column %d.%d", ErrColumnNotFound, p.Left, p.LeftCol)
 	}
@@ -131,15 +144,73 @@ func validateJoin(p Join, s SchemaLookup) error {
 		return fmt.Errorf("%w: join %d.%d = %d.%d", ErrUnindexedJoin, p.Left, p.LeftCol, p.Right, p.RightCol)
 	}
 	if p.Filter != nil {
-		// Filter must only reference the two join tables.
 		for _, ft := range p.Filter.Tables() {
 			if ft != p.Left && ft != p.Right {
 				return fmt.Errorf("%w: join filter references table %d outside join", ErrInvalidPredicate, ft)
 			}
 		}
+		if p.Left == p.Right {
+			if err := validateSelfJoinFilterAliases(p.Filter, p.LeftAlias, p.RightAlias); err != nil {
+				return err
+			}
+		}
 		if err := validate(p.Filter, s); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateSelfJoinFilterAliases walks a self-join's filter and rejects leaves
+// whose Alias does not match one of the enclosing Join's relation-instance
+// tags. Distinct-table joins skip this check because the Table check is
+// sufficient to route leaves to their side.
+func validateSelfJoinFilterAliases(p Predicate, leftAlias, rightAlias uint8) error {
+	switch x := p.(type) {
+	case ColEq:
+		if x.Alias != leftAlias && x.Alias != rightAlias {
+			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.Alias, leftAlias, rightAlias)
+		}
+	case ColNe:
+		if x.Alias != leftAlias && x.Alias != rightAlias {
+			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.Alias, leftAlias, rightAlias)
+		}
+	case ColRange:
+		if x.Alias != leftAlias && x.Alias != rightAlias {
+			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.Alias, leftAlias, rightAlias)
+		}
+	case And:
+		if x.Left != nil {
+			if err := validateSelfJoinFilterAliases(x.Left, leftAlias, rightAlias); err != nil {
+				return err
+			}
+		}
+		if x.Right != nil {
+			if err := validateSelfJoinFilterAliases(x.Right, leftAlias, rightAlias); err != nil {
+				return err
+			}
+		}
+	case Or:
+		if x.Left != nil {
+			if err := validateSelfJoinFilterAliases(x.Left, leftAlias, rightAlias); err != nil {
+				return err
+			}
+		}
+		if x.Right != nil {
+			if err := validateSelfJoinFilterAliases(x.Right, leftAlias, rightAlias); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateCrossJoinProjected(p CrossJoinProjected, s SchemaLookup) error {
+	if !s.TableExists(p.Projected) {
+		return fmt.Errorf("%w: projected table %d", ErrTableNotFound, p.Projected)
+	}
+	if !s.TableExists(p.Other) {
+		return fmt.Errorf("%w: other table %d", ErrTableNotFound, p.Other)
 	}
 	return nil
 }

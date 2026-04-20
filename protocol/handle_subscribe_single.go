@@ -20,7 +20,7 @@ func handleSubscribeSingle(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
-	q, err := parseQueryString(msg.QueryString, sl)
+	compiled, err := compileSQLQueryString(msg.QueryString, sl)
 	if err != nil {
 		sendError(conn, SubscriptionError{
 			RequestID: msg.RequestID,
@@ -29,15 +29,7 @@ func handleSubscribeSingle(
 		})
 		return
 	}
-	pred, err := compileQuery(q, sl)
-	if err != nil {
-		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   msg.QueryID,
-			Error:     err.Error(),
-		})
-		return
-	}
+	pred := compiled.Predicate
 
 	sender := connOnlySender{conn: conn}
 	reply := func(resp SubscriptionSetCommandResponse) {

@@ -166,6 +166,13 @@ func (m *Manager) collectActiveColumns() map[TableID][]ColID {
 			if x.Right != nil {
 				walk(x.Right)
 			}
+		case Or:
+			if x.Left != nil {
+				walk(x.Left)
+			}
+			if x.Right != nil {
+				walk(x.Right)
+			}
 		case Join:
 			ensure(x.Left, x.LeftCol)
 			ensure(x.Right, x.RightCol)
@@ -333,6 +340,17 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			Inserts:   ins,
 			Deletes:   del,
 		}}
+	case CrossJoinProjected:
+		ins, del := evalCrossJoinProjectedDelta(dv, p)
+		if len(ins) == 0 && len(del) == 0 {
+			return nil
+		}
+		return []SubscriptionUpdate{{
+			TableID:   p.Projected,
+			TableName: m.schema.TableName(p.Projected),
+			Inserts:   ins,
+			Deletes:   del,
+		}}
 	default:
 		var updates []SubscriptionUpdate
 		for _, t := range qs.predicate.Tables() {
@@ -349,4 +367,74 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 		}
 		return updates
 	}
+}
+
+func evalCrossJoinProjectedDelta(dv *DeltaView, p CrossJoinProjected) (inserts, deletes []types.ProductValue) {
+	view := dv.CommittedView()
+	afterOtherCount := 0
+	if view != nil {
+		afterOtherCount = view.RowCount(p.Other)
+	}
+	beforeOtherCount := afterOtherCount - len(dv.InsertedRows(p.Other)) + len(dv.DeletedRows(p.Other))
+	beforeOtherNonEmpty := beforeOtherCount > 0
+	afterOtherNonEmpty := afterOtherCount > 0
+	switch {
+	case !beforeOtherNonEmpty && !afterOtherNonEmpty:
+		return nil, nil
+	case !beforeOtherNonEmpty && afterOtherNonEmpty:
+		if view == nil {
+			return nil, nil
+		}
+		for _, row := range view.TableScan(p.Projected) {
+			inserts = append(inserts, row)
+		}
+		return inserts, nil
+	case beforeOtherNonEmpty && !afterOtherNonEmpty:
+		return nil, projectedRowsBefore(dv, p.Projected)
+	default:
+		return dv.InsertedRows(p.Projected), dv.DeletedRows(p.Projected)
+	}
+}
+
+func projectedRowsBefore(dv *DeltaView, table TableID) []types.ProductValue {
+	view := dv.CommittedView()
+	var current []types.ProductValue
+	if view != nil {
+		for _, row := range view.TableScan(table) {
+			current = append(current, row)
+		}
+	}
+	inserted := dv.InsertedRows(table)
+	remaining := make([]types.ProductValue, 0, len(current))
+	used := make([]bool, len(inserted))
+	for _, row := range current {
+		matched := false
+		for i, ins := range inserted {
+			if used[i] {
+				continue
+			}
+			if productValuesEqual(row, ins) {
+				used[i] = true
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			remaining = append(remaining, row)
+		}
+	}
+	remaining = append(remaining, dv.DeletedRows(table)...)
+	return remaining
+}
+
+func productValuesEqual(a, b types.ProductValue) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !a[i].Equal(b[i]) {
+			return false
+		}
+	}
+	return true
 }

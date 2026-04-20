@@ -89,6 +89,20 @@ func TestAndTablesNestedDedup(t *testing.T) {
 	}
 }
 
+func TestOrTablesNestedDedup(t *testing.T) {
+	inner := Or{
+		Left:  ColEq{Table: 1, Column: 0, Value: types.NewInt32(1)},
+		Right: ColEq{Table: 2, Column: 0, Value: types.NewInt32(2)},
+	}
+	outer := Or{
+		Left:  inner,
+		Right: ColEq{Table: 1, Column: 1, Value: types.NewInt32(3)},
+	}
+	if got := outer.Tables(); !reflect.DeepEqual(got, []TableID{1, 2}) {
+		t.Fatalf("Or nested = %v, want [1 2]", got)
+	}
+}
+
 func TestBoundUnboundedZeroValueIgnored(t *testing.T) {
 	b := Bound{Unbounded: true}
 	if !b.Unbounded {
@@ -102,6 +116,7 @@ func TestPredicateSealed(t *testing.T) {
 	var _ Predicate = ColNe{}
 	var _ Predicate = ColRange{}
 	var _ Predicate = And{}
+	var _ Predicate = Or{}
 	var _ Predicate = AllRows{}
 	var _ Predicate = Join{}
 }

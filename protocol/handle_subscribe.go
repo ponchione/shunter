@@ -2,12 +2,23 @@ package protocol
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
+
+type compiledSQLQuery struct {
+	TableName string
+	Predicate subscription.Predicate
+}
+
+type relationSchema struct {
+	id schema.TableID
+	ts *schema.TableSchema
+}
 
 // SchemaLookup resolves table names to their schema-level identifiers
 // and column metadata. The host wires the concrete implementation;
@@ -27,6 +38,98 @@ func compileQuery(q Query, sl SchemaLookup) (subscription.Predicate, error) {
 		return nil, fmt.Errorf("unknown table %q", q.TableName)
 	}
 	return NormalizePredicates(tableID, ts, q.Predicates)
+}
+
+func compileSQLQueryString(qs string, sl SchemaLookup) (compiledSQLQuery, error) {
+	stmt, err := sql.Parse(qs)
+	if err != nil {
+		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
+	}
+	if stmt.Join != nil {
+		leftID, leftTS, ok := sl.TableByName(stmt.Join.LeftTable)
+		if !ok {
+			return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.Join.LeftTable)
+		}
+		rightID, rightTS, ok := sl.TableByName(stmt.Join.RightTable)
+		if !ok {
+			return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.Join.RightTable)
+		}
+		if !stmt.Join.HasOn {
+			if stmt.Predicate != nil {
+				return compiledSQLQuery{}, fmt.Errorf("cross join WHERE not supported")
+			}
+			projectedID, _, ok := sl.TableByName(stmt.ProjectedTable)
+			if !ok {
+				return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.ProjectedTable)
+			}
+			otherID := leftID
+			if projectedID == leftID {
+				otherID = rightID
+			}
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.CrossJoinProjected{Projected: projectedID, Other: otherID}}, nil
+		}
+		leftCol, ok := leftTS.Column(stmt.Join.LeftOn.Column)
+		if !ok {
+			return compiledSQLQuery{}, fmt.Errorf("unknown column %q on table %q", stmt.Join.LeftOn.Column, leftTS.Name)
+		}
+		rightCol, ok := rightTS.Column(stmt.Join.RightOn.Column)
+		if !ok {
+			return compiledSQLQuery{}, fmt.Errorf("unknown column %q on table %q", stmt.Join.RightOn.Column, rightTS.Name)
+		}
+		relations := map[string]relationSchema{
+			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
+			stmt.Join.RightTable: {id: rightID, ts: rightTS},
+		}
+		// Self-join filter leaves need their Alias field stamped so MatchRowSide
+		// can restrict each leaf to the side the user named. Distinct-table
+		// joins leave the tag at zero: the Table check alone is sufficient.
+		aliasTag := func(string) uint8 { return 0 }
+		if leftID == rightID {
+			rightAliasUpper := strings.ToUpper(stmt.Join.RightAlias)
+			aliasTag = func(a string) uint8 {
+				if strings.EqualFold(a, "") {
+					return 0
+				}
+				if strings.ToUpper(a) == rightAliasUpper {
+					return 1
+				}
+				return 0
+			}
+		}
+		var filter subscription.Predicate
+		if stmt.Predicate != nil {
+			var err error
+			filter, err = compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTag)
+			if err != nil {
+				return compiledSQLQuery{}, err
+			}
+		}
+		join := subscription.Join{
+			Left: leftID, Right: rightID,
+			LeftCol: types.ColID(leftCol.Index), RightCol: types.ColID(rightCol.Index),
+			Filter: filter,
+		}
+		if leftID == rightID {
+			// Self-join: tag the two relation instances so validation and
+			// canonical hashing distinguish them. Parser already enforces
+			// distinct aliases at this point.
+			join.LeftAlias = 0
+			join.RightAlias = 1
+		}
+		return compiledSQLQuery{
+			TableName: stmt.ProjectedTable,
+			Predicate: join,
+		}, nil
+	}
+	projectedID, ts, ok := sl.TableByName(stmt.ProjectedTable)
+	if !ok {
+		return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.ProjectedTable)
+	}
+	pred, err := compileSQLPredicateForRelations(stmt.Predicate, map[string]relationSchema{stmt.ProjectedTable: {id: projectedID, ts: ts}}, func(string) uint8 { return 0 })
+	if err != nil {
+		return compiledSQLQuery{}, err
+	}
+	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred}, nil
 }
 
 // parseQueryString turns a client-supplied SQL string into the internal
@@ -58,6 +161,79 @@ func parseQueryString(qs string, sl SchemaLookup) (Query, error) {
 	return q, nil
 }
 
+func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8) (subscription.Predicate, error) {
+	switch p := pred.(type) {
+	case nil:
+		if len(relations) != 1 {
+			return nil, nil
+		}
+		for _, rel := range relations {
+			return subscription.AllRows{Table: rel.id}, nil
+		}
+		return nil, nil
+	case sql.ComparisonPredicate:
+		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag)
+	case sql.AndPredicate:
+		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag)
+		if err != nil {
+			return nil, err
+		}
+		right, err := compileSQLPredicateForRelations(p.Right, relations, aliasTag)
+		if err != nil {
+			return nil, err
+		}
+		return subscription.And{Left: left, Right: right}, nil
+	case sql.OrPredicate:
+		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag)
+		if err != nil {
+			return nil, err
+		}
+		right, err := compileSQLPredicateForRelations(p.Right, relations, aliasTag)
+		if err != nil {
+			return nil, err
+		}
+		return subscription.Or{Left: left, Right: right}, nil
+	default:
+		return nil, fmt.Errorf("unsupported SQL predicate %T", pred)
+	}
+}
+
+func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationSchema, aliasTag func(string) uint8) (subscription.Predicate, error) {
+	rel, ok := relations[f.Table]
+	if !ok {
+		return nil, fmt.Errorf("unknown table %q in SQL filter", f.Table)
+	}
+	col, ok := rel.ts.Column(f.Column)
+	if !ok {
+		return nil, fmt.Errorf("unknown column %q on table %q", f.Column, rel.ts.Name)
+	}
+	v, err := sql.Coerce(f.Literal, col.Type)
+	if err != nil {
+		return nil, fmt.Errorf("coerce column %q: %v", f.Column, err)
+	}
+	return normalizePredicate(rel.id, col.Index, aliasTag(f.Alias), f.Op, v)
+}
+
+func normalizePredicate(tableID schema.TableID, colIndex int, alias uint8, op string, value types.Value) (subscription.Predicate, error) {
+	column := types.ColID(colIndex)
+	switch op {
+	case "", "=":
+		return subscription.ColEq{Table: tableID, Column: column, Alias: alias, Value: value}, nil
+	case "!=", "<>":
+		return subscription.ColNe{Table: tableID, Column: column, Alias: alias, Value: value}, nil
+	case ">":
+		return subscription.ColRange{Table: tableID, Column: column, Alias: alias, Lower: subscription.Bound{Value: value, Inclusive: false}, Upper: subscription.Bound{Unbounded: true}}, nil
+	case ">=":
+		return subscription.ColRange{Table: tableID, Column: column, Alias: alias, Lower: subscription.Bound{Value: value, Inclusive: true}, Upper: subscription.Bound{Unbounded: true}}, nil
+	case "<":
+		return subscription.ColRange{Table: tableID, Column: column, Alias: alias, Lower: subscription.Bound{Unbounded: true}, Upper: subscription.Bound{Value: value, Inclusive: false}}, nil
+	case "<=":
+		return subscription.ColRange{Table: tableID, Column: column, Alias: alias, Lower: subscription.Bound{Unbounded: true}, Upper: subscription.Bound{Value: value, Inclusive: true}}, nil
+	default:
+		return nil, fmt.Errorf("unsupported comparison operator %q", op)
+	}
+}
+
 // NormalizePredicates converts a slice of wire-level Predicate (column
 // comparison + value) into a single subscription.Predicate tree suitable
 // for the evaluator. Empty predicates produce AllRows; a single
@@ -78,50 +254,11 @@ func NormalizePredicates(
 		if !ok {
 			return nil, fmt.Errorf("unknown column %q on table %q", p.Column, ts.Name)
 		}
-		switch p.Op {
-		case "", "=":
-			eqs = append(eqs, subscription.ColEq{
-				Table:  tableID,
-				Column: types.ColID(col.Index),
-				Value:  p.Value,
-			})
-		case "!=", "<>":
-			eqs = append(eqs, subscription.ColNe{
-				Table:  tableID,
-				Column: types.ColID(col.Index),
-				Value:  p.Value,
-			})
-		case ">":
-			eqs = append(eqs, subscription.ColRange{
-				Table:  tableID,
-				Column: types.ColID(col.Index),
-				Lower:  subscription.Bound{Value: p.Value, Inclusive: false},
-				Upper:  subscription.Bound{Unbounded: true},
-			})
-		case ">=":
-			eqs = append(eqs, subscription.ColRange{
-				Table:  tableID,
-				Column: types.ColID(col.Index),
-				Lower:  subscription.Bound{Value: p.Value, Inclusive: true},
-				Upper:  subscription.Bound{Unbounded: true},
-			})
-		case "<":
-			eqs = append(eqs, subscription.ColRange{
-				Table:  tableID,
-				Column: types.ColID(col.Index),
-				Lower:  subscription.Bound{Unbounded: true},
-				Upper:  subscription.Bound{Value: p.Value, Inclusive: false},
-			})
-		case "<=":
-			eqs = append(eqs, subscription.ColRange{
-				Table:  tableID,
-				Column: types.ColID(col.Index),
-				Lower:  subscription.Bound{Unbounded: true},
-				Upper:  subscription.Bound{Value: p.Value, Inclusive: true},
-			})
-		default:
-			return nil, fmt.Errorf("unsupported comparison operator %q", p.Op)
+		normalized, err := normalizePredicate(tableID, col.Index, 0, p.Op, p.Value)
+		if err != nil {
+			return nil, err
 		}
+		eqs = append(eqs, normalized)
 	}
 
 	if len(eqs) == 1 {

@@ -252,6 +252,112 @@ func TestEvalBatchedTier1SingleLookup(t *testing.T) {
 	}
 }
 
+func TestEvalSelfEquiJoinSubscription(t *testing.T) {
+	// T: (id, u32). Sub: SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32.
+	// Lowered to Join{Left: T, Right: T, LeftCol: 1, RightCol: 1, aliases 0/1}.
+	const selfTable TableID = 1
+	s := newFakeSchema()
+	s.addTable(selfTable, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		selfTable: {{types.NewUint64(1), types.NewUint64(5)}},
+	})
+
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{Left: selfTable, Right: selfTable, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{join},
+	}, committed)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+
+	// Insert a second row on the same table with matching u32.
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			selfTable: {
+				TableID: selfTable, TableName: "t",
+				Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(5)}},
+			},
+		},
+	}
+	committed.addRow(selfTable, 2, types.ProductValue{types.NewUint64(2), types.NewUint64(5)})
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("want 1 update, got %v", updates)
+	}
+	// Self-join IVM bag algebra for inserting r2(u32=5) into t={r1(u32=5)}:
+	// dv(+) = V' - V = {(r1,r2), (r2,r1), (r2,r2)} after ReconcileJoinDelta
+	// cancels the double-counted (r2,r2) against D3 = dT(+) join dT(+).
+	if len(updates[0].Inserts) != 3 {
+		t.Fatalf("expected 3 joined insert rows from self-join IVM, got %d", len(updates[0].Inserts))
+	}
+}
+
+func TestEvalSelfEquiJoinWithAliasedWhere(t *testing.T) {
+	// T: (id, u32). Sub: SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1.
+	// Filter is tagged with the a-side alias; only joined pairs whose a-side
+	// row has id=1 are valid. Inserting r2(id=2, u32=5) into t={r1(id=1, u32=5)}:
+	//   bag(before) filtered = {(r1,r1)}
+	//   bag(after)  filtered = {(r1,r1), (r1,r2)}  (b's id is unconstrained)
+	//   expected delta: inserts = {(r1,r2)}, deletes = {}
+	const selfTable TableID = 1
+	s := newFakeSchema()
+	s.addTable(selfTable, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		selfTable: {{types.NewUint64(1), types.NewUint64(5)}},
+	})
+
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{
+		Left: selfTable, Right: selfTable,
+		LeftCol: 1, RightCol: 1,
+		LeftAlias: 0, RightAlias: 1,
+		Filter: ColEq{Table: selfTable, Column: 0, Alias: 0, Value: types.NewUint64(1)},
+	}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{join},
+	}, committed)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			selfTable: {
+				TableID: selfTable, TableName: "t",
+				Inserts: []types.ProductValue{{types.NewUint64(2), types.NewUint64(5)}},
+			},
+		},
+	}
+	committed.addRow(selfTable, 2, types.ProductValue{types.NewUint64(2), types.NewUint64(5)})
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("want 1 update, got %v", updates)
+	}
+	if len(updates[0].Inserts) != 1 {
+		t.Fatalf("expected 1 insert (only a.id=1 pair), got %d", len(updates[0].Inserts))
+	}
+	if len(updates[0].Deletes) != 0 {
+		t.Fatalf("expected 0 deletes, got %d", len(updates[0].Deletes))
+	}
+	// Joined row format is LHS++RHS; a-side id must be 1 (filter hit).
+	if !updates[0].Inserts[0][0].Equal(types.NewUint64(1)) {
+		t.Fatalf("inserted joined row a-id = %v, want 1", updates[0].Inserts[0][0])
+	}
+}
+
 func TestEvalJoinSubscription(t *testing.T) {
 	// T1: (id, name). T2: (id, t1_id). Sub: Join on T1.id = T2.t1_id.
 	s := newFakeSchema()

@@ -24,7 +24,7 @@ func handleSubscribeMulti(
 ) {
 	preds := make([]any, 0, len(msg.QueryStrings))
 	for _, qs := range msg.QueryStrings {
-		q, err := parseQueryString(qs, sl)
+		compiled, err := compileSQLQueryString(qs, sl)
 		if err != nil {
 			sendError(conn, SubscriptionError{
 				RequestID: msg.RequestID,
@@ -33,16 +33,7 @@ func handleSubscribeMulti(
 			})
 			return
 		}
-		p, err := compileQuery(q, sl)
-		if err != nil {
-			sendError(conn, SubscriptionError{
-				RequestID: msg.RequestID,
-				QueryID:   msg.QueryID,
-				Error:     err.Error(),
-			})
-			return
-		}
-		preds = append(preds, p)
+		preds = append(preds, compiled.Predicate)
 	}
 
 	sender := connOnlySender{conn: conn}

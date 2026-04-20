@@ -129,6 +129,15 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 				}
 			}
 		}
+	case CrossJoinProjected:
+		if view.RowCount(p.Other) == 0 {
+			return nil, nil
+		}
+		for _, row := range iterateAll(view, p.Projected) {
+			if err := add(row); err != nil {
+				return nil, err
+			}
+		}
 	default:
 		tables := pred.Tables()
 		if len(tables) == 0 {
