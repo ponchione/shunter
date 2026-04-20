@@ -40,6 +40,30 @@ func compileQuery(q Query, sl SchemaLookup) (subscription.Predicate, error) {
 	return NormalizePredicates(tableID, ts, q.Predicates)
 }
 
+// joinProjectsRight decides whether the SELECT target names the right side of
+// the join. For distinct-table joins a match against the right table's alias
+// (or its base name when unaliased) is sufficient. For self-joins the table
+// names collide, so the alias alone carries the signal.
+func joinProjectsRight(stmt sql.Statement, selfJoin bool) bool {
+	if stmt.Join == nil {
+		return false
+	}
+	alias := stmt.ProjectedAlias
+	if alias == "" {
+		return false
+	}
+	if strings.EqualFold(alias, stmt.Join.LeftAlias) {
+		return false
+	}
+	if strings.EqualFold(alias, stmt.Join.RightAlias) {
+		return true
+	}
+	if selfJoin {
+		return false
+	}
+	return strings.EqualFold(alias, stmt.Join.RightTable)
+}
+
 func compileSQLQueryString(qs string, sl SchemaLookup) (compiledSQLQuery, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
@@ -116,6 +140,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup) (compiledSQLQuery, error)
 			join.LeftAlias = 0
 			join.RightAlias = 1
 		}
+		// Map the user's projection qualifier to the concrete join side.
+		// For distinct-table joins either the alias or the base table name
+		// disambiguates; for self-joins the alias is the only signal.
+		join.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
 		return compiledSQLQuery{
 			TableName: stmt.ProjectedTable,
 			Predicate: join,

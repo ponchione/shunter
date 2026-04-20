@@ -234,6 +234,9 @@ func TestParseJoinQualifiedProjectionOnAndWhere(t *testing.T) {
 	if stmt.ProjectedTable != "Orders" {
 		t.Fatalf("ProjectedTable = %q, want Orders", stmt.ProjectedTable)
 	}
+	if stmt.ProjectedAlias != "o" {
+		t.Fatalf("ProjectedAlias = %q, want o", stmt.ProjectedAlias)
+	}
 	if stmt.Join == nil {
 		t.Fatal("Join = nil, want join metadata")
 	}
@@ -271,6 +274,9 @@ func TestParseJoinQualifiedProjectionOnRightTable(t *testing.T) {
 	}
 	if stmt.ProjectedTable != "Inventory" {
 		t.Fatalf("ProjectedTable = %q, want Inventory", stmt.ProjectedTable)
+	}
+	if stmt.ProjectedAlias != "product" {
+		t.Fatalf("ProjectedAlias = %q, want product", stmt.ProjectedAlias)
 	}
 	if stmt.Join == nil {
 		t.Fatal("Join = nil, want join metadata")
@@ -413,6 +419,9 @@ func TestParseAliasedSelfEquiJoinProjection(t *testing.T) {
 	if stmt.Table != "t" || stmt.ProjectedTable != "t" {
 		t.Fatalf("Table/Projected = %q/%q, want t/t", stmt.Table, stmt.ProjectedTable)
 	}
+	if stmt.ProjectedAlias != "a" {
+		t.Fatalf("ProjectedAlias = %q, want a", stmt.ProjectedAlias)
+	}
 	if stmt.Join == nil {
 		t.Fatal("Join = nil, want join metadata")
 	}
@@ -436,10 +445,77 @@ func TestParseAliasedSelfEquiJoinProjection(t *testing.T) {
 	}
 }
 
+// TD-142 Slice 14: RHS-side self-join projection must carry the b-alias so
+// the compile path can thread ProjectRight=true.
+func TestParseAliasedSelfEquiJoinProjectsRight(t *testing.T) {
+	stmt, err := Parse("SELECT b.* FROM t AS a JOIN t AS b ON a.u32 = b.u32")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if stmt.ProjectedAlias != "b" {
+		t.Fatalf("ProjectedAlias = %q, want b", stmt.ProjectedAlias)
+	}
+}
+
 func TestParseRejectsSameAliasBothSidesOfEquiJoin(t *testing.T) {
 	_, err := Parse("SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = a.u32")
 	if err == nil {
 		t.Fatal("expected error when both ON qualifiers reference the same alias")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestParseRejectsMultiWayJoinChain pins the reference-matched rejection of
+// three-way join shapes. The reference type checker accepts this shape
+// (reference/SpacetimeDB/crates/expr/src/check.rs tests at line 459) but the
+// reference subscription runtime rejects it at
+// reference/SpacetimeDB/crates/subscription/src/lib.rs:251 with
+// "Invalid number of tables in subscription: 3". Shunter rejects the chain
+// shape at the parser boundary. WHERE-based column-vs-column forms are a
+// separate widening; the chain itself is the rejection surface.
+func TestParseRejectsMultiWayJoinChain(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"cross_chain", "SELECT t.* FROM t JOIN s JOIN s AS r"},
+		{"on_chain", "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"},
+		{"inner_keyword", "SELECT t.* FROM t INNER JOIN s INNER JOIN s AS r"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Parse(c.in)
+			if err == nil {
+				t.Fatalf("Parse(%q) = nil error, want multi-way rejection", c.in)
+			}
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("Parse(%q) err = %v, want ErrUnsupportedSQL", c.in, err)
+			}
+			if !strings.Contains(err.Error(), "multi-way join") {
+				t.Fatalf("Parse(%q) err = %q, want mention of multi-way join", c.in, err.Error())
+			}
+		})
+	}
+}
+
+// TestParseRejectsMultiWayJoinOnForwardReference pins the reference-rejected
+// shape `SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r` where the
+// second JOIN's alias `r` is referenced by the first JOIN's ON clause before
+// it is brought into scope. Reference rejects this at type-check
+// (reference/SpacetimeDB/crates/expr/src/check.rs line 527, test
+// "Alias r is not in scope when it is referenced"). Shunter's parser rejects
+// it via the existing left-to-right qualifier-resolution walk inside
+// parseJoinClause; this test pins that behavior so future refactors cannot
+// silently loosen it.
+func TestParseRejectsMultiWayJoinOnForwardReference(t *testing.T) {
+	_, err := Parse("SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r")
+	if err == nil {
+		t.Fatal("expected rejection for ON clause referencing not-yet-in-scope alias")
 	}
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)

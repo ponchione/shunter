@@ -58,6 +58,14 @@ func (s *fakeSchema) TableName(t TableID) string {
 	return ""
 }
 
+func (s *fakeSchema) ColumnCount(t TableID) int {
+	cols, ok := s.tables[t]
+	if !ok {
+		return 0
+	}
+	return len(cols)
+}
+
 // IndexIDForColumn synthesizes a stable IndexID per (table, col) when the
 // column is declared indexed. Matches the encoding used by tests that share
 // this schema with mockCommitted.

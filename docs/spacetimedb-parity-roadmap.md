@@ -66,10 +66,11 @@ If Shunter produces a different externally meaningful result, that is not parity
 ## Current grounded status
 
 Broad evidence from the current audit pass:
-- `rtk go test ./...` passes: `919 passed in 9 packages`
-- implementation footprint: `209` Go files, `34807` lines of Go code in the main package pass (`auth`, `bsatn`, `commitlog`, `executor`, `protocol`, `schema`, `store`, `subscription`, `types`)
+- `rtk go test ./...` passes: `Go test: 1101 passed in 10 packages`
+- `rtk go build ./...` succeeds
+- implementation footprint: `228` Go files, `42217` lines of Go code in the live tree outside `reference/`
 - the big execution-order implementation slices for commitlog recovery, protocol delivery, and subscription fanout are already present in live code
-- `TECH-DEBT.md` still carries unresolved hardening and contract issues
+- `TECH-DEBT.md` now tracks only the current open parity/hardening backlog
 - `docs/parity-phase0-ledger.md` and `docs/parity-phase1.5-outcome-model.md` record the parity decisions and pinned scenarios already closed
 
 Working verdict:
@@ -218,7 +219,7 @@ Primary code surfaces:
 
 ## Tier B — Must close for trustworthy private use, even if parity direction is already correct
 
-Open `TECH-DEBT.md` items show non-trivial correctness hazards.
+Open `TECH-DEBT.md` issues still show non-trivial correctness hazards.
 The most important current themes are:
 - protocol lifecycle races and unsafe channel-close behavior
 - snapshot / read-view lifetime hazards

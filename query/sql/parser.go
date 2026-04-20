@@ -117,12 +117,20 @@ type OrPredicate struct {
 func (OrPredicate) isPredicate() {}
 
 // Statement is the parsed output.
+//
+// ProjectedAlias preserves the qualifier token the user wrote for the
+// SELECT target (`a` in `SELECT a.*`, `Orders` in `SELECT Orders.*`,
+// or empty when the projection was bare `*`). Compile paths consult it to
+// distinguish `SELECT a.*` from `SELECT b.*` on aliased self-joins, where
+// ProjectedTable alone is insufficient because both aliases resolve to the
+// same base table.
 type Statement struct {
-	Table          string
-	ProjectedTable string
-	Join           *JoinClause
-	Predicate      Predicate
-	Filters        []Filter
+	Table           string
+	ProjectedTable  string
+	ProjectedAlias  string
+	Join            *JoinClause
+	Predicate       Predicate
+	Filters         []Filter
 }
 
 type relationBindings struct {
@@ -321,7 +329,7 @@ func (p *parser) parseStatement() (Statement, error) {
 	if err != nil {
 		return Statement{}, err
 	}
-	stmt := Statement{Table: tableName, ProjectedTable: tableName}
+	stmt := Statement{Table: tableName, ProjectedTable: tableName, ProjectedAlias: projectionQualifier}
 	bindings := relationBindings{defaultTable: tableName, byQualifier: singleQualifierMap(tableName, leftQualifiers)}
 	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "INNER") {
 		p.advance()
@@ -344,6 +352,20 @@ func (p *parser) parseStatement() (Statement, error) {
 			return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match joined relations", projectionQualifier))
 		}
 		stmt.ProjectedTable = projectedTable
+		stmt.ProjectedAlias = projectionQualifier
+		// Parity rejection: reference subscription runtime at
+		// reference/SpacetimeDB/crates/subscription/src/lib.rs:251 bails with
+		// "Invalid number of tables in subscription: {N}" for N >= 3. Shunter
+		// rejects the chain shape at the parser boundary so the rejection is
+		// intentional and pinned, not an incidental "unexpected token" miss.
+		if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "INNER") {
+			if p.pos+1 < len(p.toks) && p.toks[p.pos+1].kind == tokIdent && strings.EqualFold(p.toks[p.pos+1].text, "JOIN") {
+				return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
+			}
+		}
+		if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "JOIN") {
+			return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
+		}
 	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
 		return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match table %q", projectionQualifier, tableName))
 	}

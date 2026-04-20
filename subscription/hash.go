@@ -137,6 +137,11 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 		e.writeU32(uint32(p.RightCol))
 		e.writeByte(p.LeftAlias)
 		e.writeByte(p.RightAlias)
+		if p.ProjectRight {
+			e.writeByte(1)
+		} else {
+			e.writeByte(0)
+		}
 		if p.Filter == nil {
 			e.writeByte(0)
 		} else {

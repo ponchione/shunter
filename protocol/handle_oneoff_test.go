@@ -670,6 +670,45 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereBside(t *testing.T) {
 	}
 }
 
+// TD-142 Slice 14: one-off self-join RHS projection (`SELECT b.*`) must
+// return only b-side rows. For a self-join both sides share the same
+// physical table, so Join.ProjectRight is the only signal distinguishing
+// b.* from a.* inside the one-off evaluator.
+func TestHandleOneOffQuery_AliasedSelfEquiJoinProjectsRight(t *testing.T) {
+	conn := testConnDirect(nil)
+	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}, {Index: 1, Name: "u32", Type: schema.KindUint32}}}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	tReg, _ := eng.Registry().TableByName("t")
+	tTS.ID = tReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	// Only id=2 matches a-side filter, but projection is b.* so every b with
+	// matching u32 comes through. Three rows share u32=5 so b may be any of
+	// them whenever a matches; the projected rows are distinct b-rows.
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		tReg.ID: {
+			{types.NewUint32(1), types.NewUint32(5)},
+			{types.NewUint32(2), types.NewUint32(5)},
+			{types.NewUint32(3), types.NewUint32(5)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	msg := &OneOffQueryMsg{MessageID: []byte{0x2a}, QueryString: "SELECT b.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 2"}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, tTS)
+	if len(pvs) != 3 {
+		t.Fatalf("got %d rows, want 3 (every b partners with the single a.id=2)", len(pvs))
+	}
+}
+
 func TestHandleOneOffQuery_AliasedSelfCrossJoinProjection(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}
@@ -721,6 +760,52 @@ func TestHandleOneOffQuery_AliasedSelfCrossJoinEmptyTable(t *testing.T) {
 	pvs := decodeRows(t, result.Rows, tTS)
 	if len(pvs) != 0 {
 		t.Fatalf("got %d rows, want 0 (empty table self-join should project nothing)", len(pvs))
+	}
+}
+
+// TestHandleOneOffQuery_MultiWayJoinRejected pins the reference-matched
+// rejection of three-way join shapes at the one-off admission boundary.
+// Client receives OneOffQueryResult with Status=1 and a non-empty error.
+// Reference subscription runtime bails with
+// "Invalid number of tables in subscription: {N}" at
+// reference/SpacetimeDB/crates/subscription/src/lib.rs:251.
+func TestHandleOneOffQuery_MultiWayJoinRejected(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	cases := []struct {
+		name        string
+		queryString string
+	}{
+		{"cross_chain", "SELECT t.* FROM t JOIN s JOIN s AS r"},
+		{"on_chain", "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			sl := registrySchemaLookup{reg: eng.Registry()}
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+			stateAccess := &mockStateAccess{snap: snap}
+			msg := &OneOffQueryMsg{MessageID: []byte{0x60}, QueryString: c.queryString}
+			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+			result := drainOneOff(t, conn)
+			if result.Status != 1 {
+				t.Fatalf("Status = %d, want 1 (error)", result.Status)
+			}
+			if result.Error == "" {
+				t.Fatal("expected non-empty error message")
+			}
+		})
 	}
 }
 

@@ -5,7 +5,7 @@ This file is the blunt answer to: what is actually here, how complete is it, and
 ## Short version
 
 Shunter is no longer a docs-only clean-room exercise.
-It is a substantial Go implementation with working subsystem code, passing tests, and an increasingly large hardening/parity ledger.
+It is a substantial Go implementation with working subsystem code, passing tests, and a focused hardening/parity ledger.
 
 It is best described as:
 - implementation-present
@@ -17,11 +17,13 @@ It is best described as:
 
 As of the current audit pass:
 - Broad verification: `rtk go test ./...`
-- Result: `Go test: 1082 passed in 10 packages`
-- Code inventory (main package pass over `auth`, `bsatn`, `commitlog`, `executor`, `protocol`, `schema`, `store`, `subscription`, `types`): `209` Go files, `34807` lines of Go code
+- Result: `Go test: 1101 passed in 10 packages`
+- Broad build verification: `rtk go build ./...`
+- Result: `Go build: Success`
+- Code inventory (live repo-wide count, excluding `reference/`): `228` Go files, `42217` lines of Go code
 - the execution-order implementation slices that mattered most for commitlog, protocol, and fanout integration are already landed in code
-- `TECH-DEBT.md` still carries a large unresolved bullet backlog
-- `docs/spacetimedb-parity-roadmap.md` and `docs/parity-phase0-ledger.md` now carry the live parity view and next-slice framing
+- `TECH-DEBT.md` now tracks only the current open backlog instead of resolved audit history
+- `docs/spacetimedb-parity-roadmap.md` and `docs/parity-phase0-ledger.md` continue to carry the live parity view and next-slice framing
 
 ## Completion by lens
 
@@ -49,6 +51,7 @@ There is live code in:
 - `executor/`
 - `subscription/`
 - `protocol/`
+- `query/sql/`
 
 The broad test suite passes, which is strong evidence that the repo is operationally real.
 It is not proof of spec-completeness or parity.
@@ -56,9 +59,7 @@ It is not proof of spec-completeness or parity.
 ### 3. Spec-completeness
 Status: mostly implemented, still being reconciled
 
-`TECH-DEBT.md` shows two different realities:
-- the earlier execution-order/spec-slice audit rows are largely resolved
-- a later wide audit still lists many unresolved code-quality / correctness / API-shape / concurrency issues
+`TECH-DEBT.md` now shows one reality clearly: the old resolved audit ledger has been stripped out, and the remaining file is a compact list of live open parity/hardening issues.
 
 So the repo is not sitting on obvious missing subsystem epics anymore.
 Instead, it is in the harder phase: reconciling live behavior, edge cases, and public contracts.
@@ -113,7 +114,7 @@ Current important differences include:
 - `SubscribeMulti` / `SubscribeSingle` variant split landed; one-QueryID-per-query-set grouping semantics now match reference. Remaining Phase 2 Slice 2 divergences: `TotalHostExecutionDurationMicros` on applied envelopes, `SubscriptionError.TableID` / optional-field shape, SQL-string form for `SubscribeMulti.Queries` (paired with Phase 2 Slice 1 deferral).
 - `CallReducer.flags` now carries `FullUpdate=0` / `NoSuccessNotify=1`; remaining divergence is the still-open SQL/query-surface breadth around other message families
 - one-off query wire shape now matches the reference Phase 2 target (`query_string` + opaque `MessageID []byte`)
-- SQL-string handling now accepts ten narrow parity-backed slices: same-table qualified WHERE columns, case-insensitive resolution of unquoted table/column identifiers against the registered schema (for example `SELECT * FROM USERS WHERE ID = 1 AND users.DISPLAY_NAME = 'alice'`), single-table alias / qualified-star forms such as `SELECT item.* FROM users AS item WHERE item.name = 'alice'`, ordered single-column comparisons using `<`, `<=`, `>`, and `>=`, non-equality comparisons using `<>` / `!=`, narrow same-table `OR` predicates such as `SELECT * FROM metrics WHERE score = 9 OR score = 11` routed coherently through parser, subscribe, and one-off query handling via a real predicate tree, and four narrow join-backed slices for two-table joins: left projection with a qualified joined-table filter such as `SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10`, right-side projection such as `SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id` including a pinned left-side-qualified filtered variant `WHERE o.id = 1`, cross-join projection such as `SELECT o.* FROM Orders o JOIN Inventory product` (no `ON`, no extra `WHERE`), and aliased self cross-join projection such as `SELECT a.* FROM t AS a JOIN t AS b` (no `ON`, no extra `WHERE`) lowered into the existing `subscription.CrossJoinProjected` with `Projected == Other`. Alias scope is now also reference-aligned: once a relation is aliased, the base table name is out of scope for qualified projection / `WHERE` references, and unaliased self cross-joins are rejected unless the self-join is explicitly aliased. Parser-level alias identity was extended (Slice 10.5, 2026-04-20) so aliased self equi-join SQL such as `SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32` parses into an alias-aware `JoinClause`; Slice 11 (2026-04-20) lands the runtime counterpart — `subscription.Join` gained `LeftAlias`/`RightAlias` tags, `Tables()` dedupes when `Left == Right`, and the compile path accepts filterless aliased self equi-join end-to-end (initial query + 4-fragment IVM delta evaluation work correctly thanks to bag-semantic reconciliation). Slice 12 (2026-04-20) closes alias-aware WHERE on self-join: `subscription.ColEq`/`ColNe`/`ColRange` gained an `Alias uint8` tag, `MatchRowSide` routes each leaf to the side the user named (`join.LeftAlias` / `join.RightAlias`), and shapes such as `SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1` (and the symmetric `WHERE b.id = 1`) now work through parser, subscribe admission, one-off execution, and post-commit IVM delta evaluation.
+- SQL-string handling now accepts ten narrow parity-backed slices: same-table qualified WHERE columns, case-insensitive resolution of unquoted table/column identifiers against the registered schema (for example `SELECT * FROM USERS WHERE ID = 1 AND users.DISPLAY_NAME = 'alice'`), single-table alias / qualified-star forms such as `SELECT item.* FROM users AS item WHERE item.name = 'alice'`, ordered single-column comparisons using `<`, `<=`, `>`, and `>=`, non-equality comparisons using `<>` / `!=`, narrow same-table `OR` predicates such as `SELECT * FROM metrics WHERE score = 9 OR score = 11` routed coherently through parser, subscribe, and one-off query handling via a real predicate tree, and four narrow join-backed slices for two-table joins: left projection with a qualified joined-table filter such as `SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10`, right-side projection such as `SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id` including a pinned left-side-qualified filtered variant `WHERE o.id = 1`, cross-join projection such as `SELECT o.* FROM Orders o JOIN Inventory product` (no `ON`, no extra `WHERE`), and aliased self cross-join projection such as `SELECT a.* FROM t AS a JOIN t AS b` (no `ON`, no extra `WHERE`) lowered into the existing `subscription.CrossJoinProjected` with `Projected == Other`. Alias scope is now also reference-aligned: once a relation is aliased, the base table name is out of scope for qualified projection / `WHERE` references, and unaliased self cross-joins are rejected unless the self-join is explicitly aliased. Parser-level alias identity was extended (Slice 10.5, 2026-04-20) so aliased self equi-join SQL such as `SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32` parses into an alias-aware `JoinClause`; Slice 11 (2026-04-20) lands the runtime counterpart — `subscription.Join` gained `LeftAlias`/`RightAlias` tags, `Tables()` dedupes when `Left == Right`, and the compile path accepts filterless aliased self equi-join end-to-end (initial query + 4-fragment IVM delta evaluation work correctly thanks to bag-semantic reconciliation). Slice 12 (2026-04-20) closes alias-aware WHERE on self-join: `subscription.ColEq`/`ColNe`/`ColRange` gained an `Alias uint8` tag, `MatchRowSide` routes each leaf to the side the user named (`join.LeftAlias` / `join.RightAlias`), and shapes such as `SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1` (and the symmetric `WHERE b.id = 1`) now work through parser, subscribe admission, one-off execution, and post-commit IVM delta evaluation. Slice 13 (2026-04-20) closes the multi-join surface as a narrow parity-matched rejection: the reference subscription runtime at `reference/SpacetimeDB/crates/subscription/src/lib.rs:251` itself bails with `"Invalid number of tables in subscription: {N}"` for N≥3, so the externally observable reference behavior on three-way subscribes is also an admission-time error. Shunter's parser now explicitly rejects multi-way join chains with `multi-way join not supported: subscriptions are limited to at most two relations`, pinned at the parser (`TestParseRejectsMultiWayJoinChain`, `TestParseRejectsMultiWayJoinOnForwardReference`) and at the subscribe / one-off admission boundaries (`TestHandleSubscribeSingle_MultiWayJoinRejected`, `TestHandleOneOffQuery_MultiWayJoinRejected`) with both cross-chain and ON-chain sub-cases. No `subscription.MultiJoin` predicate was introduced; `subscription.Join` and the 4-fragment IVM remain binary, matching the reference runtime. Slice 14 (2026-04-20) closes the projection gap on join subscriptions: `subscription.Join` gained `ProjectRight bool` (zero-value projects LHS, true projects RHS), `subscription.SchemaLookup` grew a `ColumnCount(TableID) int` accessor, and `evalQuery` / `initialQuery` / `evaluateOneOffJoin` now slice the IVM's LHS++RHS concat fragments onto the SELECT side so subscribers receive rows shaped like one concrete table (matching reference `SubscriptionPlan::subscribed_table_id` at `reference/SpacetimeDB/crates/subscription/src/lib.rs:367`). Canonical hashing was extended to include `ProjectRight` so `SELECT lhs.*` and `SELECT rhs.*` hash distinctly. Parser-level `Statement.ProjectedAlias` preserves the user-typed qualifier (`a` vs `b` on self-joins) and the compile path at `protocol/handle_subscribe.go::joinProjectsRight` maps it to `ProjectRight` for both distinct-table and aliased self-joins. Pinned by `subscription/hash_test.go::TestQueryHashJoinProjectionDiffers`, `subscription/manager_test.go::TestRegisterJoinBootstrapFallsBackToLeftIndex` (re-asserted projected-width + TableID), `subscription/manager_test.go::TestRegisterJoinBootstrapProjectsRight`, `subscription/eval_test.go::TestEvalJoinSubscription` (re-asserted LHS projection width + TableID), `subscription/eval_test.go::TestEvalJoinSubscriptionProjectsRight`, `query/sql/parser_test.go::TestParseAliasedSelfEquiJoinProjectsRight`, `protocol/handle_subscribe_test.go::TestHandleSubscribeSingle_AliasedSelfEquiJoinProjectsRight`, and `protocol/handle_oneoff_test.go::TestHandleOneOffQuery_AliasedSelfEquiJoinProjectsRight`.
 
 ### Schema system
 - runtime reflection model instead of compile-time macro model
@@ -124,12 +125,7 @@ Bottom line: this is architecturally adjacent to SpacetimeDB, but not yet a clos
 
 ## Open hardening / correctness picture
 
-The unresolved bullet ledger in `TECH-DEBT.md` is the clearest signal that the project is not done.
-Current unresolved inventory from that file:
-- `18` open `BUG` items
-- `27` open `SMELL` items
-- `15` open `DUP` items
-- `3` open `FOLLOWUP` items
+`TECH-DEBT.md` is still one of the clearest signals that the project is not done, but it now tracks only the live open backlog.
 
 The hot spots are concentrated in:
 - `executor/`

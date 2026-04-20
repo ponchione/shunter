@@ -85,6 +85,18 @@ func TestQueryHashJoinFilterDiffers(t *testing.T) {
 	}
 }
 
+// TD-142 Slice 14: ProjectRight is part of the canonical identity because
+// `SELECT lhs.*` and `SELECT rhs.*` produce rows of different shape and are
+// distinct queries. Same Join sides must hash differently for the two
+// projections so the registry does not collapse them.
+func TestQueryHashJoinProjectionDiffers(t *testing.T) {
+	left := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, ProjectRight: false}
+	right := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, ProjectRight: true}
+	if ComputeQueryHash(left, nil) == ComputeQueryHash(right, nil) {
+		t.Fatal("Join projection side must change canonical hash")
+	}
+}
+
 func TestQueryHashStringIs64Hex(t *testing.T) {
 	p := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	h := ComputeQueryHash(p, nil)

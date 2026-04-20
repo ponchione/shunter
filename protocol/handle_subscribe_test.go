@@ -715,6 +715,11 @@ func TestHandleSubscribeSingle_JoinProjectionOnRightTable(t *testing.T) {
 	if joinPred.Filter != nil {
 		t.Fatalf("Join.Filter = %T, want nil", joinPred.Filter)
 	}
+	// TD-142 Slice 14: SELECT on the RHS alias must thread ProjectRight=true
+	// so the runtime emits RHS-shape rows.
+	if !joinPred.ProjectRight {
+		t.Fatal("Join.ProjectRight = false, want true for SELECT product.*")
+	}
 }
 
 func TestHandleSubscribeSingle_JoinProjectionOnRightTableWithLeftFilter(t *testing.T) {
@@ -971,6 +976,46 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoin(t *testing.T) {
 	if pred.Filter != nil {
 		t.Fatalf("Filter = %+v, want nil", pred.Filter)
 	}
+	if pred.ProjectRight {
+		t.Fatal("SELECT a.* must compile to ProjectRight=false (LHS side)")
+	}
+}
+
+// TD-142 Slice 14: self-join `SELECT b.*` threads ProjectRight=true so the
+// runtime emits rows shaped like the b-side instance. The parser-side
+// ProjectedAlias="b" drives this decision; the physical table is the same on
+// both sides so the alias is the only signal.
+func TestHandleSubscribeSingle_AliasedSelfEquiJoinProjectsRight(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{RequestID: 60, QueryID: 61, QueryString: "SELECT b.* FROM t AS a JOIN t AS b ON a.u32 = b.u32"}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	pred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	if !pred.ProjectRight {
+		t.Fatal("SELECT b.* must compile to ProjectRight=true on self-join")
+	}
 }
 
 func TestHandleSubscribeSingle_AliasedSelfEquiJoinWithWhere(t *testing.T) {
@@ -1051,6 +1096,55 @@ func TestHandleSubscribeSingle_UnaliasedSelfCrossJoinRejected(t *testing.T) {
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Fatal("executor should not be called for unaliased self cross join")
+	}
+}
+
+// TestHandleSubscribeSingle_MultiWayJoinRejected pins the reference-matched
+// rejection of three-way join shapes at the subscribe admission boundary.
+// Externally the client receives a SubscriptionError; internally the parser
+// short-circuits before admission. Reference subscription runtime bails with
+// "Invalid number of tables in subscription: {N}" at
+// reference/SpacetimeDB/crates/subscription/src/lib.rs:251.
+func TestHandleSubscribeSingle_MultiWayJoinRejected(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	cases := []struct {
+		name        string
+		queryString string
+	}{
+		{"cross_chain", "SELECT t.* FROM t JOIN s JOIN s AS r"},
+		{"on_chain", "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := registrySchemaLookup{reg: eng.Registry()}
+			msg := &SubscribeSingleMsg{RequestID: 70, QueryID: 71, QueryString: c.queryString}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+			tag, decoded := drainServerMsgEventually(t, conn)
+			if tag != TagSubscriptionError {
+				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+			}
+			se := decoded.(SubscriptionError)
+			if se.QueryID != 71 {
+				t.Fatalf("SubscriptionError.QueryID = %d, want 71", se.QueryID)
+			}
+			if req := executor.getRegisterSetReq(); req != nil {
+				t.Fatal("executor should not be called for multi-way join")
+			}
+		})
 	}
 }
 

@@ -326,17 +326,13 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 		if len(ins) == 0 && len(del) == 0 {
 			return nil
 		}
-		name := m.schema.TableName(p.Left)
-		if rname := m.schema.TableName(p.Right); rname != "" {
-			if name == "" {
-				name = rname
-			} else {
-				name = name + "+" + rname
-			}
-		}
+		lhsWidth := m.schema.ColumnCount(p.Left)
+		ins = projectJoinedRows(ins, lhsWidth, p.ProjectRight)
+		del = projectJoinedRows(del, lhsWidth, p.ProjectRight)
+		projected := p.ProjectedTable()
 		return []SubscriptionUpdate{{
-			TableID:   p.Left,
-			TableName: name,
+			TableID:   projected,
+			TableName: m.schema.TableName(projected),
 			Inserts:   ins,
 			Deletes:   del,
 		}}
@@ -367,6 +363,30 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 		}
 		return updates
 	}
+}
+
+// projectJoinedRows slices each LHS++RHS-concatenated joined row down to the
+// projected side. LHS projection returns row[:lhsWidth]; RHS projection
+// returns row[lhsWidth:]. Short rows (malformed width) are skipped rather
+// than panicking, mirroring the defensive width checks elsewhere in the
+// evaluator. Reference: SubscriptionPlan::subscribed_table_id at
+// reference/SpacetimeDB/crates/subscription/src/lib.rs:367.
+func projectJoinedRows(rows []types.ProductValue, lhsWidth int, projectRight bool) []types.ProductValue {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([]types.ProductValue, 0, len(rows))
+	for _, row := range rows {
+		if lhsWidth <= 0 || len(row) < lhsWidth {
+			continue
+		}
+		if projectRight {
+			out = append(out, row[lhsWidth:])
+		} else {
+			out = append(out, row[:lhsWidth])
+		}
+	}
+	return out
 }
 
 func evalCrossJoinProjectedDelta(dv *DeltaView, p CrossJoinProjected) (inserts, deletes []types.ProductValue) {

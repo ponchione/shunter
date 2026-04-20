@@ -111,20 +111,27 @@ func matchesAll(pv types.ProductValue, matchers []colMatcher) bool {
 }
 
 func evaluateOneOffJoin(view store.CommittedReadView, projectedTable schema.TableID, join subscription.Join) []types.ProductValue {
-	projectLeft := projectedTable == join.Left
+	// Trust Join.ProjectRight (compile-time signal) over projectedTable
+	// equality, because a self-join has Left == Right == projectedTable on
+	// both sides and only the boolean disambiguates.
+	projectLeft := !join.ProjectRight
 	var projectedJoinCol, otherJoinCol types.ColID
 	var otherTable schema.TableID
+	var scanTable schema.TableID
 	if projectLeft {
 		projectedJoinCol = join.LeftCol
 		otherJoinCol = join.RightCol
 		otherTable = join.Right
+		scanTable = join.Left
 	} else {
 		projectedJoinCol = join.RightCol
 		otherJoinCol = join.LeftCol
 		otherTable = join.Left
+		scanTable = join.Right
 	}
+	_ = projectedTable
 	var rows []types.ProductValue
-	for _, projectedRow := range view.TableScan(projectedTable) {
+	for _, projectedRow := range view.TableScan(scanTable) {
 		if int(projectedJoinCol) >= len(projectedRow) {
 			continue
 		}

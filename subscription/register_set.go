@@ -50,7 +50,8 @@ func (m *Manager) removeDroppedSub(connID types.ConnectionID, subID types.Subscr
 
 // initialQuery scans committed state and returns rows matching the
 // predicate. Single-table predicates use a filtered table scan. Join
-// predicates re-evaluate the full join against committed state.
+// predicates re-evaluate the full join against committed state and project
+// each joined pair down to the subscription's SELECT side (Join.ProjectRight).
 func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]types.ProductValue, error) {
 	if view == nil {
 		return nil, nil
@@ -74,6 +75,14 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 		if m.resolver == nil {
 			return nil, fmt.Errorf("%w: manager has no IndexResolver (join=%d.%d=%d.%d)", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
 		}
+		// Each matched (lrow, rrow) pair is projected onto one side so the
+		// caller sees rows shaped like the SELECT table, not concat LHS++RHS.
+		project := func(lrow, rrow types.ProductValue) types.ProductValue {
+			if p.ProjectRight {
+				return rrow
+			}
+			return lrow
+		}
 		if rhsIdx, ok := m.resolver.IndexIDForColumn(p.Right, p.RightCol); ok {
 			for _, lrow := range func() []types.ProductValue {
 				var ls []types.ProductValue
@@ -93,7 +102,8 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 						continue
 					}
 					if joined := tryJoinFilter(lrow, p.Left, rrow, p.Right, &p); joined != nil {
-						if err := add(joined); err != nil {
+						_ = joined
+						if err := add(project(lrow, rrow)); err != nil {
 							return nil, err
 						}
 					}
@@ -123,7 +133,8 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 					continue
 				}
 				if joined := tryJoinFilter(lrow, p.Left, rrow, p.Right, &p); joined != nil {
-					if err := add(joined); err != nil {
+					_ = joined
+					if err := add(project(lrow, rrow)); err != nil {
 						return nil, err
 					}
 				}
@@ -153,6 +164,24 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 		}
 	}
 	return out, nil
+}
+
+// emittedTableID returns the table ID whose row shape the subscription emits
+// at the wire boundary. Join and CrossJoinProjected carry an explicit
+// projected side; every other predicate emits rows from its sole declared
+// table. Zero is returned when the predicate carries no table (malformed).
+func emittedTableID(p Predicate) TableID {
+	switch x := p.(type) {
+	case Join:
+		return x.ProjectedTable()
+	case CrossJoinProjected:
+		return x.Projected
+	}
+	tables := p.Tables()
+	if len(tables) == 0 {
+		return 0
+	}
+	return tables[0]
 }
 
 // iterateAll materializes every row from the committed view's TableScan.
@@ -221,11 +250,7 @@ func (m *Manager) RegisterSet(
 		allocated = append(allocated, subID)
 		_ = qs
 		if len(rows) > 0 {
-			tables := p.Tables()
-			var tableID TableID
-			if len(tables) > 0 {
-				tableID = tables[0]
-			}
+			tableID := emittedTableID(p)
 			updates = append(updates, SubscriptionUpdate{
 				SubscriptionID: subID,
 				TableID:        tableID,
@@ -270,11 +295,7 @@ func (m *Manager) UnregisterSet(
 			rows, err := m.initialQuery(qs.predicate, view)
 			// Final-delta errors are non-fatal — the subscription still drops.
 			if err == nil && len(rows) > 0 {
-				tables := qs.predicate.Tables()
-				var tableID TableID
-				if len(tables) > 0 {
-					tableID = tables[0]
-				}
+				tableID := emittedTableID(qs.predicate)
 				deletes = append(deletes, SubscriptionUpdate{
 					SubscriptionID: sid,
 					TableID:        tableID,

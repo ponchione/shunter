@@ -6,7 +6,9 @@ Important reality check: this repo is no longer just a docs/spec exercise. It co
 
 Latest broad verification during active audit work:
 - `rtk go test ./...`
-- Result: `919 passed in 9 packages`
+- Result: `Go test: 1101 passed in 10 packages`
+- `rtk go build ./...`
+- Result: `Go build: Success`
 
 ## What this repo is
 
@@ -34,6 +36,7 @@ There is working code in these packages:
 - `executor` — reducer registry, serialized execution, lifecycle/scheduler wiring, subscription dispatch
 - `subscription` — predicate model, pruning indexes, delta evaluation, fanout, confirmed-read delivery
 - `protocol` — wire codecs, upgrade/auth path, connection lifecycle, dispatch, outbound delivery, backpressure handling
+- `query/sql` — the current narrow SQL surface used by subscribe and one-off query paths
 - `bsatn` — binary value encoding used across the system
 
 In other words: this is not vaporware anymore. There is a real subsystem implementation here.

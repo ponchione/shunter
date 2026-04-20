@@ -238,8 +238,48 @@ func TestRegisterJoinBootstrapFallsBackToLeftIndex(t *testing.T) {
 	if len(got.Update) != 1 || len(got.Update[0].Inserts) != 1 {
 		t.Fatalf("initial rows = %v, want 1 joined row", got.Update)
 	}
-	if len(got.Update[0].Inserts[0]) != 4 {
-		t.Fatalf("joined row = %v, want concatenated lhs+rhs columns", got.Update[0].Inserts[0])
+	// Join subscriptions emit rows projected onto the SELECT side. Default
+	// ProjectRight=false projects the LHS; Table(1) has 2 columns.
+	if len(got.Update[0].Inserts[0]) != 2 {
+		t.Fatalf("projected row width = %d, want 2 (LHS projection of Table(1))", len(got.Update[0].Inserts[0]))
+	}
+	if got.Update[0].TableID != 1 {
+		t.Fatalf("emitted TableID = %d, want 1 (LHS-projected)", got.Update[0].TableID)
+	}
+	if !got.Update[0].Inserts[0][0].Equal(types.NewUint64(1)) || !got.Update[0].Inserts[0][1].Equal(types.NewString("lhs")) {
+		t.Fatalf("projected row = %v, want [1, \"lhs\"]", got.Update[0].Inserts[0])
+	}
+}
+
+// RHS counterpart of the bootstrap test — proves ProjectRight threads through
+// initialQuery so `SELECT rhs.* FROM lhs JOIN rhs ...` emits RHS-shape rows.
+func TestRegisterJoinBootstrapProjectsRight(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString})
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1), types.NewString("lhs")}},
+		2: {{types.NewUint64(1), types.NewString("rhs")}},
+	})
+	mgr := NewManager(s, s)
+	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, ProjectRight: true}
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 11, Predicates: []Predicate{p},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if len(got.Update) != 1 || len(got.Update[0].Inserts) != 1 {
+		t.Fatalf("initial rows = %v, want 1 joined row", got.Update)
+	}
+	if got.Update[0].TableID != 2 {
+		t.Fatalf("emitted TableID = %d, want 2 (RHS-projected)", got.Update[0].TableID)
+	}
+	if len(got.Update[0].Inserts[0]) != 2 {
+		t.Fatalf("projected row width = %d, want 2 (RHS projection of Table(2))", len(got.Update[0].Inserts[0]))
+	}
+	if !got.Update[0].Inserts[0][1].Equal(types.NewString("rhs")) {
+		t.Fatalf("projected row = %v, want RHS-shaped", got.Update[0].Inserts[0])
 	}
 }
 

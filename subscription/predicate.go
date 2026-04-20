@@ -163,14 +163,22 @@ func (p AllRows) Tables() []TableID  { return []TableID{p.Table} }
 // joins they are left at their zero default — Left != Right is sufficient to
 // disambiguate the sides. Validation rejects Left == Right with equal
 // aliases, since that would describe a degenerate single-relation join.
+//
+// ProjectRight selects which side of the joined pair survives at row
+// emission time. False (the zero value) projects the Left side (the classical
+// `SELECT lhs.*` shape); true projects the Right side (`SELECT rhs.*`).
+// Reference: SubscriptionPlan::subscribed_table_id at
+// reference/SpacetimeDB/crates/subscription/src/lib.rs:367 — each plan
+// returns rows shaped like one concrete table.
 type Join struct {
-	Left       TableID
-	Right      TableID
-	LeftCol    ColID
-	RightCol   ColID
-	LeftAlias  uint8
-	RightAlias uint8
-	Filter     Predicate // optional additional filter (may be nil)
+	Left         TableID
+	Right        TableID
+	LeftCol      ColID
+	RightCol     ColID
+	LeftAlias    uint8
+	RightAlias   uint8
+	ProjectRight bool
+	Filter       Predicate // optional additional filter (may be nil)
 }
 
 func (Join) sealed() {}
@@ -179,6 +187,14 @@ func (p Join) Tables() []TableID {
 		return []TableID{p.Left}
 	}
 	return []TableID{p.Left, p.Right}
+}
+
+// ProjectedTable returns the table ID whose row shape the subscription emits.
+func (p Join) ProjectedTable() TableID {
+	if p.ProjectRight {
+		return p.Right
+	}
+	return p.Left
 }
 
 // CrossJoinProjected matches all rows from Projected when Other is non-empty.

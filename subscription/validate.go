@@ -14,6 +14,10 @@ type SchemaLookup interface {
 	// TableName returns the declared table name for wire/debug use. Empty
 	// string is acceptable when the caller does not carry names.
 	TableName(TableID) string
+	// ColumnCount returns the number of columns in the table. Used by the
+	// join evaluator to project concatenated LHS++RHS rows onto one side.
+	// Zero is returned for unknown tables.
+	ColumnCount(TableID) int
 }
 
 // ValidatePredicate checks the structural and schema-level constraints

@@ -4,13 +4,62 @@ Use this file to start the next agent on the next real Shunter parity step with 
 
 ## Copy-paste prompt
 
-Continue Shunter from the latest completed TD-142 SQL parity work. The current run (2026-04-20) landed Slices 10, 10.5, 11, and 12:
+Continue Shunter from the latest completed TD-142 SQL parity work. The current run (2026-04-20) landed Slices 10, 10.5, 11, 12, 13, and 14:
 - Slice 10: aliased self cross-join projection (`SELECT a.* FROM t AS a JOIN t AS b`)
 - Slice 10.5: parser-level alias identity and ON cross-relation check alias-based
 - Slice 11: runtime alias identity in `subscription.Join` — aliased self equi-join projection (`SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32`) now works end-to-end
 - Slice 12: alias-aware WHERE on self-join — `SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1` (and the symmetric `WHERE b.id = 1`) now work end-to-end
+- Slice 13 (narrow parity-matched rejection): three-way/multi-way join chains (`SELECT t.* FROM t JOIN s JOIN s AS r ...`) are now explicitly rejected at the parser with a reference-citing error and pinned at the subscribe / one-off admission boundaries
+- Slice 14 (projection gap closed): join subscriptions now emit rows shaped like the SELECT table instead of LHS++RHS concat
 
-The next realistic landing is **Slice 13 (multi-join)**: three-way / multi-relation joins such as `SELECT t.* FROM t JOIN s JOIN s AS r WHERE t.u32 = s.u32 AND s.u32 = r.u32`. Reference-accepted by `reference/SpacetimeDB/crates/expr/src/check.rs`. The immediate blocker is the binary-predicate shape of `subscription.Join` (single `Left`, `Right`, one `LeftCol=RightCol` pair). Multi-join requires either a chain/tree of join predicates or a generalized N-relation runtime representation closer to the reference `PhysicalPlan`.
+## Slice 14 — what landed
+
+Grounded problem: prior to Slice 14, `subscription/eval.go::evalQuery` and `subscription/register_set.go::initialQuery` returned LHS++RHS concatenated rows for every join subscription. One-off query at `protocol/handle_oneoff.go::evaluateOneOffJoin` already projected correctly but used the ambiguous `projectedTable == join.Left` equality — which collapses for self-joins where Left == Right. The reference at `reference/SpacetimeDB/crates/subscription/src/lib.rs:367` (`SubscriptionPlan::subscribed_table_id`) emits one concrete table's row shape per plan.
+
+Resolution:
+- `subscription.Join` gained `ProjectRight bool`. Zero-value projects LHS (matches existing default). True projects RHS.
+- `subscription.SchemaLookup` gained `ColumnCount(TableID) int` so the evaluator knows the LHS width and can slice the reconciled IVM fragments at the LHS/RHS boundary.
+- `subscription/eval.go::projectJoinedRows` runs post-`ReconcileJoinDelta` and slices each row; the IVM bag arithmetic is unchanged (it still reconciles on full concat rows — projection is the final emission step).
+- `subscription/register_set.go::initialQuery` projects per matched pair inside the re-evaluation loop and uses a new `emittedTableID` helper for `SubscriptionUpdate.TableID`.
+- `protocol/handle_oneoff.go::evaluateOneOffJoin` now trusts `Join.ProjectRight`, not the ambiguous `projectedTable == join.Left` equality.
+- Canonical hashing (`subscription/hash.go`) encodes `ProjectRight` so `SELECT lhs.*` and `SELECT rhs.*` register as distinct queries.
+- Parser: `Statement.ProjectedAlias` preserves the user-typed qualifier (`a` vs `b` on self-joins, `product` vs `o` on distinct-table joins). Compile at `protocol/handle_subscribe.go::joinProjectsRight` maps it to `ProjectRight`.
+
+Pins (all new tests over the 1095 baseline):
+- `subscription/hash_test.go::TestQueryHashJoinProjectionDiffers`
+- `subscription/manager_test.go::TestRegisterJoinBootstrapFallsBackToLeftIndex` (re-asserted projected-width + TableID)
+- `subscription/manager_test.go::TestRegisterJoinBootstrapProjectsRight`
+- `subscription/eval_test.go::TestEvalJoinSubscription` (re-asserted LHS projection width + TableID)
+- `subscription/eval_test.go::TestEvalJoinSubscriptionProjectsRight`
+- `query/sql/parser_test.go::TestParseAliasedSelfEquiJoinProjectsRight`
+- `protocol/handle_subscribe_test.go::TestHandleSubscribeSingle_AliasedSelfEquiJoinProjectsRight`
+- `protocol/handle_oneoff_test.go::TestHandleOneOffQuery_AliasedSelfEquiJoinProjectsRight`
+
+Baseline after Slice 14: `Go test: 1101 passed in 10 packages`.
+
+## What is no longer open under TD-142
+
+Every named reference-backed SQL parity shape inside TD-142 is now resolved — accepted (Slices 1–12), rejected with parity-matched outcome (Slice 13), or structurally corrected (Slice 14 projection). Further SQL widenings are new parity work, not TD-142 follow-up.
+
+## Next realistic parity anchors
+
+With TD-142 fully drained, the grounded options are:
+
+### Option α — Lag / slow-client policy parity (Phase 2 Slice 3)
+
+Primary code surfaces: `subscription/fanout_worker.go`, `subscription/fanout.go`, `protocol/outbound.go`, `protocol/sender.go`, `protocol/fanout_adapter.go`. Decision point: emulate SpacetimeDB's deeper queue / lazy slow-client semantics, or keep Shunter's bounded disconnect-on-lag policy and mark this divergence explicitly permanent. This is now the largest remaining externally visible subscription-behavior divergence.
+
+### Option β — Scheduled reducer startup/firing ordering (`P0-SCHED-001`)
+
+Still `in_progress` per `docs/parity-phase0-ledger.md`. Compare Shunter's recovered scheduled-reducer startup ordering against the reference's visible firing semantics and close the timing decisions deliberately. Primary code: `executor/scheduler.go`, `executor/scheduler_worker.go`, `executor/scheduler_replay_test.go`.
+
+### Option γ — Replay-horizon / validated-prefix behavior (`P0-RECOVERY-001`)
+
+Still `in_progress`. Phase 4 decision about replay tolerance vs fail-fast. Primary code: `commitlog/replay.go`, `commitlog/recovery.go`.
+
+### Option δ — Close a Tier-B hardening item
+
+`TECH-DEBT.md` still carries OI-004 (protocol lifecycle / goroutine ownership), OI-005 (snapshot / read-view lifetime), OI-006 (fanout aliasing), OI-007 (recovery sequencing). Pick one and land a narrow fix with a focused test.
 
 ## First, what you are walking into
 
@@ -19,7 +68,7 @@ Do not treat this as a docs-only project.
 Do not do a broad audit.
 Do not restart parity analysis from zero.
 
-Your job is to continue the remaining `TD-142` subscription-SQL parity work from the current live state.
+Your job is to continue from the current live state. Pick the next grounded parity anchor from `docs/spacetimedb-parity-roadmap.md` and `docs/parity-phase0-ledger.md`.
 
 ## Mandatory reading order
 
@@ -33,20 +82,8 @@ Read in this order before changing code:
 6. `docs/current-status.md`
 7. `docs/spacetimedb-parity-roadmap.md`
 8. `docs/parity-phase0-ledger.md`
-9. `TECH-DEBT.md` (especially the TD-142 entry, including the Slice 10.5 / 11 / 12 landing notes)
-10. `query/sql/parser.go`
-11. `query/sql/parser_test.go`
-12. `protocol/handle_subscribe.go`
-13. `protocol/handle_oneoff.go`
-14. `subscription/predicate.go`
-15. `subscription/hash.go`
-16. `subscription/validate.go`
-17. `subscription/register_set.go`
-18. `subscription/eval.go`
-19. `subscription/delta_join.go`
-20. `subscription/delta_dedup.go`
-21. `subscription/placement.go`
-22. relevant protocol/query/subscription tests before touching code
+9. `TECH-DEBT.md`
+10. the specific code surfaces for whichever anchor (α/β/γ/δ) you pick
 
 ## Shell discipline
 
@@ -79,86 +116,16 @@ Keep `.hermes/plans/2026-04-18_073534-phase1-wire-level-parity.md` unless you de
 10. aliased self cross-join projection (same table) — `SELECT a.* FROM t AS a JOIN t AS b`
 11. parser alias identity + aliased self equi-join parse acceptance (Slice 10.5)
 12. runtime alias identity in `subscription.Join` + filterless aliased self equi-join end-to-end (Slice 11)
-13. **alias-aware WHERE on self-join** (Slice 12, 2026-04-20) — `ColEq` / `ColNe` / `ColRange` gained `Alias uint8`, `MatchRowSide` routes each leaf to the side the user named, `PlaceSubscription` / `RemoveSubscription` short-circuit self-join to Tier 3, parser's `sql.Filter` carries `Alias string`, and `compileSQLQueryString` builds a self-join-aware `aliasTag` closure that maps the right-alias string to `1` and everything else to `0`. Pinned by `TestEvalSelfEquiJoinWithAliasedWhere`, `TestHandleSubscribeSingle_AliasedSelfEquiJoinWithWhere`, `TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereAside`, and `TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereBside`.
+13. alias-aware WHERE on self-join (Slice 12) — `SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1` and symmetric
+14. multi-way join rejection (Slice 13) — reference-matched admission rejection pinned at parser and admission boundaries
+15. **join projection semantics (Slice 14, 2026-04-20)** — `subscription.Join.ProjectRight` + canonical hash + `projectJoinedRows` + `emittedTableID` + `Statement.ProjectedAlias` + `joinProjectsRight` compile path. Join subscriptions now emit rows shaped like the SELECT table at both subscribe-initial, post-commit delta eval, and one-off paths.
 
 ### Alias-scope parity tighten
 
 - once a relation is aliased, the base table name is out of scope for qualified projection and qualified `WHERE`
 - unaliased self-join is rejected (`SELECT t.* FROM t JOIN t`)
 - same-alias-both-sides of ON is rejected (`SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = a.u32`)
-
-## Slice 13 — multi-join (three-way, with self-alias)
-
-### Target shapes
-
-Reference-accepted by `reference/SpacetimeDB/crates/expr/src/check.rs`:
-
-- `SELECT t.* FROM t JOIN s JOIN s AS r WHERE t.u32 = s.u32 AND s.u32 = r.u32`
-
-Reference-rejected (unrelated qualifier resolution):
-- `SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r`
-
-### Why it's bigger than Slice 12
-
-`subscription.Join` is a binary predicate. `query/sql.JoinClause` is also binary (`LeftTable`/`RightTable` only). Both need to grow to carry N relation instances. Two plausible options:
-
-- **Option A (chain of joins)**: parse as `(t JOIN s) JOIN (s AS r)` and carry `Join` nested in `Filter`, with each `Join` remaining binary. Requires `subscription.Join` itself to become a valid `Predicate` child of another `Join`, and `EvalJoinDeltaFragments` must compose across layers. The 4-fragment IVM combinatorially multiplies with N relations; reference literature uses different tactics here.
-- **Option B (explicit N-relation plan)**: introduce a `MultiJoin` predicate shape carrying `[]RelationInstance` (TableID + alias tag + column-set) plus `[]EquiJoinEdge` (left-alias, left-col, right-alias, right-col). Replace `EvalJoinDeltaFragments` with a multi-relation IVM evaluator that pairs each delta relation against the rest via a standard `dR ⋈ V_rest` expansion. Closer to reference `PhysicalPlan` / `Fragments::compile_from_plan`.
-
-Option A is narrower per-commit but composes awkwardly with the 4-fragment IVM. Option B is a larger single landing but matches reference shape.
-
-Recommend scoping: start with parser acceptance + subscribe/one-off admission that constructs a new `MultiJoin` predicate, then land the runtime IVM as a follow-up slice if the admission landing reveals the evaluator shape.
-
-### Live seams
-
-1. `query/sql/parser.go::parseStatement` — currently only accepts a single `JOIN` clause. Needs to accept `JOIN ... JOIN ...` sequences and build a multi-relation binding map (`parseJoinClause` as currently structured is strictly two-relation).
-2. `query/sql.JoinClause` — binary shape; needs either a nested form or replacement with a multi-relation statement node.
-3. `protocol/handle_subscribe.go::compileSQLQueryString` — only branches on `stmt.Join != nil` and assumes binary join; needs multi-join branch.
-4. `protocol/handle_oneoff.go::evaluateOneOffJoin` — binary fallback; needs multi-join executor or one-off-specific evaluator.
-5. `subscription.Predicate` — no `MultiJoin` shape; `Join` is binary.
-6. `subscription/delta_join.go::EvalJoinDeltaFragments` — fixed 4-fragment shape on binary `Join`; multi-join IVM needs a different fragment decomposition.
-7. `subscription/placement.go` — `findJoin` / `joinEdgeFor` assume one join; multi-join pruning needs a walker.
-
-### Suggested execution order
-
-1. Re-read `reference/SpacetimeDB/crates/expr/src/check.rs` (accepted/rejected multi-join shapes) and `reference/SpacetimeDB/crates/subscription/src/lib.rs::Fragments::compile_from_plan` for shape expectations.
-2. Decide between Option A (nested binary) and Option B (N-relation `MultiJoin`) on paper before writing code. Document the decision with file:line evidence in TECH-DEBT.md so future slices can audit it.
-3. Add parser-level failing tests for the accepted three-way shape.
-4. Land parser acceptance + subscribe/one-off admission that constructs a `MultiJoin` predicate rejected at a narrow runtime boundary.
-5. Follow-up slice: runtime IVM + pruning + placement.
-
-### Scope discipline
-
-In scope:
-- three-way equi-join with at most one self-alias
-- matching the narrow reference-accepted shape above
-
-Out of scope:
-- four-way and deeper joins
-- projection gap (LHS++RHS concat rows vs projected rows) — pre-existing in `subscription/eval.go::evalQuery`
-- lag policy
-- broader predicate syntax beyond the landed shapes
-
-### Stop / escalate if
-
-1. the parser needs to grow a binding tree that does not fit the current `relationBindings` / `byQualifier` shape without a redesign
-2. a multi-relation runtime representation requires rewriting `EvalJoinDeltaFragments` in a way that would break distinct-table binary join semantics
-3. the chosen option (A or B) proves materially inconsistent with the reference `PhysicalPlan` at a level that will force a second rewrite
-
-If you stop, leave a grounded blocker report in this file naming the exact representation/runtime mismatch with file:line evidence.
-
-### What not to do
-
-- do not broad-audit the repo
-- do not reopen already-landed slices without a real regression (especially Slices 10 / 10.5 / 11 / 12)
-- do not silently broaden unrelated boolean or projection syntax
-- do not lose the current guarantees around:
-  - bare `SELECT *` on joins staying rejected
-  - qualified `WHERE` requirements in landed join slices
-  - alias-scope rejection behavior after aliasing
-  - unaliased self-join rejection
-  - same-alias-both-sides of ON rejection
-  - self-join per-alias WHERE behavior landed in Slice 12
+- multi-way (≥3 relation) JOIN chains are rejected with a reference-citing error (Slice 13)
 
 ## Suggested verification commands
 
@@ -173,23 +140,23 @@ Targeted:
 Do not call the work done unless all are true:
 
 - reference-backed target shape was checked directly against reference material
-- every newly accepted shape has focused tests
-- parser and public runtime coverage both exist
-- already-landed accepted shapes still pass (especially aliased self equi-join with and without WHERE)
+- every newly accepted or rejected shape has focused tests
+- parser, subscribe, one-off, and post-commit-delta coverage all exist where applicable
+- already-landed accepted shapes still pass (especially aliased self equi-join with and without WHERE, and the new Slice 14 projection width/TableID pins)
 - already-landed rejected shapes still reject where the reference requires rejection
-- full suite still passes (current baseline: `Go test: 1084 passed in 10 packages`)
+- full suite still passes (current baseline: `Go test: 1101 passed in 10 packages`)
 - docs and handoff reflect the new truth exactly
 
 ## Deliverables for the next session
 
 Either:
-- code + tests closing the next reference-backed multi-join slice
+- code + tests closing the next reference-backed parity slice
 
 Or:
 - a grounded blocker report naming the exact representation/runtime issue preventing a narrow landing
 
 And in either case:
-- update `TECH-DEBT.md`
+- update `TECH-DEBT.md` if any OI changes state
 - update `docs/current-status.md`
 - update `docs/parity-phase0-ledger.md`
 - update `NEXT_SESSION_HANDOFF.md`
@@ -198,9 +165,6 @@ And in either case:
 
 As of this handoff:
 - targeted parity work continues to be real and cumulative
-- `TD-142` is not finished
-- Slice 10 (aliased self cross-join, no ON) landed
-- Slice 10.5 (parser alias identity + aliased self equi-join parse acceptance) landed 2026-04-20
-- Slice 11 (runtime alias identity in `subscription.Join` + filterless aliased self equi-join end-to-end) landed 2026-04-20
-- Slice 12 (alias-aware WHERE on self-join) landed 2026-04-20
-- the next realistic landing is **Slice 13**: multi-join, which requires a different (larger) representation change
+- `TD-142` is fully drained — accepted (Slices 1–12), rejected with parity-matched outcome (Slice 13), and projection-corrected (Slice 14)
+- the next realistic parity anchors are outside TD-142: lag / slow-client policy (Option α), scheduled-reducer startup ordering (Option β), replay-horizon behavior (Option γ), or a Tier-B hardening item (Option δ)
+- 10 packages, 1101 tests passing as of 2026-04-20

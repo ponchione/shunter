@@ -401,6 +401,69 @@ func TestEvalJoinSubscription(t *testing.T) {
 	if len(updates[0].Inserts) != 1 {
 		t.Fatalf("expected 1 joined insert row, got %d", len(updates[0].Inserts))
 	}
+	// TD-142 Slice 14: row is projected onto LHS (default ProjectRight=false).
+	// T1 has 2 columns, so the emitted row must be 2-wide, not the 4-wide
+	// LHS++RHS concat the IVM fragments carry internally.
+	if updates[0].TableID != joinLHS {
+		t.Fatalf("emitted TableID = %d, want %d (LHS)", updates[0].TableID, joinLHS)
+	}
+	if len(updates[0].Inserts[0]) != 2 {
+		t.Fatalf("projected row width = %d, want 2 (LHS shape)", len(updates[0].Inserts[0]))
+	}
+	// LHS join key survives at column 0; name survives at column 1.
+	if !updates[0].Inserts[0][0].Equal(types.NewUint64(1)) {
+		t.Fatalf("projected row[0] = %v, want LHS id=1", updates[0].Inserts[0][0])
+	}
+}
+
+// TD-142 Slice 14: delta eval with ProjectRight=true returns RHS-shape rows.
+func TestEvalJoinSubscriptionProjectsRight(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(joinLHS, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(joinRHS, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		joinLHS: {{types.NewUint64(1), types.NewString("a")}},
+		joinRHS: {{types.NewUint64(100), types.NewUint64(1)}},
+	})
+
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{Left: joinLHS, Right: joinRHS, LeftCol: 0, RightCol: 1, ProjectRight: true}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{join},
+	}, committed)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			joinRHS: {
+				TableID: joinRHS, TableName: "t2",
+				Inserts: []types.ProductValue{{types.NewUint64(101), types.NewUint64(1)}},
+			},
+		},
+	}
+	committed.addRow(joinRHS, 2, types.ProductValue{types.NewUint64(101), types.NewUint64(1)})
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 || len(updates[0].Inserts) != 1 {
+		t.Fatalf("want 1 update + 1 insert, got %v", updates)
+	}
+	if updates[0].TableID != joinRHS {
+		t.Fatalf("emitted TableID = %d, want %d (RHS)", updates[0].TableID, joinRHS)
+	}
+	if len(updates[0].Inserts[0]) != 2 {
+		t.Fatalf("projected row width = %d, want 2 (RHS shape)", len(updates[0].Inserts[0]))
+	}
+	// RHS id survives at column 0 of the projected row.
+	if !updates[0].Inserts[0][0].Equal(types.NewUint64(101)) {
+		t.Fatalf("projected row[0] = %v, want RHS id=101", updates[0].Inserts[0][0])
+	}
 }
 
 func TestEvalPruningFallbackVsBaseline(t *testing.T) {
