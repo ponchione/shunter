@@ -70,9 +70,6 @@ func OpenAndRecoverDetailed(dir string, reg schema.SchemaRegistry) (*store.Commi
 		maxAppliedTxID = snapshot.TxID
 	}
 
-	if err := advanceRecoveredSequences(committed); err != nil {
-		return nil, 0, RecoveryResumePlan{}, err
-	}
 	plan, err := planRecoveryResume(segments, maxAppliedTxID)
 	if err != nil {
 		return nil, 0, RecoveryResumePlan{}, err

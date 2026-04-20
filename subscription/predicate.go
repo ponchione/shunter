@@ -48,8 +48,20 @@ type ColEq struct {
 	Value  Value
 }
 
-func (ColEq) sealed()              {}
-func (p ColEq) Tables() []TableID  { return []TableID{p.Table} }
+func (ColEq) sealed()             {}
+func (p ColEq) Tables() []TableID { return []TableID{p.Table} }
+
+// ColNe matches rows where a column does not equal a literal value.
+//
+//	Example: messages.channel_id != 42
+type ColNe struct {
+	Table  TableID
+	Column ColID
+	Value  Value
+}
+
+func (ColNe) sealed()             {}
+func (p ColNe) Tables() []TableID { return []TableID{p.Table} }
 
 // ColRange matches rows where a column falls within a range.
 //

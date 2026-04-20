@@ -9,11 +9,12 @@ type Query struct {
 	Predicates []Predicate
 }
 
-// Predicate is a single equality filter inside a Query (SPEC-005
+// Predicate is a single comparison filter inside a Query (SPEC-005
 // §7.1.1). The Value side reuses the SPEC-001 Value representation so
 // decoding feeds directly into the subscription predicate path.
 type Predicate struct {
 	Column string
+	Op     string
 	Value  types.Value
 }
 

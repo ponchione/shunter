@@ -26,6 +26,13 @@ func TestColRangeTablesSingle(t *testing.T) {
 	}
 }
 
+func TestColNeTablesSingle(t *testing.T) {
+	p := ColNe{Table: 4, Column: 1, Value: types.NewInt64(9)}
+	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{4}) {
+		t.Fatalf("ColNe.Tables() = %v, want [4]", got)
+	}
+}
+
 func TestAllRowsTablesSingle(t *testing.T) {
 	p := AllRows{Table: 9}
 	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{9}) {
@@ -92,6 +99,7 @@ func TestBoundUnboundedZeroValueIgnored(t *testing.T) {
 func TestPredicateSealed(t *testing.T) {
 	// Compile-time check: concrete types implement Predicate.
 	var _ Predicate = ColEq{}
+	var _ Predicate = ColNe{}
 	var _ Predicate = ColRange{}
 	var _ Predicate = And{}
 	var _ Predicate = AllRows{}

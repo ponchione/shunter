@@ -162,17 +162,35 @@ func TestPhase15CallReducerFlagsField(t *testing.T) {
 	}
 }
 
-// TestPhase2Slice1OneOffQuerySQLShape pins the Phase 2 Slice 1 flip:
-// reference OneOffQuery carries `message_id: Box<[u8]>, query_string:
-// Box<str>` (v1.rs:247). Shunter now carries a SQL string on the wire
-// and parses it at handler entry. The `message_id` bytes flip is
-// tracked separately as Slice 1c (RequestID stays u32 for now).
-func TestPhase2Slice1OneOffQuerySQLShape(t *testing.T) {
-	fields := msgFieldNames(OneOffQueryMsg{})
-	want := []string{"RequestID", "QueryString"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("OneOffQueryMsg fields = %v, want %v (Phase 2 Slice 1 SQL-string flip)",
-			fields, want)
+// TestPhase2Slice1COneOffQueryMessageIDBytes pins the Phase 2 Slice 1c
+// wire-shape parity flip: reference OneOffQuery carries
+// `message_id: Box<[u8]>, query_string: Box<str>` and the paired result
+// envelope correlates with the same opaque bytes. Shunter must therefore
+// expose `MessageID []byte` on both request and response envelopes rather
+// than a numeric RequestID.
+func TestPhase2Slice1COneOffQueryMessageIDBytes(t *testing.T) {
+	msgFields := msgFieldNames(OneOffQueryMsg{})
+	if want := []string{"MessageID", "QueryString"}; !reflect.DeepEqual(msgFields, want) {
+		t.Fatalf("OneOffQueryMsg fields = %v, want %v (Phase 2 Slice 1c message_id bytes)", msgFields, want)
+	}
+	msgField, ok := reflect.TypeOf(OneOffQueryMsg{}).FieldByName("MessageID")
+	if !ok {
+		t.Fatal("OneOffQueryMsg.MessageID missing")
+	}
+	if got := msgField.Type.String(); got != "[]uint8" {
+		t.Fatalf("OneOffQueryMsg.MessageID type = %s, want []byte", got)
+	}
+
+	resultFields := msgFieldNames(OneOffQueryResult{})
+	if want := []string{"MessageID", "Status", "Rows", "Error"}; !reflect.DeepEqual(resultFields, want) {
+		t.Fatalf("OneOffQueryResult fields = %v, want %v (Phase 2 Slice 1c message_id bytes)", resultFields, want)
+	}
+	resultField, ok := reflect.TypeOf(OneOffQueryResult{}).FieldByName("MessageID")
+	if !ok {
+		t.Fatal("OneOffQueryResult.MessageID missing")
+	}
+	if got := resultField.Type.String(); got != "[]uint8" {
+		t.Fatalf("OneOffQueryResult.MessageID type = %s, want []byte", got)
 	}
 }
 

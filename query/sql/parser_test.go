@@ -25,6 +25,38 @@ func TestParseSelectAllTrailingSemicolonAllowed(t *testing.T) {
 	}
 }
 
+func TestParseSelectQualifiedStarWithAlias(t *testing.T) {
+	stmt, err := Parse("SELECT item.* FROM Inventory item")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Inventory" {
+		t.Fatalf("Table = %q, want Inventory", stmt.Table)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %v, want none", stmt.Filters)
+	}
+}
+
+func TestParseSelectQualifiedStarWithAsAliasAndQualifiedWhereColumns(t *testing.T) {
+	stmt, err := Parse("SELECT item.* FROM Inventory AS item WHERE item.id = 7 AND item.active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Inventory" {
+		t.Fatalf("Table = %q, want Inventory", stmt.Table)
+	}
+	if len(stmt.Filters) != 2 {
+		t.Fatalf("Filters len = %d, want 2", len(stmt.Filters))
+	}
+	if stmt.Filters[0].Column != "id" {
+		t.Fatalf("first column = %q, want id", stmt.Filters[0].Column)
+	}
+	if stmt.Filters[1].Column != "active" {
+		t.Fatalf("second column = %q, want active", stmt.Filters[1].Column)
+	}
+}
+
 func TestParseWhereSingleUint(t *testing.T) {
 	stmt, err := Parse("SELECT * FROM users WHERE id = 42")
 	if err != nil {
@@ -111,25 +143,77 @@ func TestParseStringEscapedSingleQuote(t *testing.T) {
 	}
 }
 
+func TestParseWhereQualifiedColumnsSameTable(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users WHERE users.id = 1 AND users.name = 'alice'")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "users" {
+		t.Fatalf("Table = %q, want users", stmt.Table)
+	}
+	if len(stmt.Filters) != 2 {
+		t.Fatalf("Filters len = %d, want 2", len(stmt.Filters))
+	}
+	if stmt.Filters[0].Column != "id" {
+		t.Fatalf("first column = %q, want id", stmt.Filters[0].Column)
+	}
+	if stmt.Filters[1].Column != "name" {
+		t.Fatalf("second column = %q, want name", stmt.Filters[1].Column)
+	}
+}
+
+func TestParseWhereComparisonOperators(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM metrics WHERE score > 10 AND score >= 11 AND score < 20 AND score <= 19")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(stmt.Filters) != 4 {
+		t.Fatalf("Filters len = %d, want 4", len(stmt.Filters))
+	}
+	for i, want := range []string{">", ">=", "<", "<="} {
+		if stmt.Filters[i].Op != want {
+			t.Fatalf("Filters[%d].Op = %q, want %q", i, stmt.Filters[i].Op, want)
+		}
+	}
+}
+
+func TestParseWhereNotEqualOperators(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM metrics WHERE score <> 10 AND score != 11")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(stmt.Filters) != 2 {
+		t.Fatalf("Filters len = %d, want 2", len(stmt.Filters))
+	}
+	for i, want := range []string{"<>", "!="} {
+		if stmt.Filters[i].Op != want {
+			t.Fatalf("Filters[%d].Op = %q, want %q", i, stmt.Filters[i].Op, want)
+		}
+	}
+	if stmt.Filters[0].Literal.Int != 10 || stmt.Filters[1].Literal.Int != 11 {
+		t.Fatalf("unexpected literal ints: %+v", stmt.Filters)
+	}
+}
+
 func TestParseRejectsUnsupported(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
 	}{
 		{"projection", "SELECT id FROM users"},
+		{"qualified_projection_wrong_alias", "SELECT other.* FROM users AS item"},
 		{"join", "SELECT * FROM a JOIN b ON a.id = b.id"},
-		{"comparison_gt", "SELECT * FROM users WHERE id > 1"},
 		{"or", "SELECT * FROM users WHERE id = 1 OR id = 2"},
 		{"order_by", "SELECT * FROM users ORDER BY id"},
 		{"limit", "SELECT * FROM users LIMIT 10"},
-		{"trailing_garbage", "SELECT * FROM users foo"},
+		{"trailing_garbage", "SELECT * FROM users foo bar"},
 		{"missing_from", "SELECT *"},
 		{"missing_table", "SELECT * FROM"},
 		{"missing_select", "FROM users"},
 		{"empty", ""},
 		{"unterminated_string", "SELECT * FROM t WHERE s = 'abc"},
 		{"malformed_integer", "SELECT * FROM t WHERE n = 12abc"},
-		{"qualified_column", "SELECT * FROM users WHERE users.id = 1"},
+		{"qualified_column_other_table", "SELECT * FROM users WHERE posts.id = 1"},
 		{"missing_where_rhs", "SELECT * FROM t WHERE id ="},
 		{"missing_where_op", "SELECT * FROM t WHERE id 1"},
 		{"and_without_lhs", "SELECT * FROM t WHERE AND id = 1"},
@@ -155,11 +239,11 @@ func TestParseRejectsReservedAsTable(t *testing.T) {
 }
 
 func TestParseErrorsMentionPosition(t *testing.T) {
-	_, err := Parse("SELECT * FROM users WHERE id > 1")
+	_, err := Parse("SELECT * FROM users WHERE id !~~ 1")
 	if err == nil {
 		t.Fatal("want error")
 	}
-	if !strings.Contains(err.Error(), "'>'") && !strings.Contains(err.Error(), ">") {
+	if !strings.Contains(err.Error(), "!") {
 		t.Fatalf("error %q should mention unexpected token", err.Error())
 	}
 }

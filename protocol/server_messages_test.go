@@ -221,14 +221,14 @@ func TestTransactionUpdateLightRoundTrip(t *testing.T) {
 
 func TestOneOffQueryResultSuccess(t *testing.T) {
 	rl := EncodeRowList([][]byte{{0x07}, {0x08}})
-	in := OneOffQueryResult{RequestID: 5, Status: 0, Rows: rl}
+	in := OneOffQueryResult{MessageID: []byte{0x05, 0x06}, Status: 0, Rows: rl}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := out.(OneOffQueryResult)
-	if got.RequestID != 5 || got.Status != 0 {
+	if !bytes.Equal(got.MessageID, in.MessageID) || got.Status != 0 {
 		t.Errorf("field mismatch: %+v", got)
 	}
 	if !bytes.Equal(got.Rows, rl) {
@@ -240,14 +240,14 @@ func TestOneOffQueryResultSuccess(t *testing.T) {
 }
 
 func TestOneOffQueryResultError(t *testing.T) {
-	in := OneOffQueryResult{RequestID: 5, Status: 1, Error: "bad query"}
+	in := OneOffQueryResult{MessageID: []byte{0x05, 0x06}, Status: 1, Error: "bad query"}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := out.(OneOffQueryResult)
-	if got.Status != 1 || got.Error != "bad query" {
+	if !bytes.Equal(got.MessageID, in.MessageID) || got.Status != 1 || got.Error != "bad query" {
 		t.Errorf("field mismatch: %+v", got)
 	}
 	if len(got.Rows) != 0 {

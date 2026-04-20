@@ -317,6 +317,16 @@ func TestRegistryTableByName(t *testing.T) {
 	}
 }
 
+func TestRegistryTableByNameCaseInsensitive(t *testing.T) {
+	e, _ := validBuilder().Build(EngineOptions{})
+	reg := e.Registry()
+
+	ts, ok := reg.TableByName("PLAYERS")
+	if !ok || ts.ID != 0 {
+		t.Fatal("TableByName('PLAYERS') should return TableID 0")
+	}
+}
+
 func TestRegistryTableLookupReturnsDetachedCopy(t *testing.T) {
 	e, _ := validBuilder().Build(EngineOptions{})
 	reg := e.Registry()

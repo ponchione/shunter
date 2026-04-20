@@ -23,10 +23,11 @@ func (h QueryHash) String() string { return hex.EncodeToString(h[:]) }
 // Only requirement is determinism within a single binary version.
 const (
 	tagColEq    byte = 0x01
-	tagColRange byte = 0x02
-	tagAnd      byte = 0x03
-	tagAllRows  byte = 0x04
-	tagJoin     byte = 0x05
+	tagColNe    byte = 0x02
+	tagColRange byte = 0x03
+	tagAnd      byte = 0x04
+	tagAllRows  byte = 0x05
+	tagJoin     byte = 0x06
 )
 
 // Within a canonical Bound encoding.
@@ -98,6 +99,11 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 	switch p := pred.(type) {
 	case ColEq:
 		e.writeByte(tagColEq)
+		e.writeU32(uint32(p.Table))
+		e.writeU32(uint32(p.Column))
+		encodeValue(e, p.Value)
+	case ColNe:
+		e.writeByte(tagColNe)
 		e.writeU32(uint32(p.Table))
 		e.writeU32(uint32(p.Column))
 		encodeValue(e, p.Value)

@@ -1,5 +1,7 @@
 package schema
 
+import "strings"
+
 // SchemaRegistry is a read-only view of all registered tables, indexes, and reducers.
 // Safe for concurrent use — immutable after construction.
 type SchemaRegistry interface {
@@ -62,12 +64,17 @@ func (r *schemaRegistry) Table(id TableID) (*TableSchema, bool) {
 }
 
 func (r *schemaRegistry) TableByName(name string) (*TableSchema, bool) {
-	i, ok := r.byName[name]
-	if !ok {
-		return nil, false
+	if i, ok := r.byName[name]; ok {
+		ts := cloneTableSchema(r.tables[i])
+		return &ts, true
 	}
-	ts := cloneTableSchema(r.tables[i])
-	return &ts, true
+	for i := range r.tables {
+		if strings.EqualFold(r.tables[i].Name, name) {
+			ts := cloneTableSchema(r.tables[i])
+			return &ts, true
+		}
+	}
+	return nil, false
 }
 
 func (r *schemaRegistry) Tables() []TableID {

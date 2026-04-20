@@ -53,16 +53,16 @@ func parseQueryString(qs string, sl SchemaLookup) (Query, error) {
 		if err != nil {
 			return Query{}, fmt.Errorf("coerce column %q: %v", f.Column, err)
 		}
-		q.Predicates = append(q.Predicates, Predicate{Column: f.Column, Value: v})
+		q.Predicates = append(q.Predicates, Predicate{Column: f.Column, Op: f.Op, Value: v})
 	}
 	return q, nil
 }
 
 // NormalizePredicates converts a slice of wire-level Predicate (column
-// name + value) into a single subscription.Predicate tree suitable for
-// the evaluator. Empty predicates produce AllRows; a single predicate
-// produces ColEq; multiple predicates are folded left into nested And
-// nodes.
+// comparison + value) into a single subscription.Predicate tree suitable
+// for the evaluator. Empty predicates produce AllRows; a single
+// predicate produces ColEq/ColRange; multiple predicates are folded left
+// into nested And nodes.
 func NormalizePredicates(
 	tableID schema.TableID,
 	ts *schema.TableSchema,
@@ -78,11 +78,50 @@ func NormalizePredicates(
 		if !ok {
 			return nil, fmt.Errorf("unknown column %q on table %q", p.Column, ts.Name)
 		}
-		eqs = append(eqs, subscription.ColEq{
-			Table:  tableID,
-			Column: types.ColID(col.Index),
-			Value:  p.Value,
-		})
+		switch p.Op {
+		case "", "=":
+			eqs = append(eqs, subscription.ColEq{
+				Table:  tableID,
+				Column: types.ColID(col.Index),
+				Value:  p.Value,
+			})
+		case "!=", "<>":
+			eqs = append(eqs, subscription.ColNe{
+				Table:  tableID,
+				Column: types.ColID(col.Index),
+				Value:  p.Value,
+			})
+		case ">":
+			eqs = append(eqs, subscription.ColRange{
+				Table:  tableID,
+				Column: types.ColID(col.Index),
+				Lower:  subscription.Bound{Value: p.Value, Inclusive: false},
+				Upper:  subscription.Bound{Unbounded: true},
+			})
+		case ">=":
+			eqs = append(eqs, subscription.ColRange{
+				Table:  tableID,
+				Column: types.ColID(col.Index),
+				Lower:  subscription.Bound{Value: p.Value, Inclusive: true},
+				Upper:  subscription.Bound{Unbounded: true},
+			})
+		case "<":
+			eqs = append(eqs, subscription.ColRange{
+				Table:  tableID,
+				Column: types.ColID(col.Index),
+				Lower:  subscription.Bound{Unbounded: true},
+				Upper:  subscription.Bound{Value: p.Value, Inclusive: false},
+			})
+		case "<=":
+			eqs = append(eqs, subscription.ColRange{
+				Table:  tableID,
+				Column: types.ColID(col.Index),
+				Lower:  subscription.Bound{Unbounded: true},
+				Upper:  subscription.Bound{Value: p.Value, Inclusive: true},
+			})
+		default:
+			return nil, fmt.Errorf("unsupported comparison operator %q", p.Op)
+		}
 	}
 
 	if len(eqs) == 1 {

@@ -33,6 +33,7 @@ func ApplyChangeset(cs *CommittedState, changeset *Changeset) error {
 			if err := ValidateRow(table.schema, row); err != nil {
 				return err
 			}
+			advanceReplaySequenceForInsert(table, row)
 			freshID := table.AllocRowID()
 			if err := table.InsertRow(freshID, row); err != nil {
 				return err
@@ -62,6 +63,33 @@ func findReplayDeleteRowID(table *Table, row types.ProductValue) (types.RowID, b
 		}
 	}
 	return 0, false
+}
+
+func advanceReplaySequenceForInsert(table *Table, row types.ProductValue) {
+	if table.sequence == nil || table.sequenceCol < 0 {
+		return
+	}
+	current := table.sequence.Peek()
+	value, ok := replayAutoIncrementValueAsUint64(row[table.sequenceCol], table.schema.Columns[table.sequenceCol].Type)
+	if !ok || value != current {
+		return
+	}
+	table.sequence.Next()
+}
+
+func replayAutoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, bool) {
+	switch kind {
+	case schema.KindInt8, schema.KindInt16, schema.KindInt32, schema.KindInt64:
+		n := v.AsInt64()
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case schema.KindUint8, schema.KindUint16, schema.KindUint32, schema.KindUint64:
+		return v.AsUint64(), true
+	default:
+		return 0, false
+	}
 }
 
 // ExportTableState returns the RowID counter and sequence values for snapshot persistence.

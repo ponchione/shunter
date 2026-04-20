@@ -111,8 +111,9 @@ Current important differences include:
 - `TransactionUpdate` heavy/light split and `UpdateStatus` outcome model match the Phase 1.5 parity target; caller metadata (`CallerIdentity`, `ReducerCall.ReducerName` / `ReducerID` / `Args`, `Timestamp`, `TotalHostExecutionDuration`) is now populated from the executor seam. `EnergyQuantaUsed` remains a permanent zero (no energy model)
 - `SubscribeMsg` / `UnsubscribeMsg` and their response envelopes (`SubscribeApplied` / `UnsubscribeApplied` / `SubscriptionError`) now carry `QueryID` (reference `query_id: QueryId`); client/server naming asymmetry closed
 - `SubscribeMulti` / `SubscribeSingle` variant split landed; one-QueryID-per-query-set grouping semantics now match reference. Remaining Phase 2 Slice 2 divergences: `TotalHostExecutionDurationMicros` on applied envelopes, `SubscriptionError.TableID` / optional-field shape, SQL-string form for `SubscribeMulti.Queries` (paired with Phase 2 Slice 1 deferral).
-- `CallReducer.flags` now carries `FullUpdate=0` / `NoSuccessNotify=1`; remaining divergence is the still-open SQL/query surface around other message families
-- one-off query shape differs
+- `CallReducer.flags` now carries `FullUpdate=0` / `NoSuccessNotify=1`; remaining divergence is the still-open SQL/query-surface breadth around other message families
+- one-off query wire shape now matches the reference Phase 2 target (`query_string` + opaque `MessageID []byte`)
+- SQL-string handling now accepts five narrow parity-backed slices: same-table qualified WHERE columns, case-insensitive resolution of unquoted table/column identifiers against the registered schema (for example `SELECT * FROM USERS WHERE ID = 1 AND users.DISPLAY_NAME = 'alice'`), single-table alias / qualified-star forms such as `SELECT item.* FROM users AS item WHERE item.name = 'alice'`, ordered single-column comparisons using `<`, `<=`, `>`, and `>=`, and non-equality comparisons using `<>` / `!=`
 
 ### Schema system
 - runtime reflection model instead of compile-time macro model

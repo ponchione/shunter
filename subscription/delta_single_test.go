@@ -61,6 +61,16 @@ func TestMatchRowColRangeExclusive(t *testing.T) {
 	}
 }
 
+func TestMatchRowColNe(t *testing.T) {
+	p := ColNe{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	if MatchRow(p, 1, types.ProductValue{types.NewUint64(42)}) {
+		t.Fatal("equal value should not match")
+	}
+	if !MatchRow(p, 1, types.ProductValue{types.NewUint64(43)}) {
+		t.Fatal("different value should match")
+	}
+}
+
 func TestMatchRowAnd(t *testing.T) {
 	p := And{
 		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},

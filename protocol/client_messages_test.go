@@ -154,9 +154,11 @@ func TestCallReducerEmptyArgs(t *testing.T) {
 	}
 }
 
+// TestOneOffQueryRoundTripSQL pins the Phase 2 Slice 1 + 1c wire shape:
+// SQL string query plus opaque `message_id` bytes.
 func TestOneOffQueryRoundTripSQL(t *testing.T) {
 	in := OneOffQueryMsg{
-		RequestID:   5,
+		MessageID:   []byte{0x05, 0x06},
 		QueryString: "SELECT * FROM players WHERE level = 42",
 	}
 	frame, _ := EncodeClientMessage(in)
@@ -165,7 +167,7 @@ func TestOneOffQueryRoundTripSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.(OneOffQueryMsg)
-	if got != in {
+	if !bytes.Equal(got.MessageID, in.MessageID) || got.QueryString != in.QueryString {
 		t.Errorf("round-trip mismatch: got %+v, want %+v", got, in)
 	}
 }

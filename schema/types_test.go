@@ -27,6 +27,23 @@ func TestTableSchemaColumnLookup(t *testing.T) {
 	}
 }
 
+func TestTableSchemaColumnLookupCaseInsensitive(t *testing.T) {
+	ts := TableSchema{
+		Columns: []ColumnSchema{
+			{Index: 0, Name: "id", Type: KindUint64},
+			{Index: 1, Name: "display_name", Type: KindString},
+		},
+	}
+
+	col, ok := ts.Column("DISPLAY_NAME")
+	if !ok {
+		t.Fatal("Column('DISPLAY_NAME') should be found")
+	}
+	if col.Index != 1 || col.Type != KindString {
+		t.Fatalf("Column('DISPLAY_NAME') = %+v, unexpected", col)
+	}
+}
+
 func TestTableSchemaPrimaryIndex(t *testing.T) {
 	ts := TableSchema{
 		Indexes: []IndexSchema{

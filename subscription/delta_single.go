@@ -38,6 +38,14 @@ func MatchRow(pred Predicate, table TableID, row types.ProductValue) bool {
 			return false
 		}
 		return row[p.Column].Equal(p.Value)
+	case ColNe:
+		if p.Table != table {
+			return true
+		}
+		if int(p.Column) >= len(row) {
+			return false
+		}
+		return !row[p.Column].Equal(p.Value)
 	case ColRange:
 		if p.Table != table {
 			return true

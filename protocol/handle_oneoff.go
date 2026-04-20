@@ -7,6 +7,7 @@ import (
 
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -23,7 +24,7 @@ type colMatcher struct {
 }
 
 // handleOneOffQuery executes a one-off table scan with optional
-// equality predicates against committed state and sends the result
+// comparison predicates against committed state and sends the result
 // back to the client (SPEC-005 §7.4).
 //
 // The wire carries a SQL string (Phase 2 Slice 1) which is parsed and
@@ -39,38 +40,42 @@ func handleOneOffQuery(
 	q, err := parseQueryString(msg.QueryString, sl)
 	if err != nil {
 		sendError(conn, OneOffQueryResult{
-			RequestID: msg.RequestID,
+			MessageID: msg.MessageID,
 			Status:    1,
 			Error:     err.Error(),
 		})
 		return
 	}
 
-	tableID, ts, ok := sl.TableByName(q.TableName)
+	tableID, _, ok := sl.TableByName(q.TableName)
 	if !ok {
 		sendError(conn, OneOffQueryResult{
-			RequestID: msg.RequestID,
+			MessageID: msg.MessageID,
 			Status:    1,
 			Error:     fmt.Sprintf("unknown table %q", q.TableName),
 		})
 		return
 	}
 
-	matchers := make([]colMatcher, 0, len(q.Predicates))
-	for _, p := range q.Predicates {
-		col, _ := ts.Column(p.Column)
-		matchers = append(matchers, colMatcher{colIdx: col.Index, value: p.Value})
+	pred, err := compileQuery(q, sl)
+	if err != nil {
+		sendError(conn, OneOffQueryResult{
+			MessageID: msg.MessageID,
+			Status:    1,
+			Error:     err.Error(),
+		})
+		return
 	}
 
 	view := stateAccess.Snapshot()
 	var rows [][]byte
 	for _, pv := range view.TableScan(tableID) {
-		if matchesAll(pv, matchers) {
+		if subscription.MatchRow(pred, tableID, pv) {
 			var buf bytes.Buffer
 			if err := bsatn.EncodeProductValue(&buf, pv); err != nil {
 				view.Close()
 				sendError(conn, OneOffQueryResult{
-					RequestID: msg.RequestID,
+					MessageID: msg.MessageID,
 					Status:    1,
 					Error:     "encode error: " + err.Error(),
 				})
@@ -83,7 +88,7 @@ func handleOneOffQuery(
 
 	encoded := EncodeRowList(rows)
 	sendError(conn, OneOffQueryResult{
-		RequestID: msg.RequestID,
+		MessageID: msg.MessageID,
 		Status:    0,
 		Rows:      encoded,
 	})

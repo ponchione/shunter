@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"context"
 	"iter"
 	"testing"
@@ -123,15 +124,15 @@ func TestHandleOneOffQuery_Valid(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID:   10,
+		MessageID:   []byte{0x10},
 		QueryString: "SELECT * FROM users WHERE id = 2",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.RequestID != 10 {
-		t.Errorf("RequestID = %d, want 10", result.RequestID)
+	if !bytes.Equal(result.MessageID, msg.MessageID) {
+		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
 	if result.Status != 0 {
 		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
@@ -146,6 +147,141 @@ func TestHandleOneOffQuery_Valid(t *testing.T) {
 	}
 	if !pvs[0][1].Equal(types.NewString("bob")) {
 		t.Errorf("row[0].name = %v, want String(bob)", pvs[0][1])
+	}
+}
+
+func TestHandleOneOffQuery_QualifiedStarAlias(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "users",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "name", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("users", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewString("alice")},
+				{types.NewUint32(2), types.NewString("bob")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x15},
+		QueryString: "SELECT item.* FROM users AS item WHERE item.name = 'alice'",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if !bytes.Equal(result.MessageID, msg.MessageID) {
+		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
+	}
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) {
+		t.Errorf("row[0].id = %v, want Uint32(1)", pvs[0][0])
+	}
+	if !pvs[0][1].Equal(types.NewString("alice")) {
+		t.Errorf("row[0].name = %v, want String(alice)", pvs[0][1])
+	}
+}
+
+func TestHandleOneOffQuery_LessThanOrEqualComparison(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "metrics",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "score", Type: schema.KindUint32},
+		},
+	}
+	sl := newMockSchema("metrics", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewUint32(9)},
+				{types.NewUint32(2), types.NewUint32(10)},
+				{types.NewUint32(3), types.NewUint32(11)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x16},
+		QueryString: "SELECT * FROM metrics WHERE score <= 10",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 2 {
+		t.Fatalf("got %d rows, want 2", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[1][0].Equal(types.NewUint32(2)) {
+		t.Fatalf("unexpected ids returned: %v, %v", pvs[0][0], pvs[1][0])
+	}
+}
+
+func TestHandleOneOffQuery_NotEqualComparison(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "metrics",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "score", Type: schema.KindUint32},
+		},
+	}
+	sl := newMockSchema("metrics", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewUint32(9)},
+				{types.NewUint32(2), types.NewUint32(10)},
+				{types.NewUint32(3), types.NewUint32(11)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x17},
+		QueryString: "SELECT * FROM metrics WHERE score <> 10",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 2 {
+		t.Fatalf("got %d rows, want 2", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[1][0].Equal(types.NewUint32(3)) {
+		t.Fatalf("unexpected ids returned: %v, %v", pvs[0][0], pvs[1][0])
 	}
 }
 
@@ -172,15 +308,15 @@ func TestHandleOneOffQuery_NoMatches(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID:   20,
+		MessageID:   []byte{0x20},
 		QueryString: "SELECT * FROM users WHERE id = 999",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.RequestID != 20 {
-		t.Errorf("RequestID = %d, want 20", result.RequestID)
+	if !bytes.Equal(result.MessageID, msg.MessageID) {
+		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
 	if result.Status != 0 {
 		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
@@ -219,7 +355,7 @@ func TestHandleOneOffQuery_EmptyPredicates(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID:   30,
+		MessageID:   []byte{0x30},
 		QueryString: "SELECT * FROM items",
 	}
 
@@ -254,15 +390,15 @@ func TestHandleOneOffQuery_UnknownTable(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID:   40,
+		MessageID:   []byte{0x40},
 		QueryString: "SELECT * FROM nonexistent",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.RequestID != 40 {
-		t.Errorf("RequestID = %d, want 40", result.RequestID)
+	if !bytes.Equal(result.MessageID, msg.MessageID) {
+		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
 	if result.Status != 1 {
 		t.Fatalf("Status = %d, want 1 (error)", result.Status)
@@ -289,15 +425,15 @@ func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
-		RequestID:   50,
+		MessageID:   []byte{0x50},
 		QueryString: "SELECT * FROM users WHERE bogus_col = 1",
 	}
 
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.RequestID != 50 {
-		t.Errorf("RequestID = %d, want 50", result.RequestID)
+	if !bytes.Equal(result.MessageID, msg.MessageID) {
+		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
 	if result.Status != 1 {
 		t.Fatalf("Status = %d, want 1 (error)", result.Status)

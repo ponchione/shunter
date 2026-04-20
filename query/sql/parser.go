@@ -3,15 +3,18 @@
 //
 // Grammar:
 //
-//	stmt   = "SELECT" "*" "FROM" ident [ where ] [ ";" ]
-//	where  = "WHERE" eq ( "AND" eq )*
-//	eq     = ident "=" literal
+//	stmt   = "SELECT" ( "*" | ident "." "*" ) "FROM" ident [ [ "AS" ] ident ] [ where ] [ ";" ]
+//	where  = "WHERE" cmp ( "AND" cmp )*
+//	cmp    = colref op literal
+//	colref = ident | ident "." ident   // only when qualifier matches FROM table or alias
+//	op     = "=" | "<" | ">" | "<=" | ">=" | "!=" | "<>"
 //	literal = integer | bool | string
 //	ident   = [A-Za-z_][A-Za-z0-9_]*
 //
-// Anything outside this grammar (projection other than "*", comparison
-// operators other than "=", OR, JOIN, ORDER BY, LIMIT, qualified columns,
-// subqueries, aggregates, etc.) is rejected with ErrUnsupportedSQL.
+// Anything outside this grammar (projection other than "*", OR, JOIN,
+// ORDER BY, LIMIT, aggregates,
+// subqueries, mismatched qualified columns, etc.) is rejected with
+// ErrUnsupportedSQL.
 //
 // Literals carry their lexical category only. Callers coerce them to a
 // concrete types.Value against a column kind via Coerce.
@@ -45,9 +48,10 @@ type Literal struct {
 	Str  string
 }
 
-// Filter is a single column = literal equality test.
+// Filter is a single column comparison against a literal value.
 type Filter struct {
 	Column  string
+	Op      string
 	Literal Literal
 }
 
@@ -82,6 +86,10 @@ const (
 	tokString
 	tokStar
 	tokEq
+	tokLt
+	tokGt
+	tokLe
+	tokGe
 	tokComma
 	tokSemicolon
 	tokDot
@@ -107,6 +115,40 @@ func tokenize(s string) ([]token, error) {
 			i++
 		case c == '=':
 			out = append(out, token{kind: tokEq, text: "=", pos: i})
+			i++
+		case c == '<':
+			start := i
+			if i+1 < len(s) {
+				switch s[i+1] {
+				case '=':
+					out = append(out, token{kind: tokLe, text: "<=", pos: start})
+					i += 2
+					continue
+				case '>':
+					out = append(out, token{kind: tokSymbol, text: "<>", pos: start})
+					i += 2
+					continue
+				}
+			}
+			out = append(out, token{kind: tokLt, text: "<", pos: start})
+			i++
+		case c == '>':
+			start := i
+			if i+1 < len(s) && s[i+1] == '=' {
+				out = append(out, token{kind: tokGe, text: ">=", pos: start})
+				i += 2
+				continue
+			}
+			out = append(out, token{kind: tokGt, text: ">", pos: start})
+			i++
+		case c == '!':
+			start := i
+			if i+1 < len(s) && s[i+1] == '=' {
+				out = append(out, token{kind: tokSymbol, text: "!=", pos: start})
+				i += 2
+				continue
+			}
+			out = append(out, token{kind: tokSymbol, text: string(c), pos: i})
 			i++
 		case c == ',':
 			out = append(out, token{kind: tokComma, text: ",", pos: i})
@@ -192,22 +234,30 @@ func (p *parser) parseStatement() (Statement, error) {
 	if err := p.expectKeyword("SELECT"); err != nil {
 		return Statement{}, err
 	}
-	if p.peek().kind != tokStar {
-		return Statement{}, p.unsupported("projection must be '*'")
+	projectionQualifier, err := p.parseProjection()
+	if err != nil {
+		return Statement{}, err
 	}
-	p.advance()
 	if err := p.expectKeyword("FROM"); err != nil {
 		return Statement{}, err
 	}
-	t := p.peek()
-	if t.kind != tokIdent || isReserved(t.text) {
+	tableTok := p.peek()
+	if tableTok.kind != tokIdent || isReserved(tableTok.text) {
 		return Statement{}, p.unsupported("expected table name")
 	}
 	p.advance()
-	stmt := Statement{Table: t.text}
+	tableName := tableTok.text
+	qualifiers, err := p.parseRelationQualifiers(tableName)
+	if err != nil {
+		return Statement{}, err
+	}
+	if projectionQualifier != "" && !matchesQualifier(projectionQualifier, qualifiers) {
+		return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match table %q", projectionQualifier, tableName))
+	}
+	stmt := Statement{Table: tableName}
 	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "WHERE") {
 		p.advance()
-		filters, err := p.parseWhere()
+		filters, err := p.parseWhere(qualifiers)
 		if err != nil {
 			return Statement{}, err
 		}
@@ -222,16 +272,67 @@ func (p *parser) parseStatement() (Statement, error) {
 	return stmt, nil
 }
 
-func (p *parser) parseWhere() ([]Filter, error) {
+func (p *parser) parseProjection() (string, error) {
+	t := p.peek()
+	if t.kind == tokStar {
+		p.advance()
+		return "", nil
+	}
+	if t.kind != tokIdent || isReserved(t.text) {
+		return "", p.unsupported("projection must be '*' or 'table.*'")
+	}
+	qualifier := t.text
+	p.advance()
+	if p.peek().kind != tokDot {
+		return "", p.unsupported("projection must be '*' or 'table.*'")
+	}
+	p.advance()
+	if p.peek().kind != tokStar {
+		return "", p.unsupported("projection must be '*' or 'table.*'")
+	}
+	p.advance()
+	return qualifier, nil
+}
+
+func (p *parser) parseRelationQualifiers(tableName string) ([]string, error) {
+	qualifiers := []string{tableName}
+	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "AS") {
+		p.advance()
+		alias, err := p.parseAlias()
+		if err != nil {
+			return nil, err
+		}
+		return append(qualifiers, alias), nil
+	}
+	if p.peek().kind == tokIdent && !isReserved(p.peek().text) {
+		alias, err := p.parseAlias()
+		if err != nil {
+			return nil, err
+		}
+		return append(qualifiers, alias), nil
+	}
+	return qualifiers, nil
+}
+
+func (p *parser) parseAlias() (string, error) {
+	t := p.peek()
+	if t.kind != tokIdent || isReserved(t.text) {
+		return "", p.unsupported("expected alias name")
+	}
+	p.advance()
+	return t.text, nil
+}
+
+func (p *parser) parseWhere(qualifiers []string) ([]Filter, error) {
 	var filters []Filter
-	f, err := p.parseEquality()
+	f, err := p.parseComparison(qualifiers)
 	if err != nil {
 		return nil, err
 	}
 	filters = append(filters, f)
 	for p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "AND") {
 		p.advance()
-		f, err := p.parseEquality()
+		f, err := p.parseComparison(qualifiers)
 		if err != nil {
 			return nil, err
 		}
@@ -246,24 +347,54 @@ func (p *parser) parseWhere() ([]Filter, error) {
 	return filters, nil
 }
 
-func (p *parser) parseEquality() (Filter, error) {
+func (p *parser) parseComparison(qualifiers []string) (Filter, error) {
 	t := p.peek()
 	if t.kind != tokIdent || isReserved(t.text) {
 		return Filter{}, p.unsupported(fmt.Sprintf("expected column name, got %q", t.text))
 	}
 	p.advance()
+	columnName := t.text
 	if p.peek().kind == tokDot {
-		return Filter{}, p.unsupported("qualified column names not supported")
+		qualifier := columnName
+		p.advance()
+		t = p.peek()
+		if t.kind != tokIdent || isReserved(t.text) {
+			return Filter{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
+		}
+		if !matchesQualifier(qualifier, qualifiers) {
+			return Filter{}, p.unsupported(fmt.Sprintf("qualified column %q does not match relation", qualifier))
+		}
+		columnName = t.text
+		p.advance()
+		if p.peek().kind == tokDot {
+			return Filter{}, p.unsupported("qualified column names not supported")
+		}
 	}
-	if p.peek().kind != tokEq {
-		return Filter{}, p.unsupported(fmt.Sprintf("expected '=', got %q", p.peek().text))
+	op, err := p.parseOperator()
+	if err != nil {
+		return Filter{}, err
 	}
-	p.advance()
 	lit, err := p.parseLiteral()
 	if err != nil {
 		return Filter{}, err
 	}
-	return Filter{Column: t.text, Literal: lit}, nil
+	return Filter{Column: columnName, Op: op, Literal: lit}, nil
+}
+
+func (p *parser) parseOperator() (string, error) {
+	switch t := p.peek(); t.kind {
+	case tokEq, tokLt, tokGt, tokLe, tokGe:
+		p.advance()
+		return t.text, nil
+	case tokSymbol:
+		if t.text != "!=" && t.text != "<>" {
+			return "", p.unsupported(fmt.Sprintf("expected comparison operator, got %q", t.text))
+		}
+		p.advance()
+		return t.text, nil
+	default:
+		return "", p.unsupported(fmt.Sprintf("expected comparison operator, got %q", t.text))
+	}
 }
 
 func (p *parser) parseLiteral() (Literal, error) {
@@ -310,10 +441,19 @@ func (p *parser) unsupported(msg string) error {
 	return fmt.Errorf("%w: %s", ErrUnsupportedSQL, msg)
 }
 
+func matchesQualifier(candidate string, qualifiers []string) bool {
+	for _, qualifier := range qualifiers {
+		if strings.EqualFold(candidate, qualifier) {
+			return true
+		}
+	}
+	return false
+}
+
 var reservedWords = map[string]struct{}{
 	"SELECT": {}, "FROM": {}, "WHERE": {}, "AND": {}, "OR": {},
 	"ORDER": {}, "BY": {}, "LIMIT": {}, "GROUP": {}, "HAVING": {},
-	"JOIN": {}, "ON": {},
+	"JOIN": {}, "ON": {}, "AS": {},
 }
 
 func isReserved(s string) bool {

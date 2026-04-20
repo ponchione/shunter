@@ -75,10 +75,11 @@ const (
 // (`{ message_id: Box<[u8]>, query_string: Box<str> }`).
 //
 // Phase 2 Slice 1 flipped `TableName + Predicates` → `QueryString`.
-// The `message_id: Box<[u8]>` ↔ `RequestID: uint32` divergence is
-// deferred to Phase 2 Slice 1c.
+// Phase 2 Slice 1c closes the remaining wire-shape divergence by using
+// the reference-style opaque `message_id: Box<[u8]>` rather than a
+// numeric request id.
 type OneOffQueryMsg struct {
-	RequestID   uint32
+	MessageID   []byte
 	QueryString string
 }
 
@@ -128,7 +129,7 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		buf.WriteByte(msg.Flags)
 	case OneOffQueryMsg:
 		buf.WriteByte(TagOneOffQuery)
-		writeUint32(&buf, msg.RequestID)
+		writeBytes(&buf, msg.MessageID)
 		writeString(&buf, msg.QueryString)
 	case SubscribeMultiMsg:
 		buf.WriteByte(TagSubscribeMulti)
@@ -246,7 +247,7 @@ func decodeOneOffQuery(body []byte) (OneOffQueryMsg, error) {
 	var m OneOffQueryMsg
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
+	if m.MessageID, off, err = readBytes(body, 0); err != nil {
 		return m, err
 	}
 	if m.QueryString, _, err = readString(body, off); err != nil {

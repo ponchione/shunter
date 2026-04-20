@@ -40,6 +40,8 @@ func validate(pred Predicate, s SchemaLookup) error {
 	switch p := pred.(type) {
 	case ColEq:
 		return validateColEq(p, s)
+	case ColNe:
+		return validateColNe(p, s)
 	case ColRange:
 		return validateColRange(p, s)
 	case And:
@@ -72,6 +74,20 @@ func validateColEq(p ColEq, s SchemaLookup) error {
 	want := s.ColumnType(p.Table, p.Column)
 	if p.Value.Kind() != want {
 		return fmt.Errorf("%w: ColEq value kind %s does not match column kind %s", ErrInvalidPredicate, p.Value.Kind(), want)
+	}
+	return nil
+}
+
+func validateColNe(p ColNe, s SchemaLookup) error {
+	if !s.TableExists(p.Table) {
+		return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
+	}
+	if !s.ColumnExists(p.Table, p.Column) {
+		return fmt.Errorf("%w: table %d column %d", ErrColumnNotFound, p.Table, p.Column)
+	}
+	want := s.ColumnType(p.Table, p.Column)
+	if p.Value.Kind() != want {
+		return fmt.Errorf("%w: ColNe value kind %s does not match column kind %s", ErrInvalidPredicate, p.Value.Kind(), want)
 	}
 	return nil
 }

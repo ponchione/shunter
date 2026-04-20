@@ -23,6 +23,14 @@ func TestQueryHashValueDifferent(t *testing.T) {
 	}
 }
 
+func TestQueryHashColNeDiffersFromColEq(t *testing.T) {
+	eq := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	ne := ColNe{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	if ComputeQueryHash(eq, nil) == ComputeQueryHash(ne, nil) {
+		t.Fatal("ColEq and ColNe should hash differently")
+	}
+}
+
 func TestQueryHashSameClient(t *testing.T) {
 	p := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	id := types.Identity{1, 2, 3}

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
@@ -114,7 +115,7 @@ func TestSendOneOffQueryResult(t *testing.T) {
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	msg := &OneOffQueryResult{RequestID: 7, Status: 0, Rows: []byte{0x01}}
+	msg := &OneOffQueryResult{MessageID: []byte{0x07}, Status: 0, Rows: []byte{0x01}}
 	if err := SendOneOffQueryResult(s, id, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestSendOneOffQueryResult(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected OneOffQueryResult, got %T", decoded)
 	}
-	if result.RequestID != 7 {
-		t.Fatalf("RequestID = %d, want 7", result.RequestID)
+	if !bytes.Equal(result.MessageID, msg.MessageID) {
+		t.Fatalf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
 }

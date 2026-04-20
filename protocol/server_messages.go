@@ -141,8 +141,10 @@ type ReducerCallInfo struct {
 	RequestID   uint32
 }
 
+// Phase 2 Slice 1c closes the remaining request/response correlation
+// divergence by carrying the reference-style opaque `message_id` bytes.
 type OneOffQueryResult struct {
-	RequestID uint32
+	MessageID []byte
 	Status    uint8  // 0 = success, 1 = error
 	Rows      []byte // encoded RowList; present when Status == 0
 	Error     string // present when Status == 1
@@ -203,7 +205,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		writeSubscriptionUpdates(&buf, msg.Update)
 	case OneOffQueryResult:
 		buf.WriteByte(TagOneOffQueryResult)
-		writeUint32(&buf, msg.RequestID)
+		writeBytes(&buf, msg.MessageID)
 		buf.WriteByte(msg.Status)
 		if msg.Status == 0 {
 			writeBytes(&buf, msg.Rows)
@@ -396,7 +398,7 @@ func decodeOneOffQueryResult(body []byte) (OneOffQueryResult, error) {
 	var m OneOffQueryResult
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
+	if m.MessageID, off, err = readBytes(body, 0); err != nil {
 		return m, err
 	}
 	if len(body)-off < 1 {

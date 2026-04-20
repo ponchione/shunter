@@ -118,7 +118,8 @@ Grounded current protocol divergences and closures:
 - `TransactionUpdate` heavy/light split: closed Phase 1.5
 - `SubscribeMulti` / `SubscribeSingle` variant split + one-QueryID-per-query-set grouping: closed Phase 2 Slice 2
 - `CallReducer.flags` (`FullUpdate` / `NoSuccessNotify`): closed Phase 1.5
-- one-off query SQL-string flip: closed Phase 2 Slice 1b (2026-04-19); `OneOffQueryMsg.RequestID uint32` ↔ reference `message_id: Box<[u8]>` remains open as Slice 1c
+- one-off query SQL-string flip: closed Phase 2 Slice 1b (2026-04-19)
+- one-off query `message_id: Box<[u8]>` wire-shape parity: closed Phase 2 Slice 1c (`OneOffQueryMsg.MessageID []byte` / `OneOffQueryResult.MessageID []byte`)
 - close-code behavior: closed Phase 1
 - reducer-call result status enum: closed Phase 1.5 (`UpdateStatus` tagged union)
 

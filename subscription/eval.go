@@ -155,6 +155,8 @@ func (m *Manager) collectActiveColumns() map[TableID][]ColID {
 		switch x := p.(type) {
 		case ColEq:
 			ensure(x.Table, x.Column)
+		case ColNe:
+			ensure(x.Table, x.Column)
 		case ColRange:
 			ensure(x.Table, x.Column)
 		case And:
