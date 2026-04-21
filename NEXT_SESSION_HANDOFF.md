@@ -4,33 +4,27 @@ Use this file to start the next agent on the next real Shunter parity / hardenin
 
 ## What just landed (2026-04-21)
 
-Targeted Phase 2 Slice 2 protocol follow-through: `SubscriptionError` now matches the intended optional-field / `TableID` wire shape.
+Targeted broader SQL/query-surface parity follow-through: the current narrow SQL surface now accepts reference query-builder-style parenthesized WHERE predicates end-to-end on the already-supported single-table / narrow join-backed shapes, and alias-qualified `OR` predicates with mixed qualified/unqualified column references are now explicitly pinned end-to-end on the already-supported single-table alias surface.
 
-- Root gap confirmed in live code/docs before edits: `docs/current-status.md`, `docs/spacetimedb-parity-roadmap.md`, and `docs/parity-phase0-ledger.md` still listed `SubscriptionError.TableID` / optional-field parity as the remaining response-envelope gap in this Phase 2 Slice 2 family.
-- Wire shape fix: `protocol/server_messages.go` now models `SubscriptionError` as:
-  - `RequestID *uint32`
-  - `QueryID *uint32`
-  - `TableID *schema.TableID`
-  - `Error string`
-  and server-message encode/decode now round-trip those optional fields on the wire.
-- Response/helper follow-through: `protocol/send_responses.go` now provides optional-field helpers plus nil-safe query-id logging for `SubscriptionError` delivery paths.
-- Protocol error-path follow-through: `protocol/handle_subscribe_single.go`, `protocol/handle_subscribe_multi.go`, `protocol/handle_unsubscribe_single.go`, `protocol/handle_unsubscribe_multi.go`, and `protocol/fanout_adapter.go` now emit the pointer-backed shape consistently.
-- Executor reply-path follow-through: `executor/protocol_inbox_adapter.go` now builds the optional-field `SubscriptionError` shape and infers `TableID` conservatively only when exactly one obvious table can be attached from the predicate/update surface.
-- Positive parity pin: `protocol/parity_message_family_test.go::TestPhase2SubscriptionErrorOptionalShape` now pins the optional request/query/table field shape directly.
-- Wire and seam pins: `protocol/server_messages_test.go::TestSubscriptionErrorRoundTrip`, `protocol/send_responses_test.go`, `protocol/handle_subscribe_test.go`, `protocol/handle_unsubscribe_test.go`, `protocol/fanout_adapter_test.go`, and `executor/protocol_inbox_adapter_test.go` now cover the pointer-backed shape and the conservative `TableID` attachment rule.
-- Cleanup note: the stale intermediate pin `TestPhase2SubscriptionErrorCarriesQueryID` was removed once the stronger optional-shape pin landed; that is why the clean-tree test total dropped by one.
+- Root gap confirmed in live code/docs before edits: after the quoted-identifier slice landed, the next still-open reference-backed parser mismatch was the query-builder's parenthesized WHERE output, for example `SELECT "users".* FROM "users" JOIN "other" ON "users"."id" = "other"."uid" WHERE (("users"."id" = 1) AND ("users"."id" > 10))`, which Shunter still rejected at `query/sql/parser.go` with `expected column name, got "("`.
+- TDD proof first: added parser / subscribe / one-off pins for the parenthesized conjunction surface, then verified they failed before touching production code via `rtk go test ./query/sql ./protocol -run 'ParenthesizedConjunction' -count=1`.
+- Minimal parser widening: `query/sql/parser.go` now tokenizes `(` / `)` explicitly and parses parenthesized predicate terms while preserving the existing boolean grammar (`OR` over conjunctions, `AND` over terms). This widens only grouping syntax on already-supported comparison forms; it does not add new operators, projections, joins, or broader SQL clauses.
+- Public seam pins: `query/sql/parser_test.go::TestParseQuotedIdentifiersJoinProjectionOnAndWhereWithParenthesizedConjunction`, `protocol/handle_subscribe_test.go::TestHandleSubscribeSingle_QuotedIdentifiersJoinFilterWithParenthesizedConjunction`, and `protocol/handle_oneoff_test.go::TestHandleOneOffQuery_QuotedIdentifiersJoinProjectionWithParenthesizedConjunction` now pin the reference-style grouped-WHERE surface across parser, subscribe admission, and one-off execution.
+- Alias-qualified-OR parity pin follow-through: reference expr coverage already accepted mixed qualified/unqualified `OR` under an alias (`crates/expr/src/check.rs` line 451). Added `query/sql/parser_test.go::TestParseWhereOrPredicatesWithAlias`, `protocol/handle_subscribe_test.go::TestHandleSubscribeSingle_OrComparisonWithAlias`, and `protocol/handle_oneoff_test.go::TestHandleOneOffQuery_OrComparisonWithAlias`; these passed immediately, so no production-code change was needed.
+- Docs follow-through: `docs/current-status.md`, `docs/parity-phase0-ledger.md`, and `TECH-DEBT.md` now record parenthesized query-builder WHERE support plus the alias-qualified-OR parity pin while keeping the remaining broader SQL/query-surface backlog explicit.
 
 Verification run after landing the slice:
-- `rtk go test ./protocol ./executor -run 'SubscriptionError|RegisterSubscriptionSet|UnregisterSubscriptionSet|HandleSubscribe|HandleUnsubscribe|SendSubscriptionError|FanOutSenderAdapter' -count=1`
-- `rtk go fmt ./protocol ./executor`
-- `rtk go vet ./protocol ./executor`
-- `rtk go test ./protocol ./executor ./subscription -count=1`
+- `rtk go test ./query/sql ./protocol -run 'ParenthesizedConjunction' -count=1`
+- `rtk go test ./query/sql ./protocol -run 'TestParseWhereOrPredicatesWithAlias|TestHandleSubscribeSingle_OrComparisonWithAlias|TestHandleOneOffQuery_OrComparisonWithAlias' -count=1`
+- `rtk go fmt ./query/sql ./protocol`
+- `rtk go test ./query/sql ./protocol -run 'OrComparison|ParenthesizedConjunction|QuotedIdentifiers' -count=1`
+- `rtk go vet ./query/sql ./protocol`
 - `rtk go test ./...`
 
 Current clean-tree baseline:
-- `Go test: 1156 passed in 10 packages`
+- `Go test: 1165 passed in 10 packages`
 
-Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, protocol lifecycle, and message-family follow-through.
+Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, protocol lifecycle, message-family, quoted-identifier SQL, and parenthesized-WHERE SQL follow-through.
 
 ## Recommended next slice
 
@@ -258,7 +252,7 @@ Do not call the work done unless all are true:
 - reference-backed or debt-anchored target shape was checked directly against reference material or current live code
 - every newly accepted or rejected shape has focused tests
 - already-landed parity pins still pass (including `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForInserts`, `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForDeletes`, `TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers`, `TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers`, `TestCommittedStateTableSameEnvelopeReturnsSamePointer`, `TestCommittedStateTableRetainedPointerIsStaleAfterReRegister`, `TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose`, `TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete`, `TestDispatchLoop_HandlerCtxCancelsOnConnClose`, `TestDispatchLoop_HandlerCtxCancelsOnOuterCtx`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOutboundBlocked`, `TestCloseAllBoundsDisconnectOnInboxHang`, `TestCloseAllDeliversOnInboxOK`, `TestCloseAll_DisconnectsEveryConnection`, `TestCloseAll_EmptyManagerNoOp`, `TestSuperviseLifecycleBoundsDisconnectOnInboxHang`, `TestSuperviseLifecycleDeliversOnInboxOK`, `TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang`, `TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK`, `TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation`, `TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation`, `TestWatchReducerResponseExitsOnConnClose`, `TestWatchReducerResponseDeliversOnRespCh`, `TestWatchReducerResponseExitsOnRespChClose`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnInsert`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnRemove`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_Join`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_SingleTable`, `TestCommittedSnapshotTableScanPanicsOnMidIterClose`, `TestCommittedSnapshotIndexRangePanicsOnMidIterClose`, `TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose`, `TestCommittedSnapshotTableScanPanicsAfterClose`, `TestCommittedSnapshotIndexScanPanicsAfterClose`, `TestCommittedSnapshotIndexRangePanicsAfterClose`, `TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`, `TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment`, `TestParityP0Sched001PanicRetainsScheduledRow`, `TestPhase2Slice3DefaultOutgoingBufferMatchesReference`, and `TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit`).
-- full suite still passes. Clean-tree baseline remains `Go test: 1156 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 flake cleanup follow-through.
+- full suite still passes. Clean-tree baseline remains `Go test: 1159 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 flake cleanup and quoted-identifier SQL follow-through.
 - docs and handoff reflect the new truth exactly
 
 ## Deliverables for the next session
@@ -303,7 +297,8 @@ As of this handoff:
 - OI-004 dispatch-handler ctx sub-hazard closed — `runDispatchLoop` now derives a `handlerCtx` that cancels on `c.closed`
 - Phase 2 Slice 2 applied-envelope host execution duration closed — `SubscribeSingleApplied`, `SubscribeMultiApplied`, `UnsubscribeSingleApplied`, and `UnsubscribeMultiApplied` now carry `TotalHostExecutionDurationMicros` measured at the executor register/unregister seam and preserved through the protocol reply path
 - Phase 2 Slice 2 `SubscriptionError` optional-field / `TableID` follow-through closed — `SubscriptionError` now carries optional `RequestID`, optional `QueryID`, and optional `TableID` on the wire; protocol and executor reply paths emit the pointer-backed shape consistently; `TableID` is attached only when exactly one obvious table can be inferred from the predicate/update surface
+- broader SQL/query-surface parity follow-through: reference-style double-quoted identifiers now work end-to-end on the current narrow single-table / join-backed SQL surface; parser tokenization/keyword handling preserves quoted identifiers as identifiers rather than keywords, and the parser / subscribe / one-off seams are pinned by dedicated quoted-identifier tests
 - Other detached-goroutine surfaces in `conn.go` / `lifecycle.go` / `keepalive.go` and the `ClientSender.Send` no-ctx follow-on remain open under OI-004
 - next realistic anchors: broader SQL/query-surface parity (α), further Tier-B hardening (β), format-level commitlog parity (γ), individual scheduler deferrals (δ)
 - targeted flaky-test cleanup in `subscription/delta_pool_test.go`, `subscription/eval_projected_rows_test.go`, and scheduler replay parity coverage is now closed; no known clean-tree intermittent test remains
-- 10 packages, clean-tree full-suite baseline `Go test: 1156 passed in 10 packages`
+- 10 packages, clean-tree full-suite baseline `Go test: 1165 passed in 10 packages`

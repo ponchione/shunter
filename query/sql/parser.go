@@ -4,7 +4,10 @@
 // Grammar:
 //
 //	stmt   = "SELECT" ( "*" | ident "." "*" ) "FROM" ident [ [ "AS" ] ident ] [ [ "INNER" ] "JOIN" ident [ [ "AS" ] ident ] "ON" qcol "=" qcol ] [ where ] [ ";" ]
-//	where  = "WHERE" cmp ( ( "AND" | "OR" ) cmp )*
+//	where  = "WHERE" pred
+//	pred   = conj ( "OR" conj )*
+//	conj   = term ( "AND" term )*
+//	term   = cmp | "(" pred ")"
 //	cmp    = colref op literal
 //	colref = ident | ident "." ident
 //	qcol   = ident "." ident
@@ -125,12 +128,12 @@ func (OrPredicate) isPredicate() {}
 // ProjectedTable alone is insufficient because both aliases resolve to the
 // same base table.
 type Statement struct {
-	Table           string
-	ProjectedTable  string
-	ProjectedAlias  string
-	Join            *JoinClause
-	Predicate       Predicate
-	Filters         []Filter
+	Table          string
+	ProjectedTable string
+	ProjectedAlias string
+	Join           *JoinClause
+	Predicate      Predicate
+	Filters        []Filter
 }
 
 type relationBindings struct {
@@ -171,13 +174,16 @@ const (
 	tokComma
 	tokSemicolon
 	tokDot
+	tokLParen
+	tokRParen
 	tokSymbol // any other single char — always unsupported
 )
 
 type token struct {
-	kind tokKind
-	text string // original slice for idents/numbers/symbols; unescaped body for strings
-	pos  int
+	kind   tokKind
+	text   string // original slice for idents/numbers/symbols; unescaped body for strings / quoted identifiers
+	pos    int
+	quoted bool
 }
 
 func tokenize(s string) ([]token, error) {
@@ -237,6 +243,12 @@ func tokenize(s string) ([]token, error) {
 		case c == '.':
 			out = append(out, token{kind: tokDot, text: ".", pos: i})
 			i++
+		case c == '(':
+			out = append(out, token{kind: tokLParen, text: "(", pos: i})
+			i++
+		case c == ')':
+			out = append(out, token{kind: tokRParen, text: ")", pos: i})
+			i++
 		case c == '\'':
 			start := i
 			i++
@@ -260,6 +272,32 @@ func tokenize(s string) ([]token, error) {
 				return nil, fmt.Errorf("%w: unterminated string literal at position %d", ErrUnsupportedSQL, start)
 			}
 			out = append(out, token{kind: tokString, text: sb.String(), pos: start})
+		case c == '"':
+			start := i
+			i++
+			var sb strings.Builder
+			closed := false
+			for i < len(s) {
+				if s[i] == '"' {
+					if i+1 < len(s) && s[i+1] == '"' {
+						sb.WriteByte('"')
+						i += 2
+						continue
+					}
+					closed = true
+					i++
+					break
+				}
+				sb.WriteByte(s[i])
+				i++
+			}
+			if !closed {
+				return nil, fmt.Errorf("%w: unterminated quoted identifier at position %d", ErrUnsupportedSQL, start)
+			}
+			if sb.Len() == 0 {
+				return nil, fmt.Errorf("%w: empty quoted identifier at position %d", ErrUnsupportedSQL, start)
+			}
+			out = append(out, token{kind: tokIdent, text: sb.String(), pos: start, quoted: true})
 		case c == '-' || (c >= '0' && c <= '9'):
 			start := i
 			if c == '-' {
@@ -298,6 +336,14 @@ func isIdentCont(c byte) bool {
 	return isIdentStart(c) || (c >= '0' && c <= '9')
 }
 
+func isIdentifierToken(t token) bool {
+	return t.kind == tokIdent && (t.quoted || !isReserved(t.text))
+}
+
+func isKeywordToken(t token, kw string) bool {
+	return !t.quoted && t.kind == tokIdent && strings.EqualFold(t.text, kw)
+}
+
 // --- parser ---
 
 type parser struct {
@@ -305,7 +351,7 @@ type parser struct {
 	pos  int
 }
 
-func (p *parser) peek() token   { return p.toks[p.pos] }
+func (p *parser) peek() token    { return p.toks[p.pos] }
 func (p *parser) advance() token { t := p.toks[p.pos]; p.pos++; return t }
 
 func (p *parser) parseStatement() (Statement, error) {
@@ -320,7 +366,7 @@ func (p *parser) parseStatement() (Statement, error) {
 		return Statement{}, err
 	}
 	tableTok := p.peek()
-	if tableTok.kind != tokIdent || isReserved(tableTok.text) {
+	if !isIdentifierToken(tableTok) {
 		return Statement{}, p.unsupported("expected table name")
 	}
 	p.advance()
@@ -331,10 +377,10 @@ func (p *parser) parseStatement() (Statement, error) {
 	}
 	stmt := Statement{Table: tableName, ProjectedTable: tableName, ProjectedAlias: projectionQualifier}
 	bindings := relationBindings{defaultTable: tableName, byQualifier: singleQualifierMap(tableName, leftQualifiers)}
-	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "INNER") {
+	if isKeywordToken(p.peek(), "INNER") {
 		p.advance()
 	}
-	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "JOIN") {
+	if isKeywordToken(p.peek(), "JOIN") {
 		join, rightQualifiers, err := p.parseJoinClause(tableName, leftQualifiers)
 		if err != nil {
 			return Statement{}, err
@@ -358,18 +404,18 @@ func (p *parser) parseStatement() (Statement, error) {
 		// "Invalid number of tables in subscription: {N}" for N >= 3. Shunter
 		// rejects the chain shape at the parser boundary so the rejection is
 		// intentional and pinned, not an incidental "unexpected token" miss.
-		if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "INNER") {
-			if p.pos+1 < len(p.toks) && p.toks[p.pos+1].kind == tokIdent && strings.EqualFold(p.toks[p.pos+1].text, "JOIN") {
+		if isKeywordToken(p.peek(), "INNER") {
+			if p.pos+1 < len(p.toks) && isKeywordToken(p.toks[p.pos+1], "JOIN") {
 				return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
 			}
 		}
-		if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "JOIN") {
+		if isKeywordToken(p.peek(), "JOIN") {
 			return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
 		}
 	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
 		return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match table %q", projectionQualifier, tableName))
 	}
-	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "WHERE") {
+	if isKeywordToken(p.peek(), "WHERE") {
 		p.advance()
 		pred, filters, err := p.parseWhere(bindings)
 		if err != nil {
@@ -393,7 +439,7 @@ func (p *parser) parseProjection() (string, error) {
 		p.advance()
 		return "", nil
 	}
-	if t.kind != tokIdent || isReserved(t.text) {
+	if !isIdentifierToken(t) {
 		return "", p.unsupported("projection must be '*' or 'table.*'")
 	}
 	qualifier := t.text
@@ -410,7 +456,7 @@ func (p *parser) parseProjection() (string, error) {
 }
 
 func (p *parser) parseRelationQualifiers(tableName string) ([]string, error) {
-	if p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "AS") {
+	if isKeywordToken(p.peek(), "AS") {
 		p.advance()
 		alias, err := p.parseAlias()
 		if err != nil {
@@ -418,7 +464,7 @@ func (p *parser) parseRelationQualifiers(tableName string) ([]string, error) {
 		}
 		return []string{alias}, nil
 	}
-	if p.peek().kind == tokIdent && !isReserved(p.peek().text) {
+	if isIdentifierToken(p.peek()) {
 		alias, err := p.parseAlias()
 		if err != nil {
 			return nil, err
@@ -430,7 +476,7 @@ func (p *parser) parseRelationQualifiers(tableName string) ([]string, error) {
 
 func (p *parser) parseAlias() (string, error) {
 	t := p.peek()
-	if t.kind != tokIdent || isReserved(t.text) {
+	if !isIdentifierToken(t) {
 		return "", p.unsupported("expected alias name")
 	}
 	p.advance()
@@ -442,7 +488,7 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 		return nil, nil, err
 	}
 	rightTok := p.peek()
-	if rightTok.kind != tokIdent || isReserved(rightTok.text) {
+	if !isIdentifierToken(rightTok) {
 		return nil, nil, p.unsupported("expected joined table name")
 	}
 	p.advance()
@@ -456,7 +502,7 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	if strings.EqualFold(leftTable, rightTable) && strings.EqualFold(leftAlias, rightAlias) {
 		return nil, nil, p.unsupported("self join requires aliases")
 	}
-	if !(p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "ON")) {
+	if !isKeywordToken(p.peek(), "ON") {
 		return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil
 	}
 	if err := p.expectKeyword("ON"); err != nil {
@@ -492,7 +538,7 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 
 func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, error) {
 	qualifierTok := p.peek()
-	if qualifierTok.kind != tokIdent || isReserved(qualifierTok.text) {
+	if !isIdentifierToken(qualifierTok) {
 		return ColumnRef{}, p.unsupported("expected qualified column reference")
 	}
 	p.advance()
@@ -501,7 +547,7 @@ func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, e
 	}
 	p.advance()
 	columnTok := p.peek()
-	if columnTok.kind != tokIdent || isReserved(columnTok.text) {
+	if !isIdentifierToken(columnTok) {
 		return ColumnRef{}, p.unsupported("expected column name after qualifier")
 	}
 	p.advance()
@@ -517,7 +563,7 @@ func (p *parser) parseWhere(bindings relationBindings) (Predicate, []Filter, err
 	if err != nil {
 		return nil, nil, err
 	}
-	if p.peek().kind == tokIdent {
+	if !p.peek().quoted && p.peek().kind == tokIdent {
 		kw := strings.ToUpper(p.peek().text)
 		if kw == "ORDER" || kw == "LIMIT" || kw == "GROUP" || kw == "HAVING" || kw == "JOIN" {
 			return nil, nil, p.unsupported(fmt.Sprintf("%s not supported", kw))
@@ -532,7 +578,7 @@ func (p *parser) parseDisjunction(bindings relationBindings) (Predicate, error) 
 	if err != nil {
 		return nil, err
 	}
-	for p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "OR") {
+	for isKeywordToken(p.peek(), "OR") {
 		p.advance()
 		right, err := p.parseConjunction(bindings)
 		if err != nil {
@@ -544,19 +590,35 @@ func (p *parser) parseDisjunction(bindings relationBindings) (Predicate, error) 
 }
 
 func (p *parser) parseConjunction(bindings relationBindings) (Predicate, error) {
-	left, err := p.parseComparisonPredicate(bindings)
+	left, err := p.parsePredicateTerm(bindings)
 	if err != nil {
 		return nil, err
 	}
-	for p.peek().kind == tokIdent && strings.EqualFold(p.peek().text, "AND") {
+	for isKeywordToken(p.peek(), "AND") {
 		p.advance()
-		right, err := p.parseComparisonPredicate(bindings)
+		right, err := p.parsePredicateTerm(bindings)
 		if err != nil {
 			return nil, err
 		}
 		left = AndPredicate{Left: left, Right: right}
 	}
 	return left, nil
+}
+
+func (p *parser) parsePredicateTerm(bindings relationBindings) (Predicate, error) {
+	if p.peek().kind == tokLParen {
+		p.advance()
+		pred, err := p.parseDisjunction(bindings)
+		if err != nil {
+			return nil, err
+		}
+		if p.peek().kind != tokRParen {
+			return nil, p.unsupported("expected ')' to close parenthesized predicate")
+		}
+		p.advance()
+		return pred, nil
+	}
+	return p.parseComparisonPredicate(bindings)
 }
 
 func (p *parser) parseComparisonPredicate(bindings relationBindings) (Predicate, error) {
@@ -590,7 +652,7 @@ func flattenAndFilters(pred Predicate) ([]Filter, bool) {
 
 func (p *parser) parseComparison(bindings relationBindings) (Filter, error) {
 	t := p.peek()
-	if t.kind != tokIdent || isReserved(t.text) {
+	if !isIdentifierToken(t) {
 		return Filter{}, p.unsupported(fmt.Sprintf("expected column name, got %q", t.text))
 	}
 	p.advance()
@@ -601,7 +663,7 @@ func (p *parser) parseComparison(bindings relationBindings) (Filter, error) {
 		qualifier := columnName
 		p.advance()
 		t = p.peek()
-		if t.kind != tokIdent || isReserved(t.text) {
+		if !isIdentifierToken(t) {
 			return Filter{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
 		}
 		resolved, ok := resolveQualifier(qualifier, bindings.byQualifier)
@@ -659,11 +721,11 @@ func (p *parser) parseLiteral() (Literal, error) {
 		p.advance()
 		return Literal{Kind: LitString, Str: t.text}, nil
 	case tokIdent:
-		if strings.EqualFold(t.text, "TRUE") {
+		if !t.quoted && strings.EqualFold(t.text, "TRUE") {
 			p.advance()
 			return Literal{Kind: LitBool, Bool: true}, nil
 		}
-		if strings.EqualFold(t.text, "FALSE") {
+		if !t.quoted && strings.EqualFold(t.text, "FALSE") {
 			p.advance()
 			return Literal{Kind: LitBool, Bool: false}, nil
 		}
@@ -678,7 +740,7 @@ func (p *parser) expectKeyword(kw string) error {
 	if t.kind == tokEOF {
 		return p.unsupported(fmt.Sprintf("expected %s, got end of input", kw))
 	}
-	if t.kind != tokIdent || !strings.EqualFold(t.text, kw) {
+	if !isKeywordToken(t, kw) {
 		return p.unsupported(fmt.Sprintf("expected %s, got %q", kw, t.text))
 	}
 	p.advance()
@@ -729,4 +791,3 @@ func resolveQualifier(qualifier string, lookup map[string]string) (string, bool)
 	resolved, ok := lookup[strings.ToUpper(qualifier)]
 	return resolved, ok
 }
-

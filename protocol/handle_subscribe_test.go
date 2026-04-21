@@ -531,6 +531,58 @@ func TestHandleSubscribeSingle_OrComparison(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_OrComparisonWithAlias(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   17,
+		QueryID:     14,
+		QueryString: "SELECT item.* FROM users AS item WHERE item.id = 1 OR name = 'alice'",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	orPred, ok := req.Predicates[0].(subscription.Or)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Or", req.Predicates[0])
+	}
+	left, ok := orPred.Left.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0].Left type = %T, want ColEq", orPred.Left)
+	}
+	right, ok := orPred.Right.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0].Right type = %T, want ColEq", orPred.Right)
+	}
+	if left.Column != 0 || right.Column != 1 {
+		t.Fatalf("unexpected OR column ids: left=%d right=%d", left.Column, right.Column)
+	}
+	if !left.Value.Equal(types.NewUint32(1)) {
+		t.Fatalf("left value = %v, want 1", left.Value)
+	}
+	if !right.Value.Equal(types.NewString("alice")) {
+		t.Fatalf("right value = %v, want alice", right.Value)
+	}
+}
+
 func TestHandleSubscribeSingle_QualifiedStarAlias(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -652,6 +704,167 @@ func TestHandleSubscribeSingle_JoinFilterOnRightTable(t *testing.T) {
 	}
 	if !rng.Upper.Value.Equal(types.NewUint32(10)) || rng.Upper.Inclusive || rng.Upper.Unbounded {
 		t.Fatalf("upper bound = %+v, want exclusive bounded 10", rng.Upper)
+	}
+}
+
+func TestHandleSubscribeSingle_QuotedIdentifiersJoinFilterOnRightTable(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   117,
+		QueryID:     114,
+		QueryString: `SELECT "Orders".* FROM "Orders" JOIN "Inventory" ON "Orders"."product_id" = "Inventory"."id" WHERE "Inventory"."quantity" < 10`,
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	orders, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	inventory, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	if joinPred.Left != orders.ID || joinPred.Right != inventory.ID {
+		t.Fatalf("join tables = %d/%d, want %d/%d", joinPred.Left, joinPred.Right, orders.ID, inventory.ID)
+	}
+	if joinPred.LeftCol != 1 || joinPred.RightCol != 0 {
+		t.Fatalf("join cols = %d/%d, want 1/0", joinPred.LeftCol, joinPred.RightCol)
+	}
+	rng, ok := joinPred.Filter.(subscription.ColRange)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want ColRange", joinPred.Filter)
+	}
+	if rng.Table != inventory.ID || rng.Column != 1 {
+		t.Fatalf("range table/column = %d/%d, want %d/1", rng.Table, rng.Column, inventory.ID)
+	}
+	if !rng.Upper.Value.Equal(types.NewUint32(10)) || rng.Upper.Inclusive || rng.Upper.Unbounded {
+		t.Fatalf("upper bound = %+v, want exclusive bounded 10", rng.Upper)
+	}
+}
+
+func TestHandleSubscribeSingle_QuotedIdentifiersJoinFilterWithParenthesizedConjunction(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "users",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "other",
+		Columns: []schema.ColumnDefinition{
+			{Name: "uid", Type: schema.KindUint32, PrimaryKey: true},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   118,
+		QueryID:     115,
+		QueryString: `SELECT "users".* FROM "users" JOIN "other" ON "users"."id" = "other"."uid" WHERE (("users"."id" = 1) AND ("users"."id" > 0))`,
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	users, ok := eng.Registry().TableByName("users")
+	if !ok {
+		t.Fatal("users table missing from registry")
+	}
+	other, ok := eng.Registry().TableByName("other")
+	if !ok {
+		t.Fatal("other table missing from registry")
+	}
+	if joinPred.Left != users.ID || joinPred.Right != other.ID {
+		t.Fatalf("join tables = %d/%d, want %d/%d", joinPred.Left, joinPred.Right, users.ID, other.ID)
+	}
+	andPred, ok := joinPred.Filter.(subscription.And)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want And", joinPred.Filter)
+	}
+	left, ok := andPred.Left.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Join.Filter.Left type = %T, want ColEq", andPred.Left)
+	}
+	right, ok := andPred.Right.(subscription.ColRange)
+	if !ok {
+		t.Fatalf("Join.Filter.Right type = %T, want ColRange", andPred.Right)
+	}
+	if left.Table != users.ID || left.Column != 0 || !left.Value.Equal(types.NewUint32(1)) {
+		t.Fatalf("left predicate = %+v, want users.id = 1", left)
+	}
+	if right.Table != users.ID || right.Column != 0 {
+		t.Fatalf("right predicate table/column = %d/%d, want %d/0", right.Table, right.Column, users.ID)
+	}
+	if right.Lower.Unbounded || !right.Lower.Value.Equal(types.NewUint32(0)) || right.Lower.Inclusive {
+		t.Fatalf("lower bound = %+v, want exclusive bounded 0", right.Lower)
+	}
+	if !right.Upper.Unbounded {
+		t.Fatalf("upper bound = %+v, want unbounded", right.Upper)
 	}
 }
 

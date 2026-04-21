@@ -223,6 +223,49 @@ func TestParseWhereOrPredicates(t *testing.T) {
 	}
 }
 
+// Reference expr type-check coverage accepts alias-qualified OR predicates with
+// mixed qualified and unqualified column references (`crates/expr/src/check.rs`
+// line 451: `select * from s as r where r.bytes = 0xABCD or bytes = X'ABCD'`).
+// Shunter's narrower literal surface cannot express those bytes literals, so
+// this pins the same alias-scope behavior on an already-supported int/string
+// shape.
+func TestParseWhereOrPredicatesWithAlias(t *testing.T) {
+	stmt, err := Parse("SELECT item.* FROM users AS item WHERE item.id = 1 OR name = 'alice'")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.ProjectedAlias != "item" {
+		t.Fatalf("ProjectedAlias = %q, want item", stmt.ProjectedAlias)
+	}
+	orPred, ok := stmt.Predicate.(OrPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want OrPredicate", stmt.Predicate)
+	}
+	left, ok := orPred.Left.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Left type = %T, want ComparisonPredicate", orPred.Left)
+	}
+	right, ok := orPred.Right.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Right type = %T, want ComparisonPredicate", orPred.Right)
+	}
+	if left.Filter.Column != "id" || left.Filter.Table != "users" || left.Filter.Alias != "item" {
+		t.Fatalf("left filter = %+v, want users/item.id", left.Filter)
+	}
+	if right.Filter.Column != "name" || right.Filter.Table != "users" || right.Filter.Alias != "" {
+		t.Fatalf("right filter = %+v, want bare users.name", right.Filter)
+	}
+	if left.Filter.Literal.Int != 1 {
+		t.Fatalf("left literal int = %d, want 1", left.Filter.Literal.Int)
+	}
+	if right.Filter.Literal.Kind != LitString || right.Filter.Literal.Str != "alice" {
+		t.Fatalf("right literal = %+v, want string alice", right.Filter.Literal)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %v, want nil/empty for OR tree", stmt.Filters)
+	}
+}
+
 func TestParseJoinQualifiedProjectionOnAndWhere(t *testing.T) {
 	stmt, err := Parse("SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10")
 	if err != nil {
@@ -261,6 +304,72 @@ func TestParseJoinQualifiedProjectionOnAndWhere(t *testing.T) {
 	}
 	if len(stmt.Filters) != 1 {
 		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
+	}
+}
+
+func TestParseQuotedIdentifiersJoinProjectionOnAndWhere(t *testing.T) {
+	stmt, err := Parse(`SELECT "Orders".* FROM "Orders" JOIN "Inventory" ON "Orders"."product_id" = "Inventory"."id" WHERE "Inventory"."quantity" < 10`)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Orders" {
+		t.Fatalf("Table = %q, want Orders", stmt.Table)
+	}
+	if stmt.ProjectedTable != "Orders" {
+		t.Fatalf("ProjectedTable = %q, want Orders", stmt.ProjectedTable)
+	}
+	if stmt.ProjectedAlias != "Orders" {
+		t.Fatalf("ProjectedAlias = %q, want Orders", stmt.ProjectedAlias)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.LeftTable != "Orders" || stmt.Join.RightTable != "Inventory" {
+		t.Fatalf("join tables = %q/%q, want Orders/Inventory", stmt.Join.LeftTable, stmt.Join.RightTable)
+	}
+	if stmt.Join.LeftOn.Table != "Orders" || stmt.Join.LeftOn.Column != "product_id" {
+		t.Fatalf("left ON = %+v, want Orders.product_id", stmt.Join.LeftOn)
+	}
+	if stmt.Join.RightOn.Table != "Inventory" || stmt.Join.RightOn.Column != "id" {
+		t.Fatalf("right ON = %+v, want Inventory.id", stmt.Join.RightOn)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "Inventory" || cmp.Filter.Column != "quantity" {
+		t.Fatalf("WHERE filter = %+v, want Inventory.quantity", cmp.Filter)
+	}
+	if cmp.Filter.Op != "<" || cmp.Filter.Literal.Int != 10 {
+		t.Fatalf("WHERE filter op/literal = %+v, want < 10", cmp.Filter)
+	}
+}
+
+func TestParseQuotedIdentifiersJoinProjectionOnAndWhereWithParenthesizedConjunction(t *testing.T) {
+	stmt, err := Parse(`SELECT "users".* FROM "users" JOIN "other" ON "users"."id" = "other"."uid" WHERE (("users"."id" = 1) AND ("users"."id" > 10))`)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	andPred, ok := stmt.Predicate.(AndPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want AndPredicate", stmt.Predicate)
+	}
+	left, ok := andPred.Left.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Left type = %T, want ComparisonPredicate", andPred.Left)
+	}
+	right, ok := andPred.Right.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Right type = %T, want ComparisonPredicate", andPred.Right)
+	}
+	if left.Filter.Table != "users" || left.Filter.Column != "id" || left.Filter.Op != "=" || left.Filter.Literal.Int != 1 {
+		t.Fatalf("left filter = %+v, want users.id = 1", left.Filter)
+	}
+	if right.Filter.Table != "users" || right.Filter.Column != "id" || right.Filter.Op != ">" || right.Filter.Literal.Int != 10 {
+		t.Fatalf("right filter = %+v, want users.id > 10", right.Filter)
+	}
+	if len(stmt.Filters) != 2 {
+		t.Fatalf("Filters len = %d, want 2", len(stmt.Filters))
 	}
 }
 
