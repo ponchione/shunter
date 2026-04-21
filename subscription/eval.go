@@ -115,11 +115,60 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 					cloned := u
 					cloned.SubscriptionID = subID
 					// OI-006 fanout aliasing: give each subscriber an
-					// independent slice header for Inserts/Deletes so
-					// downstream replace/append on one subscriber's
-					// updates cannot leak into another's view. Row
-					// payloads (`types.ProductValue`) remain shared
-					// under the post-commit row-immutability contract.
+					// independent outer slice header for Inserts/Deletes
+					// so downstream replace/append on one subscriber's
+					// updates cannot leak into another's view.
+					//
+					// Row payloads (`types.ProductValue`, itself
+					// `[]Value`) remain shared across subscribers by
+					// design. The `append([]types.ProductValue(nil),
+					// cloned.Inserts...)` below copies ProductValue
+					// slice-header values into the new outer backing
+					// array, but each copied header still references
+					// the original `[]Value` backing array:
+					// `&updA[0].Inserts[0][0] == &updB[0].Inserts[0][0]`
+					// holds across subscribers. Sharing is governed by
+					// the post-commit row-immutability contract:
+					//
+					//  1. Rows produced by the store after commit
+					//     completion are not mutated in place. The
+					//     store-side counterpart is enforced by
+					//     single-writer executor discipline and the
+					//     `CommittedSnapshot` open→Close RLock lifetime
+					//     (OI-005 envelopes).
+					//  2. Downstream consumers of the fanout
+					//     `SubscriptionUpdate.Inserts` / `.Deletes`
+					//     slices — `subscription/fanout_worker.go`
+					//     delivery and `protocol/fanout_adapter.go`
+					//     encoding — must only read row payloads,
+					//     never mutate `Value` elements in place.
+					//
+					// Three hazards the contract prevents but that this
+					// boundary cannot block mechanically:
+					//  - in-place `Value` mutation on any downstream
+					//    path (e.g., rewriting a column during encoding)
+					//    leaks into every other subscriber's view of
+					//    the same commit;
+					//  - ProductValue append within shared cap followed
+					//    by mutation on the newly-visible tail corrupts
+					//    peer ProductValues that still alias the same
+					//    `[]Value`;
+					//  - a store-side change that mutated
+					//    already-committed rows in place (lazy
+					//    normalization on read) is externally
+					//    indistinguishable from an in-place fanout
+					//    mutation and reopens the same hazard shape.
+					//
+					// Deepening the copy to independent `[]Value`
+					// backing arrays per subscriber would cost work
+					// proportional to row width × row count ×
+					// subscriber count for no client-visible benefit
+					// under the contract, and is not the fix. Pinned
+					// by
+					// `eval_fanout_row_payload_sharing_test.go::TestEvalFanoutRowPayloadsSharedAcrossSubscribersFor{Inserts,Deletes}`
+					// and (for the outer-slice independence
+					// complement)
+					// `eval_fanout_aliasing_test.go::TestEvalFanout{Inserts,Deletes}HeaderIsolatedAcrossSubscribers`.
 					if len(cloned.Inserts) > 0 {
 						cloned.Inserts = append([]types.ProductValue(nil), cloned.Inserts...)
 					}

@@ -21,6 +21,17 @@ import (
 //   - `SendTransactionUpdateLight` delivers the delta-only envelope to
 //     non-callers whose rows were touched.
 //
+// OI-006 row-payload sharing contract: `callerUpdates` (heavy) and
+// `updates` (light) are READ-ONLY. Each SubscriptionUpdate's
+// `Inserts` / `Deletes` slice is independent per subscriber
+// (OI-006 slice-header sub-hazard closed 2026-04-20), but the
+// contained `types.ProductValue` row payloads share `[]Value`
+// backing arrays across subscribers under the post-commit
+// row-immutability contract. Implementations must only read row
+// payloads; in-place mutation of `Value` elements corrupts every
+// other subscriber's view of the same commit. See
+// `docs/hardening-oi-006-row-payload-sharing.md`.
+//
 // Errors: implementations must return ErrSendBufferFull when the
 // client's outbound buffer is full, and ErrSendConnGone when the
 // target connection has already disconnected.

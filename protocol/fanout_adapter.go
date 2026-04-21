@@ -180,6 +180,16 @@ func encodeSubscriptionUpdate(su subscription.SubscriptionUpdate) (SubscriptionU
 	return encodeSubscriptionUpdateMemoized(su, nil)
 }
 
+// encodeRows encodes each row to BSATN bytes. Row payloads are
+// treated as READ-ONLY: OI-006 row-payload sharing contract governs
+// `types.ProductValue` backing-array sharing across subscribers of
+// the same query (see `docs/hardening-oi-006-row-payload-sharing.md`
+// and `subscription/eval.go::evaluate`). `bsatn.EncodeProductValue`
+// only reads `row` — any future change that mutated `row[i]` in place
+// during encoding (for example, column-level normalization before
+// serialization) would silently corrupt every other subscriber's
+// view of the same commit. Preserve the read-only discipline at this
+// seam.
 func encodeRows(rows []types.ProductValue) ([]byte, error) {
 	encoded := make([][]byte, len(rows))
 	for i, row := range rows {

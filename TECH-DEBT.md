@@ -211,14 +211,14 @@ Summary:
 - Fanout and update assembly remain a live hardening concern around shared slices/maps and per-subscriber isolation.
 - The parity docs treat this as one of the main non-cosmetic remaining risks.
 - Per-subscriber `Inserts` / `Deletes` slice-header aliasing sub-hazard closed 2026-04-20: `subscription/eval.go::evaluate` previously distributed the same slice header across every subscriber of a query, so any downstream replace/append on one subscriber's slice would silently corrupt every other subscriber's view of the same commit. Each subscriber now receives an independent slice header for `Inserts` / `Deletes`; row payloads (`types.ProductValue`) remain shared under the post-commit row-immutability contract. Pinned by `subscription/eval_fanout_aliasing_test.go::{TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers, TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers}`. See `docs/hardening-oi-006-fanout-aliasing.md`.
+- Row-payload sharing contract pin closed 2026-04-21: `types.ProductValue` (itself `[]Value`) backing arrays are shared across subscribers of the same query for both `Inserts` and `Deletes` — the 2026-04-20 slice-header fix copies ProductValue slice-header values into independent outer backing arrays, but each copied header still references the original `[]Value` backing array. Sharing is governed by the post-commit row-immutability contract: rows produced by the store are not mutated in place after commit, and downstream consumers (`subscription/fanout_worker.go`, `protocol/fanout_adapter.go::encodeRows`) only read row payloads. The contract was load-bearing but unwritten — a future consumer that mutated `Value` elements in place during delivery / encoding would silently corrupt every other subscriber's view of the same commit. Contract-pin slice only (no production-code semantic change): contract comments on `subscription/eval.go::evaluate` per-subscriber fanout loop, `subscription/fanout_worker.go::FanOutSender`, and `protocol/fanout_adapter.go::encodeRows` name the read-only discipline; two pin tests in `subscription/eval_fanout_row_payload_sharing_test.go` assert backing-array identity across subscribers and the mutation-leak hazard shape. Pinned by `TestEvalFanoutRowPayloadsSharedAcrossSubscribersFor{Inserts,Deletes}`. See `docs/hardening-oi-006-row-payload-sharing.md`.
 
 Why this matters:
 - Cross-subscriber mutation or aliasing bugs are subtle and can silently corrupt delivery behavior.
 - This weakens confidence in both parity and basic correctness claims.
 
 Remaining sub-hazards:
-- row-payload (`types.ProductValue`) sharing across subscribers (governed by the post-commit row-immutability contract; only relevant if a future consumer mutates row contents in place)
-- broader fanout assembly hazards in `subscription/fanout.go`, `subscription/fanout_worker.go`, and `protocol/fanout_adapter.go` if any future path introduces in-place mutation
+- broader fanout assembly hazards in `subscription/fanout.go`, `subscription/fanout_worker.go`, and `protocol/fanout_adapter.go` if any future path introduces in-place mutation. The contract-pin comments on `FanOutSender` and `encodeRows` name the read-only discipline so a future in-place mutation is visibly unsafe, but enforcement is by discipline and observational pins rather than machine-enforced immutability at the `types.ProductValue` boundary.
 
 Primary code surfaces:
 - `subscription/eval.go`
@@ -230,6 +230,7 @@ Source docs:
 - `docs/current-status.md` open hardening / correctness picture
 - `docs/spacetimedb-parity-roadmap.md` Tier B
 - `docs/hardening-oi-006-fanout-aliasing.md` (slice-header aliasing sub-hazard closure)
+- `docs/hardening-oi-006-row-payload-sharing.md` (row-payload sharing contract pin closure)
 
 ### OI-007: Recovery sequencing and replay-edge behavior still needs targeted parity closure
 
