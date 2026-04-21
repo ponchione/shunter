@@ -16,6 +16,9 @@ func TestDefaultProtocolOptions(t *testing.T) {
 	if opts.CloseHandshakeTimeout != 250*time.Millisecond {
 		t.Errorf("CloseHandshakeTimeout = %v, want 250ms", opts.CloseHandshakeTimeout)
 	}
+	if opts.DisconnectTimeout != 5*time.Second {
+		t.Errorf("DisconnectTimeout = %v, want 5s", opts.DisconnectTimeout)
+	}
 	if opts.OutgoingBufferMessages != DefaultOutgoingBufferMessages {
 		t.Errorf("OutgoingBufferMessages = %d, want %d", opts.OutgoingBufferMessages, DefaultOutgoingBufferMessages)
 	}

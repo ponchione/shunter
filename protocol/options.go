@@ -24,6 +24,17 @@ type ProtocolOptions struct {
 	// the peer's acknowledgement before the socket is forcibly torn
 	// down.
 	CloseHandshakeTimeout time.Duration
+	// DisconnectTimeout bounds the detached teardown goroutine the
+	// outbound-overflow path spawns in
+	// connManagerSender.enqueueOnConn. It is the ceiling for how long
+	// inbox.DisconnectClientSubscriptions + inbox.OnDisconnect may
+	// run before the teardown proceeds to close(c.closed) anyway.
+	// OI-004 sub-hazard pin
+	// (docs/hardening-oi-004-sender-disconnect-context.md): with a
+	// Background ctx the detached goroutine was unbounded if either
+	// inbox call hung; the bounded ctx makes the leak observable
+	// and collectible.
+	DisconnectTimeout time.Duration
 	// OutgoingBufferMessages caps the per-connection outbound queue.
 	// Overflow triggers a 1008 close per SPEC-005 §10.1.
 	OutgoingBufferMessages int
@@ -50,6 +61,7 @@ func DefaultProtocolOptions() ProtocolOptions {
 		PingInterval:           15 * time.Second,
 		IdleTimeout:            30 * time.Second,
 		CloseHandshakeTimeout:  250 * time.Millisecond,
+		DisconnectTimeout:      5 * time.Second,
 		OutgoingBufferMessages: DefaultOutgoingBufferMessages,
 		IncomingQueueMessages:  64,
 		MaxMessageSize:         4 * 1024 * 1024,
