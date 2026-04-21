@@ -51,6 +51,21 @@ func closeProtocolError(conn *Conn, reason string) {
 // read marks activity per SPEC-005 S5.4.
 //
 // Exit conditions: ctx cancelled, c.closed closed, or ws.Read error.
+//
+// OI-004 sub-hazard pin
+// (docs/hardening-oi-004-dispatch-handler-context.md): handlerCtx is
+// derived from the outer ctx and additionally cancels when c.closed
+// fires (SPEC-005 §5.3 step 4 teardown signal). Handler closures
+// spawned below forward handlerCtx into inbox.CallReducer /
+// inbox.RegisterSubscriptionSet / inbox.UnregisterSubscriptionSet,
+// which route through executor.SubmitWithContext — in default
+// (non-reject) mode that seam blocks on e.inbox <- cmd until ctx
+// cancels. The production root is context.Background() at
+// protocol/upgrade.go:201, so without the c.closed wire a wedged
+// executor (inbox full from a hung reducer or engine stall) would
+// leak handler goroutines indefinitely and pin their inflightSem
+// slot and captured *Conn past disconnect. Pin test:
+// TestDispatchLoop_HandlerCtxCancelsOnConnClose.
 func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 	readCtx := ctx
 	if c.readCtx != nil {
@@ -65,6 +80,15 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		}()
 		readCtx = combinedCtx
 	}
+	handlerCtx, handlerCancel := context.WithCancel(ctx)
+	defer handlerCancel()
+	go func() {
+		select {
+		case <-c.closed:
+			handlerCancel()
+		case <-handlerCtx.Done():
+		}
+	}()
 
 	for {
 		select {
@@ -121,37 +145,37 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			run = func() { handlers.OnSubscribeSingle(ctx, c, &m) }
+			run = func() { handlers.OnSubscribeSingle(handlerCtx, c, &m) }
 		case SubscribeMultiMsg:
 			if handlers.OnSubscribeMulti == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			run = func() { handlers.OnSubscribeMulti(ctx, c, &m) }
+			run = func() { handlers.OnSubscribeMulti(handlerCtx, c, &m) }
 		case UnsubscribeSingleMsg:
 			if handlers.OnUnsubscribeSingle == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			run = func() { handlers.OnUnsubscribeSingle(ctx, c, &m) }
+			run = func() { handlers.OnUnsubscribeSingle(handlerCtx, c, &m) }
 		case UnsubscribeMultiMsg:
 			if handlers.OnUnsubscribeMulti == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			run = func() { handlers.OnUnsubscribeMulti(ctx, c, &m) }
+			run = func() { handlers.OnUnsubscribeMulti(handlerCtx, c, &m) }
 		case CallReducerMsg:
 			if handlers.OnCallReducer == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			run = func() { handlers.OnCallReducer(ctx, c, &m) }
+			run = func() { handlers.OnCallReducer(handlerCtx, c, &m) }
 		case OneOffQueryMsg:
 			if handlers.OnOneOffQuery == nil {
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
-			run = func() { handlers.OnOneOffQuery(ctx, c, &m) }
+			run = func() { handlers.OnOneOffQuery(handlerCtx, c, &m) }
 		}
 
 		// Incoming backpressure (SPEC-005 §10.2, Story 6.2):
