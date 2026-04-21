@@ -124,6 +124,7 @@ Summary:
 - This is the main correctness/hardening theme still called out by the current-status and parity docs.
 - `watchReducerResponse` goroutine-leak sub-hazard closed 2026-04-20: `protocol/async_responses.go::watchReducerResponse` previously blocked unconditionally on `<-respCh`, so if the executor accepted a CallReducer but never sent on or closed the response channel (executor crash mid-commit, hung reducer, engine shutdown with in-flight work) the goroutine leaked for the lifetime of the process and held its `*Conn` alive past disconnect. The goroutine body is now split into `runReducerResponseWatcher` and selects on both `respCh` and `conn.closed`, tying the watcher to the owning `Conn`'s SPEC-005 §5.3 teardown. Pinned by `protocol/async_responses_test.go::{TestWatchReducerResponseExitsOnConnClose, TestWatchReducerResponseDeliversOnRespCh, TestWatchReducerResponseExitsOnRespChClose}`. See `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`.
 - `connManagerSender.enqueueOnConn` overflow-disconnect background-ctx sub-hazard closed 2026-04-21: the SPEC-005 §10.1 overflow path in `protocol/sender.go:106` previously spawned `go conn.Disconnect(context.Background(), ...)`. `Conn.Disconnect` threads the ctx into `inbox.DisconnectClientSubscriptions` and `inbox.OnDisconnect` (both honor ctx cancellation via the adapter's select arm in `executor/protocol_inbox_adapter.go:58-63` and `awaitReducerStatus` at `executor/protocol_inbox_adapter.go:133-145`), so with a Background ctx either hang — executor dispatch deadlock, inbox-drain stall, executor crash waiting on never-fed respCh — left the detached goroutine holding the `*Conn` and its transitive state forever. `closeOnce.Do` had latched but the body never reached `close(c.closed)`, so dispatch / keepalive / write loops for that conn could not exit either. The overflow path now derives a bounded ctx from `context.WithTimeout(context.Background(), conn.opts.DisconnectTimeout)` (default 5 s) and defers its cancel; a hung inbox call returns `ctx.Err()` after the timeout and Disconnect proceeds to steps 3-5 of the SPEC-005 §5.3 teardown unconditionally. Pinned by `protocol/sender_disconnect_timeout_test.go::{TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang, TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK}`. See `docs/hardening-oi-004-sender-disconnect-context.md`.
+- `superviseLifecycle` disconnect-ctx sub-hazard closed 2026-04-21: the per-connection supervisor at `protocol/disconnect.go::superviseLifecycle` received `context.Background()` hardcoded by the only production call site (`protocol/upgrade.go:211`) and forwarded it directly into `c.Disconnect(ctx, ...)`. Same hang class as the overflow site: a hung `inbox.DisconnectClientSubscriptions` or `inbox.OnDisconnect` left the supervisor goroutine (and therefore the `*Conn` via `closeOnce` latched without `close(c.closed)`) pinned for the process lifetime. Supervisor now derives `context.WithTimeout(ctx, c.opts.DisconnectTimeout)` (reuses the existing 5 s default) and defers its cancel before calling `Disconnect`; Disconnect still proceeds to steps 3-5 of the teardown after the bounded step 1/2 returns `ctx.Err()`. Pinned by `protocol/supervise_disconnect_timeout_test.go::{TestSuperviseLifecycleBoundsDisconnectOnInboxHang, TestSuperviseLifecycleDeliversOnInboxOK}`. See `docs/hardening-oi-004-supervise-disconnect-context.md`.
 
 Why this matters:
 - Lifecycle races and unsafe close behavior undermine confidence in the protocol even when nominal tests pass.
@@ -132,6 +133,7 @@ Why this matters:
 Remaining sub-hazards:
 - other detached goroutines in the protocol lifecycle surface (`protocol/conn.go`, `protocol/lifecycle.go`, `protocol/outbound.go`, `protocol/keepalive.go`) if a specific leak site surfaces
 - `ClientSender.Send` is still synchronous without its own ctx; a Send-ctx parameter would let callers propagate a shorter cancellation scope than `DisconnectTimeout` into the overflow path, but no concrete consumer needs that today
+- `ConnManager.CloseAll` forwards whatever ctx the caller passes; the contract assumes the caller bounds shutdown but no pin enforces it
 
 Primary code surfaces:
 - `protocol/upgrade.go`
@@ -148,6 +150,7 @@ Source docs:
 - `docs/spacetimedb-parity-roadmap.md` Tier B
 - `docs/hardening-oi-004-watch-reducer-response-lifecycle.md` (watchReducerResponse sub-hazard closure)
 - `docs/hardening-oi-004-sender-disconnect-context.md` (sender overflow-disconnect background-ctx sub-hazard closure)
+- `docs/hardening-oi-004-supervise-disconnect-context.md` (supervise-lifecycle disconnect-ctx sub-hazard closure)
 
 ### OI-005: Snapshot and committed-read-view lifetime rules still need stronger safety guarantees
 

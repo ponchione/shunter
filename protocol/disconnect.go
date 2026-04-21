@@ -61,6 +61,19 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 // Disconnect's closeOnce guarantees that a second exit signal is
 // a no-op, so the supervisor can safely wait for both goroutines
 // before returning.
+//
+// OI-004 sub-hazard pin
+// (docs/hardening-oi-004-supervise-disconnect-context.md): the
+// incoming ctx is hardcoded to context.Background() at the only
+// production call site (upgrade.go HandleSubscribe), so the
+// inbox.DisconnectClientSubscriptions / inbox.OnDisconnect calls
+// threaded through c.Disconnect would be non-cancellable if the
+// executor dispatch or inbox drain hung. The supervisor now
+// derives a bounded ctx from c.opts.DisconnectTimeout (default 5 s)
+// and defers its cancel; a hung inbox returns ctx.Err() after the
+// timeout and Disconnect proceeds to steps 3-5 of the SPEC-005
+// §5.3 teardown unconditionally. Pin test:
+// TestSuperviseLifecycleBoundsDisconnectOnInboxHang.
 func (c *Conn) superviseLifecycle(
 	ctx context.Context,
 	code websocket.StatusCode,
@@ -74,7 +87,9 @@ func (c *Conn) superviseLifecycle(
 	case <-dispatchDone:
 	case <-keepaliveDone:
 	}
-	c.Disconnect(ctx, code, reason, inbox, mgr)
+	disconnectCtx, cancel := context.WithTimeout(ctx, c.opts.DisconnectTimeout)
+	defer cancel()
+	c.Disconnect(disconnectCtx, code, reason, inbox, mgr)
 	<-dispatchDone
 	<-keepaliveDone
 }
