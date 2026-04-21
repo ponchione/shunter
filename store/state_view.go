@@ -45,15 +45,41 @@ func (sv *StateView) GetRow(tableID schema.TableID, rowID types.RowID) (types.Pr
 }
 
 // ScanTable yields all rows visible through the merged state.
+//
+// OI-005 sub-hazard pin: the committed-side scan is materialized into an
+// independent (RowID, ProductValue) slice at iter call time. Table.Scan
+// ranges t.rows live — the outer map iteration would otherwise span the
+// full yield loop. Under executor single-writer discipline no concurrent
+// writer runs during a reducer's synchronous iteration, but the contract
+// is unpinned at the StateView boundary: a yield callback that reaches
+// into a future path mutating t.rows (direct CommittedState access from a
+// reducer refactor), or a caller that retained the iterator past the
+// single-writer window, would race the live map iteration — Go spec §6.3
+// says an unreached-entry deletion during map iteration does not produce
+// the entry, so the observable drift is the iteration silently skipping
+// rows present at iter-construction time. Collecting (RowID, rowCopy)
+// pairs once at iter call time decouples the yield loop from t.rows,
+// mirroring the SeekIndex / SeekIndexRange precedents
+// (docs/hardening-oi-005-state-view-seekindex-aliasing.md,
+// docs/hardening-oi-005-state-view-seekindexrange-aliasing.md). Pin test:
+// TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete.
 func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		if sv.committed != nil {
 			if table, ok := sv.committed.Table(tableID); ok {
+				type entry struct {
+					id  types.RowID
+					row types.ProductValue
+				}
+				entries := make([]entry, 0, table.RowCount())
 				for id, row := range table.Scan() {
-					if sv.tx.IsDeleted(tableID, id) {
+					entries = append(entries, entry{id: id, row: row})
+				}
+				for _, e := range entries {
+					if sv.tx.IsDeleted(tableID, e.id) {
 						continue
 					}
-					if !yield(id, row) {
+					if !yield(e.id, e.row) {
 						return
 					}
 				}
