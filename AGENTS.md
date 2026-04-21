@@ -21,6 +21,31 @@ Read in this order:
 - Keep `reference/SpacetimeDB/` read-only and research-only; never copy source from it.
 - Do not add speculative scaffolding or repo structure early.
 
+## Go Workflow
+
+- When working in Go code, prefer Go-native tooling over generic text search.
+- Before editing unfamiliar Go code, inspect it with Go tools first:
+  - `rtk go doc <pkg>`
+  - `rtk go doc <pkg>.<Symbol>`
+  - `rtk go doc <pkg>.<Type>.<Method>`
+  - `rtk go list -json <pkg>`
+  - `rtk go list -json ./...`
+- If LSP/editor tooling is available, prefer gopls-backed navigation for Go code before broad grep:
+  - go to definition
+  - find references
+  - find implementations
+  - call hierarchy
+  - rename
+  - code actions / quick fixes
+  - diagnostics
+- Prefer the Go standard library and existing project patterns before adding new dependencies or helper layers.
+- Validate Go changes with the Go toolchain:
+  - run targeted tests for touched packages first
+  - expand to broader test runs only when needed
+  - run `rtk go vet` for touched packages when behavior, exported APIs, or interfaces changed
+  - run `rtk go fmt` on touched files/packages before finishing
+- Do not claim a Go change is complete until the relevant Go commands pass.
+
 ## Commands
 
 `RTK.md` is mandatory for shell usage.

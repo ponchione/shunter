@@ -200,8 +200,8 @@ func TestIncomingBackpressure_NilHandlerDoesNotLeakSemaphoreToken(t *testing.T) 
 	done := runDispatchAsync(conn, ctx, &MessageHandlers{})
 
 	frame, _ := EncodeClientMessage(SubscribeSingleMsg{
-		RequestID: 1,
-		QueryID:   100,
+		RequestID:   1,
+		QueryID:     100,
 		QueryString: "SELECT * FROM t",
 	})
 	wCtx, wCancel := context.WithTimeout(ctx, time.Second)

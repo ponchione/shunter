@@ -17,7 +17,7 @@ It is best described as:
 
 As of the current audit pass:
 - Broad verification: `rtk go test ./...`
-- Result: `Go test: 1101 passed in 10 packages`
+- Result: `Go test: 1106 passed in 10 packages`
 - Broad build verification: `rtk go build ./...`
 - Result: `Go build: Success`
 - Code inventory (live repo-wide count, excluding `reference/`): `228` Go files, `42217` lines of Go code
@@ -91,24 +91,24 @@ Current important differences include:
 - Shunter's BSATN is a rewrite, not the same codec contract
 - no offset index file; recovery is linear scan based
 - single transaction per record
-- replay is stricter/fails closed in places where the reference is more permissive
+- replay-horizon / validated-prefix behavior closed 2026-04-20 (Phase 4 Slice 2, `P0-RECOVERY-001`): continue across valid segments, skip below horizon, stop at validated prefix on tail damage, fail-closed on first-commit-of-last-segment corruption, and attach tx/segment context to errors — all externally parity-close. Shunter's segment-level short-circuit (`replay.go:21-23`, skipping a whole segment when `LastTx <= fromTxID`) is pinned as an intentional divergence from reference per-commit `CommitInfo::adjust_initial_offset` (`src/commitlog.rs:834-845`) with the same externally visible outcome. See `docs/parity-p0-recovery-001-replay-horizon.md`.
 
 ### Executor / scheduling
 - bounded inbox instead of unbounded queue
 - server-side timestamping differences
 - different fatality model for post-commit failures
-- scheduled reducer semantics differ in important details
+- scheduled-reducer startup / firing ordering parity closed 2026-04-20 (Phase 3 Slice 1, `P0-SCHED-001`): existing replay / firing pins held as parity-close; intentional divergences (past-due iteration order, panic-retains-row) pinned with reference citations. Remaining deferrals (`fn_start`-clamped scheduling "now", one-shot panic deletion, intended-time past-due ordering) recorded with reference anchors in `docs/parity-p0-sched-001-startup-firing.md`.
 
 ### Subscription engine
 - Go predicate builder instead of the reference SQL-oriented surface
-- bounded fan-out / disconnect-on-lag choices differ
+- per-client outbound queue depth aligned to reference `CLIENT_CHANNEL_CAPACITY = 16 * 1024` (Phase 2 Slice 3, 2026-04-20); overflow still disconnects the client; Shunter sends a clean `1008 "send buffer full"` close frame, reference aborts the per-client tokio task — intentional mechanism divergence with matching externally visible outcome. See `docs/parity-phase2-slice3-lag-policy.md` and `P0-SUBSCRIPTION-001`.
 - no row-level security / per-client predicate filtering
 - some delivery metadata is threaded through different seams
 
 ### Protocol
 - legacy dual-subprotocol admission remains as a compatibility deferral (`v1.bsatn.spacetimedb` preferred; `v1.bsatn.shunter` still accepted)
 - brotli remains a reserved-but-unsupported compression tag even though the wire-byte numbering now matches the reference
-- outgoing buffer defaults differ sharply
+- outgoing buffer default now matches reference `CLIENT_CHANNEL_CAPACITY = 16 * 1024` (Phase 2 Slice 3)
 - `TransactionUpdate` heavy/light split and `UpdateStatus` outcome model match the Phase 1.5 parity target; caller metadata (`CallerIdentity`, `ReducerCall.ReducerName` / `ReducerID` / `Args`, `Timestamp`, `TotalHostExecutionDuration`) is now populated from the executor seam. `EnergyQuantaUsed` remains a permanent zero (no energy model)
 - `SubscribeMsg` / `UnsubscribeMsg` and their response envelopes (`SubscribeApplied` / `UnsubscribeApplied` / `SubscriptionError`) now carry `QueryID` (reference `query_id: QueryId`); client/server naming asymmetry closed
 - `SubscribeMulti` / `SubscribeSingle` variant split landed; one-QueryID-per-query-set grouping semantics now match reference. Remaining Phase 2 Slice 2 divergences: `TotalHostExecutionDurationMicros` on applied envelopes, `SubscriptionError.TableID` / optional-field shape, SQL-string form for `SubscribeMulti.Queries` (paired with Phase 2 Slice 1 deferral).
@@ -136,7 +136,7 @@ The hot spots are concentrated in:
 
 The most serious remaining themes are not cosmetic. They include:
 - protocol connection lifecycle races and unsafe channel-close behavior
-- snapshot / read-view lifetime hazards
+- snapshot / read-view lifetime hazards (iterator-GC retention sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-retention.md`; broader lifetime concerns remain open)
 - subscription fan-out aliasing / cross-subscriber mutation risk
 - recovery / RowID sequencing sharp edges
 - API and error-surface roughness that matters when embedding this as a real library

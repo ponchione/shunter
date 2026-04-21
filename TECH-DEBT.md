@@ -52,9 +52,11 @@ Severity: high
 
 Summary:
 - The SQL/query surface is still deliberately narrow.
-- The subscription engine still exposes Shunter-specific behavior around slow clients, caller/durability seams, and broader parity semantics.
 - Row-level security / per-client filtering remains absent.
-- Join projection semantics now emit projected-width rows end-to-end (TD-142 Slice 14, 2026-04-20): `subscription.Join` carries `ProjectRight bool`, the canonical hash distinguishes `SELECT lhs.*` from `SELECT rhs.*`, and `evalQuery` / `initialQuery` / `evaluateOneOffJoin` all slice the LHS++RHS IVM fragments onto the SELECT side. Remaining anchors: lag / slow-client policy (Phase 2 Slice 3) and RLS. See `docs/parity-phase0-ledger.md` TD-142 row.
+- Join projection semantics now emit projected-width rows end-to-end (TD-142 Slice 14, 2026-04-20): `subscription.Join` carries `ProjectRight bool`, the canonical hash distinguishes `SELECT lhs.*` from `SELECT rhs.*`, and `evalQuery` / `initialQuery` / `evaluateOneOffJoin` all slice the LHS++RHS IVM fragments onto the SELECT side.
+- Lag / slow-client policy closed 2026-04-20 (Phase 2 Slice 3): `DefaultOutgoingBufferMessages` aligned to reference `CLIENT_CHANNEL_CAPACITY = 16 * 1024`; overflow-disconnect semantics preserved; close-frame mechanism (`1008 "send buffer full"`) retained as an intentional divergence from the reference `abort_handle.abort()` path. See `docs/parity-phase2-slice3-lag-policy.md` and `docs/parity-phase0-ledger.md` row `P0-SUBSCRIPTION-001`.
+- Scheduled-reducer startup / firing ordering closed 2026-04-20 (Phase 3 Slice 1, `P0-SCHED-001`): existing startup-replay / firing pins kept as parity-close; new parity pins lock the intentional divergences (past-due iteration order, panic-retains-row) with reference citations. Remaining deferrals recorded with reference anchors in `docs/parity-p0-sched-001-startup-firing.md`.
+- Remaining anchors: broader SQL/query-surface parity and RLS. See `docs/parity-phase0-ledger.md`.
 
 Why this matters:
 - The system can look architecturally right while still behaving differently under realistic subscription workloads.
@@ -146,10 +148,17 @@ Severity: high
 Summary:
 - Snapshot/read-view lifetime discipline is still treated as a sharp edge in the surrounding docs.
 - This is an architectural correctness concern, not cosmetic cleanup.
+- Snapshot iterator GC retention sub-hazard closed 2026-04-20: `*CommittedSnapshot.TableScan` / `IndexScan` / `IndexRange` returned closures that captured `*Table` but not `*CommittedSnapshot`, so a caller holding only the iter could let the snapshot become unreachable, fire the finalizer, release the RLock mid-`range`, and race a concurrent writer on `Table.rows`. Each iterator now `defer runtime.KeepAlive(s)`s the snapshot so the closure retains it for the iter's lifetime. Pinned by `store/snapshot_iter_retention_test.go::TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`. See `docs/hardening-oi-005-snapshot-iter-retention.md`.
 
 Why this matters:
 - Long-lived or misused read views can distort concurrency assumptions and make correctness depend on caller discipline.
 - It also weakens confidence in subscription evaluation and recovery-side read paths.
+
+Remaining sub-hazards:
+- use-after-`Close` on returned iters (ensureOpen is synchronous at iter construction, not inside the body)
+- cross-goroutine snapshot sharing / ownership rules
+- long-held read-view lifetime hazards at the subscription/evaluator seam
+- `state_view.go` / `committed_state.go` shared-state escape routes
 
 Primary code surfaces:
 - `store/snapshot.go`
@@ -161,6 +170,7 @@ Primary code surfaces:
 Source docs:
 - `docs/current-status.md` open hardening / correctness picture
 - `docs/spacetimedb-parity-roadmap.md` Tier B
+- `docs/hardening-oi-005-snapshot-iter-retention.md` (iter-retention sub-hazard closure)
 
 ### OI-006: Subscription fanout still carries aliasing and cross-subscriber mutation risk concerns
 
@@ -191,25 +201,24 @@ Status: open
 Severity: medium
 
 Summary:
-- The scheduler startup-ordering scenario remains in progress.
-- Replay-horizon / validated-prefix tolerance remains in progress.
-- The already-closed snapshot+replay invariant work did not eliminate the broader sequencing/replay parity backlog.
+- Replay-horizon / validated-prefix behavior (`P0-RECOVERY-001`) closed 2026-04-20 via narrow-and-pin (`docs/parity-p0-recovery-001-replay-horizon.md`). All four ledger sub-behaviors are parity-close under observation; the internal-mechanism difference (segment-level short-circuit vs reference per-commit `adjust_initial_offset`) is pinned as intentional. Remaining commitlog parity work — typed error enums, offset index file, format-level log / changeset parity — rolls up under `OI-003` as broader Phase 4 scope.
+- Scheduler startup / firing ordering (`P0-SCHED-001`) closed 2026-04-20 via narrow-and-pin (`docs/parity-p0-sched-001-startup-firing.md`). Remaining scheduler deferrals (`fn_start`-clamped schedule "now", one-shot panic deletion, intended-time past-due ordering) are recorded there with reference anchors; reopen if workload evidence surfaces.
+- The already-closed snapshot+replay invariant work did not eliminate the broader sequencing/replay parity backlog (format-level, offset index, etc.).
 
 Why this matters:
 - These are the kinds of gaps that only show up under restart, crash, and replay conditions.
 - They materially affect the “operational replacement” claim.
 
 Primary code surfaces:
-- `executor/scheduler.go`
-- `executor/scheduler_worker.go`
-- `executor/scheduler_replay_test.go`
 - `commitlog/replay.go`
 - `commitlog/recovery.go`
 - `commitlog/replay_test.go`
 - `commitlog/recovery_test.go`
 
 Source docs:
-- `docs/parity-phase0-ledger.md` rows `P0-SCHED-001` and `P0-RECOVERY-001`
+- `docs/parity-p0-recovery-001-replay-horizon.md` (replay-horizon closure)
+- `docs/parity-p0-sched-001-startup-firing.md` (scheduler deferrals)
+- `docs/parity-phase0-ledger.md` row `P0-RECOVERY-001` (closed)
 
 ### OI-008: The repo still lacks a coherent top-level engine/bootstrap story
 

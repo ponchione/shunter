@@ -72,6 +72,46 @@ func TestSchedulerReplayReturnsMaxID(t *testing.T) {
 	}
 }
 
+// TestParityP0Sched001ReplayEnqueuesByIterationOrder pins the
+// intentional divergence from reference scheduler.rs:118-130 that
+// multiple past-due rows enter the executor inbox in committed-state
+// TableScan iteration order (≈ RowID) rather than sorted by
+// next_run_at_ns. Reference uses a DelayQueue whose bucket ordering
+// approximates intended-time order but is not strictly sorted, so the
+// externally visible difference for well-separated schedules is
+// small. See docs/parity-p0-sched-001-startup-firing.md.
+func TestParityP0Sched001ReplayEnqueuesByIterationOrder(t *testing.T) {
+	s, cs, tid, inbox := schedulerWorkerFixture(t)
+	// Seed three past-due rows in the order B(nextNs=20), A(=10),
+	// C(=30). If the scheduler sorted by next_run_at_ns, the inbox
+	// would arrive as a(10), b(20), c(30). With iteration-order
+	// semantics, it arrives as b, a, c — matching the insertion order.
+	seedSchedule(t, cs, tid, 1, "b", nil, time.Unix(20, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 2, "a", nil, time.Unix(10, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 3, "c", nil, time.Unix(30, 0).UnixNano(), 0)
+
+	s.ReplayFromCommitted()
+
+	var got []string
+	for i := range 3 {
+		select {
+		case cmd := <-inbox:
+			got = append(got, cmd.(CallReducerCmd).Request.ReducerName)
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("missing enqueue %d; got=%v", i, got)
+		}
+	}
+	want := []string{"b", "a", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("enqueue count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("enqueue order = %v, want %v (insertion order; not sorted by next_run_at_ns)", got, want)
+		}
+	}
+}
+
 // Cross-process restart simulation: NewExecutor should reset schedSeq
 // from the max existing schedule_id so post-restart Schedule() doesn't
 // clash with replayed rows.

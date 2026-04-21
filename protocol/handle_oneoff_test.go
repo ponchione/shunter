@@ -824,7 +824,7 @@ func TestHandleOneOffQuery_CrossJoinProjection(t *testing.T) {
 	ordersTS.ID = ordersReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
-		ordersReg.ID: {{types.NewUint32(1)}, {types.NewUint32(2)}},
+		ordersReg.ID:    {{types.NewUint32(1)}, {types.NewUint32(2)}},
 		inventoryReg.ID: {{types.NewUint32(10)}},
 	}}
 	stateAccess := &mockStateAccess{snap: snap}

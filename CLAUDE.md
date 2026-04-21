@@ -25,6 +25,17 @@ Do not treat this as spec-only anymore. Read the docs first, then verify against
 - When editing docs, keep them tight and operational.
 - For any shell or git command, follow `RTK.md`: use RTK and prefer RTK-native subcommands when available; otherwise prefix the underlying command with `rtk`.
 
+## Go-specific working style
+
+- For unfamiliar Go code, inspect packages and symbols with Go-native tools first (`rtk go doc`, `rtk go list -json`) before broad text search.
+- If gopls/editor navigation is available, prefer definition/references/implementations/call-hierarchy over grep for symbol-level investigation.
+- Prefer standard library solutions and existing repo patterns before introducing new dependencies.
+- Before concluding a Go task, run the relevant validation:
+  - targeted `rtk go test` for touched packages
+  - `rtk go vet` when interfaces or behavior changed
+  - `rtk go fmt` on touched code
+- Do not report a Go change as finished until those checks pass.
+
 ## Practical Default
 
 Before starting a task, identify the exact spec/epic/story slice it belongs to and work only that slice unless explicitly asked to widen scope.

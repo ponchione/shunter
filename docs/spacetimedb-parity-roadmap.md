@@ -66,7 +66,7 @@ If Shunter produces a different externally meaningful result, that is not parity
 ## Current grounded status
 
 Broad evidence from the current audit pass:
-- `rtk go test ./...` passes: `Go test: 1101 passed in 10 packages`
+- `rtk go test ./...` passes: `Go test: 1105 passed in 10 packages`
 - `rtk go build ./...` succeeds
 - implementation footprint: `228` Go files, `42217` lines of Go code in the live tree outside `reference/`
 - the big execution-order implementation slices for commitlog recovery, protocol delivery, and subscription fanout are already present in live code
@@ -154,11 +154,11 @@ Primary code surfaces:
 ### A2. Subscription/query model still diverges too much
 Grounded current subscription/runtime-visible divergences:
 - Go predicate builder instead of SQL subset surface
-- bounded disconnect-on-lag fanout policy differs from SpacetimeDB’s queueing/slow-client model
+- per-client outbound queue depth aligned to reference `CLIENT_CHANNEL_CAPACITY = 16 * 1024` (Phase 2 Slice 3, 2026-04-20); overflow-disconnect semantics match; close-frame mechanism (`1008 "send buffer full"`) retained as intentional divergence from reference `abort_handle.abort()` — same externally visible outcome. See `docs/parity-phase2-slice3-lag-policy.md`.
 - no row-level security / per-client filtering model
 - message-routing seam differs for durability metadata
 - caller-result / confirmed-read behavior currently crosses subscription, executor, and protocol seams instead of living behind one parity-tested contract
-- scheduled-reducer timing and startup ordering remain parity-visible gaps when scheduled reducers matter to the workload
+- scheduled-reducer startup / firing ordering closed Phase 3 Slice 1, 2026-04-20 (`P0-SCHED-001`); remaining intentional divergences pinned with reference anchors in `docs/parity-p0-sched-001-startup-firing.md`
 
 Impact:
 - Shunter may be architecturally similar while still not behaving like SpacetimeDB under real subscription workloads
@@ -437,18 +437,13 @@ Primary files:
 - `subscription/unregister.go`
 - `subscription/manager.go`
 
-#### 3. Revisit lag / backpressure semantics
-The current bounded fail-fast behavior may be acceptable for your own use, but it is not parity.
-Decide whether to:
-- emulate SpacetimeDB’s deeper queue/lazy slow-client semantics, or
-- keep the current policy and explicitly accept this as one of the few permanent divergences
+#### 3. Revisit lag / backpressure semantics — closed Phase 2 Slice 3
+Reference runtime at `reference/SpacetimeDB/crates/core/src/client/client_connection.rs:394-431` also disconnects on per-client outbound queue overflow — the prompt-level "deeper queue with lazy slow-client handling" framing was wrong. The actual gap was queue depth (reference 16384 vs Shunter 256). Closed 2026-04-20 by aligning `DefaultOutgoingBufferMessages` to the reference `CLIENT_CHANNEL_CAPACITY = 16 * 1024`; overflow-disconnect semantics preserved; Shunter's `1008 "send buffer full"` close frame retained as an intentional mechanism divergence from reference `abort_handle.abort()`. Pinned by `protocol/parity_lag_policy_test.go::TestPhase2Slice3DefaultOutgoingBufferMatchesReference`. See `docs/parity-phase2-slice3-lag-policy.md` and `docs/parity-phase0-ledger.md` row `P0-SUBSCRIPTION-001`.
 
 Primary files:
-- `subscription/fanout_worker.go`
-- `subscription/fanout.go`
-- `protocol/outbound.go`
+- `protocol/options.go`
 - `protocol/sender.go`
-- `protocol/fanout_adapter.go`
+- `subscription/fanout_worker.go`
 
 #### 4. Confirmed-read and delivery ordering parity
 Ensure the system matches the expected visibility rules for durable vs non-durable transaction updates and caller/non-caller delivery ordering.
@@ -489,16 +484,15 @@ If the target workload depends on scheduled reducers, scheduling timing/startup-
 
 ### Required slices
 
-#### 1. Scheduling semantics and startup ordering
-Close the audit-documented scheduling differences first when scheduled reducers matter.
-The goal is not scheduler code similarity; it is the same observable firing/update behavior.
+#### 1. Scheduling semantics and startup ordering — closed Phase 3 Slice 1
+Closed 2026-04-20 via `docs/parity-p0-sched-001-startup-firing.md` (narrow-and-pin). Existing startup-replay / firing pins kept as parity-close; new pins `executor/scheduler_replay_test.go::TestParityP0Sched001ReplayEnqueuesByIterationOrder` and `executor/scheduler_firing_test.go::TestParityP0Sched001PanicRetainsScheduledRow` lock the two intentional divergences (past-due iteration order and panic-retains-row) with reference citations. Remaining deferrals (`fn_start`-clamped schedule "now" at `scheduler.rs:211-215`, one-shot panic deletion at `scheduler.rs:445-455`, intended-time past-due ordering, `Workload::Internal` commitlog labelling, lifecycle-hook startup ordering, drain-rx step) are recorded with reference anchors in the decision doc.
 
 Primary files:
 - `executor/scheduler.go`
 - `executor/scheduler_worker.go`
 - `executor/lifecycle.go`
 - `executor/executor.go`
-- relevant scheduler tests
+- `executor/scheduler_replay_test.go`, `executor/scheduler_firing_test.go`, `executor/scheduler_worker_test.go`, `executor/scheduler_test.go`
 
 #### 2. Reducer outcome model
 Map Shunter’s reducer status model to the operational outcomes you actually need:
@@ -556,12 +550,14 @@ Primary files:
 - `commitlog/snapshot_io.go`
 - `commitlog/changeset_codec.go`
 
-#### 2. Commitlog behavior parity
-Decide how close you need to get on:
-- replay tolerance vs fail-fast behavior
-- offset indexing
+#### 2. Commitlog behavior parity — replay-horizon / validated-prefix slice closed Phase 4 Slice 2
+Replay-horizon / validated-prefix behavior closed 2026-04-20 via `docs/parity-p0-recovery-001-replay-horizon.md` (narrow-and-pin). Continue across valid segments, skip below resume horizon, stop at validated prefix on tail damage, fail-closed on first-commit-of-last-segment corruption, and attach tx/segment context to errors are all parity-close under observation. Internal-mechanism difference (segment-level short-circuit vs reference per-commit `adjust_initial_offset`) pinned as intentional. See `P0-RECOVERY-001` in `docs/parity-phase0-ledger.md`.
+
+Still-open scope for this Phase 4 slice:
+- offset index file (reference `src/index/`)
 - snapshot / compaction visibility
-- record/log shape compatibility where it affects your required workloads
+- record / log format compatibility where it affects required workloads
+- typed `Traversal` / `Open` error enums
 
 Primary files:
 - `commitlog/segment.go`

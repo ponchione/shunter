@@ -798,11 +798,11 @@ func TestHandleSubscribeSingle_JoinProjectionOnRightTableWithLeftFilter(t *testi
 func TestHandleSubscribeSingle_CrossJoinProjection(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
-		Name: "Orders",
+		Name:    "Orders",
 		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}},
 	})
 	b.TableDef(schema.TableDefinition{
-		Name: "Inventory",
+		Name:    "Inventory",
 		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}},
 	})
 	eng, err := b.Build(schema.EngineOptions{})
@@ -1074,7 +1074,7 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoinWithWhere(t *testing.T) {
 func TestHandleSubscribeSingle_UnaliasedSelfCrossJoinRejected(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
-		Name: "t",
+		Name:    "t",
 		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}},
 	})
 	eng, err := b.Build(schema.EngineOptions{})

@@ -16,8 +16,8 @@ func TestDefaultProtocolOptions(t *testing.T) {
 	if opts.CloseHandshakeTimeout != 250*time.Millisecond {
 		t.Errorf("CloseHandshakeTimeout = %v, want 250ms", opts.CloseHandshakeTimeout)
 	}
-	if opts.OutgoingBufferMessages != 256 {
-		t.Errorf("OutgoingBufferMessages = %d, want 256", opts.OutgoingBufferMessages)
+	if opts.OutgoingBufferMessages != DefaultOutgoingBufferMessages {
+		t.Errorf("OutgoingBufferMessages = %d, want %d", opts.OutgoingBufferMessages, DefaultOutgoingBufferMessages)
 	}
 	if opts.IncomingQueueMessages != 64 {
 		t.Errorf("IncomingQueueMessages = %d, want 64", opts.IncomingQueueMessages)

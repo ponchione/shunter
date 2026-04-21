@@ -195,3 +195,69 @@ func TestFiringMissingRowSucceeds(t *testing.T) {
 }
 
 var errFireFailed = stubError("scheduled reducer failed on purpose")
+
+// TestParityP0Sched001PanicRetainsScheduledRow pins the intentional
+// divergence from reference scheduler.rs:445-455 that Shunter
+// preserves sys_scheduled rows on reducer panic (consistent with
+// reducer-error), while the reference deletes one-shot rows in a
+// fresh tx regardless of panic outcome. See
+// docs/parity-p0-sched-001-startup-firing.md.
+func TestParityP0Sched001PanicRetainsScheduledRow(t *testing.T) {
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "noop",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := eng.Registry()
+	cs := store.NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, store.NewTable(ts))
+	}
+	schedTS, _ := SysScheduledTable(reg)
+
+	rr := NewReducerRegistry()
+	rr.Register(RegisteredReducer{
+		Name: "firePanic",
+		Handler: types.ReducerHandler(func(_ *types.ReducerContext, _ []byte) ([]byte, error) {
+			panic("scheduled reducer panic on purpose")
+		}),
+	})
+	rr.Freeze()
+
+	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)
+	go exec.Run(t.Context())
+
+	intendedNs := time.Unix(100, 0).UnixNano()
+	seedSchedule(t, cs, schedTS.ID, 77, "firePanic", nil, intendedNs, 0)
+
+	respCh := make(chan ReducerResponse, 1)
+	exec.Submit(CallReducerCmd{
+		Request: ReducerRequest{
+			ReducerName:    "firePanic",
+			Source:         CallSourceScheduled,
+			ScheduleID:     77,
+			IntendedFireAt: intendedNs,
+		},
+		ResponseCh: respCh,
+	})
+	resp := <-respCh
+	if resp.Status != StatusFailedPanic {
+		t.Fatalf("status=%d err=%v, want StatusFailedPanic", resp.Status, resp.Error)
+	}
+
+	// Reference scheduler.rs:445-455 would delete the one-shot row in
+	// a fresh tx after catch_unwind. Shunter rolls back the reducer's
+	// tx and leaves the row for retry. Pin the Shunter outcome.
+	tbl, _ := cs.Table(schedTS.ID)
+	if tbl.RowCount() != 1 {
+		t.Fatalf("Shunter preserves one-shot row on panic (intentional divergence); remaining = %d, want 1", tbl.RowCount())
+	}
+}

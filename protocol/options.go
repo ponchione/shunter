@@ -35,13 +35,22 @@ type ProtocolOptions struct {
 	MaxMessageSize int64
 }
 
+// DefaultOutgoingBufferMessages matches the reference SpacetimeDB
+// per-client outbound channel capacity (`CLIENT_CHANNEL_CAPACITY = 16 *
+// KB`) at
+// `reference/SpacetimeDB/crates/core/src/client/client_connection.rs:657`.
+// Phase 2 Slice 3 (`docs/parity-phase2-slice3-lag-policy.md`) aligned
+// the default so realistic bursty workloads tolerate the same lag before
+// the connection is torn down.
+const DefaultOutgoingBufferMessages = 16 * 1024
+
 // DefaultProtocolOptions returns SPEC-005 §12 default values.
 func DefaultProtocolOptions() ProtocolOptions {
 	return ProtocolOptions{
 		PingInterval:           15 * time.Second,
 		IdleTimeout:            30 * time.Second,
 		CloseHandshakeTimeout:  250 * time.Millisecond,
-		OutgoingBufferMessages: 256,
+		OutgoingBufferMessages: DefaultOutgoingBufferMessages,
 		IncomingQueueMessages:  64,
 		MaxMessageSize:         4 * 1024 * 1024,
 	}

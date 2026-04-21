@@ -86,8 +86,8 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 
 	// Build and send a valid Subscribe frame.
 	subMsg := SubscribeSingleMsg{
-		RequestID: 1,
-		QueryID:   42,
+		RequestID:   1,
+		QueryID:     42,
 		QueryString: "SELECT * FROM users",
 	}
 	frame, err := EncodeClientMessage(subMsg)
@@ -231,8 +231,8 @@ func TestDispatchLoop_NilHandlerCloses(t *testing.T) {
 
 	// Send a valid Subscribe frame — but OnSubscribe is nil.
 	subMsg := SubscribeSingleMsg{
-		RequestID: 1,
-		QueryID:   10,
+		RequestID:   1,
+		QueryID:     10,
 		QueryString: "SELECT * FROM items",
 	}
 	frame, err := EncodeClientMessage(subMsg)
@@ -300,8 +300,8 @@ func TestDispatchLoop_MarksActivity(t *testing.T) {
 	done := runDispatchAsync(conn, ctx, handlers)
 
 	subMsg := SubscribeSingleMsg{
-		RequestID: 1,
-		QueryID:   7,
+		RequestID:   1,
+		QueryID:     7,
 		QueryString: "SELECT * FROM events",
 	}
 	frame, err := EncodeClientMessage(subMsg)
