@@ -17,7 +17,7 @@ It is best described as:
 
 As of the current audit pass:
 - Broad verification: `rtk go test ./...`
-- Result: `Go test: 1109 passed in 10 packages`
+- Result: `Go test: 1156 passed in 10 packages`
 - Broad build verification: `rtk go build ./...`
 - Result: `Go build: Success`
 - Code inventory (live repo-wide count, excluding `reference/`): `228` Go files, `42217` lines of Go code
@@ -140,6 +140,7 @@ The most serious remaining themes are not cosmetic. They include:
 - subscription fan-out aliasing / cross-subscriber mutation risk (per-subscriber `Inserts` / `Deletes` slice-header aliasing sub-hazard closed 2026-04-20, see `docs/hardening-oi-006-fanout-aliasing.md`; row-payload sharing contract pin closed 2026-04-21, see `docs/hardening-oi-006-row-payload-sharing.md` — contract comments on `subscription/eval.go::evaluate`, `subscription/fanout_worker.go::FanOutSender`, and `protocol/fanout_adapter.go::encodeRows` name the read-only discipline and two pin tests assert backing-array identity plus the mutation-leak hazard shape; broader fanout assembly hazards in `fanout.go` / `fanout_worker.go` / `fanout_adapter.go` remain open)
 - recovery / RowID sequencing sharp edges
 - API and error-surface roughness that matters when embedding this as a real library
+- pre-existing `subscription/delta_pool_test.go` sync.Pool flake class was cleaned up 2026-04-21 by dropping pointer-identity assertions and pinning only deterministic observable reuse behavior; remaining known intermittent tests are `executor/TestParityP0Sched001ReplayEnqueuesByIterationOrder` and `subscription/TestProjectedRowsBeforeAppendsDeletesAfterBagSubtraction`
 
 ## Best current verdict
 

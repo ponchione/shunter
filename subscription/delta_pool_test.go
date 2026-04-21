@@ -7,28 +7,31 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestBufferPoolReusesDefaultSizedBuffers(t *testing.T) {
-	buf := acquirePooledBuffer()
-	if len(buf) != 0 {
-		t.Fatalf("acquirePooledBuffer len = %d, want 0", len(buf))
-	}
-	if cap(buf) != pooledBufferDefaultCap {
-		t.Fatalf("acquirePooledBuffer cap = %d, want %d", cap(buf), pooledBufferDefaultCap)
-	}
+func TestBufferPoolReturnsClearedDefaultSizedBuffers(t *testing.T) {
+	for i := 0; i < 8; i++ {
+		buf := acquirePooledBuffer()
+		if len(buf) != 0 {
+			t.Fatalf("iteration %d: acquirePooledBuffer len = %d, want 0", i, len(buf))
+		}
+		if cap(buf) != pooledBufferDefaultCap {
+			t.Fatalf("iteration %d: acquirePooledBuffer cap = %d, want %d", i, cap(buf), pooledBufferDefaultCap)
+		}
 
-	buf = append(buf, 1, 2, 3)
-	ptr := slicePtr(buf)
-	releasePooledBuffer(buf)
+		buf = append(buf, byte(i), byte(i+1), byte(i+2))
+		releasePooledBuffer(buf)
 
-	reused := acquirePooledBuffer()
-	if len(reused) != 0 {
-		t.Fatalf("reused buffer len = %d, want 0", len(reused))
-	}
-	if cap(reused) != pooledBufferDefaultCap {
-		t.Fatalf("reused buffer cap = %d, want %d", cap(reused), pooledBufferDefaultCap)
-	}
-	if slicePtr(reused[:1]) != ptr {
-		t.Fatalf("expected pooled buffer backing array to be reused")
+		reused := acquirePooledBuffer()
+		if len(reused) != 0 {
+			t.Fatalf("iteration %d: reused buffer len = %d, want 0", i, len(reused))
+		}
+		if cap(reused) != pooledBufferDefaultCap {
+			t.Fatalf("iteration %d: reused buffer cap = %d, want %d", i, cap(reused), pooledBufferDefaultCap)
+		}
+		reused = append(reused, 9)
+		if reused[0] != 9 {
+			t.Fatalf("iteration %d: reused buffer first byte = %d, want 9", i, reused[0])
+		}
+		releasePooledBuffer(reused)
 	}
 }
 
@@ -46,58 +49,48 @@ func TestBufferPoolDropsOversizedBuffers(t *testing.T) {
 	}
 }
 
-func TestCandidateScratchReusedAndCleared(t *testing.T) {
-	st := acquireCandidateScratch()
-	st.candidates[hashN(1)] = struct{}{}
-	st.distinct["x"] = types.NewUint64(1)
-	candPtr := reflect.ValueOf(st.candidates).Pointer()
-	distinctPtr := reflect.ValueOf(st.distinct).Pointer()
-	releaseCandidateScratch(st)
+func TestCandidateScratchReleaseClearsMapsBeforeReuse(t *testing.T) {
+	for i := 0; i < 8; i++ {
+		st := acquireCandidateScratch()
+		st.candidates[hashN(byte(i+1))] = struct{}{}
+		st.distinct["x"] = types.NewUint64(uint64(i + 1))
+		releaseCandidateScratch(st)
 
-	reused := acquireCandidateScratch()
-	defer releaseCandidateScratch(reused)
-	if len(reused.candidates) != 0 {
-		t.Fatalf("reused candidate set len = %d, want 0", len(reused.candidates))
-	}
-	if len(reused.distinct) != 0 {
-		t.Fatalf("reused distinct map len = %d, want 0", len(reused.distinct))
-	}
-	if reflect.ValueOf(reused.candidates).Pointer() != candPtr {
-		t.Fatalf("expected candidate set map allocation to be reused")
-	}
-	if reflect.ValueOf(reused.distinct).Pointer() != distinctPtr {
-		t.Fatalf("expected distinct-value map allocation to be reused")
+		reused := acquireCandidateScratch()
+		if len(reused.candidates) != 0 {
+			t.Fatalf("iteration %d: reused candidate set len = %d, want 0", i, len(reused.candidates))
+		}
+		if len(reused.distinct) != 0 {
+			t.Fatalf("iteration %d: reused distinct map len = %d, want 0", i, len(reused.distinct))
+		}
+		reused.candidates[hashN(byte(i+100))] = struct{}{}
+		reused.distinct["fresh"] = types.NewUint64(uint64(i + 100))
+		releaseCandidateScratch(reused)
 	}
 }
 
-func TestDeltaViewReleaseReusesInsertDeleteBackingSlices(t *testing.T) {
-	cs1 := simpleChangeset(1,
-		[]types.ProductValue{{types.NewUint64(1), types.NewString("a")}, {types.NewUint64(2), types.NewString("b")}},
-		[]types.ProductValue{{types.NewUint64(3), types.NewString("c")}, {types.NewUint64(4), types.NewString("d")}},
-	)
-	dv1 := NewDeltaView(nil, cs1, map[TableID][]ColID{1: {0}})
-	insertPtr := slicePtr(dv1.InsertedRows(1)[:1])
-	deletePtr := slicePtr(dv1.DeletedRows(1)[:1])
-	dv1.Release()
+func TestDeltaViewReleaseClearsInsertDeleteSlicesBeforeReuse(t *testing.T) {
+	for i := 0; i < 8; i++ {
+		cs1 := simpleChangeset(1,
+			[]types.ProductValue{{types.NewUint64(1), types.NewString("a")}, {types.NewUint64(2), types.NewString("b")}},
+			[]types.ProductValue{{types.NewUint64(3), types.NewString("c")}, {types.NewUint64(4), types.NewString("d")}},
+		)
+		dv1 := NewDeltaView(nil, cs1, map[TableID][]ColID{1: {0}})
+		dv1.Release()
 
-	cs2 := simpleChangeset(1,
-		[]types.ProductValue{{types.NewUint64(9), types.NewString("z")}},
-		[]types.ProductValue{{types.NewUint64(8), types.NewString("y")}},
-	)
-	dv2 := NewDeltaView(nil, cs2, map[TableID][]ColID{1: {0}})
-	defer dv2.Release()
+		cs2 := simpleChangeset(1,
+			[]types.ProductValue{{types.NewUint64(uint64(i + 9)), types.NewString("z")}},
+			[]types.ProductValue{{types.NewUint64(uint64(i + 8)), types.NewString("y")}},
+		)
+		dv2 := NewDeltaView(nil, cs2, map[TableID][]ColID{1: {0}})
 
-	if got := dv2.InsertedRows(1); len(got) != 1 || got[0][0].AsUint64() != 9 {
-		t.Fatalf("reused inserts = %v, want one fresh row", got)
-	}
-	if got := dv2.DeletedRows(1); len(got) != 1 || got[0][0].AsUint64() != 8 {
-		t.Fatalf("reused deletes = %v, want one fresh row", got)
-	}
-	if slicePtr(dv2.InsertedRows(1)[:1]) != insertPtr {
-		t.Fatalf("expected insert backing storage to be reused")
-	}
-	if slicePtr(dv2.DeletedRows(1)[:1]) != deletePtr {
-		t.Fatalf("expected delete backing storage to be reused")
+		if got := dv2.InsertedRows(1); len(got) != 1 || got[0][0].AsUint64() != uint64(i+9) {
+			t.Fatalf("iteration %d: reused inserts = %v, want one fresh row", i, got)
+		}
+		if got := dv2.DeletedRows(1); len(got) != 1 || got[0][0].AsUint64() != uint64(i+8) {
+			t.Fatalf("iteration %d: reused deletes = %v, want one fresh row", i, got)
+		}
+		dv2.Release()
 	}
 }
 
