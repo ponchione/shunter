@@ -22,10 +22,10 @@ func (h QueryHash) String() string { return hex.EncodeToString(h[:]) }
 // Canonical serialization tags. These are internal — not a wire format.
 // Only requirement is determinism within a single binary version.
 const (
-	tagColEq    byte = 0x01
-	tagColNe    byte = 0x02
-	tagColRange byte = 0x03
-	tagAnd      byte = 0x04
+	tagColEq     byte = 0x01
+	tagColNe     byte = 0x02
+	tagColRange  byte = 0x03
+	tagAnd       byte = 0x04
 	tagAllRows   byte = 0x05
 	tagJoin      byte = 0x06
 	tagOr        byte = 0x07

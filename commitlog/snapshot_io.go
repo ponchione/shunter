@@ -237,16 +237,12 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 		<-w.continueWrite
 	}
 
-	content, err := w.buildSnapshotContent(committed, txID)
-	if err != nil {
-		return err
-	}
 	path := filepath.Join(snapshotDir, "snapshot")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(content); err != nil {
+	if err := w.writeSnapshotFile(f, committed, txID); err != nil {
 		f.Close()
 		return err
 	}
@@ -271,17 +267,49 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	return nil
 }
 
-func (w *FileSnapshotWriter) buildSnapshotContent(committed *store.CommittedState, txID types.TxID) ([]byte, error) {
-	var body bytes.Buffer
+func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.CommittedState, txID types.TxID) error {
+	if _, err := f.Write(SnapshotMagic[:]); err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte{SnapshotVersion, 0, 0, 0}); err != nil {
+		return err
+	}
+	if err := binary.Write(f, binary.LittleEndian, uint64(txID)); err != nil {
+		return err
+	}
+	if err := binary.Write(f, binary.LittleEndian, w.reg.Version()); err != nil {
+		return err
+	}
+	if _, err := f.Write(make([]byte, 32)); err != nil {
+		return err
+	}
+
+	hasher := blake3.New(32, nil)
+	bodyWriter := io.MultiWriter(f, hasher)
+	if err := w.writeSnapshotBody(bodyWriter, committed); err != nil {
+		return err
+	}
+	var hash [32]byte
+	copy(hash[:], hasher.Sum(nil))
+	if _, err := f.WriteAt(hash[:], 20); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.CommittedState) error {
+	committed.RLock()
+	defer committed.RUnlock()
+
 	var schemaBuf bytes.Buffer
 	if err := EncodeSchemaSnapshot(&schemaBuf, w.reg); err != nil {
-		return nil, err
+		return err
 	}
-	if err := binary.Write(&body, binary.LittleEndian, uint32(schemaBuf.Len())); err != nil {
-		return nil, err
+	if err := binary.Write(dst, binary.LittleEndian, uint32(schemaBuf.Len())); err != nil {
+		return err
 	}
-	if _, err := body.Write(schemaBuf.Bytes()); err != nil {
-		return nil, err
+	if _, err := dst.Write(schemaBuf.Bytes()); err != nil {
+		return err
 	}
 	ids := committed.TableIDs()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
@@ -292,75 +320,61 @@ func (w *FileSnapshotWriter) buildSnapshotContent(committed *store.CommittedStat
 			sequenceTableIDs = append(sequenceTableIDs, tableID)
 		}
 	}
-	if err := binary.Write(&body, binary.LittleEndian, uint32(len(sequenceTableIDs))); err != nil {
-		return nil, err
+	if err := binary.Write(dst, binary.LittleEndian, uint32(len(sequenceTableIDs))); err != nil {
+		return err
 	}
 	for _, tableID := range sequenceTableIDs {
 		table, _ := committed.Table(tableID)
 		seq, _ := table.SequenceValue()
-		if err := binary.Write(&body, binary.LittleEndian, uint32(tableID)); err != nil {
-			return nil, err
+		if err := binary.Write(dst, binary.LittleEndian, uint32(tableID)); err != nil {
+			return err
 		}
-		if err := binary.Write(&body, binary.LittleEndian, seq); err != nil {
-			return nil, err
+		if err := binary.Write(dst, binary.LittleEndian, seq); err != nil {
+			return err
 		}
 	}
-	if err := binary.Write(&body, binary.LittleEndian, uint32(len(ids))); err != nil {
-		return nil, err
+	if err := binary.Write(dst, binary.LittleEndian, uint32(len(ids))); err != nil {
+		return err
 	}
 	for _, tableID := range ids {
 		table, _ := committed.Table(tableID)
-		if err := binary.Write(&body, binary.LittleEndian, uint32(tableID)); err != nil {
-			return nil, err
+		if err := binary.Write(dst, binary.LittleEndian, uint32(tableID)); err != nil {
+			return err
 		}
-		if err := binary.Write(&body, binary.LittleEndian, uint64(table.NextID())); err != nil {
-			return nil, err
+		if err := binary.Write(dst, binary.LittleEndian, uint64(table.NextID())); err != nil {
+			return err
 		}
 	}
-	if err := binary.Write(&body, binary.LittleEndian, uint32(len(ids))); err != nil {
-		return nil, err
+	if err := binary.Write(dst, binary.LittleEndian, uint32(len(ids))); err != nil {
+		return err
 	}
+	var rowBuf bytes.Buffer
 	for _, tableID := range ids {
 		table, _ := committed.Table(tableID)
 		rows, err := deterministicRows(table)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if err := binary.Write(&body, binary.LittleEndian, uint32(tableID)); err != nil {
-			return nil, err
+		if err := binary.Write(dst, binary.LittleEndian, uint32(tableID)); err != nil {
+			return err
 		}
-		if err := binary.Write(&body, binary.LittleEndian, uint32(len(rows))); err != nil {
-			return nil, err
+		if err := binary.Write(dst, binary.LittleEndian, uint32(len(rows))); err != nil {
+			return err
 		}
 		for _, row := range rows {
-			rowBuf := bytes.Buffer{}
+			rowBuf.Reset()
 			if err := bsatn.EncodeProductValue(&rowBuf, row); err != nil {
-				return nil, err
+				return err
 			}
-			rowBytes := rowBuf.Bytes()
-			if err := binary.Write(&body, binary.LittleEndian, uint32(len(rowBytes))); err != nil {
-				return nil, err
+			if err := binary.Write(dst, binary.LittleEndian, uint32(rowBuf.Len())); err != nil {
+				return err
 			}
-			if _, err := body.Write(rowBytes); err != nil {
-				return nil, err
+			if _, err := dst.Write(rowBuf.Bytes()); err != nil {
+				return err
 			}
 		}
 	}
-
-	hash := ComputeSnapshotHash(body.Bytes())
-	var out bytes.Buffer
-	out.Write(SnapshotMagic[:])
-	out.WriteByte(SnapshotVersion)
-	out.Write([]byte{0, 0, 0})
-	if err := binary.Write(&out, binary.LittleEndian, uint64(txID)); err != nil {
-		return nil, err
-	}
-	if err := binary.Write(&out, binary.LittleEndian, w.reg.Version()); err != nil {
-		return nil, err
-	}
-	out.Write(hash[:])
-	out.Write(body.Bytes())
-	return out.Bytes(), nil
+	return nil
 }
 
 type SnapshotData struct {
@@ -378,48 +392,117 @@ type SnapshotTableData struct {
 }
 
 func ReadSnapshot(dir string) (*SnapshotData, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "snapshot"))
+	f, err := os.Open(filepath.Join(dir, "snapshot"))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) < SnapshotHeaderSize {
-		return nil, io.ErrUnexpectedEOF
+	defer f.Close()
+
+	txID, schemaVersion, expected, err := readSnapshotHeader(f)
+	if err != nil {
+		return nil, err
 	}
-	if !bytes.Equal(data[:4], SnapshotMagic[:]) {
-		return nil, ErrBadMagic
+	if err := verifySnapshotPayloadHash(f, expected); err != nil {
+		return nil, err
 	}
-	if data[4] != SnapshotVersion {
-		return nil, &BadVersionError{Got: data[4]}
+
+	tables, schemaByID, err := readSnapshotSchema(f)
+	if err != nil {
+		return nil, err
 	}
+	sequences, err := readSnapshotSequences(f)
+	if err != nil {
+		return nil, err
+	}
+	nextIDs, err := readSnapshotNextIDs(f)
+	if err != nil {
+		return nil, err
+	}
+	snapshotTables, err := readSnapshotTables(f, schemaByID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SnapshotData{
+		TxID:          types.TxID(txID),
+		SchemaVersion: schemaVersion,
+		Tables:        snapshotTables,
+		Sequences:     sequences,
+		NextIDs:       nextIDs,
+		Schema:        tables,
+	}, nil
+}
+
+func readSnapshotHeader(f *os.File) (uint64, uint32, [32]byte, error) {
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return 0, 0, [32]byte{}, err
+	}
+	if magic != SnapshotMagic {
+		return 0, 0, [32]byte{}, ErrBadMagic
+	}
+
+	var versionAndPad [4]byte
+	if _, err := io.ReadFull(f, versionAndPad[:]); err != nil {
+		return 0, 0, [32]byte{}, err
+	}
+	if versionAndPad[0] != SnapshotVersion {
+		return 0, 0, [32]byte{}, &BadVersionError{Got: versionAndPad[0]}
+	}
+
 	var txID uint64
 	var schemaVersion uint32
-	reader := bytes.NewReader(data[8:20])
-	if err := binary.Read(reader, binary.LittleEndian, &txID); err != nil {
-		return nil, err
+	if err := binary.Read(f, binary.LittleEndian, &txID); err != nil {
+		return 0, 0, [32]byte{}, err
 	}
-	if err := binary.Read(reader, binary.LittleEndian, &schemaVersion); err != nil {
-		return nil, err
+	if err := binary.Read(f, binary.LittleEndian, &schemaVersion); err != nil {
+		return 0, 0, [32]byte{}, err
 	}
+
 	var expected [32]byte
-	copy(expected[:], data[20:52])
-	got := ComputeSnapshotHash(data[52:])
-	if got != expected {
-		return nil, &SnapshotHashMismatchError{Expected: expected, Got: got}
+	if _, err := io.ReadFull(f, expected[:]); err != nil {
+		return 0, 0, [32]byte{}, err
 	}
-	payload := bytes.NewReader(data[52:])
+	return txID, schemaVersion, expected, nil
+}
+
+func verifySnapshotPayloadHash(f *os.File, expected [32]byte) error {
+	hasher := blake3.New(32, nil)
+	if _, err := io.Copy(hasher, f); err != nil {
+		return err
+	}
+	var got [32]byte
+	copy(got[:], hasher.Sum(nil))
+	if got != expected {
+		return &SnapshotHashMismatchError{Expected: expected, Got: got}
+	}
+	_, err := f.Seek(SnapshotHeaderSize, io.SeekStart)
+	return err
+}
+
+func readSnapshotSchema(payload io.Reader) ([]schema.TableSchema, map[schema.TableID]*schema.TableSchema, error) {
 	var schemaLen uint32
 	if err := binary.Read(payload, binary.LittleEndian, &schemaLen); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	schemaBytes := make([]byte, schemaLen)
 	if _, err := io.ReadFull(payload, schemaBytes); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tables, _, err := DecodeSchemaSnapshot(bytes.NewReader(schemaBytes))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	result := &SnapshotData{TxID: types.TxID(txID), SchemaVersion: schemaVersion, Schema: tables, Sequences: map[schema.TableID]uint64{}, NextIDs: map[schema.TableID]uint64{}}
+	schemaByID := make(map[schema.TableID]*schema.TableSchema, len(tables))
+	for i := range tables {
+		ts := &tables[i]
+		schemaByID[ts.ID] = ts
+	}
+	return tables, schemaByID, nil
+}
+
+func readSnapshotSequences(payload io.Reader) (map[schema.TableID]uint64, error) {
+	sequences := map[schema.TableID]uint64{}
 	var seqCount uint32
 	if err := binary.Read(payload, binary.LittleEndian, &seqCount); err != nil {
 		return nil, err
@@ -433,8 +516,13 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 		if err := binary.Read(payload, binary.LittleEndian, &next); err != nil {
 			return nil, err
 		}
-		result.Sequences[schema.TableID(tableID)] = next
+		sequences[schema.TableID(tableID)] = next
 	}
+	return sequences, nil
+}
+
+func readSnapshotNextIDs(payload io.Reader) (map[schema.TableID]uint64, error) {
+	nextIDs := map[schema.TableID]uint64{}
 	var nextIDCount uint32
 	if err := binary.Read(payload, binary.LittleEndian, &nextIDCount); err != nil {
 		return nil, err
@@ -448,12 +536,18 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 		if err := binary.Read(payload, binary.LittleEndian, &next); err != nil {
 			return nil, err
 		}
-		result.NextIDs[schema.TableID(tableID)] = next
+		nextIDs[schema.TableID(tableID)] = next
 	}
+	return nextIDs, nil
+}
+
+func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema.TableSchema) ([]SnapshotTableData, error) {
 	var tableCount uint32
 	if err := binary.Read(payload, binary.LittleEndian, &tableCount); err != nil {
 		return nil, err
 	}
+	tables := make([]SnapshotTableData, 0, tableCount)
+	var rowBuf []byte
 	for range tableCount {
 		var tableID uint32
 		var rowCount uint32
@@ -464,7 +558,7 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 			return nil, err
 		}
 		snapshotTable := SnapshotTableData{TableID: schema.TableID(tableID)}
-		ts, ok := findTableSchema(tables, schema.TableID(tableID))
+		ts, ok := schemaByID[schema.TableID(tableID)]
 		if !ok {
 			return nil, fmt.Errorf("snapshot references unknown table %d", tableID)
 		}
@@ -473,7 +567,10 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 			if err := binary.Read(payload, binary.LittleEndian, &rowLen); err != nil {
 				return nil, err
 			}
-			rowBytes := make([]byte, rowLen)
+			if cap(rowBuf) < int(rowLen) {
+				rowBuf = make([]byte, rowLen)
+			}
+			rowBytes := rowBuf[:rowLen]
 			if _, err := io.ReadFull(payload, rowBytes); err != nil {
 				return nil, err
 			}
@@ -483,9 +580,9 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 			}
 			snapshotTable.Rows = append(snapshotTable.Rows, row)
 		}
-		result.Tables = append(result.Tables, snapshotTable)
+		tables = append(tables, snapshotTable)
 	}
-	return result, nil
+	return tables, nil
 }
 
 func ListSnapshots(baseDir string) ([]types.TxID, error) {
@@ -540,15 +637,6 @@ func deterministicRows(table *store.Table) ([]types.ProductValue, error) {
 		rows[i] = p.row
 	}
 	return rows, nil
-}
-
-func findTableSchema(tables []schema.TableSchema, id schema.TableID) (*schema.TableSchema, bool) {
-	for i := range tables {
-		if tables[i].ID == id {
-			return &tables[i], true
-		}
-	}
-	return nil, false
 }
 
 func writeString(w io.Writer, s string) error {

@@ -135,8 +135,8 @@ The hot spots are concentrated in:
 - `store/`
 
 The most serious remaining themes are not cosmetic. They include:
-- protocol connection lifecycle races and unsafe channel-close behavior
-- snapshot / read-view lifetime hazards (iterator-GC retention sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-retention.md`; iterator use-after-Close sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-useafterclose.md`; broader lifetime concerns remain open)
+- protocol connection lifecycle races and unsafe channel-close behavior (`watchReducerResponse` goroutine-leak sub-hazard closed 2026-04-20, see `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`; broader `conn.go` / `lifecycle.go` / `outbound.go` / `sender.go` / `keepalive.go` lifecycle concerns remain open)
+- snapshot / read-view lifetime hazards (iterator-GC retention sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-retention.md`; iterator use-after-Close sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-useafterclose.md`; iterator mid-iter-close defense-in-depth sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md`; subscription-seam read-view lifetime sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md`; `CommittedSnapshot.IndexSeek` BTree-alias escape closed 2026-04-20, see `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md`; broader `state_view.go` / `committed_state.go` lifetime concerns remain open)
 - subscription fan-out aliasing / cross-subscriber mutation risk (per-subscriber `Inserts` / `Deletes` slice-header aliasing sub-hazard closed 2026-04-20, see `docs/hardening-oi-006-fanout-aliasing.md`; row-payload sharing and broader fanout assembly hazards remain open)
 - recovery / RowID sequencing sharp edges
 - API and error-surface roughness that matters when embedding this as a real library

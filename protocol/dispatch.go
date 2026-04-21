@@ -87,7 +87,10 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		}
 		c.MarkActivity()
 
-		// Decompress if compression was negotiated.
+		var (
+			msg       any
+			decodeErr error
+		)
 		if c.Compression {
 			var tag uint8
 			var body []byte
@@ -101,14 +104,10 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 				}
 				return
 			}
-			// Reconstruct frame as [tag][body] for DecodeClientMessage.
-			reframed := make([]byte, 1+len(body))
-			reframed[0] = tag
-			copy(reframed[1:], body)
-			frame = reframed
+			msg, decodeErr = decodeClientMessageParts(tag, body)
+		} else {
+			_, msg, decodeErr = DecodeClientMessage(frame)
 		}
-
-		_, msg, decodeErr := DecodeClientMessage(frame)
 		if decodeErr != nil {
 			reason := decodeErr.Error()
 			closeProtocolError(c, reason)

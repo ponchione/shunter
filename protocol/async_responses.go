@@ -59,9 +59,29 @@ func (s connOnlySender) SendTransactionUpdateLight(connID types.ConnectionID, up
 // `TransactionUpdate` envelope and delivers it on the caller's outbound
 // channel. Phase 1.5: the envelope is already fully populated by the
 // executor / fan-out seam; this watcher only owns transport delivery.
+//
+// OI-004 hardening (2026-04-20): the watcher goroutine is tied to the
+// owning `Conn`'s lifecycle. Previously the body blocked unconditionally
+// on `<-respCh`; if the executor accepted the CallReducer but never sent
+// on (or closed) respCh — e.g. executor crash mid-commit, hung reducer
+// on a shutting-down engine — the goroutine would leak forever, holding
+// the `*Conn` alive past disconnect. The select now also watches
+// `conn.closed`, which `Conn.Disconnect` closes as step 4 of the
+// SPEC-005 §5.3 teardown, so the watcher exits promptly when the owning
+// connection is torn down. A late send on respCh after `conn.closed`
+// fires is benign: `respCh` is allocated with buffer 1 at the call site
+// so a single post-close send completes without blocking, and the
+// message is garbage-collected with the channel.
+//
+// Pinned by protocol/async_responses_test.go::
+// TestWatchReducerResponseExitsOnConnClose.
 func watchReducerResponse(conn *Conn, respCh <-chan TransactionUpdate) {
-	go func() {
-		resp, ok := <-respCh
+	go runReducerResponseWatcher(conn, respCh)
+}
+
+func runReducerResponseWatcher(conn *Conn, respCh <-chan TransactionUpdate) {
+	select {
+	case resp, ok := <-respCh:
 		if !ok {
 			return
 		}
@@ -69,7 +89,9 @@ func watchReducerResponse(conn *Conn, respCh <-chan TransactionUpdate) {
 		if err := sender.SendTransactionUpdate(conn.ID, &resp); err != nil {
 			logReducerDeliveryError(conn, resp.ReducerCall.RequestID, err)
 		}
-	}()
+	case <-conn.closed:
+		return
+	}
 }
 
 func logReducerDeliveryError(conn *Conn, requestID uint32, err error) {

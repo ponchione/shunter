@@ -152,8 +152,8 @@ type AllRows struct {
 	Table TableID
 }
 
-func (AllRows) sealed()              {}
-func (p AllRows) Tables() []TableID  { return []TableID{p.Table} }
+func (AllRows) sealed()             {}
+func (p AllRows) Tables() []TableID { return []TableID{p.Table} }
 
 // Join matches rows from two tables joined on a column pair,
 // with an optional filter on either side.

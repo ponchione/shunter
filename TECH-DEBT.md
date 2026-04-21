@@ -122,10 +122,14 @@ Severity: high
 Summary:
 - Connection lifecycle code still relies on detached background goroutines and shutdown paths that are harder to reason about than a single owned lifecycle context.
 - This is the main correctness/hardening theme still called out by the current-status and parity docs.
+- `watchReducerResponse` goroutine-leak sub-hazard closed 2026-04-20: `protocol/async_responses.go::watchReducerResponse` previously blocked unconditionally on `<-respCh`, so if the executor accepted a CallReducer but never sent on or closed the response channel (executor crash mid-commit, hung reducer, engine shutdown with in-flight work) the goroutine leaked for the lifetime of the process and held its `*Conn` alive past disconnect. The goroutine body is now split into `runReducerResponseWatcher` and selects on both `respCh` and `conn.closed`, tying the watcher to the owning `Conn`'s SPEC-005 §5.3 teardown. Pinned by `protocol/async_responses_test.go::{TestWatchReducerResponseExitsOnConnClose, TestWatchReducerResponseDeliversOnRespCh, TestWatchReducerResponseExitsOnRespChClose}`. See `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`.
 
 Why this matters:
 - Lifecycle races and unsafe close behavior undermine confidence in the protocol even when nominal tests pass.
 - This is one of the main blockers to calling the runtime trustworthy for serious private use.
+
+Remaining sub-hazards:
+- other detached goroutines in the protocol lifecycle surface (`protocol/conn.go`, `protocol/lifecycle.go`, `protocol/outbound.go`, `protocol/sender.go`, `protocol/keepalive.go`) if a specific leak site surfaces
 
 Primary code surfaces:
 - `protocol/upgrade.go`
@@ -135,10 +139,12 @@ Primary code surfaces:
 - `protocol/lifecycle.go`
 - `protocol/outbound.go`
 - `protocol/sender.go`
+- `protocol/async_responses.go`
 
 Source docs:
 - `docs/current-status.md` open hardening / correctness picture
 - `docs/spacetimedb-parity-roadmap.md` Tier B
+- `docs/hardening-oi-004-watch-reducer-response-lifecycle.md` (watchReducerResponse sub-hazard closure)
 
 ### OI-005: Snapshot and committed-read-view lifetime rules still need stronger safety guarantees
 
@@ -150,15 +156,16 @@ Summary:
 - This is an architectural correctness concern, not cosmetic cleanup.
 - Snapshot iterator GC retention sub-hazard closed 2026-04-20: `*CommittedSnapshot.TableScan` / `IndexScan` / `IndexRange` returned closures that captured `*Table` but not `*CommittedSnapshot`, so a caller holding only the iter could let the snapshot become unreachable, fire the finalizer, release the RLock mid-`range`, and race a concurrent writer on `Table.rows`. Each iterator now `defer runtime.KeepAlive(s)`s the snapshot so the closure retains it for the iter's lifetime. Pinned by `store/snapshot_iter_retention_test.go::TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`. See `docs/hardening-oi-005-snapshot-iter-retention.md`.
 - Snapshot iterator use-after-Close sub-hazard closed 2026-04-20: the same three iterator bodies previously did not re-check `s.ensureOpen()` at iter-body entry, so a sequential `construct → Close → iterate` pattern silently raced the freed RLock. Each iterator body now calls `s.ensureOpen()` after the `KeepAlive` defer, converting the mis-use into a deterministic `"store: CommittedSnapshot used after Close"` panic matching the construction-time contract. Pinned by `store/snapshot_iter_useafterclose_test.go::{TestCommittedSnapshotTableScanPanicsAfterClose, TestCommittedSnapshotIndexScanPanicsAfterClose, TestCommittedSnapshotIndexRangePanicsAfterClose}`. See `docs/hardening-oi-005-snapshot-iter-useafterclose.md`.
+- Snapshot iterator mid-iter-close sub-hazard closed 2026-04-20: the three iterator bodies previously checked `s.ensureOpen()` only once at iter-body entry, so a partially consumed iter whose owner called `Close()` mid-iteration (same goroutine caller body or another goroutine holding a reference) continued yielding subsequent rows against a released RLock. Each iter-body for-loop now re-calls `s.ensureOpen()` per-iteration so the next step after `Close()` panics with the construction-time contract message rather than silently yielding. Pinned by `store/snapshot_iter_mid_iter_close_test.go::{TestCommittedSnapshotTableScanPanicsOnMidIterClose, TestCommittedSnapshotIndexRangePanicsOnMidIterClose, TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose}`. Defense-in-depth only — cannot eliminate the machine-level race window between the check and an in-flight `t.rows` read; full ownership discipline still required from callers. See `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md`.
+- Subscription-seam read-view lifetime sub-hazard closed 2026-04-20: `subscription/eval.go::EvalAndBroadcast` receives a borrowed `store.CommittedReadView`, and `executor/executor.go:540-541` calls `view.Close()` immediately after the synchronous return. The no-view-escape-past-return contract was load-bearing but unpinned; today's code keeps it (the view reference does not land in `FanOutMessage`, no goroutine spawned from `evaluate` outlives the call, `DeltaView.Release` fires in `defer`), but nothing asserted it. A contract comment on `EvalAndBroadcast` and a `trackingView` wrapper pin the invariant: after `EvalAndBroadcast` returns and the test closes the tracker, the fan-out inbox is drained and the tracker asserts zero post-close method invocations — under both Join (Tier-2 + join delta) and single-table eval paths. Pinned by `subscription/eval_view_lifetime_test.go::{TestEvalAndBroadcastDoesNotUseViewAfterReturn_Join, TestEvalAndBroadcastDoesNotUseViewAfterReturn_SingleTable}`. No production-code behavior change. See `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md`.
+- `CommittedSnapshot.IndexSeek` BTree-alias escape route closed 2026-04-20: `store/snapshot.go::CommittedSnapshot.IndexSeek` forwarded `BTreeIndex.Seek` which returns a live alias of the index entry's internal `[]types.RowID`. A caller that retained the slice past `Close()` would race any subsequent writer's `slices.Insert` / `slices.Delete` on the same key — either in-place-shifted `Delete` or capacity-case `Insert`. Current callers (`subscription/eval.go:286`, `subscription/register_set.go:{92,117}`, `subscription/delta_join.go:{85,122}` via `subscription/delta_view.go:165`, `subscription/placement.go:162`) use the slice synchronously in a for-range and did not retain, but the contract was unpinned. `IndexSeek` now returns `slices.Clone(idx.Seek(key))` so callers cannot alias BTree-internal storage past the public read-view boundary. Pinned by `store/snapshot_indexseek_aliasing_test.go::{TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnInsert, TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnRemove}`. See `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md`.
 
 Why this matters:
 - Long-lived or misused read views can distort concurrency assumptions and make correctness depend on caller discipline.
 - It also weakens confidence in subscription evaluation and recovery-side read paths.
 
 Remaining sub-hazards:
-- cross-goroutine snapshot sharing / ownership rules (concurrent `Close()` called from a goroutine different from the one iterating can still race between the body-entry check and each yield)
-- long-held read-view lifetime hazards at the subscription/evaluator seam
-- `state_view.go` / `committed_state.go` shared-state escape routes
+- `state_view.go` / `committed_state.go` shared-state escape routes beyond `IndexSeek` (e.g. `CommittedState.Table(id) *Table` raw-pointer exposure; `StateView.ScanTable` / `SeekIndex` / `SeekIndexRange` iterator surfaces)
 
 Primary code surfaces:
 - `store/snapshot.go`
@@ -172,6 +179,9 @@ Source docs:
 - `docs/spacetimedb-parity-roadmap.md` Tier B
 - `docs/hardening-oi-005-snapshot-iter-retention.md` (iter-retention sub-hazard closure)
 - `docs/hardening-oi-005-snapshot-iter-useafterclose.md` (iter use-after-Close sub-hazard closure)
+- `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md` (iter mid-iter-close sub-hazard closure)
+- `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md` (subscription-seam read-view lifetime sub-hazard closure)
+- `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md` (IndexSeek BTree-alias escape route closure)
 
 ### OI-006: Subscription fanout still carries aliasing and cross-subscriber mutation risk concerns
 

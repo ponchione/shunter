@@ -11,11 +11,11 @@ import (
 
 // mockFanOutSender records delivery calls for test assertions.
 type mockFanOutSender struct {
-	mu        sync.Mutex
+	mu         sync.Mutex
 	lightCalls []lightCall
 	heavyCalls []heavyCall
-	errCalls  []errCall
-	sendErr   error
+	errCalls   []errCall
+	sendErr    error
 }
 
 type lightCall struct {

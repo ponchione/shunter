@@ -128,3 +128,62 @@ func TestUnwrapCompressedTruncated(t *testing.T) {
 		t.Errorf("tag-less frame: got %v, want ErrMalformedMessage", err)
 	}
 }
+
+func TestDecodeClientMessagePartsMatchesFrameDecoder(t *testing.T) {
+	frame, err := EncodeClientMessage(SubscribeSingleMsg{
+		RequestID:   7,
+		QueryID:     11,
+		QueryString: "SELECT * FROM players",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTag, wantMsg, err := DecodeClientMessage(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotMsg, err := decodeClientMessageParts(frame[0], frame[1:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wantTag != frame[0] {
+		t.Fatalf("tag = %d, want %d", wantTag, frame[0])
+	}
+	if got, ok := gotMsg.(SubscribeSingleMsg); !ok {
+		t.Fatalf("decoded type = %T, want SubscribeSingleMsg", gotMsg)
+	} else if want := wantMsg.(SubscribeSingleMsg); got != want {
+		t.Fatalf("decoded msg = %+v, want %+v", got, want)
+	}
+}
+
+func BenchmarkWrapCompressedGzip(b *testing.B) {
+	body := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz012345"), 64)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		frame, err := WrapCompressed(TagTransactionUpdate, body, CompressionGzip)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(frame) == 0 {
+			b.Fatal("empty frame")
+		}
+	}
+}
+
+func BenchmarkUnwrapCompressedGzip(b *testing.B) {
+	body := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz012345"), 64)
+	frame, err := WrapCompressed(TagTransactionUpdate, body, CompressionGzip)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		tag, got, err := UnwrapCompressed(frame)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if tag != TagTransactionUpdate || len(got) != len(body) {
+			b.Fatal("bad round-trip")
+		}
+	}
+}

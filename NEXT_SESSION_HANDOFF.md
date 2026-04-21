@@ -4,17 +4,23 @@ Use this file to start the next agent on the next real Shunter parity / hardenin
 
 ## What just landed (2026-04-20)
 
-Tier-B hardening narrow sub-slice of `OI-006` (subscription fan-out aliasing / cross-subscriber mutation risk) — per-subscriber `Inserts` / `Deletes` slice-header isolation.
+Tier-B hardening narrow sub-slice of `OI-004`: `watchReducerResponse` goroutine-leak escape route closed.
 
-- Decision doc: `docs/hardening-oi-006-fanout-aliasing.md`
-- Sharp edge: `subscription/eval.go::evaluate` built one `[]SubscriptionUpdate` per query hash and distributed it across every subscriber of that query. The per-subscriber loop value-copied the `SubscriptionUpdate` struct and overwrote `SubscriptionID`, but `Inserts` / `Deletes` slice headers still referenced the same backing array across subscribers. Any downstream replace/append on one subscriber's slice would silently corrupt every other subscriber's view of the same commit. The "downstream must treat read-only" invariant was load-bearing but unpinned.
-- Fix: the per-subscriber inner loop now clones each `SubscriptionUpdate.Inserts` and `.Deletes` slice header per subscriber via `append([]types.ProductValue(nil), src...)`. Each subscriber owns an independent slice header backed by an independent array. Row payloads (`types.ProductValue`) remain shared under the post-commit row-immutability contract.
-- New parity pins (2): `subscription/eval_fanout_aliasing_test.go::{TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers, TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers}` — each registers two subscribers (different connection IDs) on the same query, runs one `EvalAndBroadcast`, asserts the two subscribers' slice elements have distinct addresses, then exercises both element-replace and append failure modes against the other subscriber's view.
-- `TECH-DEBT.md` OI-006 updated: slice-header aliasing sub-hazard closed with pin anchors. Remaining sub-hazards (row-payload sharing, broader fanout assembly hazards in `subscription/fanout.go`, `subscription/fanout_worker.go`, `protocol/fanout_adapter.go`) stay open.
+- Decision doc: `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`
+- Sharp edge: `protocol/async_responses.go::watchReducerResponse` spawned a goroutine that blocked unconditionally on `<-respCh`. If the executor accepted the CallReducer but never sent on or closed `respCh` (executor crash mid-commit, hung reducer, engine shutdown with in-flight work), the goroutine never woke and kept the `*Conn` alive past disconnect, retaining the connection's outbound buffer, decoded frames, and websocket handle. All other protocol-layer goroutines (`runDispatchLoop`, `runKeepalive`, write loop) already observe `c.closed` — the watcher was the hold-out.
+- Fix: narrow and pin. The goroutine body is split into a package-level helper `runReducerResponseWatcher` and the body's blocking read becomes a two-case `select` on `respCh` and `conn.closed`. If `conn.closed` wins (i.e. `Conn.Disconnect` step 4 of SPEC-005 §5.3 fired), the watcher returns immediately. Happy path (respCh fires first) is unchanged. The helper split exists purely so tests can drive the body synchronously and wait on a `done` channel instead of sampling `runtime.NumGoroutine`. Post-close behavior: `respCh` is allocated buffer 1 at `protocol/handle_callreducer.go:30`, so a single post-close send from a still-running executor completes without blocking and the message is garbage-collected with the channel.
+- New parity pins (3): `protocol/async_responses_test.go::{TestWatchReducerResponseExitsOnConnClose, TestWatchReducerResponseDeliversOnRespCh, TestWatchReducerResponseExitsOnRespChClose}`. The exits-on-close test is the primary leak-fix pin; the delivers-on-respCh test guards the happy path against a select-arm inversion; the exits-on-respCh-close test pins `ok==false` handling. All pass under `-race -count=3`.
+- `TECH-DEBT.md` OI-004 updated: `watchReducerResponse` sub-hazard closed with pin anchors; remaining OI-004 sub-hazards narrowed to other detached goroutines in `protocol/conn.go` / `lifecycle.go` / `outbound.go` / `sender.go` / `keepalive.go` if a specific leak site surfaces.
 
-Baseline after this slice: `Go test: 1111 passed in 10 packages`.
+Baseline after this slice: `Go test: 1127 passed in 10 packages`.
+
+Flaky test note: `executor/TestParityP0Sched001ReplayEnqueuesByIterationOrder` depends on Go map iteration order matching RowID insertion order, which is not guaranteed. Failure is pre-existing and unrelated to this slice. Worth a dedicated slice to either sort enqueues by `(next_run_at_ns, schedule_id)` or refactor the seed to avoid map-iteration dependence.
 
 Prior closed anchors in the same calendar day (still landed, included here for continuity):
+- OI-005 `CommittedSnapshot.IndexSeek` BTree-alias escape route — `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md`
+- OI-005 subscription-seam read-view lifetime sub-hazard — `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md`
+- OI-005 snapshot iterator mid-iter-close defense-in-depth sub-hazard — `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md`
+- OI-006 fanout per-subscriber slice-header aliasing sub-hazard — `docs/hardening-oi-006-fanout-aliasing.md`
 - OI-005 snapshot iterator use-after-Close sub-hazard — `docs/hardening-oi-005-snapshot-iter-useafterclose.md`
 - OI-005 snapshot iterator GC retention sub-hazard — `docs/hardening-oi-005-snapshot-iter-retention.md`
 - Phase 4 Slice 2 replay-horizon / validated-prefix (`P0-RECOVERY-001`) — `docs/parity-p0-recovery-001-replay-horizon.md`
@@ -23,20 +29,21 @@ Prior closed anchors in the same calendar day (still landed, included here for c
 
 ## Next realistic parity / hardening anchors
 
-With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, two OI-005 sub-hazards closed, and the OI-006 slice-header aliasing sub-hazard closed, the grounded options are:
+With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, five OI-005 sub-hazards closed (iter GC retention, iter use-after-Close, iter mid-iter-close, subscription-seam read-view lifetime, `CommittedSnapshot.IndexSeek` BTree-alias), the OI-006 slice-header aliasing sub-hazard closed, and the OI-004 `watchReducerResponse` goroutine-leak sub-hazard closed, the grounded options are:
 
 ### Option α — Continue Tier-B hardening
 
 `TECH-DEBT.md` still carries:
-- OI-004 (protocol lifecycle / goroutine ownership)
-- OI-005 remaining sub-hazards (cross-goroutine snapshot sharing, subscription-seam read-view lifetime, `state_view.go` / `committed_state.go` shared-state escape routes)
+- OI-004 remaining sub-hazards (other detached goroutines in `protocol/conn.go` / `lifecycle.go` / `outbound.go` / `sender.go` / `keepalive.go`)
+- OI-005 remaining sub-hazards (`state_view.go` / `committed_state.go` escape routes beyond `IndexSeek`)
 - OI-006 remaining sub-hazards (row-payload sharing under the post-commit row-immutability contract; broader fanout assembly hazards in `subscription/fanout.go`, `subscription/fanout_worker.go`, `protocol/fanout_adapter.go` if any future path introduces in-place mutation)
 - OI-008 (top-level bootstrap missing)
 
-Pick one narrow sub-hazard and land a narrow fix with a focused test, following the shape of `docs/hardening-oi-006-fanout-aliasing.md`. Concrete candidates:
-- OI-005 cross-goroutine snapshot sharing: even with the body-entry `ensureOpen()` in place, a `Close()` call from a goroutine different from the one iterating can still race between the body-entry check and each yield. A narrow slice would either introduce per-iteration `ensureOpen()` checks (defense-in-depth against concurrent Close) or pin the intended single-goroutine-ownership contract explicitly with docs + a test.
-- OI-005 subscription-seam read-view lifetime: `subscription/eval.go` retains a `CommittedReadView` reference for the duration of `evaluate`. Audit whether any code path passes that view to a goroutine that may outlive the `defer view.Release()` in `EvalAndBroadcast` callers, and pin the lifetime contract.
-- OI-004 protocol lifecycle: pick one specific detached-goroutine site in `protocol/conn.go` / `protocol/lifecycle.go` / `protocol/outbound.go` and replace it with an owned-context goroutine, pinned by a shutdown-cleanup test.
+Pick one narrow sub-hazard and land a narrow fix with a focused test, following the shape of `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`. Concrete candidates:
+- OI-005 `CommittedState.Table(id) *Table` raw-pointer escape: the method RLocks / RUnlocks and returns a raw `*Table` pointer whose internal `rows` map and indexes are mutated only under the `CommittedState` write lock. Today's callers (`CommittedSnapshot` methods hold the snapshot RLock for the use window; `StateView` accepts no lock but operates under the executor single-writer discipline; tests hold the pointer under test ownership) are safe, but the raw pointer itself is a separate escape surface. A narrow slice: either (a) return a narrower interface wrapper that re-checks snapshot openness on every access, or (b) document the contract explicitly and pin a test that a `*Table` pointer obtained outside the snapshot envelope is never used for reads. Option (b) is narrower and follows the subscription-seam pin precedent.
+- OI-005 `StateView` iterator surfaces (`ScanTable`, `SeekIndex`, `SeekIndexRange`): all reach `sv.committed.Table(...)` through the raw `*Table` pointer. `StateView` is used inside reducer execution under the executor single-writer discipline, so today's pattern is safe, but the iterator closures capture `sv.committed` / `sv.tx` and yield rows without any `KeepAlive` / lock check. If a caller retained the iterator across a commit boundary (currently forbidden by the executor's serialization, but unpinned), the yielded `types.ProductValue`s would race the writer. A narrow slice: pin the single-writer contract with a focused test, mirroring the subscription-seam pin shape.
+- OI-004 protocol lifecycle: pick one remaining detached-goroutine site in `protocol/conn.go` / `protocol/lifecycle.go` / `protocol/outbound.go` / `protocol/sender.go` / `protocol/keepalive.go` and replace any owned-context gap with a pinned test, following the `watchReducerResponse` precedent.
+- Flaky `executor/TestParityP0Sched001ReplayEnqueuesByIterationOrder` cleanup: replace the map-iteration-order contract with a deterministic one (sort by `(next_run_at_ns, schedule_id)`; or refactor the seed so only one ordering is observed). This is borderline — the test was pinned as "iteration-order semantics" intentionally, so touching it requires re-anchoring to reference behavior; reference uses `DelayQueue` which is not strictly sorted either.
 
 ### Option β — Broader SQL/query-surface parity beyond TD-142
 
@@ -78,13 +85,17 @@ Your job is to continue from the current live state. Pick the next grounded anch
 7. `docs/spacetimedb-parity-roadmap.md`
 8. `docs/parity-phase0-ledger.md`
 9. `TECH-DEBT.md`
-10. `docs/hardening-oi-006-fanout-aliasing.md` (latest closed slice — recent precedent for a Tier-B hardening decision doc + pin)
-11. `docs/hardening-oi-005-snapshot-iter-useafterclose.md` (prior OI-005 sub-slice — precedent for a narrow-and-pin Tier-B hardening decision doc)
-12. `docs/hardening-oi-005-snapshot-iter-retention.md` (earlier OI-005 sub-slice — additional precedent)
-13. `docs/parity-p0-recovery-001-replay-horizon.md` (prior-closed parity slice — precedent for a narrow-and-pin parity decision doc)
-14. `docs/parity-p0-sched-001-startup-firing.md` (prior-closed parity slice — alternative precedent)
-15. `docs/parity-phase2-slice3-lag-policy.md` (earlier-closed parity slice — another precedent)
-16. the specific code surfaces for whichever anchor (α/β/γ/δ) you pick
+10. `docs/hardening-oi-004-watch-reducer-response-lifecycle.md` (latest closed slice — recent precedent for a Tier-B hardening decision doc + pin)
+11. `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md` (prior closed Tier-B slice — precedent)
+12. `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md` (prior closed Tier-B slice — precedent)
+13. `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md` (prior closed Tier-B slice — precedent)
+14. `docs/hardening-oi-006-fanout-aliasing.md` (prior closed Tier-B slice — precedent)
+15. `docs/hardening-oi-005-snapshot-iter-useafterclose.md` (prior OI-005 sub-slice — precedent)
+16. `docs/hardening-oi-005-snapshot-iter-retention.md` (earlier OI-005 sub-slice — additional precedent)
+17. `docs/parity-p0-recovery-001-replay-horizon.md` (prior-closed parity slice — precedent for a narrow-and-pin parity decision doc)
+18. `docs/parity-p0-sched-001-startup-firing.md` (prior-closed parity slice — alternative precedent)
+19. `docs/parity-phase2-slice3-lag-policy.md` (earlier-closed parity slice — another precedent)
+20. the specific code surfaces for whichever anchor (α/β/γ/δ) you pick
 
 ## Shell discipline
 
@@ -109,11 +120,19 @@ Keep `.hermes/plans/2026-04-18_073534-phase1-wire-level-parity.md` unless you de
 - Phase 4 Slice 2 replay-horizon / validated-prefix behavior (2026-04-20) — `P0-RECOVERY-001`
 - OI-005 snapshot iterator GC retention sub-hazard (2026-04-20)
 - OI-005 snapshot iterator use-after-Close sub-hazard (2026-04-20)
-- **OI-006 fanout per-subscriber slice-header aliasing sub-hazard (2026-04-20)**
+- OI-006 fanout per-subscriber slice-header aliasing sub-hazard (2026-04-20)
+- OI-005 snapshot iterator mid-iter-close defense-in-depth sub-hazard (2026-04-20)
+- OI-005 subscription-seam read-view lifetime sub-hazard (2026-04-20)
+- OI-005 `CommittedSnapshot.IndexSeek` BTree-alias escape route (2026-04-20)
+- **OI-004 `watchReducerResponse` goroutine-leak escape route (2026-04-20)**
 
 ## Suggested verification commands
 
 Targeted:
+- `rtk go test ./protocol -run 'TestWatchReducerResponse' -race -count=3 -v`
+- `rtk go test ./store -run 'TestCommittedSnapshotIndexSeekReturnsIndependentSlice' -race -count=3 -v`
+- `rtk go test ./subscription -run 'TestEvalAndBroadcastDoesNotUseViewAfterReturn' -race -count=3 -v`
+- `rtk go test ./store -run 'TestCommittedSnapshot(TableScan|IndexRange|RowsFromRowIDs)PanicsOnMidIterClose' -race -count=3 -v`
 - `rtk go test ./subscription -run 'TestEvalFanout(Inserts|Deletes)HeaderIsolatedAcrossSubscribers' -race -count=3 -v`
 - `rtk go test ./store -run 'TestCommittedSnapshot(TableScan|IndexScan|IndexRange)PanicsAfterClose' -race -count=3 -v`
 - `rtk go test ./store -run 'TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration' -race -count=3 -v`
@@ -125,8 +144,8 @@ Do not call the work done unless all are true:
 
 - reference-backed or debt-anchored target shape was checked directly against reference material or current live code
 - every newly accepted or rejected shape has focused tests
-- already-landed parity pins still pass (including `TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers`, `TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers`, `TestCommittedSnapshotTableScanPanicsAfterClose`, `TestCommittedSnapshotIndexScanPanicsAfterClose`, `TestCommittedSnapshotIndexRangePanicsAfterClose`, `TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`, `TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment`, `TestParityP0Sched001ReplayEnqueuesByIterationOrder`, `TestParityP0Sched001PanicRetainsScheduledRow`, and `TestPhase2Slice3DefaultOutgoingBufferMatchesReference`)
-- full suite still passes (current baseline: `Go test: 1111 passed in 10 packages`)
+- already-landed parity pins still pass (including `TestWatchReducerResponseExitsOnConnClose`, `TestWatchReducerResponseDeliversOnRespCh`, `TestWatchReducerResponseExitsOnRespChClose`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnInsert`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnRemove`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_Join`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_SingleTable`, `TestCommittedSnapshotTableScanPanicsOnMidIterClose`, `TestCommittedSnapshotIndexRangePanicsOnMidIterClose`, `TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose`, `TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers`, `TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers`, `TestCommittedSnapshotTableScanPanicsAfterClose`, `TestCommittedSnapshotIndexScanPanicsAfterClose`, `TestCommittedSnapshotIndexRangePanicsAfterClose`, `TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`, `TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment`, `TestParityP0Sched001PanicRetainsScheduledRow`, and `TestPhase2Slice3DefaultOutgoingBufferMatchesReference`). Note: `TestParityP0Sched001ReplayEnqueuesByIterationOrder` is intermittently flaky on a stash-clean tree (pre-existing, map-iteration-order dependent) — do not treat a single-run failure there as caused by your slice.
+- full suite still passes (current baseline: `Go test: 1127 passed in 10 packages`)
 - docs and handoff reflect the new truth exactly
 
 ## Deliverables for the next session
@@ -151,7 +170,11 @@ As of this handoff:
 - Phase 3 Slice 1 closed — `P0-SCHED-001` scheduled-reducer startup / firing ordering narrow-and-pinned
 - Phase 4 Slice 2 closed — `P0-RECOVERY-001` replay-horizon / validated-prefix behavior narrow-and-pinned
 - OI-005 iterator-GC retention sub-hazard closed
-- OI-005 iterator use-after-Close sub-hazard closed; broader OI-005 lifetime concerns stay open with enumerated sub-hazards
+- OI-005 iterator use-after-Close sub-hazard closed
+- OI-005 iterator mid-iter-close defense-in-depth sub-hazard closed
+- OI-005 subscription-seam read-view lifetime sub-hazard closed
+- OI-005 `CommittedSnapshot.IndexSeek` BTree-alias escape route closed; only broader `state_view.go` / `committed_state.go` escape routes remain open under OI-005
 - OI-006 fanout per-subscriber slice-header aliasing sub-hazard closed; row-payload sharing and broader fanout assembly hazards stay open with enumerated sub-hazards
+- OI-004 `watchReducerResponse` goroutine-leak sub-hazard closed; other detached-goroutine surfaces in protocol lifecycle remain open
 - next realistic anchors: further Tier-B hardening (α), broader SQL parity (β), format-level commitlog parity (γ), individual scheduler deferrals (δ)
-- 10 packages, 1111 tests passing as of 2026-04-20
+- 10 packages, 1127 tests passing as of 2026-04-20

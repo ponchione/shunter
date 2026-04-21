@@ -24,10 +24,10 @@ func joinChangeset(
 
 // Join setup: T1(id, name) join T2(id, t1_id) on t1_id=id.
 const (
-	joinLHS TableID = 1
-	joinRHS TableID = 2
-	joinLHSCol ColID = 0 // T1.id
-	joinRHSCol ColID = 1 // T2.t1_id
+	joinLHS    TableID = 1
+	joinRHS    TableID = 2
+	joinLHSCol ColID   = 0 // T1.id
+	joinRHSCol ColID   = 1 // T2.t1_id
 
 	joinLHSIdx IndexID = 100 // index on T1.id
 	joinRHSIdx IndexID = 200 // index on T2.t1_id

@@ -22,6 +22,16 @@ type memoizedResult struct {
 //
 // Called synchronously on the executor goroutine; changeset is read-only.
 //
+// View lifetime (OI-005 subscription-seam sub-hazard): `view` is borrowed
+// for the duration of this call only. The executor calls `view.Close()`
+// immediately after this function returns (`executor/executor.go:540-541`),
+// so no reference to `view` may escape past return — not via the
+// `FanOutMessage` published on `m.inbox`, not via a goroutine spawned
+// from this call, not stashed in any per-subscriber state. Materialize
+// rows into `SubscriptionUpdate.Inserts`/`Deletes` before handoff.
+// Pinned by
+// `eval_view_lifetime_test.go::TestEvalAndBroadcastDoesNotUseViewAfterReturn_{Join,SingleTable}`.
+//
 // Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
 // a caller-addressable commit MUST NOT short-circuit on "no active
 // subscriptions" or "empty changeset" — the caller still needs its
@@ -437,37 +447,32 @@ func projectedRowsBefore(dv *DeltaView, table TableID) []types.ProductValue {
 			current = append(current, row)
 		}
 	}
-	inserted := dv.InsertedRows(table)
-	remaining := make([]types.ProductValue, 0, len(current))
-	used := make([]bool, len(inserted))
-	for _, row := range current {
-		matched := false
-		for i, ins := range inserted {
-			if used[i] {
-				continue
-			}
-			if productValuesEqual(row, ins) {
-				used[i] = true
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			remaining = append(remaining, row)
-		}
-	}
+	remaining := subtractProjectedRowsByKey(current, dv.InsertedRows(table))
 	remaining = append(remaining, dv.DeletedRows(table)...)
 	return remaining
 }
 
-func productValuesEqual(a, b types.ProductValue) bool {
-	if len(a) != len(b) {
-		return false
+func subtractProjectedRowsByKey(current, inserted []types.ProductValue) []types.ProductValue {
+	if len(current) == 0 {
+		return nil
 	}
-	for i := range a {
-		if !a[i].Equal(b[i]) {
-			return false
+	if len(inserted) == 0 {
+		remaining := make([]types.ProductValue, 0, len(current))
+		remaining = append(remaining, current...)
+		return remaining
+	}
+	insertCounts := make(map[string]int, len(inserted))
+	for _, row := range inserted {
+		insertCounts[encodeRowKey(row)]++
+	}
+	remaining := make([]types.ProductValue, 0, len(current))
+	for _, row := range current {
+		key := encodeRowKey(row)
+		if insertCounts[key] > 0 {
+			insertCounts[key]--
+			continue
 		}
+		remaining = append(remaining, row)
 	}
-	return true
+	return remaining
 }

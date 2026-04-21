@@ -158,28 +158,29 @@ func DecodeClientMessage(frame []byte) (uint8, any, error) {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)
 	}
 	tag := frame[0]
-	body := frame[1:]
+	msg, err := decodeClientMessageParts(tag, frame[1:])
+	if err != nil {
+		return 0, nil, err
+	}
+	return tag, msg, nil
+}
+
+func decodeClientMessageParts(tag uint8, body []byte) (any, error) {
 	switch tag {
 	case TagSubscribeSingle:
-		msg, err := decodeSubscribeSingle(body)
-		return tag, msg, err
+		return decodeSubscribeSingle(body)
 	case TagUnsubscribeSingle:
-		msg, err := decodeUnsubscribeSingle(body)
-		return tag, msg, err
+		return decodeUnsubscribeSingle(body)
 	case TagCallReducer:
-		msg, err := decodeCallReducer(body)
-		return tag, msg, err
+		return decodeCallReducer(body)
 	case TagOneOffQuery:
-		msg, err := decodeOneOffQuery(body)
-		return tag, msg, err
+		return decodeOneOffQuery(body)
 	case TagSubscribeMulti:
-		msg, err := decodeSubscribeMulti(body)
-		return tag, msg, err
+		return decodeSubscribeMulti(body)
 	case TagUnsubscribeMulti:
-		msg, err := decodeUnsubscribeMulti(body)
-		return tag, msg, err
+		return decodeUnsubscribeMulti(body)
 	default:
-		return 0, nil, fmt.Errorf("%w: tag=%d", ErrUnknownMessageTag, tag)
+		return nil, fmt.Errorf("%w: tag=%d", ErrUnknownMessageTag, tag)
 	}
 }
 

@@ -6,7 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 )
+
+var gzipWriterPool = sync.Pool{
+	New: func() any {
+		return gzip.NewWriter(io.Discard)
+	},
+}
+
+var gzipReaderPool sync.Pool
 
 // Compression byte values (SPEC-005 §3.3, parity-aligned with
 // reference/SpacetimeDB
@@ -74,13 +83,20 @@ func WrapCompressed(tag uint8, body []byte, mode uint8) ([]byte, error) {
 		var buf bytes.Buffer
 		buf.WriteByte(CompressionGzip)
 		buf.WriteByte(tag)
-		gw := gzip.NewWriter(&buf)
+		gw := gzipWriterPool.Get().(*gzip.Writer)
+		gw.Reset(&buf)
 		if _, err := gw.Write(body); err != nil {
+			gw.Reset(io.Discard)
+			gzipWriterPool.Put(gw)
 			return nil, fmt.Errorf("gzip write: %w", err)
 		}
 		if err := gw.Close(); err != nil {
+			gw.Reset(io.Discard)
+			gzipWriterPool.Put(gw)
 			return nil, fmt.Errorf("gzip close: %w", err)
 		}
+		gw.Reset(io.Discard)
+		gzipWriterPool.Put(gw)
 		return buf.Bytes(), nil
 	default:
 		return nil, fmt.Errorf("%w: mode=%d", ErrUnknownCompressionTag, mode)
@@ -104,14 +120,27 @@ func UnwrapCompressed(frame []byte) (uint8, []byte, error) {
 	case CompressionBrotli:
 		return 0, nil, ErrBrotliUnsupported
 	case CompressionGzip:
-		gr, err := gzip.NewReader(bytes.NewReader(payload))
+		var (
+			gr  *gzip.Reader
+			err error
+		)
+		if pooled := gzipReaderPool.Get(); pooled != nil {
+			gr = pooled.(*gzip.Reader)
+			err = gr.Reset(bytes.NewReader(payload))
+		} else {
+			gr, err = gzip.NewReader(bytes.NewReader(payload))
+		}
 		if err != nil {
 			return 0, nil, fmt.Errorf("%w: %v", ErrDecompressionFailed, err)
 		}
-		defer gr.Close()
 		body, err := io.ReadAll(gr)
+		closeErr := gr.Close()
+		gzipReaderPool.Put(gr)
 		if err != nil {
 			return 0, nil, fmt.Errorf("%w: %v", ErrDecompressionFailed, err)
+		}
+		if closeErr != nil {
+			return 0, nil, fmt.Errorf("%w: %v", ErrDecompressionFailed, closeErr)
 		}
 		return tag, body, nil
 	default:

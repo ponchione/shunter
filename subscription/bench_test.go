@@ -108,6 +108,37 @@ func BenchmarkRegisterSetInitialQueryAllRows(b *testing.B) {
 	}
 }
 
+func BenchmarkProjectedRowsBeforeLargeBags(b *testing.B) {
+	const totalRows = 4096
+	const distinctRows = 64
+
+	s := benchSchema()
+	current := make([]types.ProductValue, 0, totalRows)
+	inserted := make([]types.ProductValue, 0, totalRows/2)
+	for i := 0; i < totalRows; i++ {
+		row := types.ProductValue{types.NewUint64(uint64(i % distinctRows)), types.NewString("row")}
+		current = append(current, row)
+		if i%2 == 0 {
+			inserted = append(inserted, row)
+		}
+	}
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{1: current})
+	cs := &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			1: {TableID: 1, Inserts: inserted},
+		},
+	}
+	dv := NewDeltaView(view, cs, nil)
+	defer dv.Release()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = projectedRowsBefore(dv, 1)
+	}
+}
+
 func BenchmarkFanOut1KClientsSameQuery(b *testing.B) {
 	s := benchSchema()
 	inbox := make(chan FanOutMessage, 1024)

@@ -4,6 +4,7 @@ import (
 	"iter"
 	"log"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -74,6 +75,11 @@ func (s *CommittedSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, 
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()
 		for rid, row := range inner {
+			// OI-005 mid-iter-close defense-in-depth: if another
+			// caller has Closed this snapshot after iter body entry,
+			// halt with the same deterministic panic rather than
+			// continuing to yield rows against a released RLock.
+			s.ensureOpen()
 			if !yield(rid, row) {
 				return
 			}
@@ -96,7 +102,18 @@ func (s *CommittedSnapshot) IndexSeek(tableID schema.TableID, indexID schema.Ind
 	if !ok {
 		return nil
 	}
-	return idx.Seek(key)
+	// OI-005 shared-state escape route closure: the underlying BTreeIndex.Seek
+	// returns a live alias of the index entry's internal []RowID. A caller
+	// that retained that slice past Close() would race any subsequent writer's
+	// Insert/Remove on the same key (slices.Insert / slices.Delete mutate the
+	// backing array). Clone at this public read-view boundary so callers
+	// cannot alias BTree-internal storage. Pinned by
+	// snapshot_indexseek_aliasing_test.go.
+	ids := idx.Seek(key)
+	if len(ids) == 0 {
+		return nil
+	}
+	return slices.Clone(ids)
 }
 
 func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.IndexID, lower, upper Bound) iter.Seq2[types.RowID, types.ProductValue] {
@@ -109,6 +126,8 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()
 		for rid := range idx.BTree().Scan() {
+			// OI-005 mid-iter-close defense-in-depth: see TableScan.
+			s.ensureOpen()
 			row, ok := t.GetRow(rid)
 			if !ok {
 				continue
@@ -163,6 +182,8 @@ func (s *CommittedSnapshot) rowsFromRowIDs(t *Table, rowIDs []types.RowID) iter.
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()
 		for _, rid := range rowIDs {
+			// OI-005 mid-iter-close defense-in-depth: see TableScan.
+			s.ensureOpen()
 			row, ok := t.GetRow(rid)
 			if !ok {
 				continue

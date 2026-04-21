@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -214,6 +215,134 @@ func TestConcurrentSnapshotReturnsInProgress(t *testing.T) {
 	close(blocking.continueWrite)
 	if err := <-errCh; err != nil {
 		t.Fatalf("first snapshot should complete successfully: %v", err)
+	}
+}
+
+func buildLargeSnapshotCommittedState(t testing.TB, rowCount int) (*store.CommittedState, schema.SchemaRegistry) {
+	t.Helper()
+	_, reg := testSchema()
+	cs := store.NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, store.NewTable(ts))
+	}
+	players, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("missing players table")
+	}
+	for i := 1; i <= rowCount; i++ {
+		row := types.ProductValue{
+			types.NewUint64(uint64(i)),
+			types.NewString("player-" + strconv.Itoa(i)),
+		}
+		if err := players.InsertRow(players.AllocRowID(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return cs, reg
+}
+
+func TestSnapshotLargeRoundTripAndDeterministicBytes(t *testing.T) {
+	cs, reg := buildLargeSnapshotCommittedState(t, 2048)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	if err := writer.CreateSnapshot(cs, 101); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.CreateSnapshot(cs, 102); err != nil {
+		t.Fatal(err)
+	}
+
+	data101, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "101"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data102, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "102"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	playersRows101 := -1
+	playersRows102 := -1
+	for _, table := range data101.Tables {
+		if table.TableID == 0 {
+			playersRows101 = len(table.Rows)
+			if got := table.Rows[len(table.Rows)-1][1].AsString(); got != "player-2048" {
+				t.Fatalf("last player in snapshot 101 = %q, want player-2048", got)
+			}
+		}
+	}
+	for _, table := range data102.Tables {
+		if table.TableID == 0 {
+			playersRows102 = len(table.Rows)
+		}
+	}
+	if playersRows101 != 2048 || playersRows102 != 2048 {
+		t.Fatalf("player row counts = (%d, %d), want (2048, 2048)", playersRows101, playersRows102)
+	}
+
+	bytes101, err := os.ReadFile(filepath.Join(baseDir, "snapshots", "101", "snapshot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes102, err := os.ReadFile(filepath.Join(baseDir, "snapshots", "102", "snapshot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytes101[:8], bytes102[:8]) {
+		t.Fatal("snapshot magic/version prefix differs for identical state")
+	}
+	if !bytes.Equal(bytes101[16:20], bytes102[16:20]) {
+		t.Fatal("schema version bytes differ for identical state")
+	}
+	if !bytes.Equal(bytes101[20:52], bytes102[20:52]) {
+		t.Fatal("hash bytes differ for identical state")
+	}
+	if !bytes.Equal(bytes101[52:], bytes102[52:]) {
+		t.Fatal("snapshot payload differs for identical state")
+	}
+}
+
+func TestReadSnapshotLargeRoundTrip(t *testing.T) {
+	cs, reg := buildLargeSnapshotCommittedState(t, 4096)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	if err := writer.CreateSnapshot(cs, 103); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "103"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.TxID != 103 {
+		t.Fatalf("snapshot txID = %d, want 103", data.TxID)
+	}
+	playersRows := -1
+	for _, table := range data.Tables {
+		if table.TableID == 0 {
+			playersRows = len(table.Rows)
+			if got := table.Rows[0][1].AsString(); got != "player-1" {
+				t.Fatalf("first player = %q, want player-1", got)
+			}
+			if got := table.Rows[len(table.Rows)-1][1].AsString(); got != "player-4096" {
+				t.Fatalf("last player = %q, want player-4096", got)
+			}
+		}
+	}
+	if playersRows != 4096 {
+		t.Fatalf("players rows = %d, want 4096", playersRows)
+	}
+}
+
+func BenchmarkCreateSnapshotLarge(b *testing.B) {
+	cs, reg := buildLargeSnapshotCommittedState(b, 4096)
+	for i := 0; i < b.N; i++ {
+		root := b.TempDir()
+		writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+		if err := writer.CreateSnapshot(cs, types.TxID(i+1)); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
