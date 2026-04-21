@@ -27,6 +27,7 @@ package sql
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -261,6 +262,14 @@ func tokenize(s string) ([]token, error) {
 		case c == ';':
 			out = append(out, token{kind: tokSemicolon, text: ";", pos: i})
 			i++
+		case c == '.' && i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '9':
+			start := i
+			tok, next, err := tokenizeNumeric(s, i, start)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, tok)
+			i = next
 		case c == '.':
 			out = append(out, token{kind: tokDot, text: ".", pos: i})
 			i++
@@ -359,31 +368,25 @@ func tokenize(s string) ([]token, error) {
 				return nil, fmt.Errorf("%w: malformed hex literal at position %d", ErrUnsupportedSQL, start)
 			}
 			out = append(out, token{kind: tokHex, text: s[start:i], pos: start})
-		case c == '-' || (c >= '0' && c <= '9'):
+		case c == '-' || c == '+' || (c >= '0' && c <= '9'):
 			start := i
-			if c == '-' {
+			if c == '-' || c == '+' {
 				i++
-				if i >= len(s) || !(s[i] >= '0' && s[i] <= '9') {
-					return nil, fmt.Errorf("%w: unexpected '-' at position %d", ErrUnsupportedSQL, start)
+				if i >= len(s) {
+					return nil, fmt.Errorf("%w: unexpected '%c' at position %d", ErrUnsupportedSQL, c, start)
+				}
+				d := s[i]
+				leadingDotAfterSign := d == '.' && i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '9'
+				if !((d >= '0' && d <= '9') || leadingDotAfterSign) {
+					return nil, fmt.Errorf("%w: unexpected '%c' at position %d", ErrUnsupportedSQL, c, start)
 				}
 			}
-			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-				i++
+			tok, next, err := tokenizeNumeric(s, i, start)
+			if err != nil {
+				return nil, err
 			}
-			if i < len(s) && s[i] == '.' {
-				j := i + 1
-				if j >= len(s) || !(s[j] >= '0' && s[j] <= '9') {
-					return nil, fmt.Errorf("%w: malformed numeric literal at position %d", ErrUnsupportedSQL, start)
-				}
-				i = j + 1
-				for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-					i++
-				}
-			}
-			if i < len(s) && (isIdentStart(s[i]) || s[i] == '.') {
-				return nil, fmt.Errorf("%w: malformed numeric literal at position %d", ErrUnsupportedSQL, start)
-			}
-			out = append(out, token{kind: tokNumber, text: s[start:i], pos: start})
+			out = append(out, tok)
+			i = next
 		case isIdentStart(c):
 			start := i
 			for i < len(s) && isIdentCont(s[i]) {
@@ -397,6 +400,45 @@ func tokenize(s string) ([]token, error) {
 	}
 	out = append(out, token{kind: tokEOF, pos: len(s)})
 	return out, nil
+}
+
+// tokenizeNumeric consumes a numeric literal body starting at i. `start` is
+// the position of the first character of the token (possibly a leading sign
+// or a leading `.`). The caller has already validated that the lookahead at
+// i is either a digit or a `.digit` leading-dot shape, so the body parses
+// integer-part, optional fractional-part, and optional `[eE][+-]?digits`
+// exponent. Trailing identifier or `.` characters are rejected as malformed.
+func tokenizeNumeric(s string, i, start int) (token, int, error) {
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i < len(s) && s[i] == '.' {
+		j := i + 1
+		if j >= len(s) || !(s[j] >= '0' && s[j] <= '9') {
+			return token{}, 0, fmt.Errorf("%w: malformed numeric literal at position %d", ErrUnsupportedSQL, start)
+		}
+		i = j + 1
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		j := i + 1
+		if j < len(s) && (s[j] == '+' || s[j] == '-') {
+			j++
+		}
+		if j >= len(s) || !(s[j] >= '0' && s[j] <= '9') {
+			return token{}, 0, fmt.Errorf("%w: malformed numeric literal at position %d", ErrUnsupportedSQL, start)
+		}
+		i = j + 1
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+	if i < len(s) && (isIdentStart(s[i]) || s[i] == '.') {
+		return token{}, 0, fmt.Errorf("%w: malformed numeric literal at position %d", ErrUnsupportedSQL, start)
+	}
+	return token{kind: tokNumber, text: s[start:i], pos: start}, i, nil
 }
 
 func isIdentStart(c byte) bool {
@@ -793,18 +835,7 @@ func (p *parser) parseLiteral() (Literal, error) {
 	switch t.kind {
 	case tokNumber:
 		p.advance()
-		if strings.Contains(t.text, ".") {
-			f, err := strconv.ParseFloat(t.text, 64)
-			if err != nil {
-				return Literal{}, fmt.Errorf("%w: float literal %q out of range", ErrUnsupportedSQL, t.text)
-			}
-			return Literal{Kind: LitFloat, Float: f}, nil
-		}
-		n, err := strconv.ParseInt(t.text, 10, 64)
-		if err != nil {
-			return Literal{}, fmt.Errorf("%w: integer literal %q out of range", ErrUnsupportedSQL, t.text)
-		}
-		return Literal{Kind: LitInt, Int: n}, nil
+		return parseNumericLiteral(t.text)
 	case tokHex:
 		p.advance()
 		b, err := parseHexLiteral(t.text)
@@ -834,6 +865,32 @@ func (p *parser) parseLiteral() (Literal, error) {
 	default:
 		return Literal{}, p.unsupported(fmt.Sprintf("expected literal, got %q", t.text))
 	}
+}
+
+// parseNumericLiteral turns a tokenized numeric body into a typed Literal.
+// Plain integer bodies stay LitInt. Bodies with a fractional or exponent
+// part parse via strconv.ParseFloat(64); when the resulting value is finite
+// and integer-valued within int64 range the literal collapses to LitInt so
+// it can bind to integer columns at the coerce boundary (matching the
+// reference BigDecimal is_integer path in crates/expr/src/lib.rs::parse_int).
+// Otherwise the literal stays LitFloat and the coerce boundary either binds
+// it to a float column or rejects it as a float-on-integer mismatch.
+func parseNumericLiteral(text string) (Literal, error) {
+	if strings.ContainsAny(text, ".eE") {
+		f, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			return Literal{}, fmt.Errorf("%w: numeric literal %q out of range", ErrUnsupportedSQL, text)
+		}
+		if !math.IsInf(f, 0) && !math.IsNaN(f) && f == math.Trunc(f) && f >= math.MinInt64 && f <= math.MaxInt64 {
+			return Literal{Kind: LitInt, Int: int64(f)}, nil
+		}
+		return Literal{Kind: LitFloat, Float: f}, nil
+	}
+	n, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return Literal{}, fmt.Errorf("%w: integer literal %q out of range", ErrUnsupportedSQL, text)
+	}
+	return Literal{Kind: LitInt, Int: n}, nil
 }
 
 func (p *parser) expectKeyword(kw string) error {

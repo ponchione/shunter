@@ -2,70 +2,255 @@
 
 Use this file to start the next agent on the next real Shunter parity / hardening step with no prior context.
 
-## What just landed (2026-04-21, follow-up slice)
+## What just landed (2026-04-21, `sub.rs:157-168` `unsupported` rejection pin bundle + intentional one-off-vs-SQL divergence recorded)
 
-`:sender` caller-identity parameter parity on the narrow single-table SQL surface. Shunter now accepts `select * from s where id = :sender` and `select * from s where bytes = :sender` end-to-end and rejects `:sender` on any non-bytes column (the equivalent of the reference `check.rs:487-488` `select * from t where arr = :sender` rejection on Shunter's KindBytes-backed identity representation).
+Reference subscription-parser `unsupported` test block at `reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs:157-168` covers five shapes the reference rejects before type-checking:
+- `delete from t` — DML not allowed in subscription parse path
+- `` (empty string) — empty after skip
+- ` ` (whitespace only) — same as empty after tokenizer skip
+- `select distinct a from t` — DISTINCT projection
+- `select * from (select * from t) join (select * from s) on a = b` — subquery in FROM
 
-- Grounded anchors before edits:
-  - `reference/SpacetimeDB/crates/expr/src/check.rs:435-440` for positive `:sender` shapes on identity / bytes columns.
-  - `reference/SpacetimeDB/crates/expr/src/check.rs:487-488` for the rejection on non-identity / non-bytes columns (`select * from t where arr = :sender`).
-- Production widening landed:
-  - `query/sql/parser.go` tokenizes `:` + ident as `tokParam`, produces `Literal{Kind: LitSender}` only for `:sender` (case-insensitive), rejects any other `:name` parameter with `ErrUnsupportedSQL`.
-  - `query/sql/coerce.go` adds `CoerceWithCaller(lit, kind, caller *[32]byte)`; `LitSender` materializes the caller identity as a fresh `types.NewBytes(caller[:])` on KindBytes columns and rejects on any other column kind. The legacy `Coerce` path rejects `LitSender` outright so callers that have not threaded caller identity cannot accidentally resolve it.
-  - `protocol/handle_subscribe.go` extends `compileSQLQueryString`, `parseQueryString`, `compileSQLPredicateForRelations`, and `normalizeSQLFilterForRelations` to accept a `*types.Identity` caller and route coercion through `CoerceWithCaller`; `protocol/handle_subscribe_single.go` / `handle_subscribe_multi.go` / `handle_oneoff.go` thread `&conn.Identity` into the compile path.
-- New parser / coerce / public-seam pins landed:
-  - parser: `TestParseWhereSenderParameterOnIdentityColumn`, `TestParseWhereSenderParameterOnBytesColumn`, `TestParseWhereSenderParameterIsCaseInsensitive`, `TestParseWhereRejectsUnknownParameter`
-  - coerce: `TestCoerceSenderWithoutCallerFails`, `TestCoerceSenderWithCallerToBytes`, `TestCoerceSenderRejectsNonBytesColumn`
-  - protocol subscribe-single: `TestHandleSubscribeSingle_SenderParameterOnIdentityColumn`, `TestHandleSubscribeSingle_SenderParameterOnBytesColumn`, `TestHandleSubscribeSingle_SenderParameterOnStringColumnRejected`
-  - protocol one-off: `TestHandleOneOffQuery_SenderParameterOnIdentityColumn`, `TestHandleOneOffQuery_SenderParameterOnBytesColumn`, `TestHandleOneOffQuery_SenderParameterOnStringColumnRejected`
-- Scope kept narrow: no projection broadening, no `WHERE arr = :sender` path (non-bytes columns still reject), no `:other` parameter plumbing, no LIMIT / column-list widening, no multi-way join runtime work, no lifecycle/envelope churn. `SubscribeMulti` inherits the new compile path through the shared `compileSQLQueryString` seam but has no dedicated pin test (the narrow slice is covered by the subscribe-single path). Reopen if a specific `SubscribeMulti` `:sender` regression surfaces.
-- Docs follow-through: `docs/current-status.md`, `docs/parity-phase0-ledger.md`, and `TECH-DEBT.md` now record the `:sender` parameter parity as a landed narrow SQL parity slice; the pinned tests are named in the ledger.
+All five were already rejected incidentally by Shunter's SELECT-only parser:
+- DML / empty / whitespace fail at `query/sql/parser.go:475-477` `expectKeyword("SELECT")` (non-SELECT leading token or EOF-only token stream)
+- DISTINCT fails at `parseProjection` (`query/sql/parser.go:553-572`) which only accepts `*` / `table.*`; DISTINCT is consumed as a qualifier candidate, the next token is `a` not `.`, and the parser emits "projection must be '*' or 'table.*'"
+- subquery-in-FROM fails at `parseStatement` `tableTok := p.peek(); if !isIdentifierToken(tableTok)` (`query/sql/parser.go:485-488`) — the `(` token is `tokLParen`, not an identifier
+
+No runtime widening was required. The new pins latch the reference parity contract at the protocol admission boundary.
+
+New pins landed (10 tests):
+- protocol subscribe-single: `TestHandleSubscribeSingle_ParityDMLStatementRejected`, `TestHandleSubscribeSingle_ParityEmptyStatementRejected`, `TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected`, `TestHandleSubscribeSingle_ParityDistinctProjectionRejected`, `TestHandleSubscribeSingle_ParitySubqueryInFromRejected` in `protocol/handle_subscribe_test.go`
+- protocol one-off: `TestHandleOneOffQuery_ParityDMLStatementRejected`, `TestHandleOneOffQuery_ParityEmptyStatementRejected`, `TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected`, `TestHandleOneOffQuery_ParityDistinctProjectionRejected`, `TestHandleOneOffQuery_ParitySubqueryInFromRejected` in `protocol/handle_oneoff_test.go`
+
+**Intentional divergence recorded (one-off vs reference SQL statement path):** Reference splits `parse_and_type_sub` (subscription, narrow) and `parse_and_type_sql` (one-off SQL, wider). The SQL path at `reference/SpacetimeDB/crates/expr/src/statement.rs:521-551` accepts `select str from t` (bare column projection), `select str, arr from t` (multi-col bare projection), `select t.str, arr from t` (mixed qualified/unqualified), and `select * from t limit 5` (LIMIT). Shunter unifies both behind one `compileSQLQueryString` admission surface that enforces the subscription-shape contract for SubscribeSingle / SubscribeMulti / OneOffQuery, so those four shapes are rejected on all surfaces — pinned as rejections by `TestHandleOneOffQuery_ParityBareColumnProjectionRejected` and `TestHandleOneOffQuery_ParityLimitClauseRejected`. Widening would require LIMIT runtime support, bare / mixed projection plumbing, and reversing the already-landed pins — out of scope for a narrow slice. Divergence recorded in `docs/parity-phase0-ledger.md` (under the `sub.rs::unsupported` paragraph) and `TECH-DEBT.md`. If workload evidence surfaces a real need for ref-style one-off SQL semantics, promote it to its own multi-slice anchor.
+
+Verification:
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParityDMLStatementRejected|TestHandleSubscribeSingle_ParityEmptyStatementRejected|TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected|TestHandleSubscribeSingle_ParityDistinctProjectionRejected|TestHandleSubscribeSingle_ParitySubqueryInFromRejected|TestHandleOneOffQuery_ParityDMLStatementRejected|TestHandleOneOffQuery_ParityEmptyStatementRejected|TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected|TestHandleOneOffQuery_ParityDistinctProjectionRejected|TestHandleOneOffQuery_ParitySubqueryInFromRejected' -count=1 -v` → `Go test: 10 passed in 1 packages`
+- `rtk go fmt ./protocol`, `rtk go vet ./protocol` → clean
+- `rtk go test ./...` → `Go test: 1289 passed in 10 packages`
+
+Clean-tree baseline: `Go test: 1289 passed in 10 packages` (previous 1279 + 10 new pin rows).
+
+## What landed earlier (2026-04-21, `check.rs:360-370` `valid_literals_for_type` column-width breadth pin bundle)
+
+Reference `valid_literals_for_type` at `reference/SpacetimeDB/crates/expr/src/check.rs:360-370` iterates every numeric column kind (`i8, u8, i16, u16, i32, u32, i64, u64, f32, f64, i128, u128, i256, u256`) and asserts `SELECT * FROM t WHERE {ty} = 127` type-checks. Shunter realizes the subset that maps to `schema.ValueKind` — the 10 widths `i8/u8/i16/u16/i32/u32/i64/u64/f32/f64`; `i128`, `u128`, `i256`, `u256` are not realizable (no `schema.ValueKind` variant) and are deliberately skipped.
+
+All 10 realizable widths were already rejected-or-accepted incidentally via `query/sql/coerce.go`:
+- `coerceSigned` at `coerce.go:105-113` accepts LitInt within range for `KindInt8/Int16/Int32/Int64`
+- `coerceUnsigned` at `coerce.go:115-127` accepts LitInt within range for `KindUint8/Uint16/Uint32/Uint64`
+- `KindFloat32` / `KindFloat64` branches at `coerce.go:66-83` promote LitInt via `float32(lit.Int)` / `float64(lit.Int)` (integer-literal-to-float promotion landed with the 2026-04-21 scientific-notation slice)
+
+`= 127` fits every kind's range (i8's max is 127 exactly), so no runtime widening was needed. The new pins latch the reference column-width parity contract at the protocol admission boundary.
+
+New pins landed (2 top-level tests, 20 subtests):
+- protocol subscribe-single: `TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth` (10 subtests: i8, u8, i16, u16, i32, u32, i64, u64, f32, f64) in `protocol/handle_subscribe_test.go`
+- protocol one-off: `TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth` (10 subtests: same 10 widths) in `protocol/handle_oneoff_test.go`
+
+Each subtest builds a single-column table of the given kind, runs `SELECT * FROM t WHERE {colname} = 127`, and asserts admission success. SubscribeSingle pins the executor's ColEq predicate carries a width-native value; OneOff pins Status == 0 and stores a matching row.
+
+Verification:
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth|TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth' -count=1 -v` → `Go test: 22 passed in 1 packages` (2 parents + 20 subtests)
+- `rtk go fmt ./protocol`, `rtk go vet ./protocol` → clean
+- `rtk go test ./...` → `Go test: 1279 passed in 10 packages`
+
+Clean-tree baseline: `Go test: 1279 passed in 10 packages` (previous 1257 + 22 new pin rows)
+
+## What landed earlier (2026-04-21, `check.rs:382-401` `invalid_literals` rejection pin bundle)
+
+Reference `invalid_literals` block `reference/SpacetimeDB/crates/expr/src/check.rs:373-406` tests five shapes that must reject at the type-check boundary:
+- `u8 = -1` (lines 382-385) — negative integer against unsigned column
+- `u8 = 1e3` (lines 386-389) — scientific-notation collapses to LitInt(1000), out of range for u8 (max 255)
+- `u8 = 0.1` (lines 390-393) — non-integral decimal stays LitFloat, rejected against integer column
+- `u32 = 1e-3` (lines 394-397) — `1e-3 = 0.001` non-integral, LitFloat, rejected against unsigned column
+- `i32 = 1e-3` (lines 398-401) — same shape, rejected against signed column
+
+All five were already rejected incidentally inside `compileSQLQueryString` / `parseQueryString` via `coerceUnsigned` / `coerceSigned` in `query/sql/coerce.go`:
+- negative LitInt → `coerceUnsigned` line 119 rejects
+- out-of-range LitInt → `coerceUnsigned` line 123 rejects
+- LitFloat against integer column → `coerceUnsigned` line 116 / `coerceSigned` line 106 `mismatch()`
+
+No runtime widening needed; coerce-layer already has broad mechanism tests (`TestCoerceNegativeIntoUnsignedFails`, `TestCoerceIntToSignedRangeCheck`, `TestCoerceRejectsFloatLiteralOnUint32Column`) so no new coerce pins were added (precedent from `check.rs:483-497` bundle). The new pins latch the reference parity contract at the protocol admission boundary.
+
+New pins landed (10 tests):
+- protocol subscribe-single: `TestHandleSubscribeSingle_ParityInvalidLiteralNegativeIntOnUnsignedRejected`, `TestHandleSubscribeSingle_ParityInvalidLiteralScientificOverflowRejected`, `TestHandleSubscribeSingle_ParityInvalidLiteralFloatOnUnsignedRejected`, `TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnUnsignedRejected`, `TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnSignedRejected` in `protocol/handle_subscribe_test.go`
+- protocol one-off: `TestHandleOneOffQuery_ParityInvalidLiteralNegativeIntOnUnsignedRejected`, `TestHandleOneOffQuery_ParityInvalidLiteralScientificOverflowRejected`, `TestHandleOneOffQuery_ParityInvalidLiteralFloatOnUnsignedRejected`, `TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnUnsignedRejected`, `TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected` in `protocol/handle_oneoff_test.go`
+
+Verification:
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParityInvalidLiteral|TestHandleOneOffQuery_ParityInvalidLiteral' -count=1 -v` → `Go test: 10 passed in 1 packages`
+- `rtk go fmt ./protocol`, `rtk go vet ./protocol` → clean
+- `rtk go test ./...` → `Go test: 1257 passed in 10 packages`
+
+Clean-tree baseline after this slice: `Go test: 1257 passed in 10 packages` (previous 1247 + 10 new pins; now superseded by the 2026-04-21 `valid_literals_for_type` breadth bundle above — current baseline 1279)
+
+## Prior slice (2026-04-21, scientific-notation + leading-dot float literal parity bundle)
+
+Reference valid-literal bundle `reference/SpacetimeDB/crates/expr/src/check.rs:302-328` is now supported end-to-end on the Shunter SQL surface:
+- `u32 = 1e3` / `u32 = 1E3` — scientific notation, integer-valued, binds to unsigned integer column (lines 302-308)
+- `f32 = 1e3` — integer-shaped scientific notation on float column (lines 310-312)
+- `f32 = 1e-3` — negative exponent, non-integral, binds to float column (lines 314-316)
+- `f32 = .1` — leading-dot float, no integer part (lines 322-324)
+- `f32 = 1e40` — overflow to `+Inf` on float32 (lines 326-328; `types.NewFloat32` accepts `+Inf`, only `NaN` rejected)
+
+`f32 = 0.1` (lines 318-320) was already supported.
+
+Implementation:
+- `query/sql/parser.go`: extracted numeric body parsing into `tokenizeNumeric(s, i, start)` so both the signed/digit-started and leading-`.digit` entry points share the exponent/fractional logic. Added a new `case c == '.' && i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '9'` above the existing `tokDot` dispatch so `.1` routes into numeric rather than a dangling dot. Signed-prefix branch now also accepts `+.1` / `-.1`. Exponent tail is `[eE][+-]?[digits]+`; missing digits after `e`/`E`/sign still error as `malformed numeric literal`.
+- `query/sql/parser.go`: replaced the old `strings.Contains(t.text, ".")` int/float split in `parseLiteral` with `parseNumericLiteral(text)` — when the body contains `.`, `e`, or `E`, parse via `strconv.ParseFloat(64)`, then collapse to `LitInt` iff the result is finite, `math.Trunc(f) == f`, and within `[math.MinInt64, math.MaxInt64]` (mirroring the reference `BigDecimal::is_integer()` filter in `crates/expr/src/lib.rs::parse_int`). Non-integral or out-of-range stays `LitFloat`.
+- `query/sql/coerce.go`: widened `KindFloat32` / `KindFloat64` to accept `LitInt` (promoted via `float32(lit.Int)` / `float64(lit.Int)`), matching reference `parse_float` BigDecimal promotion. `LitFloat` still rejected on integer columns at the existing `coerceSigned` / `coerceUnsigned` seams — `u32 = 1.3` (non-integral) stays pinned as an admission error.
+- `query/sql/coerce_test.go`: dropped the stale `TestCoerceUnsupportedKind` (comment said "floats deferred" but floats have worked since the 2026-04-21 float-literal slice). Replaced with `TestCoerceIntegerLiteralPromotesToFloat64`, `TestCoerceIntegerLiteralPromotesToFloat32`, and `TestCoerceFloatLiteralOverflowsToFloat32Infinity`.
+
+Malformed-input guards preserved:
+- `TestParseWhereTrailingDotRejected` (`1.`) — trailing dot with no fractional digits still errors.
+- `TestParseWhereBareExponentRejected` (`1e`) — exponent letter with no digits still errors.
+- `TestParseWhereTrailingIdentifierAfterNumericRejected` (`1efoo`) — numeric followed by identifier still errors (guards against the exponent widening accidentally consuming `1e` then leaving `foo` as a dangling identifier).
+
+New pins landed (18 tests net, clean-tree baseline 1229 → 1247):
+- query/sql parser: 8 new tests (5 accept, 3 reject) in `query/sql/parser_test.go`
+- query/sql coerce: 3 new tests net (3 added, `TestCoerceUnsupportedKind` dropped as stale)
+- protocol subscribe-single: 4 new tests in `protocol/handle_subscribe_test.go`
+- protocol one-off: 4 new tests in `protocol/handle_oneoff_test.go`
+
+Verification:
+- `rtk go test ./query/sql -count=1` → `Go test: 88 passed in 1 packages`
+- `rtk go test ./protocol -count=1` → `Go test: 335 passed in 1 packages`
+- `rtk go fmt ./query/sql ./protocol`, `rtk go vet ./query/sql ./protocol` → clean
+- `rtk go test ./...` → `Go test: 1247 passed in 10 packages`
+
+Remaining `check.rs:284-332` valid-literal shapes still open (both not realizable against Shunter's column-kind enum, so they are deferred, not next slices):
+- 128/256-bit integer column kinds (`i128`, `u128`, `i256`, `u256`) — no such `schema.ValueKind` variant
+- timestamp columns — no such `schema.ValueKind` variant
+
+Clean-tree baseline: `Go test: 1247 passed in 10 packages` (previous 1229 + 18 new pins)
+
+## Prior slice (2026-04-21, leading-`+` numeric literal parity micro-slice)
+
+Reference valid-literal shape `reference/SpacetimeDB/crates/expr/src/check.rs:297-300` (`select * from t where u32 = +1` / "Leading `+`") is now supported end-to-end. Probe of `check.rs::valid_literals` (`check.rs:284-332`) showed Shunter already accepted leading `-` but rejected leading `+` at the lexer: `parser.go::tokenize` line 362 matched `c == '-' || (c >= '0' && c <= '9')` only, so `+7` fell through to `tokSymbol` and `parseLiteral` errored.
+
+One-line lexer widening: the numeric-literal case in `tokenize` now matches `c == '-' || c == '+' || (c >= '0' && c <= '9')` and mirrors the leading-sign dispatch symmetrically. `strconv.ParseInt(s, 10, 64)` accepts the `+` prefix natively, so `parseLiteral` and `coerce.go::coerceUnsigned` / `coerceSigned` required no changes.
+
+New pins landed (3 tests):
+- query/sql parser: `TestParseWhereLeadingPlusInt` in `query/sql/parser_test.go`
+- protocol subscribe-single: `TestHandleSubscribeSingle_ParityLeadingPlusIntLiteral` in `protocol/handle_subscribe_test.go`
+- protocol one-off: `TestHandleOneOffQuery_ParityLeadingPlusIntLiteral` in `protocol/handle_oneoff_test.go`
+
+Verification:
+- `rtk go test ./query/sql -run 'TestParseWhereLeadingPlusInt|TestParseWhereNegativeInt' -count=1 -v` → 2 passed
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParityLeadingPlusIntLiteral|TestHandleOneOffQuery_ParityLeadingPlusIntLiteral' -count=1 -v` → 2 passed
+- `rtk go fmt ./query/sql ./protocol`, `rtk go vet ./query/sql ./protocol` → clean
+- `rtk go test ./...` → `Go test: 1229 passed in 10 packages`
+
+Remaining `check.rs:284-332` valid-literal shapes still open (all require real lexer + coerce widening):
+- scientific notation: `u32 = 1e3` (→ 1000 as integer), `u32 = 1E3` (case-insensitive), `f32 = 1e3` (integer parses as float), `f32 = 1e-3` (negative exponent), `f32 = 1e40` (overflow → +Inf)
+- leading-dot floats: `f32 = .1`
+- 128/256-bit integer column kinds (`i128`, `u128`, `i256`, `u256`) and timestamp columns: not realizable against Shunter's `schema.ValueKind` enum — skip.
+
+Clean-tree baseline: `Go test: 1229 passed in 10 packages` (previous 1226 + 3 new pins)
+
+## Previous slice (2026-04-21, parser-surface check.rs negative-shape pin bundle)
+
+Reference type-check rejection shapes at `reference/SpacetimeDB/crates/expr/src/check.rs` lines 506-509 (`select * from t as r where t.u32 = 5` / base-table qualifier out of scope after alias), 510-513 (`select u32 from t` / bare column projection), 515-517 (`select * from t join s` / join without qualified projection), 519-521 (`select t.* from t join t` / self-join without aliases), 526-528 (`select t.* from t join s on t.u32 = r.u32 join s as r` / forward alias reference), 530-533 (`select * from t limit 5` / LIMIT clause), and 534-537 (`select t.* from t join s on t.u32 = s.u32 where bytes = 0xABCD` / unqualified WHERE column inside join) are now explicitly pinned at both the SubscribeSingle and OneOffQuery admission surfaces (14 new tests). All seven shapes were already rejected incidentally at the SQL parser boundary (`parseProjection`, `parseStatement` EOF-check, `parseStatement` joined-projection guard, `parseJoinClause` self-join guard, `parseQualifiedColumnRef` / `parseComparison` via `resolveQualifier`, and `parseComparison` requireQualify under a join binding) — no runtime widening was required. The pins promote the rejections from incidental parser-level errors to named reference-parity contracts latched on the protocol admission boundary.
+
+Grounded anchors walked before edits:
+- `check.rs:506-509`: `SELECT * FROM t AS r WHERE t.u32 = 5` — `parser.go::parseComparison` calls `resolveQualifier("t", {R: t})` which returns `!ok` → `qualified column "t" does not match relation`.
+- `check.rs:510-513`: `SELECT u32 FROM t` — `parser.go::parseProjection` rejects any projection other than `*` / `table.*` at lines 517-528.
+- `check.rs:515-517`: `SELECT * FROM t JOIN s` — `parser.go::parseStatement` line 468-469 rejects a join query whose projection qualifier is empty: `join queries require a qualified projection`.
+- `check.rs:519-521`: `SELECT t.* FROM t JOIN t` — `parser.go::parseJoinClause` line 577-578 detects `leftTable==rightTable && leftAlias==rightAlias` → `self join requires aliases`.
+- `check.rs:526-528`: `SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r` — `parser.go::parseQualifiedColumnRef` rejects the `r.u32` qualifier at line 629-631; the forward-alias reference fails before the multi-way-join guard at lines 482-489 fires.
+- `check.rs:530-533`: `SELECT * FROM t LIMIT 5` — `parser.go::parseStatement` reaches the EOF check at line 505-506 with `LIMIT` still in the token stream and rejects with `unexpected token "LIMIT"`. The already-existing trailing-keyword fast-path in `parseWhere` (lines 641-645) only fires when a WHERE clause precedes the keyword; the standalone `LIMIT` case was already rejected by the EOF guard.
+- `check.rs:534-537`: `SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE bytes = 0xABCD` — `parser.go::parseComparison` at lines 761-762 enforces `bindings.requireQualify` under a join binding: `join WHERE columns must be qualified`.
+
+Pinned but deliberately skipped:
+- `check.rs:523-525` (`SELECT t.* FROM t JOIN s ON t.arr = s.arr` / product-value comparison): not realizable against the Shunter column-kind enum. `schema.ValueKind` (re-exported from `types`) enumerates only `KindBool`, `KindInt{8,16,32,64}`, `KindUint{8,16,32,64}`, `KindFloat{32,64}`, `KindString`, `KindBytes` — there is no array / product kind — so the shape reference rejects cannot arise at the Shunter admission boundary. Skipping is intentional; if Shunter ever adds a composite column kind, this shape becomes a fresh landing candidate for either a runtime widening (accept + reject in join-ON compile) or a named parser rejection.
+
+New pins landed (14 tests):
+- protocol subscribe-single: `TestHandleSubscribeSingle_ParityBaseTableQualifierAfterAliasRejected`, `TestHandleSubscribeSingle_ParityBareColumnProjectionRejected`, `TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected`, `TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected`, `TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected`, `TestHandleSubscribeSingle_ParityLimitClauseRejected`, `TestHandleSubscribeSingle_ParityUnqualifiedWhereInJoinRejected` in `protocol/handle_subscribe_test.go`
+- protocol one-off: `TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected`, `TestHandleOneOffQuery_ParityBareColumnProjectionRejected`, `TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected`, `TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected`, `TestHandleOneOffQuery_ParityForwardAliasReferenceRejected`, `TestHandleOneOffQuery_ParityLimitClauseRejected`, `TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected` in `protocol/handle_oneoff_test.go`
+
+Scope kept narrow: no parser changes, no runtime widening, no new test files. `SubscribeMulti` inherits the compile path through shared parser+`compileSQLQueryString`; no dedicated pin added (covered by the same parser mechanism as SubscribeSingle). Existing parity pins from earlier in the calendar week are unchanged — the new 506-537 pins sit alongside the `check.rs:498-504` type-mismatch pins and the `check.rs:483-497` unknown-table / unknown-column pins as named reference-parity contracts.
+
+Docs follow-through: `docs/current-status.md`, `docs/parity-phase0-ledger.md`, and `TECH-DEBT.md` now record the fourteen new pins as landed and call out `check.rs:523-525` as not realizable against the Shunter column-kind enum.
 
 Verification run after landing the slice:
-- `rtk go test ./query/sql -run 'TestParseWhereSenderParameter|TestParseWhereRejectsUnknownParameter|TestCoerceSender' -count=1`
-- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_SenderParameter|TestHandleOneOffQuery_SenderParameter' -count=1`
-- `rtk go test ./query/sql ./protocol -count=1`
-- `rtk go fmt ./query/sql ./protocol`
-- `rtk go vet ./query/sql ./protocol`
+- `rtk go test ./protocol -run '<all 14 new test names>' -count=1 -v` → `Go test: 14 passed in 1 packages`
+- `rtk go fmt ./protocol`
+- `rtk go vet ./protocol` → `No issues found`
+- `rtk go test ./...` → `Go test: 1226 passed in 10 packages`
+
+Current clean-tree baseline:
+- `Go test: 1226 passed in 10 packages` (previous 1212 + 14 new pins)
+
+## Previous slice (2026-04-21, unknown-table / unknown-column parity pin bundle)
+
+Reference type-check rejection shapes `check.rs:483-485` (`select * from r` / unknown FROM table), `check.rs:491-493` (`select * from t where t.a = 1` / qualified unknown WHERE column), and `check.rs:495-497` (`select * from t as r where r.a = 1` / alias-qualified unknown WHERE column) are now explicitly pinned at the SubscribeSingle and OneOffQuery admission surfaces. Previously the rejection was incidental — `SchemaLookup.TableByName` returned `!ok` in `compileSQLQueryString` (`protocol/handle_subscribe.go:152-154`) and `rel.ts.Column` returned `!ok` in `normalizeSQLFilterForRelations` (`protocol/handle_subscribe.go:250-253`), but nothing named the reference parity contract.
+
+- Grounded anchors before edits:
+  - `reference/SpacetimeDB/crates/expr/src/check.rs:483-485` for the unknown FROM table rejection (`"Table r does not exist"`).
+  - `reference/SpacetimeDB/crates/expr/src/check.rs:491-493` for the qualified unknown WHERE column rejection (`"Field a does not exist on table t"`).
+  - `reference/SpacetimeDB/crates/expr/src/check.rs:495-497` for the alias-qualified unknown WHERE column rejection (same message; alias resolves back to base table in Shunter's parser `relationBindings`).
+- No production code widening was required. `compileSQLQueryString` shared between SubscribeSingle / SubscribeMulti / OneOffQuery already rejects all three shapes incidentally; walking the path confirmed:
+  - `SELECT * FROM r` fails at `sl.TableByName(stmt.ProjectedTable)` (`handle_subscribe.go:152-154`)
+  - `SELECT * FROM t WHERE t.a = 1` fails at `rel.ts.Column(f.Column)` inside `normalizeSQLFilterForRelations` (`handle_subscribe.go:250-253`)
+  - `SELECT * FROM t AS r WHERE r.a = 1` — parser's `resolveQualifier` maps alias `r` back to base table `t`, then the filter lookup fails the same way
+- New pins landed (6 tests):
+  - protocol subscribe-single: `TestHandleSubscribeSingle_ParityUnknownTableRejected`, `TestHandleSubscribeSingle_ParityUnknownColumnRejected`, `TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected` in `protocol/handle_subscribe_test.go`
+  - protocol one-off: `TestHandleOneOffQuery_ParityUnknownTableRejected`, `TestHandleOneOffQuery_ParityUnknownColumnRejected`, `TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected` in `protocol/handle_oneoff_test.go`
+- Scope kept narrow: no parser changes, no runtime widening, no new test file. `SubscribeMulti` inherits the compile path through shared `compileSQLQueryString`; no dedicated pin added (covered by same mechanism as SubscribeSingle). Existing `TestHandleSubscribeSingle_UnknownTable` / `TestHandleOneOffQuery_UnknownTable` / `TestHandleOneOffQuery_UnknownColumn` tests left unchanged — the new pins are named reference-parity contracts alongside them rather than replacements.
+- Docs follow-through: `docs/current-status.md`, `docs/parity-phase0-ledger.md`, and `TECH-DEBT.md` now record the three new pins as landed; the pinned tests are named in the ledger.
+
+Verification run after landing the slice:
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParityUnknownTableRejected|TestHandleSubscribeSingle_ParityUnknownColumnRejected|TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected|TestHandleOneOffQuery_ParityUnknownTableRejected|TestHandleOneOffQuery_ParityUnknownColumnRejected|TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected' -count=1 -v`
+- `rtk go fmt ./protocol`
+- `rtk go vet ./protocol`
 - `rtk go test ./...`
 
 Current clean-tree baseline:
-- `Go test: 1193 passed in 10 packages`
+- `Go test: 1212 passed in 10 packages` (previous 1206 + 6 new pins — this was the baseline before the 506-537 bundle landed; see the top-of-file 1226 figure for the current clean-tree truth)
 
 Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, protocol lifecycle, message-family, and SQL/query-surface follow-through.
 
 ## Recommended next slice
 
-Keep walking down the broader-SQL / query-surface parity backlog now that `:sender` on narrow single-table KindBytes columns is landed.
+All five reference subscription test blocks in `check.rs` (`valid_literals`, `valid_literals_for_type`, `invalid_literals`, `valid`, `invalid`) are drained at the subscribe-single / one-off admission surfaces for every shape realizable against `schema.ValueKind`. `statement.rs:521-551` probe closed: `invalid` block fully covered (DML, bare projection, LIMIT-wrong-type, unqualified-WHERE-in-join via existing pins); `valid` block documents an intentional one-off-vs-SQL divergence (see the section above). `rls.rs` probe closed: exercises RLS rule resolution, not realizable in Shunter. The just-landed `sub.rs:157-168` bundle pins the subscription-parser `unsupported` shapes end-to-end.
 
-Best next grounded SQL options:
-- parity extension of `:sender` into the narrow join-backed surface (`select * from s as r where r.bytes = :sender`, or a join filter whose leaf is `:sender` on an aliased relation). Same parser-level marker already lands; compile path already routes caller identity through `compileSQLPredicateForRelations` for both the `stmt.Join == nil` path and the join filter path — verify no residual gap, then add pins.
-- a different reference-backed SQL shape from `reference/SpacetimeDB/crates/expr/src/check.rs` that is not yet pinned in Shunter.
+Remaining reference shapes all need runtime widening first:
+- 128/256-bit integer column kinds (`i128`, `u128`, `i256`, `u256`) and timestamp column kinds — need a `schema.ValueKind` extension
+- array / product column kinds — same
+- RLS rule resolution — whole-feature slice, not a narrow pin
 
-Why this next:
-- the `:sender` slice closed the last named narrow-SQL gap tied to `check.rs:435-440`.
-- the next grounded reference-backed SQL shape is the cleanest continuation; broadening projection or parameter semantics beyond `:sender` is a bigger decision.
-- this stays on externally visible SQL/query parity instead of reopening speculative Tier-B watch items with no failing pin.
+Candidate next slices (pick one, do not try to widen scope):
 
-If you do not take the SQL path next:
-- prefer a concrete OI-004 lifecycle leak/hang site with a fresh failing test
-- do not reopen the landed literal / quoted-identifier / `:sender` slices unless a regression appears
+1. **Adjacent reference parser-surface positive shapes** — probe `reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs::supported` (lines 170-184) against Shunter's already-landed positive-shape pins to see if any realizable shapes are unpinned. The block includes `select * from t`, `select * from t where a = 1`, `select * from t where a <> 1`, `select * from t where a = 1 or a = 2`, `select t.* from t join s`, `select t.* from t join s on t.c = s.d`, `select a.* from t as a join s as b on a.c = b.d`, `select * from t where x = :sender`. Most are already covered by existing TD-142 Slice positive pins; check for named-parity gaps.
+
+2. **`reference/SpacetimeDB/crates/sql-parser` other test modules** — probe other parser files under `crates/sql-parser/src/parser/` for `#[test]` blocks not yet pinned.
+
+3. **ORDER BY / LEFT / RIGHT / OUTER JOIN rejection pins** — Shunter rejects these incidentally (ORDER / LIMIT / GROUP / HAVING are already in `reservedWords` at `parser.go:922-925` so they trip the EOF-check; LEFT / RIGHT / OUTER aren't reserved so they'd fail at `expectKeyword("JOIN")`). Probe reference to confirm rejection shape before pinning.
+
+4. **Tier-B hardening** — `TECH-DEBT.md` still carries the remaining OI-004 watch items (`ClientSender.Send` no-ctx follow-on, other detached goroutines in `protocol/conn.go` / `lifecycle.go` / `keepalive.go`) and the OI-008 top-level bootstrap gap. Do not force an OI-004 sub-slice unless a specific leak site surfaces in live code or a failing test.
+
+5. **Format-level commitlog parity follow-on** (Phase 4 Slice 2 α/γ) — offset index file, typed error enums, record / log shape compatibility. Larger than a single narrow slice; each would need its own decision doc.
+
+6. **One of the `P0-SCHED-001` deferrals** (`fn_start`-clamped schedule "now", one-shot panic deletion, intended-time past-due ordering) if workload evidence surfaces.
+
+Recommendation: probe option 1 or 3 first — both are narrow reference-backed pin bundles that can land in a single slice without runtime widening. Option 1 (positive-shape audit) may be mostly drained already; option 3 (ORDER BY / LEFT JOIN rejection) is the next fresh narrow reference anchor. If both are already well-pinned, move to option 4/5/6 by user evidence.
+
+Do not reopen the landed literal / quoted-identifier / `:sender` / type-mismatch / unknown-table-column / parser-surface negative / leading-`+` / scientific-notation / leading-dot / infinity / column-width-breadth / `sub.rs::unsupported` slices unless a regression appears.
 
 ## Expected shape of the next session
 
 1. Read the required startup docs in the listed order.
-2. Treat the current worktree as landed SQL/query parity truth (quoted special-character identifiers, hex byte literals, float literals, `:sender` on narrow single-table KindBytes columns), not as unfinished envelope work.
+2. Treat the current worktree as landed SQL/query parity truth (quoted special-character identifiers, hex byte literals, float literals, `:sender` on narrow single-table, aliased single-table, and narrow join-backed KindBytes columns), not as unfinished envelope work.
 3. Start with the next grounded SQL anchor from `reference/SpacetimeDB/crates/expr/src/check.rs` and the parity docs.
-4. Preferred next slice: either `:sender` on the narrow join-backed surface, or another reference-backed SQL shape.
+4. Preferred next slice: pin a specific reference-backed rejection shape (e.g. `check.rs:498-504` type-mismatch cases) on the protocol admission surface, or choose a different narrow reference-backed SQL shape.
    - add failing parser/protocol/runtime pins first
    - verify the failure
-   - implement the smallest parser/coercion/runtime widening that keeps unrelated SQL shapes rejected
+   - implement the smallest parser/coercion/runtime widening that keeps unrelated SQL shapes rejected; widening may not be needed if the rejection is already incidentally enforced
    - re-run targeted tests, then `rtk go test ./...`
 5. If the chosen slice turns out blocked by a wider runtime contract than expected, stop and choose the next narrow reference-backed SQL shape instead of broadening opportunistically.
 6. Only after the suite is green, update the docs and this handoff again.
 
 
 Prior closed anchors in the same calendar week (still landed, included here for continuity):
+- broader SQL/query-surface parity follow-through (2026-04-21): quoted special-character identifiers, hex byte literals, float literals, `:sender` caller-identity parameter on narrow single-table / aliased single-table / narrow join-backed KindBytes columns, `check.rs:498-504` type-mismatch rejection pins (string-lit and float-lit against an integer column) at coerce + subscribe-single + one-off admission seams, `check.rs:483-497` unknown-table / unknown-column rejection pins (unknown FROM table, qualified unknown WHERE column, alias-qualified unknown WHERE column) at subscribe-single + one-off admission seams, `check.rs:506-537` parser-surface negative-shape pin bundle (base-table qualifier out of scope after alias, bare column projection, join without qualified projection, self-join without aliases, forward alias reference, LIMIT clause, unqualified WHERE column inside join) at subscribe-single + one-off admission seams, and `check.rs:297-300` leading-`+` numeric-literal support (lexer mirrors existing leading-`-` handling; parser + coerce unchanged; pinned at parser + subscribe-single + one-off) — `check.rs:523-525` (product-value comparison in join ON) deliberately skipped as not realizable against Shunter's column-kind enum
 - OI-006 fanout per-subscriber slice-header aliasing sub-hazard — `docs/hardening-oi-006-fanout-aliasing.md`
 - OI-005 `CommittedState.Table(id) *Table` raw-pointer contract pin — `docs/hardening-oi-005-committed-state-table-raw-pointer.md`
 - OI-005 `StateView.ScanTable` iterator surface — `docs/hardening-oi-005-state-view-scan-aliasing.md`
@@ -93,14 +278,14 @@ With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, all nine O
 
 ### Option α — Broader SQL/query-surface parity beyond TD-142
 
-This is now the best next grounded parity path.
+This is still the best next grounded parity path.
 
 What is still open:
 - `docs/current-status.md`, `docs/spacetimedb-parity-roadmap.md`, and `docs/parity-phase0-ledger.md` now all agree that the remaining externally visible message-family follow-through is broader SQL/query-surface breadth rather than another `SubscriptionError` envelope tweak
-- TD-142 plus the 2026-04-21 SQL/query follow-through (quoted special-character identifiers, hex byte literals, float literals, `:sender` on narrow single-table KindBytes columns) drained the named narrow slices, but broader accepted SQL/query shapes are still new parity work
+- TD-142 plus the 2026-04-21 SQL/query follow-through (quoted special-character identifiers, hex byte literals, float literals, `:sender` on narrow single-table / aliased single-table / narrow join-backed KindBytes columns) drained the named narrow positive slices; the remaining grounded extension is pinning the reference *rejection* cases not yet directly pinned (e.g. `check.rs:498-504` type-mismatch cases) at the protocol admission boundary
 
 Why prefer this now:
-- the just-landed `:sender` slice closed the last named narrow-SQL gap tied to `check.rs:435-440` positive shapes
+- the just-landed alias / join `:sender` slice closed the last named narrow-SQL positive gap tied to `check.rs:435-440`
 - externally visible parity still outranks speculative Tier-B watch items
 - this keeps effort on client-visible behavior rather than reopening already-green message-family work
 
@@ -115,7 +300,7 @@ Likely code surfaces:
 - `subscription/validate.go`
 
 Concrete shape:
-- choose one exact remaining reference-backed SQL/query scenario
+- choose one exact remaining reference-backed SQL/query scenario from `check.rs` `invalid()` cases
 - add parser + public protocol/runtime pins first
 - keep the slice narrow; do not reopen unrelated lifecycle or envelope work in the same session
 
@@ -234,13 +419,14 @@ Keep `.hermes/plans/2026-04-18_073534-phase1-wire-level-parity.md` unless you de
 - OI-005 `StateView.ScanTable` iterator surface (2026-04-21)
 - OI-005 `CommittedState.Table(id) *Table` raw-pointer contract pin (2026-04-21)
 - OI-006 row-payload sharing contract pin (2026-04-21)
-- broader SQL/query-surface parity follow-through (2026-04-21): quoted special-character identifiers, hex byte literals, float literals, `:sender` caller-identity parameter on narrow single-table KindBytes columns
+- `sub.rs:157-168` subscription-parser `unsupported` rejection pin bundle (2026-04-21): DML (`delete from t`), empty string, whitespace-only, DISTINCT projection (`select distinct a from t`), subquery-in-FROM (`select * from (select * from t) join (select * from s) on a = b`) pinned at subscribe-single + one-off admission seams; all five reject incidentally at Shunter's SELECT-only parser (`expectKeyword("SELECT")`, `parseProjection`, `parseStatement` identifier-after-FROM), pins promote to named reference-parity contracts. Intentional divergence between Shunter's unified admission surface and reference's split `parse_and_type_sub` / `parse_and_type_sql` paths recorded in `docs/parity-phase0-ledger.md` and `TECH-DEBT.md`.
+- broader SQL/query-surface parity follow-through (2026-04-21): quoted special-character identifiers, hex byte literals, float literals, `:sender` caller-identity parameter on narrow single-table / aliased single-table / narrow join-backed KindBytes columns, `check.rs:498-504` type-mismatch rejection pins (string-lit and float-lit against an integer column) at coerce + subscribe-single + one-off admission seams, `check.rs:483-497` unknown-table / unknown-column rejection pins (unknown FROM table, qualified unknown WHERE column, alias-qualified unknown WHERE column) at subscribe-single + one-off admission seams, `check.rs:506-537` parser-surface negative-shape pin bundle (base-table qualifier out of scope after alias, bare column projection, join without qualified projection, self-join without aliases, forward alias reference, LIMIT clause, unqualified WHERE column inside join) at subscribe-single + one-off admission seams, `check.rs:297-300` leading-`+` numeric-literal support (lexer mirrors existing leading-`-` handling; pinned at parser + subscribe-single + one-off), `check.rs:302-328` scientific-notation + leading-dot + infinity bundle (`u32 = 1e3`, `u32 = 1E3`, `f32 = 1e3`, `f32 = 1e-3`, `f32 = .1`, `f32 = 1e40 → +Inf`; lexer numeric branch grew exponent tail + leading-dot entry via `tokenizeNumeric`, `parseNumericLiteral` collapses integer-valued finite results to `LitInt`, coerce `KindFloat32`/`KindFloat64` now accept `LitInt` via promotion; pinned at parser + coerce + subscribe-single + one-off), `check.rs:382-401` `invalid_literals` rejection pin bundle (`u8 = -1`, `u8 = 1e3`, `u8 = 0.1`, `u32 = 1e-3`, `i32 = 1e-3`; all five reject incidentally through `coerceUnsigned` / `coerceSigned`, pinned at subscribe-single + one-off admission seams), and `check.rs:360-370` `valid_literals_for_type` column-width breadth pin bundle (`{ty} = 127` for each of `i8/u8/i16/u16/i32/u32/i64/u64/f32/f64`; all 10 ride existing `coerceSigned` / `coerceUnsigned` / `KindFloat32`-`KindFloat64` promotion with no runtime widening, pinned as table-driven subtests at subscribe-single + one-off admission seams; `i128`/`u128`/`i256`/`u256` not realizable)
 
 ## Suggested verification commands
 
 Targeted:
-- `rtk go test ./query/sql -run 'TestParseWhereSenderParameter|TestParseWhereRejectsUnknownParameter|TestCoerceSender' -count=1 -v`
-- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_SenderParameter|TestHandleOneOffQuery_SenderParameter' -count=1 -v`
+- `rtk go test ./query/sql -run 'TestParseWhereSenderParameter|TestParseWhereRejectsUnknownParameter|TestCoerceSender|TestCoerceRejects' -count=1 -v`
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_SenderParameter|TestHandleOneOffQuery_SenderParameter|TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected|TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected|TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected|TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected|TestHandleSubscribeSingle_ParityUnknownTableRejected|TestHandleSubscribeSingle_ParityUnknownColumnRejected|TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected|TestHandleOneOffQuery_ParityUnknownTableRejected|TestHandleOneOffQuery_ParityUnknownColumnRejected|TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected|TestHandleSubscribeSingle_ParityBaseTableQualifierAfterAliasRejected|TestHandleSubscribeSingle_ParityBareColumnProjectionRejected|TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected|TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected|TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected|TestHandleSubscribeSingle_ParityLimitClauseRejected|TestHandleSubscribeSingle_ParityUnqualifiedWhereInJoinRejected|TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected|TestHandleOneOffQuery_ParityBareColumnProjectionRejected|TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected|TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected|TestHandleOneOffQuery_ParityForwardAliasReferenceRejected|TestHandleOneOffQuery_ParityLimitClauseRejected|TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected' -count=1 -v`
 - `rtk go test ./subscription -run 'TestEvalFanoutRowPayloadsSharedAcrossSubscribers' -race -count=3 -v`
 - `rtk go test ./subscription -run 'TestEvalFanout' -race -count=3 -v`
 - `rtk go test ./store -run 'TestCommittedStateTable' -race -count=3 -v`
@@ -251,6 +437,7 @@ Targeted:
 - `rtk go test ./protocol -run 'TestSuperviseLifecycle' -race -count=3 -v`
 - `rtk go test ./protocol -run 'TestEnqueueOnConnOverflowDisconnect' -race -count=3 -v`
 - `rtk go test ./protocol -run 'TestWatchReducerResponse' -race -count=3 -v`
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParityDMLStatementRejected|TestHandleSubscribeSingle_ParityEmptyStatementRejected|TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected|TestHandleSubscribeSingle_ParityDistinctProjectionRejected|TestHandleSubscribeSingle_ParitySubqueryInFromRejected|TestHandleOneOffQuery_ParityDMLStatementRejected|TestHandleOneOffQuery_ParityEmptyStatementRejected|TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected|TestHandleOneOffQuery_ParityDistinctProjectionRejected|TestHandleOneOffQuery_ParitySubqueryInFromRejected' -count=1 -v`
 - `rtk go test ./...`
 
 ## Acceptance gate
@@ -260,7 +447,7 @@ Do not call the work done unless all are true:
 - reference-backed or debt-anchored target shape was checked directly against reference material or current live code
 - every newly accepted or rejected shape has focused tests
 - already-landed parity pins still pass (including the `:sender` parser/coerce/protocol pins listed in `docs/parity-phase0-ledger.md`)
-- full suite still passes. Clean-tree baseline is `Go test: 1193 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 follow-through.
+- full suite still passes. Clean-tree baseline is `Go test: 1289 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 follow-through.
 - docs and handoff reflect the new truth exactly
 
 ## Deliverables for the next session
@@ -289,8 +476,9 @@ As of this handoff:
 - OI-006 enumerated sub-hazards drained (slice-header aliasing, row-payload sharing contract pin)
 - OI-004 six sub-hazards closed (watchReducerResponse, sender overflow-disconnect ctx, superviseLifecycle disconnect-ctx, CloseAll disconnect-ctx, forwardReducerResponse ctx/Done lifecycle, dispatch-handler ctx, outbound-writer supervision)
 - Phase 2 Slice 2 applied-envelope host execution duration + `SubscriptionError` optional-field / `TableID` follow-through closed
-- broader SQL/query-surface parity follow-through (2026-04-21): reference-style double-quoted identifiers, query-builder-style parenthesized WHERE predicates, alias-qualified mixed-qualified/unqualified OR, hex byte literals, float literals on the narrow single-table / join-backed SQL surface, `:sender` caller-identity parameter on narrow single-table KindBytes columns, bare boolean `WHERE TRUE` all work end-to-end and are pinned
+- broader SQL/query-surface parity follow-through (2026-04-21): reference-style double-quoted identifiers, query-builder-style parenthesized WHERE predicates, alias-qualified mixed-qualified/unqualified OR, hex byte literals, float literals on the narrow single-table / join-backed SQL surface, `:sender` caller-identity parameter on narrow single-table / aliased single-table / narrow join-backed KindBytes columns, bare boolean `WHERE TRUE`, `check.rs:498-504` type-mismatch rejections (string-lit and float-lit against an integer column), `check.rs:483-497` unknown-table / unknown-column rejections (unknown FROM table, qualified / alias-qualified unknown WHERE column), `check.rs:506-537` parser-surface negative-shape bundle (base-table qualifier out of scope after alias, bare column projection, join without qualified projection, self-join without aliases, forward alias reference, LIMIT clause, unqualified WHERE column inside join), `check.rs:297-300` leading-`+` numeric-literal support, `check.rs:302-328` scientific-notation + leading-dot + infinity bundle (`u32 = 1e3`, `u32 = 1E3`, `f32 = 1e3`, `f32 = 1e-3`, `f32 = .1`, `f32 = 1e40 → +Inf`), `check.rs:382-401` `invalid_literals` rejection bundle (`u8 = -1`, `u8 = 1e3`, `u8 = 0.1`, `u32 = 1e-3`, `i32 = 1e-3`), and `check.rs:360-370` `valid_literals_for_type` column-width breadth bundle (`{ty} = 127` for each of `i8/u8/i16/u16/i32/u32/i64/u64/f32/f64`; table-driven subtest bundle at subscribe-single + one-off) all work end-to-end and are pinned; `check.rs:523-525` (product-value comparison in join ON) deliberately skipped as not realizable against Shunter's column-kind enum, and `check.rs:284-332` `u256` / `i128`/`u128`/`i256` / timestamp column shapes plus the `i128`/`u128`/`i256`/`u256` rows of `valid_literals_for_type` are skipped for the same reason
 - Other detached-goroutine surfaces in `conn.go` / `lifecycle.go` / `keepalive.go` and the `ClientSender.Send` no-ctx follow-on remain open under OI-004
-- next realistic anchors: broader SQL/query-surface parity (α), further Tier-B hardening (β), format-level commitlog parity (γ), individual scheduler deferrals (δ)
+- `sub.rs:157-168` `unsupported` rejection pin bundle landed (2026-04-21, this session) — 10 pins across subscribe-single + one-off for DML, empty, whitespace-only, DISTINCT projection, subquery-in-FROM; all five shapes already rejected incidentally at the SELECT-only parser boundary, pins promote to named parity contracts. Intentional divergence between Shunter's unified admission surface and reference's split `parse_and_type_sub` / `parse_and_type_sql` paths recorded in `docs/parity-phase0-ledger.md` and `TECH-DEBT.md` — widening the one-off path to match reference SQL semantics (LIMIT, bare / mixed projection) would be out-of-scope multi-slice and would reverse already-landed pins.
+- next realistic anchors: `sub.rs:170-184` `supported` positive-shape audit (probe for unpinned realizable shapes), ORDER BY / LEFT / RIGHT / OUTER JOIN rejection pins (reference-anchored, already-incidentally-rejected), broader SQL/query-surface parity beyond literals (α), further Tier-B hardening (β), format-level commitlog parity (γ), individual scheduler deferrals (δ). All five `check.rs` reference subscription test blocks (`valid_literals`, `valid_literals_for_type`, `invalid_literals`, `valid`, `invalid`) plus `statement.rs::invalid` and `sub.rs::unsupported` are drained for realizable column kinds.
 - targeted flaky-test cleanup is closed; no known clean-tree intermittent test remains
-- 10 packages, clean-tree full-suite baseline `Go test: 1193 passed in 10 packages`
+- 10 packages, clean-tree full-suite baseline `Go test: 1289 passed in 10 packages`

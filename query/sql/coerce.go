@@ -64,15 +64,23 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		}
 		return types.NewBytes(lit.Bytes), nil
 	case types.KindFloat32:
-		if lit.Kind != LitFloat {
+		switch lit.Kind {
+		case LitFloat:
+			return types.NewFloat32(float32(lit.Float))
+		case LitInt:
+			return types.NewFloat32(float32(lit.Int))
+		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
-		return types.NewFloat32(float32(lit.Float))
 	case types.KindFloat64:
-		if lit.Kind != LitFloat {
+		switch lit.Kind {
+		case LitFloat:
+			return types.NewFloat64(lit.Float)
+		case LitInt:
+			return types.NewFloat64(float64(lit.Int))
+		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
-		return types.NewFloat64(lit.Float)
 	case types.KindInt8:
 		return coerceSigned(lit, kind, math.MinInt8, math.MaxInt8, func(n int64) types.Value { return types.NewInt8(int8(n)) })
 	case types.KindInt16:

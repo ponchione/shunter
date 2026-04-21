@@ -804,11 +804,11 @@ Shunter's `rowHashIndex` (§3.3) is created only when no primary key exists. A t
 
 Rationale: the `rowHashIndex` condition in v1 is stated in terms of the primary key because the builder API (SPEC-006) makes primary-key presence the primary signal. Strictly redundant but not incorrect. A perf pass may tighten the condition to "no unique index of any kind" without a spec edit; flagged here so the tightening is deliberate.
 
-### 12.4 Multi-column primary key allowed
+### 12.4 Store index shape is more general than the v1 schema surface
 
-`IndexSchema.Columns []int` with `Primary bool` (§3.1) permits any number of columns in a primary key. SpacetimeDB's `TableSchema.primary_key` is `Option<ColId>` — explicitly single-column.
+`IndexSchema.Columns []int` with `Primary bool` (§3.1) can represent a multi-column primary key structurally, but Shunter v1 does **not** expose composite primary keys through the schema surface. SPEC-006 is authoritative here: reflection tags, builder validation, and `Build()` all restrict primary keys to exactly one column in v1.
 
-Rationale: v1 supports composite PKs because the subscription predicate layer (SPEC-004) already assumes compound-key equality is expressible; restricting the store to single-column PKs would force awkward synthetic-ID workarounds for natural composite keys (e.g., `(tenant_id, entity_id)`). SPEC-006 schema validation and SPEC-004 predicate-equality both honor the compound form.
+Rationale: the store keeps the more general index representation because compound keys are a plausible future extension and the secondary-index path already uses `[]int`. But implementers MUST treat multi-column primary keys as out of scope for v1 unless SPEC-006 is revised first. This keeps SPEC-001 aligned with the actual schema contract instead of silently promising a capability the higher-level registration API forbids.
 
 ### 12.5 Replay constraint violations are fatal vs SpacetimeDB silent skip
 

@@ -87,6 +87,141 @@ func TestParseWhereNegativeInt(t *testing.T) {
 	}
 }
 
+// TestParseWhereLeadingPlusInt pins the reference valid-literal shape at
+// reference/SpacetimeDB/crates/expr/src/check.rs:297-300 (`select * from t
+// where u32 = +1` / "Leading `+`"): a leading `+` sign on an integer literal
+// is accepted and behaves identically to the unsigned form. Mirrors the
+// existing leading `-` support exercised by TestParseWhereNegativeInt.
+func TestParseWhereLeadingPlusInt(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE n = +7")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Filters[0].Literal.Kind != LitInt {
+		t.Fatalf("Literal.Kind = %v, want LitInt", stmt.Filters[0].Literal.Kind)
+	}
+	if stmt.Filters[0].Literal.Int != 7 {
+		t.Fatalf("got %d, want 7", stmt.Filters[0].Literal.Int)
+	}
+}
+
+// TestParseWhereScientificNotationUnsignedInteger pins the reference
+// valid-literal shape at reference/SpacetimeDB/crates/expr/src/check.rs:302-
+// 304 (`select * from t where u32 = 1e3` / "Scientific notation"): an
+// exponent-form numeric that evaluates to an integer value must parse as
+// LitInt so the coerce boundary can bind it to an integer column.
+func TestParseWhereScientificNotationUnsignedInteger(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE n = 1e3")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Filters[0].Literal.Kind != LitInt {
+		t.Fatalf("Literal.Kind = %v, want LitInt", stmt.Filters[0].Literal.Kind)
+	}
+	if stmt.Filters[0].Literal.Int != 1000 {
+		t.Fatalf("got %d, want 1000", stmt.Filters[0].Literal.Int)
+	}
+}
+
+// TestParseWhereScientificNotationCaseInsensitive pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:306-308 (`select * from t
+// where u32 = 1E3` / "Case insensitive scientific notation"): uppercase `E`
+// is accepted identically to lowercase.
+func TestParseWhereScientificNotationCaseInsensitive(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE n = 1E3")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Filters[0].Literal.Kind != LitInt {
+		t.Fatalf("Literal.Kind = %v, want LitInt", stmt.Filters[0].Literal.Kind)
+	}
+	if stmt.Filters[0].Literal.Int != 1000 {
+		t.Fatalf("got %d, want 1000", stmt.Filters[0].Literal.Int)
+	}
+}
+
+// TestParseWhereScientificNotationNegativeExponent pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:314-316 (`select * from t
+// where f32 = 1e-3` / "Negative exponent"): a non-integral exponent-form
+// numeric parses as LitFloat so the coerce boundary can bind it to a
+// float column.
+func TestParseWhereScientificNotationNegativeExponent(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE n = 1e-3")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Filters[0].Literal.Kind != LitFloat {
+		t.Fatalf("Literal.Kind = %v, want LitFloat", stmt.Filters[0].Literal.Kind)
+	}
+	if stmt.Filters[0].Literal.Float != 1e-3 {
+		t.Fatalf("got %g, want 1e-3", stmt.Filters[0].Literal.Float)
+	}
+}
+
+// TestParseWhereLeadingDotFloat pins reference/SpacetimeDB/crates/expr/src/
+// check.rs:322-324 (`select * from t where f32 = .1` / "Leading `.`"): a
+// leading-dot numeric with no integer part parses as LitFloat.
+func TestParseWhereLeadingDotFloat(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE n = .1")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Filters[0].Literal.Kind != LitFloat {
+		t.Fatalf("Literal.Kind = %v, want LitFloat", stmt.Filters[0].Literal.Kind)
+	}
+	if stmt.Filters[0].Literal.Float != 0.1 {
+		t.Fatalf("got %g, want 0.1", stmt.Filters[0].Literal.Float)
+	}
+}
+
+// TestParseWhereScientificNotationOverflowInfinity pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:326-328 (`select * from t
+// where f32 = 1e40` / "Infinity"): a numeric whose magnitude exceeds the
+// int64 range stays LitFloat so coerce to a float column can round the
+// out-of-range value to +Inf (as reference does with f32).
+func TestParseWhereScientificNotationOverflowFloat(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE n = 1e40")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Filters[0].Literal.Kind != LitFloat {
+		t.Fatalf("Literal.Kind = %v, want LitFloat", stmt.Filters[0].Literal.Kind)
+	}
+	if stmt.Filters[0].Literal.Float != 1e40 {
+		t.Fatalf("got %g, want 1e40", stmt.Filters[0].Literal.Float)
+	}
+}
+
+// TestParseWhereTrailingDotRejected keeps the malformed-numeric rejection
+// on a trailing `.` with no fractional digits (e.g. `1.`). Reference accepts
+// only the forms enumerated in check.rs::valid_literals; `1.` is not among
+// them and we preserve the existing rejection to avoid a latent ambiguity
+// with table.column dot-qualifier syntax.
+func TestParseWhereTrailingDotRejected(t *testing.T) {
+	if _, err := Parse("SELECT * FROM t WHERE n = 1."); err == nil {
+		t.Fatal("Parse should reject trailing-dot numeric `1.`")
+	}
+}
+
+// TestParseWhereBareExponentRejected ensures `1e` (exponent-letter with no
+// digits) remains a malformed-numeric rejection rather than silently
+// tokenizing as an identifier that would surface a confusing downstream
+// error.
+func TestParseWhereBareExponentRejected(t *testing.T) {
+	if _, err := Parse("SELECT * FROM t WHERE n = 1e"); err == nil {
+		t.Fatal("Parse should reject bare exponent `1e`")
+	}
+}
+
+// TestParseWhereTrailingIdentifierAfterNumericRejected keeps the existing
+// `1efoo` malformed-numeric rejection so the exponent widening does not
+// accidentally accept an identifier-suffixed number.
+func TestParseWhereTrailingIdentifierAfterNumericRejected(t *testing.T) {
+	if _, err := Parse("SELECT * FROM t WHERE n = 1efoo"); err == nil {
+		t.Fatal("Parse should reject `1efoo`")
+	}
+}
+
 func TestParseWhereTwoPredicatesAnd(t *testing.T) {
 	stmt, err := Parse("SELECT * FROM users WHERE id = 1 AND name = 'alice'")
 	if err != nil {
@@ -877,5 +1012,59 @@ func TestParseWhereRejectsUnknownParameter(t *testing.T) {
 	}
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestParseWhereSenderParameterOnAliasedSingleTable pins the aliased single-
+// table shape of the reference :sender parameter at the parser seam. The
+// reference expression typechecker accepts alias-qualified :sender on an
+// identity/bytes column in the same way as the unaliased form (see
+// reference/SpacetimeDB/crates/expr/src/check.rs lines 435-440 for positive
+// shapes and 487-488 for the rejection on non-identity/non-bytes columns).
+// The alias resolver must produce Filter.Table = base table and
+// Filter.Alias = the user-typed qualifier so the compile path can route
+// caller identity through the coercion seam unchanged.
+func TestParseWhereSenderParameterOnAliasedSingleTable(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM s AS r WHERE r.bytes = :sender")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "s" || cmp.Filter.Column != "bytes" || cmp.Filter.Alias != "r" || cmp.Filter.Op != "=" {
+		t.Fatalf("Filter = %+v, want s.bytes = with alias r", cmp.Filter)
+	}
+	if cmp.Filter.Literal.Kind != LitSender {
+		t.Fatalf("Literal.Kind = %v, want LitSender", cmp.Filter.Literal.Kind)
+	}
+}
+
+// TestParseWhereSenderParameterInJoinFilter pins the :sender parameter in a
+// join-backed WHERE leaf. Reference positive shapes live at
+// reference/SpacetimeDB/crates/expr/src/check.rs lines 435-440 (standalone
+// single-table) and line 462-464 (`select t.* from t join s on t.u32 = s.u32
+// where t.f32 = 0.1`) — the :sender case here is the join analogue.
+// Join WHERE leaves must stay qualified (parser.go requireQualify), and the
+// qualifier is preserved in Filter.Alias so the compile path's aliasTag can
+// route the leaf to the correct join side.
+func TestParseWhereSenderParameterInJoinFilter(t *testing.T) {
+	stmt, err := Parse("SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE s.bytes = :sender")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join clause missing")
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "s" || cmp.Filter.Column != "bytes" || cmp.Filter.Alias != "s" || cmp.Filter.Op != "=" {
+		t.Fatalf("Filter = %+v, want s.bytes = with alias s", cmp.Filter)
+	}
+	if cmp.Filter.Literal.Kind != LitSender {
+		t.Fatalf("Literal.Kind = %v, want LitSender", cmp.Filter.Literal.Kind)
 	}
 }

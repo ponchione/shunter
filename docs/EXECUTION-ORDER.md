@@ -2,6 +2,11 @@
 
 This document is the working implementation plan for the current decomposition docs. It is meant to be used for real execution, not as a loose architectural summary.
 
+Scope boundary:
+- The decomposition docs model the Shunter core engine/runtime that is comparable to the SpacetimeDB engine kernel.
+- They do not attempt to specify the full SpacetimeDB product surface such as hosted/cloud control-plane behavior, standalone host/database routing, or multi-language module-runtime hosting.
+- Do not silently expand a decomposition story into parity work that is outside this narrowed engine scope.
+
 The spec headers are not the only source of dependency cycles. There are three real implementation-level tangles that matter here:
 
 1. SPEC-006 schema registration is mostly independent of the executor, but reducer registration in SPEC-006 Epic 3 Story 3.2 explicitly consumes `ReducerHandler` / `ReducerContext` from SPEC-003.

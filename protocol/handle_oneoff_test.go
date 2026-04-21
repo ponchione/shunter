@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"iter"
+	"math"
 	"testing"
 
 	"github.com/ponchione/shunter/bsatn"
@@ -1521,6 +1522,185 @@ func TestHandleOneOffQuery_SenderParameterOnStringColumnRejected(t *testing.T) {
 	}
 }
 
+// TestHandleOneOffQuery_SenderParameterOnAliasedSingleTable extends the
+// narrow single-table :sender shape (reference check.rs 435-440) to the
+// aliased form `select * from s as r where r.bytes = :sender` on the
+// one-off query path. Caller identity materializes as the 32-byte bytes
+// payload on the target column, filtering the snapshot to the matching row.
+func TestHandleOneOffQuery_SenderParameterOnAliasedSingleTable(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{0x11, 0x22}
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "s",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "u32", Type: schema.KindUint32},
+			{Index: 1, Name: "bytes", Type: schema.KindBytes},
+		},
+	}
+	sl := newMockSchema("s", 1, ts.Columns...)
+
+	callerBytes := make([]byte, 32)
+	copy(callerBytes, conn.Identity[:])
+	otherBytes := make([]byte, 32)
+	otherBytes[0] = 0xFF
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewBytes(callerBytes)},
+				{types.NewUint32(2), types.NewBytes(otherBytes)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x70},
+		QueryString: "SELECT * FROM s AS r WHERE r.bytes = :sender",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) {
+		t.Errorf("row[0].u32 = %v, want Uint32(1)", pvs[0][0])
+	}
+}
+
+// TestHandleOneOffQuery_SenderParameterInJoinFilter extends the narrow
+// join-backed shape (reference check.rs 462-464) with the :sender parameter
+// as a WHERE leaf on the joined relation. Caller identity is threaded
+// through the join compile path the same way as the standalone
+// single-table path.
+func TestHandleOneOffQuery_SenderParameterInJoinFilter(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{0x33, 0x44}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+			{Name: "bytes", Type: schema.KindBytes},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	tReg, _ := eng.Registry().TableByName("t")
+	sReg, _ := eng.Registry().TableByName("s")
+	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: tReg.Columns}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	callerBytes := make([]byte, 32)
+	copy(callerBytes, conn.Identity[:])
+	otherBytes := make([]byte, 32)
+	otherBytes[31] = 0xAA
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			tReg.ID: {
+				{types.NewUint32(1), types.NewUint32(10)},
+				{types.NewUint32(2), types.NewUint32(20)},
+			},
+			sReg.ID: {
+				{types.NewUint32(100), types.NewUint32(10), types.NewBytes(callerBytes)},
+				{types.NewUint32(101), types.NewUint32(20), types.NewBytes(otherBytes)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x71},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE s.bytes = :sender",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, tTS)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[0][1].Equal(types.NewUint32(10)) {
+		t.Fatalf("unexpected row returned: %v", pvs[0])
+	}
+}
+
+// TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 498-501 (`select * from t where u32 = 'str'` /
+// "Field u32 is not a string") onto the OneOffQuery admission surface. The
+// rejection fires at the coerce boundary inside parseQueryString, so the
+// one-off reply must arrive with Status=1 and a non-empty Error.
+func TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x80},
+		QueryString: "SELECT * FROM t WHERE u32 = 'str'",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 502-504 (`select * from t where t.u32 = 1.3` /
+// "Field u32 is not a float") onto the OneOffQuery admission surface. Float
+// literals parse to LitFloat end-to-end (2026-04-21 follow-through), so the
+// rejection must surface at the coerce boundary rather than at the parser.
+func TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x81},
+		QueryString: "SELECT * FROM t WHERE t.u32 = 1.3",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
 func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("users", 1,
@@ -1548,6 +1728,771 @@ func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnknownTableRejected pins the reference type-
+// check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// 483-485 (`select * from r` / "Table r does not exist") onto the OneOff
+// admission surface. Enforced incidentally via SchemaLookup.TableByName
+// returning !ok inside compileSQLQueryString; the pin names the contract.
+func TestHandleOneOffQuery_ParityUnknownTableRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x82},
+		QueryString: "SELECT * FROM r",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnknownColumnRejected pins the reference type-
+// check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// 491-493 (`select * from t where t.a = 1` / "Field a does not exist on
+// table t") onto the OneOff admission surface. Enforced incidentally via
+// rel.ts.Column returning !ok inside normalizeSQLFilterForRelations.
+func TestHandleOneOffQuery_ParityUnknownColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x83},
+		QueryString: "SELECT * FROM t WHERE t.a = 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 495-497 (`select * from t as r where r.a = 1` / "Field a
+// does not exist on table t") onto the OneOff admission surface. The
+// aliased single-table shape resolves `r` to base table `t` in the parser's
+// relationBindings; normalizeSQLFilterForRelations then fails the
+// rel.ts.Column lookup. Keeps the rejection named on the alias-qualified
+// surface.
+func TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x84},
+		QueryString: "SELECT * FROM t AS r WHERE r.a = 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 506-509 (`select * from t as r where t.u32 = 5` / "t is not
+// in scope after alias") onto the OneOff admission surface. Enforced
+// incidentally at parser level via resolveQualifier in parseComparison.
+func TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x85},
+		QueryString: "SELECT * FROM t AS r WHERE t.u32 = 5",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityBareColumnProjectionRejected pins the reference
+// type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// 510-513 (`select u32 from t` / "Subscriptions must be typed to a single
+// table") onto the OneOff admission surface. Enforced incidentally at
+// parseProjection which only accepts `*` or `table.*`.
+func TestHandleOneOffQuery_ParityBareColumnProjectionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x86},
+		QueryString: "SELECT u32 FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 515-517 (`select * from t join s` / "Subscriptions must be
+// typed to a single table") onto the OneOff admission surface. Enforced
+// incidentally at parseStatement requiring a qualified projection for joins.
+func TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x87},
+		QueryString: "SELECT * FROM t JOIN s",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
+// aliases") onto the OneOff admission surface. Enforced incidentally at
+// parseJoinClause when both sides share the same table and alias.
+func TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x88},
+		QueryString: "SELECT t.* FROM t JOIN t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityForwardAliasReferenceRejected pins the reference
+// type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// 526-528 (`select t.* from t join s on t.u32 = r.u32 join s as r` / "Alias
+// r is not in scope when it is referenced") onto the OneOff admission surface.
+// Enforced incidentally in parseQualifiedColumnRef when the forward alias
+// reference fails resolveQualifier against the first join's lookup.
+func TestHandleOneOffQuery_ParityForwardAliasReferenceRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x89},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityLimitClauseRejected pins the reference type-
+// check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// 530-533 (`select * from t limit 5` / "Subscriptions do not support limit")
+// onto the OneOff admission surface. Enforced incidentally at parseStatement
+// EOF-check which rejects the trailing LIMIT token.
+func TestHandleOneOffQuery_ParityLimitClauseRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8A},
+		QueryString: "SELECT * FROM t LIMIT 5",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityLeadingPlusIntLiteral pins the reference
+// valid-literal shape at reference/SpacetimeDB/crates/expr/src/check.rs:297-
+// 300 (`select * from t where u32 = +1` / "Leading `+`"): a leading `+` on
+// an integer literal is admitted end-to-end through the OneOff path.
+func TestHandleOneOffQuery_ParityLeadingPlusIntLiteral(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(7)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8C},
+		QueryString: "SELECT * FROM t WHERE u32 = +7",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 534-537 (`select t.* from t join s on t.u32 = s.u32 where
+// bytes = 0xABCD` / "Columns must be qualified in join expressions") onto the
+// OneOff admission surface. Enforced incidentally at parseComparison when the
+// relation binding has requireQualify set by the join.
+func TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8B},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE bytes = 0xABCD",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityScientificNotationUnsignedInteger pins the
+// reference valid-literal shape at reference/SpacetimeDB/crates/expr/src/
+// check.rs:302-304 (`select * from t where u32 = 1e3` / "Scientific
+// notation") on the OneOff admission path.
+func TestHandleOneOffQuery_ParityScientificNotationUnsignedInteger(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1000)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8D},
+		QueryString: "SELECT * FROM t WHERE u32 = 1e3",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	}
+}
+
+// TestHandleOneOffQuery_ParityScientificNotationFloatNegativeExponent pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:314-316 (`select * from t
+// where f32 = 1e-3` / "Negative exponent") on the OneOff admission path.
+func TestHandleOneOffQuery_ParityScientificNotationFloatNegativeExponent(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
+	)
+	v, err := types.NewFloat32(float32(1e-3))
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{v}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8E},
+		QueryString: "SELECT * FROM t WHERE f32 = 1e-3",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	}
+}
+
+// TestHandleOneOffQuery_ParityLeadingDotFloatLiteral pins reference/
+// SpacetimeDB/crates/expr/src/check.rs:322-324 (`select * from t where
+// f32 = .1` / "Leading `.`") on the OneOff admission path.
+func TestHandleOneOffQuery_ParityLeadingDotFloatLiteral(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
+	)
+	v, err := types.NewFloat32(float32(0.1))
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{v}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8F},
+		QueryString: "SELECT * FROM t WHERE f32 = .1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	}
+}
+
+// TestHandleOneOffQuery_ParityScientificNotationOverflowInfinity pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:326-328 (`select * from t
+// where f32 = 1e40` / "Infinity") on the OneOff admission path. The stored
+// row is +Inf on the f32 column; the query literal `1e40` must coerce to
+// the same +Inf value and match.
+func TestHandleOneOffQuery_ParityScientificNotationOverflowInfinity(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
+	)
+	v, err := types.NewFloat32(float32(math.Inf(1)))
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{v}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x90},
+		QueryString: "SELECT * FROM t WHERE f32 = 1e40",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	}
+}
+
+// TestHandleOneOffQuery_ParityInvalidLiteralNegativeIntOnUnsignedRejected pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:382-385 (`select * from t
+// where u8 = -1` / "Negative integer for unsigned column") onto the
+// OneOffQuery admission surface. `-1` is LitInt(-1); coerceUnsigned
+// (query/sql/coerce.go:119) rejects negative literals against unsigned
+// columns inside parseQueryString, producing Status=1 with a non-empty
+// Error message.
+func TestHandleOneOffQuery_ParityInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x91},
+		QueryString: "SELECT * FROM t WHERE u8 = -1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityInvalidLiteralScientificOverflowRejected pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:386-389 (`select * from t
+// where u8 = 1e3` / "Out of bounds") onto the OneOffQuery admission surface.
+// `1e3` collapses to LitInt(1000) via parseNumericLiteral; coerceUnsigned
+// (query/sql/coerce.go:123) rejects the value as out of range for u8.
+func TestHandleOneOffQuery_ParityInvalidLiteralScientificOverflowRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x92},
+		QueryString: "SELECT * FROM t WHERE u8 = 1e3",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityInvalidLiteralFloatOnUnsignedRejected pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:390-393 (`select * from t
+// where u8 = 0.1` / "Float as integer") onto the OneOffQuery admission
+// surface. Complements the existing u32 = 1.3 pin by naming the u8 column
+// variant; coerceUnsigned rejects LitFloat against an integer column.
+func TestHandleOneOffQuery_ParityInvalidLiteralFloatOnUnsignedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x93},
+		QueryString: "SELECT * FROM t WHERE u8 = 0.1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnUnsignedRejected
+// pins reference/SpacetimeDB/crates/expr/src/check.rs:394-397 (`select * from
+// t where u32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
+// surface. `1e-3` stays LitFloat (non-integral) and coerceUnsigned rejects
+// it against an unsigned column.
+func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnUnsignedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x94},
+		QueryString: "SELECT * FROM t WHERE u32 = 1e-3",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected
+// pins reference/SpacetimeDB/crates/expr/src/check.rs:398-401 (`select * from
+// t where i32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
+// surface. Mirrors the unsigned case on a signed column: coerceSigned rejects
+// the LitFloat against KindInt32.
+func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "i32", Type: schema.KindInt32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewInt32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x95},
+		QueryString: "SELECT * FROM t WHERE i32 = 1e-3",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:360-370
+// (`valid_literals_for_type`) at the OneOffQuery admission surface. Each
+// subtest builds a single-column table, stores a matching row, and
+// confirms `SELECT * FROM t WHERE {colname} = 127` accepts end-to-end on
+// every numeric column kind realized by `schema.ValueKind`
+// (i8/u8/i16/u16/i32/u32/i64/u64/f32/f64). i128/u128/i256/u256 are
+// deliberately skipped — no `schema.ValueKind` variant realizes them.
+func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
+	f32Row, err := types.NewFloat32(127)
+	if err != nil {
+		t.Fatalf("NewFloat32(127): %v", err)
+	}
+	f64Row, err := types.NewFloat64(127)
+	if err != nil {
+		t.Fatalf("NewFloat64(127): %v", err)
+	}
+
+	cases := []struct {
+		colName string
+		kind    schema.ValueKind
+		row     types.Value
+	}{
+		{"i8", schema.KindInt8, types.NewInt8(127)},
+		{"u8", schema.KindUint8, types.NewUint8(127)},
+		{"i16", schema.KindInt16, types.NewInt16(127)},
+		{"u16", schema.KindUint16, types.NewUint16(127)},
+		{"i32", schema.KindInt32, types.NewInt32(127)},
+		{"u32", schema.KindUint32, types.NewUint32(127)},
+		{"i64", schema.KindInt64, types.NewInt64(127)},
+		{"u64", schema.KindUint64, types.NewUint64(127)},
+		{"f32", schema.KindFloat32, f32Row},
+		{"f64", schema.KindFloat64, f64Row},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.colName, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: tc.colName, Type: tc.kind},
+			)
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{tc.row}}}}
+			stateAccess := &mockStateAccess{snap: snap}
+
+			msg := &OneOffQueryMsg{
+				MessageID:   []byte{byte(0xA0 + i)},
+				QueryString: "SELECT * FROM t WHERE " + tc.colName + " = 127",
+			}
+			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+			result := drainOneOff(t, conn)
+			if result.Status != 0 {
+				t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+			}
+		})
+	}
+}
+
+// TestHandleOneOffQuery_ParityDMLStatementRejected pins the reference
+// subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (`delete from t` / "DML not allowed in subscriptions") onto the OneOff
+// admission surface. Enforced incidentally at parseStatement's
+// expectKeyword("SELECT").
+//
+// One-off shares the subscription-shape admission path in Shunter; the
+// intentional divergence from reference's wider parse_and_type_sql path is
+// recorded in docs/parity-phase0-ledger.md.
+func TestHandleOneOffQuery_ParityDMLStatementRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB0},
+		QueryString: "DELETE FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityEmptyStatementRejected pins the reference
+// subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (empty string / "Empty") onto the OneOff admission surface. Enforced
+// incidentally at expectKeyword("SELECT") on an EOF-only token stream.
+func TestHandleOneOffQuery_ParityEmptyStatementRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB1},
+		QueryString: "",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected pins the
+// reference subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (single space / "Empty after whitespace skip") onto the OneOff admission
+// surface. Enforced incidentally once the tokenizer drops whitespace.
+func TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB2},
+		QueryString: "   ",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityDistinctProjectionRejected pins the reference
+// subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (`select distinct a from t` / "DISTINCT not supported") onto the OneOff
+// admission surface. Enforced incidentally at parseProjection which only
+// accepts `*` or `table.*`.
+func TestHandleOneOffQuery_ParityDistinctProjectionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB3},
+		QueryString: "SELECT DISTINCT u32 FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySubqueryInFromRejected pins the reference
+// subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (`select * from (select * from t) join (select * from s) on a = b` /
+// "Subqueries in FROM not supported") onto the OneOff admission surface.
+// Enforced incidentally at parseStatement which requires an identifier token
+// after FROM.
+func TestHandleOneOffQuery_ParitySubqueryInFromRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB4},
+		QueryString: "SELECT * FROM (SELECT * FROM t) JOIN (SELECT * FROM s) ON a = b",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
 	if result.Status != 1 {
 		t.Fatalf("Status = %d, want 1 (error)", result.Status)
 	}

@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"testing"
 
@@ -1891,5 +1892,1175 @@ func TestHandleSubscribeSingle_SenderParameterOnStringColumnRejected(t *testing.
 	requireOptionalUint32(t, se.QueryID, 42, "QueryID")
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when :sender targets a non-bytes column")
+	}
+}
+
+// TestHandleSubscribeSingle_SenderParameterOnAliasedSingleTable extends the
+// reference `select * from s where id = :sender` positive shape
+// (reference/SpacetimeDB/crates/expr/src/check.rs lines 435-440) to the
+// aliased single-table form `select * from s as r where r.bytes = :sender`.
+// The compile path resolves the alias back to the base table for the
+// relations map key, so the caller-identity threading already established
+// for the unaliased shape should carry through unchanged.
+func TestHandleSubscribeSingle_SenderParameterOnAliasedSingleTable(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{5, 6, 7, 8}
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   70,
+		QueryID:     71,
+		QueryString: "SELECT * FROM s AS r WHERE r.bytes = :sender",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Table != 1 || colEq.Column != 1 {
+		t.Fatalf("predicate target = table %d col %d, want table 1 col 1", colEq.Table, colEq.Column)
+	}
+	want := types.NewBytes(conn.Identity[:])
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("predicate value = %v, want caller identity bytes", colEq.Value)
+	}
+}
+
+// TestHandleSubscribeSingle_SenderParameterInJoinFilter pins the :sender
+// parameter as a join WHERE leaf. Reference positive shape combines the
+// inner-join projection form at check.rs lines 462-464 with the :sender
+// parameter at lines 435-440. Caller identity is threaded through
+// compileSQLPredicateForRelations on the join branch the same way as the
+// standalone single-table branch.
+func TestHandleSubscribeSingle_SenderParameterInJoinFilter(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+			{Name: "bytes", Type: schema.KindBytes},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	sReg, ok := eng.Registry().TableByName("s")
+	if !ok {
+		t.Fatal("registry missing table s")
+	}
+
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{0xAA, 0xBB}
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   72,
+		QueryID:     73,
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE s.bytes = :sender",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	colEq, ok := joinPred.Filter.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want ColEq", joinPred.Filter)
+	}
+	if colEq.Table != sReg.ID || colEq.Column != 2 {
+		t.Fatalf("filter target = table %d col %d, want table %d col 2", colEq.Table, colEq.Column, sReg.ID)
+	}
+	want := types.NewBytes(conn.Identity[:])
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("filter value = %v, want caller identity bytes", colEq.Value)
+	}
+}
+
+// TestHandleSubscribeSingle_SenderParameterInJoinFilterNonBytesRejected
+// mirrors the reference rejection at check.rs lines 487-488
+// (`select * from t where arr = :sender`) onto the join-backed surface.
+// Targeting a non-bytes column on the joined relation must surface as an
+// admission error and skip the executor call, the same way it does on the
+// standalone single-table shape.
+func TestHandleSubscribeSingle_SenderParameterInJoinFilterNonBytesRejected(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+			{Name: "label", Type: schema.KindString},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{1}
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   74,
+		QueryID:     75,
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE s.label = :sender",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 75, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when :sender targets a non-bytes column on join side")
+	}
+}
+
+// TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 498-501 (`select * from t where u32 = 'str'` /
+// "Field u32 is not a string") onto the SubscribeSingle admission surface.
+// Shunter enforces the rejection at the coerce boundary inside
+// compileSQLQueryString; this pin keeps the externally visible behavior
+// tied to the reference shape rather than leaving it incidental.
+func TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   80,
+		QueryID:     81,
+		QueryString: "SELECT * FROM t WHERE u32 = 'str'",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 81, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a string literal targets an integer column")
+	}
+}
+
+// TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 502-504 (`select * from t where t.u32 = 1.3` /
+// "Field u32 is not a float") onto the SubscribeSingle admission surface.
+// Float literals now parse end-to-end (LitFloat) after the 2026-04-21
+// follow-through, so the rejection must fire at the coerce boundary rather
+// than at the parser.
+func TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   82,
+		QueryID:     83,
+		QueryString: "SELECT * FROM t WHERE t.u32 = 1.3",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 83, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a float literal targets an integer column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnknownTableRejected pins the reference
+// type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs
+// lines 483-485 (`select * from r` / "Table r does not exist") onto the
+// SubscribeSingle admission surface. Shunter enforces this incidentally via
+// SchemaLookup.TableByName returning !ok inside compileSQLQueryString
+// (protocol/handle_subscribe.go:152-154); this pin promotes the rejection
+// from incidental to named parity contract.
+func TestHandleSubscribeSingle_ParityUnknownTableRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   84,
+		QueryID:     85,
+		QueryString: "SELECT * FROM r",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 85, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when the FROM table is unknown")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnknownColumnRejected pins the reference
+// type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs
+// lines 491-493 (`select * from t where t.a = 1` / "Field a does not exist
+// on table t") onto the SubscribeSingle admission surface. Shunter enforces
+// this incidentally via rel.ts.Column returning !ok inside
+// normalizeSQLFilterForRelations (protocol/handle_subscribe.go:250-253); the
+// pin promotes the rejection from incidental to named parity contract.
+func TestHandleSubscribeSingle_ParityUnknownColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   86,
+		QueryID:     87,
+		QueryString: "SELECT * FROM t WHERE t.a = 1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 87, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a qualified WHERE column is unknown")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 495-497 (`select * from t as r where r.a = 1` / "Field a
+// does not exist on table t") onto the SubscribeSingle admission surface.
+// The aliased single-table shape resolves `r` to base table `t` in the
+// parser's relationBindings, then normalizeSQLFilterForRelations fails the
+// rel.ts.Column lookup. The pin keeps the rejection named on the alias-
+// qualified surface rather than leaving it collapsed under the unaliased
+// case.
+func TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   88,
+		QueryID:     89,
+		QueryString: "SELECT * FROM t AS r WHERE r.a = 1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 89, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when an alias-qualified WHERE column is unknown")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityBaseTableQualifierAfterAliasRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 506-509 (`select * from t as r where t.u32 = 5` / "t is not
+// in scope after alias") onto the SubscribeSingle admission surface. Once an
+// AS alias is introduced in the FROM, the base table name is out of scope;
+// Shunter's parser enforces this incidentally at parseComparison via
+// resolveQualifier returning !ok against relationBindings.byQualifier
+// (query/sql/parser.go:750-753). The pin promotes the rejection from
+// incidental to named parity contract.
+func TestHandleSubscribeSingle_ParityBaseTableQualifierAfterAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   90,
+		QueryID:     91,
+		QueryString: "SELECT * FROM t AS r WHERE t.u32 = 5",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 91, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when the base-table qualifier is out of scope after an AS alias")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityBareColumnProjectionRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 510-513 (`select u32 from t` / "Subscriptions must be typed
+// to a single table") onto the SubscribeSingle admission surface. Shunter's
+// parser rejects any projection other than `*` or `table.*` at parseProjection
+// (query/sql/parser.go:517-528). The pin promotes the rejection from
+// incidental to named parity contract on the protocol boundary.
+func TestHandleSubscribeSingle_ParityBareColumnProjectionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   92,
+		QueryID:     93,
+		QueryString: "SELECT u32 FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 93, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a bare column projection")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected pins
+// the reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 515-517 (`select * from t join s` / "Subscriptions must be
+// typed to a single table") onto the SubscribeSingle admission surface.
+// Shunter's parser requires joined queries to name the projected side via a
+// qualified projection at parseStatement (query/sql/parser.go:468-469). The
+// pin promotes the rejection from incidental to named parity contract.
+func TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   94,
+		QueryID:     95,
+		QueryString: "SELECT * FROM t JOIN s",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 95, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a join query lacks a qualified projection")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
+// aliases") onto the SubscribeSingle admission surface. Shunter's parser
+// rejects the same-alias self-join shape in parseJoinClause
+// (query/sql/parser.go:577-579). The pin promotes the rejection from
+// incidental to named parity contract.
+func TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   96,
+		QueryID:     97,
+		QueryString: "SELECT t.* FROM t JOIN t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 97, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called for a self-join without aliases")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 526-528 (`select t.* from t join s on t.u32 = r.u32 join s
+// as r` / "Alias r is not in scope when it is referenced") onto the
+// SubscribeSingle admission surface. Shunter's parser rejects the forward
+// alias reference incidentally in parseQualifiedColumnRef via resolveQualifier
+// returning !ok against the first join's lookup table (query/sql/parser.go:629
+// -631); the multi-way-join rejection at parseStatement (query/sql/parser.go:
+// 482-489) would otherwise also fire, but the forward reference fails first.
+// The pin names the shape as a parity rejection contract.
+func TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   98,
+		QueryID:     99,
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 99, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a join references an alias declared later")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityLimitClauseRejected pins the reference type-
+// check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
+// 530-533 (`select * from t limit 5` / "Subscriptions do not support limit")
+// onto the SubscribeSingle admission surface. Shunter's parser rejects the
+// trailing LIMIT clause at the statement's EOF-check in parseStatement
+// (query/sql/parser.go:505-507); the WHERE-trailing keyword fast path at
+// parseWhere (query/sql/parser.go:641-645) handles the case where LIMIT
+// follows a WHERE. The pin names the rejection as a parity contract on the
+// protocol boundary.
+func TestHandleSubscribeSingle_ParityLimitClauseRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   100,
+		QueryID:     101,
+		QueryString: "SELECT * FROM t LIMIT 5",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 101, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a LIMIT clause trails the query")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityLeadingPlusIntLiteral pins the reference
+// valid-literal shape at reference/SpacetimeDB/crates/expr/src/check.rs:297-
+// 300 (`select * from t where u32 = +1` / "Leading `+`"): a leading `+` on
+// an integer literal is admitted end-to-end (parser accepts, coerce produces
+// the unsigned value, subscribe admission registers the set). Mirrors the
+// already-landed leading `-` support (`TestParseWhereNegativeInt`).
+func TestHandleSubscribeSingle_ParityLeadingPlusIntLiteral(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   104,
+		QueryID:     105,
+		QueryString: "SELECT * FROM t WHERE u32 = +7",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	want := types.NewUint32(7)
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("filter value = %v, want %v", colEq.Value, want)
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnqualifiedWhereInJoinRejected pins the
+// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
+// check.rs lines 534-537 (`select t.* from t join s on t.u32 = s.u32 where
+// bytes = 0xABCD` / "Columns must be qualified in join expressions") onto the
+// SubscribeSingle admission surface. Shunter's parser enforces the qualify
+// requirement under a join binding at parseComparison
+// (query/sql/parser.go:761-763). The pin promotes the rejection from
+// incidental to named parity contract.
+func TestHandleSubscribeSingle_ParityUnqualifiedWhereInJoinRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   102,
+		QueryID:     103,
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE bytes = 0xABCD",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 103, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a WHERE column is unqualified inside a join")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityScientificNotationUnsignedInteger pins the
+// reference valid-literal shape at reference/SpacetimeDB/crates/expr/src/
+// check.rs:302-304 (`select * from t where u32 = 1e3` / "Scientific
+// notation"): an integer-valued exponent-form numeric binds to an unsigned
+// integer column end-to-end.
+func TestHandleSubscribeSingle_ParityScientificNotationUnsignedInteger(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   110,
+		QueryID:     111,
+		QueryString: "SELECT * FROM t WHERE u32 = 1e3",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	want := types.NewUint32(1000)
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("filter value = %v, want %v", colEq.Value, want)
+	}
+}
+
+// TestHandleSubscribeSingle_ParityScientificNotationFloatNegativeExponent
+// pins reference/SpacetimeDB/crates/expr/src/check.rs:314-316 (`select * from
+// t where f32 = 1e-3` / "Negative exponent"): a non-integral exponent-form
+// numeric binds to a float column end-to-end.
+func TestHandleSubscribeSingle_ParityScientificNotationFloatNegativeExponent(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   112,
+		QueryID:     113,
+		QueryString: "SELECT * FROM t WHERE f32 = 1e-3",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	want, err := types.NewFloat32(float32(1e-3))
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("filter value = %v, want %v", colEq.Value, want)
+	}
+}
+
+// TestHandleSubscribeSingle_ParityLeadingDotFloatLiteral pins reference/
+// SpacetimeDB/crates/expr/src/check.rs:322-324 (`select * from t where
+// f32 = .1` / "Leading `.`"): a leading-dot numeric with no integer part
+// binds to a float column end-to-end.
+func TestHandleSubscribeSingle_ParityLeadingDotFloatLiteral(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   114,
+		QueryID:     115,
+		QueryString: "SELECT * FROM t WHERE f32 = .1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	want, err := types.NewFloat32(float32(0.1))
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("filter value = %v, want %v", colEq.Value, want)
+	}
+}
+
+// TestHandleSubscribeSingle_ParityScientificNotationOverflowInfinity pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:326-328 (`select * from t
+// where f32 = 1e40` / "Infinity"): a magnitude beyond float32 range binds to
+// the f32 column as +Inf rather than being rejected.
+func TestHandleSubscribeSingle_ParityScientificNotationOverflowInfinity(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   116,
+		QueryID:     117,
+		QueryString: "SELECT * FROM t WHERE f32 = 1e40",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Value.Kind() != types.KindFloat32 {
+		t.Fatalf("Kind = %v, want KindFloat32", colEq.Value.Kind())
+	}
+	if !math.IsInf(float64(colEq.Value.AsFloat32()), 1) {
+		t.Fatalf("value = %v, want +Inf", colEq.Value.AsFloat32())
+	}
+}
+
+// TestHandleSubscribeSingle_ParityInvalidLiteralNegativeIntOnUnsignedRejected
+// pins reference/SpacetimeDB/crates/expr/src/check.rs:382-385 (`select * from
+// t where u8 = -1` / "Negative integer for unsigned column") onto the
+// SubscribeSingle admission surface. `-1` parses to LitInt(-1) and
+// coerceUnsigned (query/sql/coerce.go:119) rejects negative ints before they
+// reach an unsigned column; the pin names the rejection as a parity contract.
+func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   118,
+		QueryID:     119,
+		QueryString: "SELECT * FROM t WHERE u8 = -1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 119, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a negative literal targets an unsigned column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityInvalidLiteralScientificOverflowRejected
+// pins reference/SpacetimeDB/crates/expr/src/check.rs:386-389 (`select * from
+// t where u8 = 1e3` / "Out of bounds") onto the SubscribeSingle admission
+// surface. `1e3` parses via parseNumericLiteral as an integer-valued literal
+// that collapses to LitInt(1000); coerceUnsigned (query/sql/coerce.go:123)
+// rejects it as out of range for u8 (max 255).
+func TestHandleSubscribeSingle_ParityInvalidLiteralScientificOverflowRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   120,
+		QueryID:     121,
+		QueryString: "SELECT * FROM t WHERE u8 = 1e3",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 121, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a scientific-notation literal overflows the unsigned column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityInvalidLiteralFloatOnUnsignedRejected pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:390-393 (`select * from t
+// where u8 = 0.1` / "Float as integer") onto the SubscribeSingle admission
+// surface. A non-integral decimal stays LitFloat and coerceUnsigned
+// (query/sql/coerce.go:116) rejects non-LitInt against an integer column.
+// Complements the existing u32 = 1.3 pin by naming the u8 column variant.
+func TestHandleSubscribeSingle_ParityInvalidLiteralFloatOnUnsignedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   122,
+		QueryID:     123,
+		QueryString: "SELECT * FROM t WHERE u8 = 0.1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 123, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a float literal targets an unsigned column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnUnsignedRejected
+// pins reference/SpacetimeDB/crates/expr/src/check.rs:394-397 (`select * from
+// t where u32 = 1e-3` / "Float as integer") onto the SubscribeSingle
+// admission surface. `1e-3` parses to 0.001, fails the integer-valued collapse
+// in parseNumericLiteral (non-integral), stays LitFloat, and coerceUnsigned
+// rejects LitFloat against a KindUint32 column.
+func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnUnsignedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   124,
+		QueryID:     125,
+		QueryString: "SELECT * FROM t WHERE u32 = 1e-3",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 125, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a non-integral scientific literal targets an unsigned column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnSignedRejected
+// pins reference/SpacetimeDB/crates/expr/src/check.rs:398-401 (`select * from
+// t where i32 = 1e-3` / "Float as integer") onto the SubscribeSingle
+// admission surface. Mirrors the unsigned case on a signed column:
+// parseNumericLiteral leaves 0.001 as LitFloat, and coerceSigned
+// (query/sql/coerce.go:106) rejects non-LitInt against a KindInt32 column.
+func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnSignedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "i32", Type: schema.KindInt32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   126,
+		QueryID:     127,
+		QueryString: "SELECT * FROM t WHERE i32 = 1e-3",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 127, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a non-integral scientific literal targets a signed column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:360-370
+// (`valid_literals_for_type`) at the SubscribeSingle admission surface.
+// The reference test iterates every numeric column kind and asserts that
+// `{ty} = 127` parses and type-checks; Shunter realizes the subset that
+// maps to `schema.ValueKind` (i8/u8/i16/u16/i32/u32/i64/u64/f32/f64). Each
+// subtest builds a single-column table, sends `SELECT * FROM t WHERE
+// {colname} = 127`, and asserts the executor receives a ColEq predicate
+// with the width-native value. i128/u128/i256/u256 are deliberately not
+// exercised — no `schema.ValueKind` variant realizes them.
+func TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
+	f32Want, err := types.NewFloat32(127)
+	if err != nil {
+		t.Fatalf("NewFloat32(127): %v", err)
+	}
+	f64Want, err := types.NewFloat64(127)
+	if err != nil {
+		t.Fatalf("NewFloat64(127): %v", err)
+	}
+
+	cases := []struct {
+		colName string
+		kind    schema.ValueKind
+		want    types.Value
+	}{
+		{"i8", schema.KindInt8, types.NewInt8(127)},
+		{"u8", schema.KindUint8, types.NewUint8(127)},
+		{"i16", schema.KindInt16, types.NewInt16(127)},
+		{"u16", schema.KindUint16, types.NewUint16(127)},
+		{"i32", schema.KindInt32, types.NewInt32(127)},
+		{"u32", schema.KindUint32, types.NewUint32(127)},
+		{"i64", schema.KindInt64, types.NewInt64(127)},
+		{"u64", schema.KindUint64, types.NewUint64(127)},
+		{"f32", schema.KindFloat32, f32Want},
+		{"f64", schema.KindFloat64, f64Want},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.colName, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: tc.colName, Type: tc.kind},
+			)
+
+			requestID := uint32(200 + i*2)
+			queryID := uint32(201 + i*2)
+			msg := &SubscribeSingleMsg{
+				RequestID:   requestID,
+				QueryID:     queryID,
+				QueryString: "SELECT * FROM t WHERE " + tc.colName + " = 127",
+			}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			select {
+			case frame := <-conn.OutboundCh:
+				t.Fatalf("unexpected message on OutboundCh: %x", frame)
+			default:
+			}
+
+			req := executor.getRegisterSetReq()
+			if req == nil {
+				t.Fatal("executor did not receive RegisterSubscriptionSet call")
+			}
+			if len(req.Predicates) != 1 {
+				t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+			}
+			colEq, ok := req.Predicates[0].(subscription.ColEq)
+			if !ok {
+				t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+			}
+			if !colEq.Value.Equal(tc.want) {
+				t.Fatalf("filter value = %v, want %v", colEq.Value, tc.want)
+			}
+		})
+	}
+}
+
+// TestHandleSubscribeSingle_ParityDMLStatementRejected pins the reference
+// subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (`delete from t` / "DML not allowed in subscriptions") onto the
+// SubscribeSingle admission surface. Shunter's SELECT-only parser rejects any
+// leading token other than SELECT at parseStatement's expectKeyword("SELECT")
+// call (query/sql/parser.go:475-477). The pin promotes the rejection from
+// incidental to named parity contract.
+func TestHandleSubscribeSingle_ParityDMLStatementRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   130,
+		QueryID:     131,
+		QueryString: "DELETE FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 131, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a DML statement")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityEmptyStatementRejected pins the reference
+// subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (empty string / "Empty") onto the SubscribeSingle admission surface.
+// Shunter's parser rejects via expectKeyword("SELECT") returning "expected
+// SELECT, got end of input" on a token stream that tokenizes to only EOF.
+func TestHandleSubscribeSingle_ParityEmptyStatementRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   132,
+		QueryID:     133,
+		QueryString: "",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 133, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on an empty query string")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected pins the
+// reference subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (single space / "Empty after whitespace skip") onto the SubscribeSingle
+// admission surface. Shunter's tokenizer drops whitespace so the parser sees
+// only EOF and fails at expectKeyword("SELECT").
+func TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   134,
+		QueryID:     135,
+		QueryString: "   ",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 135, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a whitespace-only query string")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityDistinctProjectionRejected pins the reference
+// subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (`select distinct a from t` / "DISTINCT not supported") onto the
+// SubscribeSingle admission surface. Shunter's parseProjection requires `*`
+// or `table.*` (query/sql/parser.go:553-572); the DISTINCT identifier is
+// consumed as a qualifier candidate, the next token is `a` not `.`, and the
+// parser rejects with "projection must be '*' or 'table.*'".
+func TestHandleSubscribeSingle_ParityDistinctProjectionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   136,
+		QueryID:     137,
+		QueryString: "SELECT DISTINCT u32 FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 137, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a DISTINCT projection")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySubqueryInFromRejected pins the reference
+// subscription-parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
+// (`select * from (select * from t) join (select * from s) on a = b` /
+// "Subqueries in FROM not supported") onto the SubscribeSingle admission
+// surface. Shunter's parseStatement requires an identifier token after FROM
+// (query/sql/parser.go:485-488); the `(` token is tokLParen, not an identifier,
+// so the parser rejects with "expected table name".
+func TestHandleSubscribeSingle_ParitySubqueryInFromRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   138,
+		QueryID:     139,
+		QueryString: "SELECT * FROM (SELECT * FROM t) JOIN (SELECT * FROM s) ON a = b",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 139, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a subquery in FROM")
 	}
 }
