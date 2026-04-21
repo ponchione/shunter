@@ -322,14 +322,26 @@ func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req p
 			}
 			update, err := protocol.BuildTransactionUpdateHeavy(req.ConnID, resp.Committed.Outcome, resp.Committed.Updates, nil)
 			if err != nil {
-				req.ResponseCh <- buildProtocolReducerEnvelope(req, protocol.StatusFailed{Error: fmt.Sprintf("encode caller outcome: %v", err)})
+				sendTransactionUpdateWithContext(ctx, req.ResponseCh, buildProtocolReducerEnvelope(req, protocol.StatusFailed{Error: fmt.Sprintf("encode caller outcome: %v", err)}))
 				return
 			}
-			req.ResponseCh <- update
+			sendTransactionUpdateWithContext(ctx, req.ResponseCh, update)
 			return
 		}
-		req.ResponseCh <- buildProtocolReducerEnvelope(req, reducerStatusToProtocol(resp.Reducer))
+		sendTransactionUpdateWithContext(ctx, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(resp.Reducer)))
 	case <-ctx.Done():
+	}
+}
+
+func sendTransactionUpdateWithContext(ctx context.Context, ch chan<- protocol.TransactionUpdate, update protocol.TransactionUpdate) bool {
+	if ch == nil {
+		return true
+	}
+	select {
+	case ch <- update:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

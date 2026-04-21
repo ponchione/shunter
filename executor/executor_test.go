@@ -219,6 +219,124 @@ func TestSubmitWithContextRejectOnFullReturnsBusy(t *testing.T) {
 	}
 }
 
+func TestSendReducerResponse_UnbufferedChannelBlocksUntilReceiverReady(t *testing.T) {
+	ch := make(chan ReducerResponse)
+	done := make(chan struct{})
+
+	go func() {
+		sendReducerResponse(ch, ReducerResponse{Status: StatusCommitted})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("sendReducerResponse returned before a receiver was ready")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	select {
+	case resp := <-ch:
+		if resp.Status != StatusCommitted {
+			t.Fatalf("status = %d, want %d", resp.Status, StatusCommitted)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting to receive reducer response")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sendReducerResponse did not finish after receiver consumed response")
+	}
+}
+
+func TestSendProtocolCallReducerResponse_UnbufferedChannelBlocksUntilReceiverReady(t *testing.T) {
+	ch := make(chan ProtocolCallReducerResponse)
+	done := make(chan struct{})
+
+	go func() {
+		sendProtocolCallReducerResponse(ch, ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("sendProtocolCallReducerResponse returned before a receiver was ready")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	select {
+	case resp := <-ch:
+		if resp.Reducer.Status != StatusCommitted {
+			t.Fatalf("status = %d, want %d", resp.Reducer.Status, StatusCommitted)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting to receive protocol reducer response")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sendProtocolCallReducerResponse did not finish after receiver consumed response")
+	}
+}
+
+func TestSubmitRejectsUnbufferedResponseChannels(t *testing.T) {
+	exec, _ := setupExecutor()
+	ctx := context.Background()
+
+	tests := []struct {
+		name   string
+		submit func() error
+	}{
+		{
+			name: "call reducer response channel",
+			submit: func() error {
+				return exec.Submit(CallReducerCmd{
+					Request:    ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+					ResponseCh: make(chan ReducerResponse),
+				})
+			},
+		},
+		{
+			name: "call reducer protocol response channel",
+			submit: func() error {
+				return exec.Submit(CallReducerCmd{
+					Request:            ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+					ProtocolResponseCh: make(chan ProtocolCallReducerResponse),
+				})
+			},
+		},
+		{
+			name: "disconnect subscriptions response channel",
+			submit: func() error {
+				return exec.Submit(DisconnectClientSubscriptionsCmd{
+					ConnID:     types.ConnectionID{1},
+					ResponseCh: make(chan error),
+				})
+			},
+		},
+		{
+			name: "submit with context onconnect response channel",
+			submit: func() error {
+				return exec.SubmitWithContext(ctx, OnConnectCmd{
+					ConnID:     types.ConnectionID{1},
+					Identity:   types.Identity{2},
+					ResponseCh: make(chan ReducerResponse),
+				})
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.submit(); !errors.Is(err, ErrExecutorUnbufferedResponseChannel) {
+				t.Fatalf("submit error = %v, want %v", err, ErrExecutorUnbufferedResponseChannel)
+			}
+		})
+	}
+}
+
 func TestReducerRegistryBasics(t *testing.T) {
 	rr := NewReducerRegistry()
 	h := types.ReducerHandler(func(_ *types.ReducerContext, _ []byte) ([]byte, error) { return nil, nil })

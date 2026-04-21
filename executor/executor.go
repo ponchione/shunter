@@ -148,6 +148,9 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 	if e.shutdown.Load() {
 		return ErrExecutorShutdown
 	}
+	if err := validateResponseChannels(cmd); err != nil {
+		return err
+	}
 	if e.rejectMode {
 		select {
 		case e.inbox <- cmd:
@@ -170,6 +173,9 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 	if e.shutdown.Load() {
 		return ErrExecutorShutdown
 	}
+	if err := validateResponseChannels(cmd); err != nil {
+		return err
+	}
 	if e.rejectMode {
 		select {
 		case e.inbox <- cmd:
@@ -184,6 +190,40 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func validateResponseChannels(cmd ExecutorCommand) error {
+	switch c := cmd.(type) {
+	case CallReducerCmd:
+		if isUnbufferedReducerResponseChannel(c.ResponseCh) || isUnbufferedProtocolReducerResponseChannel(c.ProtocolResponseCh) {
+			return ErrExecutorUnbufferedResponseChannel
+		}
+	case DisconnectClientSubscriptionsCmd:
+		if isUnbufferedErrorChannel(c.ResponseCh) {
+			return ErrExecutorUnbufferedResponseChannel
+		}
+	case OnConnectCmd:
+		if isUnbufferedReducerResponseChannel(c.ResponseCh) {
+			return ErrExecutorUnbufferedResponseChannel
+		}
+	case OnDisconnectCmd:
+		if isUnbufferedReducerResponseChannel(c.ResponseCh) {
+			return ErrExecutorUnbufferedResponseChannel
+		}
+	}
+	return nil
+}
+
+func isUnbufferedReducerResponseChannel(ch chan<- ReducerResponse) bool {
+	return ch != nil && cap(ch) == 0
+}
+
+func isUnbufferedProtocolReducerResponseChannel(ch chan<- ProtocolCallReducerResponse) bool {
+	return ch != nil && cap(ch) == 0
+}
+
+func isUnbufferedErrorChannel(ch chan<- error) bool {
+	return ch != nil && cap(ch) == 0
 }
 
 // Shutdown stops accepting new commands and waits for Run to finish.

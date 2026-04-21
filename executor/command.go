@@ -11,6 +11,13 @@ type ExecutorCommand interface {
 }
 
 // CallReducerCmd requests a reducer invocation.
+//
+// ResponseCh and ProtocolResponseCh are executor-owned reply paths: when they
+// are non-nil, the executor sends exactly one response before it dequeues the
+// next command. Public callers should submit buffered channels (the protocol
+// adapter uses cap 1): Submit/SubmitWithContext reject unbuffered response
+// channels up front, while commands admitted to the inbox still use blocking
+// reply sends to preserve delivery and ordering.
 type CallReducerCmd struct {
 	Request            ReducerRequest
 	ResponseCh         chan<- ReducerResponse
@@ -70,6 +77,10 @@ type UnregisterSubscriptionSetCmd struct {
 func (UnregisterSubscriptionSetCmd) isExecutorCommand() {}
 
 // DisconnectClientSubscriptionsCmd removes all subscriptions for one client.
+//
+// ResponseCh follows the same executor-owned reply contract as CallReducerCmd:
+// public Submit/SubmitWithContext calls reject unbuffered channels, while
+// commands admitted to the inbox still use blocking reply sends.
 type DisconnectClientSubscriptionsCmd struct {
 	ConnID     types.ConnectionID
 	ResponseCh chan<- error
@@ -81,6 +92,8 @@ func (DisconnectClientSubscriptionsCmd) isExecutorCommand() {}
 // client connection is being admitted (SPEC-003 §10.3). It inserts the
 // `sys_clients` row and runs the optional OnConnect lifecycle reducer inside
 // a single transaction. A failed reducer rolls back the entire transaction.
+// ResponseCh follows the same Submit-time rejection / in-inbox blocking contract
+// as CallReducerCmd.
 type OnConnectCmd struct {
 	ConnID     types.ConnectionID
 	Identity   types.Identity
@@ -92,7 +105,8 @@ func (OnConnectCmd) isExecutorCommand() {}
 // OnDisconnectCmd is an internal command delivered by the protocol layer after
 // the client is considered gone (SPEC-003 §10.4). Disconnect cannot be
 // vetoed: if the OnDisconnect reducer fails, a cleanup transaction still
-// deletes the `sys_clients` row.
+// deletes the `sys_clients` row. ResponseCh follows the same Submit-time
+// rejection / in-inbox blocking contract as CallReducerCmd.
 type OnDisconnectCmd struct {
 	ConnID     types.ConnectionID
 	Identity   types.Identity

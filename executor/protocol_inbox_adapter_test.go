@@ -413,6 +413,48 @@ func TestProtocolInboxAdapter_OnConnect_BridgesLifecycleResponse(t *testing.T) {
 	}
 }
 
+func TestProtocolInboxAdapter_OnConnect_UsesBufferedResponseChannel(t *testing.T) {
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			onConnect, ok := cmd.(OnConnectCmd)
+			if !ok {
+				t.Fatalf("command type = %T, want OnConnectCmd", cmd)
+			}
+			if cap(onConnect.ResponseCh) != 1 {
+				t.Fatalf("cap(ResponseCh) = %d, want 1", cap(onConnect.ResponseCh))
+			}
+			onConnect.ResponseCh <- ReducerResponse{Status: StatusCommitted}
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	if err := adapter.OnConnect(context.Background(), types.ConnectionID{1}, types.Identity{2}); err != nil {
+		t.Fatalf("OnConnect: %v", err)
+	}
+}
+
+func TestProtocolInboxAdapter_OnDisconnect_UsesBufferedResponseChannel(t *testing.T) {
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			onDisconnect, ok := cmd.(OnDisconnectCmd)
+			if !ok {
+				t.Fatalf("command type = %T, want OnDisconnectCmd", cmd)
+			}
+			if cap(onDisconnect.ResponseCh) != 1 {
+				t.Fatalf("cap(ResponseCh) = %d, want 1", cap(onDisconnect.ResponseCh))
+			}
+			onDisconnect.ResponseCh <- ReducerResponse{Status: StatusCommitted}
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	if err := adapter.OnDisconnect(context.Background(), types.ConnectionID{1}, types.Identity{2}); err != nil {
+		t.Fatalf("OnDisconnect: %v", err)
+	}
+}
+
 func TestProtocolInboxAdapter_CallReducer_TranslatesFailedReducerResponse(t *testing.T) {
 	connID := types.ConnectionID{3}
 	identity := types.Identity{4}
@@ -461,6 +503,40 @@ func TestProtocolInboxAdapter_CallReducer_TranslatesFailedReducerResponse(t *tes
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for TransactionUpdate")
+	}
+}
+
+func TestProtocolInboxAdapter_CallReducer_UsesBufferedProtocolResponseChannel(t *testing.T) {
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			call, ok := cmd.(CallReducerCmd)
+			if !ok {
+				t.Fatalf("command type = %T, want CallReducerCmd", cmd)
+			}
+			if cap(call.ProtocolResponseCh) != 1 {
+				t.Fatalf("cap(ProtocolResponseCh) = %d, want 1", cap(call.ProtocolResponseCh))
+			}
+			call.ProtocolResponseCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusFailedUser, Error: errors.New("boom")}}
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	respCh := make(chan protocol.TransactionUpdate, 1)
+	if err := adapter.CallReducer(context.Background(), protocol.CallReducerRequest{
+		ConnID:      types.ConnectionID{3},
+		Identity:    types.Identity{4},
+		RequestID:   55,
+		ReducerName: "DoThing",
+		ResponseCh:  respCh,
+	}); err != nil {
+		t.Fatalf("CallReducer: %v", err)
+	}
+
+	select {
+	case <-respCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for forwarded reducer response")
 	}
 }
 
@@ -619,5 +695,42 @@ func TestProtocolInboxAdapter_CallReducer_DeliversFailureEvenWhenNoSuccessNotify
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for TransactionUpdate")
+	}
+}
+
+func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOutboundBlocked(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	respCh := make(chan ProtocolCallReducerResponse, 1)
+	req := protocol.CallReducerRequest{
+		ConnID:      types.ConnectionID{21},
+		Identity:    types.Identity{22},
+		RequestID:   99,
+		ReducerName: "BlockedForward",
+		ResponseCh:  make(chan protocol.TransactionUpdate),
+	}
+	adapter := &ProtocolInboxAdapter{}
+	done := make(chan struct{})
+
+	go func() {
+		adapter.forwardReducerResponse(ctx, req, respCh)
+		close(done)
+	}()
+
+	respCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusFailedUser, Error: errors.New("boom")}}
+
+	select {
+	case <-done:
+		t.Fatal("forwardReducerResponse returned before context cancellation while outbound channel was blocked")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("forwardReducerResponse did not exit after context cancellation")
 	}
 }

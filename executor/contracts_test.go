@@ -206,6 +206,7 @@ func TestEpic1InterfacesAndErrorsExist(t *testing.T) {
 		ErrReducerPanic,
 		ErrCommitFailed,
 		ErrExecutorFatal,
+		ErrExecutorUnbufferedResponseChannel,
 	}
 	for _, err := range base {
 		if !errors.Is(err, err) {
