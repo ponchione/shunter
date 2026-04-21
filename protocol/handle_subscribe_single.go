@@ -23,8 +23,8 @@ func handleSubscribeSingle(
 	compiled, err := compileSQLQueryString(msg.QueryString, sl)
 	if err != nil {
 		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   msg.QueryID,
+			RequestID: optionalUint32(msg.RequestID),
+			QueryID:   optionalUint32(msg.QueryID),
 			Error:     err.Error(),
 		})
 		return
@@ -36,7 +36,7 @@ func handleSubscribeSingle(
 		switch {
 		case resp.Error != nil:
 			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
+				log.Printf("protocol: SubscriptionError delivery failed for conn %x query_id=%s: %v", conn.ID[:], subscriptionErrorQueryIDForLog(resp.Error), err)
 			}
 		case resp.SingleApplied != nil:
 			if err := SendSubscribeSingleApplied(sender, conn, resp.SingleApplied); err != nil {
@@ -55,8 +55,8 @@ func handleSubscribeSingle(
 		Reply:      reply,
 	}); submitErr != nil {
 		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   msg.QueryID,
+			RequestID: optionalUint32(msg.RequestID),
+			QueryID:   optionalUint32(msg.QueryID),
 			Error:     "executor unavailable: " + submitErr.Error(),
 		})
 		return

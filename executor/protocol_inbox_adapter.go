@@ -164,6 +164,33 @@ func castPredicates(raw []any) ([]subscription.Predicate, error) {
 	return preds, nil
 }
 
+func optionalUint32(v uint32) *uint32 {
+	return &v
+}
+
+func firstErrorTableID(preds []subscription.Predicate, updates []subscription.SubscriptionUpdate) *schema.TableID {
+	seen := make(map[schema.TableID]struct{})
+	var only schema.TableID
+	for _, pred := range preds {
+		for _, tableID := range pred.Tables() {
+			seen[schema.TableID(tableID)] = struct{}{}
+		}
+	}
+	for _, update := range updates {
+		if update.TableID == 0 {
+			continue
+		}
+		seen[schema.TableID(update.TableID)] = struct{}{}
+	}
+	if len(seen) != 1 {
+		return nil
+	}
+	for tableID := range seen {
+		only = tableID
+	}
+	return &only
+}
+
 func (a *ProtocolInboxAdapter) buildRegisterResponse(
 	req protocol.RegisterSubscriptionSetRequest,
 	preds []subscription.Predicate,
@@ -172,7 +199,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 ) protocol.SubscriptionSetCommandResponse {
 	if replyErr != nil {
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{RequestID: req.RequestID, QueryID: req.QueryID, Error: replyErr.Error()},
+			Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, nil), Error: replyErr.Error()},
 		}
 	}
 	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))
@@ -180,28 +207,29 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 		encoded, err := encodeProtocolSubscriptionUpdate(update)
 		if err != nil {
 			return protocol.SubscriptionSetCommandResponse{
-				Error: &protocol.SubscriptionError{RequestID: req.RequestID, QueryID: req.QueryID, Error: err.Error()},
+				Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, result.Update), Error: err.Error()},
 			}
 		}
 		updates = append(updates, encoded)
 	}
 	if req.Variant == protocol.SubscriptionSetVariantMulti {
 		return protocol.SubscriptionSetCommandResponse{
-			MultiApplied: &protocol.SubscribeMultiApplied{RequestID: req.RequestID, QueryID: req.QueryID, Update: updates},
+			MultiApplied: &protocol.SubscribeMultiApplied{RequestID: req.RequestID, QueryID: req.QueryID, Update: updates, TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros},
 		}
 	}
 	rows, err := encodeProductRows(collectInsertRows(result.Update))
 	if err != nil {
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{RequestID: req.RequestID, QueryID: req.QueryID, Error: err.Error()},
+			Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, result.Update), Error: err.Error()},
 		}
 	}
 	return protocol.SubscriptionSetCommandResponse{
 		SingleApplied: &protocol.SubscribeSingleApplied{
-			RequestID: req.RequestID,
-			QueryID:   req.QueryID,
-			TableName: a.singleTableName(preds, result.Update),
-			Rows:      rows,
+			RequestID:                        req.RequestID,
+			QueryID:                          req.QueryID,
+			TableName:                        a.singleTableName(preds, result.Update),
+			Rows:                             rows,
+			TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros,
 		},
 	}
 }
@@ -213,7 +241,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 ) protocol.UnsubscribeSetCommandResponse {
 	if replyErr != nil {
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{RequestID: req.RequestID, QueryID: req.QueryID, Error: replyErr.Error()},
+			Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: replyErr.Error()},
 		}
 	}
 	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))
@@ -221,28 +249,29 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 		encoded, err := encodeProtocolSubscriptionUpdate(update)
 		if err != nil {
 			return protocol.UnsubscribeSetCommandResponse{
-				Error: &protocol.SubscriptionError{RequestID: req.RequestID, QueryID: req.QueryID, Error: err.Error()},
+				Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: err.Error()},
 			}
 		}
 		updates = append(updates, encoded)
 	}
 	if req.Variant == protocol.SubscriptionSetVariantMulti {
 		return protocol.UnsubscribeSetCommandResponse{
-			MultiApplied: &protocol.UnsubscribeMultiApplied{RequestID: req.RequestID, QueryID: req.QueryID, Update: updates},
+			MultiApplied: &protocol.UnsubscribeMultiApplied{RequestID: req.RequestID, QueryID: req.QueryID, Update: updates, TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros},
 		}
 	}
 	rows, err := encodeProductRows(collectDeleteRows(result.Update))
 	if err != nil {
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{RequestID: req.RequestID, QueryID: req.QueryID, Error: err.Error()},
+			Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: err.Error()},
 		}
 	}
 	return protocol.UnsubscribeSetCommandResponse{
 		SingleApplied: &protocol.UnsubscribeSingleApplied{
-			RequestID: req.RequestID,
-			QueryID:   req.QueryID,
-			HasRows:   len(result.Update) > 0,
-			Rows:      rows,
+			RequestID:                        req.RequestID,
+			QueryID:                          req.QueryID,
+			HasRows:                          len(result.Update) > 0,
+			Rows:                             rows,
+			TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros,
 		},
 	}
 }

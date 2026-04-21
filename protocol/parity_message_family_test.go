@@ -3,6 +3,8 @@ package protocol
 import (
 	"reflect"
 	"testing"
+
+	"github.com/ponchione/shunter/schema"
 )
 
 // These tests are *pins*, not parity implementations. Each pins the
@@ -119,7 +121,7 @@ func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317.
 func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeSingleApplied{})
-	want := []string{"RequestID", "QueryID", "TableName", "Rows"}
+	want := []string{"RequestID", "QueryID", "TableName", "Rows", "TotalHostExecutionDurationMicros"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("SubscribeSingleApplied fields = %v, want %v", fields, want)
 	}
@@ -130,22 +132,9 @@ func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331.
 func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeSingleApplied{})
-	want := []string{"RequestID", "QueryID", "HasRows", "Rows"}
+	want := []string{"RequestID", "QueryID", "HasRows", "Rows", "TotalHostExecutionDurationMicros"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("UnsubscribeSingleApplied fields = %v, want %v", fields, want)
-	}
-}
-
-// TestPhase2SubscriptionErrorCarriesQueryID pins the response-side rename
-// for `SubscriptionError`. Reference: `SubscriptionError.query_id: Option<u32>`.
-// Shunter always populates QueryID in Phase 2 because every error is
-// correlated with a specific query.
-func TestPhase2SubscriptionErrorCarriesQueryID(t *testing.T) {
-	fields := msgFieldNames(SubscriptionError{})
-	want := []string{"RequestID", "QueryID", "Error"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscriptionError fields = %v, want %v (Phase 2: QueryID response envelope)",
-			fields, want)
 	}
 }
 
@@ -223,11 +212,9 @@ func TestPhase2UnsubscribeMultiShape(t *testing.T) {
 // TestPhase2SubscribeMultiAppliedShape pins the set-scoped applied
 // envelope. Reference: SubscribeMultiApplied at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380.
-// TotalHostExecutionDurationMicros is absent — tracked by
-// TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration.
 func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeMultiApplied{})
-	want := []string{"RequestID", "QueryID", "Update"}
+	want := []string{"RequestID", "QueryID", "Update", "TotalHostExecutionDurationMicros"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("SubscribeMultiApplied fields = %v, want %v", fields, want)
 	}
@@ -238,45 +225,67 @@ func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394.
 func TestPhase2UnsubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeMultiApplied{})
-	want := []string{"RequestID", "QueryID", "Update"}
+	want := []string{"RequestID", "QueryID", "Update", "TotalHostExecutionDurationMicros"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("UnsubscribeMultiApplied fields = %v, want %v", fields, want)
 	}
 }
 
-// TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration pins the
-// still-open deferral: reference carries
-// total_host_execution_duration_micros: u64 on SubscribeApplied,
-// SubscribeMultiApplied, UnsubscribeApplied, UnsubscribeMultiApplied
-// (v1.rs:321/335/384/399). Shunter does not. Flip when the host
-// execution duration slice lands.
-func TestPhase2DeferralSubscribeAppliedNoHostExecutionDuration(t *testing.T) {
+// TestPhase2SubscribeAppliedCarriesHostExecutionDuration pins the
+// reference-style host execution duration on all four applied envelopes.
+func TestPhase2SubscribeAppliedCarriesHostExecutionDuration(t *testing.T) {
 	for _, v := range []any{
 		SubscribeSingleApplied{},
 		SubscribeMultiApplied{},
 		UnsubscribeSingleApplied{},
 		UnsubscribeMultiApplied{},
 	} {
+		found := false
 		for _, f := range msgFieldNames(v) {
 			if f == "TotalHostExecutionDurationMicros" {
-				t.Fatalf("%T.TotalHostExecutionDurationMicros unexpectedly present", v)
+				found = true
+				break
 			}
+		}
+		if !found {
+			t.Fatalf("%T missing TotalHostExecutionDurationMicros", v)
 		}
 	}
 }
 
-// TestPhase2DeferralSubscriptionErrorNoTableID pins the three-field
-// shape. Reference SubscriptionError carries
-// total_host_execution_duration_micros, Option<request_id>,
-// Option<query_id>, Option<TableId>, error (v1.rs:350). Shunter
-// always populates RequestID/QueryID and omits TableID + duration.
-// Flip when any of these close.
-func TestPhase2DeferralSubscriptionErrorNoTableID(t *testing.T) {
+// TestPhase2SubscriptionErrorOptionalShape pins the narrowed
+// SubscriptionError follow-through: request_id / query_id are now
+// explicit optionals and table_id is present on the Go envelope.
+// Reference still also carries total_host_execution_duration_micros
+// (v1.rs:350), which remains deferred.
+func TestPhase2SubscriptionErrorOptionalShape(t *testing.T) {
 	fields := msgFieldNames(SubscriptionError{})
-	want := []string{"RequestID", "QueryID", "Error"}
+	want := []string{"RequestID", "QueryID", "TableID", "Error"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscriptionError fields = %v, want %v (deferral)",
-			fields, want)
+		t.Fatalf("SubscriptionError fields = %v, want %v", fields, want)
+	}
+
+	typ := reflect.TypeOf(SubscriptionError{})
+	requestField, ok := typ.FieldByName("RequestID")
+	if !ok {
+		t.Fatal("SubscriptionError.RequestID missing")
+	}
+	if requestField.Type.Kind() != reflect.Pointer || requestField.Type.Elem().Kind() != reflect.Uint32 {
+		t.Fatalf("SubscriptionError.RequestID type = %s, want *uint32", requestField.Type)
+	}
+	queryField, ok := typ.FieldByName("QueryID")
+	if !ok {
+		t.Fatal("SubscriptionError.QueryID missing")
+	}
+	if queryField.Type.Kind() != reflect.Pointer || queryField.Type.Elem().Kind() != reflect.Uint32 {
+		t.Fatalf("SubscriptionError.QueryID type = %s, want *uint32", queryField.Type)
+	}
+	tableField, ok := typ.FieldByName("TableID")
+	if !ok {
+		t.Fatal("SubscriptionError.TableID missing")
+	}
+	if tableField.Type.Kind() != reflect.Pointer || tableField.Type.Elem() != reflect.TypeOf(schema.TableID(0)) {
+		t.Fatalf("SubscriptionError.TableID type = %s, want *schema.TableID", tableField.Type)
 	}
 }
 

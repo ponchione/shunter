@@ -24,7 +24,7 @@ func handleUnsubscribeMulti(
 		switch {
 		case resp.Error != nil:
 			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: unsubscribe SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
+				log.Printf("protocol: unsubscribe SubscriptionError delivery failed for conn %x query_id=%s: %v", conn.ID[:], subscriptionErrorQueryIDForLog(resp.Error), err)
 			}
 		case resp.MultiApplied != nil:
 			if err := SendUnsubscribeMultiApplied(sender, conn, resp.MultiApplied); err != nil {
@@ -42,8 +42,8 @@ func handleUnsubscribeMulti(
 		Reply:     reply,
 	}); err != nil {
 		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   msg.QueryID,
+			RequestID: optionalUint32(msg.RequestID),
+			QueryID:   optionalUint32(msg.QueryID),
 			Error:     "executor unavailable: " + err.Error(),
 		})
 		return

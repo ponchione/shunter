@@ -4,35 +4,62 @@ Use this file to start the next agent on the next real Shunter parity / hardenin
 
 ## What just landed (2026-04-21)
 
-Targeted Tier-B hardening follow-through from Option α: the protocol lifecycle's outbound-writer supervision gap is now closed.
+Targeted Phase 2 Slice 2 protocol follow-through: `SubscriptionError` now matches the intended optional-field / `TableID` wire shape.
 
-- Root cause confirmed in live code: `protocol/upgrade.go` spawned `runDispatchLoop`, `runKeepalive`, `runOutboundWriter`, and `superviseLifecycle`, but the supervisor only watched `dispatchDone` / `keepaliveDone`. If the outbound writer exited first on a write-side websocket failure from `protocol/outbound.go`, no disconnect was driven until some other goroutine happened to exit.
-- Failure shape: delivery was already dead, but `ConnManager` still retained the `*Conn`, subscriptions were not reaped, and `c.closed` stayed open. That left the connection registered past the first owned goroutine exit and violated the intended ownership model for the per-connection lifecycle goroutine set.
-- Fix shape: `protocol/upgrade.go` now wraps `runOutboundWriter` with `outboundDone`, and `protocol/disconnect.go::superviseLifecycle` treats `outboundDone` exactly like `dispatchDone` / `keepaliveDone`: any of the three first exits now triggers one bounded `Disconnect`, and the supervisor drains all three done channels before returning.
-- New focused pin: `protocol/disconnect_test.go::TestSuperviseLifecycleInvokesDisconnectOnOutboundWriterExit` closes a synthetic `outboundDone` while the other two done channels remain open and proves the supervisor drives `Disconnect` immediately.
-- Existing supervisor happy-path / bounded-ctx pins were updated, not replaced: `TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit`, `TestSuperviseLifecycleBoundsDisconnectOnInboxHang`, `TestSuperviseLifecycleDeliversOnInboxOK`, and `TestClientInitiatedClose_DisconnectSequenceRuns` now include the outbound writer in the supervised goroutine set.
-- New slice doc: `docs/hardening-oi-004-outbound-writer-supervision.md`.
+- Root gap confirmed in live code/docs before edits: `docs/current-status.md`, `docs/spacetimedb-parity-roadmap.md`, and `docs/parity-phase0-ledger.md` still listed `SubscriptionError.TableID` / optional-field parity as the remaining response-envelope gap in this Phase 2 Slice 2 family.
+- Wire shape fix: `protocol/server_messages.go` now models `SubscriptionError` as:
+  - `RequestID *uint32`
+  - `QueryID *uint32`
+  - `TableID *schema.TableID`
+  - `Error string`
+  and server-message encode/decode now round-trip those optional fields on the wire.
+- Response/helper follow-through: `protocol/send_responses.go` now provides optional-field helpers plus nil-safe query-id logging for `SubscriptionError` delivery paths.
+- Protocol error-path follow-through: `protocol/handle_subscribe_single.go`, `protocol/handle_subscribe_multi.go`, `protocol/handle_unsubscribe_single.go`, `protocol/handle_unsubscribe_multi.go`, and `protocol/fanout_adapter.go` now emit the pointer-backed shape consistently.
+- Executor reply-path follow-through: `executor/protocol_inbox_adapter.go` now builds the optional-field `SubscriptionError` shape and infers `TableID` conservatively only when exactly one obvious table can be attached from the predicate/update surface.
+- Positive parity pin: `protocol/parity_message_family_test.go::TestPhase2SubscriptionErrorOptionalShape` now pins the optional request/query/table field shape directly.
+- Wire and seam pins: `protocol/server_messages_test.go::TestSubscriptionErrorRoundTrip`, `protocol/send_responses_test.go`, `protocol/handle_subscribe_test.go`, `protocol/handle_unsubscribe_test.go`, `protocol/fanout_adapter_test.go`, and `executor/protocol_inbox_adapter_test.go` now cover the pointer-backed shape and the conservative `TableID` attachment rule.
+- Cleanup note: the stale intermediate pin `TestPhase2SubscriptionErrorCarriesQueryID` was removed once the stronger optional-shape pin landed; that is why the clean-tree test total dropped by one.
 
-Baseline note (2026-04-21): targeted protocol verification passed: `rtk go test ./protocol -run 'Test(SuperviseLifecycle(InvokesDisconnectOn(ReadPumpExit|OutboundWriterExit)|BoundsDisconnectOnInboxHang|DeliversOnInboxOK)|ClientInitiatedClose_DisconnectSequenceRuns)' -count=1 -v`. Broader protocol verification and repo-wide verification should be re-run after any next slice.
+Verification run after landing the slice:
+- `rtk go test ./protocol ./executor -run 'SubscriptionError|RegisterSubscriptionSet|UnregisterSubscriptionSet|HandleSubscribe|HandleUnsubscribe|SendSubscriptionError|FanOutSenderAdapter' -count=1`
+- `rtk go fmt ./protocol ./executor`
+- `rtk go vet ./protocol ./executor`
+- `rtk go test ./protocol ./executor ./subscription -count=1`
+- `rtk go test ./...`
 
-Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, and protocol lifecycle follow-through.
+Current clean-tree baseline:
+- `Go test: 1156 passed in 10 packages`
+
+Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, protocol lifecycle, and message-family follow-through.
 
 ## Recommended next slice
 
-The scheduler replay flake is closed. Prefer returning to the repo's grounded parity/hardening backlog instead of more test-stability cleanup.
+Move back to the broader parity backlog now that the Phase 2 Slice 2 response-envelope follow-through is drained.
+
+Best next grounded option:
+- broader SQL/query-surface parity beyond the currently pinned narrow slices (`query/sql/parser.go`, `protocol/handle_subscribe_{single,multi}.go`, `protocol/handle_oneoff.go`, `subscription/predicate.go`)
 
 Why this next:
-- the known clean-tree intermittent tests are drained
-- the remaining work is back on the real product/parity path rather than test harness noise
-- Option α still has the clearest narrow hardening follow-through slices if a concrete seam surfaces
+- the externally visible message-family follow-through is now landed rather than merely half-converted
+- `docs/current-status.md`, `docs/spacetimedb-parity-roadmap.md`, and `docs/parity-phase0-ledger.md` now all agree that the remaining Phase 2 family gap is broader SQL/query-surface breadth, not `SubscriptionError`
+- this stays on parity work instead of reopening speculative Tier-B watch items with no failing pin
 
-Expected shape of the next session:
+If you do not take the SQL path next:
+- prefer a concrete OI-004 lifecycle leak/hang site with a fresh failing test
+- do not reopen the just-landed `SubscriptionError` slice unless a regression appears
+
+## Expected shape of the next session
+
 1. Read the required startup docs in the listed order.
-2. Pick the next grounded anchor from `TECH-DEBT.md`, `docs/spacetimedb-parity-roadmap.md`, or `docs/parity-phase0-ledger.md`.
-3. Prefer a narrow Tier-B hardening slice under Option α unless live workload/reference evidence points directly to β/γ/δ.
-4. If taking another scheduler slice, treat `docs/parity-p0-sched-001-startup-firing.md` as authoritative: the remaining open scheduler work is intended-time ordering, `fn_start`-clamped schedule-now, or one-shot panic deletion — not replay-map-order cleanup.
-5. Re-run targeted package tests, then `rtk go test ./...`.
-6. Update `docs/current-status.md` and this handoff with the new truth.
+2. Treat the current dirty worktree as landed Phase 2 Slice 2 truth, not as an unfinished pointer-conversion pass.
+3. Pick the next grounded anchor from `docs/spacetimedb-parity-roadmap.md`, `docs/parity-phase0-ledger.md`, or `TECH-DEBT.md`.
+4. If you choose SQL/query parity next, keep it narrow and reference-backed:
+   - add the failing parser/protocol/runtime pin first
+   - verify the failure
+   - implement the smallest possible widening/fix
+   - re-run targeted tests, then `rtk go test ./...`
+5. Only after the suite is green, update the docs and this handoff again.
+
 
 Prior closed anchors in the same calendar week (still landed, included here for continuity):
 - OI-006 fanout per-subscriber slice-header aliasing sub-hazard — `docs/hardening-oi-006-fanout-aliasing.md`
@@ -60,7 +87,33 @@ Prior closed anchors in the same calendar week (still landed, included here for 
 
 With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, all nine OI-005 enumerated sub-hazards closed (iter GC retention, iter use-after-Close, iter mid-iter-close, subscription-seam read-view lifetime, `CommittedSnapshot.IndexSeek` BTree-alias, `StateView.SeekIndex` BTree-alias, `StateView.SeekIndexRange` BTree-alias, `StateView.ScanTable` iterator surface, `CommittedState.Table(id) *Table` raw-pointer contract pin), both enumerated OI-006 sub-hazards closed (slice-header aliasing, row-payload sharing contract pin), and six OI-004 sub-hazards closed (`watchReducerResponse`, `connManagerSender.enqueueOnConn` overflow-disconnect, `superviseLifecycle` disconnect-ctx, `ConnManager.CloseAll` disconnect-ctx — closes the `Background`-rooted `Conn.Disconnect` call-site family — `forwardReducerResponse` ctx / Done lifecycle, dispatch-handler ctx), the grounded options are:
 
-### Option α — Continue Tier-B hardening
+### Option α — Broader SQL/query-surface parity beyond TD-142
+
+This is now the best next grounded parity path.
+
+What is still open:
+- `docs/current-status.md`, `docs/spacetimedb-parity-roadmap.md`, and `docs/parity-phase0-ledger.md` now all agree that the remaining externally visible message-family follow-through is broader SQL/query-surface breadth rather than another `SubscriptionError` envelope tweak
+- TD-142 drained the named narrow slices, but broader accepted SQL/query shapes are still new parity work
+
+Why prefer this now:
+- the just-landed Phase 2 Slice 2 envelope work closed the last narrow response-envelope deferral in that family
+- externally visible parity still outranks speculative Tier-B watch items
+- this keeps effort on client-visible behavior rather than reopening already-green message-family work
+
+Likely code surfaces:
+- `query/sql/parser.go`
+- `protocol/handle_subscribe_single.go`
+- `protocol/handle_subscribe_multi.go`
+- `protocol/handle_oneoff.go`
+- `subscription/predicate.go`
+- `subscription/validate.go`
+
+Concrete shape:
+- choose one exact remaining reference-backed SQL/query scenario
+- add parser + public protocol/runtime pins first
+- keep the slice narrow; do not reopen unrelated lifecycle or envelope work in the same session
+
+### Option β — Continue Tier-B hardening
 
 `TECH-DEBT.md` still carries:
 - OI-004 remaining sub-hazards (other detached goroutines in `protocol/conn.go` / `lifecycle.go` / `outbound.go` / `keepalive.go`; `ClientSender.Send` no-ctx follow-on)
@@ -68,16 +121,10 @@ With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, all nine O
 - OI-006: enumerated sub-hazards list now empty; OI-006 remains open as a theme because the read-only row-payload contract is enforced by discipline and observational pins rather than machine-enforced immutability at the `types.ProductValue` boundary. Broader fanout assembly hazards in `subscription/fanout.go`, `subscription/fanout_worker.go`, and `protocol/fanout_adapter.go` stay in scope if any future path introduces in-place mutation
 - OI-008 (top-level bootstrap missing)
 
-Pick one narrow sub-hazard and land a narrow fix with a focused test, following the shape of `docs/hardening-oi-006-row-payload-sharing.md` (latest; contract-pin precedent at a row-payload sharing seam with observational identity+mutation-leak pins), `docs/hardening-oi-005-committed-state-table-raw-pointer.md` (prior contract-pin precedent at a raw-pointer seam), `docs/hardening-oi-005-state-view-scan-aliasing.md` (materialization precedent), `docs/hardening-oi-004-dispatch-handler-context.md` (derived-ctx lifecycle wire precedent), or `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md` (earlier contract-pin precedent). Concrete candidates:
-- OI-004 `ClientSender.Send` no-ctx follow-on: `protocol/sender.go` sends are synchronous without their own ctx, so callers cannot propagate a shorter cancellation scope than `DisconnectTimeout` into the overflow path. No concrete consumer needs this today; defer until a specific seam surfaces.
-- OI-004 remaining detached-goroutine audit in `protocol/conn.go` / `lifecycle.go` / `keepalive.go`: each would be its own narrow sub-slice if a specific leak site surfaces. The dispatch-loop and disconnect paths are now audited and pinned; the outbound-writer supervision gap is also closed. `closeWithHandshake` fire-and-forget goroutines at `keepalive.go:77`, `disconnect.go:49`, `dispatch.go:46`, and `dispatch.go:188` are already bounded via `context.WithTimeout(context.Background(), CloseHandshakeTimeout)` inside `closeWithHandshake` at `close.go:25-29` — those are not open sub-hazards.
-- OI-008 top-level bootstrap: larger-scope work; would need its own decision doc and parity alignment (no `cmd/` entrypoint, no polished embedding surface, no `main` package).
-- scheduler replay-map-order cleanup is now closed: the brittle map-iteration-sensitive parity pin was replaced with deterministic helper-level coverage (`TestParityP0Sched001ReplayPreservesScanOrderWithoutSorting`) without changing live replay sorting semantics
-- Flaky `subscription/TestProjectedRowsBeforeAppendsDeletesAfterBagSubtraction` cleanup: refactor the seed to a single-row table so the map-iteration ordering is not exercised, or add deterministic sorting inside `projectedRowsBefore` (semantic change — the function returns rows in `current ++ tx-deletes` order, and sorting would change the observed order for every caller).
-
-### Option β — Broader SQL/query-surface parity beyond TD-142
-
-TD-142 drained the named narrow slices. Widening beyond those is new parity work. Surfaces: `query/sql/parser.go`, `subscription/predicate.go`, `protocol/handle_subscribe_{single,multi}.go`.
+Current judgment:
+- do not force another OI-004 sub-slice unless a specific concrete leak site surfaces in live code or a failing test
+- `ClientSender.Send` no-ctx remains a follow-on with no concrete consumer today
+- the remaining detached-goroutine bullets are now watch items, not the best immediate slice
 
 ### Option γ — Format-level commitlog parity (Phase 4 Slice 2 follow-on)
 
@@ -96,7 +143,7 @@ Each remaining scheduler deferral is a candidate for its own focused slice if wo
 - one-shot panic deletion (second-commit post-rollback path; ref `scheduler.rs:445-455`)
 - past-due ordering by intended time (sort in `scanAndTrackMaxWithContext`)
 
-Prefer Option α over β/γ/δ unless workload or reference evidence directly surfaces a specific gap.
+Prefer Option α over β/γ/δ unless live workload or reference evidence surfaces a stronger blocker.
 
 ## First, what you are walking into
 
@@ -211,7 +258,7 @@ Do not call the work done unless all are true:
 - reference-backed or debt-anchored target shape was checked directly against reference material or current live code
 - every newly accepted or rejected shape has focused tests
 - already-landed parity pins still pass (including `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForInserts`, `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForDeletes`, `TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers`, `TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers`, `TestCommittedStateTableSameEnvelopeReturnsSamePointer`, `TestCommittedStateTableRetainedPointerIsStaleAfterReRegister`, `TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose`, `TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete`, `TestDispatchLoop_HandlerCtxCancelsOnConnClose`, `TestDispatchLoop_HandlerCtxCancelsOnOuterCtx`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOutboundBlocked`, `TestCloseAllBoundsDisconnectOnInboxHang`, `TestCloseAllDeliversOnInboxOK`, `TestCloseAll_DisconnectsEveryConnection`, `TestCloseAll_EmptyManagerNoOp`, `TestSuperviseLifecycleBoundsDisconnectOnInboxHang`, `TestSuperviseLifecycleDeliversOnInboxOK`, `TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang`, `TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK`, `TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation`, `TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation`, `TestWatchReducerResponseExitsOnConnClose`, `TestWatchReducerResponseDeliversOnRespCh`, `TestWatchReducerResponseExitsOnRespChClose`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnInsert`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnRemove`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_Join`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_SingleTable`, `TestCommittedSnapshotTableScanPanicsOnMidIterClose`, `TestCommittedSnapshotIndexRangePanicsOnMidIterClose`, `TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose`, `TestCommittedSnapshotTableScanPanicsAfterClose`, `TestCommittedSnapshotIndexScanPanicsAfterClose`, `TestCommittedSnapshotIndexRangePanicsAfterClose`, `TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`, `TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment`, `TestParityP0Sched001PanicRetainsScheduledRow`, `TestPhase2Slice3DefaultOutgoingBufferMatchesReference`, and `TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit`).
-- full suite still passes. Clean-tree baseline remains `Go test: 1157 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 flake cleanup follow-through.
+- full suite still passes. Clean-tree baseline remains `Go test: 1156 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 flake cleanup follow-through.
 - docs and handoff reflect the new truth exactly
 
 ## Deliverables for the next session
@@ -254,7 +301,9 @@ As of this handoff:
 - OI-004 outbound-writer supervision sub-hazard closed — supervisor now watches `outboundDone` alongside dispatch/keepalive and disconnects delivery-dead conns promptly
 - OI-004 `forwardReducerResponse` ctx / Done lifecycle sub-hazard closed — closes the executor-adapter twin of the earlier protocol-side `watchReducerResponse` leak
 - OI-004 dispatch-handler ctx sub-hazard closed — `runDispatchLoop` now derives a `handlerCtx` that cancels on `c.closed`
+- Phase 2 Slice 2 applied-envelope host execution duration closed — `SubscribeSingleApplied`, `SubscribeMultiApplied`, `UnsubscribeSingleApplied`, and `UnsubscribeMultiApplied` now carry `TotalHostExecutionDurationMicros` measured at the executor register/unregister seam and preserved through the protocol reply path
+- Phase 2 Slice 2 `SubscriptionError` optional-field / `TableID` follow-through closed — `SubscriptionError` now carries optional `RequestID`, optional `QueryID`, and optional `TableID` on the wire; protocol and executor reply paths emit the pointer-backed shape consistently; `TableID` is attached only when exactly one obvious table can be inferred from the predicate/update surface
 - Other detached-goroutine surfaces in `conn.go` / `lifecycle.go` / `keepalive.go` and the `ClientSender.Send` no-ctx follow-on remain open under OI-004
-- next realistic anchors: further Tier-B hardening (α), broader SQL parity (β), format-level commitlog parity (γ), individual scheduler deferrals (δ)
+- next realistic anchors: broader SQL/query-surface parity (α), further Tier-B hardening (β), format-level commitlog parity (γ), individual scheduler deferrals (δ)
 - targeted flaky-test cleanup in `subscription/delta_pool_test.go`, `subscription/eval_projected_rows_test.go`, and scheduler replay parity coverage is now closed; no known clean-tree intermittent test remains
-- 10 packages, clean-tree full-suite baseline `Go test: 1157 passed in 10 packages`
+- 10 packages, clean-tree full-suite baseline `Go test: 1156 passed in 10 packages`

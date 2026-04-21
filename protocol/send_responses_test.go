@@ -97,7 +97,7 @@ func TestSendSubscriptionErrorEnqueuesFrame(t *testing.T) {
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	msg := &SubscriptionError{RequestID: 1, QueryID: 10, Error: "bad predicate"}
+	msg := &SubscriptionError{RequestID: optionalUint32(1), QueryID: optionalUint32(10), Error: "bad predicate"}
 	if err := SendSubscriptionError(s, c, msg); err != nil {
 		t.Fatal(err)
 	}

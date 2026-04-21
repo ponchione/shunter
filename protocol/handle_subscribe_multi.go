@@ -27,8 +27,8 @@ func handleSubscribeMulti(
 		compiled, err := compileSQLQueryString(qs, sl)
 		if err != nil {
 			sendError(conn, SubscriptionError{
-				RequestID: msg.RequestID,
-				QueryID:   msg.QueryID,
+				RequestID: optionalUint32(msg.RequestID),
+				QueryID:   optionalUint32(msg.QueryID),
 				Error:     err.Error(),
 			})
 			return
@@ -41,7 +41,7 @@ func handleSubscribeMulti(
 		switch {
 		case resp.Error != nil:
 			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: SubscriptionError delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.Error.QueryID, err)
+				log.Printf("protocol: SubscriptionError delivery failed for conn %x query_id=%s: %v", conn.ID[:], subscriptionErrorQueryIDForLog(resp.Error), err)
 			}
 		case resp.MultiApplied != nil:
 			if err := SendSubscribeMultiApplied(sender, conn, resp.MultiApplied); err != nil {
@@ -60,8 +60,8 @@ func handleSubscribeMulti(
 		Reply:      reply,
 	}); submitErr != nil {
 		sendError(conn, SubscriptionError{
-			RequestID: msg.RequestID,
-			QueryID:   msg.QueryID,
+			RequestID: optionalUint32(msg.RequestID),
+			QueryID:   optionalUint32(msg.QueryID),
 			Error:     "executor unavailable: " + submitErr.Error(),
 		})
 		return

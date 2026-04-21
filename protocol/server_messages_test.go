@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/ponchione/shunter/schema"
 )
 
 func TestInitialConnectionRoundTrip(t *testing.T) {
@@ -46,10 +48,11 @@ func TestInitialConnectionRoundTrip(t *testing.T) {
 func TestSubscribeSingleAppliedRoundTrip(t *testing.T) {
 	rows := EncodeRowList([][]byte{{0x01}, {0x02, 0x03}})
 	in := SubscribeSingleApplied{
-		RequestID: 123,
-		QueryID:   456,
-		TableName: "players",
-		Rows:      rows,
+		RequestID:                        123,
+		QueryID:                          456,
+		TableName:                        "players",
+		Rows:                             rows,
+		TotalHostExecutionDurationMicros: 789,
 	}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
@@ -58,7 +61,8 @@ func TestSubscribeSingleAppliedRoundTrip(t *testing.T) {
 	}
 	got := out.(SubscribeSingleApplied)
 	if got.RequestID != in.RequestID || got.QueryID != in.QueryID ||
-		got.TableName != in.TableName {
+		got.TableName != in.TableName ||
+		got.TotalHostExecutionDurationMicros != in.TotalHostExecutionDurationMicros {
 		t.Errorf("field mismatch: got %+v, want %+v", got, in)
 	}
 	if !bytes.Equal(got.Rows, in.Rows) {
@@ -67,7 +71,7 @@ func TestSubscribeSingleAppliedRoundTrip(t *testing.T) {
 }
 
 func TestUnsubscribeSingleAppliedHasRowsFalse(t *testing.T) {
-	in := UnsubscribeSingleApplied{RequestID: 1, QueryID: 2, HasRows: false}
+	in := UnsubscribeSingleApplied{RequestID: 1, QueryID: 2, HasRows: false, TotalHostExecutionDurationMicros: 33}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
@@ -80,11 +84,14 @@ func TestUnsubscribeSingleAppliedHasRowsFalse(t *testing.T) {
 	if len(got.Rows) != 0 {
 		t.Errorf("Rows should be empty when HasRows=false, got len %d", len(got.Rows))
 	}
+	if got.TotalHostExecutionDurationMicros != in.TotalHostExecutionDurationMicros {
+		t.Errorf("TotalHostExecutionDurationMicros = %d, want %d", got.TotalHostExecutionDurationMicros, in.TotalHostExecutionDurationMicros)
+	}
 }
 
 func TestUnsubscribeSingleAppliedHasRowsTrue(t *testing.T) {
 	rows := EncodeRowList([][]byte{{0xaa}})
-	in := UnsubscribeSingleApplied{RequestID: 1, QueryID: 2, HasRows: true, Rows: rows}
+	in := UnsubscribeSingleApplied{RequestID: 1, QueryID: 2, HasRows: true, Rows: rows, TotalHostExecutionDurationMicros: 44}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
@@ -97,18 +104,33 @@ func TestUnsubscribeSingleAppliedHasRowsTrue(t *testing.T) {
 	if !bytes.Equal(got.Rows, rows) {
 		t.Errorf("rows payload differs")
 	}
+	if got.TotalHostExecutionDurationMicros != in.TotalHostExecutionDurationMicros {
+		t.Errorf("TotalHostExecutionDurationMicros = %d, want %d", got.TotalHostExecutionDurationMicros, in.TotalHostExecutionDurationMicros)
+	}
 }
 
 func TestSubscriptionErrorRoundTrip(t *testing.T) {
-	in := SubscriptionError{RequestID: 10, QueryID: 20, Error: "table not found"}
+	requestID := uint32(10)
+	queryID := uint32(20)
+	tableID := schema.TableID(30)
+	in := SubscriptionError{RequestID: &requestID, QueryID: &queryID, TableID: &tableID, Error: "table not found"}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := out.(SubscriptionError)
-	if got != in {
-		t.Errorf("got %+v, want %+v", got, in)
+	if got.RequestID == nil || *got.RequestID != requestID {
+		t.Fatalf("RequestID = %v, want %d", got.RequestID, requestID)
+	}
+	if got.QueryID == nil || *got.QueryID != queryID {
+		t.Fatalf("QueryID = %v, want %d", got.QueryID, queryID)
+	}
+	if got.TableID == nil || *got.TableID != tableID {
+		t.Fatalf("TableID = %v, want %d", got.TableID, tableID)
+	}
+	if got.Error != in.Error {
+		t.Fatalf("Error = %q, want %q", got.Error, in.Error)
 	}
 }
 
@@ -293,8 +315,9 @@ func TestEncodeServerMessageUnknownType(t *testing.T) {
 
 func TestSubscribeMultiAppliedRoundTrip(t *testing.T) {
 	orig := SubscribeMultiApplied{
-		RequestID: 1,
-		QueryID:   2,
+		RequestID:                        1,
+		QueryID:                          2,
+		TotalHostExecutionDurationMicros: 55,
 		Update: []SubscriptionUpdate{
 			{SubscriptionID: 10, TableName: "users", Inserts: []byte{0x01}},
 			{SubscriptionID: 11, TableName: "orders", Inserts: []byte{0x02}},
@@ -315,7 +338,7 @@ func TestSubscribeMultiAppliedRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("decoded type = %T", decoded)
 	}
-	if got.RequestID != 1 || got.QueryID != 2 || len(got.Update) != 2 {
+	if got.RequestID != 1 || got.QueryID != 2 || len(got.Update) != 2 || got.TotalHostExecutionDurationMicros != orig.TotalHostExecutionDurationMicros {
 		t.Fatalf("decoded = %+v", got)
 	}
 	if got.Update[0].SubscriptionID != 10 || got.Update[0].TableName != "users" {
@@ -328,8 +351,9 @@ func TestSubscribeMultiAppliedRoundTrip(t *testing.T) {
 
 func TestUnsubscribeMultiAppliedRoundTrip(t *testing.T) {
 	orig := UnsubscribeMultiApplied{
-		RequestID: 5,
-		QueryID:   9,
+		RequestID:                        5,
+		QueryID:                          9,
+		TotalHostExecutionDurationMicros: 66,
 		Update: []SubscriptionUpdate{
 			{SubscriptionID: 10, TableName: "users", Deletes: []byte{0x03}},
 		},
@@ -346,7 +370,7 @@ func TestUnsubscribeMultiAppliedRoundTrip(t *testing.T) {
 		t.Fatalf("tag = %d, want %d", tag, TagUnsubscribeMultiApplied)
 	}
 	got, ok := decoded.(UnsubscribeMultiApplied)
-	if !ok || got.RequestID != 5 || got.QueryID != 9 || len(got.Update) != 1 {
+	if !ok || got.RequestID != 5 || got.QueryID != 9 || len(got.Update) != 1 || got.TotalHostExecutionDurationMicros != orig.TotalHostExecutionDurationMicros {
 		t.Fatalf("decoded = %+v", decoded)
 	}
 	if got.Update[0].SubscriptionID != 10 || got.Update[0].TableName != "users" {

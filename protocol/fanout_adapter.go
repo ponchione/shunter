@@ -91,8 +91,8 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateLight(
 
 func (a *FanOutSenderAdapter) SendSubscriptionError(connID types.ConnectionID, subErr subscription.SubscriptionError) error {
 	return mapDeliveryError(a.sender.Send(connID, SubscriptionError{
-		RequestID: subErr.RequestID,
-		QueryID:   uint32(subErr.SubscriptionID),
+		RequestID: optionalUint32(subErr.RequestID),
+		QueryID:   optionalUint32(uint32(subErr.SubscriptionID)),
 		Error:     subErr.Message,
 	}))
 }

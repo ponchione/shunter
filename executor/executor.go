@@ -287,6 +287,7 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd) {
 	view := e.snapshotFn()
 	defer view.Close()
+	start := time.Now()
 	res, err := e.subs.RegisterSet(cmd.Request, view)
 	if err != nil {
 		log.Printf("executor: RegisterSubscriptionSet failed: %v", err)
@@ -298,6 +299,11 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 		}
 		return
 	}
+	durationMicros := uint64(time.Since(start).Microseconds())
+	if durationMicros == 0 {
+		durationMicros = 1
+	}
+	res.TotalHostExecutionDurationMicros = durationMicros
 	if cmd.Reply != nil {
 		cmd.Reply(res, nil)
 	}
@@ -306,7 +312,15 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSetCmd) {
 	view := e.snapshotFn()
 	defer view.Close()
+	start := time.Now()
 	res, err := e.subs.UnregisterSet(cmd.ConnID, cmd.QueryID, view)
+	if err == nil {
+		durationMicros := uint64(time.Since(start).Microseconds())
+		if durationMicros == 0 {
+			durationMicros = 1
+		}
+		res.TotalHostExecutionDurationMicros = durationMicros
+	}
 	if cmd.Reply != nil {
 		// Synchronous invocation on the executor goroutine so the
 		// caller's Applied/Error enqueue strictly precedes any

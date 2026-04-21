@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+func requireOptionalUint32Value(t *testing.T, got *uint32, want uint32, field string) {
+	t.Helper()
+	if got == nil || *got != want {
+		t.Fatalf("%s = %v, want %d", field, got, want)
+	}
+}
+
 // --- handleUnsubscribeSingle tests ---
 
 func TestHandleUnsubscribeSingleSuccess(t *testing.T) {
@@ -81,9 +88,7 @@ func TestHandleUnsubscribeSingle_ExecutorReject(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.RequestID != 4 {
-		t.Errorf("RequestID = %d, want 4", se.RequestID)
-	}
+	requireOptionalUint32Value(t, se.RequestID, 4, "RequestID")
 	if !strings.Contains(se.Error, "executor unavailable") {
 		t.Errorf("Error = %q, want to contain 'executor unavailable'", se.Error)
 	}
@@ -163,12 +168,8 @@ func TestHandleUnsubscribeMulti_ExecutorReject(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.RequestID != 24 {
-		t.Errorf("RequestID = %d, want 24", se.RequestID)
-	}
-	if se.QueryID != 99 {
-		t.Errorf("QueryID = %d, want 99", se.QueryID)
-	}
+	requireOptionalUint32Value(t, se.RequestID, 24, "RequestID")
+	requireOptionalUint32Value(t, se.QueryID, 99, "QueryID")
 	if !strings.Contains(se.Error, "executor unavailable") {
 		t.Errorf("Error = %q, want to contain 'executor unavailable'", se.Error)
 	}

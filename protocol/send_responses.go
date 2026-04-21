@@ -1,6 +1,11 @@
 package protocol
 
-import "github.com/ponchione/shunter/types"
+import (
+	"fmt"
+
+	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/types"
+)
 
 // SendSubscribeSingleApplied delivers a SubscribeSingleApplied message.
 // Phase 2 Slice 2 admission-model slice (TD-140): wire-id admission
@@ -44,6 +49,21 @@ func SendUnsubscribeMultiApplied(sender ClientSender, conn *Conn, msg *Unsubscri
 // manager on failure.
 func SendSubscriptionError(sender ClientSender, conn *Conn, msg *SubscriptionError) error {
 	return sender.Send(conn.ID, *msg)
+}
+
+func optionalUint32(v uint32) *uint32 {
+	return &v
+}
+
+func optionalTableID(v schema.TableID) *schema.TableID {
+	return &v
+}
+
+func subscriptionErrorQueryIDForLog(msg *SubscriptionError) string {
+	if msg == nil || msg.QueryID == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%d", *msg.QueryID)
 }
 
 // SendOneOffQueryResult delivers a OneOffQueryResult. No subscription

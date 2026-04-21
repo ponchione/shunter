@@ -115,6 +115,9 @@ func TestDispatchRegisterSubscriptionSet(t *testing.T) {
 	if gotResult.QueryID != 42 {
 		t.Fatalf("Reply got QueryID = %d, want 42", gotResult.QueryID)
 	}
+	if gotResult.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("Reply got zero TotalHostExecutionDurationMicros, want non-zero measured duration")
+	}
 	if !fakeSubs.registerSetCalled {
 		t.Fatal("fakeSubs.RegisterSet was not called")
 	}
@@ -141,14 +144,16 @@ func TestDispatchUnregisterSubscriptionSet(t *testing.T) {
 	}
 
 	var (
-		gotErr error
-		called bool
+		gotResult subscription.SubscriptionSetUnregisterResult
+		gotErr    error
+		called    bool
 	)
 	exec.dispatch(UnregisterSubscriptionSetCmd{
 		ConnID:  types.ConnectionID{9},
 		QueryID: 42,
-		Reply: func(_ subscription.SubscriptionSetUnregisterResult, err error) {
+		Reply: func(r subscription.SubscriptionSetUnregisterResult, err error) {
 			called = true
+			gotResult = r
 			gotErr = err
 		},
 	})
@@ -170,6 +175,9 @@ func TestDispatchUnregisterSubscriptionSet(t *testing.T) {
 	}
 	if fakeSubs.unregisterSetView != tracked {
 		t.Fatal("unregister-set should receive the acquired snapshot view")
+	}
+	if gotResult.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("UnregisterSet result should carry non-zero TotalHostExecutionDurationMicros")
 	}
 }
 

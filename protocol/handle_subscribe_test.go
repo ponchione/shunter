@@ -21,6 +21,13 @@ func (r registrySchemaLookup) TableByName(name string) (schema.TableID, *schema.
 	return ts.ID, ts, true
 }
 
+func requireOptionalUint32(t *testing.T, got *uint32, want uint32, field string) {
+	t.Helper()
+	if got == nil || *got != want {
+		t.Fatalf("%s = %v, want %d", field, got, want)
+	}
+}
+
 // --- Test mocks ---
 
 type mockSchemaLookup struct {
@@ -890,9 +897,7 @@ func TestHandleSubscribeSingle_AliasedBaseTableQualifiedWhereRejected(t *testing
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.QueryID != 17 {
-		t.Fatalf("SubscriptionError.QueryID = %d, want 17", se.QueryID)
-	}
+	requireOptionalUint32(t, se.QueryID, 17, "SubscriptionError.QueryID")
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Fatal("executor should not be called for aliased base-table qualified WHERE")
 	}
@@ -1091,9 +1096,7 @@ func TestHandleSubscribeSingle_UnaliasedSelfCrossJoinRejected(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.QueryID != 19 {
-		t.Fatalf("SubscriptionError.QueryID = %d, want 19", se.QueryID)
-	}
+	requireOptionalUint32(t, se.QueryID, 19, "SubscriptionError.QueryID")
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Fatal("executor should not be called for unaliased self cross join")
 	}
@@ -1138,9 +1141,7 @@ func TestHandleSubscribeSingle_MultiWayJoinRejected(t *testing.T) {
 				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 			}
 			se := decoded.(SubscriptionError)
-			if se.QueryID != 71 {
-				t.Fatalf("SubscriptionError.QueryID = %d, want 71", se.QueryID)
-			}
+			requireOptionalUint32(t, se.QueryID, 71, "SubscriptionError.QueryID")
 			if req := executor.getRegisterSetReq(); req != nil {
 				t.Fatal("executor should not be called for multi-way join")
 			}
@@ -1166,9 +1167,7 @@ func TestHandleSubscribeSingle_UnknownTable(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.QueryID != 99 {
-		t.Errorf("SubscriptionError.QueryID = %d, want 99", se.QueryID)
-	}
+	requireOptionalUint32(t, se.QueryID, 99, "SubscriptionError.QueryID")
 
 	// Executor must not have been called.
 	if req := executor.getRegisterSetReq(); req != nil {
@@ -1198,12 +1197,8 @@ func TestHandleSubscribeSingle_ExecutorReject(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.QueryID != 50 {
-		t.Errorf("SubscriptionError.QueryID = %d, want 50", se.QueryID)
-	}
-	if se.RequestID != 3 {
-		t.Errorf("SubscriptionError.RequestID = %d, want 3", se.RequestID)
-	}
+	requireOptionalUint32(t, se.QueryID, 50, "SubscriptionError.QueryID")
+	requireOptionalUint32(t, se.RequestID, 3, "SubscriptionError.RequestID")
 }
 
 // --- handleSubscribeMulti tests ---
@@ -1298,9 +1293,7 @@ func TestHandleSubscribeMulti_UnknownTable(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.QueryID != 99 {
-		t.Errorf("QueryID = %d, want 99", se.QueryID)
-	}
+	requireOptionalUint32(t, se.QueryID, 99, "QueryID")
 	if req := exec.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when any query is invalid")
 	}
@@ -1325,10 +1318,6 @@ func TestHandleSubscribeMulti_ExecutorReject(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.QueryID != 100 {
-		t.Errorf("QueryID = %d, want 100", se.QueryID)
-	}
-	if se.RequestID != 14 {
-		t.Errorf("RequestID = %d, want 14", se.RequestID)
-	}
+	requireOptionalUint32(t, se.QueryID, 100, "QueryID")
+	requireOptionalUint32(t, se.RequestID, 14, "RequestID")
 }

@@ -23,6 +23,13 @@ func (s stubProtocolSubmitter) SubmitWithContext(ctx context.Context, cmd Execut
 	return s.submit(ctx, cmd)
 }
 
+func requireOptionalUint32(t *testing.T, got *uint32, want uint32, field string) {
+	t.Helper()
+	if got == nil || *got != want {
+		t.Fatalf("%s = %v, want %d", field, got, want)
+	}
+}
+
 type stubProtocolSchemaRegistry struct {
 	tables map[schema.TableID]string
 }
@@ -100,7 +107,8 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleSuccessReply(t *test
 				t.Fatalf("len(Predicates) = %d, want 1", len(reg.Request.Predicates))
 			}
 			reg.Reply(subscription.SubscriptionSetRegisterResult{
-				QueryID: 7,
+				QueryID:                          7,
+				TotalHostExecutionDurationMicros: 111,
 				Update: []subscription.SubscriptionUpdate{{
 					SubscriptionID: 11,
 					TableID:        1,
@@ -143,6 +151,9 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleSuccessReply(t *test
 	applied := decoded.(protocol.SubscribeSingleApplied)
 	if applied.RequestID != 10 || applied.QueryID != 7 || applied.TableName != "users" {
 		t.Fatalf("SubscribeSingleApplied = %+v", applied)
+	}
+	if applied.TotalHostExecutionDurationMicros != 111 {
+		t.Fatalf("TotalHostExecutionDurationMicros = %d, want 111", applied.TotalHostExecutionDurationMicros)
 	}
 	rows, err := protocol.DecodeRowList(applied.Rows)
 	if err != nil {
@@ -188,8 +199,10 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorReply(t *tes
 		t.Fatalf("tag = %d, want %d", tag, protocol.TagSubscriptionError)
 	}
 	resp := decoded.(protocol.SubscriptionError)
-	if resp.RequestID != 4 || resp.QueryID != 9 {
-		t.Fatalf("SubscriptionError = %+v", resp)
+	requireOptionalUint32(t, resp.RequestID, 4, "SubscriptionError.RequestID")
+	requireOptionalUint32(t, resp.QueryID, 9, "SubscriptionError.QueryID")
+	if resp.TableID != nil {
+		t.Fatalf("SubscriptionError.TableID = %v, want nil for multi-table duplicate-register error", *resp.TableID)
 	}
 	if !errors.Is(subscription.ErrQueryIDAlreadyLive, subscription.ErrQueryIDAlreadyLive) {
 		t.Fatal("sanity")
@@ -211,7 +224,8 @@ func TestProtocolInboxAdapter_UnregisterSubscriptionSet_SingleSuccessReply(t *te
 				t.Fatalf("unregister cmd = %+v", unreg)
 			}
 			unreg.Reply(subscription.SubscriptionSetUnregisterResult{
-				QueryID: 42,
+				QueryID:                          42,
+				TotalHostExecutionDurationMicros: 222,
 				Update: []subscription.SubscriptionUpdate{{
 					SubscriptionID: 7,
 					Deletes: []types.ProductValue{{
@@ -249,6 +263,9 @@ func TestProtocolInboxAdapter_UnregisterSubscriptionSet_SingleSuccessReply(t *te
 	applied := decoded.(protocol.UnsubscribeSingleApplied)
 	if applied.RequestID != 3 || applied.QueryID != 42 || !applied.HasRows {
 		t.Fatalf("UnsubscribeSingleApplied = %+v", applied)
+	}
+	if applied.TotalHostExecutionDurationMicros != 222 {
+		t.Fatalf("TotalHostExecutionDurationMicros = %d, want 222", applied.TotalHostExecutionDurationMicros)
 	}
 	rows, err := protocol.DecodeRowList(applied.Rows)
 	if err != nil {
@@ -293,9 +310,8 @@ func TestProtocolInboxAdapter_UnregisterSubscriptionSet_NotFoundErrorReply(t *te
 		t.Fatalf("tag = %d, want %d", tag, protocol.TagSubscriptionError)
 	}
 	resp := decoded.(protocol.SubscriptionError)
-	if resp.RequestID != 12 || resp.QueryID != 77 {
-		t.Fatalf("SubscriptionError = %+v", resp)
-	}
+	requireOptionalUint32(t, resp.RequestID, 12, "SubscriptionError.RequestID")
+	requireOptionalUint32(t, resp.QueryID, 77, "SubscriptionError.QueryID")
 	if resp.Error == "" {
 		t.Fatal("expected non-empty error text")
 	}
@@ -353,7 +369,11 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_ReplyPrecedesLaterSameGoro
 					TableName:      "users",
 				}},
 			}, nil)
-			if err := protocol.SendSubscriptionError(sender, conn, &protocol.SubscriptionError{RequestID: 99, QueryID: 13, Error: "later"}); err != nil {
+			if err := protocol.SendSubscriptionError(sender, conn, &protocol.SubscriptionError{
+				RequestID: optionalUint32(99),
+				QueryID:   optionalUint32(13),
+				Error:     "later",
+			}); err != nil {
 				t.Fatalf("SendSubscriptionError: %v", err)
 			}
 			return nil
@@ -385,7 +405,7 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_ReplyPrecedesLaterSameGoro
 	if tag2 != protocol.TagSubscriptionError {
 		t.Fatalf("second tag = %d, want %d", tag2, protocol.TagSubscriptionError)
 	}
-	if got := decoded2.(protocol.SubscriptionError); got.RequestID != 99 {
+	if got := decoded2.(protocol.SubscriptionError); got.RequestID == nil || *got.RequestID != 99 {
 		t.Fatalf("second message = %+v", got)
 	}
 }

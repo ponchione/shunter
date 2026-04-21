@@ -27,16 +27,18 @@ type SubscriptionSetRegisterRequest struct {
 // Update entries have Inserts populated and Deletes empty; one entry
 // per (allocated internal SubscriptionID, table) pair.
 type SubscriptionSetRegisterResult struct {
-	QueryID uint32
-	Update  []SubscriptionUpdate
+	QueryID                          uint32
+	Update                           []SubscriptionUpdate
+	TotalHostExecutionDurationMicros uint64
 }
 
 // SubscriptionSetUnregisterResult carries the final-delta rows that
 // were still live at unsubscribe time. Update entries have Deletes
 // populated and Inserts empty.
 type SubscriptionSetUnregisterResult struct {
-	QueryID uint32
-	Update  []SubscriptionUpdate
+	QueryID                          uint32
+	Update                           []SubscriptionUpdate
+	TotalHostExecutionDurationMicros uint64
 }
 
 // SubscriptionUpdate is the per-subscription component of a transaction

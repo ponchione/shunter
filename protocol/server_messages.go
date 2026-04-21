@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
+	"github.com/ponchione/shunter/schema"
 )
 
 // Server→client message types (SPEC-005 §8).
@@ -32,10 +34,11 @@ type InitialConnection struct {
 // SubscribeApplied at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317.
 type SubscribeSingleApplied struct {
-	RequestID uint32
-	QueryID   uint32
-	TableName string
-	Rows      []byte // encoded RowList
+	RequestID                        uint32
+	QueryID                          uint32
+	TableName                        string
+	Rows                             []byte // encoded RowList
+	TotalHostExecutionDurationMicros uint64
 }
 
 // UnsubscribeSingleApplied is the server response to an UnsubscribeSingle.
@@ -44,19 +47,24 @@ type SubscribeSingleApplied struct {
 // UnsubscribeApplied at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331.
 type UnsubscribeSingleApplied struct {
-	RequestID uint32
-	QueryID   uint32
-	HasRows   bool
-	Rows      []byte // encoded RowList; only present if HasRows
+	RequestID                        uint32
+	QueryID                          uint32
+	HasRows                          bool
+	Rows                             []byte // encoded RowList; only present if HasRows
+	TotalHostExecutionDurationMicros uint64
 }
 
 // SubscriptionError is the server-emitted failure envelope for any
-// subscription-lifecycle error. QueryID mirrors reference
-// `SubscriptionError.query_id: Option<u32>`; Shunter always populates it
-// because every error in Phase 2 is correlated with a specific query.
+// subscription-lifecycle error. RequestID / QueryID now model the
+// reference optional-field shape explicitly: subscribe/unsubscribe
+// request paths populate them, while other producers may leave them nil.
+// TableID mirrors the reference optional `table_id`; when present it
+// narrows the drop scope to one return-table family rather than the
+// entire subscription set.
 type SubscriptionError struct {
-	RequestID uint32
-	QueryID   uint32
+	RequestID *uint32
+	QueryID   *uint32
+	TableID   *schema.TableID
 	Error     string
 }
 
@@ -66,9 +74,10 @@ type SubscriptionError struct {
 // populated and Deletes empty. Reference: SubscribeMultiApplied at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380.
 type SubscribeMultiApplied struct {
-	RequestID uint32
-	QueryID   uint32
-	Update    []SubscriptionUpdate
+	RequestID                        uint32
+	QueryID                          uint32
+	Update                           []SubscriptionUpdate
+	TotalHostExecutionDurationMicros uint64
 }
 
 // UnsubscribeMultiApplied is the server response to an UnsubscribeMulti.
@@ -76,9 +85,10 @@ type SubscribeMultiApplied struct {
 // live at unsubscribe time. Reference: UnsubscribeMultiApplied at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394.
 type UnsubscribeMultiApplied struct {
-	RequestID uint32
-	QueryID   uint32
-	Update    []SubscriptionUpdate
+	RequestID                        uint32
+	QueryID                          uint32
+	Update                           []SubscriptionUpdate
+	TotalHostExecutionDurationMicros uint64
 }
 
 // TransactionUpdate is the heavy caller-bound envelope (Phase 1.5).
@@ -173,6 +183,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		writeUint32(&buf, msg.QueryID)
 		writeString(&buf, msg.TableName)
 		writeBytes(&buf, msg.Rows)
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	case UnsubscribeSingleApplied:
 		buf.WriteByte(TagUnsubscribeSingleApplied)
 		writeUint32(&buf, msg.RequestID)
@@ -183,10 +194,12 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		} else {
 			buf.WriteByte(0)
 		}
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	case SubscriptionError:
 		buf.WriteByte(TagSubscriptionError)
-		writeUint32(&buf, msg.RequestID)
-		writeUint32(&buf, msg.QueryID)
+		writeOptionalUint32(&buf, msg.RequestID)
+		writeOptionalUint32(&buf, msg.QueryID)
+		writeOptionalTableID(&buf, msg.TableID)
 		writeString(&buf, msg.Error)
 	case TransactionUpdate:
 		buf.WriteByte(TagTransactionUpdate)
@@ -217,11 +230,13 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
 		writeSubscriptionUpdates(&buf, msg.Update)
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	case UnsubscribeMultiApplied:
 		buf.WriteByte(TagUnsubscribeMultiApplied)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
 		writeSubscriptionUpdates(&buf, msg.Update)
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnknownMessageTag, m)
 	}
@@ -303,7 +318,10 @@ func decodeSubscribeSingleApplied(body []byte) (SubscribeSingleApplied, error) {
 	if m.TableName, off, err = readString(body, off); err != nil {
 		return m, err
 	}
-	if m.Rows, _, err = readBytes(body, off); err != nil {
+	if m.Rows, off, err = readBytes(body, off); err != nil {
+		return m, err
+	}
+	if m.TotalHostExecutionDurationMicros, _, err = readUint64(body, off); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -325,9 +343,12 @@ func decodeUnsubscribeSingleApplied(body []byte) (UnsubscribeSingleApplied, erro
 	m.HasRows = body[off] != 0
 	off++
 	if m.HasRows {
-		if m.Rows, _, err = readBytes(body, off); err != nil {
+		if m.Rows, off, err = readBytes(body, off); err != nil {
 			return m, err
 		}
+	}
+	if m.TotalHostExecutionDurationMicros, _, err = readUint64(body, off); err != nil {
+		return m, err
 	}
 	return m, nil
 }
@@ -336,10 +357,13 @@ func decodeSubscriptionError(body []byte) (SubscriptionError, error) {
 	var m SubscriptionError
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
+	if m.RequestID, off, err = readOptionalUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.QueryID, off, err = readOptionalUint32(body, off); err != nil {
+		return m, err
+	}
+	if m.TableID, off, err = readOptionalTableID(body, off); err != nil {
 		return m, err
 	}
 	if m.Error, _, err = readString(body, off); err != nil {
@@ -428,11 +452,12 @@ func decodeSubscribeMultiApplied(body []byte) (SubscribeMultiApplied, error) {
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	ups, _, err := readSubscriptionUpdates(body, off)
-	if err != nil {
+	if m.Update, off, err = readSubscriptionUpdates(body, off); err != nil {
 		return m, err
 	}
-	m.Update = ups
+	if m.TotalHostExecutionDurationMicros, _, err = readUint64(body, off); err != nil {
+		return m, err
+	}
 	return m, nil
 }
 
@@ -446,11 +471,12 @@ func decodeUnsubscribeMultiApplied(body []byte) (UnsubscribeMultiApplied, error)
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	ups, _, err := readSubscriptionUpdates(body, off)
-	if err != nil {
+	if m.Update, off, err = readSubscriptionUpdates(body, off); err != nil {
 		return m, err
 	}
-	m.Update = ups
+	if m.TotalHostExecutionDurationMicros, _, err = readUint64(body, off); err != nil {
+		return m, err
+	}
 	return m, nil
 }
 
@@ -566,11 +592,54 @@ func writeUint64(buf *bytes.Buffer, v uint64) {
 	buf.Write(tmp[:])
 }
 
+func writeOptionalUint32(buf *bytes.Buffer, v *uint32) {
+	if v == nil {
+		buf.WriteByte(0)
+		return
+	}
+	buf.WriteByte(1)
+	writeUint32(buf, *v)
+}
+
+func writeOptionalTableID(buf *bytes.Buffer, v *schema.TableID) {
+	if v == nil {
+		buf.WriteByte(0)
+		return
+	}
+	buf.WriteByte(1)
+	writeUint32(buf, uint32(*v))
+}
+
 func readUint64(body []byte, off int) (uint64, int, error) {
 	if len(body)-off < 8 {
 		return 0, off, fmt.Errorf("%w: uint64 truncated at offset %d", ErrMalformedMessage, off)
 	}
 	return binary.LittleEndian.Uint64(body[off : off+8]), off + 8, nil
+}
+
+func readOptionalUint32(body []byte, off int) (*uint32, int, error) {
+	if len(body)-off < 1 {
+		return nil, off, fmt.Errorf("%w: optional uint32 tag truncated at offset %d", ErrMalformedMessage, off)
+	}
+	present := body[off]
+	off++
+	if present == 0 {
+		return nil, off, nil
+	}
+	v, off, err := readUint32(body, off)
+	if err != nil {
+		return nil, off, err
+	}
+	return &v, off, nil
+}
+
+func readOptionalTableID(body []byte, off int) (*schema.TableID, int, error) {
+	v, off, err := readOptionalUint32(body, off)
+	if err != nil || v == nil {
+		return nil, off, err
+	}
+	tableID := schema.TableID(*v)
+	return &tableID, off, nil
 }
 
 func writeInt64(buf *bytes.Buffer, v int64) {
