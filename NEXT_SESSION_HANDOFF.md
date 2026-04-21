@@ -2,57 +2,67 @@
 
 Use this file to start the next agent on the next real Shunter parity / hardening step with no prior context.
 
-## What just landed (2026-04-21)
+## What just landed (2026-04-21, follow-up slice)
 
-Targeted broader SQL/query-surface parity follow-through: the current narrow SQL surface now accepts reference query-builder-style parenthesized WHERE predicates end-to-end on the already-supported single-table / narrow join-backed shapes, and alias-qualified `OR` predicates with mixed qualified/unqualified column references are now explicitly pinned end-to-end on the already-supported single-table alias surface.
+`:sender` caller-identity parameter parity on the narrow single-table SQL surface. Shunter now accepts `select * from s where id = :sender` and `select * from s where bytes = :sender` end-to-end and rejects `:sender` on any non-bytes column (the equivalent of the reference `check.rs:487-488` `select * from t where arr = :sender` rejection on Shunter's KindBytes-backed identity representation).
 
-- Root gap confirmed in live code/docs before edits: after the quoted-identifier slice landed, the next still-open reference-backed parser mismatch was the query-builder's parenthesized WHERE output, for example `SELECT "users".* FROM "users" JOIN "other" ON "users"."id" = "other"."uid" WHERE (("users"."id" = 1) AND ("users"."id" > 10))`, which Shunter still rejected at `query/sql/parser.go` with `expected column name, got "("`.
-- TDD proof first: added parser / subscribe / one-off pins for the parenthesized conjunction surface, then verified they failed before touching production code via `rtk go test ./query/sql ./protocol -run 'ParenthesizedConjunction' -count=1`.
-- Minimal parser widening: `query/sql/parser.go` now tokenizes `(` / `)` explicitly and parses parenthesized predicate terms while preserving the existing boolean grammar (`OR` over conjunctions, `AND` over terms). This widens only grouping syntax on already-supported comparison forms; it does not add new operators, projections, joins, or broader SQL clauses.
-- Public seam pins: `query/sql/parser_test.go::TestParseQuotedIdentifiersJoinProjectionOnAndWhereWithParenthesizedConjunction`, `protocol/handle_subscribe_test.go::TestHandleSubscribeSingle_QuotedIdentifiersJoinFilterWithParenthesizedConjunction`, and `protocol/handle_oneoff_test.go::TestHandleOneOffQuery_QuotedIdentifiersJoinProjectionWithParenthesizedConjunction` now pin the reference-style grouped-WHERE surface across parser, subscribe admission, and one-off execution.
-- Alias-qualified-OR parity pin follow-through: reference expr coverage already accepted mixed qualified/unqualified `OR` under an alias (`crates/expr/src/check.rs` line 451). Added `query/sql/parser_test.go::TestParseWhereOrPredicatesWithAlias`, `protocol/handle_subscribe_test.go::TestHandleSubscribeSingle_OrComparisonWithAlias`, and `protocol/handle_oneoff_test.go::TestHandleOneOffQuery_OrComparisonWithAlias`; these passed immediately, so no production-code change was needed.
-- Docs follow-through: `docs/current-status.md`, `docs/parity-phase0-ledger.md`, and `TECH-DEBT.md` now record parenthesized query-builder WHERE support plus the alias-qualified-OR parity pin while keeping the remaining broader SQL/query-surface backlog explicit.
+- Grounded anchors before edits:
+  - `reference/SpacetimeDB/crates/expr/src/check.rs:435-440` for positive `:sender` shapes on identity / bytes columns.
+  - `reference/SpacetimeDB/crates/expr/src/check.rs:487-488` for the rejection on non-identity / non-bytes columns (`select * from t where arr = :sender`).
+- Production widening landed:
+  - `query/sql/parser.go` tokenizes `:` + ident as `tokParam`, produces `Literal{Kind: LitSender}` only for `:sender` (case-insensitive), rejects any other `:name` parameter with `ErrUnsupportedSQL`.
+  - `query/sql/coerce.go` adds `CoerceWithCaller(lit, kind, caller *[32]byte)`; `LitSender` materializes the caller identity as a fresh `types.NewBytes(caller[:])` on KindBytes columns and rejects on any other column kind. The legacy `Coerce` path rejects `LitSender` outright so callers that have not threaded caller identity cannot accidentally resolve it.
+  - `protocol/handle_subscribe.go` extends `compileSQLQueryString`, `parseQueryString`, `compileSQLPredicateForRelations`, and `normalizeSQLFilterForRelations` to accept a `*types.Identity` caller and route coercion through `CoerceWithCaller`; `protocol/handle_subscribe_single.go` / `handle_subscribe_multi.go` / `handle_oneoff.go` thread `&conn.Identity` into the compile path.
+- New parser / coerce / public-seam pins landed:
+  - parser: `TestParseWhereSenderParameterOnIdentityColumn`, `TestParseWhereSenderParameterOnBytesColumn`, `TestParseWhereSenderParameterIsCaseInsensitive`, `TestParseWhereRejectsUnknownParameter`
+  - coerce: `TestCoerceSenderWithoutCallerFails`, `TestCoerceSenderWithCallerToBytes`, `TestCoerceSenderRejectsNonBytesColumn`
+  - protocol subscribe-single: `TestHandleSubscribeSingle_SenderParameterOnIdentityColumn`, `TestHandleSubscribeSingle_SenderParameterOnBytesColumn`, `TestHandleSubscribeSingle_SenderParameterOnStringColumnRejected`
+  - protocol one-off: `TestHandleOneOffQuery_SenderParameterOnIdentityColumn`, `TestHandleOneOffQuery_SenderParameterOnBytesColumn`, `TestHandleOneOffQuery_SenderParameterOnStringColumnRejected`
+- Scope kept narrow: no projection broadening, no `WHERE arr = :sender` path (non-bytes columns still reject), no `:other` parameter plumbing, no LIMIT / column-list widening, no multi-way join runtime work, no lifecycle/envelope churn. `SubscribeMulti` inherits the new compile path through the shared `compileSQLQueryString` seam but has no dedicated pin test (the narrow slice is covered by the subscribe-single path). Reopen if a specific `SubscribeMulti` `:sender` regression surfaces.
+- Docs follow-through: `docs/current-status.md`, `docs/parity-phase0-ledger.md`, and `TECH-DEBT.md` now record the `:sender` parameter parity as a landed narrow SQL parity slice; the pinned tests are named in the ledger.
 
 Verification run after landing the slice:
-- `rtk go test ./query/sql ./protocol -run 'ParenthesizedConjunction' -count=1`
-- `rtk go test ./query/sql ./protocol -run 'TestParseWhereOrPredicatesWithAlias|TestHandleSubscribeSingle_OrComparisonWithAlias|TestHandleOneOffQuery_OrComparisonWithAlias' -count=1`
+- `rtk go test ./query/sql -run 'TestParseWhereSenderParameter|TestParseWhereRejectsUnknownParameter|TestCoerceSender' -count=1`
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_SenderParameter|TestHandleOneOffQuery_SenderParameter' -count=1`
+- `rtk go test ./query/sql ./protocol -count=1`
 - `rtk go fmt ./query/sql ./protocol`
-- `rtk go test ./query/sql ./protocol -run 'OrComparison|ParenthesizedConjunction|QuotedIdentifiers' -count=1`
 - `rtk go vet ./query/sql ./protocol`
 - `rtk go test ./...`
 
 Current clean-tree baseline:
-- `Go test: 1165 passed in 10 packages`
+- `Go test: 1193 passed in 10 packages`
 
-Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, protocol lifecycle, message-family, quoted-identifier SQL, and parenthesized-WHERE SQL follow-through.
+Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, protocol lifecycle, message-family, and SQL/query-surface follow-through.
 
 ## Recommended next slice
 
-Move back to the broader parity backlog now that the Phase 2 Slice 2 response-envelope follow-through is drained.
+Keep walking down the broader-SQL / query-surface parity backlog now that `:sender` on narrow single-table KindBytes columns is landed.
 
-Best next grounded option:
-- broader SQL/query-surface parity beyond the currently pinned narrow slices (`query/sql/parser.go`, `protocol/handle_subscribe_{single,multi}.go`, `protocol/handle_oneoff.go`, `subscription/predicate.go`)
+Best next grounded SQL options:
+- parity extension of `:sender` into the narrow join-backed surface (`select * from s as r where r.bytes = :sender`, or a join filter whose leaf is `:sender` on an aliased relation). Same parser-level marker already lands; compile path already routes caller identity through `compileSQLPredicateForRelations` for both the `stmt.Join == nil` path and the join filter path — verify no residual gap, then add pins.
+- a different reference-backed SQL shape from `reference/SpacetimeDB/crates/expr/src/check.rs` that is not yet pinned in Shunter.
 
 Why this next:
-- the externally visible message-family follow-through is now landed rather than merely half-converted
-- `docs/current-status.md`, `docs/spacetimedb-parity-roadmap.md`, and `docs/parity-phase0-ledger.md` now all agree that the remaining Phase 2 family gap is broader SQL/query-surface breadth, not `SubscriptionError`
-- this stays on parity work instead of reopening speculative Tier-B watch items with no failing pin
+- the `:sender` slice closed the last named narrow-SQL gap tied to `check.rs:435-440`.
+- the next grounded reference-backed SQL shape is the cleanest continuation; broadening projection or parameter semantics beyond `:sender` is a bigger decision.
+- this stays on externally visible SQL/query parity instead of reopening speculative Tier-B watch items with no failing pin.
 
 If you do not take the SQL path next:
 - prefer a concrete OI-004 lifecycle leak/hang site with a fresh failing test
-- do not reopen the just-landed `SubscriptionError` slice unless a regression appears
+- do not reopen the landed literal / quoted-identifier / `:sender` slices unless a regression appears
 
 ## Expected shape of the next session
 
 1. Read the required startup docs in the listed order.
-2. Treat the current dirty worktree as landed Phase 2 Slice 2 truth, not as an unfinished pointer-conversion pass.
-3. Pick the next grounded anchor from `docs/spacetimedb-parity-roadmap.md`, `docs/parity-phase0-ledger.md`, or `TECH-DEBT.md`.
-4. If you choose SQL/query parity next, keep it narrow and reference-backed:
-   - add the failing parser/protocol/runtime pin first
+2. Treat the current worktree as landed SQL/query parity truth (quoted special-character identifiers, hex byte literals, float literals, `:sender` on narrow single-table KindBytes columns), not as unfinished envelope work.
+3. Start with the next grounded SQL anchor from `reference/SpacetimeDB/crates/expr/src/check.rs` and the parity docs.
+4. Preferred next slice: either `:sender` on the narrow join-backed surface, or another reference-backed SQL shape.
+   - add failing parser/protocol/runtime pins first
    - verify the failure
-   - implement the smallest possible widening/fix
+   - implement the smallest parser/coercion/runtime widening that keeps unrelated SQL shapes rejected
    - re-run targeted tests, then `rtk go test ./...`
-5. Only after the suite is green, update the docs and this handoff again.
+5. If the chosen slice turns out blocked by a wider runtime contract than expected, stop and choose the next narrow reference-backed SQL shape instead of broadening opportunistically.
+6. Only after the suite is green, update the docs and this handoff again.
 
 
 Prior closed anchors in the same calendar week (still landed, included here for continuity):
@@ -79,7 +89,7 @@ Prior closed anchors in the same calendar week (still landed, included here for 
 
 ## Next realistic parity / hardening anchors
 
-With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, all nine OI-005 enumerated sub-hazards closed (iter GC retention, iter use-after-Close, iter mid-iter-close, subscription-seam read-view lifetime, `CommittedSnapshot.IndexSeek` BTree-alias, `StateView.SeekIndex` BTree-alias, `StateView.SeekIndexRange` BTree-alias, `StateView.ScanTable` iterator surface, `CommittedState.Table(id) *Table` raw-pointer contract pin), both enumerated OI-006 sub-hazards closed (slice-header aliasing, row-payload sharing contract pin), and six OI-004 sub-hazards closed (`watchReducerResponse`, `connManagerSender.enqueueOnConn` overflow-disconnect, `superviseLifecycle` disconnect-ctx, `ConnManager.CloseAll` disconnect-ctx — closes the `Background`-rooted `Conn.Disconnect` call-site family — `forwardReducerResponse` ctx / Done lifecycle, dispatch-handler ctx), the grounded options are:
+With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, all nine OI-005 enumerated sub-hazards closed, both enumerated OI-006 sub-hazards closed, and six OI-004 sub-hazards closed, the grounded options are:
 
 ### Option α — Broader SQL/query-surface parity beyond TD-142
 
@@ -87,15 +97,17 @@ This is now the best next grounded parity path.
 
 What is still open:
 - `docs/current-status.md`, `docs/spacetimedb-parity-roadmap.md`, and `docs/parity-phase0-ledger.md` now all agree that the remaining externally visible message-family follow-through is broader SQL/query-surface breadth rather than another `SubscriptionError` envelope tweak
-- TD-142 drained the named narrow slices, but broader accepted SQL/query shapes are still new parity work
+- TD-142 plus the 2026-04-21 SQL/query follow-through (quoted special-character identifiers, hex byte literals, float literals, `:sender` on narrow single-table KindBytes columns) drained the named narrow slices, but broader accepted SQL/query shapes are still new parity work
 
 Why prefer this now:
-- the just-landed Phase 2 Slice 2 envelope work closed the last narrow response-envelope deferral in that family
+- the just-landed `:sender` slice closed the last named narrow-SQL gap tied to `check.rs:435-440` positive shapes
 - externally visible parity still outranks speculative Tier-B watch items
 - this keeps effort on client-visible behavior rather than reopening already-green message-family work
 
 Likely code surfaces:
 - `query/sql/parser.go`
+- `query/sql/coerce.go`
+- `protocol/handle_subscribe.go`
 - `protocol/handle_subscribe_single.go`
 - `protocol/handle_subscribe_multi.go`
 - `protocol/handle_oneoff.go`
@@ -111,8 +123,8 @@ Concrete shape:
 
 `TECH-DEBT.md` still carries:
 - OI-004 remaining sub-hazards (other detached goroutines in `protocol/conn.go` / `lifecycle.go` / `outbound.go` / `keepalive.go`; `ClientSender.Send` no-ctx follow-on)
-- OI-005: enumerated sub-hazards list now empty; OI-005 remains open as a theme because the envelope rule for raw `*Table` access is enforced by discipline and observational pins rather than machine-enforced lifetime. Promoting to a narrower interface wrapper that re-checks snapshot openness on every access, or a generation-counter invalidation model on `*Table` itself, would be its own broader decision doc
-- OI-006: enumerated sub-hazards list now empty; OI-006 remains open as a theme because the read-only row-payload contract is enforced by discipline and observational pins rather than machine-enforced immutability at the `types.ProductValue` boundary. Broader fanout assembly hazards in `subscription/fanout.go`, `subscription/fanout_worker.go`, and `protocol/fanout_adapter.go` stay in scope if any future path introduces in-place mutation
+- OI-005: enumerated sub-hazards list now empty; OI-005 remains open as a theme because the envelope rule for raw `*Table` access is enforced by discipline and observational pins rather than machine-enforced lifetime.
+- OI-006: enumerated sub-hazards list now empty; OI-006 remains open as a theme because the read-only row-payload contract is enforced by discipline and observational pins rather than machine-enforced immutability at the `types.ProductValue` boundary.
 - OI-008 (top-level bootstrap missing)
 
 Current judgment:
@@ -161,26 +173,26 @@ Clean-room reminder:
 7. `docs/spacetimedb-parity-roadmap.md`
 8. `docs/parity-phase0-ledger.md`
 9. `TECH-DEBT.md`
-10. `docs/hardening-oi-006-row-payload-sharing.md` (latest closed slice — contract pin at the row-payload sharing seam with identity + mutation-leak observational pins; closes the second enumerated OI-006 sub-hazard)
-11. `docs/hardening-oi-006-fanout-aliasing.md` (prior OI-006 sub-slice — slice-header isolation precedent; the 2026-04-21 slice is its complement)
-12. `docs/hardening-oi-005-committed-state-table-raw-pointer.md` (prior OI-005 contract-pin precedent at a raw-pointer seam without a direct materialization option; closes the last enumerated OI-005 sub-hazard)
-13. `docs/hardening-oi-005-state-view-scan-aliasing.md` (prior OI-005 sub-slice — `StateView.ScanTable` materialization precedent)
-14. `docs/hardening-oi-005-state-view-seekindexrange-aliasing.md` (prior-same-family OI-005 sub-slice — direct materialization precedent at the `StateView` boundary)
-15. `docs/hardening-oi-005-state-view-seekindex-aliasing.md` (prior OI-005 sub-slice — precedent)
-16. `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md` (prior OI-005 sub-slice — precedent)
-17. `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md` (prior OI-005 sub-slice — earlier contract-pin precedent for seams without a materialization option)
-18. `docs/hardening-oi-004-dispatch-handler-context.md` (prior OI-004 sub-slice — derived-ctx lifecycle wire precedent)
-19. `docs/hardening-oi-004-forward-reducer-response-context.md` (prior OI-004 sub-slice — Done-channel lifecycle signal pattern)
-20. `docs/hardening-oi-004-closeall-disconnect-context.md` (prior OI-004 sub-slice — bounded-ctx precedent)
-21. `docs/hardening-oi-004-supervise-disconnect-context.md` (prior OI-004 sub-slice)
-22. `docs/hardening-oi-004-sender-disconnect-context.md` (prior OI-004 sub-slice)
-23. `docs/hardening-oi-004-watch-reducer-response-lifecycle.md` (prior OI-004 sub-slice)
-24. `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md` (prior OI-005 sub-slice — precedent)
-25. `docs/hardening-oi-005-snapshot-iter-useafterclose.md` (prior OI-005 sub-slice — precedent)
-26. `docs/hardening-oi-005-snapshot-iter-retention.md` (earlier OI-005 sub-slice — additional precedent)
-27. `docs/parity-p0-recovery-001-replay-horizon.md` (prior-closed parity slice — precedent for a narrow-and-pin parity decision doc)
-28. `docs/parity-p0-sched-001-startup-firing.md` (prior-closed parity slice — alternative precedent)
-29. `docs/parity-phase2-slice3-lag-policy.md` (earlier-closed parity slice — another precedent)
+10. `docs/hardening-oi-006-row-payload-sharing.md` (closed slice — contract pin at the row-payload sharing seam)
+11. `docs/hardening-oi-006-fanout-aliasing.md` (prior OI-006 sub-slice — slice-header isolation precedent)
+12. `docs/hardening-oi-005-committed-state-table-raw-pointer.md` (prior OI-005 contract-pin precedent)
+13. `docs/hardening-oi-005-state-view-scan-aliasing.md` (prior OI-005 sub-slice)
+14. `docs/hardening-oi-005-state-view-seekindexrange-aliasing.md`
+15. `docs/hardening-oi-005-state-view-seekindex-aliasing.md`
+16. `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md`
+17. `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md`
+18. `docs/hardening-oi-004-dispatch-handler-context.md`
+19. `docs/hardening-oi-004-forward-reducer-response-context.md`
+20. `docs/hardening-oi-004-closeall-disconnect-context.md`
+21. `docs/hardening-oi-004-supervise-disconnect-context.md`
+22. `docs/hardening-oi-004-sender-disconnect-context.md`
+23. `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`
+24. `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md`
+25. `docs/hardening-oi-005-snapshot-iter-useafterclose.md`
+26. `docs/hardening-oi-005-snapshot-iter-retention.md`
+27. `docs/parity-p0-recovery-001-replay-horizon.md`
+28. `docs/parity-p0-sched-001-startup-firing.md`
+29. `docs/parity-phase2-slice3-lag-policy.md`
 30. the specific code surfaces for whichever anchor (α/β/γ/δ) you pick
 
 ## Shell discipline
@@ -216,16 +228,19 @@ Keep `.hermes/plans/2026-04-18_073534-phase1-wire-level-parity.md` unless you de
 - P1-07 executor response-channel contract + protocol-forwarding cancel-safe + Submit-time validation (2026-04-20, landed in commit `40b2152 baseline`)
 - OI-004 `connManagerSender.enqueueOnConn` overflow-disconnect background-ctx sub-hazard (2026-04-21)
 - OI-004 `superviseLifecycle` disconnect-ctx sub-hazard (2026-04-21)
-- OI-004 `ConnManager.CloseAll` disconnect-ctx sub-hazard (2026-04-21) — closes the `Background`-rooted `Conn.Disconnect` call-site family
-- OI-004 `forwardReducerResponse` ctx / Done lifecycle sub-hazard (2026-04-21) — closes the executor-adapter twin of the earlier protocol-side `watchReducerResponse` leak
-- OI-004 dispatch-handler ctx sub-hazard (2026-04-21) — request-side analog to `forwardReducerResponse`
-- OI-005 `StateView.ScanTable` iterator surface (2026-04-21) — `StateView.ScanTable` now pre-collects committed rows into an `[]entry{id, row}` slice before entering the yield loop; closes the last `StateView` iter-surface escape route alongside the earlier `SeekIndex` / `SeekIndexRange` closures
-- OI-005 `CommittedState.Table(id) *Table` raw-pointer contract pin (2026-04-21) — contract comments on `CommittedState.Table` and `CommittedState.TableIDs` document the three legal envelopes (`CommittedSnapshot` RLock lifetime, executor single-writer discipline, commitlog recovery bootstrap) and the three hazards (escape past envelope, stale-after-re-register, non-executor-goroutine read without RLock); three pin tests assert pointer identity, stale-after-re-register hazard shape, and snapshot RLock lifetime. Closes the last enumerated OI-005 sub-hazard
-- **OI-006 row-payload sharing contract pin (2026-04-21)** — contract comments on `subscription/eval.go::evaluate` per-subscriber fanout loop, `subscription/fanout_worker.go::FanOutSender`, and `protocol/fanout_adapter.go::encodeRows` document the post-commit row-immutability contract and enumerate the three hazards the read-only discipline prevents (in-place Value mutation on any downstream path, ProductValue append-within-shared-cap followed by tail mutation, store-side mutation of already-committed rows); two pin tests in `subscription/eval_fanout_row_payload_sharing_test.go` assert `[]Value` backing-array identity across subscribers for `Inserts` / `Deletes` and the in-place-mutation-leak hazard shape. Closes the second enumerated OI-006 sub-hazard
+- OI-004 `ConnManager.CloseAll` disconnect-ctx sub-hazard (2026-04-21)
+- OI-004 `forwardReducerResponse` ctx / Done lifecycle sub-hazard (2026-04-21)
+- OI-004 dispatch-handler ctx sub-hazard (2026-04-21)
+- OI-005 `StateView.ScanTable` iterator surface (2026-04-21)
+- OI-005 `CommittedState.Table(id) *Table` raw-pointer contract pin (2026-04-21)
+- OI-006 row-payload sharing contract pin (2026-04-21)
+- broader SQL/query-surface parity follow-through (2026-04-21): quoted special-character identifiers, hex byte literals, float literals, `:sender` caller-identity parameter on narrow single-table KindBytes columns
 
 ## Suggested verification commands
 
 Targeted:
+- `rtk go test ./query/sql -run 'TestParseWhereSenderParameter|TestParseWhereRejectsUnknownParameter|TestCoerceSender' -count=1 -v`
+- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_SenderParameter|TestHandleOneOffQuery_SenderParameter' -count=1 -v`
 - `rtk go test ./subscription -run 'TestEvalFanoutRowPayloadsSharedAcrossSubscribers' -race -count=3 -v`
 - `rtk go test ./subscription -run 'TestEvalFanout' -race -count=3 -v`
 - `rtk go test ./store -run 'TestCommittedStateTable' -race -count=3 -v`
@@ -236,13 +251,6 @@ Targeted:
 - `rtk go test ./protocol -run 'TestSuperviseLifecycle' -race -count=3 -v`
 - `rtk go test ./protocol -run 'TestEnqueueOnConnOverflowDisconnect' -race -count=3 -v`
 - `rtk go test ./protocol -run 'TestWatchReducerResponse' -race -count=3 -v`
-- `rtk go test ./store -run 'TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation' -race -count=3 -v`
-- `rtk go test ./store -run 'TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation' -race -count=3 -v`
-- `rtk go test ./store -run 'TestCommittedSnapshotIndexSeekReturnsIndependentSlice' -race -count=3 -v`
-- `rtk go test ./subscription -run 'TestEvalAndBroadcastDoesNotUseViewAfterReturn' -race -count=3 -v`
-- `rtk go test ./store -run 'TestCommittedSnapshot(TableScan|IndexRange|RowsFromRowIDs)PanicsOnMidIterClose' -race -count=3 -v`
-- `rtk go test ./store -run 'TestCommittedSnapshot(TableScan|IndexScan|IndexRange)PanicsAfterClose' -race -count=3 -v`
-- `rtk go test ./store -run 'TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration' -race -count=3 -v`
 - `rtk go test ./...`
 
 ## Acceptance gate
@@ -251,8 +259,8 @@ Do not call the work done unless all are true:
 
 - reference-backed or debt-anchored target shape was checked directly against reference material or current live code
 - every newly accepted or rejected shape has focused tests
-- already-landed parity pins still pass (including `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForInserts`, `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForDeletes`, `TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers`, `TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers`, `TestCommittedStateTableSameEnvelopeReturnsSamePointer`, `TestCommittedStateTableRetainedPointerIsStaleAfterReRegister`, `TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose`, `TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete`, `TestDispatchLoop_HandlerCtxCancelsOnConnClose`, `TestDispatchLoop_HandlerCtxCancelsOnOuterCtx`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOutboundBlocked`, `TestCloseAllBoundsDisconnectOnInboxHang`, `TestCloseAllDeliversOnInboxOK`, `TestCloseAll_DisconnectsEveryConnection`, `TestCloseAll_EmptyManagerNoOp`, `TestSuperviseLifecycleBoundsDisconnectOnInboxHang`, `TestSuperviseLifecycleDeliversOnInboxOK`, `TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang`, `TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK`, `TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation`, `TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation`, `TestWatchReducerResponseExitsOnConnClose`, `TestWatchReducerResponseDeliversOnRespCh`, `TestWatchReducerResponseExitsOnRespChClose`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnInsert`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnRemove`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_Join`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_SingleTable`, `TestCommittedSnapshotTableScanPanicsOnMidIterClose`, `TestCommittedSnapshotIndexRangePanicsOnMidIterClose`, `TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose`, `TestCommittedSnapshotTableScanPanicsAfterClose`, `TestCommittedSnapshotIndexScanPanicsAfterClose`, `TestCommittedSnapshotIndexRangePanicsAfterClose`, `TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`, `TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment`, `TestParityP0Sched001PanicRetainsScheduledRow`, `TestPhase2Slice3DefaultOutgoingBufferMatchesReference`, and `TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit`).
-- full suite still passes. Clean-tree baseline remains `Go test: 1159 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 flake cleanup and quoted-identifier SQL follow-through.
+- already-landed parity pins still pass (including the `:sender` parser/coerce/protocol pins listed in `docs/parity-phase0-ledger.md`)
+- full suite still passes. Clean-tree baseline is `Go test: 1193 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 follow-through.
 - docs and handoff reflect the new truth exactly
 
 ## Deliverables for the next session
@@ -276,29 +284,13 @@ As of this handoff:
 - Phase 2 Slice 3 closed — per-client outbound queue aligned to reference `CLIENT_CHANNEL_CAPACITY`; close-frame mechanism retained as intentional divergence
 - Phase 3 Slice 1 closed — `P0-SCHED-001` scheduled-reducer startup / firing ordering narrow-and-pinned
 - Phase 4 Slice 2 closed — `P0-RECOVERY-001` replay-horizon / validated-prefix behavior narrow-and-pinned
-- P1-07 executor response-channel contract + protocol-forwarding cancel-safe + Submit-time validation landed in commit `40b2152 baseline`
-- OI-005 iterator-GC retention sub-hazard closed
-- OI-005 iterator use-after-Close sub-hazard closed
-- OI-005 iterator mid-iter-close defense-in-depth sub-hazard closed
-- OI-005 subscription-seam read-view lifetime sub-hazard closed
-- OI-005 `CommittedSnapshot.IndexSeek` BTree-alias escape route closed
-- OI-005 `StateView.SeekIndex` BTree-alias escape route closed
-- OI-005 `StateView.SeekIndexRange` BTree-alias escape route closed
-- OI-005 `StateView.ScanTable` iterator surface closed — last `StateView` iter-surface escape route
-- OI-005 `CommittedState.Table(id) *Table` raw-pointer contract pin closed — last enumerated OI-005 sub-hazard
-- OI-006 fanout per-subscriber slice-header aliasing sub-hazard closed
-- **OI-006 row-payload sharing contract pin closed** — contract comments on `subscription/eval.go::evaluate`, `subscription/fanout_worker.go::FanOutSender`, and `protocol/fanout_adapter.go::encodeRows` name the post-commit row-immutability contract and the read-only downstream discipline; two pin tests assert backing-array identity across subscribers and the in-place-mutation-leak hazard shape. Closes the second enumerated OI-006 sub-hazard; OI-006's remaining-sub-hazards list is now "broader fanout assembly hazards if any future path introduces in-place mutation". OI-006 stays open as a theme because the read-only contract is enforced by discipline and observational pins rather than machine-enforced immutability
-- OI-004 `watchReducerResponse` goroutine-leak sub-hazard closed
-- OI-004 `connManagerSender.enqueueOnConn` overflow-disconnect background-ctx sub-hazard closed
-- OI-004 `superviseLifecycle` disconnect-ctx sub-hazard closed
-- OI-004 `ConnManager.CloseAll` disconnect-ctx sub-hazard closed — closes the `Background`-rooted `Conn.Disconnect` call-site family (supervisor, sender overflow, CloseAll now all derive a bounded ctx at the spawn point)
-- OI-004 outbound-writer supervision sub-hazard closed — supervisor now watches `outboundDone` alongside dispatch/keepalive and disconnects delivery-dead conns promptly
-- OI-004 `forwardReducerResponse` ctx / Done lifecycle sub-hazard closed — closes the executor-adapter twin of the earlier protocol-side `watchReducerResponse` leak
-- OI-004 dispatch-handler ctx sub-hazard closed — `runDispatchLoop` now derives a `handlerCtx` that cancels on `c.closed`
-- Phase 2 Slice 2 applied-envelope host execution duration closed — `SubscribeSingleApplied`, `SubscribeMultiApplied`, `UnsubscribeSingleApplied`, and `UnsubscribeMultiApplied` now carry `TotalHostExecutionDurationMicros` measured at the executor register/unregister seam and preserved through the protocol reply path
-- Phase 2 Slice 2 `SubscriptionError` optional-field / `TableID` follow-through closed — `SubscriptionError` now carries optional `RequestID`, optional `QueryID`, and optional `TableID` on the wire; protocol and executor reply paths emit the pointer-backed shape consistently; `TableID` is attached only when exactly one obvious table can be inferred from the predicate/update surface
-- broader SQL/query-surface parity follow-through: reference-style double-quoted identifiers now work end-to-end on the current narrow single-table / join-backed SQL surface; parser tokenization/keyword handling preserves quoted identifiers as identifiers rather than keywords, and the parser / subscribe / one-off seams are pinned by dedicated quoted-identifier tests
+- P1-07 executor response-channel contract + protocol-forwarding cancel-safe + Submit-time validation landed
+- OI-005 enumerated sub-hazards drained (iter GC retention, iter use-after-Close, iter mid-iter-close, subscription-seam read-view lifetime, IndexSeek BTree-alias, SeekIndex BTree-alias, SeekIndexRange BTree-alias, ScanTable iterator surface, `CommittedState.Table` raw-pointer contract pin)
+- OI-006 enumerated sub-hazards drained (slice-header aliasing, row-payload sharing contract pin)
+- OI-004 six sub-hazards closed (watchReducerResponse, sender overflow-disconnect ctx, superviseLifecycle disconnect-ctx, CloseAll disconnect-ctx, forwardReducerResponse ctx/Done lifecycle, dispatch-handler ctx, outbound-writer supervision)
+- Phase 2 Slice 2 applied-envelope host execution duration + `SubscriptionError` optional-field / `TableID` follow-through closed
+- broader SQL/query-surface parity follow-through (2026-04-21): reference-style double-quoted identifiers, query-builder-style parenthesized WHERE predicates, alias-qualified mixed-qualified/unqualified OR, hex byte literals, float literals on the narrow single-table / join-backed SQL surface, `:sender` caller-identity parameter on narrow single-table KindBytes columns, bare boolean `WHERE TRUE` all work end-to-end and are pinned
 - Other detached-goroutine surfaces in `conn.go` / `lifecycle.go` / `keepalive.go` and the `ClientSender.Send` no-ctx follow-on remain open under OI-004
 - next realistic anchors: broader SQL/query-surface parity (α), further Tier-B hardening (β), format-level commitlog parity (γ), individual scheduler deferrals (δ)
-- targeted flaky-test cleanup in `subscription/delta_pool_test.go`, `subscription/eval_projected_rows_test.go`, and scheduler replay parity coverage is now closed; no known clean-tree intermittent test remains
-- 10 packages, clean-tree full-suite baseline `Go test: 1165 passed in 10 packages`
+- targeted flaky-test cleanup is closed; no known clean-tree intermittent test remains
+- 10 packages, clean-tree full-suite baseline `Go test: 1193 passed in 10 packages`

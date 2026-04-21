@@ -531,6 +531,56 @@ func TestHandleSubscribeSingle_OrComparison(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_OrComparisonWithAliasAndHexBytes(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   17,
+		QueryID:     14,
+		QueryString: "SELECT * FROM s AS r WHERE r.bytes = 0xABCD OR bytes = X'ABCD'",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	orPred, ok := req.Predicates[0].(subscription.Or)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Or", req.Predicates[0])
+	}
+	left, ok := orPred.Left.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0].Left type = %T, want ColEq", orPred.Left)
+	}
+	right, ok := orPred.Right.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0].Right type = %T, want ColEq", orPred.Right)
+	}
+	want := types.NewBytes([]byte{0xAB, 0xCD})
+	if left.Column != 1 || right.Column != 1 {
+		t.Fatalf("unexpected OR column ids: left=%d right=%d", left.Column, right.Column)
+	}
+	if !left.Value.Equal(want) || !right.Value.Equal(want) {
+		t.Fatalf("unexpected OR values: left=%v right=%v want=%v", left.Value, right.Value, want)
+	}
+}
+
 func TestHandleSubscribeSingle_OrComparisonWithAlias(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -583,6 +633,126 @@ func TestHandleSubscribeSingle_OrComparisonWithAlias(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_WhereTrueLiteralCompilesToAllRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "flag", Type: schema.KindBool},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   18,
+		QueryID:     15,
+		QueryString: "SELECT * FROM t WHERE TRUE",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	allRows, ok := req.Predicates[0].(subscription.AllRows)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want AllRows", req.Predicates[0])
+	}
+	if allRows.Table != 1 {
+		t.Fatalf("AllRows.Table = %d, want 1", allRows.Table)
+	}
+}
+
+func TestHandleSubscribeSingle_QuotedSpecialCharacterIdentifiers(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("Balance$", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "status", Type: schema.KindString},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   21,
+		QueryID:     18,
+		QueryString: `SELECT * FROM "Balance$" WHERE "id" = 7`,
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Table != 1 || colEq.Column != 0 {
+		t.Fatalf("predicate target = table %d col %d, want table 1 col 0", colEq.Table, colEq.Column)
+	}
+	if !colEq.Value.Equal(types.NewUint32(7)) {
+		t.Fatalf("predicate value = %v, want 7", colEq.Value)
+	}
+}
+
+func TestHandleSubscribeSingle_QuotedReservedIdentifiers(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("Order", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "status", Type: schema.KindString},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   19,
+		QueryID:     16,
+		QueryString: `SELECT * FROM "Order" WHERE "id" = 7`,
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Table != 1 || colEq.Column != 0 {
+		t.Fatalf("predicate target = table %d col %d, want table 1 col 0", colEq.Table, colEq.Column)
+	}
+	if !colEq.Value.Equal(types.NewUint32(7)) {
+		t.Fatalf("predicate value = %v, want 7", colEq.Value)
+	}
+}
+
 func TestHandleSubscribeSingle_QualifiedStarAlias(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -628,6 +798,77 @@ func TestHandleSubscribeSingle_QualifiedStarAlias(t *testing.T) {
 	}
 	if colEq.Column != 1 {
 		t.Fatalf("Predicates[0].Column = %d, want 1", colEq.Column)
+	}
+}
+
+func TestHandleSubscribeSingle_JoinFilterOnLeftFloatColumn(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+			{Name: "f32", Type: schema.KindFloat32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	tReg, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("registry missing table t")
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   20,
+		QueryID:     17,
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.f32 = 0.1",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	colEq, ok := joinPred.Filter.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want ColEq", joinPred.Filter)
+	}
+	want, err := types.NewFloat32(0.1)
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	if colEq.Table != tReg.ID || colEq.Column != 2 {
+		t.Fatalf("filter target = table %d col %d, want table %d col 2", colEq.Table, colEq.Column, tReg.ID)
+	}
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("filter value = %v, want %v", colEq.Value, want)
 	}
 }
 
@@ -1533,4 +1774,122 @@ func TestHandleSubscribeMulti_ExecutorReject(t *testing.T) {
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 100, "QueryID")
 	requireOptionalUint32(t, se.RequestID, 14, "RequestID")
+}
+
+// Reference expr type-check coverage accepts `:sender` as the caller-identity
+// parameter on both identity-typed columns and byte-array columns
+// (`crates/expr/src/check.rs` lines 434-440). Pin the subscribe-single path
+// end-to-end: the compiled predicate must carry the caller's 32-byte identity
+// payload materialized as KindBytes so the evaluator can match it against the
+// row column without any wire-level parameter substitution.
+func TestHandleSubscribeSingle_SenderParameterOnIdentityColumn(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{1, 2, 3, 4}
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindBytes},
+		schema.ColumnSchema{Index: 1, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   25,
+		QueryID:     40,
+		QueryString: "SELECT * FROM s WHERE id = :sender",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Table != 1 || colEq.Column != 0 {
+		t.Fatalf("predicate target = table %d col %d, want table 1 col 0", colEq.Table, colEq.Column)
+	}
+	want := types.NewBytes(conn.Identity[:])
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("predicate value = %v, want caller identity bytes", colEq.Value)
+	}
+}
+
+func TestHandleSubscribeSingle_SenderParameterOnBytesColumn(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{9, 9, 9, 9}
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   26,
+		QueryID:     41,
+		QueryString: "SELECT * FROM s WHERE bytes = :sender",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Column != 1 {
+		t.Fatalf("predicate column = %d, want 1", colEq.Column)
+	}
+	want := types.NewBytes(conn.Identity[:])
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("predicate value = %v, want caller identity bytes", colEq.Value)
+	}
+}
+
+// Reference expr rejects :sender on any non-identity / non-bytes column
+// (`crates/expr/src/check.rs` lines 487-488: `select * from t where arr =
+// :sender`). Shunter's column-kind surface lacks a distinct identity kind,
+// so the equivalent rejection applies to non-bytes columns such as a
+// string column.
+func TestHandleSubscribeSingle_SenderParameterOnStringColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{1}
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "name", Type: schema.KindString},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   27,
+		QueryID:     42,
+		QueryString: "SELECT * FROM t WHERE name = :sender",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 42, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when :sender targets a non-bytes column")
+	}
 }

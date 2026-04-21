@@ -328,6 +328,48 @@ func TestHandleOneOffQuery_OrComparison(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQuery_OrComparisonWithAliasAndHexBytes(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "s",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "bytes", Type: schema.KindBytes},
+		},
+	}
+	sl := newMockSchema("s", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewBytes([]byte{0xAB, 0xCD})},
+				{types.NewUint32(2), types.NewBytes([]byte{0x00, 0x01})},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x19},
+		QueryString: "SELECT * FROM s AS r WHERE r.bytes = 0xABCD OR bytes = X'ABCD'",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) {
+		t.Fatalf("unexpected row returned: %v", pvs[0])
+	}
+}
+
 func TestHandleOneOffQuery_OrComparisonWithAlias(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{
@@ -371,6 +413,200 @@ func TestHandleOneOffQuery_OrComparisonWithAlias(t *testing.T) {
 	}
 	if !pvs[1][0].Equal(types.NewUint32(2)) || !pvs[1][1].Equal(types.NewString("alice")) {
 		t.Fatalf("second row = %v, want id=2 name=alice", pvs[1])
+	}
+}
+
+func TestHandleOneOffQuery_WhereTrueLiteralReturnsAllRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "flag", Type: schema.KindBool},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewBool(true)},
+				{types.NewUint32(2), types.NewBool(false)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x1a},
+		QueryString: "SELECT * FROM t WHERE TRUE",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 2 {
+		t.Fatalf("got %d rows, want 2", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[1][0].Equal(types.NewUint32(2)) {
+		t.Fatalf("unexpected ids returned: %v, %v", pvs[0][0], pvs[1][0])
+	}
+}
+
+func TestHandleOneOffQuery_QuotedSpecialCharacterIdentifiers(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "Balance$",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "status", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("Balance$", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(7), types.NewString("open")},
+				{types.NewUint32(8), types.NewString("closed")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x1d},
+		QueryString: `SELECT * FROM "Balance$" WHERE "id" = 7`,
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(7)) || !pvs[0][1].Equal(types.NewString("open")) {
+		t.Fatalf("unexpected row returned: %v", pvs[0])
+	}
+}
+
+func TestHandleOneOffQuery_QuotedReservedIdentifiers(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "Order",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "status", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("Order", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(7), types.NewString("open")},
+				{types.NewUint32(8), types.NewString("closed")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x1b},
+		QueryString: `SELECT * FROM "Order" WHERE "id" = 7`,
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(7)) || !pvs[0][1].Equal(types.NewString("open")) {
+		t.Fatalf("unexpected row returned: %v", pvs[0])
+	}
+}
+
+func TestHandleOneOffQuery_JoinFilterOnLeftFloatColumn(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+			{Name: "f32", Type: schema.KindFloat32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	tReg, _ := eng.Registry().TableByName("t")
+	sReg, _ := eng.Registry().TableByName("s")
+	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: tReg.Columns}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	goodFloat, err := types.NewFloat32(0.1)
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	otherFloat, err := types.NewFloat32(0.2)
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			tReg.ID: {
+				{types.NewUint32(1), types.NewUint32(10), goodFloat},
+				{types.NewUint32(2), types.NewUint32(10), otherFloat},
+			},
+			sReg.ID: {
+				{types.NewUint32(7), types.NewUint32(10)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x1c},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.f32 = 0.1",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, tTS)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[0][2].Equal(goodFloat) {
+		t.Fatalf("unexpected row returned: %v", pvs[0])
 	}
 }
 
@@ -1147,6 +1383,136 @@ func TestHandleOneOffQuery_UnknownTable(t *testing.T) {
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// Reference expr type-check coverage accepts `:sender` on both identity
+// and byte-array columns (`crates/expr/src/check.rs` lines 434-440). Pin the
+// one-off path end-to-end: the scan must select only the row whose bytes
+// column equals the caller's 32-byte identity payload. No wire parameter
+// substitution: :sender is resolved at compile time against conn.Identity.
+func TestHandleOneOffQuery_SenderParameterOnBytesColumn(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{7, 8, 9}
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "s",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "bytes", Type: schema.KindBytes},
+		},
+	}
+	sl := newMockSchema("s", 1, ts.Columns...)
+
+	callerBytes := make([]byte, 32)
+	copy(callerBytes, conn.Identity[:])
+	otherBytes := make([]byte, 32)
+	otherBytes[0] = 0xFF
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewBytes(callerBytes)},
+				{types.NewUint32(2), types.NewBytes(otherBytes)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x60},
+		QueryString: "SELECT * FROM s WHERE bytes = :sender",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) {
+		t.Errorf("row[0].id = %v, want Uint32(1)", pvs[0][0])
+	}
+}
+
+func TestHandleOneOffQuery_SenderParameterOnIdentityColumn(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{3, 1, 4, 1, 5, 9}
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "s",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindBytes},
+			{Index: 1, Name: "label", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("s", 1, ts.Columns...)
+
+	callerBytes := make([]byte, 32)
+	copy(callerBytes, conn.Identity[:])
+	otherBytes := make([]byte, 32)
+	otherBytes[31] = 0xAA
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewBytes(callerBytes), types.NewString("me")},
+				{types.NewBytes(otherBytes), types.NewString("other")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x61},
+		QueryString: "SELECT * FROM s WHERE id = :sender",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	}
+	pvs := decodeRows(t, result.Rows, ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][1].Equal(types.NewString("me")) {
+		t.Errorf("row[0].label = %v, want String(me)", pvs[0][1])
+	}
+}
+
+// Reference expr rejects :sender on columns whose algebraic type is neither
+// identity nor bytes (`crates/expr/src/check.rs` lines 487-488). Shunter
+// emits a one-off error reply with Status=1 when :sender targets a
+// non-bytes column.
+func TestHandleOneOffQuery_SenderParameterOnStringColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{1}
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "name", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewString("x")}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x62},
+		QueryString: "SELECT * FROM t WHERE name = :sender",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
 	if result.Status != 1 {
 		t.Fatalf("Status = %d, want 1 (error)", result.Status)
 	}

@@ -119,6 +119,71 @@ func TestParseWhereBoolLiterals(t *testing.T) {
 	}
 }
 
+// Reference expr type-check accepts bare boolean WHERE predicates
+// (`select * from t where true`, crates/expr/src/check.rs line 423).
+// On Shunter's current narrow surface this should behave the same as a
+// filterless single-table query rather than forcing a synthetic comparison.
+func TestParseWhereTrueLiteral(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if _, ok := stmt.Predicate.(TruePredicate); !ok {
+		t.Fatalf("Predicate = %T, want TruePredicate", stmt.Predicate)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %v, want none", stmt.Filters)
+	}
+}
+
+// Reference SQL docs explicitly call out quoted identifiers as the way to use
+// reserved SQL keywords as table/column names (for example `SELECT * FROM
+// "Order"`). Pin that end-to-end on Shunter's current narrow single-table
+// surface using a quoted reserved table plus a quoted column reference.
+// Reference SQL docs also call out quoted identifiers with non-alphanumeric
+// characters such as `SELECT * FROM "Balance$"`. Pin that narrow single-table
+// shape end-to-end so future parser changes do not regress quoted special-char
+// table names.
+func TestParseQuotedSpecialCharacterIdentifiers(t *testing.T) {
+	stmt, err := Parse(`SELECT * FROM "Balance$" WHERE "id" = 7`)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Balance$" {
+		t.Fatalf("Table = %q, want Balance$", stmt.Table)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "Balance$" || cmp.Filter.Column != "id" || cmp.Filter.Op != "=" {
+		t.Fatalf("Filter = %+v, want Balance$.id =", cmp.Filter)
+	}
+}
+
+func TestParseQuotedReservedIdentifiers(t *testing.T) {
+	stmt, err := Parse(`SELECT * FROM "Order" WHERE "id" = 7`)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "Order" {
+		t.Fatalf("Table = %q, want Order", stmt.Table)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "Order" || cmp.Filter.Column != "id" || cmp.Filter.Op != "=" {
+		t.Fatalf("Filter = %+v, want Order.id =", cmp.Filter)
+	}
+	if cmp.Filter.Literal.Kind != LitInt || cmp.Filter.Literal.Int != 7 {
+		t.Fatalf("Literal = %+v, want int 7", cmp.Filter.Literal)
+	}
+	if len(stmt.Filters) != 1 {
+		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
+	}
+}
+
 func TestParseKeywordsCaseInsensitive(t *testing.T) {
 	stmt, err := Parse("select * from Users where Id = 1")
 	if err != nil {
@@ -226,9 +291,45 @@ func TestParseWhereOrPredicates(t *testing.T) {
 // Reference expr type-check coverage accepts alias-qualified OR predicates with
 // mixed qualified and unqualified column references (`crates/expr/src/check.rs`
 // line 451: `select * from s as r where r.bytes = 0xABCD or bytes = X'ABCD'`).
-// Shunter's narrower literal surface cannot express those bytes literals, so
-// this pins the same alias-scope behavior on an already-supported int/string
-// shape.
+// Pin that exact literal/alias shape now that Shunter's SQL grammar supports
+// both 0x-prefixed and X'..' hex byte literals.
+func TestParseWhereOrPredicatesWithAliasAndHexBytes(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM s AS r WHERE r.bytes = 0xABCD OR bytes = X'ABCD'")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	orPred, ok := stmt.Predicate.(OrPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want OrPredicate", stmt.Predicate)
+	}
+	left, ok := orPred.Left.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Left type = %T, want ComparisonPredicate", orPred.Left)
+	}
+	right, ok := orPred.Right.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Right type = %T, want ComparisonPredicate", orPred.Right)
+	}
+	if left.Filter.Column != "bytes" || left.Filter.Table != "s" || left.Filter.Alias != "r" {
+		t.Fatalf("left filter = %+v, want s/r.bytes", left.Filter)
+	}
+	if right.Filter.Column != "bytes" || right.Filter.Table != "s" || right.Filter.Alias != "" {
+		t.Fatalf("right filter = %+v, want bare s.bytes", right.Filter)
+	}
+	if left.Filter.Literal.Kind != LitBytes || right.Filter.Literal.Kind != LitBytes {
+		t.Fatalf("literal kinds = %v/%v, want LitBytes/LitBytes", left.Filter.Literal.Kind, right.Filter.Literal.Kind)
+	}
+	if got := string(left.Filter.Literal.Bytes); got != string([]byte{0xAB, 0xCD}) {
+		t.Fatalf("left bytes = %x, want abcd", left.Filter.Literal.Bytes)
+	}
+	if got := string(right.Filter.Literal.Bytes); got != string([]byte{0xAB, 0xCD}) {
+		t.Fatalf("right bytes = %x, want abcd", right.Filter.Literal.Bytes)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %v, want nil/empty for OR tree", stmt.Filters)
+	}
+}
+
 func TestParseWhereOrPredicatesWithAlias(t *testing.T) {
 	stmt, err := Parse("SELECT item.* FROM users AS item WHERE item.id = 1 OR name = 'alice'")
 	if err != nil {
@@ -263,6 +364,29 @@ func TestParseWhereOrPredicatesWithAlias(t *testing.T) {
 	}
 	if len(stmt.Filters) != 0 {
 		t.Fatalf("Filters = %v, want nil/empty for OR tree", stmt.Filters)
+	}
+}
+
+func TestParseJoinQualifiedProjectionOnAndWhereWithFloatLiteral(t *testing.T) {
+	stmt, err := Parse("SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.f32 = 0.1")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "t" || cmp.Filter.Column != "f32" || cmp.Filter.Alias != "t" {
+		t.Fatalf("WHERE filter = %+v, want t.f32", cmp.Filter)
+	}
+	if cmp.Filter.Op != "=" || cmp.Filter.Literal.Kind != LitFloat || cmp.Filter.Literal.Float != 0.1 {
+		t.Fatalf("WHERE filter op/literal = %+v, want = 0.1 float", cmp.Filter)
+	}
+	if len(stmt.Filters) != 1 {
+		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
 	}
 }
 
@@ -689,5 +813,69 @@ func TestParseErrorsMentionPosition(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "!") {
 		t.Fatalf("error %q should mention unexpected token", err.Error())
+	}
+}
+
+// Reference expr type-check coverage accepts `:sender` as a caller-identity
+// parameter on columns whose algebraic type is `identity()` or
+// `bytes()` (`crates/expr/src/check.rs` lines 434-440: `select * from s
+// where id = :sender` and `select * from s where bytes = :sender`). Pin the
+// parser-level literal-kind surface so the subsequent coercion path sees a
+// dedicated sender-parameter marker instead of a bare identifier.
+func TestParseWhereSenderParameterOnIdentityColumn(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM s WHERE id = :sender")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "s" || cmp.Filter.Column != "id" || cmp.Filter.Op != "=" {
+		t.Fatalf("Filter = %+v, want s.id =", cmp.Filter)
+	}
+	if cmp.Filter.Literal.Kind != LitSender {
+		t.Fatalf("Literal.Kind = %v, want LitSender", cmp.Filter.Literal.Kind)
+	}
+}
+
+func TestParseWhereSenderParameterOnBytesColumn(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM s WHERE bytes = :sender")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "s" || cmp.Filter.Column != "bytes" || cmp.Filter.Op != "=" {
+		t.Fatalf("Filter = %+v, want s.bytes =", cmp.Filter)
+	}
+	if cmp.Filter.Literal.Kind != LitSender {
+		t.Fatalf("Literal.Kind = %v, want LitSender", cmp.Filter.Literal.Kind)
+	}
+}
+
+func TestParseWhereSenderParameterIsCaseInsensitive(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM s WHERE id = :SENDER")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Literal.Kind != LitSender {
+		t.Fatalf("Literal.Kind = %v, want LitSender", cmp.Filter.Literal.Kind)
+	}
+}
+
+func TestParseWhereRejectsUnknownParameter(t *testing.T) {
+	_, err := Parse("SELECT * FROM s WHERE id = :other")
+	if err == nil {
+		t.Fatal("expected error for unknown SQL parameter")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
 	}
 }

@@ -64,7 +64,7 @@ func joinProjectsRight(stmt sql.Statement, selfJoin bool) bool {
 	return strings.EqualFold(alias, stmt.Join.RightTable)
 }
 
-func compileSQLQueryString(qs string, sl SchemaLookup) (compiledSQLQuery, error) {
+func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (compiledSQLQuery, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
@@ -123,7 +123,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup) (compiledSQLQuery, error)
 		var filter subscription.Predicate
 		if stmt.Predicate != nil {
 			var err error
-			filter, err = compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTag)
+			filter, err = compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTag, caller)
 			if err != nil {
 				return compiledSQLQuery{}, err
 			}
@@ -153,7 +153,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup) (compiledSQLQuery, error)
 	if !ok {
 		return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.ProjectedTable)
 	}
-	pred, err := compileSQLPredicateForRelations(stmt.Predicate, map[string]relationSchema{stmt.ProjectedTable: {id: projectedID, ts: ts}}, func(string) uint8 { return 0 })
+	pred, err := compileSQLPredicateForRelations(stmt.Predicate, map[string]relationSchema{stmt.ProjectedTable: {id: projectedID, ts: ts}}, func(string) uint8 { return 0 }, caller)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
@@ -165,7 +165,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup) (compiledSQLQuery, error)
 // schema and coerces each literal against the matching column kind.
 // Errors carry context suitable for SubscriptionError.Error /
 // OneOffQueryResult.Error.
-func parseQueryString(qs string, sl SchemaLookup) (Query, error) {
+func parseQueryString(qs string, sl SchemaLookup, caller *types.Identity) (Query, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
 		return Query{}, fmt.Errorf("parse: %v", err)
@@ -180,7 +180,7 @@ func parseQueryString(qs string, sl SchemaLookup) (Query, error) {
 		if !ok {
 			return Query{}, fmt.Errorf("unknown column %q on table %q", f.Column, ts.Name)
 		}
-		v, err := sql.Coerce(f.Literal, col.Type)
+		v, err := coerceLiteral(f.Literal, col.Type, caller)
 		if err != nil {
 			return Query{}, fmt.Errorf("coerce column %q: %v", f.Column, err)
 		}
@@ -189,7 +189,15 @@ func parseQueryString(qs string, sl SchemaLookup) (Query, error) {
 	return q, nil
 }
 
-func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8) (subscription.Predicate, error) {
+func coerceLiteral(lit sql.Literal, kind types.ValueKind, caller *types.Identity) (types.Value, error) {
+	if caller != nil {
+		raw := (*[32]byte)(caller)
+		return sql.CoerceWithCaller(lit, kind, raw)
+	}
+	return sql.Coerce(lit, kind)
+}
+
+func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity) (subscription.Predicate, error) {
 	switch p := pred.(type) {
 	case nil:
 		if len(relations) != 1 {
@@ -199,24 +207,32 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 			return subscription.AllRows{Table: rel.id}, nil
 		}
 		return nil, nil
+	case sql.TruePredicate:
+		if len(relations) != 1 {
+			return nil, nil
+		}
+		for _, rel := range relations {
+			return subscription.AllRows{Table: rel.id}, nil
+		}
+		return nil, nil
 	case sql.ComparisonPredicate:
-		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag)
+		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag, caller)
 	case sql.AndPredicate:
-		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag)
+		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag, caller)
 		if err != nil {
 			return nil, err
 		}
-		right, err := compileSQLPredicateForRelations(p.Right, relations, aliasTag)
+		right, err := compileSQLPredicateForRelations(p.Right, relations, aliasTag, caller)
 		if err != nil {
 			return nil, err
 		}
 		return subscription.And{Left: left, Right: right}, nil
 	case sql.OrPredicate:
-		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag)
+		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag, caller)
 		if err != nil {
 			return nil, err
 		}
-		right, err := compileSQLPredicateForRelations(p.Right, relations, aliasTag)
+		right, err := compileSQLPredicateForRelations(p.Right, relations, aliasTag, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -226,7 +242,7 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 	}
 }
 
-func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationSchema, aliasTag func(string) uint8) (subscription.Predicate, error) {
+func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity) (subscription.Predicate, error) {
 	rel, ok := relations[f.Table]
 	if !ok {
 		return nil, fmt.Errorf("unknown table %q in SQL filter", f.Table)
@@ -235,7 +251,7 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 	if !ok {
 		return nil, fmt.Errorf("unknown column %q on table %q", f.Column, rel.ts.Name)
 	}
-	v, err := sql.Coerce(f.Literal, col.Type)
+	v, err := coerceLiteral(f.Literal, col.Type, caller)
 	if err != nil {
 		return nil, fmt.Errorf("coerce column %q: %v", f.Column, err)
 	}

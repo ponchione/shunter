@@ -12,7 +12,7 @@
 //	colref = ident | ident "." ident
 //	qcol   = ident "." ident
 //	op     = "=" | "<" | ">" | "<=" | ">=" | "!=" | "<>"
-//	literal = integer | bool | string
+//	literal = integer | float | bool | string | hex-bytes
 //	ident   = [A-Za-z_][A-Za-z0-9_]*
 //
 // Anything outside this grammar (projection other than "*", unsupported JOIN forms,
@@ -40,16 +40,28 @@ type LitKind int
 
 const (
 	LitInt LitKind = iota
+	LitFloat
 	LitBool
 	LitString
+	LitBytes
+	// LitSender is the parameter marker for `:sender`, the caller identity
+	// placeholder accepted on identity / bytes columns. The parser preserves
+	// it as a distinct lexical kind so the coercion path resolves it against
+	// the caller identity supplied at compile time rather than a literal
+	// value from the SQL text. See reference/SpacetimeDB/crates/expr/src/
+	// check.rs lines 434-440 for accepted shapes and lines 487-488 for the
+	// rejection on non-identity columns.
+	LitSender
 )
 
 // Literal is a parsed SQL literal in raw lexical form.
 type Literal struct {
-	Kind LitKind
-	Int  int64
-	Bool bool
-	Str  string
+	Kind  LitKind
+	Int   int64
+	Float float64
+	Bool  bool
+	Str   string
+	Bytes []byte
 }
 
 // Filter is a single column comparison against a literal value.
@@ -119,6 +131,13 @@ type OrPredicate struct {
 
 func (OrPredicate) isPredicate() {}
 
+// TruePredicate is a bare boolean WHERE term that acts as a no-op filter.
+// It exists to accept reference-backed shapes such as `WHERE TRUE` without
+// inventing a synthetic comparison.
+type TruePredicate struct{}
+
+func (TruePredicate) isPredicate() {}
+
 // Statement is the parsed output.
 //
 // ProjectedAlias preserves the qualifier token the user wrote for the
@@ -164,6 +183,7 @@ const (
 	tokEOF tokKind = iota
 	tokIdent
 	tokNumber
+	tokHex
 	tokString
 	tokStar
 	tokEq
@@ -176,6 +196,7 @@ const (
 	tokDot
 	tokLParen
 	tokRParen
+	tokParam  // :name parameter placeholder (only :sender accepted downstream)
 	tokSymbol // any other single char — always unsupported
 )
 
@@ -243,6 +264,17 @@ func tokenize(s string) ([]token, error) {
 		case c == '.':
 			out = append(out, token{kind: tokDot, text: ".", pos: i})
 			i++
+		case c == ':':
+			start := i
+			i++
+			nameStart := i
+			for i < len(s) && isIdentCont(s[i]) {
+				i++
+			}
+			if i == nameStart {
+				return nil, fmt.Errorf("%w: unexpected ':' at position %d", ErrUnsupportedSQL, start)
+			}
+			out = append(out, token{kind: tokParam, text: s[nameStart:i], pos: start})
 		case c == '(':
 			out = append(out, token{kind: tokLParen, text: "(", pos: i})
 			i++
@@ -298,6 +330,35 @@ func tokenize(s string) ([]token, error) {
 				return nil, fmt.Errorf("%w: empty quoted identifier at position %d", ErrUnsupportedSQL, start)
 			}
 			out = append(out, token{kind: tokIdent, text: sb.String(), pos: start, quoted: true})
+		case c == '0' && i+1 < len(s) && (s[i+1] == 'x' || s[i+1] == 'X'):
+			start := i
+			i += 2
+			hexStart := i
+			for i < len(s) && isHexDigit(s[i]) {
+				i++
+			}
+			if i == hexStart {
+				return nil, fmt.Errorf("%w: malformed hex literal at position %d", ErrUnsupportedSQL, start)
+			}
+			if i < len(s) && (isIdentStart(s[i]) || s[i] == '.') {
+				return nil, fmt.Errorf("%w: malformed hex literal at position %d", ErrUnsupportedSQL, start)
+			}
+			out = append(out, token{kind: tokHex, text: s[start:i], pos: start})
+		case (c == 'X' || c == 'x') && i+1 < len(s) && s[i+1] == '\'':
+			start := i
+			i += 2
+			hexStart := i
+			for i < len(s) && isHexDigit(s[i]) {
+				i++
+			}
+			if i == hexStart || i >= len(s) || s[i] != '\'' {
+				return nil, fmt.Errorf("%w: malformed hex literal at position %d", ErrUnsupportedSQL, start)
+			}
+			i++
+			if i < len(s) && (isIdentStart(s[i]) || s[i] == '.') {
+				return nil, fmt.Errorf("%w: malformed hex literal at position %d", ErrUnsupportedSQL, start)
+			}
+			out = append(out, token{kind: tokHex, text: s[start:i], pos: start})
 		case c == '-' || (c >= '0' && c <= '9'):
 			start := i
 			if c == '-' {
@@ -308,6 +369,16 @@ func tokenize(s string) ([]token, error) {
 			}
 			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 				i++
+			}
+			if i < len(s) && s[i] == '.' {
+				j := i + 1
+				if j >= len(s) || !(s[j] >= '0' && s[j] <= '9') {
+					return nil, fmt.Errorf("%w: malformed numeric literal at position %d", ErrUnsupportedSQL, start)
+				}
+				i = j + 1
+				for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+					i++
+				}
 			}
 			if i < len(s) && (isIdentStart(s[i]) || s[i] == '.') {
 				return nil, fmt.Errorf("%w: malformed numeric literal at position %d", ErrUnsupportedSQL, start)
@@ -334,6 +405,10 @@ func isIdentStart(c byte) bool {
 
 func isIdentCont(c byte) bool {
 	return isIdentStart(c) || (c >= '0' && c <= '9')
+}
+
+func isHexDigit(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
 func isIdentifierToken(t token) bool {
@@ -618,6 +693,10 @@ func (p *parser) parsePredicateTerm(bindings relationBindings) (Predicate, error
 		p.advance()
 		return pred, nil
 	}
+	if t := p.peek(); t.kind == tokIdent && !t.quoted && strings.EqualFold(t.text, "TRUE") {
+		p.advance()
+		return TruePredicate{}, nil
+	}
 	return p.parseComparisonPredicate(bindings)
 }
 
@@ -632,6 +711,8 @@ func (p *parser) parseComparisonPredicate(bindings relationBindings) (Predicate,
 func flattenAndFilters(pred Predicate) ([]Filter, bool) {
 	switch p := pred.(type) {
 	case nil:
+		return nil, true
+	case TruePredicate:
 		return nil, true
 	case ComparisonPredicate:
 		return []Filter{p.Filter}, true
@@ -712,11 +793,25 @@ func (p *parser) parseLiteral() (Literal, error) {
 	switch t.kind {
 	case tokNumber:
 		p.advance()
+		if strings.Contains(t.text, ".") {
+			f, err := strconv.ParseFloat(t.text, 64)
+			if err != nil {
+				return Literal{}, fmt.Errorf("%w: float literal %q out of range", ErrUnsupportedSQL, t.text)
+			}
+			return Literal{Kind: LitFloat, Float: f}, nil
+		}
 		n, err := strconv.ParseInt(t.text, 10, 64)
 		if err != nil {
 			return Literal{}, fmt.Errorf("%w: integer literal %q out of range", ErrUnsupportedSQL, t.text)
 		}
 		return Literal{Kind: LitInt, Int: n}, nil
+	case tokHex:
+		p.advance()
+		b, err := parseHexLiteral(t.text)
+		if err != nil {
+			return Literal{}, err
+		}
+		return Literal{Kind: LitBytes, Bytes: b}, nil
 	case tokString:
 		p.advance()
 		return Literal{Kind: LitString, Str: t.text}, nil
@@ -730,6 +825,12 @@ func (p *parser) parseLiteral() (Literal, error) {
 			return Literal{Kind: LitBool, Bool: false}, nil
 		}
 		return Literal{}, p.unsupported(fmt.Sprintf("expected literal, got identifier %q", t.text))
+	case tokParam:
+		if !strings.EqualFold(t.text, "sender") {
+			return Literal{}, p.unsupported(fmt.Sprintf("unknown SQL parameter %q", ":"+t.text))
+		}
+		p.advance()
+		return Literal{Kind: LitSender}, nil
 	default:
 		return Literal{}, p.unsupported(fmt.Sprintf("expected literal, got %q", t.text))
 	}

@@ -20,7 +20,7 @@ func handleSubscribeSingle(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
-	compiled, err := compileSQLQueryString(msg.QueryString, sl)
+	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity)
 	if err != nil {
 		sendError(conn, SubscriptionError{
 			RequestID: optionalUint32(msg.RequestID),

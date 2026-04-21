@@ -78,3 +78,33 @@ func TestCoerceUnsupportedKind(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnsupportedSQL (floats deferred)", err)
 	}
 }
+
+func TestCoerceSenderWithoutCallerFails(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitSender}, types.KindBytes)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestCoerceSenderWithCallerToBytes(t *testing.T) {
+	caller := [32]byte{1, 2, 3}
+	v, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindBytes, &caller)
+	if err != nil {
+		t.Fatalf("CoerceWithCaller error: %v", err)
+	}
+	if v.Kind() != types.KindBytes {
+		t.Fatalf("Kind = %v, want KindBytes", v.Kind())
+	}
+	got := v.AsBytes()
+	if len(got) != 32 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
+		t.Fatalf("AsBytes = %x, want caller identity bytes", got)
+	}
+}
+
+func TestCoerceSenderRejectsNonBytesColumn(t *testing.T) {
+	caller := [32]byte{1}
+	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindString, &caller)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}

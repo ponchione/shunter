@@ -24,7 +24,7 @@ func handleSubscribeMulti(
 ) {
 	preds := make([]any, 0, len(msg.QueryStrings))
 	for _, qs := range msg.QueryStrings {
-		compiled, err := compileSQLQueryString(qs, sl)
+		compiled, err := compileSQLQueryString(qs, sl, &conn.Identity)
 		if err != nil {
 			sendError(conn, SubscriptionError{
 				RequestID: optionalUint32(msg.RequestID),

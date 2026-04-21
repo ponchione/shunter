@@ -38,7 +38,7 @@ func handleOneOffQuery(
 	stateAccess CommittedStateAccess,
 	sl SchemaLookup,
 ) {
-	compiled, err := compileSQLQueryString(msg.QueryString, sl)
+	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity)
 	if err != nil {
 		sendError(conn, OneOffQueryResult{
 			MessageID: msg.MessageID,
