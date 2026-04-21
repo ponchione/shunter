@@ -23,6 +23,8 @@ const (
 	TagFloat64 byte = 10
 	TagString  byte = 11
 	TagBytes   byte = 12
+	TagInt128  byte = 13
+	TagUint128 byte = 14
 )
 
 // EncodeValue writes a Value in BSATN format: tag byte + LE payload.
@@ -95,6 +97,20 @@ func EncodeValue(w io.Writer, v types.Value) error {
 		}
 		_, err := w.Write(b)
 		return err
+	case types.KindInt128:
+		hi, lo := v.AsInt128()
+		var wide [16]byte
+		binary.LittleEndian.PutUint64(wide[0:8], lo)
+		binary.LittleEndian.PutUint64(wide[8:16], uint64(hi))
+		_, err := w.Write(wide[:])
+		return err
+	case types.KindUint128:
+		hi, lo := v.AsUint128()
+		var wide [16]byte
+		binary.LittleEndian.PutUint64(wide[0:8], lo)
+		binary.LittleEndian.PutUint64(wide[8:16], hi)
+		_, err := w.Write(wide[:])
+		return err
 	default:
 		return &UnknownValueTagError{Tag: tag}
 	}
@@ -115,6 +131,8 @@ func EncodedValueSize(v types.Value) int {
 		return 1 + 4 + len(v.AsString())
 	case types.KindBytes:
 		return 1 + 4 + len(v.AsBytes())
+	case types.KindInt128, types.KindUint128:
+		return 17
 	default:
 		return 0
 	}

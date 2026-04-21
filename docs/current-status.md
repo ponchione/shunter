@@ -17,7 +17,7 @@ It is best described as:
 
 As of the current audit pass:
 - Broad verification: `rtk go test ./...`
-- Result: `Go test: 1315 passed in 10 packages`
+- Result: `Go test: 1339 passed in 10 packages`
 - Broad build verification: `rtk go build ./...`
 - Result: `Go build: Success`
 - Code inventory (live repo-wide count, excluding `reference/`): `228` Go files, `42217` lines of Go code
@@ -86,6 +86,7 @@ Current important differences include:
 - no composite `Sum` / `Array` / nested `Product` value model
 - single-column primary-key / auto-increment model is simpler than the reference
 - changeset metadata is thinner than the reference
+- 128-bit integer column kinds `KindInt128` / `KindUint128` landed 2026-04-21 (first column-kind widening slice). BSATN primitive-type tags 13 / 14 (16 bytes LE), coerce promotes `LitInt` via `NewInt128FromInt64` / `NewUint128FromUint64`, subscription canonical hashing writes 16 bytes. Two reference `check.rs:360-370` rows now accept end-to-end (`i128 = 127`, `u128 = 127`). `i256` / `u256` / timestamp / array / product kinds remain unrealizable pending further widening slices.
 
 ### Commit log / recovery
 - Shunter's BSATN is a rewrite, not the same codec contract

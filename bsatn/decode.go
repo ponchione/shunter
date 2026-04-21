@@ -114,6 +114,22 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		return types.NewBytes(data), nil
+	case TagInt128:
+		var wide [16]byte
+		if _, err := io.ReadFull(r, wide[:]); err != nil {
+			return types.Value{}, err
+		}
+		lo := binary.LittleEndian.Uint64(wide[0:8])
+		hi := binary.LittleEndian.Uint64(wide[8:16])
+		return types.NewInt128(int64(hi), lo), nil
+	case TagUint128:
+		var wide [16]byte
+		if _, err := io.ReadFull(r, wide[:]); err != nil {
+			return types.Value{}, err
+		}
+		lo := binary.LittleEndian.Uint64(wide[0:8])
+		hi := binary.LittleEndian.Uint64(wide[8:16])
+		return types.NewUint128(hi, lo), nil
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}

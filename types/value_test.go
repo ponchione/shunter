@@ -194,6 +194,127 @@ func TestRoundTripBytes(t *testing.T) {
 	}
 }
 
+func TestRoundTripInt128(t *testing.T) {
+	cases := []struct {
+		hi int64
+		lo uint64
+	}{
+		{0, 0},
+		{0, 127},
+		{-1, ^uint64(0)},            // -1
+		{-1, 0},                     // i128 minimum-ish (hi=-1, lo=0 = -2^64)
+		{math.MinInt64, 0},          // i128 minimum
+		{math.MaxInt64, ^uint64(0)}, // i128 maximum
+	}
+	for _, c := range cases {
+		v := NewInt128(c.hi, c.lo)
+		if v.Kind() != KindInt128 {
+			t.Fatalf("Kind = %v, want Int128", v.Kind())
+		}
+		hi, lo := v.AsInt128()
+		if hi != c.hi || lo != c.lo {
+			t.Fatalf("AsInt128 = (%d,%d), want (%d,%d)", hi, lo, c.hi, c.lo)
+		}
+	}
+}
+
+func TestRoundTripUint128(t *testing.T) {
+	cases := []struct{ hi, lo uint64 }{
+		{0, 0},
+		{0, 127},
+		{0, ^uint64(0)},          // 2^64-1
+		{1, 0},                   // 2^64
+		{^uint64(0), ^uint64(0)}, // u128 maximum
+	}
+	for _, c := range cases {
+		v := NewUint128(c.hi, c.lo)
+		if v.Kind() != KindUint128 {
+			t.Fatalf("Kind = %v, want Uint128", v.Kind())
+		}
+		hi, lo := v.AsUint128()
+		if hi != c.hi || lo != c.lo {
+			t.Fatalf("AsUint128 = (%d,%d), want (%d,%d)", hi, lo, c.hi, c.lo)
+		}
+	}
+}
+
+func TestInt128FromInt64SignExtends(t *testing.T) {
+	v := NewInt128FromInt64(-1)
+	hi, lo := v.AsInt128()
+	if hi != -1 || lo != ^uint64(0) {
+		t.Fatalf("NewInt128FromInt64(-1) = (%d,%d), want (-1,^0)", hi, lo)
+	}
+	v = NewInt128FromInt64(127)
+	hi, lo = v.AsInt128()
+	if hi != 0 || lo != 127 {
+		t.Fatalf("NewInt128FromInt64(127) = (%d,%d), want (0,127)", hi, lo)
+	}
+}
+
+func TestUint128FromUint64ZeroExtends(t *testing.T) {
+	v := NewUint128FromUint64(^uint64(0))
+	hi, lo := v.AsUint128()
+	if hi != 0 || lo != ^uint64(0) {
+		t.Fatalf("NewUint128FromUint64(^0) = (%d,%d), want (0,^0)", hi, lo)
+	}
+}
+
+func TestEqualInt128AndUint128(t *testing.T) {
+	if !NewInt128(1, 2).Equal(NewInt128(1, 2)) {
+		t.Fatal("Int128 Equal: identical not equal")
+	}
+	if NewInt128(1, 2).Equal(NewInt128(1, 3)) {
+		t.Fatal("Int128 Equal: differing lo reported equal")
+	}
+	if NewInt128(1, 2).Equal(NewUint128(1, 2)) {
+		t.Fatal("Int128 and Uint128 with same payload should not be Equal — cross-kind")
+	}
+	if !NewUint128(0, 127).Equal(NewUint128(0, 127)) {
+		t.Fatal("Uint128 Equal: identical not equal")
+	}
+}
+
+func TestCompareInt128(t *testing.T) {
+	// -1 < 0
+	if NewInt128(-1, ^uint64(0)).Compare(NewInt128(0, 0)) >= 0 {
+		t.Fatal("Int128 Compare: -1 should be < 0")
+	}
+	// Same hi, larger lo
+	if NewInt128(0, 10).Compare(NewInt128(0, 20)) >= 0 {
+		t.Fatal("Int128 Compare: (0,10) should be < (0,20)")
+	}
+	// Smaller hi wins
+	if NewInt128(-5, ^uint64(0)).Compare(NewInt128(-1, 0)) >= 0 {
+		t.Fatal("Int128 Compare: (-5,^0) should be < (-1,0)")
+	}
+	// Equal
+	if NewInt128(3, 5).Compare(NewInt128(3, 5)) != 0 {
+		t.Fatal("Int128 Compare: equal reported non-zero")
+	}
+}
+
+func TestCompareUint128(t *testing.T) {
+	if NewUint128(0, 10).Compare(NewUint128(0, 20)) >= 0 {
+		t.Fatal("Uint128 Compare: (0,10) should be < (0,20)")
+	}
+	if NewUint128(0, ^uint64(0)).Compare(NewUint128(1, 0)) >= 0 {
+		t.Fatal("Uint128 Compare: (0,^0) should be < (1,0)")
+	}
+	if NewUint128(3, 5).Compare(NewUint128(3, 5)) != 0 {
+		t.Fatal("Uint128 Compare: equal reported non-zero")
+	}
+}
+
+func TestAccessor128PanicsOnWrongKind(t *testing.T) {
+	v := NewBool(true)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("AsInt128 on Bool did not panic")
+		}
+	}()
+	v.AsInt128()
+}
+
 // --- NaN rejection ---
 
 func TestFloat32RejectsNaN(t *testing.T) {
@@ -297,8 +418,10 @@ func TestValueKindString(t *testing.T) {
 		{KindFloat64, "Float64"},
 		{KindString, "String"},
 		{KindBytes, "Bytes"},
+		{KindInt128, "Int128"},
+		{KindUint128, "Uint128"},
 		{ValueKind(-1), "ValueKind(-1)"},
-		{ValueKind(len(kindNames)), "ValueKind(13)"},
+		{ValueKind(len(kindNames)), "ValueKind(15)"},
 	}
 	for _, c := range cases {
 		if got := c.k.String(); got != c.want {

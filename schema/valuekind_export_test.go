@@ -25,6 +25,8 @@ func TestValueKindExportStringAll(t *testing.T) {
 		{KindFloat64, "float64"},
 		{KindString, "string"},
 		{KindBytes, "bytes"},
+		{KindInt128, "int128"},
+		{KindUint128, "uint128"},
 	}
 	for _, c := range cases {
 		got := ValueKindExportString(c.k)
@@ -72,6 +74,7 @@ func TestAutoIncrementBoundsNonInteger(t *testing.T) {
 	nonInt := []ValueKind{
 		KindBool, KindFloat32, KindFloat64,
 		KindString, KindBytes,
+		KindInt128, KindUint128,
 	}
 	for _, k := range nonInt {
 		_, _, ok := AutoIncrementBounds(k)

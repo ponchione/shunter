@@ -2,7 +2,37 @@
 
 Use this file to start the next agent on the next real Shunter parity / hardening step with no prior context.
 
-## What just landed (2026-04-21, `sql.rs:457-476` `parse_sql::invalid` pure-syntax rejection pin bundle)
+## What just landed (2026-04-21, column-kind widening Slice 1 — `i128` / `u128` realized)
+
+First column-kind widening slice. `types.ValueKind` gained `KindInt128` / `KindUint128`; `types.Value` grew two uint64 storage slots (`hi128`, `lo128`); BSATN added tags 13 (Int128) and 14 (Uint128) encoding 16 bytes LE (lo then hi); `query/sql/coerce.go` promotes `LitInt` to 128-bit via `NewInt128FromInt64` / `NewUint128FromUint64` — int64 always fits both widths so the coerce branches are one-liners, and `u128 = -1` still rejects on the existing negative-LitInt guard; subscription canonical hashing writes hi then lo (16 bytes big-endian). Autoincrement remains 64-bit-only by design — `schema.AutoIncrementBounds` returns `ok=false` for 128-bit, so `store/transaction.go::newAutoIncrementValue` / `store/recovery.go::replayAutoIncrementValueAsUint64` / `commitlog/recovery.go::autoIncrementValueAsUint64` never see a 128-bit kind. `schema.GoTypeToValueKind` continues to reject 128-bit (Go has no native `int128` / `uint128`); column-kind instantiation is library-API driven.
+
+Unlocked reference rows:
+- `check.rs:360-370` `valid_literals_for_type` rows `i128 = 127` and `u128 = 127` now accept end-to-end. Pinned by extending the existing `TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth` / `TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth` bundle with two new subtests each (no structural change, just new rows in the `cases` slice).
+- `check.rs:382-385` `invalid_literals` negative-on-unsigned extended to the u128 row via dedicated `TestHandleSubscribeSingle_ParityUint128NegativeRejected` / `TestHandleOneOffQuery_ParityUint128NegativeRejected`.
+
+Verification:
+- `rtk go test ./types -count=1` → 9 new round-trip / Equal / Compare / accessor-panic tests
+- `rtk go test ./bsatn -count=1` → 7 new round-trip values + `TestEncodedValueSize128`
+- `rtk go test ./query/sql -count=1` → 6 new coerce pins (`TestCoerceIntLiteralToInt128`, `TestCoerceNegativeIntLiteralToInt128`, `TestCoerceIntLiteralToUint128`, `TestCoerceNegativeIntoUint128Fails`, `TestCoerceStringLiteralOnInt128Rejected`, `TestCoerceFloatLiteralOnUint128Rejected`, `TestCoerceSenderRejectsInt128Column`)
+- `rtk go test ./subscription -count=1` → 2 new hash pins (`TestQueryHashInt128VsUint128`, `TestQueryHashInt128DiffersByPayload`) plus 4 new entries in `TestQueryHashAllKindsRoundTrip`
+- `rtk go test ./schema -count=1` → `valuekind_export_test.go` extended for 128-bit in both `TestValueKindExportStringAll` and `TestAutoIncrementBoundsNonInteger`
+- `rtk go test ./protocol -run 'ParityValidLiteralOnEachIntegerWidth|ParityUint128NegativeRejected' -count=1 -v` → 28 passed (24 subtests + 4 top-level tests)
+- `rtk go fmt ./...`, `rtk go vet ./...` → clean
+- `rtk go test ./...` → `Go test: 1339 passed in 10 packages`
+
+Clean-tree baseline: `Go test: 1339 passed in 10 packages` (previous 1315 + 24 new tests).
+
+Remaining `check.rs:360-370` / `check.rs:284-332` shapes still deferred:
+- `i256` / `u256` column kinds — need 32-byte storage (`[4]uint64` or similar) and BigDecimal-style literal widening to accept `u256 = 1e40` (the ref test case; `1e40` overflows `int64` so today's `parseNumericLiteral` collapses it to `LitFloat`)
+- timestamp column kind — needs RFC3339 SQL literal grammar (today's numeric lexer cannot produce `'2025-02-10T15:45:30Z'` as a timestamp literal; string-literal on timestamp column rejects)
+- array / product column kinds — recursive `Value` representation, also unblocks `check.rs:523-525` product-value comparison
+
+Next candidate slices (pick one, keep scope narrow):
+1. **i256 / u256 without `1e40`** — 32-byte storage (`hi, midhi, midlo, lo uint64`), BSATN tags 15 / 16 (32 bytes LE), coerce from `LitInt`; pin `i256 = 127` / `u256 = 127` (leaving `u256 = 1e40` as a separate follow-up that needs BigDecimal literal support).
+2. **Timestamp column kind** — reuse `i64` slot for microseconds since unix epoch, add RFC3339 literal grammar (`LitTimestamp` or extend `LitString` parsing to attempt timestamp on KindTimestamp columns); pin `ts = '2025-02-10T15:45:30Z'`.
+3. **Array column kind (narrow: KindString elements only)** — recursive Value with element kind embedded in the column schema, new BSATN tag, minimal coerce surface; pin `SELECT * FROM t WHERE arr = :sender` rejection (which today fires incidentally via `Coerce` default branch) as a **positive** parity contract with array support. Biggest representation change.
+
+## What landed earlier (2026-04-21, `sql.rs:457-476` `parse_sql::invalid` pure-syntax rejection pin bundle)
 
 Reference `parse_sql::invalid` test block at `reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs:457-476` asserts seven shapes reject at the parser boundary:
 
@@ -519,7 +549,7 @@ Do not call the work done unless all are true:
 - reference-backed or debt-anchored target shape was checked directly against reference material or current live code
 - every newly accepted or rejected shape has focused tests
 - already-landed parity pins still pass (including the `:sender` parser/coerce/protocol pins listed in `docs/parity-phase0-ledger.md`)
-- full suite still passes. Clean-tree baseline is `Go test: 1315 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 follow-through.
+- full suite still passes. Clean-tree baseline is `Go test: 1339 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 follow-through.
 - docs and handoff reflect the new truth exactly
 
 ## Deliverables for the next session

@@ -18,6 +18,8 @@ var exportStrings = [...]string{
 	KindFloat64: "float64",
 	KindString:  "string",
 	KindBytes:   "bytes",
+	KindInt128:  "int128",
+	KindUint128: "uint128",
 }
 
 // ValueKindExportString returns the lowercase export name for a ValueKind.

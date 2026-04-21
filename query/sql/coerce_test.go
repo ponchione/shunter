@@ -175,3 +175,81 @@ func TestCoerceSenderRejectsNonBytesColumn(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
 	}
 }
+
+// TestCoerceIntLiteralToInt128 pins reference valid_literals_for_type at
+// check.rs:360-370 for the i128 row — `= 127` on an i128 column must
+// type-check. LitInt always fits Int128 via sign-extension from int64.
+func TestCoerceIntLiteralToInt128(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitInt, Int: 127}, types.KindInt128)
+	if err != nil {
+		t.Fatalf("Coerce(127 → Int128) error: %v", err)
+	}
+	if v.Kind() != types.KindInt128 {
+		t.Fatalf("Kind = %v, want Int128", v.Kind())
+	}
+	hi, lo := v.AsInt128()
+	if hi != 0 || lo != 127 {
+		t.Fatalf("AsInt128 = (%d,%d), want (0,127)", hi, lo)
+	}
+}
+
+func TestCoerceNegativeIntLiteralToInt128(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitInt, Int: -1}, types.KindInt128)
+	if err != nil {
+		t.Fatalf("Coerce(-1 → Int128) error: %v", err)
+	}
+	hi, lo := v.AsInt128()
+	if hi != -1 || lo != ^uint64(0) {
+		t.Fatalf("AsInt128 = (%d,%d), want (-1,^0)", hi, lo)
+	}
+}
+
+// TestCoerceIntLiteralToUint128 pins the u128 row of valid_literals_for_type.
+func TestCoerceIntLiteralToUint128(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitInt, Int: 127}, types.KindUint128)
+	if err != nil {
+		t.Fatalf("Coerce(127 → Uint128) error: %v", err)
+	}
+	if v.Kind() != types.KindUint128 {
+		t.Fatalf("Kind = %v, want Uint128", v.Kind())
+	}
+	hi, lo := v.AsUint128()
+	if hi != 0 || lo != 127 {
+		t.Fatalf("AsUint128 = (%d,%d), want (0,127)", hi, lo)
+	}
+}
+
+// TestCoerceNegativeIntoUint128Fails mirrors the reference invalid_literals
+// rejection for `u8 = -1` extended to u128.
+func TestCoerceNegativeIntoUint128Fails(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitInt, Int: -1}, types.KindUint128)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestCoerceStringLiteralOnInt128Rejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitString, Str: "127"}, types.KindInt128)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestCoerceFloatLiteralOnUint128Rejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitFloat, Float: 1.5}, types.KindUint128)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceSenderRejectsInt128Column pins that :sender is rejected on 128-bit
+// integer columns — they are not KindBytes, so the existing :sender guard
+// applies.
+func TestCoerceSenderRejectsInt128Column(t *testing.T) {
+	_ = math.MaxInt8 // keep math import live if the underlying file trims it
+	caller := [32]byte{1}
+	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindInt128, &caller)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}

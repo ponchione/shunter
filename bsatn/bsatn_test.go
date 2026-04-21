@@ -46,6 +46,13 @@ func TestValueRoundTrip(t *testing.T) {
 		types.NewString(""),
 		types.NewBytes([]byte{0xDE, 0xAD}),
 		types.NewBytes([]byte{}),
+		types.NewInt128(0, 127),
+		types.NewInt128(-1, ^uint64(0)),
+		types.NewInt128(math.MinInt64, 0),
+		types.NewInt128(math.MaxInt64, ^uint64(0)),
+		types.NewUint128(0, 0),
+		types.NewUint128(0, ^uint64(0)),
+		types.NewUint128(^uint64(0), ^uint64(0)),
 	}
 	for _, v := range cases {
 		var buf bytes.Buffer
@@ -154,5 +161,24 @@ func TestEncodedValueSize(t *testing.T) {
 	EncodeValue(&buf, v)
 	if EncodedValueSize(v) != buf.Len() {
 		t.Fatalf("size prediction %d != actual %d", EncodedValueSize(v), buf.Len())
+	}
+}
+
+func TestEncodedValueSize128(t *testing.T) {
+	cases := []types.Value{
+		types.NewInt128(0, 127),
+		types.NewUint128(^uint64(0), ^uint64(0)),
+	}
+	for _, v := range cases {
+		var buf bytes.Buffer
+		if err := EncodeValue(&buf, v); err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		if EncodedValueSize(v) != buf.Len() {
+			t.Fatalf("%v size prediction %d != actual %d", v.Kind(), EncodedValueSize(v), buf.Len())
+		}
+		if buf.Len() != 17 {
+			t.Fatalf("%v: expected 17 bytes, got %d", v.Kind(), buf.Len())
+		}
 	}
 }

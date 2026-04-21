@@ -97,6 +97,19 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		return coerceUnsigned(lit, kind, math.MaxUint32, func(u uint64) types.Value { return types.NewUint32(uint32(u)) })
 	case types.KindUint64:
 		return coerceUnsigned(lit, kind, math.MaxUint64, func(u uint64) types.Value { return types.NewUint64(u) })
+	case types.KindInt128:
+		if lit.Kind != LitInt {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		return types.NewInt128FromInt64(lit.Int), nil
+	case types.KindUint128:
+		if lit.Kind != LitInt {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		if lit.Int < 0 {
+			return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
+		}
+		return types.NewUint128FromUint64(uint64(lit.Int)), nil
 	default:
 		return types.Value{}, fmt.Errorf("%w: column kind %s not supported by SQL literal coercion", ErrUnsupportedSQL, kind)
 	}

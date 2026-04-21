@@ -2301,8 +2301,8 @@ func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected(
 // subtest builds a single-column table, stores a matching row, and
 // confirms `SELECT * FROM t WHERE {colname} = 127` accepts end-to-end on
 // every numeric column kind realized by `schema.ValueKind`
-// (i8/u8/i16/u16/i32/u32/i64/u64/f32/f64). i128/u128/i256/u256 are
-// deliberately skipped — no `schema.ValueKind` variant realizes them.
+// (i8/u8/i16/u16/i32/u32/i64/u64/f32/f64 plus i128/u128 added 2026-04-21).
+// i256/u256 are skipped — no `schema.ValueKind` variant realizes them yet.
 func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
 	f32Row, err := types.NewFloat32(127)
 	if err != nil {
@@ -2328,6 +2328,8 @@ func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
 		{"u64", schema.KindUint64, types.NewUint64(127)},
 		{"f32", schema.KindFloat32, f32Row},
 		{"f64", schema.KindFloat64, f64Row},
+		{"i128", schema.KindInt128, types.NewInt128(0, 127)},
+		{"u128", schema.KindUint128, types.NewUint128(0, 127)},
 	}
 
 	for i, tc := range cases {
@@ -2350,6 +2352,32 @@ func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
 				t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
 			}
 		})
+	}
+}
+
+// TestHandleOneOffQuery_ParityUint128NegativeRejected extends the
+// reference invalid_literals bundle at check.rs:382-385 to the Uint128
+// column kind. Mirrors the subscribe-side pin.
+func TestHandleOneOffQuery_ParityUint128NegativeRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint128(0, 1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC1},
+		QueryString: "SELECT * FROM t WHERE u128 = -1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
 	}
 }
 
