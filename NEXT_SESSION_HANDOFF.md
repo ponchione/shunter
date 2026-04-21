@@ -4,21 +4,35 @@ Use this file to start the next agent on the next real Shunter parity / hardenin
 
 ## What just landed (2026-04-21)
 
-Targeted flaky-test cleanup slice from the handoff's Option α candidate list: the `subscription/delta_pool_test.go` sync.Pool reuse tests were stabilized by dropping non-deterministic pointer-identity assertions and pinning only deterministic observable behavior.
+Targeted Tier-B hardening follow-through from Option α: the protocol lifecycle's outbound-writer supervision gap is now closed.
 
-- Sharp edge: three tests in `subscription/delta_pool_test.go` were asserting that `sync.Pool` would hand back the exact same backing allocation after `Release` → re-`Acquire` (`TestBufferPoolReusesDefaultSizedBuffers`, `TestCandidateScratchReusedAndCleared`, `TestDeltaViewReleaseReusesInsertDeleteBackingSlices`). That is not a valid contract: `sync.Pool` may drop cached entries at any GC cycle, especially under `-race`, so the tests were intermittently failing on a clean tree even though the production pool helpers were behaving correctly.
-- Root cause confirmed directly against live code: the helpers in `subscription/delta_pool.go` guarantee only observable reuse semantics — cleared length/maps, default capacity, oversized-buffer drop, and fresh row contents after `DeltaView.Release()`. They do not and cannot guarantee backing-pointer identity because the runtime controls pool retention.
-- Fix: test-only change. `subscription/delta_pool_test.go` now checks deterministic behavior only:
-  - `TestBufferPoolReturnsClearedDefaultSizedBuffers` loops through acquire/release cycles and pins `len==0`, `cap==pooledBufferDefaultCap`, and successful fresh writes after reuse.
-  - `TestCandidateScratchReleaseClearsMapsBeforeReuse` loops through acquire/release cycles and pins that `candidates` / `distinct` are empty before reuse, then repopulates them to prove reuse remains safe across iterations.
-  - `TestDeltaViewReleaseClearsInsertDeleteSlicesBeforeReuse` loops through `NewDeltaView(...)->Release()` cycles and pins that reused insert/delete slices expose only the fresh changeset rows, not stale prior content.
-- No production code changed. This slice closes the specific flaky-test class rather than widening pool semantics.
+- Root cause confirmed in live code: `protocol/upgrade.go` spawned `runDispatchLoop`, `runKeepalive`, `runOutboundWriter`, and `superviseLifecycle`, but the supervisor only watched `dispatchDone` / `keepaliveDone`. If the outbound writer exited first on a write-side websocket failure from `protocol/outbound.go`, no disconnect was driven until some other goroutine happened to exit.
+- Failure shape: delivery was already dead, but `ConnManager` still retained the `*Conn`, subscriptions were not reaped, and `c.closed` stayed open. That left the connection registered past the first owned goroutine exit and violated the intended ownership model for the per-connection lifecycle goroutine set.
+- Fix shape: `protocol/upgrade.go` now wraps `runOutboundWriter` with `outboundDone`, and `protocol/disconnect.go::superviseLifecycle` treats `outboundDone` exactly like `dispatchDone` / `keepaliveDone`: any of the three first exits now triggers one bounded `Disconnect`, and the supervisor drains all three done channels before returning.
+- New focused pin: `protocol/disconnect_test.go::TestSuperviseLifecycleInvokesDisconnectOnOutboundWriterExit` closes a synthetic `outboundDone` while the other two done channels remain open and proves the supervisor drives `Disconnect` immediately.
+- Existing supervisor happy-path / bounded-ctx pins were updated, not replaced: `TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit`, `TestSuperviseLifecycleBoundsDisconnectOnInboxHang`, `TestSuperviseLifecycleDeliversOnInboxOK`, and `TestClientInitiatedClose_DisconnectSequenceRuns` now include the outbound writer in the supervised goroutine set.
+- New slice doc: `docs/hardening-oi-004-outbound-writer-supervision.md`.
 
-Baseline note (2026-04-21): clean-tree full-suite remains `Go test: 1156 passed in 10 packages` after this slice (test count unchanged). Targeted stress now passes: `rtk go test ./subscription -run 'TestBufferPool(ReturnsClearedDefaultSizedBuffers|DropsOversizedBuffers)|TestCandidateScratchReleaseClearsMapsBeforeReuse|TestDeltaViewReleaseClearsInsertDeleteSlicesBeforeReuse' -race -count=10 -v`.
+Baseline note (2026-04-21): targeted protocol verification passed: `rtk go test ./protocol -run 'Test(SuperviseLifecycle(InvokesDisconnectOn(ReadPumpExit|OutboundWriterExit)|BoundsDisconnectOnInboxHang|DeliversOnInboxOK)|ClientInitiatedClose_DisconnectSequenceRuns)' -count=1 -v`. Broader protocol verification and repo-wide verification should be re-run after any next slice.
 
-Flaky test note: two known intermittent tests still surface on a clean tree. Neither was caused by this slice.
-- `executor/TestParityP0Sched001ReplayEnqueuesByIterationOrder` depends on Go map iteration order matching RowID insertion order. Fix: either sort enqueues by `(next_run_at_ns, schedule_id)` or refactor the seed to avoid map-iteration dependence.
-- `subscription/TestProjectedRowsBeforeAppendsDeletesAfterBagSubtraction` (`eval_projected_rows_test.go:31-70`) builds a mock committed view from a `map[TableID][]types.ProductValue`, then asserts `projectedRowsBefore(dv, 1)[0]` equals rowA and `[1]` equals rowB. Current-map-rows originate from `t.rows` map iteration order, which Go does not guarantee.
+Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, and protocol lifecycle follow-through.
+
+## Recommended next slice
+
+The scheduler replay flake is closed. Prefer returning to the repo's grounded parity/hardening backlog instead of more test-stability cleanup.
+
+Why this next:
+- the known clean-tree intermittent tests are drained
+- the remaining work is back on the real product/parity path rather than test harness noise
+- Option α still has the clearest narrow hardening follow-through slices if a concrete seam surfaces
+
+Expected shape of the next session:
+1. Read the required startup docs in the listed order.
+2. Pick the next grounded anchor from `TECH-DEBT.md`, `docs/spacetimedb-parity-roadmap.md`, or `docs/parity-phase0-ledger.md`.
+3. Prefer a narrow Tier-B hardening slice under Option α unless live workload/reference evidence points directly to β/γ/δ.
+4. If taking another scheduler slice, treat `docs/parity-p0-sched-001-startup-firing.md` as authoritative: the remaining open scheduler work is intended-time ordering, `fn_start`-clamped schedule-now, or one-shot panic deletion — not replay-map-order cleanup.
+5. Re-run targeted package tests, then `rtk go test ./...`.
+6. Update `docs/current-status.md` and this handoff with the new truth.
 
 Prior closed anchors in the same calendar week (still landed, included here for continuity):
 - OI-006 fanout per-subscriber slice-header aliasing sub-hazard — `docs/hardening-oi-006-fanout-aliasing.md`
@@ -26,7 +40,8 @@ Prior closed anchors in the same calendar week (still landed, included here for 
 - OI-005 `StateView.ScanTable` iterator surface — `docs/hardening-oi-005-state-view-scan-aliasing.md`
 - OI-004 dispatch-handler ctx sub-hazard — `docs/hardening-oi-004-dispatch-handler-context.md`
 - OI-004 `forwardReducerResponse` ctx / Done lifecycle — `docs/hardening-oi-004-forward-reducer-response-context.md`
-- OI-004 `ConnManager.CloseAll` disconnect-ctx — `docs/hardening-oi-004-closeall-disconnect-context.md`
+- OI-004 `ConnManager.CloseAll` disconnect-ctx sub-hazard — `docs/hardening-oi-004-closeall-disconnect-context.md`
+- OI-004 outbound-writer supervision sub-hazard — `docs/hardening-oi-004-outbound-writer-supervision.md`
 - OI-004 `superviseLifecycle` disconnect-ctx — `docs/hardening-oi-004-supervise-disconnect-context.md`
 - OI-004 `connManagerSender.enqueueOnConn` overflow-disconnect background-ctx — `docs/hardening-oi-004-sender-disconnect-context.md`
 - OI-004 `watchReducerResponse` goroutine-leak escape route — `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`
@@ -55,9 +70,9 @@ With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, all nine O
 
 Pick one narrow sub-hazard and land a narrow fix with a focused test, following the shape of `docs/hardening-oi-006-row-payload-sharing.md` (latest; contract-pin precedent at a row-payload sharing seam with observational identity+mutation-leak pins), `docs/hardening-oi-005-committed-state-table-raw-pointer.md` (prior contract-pin precedent at a raw-pointer seam), `docs/hardening-oi-005-state-view-scan-aliasing.md` (materialization precedent), `docs/hardening-oi-004-dispatch-handler-context.md` (derived-ctx lifecycle wire precedent), or `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md` (earlier contract-pin precedent). Concrete candidates:
 - OI-004 `ClientSender.Send` no-ctx follow-on: `protocol/sender.go` sends are synchronous without their own ctx, so callers cannot propagate a shorter cancellation scope than `DisconnectTimeout` into the overflow path. No concrete consumer needs this today; defer until a specific seam surfaces.
-- OI-004 remaining detached-goroutine audit in `protocol/conn.go` / `lifecycle.go` / `outbound.go` / `keepalive.go`: each would be its own narrow sub-slice if a specific leak site surfaces. The dispatch-loop and disconnect paths are now audited and pinned; the remaining lifecycle surface has not surfaced a specific seam but has not been exhaustively walked either. `closeWithHandshake` fire-and-forget goroutines at `keepalive.go:77`, `disconnect.go:49`, `dispatch.go:46`, and `dispatch.go:188` are already bounded via `context.WithTimeout(context.Background(), CloseHandshakeTimeout)` inside `closeWithHandshake` at `close.go:25-29` — those are not open sub-hazards.
+- OI-004 remaining detached-goroutine audit in `protocol/conn.go` / `lifecycle.go` / `keepalive.go`: each would be its own narrow sub-slice if a specific leak site surfaces. The dispatch-loop and disconnect paths are now audited and pinned; the outbound-writer supervision gap is also closed. `closeWithHandshake` fire-and-forget goroutines at `keepalive.go:77`, `disconnect.go:49`, `dispatch.go:46`, and `dispatch.go:188` are already bounded via `context.WithTimeout(context.Background(), CloseHandshakeTimeout)` inside `closeWithHandshake` at `close.go:25-29` — those are not open sub-hazards.
 - OI-008 top-level bootstrap: larger-scope work; would need its own decision doc and parity alignment (no `cmd/` entrypoint, no polished embedding surface, no `main` package).
-- Flaky `executor/TestParityP0Sched001ReplayEnqueuesByIterationOrder` cleanup: replace the map-iteration-order contract with a deterministic one (sort by `(next_run_at_ns, schedule_id)`; or refactor the seed so only one ordering is observed). This is borderline — the test was pinned as "iteration-order semantics" intentionally, so touching it requires re-anchoring to reference behavior; reference uses `DelayQueue` which is not strictly sorted either.
+- scheduler replay-map-order cleanup is now closed: the brittle map-iteration-sensitive parity pin was replaced with deterministic helper-level coverage (`TestParityP0Sched001ReplayPreservesScanOrderWithoutSorting`) without changing live replay sorting semantics
 - Flaky `subscription/TestProjectedRowsBeforeAppendsDeletesAfterBagSubtraction` cleanup: refactor the seed to a single-row table so the map-iteration ordering is not exercised, or add deterministic sorting inside `projectedRowsBefore` (semantic change — the function returns rows in `current ++ tx-deletes` order, and sorting would change the observed order for every caller).
 
 ### Option β — Broader SQL/query-surface parity beyond TD-142
@@ -88,6 +103,11 @@ Prefer Option α over β/γ/δ unless workload or reference evidence directly su
 The repo already has substantial implementation. Do not treat this as a docs-only project. Do not do a broad audit. Do not restart parity analysis from zero.
 
 Your job is to continue from the current live state. Pick the next grounded anchor from `docs/spacetimedb-parity-roadmap.md`, `docs/parity-phase0-ledger.md`, or `TECH-DEBT.md`.
+
+Clean-room reminder:
+- parity target means matching externally meaningful behavior where required, not translating Rust source into Go
+- `reference/SpacetimeDB/` stays research-only and read-only; do not copy, transliterate, or mechanically port code from it
+- re-derive behavior from public docs, reference outcomes, and live Shunter contracts, then implement natively in Go
 
 ## Mandatory reading order
 
@@ -190,8 +210,8 @@ Do not call the work done unless all are true:
 
 - reference-backed or debt-anchored target shape was checked directly against reference material or current live code
 - every newly accepted or rejected shape has focused tests
-- already-landed parity pins still pass (including `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForInserts`, `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForDeletes`, `TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers`, `TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers`, `TestCommittedStateTableSameEnvelopeReturnsSamePointer`, `TestCommittedStateTableRetainedPointerIsStaleAfterReRegister`, `TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose`, `TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete`, `TestDispatchLoop_HandlerCtxCancelsOnConnClose`, `TestDispatchLoop_HandlerCtxCancelsOnOuterCtx`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOutboundBlocked`, `TestCloseAllBoundsDisconnectOnInboxHang`, `TestCloseAllDeliversOnInboxOK`, `TestCloseAll_DisconnectsEveryConnection`, `TestCloseAll_EmptyManagerNoOp`, `TestSuperviseLifecycleBoundsDisconnectOnInboxHang`, `TestSuperviseLifecycleDeliversOnInboxOK`, `TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang`, `TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK`, `TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation`, `TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation`, `TestWatchReducerResponseExitsOnConnClose`, `TestWatchReducerResponseDeliversOnRespCh`, `TestWatchReducerResponseExitsOnRespChClose`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnInsert`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnRemove`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_Join`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_SingleTable`, `TestCommittedSnapshotTableScanPanicsOnMidIterClose`, `TestCommittedSnapshotIndexRangePanicsOnMidIterClose`, `TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose`, `TestCommittedSnapshotTableScanPanicsAfterClose`, `TestCommittedSnapshotIndexScanPanicsAfterClose`, `TestCommittedSnapshotIndexRangePanicsAfterClose`, `TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`, `TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment`, `TestParityP0Sched001PanicRetainsScheduledRow`, `TestPhase2Slice3DefaultOutgoingBufferMatchesReference`, and `TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit`). Note: `TestParityP0Sched001ReplayEnqueuesByIterationOrder` and `TestProjectedRowsBeforeAppendsDeletesAfterBagSubtraction` are the remaining known intermittent tests on a clean tree — do not treat a single-run failure there as caused by your slice.
-- full suite still passes. Clean-tree baseline remains `Go test: 1156 passed in 10 packages`. Remaining known intermittent tests are the two listed above; do not treat them as regression from this slice.
+- already-landed parity pins still pass (including `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForInserts`, `TestEvalFanoutRowPayloadsSharedAcrossSubscribersForDeletes`, `TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers`, `TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers`, `TestCommittedStateTableSameEnvelopeReturnsSamePointer`, `TestCommittedStateTableRetainedPointerIsStaleAfterReRegister`, `TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose`, `TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete`, `TestDispatchLoop_HandlerCtxCancelsOnConnClose`, `TestDispatchLoop_HandlerCtxCancelsOnOuterCtx`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed`, `TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOutboundBlocked`, `TestCloseAllBoundsDisconnectOnInboxHang`, `TestCloseAllDeliversOnInboxOK`, `TestCloseAll_DisconnectsEveryConnection`, `TestCloseAll_EmptyManagerNoOp`, `TestSuperviseLifecycleBoundsDisconnectOnInboxHang`, `TestSuperviseLifecycleDeliversOnInboxOK`, `TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang`, `TestEnqueueOnConnOverflowDisconnectDeliversOnInboxOK`, `TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation`, `TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation`, `TestWatchReducerResponseExitsOnConnClose`, `TestWatchReducerResponseDeliversOnRespCh`, `TestWatchReducerResponseExitsOnRespChClose`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnInsert`, `TestCommittedSnapshotIndexSeekReturnsIndependentSliceAfterCloseOnRemove`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_Join`, `TestEvalAndBroadcastDoesNotUseViewAfterReturn_SingleTable`, `TestCommittedSnapshotTableScanPanicsOnMidIterClose`, `TestCommittedSnapshotIndexRangePanicsOnMidIterClose`, `TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose`, `TestCommittedSnapshotTableScanPanicsAfterClose`, `TestCommittedSnapshotIndexScanPanicsAfterClose`, `TestCommittedSnapshotIndexRangePanicsAfterClose`, `TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`, `TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment`, `TestParityP0Sched001PanicRetainsScheduledRow`, `TestPhase2Slice3DefaultOutgoingBufferMatchesReference`, and `TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit`).
+- full suite still passes. Clean-tree baseline remains `Go test: 1157 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 flake cleanup follow-through.
 - docs and handoff reflect the new truth exactly
 
 ## Deliverables for the next session
@@ -231,8 +251,10 @@ As of this handoff:
 - OI-004 `connManagerSender.enqueueOnConn` overflow-disconnect background-ctx sub-hazard closed
 - OI-004 `superviseLifecycle` disconnect-ctx sub-hazard closed
 - OI-004 `ConnManager.CloseAll` disconnect-ctx sub-hazard closed — closes the `Background`-rooted `Conn.Disconnect` call-site family (supervisor, sender overflow, CloseAll now all derive a bounded ctx at the spawn point)
+- OI-004 outbound-writer supervision sub-hazard closed — supervisor now watches `outboundDone` alongside dispatch/keepalive and disconnects delivery-dead conns promptly
 - OI-004 `forwardReducerResponse` ctx / Done lifecycle sub-hazard closed — closes the executor-adapter twin of the earlier protocol-side `watchReducerResponse` leak
 - OI-004 dispatch-handler ctx sub-hazard closed — `runDispatchLoop` now derives a `handlerCtx` that cancels on `c.closed`
-- Other detached-goroutine surfaces in `conn.go` / `lifecycle.go` / `outbound.go` / `keepalive.go` and the `ClientSender.Send` no-ctx follow-on remain open under OI-004
+- Other detached-goroutine surfaces in `conn.go` / `lifecycle.go` / `keepalive.go` and the `ClientSender.Send` no-ctx follow-on remain open under OI-004
 - next realistic anchors: further Tier-B hardening (α), broader SQL parity (β), format-level commitlog parity (γ), individual scheduler deferrals (δ)
-- 10 packages, clean-tree full-suite baseline `Go test: 1156 passed in 10 packages` (1154 pre-slice + 2 new pins)
+- targeted flaky-test cleanup in `subscription/delta_pool_test.go`, `subscription/eval_projected_rows_test.go`, and scheduler replay parity coverage is now closed; no known clean-tree intermittent test remains
+- 10 packages, clean-tree full-suite baseline `Go test: 1157 passed in 10 packages`

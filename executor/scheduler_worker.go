@@ -149,30 +149,44 @@ func (s *Scheduler) scanAndTrackMax() ScheduleID {
 }
 
 func (s *Scheduler) scanAndTrackMaxWithContext(ctx context.Context) (ScheduleID, bool) {
-	now := s.now()
-	nowNs := now.UnixNano()
+	nowNs := s.now().UnixNano()
 	view := s.cs.Snapshot()
 	defer view.Close()
 
-	s.nextWakeup = time.Time{}
-	var maxID ScheduleID
+	var rows []types.ProductValue
 	for _, row := range view.TableScan(s.tableID) {
+		rows = append(rows, row)
+	}
+
+	maxID, nextWakeup, ok := s.scanRows(rows, nowNs, func(row types.ProductValue) bool {
+		return s.enqueueWithContext(ctx, row)
+	})
+	s.nextWakeup = nextWakeup
+	return maxID, ok
+}
+
+func (s *Scheduler) scanRows(rows []types.ProductValue, nowNs int64, enqueue func(types.ProductValue) bool) (ScheduleID, time.Time, bool) {
+	var (
+		maxID      ScheduleID
+		nextWakeup time.Time
+	)
+	for _, row := range rows {
 		if id := ScheduleID(row[SysScheduledColScheduleID].AsUint64()); id > maxID {
 			maxID = id
 		}
 		nextNs := row[SysScheduledColNextRunAtNs].AsInt64()
 		if nextNs <= nowNs {
-			if !s.enqueueWithContext(ctx, row) {
-				return maxID, false
+			if !enqueue(row) {
+				return maxID, nextWakeup, false
 			}
 			continue
 		}
 		t := time.Unix(0, nextNs)
-		if s.nextWakeup.IsZero() || t.Before(s.nextWakeup) {
-			s.nextWakeup = t
+		if nextWakeup.IsZero() || t.Before(nextWakeup) {
+			nextWakeup = t
 		}
 	}
-	return maxID, true
+	return maxID, nextWakeup, true
 }
 
 // enqueue sends a CallReducerCmd for a due schedule row. A blocked

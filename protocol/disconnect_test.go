@@ -137,20 +137,25 @@ func TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit(t *testing.T) {
 	defer cleanup()
 	mgr.Add(c)
 
-	// Start the two background goroutines the default Upgraded path
-	// normally spawns, wrapped with supervisor-style done channels.
+	// Start the background goroutines the default Upgraded path normally
+	// spawns, wrapped with supervisor-style done channels.
 	pumpDone := runDispatchAsync(c, context.Background(), &MessageHandlers{})
 	kaDone := runKeepaliveAsync(c, context.Background())
+	outboundDone := make(chan struct{})
+	go func() {
+		c.runOutboundWriter(context.Background())
+		close(outboundDone)
+	}()
 
 	supervised := make(chan struct{})
 	go func() {
-		c.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, pumpDone, kaDone)
+		c.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, pumpDone, kaDone, outboundDone)
 		close(supervised)
 	}()
 
 	// Client initiates close -> server read pump exits -> supervisor
-	// runs Disconnect -> keepalive sees c.closed and exits -> supervisor
-	// completes.
+	// runs Disconnect -> keepalive/outbound writer see c.closed and exit ->
+	// supervisor completes.
 	_ = clientWS.Close(websocket.StatusNormalClosure, "")
 
 	select {
@@ -165,6 +170,47 @@ func TestSuperviseLifecycleInvokesDisconnectOnReadPumpExit(t *testing.T) {
 	}
 	if mgr.Get(c.ID) != nil {
 		t.Error("ConnManager still holds connection after supervisor exit")
+	}
+}
+
+func TestSuperviseLifecycleInvokesDisconnectOnOutboundWriterExit(t *testing.T) {
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	c, _, cleanup := loopbackConn(t, DefaultProtocolOptions())
+	defer cleanup()
+	mgr.Add(c)
+
+	dispatchDone := make(chan struct{})
+	keepaliveDone := make(chan struct{})
+	outboundDone := make(chan struct{})
+	supervised := make(chan struct{})
+	go func() {
+		c.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, dispatchDone, keepaliveDone, outboundDone)
+		close(supervised)
+	}()
+
+	close(outboundDone)
+
+	select {
+	case <-c.closed:
+	case <-time.After(1 * time.Second):
+		t.Fatal("supervisor did not drive Disconnect after outbound writer exit")
+	}
+
+	onDis, onSubs, _ := inbox.disconnectSnapshot()
+	if onDis != 1 || onSubs != 1 {
+		t.Fatalf("disconnect calls = (dis=%d, subs=%d), want both 1", onDis, onSubs)
+	}
+	if mgr.Get(c.ID) != nil {
+		t.Fatal("ConnManager still holds connection after outbound writer exit")
+	}
+
+	close(dispatchDone)
+	close(keepaliveDone)
+	select {
+	case <-supervised:
+	case <-time.After(1 * time.Second):
+		t.Fatal("supervisor did not complete after synthetic goroutine shutdown")
 	}
 }
 

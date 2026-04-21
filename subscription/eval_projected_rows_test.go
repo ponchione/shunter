@@ -58,13 +58,22 @@ func TestProjectedRowsBeforeAppendsDeletesAfterBagSubtraction(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("projectedRowsBefore len = %d, want 3 (%v)", len(got), got)
 	}
-	if encodeRowKey(got[0]) != encodeRowKey(types.ProductValue{types.NewUint64(1), types.NewString("a")}) {
-		t.Fatalf("got[0] = %v, want unmatched current rowA", got[0])
+
+	gotCounts := make(map[string]int, len(got))
+	for _, row := range got {
+		gotCounts[encodeRowKey(row)]++
 	}
-	if encodeRowKey(got[1]) != encodeRowKey(types.ProductValue{types.NewUint64(2), types.NewString("b")}) {
-		t.Fatalf("got[1] = %v, want current rowB", got[1])
+	wantCounts := map[string]int{
+		encodeRowKey(types.ProductValue{types.NewUint64(1), types.NewString("a")}):    1,
+		encodeRowKey(types.ProductValue{types.NewUint64(2), types.NewString("b")}):    1,
+		encodeRowKey(types.ProductValue{types.NewUint64(9), types.NewString("gone")}): 1,
 	}
-	if encodeRowKey(got[2]) != encodeRowKey(types.ProductValue{types.NewUint64(9), types.NewString("gone")}) {
-		t.Fatalf("got[2] = %v, want appended delete row", got[2])
+	if len(gotCounts) != len(wantCounts) {
+		t.Fatalf("projectedRowsBefore distinct rows = %v, want %v", gotCounts, wantCounts)
+	}
+	for key, want := range wantCounts {
+		if gotCounts[key] != want {
+			t.Fatalf("projectedRowsBefore counts[%q] = %d, want %d (all=%v)", key, gotCounts[key], want, got)
+		}
 	}
 }

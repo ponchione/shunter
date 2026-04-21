@@ -107,11 +107,15 @@ later slice once scheduled-reducer workloads surface the gap.
 
 **New parity pins landed here:**
 
-- `TestParityP0Sched001ReplayEnqueuesByIterationOrder` — pins the
-  intentional divergence that Shunter fires past-due rows in
-  TableScan iteration order rather than sorted by `next_run_at_ns`.
-  Reference's DelayQueue bucket ordering is also non-strict, so this
-  is not a client-visible regression for well-separated schedules.
+- `TestParityP0Sched001ReplayPreservesScanOrderWithoutSorting` — pins
+  the intentional divergence that Shunter preserves whatever committed
+  scan order it is given for past-due rows rather than sorting by
+  `next_run_at_ns`. The committed-state `TableScan` surface is
+  explicitly unordered, so the parity pin now targets the
+  order-preservation seam directly instead of assuming map iteration
+  matches RowID insertion order. Reference's DelayQueue bucket ordering
+  is also non-strict, so this is not a client-visible regression for
+  well-separated schedules.
 - `TestParityP0Sched001PanicRetainsScheduledRow` — pins the
   intentional divergence that Shunter preserves `sys_scheduled` rows
   on reducer panic (consistent with reducer-error) while reference
@@ -166,8 +170,9 @@ later slice once scheduled-reducer workloads surface the gap.
 - This document.
 - `executor/scheduler_firing_test.go::TestParityP0Sched001PanicRetainsScheduledRow`
   — new pin locking the panic-retains-row divergence.
-- `executor/scheduler_replay_test.go::TestParityP0Sched001ReplayEnqueuesByIterationOrder`
-  — new pin locking the iteration-order divergence.
+- `executor/scheduler_replay_test.go::TestParityP0Sched001ReplayPreservesScanOrderWithoutSorting`
+  — new pin locking the replay-order-preservation-without-sorting
+  divergence without depending on unordered map iteration.
 - Existing pins re-asserted as parity-close: replay /
   seq-reset / firing tests listed above.
 - `docs/parity-phase0-ledger.md` — `P0-SCHED-001` row moves from

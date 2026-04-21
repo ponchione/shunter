@@ -82,14 +82,17 @@ func (c *Conn) superviseLifecycle(
 	mgr *ConnManager,
 	dispatchDone <-chan struct{},
 	keepaliveDone <-chan struct{},
+	outboundDone <-chan struct{},
 ) {
 	select {
 	case <-dispatchDone:
 	case <-keepaliveDone:
+	case <-outboundDone:
 	}
 	disconnectCtx, cancel := context.WithTimeout(ctx, c.opts.DisconnectTimeout)
 	defer cancel()
 	c.Disconnect(disconnectCtx, code, reason, inbox, mgr)
 	<-dispatchDone
 	<-keepaliveDone
+	<-outboundDone
 }

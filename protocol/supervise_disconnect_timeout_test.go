@@ -28,24 +28,26 @@ func TestSuperviseLifecycleBoundsDisconnectOnInboxHang(t *testing.T) {
 
 	dispatchDone := make(chan struct{})
 	keepaliveDone := make(chan struct{})
+	outboundDone := make(chan struct{})
 
 	supervised := make(chan struct{})
 	start := time.Now()
 	go func() {
-		conn.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, dispatchDone, keepaliveDone)
+		conn.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, dispatchDone, keepaliveDone, outboundDone)
 		close(supervised)
 	}()
 
 	// Simulate dispatch exiting (peer close, ws read error). The
 	// supervisor must then drive Disconnect with a bounded ctx.
 	close(dispatchDone)
-	// The supervisor waits on both done channels after Disconnect
-	// returns; keepalive normally exits on c.closed, so close it
+	// The supervisor waits on every done channel after Disconnect
+	// returns; keepalive/outbound normally exit on c.closed, so close them
 	// pre-emptively to let the supervisor unwind once Disconnect
 	// returns.
 	go func() {
 		<-conn.closed
 		close(keepaliveDone)
+		close(outboundDone)
 	}()
 
 	select {
@@ -106,11 +108,12 @@ func TestSuperviseLifecycleDeliversOnInboxOK(t *testing.T) {
 
 	dispatchDone := make(chan struct{})
 	keepaliveDone := make(chan struct{})
+	outboundDone := make(chan struct{})
 
 	supervised := make(chan struct{})
 	start := time.Now()
 	go func() {
-		conn.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, dispatchDone, keepaliveDone)
+		conn.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, dispatchDone, keepaliveDone, outboundDone)
 		close(supervised)
 	}()
 
@@ -118,6 +121,7 @@ func TestSuperviseLifecycleDeliversOnInboxOK(t *testing.T) {
 	go func() {
 		<-conn.closed
 		close(keepaliveDone)
+		close(outboundDone)
 	}()
 
 	select {

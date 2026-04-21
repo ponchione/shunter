@@ -22,10 +22,15 @@ func TestClientInitiatedClose_DisconnectSequenceRuns(t *testing.T) {
 	handlers := &MessageHandlers{}
 	dispatchDone := runDispatchAsync(conn, context.Background(), handlers)
 	keepaliveDone := runKeepaliveAsync(conn, context.Background())
+	outboundDone := make(chan struct{})
+	go func() {
+		conn.runOutboundWriter(context.Background())
+		close(outboundDone)
+	}()
 
 	supervised := make(chan struct{})
 	go func() {
-		conn.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, dispatchDone, keepaliveDone)
+		conn.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr, dispatchDone, keepaliveDone, outboundDone)
 		close(supervised)
 	}()
 

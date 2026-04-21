@@ -207,8 +207,12 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		}()
 		// Outbound writer goroutine drains OutboundCh → WebSocket.
 		// Exits when OutboundCh is closed during Disconnect.
-		go c.runOutboundWriter(context.Background())
-		go c.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", s.Executor, s.Conns, dispatchDone, keepaliveDone)
+		outboundDone := make(chan struct{})
+		go func() {
+			c.runOutboundWriter(context.Background())
+			close(outboundDone)
+		}()
+		go c.superviseLifecycle(context.Background(), websocket.StatusNormalClosure, "", s.Executor, s.Conns, dispatchDone, keepaliveDone, outboundDone)
 		return
 	}
 	// No Upgraded hook and no Executor wiring — close the connection
