@@ -134,6 +134,21 @@ func (m *ConnManager) Get(id types.ConnectionID) *Conn {
 // the disconnect sequence for each. Used for graceful server shutdown
 // (SPEC-005 §11.1, close code 1000). Connections are closed
 // concurrently with a bounded wait for all teardowns to complete.
+//
+// OI-004 sub-hazard pin
+// (docs/hardening-oi-004-closeall-disconnect-context.md): the caller-
+// supplied ctx is forwarded into each Conn.Disconnect, which threads it
+// into inbox.DisconnectClientSubscriptions and inbox.OnDisconnect (steps
+// 1-2 of the SPEC-005 §5.3 teardown). Every caller-supplied ctx is
+// additionally wrapped per-conn by context.WithTimeout(ctx,
+// DisconnectTimeout) so a single hung inbox call cannot pin a *Conn
+// past the shutdown window, matching the bounded-ctx contract already
+// enforced at the supervisor and sender overflow sites. The outer ctx
+// is still honored — cancellation propagates through the per-conn
+// derived ctx immediately — but a Background-rooted caller can no
+// longer stall shutdown indefinitely. Pin tests:
+// TestCloseAllBoundsDisconnectOnInboxHang,
+// TestCloseAllDeliversOnInboxOK.
 func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 	m.mu.RLock()
 	conns := make([]*Conn, 0, len(m.conns))
@@ -147,7 +162,9 @@ func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 		wg.Add(1)
 		go func(c *Conn) {
 			defer wg.Done()
-			c.Disconnect(ctx, CloseNormal, "server shutdown", inbox, m)
+			disconnectCtx, cancel := context.WithTimeout(ctx, c.opts.DisconnectTimeout)
+			defer cancel()
+			c.Disconnect(disconnectCtx, CloseNormal, "server shutdown", inbox, m)
 		}(c)
 	}
 	wg.Wait()
