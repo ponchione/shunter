@@ -17,7 +17,7 @@ It is best described as:
 
 As of the current audit pass:
 - Broad verification: `rtk go test ./...`
-- Result: `Go test: 1289 passed in 10 packages`
+- Result: `Go test: 1315 passed in 10 packages`
 - Broad build verification: `rtk go build ./...`
 - Result: `Go build: Success`
 - Code inventory (live repo-wide count, excluding `reference/`): `228` Go files, `42217` lines of Go code

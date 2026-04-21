@@ -3064,3 +3064,417 @@ func TestHandleSubscribeSingle_ParitySubqueryInFromRejected(t *testing.T) {
 		t.Error("executor should not be called on a subquery in FROM")
 	}
 }
+
+// TestHandleSubscribeSingle_ParitySqlUnsupportedSelectLiteralWithoutFromRejected
+// pins the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select 1` / "FROM is required") onto the SubscribeSingle admission surface.
+// Shunter's parseProjection only accepts `*` or `table.*`
+// (query/sql/parser.go:553-572); the integer literal `1` matches neither and
+// the parser rejects with "projection must be '*' or 'table.*'".
+func TestHandleSubscribeSingle_ParitySqlUnsupportedSelectLiteralWithoutFromRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   140,
+		QueryID:     141,
+		QueryString: "SELECT 1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 141, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on SELECT without FROM")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlUnsupportedMultiPartTableNameRejected pins
+// the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select a from s.t` / "Multi-part table names") onto the SubscribeSingle
+// admission surface. Shunter's parseProjection rejects the bare identifier `a`
+// (non-`*` / non-`table.*`) before FROM parsing begins, so the rejection fires
+// at the projection surface with "projection must be '*' or 'table.*'".
+func TestHandleSubscribeSingle_ParitySqlUnsupportedMultiPartTableNameRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   142,
+		QueryID:     143,
+		QueryString: "SELECT a FROM s.t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 143, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on multi-part table name")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlUnsupportedBitStringLiteralRejected pins
+// the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select * from t where a = B'1010'` / "Bit-string literals") onto the
+// SubscribeSingle admission surface. Shunter's lexer tokenizes `B` as an
+// identifier and `'1010'` as a separate string literal; parseLiteral then
+// rejects the identifier RHS with "expected literal, got identifier "B"".
+func TestHandleSubscribeSingle_ParitySqlUnsupportedBitStringLiteralRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   144,
+		QueryID:     145,
+		QueryString: "SELECT * FROM t WHERE u32 = B'1010'",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 145, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a bit-string literal")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlUnsupportedWildcardWithBareColumnsRejected
+// pins the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
+// the SubscribeSingle admission surface. Shunter's parseProjection accepts one
+// projection item; after consuming `a.*` the parser expects FROM but finds `,`
+// and rejects with "expected FROM, got \",\"".
+func TestHandleSubscribeSingle_ParitySqlUnsupportedWildcardWithBareColumnsRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   146,
+		QueryID:     147,
+		QueryString: "SELECT t.*, b, c FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 147, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on wildcard with bare columns")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlUnsupportedOrderByWithLimitExpressionRejected
+// pins the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select * from t order by a limit b` / "Limit expression") onto the
+// SubscribeSingle admission surface. The standalone ORDER BY clause already
+// trips Shunter's EOF guard at parseStatement (query/sql/parser.go:547-549)
+// with "unexpected token \"ORDER\"" before reaching the LIMIT identifier.
+func TestHandleSubscribeSingle_ParitySqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   148,
+		QueryID:     149,
+		QueryString: "SELECT * FROM t ORDER BY u32 LIMIT u32",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 149, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on ORDER BY with LIMIT expression")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlUnsupportedAggregateWithGroupByRejected
+// pins the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select a, count(*) from t group by a` / "GROUP BY") onto the SubscribeSingle
+// admission surface. parseProjection rejects the leading bare column `a` with
+// "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
+// keyword is ever seen.
+func TestHandleSubscribeSingle_ParitySqlUnsupportedAggregateWithGroupByRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   150,
+		QueryID:     151,
+		QueryString: "SELECT u32, COUNT(*) FROM t GROUP BY u32",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 151, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on aggregate with GROUP BY")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlUnsupportedImplicitCommaJoinRejected pins
+// the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
+// "Implicit joins") onto the SubscribeSingle admission surface. After
+// consuming `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects
+// with "unexpected token \",\"".
+func TestHandleSubscribeSingle_ParitySqlUnsupportedImplicitCommaJoinRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   152,
+		QueryID:     153,
+		QueryString: "SELECT a.* FROM t AS a, s AS b WHERE a.u32 = b.u32",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 153, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on implicit comma join")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected
+// pins the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select t.* from t join s on int = u32` / "Joins require qualified vars")
+// onto the SubscribeSingle admission surface. parseJoinClause calls
+// parseQualifiedColumnRef for the left side of ON (query/sql/parser.go:629),
+// which requires `ident.ident`; the bare identifier `int` fails there.
+func TestHandleSubscribeSingle_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   154,
+		QueryID:     155,
+		QueryString: "SELECT t.* FROM t JOIN s ON int = u32",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 155, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on unqualified JOIN ON vars")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlInvalidEmptySelectRejected pins the
+// reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select from t` / "Empty SELECT") onto the SubscribeSingle admission
+// surface. parseProjection rejects because the next token after SELECT is the
+// identifier `from`, which is then followed by `t` (not a dot), so the
+// projection fails with "projection must be '*' or 'table.*'".
+func TestHandleSubscribeSingle_ParitySqlInvalidEmptySelectRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   156,
+		QueryID:     157,
+		QueryString: "SELECT FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 157, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on empty SELECT")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlInvalidEmptyFromRejected pins the
+// reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select a from where b = 1` / "Empty FROM") onto the SubscribeSingle
+// admission surface. parseProjection rejects the bare column `a` with
+// "projection must be '*' or 'table.*'" before the empty FROM is examined.
+func TestHandleSubscribeSingle_ParitySqlInvalidEmptyFromRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   158,
+		QueryID:     159,
+		QueryString: "SELECT a FROM WHERE b = 1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 159, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on empty FROM")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlInvalidEmptyWhereRejected pins the
+// reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select a from t where` / "Empty WHERE") onto the SubscribeSingle admission
+// surface. parseProjection rejects the bare column `a` with "projection must
+// be '*' or 'table.*'" before the empty WHERE is examined.
+func TestHandleSubscribeSingle_ParitySqlInvalidEmptyWhereRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   160,
+		QueryID:     161,
+		QueryString: "SELECT a FROM t WHERE",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 161, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on empty WHERE")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlInvalidEmptyGroupByRejected pins the
+// reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select a, count(*) from t group by` / "Empty GROUP BY") onto the
+// SubscribeSingle admission surface. parseProjection rejects the leading bare
+// column `a` with "projection must be '*' or 'table.*'" before the aggregate
+// or empty GROUP BY is examined.
+func TestHandleSubscribeSingle_ParitySqlInvalidEmptyGroupByRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   162,
+		QueryID:     163,
+		QueryString: "SELECT a, COUNT(*) FROM t GROUP BY",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 163, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on empty GROUP BY")
+	}
+}
+
+// TestHandleSubscribeSingle_ParitySqlInvalidAggregateWithoutAliasRejected pins
+// the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select count(*) from t` / "Aggregate without alias") onto the
+// SubscribeSingle admission surface. parseProjection reads `count` as an
+// identifier qualifier, then finds `(` where it expects a dot, rejecting with
+// "projection must be '*' or 'table.*'".
+func TestHandleSubscribeSingle_ParitySqlInvalidAggregateWithoutAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   164,
+		QueryID:     165,
+		QueryString: "SELECT COUNT(*) FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 165, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on aggregate without alias")
+	}
+}

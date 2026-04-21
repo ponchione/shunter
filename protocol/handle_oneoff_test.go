@@ -2500,3 +2500,390 @@ func TestHandleOneOffQuery_ParitySubqueryInFromRejected(t *testing.T) {
 		t.Error("expected non-empty error message")
 	}
 }
+
+// TestHandleOneOffQuery_ParitySqlUnsupportedSelectLiteralWithoutFromRejected
+// pins the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select 1` / "FROM is required") onto the OneOff admission surface.
+// parseProjection rejects the integer literal `1` with "projection must be
+// '*' or 'table.*'".
+func TestHandleOneOffQuery_ParitySqlUnsupportedSelectLiteralWithoutFromRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB5},
+		QueryString: "SELECT 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlUnsupportedMultiPartTableNameRejected pins
+// the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select a from s.t` / "Multi-part table names") onto the OneOff admission
+// surface. parseProjection rejects the bare identifier `a` before FROM is
+// parsed, so rejection fires with "projection must be '*' or 'table.*'".
+func TestHandleOneOffQuery_ParitySqlUnsupportedMultiPartTableNameRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB6},
+		QueryString: "SELECT a FROM s.t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlUnsupportedBitStringLiteralRejected pins
+// the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select * from t where a = B'1010'` / "Bit-string literals") onto the
+// OneOff admission surface. The lexer tokenizes `B` as an identifier and
+// `'1010'` as a separate string literal; parseLiteral rejects the identifier
+// RHS of `=` with "expected literal, got identifier \"B\"".
+func TestHandleOneOffQuery_ParitySqlUnsupportedBitStringLiteralRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB7},
+		QueryString: "SELECT * FROM t WHERE u32 = B'1010'",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlUnsupportedWildcardWithBareColumnsRejected
+// pins the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
+// the OneOff admission surface. After parseProjection consumes `t.*`,
+// parseStatement expects FROM but finds `,` and rejects with
+// "expected FROM, got \",\"".
+func TestHandleOneOffQuery_ParitySqlUnsupportedWildcardWithBareColumnsRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB8},
+		QueryString: "SELECT t.*, b, c FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlUnsupportedOrderByWithLimitExpressionRejected
+// pins the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select * from t order by a limit b` / "Limit expression") onto the OneOff
+// admission surface. ORDER BY trips parseStatement's EOF guard
+// (query/sql/parser.go:547-549) with "unexpected token \"ORDER\"" before the
+// LIMIT identifier is examined.
+func TestHandleOneOffQuery_ParitySqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xB9},
+		QueryString: "SELECT * FROM t ORDER BY u32 LIMIT u32",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlUnsupportedAggregateWithGroupByRejected pins
+// the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select a, count(*) from t group by a` / "GROUP BY") onto the OneOff
+// admission surface. parseProjection rejects the leading bare column with
+// "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
+// keyword is ever seen.
+func TestHandleOneOffQuery_ParitySqlUnsupportedAggregateWithGroupByRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xBA},
+		QueryString: "SELECT u32, COUNT(*) FROM t GROUP BY u32",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlUnsupportedImplicitCommaJoinRejected pins the
+// reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
+// "Implicit joins") onto the OneOff admission surface. After consuming
+// `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects with
+// "unexpected token \",\"".
+func TestHandleOneOffQuery_ParitySqlUnsupportedImplicitCommaJoinRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xBB},
+		QueryString: "SELECT a.* FROM t AS a, s AS b WHERE a.u32 = b.u32",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected pins
+// the reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
+// (`select t.* from t join s on int = u32` / "Joins require qualified vars")
+// onto the OneOff admission surface. parseJoinClause calls
+// parseQualifiedColumnRef for the left side of ON
+// (query/sql/parser.go:629); the bare identifier `int` fails there with
+// "expected qualified column reference".
+func TestHandleOneOffQuery_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xBC},
+		QueryString: "SELECT t.* FROM t JOIN s ON int = u32",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlInvalidEmptySelectRejected pins the
+// reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select from t` / "Empty SELECT") onto the OneOff admission surface.
+// parseProjection rejects because the next token after SELECT is the
+// identifier `from`, which is then followed by `t` (not a dot), so the
+// projection fails with "projection must be '*' or 'table.*'".
+func TestHandleOneOffQuery_ParitySqlInvalidEmptySelectRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xBD},
+		QueryString: "SELECT FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlInvalidEmptyFromRejected pins the reference
+// parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select a from where b = 1` / "Empty FROM") onto the OneOff admission
+// surface. parseProjection rejects the bare column `a` with "projection must
+// be '*' or 'table.*'" before the empty FROM is examined.
+func TestHandleOneOffQuery_ParitySqlInvalidEmptyFromRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xBE},
+		QueryString: "SELECT a FROM WHERE b = 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlInvalidEmptyWhereRejected pins the reference
+// parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select a from t where` / "Empty WHERE") onto the OneOff admission
+// surface. parseProjection rejects the bare column `a` with "projection must
+// be '*' or 'table.*'" before the empty WHERE is examined.
+func TestHandleOneOffQuery_ParitySqlInvalidEmptyWhereRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xBF},
+		QueryString: "SELECT a FROM t WHERE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlInvalidEmptyGroupByRejected pins the
+// reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select a, count(*) from t group by` / "Empty GROUP BY") onto the OneOff
+// admission surface. parseProjection rejects the leading bare column `a` with
+// "projection must be '*' or 'table.*'" before the aggregate or empty GROUP
+// BY is examined.
+func TestHandleOneOffQuery_ParitySqlInvalidEmptyGroupByRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC0},
+		QueryString: "SELECT a, COUNT(*) FROM t GROUP BY",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParitySqlInvalidAggregateWithoutAliasRejected pins the
+// reference parse_sql rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
+// (`select count(*) from t` / "Aggregate without alias") onto the OneOff
+// admission surface. parseProjection reads `count` as an identifier
+// qualifier, then finds `(` where it expects a dot, rejecting with
+// "projection must be '*' or 'table.*'".
+func TestHandleOneOffQuery_ParitySqlInvalidAggregateWithoutAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC1},
+		QueryString: "SELECT COUNT(*) FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
