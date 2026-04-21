@@ -143,6 +143,16 @@ type CallReducerRequest struct {
 	// successful-commit heavy echo (`CallReducerFlagsNoSuccessNotify`).
 	Flags      byte
 	ResponseCh chan TransactionUpdate
+	// Done signals the owning connection is being torn down (Conn.closed
+	// closed at step 4 of the SPEC-005 §5.3 teardown). The executor-side
+	// response-forwarding goroutine selects on this in addition to its
+	// internal response channel, so it exits promptly when the conn goes
+	// away rather than leaking if the executor never feeds the internal
+	// channel (crash mid-commit, hung reducer, engine shutdown). A nil
+	// Done blocks forever on its select arm, matching pre-wire behavior
+	// for callers that do not wire a lifecycle signal. Analog to the
+	// `watchReducerResponse` hardening on the protocol-side watcher.
+	Done <-chan struct{}
 }
 
 // RunLifecycle drives SPEC-005 §5.1–§5.2 admission for one connection:

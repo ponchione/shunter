@@ -36,6 +36,7 @@ func handleCallReducer(
 		Args:        msg.Args,
 		Flags:       msg.Flags,
 		ResponseCh:  respCh,
+		Done:        conn.closed,
 	}); err != nil {
 		sendSyntheticFailure(conn, msg, "executor unavailable: "+err.Error())
 		return

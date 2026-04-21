@@ -311,6 +311,22 @@ func encodeProductRows(rows []types.ProductValue) ([]byte, error) {
 	return protocol.EncodeRowList(encoded), nil
 }
 
+// forwardReducerResponse bridges the executor-internal
+// ProtocolCallReducerResponse onto the caller's protocol.TransactionUpdate
+// channel.
+//
+// OI-004 sub-hazard pin: the select additionally watches req.Done so the
+// goroutine exits promptly when the owning connection tears down. Without
+// this arm, a ctx rooted at context.Background() (the production path from
+// protocol/upgrade.go:201 through runDispatchLoop) combined with an executor
+// that never feeds respCh (crash mid-commit, hung reducer, engine shutdown
+// mid-flight) would leak the goroutine indefinitely and hold the *Conn and
+// its transitive state alive past disconnect. Direct analog to the
+// watchReducerResponse hardening on the protocol-side watcher (closed
+// 2026-04-20; see docs/hardening-oi-004-watch-reducer-response-lifecycle.md).
+// A nil req.Done disables the arm, matching pre-wire behavior for callers
+// that do not attach a lifecycle signal. Pin test:
+// TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs.
 func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req protocol.CallReducerRequest, respCh <-chan ProtocolCallReducerResponse) {
 	select {
 	case resp := <-respCh:
@@ -330,6 +346,7 @@ func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req p
 		}
 		sendTransactionUpdateWithContext(ctx, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(resp.Reducer)))
 	case <-ctx.Done():
+	case <-req.Done:
 	}
 }
 
