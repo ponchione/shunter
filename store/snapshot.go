@@ -72,6 +72,7 @@ func (s *CommittedSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, 
 	inner := t.Scan()
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		defer runtime.KeepAlive(s)
+		s.ensureOpen()
 		for rid, row := range inner {
 			if !yield(rid, row) {
 				return
@@ -106,6 +107,7 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 	}
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		defer runtime.KeepAlive(s)
+		s.ensureOpen()
 		for rid := range idx.BTree().Scan() {
 			row, ok := t.GetRow(rid)
 			if !ok {
@@ -159,6 +161,7 @@ func (s *CommittedSnapshot) lookupIndex(tableID schema.TableID, indexID schema.I
 func (s *CommittedSnapshot) rowsFromRowIDs(t *Table, rowIDs []types.RowID) iter.Seq2[types.RowID, types.ProductValue] {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		defer runtime.KeepAlive(s)
+		s.ensureOpen()
 		for _, rid := range rowIDs {
 			row, ok := t.GetRow(rid)
 			if !ok {

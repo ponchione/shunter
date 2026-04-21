@@ -85,6 +85,29 @@ func BenchmarkRegisterUnregister(b *testing.B) {
 	}
 }
 
+func BenchmarkRegisterSetInitialQueryAllRows(b *testing.B) {
+	s := benchSchema()
+	rows := make([]types.ProductValue, 1024)
+	for i := range rows {
+		rows[i] = types.ProductValue{types.NewUint64(uint64(i)), types.NewString("row")}
+	}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{1: rows})
+	pred := AllRows{Table: 1}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		mgr := NewManager(s, s)
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID:     types.ConnectionID{1},
+			QueryID:    uint32(i),
+			Predicates: []Predicate{pred},
+		}, committed); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkFanOut1KClientsSameQuery(b *testing.B) {
 	s := benchSchema()
 	inbox := make(chan FanOutMessage, 1024)

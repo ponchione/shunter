@@ -102,8 +102,21 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 		for connID, subIDs := range qs.subscribers {
 			for subID := range subIDs {
 				for _, u := range updates {
-					u.SubscriptionID = subID
-					fanout[connID] = append(fanout[connID], u)
+					cloned := u
+					cloned.SubscriptionID = subID
+					// OI-006 fanout aliasing: give each subscriber an
+					// independent slice header for Inserts/Deletes so
+					// downstream replace/append on one subscriber's
+					// updates cannot leak into another's view. Row
+					// payloads (`types.ProductValue`) remain shared
+					// under the post-commit row-immutability contract.
+					if len(cloned.Inserts) > 0 {
+						cloned.Inserts = append([]types.ProductValue(nil), cloned.Inserts...)
+					}
+					if len(cloned.Deletes) > 0 {
+						cloned.Deletes = append([]types.ProductValue(nil), cloned.Deletes...)
+					}
+					fanout[connID] = append(fanout[connID], cloned)
 				}
 			}
 		}

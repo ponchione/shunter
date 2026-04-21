@@ -2,8 +2,11 @@ package subscription
 
 import (
 	"errors"
+	"fmt"
+	"iter"
 	"testing"
 
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -33,6 +36,35 @@ func newRegisterSetTestManagerWithRows(t *testing.T) (*Manager, *mockCommitted) 
 	})
 	mgr := NewManager(s, s)
 	return mgr, view
+}
+
+type streamingJoinView struct {
+	*mockCommitted
+	beforeFirstProbe func(scanned int)
+	scannedLeft      int
+	probes           int
+}
+
+func (v *streamingJoinView) TableScan(id TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	base := v.mockCommitted.TableScan(id)
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for rid, row := range base {
+			if id == 1 {
+				v.scannedLeft++
+			}
+			if !yield(rid, row) {
+				return
+			}
+		}
+	}
+}
+
+func (v *streamingJoinView) IndexSeek(tableID TableID, indexID IndexID, key store.IndexKey) []types.RowID {
+	if v.probes == 0 && v.beforeFirstProbe != nil {
+		v.beforeFirstProbe(v.scannedLeft)
+	}
+	v.probes++
+	return v.mockCommitted.IndexSeek(tableID, indexID, key)
 }
 
 // TestRegisterSetMultiAtomicOnInvalidPredicate — SubscribeMulti with one
@@ -213,5 +245,47 @@ func TestDisconnectClientClearsQuerySets(t *testing.T) {
 	}
 	if _, ok := mgr.querySets[connID]; ok {
 		t.Fatalf("querySets[%v] not cleared", connID)
+	}
+}
+
+func TestRegisterSetJoinInitialQueryStreamsScanSideBeforeProbe(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+
+	base := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("lhs-1")},
+			{types.NewUint64(2), types.NewString("lhs-2")},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(1)},
+			{types.NewUint64(20), types.NewUint64(2)},
+		},
+	})
+	view := &streamingJoinView{mockCommitted: base}
+	view.beforeFirstProbe = func(scanned int) {
+		if scanned != 1 {
+			panic(fmt.Sprintf("first probe happened after scanning %d left rows; want streaming interleave after 1", scanned))
+		}
+	}
+
+	mgr := NewManager(s, s)
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    42,
+		Predicates: []Predicate{Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 1}},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet(join): %v", err)
+	}
+	if view.probes != 2 {
+		t.Fatalf("IndexSeek probes = %d, want 2", view.probes)
+	}
+	if len(res.Update) != 1 {
+		t.Fatalf("updates = %d, want 1", len(res.Update))
+	}
+	if got := len(res.Update[0].Inserts); got != 2 {
+		t.Fatalf("initial join inserts = %d, want 2", got)
 	}
 }

@@ -84,13 +84,7 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 			return lrow
 		}
 		if rhsIdx, ok := m.resolver.IndexIDForColumn(p.Right, p.RightCol); ok {
-			for _, lrow := range func() []types.ProductValue {
-				var ls []types.ProductValue
-				for _, row := range iterateAll(view, p.Left) {
-					ls = append(ls, row)
-				}
-				return ls
-			}() {
+			for _, lrow := range view.TableScan(p.Left) {
 				if int(p.LeftCol) >= len(lrow) {
 					continue
 				}
@@ -115,13 +109,7 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 		if !ok {
 			return nil, fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
 		}
-		for _, rrow := range func() []types.ProductValue {
-			var rs []types.ProductValue
-			for _, row := range iterateAll(view, p.Right) {
-				rs = append(rs, row)
-			}
-			return rs
-		}() {
+		for _, rrow := range view.TableScan(p.Right) {
 			if int(p.RightCol) >= len(rrow) {
 				continue
 			}
@@ -144,7 +132,7 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 		if view.RowCount(p.Other) == 0 {
 			return nil, nil
 		}
-		for _, row := range iterateAll(view, p.Projected) {
+		for _, row := range view.TableScan(p.Projected) {
 			if err := add(row); err != nil {
 				return nil, err
 			}
@@ -155,7 +143,7 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 			return nil, nil
 		}
 		t := tables[0]
-		for _, row := range iterateAll(view, t) {
+		for _, row := range view.TableScan(t) {
 			if MatchRow(pred, t, row) {
 				if err := add(row); err != nil {
 					return nil, err
@@ -182,16 +170,6 @@ func emittedTableID(p Predicate) TableID {
 		return 0
 	}
 	return tables[0]
-}
-
-// iterateAll materializes every row from the committed view's TableScan.
-// Small helper so callers can range over a slice instead of iter.Seq2.
-func iterateAll(view store.CommittedReadView, t TableID) []types.ProductValue {
-	var out []types.ProductValue
-	for _, row := range view.TableScan(t) {
-		out = append(out, row)
-	}
-	return out
 }
 
 // RegisterSet atomically registers 1..N predicates under a single

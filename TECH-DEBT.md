@@ -149,14 +149,14 @@ Summary:
 - Snapshot/read-view lifetime discipline is still treated as a sharp edge in the surrounding docs.
 - This is an architectural correctness concern, not cosmetic cleanup.
 - Snapshot iterator GC retention sub-hazard closed 2026-04-20: `*CommittedSnapshot.TableScan` / `IndexScan` / `IndexRange` returned closures that captured `*Table` but not `*CommittedSnapshot`, so a caller holding only the iter could let the snapshot become unreachable, fire the finalizer, release the RLock mid-`range`, and race a concurrent writer on `Table.rows`. Each iterator now `defer runtime.KeepAlive(s)`s the snapshot so the closure retains it for the iter's lifetime. Pinned by `store/snapshot_iter_retention_test.go::TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration`. See `docs/hardening-oi-005-snapshot-iter-retention.md`.
+- Snapshot iterator use-after-Close sub-hazard closed 2026-04-20: the same three iterator bodies previously did not re-check `s.ensureOpen()` at iter-body entry, so a sequential `construct → Close → iterate` pattern silently raced the freed RLock. Each iterator body now calls `s.ensureOpen()` after the `KeepAlive` defer, converting the mis-use into a deterministic `"store: CommittedSnapshot used after Close"` panic matching the construction-time contract. Pinned by `store/snapshot_iter_useafterclose_test.go::{TestCommittedSnapshotTableScanPanicsAfterClose, TestCommittedSnapshotIndexScanPanicsAfterClose, TestCommittedSnapshotIndexRangePanicsAfterClose}`. See `docs/hardening-oi-005-snapshot-iter-useafterclose.md`.
 
 Why this matters:
 - Long-lived or misused read views can distort concurrency assumptions and make correctness depend on caller discipline.
 - It also weakens confidence in subscription evaluation and recovery-side read paths.
 
 Remaining sub-hazards:
-- use-after-`Close` on returned iters (ensureOpen is synchronous at iter construction, not inside the body)
-- cross-goroutine snapshot sharing / ownership rules
+- cross-goroutine snapshot sharing / ownership rules (concurrent `Close()` called from a goroutine different from the one iterating can still race between the body-entry check and each yield)
 - long-held read-view lifetime hazards at the subscription/evaluator seam
 - `state_view.go` / `committed_state.go` shared-state escape routes
 
@@ -171,6 +171,7 @@ Source docs:
 - `docs/current-status.md` open hardening / correctness picture
 - `docs/spacetimedb-parity-roadmap.md` Tier B
 - `docs/hardening-oi-005-snapshot-iter-retention.md` (iter-retention sub-hazard closure)
+- `docs/hardening-oi-005-snapshot-iter-useafterclose.md` (iter use-after-Close sub-hazard closure)
 
 ### OI-006: Subscription fanout still carries aliasing and cross-subscriber mutation risk concerns
 
@@ -180,10 +181,15 @@ Severity: medium
 Summary:
 - Fanout and update assembly remain a live hardening concern around shared slices/maps and per-subscriber isolation.
 - The parity docs treat this as one of the main non-cosmetic remaining risks.
+- Per-subscriber `Inserts` / `Deletes` slice-header aliasing sub-hazard closed 2026-04-20: `subscription/eval.go::evaluate` previously distributed the same slice header across every subscriber of a query, so any downstream replace/append on one subscriber's slice would silently corrupt every other subscriber's view of the same commit. Each subscriber now receives an independent slice header for `Inserts` / `Deletes`; row payloads (`types.ProductValue`) remain shared under the post-commit row-immutability contract. Pinned by `subscription/eval_fanout_aliasing_test.go::{TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers, TestEvalFanoutDeletesHeaderIsolatedAcrossSubscribers}`. See `docs/hardening-oi-006-fanout-aliasing.md`.
 
 Why this matters:
 - Cross-subscriber mutation or aliasing bugs are subtle and can silently corrupt delivery behavior.
 - This weakens confidence in both parity and basic correctness claims.
+
+Remaining sub-hazards:
+- row-payload (`types.ProductValue`) sharing across subscribers (governed by the post-commit row-immutability contract; only relevant if a future consumer mutates row contents in place)
+- broader fanout assembly hazards in `subscription/fanout.go`, `subscription/fanout_worker.go`, and `protocol/fanout_adapter.go` if any future path introduces in-place mutation
 
 Primary code surfaces:
 - `subscription/eval.go`
@@ -194,6 +200,7 @@ Primary code surfaces:
 Source docs:
 - `docs/current-status.md` open hardening / correctness picture
 - `docs/spacetimedb-parity-roadmap.md` Tier B
+- `docs/hardening-oi-006-fanout-aliasing.md` (slice-header aliasing sub-hazard closure)
 
 ### OI-007: Recovery sequencing and replay-edge behavior still needs targeted parity closure
 

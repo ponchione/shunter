@@ -17,7 +17,7 @@ It is best described as:
 
 As of the current audit pass:
 - Broad verification: `rtk go test ./...`
-- Result: `Go test: 1106 passed in 10 packages`
+- Result: `Go test: 1109 passed in 10 packages`
 - Broad build verification: `rtk go build ./...`
 - Result: `Go build: Success`
 - Code inventory (live repo-wide count, excluding `reference/`): `228` Go files, `42217` lines of Go code
@@ -136,8 +136,8 @@ The hot spots are concentrated in:
 
 The most serious remaining themes are not cosmetic. They include:
 - protocol connection lifecycle races and unsafe channel-close behavior
-- snapshot / read-view lifetime hazards (iterator-GC retention sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-retention.md`; broader lifetime concerns remain open)
-- subscription fan-out aliasing / cross-subscriber mutation risk
+- snapshot / read-view lifetime hazards (iterator-GC retention sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-retention.md`; iterator use-after-Close sub-hazard closed 2026-04-20, see `docs/hardening-oi-005-snapshot-iter-useafterclose.md`; broader lifetime concerns remain open)
+- subscription fan-out aliasing / cross-subscriber mutation risk (per-subscriber `Inserts` / `Deletes` slice-header aliasing sub-hazard closed 2026-04-20, see `docs/hardening-oi-006-fanout-aliasing.md`; row-payload sharing and broader fanout assembly hazards remain open)
 - recovery / RowID sequencing sharp edges
 - API and error-surface roughness that matters when embedding this as a real library
 
