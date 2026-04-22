@@ -138,15 +138,16 @@ func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
 	}
 }
 
-// TestPhase15CallReducerFlagsField pins the Phase 1.5 sub-slice closure:
-// reference/SpacetimeDB CallReducer carries a flags byte
-// (CallReducerFlags::NoSuccessNotify) that lets callers opt out of the
-// successful caller-echo. Shunter's CallReducerMsg now carries it too.
+// TestPhase15CallReducerFlagsField pins the reference `CallReducer<Args>`
+// field order from
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:110
+// (`reducer, args, request_id, flags`). The wire byte shape is pinned
+// separately in parity_call_reducer_test.go.
 func TestPhase15CallReducerFlagsField(t *testing.T) {
 	fields := msgFieldNames(CallReducerMsg{})
-	want := []string{"RequestID", "ReducerName", "Args", "Flags"}
+	want := []string{"ReducerName", "Args", "RequestID", "Flags"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("CallReducerMsg fields = %v, want %v (Phase 1.5: Flags field landed)",
+		t.Fatalf("CallReducerMsg fields = %v, want %v (reference field order)",
 			fields, want)
 	}
 }

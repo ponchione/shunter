@@ -45,10 +45,15 @@ type UnsubscribeSingleMsg struct {
 // Flags is a single-byte discriminant matching the reference
 // `CallReducerFlags` behavior.
 // Only two values are defined today; see the constants below.
+//
+// Field order matches reference `CallReducer<Args>` at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:110
+// (`reducer, args, request_id, flags`) — pinned by
+// parity_call_reducer_test.go against the reference byte shape.
 type CallReducerMsg struct {
-	RequestID   uint32
 	ReducerName string
 	Args        []byte
+	RequestID   uint32
 	Flags       byte
 }
 
@@ -123,9 +128,9 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		}
 	case CallReducerMsg:
 		buf.WriteByte(TagCallReducer)
-		writeUint32(&buf, msg.RequestID)
 		writeString(&buf, msg.ReducerName)
 		writeBytes(&buf, msg.Args)
+		writeUint32(&buf, msg.RequestID)
 		buf.WriteByte(msg.Flags)
 	case OneOffQueryMsg:
 		buf.WriteByte(TagOneOffQuery)
@@ -223,13 +228,13 @@ func decodeCallReducer(body []byte) (CallReducerMsg, error) {
 	var m CallReducerMsg
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.ReducerName, off, err = readString(body, off); err != nil {
+	if m.ReducerName, off, err = readString(body, 0); err != nil {
 		return m, err
 	}
 	if m.Args, off, err = readBytes(body, off); err != nil {
+		return m, err
+	}
+	if m.RequestID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
 	if len(body)-off < 1 {

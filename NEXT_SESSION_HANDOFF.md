@@ -11,6 +11,7 @@ For provenance of closed slices, use `git log` — this file tracks only current
 - Follow-on queue item for subscription fan-out wiring in `cmd/shunter-example` is closed.
 - Follow-on queue item for exposing executor inbox for scheduler wiring is closed — `Executor.SchedulerFor()` returns a wired `*Scheduler`, and `cmd/shunter-example` passes it to `Startup` and owns its Run goroutine.
 - OI-001 A1 wire-close slice for `SubscriptionError.total_host_execution_duration_micros` is closed — the field is the reference-position first wire field (v1.rs:350), pinned by `protocol/parity_subscription_error_test.go` against the reference byte shape. Emit sites populate 0; duration measurement is deferred (see "Current active constraint" below).
+- OI-001 A1 wire-close slice for `CallReducer` field order is closed — struct + encode/decode reordered to the reference `reducer, args, request_id, flags` layout (v1.rs:110), pinned by `protocol/parity_call_reducer_test.go` against the reference byte shape.
 - Closed-slice provenance, detailed verification history, and implementation narratives live in `rtk git log`.
 - Before starting a new slice, verify any remembered closure claim against live code; this file is intentionally current-state only.
 
@@ -22,7 +23,7 @@ For provenance of closed slices, use `git log` — this file tracks only current
 
 ## Next session: OI-001 A1 protocol wire-close — next concrete envelope/tag divergence
 
-Prior A1 slice (`SubscriptionError` duration field) is closed. OI-001 still has remaining visible divergences. Pick one and repeat the scout → pick → close-or-pin pattern.
+Prior A1 slices (`SubscriptionError` duration field, `CallReducer` field order) are closed. OI-001 still has remaining visible divergences. Pick one and repeat the scout → pick → close-or-pin pattern.
 
 Known remaining divergences from the 2026-04-22 scout (not exhaustive — re-scout before picking):
 
@@ -31,7 +32,6 @@ Known remaining divergences from the 2026-04-22 scout (not exhaustive — re-sco
 - `InitialConnection` vs reference `IdentityToken` — naming differs and field order differs (reference: `identity, token, connection_id`; Shunter wire: identity, connection_id, token).
 - `TransactionUpdateLight.Update` — reference uses `DatabaseUpdate { tables: Vec<TableUpdate> }`; Shunter uses flat `[]SubscriptionUpdate`.
 - `OneOffQueryResult` vs reference `OneOffQueryResponse` — reference uses `Option<error> + Vec<OneOffTable> + duration`; Shunter uses `Status byte + Rows + Error`.
-- `CallReducer` wire field order — reference: `reducer, args, request_id, flags`; Shunter encodes `RequestID, ReducerName, Args, Flags`.
 - `Unsubscribe.SendDropped` — extra byte in Shunter, not in reference.
 - Applied-envelope rows shape — reference wraps `SubscribeRows { table_id, table_name, table_rows: TableUpdate }`; Shunter flattens to `TableName + Rows []byte` (no `table_id`, no `num_rows`).
 
