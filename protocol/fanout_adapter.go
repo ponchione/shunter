@@ -89,11 +89,24 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateLight(
 	return mapDeliveryError(a.sender.SendTransactionUpdateLight(connID, msg))
 }
 
+// SendSubscriptionError delivers a post-commit evaluation-origin
+// SubscriptionError. The evaluator routes here only via the fan-out
+// worker after a TransactionUpdate-driven re-eval (see
+// `subscription/eval.go::handleEvalError` and
+// `subscription/fanout_worker.go::run`), so the error is never tied to
+// a client Subscribe/Unsubscribe request.
+//
+// Reference `SubscriptionError` (v1.rs:350) sets both `request_id` and
+// `query_id` to `None` in exactly this case — see
+// `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1998-2010`
+// (v1) and `messages.rs:622-629` (Option propagates through
+// `SubscriptionMessage`). Any per-connection diagnostic fields on
+// `subscription.SubscriptionError` (`RequestID`, `SubscriptionID`,
+// `QueryHash`, `Predicate`) are intentionally not on the wire; they
+// stay for internal logging only.
 func (a *FanOutSenderAdapter) SendSubscriptionError(connID types.ConnectionID, subErr subscription.SubscriptionError) error {
 	return mapDeliveryError(a.sender.Send(connID, SubscriptionError{
-		RequestID: optionalUint32(subErr.RequestID),
-		QueryID:   optionalUint32(uint32(subErr.SubscriptionID)),
-		Error:     subErr.Message,
+		Error: subErr.Message,
 	}))
 }
 

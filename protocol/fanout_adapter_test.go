@@ -285,7 +285,19 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 	}
 }
 
-func TestFanOutSenderAdapter_SendSubscriptionErrorPreservesRequestID(t *testing.T) {
+// TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs
+// pins the reference-parity behavior for post-commit evaluation errors.
+// The fan-out adapter is only invoked for errors routed through
+// FanOutMessage.Errors, which originate from
+// `subscription/eval.go::handleEvalError` during a TransactionUpdate
+// re-eval. Reference
+// `core/src/subscription/module_subscription_manager.rs:1998-2010`
+// emits `SubscriptionError { request_id: None, query_id: None, ... }`
+// in this exact case, and `core/src/client/messages.rs:622-629`
+// propagates the Options straight through. Per-connection diagnostics
+// (`subscription.SubscriptionError.RequestID`/`SubscriptionID`) are
+// internal logging state; they must not appear on the wire.
+func TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)
 	if err := adapter.SendSubscriptionError(connID(3), subscription.SubscriptionError{RequestID: 55, SubscriptionID: 77, Message: "boom"}); err != nil {
@@ -300,11 +312,17 @@ func TestFanOutSenderAdapter_SendSubscriptionErrorPreservesRequestID(t *testing.
 	if !ok {
 		t.Fatalf("message type = %T, want SubscriptionError", mock.genericMsgs[0])
 	}
-	if msg.RequestID == nil || *msg.RequestID != 55 {
-		t.Fatalf("RequestID = %v, want 55", msg.RequestID)
+	if msg.RequestID != nil {
+		t.Fatalf("RequestID = %v, want nil (TransactionUpdate-origin per reference)", *msg.RequestID)
 	}
-	if msg.QueryID == nil || *msg.QueryID != 77 || msg.Error != "boom" {
-		t.Fatalf("subscription error = %+v", msg)
+	if msg.QueryID != nil {
+		t.Fatalf("QueryID = %v, want nil (TransactionUpdate-origin per reference)", *msg.QueryID)
+	}
+	if msg.TableID != nil {
+		t.Fatalf("TableID = %v, want nil (TransactionUpdate-origin per reference)", *msg.TableID)
+	}
+	if msg.Error != "boom" {
+		t.Fatalf("Error = %q, want %q", msg.Error, "boom")
 	}
 }
 

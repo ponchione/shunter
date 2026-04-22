@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/subscription"
+	"github.com/ponchione/shunter/types"
 )
 
 // TestParitySubscriptionErrorWireShape pins the byte-level wire shape
@@ -145,4 +147,73 @@ func TestParitySubscriptionErrorWireShapeAllNoneOptions(t *testing.T) {
 		t.Fatalf("None-option SubscriptionError wire shape mismatch\n got: % x\nwant: % x",
 			frame, want.Bytes())
 	}
+}
+
+// TestParitySubscriptionErrorTransactionOriginWire pins the wire shape
+// produced by the fan-out adapter for a post-commit evaluation error.
+// Reference emit path at
+// `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1998-2010`
+// constructs `SubscriptionMessage { request_id: None, query_id: None,
+// timer: None, result: SubscriptionResult::Error(SubscriptionError {
+// table_id: None, message }) }` for exactly this case, and
+// `core/src/client/messages.rs:622-629` propagates the Options straight
+// through to the ws_v1 envelope. This test round-trips through the
+// adapter seam (subscription.SubscriptionError in → protocol
+// SubscriptionError bytes out) to prove the emit site matches the
+// reference None-all layout regardless of the diagnostic RequestID /
+// SubscriptionID carried by the subscription layer.
+func TestParitySubscriptionErrorTransactionOriginWire(t *testing.T) {
+	capture := &captureSender{}
+	adapter := NewFanOutSenderAdapter(capture)
+
+	errMsg := "predicate rewrite failed"
+	in := subscription.SubscriptionError{
+		RequestID:      55,
+		SubscriptionID: 77,
+		Message:        errMsg,
+	}
+	if err := adapter.SendSubscriptionError(types.ConnectionID{}, in); err != nil {
+		t.Fatalf("SendSubscriptionError: %v", err)
+	}
+
+	if len(capture.generic) != 1 {
+		t.Fatalf("generic sends = %d, want 1", len(capture.generic))
+	}
+	frame, err := EncodeServerMessage(capture.generic[0])
+	if err != nil {
+		t.Fatalf("encode captured: %v", err)
+	}
+
+	var want bytes.Buffer
+	want.WriteByte(TagSubscriptionError)
+	want.Write(make([]byte, 8)) // duration=0 (measurement deferred)
+	want.WriteByte(0)           // request_id: None
+	want.WriteByte(0)           // query_id: None
+	want.WriteByte(0)           // table_id: None
+	var u32Buf [4]byte
+	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(errMsg)))
+	want.Write(u32Buf[:])
+	want.WriteString(errMsg)
+
+	if !bytes.Equal(frame, want.Bytes()) {
+		t.Fatalf("TransactionUpdate-origin SubscriptionError wire shape mismatch\n got: % x\nwant: % x",
+			frame, want.Bytes())
+	}
+}
+
+// captureSender records every Send() message so the adapter→wire byte
+// shape can be inspected.
+type captureSender struct {
+	generic []any
+}
+
+func (c *captureSender) Send(_ types.ConnectionID, msg any) error {
+	c.generic = append(c.generic, msg)
+	return nil
+}
+func (c *captureSender) SendTransactionUpdate(types.ConnectionID, *TransactionUpdate) error {
+	return nil
+}
+func (c *captureSender) SendTransactionUpdateLight(types.ConnectionID, *TransactionUpdateLight) error {
+	return nil
 }
