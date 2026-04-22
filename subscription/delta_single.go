@@ -88,7 +88,7 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 		// A Join is a structural predicate, not a row-level filter.
 		// Treat as pass; the join-delta evaluator handles it directly.
 		return true
-	case CrossJoinProjected:
+	case CrossJoin:
 		return true
 	}
 	return false

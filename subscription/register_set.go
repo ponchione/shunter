@@ -128,11 +128,8 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 				}
 			}
 		}
-	case CrossJoinProjected:
-		if view.RowCount(p.Other) == 0 {
-			return nil, nil
-		}
-		for _, row := range view.TableScan(p.Projected) {
+	case CrossJoin:
+		for _, row := range projectedCrossJoinRows(view, p) {
 			if err := add(row); err != nil {
 				return nil, err
 			}
@@ -172,21 +169,43 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 }
 
 // emittedTableID returns the table ID whose row shape the subscription emits
-// at the wire boundary. Join and CrossJoinProjected carry an explicit
-// projected side; every other predicate emits rows from its sole declared
-// table. Zero is returned when the predicate carries no table (malformed).
+// at the wire boundary. Join and CrossJoin carry an explicit projected side;
+// every other predicate emits rows from its sole declared table. Zero is
+// returned when the predicate carries no table (malformed).
 func emittedTableID(p Predicate) TableID {
 	switch x := p.(type) {
 	case Join:
 		return x.ProjectedTable()
-	case CrossJoinProjected:
-		return x.Projected
+	case CrossJoin:
+		return x.ProjectedTable()
 	}
 	tables := p.Tables()
 	if len(tables) == 0 {
 		return 0
 	}
 	return tables[0]
+}
+
+func projectedCrossJoinRows(view store.CommittedReadView, p CrossJoin) []types.ProductValue {
+	if view == nil {
+		return nil
+	}
+	projectedTable := p.ProjectedTable()
+	otherTable := p.Left
+	if projectedTable == p.Left {
+		otherTable = p.Right
+	}
+	var rows []types.ProductValue
+	otherCount := view.RowCount(otherTable)
+	if otherCount == 0 {
+		return nil
+	}
+	for _, projectedRow := range view.TableScan(projectedTable) {
+		for range view.TableScan(otherTable) {
+			rows = append(rows, projectedRow)
+		}
+	}
+	return rows
 }
 
 // RegisterSet atomically registers 1..N predicates under a single

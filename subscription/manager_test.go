@@ -283,6 +283,65 @@ func TestRegisterJoinBootstrapProjectsRight(t *testing.T) {
 	}
 }
 
+func TestRegisterCrossJoinBootstrapPreservesMultiplicity(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1)}, {types.NewUint64(2)}},
+		2: {{types.NewUint64(10)}, {types.NewUint64(11)}, {types.NewUint64(12)}},
+	})
+	mgr := NewManager(s, s)
+	p := CrossJoin{Left: 1, Right: 2}
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 12, Predicates: []Predicate{p},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if len(got.Update) != 1 {
+		t.Fatalf("update count = %d, want 1", len(got.Update))
+	}
+	if len(got.Update[0].Inserts) != 6 {
+		t.Fatalf("bootstrap inserts = %d, want 6 cartesian pairs", len(got.Update[0].Inserts))
+	}
+	counts := map[uint64]int{}
+	for _, row := range got.Update[0].Inserts {
+		counts[row[0].AsUint64()]++
+	}
+	if counts[1] != 3 || counts[2] != 3 {
+		t.Fatalf("LHS multiplicity counts = %v, want {1:3, 2:3}", counts)
+	}
+}
+
+func TestRegisterCrossJoinBootstrapProjectsRight(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1)}, {types.NewUint64(2)}, {types.NewUint64(3)}},
+		2: {{types.NewUint64(10)}, {types.NewUint64(11)}},
+	})
+	mgr := NewManager(s, s)
+	p := CrossJoin{Left: 1, Right: 2, ProjectRight: true}
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 13, Predicates: []Predicate{p},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if len(got.Update) != 1 || len(got.Update[0].Inserts) != 6 {
+		t.Fatalf("initial rows = %v, want 6 RHS-projected cartesian rows", got.Update)
+	}
+	counts := map[uint64]int{}
+	for _, row := range got.Update[0].Inserts {
+		counts[row[0].AsUint64()]++
+	}
+	if counts[10] != 3 || counts[11] != 3 {
+		t.Fatalf("RHS multiplicity counts = %v, want {10:3, 11:3}", counts)
+	}
+}
+
 func TestRegisterInitialRowLimit(t *testing.T) {
 	s := testSchema()
 	view := buildMockCommitted(s, map[TableID][]types.ProductValue{

@@ -82,15 +82,13 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 			if stmt.Predicate != nil {
 				return compiledSQLQuery{}, fmt.Errorf("cross join WHERE not supported")
 			}
-			projectedID, _, ok := sl.TableByName(stmt.ProjectedTable)
-			if !ok {
-				return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.ProjectedTable)
+			cross := subscription.CrossJoin{Left: leftID, Right: rightID}
+			if leftID == rightID {
+				cross.LeftAlias = 0
+				cross.RightAlias = 1
 			}
-			otherID := leftID
-			if projectedID == leftID {
-				otherID = rightID
-			}
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.CrossJoinProjected{Projected: projectedID, Other: otherID}}, nil
+			cross.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross}, nil
 		}
 		leftCol, ok := leftTS.Column(stmt.Join.LeftOn.Column)
 		if !ok {

@@ -71,8 +71,8 @@ func validate(pred Predicate, s SchemaLookup) error {
 		return nil
 	case Join:
 		return validateJoin(p, s)
-	case CrossJoinProjected:
-		return validateCrossJoinProjected(p, s)
+	case CrossJoin:
+		return validateCrossJoin(p, s)
 	default:
 		return fmt.Errorf("%w: unsupported predicate %T", ErrInvalidPredicate, pred)
 	}
@@ -209,12 +209,15 @@ func validateSelfJoinFilterAliases(p Predicate, leftAlias, rightAlias uint8) err
 	return nil
 }
 
-func validateCrossJoinProjected(p CrossJoinProjected, s SchemaLookup) error {
-	if !s.TableExists(p.Projected) {
-		return fmt.Errorf("%w: projected table %d", ErrTableNotFound, p.Projected)
+func validateCrossJoin(p CrossJoin, s SchemaLookup) error {
+	if !s.TableExists(p.Left) {
+		return fmt.Errorf("%w: cross join left table %d", ErrTableNotFound, p.Left)
 	}
-	if !s.TableExists(p.Other) {
-		return fmt.Errorf("%w: other table %d", ErrTableNotFound, p.Other)
+	if !s.TableExists(p.Right) {
+		return fmt.Errorf("%w: cross join right table %d", ErrTableNotFound, p.Right)
+	}
+	if p.Left == p.Right && p.LeftAlias == p.RightAlias {
+		return fmt.Errorf("%w: self-cross-join requires distinct relation aliases (table %d)", ErrInvalidPredicate, p.Left)
 	}
 	return nil
 }

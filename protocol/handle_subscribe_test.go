@@ -1286,14 +1286,14 @@ func TestHandleSubscribeSingle_CrossJoinProjection(t *testing.T) {
 	if len(req.Predicates) != 1 {
 		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
 	}
-	pred, ok := req.Predicates[0].(subscription.CrossJoinProjected)
+	pred, ok := req.Predicates[0].(subscription.CrossJoin)
 	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want CrossJoinProjected", req.Predicates[0])
+		t.Fatalf("Predicates[0] type = %T, want CrossJoin", req.Predicates[0])
 	}
 	_, orders, _ := eng.Registry().TableByName("Orders")
 	_, inventory, _ := eng.Registry().TableByName("Inventory")
-	if pred.Projected != orders.ID || pred.Other != inventory.ID {
-		t.Fatalf("cross join predicate = %+v, want projected Orders other Inventory", pred)
+	if pred.Left != orders.ID || pred.Right != inventory.ID || pred.ProjectRight {
+		t.Fatalf("cross join predicate = %+v, want Left=Orders Right=Inventory ProjectRight=false", pred)
 	}
 }
 
@@ -1383,13 +1383,52 @@ func TestHandleSubscribeSingle_AliasedSelfCrossJoin(t *testing.T) {
 	if len(req.Predicates) != 1 {
 		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
 	}
-	pred, ok := req.Predicates[0].(subscription.CrossJoinProjected)
+	pred, ok := req.Predicates[0].(subscription.CrossJoin)
 	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want CrossJoinProjected", req.Predicates[0])
+		t.Fatalf("Predicates[0] type = %T, want CrossJoin", req.Predicates[0])
 	}
 	_, tTable, _ := eng.Registry().TableByName("t")
-	if pred.Projected != tTable.ID || pred.Other != tTable.ID {
-		t.Fatalf("self cross join predicate = %+v, want projected/other both t", pred)
+	if pred.Left != tTable.ID || pred.Right != tTable.ID {
+		t.Fatalf("self cross join predicate = %+v, want Left/Right both t", pred)
+	}
+	if pred.LeftAlias == pred.RightAlias {
+		t.Fatalf("self cross join aliases must differ, got Left=%d Right=%d", pred.LeftAlias, pred.RightAlias)
+	}
+	if pred.ProjectRight {
+		t.Fatal("SELECT a.* must compile to ProjectRight=false on self-cross-join")
+	}
+}
+
+func TestHandleSubscribeSingle_AliasedSelfCrossJoinProjectsRight(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{RequestID: 25, QueryID: 26, QueryString: "SELECT b.* FROM t AS a JOIN t AS b"}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	pred, ok := req.Predicates[0].(subscription.CrossJoin)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want CrossJoin", req.Predicates[0])
+	}
+	if !pred.ProjectRight {
+		t.Fatal("SELECT b.* must compile to ProjectRight=true on self-cross-join")
 	}
 }
 

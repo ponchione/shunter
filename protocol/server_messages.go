@@ -155,11 +155,11 @@ type TransactionUpdate struct {
 	// Timestamp is microseconds since Unix epoch, matching reference
 	// `Timestamp` (sats/timestamp.rs:11-13 — `i64` micros). Wire width
 	// is i64 regardless; only the unit flipped ns→µs here.
-	Timestamp                  int64
-	CallerIdentity             [32]byte
-	CallerConnectionID         [16]byte
-	ReducerCall                ReducerCallInfo
-	EnergyQuantaUsed           [16]byte // u128 little-endian, reference `EnergyQuanta.quanta`
+	Timestamp          int64
+	CallerIdentity     [32]byte
+	CallerConnectionID [16]byte
+	ReducerCall        ReducerCallInfo
+	EnergyQuantaUsed   [16]byte // u128 little-endian, reference `EnergyQuanta.quanta`
 	// TotalHostExecutionDuration is microseconds, matching reference
 	// `TimeDuration` (sats/time_duration.rs:17-19 — `i64` micros).
 	TotalHostExecutionDuration int64

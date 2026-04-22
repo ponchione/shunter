@@ -94,6 +94,7 @@ Main code surfaces:
 Current grounded state:
 - many narrow SQL/query parity slices are landed and pinned
 - the supported SQL surface remains intentionally narrower than the reference SQL path
+- the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off execution, and delta evaluation
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -193,10 +194,12 @@ What landed already:
 - subscription envelope follow-through
 - lag / slow-client policy parity slice (`docs/parity-phase2-slice3-lag-policy.md`)
 - rows-shape documented-divergence close covering applied / light / committed envelopes (`docs/parity-phase2-slice4-rows-shape.md`)
+- fan-out delivery parity for recipient-level durability gating plus dropped-client cleanup on eval failure
 - many narrow SQL/query slices and rejection pins
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
+- predicate normalization / validation drift and other runtime-shape gaps still need bounded A2 follow-ons
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
@@ -246,10 +249,11 @@ When choosing the next slice:
 
 ## Current best next direction
 
-There is no single narrow-ready automatic next slice.
+The best current narrow-ready direction is the next OI-002 A2 runtime/model residual after the now-closed multiplicity batch.
 
 Current candidate directions are:
-- broader protocol/query parity where an externally visible gap outranks hardening work
+- predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model
+- evaluation-ordering/runtime-shape follow-ons if the scout shows they outrank hardening work
 - Tier B hardening when a concrete live risk is stronger than the next parity slice
 - a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
 - scheduler/bootstrap follow-through only when workload or integration evidence surfaces

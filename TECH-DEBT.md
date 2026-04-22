@@ -58,11 +58,13 @@ Severity: high
 Summary:
 - many narrow SQL/query parity slices are now landed and pinned
 - the surface is still intentionally narrower than the reference SQL path
+- the fan-out delivery parity batch is now partly closed: fast-read recipients can bypass durability while confirmed-read recipients still wait, and eval failures now mark the whole connection dropped for executor-side cleanup instead of pruning only the failing subscription
+- the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off query execution, and post-commit delta evaluation
 - row-level security / per-client filtering remains absent
-- broader query/subscription parity is still open beyond the landed narrow shapes
+- broader query/subscription parity is still open beyond the landed narrow shapes, especially predicate normalization / validation drift, ordering/runtime-shape follow-ons, and other bounded A2 gaps
 
 Execution note:
-- this is the next active issue for the handoff queue: scout the live subscription runtime against `reference/SpacetimeDB/crates/core/src/subscription/`, then pick one bounded A2 batch (predicate parity, evaluation ordering, or fan-out delivery) rather than reopening closed A1 protocol slices.
+- OI-002 remains the next active handoff issue, but both the fan-out delivery batch and the join/cross-join multiplicity batch are now closed. The next bounded A2 batch should start from the remaining runtime/model gaps (for example predicate normalization / validation drift or another reference-backed predicate/runtime mismatch) rather than reopening those closed slices or closed A1 protocol work.
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads

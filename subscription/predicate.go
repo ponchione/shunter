@@ -203,20 +203,33 @@ func (p Join) ProjectedTable() TableID {
 	return p.Left
 }
 
-// CrossJoinProjected matches all rows from Projected when Other is non-empty.
-// It is the narrow runtime form for SQL cross-join projection such as
-// `SELECT t.* FROM t JOIN s`.
-type CrossJoinProjected struct {
-	Projected TableID
-	Other     TableID
+// CrossJoin matches rows from two relations with cartesian-product semantics.
+//
+// ProjectRight selects which side of the cartesian pair survives at row
+// emission time, mirroring Join.ProjectRight for equi-joins. LeftAlias and
+// RightAlias disambiguate aliased self-cross-joins when Left == Right.
+type CrossJoin struct {
+	Left         TableID
+	Right        TableID
+	LeftAlias    uint8
+	RightAlias   uint8
+	ProjectRight bool
 }
 
-func (CrossJoinProjected) sealed() {}
-func (p CrossJoinProjected) Tables() []TableID {
-	if p.Projected == p.Other {
-		return []TableID{p.Projected}
+func (CrossJoin) sealed() {}
+func (p CrossJoin) Tables() []TableID {
+	if p.Left == p.Right {
+		return []TableID{p.Left}
 	}
-	return []TableID{p.Projected, p.Other}
+	return []TableID{p.Left, p.Right}
+}
+
+// ProjectedTable returns the table ID whose row shape the subscription emits.
+func (p CrossJoin) ProjectedTable() TableID {
+	if p.ProjectRight {
+		return p.Right
+	}
+	return p.Left
 }
 
 // Bound describes one end of a ColRange. If Unbounded is true, Value and

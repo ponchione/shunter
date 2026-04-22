@@ -707,6 +707,91 @@ func TestFanOutWorker_ConfirmedReadCallerOnly_Waits(t *testing.T) {
 	}
 }
 
+func TestFanOutWorker_FastRecipientDoesNotWaitForConfirmedCaller(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+	caller := cid(1)
+	fast := cid(2)
+	w.SetConfirmedReads(caller, true)
+	w.SetConfirmedReads(fast, false)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	durableCh := make(chan types.TxID, 1)
+	inbox <- FanOutMessage{
+		TxID:      types.TxID(1),
+		TxDurable: durableCh,
+		Fanout: CommitFanout{
+			fast: {{SubscriptionID: 2, TableName: "t1"}},
+		},
+		CallerConnID:  &caller,
+		CallerOutcome: committedOutcome(11),
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	mock.mu.Lock()
+	preLight := len(mock.lightCalls)
+	preHeavy := len(mock.heavyCalls)
+	mock.mu.Unlock()
+	if preLight != 1 {
+		t.Fatalf("lightCalls = %d before TxDurable, want 1 for fast recipient", preLight)
+	}
+	if preHeavy != 0 {
+		t.Fatalf("heavyCalls = %d before TxDurable, want 0 for confirmed-read caller", preHeavy)
+	}
+
+	durableCh <- types.TxID(1)
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.lightCalls) != 1 {
+		t.Fatalf("lightCalls = %d after TxDurable, want 1", len(mock.lightCalls))
+	}
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls = %d after TxDurable, want 1", len(mock.heavyCalls))
+	}
+}
+
+func TestFanOutWorker_FastCallerOnly_DoesNotWaitForTxDurable(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+	caller := cid(1)
+	w.SetConfirmedReads(caller, false)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	inbox <- FanOutMessage{
+		TxID:          types.TxID(1),
+		TxDurable:     make(chan types.TxID),
+		Fanout:        CommitFanout{},
+		CallerConnID:  &caller,
+		CallerOutcome: committedOutcome(12),
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.heavyCalls) != 1 {
+		t.Fatalf("heavyCalls = %d, want 1 for fast-read caller", len(mock.heavyCalls))
+	}
+	if len(mock.lightCalls) != 0 {
+		t.Fatalf("lightCalls = %d, want 0", len(mock.lightCalls))
+	}
+}
+
 func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
@@ -737,7 +822,7 @@ func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
 }
 
 func TestFanOutWorker_SetConfirmedReads_Toggle(t *testing.T) {
-	w := &FanOutWorker{confirmedReads: make(map[types.ConnectionID]bool)}
+	w := &FanOutWorker{confirmedReads: make(map[types.ConnectionID]bool), fastReads: make(map[types.ConnectionID]bool)}
 	conn1 := cid(1)
 
 	w.SetConfirmedReads(conn1, true)
@@ -752,7 +837,7 @@ func TestFanOutWorker_SetConfirmedReads_Toggle(t *testing.T) {
 }
 
 func TestFanOutWorker_RemoveClient(t *testing.T) {
-	w := &FanOutWorker{confirmedReads: make(map[types.ConnectionID]bool)}
+	w := &FanOutWorker{confirmedReads: make(map[types.ConnectionID]bool), fastReads: make(map[types.ConnectionID]bool)}
 	conn1 := cid(1)
 	w.confirmedReads[conn1] = true
 

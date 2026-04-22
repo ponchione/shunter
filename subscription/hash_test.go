@@ -97,6 +97,18 @@ func TestQueryHashJoinProjectionDiffers(t *testing.T) {
 	}
 }
 
+func TestQueryHashCrossJoinProjectionAndAliasesDiffer(t *testing.T) {
+	left := CrossJoin{Left: 1, Right: 1, LeftAlias: 0, RightAlias: 1, ProjectRight: false}
+	right := CrossJoin{Left: 1, Right: 1, LeftAlias: 0, RightAlias: 1, ProjectRight: true}
+	aliasDrift := CrossJoin{Left: 1, Right: 1, LeftAlias: 2, RightAlias: 3, ProjectRight: false}
+	if ComputeQueryHash(left, nil) == ComputeQueryHash(right, nil) {
+		t.Fatal("CrossJoin projection side must change canonical hash")
+	}
+	if ComputeQueryHash(left, nil) == ComputeQueryHash(aliasDrift, nil) {
+		t.Fatal("CrossJoin alias identity must change canonical hash")
+	}
+}
+
 func TestQueryHashStringIs64Hex(t *testing.T) {
 	p := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	h := ComputeQueryHash(p, nil)

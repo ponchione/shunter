@@ -52,6 +52,7 @@ type FanOutWorker struct {
 	sender         FanOutSender
 	mu             sync.RWMutex
 	confirmedReads map[types.ConnectionID]bool
+	fastReads      map[types.ConnectionID]bool
 	dropped        chan<- types.ConnectionID
 }
 
@@ -63,6 +64,7 @@ func NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropped ch
 		inbox:          inbox,
 		sender:         sender,
 		confirmedReads: make(map[types.ConnectionID]bool),
+		fastReads:      make(map[types.ConnectionID]bool),
 		dropped:        dropped,
 	}
 }
@@ -84,13 +86,17 @@ func (w *FanOutWorker) Run(ctx context.Context) {
 }
 
 // SetConfirmedReads toggles the per-connection confirmed-read policy.
+// Public protocol delivery defaults to confirmed reads; calling with
+// enabled=false opts a connection into fast-read delivery.
 func (w *FanOutWorker) SetConfirmedReads(connID types.ConnectionID, enabled bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if enabled {
 		w.confirmedReads[connID] = true
+		delete(w.fastReads, connID)
 	} else {
 		delete(w.confirmedReads, connID)
+		w.fastReads[connID] = true
 	}
 }
 
@@ -99,26 +105,34 @@ func (w *FanOutWorker) RemoveClient(connID types.ConnectionID) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.confirmedReads, connID)
+	delete(w.fastReads, connID)
 }
 
-func (w *FanOutWorker) anyConfirmedRead(fanout CommitFanout, callerConnID *types.ConnectionID, callerOutcome *CallerOutcome) bool {
-	if len(fanout) > 0 {
-		return true
-	}
-	if callerConnID != nil && callerOutcome != nil {
-		return true
-	}
+func (w *FanOutWorker) requiresConfirmedRead(connID types.ConnectionID) bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	for connID := range fanout {
-		if w.confirmedReads[connID] {
-			return true
-		}
+	if w.fastReads[connID] {
+		return false
 	}
-	if callerConnID != nil && callerOutcome != nil && w.confirmedReads[*callerConnID] {
+	return true
+}
+
+func waitForDurable(ctx context.Context, durable <-chan types.TxID, waited *bool, ready *bool) bool {
+	if *ready || durable == nil {
+		*ready = true
 		return true
 	}
-	return false
+	if *waited {
+		return *ready
+	}
+	*waited = true
+	select {
+	case <-ctx.Done():
+		return false
+	case <-durable:
+		*ready = true
+		return true
+	}
 }
 
 func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
@@ -146,17 +160,6 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		effCallerOutcome = nil
 	}
 
-	// Confirmed-read gating (Story 6.4). The heavy envelope is the
-	// caller-visible commit confirmation, so it participates in
-	// confirmed-read gating just like a non-caller light delivery.
-	if msg.TxDurable != nil && w.anyConfirmedRead(msg.Fanout, effCallerConnID, effCallerOutcome) {
-		select {
-		case <-ctx.Done():
-			return
-		case <-msg.TxDurable:
-		}
-	}
-
 	// Deliver subscription errors first (before updates).
 	for connID, errs := range msg.Errors {
 		for _, se := range errs {
@@ -181,9 +184,14 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	if msg.CallerOutcome != nil {
 		lightRequestID = msg.CallerOutcome.RequestID
 	}
+	var durableWaited bool
+	var durableReady bool
 	for connID, updates := range msg.Fanout {
 		if msg.CallerConnID != nil && connID == *msg.CallerConnID {
 			continue
+		}
+		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+			return
 		}
 		if err := w.sender.SendTransactionUpdateLight(connID, lightRequestID, updates, memo); err != nil {
 			w.handleSendError(connID, err)
@@ -198,6 +206,9 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// NoSuccessNotify caller-echo opt-out (above) is the one exception:
 	// effCallerConnID / effCallerOutcome are nil in that case.
 	if effCallerConnID != nil && effCallerOutcome != nil {
+		if w.requiresConfirmedRead(*effCallerConnID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+			return
+		}
 		if err := w.sender.SendTransactionUpdateHeavy(*effCallerConnID, *effCallerOutcome, callerUpdates, memo); err != nil {
 			w.handleSendError(*effCallerConnID, err)
 		}

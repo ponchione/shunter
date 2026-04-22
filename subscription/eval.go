@@ -202,11 +202,7 @@ func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.Conne
 	wrapped := fmt.Errorf("%w: %v", ErrSubscriptionEval, err)
 	log.Printf("subscription: evaluation error for query %s predicate=%s: %v", qs.hash, predRepr, wrapped)
 
-	type doomedSub struct {
-		connID types.ConnectionID
-		subID  types.SubscriptionID
-	}
-	var doomed []doomedSub
+	dropped := make(map[types.ConnectionID]struct{})
 	for connID, subIDs := range qs.subscribers {
 		for subID, delivery := range subIDs {
 			out[connID] = append(out[connID], SubscriptionError{
@@ -216,11 +212,11 @@ func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.Conne
 				Predicate:      predRepr,
 				Message:        wrapped.Error(),
 			})
-			doomed = append(doomed, doomedSub{connID: connID, subID: subID})
 		}
+		dropped[connID] = struct{}{}
 	}
-	for _, sub := range doomed {
-		m.removeDroppedSub(sub.connID, sub.subID)
+	for connID := range dropped {
+		m.signalDropped(connID)
 	}
 }
 
@@ -422,14 +418,14 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			Inserts:   ins,
 			Deletes:   del,
 		}}
-	case CrossJoinProjected:
-		ins, del := evalCrossJoinProjectedDelta(dv, p)
+	case CrossJoin:
+		ins, del := evalCrossJoinDelta(dv, p)
 		if len(ins) == 0 && len(del) == 0 {
 			return nil
 		}
 		return []SubscriptionUpdate{{
-			TableID:   p.Projected,
-			TableName: m.schema.TableName(p.Projected),
+			TableID:   p.ProjectedTable(),
+			TableName: m.schema.TableName(p.ProjectedTable()),
 			Inserts:   ins,
 			Deletes:   del,
 		}}
@@ -475,31 +471,70 @@ func projectJoinedRows(rows []types.ProductValue, lhsWidth int, projectRight boo
 	return out
 }
 
-func evalCrossJoinProjectedDelta(dv *DeltaView, p CrossJoinProjected) (inserts, deletes []types.ProductValue) {
-	view := dv.CommittedView()
-	afterOtherCount := 0
-	if view != nil {
-		afterOtherCount = view.RowCount(p.Other)
+func evalCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue) {
+	afterRows := materializeCrossJoinProjectedRows(tableRowsAfter(dv.CommittedView(), p.ProjectedTable()), tableRowsAfter(dv.CommittedView(), crossJoinOtherTable(p)))
+	beforeRows := materializeCrossJoinProjectedRows(projectedRowsBefore(dv, p.ProjectedTable()), projectedRowsBefore(dv, crossJoinOtherTable(p)))
+	return diffProjectedRows(beforeRows, afterRows)
+}
+
+func crossJoinOtherTable(p CrossJoin) TableID {
+	projected := p.ProjectedTable()
+	if projected == p.Left {
+		return p.Right
 	}
-	beforeOtherCount := afterOtherCount - len(dv.InsertedRows(p.Other)) + len(dv.DeletedRows(p.Other))
-	beforeOtherNonEmpty := beforeOtherCount > 0
-	afterOtherNonEmpty := afterOtherCount > 0
-	switch {
-	case !beforeOtherNonEmpty && !afterOtherNonEmpty:
-		return nil, nil
-	case !beforeOtherNonEmpty && afterOtherNonEmpty:
-		if view == nil {
-			return nil, nil
-		}
-		for _, row := range view.TableScan(p.Projected) {
-			inserts = append(inserts, row)
-		}
-		return inserts, nil
-	case beforeOtherNonEmpty && !afterOtherNonEmpty:
-		return nil, projectedRowsBefore(dv, p.Projected)
-	default:
-		return dv.InsertedRows(p.Projected), dv.DeletedRows(p.Projected)
+	return p.Left
+}
+
+func tableRowsAfter(view store.CommittedReadView, table TableID) []types.ProductValue {
+	if view == nil {
+		return nil
 	}
+	var rows []types.ProductValue
+	for _, row := range view.TableScan(table) {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func materializeCrossJoinProjectedRows(projectedRows, otherRows []types.ProductValue) []types.ProductValue {
+	if len(projectedRows) == 0 || len(otherRows) == 0 {
+		return nil
+	}
+	out := make([]types.ProductValue, 0, len(projectedRows)*len(otherRows))
+	for _, projectedRow := range projectedRows {
+		for range otherRows {
+			out = append(out, projectedRow)
+		}
+	}
+	return out
+}
+
+func diffProjectedRows(beforeRows, afterRows []types.ProductValue) (inserts, deletes []types.ProductValue) {
+	beforeCounts := make(map[string]int, len(beforeRows))
+	for _, row := range beforeRows {
+		beforeCounts[encodeRowKey(row)]++
+	}
+	for _, row := range afterRows {
+		key := encodeRowKey(row)
+		if beforeCounts[key] > 0 {
+			beforeCounts[key]--
+			continue
+		}
+		inserts = append(inserts, row)
+	}
+	afterCounts := make(map[string]int, len(afterRows))
+	for _, row := range afterRows {
+		afterCounts[encodeRowKey(row)]++
+	}
+	for _, row := range beforeRows {
+		key := encodeRowKey(row)
+		if afterCounts[key] > 0 {
+			afterCounts[key]--
+			continue
+		}
+		deletes = append(deletes, row)
+	}
+	return inserts, deletes
 }
 
 func projectedRowsBefore(dv *DeltaView, table TableID) []types.ProductValue {

@@ -148,10 +148,17 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 			e.writeByte(1)
 			encodePredicate(e, p.Filter)
 		}
-	case CrossJoinProjected:
+	case CrossJoin:
 		e.writeByte(tagCrossJoin)
-		e.writeU32(uint32(p.Projected))
-		e.writeU32(uint32(p.Other))
+		e.writeU32(uint32(p.Left))
+		e.writeU32(uint32(p.Right))
+		e.writeByte(p.LeftAlias)
+		e.writeByte(p.RightAlias)
+		if p.ProjectRight {
+			e.writeByte(1)
+		} else {
+			e.writeByte(0)
+		}
 	default:
 		// Sealed interface — no external impls reach this point.
 		panic("subscription: unknown predicate type")

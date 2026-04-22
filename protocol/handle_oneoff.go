@@ -58,7 +58,7 @@ func handleOneOffQuery(
 	var matchedRows []types.ProductValue
 	if joinPred, ok := pred.(subscription.Join); ok {
 		matchedRows = evaluateOneOffJoin(view, tableID, joinPred)
-	} else if crossPred, ok := pred.(subscription.CrossJoinProjected); ok {
+	} else if crossPred, ok := pred.(subscription.CrossJoin); ok {
 		matchedRows = evaluateOneOffCrossJoin(view, tableID, crossPred)
 	} else {
 		for _, pv := range view.TableScan(tableID) {
@@ -150,7 +150,6 @@ func evaluateOneOffJoin(view store.CommittedReadView, projectedTable schema.Tabl
 		if int(projectedJoinCol) >= len(projectedRow) {
 			continue
 		}
-		matched := false
 		for _, otherRow := range view.TableScan(otherTable) {
 			if int(otherJoinCol) >= len(otherRow) {
 				continue
@@ -170,26 +169,28 @@ func evaluateOneOffJoin(view store.CommittedReadView, projectedTable schema.Tabl
 					continue
 				}
 			}
-			matched = true
-			break
-		}
-		if matched {
 			rows = append(rows, projectedRow)
 		}
 	}
 	return rows
 }
 
-func evaluateOneOffCrossJoin(view store.CommittedReadView, projectedTable schema.TableID, cross subscription.CrossJoinProjected) []types.ProductValue {
-	if projectedTable != cross.Projected {
+func evaluateOneOffCrossJoin(view store.CommittedReadView, projectedTable schema.TableID, cross subscription.CrossJoin) []types.ProductValue {
+	if projectedTable != cross.ProjectedTable() {
 		return nil
 	}
-	if view.RowCount(cross.Other) == 0 {
+	otherTable := cross.Left
+	if projectedTable == cross.Left {
+		otherTable = cross.Right
+	}
+	if view.RowCount(otherTable) == 0 {
 		return nil
 	}
 	var rows []types.ProductValue
 	for _, row := range view.TableScan(projectedTable) {
-		rows = append(rows, row)
+		for range view.TableScan(otherTable) {
+			rows = append(rows, row)
+		}
 	}
 	return rows
 }

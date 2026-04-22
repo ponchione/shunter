@@ -924,14 +924,14 @@ func TestHandleOneOffQuery_JoinProjectionOnRightTable(t *testing.T) {
 		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 	pvs := decodeRows(t, firstTableRows(result), inventoryTS)
-	if len(pvs) != 2 {
-		t.Fatalf("got %d rows, want 2", len(pvs))
+	if len(pvs) != 3 {
+		t.Fatalf("got %d rows, want 3 multiplicity-preserving projected inventory rows", len(pvs))
 	}
-	if !pvs[0][0].Equal(types.NewUint32(100)) || !pvs[1][0].Equal(types.NewUint32(102)) {
-		t.Fatalf("unexpected inventory ids returned: %v, %v", pvs[0][0], pvs[1][0])
+	if !pvs[0][0].Equal(types.NewUint32(100)) || !pvs[1][0].Equal(types.NewUint32(100)) || !pvs[2][0].Equal(types.NewUint32(102)) {
+		t.Fatalf("unexpected inventory ids returned: %v, %v, %v", pvs[0][0], pvs[1][0], pvs[2][0])
 	}
-	if !pvs[0][1].Equal(types.NewUint32(9)) || !pvs[1][1].Equal(types.NewUint32(3)) {
-		t.Fatalf("unexpected quantities returned: %v, %v", pvs[0][1], pvs[1][1])
+	if !pvs[0][1].Equal(types.NewUint32(9)) || !pvs[1][1].Equal(types.NewUint32(9)) || !pvs[2][1].Equal(types.NewUint32(3)) {
+		t.Fatalf("unexpected quantities returned: %v, %v, %v", pvs[0][1], pvs[1][1], pvs[2][1])
 	}
 }
 
@@ -1041,8 +1041,8 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoin(t *testing.T) {
 		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 	pvs := decodeRows(t, firstTableRows(result), tTS)
-	if len(pvs) != 3 {
-		t.Fatalf("got %d rows, want 3 (every row matches itself by u32)", len(pvs))
+	if len(pvs) != 5 {
+		t.Fatalf("got %d rows, want 5 (bag semantics across 2x2 + 1x1 self-join pairs)", len(pvs))
 	}
 }
 
@@ -1076,11 +1076,13 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereAside(t *testing.T) {
 		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 	pvs := decodeRows(t, firstTableRows(result), tTS)
-	if len(pvs) != 1 {
-		t.Fatalf("got %d rows, want 1 (only a-side row with id=1)", len(pvs))
+	if len(pvs) != 3 {
+		t.Fatalf("got %d rows, want 3 (a.id=1 paired with every b row sharing u32=5)", len(pvs))
 	}
-	if !pvs[0][0].Equal(types.NewUint32(1)) {
-		t.Fatalf("got id=%v, want id=1", pvs[0][0])
+	for i, pv := range pvs {
+		if !pv[0].Equal(types.NewUint32(1)) {
+			t.Fatalf("row %d id=%v, want id=1 on every multiplicity-expanded row", i, pv[0])
+		}
 	}
 }
 
@@ -1181,8 +1183,8 @@ func TestHandleOneOffQuery_AliasedSelfCrossJoinProjection(t *testing.T) {
 		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 	pvs := decodeRows(t, firstTableRows(result), tTS)
-	if len(pvs) != 2 {
-		t.Fatalf("got %d rows, want 2", len(pvs))
+	if len(pvs) != 4 {
+		t.Fatalf("got %d rows, want 4 cartesian pairs projected onto a.*", len(pvs))
 	}
 }
 
@@ -1271,7 +1273,7 @@ func TestHandleOneOffQuery_CrossJoinProjection(t *testing.T) {
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
 		ordersReg.ID:    {{types.NewUint32(1)}, {types.NewUint32(2)}},
-		inventoryReg.ID: {{types.NewUint32(10)}},
+		inventoryReg.ID: {{types.NewUint32(10)}, {types.NewUint32(11)}, {types.NewUint32(12)}},
 	}}
 	stateAccess := &mockStateAccess{snap: snap}
 	msg := &OneOffQueryMsg{MessageID: []byte{0x1c}, QueryString: "SELECT o.* FROM Orders o JOIN Inventory product"}
@@ -1281,8 +1283,91 @@ func TestHandleOneOffQuery_CrossJoinProjection(t *testing.T) {
 		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 	pvs := decodeRows(t, firstTableRows(result), ordersTS)
+	if len(pvs) != 6 {
+		t.Fatalf("got %d rows, want 6 cartesian pairs projected onto Orders", len(pvs))
+	}
+}
+
+func TestHandleOneOffQuery_CrossJoinProjectsRight(t *testing.T) {
+	conn := testConnDirect(nil)
+	inventoryTS := &schema.TableSchema{ID: 2, Name: "Inventory", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{Name: "Orders", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}}})
+	b.TableDef(schema.TableDefinition{Name: "Inventory", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}}})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ordersReg, _ := eng.Registry().TableByName("Orders")
+	_, inventoryReg, _ := eng.Registry().TableByName("Inventory")
+	inventoryTS.ID = inventoryReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		ordersReg.ID:    {{types.NewUint32(1)}, {types.NewUint32(2)}, {types.NewUint32(3)}},
+		inventoryReg.ID: {{types.NewUint32(10)}, {types.NewUint32(11)}},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	msg := &OneOffQueryMsg{MessageID: []byte{0x62}, QueryString: "SELECT product.* FROM Orders o JOIN Inventory product"}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), inventoryTS)
+	if len(pvs) != 6 {
+		t.Fatalf("got %d rows, want 6 cartesian pairs projected onto Inventory", len(pvs))
+	}
+	for i := 0; i < 3; i++ {
+		if !pvs[i][0].Equal(types.NewUint32(10)) {
+			t.Fatalf("row %d = %v, want inventory row 10 repeated first", i, pvs[i])
+		}
+	}
+	for i := 3; i < 6; i++ {
+		if !pvs[i][0].Equal(types.NewUint32(11)) {
+			t.Fatalf("row %d = %v, want inventory row 11 repeated second", i, pvs[i])
+		}
+	}
+}
+
+func TestHandleOneOffQuery_JoinProjectionOnRightTablePreservesMultiplicity(t *testing.T) {
+	conn := testConnDirect(nil)
+	inventoryTS := &schema.TableSchema{ID: 2, Name: "Inventory", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}, {Index: 1, Name: "quantity", Type: schema.KindUint32}}}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{Name: "Orders", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "product_id", Type: schema.KindUint32}}})
+	b.TableDef(schema.TableDefinition{Name: "Inventory", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "quantity", Type: schema.KindUint32}}})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	inventoryTS.ID = inventoryReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		ordersReg.ID:    {{types.NewUint32(1), types.NewUint32(100)}, {types.NewUint32(2), types.NewUint32(100)}},
+		inventoryReg.ID: {{types.NewUint32(100), types.NewUint32(9)}},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	msg := &OneOffQueryMsg{MessageID: []byte{0x61}, QueryString: "SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id"}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), inventoryTS)
 	if len(pvs) != 2 {
-		t.Fatalf("got %d rows, want 2", len(pvs))
+		t.Fatalf("got %d rows, want 2 duplicate projected inventory rows", len(pvs))
+	}
+	for i, pv := range pvs {
+		if !pv[0].Equal(types.NewUint32(100)) || !pv[1].Equal(types.NewUint32(9)) {
+			t.Fatalf("row %d = %v, want duplicated inventory row [100,9]", i, pv)
+		}
 	}
 }
 

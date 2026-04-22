@@ -156,14 +156,13 @@ func TestEvalSameConnectionSameQueryProducesIndependentUpdates(t *testing.T) {
 	}
 }
 
-func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T) {
+func TestEvalErrorQueuesSubscriptionErrorAndDropsConnection(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 2)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	c := types.ConnectionID{1}
 	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 10, RequestID: 77, Predicates: []Predicate{AllRows{Table: 1}}}, nil)
 	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 11, Predicates: []Predicate{AllRows{Table: 2}}}, nil)
-	wantHealthy := mgr.querySets[c][11][0]
 
 	var logs bytes.Buffer
 	oldOut := log.Writer()
@@ -201,8 +200,11 @@ func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T)
 	}
 	select {
 	case dropped := <-mgr.DroppedClients():
-		t.Fatalf("unexpected dropped connection signal: %v", dropped)
+		if dropped != c {
+			t.Fatalf("dropped connection = %v, want %v", dropped, c)
+		}
 	default:
+		t.Fatal("expected dropped connection signal for eval failure")
 	}
 	logText := logs.String()
 	if !strings.Contains(logText, ComputeQueryHash(AllRows{Table: 1}, nil).String()) {
@@ -213,6 +215,9 @@ func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T)
 	}
 
 	mgr.schema = s
+	if err := mgr.DisconnectClient(c); err != nil {
+		t.Fatalf("DisconnectClient: %v", err)
+	}
 	cs2 := &store.Changeset{
 		TxID: 2,
 		Tables: map[schema.TableID]*store.TableChangeset{
@@ -224,10 +229,12 @@ func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T)
 		},
 	}
 	mgr.EvalAndBroadcast(types.TxID(2), cs2, nil, PostCommitMeta{})
-	msg2 := <-inbox
-	updates := msg2.Fanout[c]
-	if len(updates) != 1 || updates[0].SubscriptionID != wantHealthy {
-		t.Fatalf("healthy subscription should remain active, got %v (want subID=%d)", updates, wantHealthy)
+	select {
+	case msg2 := <-inbox:
+		if len(msg2.Fanout[c]) != 0 {
+			t.Fatalf("dropped connection should not receive further updates, got %v", msg2.Fanout[c])
+		}
+	default:
 	}
 }
 
@@ -469,6 +476,133 @@ func TestEvalJoinSubscriptionProjectsRight(t *testing.T) {
 	}
 }
 
+func TestEvalCrossJoinProjectedOtherInsertPreservesMultiplicity(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1)}, {types.NewUint64(2)}},
+		2: {{types.NewUint64(10)}, {types.NewUint64(11)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := CrossJoin{Left: 1, Right: 2}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 20, Predicates: []Predicate{pred},
+	}, committed)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{2: {TableID: 2, TableName: "other", Inserts: []types.ProductValue{{types.NewUint64(12)}}}}}
+	committed.addRow(2, 3, types.ProductValue{types.NewUint64(12)})
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Inserts) != 2 {
+		t.Fatalf("insert count = %d, want 2 projected rows for the new partner", len(updates[0].Inserts))
+	}
+}
+
+func TestEvalCrossJoinProjectedProjectedInsertPreservesMultiplicity(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1)}},
+		2: {{types.NewUint64(10)}, {types.NewUint64(11)}, {types.NewUint64(12)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := CrossJoin{Left: 1, Right: 2}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 21, Predicates: []Predicate{pred},
+	}, committed)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{1: {TableID: 1, TableName: "projected", Inserts: []types.ProductValue{{types.NewUint64(2)}}}}}
+	committed.addRow(1, 2, types.ProductValue{types.NewUint64(2)})
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Inserts) != 3 {
+		t.Fatalf("insert count = %d, want 3 projected-row copies for three partners", len(updates[0].Inserts))
+	}
+	for i, row := range updates[0].Inserts {
+		if !row[0].Equal(types.NewUint64(2)) {
+			t.Fatalf("insert %d = %v, want inserted projected row repeated", i, row)
+		}
+	}
+}
+
+func TestEvalCrossJoinProjectedOtherDeletePreservesMultiplicity(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1)}, {types.NewUint64(2)}},
+		2: {{types.NewUint64(10)}, {types.NewUint64(11)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := CrossJoin{Left: 1, Right: 2}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 22, Predicates: []Predicate{pred},
+	}, committed)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	delete(committed.rows[2], 2)
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{2: {TableID: 2, TableName: "other", Deletes: []types.ProductValue{{types.NewUint64(11)}}}}}
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Deletes) != 2 {
+		t.Fatalf("delete count = %d, want 2 projected-row deletes for the removed partner", len(updates[0].Deletes))
+	}
+}
+
+func TestEvalCrossJoinProjectsRightOnProjectedInsert(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(1)}, {types.NewUint64(2)}},
+		2: {{types.NewUint64(10)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := CrossJoin{Left: 1, Right: 2, ProjectRight: true}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 23, Predicates: []Predicate{pred},
+	}, committed)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{2: {TableID: 2, TableName: "projected", Inserts: []types.ProductValue{{types.NewUint64(11)}}}}}
+	committed.addRow(2, 2, types.ProductValue{types.NewUint64(11)})
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 || len(updates[0].Inserts) != 2 {
+		t.Fatalf("updates = %v, want 2 RHS-projected inserts", updates)
+	}
+	for i, row := range updates[0].Inserts {
+		if !row[0].Equal(types.NewUint64(11)) {
+			t.Fatalf("insert %d = %v, want inserted RHS row repeated", i, row)
+		}
+	}
+}
+
 func TestEvalPruningFallbackVsBaseline(t *testing.T) {
 	// Pruning safety: ensure an affected subscription is picked up via the
 	// expected tier.
@@ -513,7 +647,7 @@ func TestEvalChangesetNotMutated(t *testing.T) {
 	}
 }
 
-func TestEvalErrorDropCullsQuerySets(t *testing.T) {
+func TestEvalErrorDropSignalsConnectionUntilDisconnectRuns(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 2)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
@@ -526,17 +660,29 @@ func TestEvalErrorDropCullsQuerySets(t *testing.T) {
 		Predicates: []Predicate{AllRows{Table: 1}},
 	}, nil)
 
-	// Trigger eval error by nil-ing the schema (same technique as
-	// TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection).
 	mgr.schema = nil
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("x")}}, nil)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 	<-inbox // drain the FanOutMessage
 
-	if _, still := mgr.querySets[c][qid]; still {
-		t.Fatalf("querySets[%v][%d] should be deleted after eval-error drop", c, qid)
+	if _, still := mgr.querySets[c][qid]; !still {
+		t.Fatalf("querySets[%v][%d] should remain until DisconnectClient runs", c, qid)
 	}
-	mgr.schema = s // restore so UnregisterSet can run
+	select {
+	case dropped := <-mgr.DroppedClients():
+		if dropped != c {
+			t.Fatalf("dropped connection = %v, want %v", dropped, c)
+		}
+	default:
+		t.Fatal("expected dropped connection signal")
+	}
+	mgr.schema = s
+	if err := mgr.DisconnectClient(c); err != nil {
+		t.Fatalf("DisconnectClient: %v", err)
+	}
+	if _, still := mgr.querySets[c][qid]; still {
+		t.Fatalf("querySets[%v][%d] should be deleted after DisconnectClient", c, qid)
+	}
 	if _, err := mgr.UnregisterSet(c, qid, nil); !errors.Is(err, ErrSubscriptionNotFound) {
 		t.Fatalf("second UnregisterSet err = %v, want ErrSubscriptionNotFound", err)
 	}

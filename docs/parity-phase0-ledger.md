@@ -34,6 +34,8 @@ Status values:
 | Scenario | Status | Authoritative tests/files | Current truth |
 |---|---|---|---|
 | `P0-SUBSCRIPTION-001` per-connection outbound lag / slow-client policy | `closed (divergences explicit)` | `protocol/options.go`, `protocol/sender.go`, `protocol/parity_lag_policy_test.go`, `protocol/backpressure_out_test.go`, `subscription/fanout_worker.go` | Queue depth is aligned to reference capacity; overflow-disconnect outcome matches, while close mechanism remains an intentional divergence. |
+| `P0-SUBSCRIPTION-002` fan-out durability gating + dropped-client cleanup | `closed` | `subscription/fanout_worker_test.go`, `subscription/eval_test.go`, `executor/pipeline_test.go` | Fast-read recipients can receive post-commit delivery before durability while confirmed-read recipients still wait on `TxDurable`; eval failures now mark the whole connection dropped and rely on executor-side `DisconnectClient` drain for cleanup. |
+| `P0-SUBSCRIPTION-003` projected join/cross-join multiplicity | `closed` | `protocol/handle_oneoff_test.go`, `protocol/handle_subscribe_test.go`, `subscription/manager_test.go`, `subscription/eval_test.go`, `subscription/hash_test.go` | Existing accepted join/cross-join SQL forms now preserve bag/cartesian multiplicity across compile/hash identity, bootstrap, one-off execution, and post-commit delta evaluation, including aliased self-cross-join projection identity. |
 
 ## Scheduler / recovery parity scenarios
 
@@ -71,7 +73,7 @@ If you need implementation detail, read the linked decision doc or the narrow sl
 
 What remains is better thought of as a small set of live themes than as a long historical slice list:
 - protocol wire-close follow-through
-- broader query/subscription parity beyond the narrow landed shapes
+- broader query/subscription parity beyond the narrow landed shapes (now after the closed fan-out delivery and join/cross-join multiplicity batches)
 - recovery/store parity follow-ons after 2γ (carried-forward deferrals in `TECH-DEBT.md` OI-007)
 - hardening themes tracked in `TECH-DEBT.md`
 
