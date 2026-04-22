@@ -37,25 +37,25 @@ func validateReducerAndSchemaRules(b *Builder) []error {
 			errs = append(errs, fmt.Errorf("%w: %q", ErrDuplicateReducerName, name))
 		}
 		if entry.handler == nil {
-			errs = append(errs, fmt.Errorf("reducer %q: handler must not be nil", name))
+			errs = append(errs, fmt.Errorf("%w: reducer %q", ErrNilReducerHandler, name))
 		}
 		if name == "OnConnect" || name == "OnDisconnect" {
-			errs = append(errs, fmt.Errorf("reducer name %q is reserved for lifecycle hooks", name))
+			errs = append(errs, fmt.Errorf("%w: %q", ErrReservedReducerName, name))
 		}
 	}
 
 	// Lifecycle handler checks.
 	if b.onConnectRegistrations > 1 {
-		errs = append(errs, fmt.Errorf("duplicate OnConnect registration"))
+		errs = append(errs, fmt.Errorf("%w: OnConnect", ErrDuplicateLifecycleReducer))
 	}
 	if b.onDisconnectRegistrations > 1 {
-		errs = append(errs, fmt.Errorf("duplicate OnDisconnect registration"))
+		errs = append(errs, fmt.Errorf("%w: OnDisconnect", ErrDuplicateLifecycleReducer))
 	}
 	if b.onConnectRegistrations == 1 && b.onConnect == nil {
-		errs = append(errs, fmt.Errorf("OnConnect handler must not be nil"))
+		errs = append(errs, fmt.Errorf("%w: OnConnect", ErrNilReducerHandler))
 	}
 	if b.onDisconnectRegistrations == 1 && b.onDisconnect == nil {
-		errs = append(errs, fmt.Errorf("OnDisconnect handler must not be nil"))
+		errs = append(errs, fmt.Errorf("%w: OnDisconnect", ErrNilReducerHandler))
 	}
 
 	return errs

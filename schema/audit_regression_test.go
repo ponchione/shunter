@@ -16,7 +16,7 @@ func TestBuildSystemTablesMatchSpecExactly(t *testing.T) {
 	}
 	reg := e.Registry()
 
-	sysClients, ok := reg.TableByName("sys_clients")
+	_, sysClients, ok := reg.TableByName("sys_clients")
 	if !ok {
 		t.Fatal("sys_clients should exist")
 	}
@@ -33,7 +33,7 @@ func TestBuildSystemTablesMatchSpecExactly(t *testing.T) {
 		t.Fatalf("sys_clients pk = %+v", pk)
 	}
 
-	sysScheduled, ok := reg.TableByName("sys_scheduled")
+	_, sysScheduled, ok := reg.TableByName("sys_scheduled")
 	if !ok {
 		t.Fatal("sys_scheduled should exist")
 	}
@@ -80,22 +80,22 @@ func TestBuildRejectsNilReducerAndNilLifecycleHandlers(t *testing.T) {
 	b := validBuilder()
 	b.Reducer("NilReducer", nil)
 	_, err := b.Build(EngineOptions{})
-	if err == nil || !strings.Contains(err.Error(), "NilReducer") {
-		t.Fatalf("expected nil reducer validation error, got %v", err)
+	if err == nil || !errors.Is(err, ErrNilReducerHandler) || !strings.Contains(err.Error(), "NilReducer") {
+		t.Fatalf("expected ErrNilReducerHandler mentioning NilReducer, got %v", err)
 	}
 
 	b = validBuilder()
 	b.OnConnect(nil)
 	_, err = b.Build(EngineOptions{})
-	if err == nil || !strings.Contains(err.Error(), "OnConnect handler") {
-		t.Fatalf("expected nil OnConnect validation error, got %v", err)
+	if err == nil || !errors.Is(err, ErrNilReducerHandler) || !strings.Contains(err.Error(), "OnConnect") {
+		t.Fatalf("expected ErrNilReducerHandler mentioning OnConnect, got %v", err)
 	}
 
 	b = validBuilder()
 	b.OnDisconnect(nil)
 	_, err = b.Build(EngineOptions{})
-	if err == nil || !strings.Contains(err.Error(), "OnDisconnect handler") {
-		t.Fatalf("expected nil OnDisconnect validation error, got %v", err)
+	if err == nil || !errors.Is(err, ErrNilReducerHandler) || !strings.Contains(err.Error(), "OnDisconnect") {
+		t.Fatalf("expected ErrNilReducerHandler mentioning OnDisconnect, got %v", err)
 	}
 }
 
@@ -104,8 +104,8 @@ func TestBuildRejectsDuplicateOnDisconnect(t *testing.T) {
 	b.OnDisconnect(func(*types.ReducerContext) error { return nil })
 	b.OnDisconnect(func(*types.ReducerContext) error { return nil })
 	_, err := b.Build(EngineOptions{})
-	if err == nil || !strings.Contains(err.Error(), "duplicate OnDisconnect") {
-		t.Fatalf("expected duplicate OnDisconnect validation error, got %v", err)
+	if err == nil || !errors.Is(err, ErrDuplicateLifecycleReducer) || !strings.Contains(err.Error(), "OnDisconnect") {
+		t.Fatalf("expected ErrDuplicateLifecycleReducer mentioning OnDisconnect, got %v", err)
 	}
 }
 
@@ -150,8 +150,8 @@ func TestBuildRejectsIndexWithMissingColumn(t *testing.T) {
 		Indexes: []IndexDefinition{{Name: "missing_idx", Columns: []string{"name"}}},
 	})
 	_, err := b.Build(EngineOptions{})
-	if err == nil || !strings.Contains(err.Error(), "references nonexistent column") {
-		t.Fatalf("expected missing-column validation error, got %v", err)
+	if err == nil || !errors.Is(err, ErrColumnNotFound) || !strings.Contains(err.Error(), "missing_idx") {
+		t.Fatalf("expected ErrColumnNotFound for missing index column, got %v", err)
 	}
 }
 

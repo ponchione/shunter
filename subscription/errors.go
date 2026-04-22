@@ -1,6 +1,10 @@
 package subscription
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/ponchione/shunter/schema"
+)
 
 // Validation errors (Story 1.2).
 var (
@@ -12,8 +16,10 @@ var (
 	ErrInvalidPredicate = errors.New("subscription: invalid predicate")
 	// ErrTableNotFound — predicate references a table that is not registered.
 	ErrTableNotFound = errors.New("subscription: table not found")
-	// ErrColumnNotFound — predicate references a column that is not registered.
-	ErrColumnNotFound = errors.New("subscription: column not found")
+	// ErrColumnNotFound is re-exported from SPEC-006 §13 so subscription
+	// predicate validation and the store integrity path share one sentinel
+	// value for errors.Is across package boundaries.
+	ErrColumnNotFound = schema.ErrColumnNotFound
 )
 
 // Registration errors (Story 4.2 / 4.5).

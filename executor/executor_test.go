@@ -204,6 +204,9 @@ func TestSubmitAfterPostCommitFatalReturnsExecutorFatal(t *testing.T) {
 func TestSubmitWithContextRejectOnFullReturnsBusy(t *testing.T) {
 	exec, _ := setupExecutor()
 	exec = NewExecutor(ExecutorConfig{InboxCapacity: 1, RejectOnFull: true}, exec.registry, exec.committed, exec.schemaReg, 0)
+	if err := exec.Startup(context.Background(), nil); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
 	exec.inbox <- CallReducerCmd{}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -284,6 +287,9 @@ func TestSendProtocolCallReducerResponse_UnbufferedChannelBlocksUntilReceiverRea
 func TestSubmitRejectsUnbufferedResponseChannels(t *testing.T) {
 	exec, _ := setupExecutor()
 	ctx := context.Background()
+	if err := exec.Startup(ctx, nil); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
 
 	tests := []struct {
 		name   string

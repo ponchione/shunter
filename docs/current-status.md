@@ -15,9 +15,9 @@ Best current description:
 
 ## Grounded evidence
 
-Latest recorded broad verification in the current repo docs:
-- full suite baseline: `Go test: 1444 passed in 10 packages`
-- broad build verification: `rtk go build ./...` recorded as clean in the current-status / roadmap family of docs
+Latest live verification:
+- `rtk go test ./...` → `Go test: 1546 passed in 10 packages`
+- `rtk go build ./...` → `Go build: Success`
 - live implementation spans the core runtime packages (`types`, `bsatn`, `schema`, `store`, `commitlog`, `executor`, `subscription`, `protocol`, `query/sql`)
 - `TECH-DEBT.md` is the open-issues tracker
 - `docs/parity-phase0-ledger.md` is the scenario ledger
@@ -69,9 +69,8 @@ The repo has moved past missing-subsystem work and into behavior reconciliation:
 ### Commitlog / recovery
 - commitlog/recovery remains a clean-room rewrite, not format-compatible
 - replay-horizon / validated-prefix behavior is closed as a parity slice
-- Phase 4 Slice 2α offset-index work is closed
-- Phase 4 Slice 2β typed error categorization is the current follow-on
-- format-level record/log parity remains deferred after that
+- Phase 4 Slice 2 (2α offset index, 2β typed error categorization, 2γ wire-shape divergence audit + pin suite) is closed for the current phase framing
+- carried-forward format-level and replay-edge deferrals now live under `TECH-DEBT.md` OI-007
 
 ### Executor / scheduling
 - bounded inbox model differs from the reference runtime model
@@ -94,7 +93,7 @@ In concrete repo terms, the main live drivers are:
 - `TECH-DEBT.md` for open issues
 - `docs/parity-phase0-ledger.md` for pinned scenario status
 - `docs/spacetimedb-parity-roadmap.md` for execution order and phase framing
-- `NEXT_SESSION_HANDOFF.md` for the immediate current slice only
+- `NEXT_SESSION_HANDOFF.md` for the current resume point / scope-selection note
 
 ## Best verdict
 
@@ -124,3 +123,8 @@ For the concrete development driver, read:
 2. `docs/parity-phase0-ledger.md`
 3. `TECH-DEBT.md`
 4. `NEXT_SESSION_HANDOFF.md`
+
+## Doc hygiene note
+
+Use this file as the short, current truth only.
+Historical one-off assessments and old slice handoffs should not be treated as active guidance when they disagree with the roadmap, ledger, or live code.

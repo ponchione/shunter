@@ -40,13 +40,6 @@ func (p *PruningIndexes) TestOnlyIsEmpty() bool {
 	return true
 }
 
-// IndexResolver maps (table, column) → indexID when an index on that single
-// column exists. Used by Tier 2 candidate collection to resolve the RHS row
-// for a join edge.
-type IndexResolver interface {
-	IndexIDForColumn(table TableID, col ColID) (IndexID, bool)
-}
-
 // PlaceSubscription routes each (query, table) pair to exactly one tier
 // following the §5.4 invariant. A two-table subscription may land in
 // different tiers for each table.

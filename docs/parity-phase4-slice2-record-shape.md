@@ -295,10 +295,14 @@ All pins land in new file `commitlog/wire_shape_test.go` in session
    `errors.As` into `*BadVersionError` with `Got == 2`.
 7. `TestSegmentHeaderRejectsNonZeroFlags` — byte 5 = 1; returns
    error matching `errors.Is(_, ErrBadFlags)` and
-   `errors.Is(_, ErrOpen)`.
+   `errors.Is(_, ErrTraversal)`. (Decision-doc session-2 update:
+   the 2β category for `ErrBadFlags` landed as a single-category
+   leaf — `Is(ErrTraversal) → true` — rather than the call-site
+   split originally proposed in the 2β decision doc. Pins 7, 8, 30
+   reflect the realized 2β shape, not the proposed split.)
 8. `TestSegmentHeaderRejectsNonZeroPadding` — byte 6 = 1 or byte 7
    = 1; each returns `ErrBadFlags` (covered by the same strict
-   guard).
+   guard), with the same `ErrTraversal` category as pin 7.
 
 ### Record-header layout pins
 

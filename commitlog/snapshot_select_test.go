@@ -305,14 +305,61 @@ func (r selectionSchemaRegistry) Table(id schema.TableID) (*schema.TableSchema, 
 	return &clone, true
 }
 
-func (r selectionSchemaRegistry) TableByName(name string) (*schema.TableSchema, bool) {
+func (r selectionSchemaRegistry) TableByName(name string) (schema.TableID, *schema.TableSchema, bool) {
 	for _, tableID := range r.ids {
 		table := r.tables[tableID]
 		if table.Name == name {
-			return r.Table(tableID)
+			ts, ok := r.Table(tableID)
+			return tableID, ts, ok
 		}
 	}
-	return nil, false
+	return 0, nil, false
+}
+
+func (r selectionSchemaRegistry) TableExists(id schema.TableID) bool {
+	_, ok := r.tables[id]
+	return ok
+}
+
+func (r selectionSchemaRegistry) TableName(id schema.TableID) string {
+	if t, ok := r.tables[id]; ok {
+		return t.Name
+	}
+	return ""
+}
+
+func (r selectionSchemaRegistry) ColumnExists(id schema.TableID, col types.ColID) bool {
+	t, ok := r.tables[id]
+	if !ok {
+		return false
+	}
+	return int(col) >= 0 && int(col) < len(t.Columns)
+}
+
+func (r selectionSchemaRegistry) ColumnType(id schema.TableID, col types.ColID) schema.ValueKind {
+	t, ok := r.tables[id]
+	if !ok || int(col) < 0 || int(col) >= len(t.Columns) {
+		return 0
+	}
+	return t.Columns[col].Type
+}
+
+func (r selectionSchemaRegistry) HasIndex(id schema.TableID, col types.ColID) bool {
+	_, ok := r.IndexIDForColumn(id, col)
+	return ok
+}
+
+func (r selectionSchemaRegistry) IndexIDForColumn(id schema.TableID, col types.ColID) (schema.IndexID, bool) {
+	t, ok := r.tables[id]
+	if !ok {
+		return 0, false
+	}
+	for _, idx := range t.Indexes {
+		if len(idx.Columns) == 1 && idx.Columns[0] == int(col) {
+			return idx.ID, true
+		}
+	}
+	return 0, false
 }
 
 func (r selectionSchemaRegistry) Tables() []schema.TableID {

@@ -20,5 +20,6 @@ const (
 // skipped `registerSystemTables` — treat it as a programming error by the
 // caller.
 func SysClientsTable(reg schema.SchemaRegistry) (*schema.TableSchema, bool) {
-	return reg.TableByName(SysClientsTableName)
+	_, ts, ok := reg.TableByName(SysClientsTableName)
+	return ts, ok
 }

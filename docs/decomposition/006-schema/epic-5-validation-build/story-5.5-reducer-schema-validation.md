@@ -31,18 +31,24 @@ Validate reducer registrations and top-level schema configuration rules that are
 
 ## Acceptance Criteria
 
-- [ ] Reducer name `""` or duplicate reducer names → validation error / `ErrDuplicateReducerName` as appropriate
-- [ ] Registering a normal reducer with name `"OnConnect"` or `"OnDisconnect"` → `ErrReservedReducerName`
-- [ ] Duplicate `OnConnect` or duplicate `OnDisconnect` registrations → `ErrDuplicateLifecycleReducer`
-- [ ] Nil reducer or lifecycle handler → `ErrNilReducerHandler`
-- [ ] Missing `SchemaVersion()` or `SchemaVersion(0)` → `ErrSchemaVersionNotSet`
-- [ ] User table named `"sys_clients"` (or `"sys_scheduled"`) → `ErrReservedTableName`
-- [ ] No user tables registered → `ErrNoTables`
+All "→ ErrX" rows below are asserted by `errors.Is(err, ErrX)` against the error returned by `Build()`. The Build-time validation gates were canonicalized as part of **OI-011** (SPEC-006 §7/§13 closure, 2026-04-22) — prior to OI-011 several paths returned bare `fmt.Errorf` strings that did not match the sentinels. Post-OI-011, the paths below MUST return the canonical sentinel wrapped only via `fmt.Errorf("%w", ...)` so `errors.Is` matches through the wrap.
+
+- [ ] Reducer name `""` → validation error (non-empty-name rule); duplicate reducer names → `errors.Is(err, ErrDuplicateReducerName)`
+- [ ] Registering a normal reducer with name `"OnConnect"` or `"OnDisconnect"` → `errors.Is(err, ErrReservedReducerName)`
+- [ ] Duplicate `OnConnect` or duplicate `OnDisconnect` registrations → `errors.Is(err, ErrDuplicateLifecycleReducer)`
+- [ ] Nil reducer handler (`RegisterReducer(name, nil)`) OR nil lifecycle handler (`OnConnect(nil)` / `OnDisconnect(nil)`) → `errors.Is(err, ErrNilReducerHandler)`
+- [ ] Missing `SchemaVersion()` or `SchemaVersion(0)` → `errors.Is(err, ErrSchemaVersionNotSet)`
+- [ ] User table named `"sys_clients"` (or `"sys_scheduled"`) → `errors.Is(err, ErrReservedTableName)`
+- [ ] No user tables registered → `errors.Is(err, ErrNoTables)`
 - [ ] Multiple reducer/schema-level errors are returned in one pass
+
+Authoritative pins (OI-011):
+- `schema/oi011_pins_test.go` — reserved name, nil reducer, nil lifecycle (both `OnConnect(nil)` and `OnDisconnect(nil)`), duplicate `OnConnect`, duplicate `OnDisconnect`
+- `schema/audit_regression_test.go` — migrated from `strings.Contains` assertions to `errors.Is` against these sentinels
 
 ## Design Notes
 
 - Registration methods stay lightweight; this story is where policy is enforced.
-- This story is the canonical owner for the reducer-oriented sentinels added in SPEC-006 §13: `ErrReservedReducerName`, `ErrNilReducerHandler`, and `ErrDuplicateLifecycleReducer`.
+- This story is the canonical owner for the reducer-oriented sentinels added in SPEC-006 §13: `ErrReservedReducerName`, `ErrNilReducerHandler`, and `ErrDuplicateLifecycleReducer`. OI-011 closed the final gap where those sentinels existed in `schema/errors.go` but were not consistently returned from `Build()`.
 - Splitting reducer/schema validation from structural validation keeps both stories implementable without turning either into a grab-bag.
 - `sys_*` name protection is kept with schema-level validation because it is about the global namespace, not any one table's internal structure.

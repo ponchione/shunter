@@ -2,9 +2,14 @@
 
 Date: 2026-04-20
 Source: wide, shallow live-code audit of the current Shunter Go codebase
-Baseline checked:
+Audit-time baseline checked:
 - `rtk go test ./...` -> pass (`1102 passed in 10 packages`)
 - `rtk go vet ./...` -> clean
+
+Status note:
+- this is a historical cleanup punchlist snapshot, not the active parity roadmap
+- current broad verification lives in `docs/current-status.md` / `docs/spacetimedb-parity-roadmap.md`
+- keep only if the punchlist items are still useful; do not treat its baseline counts as current repo truth
 
 Purpose:
 - Capture the most obvious, relatively bounded cleanup items surfaced by a broad audit

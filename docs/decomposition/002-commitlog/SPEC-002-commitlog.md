@@ -107,7 +107,7 @@ Written as 4 bytes, little-endian, immediately after the payload.
 
 **Recommendation:** Use a simple length-prefixed binary encoding of `Changeset`. Not protobuf (adds a dependency), not JSON (too large). A custom encoding with explicit version byte, matching the simplicity of the log format.
 
-**BSATN naming disclaimer (canonical).** "BSATN" = "Binary SpacetimeDB Algebraic Type Notation" — the acronym is borrowed verbatim from SpacetimeDB's `bsatn` crate. It is **not** a standard encoding format (distinct from MessagePack / CBOR / Protobuf / Postcard). Shunter's BSATN is a clean-room rewrite per `CLAUDE.md`: own tag numbering (0–12 for 13 scalars, see §3.3), no Sum / Array / nested-Product types, Shunter-specific framing. The encoding is of the same family as SpacetimeDB's BSATN but is **not byte-compatible** — no wire interoperability is intended, and no Rust source was copied. All other specs MUST point to this subsection rather than re-describe the name.
+**BSATN naming disclaimer (canonical).** "BSATN" = "Binary SpacetimeDB Algebraic Type Notation" — the acronym is borrowed verbatim from SpacetimeDB's `bsatn` crate. It is **not** a standard encoding format (distinct from MessagePack / CBOR / Protobuf / Postcard). Shunter's BSATN is a clean-room rewrite per `CLAUDE.md`: own tag numbering (0–18 for 19 scalar kinds, see §3.3), no Sum / Array (except the single `ArrayString` convenience kind) / nested-Product types, Shunter-specific framing. The encoding is of the same family as SpacetimeDB's BSATN but is **not byte-compatible** — no wire interoperability is intended, and no Rust source was copied. All other specs MUST point to this subsection rather than re-describe the name.
 
 ### 3.2 Payload Structure
 
@@ -159,8 +159,16 @@ Each `ProductValue` (a row) is encoded as its column values in schema-defined co
 | Float64 | 10 | 8 bytes IEEE-754 LE |
 | String | 11 | uint32 LE byte count + UTF-8 bytes |
 | Bytes | 12 | uint32 LE byte count + raw bytes |
+| Int128 | 13 | 16 bytes LE two's-complement (low 8 bytes first, then high 8 bytes; high word is signed) |
+| Uint128 | 14 | 16 bytes LE (low 8 bytes first, then high 8 bytes; both unsigned) |
+| Int256 | 15 | 32 bytes LE two's-complement (four 8-byte LE words, least-significant word first; highest word is signed) |
+| Uint256 | 16 | 32 bytes LE (four 8-byte LE words, least-significant word first; all words unsigned) |
+| Timestamp | 17 | 8 bytes LE signed (Unix epoch nanoseconds, int64) |
+| ArrayString | 18 | uint32 LE element count, followed by each element as uint32 LE byte count + UTF-8 bytes |
 
 Tags are stable. Adding new column types requires a new tag value and a payload encoding increment.
+
+**Widening history (informational).** v1 shipped with 13 scalar kinds (tags 0–12). Tags 13–18 were added incrementally by the column-kind-widening slices to keep Go structs honest about real application shapes (128/256-bit ID-like values, epoch-nanosecond timestamps, string arrays for tag sets). The direction of drift is widening-only: tags never get renumbered, and no existing tag's payload has changed. Canonical source is `types/value.go` (`KindBool` … `KindArrayString`) and `bsatn/encode.go` (`TagBool` … `TagArrayString`). Any future widening MUST append above the current max tag.
 
 Decoder rules:
 - The decoder MAY parse bytes value-by-value without schema, but schema is still required to validate the expected column count, expected value kinds, and table identity.

@@ -141,7 +141,7 @@ func TestRegisterTableExcludedEmbeddedFieldsOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	ts, ok := eng.Registry().TableByName("excluded_embedded")
+	_, ts, ok := eng.Registry().TableByName("excluded_embedded")
 	if !ok {
 		t.Fatal("excluded_embedded table missing")
 	}

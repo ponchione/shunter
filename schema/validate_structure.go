@@ -23,7 +23,7 @@ func validateStructure(b *Builder) []error {
 			continue
 		}
 		if !tableNamePattern.MatchString(t.Name) {
-			errs = append(errs, fmt.Errorf("%w: %q", ErrEmptyTableName, t.Name))
+			errs = append(errs, fmt.Errorf("%w: %q", ErrInvalidTableName, t.Name))
 		}
 		if tableNames[t.Name] {
 			errs = append(errs, fmt.Errorf("%w: %q", ErrDuplicateTableName, t.Name))
@@ -41,7 +41,7 @@ func validateStructure(b *Builder) []error {
 		pkCount := 0
 		for _, c := range t.Columns {
 			if c.Name == "" {
-				errs = append(errs, fmt.Errorf("table %q: column name must not be empty", t.Name))
+				errs = append(errs, fmt.Errorf("table %q: %w", t.Name, ErrEmptyColumnName))
 				continue
 			}
 			if !columnNamePattern.MatchString(c.Name) {
@@ -110,7 +110,7 @@ func validateStructure(b *Builder) []error {
 			}
 			for _, cn := range idx.Columns {
 				if !colNames[cn] {
-					errs = append(errs, fmt.Errorf("table %q index %q: references nonexistent column %q", t.Name, idx.Name, cn))
+					errs = append(errs, fmt.Errorf("table %q index %q: %w: %q", t.Name, idx.Name, ErrColumnNotFound, cn))
 				}
 				if pkColName != "" && cn == pkColName {
 					errs = append(errs, fmt.Errorf("table %q index %q: PK column %q must not appear in explicit index", t.Name, idx.Name, cn))

@@ -4,12 +4,16 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
 var (
-	ErrTableNotFound             = errors.New("table not found")
-	ErrColumnNotFound            = errors.New("column not found")
+	ErrTableNotFound = errors.New("table not found")
+	// ErrColumnNotFound is re-exported from SPEC-006 §13 so store-layer
+	// integrity paths can construct and match the sentinel via errors.Is
+	// across the schema/store boundary.
+	ErrColumnNotFound            = schema.ErrColumnNotFound
 	ErrTypeMismatch              = errors.New("type mismatch")
 	ErrPrimaryKeyViolation       = errors.New("primary key violation")
 	ErrUniqueConstraintViolation = errors.New("unique constraint violation")

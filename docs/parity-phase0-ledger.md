@@ -45,15 +45,15 @@ Status values:
 
 ## Current next-slice framing
 
-Phase 1 / 1.5 / 2 / 3 / the narrow `P0-RECOVERY-001` recovery slice are closed for the current phase framing.
+Phase 1 / 1.5 / 2 / 3 / Phase 4 Slice 2 (2α / 2β / 2γ) / the narrow `P0-RECOVERY-001` recovery slice are all closed for the current phase framing.
 
-Current follow-on theme is Phase 4 Slice 2:
+Phase 4 Slice 2 sub-slice record (for reference; all closed):
 
 | Sub-slice | Status | Decision doc | Current truth |
 |---|---|---|---|
 | 2α — per-segment offset index file | `closed` | `docs/parity-phase4-slice2-offset-index.md` | Fully landed across Sessions 1-5, including replay seek integration, durability wiring, compaction cleanup, and crash-tail handling. |
-| 2β — typed `Traversal` / `Open` error enums | `closed` | `docs/parity-phase4-slice2-errors.md` | Five category sentinels (`ErrTraversal`, `ErrOpen`, `ErrDurability`, `ErrSnapshot`, `ErrIndex`) + `wrapCategory` helper + `Is` methods on the nine typed structs landed across Sessions 1-2. All call-site wraps in place at the nine emission seams; leaf sentinel / typed-struct identity preserved end-to-end. |
-| 2γ — record / log shape format compatibility | `in_progress` (decision doc locked) | `docs/parity-phase4-slice2-record-shape.md` | Session 1 landed the locked divergence audit: reference vs Shunter wire documented field-by-field, 26 delta entries categorized, decision to close as documented-divergence rather than byte-parity rewrite. Session 2 lands the 33-pin wire-shape contract suite in `commitlog/wire_shape_test.go`. No wire-format change; every named deferral is carried forward in the decision doc's out-of-scope list. |
+| 2β — typed `Traversal` / `Open` error enums | `closed` | `docs/parity-phase4-slice2-errors.md` | Five category sentinels (`ErrTraversal`, `ErrOpen`, `ErrDurability`, `ErrSnapshot`, `ErrIndex`) + `wrapCategory` helper + `Is` methods on the nine typed structs landed across Sessions 1-2. |
+| 2γ — record / log shape format compatibility | `closed (divergences recorded)` | `docs/parity-phase4-slice2-record-shape.md` | Sessions 1-2 landed: Session 1 locked the field-by-field divergence audit (documented-divergence close rather than byte-parity rewrite); Session 2 landed the 33-pin wire-shape contract suite at `commitlog/wire_shape_test.go`. Named out-of-scope deferrals carried forward in `TECH-DEBT.md` OI-007. |
 
 ## Reading rule
 
@@ -65,7 +65,7 @@ If you need implementation detail, read the linked decision doc or the narrow sl
 What remains is better thought of as a small set of live themes than as a long historical slice list:
 - protocol wire-close follow-through
 - broader query/subscription parity beyond the narrow landed shapes
-- recovery/store parity follow-ons after 2β
+- recovery/store parity follow-ons after 2γ (carried-forward deferrals in `TECH-DEBT.md` OI-007)
 - hardening themes tracked in `TECH-DEBT.md`
 
 For prioritization, read:

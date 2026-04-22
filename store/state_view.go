@@ -178,6 +178,46 @@ func (sv *StateView) SeekIndexRange(tableID schema.TableID, indexID schema.Index
 	}
 }
 
+// SeekIndexBounds returns visible row IDs whose keys satisfy both
+// Bound endpoints per SPEC-001 §4.4 / §5.4. Exclusive / inclusive /
+// unbounded endpoints independently. SPEC-004 predicate scans on
+// string/bytes/float keys require this over SeekIndexRange because
+// "strictly greater than v" cannot be expressed via *IndexKey alone.
+//
+// OI-005 sub-hazard pin: same aliasing hazard as SeekIndexRange —
+// BTreeIndex.SeekBounds walks b.entries live. Collecting the range
+// once at the StateView boundary decouples iteration from BTree-
+// internal storage. Pin test:
+// TestStateViewSeekIndexBoundsIteratesIndependentRowIDsAfterBTreeMutation.
+func (sv *StateView) SeekIndexBounds(tableID schema.TableID, indexID schema.IndexID, low, high Bound) iter.Seq[types.RowID] {
+	return func(yield func(types.RowID) bool) {
+		if sv.committed != nil {
+			if table, idx, ok := sv.lookupIndex(tableID, indexID); ok {
+				for _, rid := range slices.Collect(idx.BTree().SeekBounds(low, high)) {
+					if sv.tx.IsDeleted(tableID, rid) {
+						continue
+					}
+					if _, ok := table.GetRow(rid); !ok {
+						continue
+					}
+					if !yield(rid) {
+						return
+					}
+				}
+				for rid, row := range sv.tx.Inserts(tableID) {
+					key := idx.ExtractKey(row)
+					if matchesLowerBound(key, low) && matchesUpperBound(key, high) {
+						if !yield(rid) {
+							return
+						}
+					}
+				}
+				return
+			}
+		}
+	}
+}
+
 func (sv *StateView) lookupIndex(tableID schema.TableID, indexID schema.IndexID) (*Table, *Index, bool) {
 	if sv.committed == nil {
 		return nil, nil, false

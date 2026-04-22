@@ -2,6 +2,7 @@ package executor
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -112,6 +113,71 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
 	// Even when the reducer failed, the cleanup commit still runs the
 	// post-commit pipeline so subscribers see the sys_clients delete.
 	e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle})
+}
+
+// sweepDanglingClients is the Story 7.5 startup sweep (SPEC-003 §10.6). For
+// every sys_clients row surviving recovery, it runs a fresh cleanup
+// transaction that only deletes the row — the same cleanup-only path used in
+// handleOnDisconnect's reducer-failure branch (this file: Story 7.3). No
+// OnDisconnect reducer is invoked; the cleanup commit still runs the
+// post-commit pipeline with source=CallSourceLifecycle so subscribers see
+// the sys_clients delete. A missing sys_clients table is treated as a
+// harness error (same contract as handleOnConnect). An empty table is a
+// no-op.
+//
+// If the post-commit pipeline latches executor-fatal mid-sweep the sweep
+// stops and returns ErrExecutorFatal; remaining rows stay in sys_clients
+// and Startup declines to flip externalReady, leaving external admission
+// closed.
+func (e *Executor) sweepDanglingClients(ctx context.Context) error {
+	sysID, ok := e.sysClientsTableID()
+	if !ok {
+		return fmt.Errorf("sys_clients table missing")
+	}
+
+	type sysClientsTarget struct {
+		conn     types.ConnectionID
+		identity types.Identity
+	}
+
+	var targets []sysClientsTarget
+	view := e.committed.Snapshot()
+	for _, row := range view.TableScan(sysID) {
+		if int(SysClientsColIdentity) >= len(row) {
+			continue
+		}
+		connBytes := row[SysClientsColConnectionID].AsBytes()
+		identityBytes := row[SysClientsColIdentity].AsBytes()
+		var t sysClientsTarget
+		copy(t.conn[:], connBytes)
+		copy(t.identity[:], identityBytes)
+		targets = append(targets, t)
+	}
+	view.Close()
+
+	for _, t := range targets {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		tx := store.NewTransaction(e.committed, e.schemaReg)
+		if err := deleteSysClientsRow(tx, sysID, t.conn); err != nil {
+			store.Rollback(tx)
+			return fmt.Errorf("sweep sys_clients delete conn=%x: %w", t.conn[:], err)
+		}
+		changeset, err := store.Commit(e.committed, tx)
+		if err != nil {
+			store.Rollback(tx)
+			return fmt.Errorf("sweep commit conn=%x: %w", t.conn[:], err)
+		}
+		txID := types.TxID(e.nextTxID)
+		e.nextTxID++
+		changeset.TxID = txID
+		e.postCommit(txID, changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
+		if e.fatal.Load() {
+			return fmt.Errorf("sweep aborted: %w", ErrExecutorFatal)
+		}
+	}
+	return nil
 }
 
 // runLifecycleReducer invokes a lifecycle reducer with panic recovery and

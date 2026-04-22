@@ -30,9 +30,9 @@ Guardrails:
 
 ## Current grounded status
 
-Latest recorded broad repo state in the current doc set:
-- latest recorded full-suite baseline: `Go test: 1444 passed in 10 packages`
-- broad build verification is recorded as clean in the current-status family of docs
+Latest live repo state:
+- `rtk go test ./...` → `Go test: 1546 passed in 10 packages`
+- `rtk go build ./...` → `Go build: Success`
 - major runtime packages are already implemented in live Go code
 - `docs/parity-phase0-ledger.md` carries the scenario ledger
 - `TECH-DEBT.md` carries the open backlog
@@ -114,9 +114,8 @@ Current grounded state:
 - value model and changeset semantics remain simpler than the reference
 - commitlog/recovery is still a clean-room rewrite, not format-compatible
 - replay-horizon / validated-prefix parity slice is closed
-- Phase 4 Slice 2α offset-index work is closed
-- Phase 4 Slice 2β typed error categorization is the current follow-on
-- later record/log format parity remains deferred
+- Phase 4 Slice 2 (2α offset-index, 2β typed error categorization, 2γ wire-shape divergence audit + canonical pin suite) is closed for the current phase framing
+- carried-forward replay-edge and format-level deferrals now live under `TECH-DEBT.md` OI-007
 
 Main code surfaces:
 - `types/`
@@ -213,13 +212,12 @@ Status: active multi-follow-on phase.
 Current sub-slice state:
 - `P0-RECOVERY-001` replay-horizon / validated-prefix slice: closed
 - Phase 4 Slice 2α offset-index file: closed
-- Phase 4 Slice 2β typed `Traversal` / `Open` error categories: in progress
-- Phase 4 Slice 2γ record/log shape parity: deferred until it has a decision doc
+- Phase 4 Slice 2β typed `Traversal` / `Open` error categories: closed
+- Phase 4 Slice 2γ record/log shape parity: closed as a documented-divergence slice with a wire-shape pin suite; carried-forward deferrals remain open in `TECH-DEBT.md` OI-007
 
 Current practical rule:
-- prefer 2β now
-- do not reopen 2α unless a regression appears
-- treat 2γ as a separate, larger-scope decision
+- do not reopen 2α / 2β / 2γ unless a regression or workload trigger appears
+- treat the carried-forward 2γ deferrals as separate future decisions, not as hidden active work
 
 ## Phase 5 — Schema and capability parity
 Status: selective capability widening only.
@@ -246,13 +244,13 @@ When choosing the next slice:
 
 ## Current best next direction
 
-Current immediate follow-on is:
-- Phase 4 Slice 2β — typed `Traversal` / `Open` error categorization (`docs/parity-phase4-slice2-errors.md`)
+There is no single narrow-ready automatic next slice.
 
-After that, the main candidates are:
-- Phase 4 Slice 2γ if a decision doc is written
+Current candidate directions are:
 - broader protocol/query parity where an externally visible gap outranks hardening work
-- Tier B hardening only when a concrete live risk is stronger than the next parity slice
+- Tier B hardening when a concrete live risk is stronger than the next parity slice
+- a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
+- scheduler/bootstrap follow-through only when workload or integration evidence surfaces
 
 # 5. Reading rule for this document
 

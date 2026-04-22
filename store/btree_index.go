@@ -105,6 +105,46 @@ func (b *BTreeIndex) SeekRange(low, high *IndexKey) iter.Seq[types.RowID] {
 	}
 }
 
+// SeekBounds returns RowIDs for keys between low and high per Bound
+// semantics (SPEC-001 §4.4 / §4.6). Each endpoint is independently
+// inclusive, exclusive, or unbounded. SPEC-004 predicate scans on
+// string/bytes/float keys need "strictly greater than v" — expressible
+// through Bound but not through *IndexKey. Yields keys in comparator
+// order; within a key, RowIDs in ascending order.
+func (b *BTreeIndex) SeekBounds(low, high Bound) iter.Seq[types.RowID] {
+	return func(yield func(types.RowID) bool) {
+		startIdx := 0
+		if !low.Unbounded {
+			lowKey := NewIndexKey(low.Value)
+			idx, found := slices.BinarySearchFunc(b.entries, lowKey, func(e btreeEntry, k IndexKey) int {
+				return e.key.Compare(k)
+			})
+			startIdx = idx
+			if found && !low.Inclusive {
+				startIdx++
+			}
+		}
+		for i := startIdx; i < len(b.entries); i++ {
+			e := b.entries[i]
+			if !high.Unbounded {
+				cmp := e.key.Compare(NewIndexKey(high.Value))
+				if high.Inclusive {
+					if cmp > 0 {
+						return
+					}
+				} else if cmp >= 0 {
+					return
+				}
+			}
+			for _, rid := range e.rowIDs {
+				if !yield(rid) {
+					return
+				}
+			}
+		}
+	}
+}
+
 // Scan returns all RowIDs in key order.
 func (b *BTreeIndex) Scan() iter.Seq[types.RowID] {
 	return b.SeekRange(nil, nil)

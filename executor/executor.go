@@ -40,7 +40,17 @@ type Executor struct {
 	fatal      atomic.Bool
 	rejectMode bool
 	shutdown   atomic.Bool
-	submitMu   sync.RWMutex
+	// externalReady guards SubmitWithContext — the spec-declared external
+	// admission entrypoint (SPEC-003 §10.6, §13.5, Story 3.6). Flipped true
+	// by Startup after scheduler replay and the dangling-client sweep
+	// finish; until then external protocol traffic is rejected with
+	// ErrExecutorNotStarted. Submit (the in-process/test entrypoint) is
+	// deliberately ungated — embedder-direct callers own their ordering.
+	externalReady atomic.Bool
+	// startupOnce ensures Startup runs its replay + sweep sequence once.
+	// Subsequent calls return nil without re-entering the sweep.
+	startupOnce sync.Once
+	submitMu    sync.RWMutex
 	// schedTableID is the cached schema.TableID for sys_scheduled,
 	// resolved once at NewExecutor so per-reducer handle construction
 	// avoids a registry lookup on every dispatch.
@@ -122,6 +132,44 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 	return e
 }
 
+// Startup runs the executor-side startup sequence after recovery (SPEC-003
+// §10.6, §13.5; Story 3.6 owner / Story 7.5 sweep):
+//
+//  1. scheduler.ReplayFromCommitted — repopulates the in-memory wakeup cache
+//     from sys_scheduled and enqueues any past-due rows into the executor
+//     inbox so they fire promptly once Run begins consuming it. Pass a nil
+//     scheduler in tests / deployments that skip sys_scheduled replay.
+//  2. dangling-client sweep — every surviving sys_clients row left by a
+//     previous crash is deleted via a fresh cleanup transaction, reusing
+//     Story 7.3's cleanup-only semantics (no OnDisconnect reducer is run;
+//     the cleanup commit still fans out via the post-commit pipeline so
+//     subscribers observe the sys_clients delete).
+//  3. flip externalReady so SubmitWithContext starts admitting external
+//     reducer / subscription-registration traffic from the protocol layer.
+//
+// Startup MUST complete before the caller starts Scheduler.Run / Executor.Run
+// and before the protocol layer begins accepting connections. The full engine
+// boot ordering is: recovery → NewExecutor → Startup → go Scheduler.Run →
+// go Executor.Run → first protocol accept.
+//
+// Startup is idempotent: later calls are no-ops (first-call wins via
+// sync.Once). If the sweep's post-commit pipeline latches executor-fatal
+// mid-sequence, Startup returns the error and leaves externalReady false.
+func (e *Executor) Startup(ctx context.Context, scheduler *Scheduler) error {
+	var startupErr error
+	e.startupOnce.Do(func() {
+		if scheduler != nil {
+			scheduler.ReplayFromCommitted()
+		}
+		if err := e.sweepDanglingClients(ctx); err != nil {
+			startupErr = err
+			return
+		}
+		e.externalReady.Store(true)
+	})
+	return startupErr
+}
+
 // Run processes commands until context is cancelled or inbox is closed.
 func (e *Executor) Run(ctx context.Context) {
 	defer close(e.done)
@@ -164,6 +212,12 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 }
 
 // SubmitWithContext sends a command respecting a caller context.
+//
+// This is the external admission entrypoint used by the protocol adapter
+// (SPEC-003 §10.6, §13.5, Story 3.6 / Story 7.5). The call is rejected with
+// ErrExecutorNotStarted until Startup has finished scheduler replay and the
+// dangling-client sweep — external reducer / subscription-registration work
+// is not allowed to race ahead of either.
 func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) error {
 	e.submitMu.RLock()
 	defer e.submitMu.RUnlock()
@@ -172,6 +226,9 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 	}
 	if e.shutdown.Load() {
 		return ErrExecutorShutdown
+	}
+	if !e.externalReady.Load() {
+		return ErrExecutorNotStarted
 	}
 	if err := validateResponseChannels(cmd); err != nil {
 		return err

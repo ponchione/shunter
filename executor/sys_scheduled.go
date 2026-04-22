@@ -22,5 +22,6 @@ const (
 // skipped `registerSystemTables` — treat it as a programming error by the
 // caller.
 func SysScheduledTable(reg schema.SchemaRegistry) (*schema.TableSchema, bool) {
-	return reg.TableByName(SysScheduledTableName)
+	_, ts, ok := reg.TableByName(SysScheduledTableName)
+	return ts, ok
 }

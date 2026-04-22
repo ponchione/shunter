@@ -22,6 +22,12 @@ type IndexID = schema.IndexID
 // ColID is a zero-based column index within a table schema.
 type ColID = types.ColID
 
+// IndexResolver is the canonical schema-layer surface for resolving a
+// single-column index ID; re-exported here for subscription callers so
+// they do not need to import schema directly. SPEC-006 §7 declares the
+// canonical interface in schema/registry.go.
+type IndexResolver = schema.IndexResolver
+
 // Value is the tagged-union column value used in predicates.
 type Value = types.Value
 

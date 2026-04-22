@@ -89,7 +89,7 @@ func TestBuildSystemTablesExist(t *testing.T) {
 	e, _ := validBuilder().Build(EngineOptions{})
 	reg := e.Registry()
 
-	sc, ok := reg.TableByName("sys_clients")
+	_, sc, ok := reg.TableByName("sys_clients")
 	if !ok {
 		t.Fatal("sys_clients should exist")
 	}
@@ -97,7 +97,7 @@ func TestBuildSystemTablesExist(t *testing.T) {
 		t.Fatalf("sys_clients should have 3 columns, got %d", len(sc.Columns))
 	}
 
-	ss, ok := reg.TableByName("sys_scheduled")
+	_, ss, ok := reg.TableByName("sys_scheduled")
 	if !ok {
 		t.Fatal("sys_scheduled should exist")
 	}
@@ -109,7 +109,7 @@ func TestBuildSystemTablesExist(t *testing.T) {
 func TestBuildSynthesizesPKIndex(t *testing.T) {
 	e, _ := validBuilder().Build(EngineOptions{})
 	reg := e.Registry()
-	ts, _ := reg.TableByName("players")
+	_, ts, _ := reg.TableByName("players")
 	pk, ok := ts.PrimaryIndex()
 	if !ok {
 		t.Fatal("players should have a primary index")
@@ -133,7 +133,7 @@ func TestBuildNoPKNoPrimaryIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts, _ := e.Registry().TableByName("logs")
+	_, ts, _ := e.Registry().TableByName("logs")
 	_, ok := ts.PrimaryIndex()
 	if ok {
 		t.Fatal("table without PK column should have no primary index")
@@ -155,7 +155,7 @@ func TestBuildReflectionPathIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	ts, ok := e.Registry().TableByName("player")
+	_, ts, ok := e.Registry().TableByName("player")
 	if !ok {
 		t.Fatal("player table should exist")
 	}
@@ -306,12 +306,12 @@ func TestRegistryTableByName(t *testing.T) {
 	e, _ := validBuilder().Build(EngineOptions{})
 	reg := e.Registry()
 
-	ts, ok := reg.TableByName("players")
-	if !ok || ts.ID != 0 {
+	id, ts, ok := reg.TableByName("players")
+	if !ok || ts.ID != 0 || id != 0 {
 		t.Fatal("TableByName('players') should return TableID 0")
 	}
 
-	_, ok = reg.TableByName("nonexistent")
+	_, _, ok = reg.TableByName("nonexistent")
 	if ok {
 		t.Fatal("TableByName('nonexistent') should return false")
 	}
@@ -321,8 +321,8 @@ func TestRegistryTableByNameCaseInsensitive(t *testing.T) {
 	e, _ := validBuilder().Build(EngineOptions{})
 	reg := e.Registry()
 
-	ts, ok := reg.TableByName("PLAYERS")
-	if !ok || ts.ID != 0 {
+	id, ts, ok := reg.TableByName("PLAYERS")
+	if !ok || ts.ID != 0 || id != 0 {
 		t.Fatal("TableByName('PLAYERS') should return TableID 0")
 	}
 }
@@ -359,7 +359,7 @@ func TestRegistryTableByNameReturnsDetachedCopy(t *testing.T) {
 	e, _ := validBuilder().Build(EngineOptions{})
 	reg := e.Registry()
 
-	ts, ok := reg.TableByName("players")
+	_, ts, ok := reg.TableByName("players")
 	if !ok {
 		t.Fatal("TableByName(players) should exist")
 	}
@@ -367,7 +367,7 @@ func TestRegistryTableByNameReturnsDetachedCopy(t *testing.T) {
 	ts.Columns[1].Name = "mutated_name"
 	ts.Indexes[0].Columns[0] = 99
 
-	again, ok := reg.TableByName("players")
+	_, again, ok := reg.TableByName("players")
 	if !ok {
 		t.Fatal("TableByName(players) should still exist")
 	}
