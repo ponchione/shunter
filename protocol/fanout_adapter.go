@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"reflect"
@@ -68,9 +69,19 @@ func BuildTransactionUpdateHeavy(
 		CallerConnectionID:         connID,
 		ReducerCall:                reducerCallInfoFrom(outcome),
 		Timestamp:                  outcome.Timestamp,
-		EnergyQuantaUsed:           outcome.EnergyQuantaUsed,
+		EnergyQuantaUsed:           energyQuantaU128LE(outcome.EnergyQuantaUsed),
 		TotalHostExecutionDuration: outcome.TotalHostExecutionDuration,
 	}, nil
+}
+
+// energyQuantaU128LE widens the subscription-domain u64 energy count to
+// the reference-wire u128 little-endian layout. Shunter has no energy
+// model so the value is always 0, but the wire width must match
+// reference `EnergyQuanta { quanta: u128 }` (energy.rs:12).
+func energyQuantaU128LE(quanta uint64) [16]byte {
+	var out [16]byte
+	binary.LittleEndian.PutUint64(out[:8], quanta)
+	return out
 }
 
 // SendTransactionUpdateLight delivers the delta-only envelope to

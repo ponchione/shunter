@@ -143,14 +143,21 @@ type UnsubscribeMultiApplied struct {
 // reducer_call, energy_quanta_used, total_host_execution_duration`) —
 // pinned by parity_transaction_update_test.go against the reference
 // byte shape.
+//
+// EnergyQuantaUsed is the 16-byte little-endian u128 quanta field of
+// reference `EnergyQuanta { quanta: u128 }` at
+// reference/SpacetimeDB/crates/client-api-messages/src/energy.rs:12.
+// The wire width was widened from u64 to u128 to match the reference
+// byte shape; Shunter emits all-zero bytes because there is no energy
+// model.
 type TransactionUpdate struct {
 	Status                     UpdateStatus
 	Timestamp                  int64 // nanoseconds since Unix epoch
 	CallerIdentity             [32]byte
 	CallerConnectionID         [16]byte
 	ReducerCall                ReducerCallInfo
-	EnergyQuantaUsed           uint64
-	TotalHostExecutionDuration int64 // nanoseconds
+	EnergyQuantaUsed           [16]byte // u128 little-endian, reference `EnergyQuanta.quanta`
+	TotalHostExecutionDuration int64    // nanoseconds
 }
 
 // TransactionUpdateLight is the delta-only envelope delivered to
@@ -291,7 +298,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		buf.Write(msg.CallerIdentity[:])
 		buf.Write(msg.CallerConnectionID[:])
 		writeReducerCallInfo(&buf, msg.ReducerCall)
-		writeUint64(&buf, msg.EnergyQuantaUsed)
+		buf.Write(msg.EnergyQuantaUsed[:])
 		writeInt64(&buf, msg.TotalHostExecutionDuration)
 	case TransactionUpdateLight:
 		buf.WriteByte(TagTransactionUpdateLight)
@@ -478,9 +485,11 @@ func decodeTransactionUpdate(body []byte) (TransactionUpdate, error) {
 		return m, err
 	}
 	m.ReducerCall = rci
-	if m.EnergyQuantaUsed, off, err = readUint64(body, off); err != nil {
-		return m, err
+	if len(body)-off < 16 {
+		return m, fmt.Errorf("%w: TransactionUpdate energy_quanta_used truncated", ErrMalformedMessage)
 	}
+	copy(m.EnergyQuantaUsed[:], body[off:off+16])
+	off += 16
 	if m.TotalHostExecutionDuration, _, err = readInt64(body, off); err != nil {
 		return m, err
 	}

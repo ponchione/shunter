@@ -16,8 +16,13 @@ import (
 //	caller_identity:            Identity         (32 bytes)
 //	caller_connection_id:       ConnectionId     (16 bytes)
 //	reducer_call:               ReducerCallInfo
-//	energy_quanta_used:         EnergyQuanta     (u64)
+//	energy_quanta_used:         EnergyQuanta     (u128 LE)
 //	total_host_execution_duration: TimeDuration  (i64 ns)
+//
+// `energy_quanta_used` is 16 bytes little-endian to match reference
+// `EnergyQuanta { quanta: u128 }` (energy.rs:12); the prior Shunter
+// wire carried 8 bytes (u64), which is the divergence closed by this
+// slice.
 //
 // The test constructs the reference byte shape by hand and compares
 // against EncodeServerMessage, then round-trips through
@@ -32,7 +37,10 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 		connID[i] = byte(0xA0 + i)
 	}
 	const timestamp int64 = 0x0102030405060708
-	const energy uint64 = 0x1122334455667788
+	energy := [16]byte{
+		0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
+		0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88, 0x77,
+	}
 	const duration int64 = 0x7766554433221100
 	rci := ReducerCallInfo{
 		ReducerName: "transfer",
@@ -106,9 +114,8 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 	binary.LittleEndian.PutUint32(u32Buf[:], rci.RequestID)
 	want.Write(u32Buf[:])
 
-	// energy_quanta_used: u64
-	binary.LittleEndian.PutUint64(i64Buf[:], energy)
-	want.Write(i64Buf[:])
+	// energy_quanta_used: u128 little-endian (16 bytes)
+	want.Write(energy[:])
 
 	// total_host_execution_duration: i64
 	binary.LittleEndian.PutUint64(i64Buf[:], uint64(duration))
@@ -146,7 +153,7 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 		t.Errorf("ReducerCall mismatch: got %+v, want %+v", got.ReducerCall, rci)
 	}
 	if got.EnergyQuantaUsed != energy {
-		t.Errorf("EnergyQuantaUsed = %d, want %d", got.EnergyQuantaUsed, energy)
+		t.Errorf("EnergyQuantaUsed = % x, want % x", got.EnergyQuantaUsed, energy)
 	}
 	if got.TotalHostExecutionDuration != duration {
 		t.Errorf("TotalHostExecutionDuration = %d, want %d", got.TotalHostExecutionDuration, duration)
@@ -213,8 +220,8 @@ func TestParityTransactionUpdateWireShapeFailed(t *testing.T) {
 	binary.LittleEndian.PutUint32(u32Buf[:], 3)
 	want.Write(u32Buf[:])
 
-	// energy_quanta_used + total_host_execution_duration — zeros
-	want.Write(make([]byte, 8))
+	// energy_quanta_used (u128 LE) + total_host_execution_duration (i64) — zeros
+	want.Write(make([]byte, 16))
 	want.Write(make([]byte, 8))
 
 	if !bytes.Equal(frame, want.Bytes()) {
