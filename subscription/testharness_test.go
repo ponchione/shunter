@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"iter"
+	"slices"
 
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -9,7 +10,10 @@ import (
 
 // mockCommitted is a minimal in-memory CommittedReadView for tests. It does
 // not enforce schema; tests declare the rows and the (table, indexID) →
-// column mapping they care about.
+// column mapping they care about. Iteration is stabilized by RowID so
+// order-sensitive bootstrap/one-off parity tests can assert row sequence
+// deterministically even though the production store scan is currently
+// unordered.
 type mockCommitted struct {
 	rows map[TableID]map[types.RowID]types.ProductValue
 	// idxCol maps (tableID, indexID) → column index for single-column
@@ -44,8 +48,9 @@ func (m *mockCommitted) setIndex(table TableID, index IndexID, col int) {
 
 func (m *mockCommitted) TableScan(id TableID) iter.Seq2[types.RowID, types.ProductValue] {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
-		for rid, r := range m.rows[id] {
-			if !yield(rid, r) {
+		rids := sortedRowIDs(m.rows[id])
+		for _, rid := range rids {
+			if !yield(rid, m.rows[id][rid]) {
 				return
 			}
 		}
@@ -59,7 +64,8 @@ func (m *mockCommitted) IndexSeek(tableID TableID, indexID IndexID, key store.In
 	}
 	want := key.Part(0)
 	var out []types.RowID
-	for rid, row := range m.rows[tableID] {
+	for _, rid := range sortedRowIDs(m.rows[tableID]) {
+		row := m.rows[tableID][rid]
 		if col >= len(row) {
 			continue
 		}
@@ -90,7 +96,8 @@ func (m *mockCommitted) IndexRange(tableID TableID, indexID IndexID, low, high s
 		return func(yield func(types.RowID, types.ProductValue) bool) {}
 	}
 	return func(yield func(types.RowID, types.ProductValue) bool) {
-		for rid, row := range m.rows[tableID] {
+		for _, rid := range sortedRowIDs(m.rows[tableID]) {
+			row := m.rows[tableID][rid]
 			if col >= len(row) {
 				continue
 			}
@@ -120,6 +127,15 @@ func (m *mockCommitted) IndexRange(tableID TableID, indexID IndexID, low, high s
 			}
 		}
 	}
+}
+
+func sortedRowIDs(rows map[types.RowID]types.ProductValue) []types.RowID {
+	rids := make([]types.RowID, 0, len(rows))
+	for rid := range rows {
+		rids = append(rids, rid)
+	}
+	slices.Sort(rids)
+	return rids
 }
 
 func (m *mockCommitted) GetRow(tableID TableID, rowID types.RowID) (types.ProductValue, bool) {

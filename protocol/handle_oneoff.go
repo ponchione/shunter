@@ -53,6 +53,10 @@ func handleOneOffQuery(
 	}
 
 	pred := compiled.Predicate
+	if err := subscription.ValidatePredicate(pred, sl); err != nil {
+		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
+		return
+	}
 
 	view := stateAccess.Snapshot()
 	var matchedRows []types.ProductValue

@@ -349,6 +349,14 @@ func (r selectionSchemaRegistry) HasIndex(id schema.TableID, col types.ColID) bo
 	return ok
 }
 
+func (r selectionSchemaRegistry) ColumnCount(id schema.TableID) int {
+	t, ok := r.tables[id]
+	if !ok {
+		return 0
+	}
+	return len(t.Columns)
+}
+
 func (r selectionSchemaRegistry) IndexIDForColumn(id schema.TableID, col types.ColID) (schema.IndexID, bool) {
 	t, ok := r.tables[id]
 	if !ok {

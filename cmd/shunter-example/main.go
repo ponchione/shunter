@@ -131,7 +131,7 @@ func buildEngine(ctx context.Context, dataDir string) (*engineGraph, error) {
 	// delta and enqueues it on the target connection's OutboundCh.
 	fanOutInbox := make(chan subscription.FanOutMessage, fanOutInboxCapacity)
 	subs := subscription.NewManager(
-		schemaLookupAdapter{reg},
+		reg,
 		reg,
 		subscription.WithFanOutInbox(fanOutInbox),
 	)
@@ -301,35 +301,6 @@ func buildProtocolServer(inbox *executor.ProtocolInboxAdapter, conns *protocol.C
 type stateAdapter struct{ cs *store.CommittedState }
 
 func (a stateAdapter) Snapshot() store.CommittedReadView { return a.cs.Snapshot() }
-
-// schemaLookupAdapter widens schema.SchemaRegistry to satisfy
-// subscription.SchemaLookup. The subscription layer needs ColumnCount
-// (used by the join evaluator to project concatenated LHS++RHS rows onto
-// one side) which schema.SchemaRegistry itself does not expose.
-type schemaLookupAdapter struct{ reg schema.SchemaRegistry }
-
-func (a schemaLookupAdapter) TableExists(t subscription.TableID) bool {
-	return a.reg.TableExists(t)
-}
-func (a schemaLookupAdapter) ColumnExists(t subscription.TableID, c subscription.ColID) bool {
-	return a.reg.ColumnExists(t, c)
-}
-func (a schemaLookupAdapter) ColumnType(t subscription.TableID, c subscription.ColID) subscription.ValueKind {
-	return a.reg.ColumnType(t, c)
-}
-func (a schemaLookupAdapter) HasIndex(t subscription.TableID, c subscription.ColID) bool {
-	return a.reg.HasIndex(t, c)
-}
-func (a schemaLookupAdapter) TableName(t subscription.TableID) string {
-	return a.reg.TableName(t)
-}
-func (a schemaLookupAdapter) ColumnCount(t subscription.TableID) int {
-	ts, ok := a.reg.Table(t)
-	if !ok {
-		return 0
-	}
-	return len(ts.Columns)
-}
 
 // durabilityAdapter bridges commitlog.DurabilityWorker to executor.DurabilityHandle.
 // The method signatures differ only on the txID scalar type.

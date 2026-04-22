@@ -16,7 +16,7 @@ commitlog.OpenAndRecoverDetailed ──► store.CommittedState
 commitlog.DurabilityWorker ──► durabilityAdapter
                       │                      │
                       │                      ▼
-                      │    subscription.Manager (schemaLookupAdapter, reg, WithFanOutInbox)
+                      │    subscription.Manager (reg, reg, WithFanOutInbox)
                       │                      │
                       ▼                      ▼
                 executor.NewExecutor(cfg{Durability, Subscriptions}, reducerRegistry, committed, schemaReg, maxTxID)
@@ -111,27 +111,13 @@ the executor.
 ```go
 fanOutInbox := make(chan subscription.FanOutMessage, 256)
 subs := subscription.NewManager(
-    schemaLookupAdapter{reg}, // widens reg with ColumnCount
-    reg,                      // schema.SchemaRegistry satisfies subscription.IndexResolver
+    reg,
+    reg, // schema.SchemaRegistry also satisfies subscription.IndexResolver
     subscription.WithFanOutInbox(fanOutInbox),
 )
 ```
 
-`subscription.SchemaLookup` requires `ColumnCount(TableID) int`, which
-`schema.SchemaRegistry` does not expose directly. A small adapter bridges
-the gap by looking up the full `TableSchema`:
-
-```go
-type schemaLookupAdapter struct{ reg schema.SchemaRegistry }
-
-func (a schemaLookupAdapter) ColumnCount(t schema.TableID) int {
-    ts, ok := a.reg.Table(t)
-    if !ok { return 0 }
-    return len(ts.Columns)
-}
-// TableExists / ColumnExists / ColumnType / HasIndex / TableName
-// all forward straight to a.reg.
-```
+`schema.SchemaRegistry` now satisfies the subscription-side lookup contract directly, including `ColumnCount(TableID) int`, so embedders can pass the registry straight to `subscription.NewManager`.
 
 ### 6. Construct and start the executor
 

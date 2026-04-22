@@ -60,11 +60,13 @@ Summary:
 - the surface is still intentionally narrower than the reference SQL path
 - the fan-out delivery parity batch is now partly closed: fast-read recipients can bypass durability while confirmed-read recipients still wait, and eval failures now mark the whole connection dropped for executor-side cleanup instead of pruning only the failing subscription
 - the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off query execution, and post-commit delta evaluation
+- one-off SQL now reuses `subscription.ValidatePredicate(...)` before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing shared join-index validation
+- committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
 - row-level security / per-client filtering remains absent
-- broader query/subscription parity is still open beyond the landed narrow shapes, especially predicate normalization / validation drift, ordering/runtime-shape follow-ons, and other bounded A2 gaps
+- broader query/subscription parity is still open beyond the landed narrow shapes, especially post-commit delta evaluation ordering/runtime-shape follow-ons and other bounded A2 gaps that remain after the closed join-index-validation + committed-join-ordering seams
 
 Execution note:
-- OI-002 remains the next active handoff issue, but both the fan-out delivery batch and the join/cross-join multiplicity batch are now closed. The next bounded A2 batch should start from the remaining runtime/model gaps (for example predicate normalization / validation drift or another reference-backed predicate/runtime mismatch) rather than reopening those closed slices or closed A1 protocol work.
+- OI-002 remains the next active handoff issue, but the fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, and the committed join bootstrap/final-delta projected-order seam are now closed. The next bounded A2 batch should start from another remaining runtime/model gap rather than reopening those closed slices or closed A1 protocol work.
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads
@@ -256,45 +258,27 @@ Source docs:
 - `docs/parity-phase4-slice2-errors.md`
 - `docs/parity-phase4-slice2-record-shape.md`
 
-### OI-013: SchemaRegistry does not satisfy the documented subscription SchemaLookup contract directly
+### OI-013: SchemaRegistry direct subscription-lookup compatibility (closed 2026-04-22)
 
-Status: open
+Status: closed 2026-04-22
 Severity: medium
 
-Summary:
-- SPEC-004 and SPEC-006 still describe `schema.SchemaRegistry` as directly satisfying the canonical subscription `SchemaLookup` interface.
-- The live `subscription.SchemaLookup` requires `ColumnCount(TableID) int`, but `schema.SchemaRegistry` does not expose that method.
-- Real embedders therefore need an extra adapter layer (`schemaLookupAdapter`) to construct `subscription.Manager`, even though the decomposition/docs describe the registry itself as the shared immutable schema surface crossing into SPEC-004.
+Realized closure:
+- `schema.SchemaLookup` and `schema.SchemaRegistry` now expose `ColumnCount(TableID) int`, so the built registry satisfies `subscription.SchemaLookup` directly.
+- `protocol.SchemaLookup` now embeds the schema-owned lookup surface, which lets one-off query admission reuse `subscription.ValidatePredicate(...)` without a protocol-local adapter seam.
+- The example bootstrap and embedder docs now pass `reg` directly to `subscription.NewManager(...)`; the old `schemaLookupAdapter` shim was removed.
+- A compile-time pin now asserts `schema.SchemaRegistry` satisfies `subscription.SchemaLookup` directly.
 
-Why this matters:
-- this is a real spec/runtime seam mismatch in one of the core cross-package contracts
-- it makes the engine harder to embed because the supposedly canonical schema object is not actually plug-compatible with the subscription manager
-- it weakens the execution-order claim that the built schema registry is the direct dependency handoff into later runtime phases
+Verification:
+- `rtk go test ./subscription -count=1`
+- `rtk go test ./... -count=1`
 
-Primary code surfaces:
-- `subscription/validate.go`
-- `subscription/manager.go`
+Source docs / surfaces:
 - `schema/registry.go`
+- `protocol/handle_subscribe.go`
 - `cmd/shunter-example/main.go`
 - `docs/embedding.md`
-
-Grounded evidence:
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:766-769` says the canonical SPEC-006 `SchemaLookup` is used and that `*SchemaRegistry` satisfies it directly.
-- `docs/decomposition/006-schema/SPEC-006-schema.md:337` says SPEC-004's subscription manager receives the registry as both `SchemaLookup` and `IndexResolver`.
-- `subscription/validate.go:9-21` defines `SchemaLookup` with `ColumnCount(TableID) int`.
-- `subscription/manager.go:77-121` stores that interface directly on `Manager` and requires it at `NewManager(...)`.
-- `docs/embedding.md:113-133` documents a required `schemaLookupAdapter` specifically because `schema.SchemaRegistry` does not expose `ColumnCount`.
-- `cmd/shunter-example/main.go:132-137` uses that adapter in the real bootstrap path.
-- Compile-only audit repro (`rtk go test ./.tmp_audit_schema_lookup`) fails with `cannot use reg ... as subscription.SchemaLookup`.
-
-Recommended resolution options:
-- make `schema.SchemaRegistry` satisfy the canonical subscription lookup surface directly (for example by adding `ColumnCount` to the schema-owned interface)
-- or deliberately keep the adapter seam and update SPEC-004 / SPEC-006 / execution-order text so the docs stop claiming direct satisfaction
-- whichever direction wins, pin it with a compile-only consumer test so this contract cannot silently drift again
-
-Suggested follow-up tests:
-- compile-only pin that `schema.SchemaRegistry` satisfies `subscription.SchemaLookup` if direct compatibility is intended
-- if the adapter seam is intentional, doc/contract pins asserting the narrower schema-owned interface and the embedder adapter requirement
+- `subscription/oi013_registry_lookup_test.go`
 
 ### OI-014: Shunter still lacks a true embeddable library surface despite the new example bootstrap
 
@@ -325,8 +309,8 @@ Grounded evidence:
 - `rtk go list` at the repo root fails with `no Go files in /home/gernsback/source/shunter`.
 - `rtk go list ./engine` fails with `stat /home/gernsback/source/shunter/engine: directory not found`.
 - Compile-only audit repro (`rtk go test ./.tmp_audit_rootpkg`) fails because `github.com/ponchione/shunter` is not importable as a package.
-- `cmd/shunter-example/main.go:99-205` shows the real host-facing bring-up still requires manual assembly of all major subsystems plus adapters.
-- `docs/embedding.md:10-40,83-124,191-199` documents three separate adapters (`durabilityAdapter`, `schemaLookupAdapter`, `stateAdapter`) and the explicit subsystem wiring sequence.
+- `cmd/shunter-example/main.go:99-205` shows the real host-facing bring-up still requires manual assembly of the major subsystems plus the remaining glue adapters that are not yet hidden behind a top-level engine API.
+- `docs/embedding.md:10-40,83-124,191-199` documents the explicit subsystem wiring sequence and the two remaining adapter seams (`durabilityAdapter`, `stateAdapter`) that embedders still carry in host code.
 - `schema/builder.go:116-128` defines runtime-facing `EngineOptions`, but `schema/version.go:134-135` only consumes `StartupSnapshotSchema`; the other knobs are not used in the live code path.
 
 Recommended resolution options:

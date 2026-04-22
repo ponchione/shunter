@@ -67,67 +67,11 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 
 	switch p := pred.(type) {
 	case Join:
-		// Re-evaluate join: iterate one side and probe the other by join key.
-		// Validation already confirmed an index exists on at least one side;
-		// if the resolver disagrees on both sides, that is a contract violation,
-		// not a user error — hard-fail instead of silently returning empty rows
-		// (PHASE-5-DEFERRED §D).
-		if m.resolver == nil {
-			return nil, fmt.Errorf("%w: manager has no IndexResolver (join=%d.%d=%d.%d)", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
+		joinedRows, err := m.appendProjectedJoinRows(out, view, p)
+		if err != nil {
+			return nil, err
 		}
-		// Each matched (lrow, rrow) pair is projected onto one side so the
-		// caller sees rows shaped like the SELECT table, not concat LHS++RHS.
-		project := func(lrow, rrow types.ProductValue) types.ProductValue {
-			if p.ProjectRight {
-				return rrow
-			}
-			return lrow
-		}
-		if rhsIdx, ok := m.resolver.IndexIDForColumn(p.Right, p.RightCol); ok {
-			for _, lrow := range view.TableScan(p.Left) {
-				if int(p.LeftCol) >= len(lrow) {
-					continue
-				}
-				key := store.NewIndexKey(lrow[p.LeftCol])
-				rowIDs := view.IndexSeek(p.Right, rhsIdx, key)
-				for _, rid := range rowIDs {
-					rrow, ok := view.GetRow(p.Right, rid)
-					if !ok {
-						continue
-					}
-					if joined := tryJoinFilter(lrow, p.Left, rrow, p.Right, &p); joined != nil {
-						_ = joined
-						if err := add(project(lrow, rrow)); err != nil {
-							return nil, err
-						}
-					}
-				}
-			}
-			break
-		}
-		lhsIdx, ok := m.resolver.IndexIDForColumn(p.Left, p.LeftCol)
-		if !ok {
-			return nil, fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
-		}
-		for _, rrow := range view.TableScan(p.Right) {
-			if int(p.RightCol) >= len(rrow) {
-				continue
-			}
-			key := store.NewIndexKey(rrow[p.RightCol])
-			rowIDs := view.IndexSeek(p.Left, lhsIdx, key)
-			for _, rid := range rowIDs {
-				lrow, ok := view.GetRow(p.Left, rid)
-				if !ok {
-					continue
-				}
-				if joined := tryJoinFilter(lrow, p.Left, rrow, p.Right, &p); joined != nil {
-					_ = joined
-					if err := add(project(lrow, rrow)); err != nil {
-						return nil, err
-					}
-				}
-			}
-		}
+		out = joinedRows
 	case CrossJoin:
 		for _, row := range projectedCrossJoinRows(view, p) {
 			if err := add(row); err != nil {
@@ -162,6 +106,74 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 				if err := add(row); err != nil {
 					return nil, err
 				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func (m *Manager) appendProjectedJoinRows(out []types.ProductValue, view store.CommittedReadView, p Join) ([]types.ProductValue, error) {
+	if m.resolver == nil {
+		return nil, fmt.Errorf("%w: manager has no IndexResolver (join=%d.%d=%d.%d)", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
+	}
+	projectedTable := p.Left
+	otherTable := p.Right
+	projectedJoinCol := p.LeftCol
+	otherJoinCol := p.RightCol
+	orientedRows := func(projectedRow, otherRow types.ProductValue) (types.ProductValue, types.ProductValue) {
+		if p.ProjectRight {
+			return otherRow, projectedRow
+		}
+		return projectedRow, otherRow
+	}
+	if p.ProjectRight {
+		projectedTable, otherTable = p.Right, p.Left
+		projectedJoinCol, otherJoinCol = p.RightCol, p.LeftCol
+	}
+	otherIdx, hasOtherIdx := m.resolver.IndexIDForColumn(otherTable, otherJoinCol)
+	if !hasOtherIdx {
+		if _, ok := m.resolver.IndexIDForColumn(projectedTable, projectedJoinCol); !ok {
+			return nil, fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
+		}
+	}
+	add := func(row types.ProductValue) error {
+		if m.InitialRowLimit > 0 && len(out) >= m.InitialRowLimit {
+			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
+		}
+		out = append(out, row)
+		return nil
+	}
+	for _, projectedRow := range view.TableScan(projectedTable) {
+		if int(projectedJoinCol) >= len(projectedRow) {
+			continue
+		}
+		if hasOtherIdx {
+			key := store.NewIndexKey(projectedRow[projectedJoinCol])
+			for _, rid := range view.IndexSeek(otherTable, otherIdx, key) {
+				otherRow, ok := view.GetRow(otherTable, rid)
+				if !ok {
+					continue
+				}
+				leftRow, rightRow := orientedRows(projectedRow, otherRow)
+				if tryJoinFilter(leftRow, p.Left, rightRow, p.Right, &p) == nil {
+					continue
+				}
+				if err := add(projectedRow); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		for _, otherRow := range view.TableScan(otherTable) {
+			if int(otherJoinCol) >= len(otherRow) || !projectedRow[projectedJoinCol].Equal(otherRow[otherJoinCol]) {
+				continue
+			}
+			leftRow, rightRow := orientedRows(projectedRow, otherRow)
+			if tryJoinFilter(leftRow, p.Left, rightRow, p.Right, &p) == nil {
+				continue
+			}
+			if err := add(projectedRow); err != nil {
+				return nil, err
 			}
 		}
 	}

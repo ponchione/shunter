@@ -73,7 +73,7 @@ If you need implementation detail, read the linked decision doc or the narrow sl
 
 What remains is better thought of as a small set of live themes than as a long historical slice list:
 - protocol wire-close follow-through
-- broader query/subscription parity beyond the narrow landed shapes (now after the closed fan-out delivery and join/cross-join multiplicity batches)
+- broader query/subscription parity beyond the narrow landed shapes (now after the closed fan-out delivery, multiplicity, one-off-vs-subscribe join-index-validation, and committed bootstrap/final-delta projected-ordering slices)
 - recovery/store parity follow-ons after 2γ (carried-forward deferrals in `TECH-DEBT.md` OI-007)
 - hardening themes tracked in `TECH-DEBT.md`
 

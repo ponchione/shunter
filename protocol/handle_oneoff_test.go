@@ -6,6 +6,7 @@ import (
 	"iter"
 	"math"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/bsatn"
@@ -573,6 +574,7 @@ func TestHandleOneOffQuery_JoinFilterOnLeftFloatColumn(t *testing.T) {
 			{Name: "u32", Type: schema.KindUint32},
 			{Name: "f32", Type: schema.KindFloat32},
 		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	b.TableDef(schema.TableDefinition{
 		Name: "s",
@@ -628,6 +630,70 @@ func TestHandleOneOffQuery_JoinFilterOnLeftFloatColumn(t *testing.T) {
 	}
 	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[0][2].Equal(goodFloat) {
 		t.Fatalf("unexpected row returned: %v", pvs[0])
+	}
+}
+
+func TestHandleOneOffQuery_UnindexedJoinRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ordersTS, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	_, inventoryTS, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			ordersTS.ID: {
+				{types.NewUint32(1), types.NewUint32(100)},
+				{types.NewUint32(2), types.NewUint32(101)},
+			},
+			inventoryTS.ID: {
+				{types.NewUint32(100), types.NewUint32(9)},
+				{types.NewUint32(101), types.NewUint32(10)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x19},
+		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("Error = nil, want validation failure")
+	}
+	if !strings.Contains(*result.Error, "join column has no index on either side") {
+		t.Fatalf("Error = %q, want unindexed-join validation text", *result.Error)
+	}
+	if len(result.Tables) != 0 {
+		t.Fatalf("Tables len = %d, want 0 on validation failure", len(result.Tables))
 	}
 }
 
@@ -1018,7 +1084,7 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoin(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}, {Index: 1, Name: "u32", Type: schema.KindUint32}}}
 	b := schema.NewBuilder().SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}})
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})
 	eng, err := b.Build(schema.EngineOptions{})
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -1050,7 +1116,7 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereAside(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}, {Index: 1, Name: "u32", Type: schema.KindUint32}}}
 	b := schema.NewBuilder().SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}})
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})
 	eng, err := b.Build(schema.EngineOptions{})
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -1090,7 +1156,7 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereBside(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}, {Index: 1, Name: "u32", Type: schema.KindUint32}}}
 	b := schema.NewBuilder().SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}})
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})
 	eng, err := b.Build(schema.EngineOptions{})
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -1129,7 +1195,7 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinProjectsRight(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}, {Index: 1, Name: "u32", Type: schema.KindUint32}}}
 	b := schema.NewBuilder().SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}})
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})
 	eng, err := b.Build(schema.EngineOptions{})
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -1690,6 +1756,7 @@ func TestHandleOneOffQuery_SenderParameterInJoinFilter(t *testing.T) {
 			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
 			{Name: "u32", Type: schema.KindUint32},
 		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	b.TableDef(schema.TableDefinition{
 		Name: "s",

@@ -55,6 +55,7 @@ func (s stubProtocolSchemaRegistry) ColumnType(schema.TableID, types.ColID) sche
 	return 0
 }
 func (s stubProtocolSchemaRegistry) HasIndex(schema.TableID, types.ColID) bool { return false }
+func (s stubProtocolSchemaRegistry) ColumnCount(schema.TableID) int            { return 0 }
 func (s stubProtocolSchemaRegistry) IndexIDForColumn(schema.TableID, types.ColID) (schema.IndexID, bool) {
 	return 0, false
 }

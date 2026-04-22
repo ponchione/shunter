@@ -37,6 +37,10 @@ type SchemaLookup interface {
 
 	// HasIndex reports whether a single-column index on (table, col) exists.
 	HasIndex(table TableID, col types.ColID) bool
+
+	// ColumnCount returns the number of declared columns for the table, or
+	// zero when the table ID is unknown.
+	ColumnCount(table TableID) int
 }
 
 // IndexResolver maps (table, column) → index ID when a single-column index
@@ -157,6 +161,14 @@ func (r *schemaRegistry) ColumnType(table TableID, col types.ColID) ValueKind {
 func (r *schemaRegistry) HasIndex(table TableID, col types.ColID) bool {
 	_, ok := r.indexIDForColumn(table, col)
 	return ok
+}
+
+func (r *schemaRegistry) ColumnCount(table TableID) int {
+	i, ok := r.byID[table]
+	if !ok {
+		return 0
+	}
+	return len(r.tables[i].Columns)
 }
 
 func (r *schemaRegistry) IndexIDForColumn(table TableID, col types.ColID) (IndexID, bool) {

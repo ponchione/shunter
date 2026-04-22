@@ -21,6 +21,8 @@ For provenance of closed slices, use `rtk git log` — this file tracks only cur
 - `TECH-DEBT.md` now marks OI-002 / Tier A2 as the next active execution issue; use that as the tie-breaker if stale docs suggest reopening A1 protocol work.
 - The first OI-002 fan-out delivery batch is now closed: `subscription/fanout_worker.go` delivers fast-read recipients without global `TxDurable` blocking while confirmed-read recipients still wait, and `subscription/eval.go` now marks eval-failure connections dropped for executor-side cleanup instead of pruning only the failing subscription.
 - The OI-002 join/cross-join multiplicity batch is now closed: `subscription.CrossJoin` carries projection-side/self-alias identity, cross joins preserve cartesian multiplicity across bootstrap/one-off/delta paths, and one-off equi-join projection now preserves bag semantics instead of semijoin-style dedup.
+- The one-off-vs-subscribe unindexed-join validation seam is now closed: `protocol/handle_oneoff.go` runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so one-off SQL rejects the same unindexed join admission shapes subscribe registration already rejects.
+- The committed join projected-order seam is now closed: `subscription/register_set.go` enumerates projected-side rows first for bootstrap and unregister final-delta joins, so accepted join SQL no longer flips visible committed-row order solely because the usable index lives on the opposite join side.
 
 ## How to frame a session
 
@@ -34,35 +36,88 @@ Work in *batches*, not single slices. One session = one batch. Within a batch, l
 
 Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A3 or OI-004/005/006 hardening.
 
-## Next session: OI-002 A2 predicate/runtime follow-on batch
+## Next session: OI-002 A2 next runtime/model residual after committed-join ordering closure
 
-OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and both the first OI-002 fan-out delivery batch and the join/cross-join multiplicity batch are now closed. The next open protocol-adjacent batch stays in OI-002 A2: subscription/runtime parity against `reference/SpacetimeDB/crates/core/src/subscription/`, but should start from the remaining runtime/model gaps rather than reopening those closed slices.
+OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the first OI-002 fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, and the committed join bootstrap/final-delta projected-order seam are now closed. The next open protocol-adjacent batch stays in OI-002 A2: subscription/runtime parity against `reference/SpacetimeDB/crates/core/src/subscription/`, but should now start from another bounded runtime/model residual rather than reopening those closed slices.
+
+Fresh-agent task:
+
+- Scout and then close one bounded OI-002 A2 runtime/model mismatch that remains after the closed multiplicity, join-index-validation, and committed-join-ordering slices.
+- Do not start with a broad SQL widening pass. Start from live accepted shapes only and prove the mismatch with focused tests before editing production code.
+- Do not reopen the one-off-vs-subscribe unindexed-join validation seam or the committed join bootstrap/final-delta projected-order seam unless fresh evidence shows a new regression or a distinct uncovered shape.
+- If the scout does not confirm a real remaining runtime/model gap, stop after updating this handoff with the grounded residual and point the next agent at the next best A2 seam instead of forcing a speculative change.
+
+Fresh-agent context:
+
+- Closed already in OI-002 A2:
+  - recipient-level fan-out durability gating + dropped-client cleanup on eval failure
+  - join/cross-join multiplicity across compile/hash identity, bootstrap, one-off, and delta
+  - one-off vs subscribe unindexed-join admission parity via shared `subscription.ValidatePredicate(...)`
+  - committed join bootstrap/unregister projected-side ordering regardless of usable index side
+- Do not reopen:
+  - fan-out delivery parity
+  - join/cross-join multiplicity
+  - one-off-vs-subscribe join-index validation
+  - committed join bootstrap/final-delta projected ordering
+  - rows-shape documented divergence
+  - OI-001 A1 wire/message-family work
+- The next useful work should stay in the remaining predicate/model seam: accepted SQL -> compiled subscription predicate -> hash identity -> bootstrap/eval/one-off behavior, with post-commit delta evaluation ordering/runtime-shape follow-ons as the best current candidate if the scout confirms them.
 
 Batch framing:
 
 1. Scout the live subscription surfaces first: `subscription/predicate.go`, `subscription/validate.go`, `subscription/eval.go`, `subscription/manager.go`, `subscription/fanout.go`, `subscription/fanout_worker.go`, plus the protocol compile/admission seams in `protocol/handle_subscribe_*.go`, `protocol/handle_oneoff.go`, and `executor/protocol_inbox_adapter.go`.
-2. Diff those against the relevant reference subscription/runtime paths and produce the residual A2 list only. Ignore already-closed fan-out delivery and SQL surface pins unless they expose a fresh runtime mismatch.
-3. Prefer the next bounded runtime/model gap after multiplicity closure: predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model is the best current candidate if the scout still confirms it. If not, pick another single reference-backed runtime/model residual such as evaluation-ordering drift. Keep the session inside one such batch.
+2. Diff those against the relevant reference subscription/runtime paths and produce the residual A2 list only. Ignore already-closed fan-out delivery, multiplicity, join-index-validation, and committed-join-ordering seams unless they expose fresh evidence.
+3. Prefer the next bounded runtime/model gap after the newly closed committed-join-ordering seam: post-commit delta evaluation ordering/runtime-shape follow-ons are the best current candidate if the scout confirms them. If not, pick another single reference-backed runtime/model residual. Keep the session inside one such batch.
 4. Land one commit per slice with parser/runtime/protocol pins as appropriate, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
+
+Concrete deliverable for the fresh agent:
+
+1. Write down the exact confirmed mismatch in one short bullet before coding.
+2. Add failing focused tests first.
+3. Fix only the minimal compile/runtime seam needed.
+4. Re-run focused tests, then `rtk go test ./protocol/... ./subscription/... ./executor/...`, then `rtk go test ./...`.
+5. Update `TECH-DEBT.md`, `docs/parity-phase0-ledger.md`, `docs/spacetimedb-parity-roadmap.md`, and this file in the same session.
 
 Suggested starting reads for this batch:
 
 - `subscription/predicate.go`
 - `subscription/validate.go`
+- `subscription/hash.go`
 - `subscription/eval.go`
+- `subscription/register_set.go`
 - `subscription/manager.go`
 - `subscription/fanout.go`
 - `subscription/fanout_worker.go`
+- `protocol/handle_subscribe.go`
 - `protocol/handle_subscribe_single.go`
 - `protocol/handle_subscribe_multi.go`
 - `protocol/handle_oneoff.go`
 - `executor/protocol_inbox_adapter.go`
+
+Suggested starting test surfaces:
+
+- `protocol/handle_subscribe_test.go`
+- `protocol/handle_oneoff_test.go`
+- `subscription/validate_test.go`
+- `subscription/hash_test.go`
+- `subscription/manager_test.go`
+- `subscription/eval_test.go`
 
 Good candidate seams to scout before choosing the batch:
 
 - predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model
 - evaluation-ordering differences that still change user-visible delta sequencing
 - any remaining one-off vs subscribe/runtime mismatches after the now-closed multiplicity batch
+
+Useful scout heuristic:
+
+- Look for shapes where parser/protocol admission already accepts the query, but one of these still disagrees with the others:
+  - compiled predicate structure
+  - `ValidatePredicate(...)`
+  - canonical hash identity
+  - bootstrap result shape/count
+  - one-off result shape/count
+  - delta/update behavior
 
 Stop conditions:
 
@@ -74,7 +129,7 @@ Out of scope for this batch: OI-001 A3 recovery/store parity, OI-004/005/006 har
 
 ## Follow-on queue (pickable next, one per session)
 
-- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: predicate normalization / validation drift or another reference-backed runtime/model gap after the closed fan-out delivery and multiplicity slices. Do not reopen those closed slices without fresh evidence.
+- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: post-commit delta evaluation ordering/runtime-shape follow-ons or another reference-backed runtime/model residual after the closed fan-out delivery, multiplicity, join-index-validation, and committed-join-ordering slices. Do not reopen those closed slices without fresh evidence.
 - **OI-001 A3** — recovery / store parity against `reference/SpacetimeDB/crates/core/src/db/`. Batch scope: snapshot/replay invariants beyond what `P0-RECOVERY-*` already covered.
 - **Coordinated wrapper-chain + row-list close** (Phase 2 Slice 4 carried-forward deferral). Requires a new decision doc reopening the SPEC-005 §3.4 `BsatnRowList` deferral together with the reference `SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `QueryUpdate` wrapper chain. Scope is large — do not start without a named consumer or a bandwidth trigger (SPEC-005 §3.4 "fixed-schema row delivery bottleneck").
 - **Strict-auth wiring in `cmd/shunter-example`**. Currently anonymous-only. Batch scope: JWT identity, token rotation, `IdentityToken` round-trip, upgrade-path handshake.

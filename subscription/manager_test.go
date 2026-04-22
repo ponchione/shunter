@@ -342,6 +342,174 @@ func TestRegisterCrossJoinBootstrapProjectsRight(t *testing.T) {
 	}
 }
 
+func TestRegisterJoinBootstrapPreservesProjectedLeftOrderWhenOnlyLeftJoinColumnIndexed(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewUint64(7)},
+			{types.NewUint64(2), types.NewUint64(7)},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(7)},
+			{types.NewUint64(11), types.NewUint64(7)},
+		},
+	})
+	mgr := NewManager(s, s)
+	p := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1, ProjectRight: false}
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 14, Predicates: []Predicate{p},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if len(got.Update) != 1 {
+		t.Fatalf("update count = %d, want 1", len(got.Update))
+	}
+	gotRows := got.Update[0].Inserts
+	wantRows := []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+	}
+	if len(gotRows) != len(wantRows) {
+		t.Fatalf("insert count = %d, want %d", len(gotRows), len(wantRows))
+	}
+	for i := range wantRows {
+		if !gotRows[i][0].Equal(wantRows[i][0]) || !gotRows[i][1].Equal(wantRows[i][1]) {
+			t.Fatalf("insert[%d] = %v, want %v", i, gotRows[i], wantRows[i])
+		}
+	}
+}
+
+func TestRegisterJoinBootstrapPreservesProjectedRightOrderWhenOnlyRightJoinColumnIndexed(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewUint64(7)},
+			{types.NewUint64(2), types.NewUint64(7)},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(7)},
+			{types.NewUint64(11), types.NewUint64(7)},
+		},
+	})
+	mgr := NewManager(s, s)
+	p := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1, ProjectRight: true}
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 15, Predicates: []Predicate{p},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if len(got.Update) != 1 {
+		t.Fatalf("update count = %d, want 1", len(got.Update))
+	}
+	gotRows := got.Update[0].Inserts
+	wantRows := []types.ProductValue{
+		{types.NewUint64(10), types.NewUint64(7)},
+		{types.NewUint64(10), types.NewUint64(7)},
+		{types.NewUint64(11), types.NewUint64(7)},
+		{types.NewUint64(11), types.NewUint64(7)},
+	}
+	if len(gotRows) != len(wantRows) {
+		t.Fatalf("insert count = %d, want %d", len(gotRows), len(wantRows))
+	}
+	for i := range wantRows {
+		if !gotRows[i][0].Equal(wantRows[i][0]) || !gotRows[i][1].Equal(wantRows[i][1]) {
+			t.Fatalf("insert[%d] = %v, want %v", i, gotRows[i], wantRows[i])
+		}
+	}
+}
+
+func TestRegisterJoinBootstrapPreservesProjectedLeftOrderWhenOnlyRightJoinColumnIndexed(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewUint64(7)},
+			{types.NewUint64(2), types.NewUint64(7)},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(7)},
+			{types.NewUint64(11), types.NewUint64(7)},
+		},
+	})
+	mgr := NewManager(s, s)
+	p := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1}
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 151, Predicates: []Predicate{p},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	gotRows := got.Update[0].Inserts
+	wantRows := []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+	}
+	if len(gotRows) != len(wantRows) {
+		t.Fatalf("insert count = %d, want %d", len(gotRows), len(wantRows))
+	}
+	for i := range wantRows {
+		if !gotRows[i][0].Equal(wantRows[i][0]) || !gotRows[i][1].Equal(wantRows[i][1]) {
+			t.Fatalf("insert[%d] = %v, want %v", i, gotRows[i], wantRows[i])
+		}
+	}
+}
+
+func TestUnregisterJoinFinalDeltaPreservesProjectedLeftOrderWhenOnlyLeftJoinColumnIndexed(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewUint64(7)},
+			{types.NewUint64(2), types.NewUint64(7)},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(7)},
+			{types.NewUint64(11), types.NewUint64(7)},
+		},
+	})
+	mgr := NewManager(s, s)
+	p := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 16, Predicates: []Predicate{p},
+	}, view); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	got, err := mgr.UnregisterSet(types.ConnectionID{1}, 16, view)
+	if err != nil {
+		t.Fatalf("UnregisterSet = %v", err)
+	}
+	if len(got.Update) != 1 {
+		t.Fatalf("update count = %d, want 1", len(got.Update))
+	}
+	gotRows := got.Update[0].Deletes
+	wantRows := []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+	}
+	if len(gotRows) != len(wantRows) {
+		t.Fatalf("delete count = %d, want %d", len(gotRows), len(wantRows))
+	}
+	for i := range wantRows {
+		if !gotRows[i][0].Equal(wantRows[i][0]) || !gotRows[i][1].Equal(wantRows[i][1]) {
+			t.Fatalf("delete[%d] = %v, want %v", i, gotRows[i], wantRows[i])
+		}
+	}
+}
+
 func TestRegisterInitialRowLimit(t *testing.T) {
 	s := testSchema()
 	view := buildMockCommitted(s, map[TableID][]types.ProductValue{

@@ -31,7 +31,7 @@ Guardrails:
 ## Current grounded status
 
 Latest live repo state:
-- `rtk go test ./...` → `Go test: 1546 passed in 10 packages`
+- `rtk go test ./...` → `Go test: 1672 passed in 11 packages`
 - `rtk go build ./...` → `Go build: Success`
 - major runtime packages are already implemented in live Go code
 - `docs/parity-phase0-ledger.md` carries the scenario ledger
@@ -95,6 +95,8 @@ Current grounded state:
 - many narrow SQL/query parity slices are landed and pinned
 - the supported SQL surface remains intentionally narrower than the reference SQL path
 - the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off execution, and delta evaluation
+- one-off SQL now runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing join-index validation
+- committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -199,7 +201,7 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- predicate normalization / validation drift and other runtime-shape gaps still need bounded A2 follow-ons
+- post-commit delta evaluation ordering/runtime-shape follow-ons and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation and committed join bootstrap/final-delta ordering seams
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
@@ -249,11 +251,11 @@ When choosing the next slice:
 
 ## Current best next direction
 
-The best current narrow-ready direction is the next OI-002 A2 runtime/model residual after the now-closed multiplicity batch.
+The best current narrow-ready direction is the next OI-002 A2 runtime/model residual after the now-closed multiplicity, join-index-validation, and committed join bootstrap/final-delta ordering batches.
 
 Current candidate directions are:
+- post-commit delta evaluation ordering/runtime-shape follow-ons, especially if committed bootstrap/final-delta order is now aligned but delta paths still differ
 - predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model
-- evaluation-ordering/runtime-shape follow-ons if the scout shows they outrank hardening work
 - Tier B hardening when a concrete live risk is stronger than the next parity slice
 - a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
 - scheduler/bootstrap follow-through only when workload or integration evidence surfaces

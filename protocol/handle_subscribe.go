@@ -23,9 +23,10 @@ type relationSchema struct {
 // SchemaLookup resolves table names to their schema-level identifiers
 // and column metadata. The host wires the concrete implementation;
 // the protocol layer uses it during subscribe/query handling to
-// validate table + column references before forwarding to the executor.
+// validate table + column references before forwarding to the executor
+// and to run shared predicate validation for one-off admission.
 type SchemaLookup interface {
-	TableByName(name string) (schema.TableID, *schema.TableSchema, bool)
+	schema.SchemaLookup
 }
 
 // compileQuery resolves a wire Query against the schema and returns the

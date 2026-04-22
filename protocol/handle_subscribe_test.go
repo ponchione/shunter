@@ -16,8 +16,36 @@ import (
 
 type registrySchemaLookup struct{ reg schema.SchemaRegistry }
 
+func (r registrySchemaLookup) Table(id schema.TableID) (*schema.TableSchema, bool) {
+	return r.reg.Table(id)
+}
+
 func (r registrySchemaLookup) TableByName(name string) (schema.TableID, *schema.TableSchema, bool) {
 	return r.reg.TableByName(name)
+}
+
+func (r registrySchemaLookup) TableExists(id schema.TableID) bool {
+	return r.reg.TableExists(id)
+}
+
+func (r registrySchemaLookup) TableName(id schema.TableID) string {
+	return r.reg.TableName(id)
+}
+
+func (r registrySchemaLookup) ColumnExists(table schema.TableID, col types.ColID) bool {
+	return r.reg.ColumnExists(table, col)
+}
+
+func (r registrySchemaLookup) ColumnType(table schema.TableID, col types.ColID) schema.ValueKind {
+	return r.reg.ColumnType(table, col)
+}
+
+func (r registrySchemaLookup) HasIndex(table schema.TableID, col types.ColID) bool {
+	return r.reg.HasIndex(table, col)
+}
+
+func (r registrySchemaLookup) ColumnCount(table schema.TableID) int {
+	return r.reg.ColumnCount(table)
 }
 
 func requireOptionalUint32(t *testing.T, got *uint32, want uint32, field string) {
@@ -36,12 +64,72 @@ type mockSchemaLookup struct {
 	}
 }
 
+func (m *mockSchemaLookup) Table(id schema.TableID) (*schema.TableSchema, bool) {
+	for _, entry := range m.tables {
+		if entry.id == id {
+			return entry.schema, true
+		}
+	}
+	return nil, false
+}
+
 func (m *mockSchemaLookup) TableByName(name string) (schema.TableID, *schema.TableSchema, bool) {
 	entry, ok := m.tables[name]
 	if !ok {
 		return 0, nil, false
 	}
 	return entry.id, entry.schema, true
+}
+
+func (m *mockSchemaLookup) TableExists(id schema.TableID) bool {
+	_, ok := m.Table(id)
+	return ok
+}
+
+func (m *mockSchemaLookup) TableName(id schema.TableID) string {
+	for name, entry := range m.tables {
+		if entry.id == id {
+			return name
+		}
+	}
+	return ""
+}
+
+func (m *mockSchemaLookup) ColumnExists(table schema.TableID, col types.ColID) bool {
+	ts, ok := m.Table(table)
+	if !ok {
+		return false
+	}
+	return int(col) >= 0 && int(col) < len(ts.Columns)
+}
+
+func (m *mockSchemaLookup) ColumnType(table schema.TableID, col types.ColID) schema.ValueKind {
+	ts, ok := m.Table(table)
+	if !ok || int(col) < 0 || int(col) >= len(ts.Columns) {
+		return 0
+	}
+	return ts.Columns[col].Type
+}
+
+func (m *mockSchemaLookup) HasIndex(table schema.TableID, col types.ColID) bool {
+	ts, ok := m.Table(table)
+	if !ok {
+		return false
+	}
+	for _, idx := range ts.Indexes {
+		if len(idx.Columns) == 1 && idx.Columns[0] == int(col) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *mockSchemaLookup) ColumnCount(table schema.TableID) int {
+	ts, ok := m.Table(table)
+	if !ok {
+		return 0
+	}
+	return len(ts.Columns)
 }
 
 func newMockSchema(name string, id schema.TableID, cols ...schema.ColumnSchema) *mockSchemaLookup {
