@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"log"
+	"time"
 )
 
 // handleUnsubscribeSingle processes an incoming UnsubscribeSingleMsg.
@@ -12,12 +13,15 @@ import (
 // has been applied. The executor invokes the Reply closure
 // synchronously on its own goroutine; the closure enqueues the result
 // onto the connection's outbound channel.
+//
+// Receipt-timestamp seam: see handleSubscribeSingle.
 func handleUnsubscribeSingle(
 	ctx context.Context,
 	conn *Conn,
 	msg *UnsubscribeSingleMsg,
 	executor ExecutorInbox,
 ) {
+	receipt := time.Now()
 	sender := connOnlySender{conn: conn}
 	reply := func(resp UnsubscribeSetCommandResponse) {
 		switch {
@@ -39,11 +43,13 @@ func handleUnsubscribeSingle(
 		RequestID: msg.RequestID,
 		Variant:   SubscriptionSetVariantSingle,
 		Reply:     reply,
+		Receipt:   receipt,
 	}); err != nil {
 		sendError(conn, SubscriptionError{
-			RequestID: optionalUint32(msg.RequestID),
-			QueryID:   optionalUint32(msg.QueryID),
-			Error:     "executor unavailable: " + err.Error(),
+			TotalHostExecutionDurationMicros: elapsedMicros(receipt),
+			RequestID:                        optionalUint32(msg.RequestID),
+			QueryID:                          optionalUint32(msg.QueryID),
+			Error:                            "executor unavailable: " + err.Error(),
 		})
 		return
 	}

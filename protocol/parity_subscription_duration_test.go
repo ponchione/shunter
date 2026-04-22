@@ -100,3 +100,39 @@ func TestParitySubscribeMultiDurationNonZeroOnSubmitFail(t *testing.T) {
 		t.Fatal("TotalHostExecutionDurationMicros = 0, want non-zero on multi submit-fail path")
 	}
 }
+
+// TestParityUnsubscribeSingleDurationNonZeroOnSubmitFail pins the seam
+// on handleUnsubscribeSingle's executor-unavailable short-circuit.
+func TestParityUnsubscribeSingleDurationNonZeroOnSubmitFail(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockDispatchExecutor{unregisterSetErr: errors.New("db down")}
+	msg := &UnsubscribeSingleMsg{RequestID: 4, QueryID: 7}
+	handleUnsubscribeSingle(context.Background(), conn, msg, exec)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("TotalHostExecutionDurationMicros = 0, want non-zero on unsubscribe-single submit-fail path")
+	}
+}
+
+// TestParityUnsubscribeMultiDurationNonZeroOnSubmitFail pins the same
+// contract on handleUnsubscribeMulti.
+func TestParityUnsubscribeMultiDurationNonZeroOnSubmitFail(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockDispatchExecutor{unregisterSetErr: errors.New("db down")}
+	msg := &UnsubscribeMultiMsg{RequestID: 24, QueryID: 99}
+	handleUnsubscribeMulti(context.Background(), conn, msg, exec)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("TotalHostExecutionDurationMicros = 0, want non-zero on unsubscribe-multi submit-fail path")
+	}
+}
