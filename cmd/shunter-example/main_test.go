@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/ponchione/shunter/protocol"
 )
 
 // TestBuildEngine_BootstrapThenRecover exercises the cold-boot (ErrNoData →
@@ -72,6 +74,129 @@ func TestBuildEngine_AdmitsAnonymousConnection(t *testing.T) {
 	defer readCancel()
 	if _, _, err := conn.Read(readCtx); err != nil {
 		t.Fatalf("read InitialConnection: %v", err)
+	}
+}
+
+// TestFanOut_SubscriberReceivesReducerInsert pins the full subscription
+// fan-out path end-to-end. Client A subscribes to `SELECT * FROM greetings`
+// and Client B calls the `say_hello` reducer; the insert must arrive on A
+// as a `TransactionUpdateLight` delta. Pre-wiring, the example ran with the
+// noop SubscriptionManager and no delta was ever produced, so this pin
+// guards against fan-out regression.
+func TestFanOut_SubscriberReceivesReducerInsert(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	graph, err := buildEngine(ctx, dir)
+	if err != nil {
+		t.Fatalf("buildEngine: %v", err)
+	}
+	defer graph.shutdown()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/subscribe", graph.server.HandleSubscribe)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	wsURL := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+	dialOpts := &websocket.DialOptions{Subprotocols: []string{"v1.bsatn.spacetimedb"}}
+
+	dial := func(name string) *websocket.Conn {
+		t.Helper()
+		dialCtx, dialCancel := context.WithTimeout(ctx, 2*time.Second)
+		defer dialCancel()
+		c, _, err := websocket.Dial(dialCtx, wsURL, dialOpts)
+		if err != nil {
+			t.Fatalf("%s dial: %v", name, err)
+		}
+		// Consume InitialConnection so subsequent reads land on
+		// post-handshake frames.
+		readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
+		defer readCancel()
+		if _, _, err := c.Read(readCtx); err != nil {
+			t.Fatalf("%s read InitialConnection: %v", name, err)
+		}
+		return c
+	}
+	write := func(name string, c *websocket.Conn, msg any) {
+		t.Helper()
+		frame, err := protocol.EncodeClientMessage(msg)
+		if err != nil {
+			t.Fatalf("%s encode: %v", name, err)
+		}
+		writeCtx, writeCancel := context.WithTimeout(ctx, 2*time.Second)
+		defer writeCancel()
+		if err := c.Write(writeCtx, websocket.MessageBinary, frame); err != nil {
+			t.Fatalf("%s write: %v", name, err)
+		}
+	}
+	readUntilTag := func(name string, c *websocket.Conn, tag uint8) any {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			readCtx, readCancel := context.WithDeadline(ctx, deadline)
+			_, frame, err := c.Read(readCtx)
+			readCancel()
+			if err != nil {
+				t.Fatalf("%s read: %v", name, err)
+			}
+			gotTag, msg, err := protocol.DecodeServerMessage(frame)
+			if err != nil {
+				t.Fatalf("%s decode: %v", name, err)
+			}
+			if gotTag == tag {
+				return msg
+			}
+			// Non-target frame (e.g. SubscribeSingleApplied received
+			// while waiting for TransactionUpdateLight). Swallow and
+			// continue reading.
+		}
+		t.Fatalf("%s timeout waiting for tag=%d", name, tag)
+		return nil
+	}
+
+	subscriber := dial("subscriber")
+	defer subscriber.Close(websocket.StatusNormalClosure, "")
+	caller := dial("caller")
+	defer caller.Close(websocket.StatusNormalClosure, "")
+
+	write("subscriber", subscriber, protocol.SubscribeSingleMsg{
+		RequestID:   1,
+		QueryID:     1,
+		QueryString: "SELECT * FROM greetings",
+	})
+	applied, ok := readUntilTag("subscriber", subscriber, protocol.TagSubscribeSingleApplied).(protocol.SubscribeSingleApplied)
+	if !ok {
+		t.Fatalf("subscriber: unexpected Applied shape")
+	}
+	if applied.TableName != "greetings" {
+		t.Fatalf("subscriber Applied TableName = %q, want greetings", applied.TableName)
+	}
+
+	write("caller", caller, protocol.CallReducerMsg{
+		RequestID:   2,
+		ReducerName: "say_hello",
+		Args:        []byte("hola"),
+		Flags:       protocol.CallReducerFlagsFullUpdate,
+	})
+
+	light, ok := readUntilTag("subscriber", subscriber, protocol.TagTransactionUpdateLight).(protocol.TransactionUpdateLight)
+	if !ok {
+		t.Fatalf("subscriber: unexpected Light shape")
+	}
+	if len(light.Update) != 1 {
+		t.Fatalf("light.Update len = %d, want 1", len(light.Update))
+	}
+	if light.Update[0].TableName != "greetings" {
+		t.Fatalf("light update table = %q, want greetings", light.Update[0].TableName)
+	}
+	// Non-empty Inserts payload proves the reducer's row round-tripped
+	// through the fan-out adapter's BSATN encoder; we intentionally do
+	// not decode here — a zero-length body would indicate the fan-out
+	// wiring dropped the delta.
+	if len(light.Update[0].Inserts) == 0 {
+		t.Fatalf("light update inserts empty, want encoded row")
 	}
 }
 

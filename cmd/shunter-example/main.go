@@ -24,8 +24,15 @@ import (
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
+	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
+
+// fanOutInboxCapacity bounds the buffered hand-off between the executor's
+// EvalAndBroadcast call and the fan-out worker goroutine. Sized to match
+// the executor inbox default so a commit backlog does not rendezvous-stall
+// the executor.
+const fanOutInboxCapacity = 256
 
 func main() {
 	var (
@@ -85,6 +92,7 @@ type engineGraph struct {
 	server   *protocol.Server
 	exec     *executor.Executor
 	dw       *commitlog.DurabilityWorker
+	subs     *subscription.Manager
 	shutdown func()
 }
 
@@ -116,8 +124,21 @@ func buildEngine(ctx context.Context, dataDir string) (*engineGraph, error) {
 		return nil, fmt.Errorf("build reducers: %w", err)
 	}
 
+	// Subscription fan-out graph. The Manager consumes reducer commits
+	// synchronously on the executor goroutine (EvalAndBroadcast) and hands
+	// computed per-connection deltas to the FanOutWorker over fanOutInbox.
+	// The worker drives protocol.FanOutSenderAdapter, which encodes each
+	// delta and enqueues it on the target connection's OutboundCh.
+	fanOutInbox := make(chan subscription.FanOutMessage, fanOutInboxCapacity)
+	subs := subscription.NewManager(
+		schemaLookupAdapter{reg},
+		reg,
+		subscription.WithFanOutInbox(fanOutInbox),
+	)
+
 	exec := executor.NewExecutor(executor.ExecutorConfig{
-		Durability: durabilityAdapter{dw},
+		Durability:    durabilityAdapter{dw},
+		Subscriptions: subs,
 	}, rr, committed, reg, uint64(maxTxID))
 
 	if err := exec.Startup(ctx, nil); err != nil {
@@ -131,15 +152,37 @@ func buildEngine(ctx context.Context, dataDir string) (*engineGraph, error) {
 		close(runDone)
 	}()
 
-	server := buildProtocolServer(exec, reg, committed)
+	// ConnManager is shared between the protocol.Server (admission) and the
+	// fan-out ClientSender (delivery) so resolved ConnectionIDs point at
+	// the same *Conn in both directions.
+	conns := protocol.NewConnManager()
+	inboxAdapter := executor.NewProtocolInboxAdapter(exec)
+	clientSender := protocol.NewClientSender(conns, inboxAdapter)
+	fanOutSender := protocol.NewFanOutSenderAdapter(clientSender)
+	worker := subscription.NewFanOutWorker(fanOutInbox, fanOutSender, subs.DroppedChanSend())
+	workerDone := make(chan struct{})
+	go func() {
+		worker.Run(ctx)
+		close(workerDone)
+	}()
+
+	server := buildProtocolServer(inboxAdapter, conns, reg, committed)
 
 	return &engineGraph{
 		server: server,
 		exec:   exec,
 		dw:     dw,
+		subs:   subs,
 		shutdown: func() {
 			exec.Shutdown()
 			<-runDone
+			// Closing the fan-out inbox drains the worker so it does not
+			// sit on a cancelled ctx waiting for late sends after the
+			// executor has already stopped publishing. Order matters:
+			// worker exit first, then durability close, so any in-flight
+			// delivery completes before the commit-log goes away.
+			close(fanOutInbox)
+			<-workerDone
 			dw.Close()
 		},
 	}, nil
@@ -216,7 +259,7 @@ func openOrBootstrap(dir string, reg schema.SchemaRegistry) (*store.CommittedSta
 	return commitlog.OpenAndRecoverDetailed(dir, reg)
 }
 
-func buildProtocolServer(exec *executor.Executor, reg schema.SchemaRegistry, cs *store.CommittedState) *protocol.Server {
+func buildProtocolServer(inbox *executor.ProtocolInboxAdapter, conns *protocol.ConnManager, reg schema.SchemaRegistry, cs *store.CommittedState) *protocol.Server {
 	signingKey := []byte("shunter-example-signing-key-change-me")
 	return &protocol.Server{
 		JWT: &auth.JWTConfig{
@@ -230,8 +273,8 @@ func buildProtocolServer(exec *executor.Executor, reg schema.SchemaRegistry, cs 
 			Expiry:     24 * time.Hour,
 		},
 		Options:  protocol.DefaultProtocolOptions(),
-		Executor: executor.NewProtocolInboxAdapter(exec),
-		Conns:    protocol.NewConnManager(),
+		Executor: inbox,
+		Conns:    conns,
 		Schema:   reg,
 		State:    stateAdapter{cs},
 	}
@@ -242,6 +285,35 @@ func buildProtocolServer(exec *executor.Executor, reg schema.SchemaRegistry, cs 
 type stateAdapter struct{ cs *store.CommittedState }
 
 func (a stateAdapter) Snapshot() store.CommittedReadView { return a.cs.Snapshot() }
+
+// schemaLookupAdapter widens schema.SchemaRegistry to satisfy
+// subscription.SchemaLookup. The subscription layer needs ColumnCount
+// (used by the join evaluator to project concatenated LHS++RHS rows onto
+// one side) which schema.SchemaRegistry itself does not expose.
+type schemaLookupAdapter struct{ reg schema.SchemaRegistry }
+
+func (a schemaLookupAdapter) TableExists(t subscription.TableID) bool {
+	return a.reg.TableExists(t)
+}
+func (a schemaLookupAdapter) ColumnExists(t subscription.TableID, c subscription.ColID) bool {
+	return a.reg.ColumnExists(t, c)
+}
+func (a schemaLookupAdapter) ColumnType(t subscription.TableID, c subscription.ColID) subscription.ValueKind {
+	return a.reg.ColumnType(t, c)
+}
+func (a schemaLookupAdapter) HasIndex(t subscription.TableID, c subscription.ColID) bool {
+	return a.reg.HasIndex(t, c)
+}
+func (a schemaLookupAdapter) TableName(t subscription.TableID) string {
+	return a.reg.TableName(t)
+}
+func (a schemaLookupAdapter) ColumnCount(t subscription.TableID) int {
+	ts, ok := a.reg.Table(t)
+	if !ok {
+		return 0
+	}
+	return len(ts.Columns)
+}
 
 // durabilityAdapter bridges commitlog.DurabilityWorker to executor.DurabilityHandle.
 // The method signatures differ only on the txID scalar type.

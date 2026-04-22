@@ -15,14 +15,26 @@ commitlog.OpenAndRecoverDetailed ──► store.CommittedState
                       ▼                      │
 commitlog.DurabilityWorker ──► durabilityAdapter
                       │                      │
+                      │                      ▼
+                      │    subscription.Manager (schemaLookupAdapter, reg, WithFanOutInbox)
+                      │                      │
                       ▼                      ▼
-                executor.NewExecutor(cfg, reducerRegistry, committed, schemaReg, maxTxID)
+                executor.NewExecutor(cfg{Durability, Subscriptions}, reducerRegistry, committed, schemaReg, maxTxID)
                       │
                       ▼
                 executor.Startup(ctx, nil) ─── flips external-admission gate
                       │
                       ▼
-                protocol.Server { Executor: NewProtocolInboxAdapter(exec), ... }
+                protocol.NewClientSender(conns, inboxAdapter)
+                      │
+                      ▼
+                protocol.NewFanOutSenderAdapter(clientSender)
+                      │
+                      ▼
+                subscription.NewFanOutWorker(inbox, sender, subs.DroppedChanSend()) — go worker.Run(ctx)
+                      │
+                      ▼
+                protocol.Server { Executor: inboxAdapter, Conns: conns, ... }
                       │
                       ▼
                 http.Server mux.Handle("/subscribe", server.HandleSubscribe)
@@ -94,11 +106,39 @@ schema builder records reducers for declarative purposes (export, validation),
 while the executor's registry owns runtime dispatch. Freeze before constructing
 the executor.
 
-### 5. Construct and start the executor
+### 5. Wire the subscription fan-out graph
+
+```go
+fanOutInbox := make(chan subscription.FanOutMessage, 256)
+subs := subscription.NewManager(
+    schemaLookupAdapter{reg}, // widens reg with ColumnCount
+    reg,                      // schema.SchemaRegistry satisfies subscription.IndexResolver
+    subscription.WithFanOutInbox(fanOutInbox),
+)
+```
+
+`subscription.SchemaLookup` requires `ColumnCount(TableID) int`, which
+`schema.SchemaRegistry` does not expose directly. A small adapter bridges
+the gap by looking up the full `TableSchema`:
+
+```go
+type schemaLookupAdapter struct{ reg schema.SchemaRegistry }
+
+func (a schemaLookupAdapter) ColumnCount(t schema.TableID) int {
+    ts, ok := a.reg.Table(t)
+    if !ok { return 0 }
+    return len(ts.Columns)
+}
+// TableExists / ColumnExists / ColumnType / HasIndex / TableName
+// all forward straight to a.reg.
+```
+
+### 6. Construct and start the executor
 
 ```go
 exec := executor.NewExecutor(executor.ExecutorConfig{
-    Durability: durabilityAdapter{dw},
+    Durability:    durabilityAdapter{dw},
+    Subscriptions: subs,
 }, rr, committed, reg, uint64(maxTxID))
 
 if err := exec.Startup(ctx, nil); err != nil { return err }
@@ -114,15 +154,31 @@ that rely on scheduled reducers wire a `Scheduler` here — at the time of
 writing the scheduler constructor reaches the executor's unexported inbox, so
 scheduler wiring is still an internal / test-only path.
 
-### 6. Stand up the protocol server
+### 7. Wire the fan-out worker
+
+```go
+conns := protocol.NewConnManager()
+inboxAdapter := executor.NewProtocolInboxAdapter(exec)
+clientSender := protocol.NewClientSender(conns, inboxAdapter)
+fanOutSender := protocol.NewFanOutSenderAdapter(clientSender)
+worker := subscription.NewFanOutWorker(fanOutInbox, fanOutSender, subs.DroppedChanSend())
+go worker.Run(ctx)
+```
+
+The `ConnManager` is shared between `protocol.Server` (admission) and
+`NewClientSender` (delivery) so resolved `ConnectionID`s point at the same
+`*Conn` in both directions. On shutdown, close `fanOutInbox` after the
+executor has drained so the worker exits before durability is closed.
+
+### 8. Stand up the protocol server
 
 ```go
 server := &protocol.Server{
     JWT:      &auth.JWTConfig{SigningKey: key, AuthMode: auth.AuthModeAnonymous},
     Mint:     &auth.MintConfig{Issuer: "...", Audience: "...", SigningKey: key, Expiry: 24 * time.Hour},
     Options:  protocol.DefaultProtocolOptions(),
-    Executor: executor.NewProtocolInboxAdapter(exec),
-    Conns:    protocol.NewConnManager(),
+    Executor: inboxAdapter,
+    Conns:    conns,
     Schema:   reg,
     State:    stateAdapter{committed},
 }
@@ -142,20 +198,15 @@ type stateAdapter struct{ cs *store.CommittedState }
 func (a stateAdapter) Snapshot() store.CommittedReadView { return a.cs.Snapshot() }
 ```
 
-### 7. Graceful shutdown
+### 9. Graceful shutdown
 
-On SIGINT/SIGTERM, cancel the root context, shut the HTTP server down with a
-bounded timeout, call `exec.Shutdown()` (waits for Run to drain), then
-`dw.Close()` to flush the commit log. See `cmd/shunter-example/main.go` for
-the ordering.
+On SIGINT/SIGTERM, cancel the root context, shut the HTTP server down with
+a bounded timeout, call `exec.Shutdown()` (waits for Run to drain), close
+`fanOutInbox` so the worker exits, then `dw.Close()` to flush the commit
+log. See `cmd/shunter-example/main.go` for the ordering.
 
 ## What is deliberately out of scope
 
-- **Subscriptions** — the example runs with the noop `SubscriptionManager`
-  default, so reducer writes do not fan out to subscribers. Wiring
-  `subscription.Manager` + `FanOutWorker` requires an adapter that widens
-  `schema.SchemaRegistry` with `ColumnCount` (the subscription-layer
-  `SchemaLookup` interface demands it).
 - **Scheduled reducers** — `executor.Scheduler` reads an unexported executor
   channel; production wiring for that path is still pending.
 - **Authentication in strict mode** — the example uses anonymous auth so it

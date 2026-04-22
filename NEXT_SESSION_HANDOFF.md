@@ -4,7 +4,46 @@ Use this file to start the next agent on the next real Shunter parity / hardenin
 
 For provenance of closed slices, use `git log` — this file tracks only current state and forward motion.
 
-## What just landed (2026-04-22, Subscription `IndexRange` migration — follow-on queue #1, closed)
+## What just landed (2026-04-22, Subscription fan-out wiring in `cmd/shunter-example` — follow-on queue #1 (post-OI-008), closed)
+
+Narrow consumer-side wiring of `subscription.Manager` + `FanOutWorker` + `protocol.FanOutSenderAdapter` into the OI-008 example binary. Before this slice, the example ran with the `executor` package's `noopSubs` default (`executor.go:688-699`), so reducer writes committed and durability queued but no subscriber ever received a delta. Queue #1 called for exactly this wiring plus a `ColumnCount` adapter closing the gap between `schema.SchemaRegistry` (missing `ColumnCount`) and `subscription.SchemaLookup` (requires it — used by `eval.go:401` for join row projection width).
+
+Landed:
+
+- `cmd/shunter-example/main.go` `buildEngine`:
+  - `schemaLookupAdapter` (struct over `schema.SchemaRegistry`) — forwards `TableExists` / `ColumnExists` / `ColumnType` / `HasIndex` / `TableName` straight through, synthesizes `ColumnCount(TableID) int` via `reg.Table(t)` + `len(ts.Columns)`. `reg` itself satisfies `subscription.IndexResolver` (schema/registry.go:162) so no second adapter is needed on that seam.
+  - `fanOutInbox := make(chan subscription.FanOutMessage, 256)` — cap sized to match the executor inbox default so a commit backlog cannot rendezvous-stall `EvalAndBroadcast`.
+  - `subs := subscription.NewManager(schemaLookupAdapter{reg}, reg, subscription.WithFanOutInbox(fanOutInbox))`.
+  - `executor.ExecutorConfig.Subscriptions = subs` — flips the executor off `noopSubs` onto the live Manager so every committed transaction's post-commit evaluation runs through the real fan-out path.
+  - `conns := protocol.NewConnManager()` is now constructed in `buildEngine` (previously inline in `buildProtocolServer`) so the same `*ConnManager` is shared by both admission (`protocol.Server.Conns`) and delivery (`protocol.NewClientSender`). Without this, `ClientSender.SendTransactionUpdateLight` would fail with `ErrConnNotFound` on every non-caller recipient.
+  - `inboxAdapter := executor.NewProtocolInboxAdapter(exec)` hoisted into `buildEngine` — used both by `Server.Executor` and by `NewClientSender` (for its disconnect-on-buffer-overflow path at `protocol/sender.go:107-123`).
+  - `clientSender := protocol.NewClientSender(conns, inboxAdapter)` → `fanOutSender := protocol.NewFanOutSenderAdapter(clientSender)` → `worker := subscription.NewFanOutWorker(fanOutInbox, fanOutSender, subs.DroppedChanSend())`. `DroppedChanSend()` (manager.go:130) is the write end of the Manager's dropped-client channel so the executor's post-commit drain at `executor.go:664-674` sees both evaluator-side eval errors and delivery-side buffer-overflow drops on one channel.
+  - `go worker.Run(ctx)` + `workerDone := make(chan struct{})` shutdown plumbing. `engineGraph.shutdown` ordering: `exec.Shutdown() → <-runDone → close(fanOutInbox) → <-workerDone → dw.Close()`. Rationale: executor must stop publishing before we close the inbox (sending to a closed channel panics); worker must drain before durability closes so any in-flight `SendTransactionUpdateLight` completes before the commit-log goes away.
+  - `buildProtocolServer` signature changed to `(inbox *executor.ProtocolInboxAdapter, conns *protocol.ConnManager, reg, cs)` — no more per-call `NewConnManager` / `NewProtocolInboxAdapter` allocation that would fork admission and delivery onto separate `*ConnManager` instances.
+- `docs/embedding.md` rewritten: wiring diagram now shows the subscription fan-out graph; steps renumbered to nine (was seven) with new §5 "Wire the subscription fan-out graph" (Manager + `schemaLookupAdapter`), §7 "Wire the fan-out worker" (ClientSender + FanOutSenderAdapter + worker goroutine), and §9 shutdown-ordering updated to include the `close(fanOutInbox)` step. "Subscriptions — deferred" bullet removed from the out-of-scope list.
+
+Pins landed:
+
+- `cmd/shunter-example/main_test.go` `TestFanOut_SubscriberReceivesReducerInsert` (new, 1 pin): two WebSocket clients dial `/subscribe` with the reference subprotocol. Subscriber sends `SubscribeSingleMsg{QueryString: "SELECT * FROM greetings"}` and reads `SubscribeSingleApplied` (asserting `TableName == "greetings"`). Caller sends `CallReducerMsg{ReducerName: "say_hello", Args: []byte("hola"), Flags: FullUpdate}`. Subscriber must then receive `TransactionUpdateLight` (tag 8) whose `Update[0].TableName == "greetings"` and whose `Inserts` payload is non-empty (proves the reducer's row round-tripped through `FanOutSenderAdapter.encodeRows`). `readUntilTag` helper swallows intermediate frames so the pin tolerates interleaving. Pre-wiring, this test would time out at the `readUntilTag(TransactionUpdateLight)` step because `noopSubs.EvalAndBroadcast` returns without publishing.
+
+Intentionally out of scope (carried forward on queue):
+
+- `executor.Scheduler` wiring still needs an exported accessor for the unexported `inbox` channel (queue #2). Example continues to pass `nil` to `Executor.Startup`.
+- Protocol `AuthModeStrict` wiring — the example stays on anonymous auth.
+
+Verification:
+
+- `rtk go build ./cmd/shunter-example` → clean
+- `rtk go vet ./cmd/shunter-example` → `Go vet: No issues found`
+- `rtk go fmt ./cmd/shunter-example` → clean
+- `rtk go test ./cmd/shunter-example -count=1 -race` → 4 passed (3 baseline + 1 new)
+- `rtk go test ./... -count=1` → 1621 passed in 11 packages (baseline 1620 + 1 new)
+
+Ledger / debt follow-through:
+
+- Not an OI — narrow consumer-side wiring of landed spec surfaces (subscription Manager / FanOutWorker / FanOutSenderAdapter were all already in the tree; only the example binary was on `noopSubs`). No TECH-DEBT entry. Follow-on queue item #1 closed; queue reduces to item #2 (expose executor inbox for scheduler wiring).
+
+## What just landed (2026-04-22, Subscription `IndexRange` migration — follow-on queue #1 (post-OI-010), closed)
 
 Narrow consumer-side rewire of `subscription/register_set.go` `initialQuery` default branch onto `CommittedReadView.IndexRange`. Prerequisite (efficient `CommittedSnapshot.IndexRange` backed by `BTreeIndex.SeekBounds`) landed earlier 2026-04-22. Before this slice, a bare `ColRange` predicate on an indexed column still took the `view.TableScan(t) + MatchRow` fallback — a full ordered walk with per-row bound recheck. The range-bounds primitive existed all the way down to the BTree, but subscription did not consume it.
 
@@ -254,14 +293,11 @@ Non-blockers also surfaced (no OI, intentional / performance-only / spec-deferre
 
 ## Next session: pick one narrow slice from the follow-on queue
 
-OI-008 / OI-009 / OI-010 / OI-011 / OI-012 are all closed. Follow-on queue #1 closed this session. No remaining `open` OIs. Pick one from the queue below, open no more than one at a time.
+OI-008 / OI-009 / OI-010 / OI-011 / OI-012 are all closed. Follow-on queue items #1 (IndexRange consumer migration) and #1 (subscription fan-out wiring in `cmd/shunter-example`) are both closed. No remaining `open` OIs. Pick one from the queue below, open no more than one at a time.
 
 ## Follow-on queue
 
-In priority order, all narrow-ready:
-
-1. **Subscription fan-out wiring in `cmd/shunter-example`** — wire `subscription.Manager` + `FanOutWorker` + `protocol.FanOutSenderAdapter` into the example so reducer writes actually fan out to subscribers. Requires an adapter that widens `schema.SchemaRegistry` with `ColumnCount(TableID) int` (subscription `SchemaLookup` demands it; `schema.SchemaRegistry` does not satisfy it). Adds real subscription coverage to the example's smoke tests. Follow-on to OI-008.
-2. **Expose executor inbox for scheduler wiring** — `NewScheduler(inbox chan<- ExecutorCommand, ...)` reaches the executor's unexported `inbox`. Production embedders that want sys_scheduled replay need an exported accessor (e.g. `Executor.SchedulerFor(tableID)` or `Executor.Inbox()`). Lets the OI-008 example pass a real `*Scheduler` to `Startup`.
+1. **Expose executor inbox for scheduler wiring** — `NewScheduler(inbox chan<- ExecutorCommand, ...)` reaches the executor's unexported `inbox`. Production embedders that want sys_scheduled replay need an exported accessor (e.g. `Executor.SchedulerFor(tableID)` or `Executor.Inbox()`). Lets the OI-008 example pass a real `*Scheduler` to `Startup`.
 
 Pick scope before starting. Do not open multiple OIs at once.
 
