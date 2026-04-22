@@ -42,10 +42,11 @@ OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the 
 
 Fresh-agent task:
 
-- Scout and then close one bounded OI-002 A2 runtime/model mismatch that remains after the closed multiplicity, join-index-validation, and committed-join-ordering slices.
-- Do not start with a broad SQL widening pass. Start from live accepted shapes only and prove the mismatch with focused tests before editing production code.
+- Scout and then close one bounded OI-002 A2 post-commit delta evaluation ordering/runtime-shape mismatch that remains after the closed multiplicity, join-index-validation, and committed-join-ordering slices.
+- Start from accepted projected-join shapes that now agree between one-off and committed bootstrap/final-delta paths, then check whether post-commit delta emission still differs in row ordering or visible row bag shape.
+- Do not start with a broad SQL widening pass. Stay inside the existing accepted join surface and prove the mismatch with focused tests before editing production code.
 - Do not reopen the one-off-vs-subscribe unindexed-join validation seam or the committed join bootstrap/final-delta projected-order seam unless fresh evidence shows a new regression or a distinct uncovered shape.
-- If the scout does not confirm a real remaining runtime/model gap, stop after updating this handoff with the grounded residual and point the next agent at the next best A2 seam instead of forcing a speculative change.
+- If the scout does not confirm a real remaining delta-path runtime/model gap, stop after updating this handoff with the grounded residual and point the next agent at the next best A2 seam instead of forcing a speculative change.
 
 Fresh-agent context:
 
@@ -61,14 +62,16 @@ Fresh-agent context:
   - committed join bootstrap/final-delta projected ordering
   - rows-shape documented divergence
   - OI-001 A1 wire/message-family work
-- The next useful work should stay in the remaining predicate/model seam: accepted SQL -> compiled subscription predicate -> hash identity -> bootstrap/eval/one-off behavior, with post-commit delta evaluation ordering/runtime-shape follow-ons as the best current candidate if the scout confirms them.
+- The highest-yield next check is now the post-commit delta path for projected joins: accepted SQL -> compiled subscription predicate -> commit-time fragment evaluation/reconciliation -> emitted `SubscriptionUpdate` row order/shape.
+- Treat `subscription/delta_join.go`, `subscription/delta_dedup.go`, and the join path in `subscription/eval.go` as the primary runtime seam to compare against the now-aligned one-off + committed-query baseline.
+- The question for the fresh agent is not whether joins are accepted or whether bootstrap order is fixed; it is whether delta inserts/deletes still surface projected rows in a different order or shape than the aligned committed-query paths.
 
 Batch framing:
 
-1. Scout the live subscription surfaces first: `subscription/predicate.go`, `subscription/validate.go`, `subscription/eval.go`, `subscription/manager.go`, `subscription/fanout.go`, `subscription/fanout_worker.go`, plus the protocol compile/admission seams in `protocol/handle_subscribe_*.go`, `protocol/handle_oneoff.go`, and `executor/protocol_inbox_adapter.go`.
-2. Diff those against the relevant reference subscription/runtime paths and produce the residual A2 list only. Ignore already-closed fan-out delivery, multiplicity, join-index-validation, and committed-join-ordering seams unless they expose fresh evidence.
-3. Prefer the next bounded runtime/model gap after the newly closed committed-join-ordering seam: post-commit delta evaluation ordering/runtime-shape follow-ons are the best current candidate if the scout confirms them. If not, pick another single reference-backed runtime/model residual. Keep the session inside one such batch.
-4. Land one commit per slice with parser/runtime/protocol pins as appropriate, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
+1. Scout the live subscription surfaces first: `subscription/eval.go`, `subscription/delta_join.go`, `subscription/delta_dedup.go`, `subscription/register_set.go`, `subscription/predicate.go`, `subscription/validate.go`, plus the protocol comparison baseline in `protocol/handle_oneoff.go`.
+2. Build the residual A2 list only for projected-join delta behavior. Ignore already-closed fan-out delivery, multiplicity, join-index-validation, and committed-join-ordering seams unless they expose fresh evidence.
+3. Prefer a single bounded delta-path mismatch after the newly closed committed-join-ordering seam: for example, projected join inserts/deletes whose delta-path row order/grouping still differs from the aligned one-off and committed bootstrap/final-delta behavior. If the scout does not confirm that class of gap, pick another single reference-backed runtime/model residual and stay inside that batch.
+4. Land one commit per slice with focused `subscription/eval_test.go` and nearby protocol/manager regression pins as appropriate, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
 
 Concrete deliverable for the fresh agent:
 
@@ -80,37 +83,35 @@ Concrete deliverable for the fresh agent:
 
 Suggested starting reads for this batch:
 
+- `subscription/eval.go`
+- `subscription/delta_join.go`
+- `subscription/delta_dedup.go`
 - `subscription/predicate.go`
 - `subscription/validate.go`
 - `subscription/hash.go`
-- `subscription/eval.go`
 - `subscription/register_set.go`
-- `subscription/manager.go`
-- `subscription/fanout.go`
-- `subscription/fanout_worker.go`
-- `protocol/handle_subscribe.go`
-- `protocol/handle_subscribe_single.go`
-- `protocol/handle_subscribe_multi.go`
 - `protocol/handle_oneoff.go`
+- `protocol/handle_subscribe.go`
 - `executor/protocol_inbox_adapter.go`
 
 Suggested starting test surfaces:
 
-- `protocol/handle_subscribe_test.go`
+- `subscription/eval_test.go`
+- `subscription/manager_test.go`
 - `protocol/handle_oneoff_test.go`
+- `protocol/handle_subscribe_test.go`
 - `subscription/validate_test.go`
 - `subscription/hash_test.go`
-- `subscription/manager_test.go`
-- `subscription/eval_test.go`
 
 Good candidate seams to scout before choosing the batch:
 
-- predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model
-- evaluation-ordering differences that still change user-visible delta sequencing
-- any remaining one-off vs subscribe/runtime mismatches after the now-closed multiplicity batch
+- projected join delta inserts/deletes whose row order still differs from the aligned one-off and committed bootstrap/final-delta paths
+- fragment reconciliation / dedup behavior that changes visible projected-row grouping or multiplicity in `subscription/eval.go` + `subscription/delta_join.go` + `subscription/delta_dedup.go`
+- any remaining one-off vs subscribe/runtime mismatch on already-accepted projected join shapes after the now-closed multiplicity, join-index-validation, and committed-ordering slices
 
 Useful scout heuristic:
 
+- Start from a projected join shape already pinned in one-off and committed bootstrap tests, then drive a commit through the same subscription and compare whether delta behavior disagrees with the aligned baseline.
 - Look for shapes where parser/protocol admission already accepts the query, but one of these still disagrees with the others:
   - compiled predicate structure
   - `ValidatePredicate(...)`
@@ -118,6 +119,7 @@ Useful scout heuristic:
   - bootstrap result shape/count
   - one-off result shape/count
   - delta/update behavior
+- The ideal next mismatch is: one-off and committed bootstrap/final-delta now agree on projected-side order, but post-commit `SubscriptionUpdate.Inserts`/`Deletes` for the same projected join still arrive interleaved or grouped differently.
 
 Stop conditions:
 
@@ -129,7 +131,7 @@ Out of scope for this batch: OI-001 A3 recovery/store parity, OI-004/005/006 har
 
 ## Follow-on queue (pickable next, one per session)
 
-- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: post-commit delta evaluation ordering/runtime-shape follow-ons or another reference-backed runtime/model residual after the closed fan-out delivery, multiplicity, join-index-validation, and committed-join-ordering slices. Do not reopen those closed slices without fresh evidence.
+- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: projected-join post-commit delta evaluation ordering/runtime-shape follow-ons, or another reference-backed runtime/model residual after the closed fan-out delivery, multiplicity, join-index-validation, and committed-join-ordering slices. Do not reopen those closed slices without fresh evidence.
 - **OI-001 A3** — recovery / store parity against `reference/SpacetimeDB/crates/core/src/db/`. Batch scope: snapshot/replay invariants beyond what `P0-RECOVERY-*` already covered.
 - **Coordinated wrapper-chain + row-list close** (Phase 2 Slice 4 carried-forward deferral). Requires a new decision doc reopening the SPEC-005 §3.4 `BsatnRowList` deferral together with the reference `SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `QueryUpdate` wrapper chain. Scope is large — do not start without a named consumer or a bandwidth trigger (SPEC-005 §3.4 "fixed-schema row delivery bottleneck").
 - **Strict-auth wiring in `cmd/shunter-example`**. Currently anonymous-only. Batch scope: JWT identity, token rotation, `IdentityToken` round-trip, upgrade-path handshake.

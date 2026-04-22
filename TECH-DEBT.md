@@ -62,11 +62,12 @@ Summary:
 - the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off query execution, and post-commit delta evaluation
 - one-off SQL now reuses `subscription.ValidatePredicate(...)` before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing shared join-index validation
 - committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
+- post-commit projected join delta inserts now preserve projected-side encounter order too: `ReconcileJoinDelta(...)` emits surviving rows in fragment encounter order instead of map iteration order, and focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right delta ordering
 - row-level security / per-client filtering remains absent
-- broader query/subscription parity is still open beyond the landed narrow shapes, especially post-commit delta evaluation ordering/runtime-shape follow-ons and other bounded A2 gaps that remain after the closed join-index-validation + committed-join-ordering seams
+- broader query/subscription parity is still open beyond the landed narrow shapes, especially predicate normalization / validation drift and other bounded A2 gaps that remain after the closed join-index-validation + committed-ordering + projected-join-delta-ordering seams
 
 Execution note:
-- OI-002 remains the next active handoff issue, but the fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, and the committed join bootstrap/final-delta projected-order seam are now closed. The next bounded A2 batch should start from another remaining runtime/model gap rather than reopening those closed slices or closed A1 protocol work.
+- OI-002 remains the next active handoff issue, but the fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, and the projected-join delta-order seam are now closed. The next bounded A2 batch should start from another remaining runtime/model gap rather than reopening those closed slices or closed A1 protocol work.
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads

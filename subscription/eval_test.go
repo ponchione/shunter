@@ -476,6 +476,92 @@ func TestEvalJoinSubscriptionProjectsRight(t *testing.T) {
 	}
 }
 
+func TestEvalJoinSubscriptionPreservesProjectedLeftDeltaOrder(t *testing.T) {
+	want := []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+		{types.NewUint64(3), types.NewUint64(7)},
+	}
+
+	for attempt := 0; attempt < 64; attempt++ {
+		s := newFakeSchema()
+		s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+		s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+		committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+			1: want,
+		})
+		inbox := make(chan FanOutMessage, 1)
+		mgr := NewManager(s, s, WithFanOutInbox(inbox))
+		join := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1}
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID: types.ConnectionID{1}, QueryID: 20, Predicates: []Predicate{join},
+		}, committed); err != nil {
+			t.Fatalf("attempt %d: RegisterSet = %v", attempt, err)
+		}
+		cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+			2: {
+				TableID:   2,
+				TableName: "rhs",
+				Inserts:   []types.ProductValue{{types.NewUint64(10), types.NewUint64(7)}},
+			},
+		}}
+		committed.addRow(2, 1, types.ProductValue{types.NewUint64(10), types.NewUint64(7)})
+		mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+		msg := <-inbox
+		updates := msg.Fanout[types.ConnectionID{1}]
+		if len(updates) != 1 {
+			t.Fatalf("attempt %d: update count = %d, want 1", attempt, len(updates))
+		}
+		assertRowsEqual(t, updates[0].Inserts, want)
+		if len(updates[0].Deletes) != 0 {
+			t.Fatalf("attempt %d: deletes = %v, want none", attempt, updates[0].Deletes)
+		}
+	}
+}
+
+func TestEvalJoinSubscriptionPreservesProjectedRightDeltaOrder(t *testing.T) {
+	want := []types.ProductValue{
+		{types.NewUint64(10), types.NewUint64(7)},
+		{types.NewUint64(11), types.NewUint64(7)},
+		{types.NewUint64(12), types.NewUint64(7)},
+	}
+
+	for attempt := 0; attempt < 64; attempt++ {
+		s := newFakeSchema()
+		s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+		s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+		committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+			2: want,
+		})
+		inbox := make(chan FanOutMessage, 1)
+		mgr := NewManager(s, s, WithFanOutInbox(inbox))
+		join := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1, ProjectRight: true}
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID: types.ConnectionID{1}, QueryID: 21, Predicates: []Predicate{join},
+		}, committed); err != nil {
+			t.Fatalf("attempt %d: RegisterSet = %v", attempt, err)
+		}
+		cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+			1: {
+				TableID:   1,
+				TableName: "lhs",
+				Inserts:   []types.ProductValue{{types.NewUint64(1), types.NewUint64(7)}},
+			},
+		}}
+		committed.addRow(1, 1, types.ProductValue{types.NewUint64(1), types.NewUint64(7)})
+		mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+		msg := <-inbox
+		updates := msg.Fanout[types.ConnectionID{1}]
+		if len(updates) != 1 {
+			t.Fatalf("attempt %d: update count = %d, want 1", attempt, len(updates))
+		}
+		assertRowsEqual(t, updates[0].Inserts, want)
+		if len(updates[0].Deletes) != 0 {
+			t.Fatalf("attempt %d: deletes = %v, want none", attempt, updates[0].Deletes)
+		}
+	}
+}
+
 func TestEvalCrossJoinProjectedOtherInsertPreservesMultiplicity(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})

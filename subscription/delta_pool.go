@@ -14,8 +14,10 @@ const pooledBufferDefaultCap = 4 * 1024
 type dedupState struct {
 	insertCounts map[string]int
 	insertRows   map[string]types.ProductValue
+	insertOrder  []string
 	deleteCounts map[string]int
 	deleteRows   map[string]types.ProductValue
+	deleteOrder  []string
 }
 
 // candidateScratch is the reusable candidate-collection scratch state used by
@@ -30,8 +32,10 @@ var dedupPool = sync.Pool{
 		return &dedupState{
 			insertCounts: make(map[string]int),
 			insertRows:   make(map[string]types.ProductValue),
+			insertOrder:  make([]string, 0, 8),
 			deleteCounts: make(map[string]int),
 			deleteRows:   make(map[string]types.ProductValue),
+			deleteOrder:  make([]string, 0, 8),
 		}
 	},
 }
@@ -193,10 +197,12 @@ func (s *dedupState) clear() {
 	for k := range s.insertRows {
 		delete(s.insertRows, k)
 	}
+	s.insertOrder = s.insertOrder[:0]
 	for k := range s.deleteCounts {
 		delete(s.deleteCounts, k)
 	}
 	for k := range s.deleteRows {
 		delete(s.deleteRows, k)
 	}
+	s.deleteOrder = s.deleteOrder[:0]
 }

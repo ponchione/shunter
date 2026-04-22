@@ -25,10 +25,11 @@ func ReconcileJoinDelta(insertFragments, deleteFragments [][]types.ProductValue)
 	for _, frag := range insertFragments {
 		for _, row := range frag {
 			key := encodeRowKey(row)
-			st.insertCounts[key]++
 			if _, ok := st.insertRows[key]; !ok {
 				st.insertRows[key] = row
+				st.insertOrder = append(st.insertOrder, key)
 			}
+			st.insertCounts[key]++
 		}
 	}
 
@@ -38,15 +39,17 @@ func ReconcileJoinDelta(insertFragments, deleteFragments [][]types.ProductValue)
 			if st.insertCounts[key] > 0 {
 				st.insertCounts[key]--
 			} else {
-				st.deleteCounts[key]++
 				if _, ok := st.deleteRows[key]; !ok {
 					st.deleteRows[key] = row
+					st.deleteOrder = append(st.deleteOrder, key)
 				}
+				st.deleteCounts[key]++
 			}
 		}
 	}
 
-	for k, n := range st.insertCounts {
+	for _, k := range st.insertOrder {
+		n := st.insertCounts[k]
 		if n < 0 {
 			panic(fmt.Sprintf("subscription: negative insert count %d for row key", n))
 		}
@@ -54,7 +57,8 @@ func ReconcileJoinDelta(insertFragments, deleteFragments [][]types.ProductValue)
 			inserts = append(inserts, st.insertRows[k])
 		}
 	}
-	for k, n := range st.deleteCounts {
+	for _, k := range st.deleteOrder {
+		n := st.deleteCounts[k]
 		if n < 0 {
 			panic(fmt.Sprintf("subscription: negative delete count %d for row key", n))
 		}

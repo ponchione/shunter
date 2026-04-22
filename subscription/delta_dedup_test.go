@@ -131,3 +131,59 @@ func TestReconcileDistributedFragmentsNetCount(t *testing.T) {
 		t.Fatalf("distributed fragments should net to 1 insert, got %d/%d", len(i), len(d))
 	}
 }
+
+func TestReconcileJoinDeltaPreservesInsertEncounterOrder(t *testing.T) {
+	rowA := mkRow(uint64(1), "a")
+	rowB := mkRow(uint64(2), "b")
+	rowC := mkRow(uint64(3), "c")
+	ins := [][]types.ProductValue{{rowA, rowB}, {rowC}}
+	want := []types.ProductValue{rowA, rowB, rowC}
+
+	for attempt := 0; attempt < 64; attempt++ {
+		got, del := ReconcileJoinDelta(ins, nil)
+		if len(del) != 0 {
+			t.Fatalf("attempt %d: deletes = %v, want none", attempt, del)
+		}
+		assertRowsEqual(t, got, want)
+	}
+}
+
+func TestReconcileJoinDeltaPreservesDeleteEncounterOrder(t *testing.T) {
+	rowA := mkRow(uint64(1), "a")
+	rowB := mkRow(uint64(2), "b")
+	rowC := mkRow(uint64(3), "c")
+	del := [][]types.ProductValue{{rowA, rowB}, {rowC}}
+	want := []types.ProductValue{rowA, rowB, rowC}
+
+	for attempt := 0; attempt < 64; attempt++ {
+		ins, got := ReconcileJoinDelta(nil, del)
+		if len(ins) != 0 {
+			t.Fatalf("attempt %d: inserts = %v, want none", attempt, ins)
+		}
+		assertRowsEqual(t, got, want)
+	}
+}
+
+func assertRowsEqual(t *testing.T, got, want []types.ProductValue) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("row count = %d, want %d (got=%v want=%v)", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if !rowsEqual(got[i], want[i]) {
+			t.Fatalf("row[%d] = %v, want %v (full got=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func rowsEqual(got, want types.ProductValue) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if !got[i].Equal(want[i]) {
+			return false
+		}
+	}
+	return true
+}

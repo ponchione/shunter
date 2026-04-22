@@ -97,6 +97,7 @@ Current grounded state:
 - the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off execution, and delta evaluation
 - one-off SQL now runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing join-index validation
 - committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
+- post-commit projected join delta rows now preserve the same projected-side encounter order on both projected-left and projected-right accepted join shapes; `ReconcileJoinDelta(...)` no longer reorders surviving rows via map iteration, and focused `subscription/delta_dedup_test.go` / `subscription/eval_test.go` pins lock the behavior
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -201,7 +202,7 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- post-commit delta evaluation ordering/runtime-shape follow-ons and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation and committed join bootstrap/final-delta ordering seams
+- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, and projected-join delta-ordering seams
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
