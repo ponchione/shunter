@@ -197,12 +197,18 @@ func (s *dedupState) clear() {
 	for k := range s.insertRows {
 		delete(s.insertRows, k)
 	}
+	for i := range s.insertOrder {
+		s.insertOrder[i] = ""
+	}
 	s.insertOrder = s.insertOrder[:0]
 	for k := range s.deleteCounts {
 		delete(s.deleteCounts, k)
 	}
 	for k := range s.deleteRows {
 		delete(s.deleteRows, k)
+	}
+	for i := range s.deleteOrder {
+		s.deleteOrder[i] = ""
 	}
 	s.deleteOrder = s.deleteOrder[:0]
 }

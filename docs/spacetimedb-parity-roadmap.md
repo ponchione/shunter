@@ -97,7 +97,7 @@ Current grounded state:
 - the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off execution, and delta evaluation
 - one-off SQL now runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing join-index validation
 - committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
-- post-commit projected join delta rows now preserve the same projected-side encounter order on both projected-left and projected-right accepted join shapes; `ReconcileJoinDelta(...)` no longer reorders surviving rows via map iteration, and focused `subscription/delta_dedup_test.go` / `subscription/eval_test.go` pins lock the behavior
+- post-commit projected join delta rows now preserve the same projected-side semantics on both projected-left and projected-right accepted join shapes: fragments are projected before reconciliation so partner churn cancels at the projected-row bag level, and `ReconcileJoinDelta(...)` no longer reorders surviving rows via map iteration; focused `subscription/delta_dedup_test.go` / `subscription/eval_test.go` pins lock the behavior
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -252,11 +252,11 @@ When choosing the next slice:
 
 ## Current best next direction
 
-The best current narrow-ready direction is the next OI-002 A2 runtime/model residual after the now-closed multiplicity, join-index-validation, and committed join bootstrap/final-delta ordering batches.
+The best current narrow-ready direction is predicate normalization / validation drift inside OI-002 A2 now that the multiplicity, join-index-validation, committed join bootstrap/final-delta ordering, and projected-join delta-ordering batches are closed.
 
 Current candidate directions are:
-- post-commit delta evaluation ordering/runtime-shape follow-ons, especially if committed bootstrap/final-delta order is now aligned but delta paths still differ
 - predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model
+- another bounded OI-002 A2 runtime/model residual only if a fresh scout shows it is stronger than the normalization/validation seam
 - Tier B hardening when a concrete live risk is stronger than the next parity slice
 - a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
 - scheduler/bootstrap follow-through only when workload or integration evidence surfaces

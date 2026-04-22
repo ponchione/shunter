@@ -62,7 +62,7 @@ Summary:
 - the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off query execution, and post-commit delta evaluation
 - one-off SQL now reuses `subscription.ValidatePredicate(...)` before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing shared join-index validation
 - committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
-- post-commit projected join delta inserts now preserve projected-side encounter order too: `ReconcileJoinDelta(...)` emits surviving rows in fragment encounter order instead of map iteration order, and focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right delta ordering
+- post-commit projected join deltas now preserve projected-side semantics too: join fragments are projected before reconciliation so partner churn cancels at the projected-row bag level, and `ReconcileJoinDelta(...)` emits surviving rows in fragment encounter order instead of map iteration order; focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right ordering and no-op churn cases
 - row-level security / per-client filtering remains absent
 - broader query/subscription parity is still open beyond the landed narrow shapes, especially predicate normalization / validation drift and other bounded A2 gaps that remain after the closed join-index-validation + committed-ordering + projected-join-delta-ordering seams
 

@@ -562,6 +562,78 @@ func TestEvalJoinSubscriptionPreservesProjectedRightDeltaOrder(t *testing.T) {
 	}
 }
 
+func TestEvalJoinSubscriptionProjectedLeftCancelsJoinedPairChurn(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	lhsRow := types.ProductValue{types.NewUint64(1), types.NewUint64(7)}
+	rhsBefore := types.ProductValue{types.NewUint64(10), types.NewUint64(7)}
+	rhsAfter := types.ProductValue{types.NewUint64(11), types.NewUint64(7)}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {lhsRow},
+		2: {rhsBefore},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 22, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		2: {
+			TableID:   2,
+			TableName: "rhs",
+			Inserts:   []types.ProductValue{rhsAfter},
+			Deletes:   []types.ProductValue{rhsBefore},
+		},
+	}}
+	committed.rows[2] = map[types.RowID]types.ProductValue{2: rhsAfter}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 0 && (len(updates[0].Inserts) != 0 || len(updates[0].Deletes) != 0) {
+		t.Fatalf("projected-left pair churn should net to no delta, got %v", updates)
+	}
+}
+
+func TestEvalJoinSubscriptionProjectedRightCancelsJoinedPairChurn(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	lhsBefore := types.ProductValue{types.NewUint64(1), types.NewUint64(7)}
+	lhsAfter := types.ProductValue{types.NewUint64(2), types.NewUint64(7)}
+	rhsRow := types.ProductValue{types.NewUint64(10), types.NewUint64(7)}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {lhsBefore},
+		2: {rhsRow},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1, ProjectRight: true}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 23, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "lhs",
+			Inserts:   []types.ProductValue{lhsAfter},
+			Deletes:   []types.ProductValue{lhsBefore},
+		},
+	}}
+	committed.rows[1] = map[types.RowID]types.ProductValue{2: lhsAfter}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 0 && (len(updates[0].Inserts) != 0 || len(updates[0].Deletes) != 0) {
+		t.Fatalf("projected-right pair churn should net to no delta, got %v", updates)
+	}
+}
+
 func TestEvalCrossJoinProjectedOtherInsertPreservesMultiplicity(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})

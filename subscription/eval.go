@@ -404,13 +404,13 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 	switch p := qs.predicate.(type) {
 	case Join:
 		frags := EvalJoinDeltaFragments(dv, &p, m.resolver)
+		lhsWidth := m.schema.ColumnCount(p.Left)
+		projectJoinFragments(frags.Inserts[:], lhsWidth, p.ProjectRight)
+		projectJoinFragments(frags.Deletes[:], lhsWidth, p.ProjectRight)
 		ins, del := ReconcileJoinDelta(frags.Inserts[:], frags.Deletes[:])
 		if len(ins) == 0 && len(del) == 0 {
 			return nil
 		}
-		lhsWidth := m.schema.ColumnCount(p.Left)
-		ins = projectJoinedRows(ins, lhsWidth, p.ProjectRight)
-		del = projectJoinedRows(del, lhsWidth, p.ProjectRight)
 		projected := p.ProjectedTable()
 		return []SubscriptionUpdate{{
 			TableID:   projected,
@@ -469,6 +469,12 @@ func projectJoinedRows(rows []types.ProductValue, lhsWidth int, projectRight boo
 		}
 	}
 	return out
+}
+
+func projectJoinFragments(fragments [][]types.ProductValue, lhsWidth int, projectRight bool) {
+	for i := range fragments {
+		fragments[i] = projectJoinedRows(fragments[i], lhsWidth, projectRight)
+	}
 }
 
 func evalCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue) {

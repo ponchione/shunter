@@ -23,6 +23,7 @@ For provenance of closed slices, use `rtk git log` — this file tracks only cur
 - The OI-002 join/cross-join multiplicity batch is now closed: `subscription.CrossJoin` carries projection-side/self-alias identity, cross joins preserve cartesian multiplicity across bootstrap/one-off/delta paths, and one-off equi-join projection now preserves bag semantics instead of semijoin-style dedup.
 - The one-off-vs-subscribe unindexed-join validation seam is now closed: `protocol/handle_oneoff.go` runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so one-off SQL rejects the same unindexed join admission shapes subscribe registration already rejects.
 - The committed join projected-order seam is now closed: `subscription/register_set.go` enumerates projected-side rows first for bootstrap and unregister final-delta joins, so accepted join SQL no longer flips visible committed-row order solely because the usable index lives on the opposite join side.
+- The projected join delta-order seam is now closed too: `subscription/eval.go` now projects join fragments before reconciliation so partner churn cancels at the projected-row bag level, `subscription/delta_dedup.go` preserves fragment encounter order for surviving rows, and focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right ordering plus no-op churn cases.
 
 ## How to frame a session
 
@@ -36,17 +37,17 @@ Work in *batches*, not single slices. One session = one batch. Within a batch, l
 
 Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A3 or OI-004/005/006 hardening.
 
-## Next session: OI-002 A2 next runtime/model residual after committed-join ordering closure
+## Next session: OI-002 A2 predicate normalization / validation drift after projected-join ordering closure
 
-OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the first OI-002 fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, and the committed join bootstrap/final-delta projected-order seam are now closed. The next open protocol-adjacent batch stays in OI-002 A2: subscription/runtime parity against `reference/SpacetimeDB/crates/core/src/subscription/`, but should now start from another bounded runtime/model residual rather than reopening those closed slices.
+OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the first OI-002 fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, and the projected-join delta-order seam are now closed. The next open protocol-adjacent batch stays in OI-002 A2, but it should now move off join-ordering and onto the next bounded runtime/model residual: predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model.
 
 Fresh-agent task:
 
-- Scout and then close one bounded OI-002 A2 post-commit delta evaluation ordering/runtime-shape mismatch that remains after the closed multiplicity, join-index-validation, and committed-join-ordering slices.
-- Start from accepted projected-join shapes that now agree between one-off and committed bootstrap/final-delta paths, then check whether post-commit delta emission still differs in row ordering or visible row bag shape.
-- Do not start with a broad SQL widening pass. Stay inside the existing accepted join surface and prove the mismatch with focused tests before editing production code.
-- Do not reopen the one-off-vs-subscribe unindexed-join validation seam or the committed join bootstrap/final-delta projected-order seam unless fresh evidence shows a new regression or a distinct uncovered shape.
-- If the scout does not confirm a real remaining delta-path runtime/model gap, stop after updating this handoff with the grounded residual and point the next agent at the next best A2 seam instead of forcing a speculative change.
+- Scout and then close one bounded OI-002 A2 predicate normalization / validation mismatch on an already-accepted SQL shape.
+- Compare the accepted SQL compile path against the runtime predicate model used by subscribe registration and one-off execution; look for a shape where parser acceptance exists but normalization / validation / hash identity / execution behavior still disagrees across seams.
+- Do not reopen projected-join ordering, join multiplicity, or join-index validation unless fresh evidence shows a new regression distinct from those closed slices.
+- Do not start with a broad SQL widening pass. Stay inside an already-accepted shape and prove the mismatch with focused tests before editing production code.
+- If the scout does not confirm a real normalization / validation residual, stop after updating this handoff with the grounded next-best A2 seam instead of forcing speculative churn.
 
 Fresh-agent context:
 
@@ -55,23 +56,29 @@ Fresh-agent context:
   - join/cross-join multiplicity across compile/hash identity, bootstrap, one-off, and delta
   - one-off vs subscribe unindexed-join admission parity via shared `subscription.ValidatePredicate(...)`
   - committed join bootstrap/unregister projected-side ordering regardless of usable index side
+  - post-commit projected-join delta ordering via projected-fragment-first reconciliation plus encounter-order-preserving `ReconcileJoinDelta(...)`
 - Do not reopen:
   - fan-out delivery parity
   - join/cross-join multiplicity
   - one-off-vs-subscribe join-index validation
   - committed join bootstrap/final-delta projected ordering
+  - projected join delta ordering
   - rows-shape documented divergence
   - OI-001 A1 wire/message-family work
-- The highest-yield next check is now the post-commit delta path for projected joins: accepted SQL -> compiled subscription predicate -> commit-time fragment evaluation/reconciliation -> emitted `SubscriptionUpdate` row order/shape.
-- Treat `subscription/delta_join.go`, `subscription/delta_dedup.go`, and the join path in `subscription/eval.go` as the primary runtime seam to compare against the now-aligned one-off + committed-query baseline.
-- The question for the fresh agent is not whether joins are accepted or whether bootstrap order is fixed; it is whether delta inserts/deletes still surface projected rows in a different order or shape than the aligned committed-query paths.
+- The highest-yield next check is now accepted SQL whose parser/compile path succeeds but whose normalized runtime predicate, validation outcome, canonical hash, or subscribe/one-off behavior still drifts across seams.
+- Treat `query/sql/parser.go`, `protocol/handle_subscribe.go`, `protocol/handle_oneoff.go`, `subscription/predicate.go`, `subscription/validate.go`, and `subscription/hash.go` as the primary seam to compare.
+- The question for the fresh agent is not whether projected joins are ordered now; it is whether any already-accepted SQL shape still compiles into a runtime predicate model that disagrees between subscribe admission, one-off execution, and downstream identity/validation behavior.
 
 Batch framing:
 
-1. Scout the live subscription surfaces first: `subscription/eval.go`, `subscription/delta_join.go`, `subscription/delta_dedup.go`, `subscription/register_set.go`, `subscription/predicate.go`, `subscription/validate.go`, plus the protocol comparison baseline in `protocol/handle_oneoff.go`.
-2. Build the residual A2 list only for projected-join delta behavior. Ignore already-closed fan-out delivery, multiplicity, join-index-validation, and committed-join-ordering seams unless they expose fresh evidence.
-3. Prefer a single bounded delta-path mismatch after the newly closed committed-join-ordering seam: for example, projected join inserts/deletes whose delta-path row order/grouping still differs from the aligned one-off and committed bootstrap/final-delta behavior. If the scout does not confirm that class of gap, pick another single reference-backed runtime/model residual and stay inside that batch.
-4. Land one commit per slice with focused `subscription/eval_test.go` and nearby protocol/manager regression pins as appropriate, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
+1. Scout the live parser/compile/runtime surfaces first: `query/sql/parser.go`, `query/sql/coerce.go`, `protocol/handle_subscribe.go`, `protocol/handle_oneoff.go`, `subscription/predicate.go`, `subscription/validate.go`, `subscription/hash.go`, and the relevant current tests.
+2. Build the residual A2 list only for accepted-shape normalization / validation drift. Ignore already-closed fan-out delivery, multiplicity, join-index-validation, and projected-ordering seams unless they expose fresh evidence.
+3. Prefer one accepted SQL shape whose parser acceptance already exists but where one of these still disagrees across seams:
+   - normalized predicate structure
+   - `ValidatePredicate(...)`
+   - canonical query hash identity
+   - subscribe vs one-off execution result/behavior
+4. Land one commit per slice with focused parser/protocol/subscription tests, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
 
 Concrete deliverable for the fresh agent:
 
@@ -83,21 +90,20 @@ Concrete deliverable for the fresh agent:
 
 Suggested starting reads for this batch:
 
-- `subscription/eval.go`
-- `subscription/delta_join.go`
-- `subscription/delta_dedup.go`
+- `query/sql/parser.go`
+- `query/sql/coerce.go`
+- `protocol/handle_subscribe.go`
+- `protocol/handle_oneoff.go`
 - `subscription/predicate.go`
 - `subscription/validate.go`
 - `subscription/hash.go`
 - `subscription/register_set.go`
-- `protocol/handle_oneoff.go`
-- `protocol/handle_subscribe.go`
-- `executor/protocol_inbox_adapter.go`
+- `subscription/eval.go`
 
 Suggested starting test surfaces:
 
-- `subscription/eval_test.go`
-- `subscription/manager_test.go`
+- `query/sql/parser_test.go`
+- `query/sql/coerce_test.go`
 - `protocol/handle_oneoff_test.go`
 - `protocol/handle_subscribe_test.go`
 - `subscription/validate_test.go`
@@ -105,33 +111,26 @@ Suggested starting test surfaces:
 
 Good candidate seams to scout before choosing the batch:
 
-- projected join delta inserts/deletes whose row order still differs from the aligned one-off and committed bootstrap/final-delta paths
-- fragment reconciliation / dedup behavior that changes visible projected-row grouping or multiplicity in `subscription/eval.go` + `subscription/delta_join.go` + `subscription/delta_dedup.go`
-- any remaining one-off vs subscribe/runtime mismatch on already-accepted projected join shapes after the now-closed multiplicity, join-index-validation, and committed-ordering slices
+- accepted SQL shapes whose subscribe compile path and one-off compile path build different runtime predicates
+- accepted shapes whose runtime predicate normalizes but then hashes or validates differently than the same shape admitted through another path
+- parameter/literal coercion or alias/qualification follow-ons where parser acceptance already exists but runtime predicate structure still drifts
 
 Useful scout heuristic:
 
-- Start from a projected join shape already pinned in one-off and committed bootstrap tests, then drive a commit through the same subscription and compare whether delta behavior disagrees with the aligned baseline.
-- Look for shapes where parser/protocol admission already accepts the query, but one of these still disagrees with the others:
-  - compiled predicate structure
-  - `ValidatePredicate(...)`
-  - canonical hash identity
-  - bootstrap result shape/count
-  - one-off result shape/count
-  - delta/update behavior
-- The ideal next mismatch is: one-off and committed bootstrap/final-delta now agree on projected-side order, but post-commit `SubscriptionUpdate.Inserts`/`Deletes` for the same projected join still arrive interleaved or grouped differently.
+- Start from an already-accepted SQL shape that has parser and public-path tests, then compare whether `compileSQLQueryString(...)`, `subscription.ValidatePredicate(...)`, `ComputeQueryHash(...)`, subscribe admission, and one-off execution all agree on the same runtime meaning.
+- The ideal next mismatch is: parser acceptance already exists, but one of normalization / validation / hash identity / execution still diverges between accepted subscribe and one-off paths.
 
 Stop conditions:
 
 - stop at the first clean batch boundary that would require a new decision doc or would cross into A3 / hardening work
-- do not reopen the just-closed fan-out delivery batch, the rows-shape cluster, or A1 wire/message-family work in the same session
+- do not reopen the just-closed projected-join ordering work, the rows-shape cluster, or A1 wire/message-family work in the same session
 - if the scout shows the next meaningful gap is actually A3 or a new documented divergence, write that up here before handing off
 
 Out of scope for this batch: OI-001 A3 recovery/store parity, OI-004/005/006 hardening, rows-shape cluster reopen, strict-auth wiring in `cmd/shunter-example`.
 
 ## Follow-on queue (pickable next, one per session)
 
-- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: projected-join post-commit delta evaluation ordering/runtime-shape follow-ons, or another reference-backed runtime/model residual after the closed fan-out delivery, multiplicity, join-index-validation, and committed-join-ordering slices. Do not reopen those closed slices without fresh evidence.
+- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: predicate normalization / validation drift on already-accepted SQL shapes, or another bounded runtime/model residual after the closed fan-out delivery, multiplicity, join-index-validation, committed projected-ordering, and projected-join delta-ordering slices. Do not reopen those closed slices without fresh evidence.
 - **OI-001 A3** — recovery / store parity against `reference/SpacetimeDB/crates/core/src/db/`. Batch scope: snapshot/replay invariants beyond what `P0-RECOVERY-*` already covered.
 - **Coordinated wrapper-chain + row-list close** (Phase 2 Slice 4 carried-forward deferral). Requires a new decision doc reopening the SPEC-005 §3.4 `BsatnRowList` deferral together with the reference `SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `QueryUpdate` wrapper chain. Scope is large — do not start without a named consumer or a bandwidth trigger (SPEC-005 §3.4 "fixed-schema row delivery bottleneck").
 - **Strict-auth wiring in `cmd/shunter-example`**. Currently anonymous-only. Batch scope: JWT identity, token rotation, `IdentityToken` round-trip, upgrade-path handshake.
