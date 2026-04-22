@@ -117,7 +117,8 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateLight(
 // stay for internal logging only.
 func (a *FanOutSenderAdapter) SendSubscriptionError(connID types.ConnectionID, subErr subscription.SubscriptionError) error {
 	return mapDeliveryError(a.sender.Send(connID, SubscriptionError{
-		Error: subErr.Message,
+		TotalHostExecutionDurationMicros: subErr.TotalHostExecutionDurationMicros,
+		Error:                            subErr.Message,
 	}))
 }
 

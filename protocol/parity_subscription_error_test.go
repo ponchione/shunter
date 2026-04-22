@@ -162,15 +162,24 @@ func TestParitySubscriptionErrorWireShapeAllNoneOptions(t *testing.T) {
 // SubscriptionError bytes out) to prove the emit site matches the
 // reference None-all layout regardless of the diagnostic RequestID /
 // SubscriptionID carried by the subscription layer.
+//
+// Duration measurement is now wired at the evaluator
+// (`subscription/eval.go::EvalAndBroadcast`); this test uses a specific
+// non-zero input to prove the adapter forwards the measured value onto
+// the wire. A zero-duration adapter call would still encode cleanly (0
+// is a legal reference-side value), but the evaluator no longer hands
+// zero to the adapter for a live eval-origin error.
 func TestParitySubscriptionErrorTransactionOriginWire(t *testing.T) {
 	capture := &captureSender{}
 	adapter := NewFanOutSenderAdapter(capture)
 
 	errMsg := "predicate rewrite failed"
+	const measuredDuration uint64 = 4242
 	in := subscription.SubscriptionError{
-		RequestID:      55,
-		SubscriptionID: 77,
-		Message:        errMsg,
+		RequestID:                        55,
+		SubscriptionID:                   77,
+		Message:                          errMsg,
+		TotalHostExecutionDurationMicros: measuredDuration,
 	}
 	if err := adapter.SendSubscriptionError(types.ConnectionID{}, in); err != nil {
 		t.Fatalf("SendSubscriptionError: %v", err)
@@ -186,10 +195,12 @@ func TestParitySubscriptionErrorTransactionOriginWire(t *testing.T) {
 
 	var want bytes.Buffer
 	want.WriteByte(TagSubscriptionError)
-	want.Write(make([]byte, 8)) // duration=0 (measurement deferred)
-	want.WriteByte(0)           // request_id: None
-	want.WriteByte(0)           // query_id: None
-	want.WriteByte(0)           // table_id: None
+	var durBuf [8]byte
+	binary.LittleEndian.PutUint64(durBuf[:], measuredDuration)
+	want.Write(durBuf[:])
+	want.WriteByte(0) // request_id: None
+	want.WriteByte(0) // query_id: None
+	want.WriteByte(0) // table_id: None
 	var u32Buf [4]byte
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(errMsg)))
 	want.Write(u32Buf[:])

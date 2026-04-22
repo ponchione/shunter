@@ -196,6 +196,9 @@ func TestEvalErrorQueuesSubscriptionErrorWithoutDroppingConnection(t *testing.T)
 	if !strings.Contains(errMsg.Message, ErrSubscriptionEval.Error()) {
 		t.Fatalf("error message = %q, want wrapped subscription eval error", errMsg.Message)
 	}
+	if errMsg.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("TotalHostExecutionDurationMicros = 0, want non-zero (eval-path receipt seam)")
+	}
 	select {
 	case dropped := <-mgr.DroppedClients():
 		t.Fatalf("unexpected dropped connection signal: %v", dropped)

@@ -3,6 +3,7 @@ package subscription
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -44,6 +45,7 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	if nothingToEvaluate && !hasCaller {
 		return
 	}
+	start := time.Now()
 	var (
 		fanout CommitFanout
 		errs   map[types.ConnectionID][]SubscriptionError
@@ -53,6 +55,18 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 	} else {
 		fanout = CommitFanout{}
 		errs = make(map[types.ConnectionID][]SubscriptionError)
+	}
+	if len(errs) > 0 {
+		durationMicros := uint64(time.Since(start).Microseconds())
+		if durationMicros == 0 {
+			durationMicros = 1
+		}
+		for connID, list := range errs {
+			for i := range list {
+				list[i].TotalHostExecutionDurationMicros = durationMicros
+			}
+			errs[connID] = list
+		}
 	}
 	if meta.CaptureCallerUpdates != nil {
 		var callerUpdates []SubscriptionUpdate

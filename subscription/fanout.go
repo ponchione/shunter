@@ -65,12 +65,18 @@ type PostCommitMeta struct {
 // SubscriptionError is the protocol-facing evaluation-failure payload queued
 // for clients affected by a broken subscription. SPEC-005 owns wire encoding;
 // this package only carries the semantic content across the fan-out seam.
+//
+// TotalHostExecutionDurationMicros carries the measured evaluation duration
+// in microseconds so the adapter can populate the reference wire field of
+// the same name (v1.rs:350). The evaluator sets it once per evaluation pass;
+// every error produced for a given commit shares the same measured value.
 type SubscriptionError struct {
-	RequestID      uint32
-	SubscriptionID types.SubscriptionID
-	QueryHash      QueryHash
-	Predicate      string
-	Message        string
+	RequestID                        uint32
+	SubscriptionID                   types.SubscriptionID
+	QueryHash                        QueryHash
+	Predicate                        string
+	Message                          string
+	TotalHostExecutionDurationMicros uint64
 }
 
 // CallerOutcomeKind is the discriminant for `CallerOutcome`. It maps
