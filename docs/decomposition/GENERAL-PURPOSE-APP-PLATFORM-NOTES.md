@@ -5,6 +5,11 @@ Scope: additive product/platform notes describing what Shunter would still need,
 
 This document is a companion to `BRAIN-EXTENSIONS-LLM-HARNESS.md`.
 
+Owner-operator framing:
+- These notes should be read through the lens of a private, owner-operated platform for the repo owner’s own projects/businesses.
+- “General-purpose” here means reusable across the owner's own app ideas, not “public competitor to SpacetimeDB” or “broad-market database product.”
+- That makes selective parity, opinionated defaults, and workload-specific narrowing acceptable as long as the kernel/layering stays clean.
+
 ---
 
 ## 1. Core conclusion

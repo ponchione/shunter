@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -154,6 +155,228 @@ func TestReplayLogSkipsDamagedTailSegmentWhenFromTxIDAlreadyAtValidatedPrefix(t 
 		t.Fatalf("ReplayLog max tx = %d, want 2", maxTxID)
 	}
 	assertReplayPlayerRows(t, committed, map[uint64]string{1: "alice", 2: "bob"})
+}
+
+// writeDenseReplaySegment writes n monotonically-tx'd inserts and returns the
+// segment path plus the (txID, segment byte offset) pair for every record.
+// Useful for populating a sparse offset index on top of a real segment.
+func writeDenseReplaySegment(t *testing.T, root string, startTx, n uint64) (string, []OffsetIndexEntry) {
+	t.Helper()
+	seg, err := CreateSegment(root, startTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]OffsetIndexEntry, 0, n)
+	for i := uint64(0); i < n; i++ {
+		tx := startTx + i
+		payload, encErr := EncodeChangeset(&store.Changeset{
+			TxID: types.TxID(tx),
+			Tables: map[schema.TableID]*store.TableChangeset{
+				0: {
+					TableID:   0,
+					TableName: "players",
+					Inserts:   []types.ProductValue{{types.NewUint64(tx), types.NewString("p")}},
+				},
+			},
+		})
+		if encErr != nil {
+			_ = seg.Close()
+			t.Fatal(encErr)
+		}
+		if err := seg.Append(&Record{TxID: tx, RecordType: RecordTypeChangeset, Payload: payload}); err != nil {
+			_ = seg.Close()
+			t.Fatal(err)
+		}
+		off, ok := seg.LastRecordByteOffset()
+		if !ok {
+			_ = seg.Close()
+			t.Fatal("LastRecordByteOffset not set after Append")
+		}
+		entries = append(entries, OffsetIndexEntry{TxID: types.TxID(tx), ByteOffset: uint64(off)})
+	}
+	if err := seg.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(root, SegmentFileName(startTx)), entries
+}
+
+// countingReplayHook installs replayDecodeHook for the lifetime of a single
+// ReplayLog invocation and returns a function that restores the prior hook
+// and yields the decoded count.
+func countingReplayHook(t *testing.T) (restore func() int64, counter *int64) {
+	t.Helper()
+	var n int64
+	prev := replayDecodeHook
+	replayDecodeHook = func(*Record) { n++ }
+	return func() int64 {
+		replayDecodeHook = prev
+		return n
+	}, &n
+}
+
+// Pin 17.
+func TestReplayLogUsesIndexToSkipPastHorizon(t *testing.T) {
+	root := t.TempDir()
+	const startTx = uint64(1)
+	const n = uint64(1024)
+	const horizon = types.TxID(512)
+
+	segPath, entries := writeDenseReplaySegment(t, root, startTx, n)
+
+	// Populate a sparse index at every 64th record.
+	sparse := make([]OffsetIndexEntry, 0, n/64)
+	for i := uint64(0); i < uint64(len(entries)); i += 64 {
+		sparse = append(sparse, entries[i])
+	}
+	idxPath := filepath.Join(root, OffsetIndexFileName(startTx))
+	idx := populateSparseIndex(t, idxPath, 64, sparse)
+	_ = idx.Close()
+
+	segments := []SegmentInfo{{Path: segPath, StartTx: types.TxID(startTx), LastTx: types.TxID(startTx + n - 1), Valid: true}}
+
+	// Indexed replay.
+	committedIdx, reg := buildReplayCommittedState(t)
+	restore, counter := countingReplayHook(t)
+	if _, err := ReplayLog(committedIdx, segments, horizon, reg); err != nil {
+		restore()
+		t.Fatalf("indexed replay: %v", err)
+	}
+	indexedCount := restore()
+	_ = counter
+
+	// Linear baseline: remove sidecar, rerun.
+	if err := os.Remove(idxPath); err != nil {
+		t.Fatalf("remove sidecar: %v", err)
+	}
+	committedLin, regLin := buildReplayCommittedState(t)
+	restore, counter = countingReplayHook(t)
+	if _, err := ReplayLog(committedLin, segments, horizon, regLin); err != nil {
+		restore()
+		t.Fatalf("linear replay: %v", err)
+	}
+	linearCount := restore()
+	_ = counter
+
+	t.Logf("replay decode counts: indexed=%d linear=%d (horizon=%d, n=%d)", indexedCount, linearCount, horizon, n)
+	if indexedCount >= linearCount {
+		t.Fatalf("expected indexed replay to decode strictly fewer records than linear: indexed=%d linear=%d", indexedCount, linearCount)
+	}
+	assertReplayStatesEqual(t, committedIdx, committedLin)
+}
+
+// Pin 18.
+func TestReplayLogCorrectWhenIndexMissing(t *testing.T) {
+	root := t.TempDir()
+	const startTx = uint64(1)
+	const n = uint64(1024)
+	const horizon = types.TxID(512)
+
+	segPath, entries := writeDenseReplaySegment(t, root, startTx, n)
+
+	// Populate index first, then delete so the on-disk artifact never exists
+	// during ReplayLog's pass. Baseline run with index present.
+	sparse := make([]OffsetIndexEntry, 0, n/64)
+	for i := uint64(0); i < uint64(len(entries)); i += 64 {
+		sparse = append(sparse, entries[i])
+	}
+	idxPath := filepath.Join(root, OffsetIndexFileName(startTx))
+	idx := populateSparseIndex(t, idxPath, 64, sparse)
+	_ = idx.Close()
+
+	segments := []SegmentInfo{{Path: segPath, StartTx: types.TxID(startTx), LastTx: types.TxID(startTx + n - 1), Valid: true}}
+
+	committedWith, reg := buildReplayCommittedState(t)
+	if _, err := ReplayLog(committedWith, segments, horizon, reg); err != nil {
+		t.Fatalf("with-index replay: %v", err)
+	}
+
+	if err := os.Remove(idxPath); err != nil {
+		t.Fatalf("remove sidecar: %v", err)
+	}
+	committedWithout, regWithout := buildReplayCommittedState(t)
+	if _, err := ReplayLog(committedWithout, segments, horizon, regWithout); err != nil {
+		t.Fatalf("without-index replay: %v", err)
+	}
+
+	assertReplayStatesEqual(t, committedWith, committedWithout)
+}
+
+// Pin 23.
+func TestReplayCorrectAfterPartialIndexTail(t *testing.T) {
+	root := t.TempDir()
+	const startTx = uint64(1)
+	const n = uint64(1024)
+	const horizon = types.TxID(512)
+
+	segPath, entries := writeDenseReplaySegment(t, root, startTx, n)
+
+	sparse := make([]OffsetIndexEntry, 0, n/64)
+	for i := uint64(0); i < uint64(len(entries)); i += 64 {
+		sparse = append(sparse, entries[i])
+	}
+	idxPath := filepath.Join(root, OffsetIndexFileName(startTx))
+	idx := populateSparseIndex(t, idxPath, 64, sparse)
+	_ = idx.Close()
+
+	// Clean-index replay as the reference state.
+	segments := []SegmentInfo{{Path: segPath, StartTx: types.TxID(startTx), LastTx: types.TxID(startTx + n - 1), Valid: true}}
+	committedClean, reg := buildReplayCommittedState(t)
+	if _, err := ReplayLog(committedClean, segments, horizon, reg); err != nil {
+		t.Fatalf("clean-index replay: %v", err)
+	}
+
+	// Corrupt the sidecar: zero out the value half of the last valid entry,
+	// simulating "key half landed, value half did not" mid-entry crash.
+	lastValidEntryOffset := int64(uint64(len(sparse)-1) * OffsetIndexEntrySize)
+	f, err := os.OpenFile(idxPath, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var zeros [8]byte
+	if _, err := f.WriteAt(zeros[:], lastValidEntryOffset+8); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Replay with the corrupted sidecar. The key-only partial entry must be
+	// treated as absent; earlier valid entries may still assist the seek.
+	committedPartial, regPartial := buildReplayCommittedState(t)
+	if _, err := ReplayLog(committedPartial, segments, horizon, regPartial); err != nil {
+		t.Fatalf("partial-tail replay: %v", err)
+	}
+
+	assertReplayStatesEqual(t, committedClean, committedPartial)
+}
+
+func assertReplayStatesEqual(t *testing.T, a, b *store.CommittedState) {
+	t.Helper()
+	ta, okA := a.Table(0)
+	tb, okB := b.Table(0)
+	if !okA || !okB {
+		t.Fatal("players table missing")
+	}
+	if ta.RowCount() != tb.RowCount() {
+		t.Fatalf("row count: a=%d b=%d", ta.RowCount(), tb.RowCount())
+	}
+	aRows := map[uint64]string{}
+	for _, row := range ta.Scan() {
+		aRows[row[0].AsUint64()] = row[1].AsString()
+	}
+	bRows := map[uint64]string{}
+	for _, row := range tb.Scan() {
+		bRows[row[0].AsUint64()] = row[1].AsString()
+	}
+	if len(aRows) != len(bRows) {
+		t.Fatalf("distinct row maps differ: a=%d b=%d", len(aRows), len(bRows))
+	}
+	for id, av := range aRows {
+		if bv, ok := bRows[id]; !ok || bv != av {
+			t.Fatalf("row %d: a=%q b=%q (ok=%v)", id, av, bv, ok)
+		}
+	}
 }
 
 func TestReplayLogDecodeErrorIncludesTxAndSegmentContext(t *testing.T) {

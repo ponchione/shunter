@@ -298,7 +298,13 @@ func TestDurabilityWorkerBasic(t *testing.T) {
 
 	// Verify segment file exists.
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 segment file, got %d", len(entries))
+	logs := 0
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".log" {
+			logs++
+		}
+	}
+	if logs != 1 {
+		t.Fatalf("expected 1 segment file, got %d (dir=%v)", logs, entries)
 	}
 }

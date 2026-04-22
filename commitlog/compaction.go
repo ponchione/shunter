@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"os"
+	"strings"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -65,8 +66,23 @@ func RunCompaction(dir string, snapshotTxID types.TxID) error {
 		if err := os.Remove(path); err != nil {
 			return err
 		}
+		if idxPath := offsetIndexPathForSegment(path); idxPath != "" {
+			if err := os.Remove(idxPath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
 	}
 	return syncDir(dir)
+}
+
+// offsetIndexPathForSegment returns the sidecar offset index path that pairs
+// with a %020d.log segment path. Returns "" when path does not look like a
+// segment filename (in which case the caller skips cleanup).
+func offsetIndexPathForSegment(segmentPath string) string {
+	if !strings.HasSuffix(segmentPath, ".log") {
+		return ""
+	}
+	return strings.TrimSuffix(segmentPath, ".log") + ".idx"
 }
 
 func syncDirPath(path string) error {

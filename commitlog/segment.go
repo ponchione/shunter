@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/ponchione/shunter/types"
 )
 
 // Segment constants.
@@ -57,13 +60,13 @@ func ReadSegmentHeader(r io.Reader) error {
 	}
 	if buf[0] != SegmentMagic[0] || buf[1] != SegmentMagic[1] ||
 		buf[2] != SegmentMagic[2] || buf[3] != SegmentMagic[3] {
-		return ErrBadMagic
+		return wrapCategory(ErrOpen, ErrBadMagic)
 	}
 	if buf[4] != SegmentVersion {
 		return &BadVersionError{Got: buf[4]}
 	}
 	if buf[5] != 0 || buf[6] != 0 || buf[7] != 0 {
-		return ErrBadFlags
+		return wrapCategory(ErrOpen, ErrBadFlags)
 	}
 	return nil
 }
@@ -108,7 +111,7 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	var buf [RecordHeaderSize]byte
 	if _, err := io.ReadFull(r, buf[:]); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return nil, ErrTruncatedRecord
+			return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
 		}
 		return nil, err
 	}
@@ -127,7 +130,7 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	rec.Payload = make([]byte, dataLen)
 	if _, err := io.ReadFull(r, rec.Payload); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return nil, ErrTruncatedRecord
+			return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
 		}
 		return nil, err
 	}
@@ -135,7 +138,7 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	var crcBuf [4]byte
 	if _, err := io.ReadFull(r, crcBuf[:]); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return nil, ErrTruncatedRecord
+			return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
 		}
 		return nil, err
 	}
@@ -149,7 +152,7 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 		return nil, &UnknownRecordTypeError{Type: rec.RecordType}
 	}
 	if rec.Flags != 0 {
-		return nil, ErrBadFlags
+		return nil, wrapCategory(ErrTraversal, ErrBadFlags)
 	}
 
 	return rec, nil
@@ -162,11 +165,13 @@ func SegmentFileName(startTxID uint64) string {
 
 // SegmentWriter writes records to a segment file.
 type SegmentWriter struct {
-	file    *os.File
-	bw      *bufio.Writer
-	size    int64
-	startTx uint64
-	lastTx  uint64
+	file             *os.File
+	bw               *bufio.Writer
+	size             int64
+	startTx          uint64
+	lastTx           uint64
+	lastRecordOffset int64
+	hasLastRecord    bool
 }
 
 // CreateSegment creates a new segment file.
@@ -207,10 +212,12 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 
 	size := int64(SegmentHeaderSize)
 	var lastTx uint64
+	var lastRecordOffset int64
 	var recordCount int
 
 	// Scan forward through valid records.
 	for {
+		recordStart := size
 		rec, err := DecodeRecord(f, 0)
 		if err != nil {
 			if err == io.EOF {
@@ -229,6 +236,7 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 		}
 		size += int64(RecordOverhead + len(rec.Payload))
 		lastTx = rec.TxID
+		lastRecordOffset = recordStart
 		recordCount++
 	}
 
@@ -239,11 +247,13 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 	}
 
 	return &SegmentWriter{
-		file:    f,
-		bw:      bufio.NewWriter(f),
-		size:    size,
-		startTx: startTxID,
-		lastTx:  lastTx,
+		file:             f,
+		bw:               bufio.NewWriter(f),
+		size:             size,
+		startTx:          startTxID,
+		lastTx:           lastTx,
+		lastRecordOffset: lastRecordOffset,
+		hasLastRecord:    recordCount > 0,
 	}, nil
 }
 
@@ -256,12 +266,22 @@ func (sw *SegmentWriter) Append(rec *Record) error {
 	} else if rec.TxID <= sw.lastTx {
 		return fmt.Errorf("commitlog: tx_id %d not > last %d", rec.TxID, sw.lastTx)
 	}
+	byteOffset := sw.size
 	if err := EncodeRecord(sw.bw, rec); err != nil {
 		return err
 	}
 	sw.size += int64(RecordOverhead + len(rec.Payload))
 	sw.lastTx = rec.TxID
+	sw.lastRecordOffset = byteOffset
+	sw.hasLastRecord = true
 	return nil
+}
+
+// LastRecordByteOffset returns the segment byte offset of the most recently
+// appended record's header. Valid only after a successful Append; the second
+// return is false when no record has been appended since construction.
+func (sw *SegmentWriter) LastRecordByteOffset() (int64, bool) {
+	return sw.lastRecordOffset, sw.hasLastRecord
 }
 
 // Sync flushes and fsyncs.
@@ -330,6 +350,52 @@ func (sr *SegmentReader) nextWithMax(maxPayload uint32) (*Record, error) {
 	}
 	sr.lastTx = rec.TxID
 	return rec, nil
+}
+
+// SeekToTxID positions the reader so that the next Next() call returns the
+// smallest record whose TxID is >= target, or io.EOF if no such record
+// remains in the segment.
+//
+// If idx is non-nil, KeyLookup(target) is used to jump to the largest
+// indexed record with TxID <= target; any index error (including
+// ErrOffsetIndexKeyNotFound) falls back to a linear scan from the segment
+// header. Index errors are never propagated to the caller — the index is
+// advisory.
+func (sr *SegmentReader) SeekToTxID(target types.TxID, idx *OffsetIndex) error {
+	startOff := int64(SegmentHeaderSize)
+	if idx != nil {
+		if _, off, err := idx.KeyLookup(target); err == nil {
+			startOff = int64(off)
+		} else if !errors.Is(err, ErrOffsetIndexKeyNotFound) {
+			log.Printf("commitlog: offset index lookup failed, falling back to linear scan: %v", err)
+		}
+	}
+	if _, err := sr.file.Seek(startOff, io.SeekStart); err != nil {
+		return err
+	}
+	sr.lastTx = 0
+	maxPayload := DefaultCommitLogOptions().MaxRecordPayloadBytes
+	targetKey := uint64(target)
+	for {
+		pos, err := sr.file.Seek(0, io.SeekCurrent)
+		if err != nil {
+			return err
+		}
+		rec, err := sr.nextWithMax(maxPayload)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if rec.TxID >= targetKey {
+			if _, err := sr.file.Seek(pos, io.SeekStart); err != nil {
+				return err
+			}
+			sr.lastTx = 0
+			return nil
+		}
+	}
 }
 
 // Close closes the file.

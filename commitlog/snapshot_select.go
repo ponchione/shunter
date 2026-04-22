@@ -38,7 +38,7 @@ func SelectSnapshot(baseDir string, durableHorizon types.TxID, reg schema.Schema
 	if len(segments) == 0 || segments[0].StartTx <= 1 {
 		return nil, nil
 	}
-	return nil, ErrMissingBaseSnapshot
+	return nil, wrapCategory(ErrOpen, ErrMissingBaseSnapshot)
 }
 
 func resolveSnapshotAndLogDirs(baseDir string) (string, string) {

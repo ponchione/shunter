@@ -94,6 +94,57 @@ func TestRunCompactionDeletesCoveredSegmentsAndFsyncsDirectory(t *testing.T) {
 	assertFileExists(t, seg3)
 }
 
+// Pin 21.
+func TestCompactionRemovesSidecarIndex(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	seg2 := makeScanTestSegment(t, dir, 4, 4, 5, 6)
+	seg3 := makeScanTestSegment(t, dir, 7, 7, 8)
+
+	idx1Path := filepath.Join(dir, OffsetIndexFileName(1))
+	idx2Path := filepath.Join(dir, OffsetIndexFileName(4))
+	idx3Path := filepath.Join(dir, OffsetIndexFileName(7))
+	for _, p := range []string{idx1Path, idx2Path, idx3Path} {
+		idx, err := CreateOffsetIndex(p, 4)
+		if err != nil {
+			t.Fatalf("CreateOffsetIndex(%s): %v", p, err)
+		}
+		_ = idx.Close()
+	}
+
+	originalSyncDir := syncDir
+	syncDir = func(string) error { return nil }
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 6); err != nil {
+		t.Fatalf("RunCompaction: %v", err)
+	}
+	assertFileMissing(t, seg1)
+	assertFileMissing(t, seg2)
+	assertFileExists(t, seg3)
+	assertFileMissing(t, idx1Path)
+	assertFileMissing(t, idx2Path)
+	assertFileExists(t, idx3Path)
+}
+
+// TestCompactionToleratesMissingSidecar covers the backwards-compat path:
+// segments compacted on old deployments have no paired .idx file. Compaction
+// must treat os.IsNotExist as non-fatal.
+func TestCompactionToleratesMissingSidecar(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	makeScanTestSegment(t, dir, 4, 4, 5, 6)
+
+	originalSyncDir := syncDir
+	syncDir = func(string) error { return nil }
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction with no sidecars: %v", err)
+	}
+	assertFileMissing(t, seg1)
+}
+
 func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	dir := t.TempDir()
 	boundary := makeScanTestSegment(t, dir, 900, contiguousTxs(900, 1100)...)

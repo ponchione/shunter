@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -12,6 +15,34 @@ import (
 
 func shouldStopAfterRecord(segment SegmentInfo, txID types.TxID) bool {
 	return segment.AppendMode == AppendByFreshNextSegment && txID >= segment.LastTx
+}
+
+// replayDecodeHook is a test-only instrumentation point fired once per record
+// decoded by ReplayLog's segment read loop. Always nil in production.
+var replayDecodeHook func(*Record)
+
+// seekReplayReaderToHorizon positions reader past the resume horizon using
+// the per-segment offset index when available. The index is advisory: any
+// error (open, lookup, seek) degrades to a linear scan from the segment
+// header. Returns without error in all non-fatal paths.
+func seekReplayReaderToHorizon(reader *SegmentReader, segmentPath string, startTx, fromTxID types.TxID) {
+	if fromTxID < startTx {
+		return
+	}
+	dir := filepath.Dir(segmentPath)
+	idxPath := filepath.Join(dir, OffsetIndexFileName(uint64(startTx)))
+	if _, err := os.Stat(idxPath); err != nil {
+		return
+	}
+	idx, err := OpenOffsetIndex(idxPath)
+	if err != nil {
+		log.Printf("commitlog: replay: opening offset index %s failed, falling back to linear scan: %v", idxPath, err)
+		return
+	}
+	defer idx.Close()
+	if err := reader.SeekToTxID(fromTxID+1, idx); err != nil {
+		log.Printf("commitlog: replay: seek via offset index %s failed, falling back to linear scan: %v", idxPath, err)
+	}
 }
 
 func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID types.TxID, reg schema.SchemaRegistry) (types.TxID, error) {
@@ -27,6 +58,10 @@ func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID
 			return maxAppliedTxID, fmt.Errorf("commitlog: replay open segment %s: %w", segment.Path, err)
 		}
 
+		if segment.StartTx <= fromTxID {
+			seekReplayReaderToHorizon(reader, segment.Path, segment.StartTx, fromTxID)
+		}
+
 		for {
 			record, err := reader.Next()
 			if err != nil {
@@ -38,6 +73,9 @@ func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID
 					return maxAppliedTxID, fmt.Errorf("commitlog: replay read segment %s: %w (close error: %v)", segment.Path, err, closeErr)
 				}
 				return maxAppliedTxID, fmt.Errorf("commitlog: replay read segment %s: %w", segment.Path, err)
+			}
+			if replayDecodeHook != nil {
+				replayDecodeHook(record)
 			}
 			txID := types.TxID(record.TxID)
 			if txID <= fromTxID {

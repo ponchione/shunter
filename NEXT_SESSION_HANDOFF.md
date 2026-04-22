@@ -2,7 +2,155 @@
 
 Use this file to start the next agent on the next real Shunter parity / hardening step with no prior context.
 
-## What just landed (2026-04-21, column-kind widening Slice 5 — `KindArrayString` realized)
+## What just landed (2026-04-22, Phase 4 Slice 2β Session 2 — category sentinels + call-site wraps, slice closed)
+
+Session 2 closes Phase 4 Slice 2β — typed `Traversal` / `Open` error enums. Decision doc `docs/parity-phase4-slice2-errors.md` is unchanged — Session 2 is pure implementation against the locked spec.
+
+Landed:
+
+- `commitlog/errors.go`:
+  - five category sentinels: `ErrTraversal`, `ErrOpen`, `ErrDurability`, `ErrSnapshot`, `ErrIndex`.
+  - `wrapCategory(cat, leaf error) error` helper + unexported `categorizedError` struct. `Error()` returns the leaf's surface text unchanged; `Unwrap() []error` returns `{leaf, cat}` so Go 1.20+ multi-Unwrap `errors.Is` matches both. Nil guards: `wrapCategory(nil, leaf) = leaf`; `wrapCategory(cat, nil) = nil`.
+  - `Is(target error) bool` methods on the nine typed structs — `BadVersionError`/`HistoryGapError` → `ErrOpen`; `UnknownRecordTypeError`/`ChecksumMismatchError`/`RecordTooLargeError`/`RowTooLargeError` → `ErrTraversal`; `SchemaMismatchError`/`SnapshotHashMismatchError` → `ErrSnapshot`; `OffsetIndexNonMonotonicError` → `ErrIndex`. Each returns true iff target matches its category. `SchemaMismatchError.Unwrap()` → `Cause` is preserved (already existed; the new `Is` method does not interfere with it).
+- `commitlog/segment.go`:
+  - `ReadSegmentHeader`: bare `ErrBadMagic` / `ErrBadFlags` returns now wrap with `ErrOpen`.
+  - `DecodeRecord`: three `ErrTruncatedRecord` returns and the mid-record `ErrBadFlags` return wrap with `ErrTraversal`. Typed struct returns (`BadVersionError`, `ChecksumMismatchError`, `RecordTooLargeError`, `UnknownRecordTypeError`) unchanged — their `Is` methods carry the category.
+- `commitlog/segment_scan.go::scanNextRecord`:
+  - two header-time truncation sites (remaining < RecordHeaderSize; EOF mid-header) wrap with `ErrOpen`.
+  - three mid-record truncation sites (dataLen overflow; EOF mid-payload; EOF mid-CRC) wrap with `ErrTraversal`.
+  - mid-record `ErrBadFlags` wraps with `ErrTraversal`.
+  - `HistoryGapError` sites unchanged — `HistoryGapError.Is` carries `ErrOpen`.
+- `commitlog/recovery.go::OpenAndRecoverDetailed`: `ErrNoData` and `ErrMissingBaseSnapshot` returns wrap with `ErrOpen`.
+- `commitlog/snapshot_io.go`: `ErrSnapshotInProgress` wraps with `ErrSnapshot`; snapshot-header `ErrBadMagic` wraps with `ErrOpen`. `BadVersionError` and `SnapshotHashMismatchError` sites unchanged — their `Is` methods carry the category.
+- `commitlog/snapshot_select.go`: `ErrMissingBaseSnapshot` return wraps with `ErrOpen`. `SchemaMismatchError` sites unchanged.
+- `commitlog/durability.go`:
+  - `validateFsyncMode`: `fmt.Errorf("%w: %d", ErrUnknownFsyncMode, mode)` → `fmt.Errorf("%w: %w: %d", ErrOpen, ErrUnknownFsyncMode, mode)` (multi-%w is fine here because the mode integer already mutates the surface text).
+  - panic value in `EnqueueCommitted` (both fatal branches) grew `ErrDurability` as an additional leading `%w` so the recovered error's Unwrap chain contains `ErrDurability`, `ErrDurabilityFailed`, and the underlying fatal cause.
+- `commitlog/offset_index.go`: `ErrOffsetIndexFull` (in `Append`) and both `ErrOffsetIndexKeyNotFound` sites (in `offsetIndexLookup`: empty index; target below first key) wrap with `ErrIndex`. `OffsetIndexNonMonotonicError.Is` carries `ErrIndex` for the typed case. `ErrOffsetIndexCorrupt` is declared but never emitted at present — no wrap needed.
+- `commitlog/segment_test.go`: one existing pin (`TestSegmentReaderSeekToTxIDFallsBackOnMissingKey`) used raw `err != ErrOffsetIndexKeyNotFound` identity; swapped for `!errors.Is(err, ErrOffsetIndexKeyNotFound)` to match every other pin in the suite. This was the only raw-`==` sentinel check in the commitlog package; back-compat semantics are preserved via `errors.Is`.
+- `commitlog/errors_category_test.go` (new file) — 28 pins:
+  - typed-struct category pins 1-9 (Checksum / BadVersion / UnknownRecordType / RecordTooLarge / RowTooLarge / HistoryGap / SchemaMismatch / SnapshotHashMismatch / OffsetIndexNonMonotonic). Pin 7 additionally re-asserts `SchemaMismatchError.Unwrap()` → Cause still chains.
+  - wrap-helper pins 10-12 (bad-magic wrap; same leaf different categories by site for truncated-record; nil-guard behavior).
+  - end-to-end admission-seam pins 13-25 (bad-magic segment file; decode-record CRC flip; scan-segments history gap; replay mid-record CRC flip; recovery-no-data; recovery-missing-base-snapshot; snapshot-hash-mismatch; snapshot-select schema-mismatch; durability-worker fatal panic; durability-ctor unknown-fsync-mode; offset-index-key-not-found; offset-index-full; offset-index-non-monotonic).
+  - back-compat pins 26-28: sentinel-identity preserved table-driven across every sentinel (incl. the fmt-wrapped `ErrUnknownFsyncMode` and `ErrDurabilityFailed` paths); typed-struct `errors.As` preserved table-driven across all nine structs; wrapped-error `Error()` surface text equals the leaf's text and never contains category strings ("traversal error", "open error", etc.) — one representative per sentinel family.
+
+Explicitly preserved (back-compat pinned):
+- no sentinel renames, no typed-struct renames, no surface `Error()` text change.
+- `errors.Is(err, <leaf>)` for every sentinel still returns true after the category wrap.
+- `errors.As(err, &<typed-struct>)` for every typed struct still succeeds.
+- `SchemaMismatchError.Unwrap() → Cause` chain still works (pin 7).
+
+Deliberately deferred to their own decision docs (unchanged from Session 1):
+- reference `Traversal::Forked` detection (same offset, different CRC) — needs record-layer CRC tracking across reopens.
+- reference `Append<T>` payload-return surface — requires public commitlog API change; Shunter durability worker currently owns the payload.
+- record / log on-disk shape parity — covered by Phase 4 Slice 2γ (separate decision doc, not yet open).
+- `source_chain` helper — not needed; `errors.Unwrap` + `%w` satisfy existing log formatting.
+
+Verification:
+- `rtk go test ./commitlog -run ErrorCategory -count=1 -v` → `Go test: 9 passed in 1 packages` (pins 1-9; the `-run ErrorCategory` filter matches only the typed-struct category pin names, by design)
+- `rtk go test ./commitlog -count=1` → `Go test: 175 passed in 1 packages` (118 baseline + 57 subtest-counted test runs from the 28 new pins — `TestBackCompatSentinelIdentityPreserved`, `TestBackCompatTypedStructErrorAsStillWorks`, and `TestBackCompatErrorMessageUnchanged` each use `t.Run` subtests so go test counts them individually)
+- `rtk go test ./...` → `Go test: 1501 passed in 10 packages` (1444 baseline + 57 new test runs). The decision doc's "1472 target" line assumed one test-run per pin; my subtest structure legitimately scores higher. No regression: every baseline test still passes.
+- `rtk go fmt ./commitlog`, `rtk go vet ./commitlog` → clean
+
+Ledger / debt follow-through:
+- `docs/parity-phase0-ledger.md` — 2β row flipped from `in_progress` to `closed` with a summary of what landed; 2γ row flipped from `deferred` to `open (next)`.
+- `TECH-DEBT.md` OI-007 — summary paragraph rewritten to name 2β closed and 2γ as the next open / deferred sub-slice (needs its own decision doc).
+- `TECH-DEBT.md` OI-003 — summary paragraph updated to name 2α and 2β closed.
+
+Clean-tree baseline at session close: `Go test: 1501 passed in 10 packages`.
+
+## Next session: Phase 4 Slice 2γ decision doc — or pivot
+
+No forced Slice 2γ start. 2γ is the largest remaining commitlog parity theme (record / log on-disk shape format compatibility with the reference wire) and needs a dedicated decision doc before any code lands. That doc work is session-sized; only start it if the priority is commitlog format parity. Otherwise, prefer a narrower slice.
+
+Alternative priorities:
+
+- **Phase 4 Slice 2γ decision doc** — record / log on-disk shape parity. Biggest scope. Plan: read `reference/SpacetimeDB/crates/commitlog/src/commit.rs` and `segment.rs` for the reference wire layout, then write `docs/parity-phase4-slice2-record-shape.md` with the same structure as `parity-phase4-slice2-errors.md` (reference shape, Shunter shape today, delta taxonomy, session breakdown, pin plan). No code this session.
+- **Tier-B hardening** (OI-004 remaining watch items, OI-008 top-level bootstrap) — don't force without concrete leak evidence.
+- **One of the `P0-SCHED-001` deferrals** (`fn_start`-clamped "now", one-shot panic deletion, past-due intended-time ordering) if workload evidence surfaces.
+- **Generalize array element kinds beyond string** — requires either per-element-kind `Value` slots or a parameterized `KindArray(elem)` representation.
+- **Protocol wire-close follow-through** — tracked at the top of `TECH-DEBT.md`.
+
+Implementation must stay clean-room — re-derive from the reference's behavioral contract, not from the Rust source.
+
+## What landed earlier (2026-04-22, Phase 4 Slice 2α Session 5 — replay + compaction wiring, slice closed)
+
+Session 5 closes the multi-session Phase 4 Slice 2α per-segment offset index slice. Decision doc `docs/parity-phase4-slice2-offset-index.md` is unchanged — session 5 is pure implementation against the locked spec.
+
+Landed:
+
+- `commitlog/replay.go`:
+  - New helper `seekReplayReaderToHorizon(reader, segmentPath, startTx, fromTxID)`: no-op when `fromTxID < startTx`; otherwise derives `<dir>/OffsetIndexFileName(startTx)` via `filepath.Dir(segmentPath)`, stats the sidecar (early-return on any stat error including `IsNotExist`), opens via `OpenOffsetIndex`, and calls `reader.SeekToTxID(fromTxID+1, idx)`. Every error path (open failure, seek failure) logs and falls back to linear scan. The index handle is always closed via `defer idx.Close()`.
+  - `ReplayLog` calls the helper after `OpenSegment` and before the per-segment read loop, gated on `segment.StartTx <= fromTxID`. The existing `txID <= fromTxID` guard at `replay.go:85-91` still skips any records between the sparse index entry and the exact horizon — no structural change to the traversal loop.
+  - New unexported `replayDecodeHook func(*Record)` — fired once per record decoded inside ReplayLog's segment loop. Always nil in production; set by the pin-17 test to count records.
+- `commitlog/compaction.go`:
+  - `RunCompaction` loop now, after `os.Remove(logPath)`, also attempts `os.Remove(offsetIndexPathForSegment(path))` and ignores `os.IsNotExist`. New unexported helper `offsetIndexPathForSegment(segmentPath string) string` swaps `.log` → `.idx` on the canonical `%020d.log` filename.
+- `commitlog/offset_index.go`:
+  - `scanOffsetIndexPrefix` additionally treats `key != 0 && val == 0` as sentinel-empty (end of valid prefix). Real record byte offsets are always `>= SegmentHeaderSize (=8)`, so `val == 0` is a reliable indicator of a partial write where the key half landed but the value half did not (pre-allocated zero bytes showing through). Without this, a post-crash reopen on a key-only partial tail would yield a bogus entry with `byteOffset=0`, and any index-assisted seek would land at segment byte 0 (pre-header) and decode garbage. Pin 23 specifically locks this.
+- No touches to `durability.go`, `segment.go`, `recovery.go`, or the snapshot path. Session 4's durability wiring is unchanged — Session 5 is strictly reader + cleanup side + one reader-tolerance fix.
+
+Pins landed (5 decision-doc pins + 1 back-compat pin):
+
+17. `TestReplayLogUsesIndexToSkipPastHorizon` (`replay_test.go`): builds a 1024-record segment via new helper `writeDenseReplaySegment`, populates a sparse index at every 64th record (cap=64), replays from `fromTxID=512` twice — once with sidecar present, once after `os.Remove(idxPath)`. Uses `countingReplayHook` to count records decoded by ReplayLog's loop on each pass. Observed counts: `indexed=512, linear=1024`. Asserts `indexed < linear` and `assertReplayStatesEqual` (same final committed state across both).
+18. `TestReplayLogCorrectWhenIndexMissing`: same scenario, but runs one pass with a fresh sidecar and one pass after deletion; asserts the two final committed states are byte-identical via the same `assertReplayStatesEqual` helper.
+21. `TestCompactionRemovesSidecarIndex` (`compaction_test.go`): three segments (start txs 1, 4, 7) each with a populated `.idx`; `RunCompaction(dir, 6)` drops segments 1 and 4; assert both their `.log` and `.idx` files are gone, segment 7 and its sidecar remain.
+21b (bonus). `TestCompactionToleratesMissingSidecar`: two segments without any sidecars; `RunCompaction` completes cleanly — the `IsNotExist` guard keeps old deployments correct.
+22. `TestOffsetIndexWriterSurvivesCrashBeforeFsync` (`offset_index_test.go`): feeds six commits (interval=100, recordLen=100) through `OffsetIndexWriter.AppendAfterCommit`; closes the writer WITHOUT calling `Sync()` first; reopens via `OpenOffsetIndex` (read-only); asserts at least one entry survives, every surviving entry corresponds to a commit that was fed in, and the surviving prefix is monotonic. The pending candidate slot is lost (expected) but flushed entries — already landed in the backing file via `WriteAt` — are readable.
+23. `TestReplayCorrectAfterPartialIndexTail` (`replay_test.go`): writes a 1024-record segment + sparse index, runs a clean-index replay to capture the reference state, then opens the sidecar and zero-fills the value half of the last valid entry (simulating "key half landed, value half did not"). A fresh replay with the corrupted sidecar must produce a committed state identical to the clean-index replay. This exercises the new `val == 0` sentinel in `scanOffsetIndexPrefix`.
+
+Per-segment sidecar convention (now fully realized): filename `%020d.idx` next to the paired `%020d.log`; 16-byte entries, two little-endian uint64 (tx id key, byte offset value); file pre-allocated to `OffsetIndexCap * 16` bytes with unused slots zero-filled. Cadence defaults: `OffsetIndexIntervalBytes = 64 KiB`, `OffsetIndexCap = 16384` (256 KiB sidecar per segment). Durability ordering: `seg.Sync()` before `idx.Sync()`, so the sidecar never references an undurable segment byte offset. Advisory posture throughout: every reader / replay / compaction path degrades to linear scan or silent skip on any index error; construction failures log and disable indexing rather than bubble.
+
+Verification:
+- `rtk go test ./commitlog -count=1` → `Go test: 118 passed in 1 packages`
+- `rtk go test ./...` → `Go test: 1444 passed in 10 packages` (1438 baseline + 6 new pins)
+- `rtk go fmt ./commitlog`, `rtk go vet ./commitlog` → clean
+
+Ledger / debt follow-through:
+- `docs/parity-phase0-ledger.md` — Slice 2α row flipped to `closed` with a full summary of Sessions 1-5; 2β row updated from `deferred (blocked on 2α)` to `open (next)`.
+- `TECH-DEBT.md` OI-007 — 2α paragraph rewritten to name Session 5's reader + cleanup wiring and close-out; names 2β as the next open Phase 4 sub-slice.
+
+Clean-tree baseline: `Go test: 1444 passed in 10 packages` (previous 1438 + 6 new pins — pins 17, 18, 21, 22, 23 plus `TestCompactionToleratesMissingSidecar`).
+
+## What landed earlier (2026-04-21, Phase 4 Slice 2α Session 2 — standalone offset index writer/reader)
+
+Session 2 of the multi-session Phase 4 Slice 2α per-segment offset index slice. Decision doc `docs/parity-phase4-slice2-offset-index.md` is unchanged — session 2 is pure implementation against the locked spec.
+
+Landed:
+
+- new `commitlog/offset_index.go` with three types:
+  - `OffsetIndex` — read-only view. `OpenOffsetIndex(path)`, `KeyLookup(target types.TxID) (found types.TxID, byteOffset uint64, err error)`, `Entries()`, `NumEntries()`, `Close()`.
+  - `OffsetIndexMut` — writer. `CreateOffsetIndex(path, cap)` pre-allocates `cap * 16` bytes of zero; `OpenOffsetIndexMut(path, cap)` reopens, extending to `cap*16` if the file is smaller and scanning the leading valid prefix. `Append(txID, byteOffset)`, `Truncate(target)`, `Sync()`, `Close()`, plus `KeyLookup` / `Entries` / `NumEntries` / `Cap` for symmetry with the read-only view.
+  - `OffsetIndexWriter` — cadence wrapper over `OffsetIndexMut`. `NewOffsetIndexWriter(head, minWriteIntervalBytes)`, `AppendAfterCommit(txID, byteOffset, recordLen)`, `Sync()` (flushes pending candidate + head.Sync), `Truncate(target)`, `Close()`. First call stashes a candidate; subsequent calls inside a cadence window retain the earliest (lowest-txID) candidate; when `bytesSinceLastAppend >= minWriteIntervalBytes` on a later commit, the candidate is flushed and the incoming commit becomes the next candidate. `ErrOffsetIndexFull` is caught at the writer: index is marked full and subsequent appends are no-ops (advisory posture — index is always optional).
+- on-disk layout per decision doc: 16-byte entries, two little-endian `uint64` (tx id key, byte offset value). Key `0` is the empty-slot sentinel; `Append(0, _)` rejects as non-monotonic on a fresh index. Pre-allocated `cap * 16` zero-filled slots on create; partial tail (zero key, arbitrary value bytes) is ignored on reopen per the sentinel rule.
+- read path: `KeyLookup` binary-searches for the largest entry with key `<= target`. Empty index or target below first key returns `ErrOffsetIndexKeyNotFound`. `Truncate(target)` drops every entry with key `>= target` via binary-search + zero-fill (matches reference `truncate` semantics: `drop everything` when target < first key; `drop target and above` when target is found or between entries).
+- new errors in `commitlog/errors.go`: sentinel `ErrOffsetIndexKeyNotFound`, `ErrOffsetIndexFull`, `ErrOffsetIndexCorrupt`; typed `OffsetIndexNonMonotonicError{Last, Got uint64}` using existing package style.
+- no touches to `segment.go`, `durability.go`, `replay.go`, `recovery.go`, or `compaction.go` — strictly standalone. `OffsetIndexEntrySize` (16) exported for future segment-wiring code.
+- pread/pwrite via `*os.File.ReadAt` / `WriteAt`; no mmap. Correctness matches the reference advisory contract; mmap remains deferred pending profiling.
+
+Pins landed (`commitlog/offset_index_test.go`, pins 1-13 from the decision doc):
+
+1. `TestOffsetIndexAppendAndLookupExact` — exact-key lookup returns its own value.
+2. `TestOffsetIndexLookupLargestLessOrEqual` — sparse keys; `KeyLookup(k+1)` / `KeyLookup(anything above last)` return the correct predecessor entry.
+3. `TestOffsetIndexKeyNotFoundBelowFirst` — below first key → `ErrOffsetIndexKeyNotFound`.
+4. `TestOffsetIndexEmpty` — fresh index: any `KeyLookup` returns `ErrOffsetIndexKeyNotFound`, `Entries()` empty, `NumEntries==0`.
+5. `TestOffsetIndexNonMonotonicAppendRejected` — duplicate key, smaller key, zero key (including zero on a fresh index) all return `*OffsetIndexNonMonotonicError` with `Last`/`Got` populated correctly.
+6. `TestOffsetIndexAppendBeyondCap` — fill to `cap`, next append returns `ErrOffsetIndexFull`; count remains at cap.
+7. `TestOffsetIndexTruncateAtExistingKey` — reference semantics: `Truncate(target)` drops the target entry and everything after; `KeyLookup(target-1)` still succeeds on the surviving prefix; target entry is absent from `Entries()`. (The decision doc's literal "KeyLookup(target) returns ErrOffsetIndexKeyNotFound" is physically impossible with "largest `<=`" semantics when a lower entry survives, so the pin expresses the intent via `Entries()` + `NumEntries` + the predecessor lookup succeeding.)
+8. `TestOffsetIndexTruncateBelowFirstEmptiesIndex` — target below first empties the file; subsequent `Append` accepts any positive key.
+9. `TestOffsetIndexReopenRecoversNumEntries` — write N, Sync, Close, reopen via `OpenOffsetIndexMut` and `OpenOffsetIndex`; both yield the same N entries in order.
+10. `TestOffsetIndexPartialTailIsIgnored` — simulate partial write by writing only the value half of entry N (key half remains zero sentinel); reopen, assert `NumEntries == N`.
+11. `TestOffsetIndexWriterCadenceHoldsCandidate` — sub-interval commits never flush.
+12. `TestOffsetIndexWriterCadenceFlushesOnSync` — `Sync()` promotes the pending candidate; second `Sync()` is idempotent.
+13. `TestOffsetIndexWriterCadenceAdvancesEarliestInWindow` — within a window, earliest (lowest-txID) commit wins the candidate slot; crossing the interval flushes the candidate and stashes the incoming commit.
+
+Verification:
+- `rtk go test ./commitlog -run OffsetIndex -count=1 -v` → `Go test: 13 passed in 1 packages`
+- `rtk go test ./...` → `Go test: 1433 passed in 10 packages` (1420 baseline + 13 new pins)
+- `rtk go fmt ./commitlog/...`, `rtk go vet ./commitlog/...` → clean
+
+Clean-tree baseline at session 2 close: `Go test: 1433 passed in 10 packages` (previous 1420 + 13 new unit pins). Now 1436 after Session 3.
+
+## What landed earlier (2026-04-21, column-kind widening Slice 5 — `KindArrayString` realized)
 
 Fifth column-kind widening slice closes the last narrow reference-backed rows from `check.rs:487-489` (`select * from t where arr = :sender` / "The :sender param is an identity") and `check.rs:523-525` (`select t.* from t join s on t.arr = s.arr` / "Product values are not comparable") as **positive** parity contracts at the protocol admission surface. Both shapes were rejected incidentally today (coerce default branch for the first; join compile had no type guard for the second); pins now promote the rejection from incidental to named reference-parity contract once `arr` is instantiable as a column kind.
 
@@ -422,283 +570,9 @@ Current clean-tree baseline:
 
 Flaky test note: no known clean-tree intermittent tests remain after the 2026-04-21 subscription, scheduler, protocol lifecycle, message-family, and SQL/query-surface follow-through.
 
-## Recommended next slice
+## Current startup notes
 
-All five reference subscription test blocks in `check.rs` (`valid_literals`, `valid_literals_for_type`, `invalid_literals`, `valid`, `invalid`) are now drained at the subscribe-single / one-off admission surfaces for every shape realizable against `schema.ValueKind`, including the Timestamp rows (`check.rs:334-352`) and the `u256 = 1e40` BigDecimal row (`check.rs:330-332`, closed this session). `statement.rs:521-551` probe closed. `rls.rs` probe closed. `sub.rs::unsupported` (157-168) pinned. `sub.rs::supported` (170-184) audited — all 8 positive shapes covered incidentally. `sql.rs::unsupported` (411-436) pinned — 8 SELECT-level shapes. `sql.rs::invalid` (457-476) pinned — 5 pure-syntax shapes.
-
-Remaining reference shapes all need larger-scope runtime widening first:
-- array / product column kinds — recursive `Value` representation + new BSATN tag + coerce surface (also unlocks `check.rs:523-525` product-value comparison in join ON)
-- RLS rule resolution — whole-feature slice, not a narrow pin
-
-Candidate next slices (pick one, do not try to widen scope):
-
-1. **Tier-B hardening** — `TECH-DEBT.md` still carries the remaining OI-004 watch items (`ClientSender.Send` no-ctx follow-on, other detached goroutines in `protocol/conn.go` / `lifecycle.go` / `keepalive.go`) and the OI-008 top-level bootstrap gap. Do not force an OI-004 sub-slice unless a specific leak site surfaces in live code or a failing test.
-
-2. **Format-level commitlog parity follow-on** (Phase 4 Slice 2 α/γ) — offset index file, typed error enums, record / log shape compatibility. Larger than a single narrow slice; each would need its own decision doc.
-
-3. **One of the `P0-SCHED-001` deferrals** (`fn_start`-clamped schedule "now", one-shot panic deletion, intended-time past-due ordering) if workload evidence surfaces.
-
-4. **Array / product column kinds** — biggest representation change remaining on the column-kind axis. Recursive `Value`, new BSATN tag, element-kind-aware coerce surface. Would unlock `check.rs:523-525` product-value comparison and give positive-shape status to the `SELECT * FROM t WHERE arr = :sender` path currently pinned only as incidental rejection.
-
-Recommendation: no obvious next narrow-and-pinned SQL anchor remains. Pick option 1/2/3/4 driven by workload or reference evidence, or wait for the user to name the next concrete target.
-
-Do not reopen the landed literal / quoted-identifier / `:sender` / type-mismatch / unknown-table-column / parser-surface negative / leading-`+` / scientific-notation / leading-dot / infinity / column-width-breadth / `sub.rs::unsupported` / `sql.rs::unsupported` / `sql.rs::invalid` / Timestamp / u256-BigDecimal / array-of-string slices unless a regression appears.
-
-## Expected shape of the next session
-
-1. Read the required startup docs in the listed order.
-2. Treat the current worktree as landed SQL/query parity truth (quoted special-character identifiers, hex byte literals, float literals, `:sender` on narrow single-table, aliased single-table, and narrow join-backed KindBytes columns), not as unfinished envelope work.
-3. Start with the next grounded SQL anchor from `reference/SpacetimeDB/crates/expr/src/check.rs` and the parity docs.
-4. Preferred next slice: pin a specific reference-backed rejection shape (e.g. `check.rs:498-504` type-mismatch cases) on the protocol admission surface, or choose a different narrow reference-backed SQL shape.
-   - add failing parser/protocol/runtime pins first
-   - verify the failure
-   - implement the smallest parser/coercion/runtime widening that keeps unrelated SQL shapes rejected; widening may not be needed if the rejection is already incidentally enforced
-   - re-run targeted tests, then `rtk go test ./...`
-5. If the chosen slice turns out blocked by a wider runtime contract than expected, stop and choose the next narrow reference-backed SQL shape instead of broadening opportunistically.
-6. Only after the suite is green, update the docs and this handoff again.
-
-
-Prior closed anchors in the same calendar week (still landed, included here for continuity):
-- broader SQL/query-surface parity follow-through (2026-04-21): quoted special-character identifiers, hex byte literals, float literals, `:sender` caller-identity parameter on narrow single-table / aliased single-table / narrow join-backed KindBytes columns, `check.rs:498-504` type-mismatch rejection pins (string-lit and float-lit against an integer column) at coerce + subscribe-single + one-off admission seams, `check.rs:483-497` unknown-table / unknown-column rejection pins (unknown FROM table, qualified unknown WHERE column, alias-qualified unknown WHERE column) at subscribe-single + one-off admission seams, `check.rs:506-537` parser-surface negative-shape pin bundle (base-table qualifier out of scope after alias, bare column projection, join without qualified projection, self-join without aliases, forward alias reference, LIMIT clause, unqualified WHERE column inside join) at subscribe-single + one-off admission seams, and `check.rs:297-300` leading-`+` numeric-literal support (lexer mirrors existing leading-`-` handling; parser + coerce unchanged; pinned at parser + subscribe-single + one-off) — `check.rs:523-525` (product-value comparison in join ON) deliberately skipped as not realizable against Shunter's column-kind enum
-- OI-006 fanout per-subscriber slice-header aliasing sub-hazard — `docs/hardening-oi-006-fanout-aliasing.md`
-- OI-005 `CommittedState.Table(id) *Table` raw-pointer contract pin — `docs/hardening-oi-005-committed-state-table-raw-pointer.md`
-- OI-005 `StateView.ScanTable` iterator surface — `docs/hardening-oi-005-state-view-scan-aliasing.md`
-- OI-004 dispatch-handler ctx sub-hazard — `docs/hardening-oi-004-dispatch-handler-context.md`
-- OI-004 `forwardReducerResponse` ctx / Done lifecycle — `docs/hardening-oi-004-forward-reducer-response-context.md`
-- OI-004 `ConnManager.CloseAll` disconnect-ctx sub-hazard — `docs/hardening-oi-004-closeall-disconnect-context.md`
-- OI-004 outbound-writer supervision sub-hazard — `docs/hardening-oi-004-outbound-writer-supervision.md`
-- OI-004 `superviseLifecycle` disconnect-ctx — `docs/hardening-oi-004-supervise-disconnect-context.md`
-- OI-004 `connManagerSender.enqueueOnConn` overflow-disconnect background-ctx — `docs/hardening-oi-004-sender-disconnect-context.md`
-- OI-004 `watchReducerResponse` goroutine-leak escape route — `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`
-- OI-005 `StateView.SeekIndexRange` BTree-alias escape route — `docs/hardening-oi-005-state-view-seekindexrange-aliasing.md`
-- OI-005 `StateView.SeekIndex` BTree-alias escape route — `docs/hardening-oi-005-state-view-seekindex-aliasing.md`
-- OI-005 `CommittedSnapshot.IndexSeek` BTree-alias escape route — `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md`
-- OI-005 subscription-seam read-view lifetime sub-hazard — `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md`
-- OI-005 snapshot iterator mid-iter-close defense-in-depth sub-hazard — `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md`
-- OI-005 snapshot iterator use-after-Close sub-hazard — `docs/hardening-oi-005-snapshot-iter-useafterclose.md`
-- OI-005 snapshot iterator GC retention sub-hazard — `docs/hardening-oi-005-snapshot-iter-retention.md`
-- Phase 4 Slice 2 replay-horizon / validated-prefix (`P0-RECOVERY-001`) — `docs/parity-p0-recovery-001-replay-horizon.md`
-- Phase 3 Slice 1 scheduled-reducer startup / firing ordering (`P0-SCHED-001`) — `docs/parity-p0-sched-001-startup-firing.md`
-- Phase 2 Slice 3 lag / slow-client policy (`P0-SUBSCRIPTION-001`) — `docs/parity-phase2-slice3-lag-policy.md`
-
-## Next realistic parity / hardening anchors
-
-With `P0-RECOVERY-001`, `P0-SCHED-001`, `P0-SUBSCRIPTION-001` closed, all nine OI-005 enumerated sub-hazards closed, both enumerated OI-006 sub-hazards closed, and six OI-004 sub-hazards closed, the grounded options are:
-
-### Option α — Broader SQL/query-surface parity beyond TD-142
-
-This is still the best next grounded parity path.
-
-What is still open:
-- `docs/current-status.md`, `docs/spacetimedb-parity-roadmap.md`, and `docs/parity-phase0-ledger.md` now all agree that the remaining externally visible message-family follow-through is broader SQL/query-surface breadth rather than another `SubscriptionError` envelope tweak
-- TD-142 plus the 2026-04-21 SQL/query follow-through (quoted special-character identifiers, hex byte literals, float literals, `:sender` on narrow single-table / aliased single-table / narrow join-backed KindBytes columns) drained the named narrow positive slices; the remaining grounded extension is pinning the reference *rejection* cases not yet directly pinned (e.g. `check.rs:498-504` type-mismatch cases) at the protocol admission boundary
-
-Why prefer this now:
-- the just-landed alias / join `:sender` slice closed the last named narrow-SQL positive gap tied to `check.rs:435-440`
-- externally visible parity still outranks speculative Tier-B watch items
-- this keeps effort on client-visible behavior rather than reopening already-green message-family work
-
-Likely code surfaces:
-- `query/sql/parser.go`
-- `query/sql/coerce.go`
-- `protocol/handle_subscribe.go`
-- `protocol/handle_subscribe_single.go`
-- `protocol/handle_subscribe_multi.go`
-- `protocol/handle_oneoff.go`
-- `subscription/predicate.go`
-- `subscription/validate.go`
-
-Concrete shape:
-- choose one exact remaining reference-backed SQL/query scenario from `check.rs` `invalid()` cases
-- add parser + public protocol/runtime pins first
-- keep the slice narrow; do not reopen unrelated lifecycle or envelope work in the same session
-
-### Option β — Continue Tier-B hardening
-
-`TECH-DEBT.md` still carries:
-- OI-004 remaining sub-hazards (other detached goroutines in `protocol/conn.go` / `lifecycle.go` / `outbound.go` / `keepalive.go`; `ClientSender.Send` no-ctx follow-on)
-- OI-005: enumerated sub-hazards list now empty; OI-005 remains open as a theme because the envelope rule for raw `*Table` access is enforced by discipline and observational pins rather than machine-enforced lifetime.
-- OI-006: enumerated sub-hazards list now empty; OI-006 remains open as a theme because the read-only row-payload contract is enforced by discipline and observational pins rather than machine-enforced immutability at the `types.ProductValue` boundary.
-- OI-008 (top-level bootstrap missing)
-
-Current judgment:
-- do not force another OI-004 sub-slice unless a specific concrete leak site surfaces in live code or a failing test
-- `ClientSender.Send` no-ctx remains a follow-on with no concrete consumer today
-- the remaining detached-goroutine bullets are now watch items, not the best immediate slice
-
-### Option γ — Format-level commitlog parity (Phase 4 Slice 2 follow-on)
-
-With the replay-horizon / validated-prefix slice closed, the remaining commitlog parity work is format-level:
-- offset index file (reference `src/index/indexfile.rs`, `src/index/mod.rs`)
-- record / log shape compatibility (reference `src/commit.rs`, `src/payload/txdata.rs`)
-- typed `error::Traversal` / `error::Open` enums
-- snapshot / compaction visibility vs reference `repo::resume_segment_writer` contract
-
-These are larger scope than a single narrow slice; each would need its own decision doc.
-
-### Option δ — Pick one of the `P0-SCHED-001` deferrals
-
-Each remaining scheduler deferral is a candidate for its own focused slice if workload evidence surfaces:
-- `fn_start`-clamped schedule "now" (plumb reducer dispatch timestamp into `schedulerHandle`; ref `scheduler.rs:211-215`)
-- one-shot panic deletion (second-commit post-rollback path; ref `scheduler.rs:445-455`)
-- past-due ordering by intended time (sort in `scanAndTrackMaxWithContext`)
-
-Prefer Option α over β/γ/δ unless live workload or reference evidence surfaces a stronger blocker.
-
-## First, what you are walking into
-
-The repo already has substantial implementation. Do not treat this as a docs-only project. Do not do a broad audit. Do not restart parity analysis from zero.
-
-Your job is to continue from the current live state. Pick the next grounded anchor from `docs/spacetimedb-parity-roadmap.md`, `docs/parity-phase0-ledger.md`, or `TECH-DEBT.md`.
-
-Clean-room reminder:
-- parity target means matching externally meaningful behavior where required, not translating Rust source into Go
-- `reference/SpacetimeDB/` stays research-only and read-only; do not copy, transliterate, or mechanically port code from it
-- re-derive behavior from public docs, reference outcomes, and live Shunter contracts, then implement natively in Go
-
-## Mandatory reading order
-
-1. `AGENTS.md`
-2. `RTK.md`
-3. `docs/project-brief.md`
-4. `docs/EXECUTION-ORDER.md`
-5. `README.md`
-6. `docs/current-status.md`
-7. `docs/spacetimedb-parity-roadmap.md`
-8. `docs/parity-phase0-ledger.md`
-9. `TECH-DEBT.md`
-10. `docs/hardening-oi-006-row-payload-sharing.md` (closed slice — contract pin at the row-payload sharing seam)
-11. `docs/hardening-oi-006-fanout-aliasing.md` (prior OI-006 sub-slice — slice-header isolation precedent)
-12. `docs/hardening-oi-005-committed-state-table-raw-pointer.md` (prior OI-005 contract-pin precedent)
-13. `docs/hardening-oi-005-state-view-scan-aliasing.md` (prior OI-005 sub-slice)
-14. `docs/hardening-oi-005-state-view-seekindexrange-aliasing.md`
-15. `docs/hardening-oi-005-state-view-seekindex-aliasing.md`
-16. `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md`
-17. `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md`
-18. `docs/hardening-oi-004-dispatch-handler-context.md`
-19. `docs/hardening-oi-004-forward-reducer-response-context.md`
-20. `docs/hardening-oi-004-closeall-disconnect-context.md`
-21. `docs/hardening-oi-004-supervise-disconnect-context.md`
-22. `docs/hardening-oi-004-sender-disconnect-context.md`
-23. `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`
-24. `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md`
-25. `docs/hardening-oi-005-snapshot-iter-useafterclose.md`
-26. `docs/hardening-oi-005-snapshot-iter-retention.md`
-27. `docs/parity-p0-recovery-001-replay-horizon.md`
-28. `docs/parity-p0-sched-001-startup-firing.md`
-29. `docs/parity-phase2-slice3-lag-policy.md`
-30. the specific code surfaces for whichever anchor (α/β/γ/δ) you pick
-
-## Shell discipline
-
-Use `rtk` for shell commands. Examples:
-- `rtk git status --short --branch`
-- `rtk go test ./store -run 'TestName' -v`
-- `rtk go test ./...`
-
-## Important repo note
-
-Keep `.hermes/plans/2026-04-18_073534-phase1-wire-level-parity.md` unless you deliberately update the contract that depends on it. A test expects it.
-
-## What is already landed (do not reopen)
-
-- Protocol conformance P0-PROTOCOL-001..004
-- Delivery parity P0-DELIVERY-001..002
-- Recovery invariant P0-RECOVERY-002
-- TD-142 Slices 1–14 (all narrow SQL parity shapes, including join projection emitted onto the SELECT side)
-- Phase 1.5 outcome model + caller metadata wiring
-- Phase 2 Slice 3 lag / slow-client policy (2026-04-20) — `P0-SUBSCRIPTION-001`
-- Phase 3 Slice 1 scheduled reducer startup / firing ordering (2026-04-20) — `P0-SCHED-001`
-- Phase 4 Slice 2 replay-horizon / validated-prefix behavior (2026-04-20) — `P0-RECOVERY-001`
-- OI-005 snapshot iterator GC retention sub-hazard (2026-04-20)
-- OI-005 snapshot iterator use-after-Close sub-hazard (2026-04-20)
-- OI-006 fanout per-subscriber slice-header aliasing sub-hazard (2026-04-20)
-- OI-005 snapshot iterator mid-iter-close defense-in-depth sub-hazard (2026-04-20)
-- OI-005 subscription-seam read-view lifetime sub-hazard (2026-04-20)
-- OI-005 `CommittedSnapshot.IndexSeek` BTree-alias escape route (2026-04-20)
-- OI-004 `watchReducerResponse` goroutine-leak escape route (2026-04-20)
-- OI-005 `StateView.SeekIndex` BTree-alias escape route (2026-04-20)
-- OI-005 `StateView.SeekIndexRange` BTree-alias escape route (2026-04-20)
-- P1-07 executor response-channel contract + protocol-forwarding cancel-safe + Submit-time validation (2026-04-20, landed in commit `40b2152 baseline`)
-- OI-004 `connManagerSender.enqueueOnConn` overflow-disconnect background-ctx sub-hazard (2026-04-21)
-- OI-004 `superviseLifecycle` disconnect-ctx sub-hazard (2026-04-21)
-- OI-004 `ConnManager.CloseAll` disconnect-ctx sub-hazard (2026-04-21)
-- OI-004 `forwardReducerResponse` ctx / Done lifecycle sub-hazard (2026-04-21)
-- OI-004 dispatch-handler ctx sub-hazard (2026-04-21)
-- OI-005 `StateView.ScanTable` iterator surface (2026-04-21)
-- OI-005 `CommittedState.Table(id) *Table` raw-pointer contract pin (2026-04-21)
-- OI-006 row-payload sharing contract pin (2026-04-21)
-- `sub.rs:157-168` subscription-parser `unsupported` rejection pin bundle (2026-04-21): DML (`delete from t`), empty string, whitespace-only, DISTINCT projection (`select distinct a from t`), subquery-in-FROM (`select * from (select * from t) join (select * from s) on a = b`) pinned at subscribe-single + one-off admission seams; all five reject incidentally at Shunter's SELECT-only parser (`expectKeyword("SELECT")`, `parseProjection`, `parseStatement` identifier-after-FROM), pins promote to named reference-parity contracts. Intentional divergence between Shunter's unified admission surface and reference's split `parse_and_type_sub` / `parse_and_type_sql` paths recorded in `docs/parity-phase0-ledger.md` and `TECH-DEBT.md`.
-- `sql.rs:411-436` `parse_sql::unsupported` rejection pin bundle (2026-04-21): SELECT-level shapes (`select 1`, `select a from s.t`, `select * from t where a = B'1010'`, `select a.*, b, c from t`, `select * from t order by a limit b`, `select a, count(*) from t group by a`, `select a.* from t as a, s as b where a.id = b.id and b.c = 1`, `select t.* from t join s on int = u32`) pinned at subscribe-single + one-off admission seams; all eight reject incidentally at Shunter's SELECT-only parser boundary, pins promote to named reference-parity contracts. DML shapes in the same reference block are covered by existing `ParityDMLStatementRejected` pins.
-- broader SQL/query-surface parity follow-through (2026-04-21): quoted special-character identifiers, hex byte literals, float literals, `:sender` caller-identity parameter on narrow single-table / aliased single-table / narrow join-backed KindBytes columns, `check.rs:498-504` type-mismatch rejection pins (string-lit and float-lit against an integer column) at coerce + subscribe-single + one-off admission seams, `check.rs:483-497` unknown-table / unknown-column rejection pins (unknown FROM table, qualified unknown WHERE column, alias-qualified unknown WHERE column) at subscribe-single + one-off admission seams, `check.rs:506-537` parser-surface negative-shape pin bundle (base-table qualifier out of scope after alias, bare column projection, join without qualified projection, self-join without aliases, forward alias reference, LIMIT clause, unqualified WHERE column inside join) at subscribe-single + one-off admission seams, `check.rs:297-300` leading-`+` numeric-literal support (lexer mirrors existing leading-`-` handling; pinned at parser + subscribe-single + one-off), `check.rs:302-328` scientific-notation + leading-dot + infinity bundle (`u32 = 1e3`, `u32 = 1E3`, `f32 = 1e3`, `f32 = 1e-3`, `f32 = .1`, `f32 = 1e40 → +Inf`; lexer numeric branch grew exponent tail + leading-dot entry via `tokenizeNumeric`, `parseNumericLiteral` collapses integer-valued finite results to `LitInt`, coerce `KindFloat32`/`KindFloat64` now accept `LitInt` via promotion; pinned at parser + coerce + subscribe-single + one-off), `check.rs:382-401` `invalid_literals` rejection pin bundle (`u8 = -1`, `u8 = 1e3`, `u8 = 0.1`, `u32 = 1e-3`, `i32 = 1e-3`; all five reject incidentally through `coerceUnsigned` / `coerceSigned`, pinned at subscribe-single + one-off admission seams), and `check.rs:360-370` `valid_literals_for_type` column-width breadth pin bundle (`{ty} = 127` for each of `i8/u8/i16/u16/i32/u32/i64/u64/f32/f64`; all 10 ride existing `coerceSigned` / `coerceUnsigned` / `KindFloat32`-`KindFloat64` promotion with no runtime widening, pinned as table-driven subtests at subscribe-single + one-off admission seams; `i128`/`u128`/`i256`/`u256` not realizable)
-
-## Suggested verification commands
-
-Targeted:
-- `rtk go test ./query/sql -run 'TestParseWhereSenderParameter|TestParseWhereRejectsUnknownParameter|TestCoerceSender|TestCoerceRejects' -count=1 -v`
-- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_SenderParameter|TestHandleOneOffQuery_SenderParameter|TestHandleSubscribeSingle_StringLiteralOnIntegerColumnRejected|TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected|TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected|TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected|TestHandleSubscribeSingle_ParityUnknownTableRejected|TestHandleSubscribeSingle_ParityUnknownColumnRejected|TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected|TestHandleOneOffQuery_ParityUnknownTableRejected|TestHandleOneOffQuery_ParityUnknownColumnRejected|TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected|TestHandleSubscribeSingle_ParityBaseTableQualifierAfterAliasRejected|TestHandleSubscribeSingle_ParityBareColumnProjectionRejected|TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected|TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected|TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected|TestHandleSubscribeSingle_ParityLimitClauseRejected|TestHandleSubscribeSingle_ParityUnqualifiedWhereInJoinRejected|TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected|TestHandleOneOffQuery_ParityBareColumnProjectionRejected|TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected|TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected|TestHandleOneOffQuery_ParityForwardAliasReferenceRejected|TestHandleOneOffQuery_ParityLimitClauseRejected|TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected' -count=1 -v`
-- `rtk go test ./subscription -run 'TestEvalFanoutRowPayloadsSharedAcrossSubscribers' -race -count=3 -v`
-- `rtk go test ./subscription -run 'TestEvalFanout' -race -count=3 -v`
-- `rtk go test ./store -run 'TestCommittedStateTable' -race -count=3 -v`
-- `rtk go test ./store -run 'TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete' -race -count=3 -v`
-- `rtk go test ./protocol -run 'TestDispatchLoop_HandlerCtx' -race -count=3 -v`
-- `rtk go test ./executor -run 'TestProtocolInboxAdapter_ForwardReducerResponse' -race -count=3 -v`
-- `rtk go test ./protocol -run 'TestCloseAll' -race -count=3 -v`
-- `rtk go test ./protocol -run 'TestSuperviseLifecycle' -race -count=3 -v`
-- `rtk go test ./protocol -run 'TestEnqueueOnConnOverflowDisconnect' -race -count=3 -v`
-- `rtk go test ./protocol -run 'TestWatchReducerResponse' -race -count=3 -v`
-- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParityDMLStatementRejected|TestHandleSubscribeSingle_ParityEmptyStatementRejected|TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected|TestHandleSubscribeSingle_ParityDistinctProjectionRejected|TestHandleSubscribeSingle_ParitySubqueryInFromRejected|TestHandleOneOffQuery_ParityDMLStatementRejected|TestHandleOneOffQuery_ParityEmptyStatementRejected|TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected|TestHandleOneOffQuery_ParityDistinctProjectionRejected|TestHandleOneOffQuery_ParitySubqueryInFromRejected' -count=1 -v`
-- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParitySqlUnsupported|TestHandleOneOffQuery_ParitySqlUnsupported' -count=1 -v`
-- `rtk go test ./protocol -run 'TestHandleSubscribeSingle_ParitySqlInvalid|TestHandleOneOffQuery_ParitySqlInvalid' -count=1 -v`
-- `rtk go test ./protocol -run 'ParityTimestamp' -count=1 -v`
-- `rtk go test ./...`
-
-## Acceptance gate
-
-Do not call the work done unless all are true:
-
-- reference-backed or debt-anchored target shape was checked directly against reference material or current live code
-- every newly accepted or rejected shape has focused tests
-- already-landed parity pins still pass (including the `:sender` parser/coerce/protocol pins listed in `docs/parity-phase0-ledger.md`)
-- full suite still passes. Clean-tree baseline is `Go test: 1420 passed in 10 packages`. No known clean-tree intermittent test remains after the 2026-04-21 follow-through.
-- docs and handoff reflect the new truth exactly
-
-## Deliverables for the next session
-
-Either:
-- code + tests closing the next reference-backed parity slice or Tier-B hardening sub-hazard
-
-Or:
-- a grounded blocker report naming the exact representation/runtime issue preventing a narrow landing
-
-And in either case:
-- update `TECH-DEBT.md` if any OI changes state
-- update `docs/current-status.md`
-- update `docs/parity-phase0-ledger.md` if a parity scenario moves
-- update `NEXT_SESSION_HANDOFF.md`
-
-## Final status snapshot right now
-
-As of this handoff:
-- `TD-142` fully drained
-- Phase 2 Slice 3 closed — per-client outbound queue aligned to reference `CLIENT_CHANNEL_CAPACITY`; close-frame mechanism retained as intentional divergence
-- Phase 3 Slice 1 closed — `P0-SCHED-001` scheduled-reducer startup / firing ordering narrow-and-pinned
-- Phase 4 Slice 2 closed — `P0-RECOVERY-001` replay-horizon / validated-prefix behavior narrow-and-pinned
-- P1-07 executor response-channel contract + protocol-forwarding cancel-safe + Submit-time validation landed
-- OI-005 enumerated sub-hazards drained (iter GC retention, iter use-after-Close, iter mid-iter-close, subscription-seam read-view lifetime, IndexSeek BTree-alias, SeekIndex BTree-alias, SeekIndexRange BTree-alias, ScanTable iterator surface, `CommittedState.Table` raw-pointer contract pin)
-- OI-006 enumerated sub-hazards drained (slice-header aliasing, row-payload sharing contract pin)
-- OI-004 six sub-hazards closed (watchReducerResponse, sender overflow-disconnect ctx, superviseLifecycle disconnect-ctx, CloseAll disconnect-ctx, forwardReducerResponse ctx/Done lifecycle, dispatch-handler ctx, outbound-writer supervision)
-- Phase 2 Slice 2 applied-envelope host execution duration + `SubscriptionError` optional-field / `TableID` follow-through closed
-- broader SQL/query-surface parity follow-through (2026-04-21): reference-style double-quoted identifiers, query-builder-style parenthesized WHERE predicates, alias-qualified mixed-qualified/unqualified OR, hex byte literals, float literals on the narrow single-table / join-backed SQL surface, `:sender` caller-identity parameter on narrow single-table / aliased single-table / narrow join-backed KindBytes columns, bare boolean `WHERE TRUE`, `check.rs:498-504` type-mismatch rejections (string-lit and float-lit against an integer column), `check.rs:483-497` unknown-table / unknown-column rejections (unknown FROM table, qualified / alias-qualified unknown WHERE column), `check.rs:506-537` parser-surface negative-shape bundle (base-table qualifier out of scope after alias, bare column projection, join without qualified projection, self-join without aliases, forward alias reference, LIMIT clause, unqualified WHERE column inside join), `check.rs:297-300` leading-`+` numeric-literal support, `check.rs:302-328` scientific-notation + leading-dot + infinity bundle (`u32 = 1e3`, `u32 = 1E3`, `f32 = 1e3`, `f32 = 1e-3`, `f32 = .1`, `f32 = 1e40 → +Inf`), `check.rs:382-401` `invalid_literals` rejection bundle (`u8 = -1`, `u8 = 1e3`, `u8 = 0.1`, `u32 = 1e-3`, `i32 = 1e-3`), and `check.rs:360-370` `valid_literals_for_type` column-width breadth bundle (`{ty} = 127` for each of `i8/u8/i16/u16/i32/u32/i64/u64/f32/f64`; table-driven subtest bundle at subscribe-single + one-off) all work end-to-end and are pinned; `check.rs:523-525` (product-value comparison in join ON) deliberately skipped as not realizable against Shunter's column-kind enum, and `check.rs:284-332` `u256` / `i128`/`u128`/`i256` / timestamp column shapes plus the `i128`/`u128`/`i256`/`u256` rows of `valid_literals_for_type` are skipped for the same reason
-- Other detached-goroutine surfaces in `conn.go` / `lifecycle.go` / `keepalive.go` and the `ClientSender.Send` no-ctx follow-on remain open under OI-004
-- `sub.rs:157-168` `unsupported` rejection pin bundle landed (2026-04-21) — 10 pins across subscribe-single + one-off for DML, empty, whitespace-only, DISTINCT projection, subquery-in-FROM. Intentional divergence between Shunter's unified admission surface and reference's split `parse_and_type_sub` / `parse_and_type_sql` paths recorded in `docs/parity-phase0-ledger.md` and `TECH-DEBT.md`.
-- `sql.rs:411-436` `parse_sql::unsupported` rejection pin bundle landed (2026-04-21) — 16 pins across subscribe-single + one-off for SELECT-level shapes: `select 1` (FROM-required), multi-part table, bit-string literal, wildcard with bare columns, ORDER BY + LIMIT expression, aggregate + GROUP BY, implicit comma join, unqualified JOIN ON vars. All eight shapes already rejected incidentally at Shunter's SELECT-only parser boundary, pins promote to named parity contracts. The two DML shapes in that reference block (`update ... join ... set`, `update t set a = 1 from s where ...`) are covered by the existing `ParityDMLStatementRejected` pins.
-- `sql.rs:457-476` `parse_sql::invalid` pure-syntax rejection pin bundle landed (2026-04-21, this session) — 10 pins across subscribe-single + one-off for the five new shapes: empty SELECT (`select from t`), empty FROM (`select a from where b = 1`), empty WHERE (`select a from t where`), empty GROUP BY (`select a, count(*) from t group by`), aggregate without alias (`select count(*) from t`). All five reject incidentally inside `parseProjection` at `query/sql/parser.go:553-572` before the reference-style conditions are ever checked; no runtime widening was required. Empty-string and whitespace-only shapes in that reference block are covered by the existing `sub.rs::unsupported` pin bundle.
-- column-kind widening Slice 1 (2026-04-21) landed — `KindInt128` / `KindUint128` realizable end-to-end (BSATN tags 13/14, 16-byte LE; coerce promotes `LitInt`; subscription hash 16-byte BE). Unlocks `check.rs:360-370` rows `i128 = 127` / `u128 = 127`; `TestHandle*_ParityUint128NegativeRejected` extends `invalid_literals` to u128.
-- column-kind widening Slice 2 (2026-04-21) landed — `KindInt256` / `KindUint256` realizable end-to-end without the BigDecimal literal path (BSATN tags 15/16, 32-byte LE lowest-word-first; coerce promotes `LitInt`; subscription hash 32-byte BE; storage `w256 [4]uint64` with index 0 most-significant, signed for Int256). Unlocks `check.rs:360-370` rows `i256 = 127` / `u256 = 127`; `TestHandle*_ParityUint256NegativeRejected` extends `invalid_literals` to u256. `u256 = 1e40` (`check.rs:330-332`) still deferred — needs BigDecimal-style literal widening.
-- column-kind widening Slice 3 (2026-04-21) landed — `KindTimestamp` realizable end-to-end (BSATN tag 17, 8-byte LE; coerce accepts `LitString` parsed as RFC3339 with `T`/space separator, optional fractional seconds truncated to micros, `Z` or numeric offset; subscription hash 8-byte BE with kind tag separating Timestamp from Int64; storage reuses `i64` slot as micros since Unix epoch). Unlocks `check.rs:334-352` timestamp rows — pinned by `TestHandle*_ParityTimestampLiteralAccepted` (5 subtests each) and malformed-rejection pins `TestHandle*_ParityTimestampMalformedRejected`.
-- column-kind widening Slice 5 (2026-04-21, this session) landed — `KindArrayString` realized end-to-end (narrow, string element type only). `types.Value` grew `strArr []string` slot with defensive-copy constructor/accessor; BSATN tag 18 (u32 LE count + per-element u32 LE length + utf8); coerce rejects all scalar literals on `KindArrayString`; subscription canonical hashing writes u32 BE count + per-element (u32 BE length + utf8); join-ON compile rejects array kinds via new `isArrayKind` helper in `protocol/handle_subscribe.go`. Unlocks `check.rs:487-489` (`arr = :sender` rejection as positive parity) and `check.rs:523-525` (`t.arr = s.arr` join-ON rejection as positive parity). Pinned across types (6 new tests), bsatn (3 new tests + 5 round-trip entries), schema (export + autoincrement extensions), coerce (2 new tests), subscription hash (2 new tests + 3 round-trip entries), and protocol admission (4 new tests: `TestHandle{SubscribeSingle,OneOffQuery}_ParityArraySenderRejected`, `TestHandle{SubscribeSingle,OneOffQuery}_ParityArrayJoinOnRejected`). With this slice every narrow reference-backed SQL/query-surface anchor realizable against `schema.ValueKind` is drained.
-- column-kind widening Slice 4 (2026-04-21) landed — BigDecimal literal path closes `check.rs:330-332` `u256 = 1e40`. New `LitBigInt` literal kind in `query/sql/parser.go` carries `*big.Int`; `parseNumericLiteral` routes `.eE` bodies through `big.Rat.SetString` so integer-valued scientific shapes beyond int64 promote to `LitBigInt` (plain integer overflow also promotes). Coerce widens 128/256-bit kinds to accept `LitBigInt` via two's-complement decomposition into uint64 words with width-bound range checks; float kinds accept `LitBigInt` via `big.Float.Float64()` so `f32 = 1e40 → +Inf` behavior is preserved. Pinned by parser (`TestParseWhereScientificNotationOverflowBigInt`, `TestParseWhereIntegerOverflowPromotesToBigInt`), coerce (9 pins — u256/i256 accept, u128 overflow reject, u256 overflow reject, negative reject, int64 reject, f32 infinity, f64 exact, string reject), and protocol admission (`TestHandle{SubscribeSingle,OneOffQuery}_ParityValidLiteralU256Scientific`).
-- next realistic anchors: no narrow reference-backed SQL/query-surface slice remains without larger-scope runtime widening. Candidates are further Tier-B hardening (α), format-level commitlog parity (β), individual scheduler deferrals (γ), or array / product column kinds (recursive `Value` representation; biggest column-kind change).
-- targeted flaky-test cleanup is closed; no known clean-tree intermittent test remains
-- 10 packages, clean-tree full-suite baseline `Go test: 1420 passed in 10 packages`
+- Authoritative next step is the top-of-file `## Next session is Phase 4 Slice 2β` block.
+- Treat the historical sections above as provenance only.
+- Do not use any superseded guidance below this point; it has been intentionally trimmed to reduce token waste.
+- For broader project state, read the current source-of-truth docs already listed in `AGENTS.md` / `docs/EXECUTION-ORDER.md` rather than relying on stale copied summaries here.

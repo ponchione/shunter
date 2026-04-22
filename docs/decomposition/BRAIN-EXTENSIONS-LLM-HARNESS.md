@@ -5,6 +5,11 @@ Scope: additive design document describing what would need to be added on top of
 
 This document does not change the existing six core specs. It describes the additional subsystem surface needed to turn the current Shunter engine shape into a practical, durable, agent-facing knowledge system.
 
+Owner-operator framing:
+- This document assumes the brain is primarily for the repo owner’s own harnesses, agents, and projects.
+- It therefore optimizes for practical private usefulness over broad-market product completeness.
+- Features that are only necessary for a public multi-tenant product should be treated as optional unless they materially improve the owner’s own workflows.
+
 ---
 
 ## 1. Goal
