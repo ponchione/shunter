@@ -12,12 +12,12 @@ import (
 // (`pub struct TransactionUpdate<F>`). Reference field order:
 //
 //	status:                     UpdateStatus     (tagged union)
-//	timestamp:                  Timestamp        (i64 ns since Unix epoch)
+//	timestamp:                  Timestamp        (i64 µs since Unix epoch — sats/timestamp.rs:11-13)
 //	caller_identity:            Identity         (32 bytes)
 //	caller_connection_id:       ConnectionId     (16 bytes)
 //	reducer_call:               ReducerCallInfo
 //	energy_quanta_used:         EnergyQuanta     (u128 LE)
-//	total_host_execution_duration: TimeDuration  (i64 ns)
+//	total_host_execution_duration: TimeDuration  (i64 µs — sats/time_duration.rs:17-19)
 //
 // `energy_quanta_used` is 16 bytes little-endian to match reference
 // `EnergyQuanta { quanta: u128 }` (energy.rs:12); the prior Shunter

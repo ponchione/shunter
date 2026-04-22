@@ -20,8 +20,8 @@ import (
 //	TransactionUpdate.ReducerCall.ReducerName   (Box<str>)
 //	TransactionUpdate.ReducerCall.ReducerID     (ReducerId u32)
 //	TransactionUpdate.ReducerCall.Args          (Bytes)
-//	TransactionUpdate.Timestamp                 (Timestamp i64 ns)
-//	TransactionUpdate.TotalHostExecutionDuration (TimeDuration i64 ns)
+//	TransactionUpdate.Timestamp                 (Timestamp i64 µs)
+//	TransactionUpdate.TotalHostExecutionDuration (TimeDuration i64 µs)
 
 func submitWithMetadata(
 	t *testing.T,
@@ -115,9 +115,9 @@ func TestCallerOutcomeCarriesTimestampAndDuration(t *testing.T) {
 	defer cancel()
 	go h.exec.Run(ctx)
 
-	before := time.Now().UnixNano()
+	before := time.Now().UnixMicro()
 	resp := submitWithMetadata(t, h.exec, "InsertPlayer", types.Identity{}, nil)
-	after := time.Now().UnixNano()
+	after := time.Now().UnixMicro()
 	if resp.Status != StatusCommitted {
 		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
 	}
@@ -129,7 +129,7 @@ func TestCallerOutcomeCarriesTimestampAndDuration(t *testing.T) {
 	if got.TotalHostExecutionDuration <= 0 {
 		t.Errorf("CallerOutcome.TotalHostExecutionDuration = %d, want > 0", got.TotalHostExecutionDuration)
 	}
-	bound := after - before + int64(time.Second)
+	bound := after - before + int64(time.Second/time.Microsecond)
 	if got.TotalHostExecutionDuration > bound {
 		t.Errorf("CallerOutcome.TotalHostExecutionDuration = %d, exceeds upper bound %d",
 			got.TotalHostExecutionDuration, bound)
@@ -182,3 +182,36 @@ func TestRegistryAssignsMonotonicReducerIDs(t *testing.T) {
 }
 
 func noopHandler(*types.ReducerContext, []byte) ([]byte, error) { return nil, nil }
+
+// TestCallerOutcomeTimestampIsMicroseconds pins the ns→µs flip on the
+// executor populator. Reference `Timestamp` carries
+// `__timestamp_micros_since_unix_epoch__` (sats/timestamp.rs:11-13), so
+// CallerOutcome.Timestamp must match UnixMicro rather than UnixNano.
+// The test bounds Timestamp against a UnixMicro window and asserts the
+// magnitude is below the UnixNano floor (which would exceed the µs
+// window by 1000×) to catch an accidental revert.
+func TestCallerOutcomeTimestampIsMicroseconds(t *testing.T) {
+	h := newPipelineHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	before := time.Now().UnixMicro()
+	resp := submitWithMetadata(t, h.exec, "InsertPlayer", types.Identity{}, nil)
+	after := time.Now().UnixMicro()
+	if resp.Status != StatusCommitted {
+		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
+	}
+
+	got := latestCallerOutcome(t, h)
+	if got.Timestamp < before || got.Timestamp > after+int64(time.Second/time.Microsecond) {
+		t.Errorf("CallerOutcome.Timestamp = %d, want in [%d,%d] (µs)", got.Timestamp, before, after)
+	}
+	// If the executor accidentally reverted to UnixNano, the value
+	// would be ~1000× larger than a µs-window upper bound. Anchor
+	// against the nanosecond floor to catch that regression.
+	nsFloor := time.Now().UnixNano() / 10
+	if got.Timestamp >= nsFloor {
+		t.Errorf("CallerOutcome.Timestamp = %d looks like ns (>= %d); reference is µs", got.Timestamp, nsFloor)
+	}
+}

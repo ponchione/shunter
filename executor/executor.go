@@ -78,8 +78,10 @@ type postCommitOptions struct {
 	// Caller metadata populated for CallSourceExternal so the heavy
 	// TransactionUpdate envelope can carry the reference
 	// CallerIdentity / ReducerCallInfo fields. startTime captures the
-	// reducer-dispatch instant (Unix ns) — postCommit reads both
-	// Timestamp and wall-clock TotalHostExecutionDuration from it.
+	// reducer-dispatch instant — postCommit derives both the µs-since-Unix
+	// `Timestamp` (reference `Timestamp` at sats/timestamp.rs:11-13) and
+	// the wall-clock µs `TotalHostExecutionDuration` (reference
+	// `TimeDuration` at sats/time_duration.rs:17-19) from it.
 	callerIdentity types.Identity
 	reducerName    string
 	reducerID      uint32
@@ -627,8 +629,8 @@ func (e *Executor) postCommit(
 			ReducerName:                opts.reducerName,
 			ReducerID:                  opts.reducerID,
 			Args:                       opts.args,
-			Timestamp:                  opts.startTime.UnixNano(),
-			TotalHostExecutionDuration: time.Since(opts.startTime).Nanoseconds(),
+			Timestamp:                  opts.startTime.UnixMicro(),
+			TotalHostExecutionDuration: time.Since(opts.startTime).Microseconds(),
 		}
 		if cmd.ProtocolResponseCh != nil {
 			// For protocol-originated reducer calls the protocol inbox adapter owns

@@ -133,7 +133,8 @@ type UnsubscribeMultiApplied struct {
 
 // TransactionUpdate is the heavy caller-bound envelope (Phase 1.5).
 // Non-callers receive `TransactionUpdateLight` instead. `Timestamp` and
-// `TotalHostExecutionDuration` are populated from the executor seam;
+// `TotalHostExecutionDuration` are populated from the executor seam in
+// microseconds to match the reference SATS semantics (§docs/parity…);
 // `EnergyQuantaUsed` remains zero because Shunter has no energy model —
 // see the decision doc.
 //
@@ -151,13 +152,18 @@ type UnsubscribeMultiApplied struct {
 // byte shape; Shunter emits all-zero bytes because there is no energy
 // model.
 type TransactionUpdate struct {
-	Status                     UpdateStatus
-	Timestamp                  int64 // nanoseconds since Unix epoch
+	Status UpdateStatus
+	// Timestamp is microseconds since Unix epoch, matching reference
+	// `Timestamp` (sats/timestamp.rs:11-13 — `i64` micros). Wire width
+	// is i64 regardless; only the unit flipped ns→µs here.
+	Timestamp                  int64
 	CallerIdentity             [32]byte
 	CallerConnectionID         [16]byte
 	ReducerCall                ReducerCallInfo
 	EnergyQuantaUsed           [16]byte // u128 little-endian, reference `EnergyQuanta.quanta`
-	TotalHostExecutionDuration int64    // nanoseconds
+	// TotalHostExecutionDuration is microseconds, matching reference
+	// `TimeDuration` (sats/time_duration.rs:17-19 — `i64` micros).
+	TotalHostExecutionDuration int64
 }
 
 // TransactionUpdateLight is the delta-only envelope delivered to
