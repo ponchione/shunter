@@ -209,13 +209,13 @@ func TestReconnectSameIdentityViaRealUpgrade(t *testing.T) {
 	defer c1.Close(websocket.StatusNormalClosure, "")
 	data1, err := readOneBinary(t, c1, 2*time.Second)
 	if err != nil {
-		t.Fatalf("read first InitialConnection: %v", err)
+		t.Fatalf("read first IdentityToken: %v", err)
 	}
 	_, msg1, err := DecodeServerMessage(data1)
 	if err != nil {
-		t.Fatalf("decode first InitialConnection: %v", err)
+		t.Fatalf("decode first IdentityToken: %v", err)
 	}
-	ic1 := msg1.(InitialConnection)
+	ic1 := msg1.(IdentityToken)
 	if ic1.Identity != expectedIdentity {
 		t.Fatalf("first identity = %x, want %x", ic1.Identity, expectedIdentity)
 	}
@@ -228,13 +228,13 @@ func TestReconnectSameIdentityViaRealUpgrade(t *testing.T) {
 	defer c2.Close(websocket.StatusNormalClosure, "")
 	data2, err := readOneBinary(t, c2, 2*time.Second)
 	if err != nil {
-		t.Fatalf("read second InitialConnection: %v", err)
+		t.Fatalf("read second IdentityToken: %v", err)
 	}
 	_, msg2, err := DecodeServerMessage(data2)
 	if err != nil {
-		t.Fatalf("decode second InitialConnection: %v", err)
+		t.Fatalf("decode second IdentityToken: %v", err)
 	}
-	ic2 := msg2.(InitialConnection)
+	ic2 := msg2.(IdentityToken)
 
 	if ic2.Identity != ic1.Identity {
 		t.Fatalf("reconnect identity = %x, want %x", ic2.Identity, ic1.Identity)
@@ -261,13 +261,13 @@ func TestReconnectSameConnectionIDAcceptedViaUpgradeQuery(t *testing.T) {
 	defer c.Close(websocket.StatusNormalClosure, "")
 	data, err := readOneBinary(t, c, 2*time.Second)
 	if err != nil {
-		t.Fatalf("read InitialConnection: %v", err)
+		t.Fatalf("read IdentityToken: %v", err)
 	}
 	_, msg, err := DecodeServerMessage(data)
 	if err != nil {
-		t.Fatalf("decode InitialConnection: %v", err)
+		t.Fatalf("decode IdentityToken: %v", err)
 	}
-	ic := msg.(InitialConnection)
+	ic := msg.(IdentityToken)
 	if ic.ConnectionID != wantID {
 		t.Fatalf("ConnectionID = %x, want %x", ic.ConnectionID, wantID)
 	}

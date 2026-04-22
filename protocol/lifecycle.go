@@ -167,7 +167,7 @@ type CallReducerRequest struct {
 //     never sees the rejected connection.
 //  3. On admit: register the Conn in the manager first so any
 //     concurrent fan-out delivery can resolve the ConnectionID, then
-//     encode + send InitialConnection as the first binary frame. On a
+//     encode + send IdentityToken as the first binary frame. On a
 //     write failure the connection is de-registered and closed with
 //     StatusInternalError (1011).
 //
@@ -185,35 +185,35 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 	// Register before first send: the fan-out worker (Phase 8) resolves
 	// ConnectionID → Conn via this manager, and admitting a connection
 	// that is not yet visible would drop its first delta. Order is
-	// safe because RunLifecycle is synchronous and InitialConnection is
+	// safe because RunLifecycle is synchronous and IdentityToken is
 	// the very next thing emitted on this socket.
 	mgr.Add(c)
 
-	frame, err := encodeInitialConnectionFrame(InitialConnection{
+	frame, err := encodeIdentityTokenFrame(IdentityToken{
 		Identity:     c.Identity,
 		ConnectionID: c.ID,
 		Token:        c.Token,
 	}, c.Compression)
 	if err != nil {
 		mgr.Remove(c.ID)
-		_ = c.ws.Close(websocket.StatusInternalError, "encode InitialConnection")
-		return fmt.Errorf("encode InitialConnection: %w", err)
+		_ = c.ws.Close(websocket.StatusInternalError, "encode IdentityToken")
+		return fmt.Errorf("encode IdentityToken: %w", err)
 	}
 	if err := c.ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
 		mgr.Remove(c.ID)
-		_ = c.ws.Close(websocket.StatusInternalError, "write InitialConnection")
-		return fmt.Errorf("write InitialConnection: %w", err)
+		_ = c.ws.Close(websocket.StatusInternalError, "write IdentityToken")
+		return fmt.Errorf("write IdentityToken: %w", err)
 	}
 	return nil
 }
 
-// encodeInitialConnectionFrame serializes the InitialConnection server
+// encodeIdentityTokenFrame serializes the IdentityToken server
 // message per SPEC-005 §8.1 and wraps it in the correct transport
 // envelope. When compression was negotiated at upgrade time, the
 // handshake frame still carries its compression byte (CompressionNone)
 // per §3.3 so the client's decoder branches consistently; the
 // handshake body itself is never gzipped.
-func encodeInitialConnectionFrame(msg InitialConnection, compressionNegotiated bool) ([]byte, error) {
+func encodeIdentityTokenFrame(msg IdentityToken, compressionNegotiated bool) ([]byte, error) {
 	wire, err := EncodeServerMessage(msg)
 	if err != nil {
 		return nil, err

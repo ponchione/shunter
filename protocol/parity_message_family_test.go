@@ -344,7 +344,7 @@ func TestPhase2TagByteStability(t *testing.T) {
 		{"TagOneOffQuery", TagOneOffQuery, 4},
 		{"TagSubscribeMulti", TagSubscribeMulti, 5},
 		{"TagUnsubscribeMulti", TagUnsubscribeMulti, 6},
-		{"TagInitialConnection", TagInitialConnection, 1},
+		{"TagIdentityToken", TagIdentityToken, 1},
 		{"TagSubscribeSingleApplied", TagSubscribeSingleApplied, 2},
 		{"TagUnsubscribeSingleApplied", TagUnsubscribeSingleApplied, 3},
 		{"TagSubscriptionError", TagSubscriptionError, 4},

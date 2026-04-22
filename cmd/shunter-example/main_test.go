@@ -68,12 +68,12 @@ func TestBuildEngine_AdmitsAnonymousConnection(t *testing.T) {
 		t.Fatalf("upgrade status = %d, want 101", resp.StatusCode)
 	}
 
-	// Consume InitialConnection frame so the socket advances past handshake
+	// Consume IdentityToken frame so the socket advances past handshake
 	// before teardown. Nothing to assert beyond "a frame arrived".
 	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer readCancel()
 	if _, _, err := conn.Read(readCtx); err != nil {
-		t.Fatalf("read InitialConnection: %v", err)
+		t.Fatalf("read IdentityToken: %v", err)
 	}
 }
 
@@ -110,12 +110,12 @@ func TestFanOut_SubscriberReceivesReducerInsert(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s dial: %v", name, err)
 		}
-		// Consume InitialConnection so subsequent reads land on
+		// Consume IdentityToken so subsequent reads land on
 		// post-handshake frames.
 		readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
 		defer readCancel()
 		if _, _, err := c.Read(readCtx); err != nil {
-			t.Fatalf("%s read InitialConnection: %v", name, err)
+			t.Fatalf("%s read IdentityToken: %v", name, err)
 		}
 		return c
 	}

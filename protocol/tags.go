@@ -24,7 +24,7 @@ const (
 //     The tag byte is intentionally not reused so a future reintroduction
 //     cannot silently collide with the removed shape.
 const (
-	TagInitialConnection        uint8 = 1
+	TagIdentityToken            uint8 = 1 // matches reference `IdentityToken` (v1.rs:445); renamed from TagInitialConnection
 	TagSubscribeSingleApplied   uint8 = 2 // renamed from TagSubscribeApplied (Phase 2 Slice 2 variant split)
 	TagUnsubscribeSingleApplied uint8 = 3 // renamed from TagUnsubscribeApplied (Phase 2 Slice 2 variant split)
 	TagSubscriptionError        uint8 = 4

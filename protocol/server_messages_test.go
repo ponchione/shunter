@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/schema"
 )
 
-func TestInitialConnectionRoundTrip(t *testing.T) {
+func TestIdentityTokenRoundTrip(t *testing.T) {
 	var id [32]byte
 	var conn [16]byte
 	for i := range id {
@@ -17,23 +17,23 @@ func TestInitialConnectionRoundTrip(t *testing.T) {
 	for i := range conn {
 		conn[i] = byte(0xa0 + i)
 	}
-	in := InitialConnection{Identity: id, ConnectionID: conn, Token: "abc.def.ghi"}
+	in := IdentityToken{Identity: id, Token: "abc.def.ghi", ConnectionID: conn}
 
 	frame, err := EncodeServerMessage(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if frame[0] != TagInitialConnection {
-		t.Errorf("tag = %d, want TagInitialConnection", frame[0])
+	if frame[0] != TagIdentityToken {
+		t.Errorf("tag = %d, want TagIdentityToken", frame[0])
 	}
 	tag, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tag != TagInitialConnection {
-		t.Errorf("tag = %d, want TagInitialConnection", tag)
+	if tag != TagIdentityToken {
+		t.Errorf("tag = %d, want TagIdentityToken", tag)
 	}
-	got := out.(InitialConnection)
+	got := out.(IdentityToken)
 	if got.Identity != in.Identity {
 		t.Errorf("Identity mismatch: got % x, want % x", got.Identity, in.Identity)
 	}

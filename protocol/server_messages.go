@@ -22,10 +22,17 @@ import (
 //   - `UpdateStatus` is a three-arm tagged union. `OutOfEnergy` is present for
 //     shape parity but is never emitted by the Phase 1.5 executor.
 
-type InitialConnection struct {
+// IdentityToken is the first server→client frame on every connection.
+// Field order matches reference `IdentityToken` at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:445
+// (`identity, token, connection_id`) — pinned by
+// parity_identity_token_test.go against the reference byte shape.
+// Renamed from `InitialConnection`; the prior type name and field
+// order (`identity, connection_id, token`) were Shunter-local.
+type IdentityToken struct {
 	Identity     [32]byte
-	ConnectionID [16]byte
 	Token        string
+	ConnectionID [16]byte
 }
 
 // SubscribeSingleApplied is the server response to a SubscribeSingle.
@@ -207,11 +214,11 @@ const (
 func EncodeServerMessage(m any) ([]byte, error) {
 	var buf bytes.Buffer
 	switch msg := m.(type) {
-	case InitialConnection:
-		buf.WriteByte(TagInitialConnection)
+	case IdentityToken:
+		buf.WriteByte(TagIdentityToken)
 		buf.Write(msg.Identity[:])
-		buf.Write(msg.ConnectionID[:])
 		writeString(&buf, msg.Token)
+		buf.Write(msg.ConnectionID[:])
 	case SubscribeSingleApplied:
 		buf.WriteByte(TagSubscribeSingleApplied)
 		writeUint32(&buf, msg.RequestID)
@@ -281,7 +288,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 
 // DecodeServerMessage parses a server frame back into the concrete
 // message type. Provided for symmetry and client-side / test use.
-// The returned any is one of InitialConnection, SubscribeSingleApplied,
+// The returned any is one of IdentityToken, SubscribeSingleApplied,
 // UnsubscribeSingleApplied, SubscriptionError, TransactionUpdate,
 // OneOffQueryResult, TransactionUpdateLight, SubscribeMultiApplied,
 // UnsubscribeMultiApplied — matching the tag byte.
@@ -294,8 +301,8 @@ func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	tag := frame[0]
 	body := frame[1:]
 	switch tag {
-	case TagInitialConnection:
-		msg, err := decodeInitialConnection(body)
+	case TagIdentityToken:
+		msg, err := decodeIdentityToken(body)
 		return tag, msg, err
 	case TagSubscribeSingleApplied:
 		msg, err := decodeSubscribeSingleApplied(body)
@@ -326,18 +333,21 @@ func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	}
 }
 
-func decodeInitialConnection(body []byte) (InitialConnection, error) {
-	var m InitialConnection
-	if len(body) < 32+16 {
-		return m, fmt.Errorf("%w: InitialConnection fixed fields", ErrMalformedMessage)
+func decodeIdentityToken(body []byte) (IdentityToken, error) {
+	var m IdentityToken
+	if len(body) < 32 {
+		return m, fmt.Errorf("%w: IdentityToken identity field", ErrMalformedMessage)
 	}
 	copy(m.Identity[:], body[0:32])
-	copy(m.ConnectionID[:], body[32:48])
-	s, _, err := readString(body, 48)
+	token, off, err := readString(body, 32)
 	if err != nil {
 		return m, err
 	}
-	m.Token = s
+	m.Token = token
+	if len(body)-off < 16 {
+		return m, fmt.Errorf("%w: IdentityToken connection_id field", ErrMalformedMessage)
+	}
+	copy(m.ConnectionID[:], body[off:off+16])
 	return m, nil
 }
 

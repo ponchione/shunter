@@ -45,7 +45,7 @@ type Server struct {
 	// supplies SPEC-005 §12 defaults.
 	Options ProtocolOptions
 	// Executor is the lifecycle seam used by the default Upgraded
-	// handler to run OnConnect and emit InitialConnection (Story 3.4).
+	// handler to run OnConnect and emit IdentityToken (Story 3.4).
 	// When non-nil AND Conns is non-nil AND Upgraded is nil, the
 	// handler drives Conn.RunLifecycle for every admitted upgrade.
 	Executor ExecutorInbox

@@ -134,7 +134,7 @@ func readOneBinary(t *testing.T, c *websocket.Conn, timeout time.Duration) ([]by
 	return data, nil
 }
 
-func TestRunLifecycleSuccessSendsInitialConnection(t *testing.T) {
+func TestRunLifecycleSuccessSendsIdentityToken(t *testing.T) {
 	inbox := &fakeInbox{}
 	s, mgr := lifecycleServer(t, inbox)
 	srv := newTestServer(t, s)
@@ -150,18 +150,18 @@ func TestRunLifecycleSuccessSendsInitialConnection(t *testing.T) {
 
 	data, err := readOneBinary(t, c, 2*time.Second)
 	if err != nil {
-		t.Fatalf("read InitialConnection: %v", err)
+		t.Fatalf("read IdentityToken: %v", err)
 	}
 	tag, msg, err := DecodeServerMessage(data)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if tag != TagInitialConnection {
-		t.Fatalf("tag = %d, want %d", tag, TagInitialConnection)
+	if tag != TagIdentityToken {
+		t.Fatalf("tag = %d, want %d", tag, TagIdentityToken)
 	}
-	ic, ok := msg.(InitialConnection)
+	ic, ok := msg.(IdentityToken)
 	if !ok {
-		t.Fatalf("decoded type = %T, want InitialConnection", msg)
+		t.Fatalf("decoded type = %T, want IdentityToken", msg)
 	}
 
 	expectedIdentity := auth.DeriveIdentity("test-issuer", "alice")
@@ -208,7 +208,7 @@ func TestRunLifecycleOnConnectRejectClosesWith1008(t *testing.T) {
 	// The first and only frame the client observes must be the close.
 	_, err = readOneBinary(t, c, 2*time.Second)
 	if err == nil {
-		t.Fatal("expected close frame; got a data frame instead — InitialConnection must not be sent on OnConnect failure")
+		t.Fatal("expected close frame; got a data frame instead — IdentityToken must not be sent on OnConnect failure")
 	}
 	code := websocket.CloseStatus(err)
 	if code != websocket.StatusPolicyViolation {
