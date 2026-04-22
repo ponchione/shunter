@@ -2,64 +2,80 @@
 
 Use this file to start the next agent on the next real Shunter parity / hardening step with no prior context.
 
-For provenance of closed slices, use `git log` — this file tracks only current state and forward motion.
+For provenance of closed slices, use `rtk git log` — this file tracks only current state and forward motion. Do not re-narrate closed slices here.
 
-## Current state
+## Current state (live only)
 
 - All OIs referenced in the 2026-04-22 audit chain (OI-008 through OI-012) are closed.
-- Follow-on queue item for subscription `IndexRange` migration is closed.
-- Follow-on queue item for subscription fan-out wiring in `cmd/shunter-example` is closed.
-- Follow-on queue item for exposing executor inbox for scheduler wiring is closed — `Executor.SchedulerFor()` returns a wired `*Scheduler`, and `cmd/shunter-example` passes it to `Startup` and owns its Run goroutine.
-- OI-001 A1 wire-close slice for `SubscriptionError.total_host_execution_duration_micros` is closed — the field is the reference-position first wire field (v1.rs:350), pinned by `protocol/parity_subscription_error_test.go` against the reference byte shape. Emit sites populate 0; duration measurement is deferred (see "Current active constraint" below).
-- OI-001 A1 wire-close slice for `CallReducer` field order is closed — struct + encode/decode reordered to the reference `reducer, args, request_id, flags` layout (v1.rs:110), pinned by `protocol/parity_call_reducer_test.go` against the reference byte shape.
-- OI-001 A1 wire-close slice for `TransactionUpdate` field order is closed — struct + encode/decode reordered to the reference `status, timestamp, caller_identity, caller_connection_id, reducer_call, energy_quanta_used, total_host_execution_duration` layout (v1.rs:458), pinned by `protocol/parity_transaction_update_test.go` against the reference byte shape. `TestPhase15TransactionUpdateHeavyShape` asserts the new field order.
-- OI-001 A1 wire-close slice for applied-envelope field order is closed — `SubscribeSingleApplied`, `UnsubscribeSingleApplied`, `SubscribeMultiApplied`, and `UnsubscribeMultiApplied` now match the reference `request_id, total_host_execution_duration_micros, query_id, rows/update` layout (v1.rs:317/331/380/394). Struct + encode/decode reordered; byte shape pinned by `protocol/parity_applied_envelopes_test.go`; field-order pins updated in `parity_message_family_test.go`. Flattened rows shapes (`TableName+Rows`, `HasRows+Rows`, `[]SubscriptionUpdate`) remain as separate documented divergences from the reference `SubscribeRows` / `DatabaseUpdate` wrappers.
-- OI-001 A1 wire-close slice for `IdentityToken` is closed — Shunter's `InitialConnection` type and `TagInitialConnection` tag are renamed to `IdentityToken` / `TagIdentityToken`, and the wire is reordered to the reference `identity, token, connection_id` layout (v1.rs:445). Tag byte value is unchanged (1); struct + encode/decode reordered; byte shape pinned by `protocol/parity_identity_token_test.go`; tag pin updated in `parity_message_family_test.go`.
-- OI-001 A1 wire-close slice for `Unsubscribe.SendDropped` is closed — the extra `send_dropped: u8` byte has been removed from the `UnsubscribeSingleMsg` wire and struct to match reference `Unsubscribe { request_id: u32, query_id: QueryId }` (v1.rs:218). The `SendDroppedRows` concept lives only on v2 `UnsubscribeFlags` and is out of scope for v1 parity. Byte shape pinned by `protocol/parity_unsubscribe_test.go`; field-order pin updated in `parity_message_family_test.go`; seam doc example updated in `docs/decisions/protocol-executor-seam.md`.
-- OI-001 A1 wire-close slice for `OneOffQueryResponse` is closed — `OneOffQueryResult` (Status-byte + single-Rows + Error layout) has been renamed to `OneOffQueryResponse` with the reference field order `message_id, error: Option<Box<str>>, tables: Box<[OneOffTable]>, total_host_execution_duration: TimeDuration` (v1.rs:654). `OneOffTable { table_name, rows }` mirrors v1.rs:669. Success emission populates a single `OneOffTable` entry carrying the matched rows; failure emission sets `Error: Some(msg), Tables: []`, matching `module_host.rs:2290-2308`. `TagOneOffQueryResult` is renamed to `TagOneOffQueryResponse` (byte value 6 unchanged). Byte shape pinned by `protocol/parity_one_off_query_response_test.go` (success + error variants); field-order pin updated in `parity_message_family_test.go`. `TotalHostExecutionDuration` is on the wire but always 0 — same measurement-deferred pattern as `SubscriptionError.TotalHostExecutionDurationMicros` (no receipt-timestamp seam plumbed through the one-off path).
-- OI-001 A1 `SubscriptionError.RequestID`/`QueryID` emission parity is closed — `protocol/fanout_adapter.go::SendSubscriptionError` now emits `RequestID: nil, QueryID: nil` for post-commit evaluation-origin errors (reference `core/src/subscription/module_subscription_manager.rs:1998-2010` + `core/src/client/messages.rs:622-629`). The fan-out path is the only origin for this adapter; subscribe/unsubscribe request errors still flow through `handle_subscribe_*` / `handle_unsubscribe_*` / `executor/protocol_inbox_adapter.go`, which continue to populate `RequestID`/`QueryID` from the originating client request. Behavior pinned by `protocol/fanout_adapter_test.go::TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs`; wire byte shape through the adapter seam pinned by `protocol/parity_subscription_error_test.go::TestParitySubscriptionErrorTransactionOriginWire`. The diagnostic-only `subscription.SubscriptionError.{RequestID,SubscriptionID}` fields remain on the subscription-layer struct for internal logging but are not plumbed to the wire.
-- OI-001 A1 wire-close slice for `TransactionUpdate.EnergyQuantaUsed` width is closed — the field was widened from `uint64` (8 bytes) to `[16]byte` (u128 little-endian) to match reference `EnergyQuanta { quanta: u128 }` at `reference/SpacetimeDB/crates/client-api-messages/src/energy.rs:12`. Shunter has no energy model so emit sites populate all-zero bytes; `protocol/fanout_adapter.go::energyQuantaU128LE` widens the subscription-domain `CallerOutcome.EnergyQuantaUsed uint64` to the wire shape at the adapter seam. Byte shape pinned by `protocol/parity_transaction_update_test.go` (success variant writes a 16-byte non-zero energy; Failed variant pins 16 zero bytes). Field-order pin in `parity_message_family_test.go` is unchanged (name-level).
-- Phase 2 Slice 4 rows-shape slice is closed as a documented divergence — the flat `[]SubscriptionUpdate` / `TableName+Rows` layout on `Subscribe{Single,Multi}Applied`, `Unsubscribe{Single,Multi}Applied`, `TransactionUpdateLight`, and `StatusCommitted` is accepted as Shunter-canonical. Full rationale in `docs/parity-phase2-slice4-rows-shape.md`: every wrapper-chain delta (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `QueryUpdate`) collapses onto the SPEC-005 §3.4 `BsatnRowList` vs per-row-length-prefix row-list deferral, so a partial close produces a hybrid wire that is neither reference-parity nor SPEC-005 clean. Canonical-contract pins rolled up in `protocol/parity_rows_shape_test.go` (cross-envelope field-order table, new `TransactionUpdateLight` byte-shape pin, `SubscriptionUpdate` inner-layout pin, rowlist-format pin). Existing byte-shape pins in `parity_applied_envelopes_test.go` and `parity_transaction_update_test.go` remain authoritative.
-- Closed-slice provenance, detailed verification history, and implementation narratives live in `rtk git log`.
-- Before starting a new slice, verify any remembered closure claim against live code; this file is intentionally current-state only.
+- All OI-001 A1 protocol wire-close slices identified to date are closed: `SubscriptionError` duration field + RequestID/QueryID None parity, `CallReducer` field order, `TransactionUpdate` field order + `EnergyQuantaUsed` u64→u128 width, applied-envelope field order (all four variants), `IdentityToken` rename + field order, `Unsubscribe.SendDropped` removal, `OneOffQueryResponse` rename + field order. All pinned in `protocol/parity_*_test.go`.
+- Phase 2 Slice 4 rows-shape cluster (flat `[]SubscriptionUpdate` / `TableName+Rows` vs reference `SubscribeRows` / `DatabaseUpdate` wrapper chain) is closed as documented divergence — `docs/parity-phase2-slice4-rows-shape.md`. Reopening requires a new decision doc that *also* closes SPEC-005 §3.4 `BsatnRowList` row-list deferral. Do not attempt a partial close.
+- `cmd/shunter-example` runs schema → commitlog recovery → durability → executor → WebSocket with anonymous auth, subscription fan-out, and a real `*Scheduler` owned by the example.
+- Before changing a file, verify against live code — memory/ledger claims can drift.
 
-## Current active constraint from the last closed slice
+## Live constraints (carry forward)
 
-- The example remains on anonymous auth; strict auth wiring is still out of scope for this queue.
+- `SubscriptionError.TotalHostExecutionDurationMicros`, `OneOffQueryResponse.TotalHostExecutionDuration`, and `Subscribe{Single,Multi}Applied.TotalHostExecutionDurationMicros` / `Unsubscribe{Single,Multi}Applied.TotalHostExecutionDurationMicros` are all on the wire but always 0 — no receipt-timestamp seam is plumbed through the admission path (`protocol/handle_subscribe_*.go`, `protocol/handle_unsubscribe_*.go`), the evaluation path (`subscription/eval.go`), or the one-off path (`protocol/handle_oneoff.go`). Wire shapes match reference; measured-value parity is the receipt-timestamp-seam batch (see below).
+- `TransactionUpdate.Timestamp` and `TransactionUpdate.TotalHostExecutionDuration` are i64 with the same width as reference `Timestamp` / `TimeDuration`, but Shunter populates nanoseconds while reference SATS structs store microseconds (`reference/SpacetimeDB/crates/sats/src/timestamp.rs:11-13`, `.../time_duration.rs:17-19`). Bundled into the receipt-timestamp-seam batch.
+- `EnergyQuantaUsed` on the wire is a 16-byte u128 LE that always emits zeros. Shunter has no energy model; widening to honest u128 values is not on the roadmap.
+- `cmd/shunter-example` remains on anonymous auth; strict auth wiring is still out of scope for this queue.
 - `Scheduler.ReplayFromCommitted` still uses `context.Background()`; a recovered schedule count exceeding the executor inbox capacity would block replay. Inherited backpressure, not introduced here.
-- `SubscriptionError.TotalHostExecutionDurationMicros` is on the wire but always 0 — no receipt-timestamp seam is plumbed through the admission path (`protocol/handle_subscribe_*.go`, `protocol/handle_unsubscribe_*.go`) or the evaluation path (`subscription/eval.go`). Wire shape matches the reference; measured-value parity is a separate future slice.
-- `OneOffQueryResponse.TotalHostExecutionDuration` is on the wire but always 0 — `protocol/handle_oneoff.go` does not thread a receipt-timestamp timer. Wire shape matches the reference; measured-value parity is deferred under the same receipt-timestamp-seam follow-on as `SubscriptionError`.
 
-## Next session: OI-001 A1 protocol wire-close — next concrete envelope/tag divergence
+## How to frame a session
 
-Prior A1 slices (`SubscriptionError` duration field, `CallReducer` field order, `TransactionUpdate` field order, applied-envelope field order, `IdentityToken` rename + field order, `Unsubscribe.SendDropped` removal, `OneOffQueryResponse` rename + field-order close, Phase 2 Slice 4 rows-shape documented divergence, `SubscriptionError` TransactionUpdate-origin RequestID/QueryID None parity, `TransactionUpdate.EnergyQuantaUsed` u64→u128 width close) are closed. OI-001 still has residual visible divergences. Pick one and repeat the scout → pick → close-or-pin pattern.
+Work in *batches*, not single slices. One session = one batch. Within a batch, land one commit per slice so each remains reviewable.
 
-The two rows-shape items that previously sat here (flat `[]SubscriptionUpdate` on `TransactionUpdateLight` / `{Subscribe,Unsubscribe}MultiApplied` / `StatusCommitted`, and the `SubscribeRows` wrapper on `{Single}Applied`) are now closed as documented divergences under `docs/parity-phase2-slice4-rows-shape.md`. Do not reopen them as a single-slice close — the decision doc shows every delta collapsing onto the SPEC-005 §3.4 `BsatnRowList` row-list deferral, so partial close is worse than no close. Any future attempt must open its own decision doc under Phase 2 and close the wrapper chain *together with* the row-list format.
+1. **Scout once, at the start of the session.** Read `protocol/tags.go`, `protocol/wire_types.go`, `protocol/client_messages.go`, `protocol/server_messages.go`, `protocol/send_responses.go`, `protocol/send_txupdate.go`, `protocol/fanout_adapter.go`, and diff each against `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs` (read-only). Grep for `parity_` and `documented-divergence` to filter out already-closed items. Produce the full residual list.
+2. **Pick the batch's scope boundary** (one OI, or one named follow-on). Write out which items from the residual list fall inside it. Items outside stay for a future session — do not widen mid-batch.
+3. **Close each item in turn**, one commit per slice, each with a new `parity_*_test.go` byte-shape pin or a short decision doc under `docs/` matching the Slice 4 / 2γ / subprotocol pattern. Run `rtk go test ./protocol/...` + dependent packages after each, not only at the end.
+4. **Stop when** (a) the batch scope is exhausted, (b) the next item would need a new decision doc (stop and write the doc; do not just ship it), or (c) the next item crosses an OI/scope boundary. Do not stop mid-slice because "one slice is enough for today."
+5. **Update this file + memory at the end**, then commit and hand off.
 
-Known remaining divergences to scout before picking (not exhaustive; the rows-shape cluster is removed from this list per the slice above):
+Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A2/A3 or OI-004/005/006 hardening.
 
-- Legacy `ServerMessage::InitialSubscription` / client `Subscribe` (non-Single) variants are absent from Shunter; flagged in reference as "will be removed when we switch to `SubscribeSingle`". Already out-of-scope per OI-001 A1, but verify no client still negotiates for them before closing the audit.
-- `CallProcedure` / `ProcedureResult` variants are reference-only; Shunter does not implement procedures. Out-of-scope for OI-001 A1; revisit only if procedures become a Shunter feature.
-- `TransactionUpdate.Timestamp` and `TransactionUpdate.TotalHostExecutionDuration` are encoded as i64 with the same width as reference `Timestamp` / `TimeDuration`, but Shunter populates nanoseconds while the reference SATS structs store microseconds (`reference/SpacetimeDB/crates/sats/src/timestamp.rs:11-13`, `.../time_duration.rs:17-19`). The same unit mismatch applies to `OneOffQueryResponse.TotalHostExecutionDuration` (currently always 0) and `SubscribeApplied*.TotalHostExecutionDurationMicros` (also always 0 until a measurement seam lands). This is measurement parity, not shape parity — bundle it with the receipt-timestamp-seam follow-on below rather than opening a separate wire-close slice.
-- Re-scout: the file list in step 1 of the slice framing has been exhausted at least twice; before a new slice, widen the scan to any new reference envelopes in `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs` not yet represented in `protocol/tags.go` / `server_messages.go` / `client_messages.go`.
+## Next session: receipt-timestamp seam (OI-001 A1 measurement-parity batch)
 
-Recommended slice framing for the next session:
+OI-001 A1 is exhausted for *wire-shape* residuals. The remaining A1 work is measurement parity: four duration fields on the wire that always emit 0.
 
-1. **Scout first** — read `protocol/tags.go`, `protocol/wire_types.go`, `protocol/client_messages.go`, `protocol/server_messages.go`, `protocol/send_responses.go`, `protocol/send_txupdate.go`, and `protocol/fanout_adapter.go`, and diff each against `reference/SpacetimeDB/crates/client-api-messages/` (read-only). Produce a short list of still-visible divergences against what is already pinned (grep for `parity_` and `documented-divergence`; check `docs/parity-phase2-slice4-rows-shape.md` before flagging rows-shape items).
-2. **Pick exactly one** item off that list. Do not widen.
-3. **Close or pin** — either (a) land a minimal code change that matches the reference envelope/tag, with a new `parity_*_test.go` pin against the reference byte shape; or (b) add a pinned compatibility test and a short decision doc under `docs/` stating the accepted divergence and why, matching the 2γ / subprotocol / Slice 4 rows-shape pattern.
+Fields to populate with real measured values in this batch:
 
-Out of scope for that slice: A2 subscription parity, A3 recovery/store parity, OI-004/005/006 hardening. Do not reopen any of OI-008 … OI-012, the `SubscriptionError` duration slice, or the Slice 4 rows-shape cluster.
+- `SubscriptionError.TotalHostExecutionDurationMicros`
+- `OneOffQueryResponse.TotalHostExecutionDuration`
+- `SubscribeSingleApplied.TotalHostExecutionDurationMicros`
+- `SubscribeMultiApplied.TotalHostExecutionDurationMicros`
+- `UnsubscribeSingleApplied.TotalHostExecutionDurationMicros`
+- `UnsubscribeMultiApplied.TotalHostExecutionDurationMicros`
 
-## Follow-on queue
+Also in scope: `TransactionUpdate.Timestamp` and `TransactionUpdate.TotalHostExecutionDuration` unit conversion (ns → µs) to match reference SATS semantics. This is a *unit* change, not a shape change — the wire is still i64.
 
-- Populate `SubscriptionError.TotalHostExecutionDurationMicros` and `OneOffQueryResponse.TotalHostExecutionDuration` with real measured durations. Needs a receipt-timestamp seam threaded through the admission and evaluation paths plus the one-off query path; current emit sites all populate 0.
-- Coordinated wrapper-chain + row-list close (Phase 2 Slice 4 carried-forward deferral). Requires a new decision doc reopening the SPEC-005 §3.4 `BsatnRowList` deferral; scope is an order of magnitude larger than a single wire-close slice. Do not start without a named consumer or bandwidth trigger (SPEC-005 §3.4 "fixed-schema row delivery bottleneck").
+Seam work required (scout before coding):
 
-Pick scope before starting. Do not open multiple OIs at once.
+1. **Admission path**: thread a receipt-timestamp (captured at request decode, before dispatch) through `protocol/handle_subscribe_single.go`, `protocol/handle_subscribe_multi.go`, `protocol/handle_unsubscribe_single.go`, `protocol/handle_unsubscribe_multi.go`, `protocol/handle_oneoff.go`. The emit site computes `time.Since(receipt)` in microseconds at Reply/response time.
+2. **Evaluation path**: `subscription/eval.go` post-commit evaluation-origin `SubscriptionError` emission needs a receipt timestamp from the enclosing commit / fan-out context. `protocol/fanout_adapter.go::SendSubscriptionError` should accept the measured duration rather than defaulting to 0.
+3. **TransactionUpdate unit flip**: change `CallerOutcome.Timestamp` and `CallerOutcome.TotalHostExecutionDuration` semantics from nanoseconds to microseconds at the subscription/executor boundary. Audit every populator (`executor/...`, subscription pipeline) and flip `time.Now().UnixNano()` / `elapsed.Nanoseconds()` to the microsecond equivalent. Update pin tests in `protocol/parity_transaction_update_test.go` to document the unit.
+4. **Per-slice pins**: each of the six duration fields gets an updated parity test that asserts a *non-zero* duration on the wire after seam wiring, not just the field position. Existing byte-shape pins should continue to pass.
+
+Close criteria for the batch:
+
+- All six `*Applied` / error / one-off duration fields populate non-zero values when a real request takes observable time.
+- `TransactionUpdate` timestamp + duration values round-trip cleanly in microseconds.
+- `rtk go test ./protocol/... ./subscription/... ./executor/... ./cmd/shunter-example/...` passes.
+- One commit per sub-slice; final commit updates this file.
+
+If a real blocker surfaces (e.g., the evaluation path needs a new `CommitFanout` field that ripples through SPEC-004 contracts), stop the batch at a clean sub-slice boundary, write the blocker up at the bottom of this file as a new follow-on, and hand off.
+
+Out of scope for this batch: OI-001 A2 subscription parity, OI-001 A3 recovery/store parity, OI-004/005/006 hardening, rows-shape cluster reopen.
+
+## Follow-on queue (pickable next, one per session)
+
+- **OI-001 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Needs its own scout pass; SPEC-004 E1-E5 is the relevant surface. Batch scope: predicate parity, evaluation-ordering parity, fan-out delivery parity.
+- **OI-001 A3** — recovery / store parity against `reference/SpacetimeDB/crates/core/src/db/`. Batch scope: snapshot/replay invariants beyond what `P0-RECOVERY-*` already covered.
+- **Coordinated wrapper-chain + row-list close** (Phase 2 Slice 4 carried-forward deferral). Requires a new decision doc reopening the SPEC-005 §3.4 `BsatnRowList` deferral together with the reference `SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `QueryUpdate` wrapper chain. Scope is large — do not start without a named consumer or a bandwidth trigger (SPEC-005 §3.4 "fixed-schema row delivery bottleneck").
+- **Strict-auth wiring in `cmd/shunter-example`**. Currently anonymous-only. Batch scope: JWT identity, token rotation, `IdentityToken` round-trip, upgrade-path handshake.
+
+Pick one follow-on per session and treat it as the batch scope. Do not interleave.
 
 ## Startup notes
 
 - Read `CLAUDE.md` first, then `RTK.md` for command rules, then `docs/EXECUTION-ORDER.md` for sequencing.
-- Use `git log` for slice provenance; this file is current-state only.
+- Use `rtk git log` for slice provenance; this file is current-state only.
 - Before changing a file, verify against live code — memory/ledger claims can drift.
