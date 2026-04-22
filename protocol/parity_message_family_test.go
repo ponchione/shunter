@@ -14,22 +14,26 @@ import (
 // light / `UpdateStatus` shape; see `docs/parity-phase1.5-outcome-model.md`.
 
 // TestPhase15TransactionUpdateHeavyShape pins the Phase 1.5 adoption
-// of the reference heavy `TransactionUpdate` envelope. Reference:
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`
-// `pub struct TransactionUpdate<F: WebsocketFormat>`.
+// of the reference heavy `TransactionUpdate` envelope. Reference field
+// order at
+// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:458`
+// (`status, timestamp, caller_identity, caller_connection_id,
+// reducer_call, energy_quanta_used, total_host_execution_duration`).
+// The wire byte shape is pinned separately in
+// parity_transaction_update_test.go.
 func TestPhase15TransactionUpdateHeavyShape(t *testing.T) {
 	fields := msgFieldNames(TransactionUpdate{})
 	want := []string{
 		"Status",
+		"Timestamp",
 		"CallerIdentity",
 		"CallerConnectionID",
 		"ReducerCall",
-		"Timestamp",
 		"EnergyQuantaUsed",
 		"TotalHostExecutionDuration",
 	}
 	if !reflect.DeepEqual(fields, want) {
-		t.Errorf("TransactionUpdate fields = %v, want %v (Phase 1.5 heavy envelope)",
+		t.Errorf("TransactionUpdate fields = %v, want %v (reference field order)",
 			fields, want)
 	}
 }
@@ -116,25 +120,35 @@ func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeSingleAppliedShape pins the renamed single-applied
-// envelope. Reference: SubscribeApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317.
+// TestPhase2SubscribeSingleAppliedShape pins the reference field order.
+// Reference: SubscribeApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317
+// (`request_id, total_host_execution_duration_micros, query_id, rows`).
+// Duration sits at position 2. Byte shape is pinned in
+// parity_applied_envelopes_test.go. The flattened TableName + Rows
+// shape is a separate documented divergence — the reference wraps
+// them in `SubscribeRows`.
 func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeSingleApplied{})
-	want := []string{"RequestID", "QueryID", "TableName", "Rows", "TotalHostExecutionDurationMicros"}
+	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "TableName", "Rows"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeSingleApplied fields = %v, want %v", fields, want)
+		t.Fatalf("SubscribeSingleApplied fields = %v, want %v (reference field order)", fields, want)
 	}
 }
 
-// TestPhase2UnsubscribeSingleAppliedShape pins the renamed
-// single-applied envelope. Reference: UnsubscribeApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331.
+// TestPhase2UnsubscribeSingleAppliedShape pins the reference field order.
+// Reference: UnsubscribeApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331
+// (`request_id, total_host_execution_duration_micros, query_id, rows`).
+// Duration sits at position 2. Byte shape is pinned in
+// parity_applied_envelopes_test.go. HasRows + Rows still diverges from
+// the reference required `SubscribeRows` wrapper — separate future
+// slice.
 func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeSingleApplied{})
-	want := []string{"RequestID", "QueryID", "HasRows", "Rows", "TotalHostExecutionDurationMicros"}
+	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "HasRows", "Rows"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("UnsubscribeSingleApplied fields = %v, want %v", fields, want)
+		t.Fatalf("UnsubscribeSingleApplied fields = %v, want %v (reference field order)", fields, want)
 	}
 }
 
@@ -210,25 +224,33 @@ func TestPhase2UnsubscribeMultiShape(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeMultiAppliedShape pins the set-scoped applied
-// envelope. Reference: SubscribeMultiApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380.
+// TestPhase2SubscribeMultiAppliedShape pins the reference field order.
+// Reference: SubscribeMultiApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380
+// (`request_id, total_host_execution_duration_micros, query_id, update`).
+// Duration sits at position 2. Byte shape is pinned in
+// parity_applied_envelopes_test.go. Update still flattens the
+// reference `DatabaseUpdate` wrapper — separate future slice.
 func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeMultiApplied{})
-	want := []string{"RequestID", "QueryID", "Update", "TotalHostExecutionDurationMicros"}
+	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeMultiApplied fields = %v, want %v", fields, want)
+		t.Fatalf("SubscribeMultiApplied fields = %v, want %v (reference field order)", fields, want)
 	}
 }
 
-// TestPhase2UnsubscribeMultiAppliedShape pins the set-scoped applied
-// envelope. Reference: UnsubscribeMultiApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394.
+// TestPhase2UnsubscribeMultiAppliedShape pins the reference field order.
+// Reference: UnsubscribeMultiApplied at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394
+// (`request_id, total_host_execution_duration_micros, query_id, update`).
+// Duration sits at position 2. Byte shape is pinned in
+// parity_applied_envelopes_test.go. Update still flattens the
+// reference `DatabaseUpdate` wrapper — separate future slice.
 func TestPhase2UnsubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeMultiApplied{})
-	want := []string{"RequestID", "QueryID", "Update", "TotalHostExecutionDurationMicros"}
+	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}
 	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("UnsubscribeMultiApplied fields = %v, want %v", fields, want)
+		t.Fatalf("UnsubscribeMultiApplied fields = %v, want %v (reference field order)", fields, want)
 	}
 }
 

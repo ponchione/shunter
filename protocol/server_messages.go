@@ -32,26 +32,36 @@ type InitialConnection struct {
 // Part of the Phase 2 Slice 2 variant split — SubscribeMultiApplied
 // carries the merged delta for a multi-query set. Reference:
 // SubscribeApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317.
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317
+// (`request_id, total_host_execution_duration_micros, query_id, rows`).
+// Duration sits at position 2 to match the reference byte shape — pinned
+// by parity_applied_envelopes_test.go. TableName + Rows still flatten the
+// reference `SubscribeRows` wrapper; that rows-shape divergence is a
+// separate future slice.
 type SubscribeSingleApplied struct {
 	RequestID                        uint32
+	TotalHostExecutionDurationMicros uint64
 	QueryID                          uint32
 	TableName                        string
 	Rows                             []byte // encoded RowList
-	TotalHostExecutionDurationMicros uint64
 }
 
 // UnsubscribeSingleApplied is the server response to an UnsubscribeSingle.
 // Part of the Phase 2 Slice 2 variant split — UnsubscribeMultiApplied
 // carries the merged delta for a multi-query set. Reference:
 // UnsubscribeApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331.
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331
+// (`request_id, total_host_execution_duration_micros, query_id, rows`).
+// Duration sits at position 2 to match the reference byte shape — pinned
+// by parity_applied_envelopes_test.go. HasRows + Rows still diverges from
+// the reference required `SubscribeRows` wrapper; that rows-shape
+// divergence is a separate future slice.
 type UnsubscribeSingleApplied struct {
 	RequestID                        uint32
+	TotalHostExecutionDurationMicros uint64
 	QueryID                          uint32
 	HasRows                          bool
 	Rows                             []byte // encoded RowList; only present if HasRows
-	TotalHostExecutionDurationMicros uint64
 }
 
 // SubscriptionError is the server-emitted failure envelope for any
@@ -80,23 +90,33 @@ type SubscriptionError struct {
 // Update is a merged initial snapshot, one SubscriptionUpdate per
 // (allocated internal SubscriptionID, table) pair, with Inserts
 // populated and Deletes empty. Reference: SubscribeMultiApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380.
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380
+// (`request_id, total_host_execution_duration_micros, query_id, update`).
+// Duration sits at position 2 to match the reference byte shape — pinned
+// by parity_applied_envelopes_test.go. Update still flattens the
+// reference `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that
+// rows-shape divergence is a separate future slice.
 type SubscribeMultiApplied struct {
 	RequestID                        uint32
+	TotalHostExecutionDurationMicros uint64
 	QueryID                          uint32
 	Update                           []SubscriptionUpdate
-	TotalHostExecutionDurationMicros uint64
 }
 
 // UnsubscribeMultiApplied is the server response to an UnsubscribeMulti.
 // Update carries Deletes-populated entries for rows that were still
 // live at unsubscribe time. Reference: UnsubscribeMultiApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394.
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394
+// (`request_id, total_host_execution_duration_micros, query_id, update`).
+// Duration sits at position 2 to match the reference byte shape — pinned
+// by parity_applied_envelopes_test.go. Update still flattens the
+// reference `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that
+// rows-shape divergence is a separate future slice.
 type UnsubscribeMultiApplied struct {
 	RequestID                        uint32
+	TotalHostExecutionDurationMicros uint64
 	QueryID                          uint32
 	Update                           []SubscriptionUpdate
-	TotalHostExecutionDurationMicros uint64
 }
 
 // TransactionUpdate is the heavy caller-bound envelope (Phase 1.5).
@@ -104,12 +124,19 @@ type UnsubscribeMultiApplied struct {
 // `TotalHostExecutionDuration` are populated from the executor seam;
 // `EnergyQuantaUsed` remains zero because Shunter has no energy model —
 // see the decision doc.
+//
+// Field order matches reference `TransactionUpdate<F>` at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:458
+// (`status, timestamp, caller_identity, caller_connection_id,
+// reducer_call, energy_quanta_used, total_host_execution_duration`) —
+// pinned by parity_transaction_update_test.go against the reference
+// byte shape.
 type TransactionUpdate struct {
 	Status                     UpdateStatus
+	Timestamp                  int64 // nanoseconds since Unix epoch
 	CallerIdentity             [32]byte
 	CallerConnectionID         [16]byte
 	ReducerCall                ReducerCallInfo
-	Timestamp                  int64 // nanoseconds since Unix epoch
 	EnergyQuantaUsed           uint64
 	TotalHostExecutionDuration int64 // nanoseconds
 }
@@ -188,13 +215,14 @@ func EncodeServerMessage(m any) ([]byte, error) {
 	case SubscribeSingleApplied:
 		buf.WriteByte(TagSubscribeSingleApplied)
 		writeUint32(&buf, msg.RequestID)
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 		writeUint32(&buf, msg.QueryID)
 		writeString(&buf, msg.TableName)
 		writeBytes(&buf, msg.Rows)
-		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	case UnsubscribeSingleApplied:
 		buf.WriteByte(TagUnsubscribeSingleApplied)
 		writeUint32(&buf, msg.RequestID)
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 		writeUint32(&buf, msg.QueryID)
 		if msg.HasRows {
 			buf.WriteByte(1)
@@ -202,7 +230,6 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		} else {
 			buf.WriteByte(0)
 		}
-		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	case SubscriptionError:
 		buf.WriteByte(TagSubscriptionError)
 		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
@@ -215,10 +242,10 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		if err := writeUpdateStatus(&buf, msg.Status); err != nil {
 			return nil, err
 		}
+		writeInt64(&buf, msg.Timestamp)
 		buf.Write(msg.CallerIdentity[:])
 		buf.Write(msg.CallerConnectionID[:])
 		writeReducerCallInfo(&buf, msg.ReducerCall)
-		writeInt64(&buf, msg.Timestamp)
 		writeUint64(&buf, msg.EnergyQuantaUsed)
 		writeInt64(&buf, msg.TotalHostExecutionDuration)
 	case TransactionUpdateLight:
@@ -237,15 +264,15 @@ func EncodeServerMessage(m any) ([]byte, error) {
 	case SubscribeMultiApplied:
 		buf.WriteByte(TagSubscribeMultiApplied)
 		writeUint32(&buf, msg.RequestID)
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 		writeUint32(&buf, msg.QueryID)
 		writeSubscriptionUpdates(&buf, msg.Update)
-		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	case UnsubscribeMultiApplied:
 		buf.WriteByte(TagUnsubscribeMultiApplied)
 		writeUint32(&buf, msg.RequestID)
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 		writeUint32(&buf, msg.QueryID)
 		writeSubscriptionUpdates(&buf, msg.Update)
-		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnknownMessageTag, m)
 	}
@@ -321,16 +348,16 @@ func decodeSubscribeSingleApplied(body []byte) (SubscribeSingleApplied, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
+	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, off); err != nil {
+		return m, err
+	}
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
 	if m.TableName, off, err = readString(body, off); err != nil {
 		return m, err
 	}
-	if m.Rows, off, err = readBytes(body, off); err != nil {
-		return m, err
-	}
-	if m.TotalHostExecutionDurationMicros, _, err = readUint64(body, off); err != nil {
+	if m.Rows, _, err = readBytes(body, off); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -343,6 +370,9 @@ func decodeUnsubscribeSingleApplied(body []byte) (UnsubscribeSingleApplied, erro
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
+	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, off); err != nil {
+		return m, err
+	}
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
@@ -352,12 +382,9 @@ func decodeUnsubscribeSingleApplied(body []byte) (UnsubscribeSingleApplied, erro
 	m.HasRows = body[off] != 0
 	off++
 	if m.HasRows {
-		if m.Rows, off, err = readBytes(body, off); err != nil {
+		if m.Rows, _, err = readBytes(body, off); err != nil {
 			return m, err
 		}
-	}
-	if m.TotalHostExecutionDurationMicros, _, err = readUint64(body, off); err != nil {
-		return m, err
 	}
 	return m, nil
 }
@@ -391,6 +418,9 @@ func decodeTransactionUpdate(body []byte) (TransactionUpdate, error) {
 		return m, err
 	}
 	m.Status = status
+	if m.Timestamp, off, err = readInt64(body, off); err != nil {
+		return m, err
+	}
 	if len(body)-off < 32+16 {
 		return m, fmt.Errorf("%w: TransactionUpdate caller fields truncated", ErrMalformedMessage)
 	}
@@ -403,9 +433,6 @@ func decodeTransactionUpdate(body []byte) (TransactionUpdate, error) {
 		return m, err
 	}
 	m.ReducerCall = rci
-	if m.Timestamp, off, err = readInt64(body, off); err != nil {
-		return m, err
-	}
 	if m.EnergyQuantaUsed, off, err = readUint64(body, off); err != nil {
 		return m, err
 	}
@@ -461,13 +488,13 @@ func decodeSubscribeMultiApplied(body []byte) (SubscribeMultiApplied, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
+	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, off); err != nil {
+		return m, err
+	}
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	if m.Update, off, err = readSubscriptionUpdates(body, off); err != nil {
-		return m, err
-	}
-	if m.TotalHostExecutionDurationMicros, _, err = readUint64(body, off); err != nil {
+	if m.Update, _, err = readSubscriptionUpdates(body, off); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -480,13 +507,13 @@ func decodeUnsubscribeMultiApplied(body []byte) (UnsubscribeMultiApplied, error)
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
+	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, off); err != nil {
+		return m, err
+	}
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	if m.Update, off, err = readSubscriptionUpdates(body, off); err != nil {
-		return m, err
-	}
-	if m.TotalHostExecutionDurationMicros, _, err = readUint64(body, off); err != nil {
+	if m.Update, _, err = readSubscriptionUpdates(body, off); err != nil {
 		return m, err
 	}
 	return m, nil
