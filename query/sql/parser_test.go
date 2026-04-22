@@ -174,21 +174,48 @@ func TestParseWhereLeadingDotFloat(t *testing.T) {
 	}
 }
 
-// TestParseWhereScientificNotationOverflowInfinity pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:326-328 (`select * from t
-// where f32 = 1e40` / "Infinity"): a numeric whose magnitude exceeds the
-// int64 range stays LitFloat so coerce to a float column can round the
-// out-of-range value to +Inf (as reference does with f32).
-func TestParseWhereScientificNotationOverflowFloat(t *testing.T) {
+// TestParseWhereScientificNotationOverflowBigInt pins
+// reference/SpacetimeDB/crates/expr/src/check.rs:326-332 (`select * from t
+// where f32 = 1e40` / "Infinity" and `select * from t where u256 = 1e40` /
+// "u256"): an integer-valued exponent-form numeric whose magnitude exceeds
+// int64 must parse as LitBigInt so the coerce boundary can bind it to a
+// 256-bit integer column (via exact BigInt decomposition) or to a float
+// column (via big.Float → f64, which rounds to +Inf on f32). Matches the
+// reference BigDecimal is_integer path in
+// crates/expr/src/lib.rs::parse_int.
+func TestParseWhereScientificNotationOverflowBigInt(t *testing.T) {
 	stmt, err := Parse("SELECT * FROM t WHERE n = 1e40")
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	if stmt.Filters[0].Literal.Kind != LitFloat {
-		t.Fatalf("Literal.Kind = %v, want LitFloat", stmt.Filters[0].Literal.Kind)
+	lit := stmt.Filters[0].Literal
+	if lit.Kind != LitBigInt {
+		t.Fatalf("Literal.Kind = %v, want LitBigInt", lit.Kind)
 	}
-	if stmt.Filters[0].Literal.Float != 1e40 {
-		t.Fatalf("got %g, want 1e40", stmt.Filters[0].Literal.Float)
+	if lit.Big == nil {
+		t.Fatal("Literal.Big = nil, want *big.Int(10^40)")
+	}
+	want := "10000000000000000000000000000000000000000"
+	if got := lit.Big.String(); got != want {
+		t.Fatalf("Literal.Big = %s, want %s", got, want)
+	}
+}
+
+// TestParseWhereIntegerOverflowPromotesToBigInt pins the plain-integer
+// overflow path: an integer literal too wide for int64 (no fractional or
+// exponent part) promotes to LitBigInt rather than erroring. Supports the
+// reference BigDecimal integer literal grammar for wide-column bindings.
+func TestParseWhereIntegerOverflowPromotesToBigInt(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE n = 99999999999999999999")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	lit := stmt.Filters[0].Literal
+	if lit.Kind != LitBigInt {
+		t.Fatalf("Literal.Kind = %v, want LitBigInt", lit.Kind)
+	}
+	if got := lit.Big.String(); got != "99999999999999999999" {
+		t.Fatalf("Literal.Big = %s, want 99999999999999999999", got)
 	}
 }
 

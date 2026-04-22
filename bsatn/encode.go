@@ -10,23 +10,25 @@ import (
 
 // Tag constants for each ValueKind.
 const (
-	TagBool    byte = 0
-	TagInt8    byte = 1
-	TagUint8   byte = 2
-	TagInt16   byte = 3
-	TagUint16  byte = 4
-	TagInt32   byte = 5
-	TagUint32  byte = 6
-	TagInt64   byte = 7
-	TagUint64  byte = 8
-	TagFloat32 byte = 9
-	TagFloat64 byte = 10
-	TagString  byte = 11
-	TagBytes   byte = 12
-	TagInt128  byte = 13
-	TagUint128 byte = 14
-	TagInt256  byte = 15
-	TagUint256 byte = 16
+	TagBool        byte = 0
+	TagInt8        byte = 1
+	TagUint8       byte = 2
+	TagInt16       byte = 3
+	TagUint16      byte = 4
+	TagInt32       byte = 5
+	TagUint32      byte = 6
+	TagInt64       byte = 7
+	TagUint64      byte = 8
+	TagFloat32     byte = 9
+	TagFloat64     byte = 10
+	TagString      byte = 11
+	TagBytes       byte = 12
+	TagInt128      byte = 13
+	TagUint128     byte = 14
+	TagInt256      byte = 15
+	TagUint256     byte = 16
+	TagTimestamp   byte = 17
+	TagArrayString byte = 18
 )
 
 // EncodeValue writes a Value in BSATN format: tag byte + LE payload.
@@ -131,6 +133,26 @@ func EncodeValue(w io.Writer, v types.Value) error {
 		binary.LittleEndian.PutUint64(wide[24:32], w0)
 		_, err := w.Write(wide[:])
 		return err
+	case types.KindTimestamp:
+		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsTimestamp()))
+		_, err := w.Write(buf[:8])
+		return err
+	case types.KindArrayString:
+		xs := v.AsArrayString()
+		binary.LittleEndian.PutUint32(buf[:4], uint32(len(xs)))
+		if _, err := w.Write(buf[:4]); err != nil {
+			return err
+		}
+		for _, s := range xs {
+			binary.LittleEndian.PutUint32(buf[:4], uint32(len(s)))
+			if _, err := w.Write(buf[:4]); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, s); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		return &UnknownValueTagError{Tag: tag}
 	}
@@ -155,6 +177,15 @@ func EncodedValueSize(v types.Value) int {
 		return 17
 	case types.KindInt256, types.KindUint256:
 		return 33
+	case types.KindTimestamp:
+		return 9
+	case types.KindArrayString:
+		xs := v.AsArrayString()
+		n := 1 + 4
+		for _, s := range xs {
+			n += 4 + len(s)
+		}
+		return n
 	default:
 		return 0
 	}

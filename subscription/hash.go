@@ -229,6 +229,15 @@ func encodeValue(e *canonicalEncoder, v Value) {
 		e.writeU64(w1)
 		e.writeU64(w2)
 		e.writeU64(w3)
+	case types.KindTimestamp:
+		e.writeU64(uint64(v.AsTimestamp()))
+	case types.KindArrayString:
+		xs := v.AsArrayString()
+		e.writeU32(uint32(len(xs)))
+		for _, s := range xs {
+			e.writeU32(uint32(len(s)))
+			e.buf = append(e.buf, s...)
+		}
 	default:
 		panic("subscription: encodeValue unhandled kind")
 	}

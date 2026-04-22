@@ -1,11 +1,25 @@
 package sql
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
+	"time"
 
 	"github.com/ponchione/shunter/types"
+)
+
+// Bound big integers for 128/256-bit coerce range checks. Computed once at
+// package init so the coerce hot path only does big.Int comparisons.
+var (
+	uint128Max = new(big.Int).Lsh(big.NewInt(1), 128)
+	uint256Max = new(big.Int).Lsh(big.NewInt(1), 256)
+	int128Max  = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 127), big.NewInt(1))
+	int128Min  = new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 127))
+	int256Max  = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))
+	int256Min  = new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 255))
 )
 
 // Coerce turns a parsed Literal into a types.Value matching the target
@@ -69,6 +83,9 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 			return types.NewFloat32(float32(lit.Float))
 		case LitInt:
 			return types.NewFloat32(float32(lit.Int))
+		case LitBigInt:
+			f, _ := new(big.Float).SetInt(lit.Big).Float64()
+			return types.NewFloat32(float32(f))
 		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
@@ -78,6 +95,9 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 			return types.NewFloat64(lit.Float)
 		case LitInt:
 			return types.NewFloat64(float64(lit.Int))
+		case LitBigInt:
+			f, _ := new(big.Float).SetInt(lit.Big).Float64()
+			return types.NewFloat64(f)
 		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
@@ -98,31 +118,58 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 	case types.KindUint64:
 		return coerceUnsigned(lit, kind, math.MaxUint64, func(u uint64) types.Value { return types.NewUint64(u) })
 	case types.KindInt128:
-		if lit.Kind != LitInt {
+		switch lit.Kind {
+		case LitInt:
+			return types.NewInt128FromInt64(lit.Int), nil
+		case LitBigInt:
+			return coerceBigIntToInt128(lit.Big, kind)
+		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
-		return types.NewInt128FromInt64(lit.Int), nil
 	case types.KindUint128:
-		if lit.Kind != LitInt {
+		switch lit.Kind {
+		case LitInt:
+			if lit.Int < 0 {
+				return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
+			}
+			return types.NewUint128FromUint64(uint64(lit.Int)), nil
+		case LitBigInt:
+			return coerceBigIntToUint128(lit.Big, kind)
+		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
-		if lit.Int < 0 {
-			return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
-		}
-		return types.NewUint128FromUint64(uint64(lit.Int)), nil
 	case types.KindInt256:
-		if lit.Kind != LitInt {
+		switch lit.Kind {
+		case LitInt:
+			return types.NewInt256FromInt64(lit.Int), nil
+		case LitBigInt:
+			return coerceBigIntToInt256(lit.Big, kind)
+		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
-		return types.NewInt256FromInt64(lit.Int), nil
 	case types.KindUint256:
-		if lit.Kind != LitInt {
+		switch lit.Kind {
+		case LitInt:
+			if lit.Int < 0 {
+				return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
+			}
+			return types.NewUint256FromUint64(uint64(lit.Int)), nil
+		case LitBigInt:
+			return coerceBigIntToUint256(lit.Big, kind)
+		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
-		if lit.Int < 0 {
-			return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
+	case types.KindTimestamp:
+		if lit.Kind != LitString {
+			return types.Value{}, mismatch(lit, kind)
 		}
-		return types.NewUint256FromUint64(uint64(lit.Int)), nil
+		micros, ok := parseTimestampLiteral(lit.Str)
+		if !ok {
+			return types.Value{}, fmt.Errorf("%w: malformed timestamp literal %q (expected RFC3339)", ErrUnsupportedSQL, lit.Str)
+		}
+		return types.NewTimestamp(micros), nil
+	case types.KindArrayString:
+		return types.Value{}, mismatch(lit, kind)
 	default:
 		return types.Value{}, fmt.Errorf("%w: column kind %s not supported by SQL literal coercion", ErrUnsupportedSQL, kind)
 	}
@@ -171,9 +218,110 @@ func (k LitKind) String() string {
 		return "bytes"
 	case LitSender:
 		return ":sender"
+	case LitBigInt:
+		return "bigint"
 	default:
 		return "unknown"
 	}
+}
+
+// timestampLayouts mirror the reference chrono::DateTime::parse_from_rfc3339
+// surface that accepts both `T` and space as the date/time separator and
+// accepts variable-precision fractional seconds (up to nanoseconds). Go's
+// `2006-01-02T15:04:05.999999999Z07:00` layout treats trailing 9s as optional
+// fractional-second digits, so the same layout covers `Z`-suffixed and
+// numeric-offset forms with or without a fractional component.
+var timestampLayouts = [...]string{
+	"2006-01-02T15:04:05.999999999Z07:00",
+	"2006-01-02 15:04:05.999999999Z07:00",
+}
+
+// parseTimestampLiteral converts an RFC3339-style string into microseconds
+// since the Unix epoch. Nanosecond precision is truncated via time.UnixMicro,
+// matching reference `Timestamp::parse_from_rfc3339` -> `timestamp_micros()`.
+func parseTimestampLiteral(s string) (int64, bool) {
+	for _, layout := range timestampLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UnixMicro(), true
+		}
+	}
+	return 0, false
+}
+
+// coerceBigIntToInt128 binds a big.Int literal to a 128-bit signed column.
+// Rejects |x| that overflows [-2^127, 2^127-1]. For negative values the
+// two's-complement encoding is materialized via `x + 2^128` before splitting
+// into (hi, lo) uint64 words — matches types.NewInt128's hi(signed)/lo(unsigned)
+// layout.
+func coerceBigIntToInt128(x *big.Int, kind types.ValueKind) (types.Value, error) {
+	if x.Cmp(int128Max) > 0 || x.Cmp(int128Min) < 0 {
+		return types.Value{}, fmt.Errorf("%w: literal %s out of range for %s", ErrUnsupportedSQL, x.String(), kind)
+	}
+	t := new(big.Int).Set(x)
+	if t.Sign() < 0 {
+		t.Add(t, uint128Max)
+	}
+	var buf [16]byte
+	t.FillBytes(buf[:])
+	hi := int64(binary.BigEndian.Uint64(buf[0:8]))
+	lo := binary.BigEndian.Uint64(buf[8:16])
+	return types.NewInt128(hi, lo), nil
+}
+
+// coerceBigIntToUint128 binds a big.Int literal to a 128-bit unsigned column.
+// Rejects negative values and values >= 2^128.
+func coerceBigIntToUint128(x *big.Int, kind types.ValueKind) (types.Value, error) {
+	if x.Sign() < 0 {
+		return types.Value{}, fmt.Errorf("%w: negative literal %s cannot fit unsigned %s", ErrUnsupportedSQL, x.String(), kind)
+	}
+	if x.Cmp(uint128Max) >= 0 {
+		return types.Value{}, fmt.Errorf("%w: literal %s out of range for %s", ErrUnsupportedSQL, x.String(), kind)
+	}
+	var buf [16]byte
+	x.FillBytes(buf[:])
+	hi := binary.BigEndian.Uint64(buf[0:8])
+	lo := binary.BigEndian.Uint64(buf[8:16])
+	return types.NewUint128(hi, lo), nil
+}
+
+// coerceBigIntToInt256 binds a big.Int literal to a 256-bit signed column.
+// Rejects |x| that overflows [-2^255, 2^255-1]. Negative values materialize
+// through `x + 2^256` for two's-complement encoding.
+func coerceBigIntToInt256(x *big.Int, kind types.ValueKind) (types.Value, error) {
+	if x.Cmp(int256Max) > 0 || x.Cmp(int256Min) < 0 {
+		return types.Value{}, fmt.Errorf("%w: literal %s out of range for %s", ErrUnsupportedSQL, x.String(), kind)
+	}
+	t := new(big.Int).Set(x)
+	if t.Sign() < 0 {
+		t.Add(t, uint256Max)
+	}
+	var buf [32]byte
+	t.FillBytes(buf[:])
+	w0 := int64(binary.BigEndian.Uint64(buf[0:8]))
+	w1 := binary.BigEndian.Uint64(buf[8:16])
+	w2 := binary.BigEndian.Uint64(buf[16:24])
+	w3 := binary.BigEndian.Uint64(buf[24:32])
+	return types.NewInt256(w0, w1, w2, w3), nil
+}
+
+// coerceBigIntToUint256 binds a big.Int literal to a 256-bit unsigned column.
+// Rejects negative values and values >= 2^256. The reference parity target
+// `u256 = 1e40` (check.rs:330-332) goes through this path — 10^40 fits
+// comfortably in u256 (max ~1.16e77).
+func coerceBigIntToUint256(x *big.Int, kind types.ValueKind) (types.Value, error) {
+	if x.Sign() < 0 {
+		return types.Value{}, fmt.Errorf("%w: negative literal %s cannot fit unsigned %s", ErrUnsupportedSQL, x.String(), kind)
+	}
+	if x.Cmp(uint256Max) >= 0 {
+		return types.Value{}, fmt.Errorf("%w: literal %s out of range for %s", ErrUnsupportedSQL, x.String(), kind)
+	}
+	var buf [32]byte
+	x.FillBytes(buf[:])
+	w0 := binary.BigEndian.Uint64(buf[0:8])
+	w1 := binary.BigEndian.Uint64(buf[8:16])
+	w2 := binary.BigEndian.Uint64(buf[16:24])
+	w3 := binary.BigEndian.Uint64(buf[24:32])
+	return types.NewUint256(w0, w1, w2, w3), nil
 }
 
 func parseHexLiteral(text string) ([]byte, error) {

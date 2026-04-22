@@ -150,6 +150,32 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 		w1 := binary.LittleEndian.Uint64(wide[16:24])
 		w0 := binary.LittleEndian.Uint64(wide[24:32])
 		return types.NewUint256(w0, w1, w2, w3), nil
+	case TagTimestamp:
+		if _, err := io.ReadFull(r, buf[:8]); err != nil {
+			return types.Value{}, err
+		}
+		return types.NewTimestamp(int64(binary.LittleEndian.Uint64(buf[:8]))), nil
+	case TagArrayString:
+		if _, err := io.ReadFull(r, buf[:4]); err != nil {
+			return types.Value{}, err
+		}
+		count := binary.LittleEndian.Uint32(buf[:4])
+		xs := make([]string, count)
+		for i := range count {
+			if _, err := io.ReadFull(r, buf[:4]); err != nil {
+				return types.Value{}, err
+			}
+			n := binary.LittleEndian.Uint32(buf[:4])
+			data := make([]byte, n)
+			if _, err := io.ReadFull(r, data); err != nil {
+				return types.Value{}, err
+			}
+			if !utf8.Valid(data) {
+				return types.Value{}, ErrInvalidUTF8
+			}
+			xs[i] = string(data)
+		}
+		return types.NewArrayString(xs), nil
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}

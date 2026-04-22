@@ -3,6 +3,7 @@ package sql
 import (
 	"errors"
 	"math"
+	"math/big"
 	"testing"
 
 	"github.com/ponchione/shunter/types"
@@ -325,6 +326,251 @@ func TestCoerceFloatLiteralOnUint256Rejected(t *testing.T) {
 func TestCoerceSenderRejectsInt256Column(t *testing.T) {
 	caller := [32]byte{1}
 	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindInt256, &caller)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceStringLiteralToTimestamp pins check.rs:334-352 — RFC3339-shaped
+// string literals bind to KindTimestamp columns. Nanosecond precision is
+// truncated to microseconds (reference: chrono::DateTime::timestamp_micros).
+func TestCoerceStringLiteralToTimestamp(t *testing.T) {
+	cases := []struct {
+		sql   string
+		micro int64
+	}{
+		{"2025-02-10T15:45:30Z", 1_739_202_330_000_000},
+		{"2025-02-10T15:45:30.123Z", 1_739_202_330_123_000},
+		{"2025-02-10T15:45:30.123456789Z", 1_739_202_330_123_456},
+		{"2025-02-10 15:45:30+02:00", 1_739_195_130_000_000},
+		{"2025-02-10 15:45:30.123+02:00", 1_739_195_130_123_000},
+	}
+	for _, c := range cases {
+		v, err := Coerce(Literal{Kind: LitString, Str: c.sql}, types.KindTimestamp)
+		if err != nil {
+			t.Fatalf("Coerce(%q → Timestamp) error: %v", c.sql, err)
+		}
+		if v.Kind() != types.KindTimestamp {
+			t.Fatalf("Kind = %v, want Timestamp", v.Kind())
+		}
+		if got := v.AsTimestamp(); got != c.micro {
+			t.Fatalf("Coerce(%q) micros = %d, want %d", c.sql, got, c.micro)
+		}
+	}
+}
+
+// TestCoerceMalformedTimestampRejected pins that non-RFC3339 strings fail on a
+// Timestamp column rather than silently becoming zero micros.
+func TestCoerceMalformedTimestampRejected(t *testing.T) {
+	for _, s := range []string{"", "2025-02-10", "not-a-timestamp", "2025-02-10T15:45"} {
+		_, err := Coerce(Literal{Kind: LitString, Str: s}, types.KindTimestamp)
+		if !errors.Is(err, ErrUnsupportedSQL) {
+			t.Fatalf("Coerce(%q) err = %v, want ErrUnsupportedSQL", s, err)
+		}
+	}
+}
+
+func TestCoerceIntLiteralOnTimestampRejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitInt, Int: 0}, types.KindTimestamp)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestCoerceFloatLiteralOnTimestampRejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitFloat, Float: 0}, types.KindTimestamp)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestCoerceSenderRejectsTimestampColumn(t *testing.T) {
+	caller := [32]byte{1}
+	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindTimestamp, &caller)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceSenderRejectsArrayStringColumn pins the reference parity shape
+// `SELECT * FROM t WHERE arr = :sender` at check.rs:487-489. The :sender
+// parameter materializes as a 32-byte identity; an array-of-string column
+// cannot accept it, and coerce rejects with ErrUnsupportedSQL.
+func TestCoerceSenderRejectsArrayStringColumn(t *testing.T) {
+	caller := [32]byte{1}
+	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindArrayString, &caller)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceLiteralsRejectedOnArrayStringColumn pins that no SQL literal
+// grammar can bind to an ArrayString column — there is no array literal in
+// the Shunter grammar, and every scalar literal shape fails with a
+// type-mismatch error.
+func TestCoerceLiteralsRejectedOnArrayStringColumn(t *testing.T) {
+	cases := []Literal{
+		{Kind: LitInt, Int: 0},
+		{Kind: LitFloat, Float: 1.0},
+		{Kind: LitBool, Bool: true},
+		{Kind: LitString, Str: "alpha"},
+		{Kind: LitBytes, Bytes: []byte{0x01}},
+	}
+	for _, lit := range cases {
+		_, err := Coerce(lit, types.KindArrayString)
+		if !errors.Is(err, ErrUnsupportedSQL) {
+			t.Fatalf("literal %v on KindArrayString: err = %v, want ErrUnsupportedSQL", lit.Kind, err)
+		}
+	}
+}
+
+// bigIntFromStr is a test helper — panics on parse failure, which catches
+// typos in literal strings at test authoring time.
+func bigIntFromStr(t *testing.T, s string) *big.Int {
+	t.Helper()
+	b, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		t.Fatalf("bigIntFromStr(%q) failed", s)
+	}
+	return b
+}
+
+// TestCoerceBigIntLiteralToUint256 pins the reference `u256 = 1e40` shape at
+// reference/SpacetimeDB/crates/expr/src/check.rs:330-332. A LitBigInt with
+// value 10^40 decomposes into four uint64 words matching the 256-bit
+// little-significant-word-first layout and binds to a KindUint256 column.
+func TestCoerceBigIntLiteralToUint256(t *testing.T) {
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000") // 10^40
+	v, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindUint256)
+	if err != nil {
+		t.Fatalf("Coerce error: %v", err)
+	}
+	if v.Kind() != types.KindUint256 {
+		t.Fatalf("Kind = %v, want KindUint256", v.Kind())
+	}
+	w0, w1, w2, w3 := v.AsUint256()
+	if w0 != 0 || w1 != 0x1d { // 10^40 = 0x1d...; top nonzero word is index 1
+		t.Fatalf("AsUint256 top words = (%x, %x, ...), want (0, 0x1d, ...) for 10^40", w0, w1)
+	}
+	// low words: confirm round-trip back to big.Int reconstructs 10^40.
+	var buf [32]byte
+	// reassemble big-endian bytes
+	for i, w := range [4]uint64{w0, w1, w2, w3} {
+		for j := range 8 {
+			buf[i*8+j] = byte(w >> (56 - 8*j))
+		}
+	}
+	got := new(big.Int).SetBytes(buf[:])
+	if got.Cmp(x) != 0 {
+		t.Fatalf("round-trip = %s, want %s", got.String(), x.String())
+	}
+}
+
+// TestCoerceBigIntLiteralToInt256 pins that a BigInt within Int256 range
+// binds correctly including for negative values via two's-complement
+// materialization.
+func TestCoerceBigIntLiteralToInt256(t *testing.T) {
+	// Positive: 10^40
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000")
+	v, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindInt256)
+	if err != nil {
+		t.Fatalf("positive Coerce error: %v", err)
+	}
+	if v.Kind() != types.KindInt256 {
+		t.Fatalf("Kind = %v, want KindInt256", v.Kind())
+	}
+
+	// Negative: -10^40. Must materialize as two's-complement (sign-extend
+	// 0xFFFF.. into the high words).
+	neg := new(big.Int).Neg(x)
+	v2, err := Coerce(Literal{Kind: LitBigInt, Big: neg}, types.KindInt256)
+	if err != nil {
+		t.Fatalf("negative Coerce error: %v", err)
+	}
+	w0, _, _, _ := v2.AsInt256()
+	if w0 != -1 { // sign-extended high word
+		t.Fatalf("negative AsInt256 w0 = %d, want -1", w0)
+	}
+}
+
+// TestCoerceBigIntLiteralOverflowsUint128 pins that 10^40 (a value > 2^128)
+// rejects when targeted at a Uint128 column — u128 max is ~3.4e38, below
+// the 10^40 literal.
+func TestCoerceBigIntLiteralOverflowsUint128(t *testing.T) {
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000")
+	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindUint128)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceBigIntLiteralOverflowsUint256 pins that a BigInt > 2^256-1
+// rejects at the Uint256 seam — covers the reference "Out of bounds" shape
+// scaled up to 256-bit.
+func TestCoerceBigIntLiteralOverflowsUint256(t *testing.T) {
+	// 2^256 exactly — one past u256 max.
+	x := new(big.Int).Lsh(big.NewInt(1), 256)
+	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindUint256)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceNegativeBigIntRejectedOnUint256 pins that a negative BigInt
+// rejects on an unsigned 256-bit column — mirrors `u8 = -1` / `u256 = -1`
+// rejection semantics at the wider-width boundary.
+func TestCoerceNegativeBigIntRejectedOnUint256(t *testing.T) {
+	x := new(big.Int).Neg(bigIntFromStr(t, "10000000000000000000000000000000000000000"))
+	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindUint256)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceBigIntLiteralOnInt64Rejected pins that a BigInt beyond int64
+// range rejects on a narrower integer column — matches `u32 = 1e40` /
+// `i64 = 1e40` overflow semantics.
+func TestCoerceBigIntLiteralOnInt64Rejected(t *testing.T) {
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000")
+	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindInt64)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceBigIntLiteralToFloat32Infinity pins that the f32 = 1e40 path
+// continues to accept overflow-to-+Inf after the parser promotes 1e40 to
+// LitBigInt. The coerce path materializes the BigInt as float64 (1e40)
+// then NewFloat32 rounds to +Inf.
+func TestCoerceBigIntLiteralToFloat32Infinity(t *testing.T) {
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000")
+	v, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindFloat32)
+	if err != nil {
+		t.Fatalf("Coerce error: %v", err)
+	}
+	if !math.IsInf(float64(v.AsFloat32()), 1) {
+		t.Fatalf("AsFloat32 = %v, want +Inf", v.AsFloat32())
+	}
+}
+
+// TestCoerceBigIntLiteralToFloat64 pins that a BigInt within f64 range
+// materializes exactly as the rounded f64 representation.
+func TestCoerceBigIntLiteralToFloat64(t *testing.T) {
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000")
+	v, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindFloat64)
+	if err != nil {
+		t.Fatalf("Coerce error: %v", err)
+	}
+	if v.AsFloat64() != 1e40 {
+		t.Fatalf("AsFloat64 = %v, want 1e40", v.AsFloat64())
+	}
+}
+
+// TestCoerceBigIntLiteralOnStringColumnRejected pins that a BigInt literal
+// rejects on non-numeric column kinds (string/bytes/bool/timestamp).
+func TestCoerceBigIntLiteralOnStringColumnRejected(t *testing.T) {
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000")
+	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindString)
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
 	}

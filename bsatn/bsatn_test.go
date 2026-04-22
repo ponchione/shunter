@@ -60,6 +60,16 @@ func TestValueRoundTrip(t *testing.T) {
 		types.NewUint256(0, 0, 0, 0),
 		types.NewUint256(0, 0, 0, ^uint64(0)),
 		types.NewUint256(^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)),
+		types.NewTimestamp(0),
+		types.NewTimestamp(-1),
+		types.NewTimestamp(math.MinInt64),
+		types.NewTimestamp(math.MaxInt64),
+		types.NewTimestamp(1_739_201_130_000_000),
+		types.NewArrayString(nil),
+		types.NewArrayString([]string{}),
+		types.NewArrayString([]string{""}),
+		types.NewArrayString([]string{"alpha"}),
+		types.NewArrayString([]string{"alpha", "beta", "γ"}),
 	}
 	for _, v := range cases {
 		var buf bytes.Buffer
@@ -206,6 +216,90 @@ func TestEncodedValueSize256(t *testing.T) {
 		if buf.Len() != 33 {
 			t.Fatalf("%v: expected 33 bytes, got %d", v.Kind(), buf.Len())
 		}
+	}
+}
+
+func TestEncodedValueSizeTimestamp(t *testing.T) {
+	v := types.NewTimestamp(1_739_201_130_000_000)
+	var buf bytes.Buffer
+	if err := EncodeValue(&buf, v); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if EncodedValueSize(v) != buf.Len() {
+		t.Fatalf("Timestamp size prediction %d != actual %d", EncodedValueSize(v), buf.Len())
+	}
+	if buf.Len() != 9 {
+		t.Fatalf("Timestamp: expected 9 bytes (tag + 8 LE i64), got %d", buf.Len())
+	}
+}
+
+// TestEncodeTimestampLittleEndian pins the on-wire byte order: tag + 8 bytes
+// little-endian signed microseconds since the Unix epoch.
+func TestEncodeTimestampLittleEndian(t *testing.T) {
+	v := types.NewTimestamp(int64(0x0102030405060708))
+	var buf bytes.Buffer
+	if err := EncodeValue(&buf, v); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	want := []byte{
+		TagTimestamp,
+		0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("encoded = %x\nwant     = %x", buf.Bytes(), want)
+	}
+}
+
+// TestEncodedValueSizeArrayString pins the predicted size for an ArrayString
+// payload: tag + u32 count + per-element u32 length + utf8 bytes.
+func TestEncodedValueSizeArrayString(t *testing.T) {
+	v := types.NewArrayString([]string{"a", "bcd", ""})
+	var buf bytes.Buffer
+	if err := EncodeValue(&buf, v); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if EncodedValueSize(v) != buf.Len() {
+		t.Fatalf("ArrayString size prediction %d != actual %d", EncodedValueSize(v), buf.Len())
+	}
+	// 1 tag + 4 count + (4+1) + (4+3) + (4+0) = 1 + 4 + 5 + 7 + 4 = 21
+	if buf.Len() != 21 {
+		t.Fatalf("ArrayString: expected 21 bytes, got %d", buf.Len())
+	}
+}
+
+// TestEncodeArrayStringLittleEndianLayout pins the on-wire byte order:
+// tag + LE u32 count + [LE u32 length + utf8 bytes]* per element.
+func TestEncodeArrayStringLittleEndianLayout(t *testing.T) {
+	v := types.NewArrayString([]string{"ab", "cde"})
+	var buf bytes.Buffer
+	if err := EncodeValue(&buf, v); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	want := []byte{
+		TagArrayString,
+		0x02, 0x00, 0x00, 0x00, // count = 2
+		0x02, 0x00, 0x00, 0x00, // len("ab")
+		'a', 'b',
+		0x03, 0x00, 0x00, 0x00, // len("cde")
+		'c', 'd', 'e',
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("encoded = %x\nwant     = %x", buf.Bytes(), want)
+	}
+}
+
+// TestDecodeArrayStringRejectsInvalidUTF8 pins that element payloads are
+// validated as utf8, matching the single-KindString rule.
+func TestDecodeArrayStringRejectsInvalidUTF8(t *testing.T) {
+	raw := []byte{
+		TagArrayString,
+		0x01, 0x00, 0x00, 0x00, // count = 1
+		0x01, 0x00, 0x00, 0x00, // len = 1
+		0xFF, // invalid utf8
+	}
+	_, err := DecodeValue(bytes.NewReader(raw))
+	if !errors.Is(err, ErrInvalidUTF8) {
+		t.Fatalf("err = %v, want ErrInvalidUTF8", err)
 	}
 }
 

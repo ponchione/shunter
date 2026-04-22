@@ -100,6 +100,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("unknown column %q on table %q", stmt.Join.RightOn.Column, rightTS.Name)
 		}
+		if isArrayKind(leftCol.Type) || isArrayKind(rightCol.Type) {
+			return compiledSQLQuery{}, fmt.Errorf("join ON %s.%s = %s.%s: array/product values are not comparable",
+				stmt.Join.LeftTable, stmt.Join.LeftOn.Column, stmt.Join.RightTable, stmt.Join.RightOn.Column)
+		}
 		relations := map[string]relationSchema{
 			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
 			stmt.Join.RightTable: {id: rightID, ts: rightTS},
@@ -187,6 +191,15 @@ func parseQueryString(qs string, sl SchemaLookup, caller *types.Identity) (Query
 		q.Predicates = append(q.Predicates, Predicate{Column: f.Column, Op: f.Op, Value: v})
 	}
 	return q, nil
+}
+
+// isArrayKind reports whether a column kind is an array/product kind that
+// cannot participate in equality or range comparisons. Today the only
+// realized array kind is KindArrayString; the helper keeps the join-ON and
+// future filter guards in one place so additional array element widenings
+// stay narrow.
+func isArrayKind(k types.ValueKind) bool {
+	return k == types.KindArrayString
 }
 
 func coerceLiteral(lit sql.Literal, kind types.ValueKind, caller *types.Identity) (types.Value, error) {

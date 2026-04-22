@@ -29,6 +29,8 @@ func TestValueKindExportStringAll(t *testing.T) {
 		{KindUint128, "uint128"},
 		{KindInt256, "int256"},
 		{KindUint256, "uint256"},
+		{KindTimestamp, "timestamp"},
+		{KindArrayString, "arrayString"},
 	}
 	for _, c := range cases {
 		got := ValueKindExportString(c.k)
@@ -78,6 +80,8 @@ func TestAutoIncrementBoundsNonInteger(t *testing.T) {
 		KindString, KindBytes,
 		KindInt128, KindUint128,
 		KindInt256, KindUint256,
+		KindTimestamp,
+		KindArrayString,
 	}
 	for _, k := range nonInt {
 		_, _, ok := AutoIncrementBounds(k)

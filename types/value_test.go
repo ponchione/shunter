@@ -436,6 +436,145 @@ func TestAccessor256PanicsOnWrongKind(t *testing.T) {
 	v.AsInt256()
 }
 
+func TestRoundTripTimestamp(t *testing.T) {
+	for _, m := range []int64{math.MinInt64, -1, 0, 1, 1_739_201_130_000_000, math.MaxInt64} {
+		v := NewTimestamp(m)
+		if v.Kind() != KindTimestamp {
+			t.Fatalf("Kind = %v, want Timestamp", v.Kind())
+		}
+		if got := v.AsTimestamp(); got != m {
+			t.Fatalf("AsTimestamp = %d, want %d", got, m)
+		}
+	}
+}
+
+func TestEqualTimestamp(t *testing.T) {
+	if !NewTimestamp(1).Equal(NewTimestamp(1)) {
+		t.Fatal("identical timestamps not equal")
+	}
+	if NewTimestamp(1).Equal(NewTimestamp(2)) {
+		t.Fatal("differing timestamps reported equal")
+	}
+	if NewTimestamp(0).Equal(NewInt64(0)) {
+		t.Fatal("Timestamp and Int64 with same payload should not be Equal — cross-kind")
+	}
+}
+
+func TestCompareTimestamp(t *testing.T) {
+	if NewTimestamp(1).Compare(NewTimestamp(2)) >= 0 {
+		t.Fatal("Timestamp Compare: 1 should be < 2")
+	}
+	if NewTimestamp(-5).Compare(NewTimestamp(1)) >= 0 {
+		t.Fatal("Timestamp Compare: -5 should be < 1")
+	}
+	if NewTimestamp(3).Compare(NewTimestamp(3)) != 0 {
+		t.Fatal("Timestamp Compare: equal reported non-zero")
+	}
+}
+
+func TestAccessorTimestampPanicsOnWrongKind(t *testing.T) {
+	v := NewBool(true)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("AsTimestamp on Bool did not panic")
+		}
+	}()
+	v.AsTimestamp()
+}
+
+func TestRoundTripArrayString(t *testing.T) {
+	cases := [][]string{
+		nil,
+		{},
+		{""},
+		{"alpha"},
+		{"alpha", "beta", "γ"},
+	}
+	for _, xs := range cases {
+		v := NewArrayString(xs)
+		if v.Kind() != KindArrayString {
+			t.Fatalf("Kind = %v, want ArrayString", v.Kind())
+		}
+		got := v.AsArrayString()
+		if len(got) != len(xs) {
+			t.Fatalf("len(AsArrayString) = %d, want %d", len(got), len(xs))
+		}
+		for i := range xs {
+			if got[i] != xs[i] {
+				t.Fatalf("AsArrayString[%d] = %q, want %q", i, got[i], xs[i])
+			}
+		}
+	}
+}
+
+func TestArrayStringDefensiveCopyOnConstruct(t *testing.T) {
+	src := []string{"alpha", "beta"}
+	v := NewArrayString(src)
+	src[0] = "mutated"
+	got := v.AsArrayString()
+	if got[0] != "alpha" {
+		t.Fatalf("mutation of constructor input leaked into Value: got[0] = %q", got[0])
+	}
+}
+
+func TestArrayStringDefensiveCopyOnAccess(t *testing.T) {
+	v := NewArrayString([]string{"alpha", "beta"})
+	got := v.AsArrayString()
+	got[0] = "mutated"
+	if v.AsArrayString()[0] != "alpha" {
+		t.Fatal("mutation of accessor result leaked back into Value")
+	}
+}
+
+func TestEqualArrayString(t *testing.T) {
+	a := NewArrayString([]string{"x", "y"})
+	b := NewArrayString([]string{"x", "y"})
+	c := NewArrayString([]string{"x", "z"})
+	d := NewArrayString([]string{"x"})
+	empty := NewArrayString(nil)
+	if !a.Equal(b) {
+		t.Fatal("identical ArrayString values not Equal")
+	}
+	if a.Equal(c) {
+		t.Fatal("differing ArrayString values reported Equal")
+	}
+	if a.Equal(d) {
+		t.Fatal("different-length ArrayString values reported Equal")
+	}
+	if a.Equal(empty) {
+		t.Fatal("non-empty vs empty reported Equal")
+	}
+	if a.Equal(NewString("x,y")) {
+		t.Fatal("ArrayString and String should not be cross-kind Equal")
+	}
+}
+
+func TestCompareArrayString(t *testing.T) {
+	a := NewArrayString([]string{"x", "y"})
+	b := NewArrayString([]string{"x", "y"})
+	if a.Compare(b) != 0 {
+		t.Fatal("equal ArrayString Compare != 0")
+	}
+	short := NewArrayString([]string{"x"})
+	if short.Compare(a) >= 0 {
+		t.Fatal("shorter prefix should compare less")
+	}
+	smaller := NewArrayString([]string{"x", "x"})
+	if smaller.Compare(a) >= 0 {
+		t.Fatal("lexicographic element compare failed")
+	}
+}
+
+func TestAccessorArrayStringPanicsOnWrongKind(t *testing.T) {
+	v := NewBool(true)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("AsArrayString on Bool did not panic")
+		}
+	}()
+	v.AsArrayString()
+}
+
 // --- NaN rejection ---
 
 func TestFloat32RejectsNaN(t *testing.T) {
@@ -543,8 +682,10 @@ func TestValueKindString(t *testing.T) {
 		{KindUint128, "Uint128"},
 		{KindInt256, "Int256"},
 		{KindUint256, "Uint256"},
+		{KindTimestamp, "Timestamp"},
+		{KindArrayString, "ArrayString"},
 		{ValueKind(-1), "ValueKind(-1)"},
-		{ValueKind(len(kindNames)), "ValueKind(17)"},
+		{ValueKind(len(kindNames)), "ValueKind(19)"},
 	}
 	for _, c := range cases {
 		if got := c.k.String(); got != c.want {

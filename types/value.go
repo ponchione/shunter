@@ -35,26 +35,30 @@ const (
 	KindUint128
 	KindInt256
 	KindUint256
+	KindTimestamp
+	KindArrayString
 )
 
 var kindNames = [...]string{
-	KindBool:    "Bool",
-	KindInt8:    "Int8",
-	KindUint8:   "Uint8",
-	KindInt16:   "Int16",
-	KindUint16:  "Uint16",
-	KindInt32:   "Int32",
-	KindUint32:  "Uint32",
-	KindInt64:   "Int64",
-	KindUint64:  "Uint64",
-	KindFloat32: "Float32",
-	KindFloat64: "Float64",
-	KindString:  "String",
-	KindBytes:   "Bytes",
-	KindInt128:  "Int128",
-	KindUint128: "Uint128",
-	KindInt256:  "Int256",
-	KindUint256: "Uint256",
+	KindBool:        "Bool",
+	KindInt8:        "Int8",
+	KindUint8:       "Uint8",
+	KindInt16:       "Int16",
+	KindUint16:      "Uint16",
+	KindInt32:       "Int32",
+	KindUint32:      "Uint32",
+	KindInt64:       "Int64",
+	KindUint64:      "Uint64",
+	KindFloat32:     "Float32",
+	KindFloat64:     "Float64",
+	KindString:      "String",
+	KindBytes:       "Bytes",
+	KindInt128:      "Int128",
+	KindUint128:     "Uint128",
+	KindInt256:      "Int256",
+	KindUint256:     "Uint256",
+	KindTimestamp:   "Timestamp",
+	KindArrayString: "ArrayString",
 }
 
 func (k ValueKind) String() string {
@@ -73,17 +77,18 @@ func (k ValueKind) String() string {
 // high word is signed for Int256). Existing primitive slots are untouched so
 // the blast radius on unrelated code paths stays zero.
 type Value struct {
-	kind  ValueKind
-	b     bool
-	i64   int64
-	u64   uint64
-	f32   float32
-	f64   float64
-	str   string
-	buf   []byte
-	hi128 uint64
-	lo128 uint64
-	w256  [4]uint64
+	kind   ValueKind
+	b      bool
+	i64    int64
+	u64    uint64
+	f32    float32
+	f64    float64
+	str    string
+	buf    []byte
+	hi128  uint64
+	lo128  uint64
+	w256   [4]uint64
+	strArr []string
 }
 
 // Kind returns the ValueKind of this Value.
@@ -203,6 +208,22 @@ func NewUint256FromUint64(x uint64) Value {
 	return Value{kind: KindUint256, w256: [4]uint64{0, 0, 0, x}}
 }
 
+// NewTimestamp builds a Timestamp value. micros is microseconds since the
+// Unix epoch (negative values denote times before the epoch); storage reuses
+// the i64 slot.
+func NewTimestamp(micros int64) Value {
+	return Value{kind: KindTimestamp, i64: micros}
+}
+
+// NewArrayString builds an ArrayString value from a slice of strings.
+// The input slice is copied defensively so the resulting Value does not
+// alias caller storage.
+func NewArrayString(xs []string) Value {
+	cp := make([]string, len(xs))
+	copy(cp, xs)
+	return Value{kind: KindArrayString, strArr: cp}
+}
+
 // --- Accessors ---
 
 func (v Value) AsBool() bool {
@@ -298,6 +319,20 @@ func (v Value) AsUint256() (w0, w1, w2, w3 uint64) {
 	return v.w256[0], v.w256[1], v.w256[2], v.w256[3]
 }
 
+// AsTimestamp returns the Timestamp in microseconds since the Unix epoch.
+func (v Value) AsTimestamp() int64 {
+	v.mustKind(KindTimestamp)
+	return v.i64
+}
+
+// AsArrayString returns a defensive copy of the string-array payload.
+func (v Value) AsArrayString() []string {
+	v.mustKind(KindArrayString)
+	cp := make([]string, len(v.strArr))
+	copy(cp, v.strArr)
+	return cp
+}
+
 func (v Value) mustKind(want ValueKind) {
 	if v.kind != want {
 		panic(fmt.Sprintf("shunter: Value.As%s called on %s value", want, v.kind))
@@ -331,6 +366,18 @@ func (v Value) Equal(other Value) bool {
 		return v.hi128 == other.hi128 && v.lo128 == other.lo128
 	case KindInt256, KindUint256:
 		return v.w256 == other.w256
+	case KindTimestamp:
+		return v.i64 == other.i64
+	case KindArrayString:
+		if len(v.strArr) != len(other.strArr) {
+			return false
+		}
+		for i := range v.strArr {
+			if v.strArr[i] != other.strArr[i] {
+				return false
+			}
+		}
+		return true
 	default:
 		panic(fmt.Sprintf("shunter: unhandled ValueKind %d", int(v.kind)))
 	}
@@ -391,6 +438,19 @@ func (v Value) Compare(other Value) int {
 			}
 		}
 		return 0
+	case KindTimestamp:
+		return cmp.Compare(v.i64, other.i64)
+	case KindArrayString:
+		n := len(v.strArr)
+		if m := len(other.strArr); m < n {
+			n = m
+		}
+		for i := range n {
+			if c := strings.Compare(v.strArr[i], other.strArr[i]); c != 0 {
+				return c
+			}
+		}
+		return cmp.Compare(len(v.strArr), len(other.strArr))
 	default:
 		panic(fmt.Sprintf("shunter: unhandled ValueKind %d", int(v.kind)))
 	}
@@ -447,6 +507,17 @@ func (v Value) writePayload(h hash.Hash64) {
 			binary.BigEndian.PutUint64(buf[:], v.w256[i])
 			h.Write(buf[:])
 		}
+	case KindTimestamp:
+		binary.BigEndian.PutUint64(buf[:], uint64(v.i64))
+		h.Write(buf[:])
+	case KindArrayString:
+		binary.BigEndian.PutUint32(buf[:4], uint32(len(v.strArr)))
+		h.Write(buf[:4])
+		for _, s := range v.strArr {
+			binary.BigEndian.PutUint32(buf[:4], uint32(len(s)))
+			h.Write(buf[:4])
+			h.Write([]byte(s))
+		}
 	}
 }
 
@@ -471,6 +542,14 @@ func (v Value) payloadLen() uint32 {
 		return 16
 	case KindInt256, KindUint256:
 		return 32
+	case KindTimestamp:
+		return 8
+	case KindArrayString:
+		n := uint32(4)
+		for _, s := range v.strArr {
+			n += 4 + uint32(len(s))
+		}
+		return n
 	default:
 		return 0
 	}

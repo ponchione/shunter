@@ -5,13 +5,23 @@ import (
 	"context"
 	"iter"
 	"math"
+	"math/big"
 	"testing"
 
 	"github.com/ponchione/shunter/bsatn"
+	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
+
+// buildUint256From1e40 materializes the 10^40 Uint256 value via the same
+// coerce path the parser + admission use, so test expectations and the
+// stored row stay in lockstep if the word layout ever changes.
+func buildUint256From1e40() (types.Value, error) {
+	big1e40, _ := new(big.Int).SetString("10000000000000000000000000000000000000000", 10)
+	return sql.Coerce(sql.Literal{Kind: sql.LitBigInt, Big: big1e40}, schema.KindUint256)
+}
 
 // --- Mocks ---
 
@@ -2358,6 +2368,40 @@ func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
 	}
 }
 
+// TestHandleOneOffQuery_ParityValidLiteralU256Scientific pins the remaining
+// reference `valid_literals` row at
+// reference/SpacetimeDB/crates/expr/src/check.rs:330-332
+// (`select * from t where u256 = 1e40` / "u256") at the OneOffQuery
+// admission surface. Shunter's parser promotes `1e40` to LitBigInt and
+// coerce decomposes 10^40 into four uint64 words for the 256-bit Uint256
+// layout. The snapshot holds one matching row so the query should return
+// Status == 0.
+func TestHandleOneOffQuery_ParityValidLiteralU256Scientific(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
+	)
+	// 10^40 decomposed via the same coerce path the query admission uses,
+	// so the stored row is guaranteed to equal the admission-time value.
+	row, err := buildUint256From1e40()
+	if err != nil {
+		t.Fatalf("build row: %v", err)
+	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{row}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC5},
+		QueryString: "SELECT * FROM t WHERE u256 = 1e40",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 0 {
+		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	}
+}
+
 // TestHandleOneOffQuery_ParityUint256NegativeRejected extends the
 // reference invalid_literals bundle at check.rs:382-385 to the Uint256
 // column kind. Mirrors the subscribe-side pin.
@@ -2372,6 +2416,71 @@ func TestHandleOneOffQuery_ParityUint256NegativeRejected(t *testing.T) {
 	msg := &OneOffQueryMsg{
 		MessageID:   []byte{0xC2},
 		QueryString: "SELECT * FROM t WHERE u256 = -1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityTimestampLiteralAccepted pins the reference
+// valid_literals rows at check.rs:334-352 onto the OneOff admission surface.
+// Each subtest builds a Timestamp-column table, stores a matching row, and
+// confirms `SELECT * FROM t WHERE ts = '<shape>'` accepts end-to-end across
+// all five reference RFC3339 shapes.
+func TestHandleOneOffQuery_ParityTimestampLiteralAccepted(t *testing.T) {
+	cases := []struct {
+		name  string
+		lit   string
+		micro int64
+	}{
+		{"rfc3339_utc_no_fraction", "2025-02-10T15:45:30Z", 1_739_202_330_000_000},
+		{"rfc3339_utc_millis", "2025-02-10T15:45:30.123Z", 1_739_202_330_123_000},
+		{"rfc3339_utc_nanos_truncated", "2025-02-10T15:45:30.123456789Z", 1_739_202_330_123_456},
+		{"space_separator_offset", "2025-02-10 15:45:30+02:00", 1_739_195_130_000_000},
+		{"space_separator_millis_offset", "2025-02-10 15:45:30.123+02:00", 1_739_195_130_123_000},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
+			)
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewTimestamp(tc.micro)}}}}
+			stateAccess := &mockStateAccess{snap: snap}
+
+			msg := &OneOffQueryMsg{
+				MessageID:   []byte{byte(0xD0 + i)},
+				QueryString: "SELECT * FROM t WHERE ts = '" + tc.lit + "'",
+			}
+			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+			result := drainOneOff(t, conn)
+			if result.Status != 0 {
+				t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+			}
+		})
+	}
+}
+
+// TestHandleOneOffQuery_ParityTimestampMalformedRejected mirrors the
+// subscribe-side pin: a non-RFC3339 string on a Timestamp column must reject.
+func TestHandleOneOffQuery_ParityTimestampMalformedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewTimestamp(0)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD5},
+		QueryString: "SELECT * FROM t WHERE ts = 'not-a-timestamp'",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
@@ -2942,5 +3051,71 @@ func TestHandleOneOffQuery_ParitySqlInvalidAggregateWithoutAliasRejected(t *test
 	}
 	if result.Error == "" {
 		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleOneOffQuery_ParityArraySenderRejected pins reference
+// check.rs:487-489 (`select * from t where arr = :sender` / "The :sender
+// param is an identity") onto the OneOffQuery admission surface. With
+// KindArrayString realized, the coerce layer rejects :sender against the
+// array column instead of hitting the default "column kind not supported"
+// branch — the rejection is a positive parity contract.
+func TestHandleOneOffQuery_ParityArraySenderRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD0},
+		QueryString: "SELECT * FROM t WHERE arr = :sender",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error); Error=%q", result.Status, result.Error)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message for :sender on array column")
+	}
+}
+
+// TestHandleOneOffQuery_ParityArrayJoinOnRejected pins reference
+// check.rs:523-525 (`select t.* from t join s on t.arr = s.arr` / "Product
+// values are not comparable") onto the OneOffQuery admission surface. The
+// join compile path rejects when either ON side names an array column.
+func TestHandleOneOffQuery_ParityArrayJoinOnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{
+		tables: map[string]struct {
+			id     schema.TableID
+			schema *schema.TableSchema
+		}{
+			"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+				{Index: 0, Name: "arr", Type: schema.KindArrayString},
+			}}},
+			"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+				{Index: 0, Name: "arr", Type: schema.KindArrayString},
+			}}},
+		},
+	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD1},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.arr = s.arr",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Status != 1 {
+		t.Fatalf("Status = %d, want 1 (error); Error=%q", result.Status, result.Error)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error message for array-on-array join ON")
 	}
 }

@@ -13,23 +13,25 @@ type ValueKind = types.ValueKind
 
 // Re-export ValueKind constants for schema-facing APIs.
 const (
-	KindBool    = types.KindBool
-	KindInt8    = types.KindInt8
-	KindUint8   = types.KindUint8
-	KindInt16   = types.KindInt16
-	KindUint16  = types.KindUint16
-	KindInt32   = types.KindInt32
-	KindUint32  = types.KindUint32
-	KindInt64   = types.KindInt64
-	KindUint64  = types.KindUint64
-	KindFloat32 = types.KindFloat32
-	KindFloat64 = types.KindFloat64
-	KindString  = types.KindString
-	KindBytes   = types.KindBytes
-	KindInt128  = types.KindInt128
-	KindUint128 = types.KindUint128
-	KindInt256  = types.KindInt256
-	KindUint256 = types.KindUint256
+	KindBool        = types.KindBool
+	KindInt8        = types.KindInt8
+	KindUint8       = types.KindUint8
+	KindInt16       = types.KindInt16
+	KindUint16      = types.KindUint16
+	KindInt32       = types.KindInt32
+	KindUint32      = types.KindUint32
+	KindInt64       = types.KindInt64
+	KindUint64      = types.KindUint64
+	KindFloat32     = types.KindFloat32
+	KindFloat64     = types.KindFloat64
+	KindString      = types.KindString
+	KindBytes       = types.KindBytes
+	KindInt128      = types.KindInt128
+	KindUint128     = types.KindUint128
+	KindInt256      = types.KindInt256
+	KindUint256     = types.KindUint256
+	KindTimestamp   = types.KindTimestamp
+	KindArrayString = types.KindArrayString
 )
 
 // TableID is a stable identifier for a table, assigned by the builder.

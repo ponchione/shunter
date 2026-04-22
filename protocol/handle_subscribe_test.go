@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/big"
 	"sync"
 	"testing"
 
+	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
@@ -2909,6 +2911,56 @@ func TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth(t *testing.T
 	}
 }
 
+// TestHandleSubscribeSingle_ParityValidLiteralU256Scientific pins the
+// remaining reference `valid_literals` row at
+// reference/SpacetimeDB/crates/expr/src/check.rs:330-332
+// (`select * from t where u256 = 1e40` / "u256"). The reference BigDecimal
+// is_integer path treats `1e40` as the exact integer 10^40, which fits u256
+// (max ~1.16e77). Shunter's parser now promotes `1e40` to LitBigInt and
+// coerce decomposes it into four uint64 words matching the 256-bit layout.
+// Admission must succeed and the executor must receive a ColEq predicate
+// carrying the 10^40 Uint256 value.
+func TestHandleSubscribeSingle_ParityValidLiteralU256Scientific(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   250,
+		QueryID:     251,
+		QueryString: "SELECT * FROM t WHERE u256 = 1e40",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	wantBig, _ := new(big.Int).SetString("10000000000000000000000000000000000000000", 10)
+	want, err := sql.Coerce(sql.Literal{Kind: sql.LitBigInt, Big: wantBig}, schema.KindUint256)
+	if err != nil {
+		t.Fatalf("build expected: %v", err)
+	}
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("filter value = %v, want Uint256(10^40)", colEq.Value)
+	}
+}
+
 // TestHandleSubscribeSingle_ParityUint256NegativeRejected extends the
 // reference invalid_literals bundle at check.rs:382-385 to the Uint256
 // column kind. `-1` parses to LitInt(-1) and coerce's KindUint256 branch
@@ -2935,6 +2987,98 @@ func TestHandleSubscribeSingle_ParityUint256NegativeRejected(t *testing.T) {
 	requireOptionalUint32(t, se.QueryID, 243, "QueryID")
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when a negative literal targets a Uint256 column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityTimestampLiteralAccepted pins the reference
+// valid_literals rows at check.rs:334-352 onto the SubscribeSingle admission
+// surface: RFC3339-shaped string literals bind to a KindTimestamp column. The
+// coerce path (query/sql/coerce.go) parses `T`/space separator, optional
+// fractional seconds up to nanoseconds (truncated to micros), and both `Z`
+// and numeric offset forms. Each subtest runs
+// `SELECT * FROM t WHERE ts = '<shape>'` and confirms the executor receives a
+// ColEq predicate carrying a Timestamp value with the expected micros.
+func TestHandleSubscribeSingle_ParityTimestampLiteralAccepted(t *testing.T) {
+	cases := []struct {
+		name  string
+		lit   string
+		micro int64
+	}{
+		{"rfc3339_utc_no_fraction", "2025-02-10T15:45:30Z", 1_739_202_330_000_000},
+		{"rfc3339_utc_millis", "2025-02-10T15:45:30.123Z", 1_739_202_330_123_000},
+		{"rfc3339_utc_nanos_truncated", "2025-02-10T15:45:30.123456789Z", 1_739_202_330_123_456},
+		{"space_separator_offset", "2025-02-10 15:45:30+02:00", 1_739_195_130_000_000},
+		{"space_separator_millis_offset", "2025-02-10 15:45:30.123+02:00", 1_739_195_130_123_000},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
+			)
+
+			requestID := uint32(260 + i*2)
+			queryID := uint32(261 + i*2)
+			msg := &SubscribeSingleMsg{
+				RequestID:   requestID,
+				QueryID:     queryID,
+				QueryString: "SELECT * FROM t WHERE ts = '" + tc.lit + "'",
+			}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			select {
+			case frame := <-conn.OutboundCh:
+				t.Fatalf("unexpected message on OutboundCh: %x", frame)
+			default:
+			}
+
+			req := executor.getRegisterSetReq()
+			if req == nil {
+				t.Fatal("executor did not receive RegisterSubscriptionSet call")
+			}
+			if len(req.Predicates) != 1 {
+				t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+			}
+			colEq, ok := req.Predicates[0].(subscription.ColEq)
+			if !ok {
+				t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+			}
+			if colEq.Value.Kind() != schema.KindTimestamp {
+				t.Fatalf("filter kind = %v, want Timestamp", colEq.Value.Kind())
+			}
+			if got := colEq.Value.AsTimestamp(); got != tc.micro {
+				t.Fatalf("filter micros = %d, want %d", got, tc.micro)
+			}
+		})
+	}
+}
+
+// TestHandleSubscribeSingle_ParityTimestampMalformedRejected pins that a
+// non-RFC3339 string literal targeting a Timestamp column is rejected by the
+// coerce layer rather than silently becoming zero micros.
+func TestHandleSubscribeSingle_ParityTimestampMalformedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   270,
+		QueryID:     271,
+		QueryString: "SELECT * FROM t WHERE ts = 'not-a-timestamp'",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 271, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a malformed timestamp literal")
 	}
 }
 
@@ -3540,5 +3684,77 @@ func TestHandleSubscribeSingle_ParitySqlInvalidAggregateWithoutAliasRejected(t *
 	requireOptionalUint32(t, se.QueryID, 165, "QueryID")
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on aggregate without alias")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityArraySenderRejected pins reference
+// check.rs:487-489 (`select * from t where arr = :sender` / "The :sender
+// param is an identity"). With KindArrayString realized, the coerce layer
+// rejects :sender against the array column because :sender only resolves
+// to the 32-byte identity (KindBytes) representation. The rejection is
+// now a positive parity contract instead of falling through the default
+// "column kind not supported" branch.
+func TestHandleSubscribeSingle_ParityArraySenderRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   400,
+		QueryID:     401,
+		QueryString: "SELECT * FROM t WHERE arr = :sender",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 401, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when :sender targets an array column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityArrayJoinOnRejected pins reference
+// check.rs:523-525 (`select t.* from t join s on t.arr = s.arr` / "Product
+// values are not comparable"). The join compile path refuses to build a
+// subscription.Join when either side of the ON clause names an array
+// column.
+func TestHandleSubscribeSingle_ParityArrayJoinOnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := &mockSchemaLookup{
+		tables: map[string]struct {
+			id     schema.TableID
+			schema *schema.TableSchema
+		}{
+			"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+				{Index: 0, Name: "arr", Type: schema.KindArrayString},
+			}}},
+			"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+				{Index: 0, Name: "arr", Type: schema.KindArrayString},
+			}}},
+		},
+	}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   402,
+		QueryID:     403,
+		QueryString: "SELECT t.* FROM t JOIN s ON t.arr = s.arr",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 403, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on array-on-array join ON")
 	}
 }

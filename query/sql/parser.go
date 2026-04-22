@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -53,6 +54,12 @@ const (
 	// check.rs lines 434-440 for accepted shapes and lines 487-488 for the
 	// rejection on non-identity columns.
 	LitSender
+	// LitBigInt carries an arbitrary-precision integer literal — the branch
+	// used when a numeric literal parses as integer-valued (via big.Rat) but
+	// does not fit int64. Reference parity target is `u256 = 1e40` at
+	// reference/SpacetimeDB/crates/expr/src/check.rs:330-332, where the
+	// reference BigDecimal path treats `1e40` as the exact integer 10^40.
+	LitBigInt
 )
 
 // Literal is a parsed SQL literal in raw lexical form.
@@ -63,6 +70,7 @@ type Literal struct {
 	Bool  bool
 	Str   string
 	Bytes []byte
+	Big   *big.Int
 }
 
 // Filter is a single column comparison against a literal value.
@@ -868,15 +876,26 @@ func (p *parser) parseLiteral() (Literal, error) {
 }
 
 // parseNumericLiteral turns a tokenized numeric body into a typed Literal.
-// Plain integer bodies stay LitInt. Bodies with a fractional or exponent
-// part parse via strconv.ParseFloat(64); when the resulting value is finite
-// and integer-valued within int64 range the literal collapses to LitInt so
-// it can bind to integer columns at the coerce boundary (matching the
-// reference BigDecimal is_integer path in crates/expr/src/lib.rs::parse_int).
-// Otherwise the literal stays LitFloat and the coerce boundary either binds
-// it to a float column or rejects it as a float-on-integer mismatch.
+// Plain integer bodies attempt strconv.ParseInt; on int64 overflow they
+// promote to LitBigInt. Bodies with a fractional or exponent part first go
+// through big.Rat so scientific shapes like `1e40` preserve exact-integer
+// semantics (the reference BigDecimal is_integer path in
+// crates/expr/src/lib.rs::parse_int collapses integer-valued decimals into
+// big integers). Integer-valued rationals collapse to LitInt when they fit
+// int64, else LitBigInt. Non-integer rationals fall back to LitFloat via
+// strconv.ParseFloat so `1e-3` / `0.1` stay float-kinded for the coerce
+// boundary to either bind to a float column or reject as a float-on-integer
+// mismatch.
 func parseNumericLiteral(text string) (Literal, error) {
 	if strings.ContainsAny(text, ".eE") {
+		r, ok := new(big.Rat).SetString(text)
+		if ok && r.IsInt() {
+			n := r.Num()
+			if n.IsInt64() {
+				return Literal{Kind: LitInt, Int: n.Int64()}, nil
+			}
+			return Literal{Kind: LitBigInt, Big: new(big.Int).Set(n)}, nil
+		}
 		f, err := strconv.ParseFloat(text, 64)
 		if err != nil {
 			return Literal{}, fmt.Errorf("%w: numeric literal %q out of range", ErrUnsupportedSQL, text)
@@ -886,11 +905,14 @@ func parseNumericLiteral(text string) (Literal, error) {
 		}
 		return Literal{Kind: LitFloat, Float: f}, nil
 	}
-	n, err := strconv.ParseInt(text, 10, 64)
-	if err != nil {
+	if n, err := strconv.ParseInt(text, 10, 64); err == nil {
+		return Literal{Kind: LitInt, Int: n}, nil
+	}
+	b, ok := new(big.Int).SetString(text, 10)
+	if !ok {
 		return Literal{}, fmt.Errorf("%w: integer literal %q out of range", ErrUnsupportedSQL, text)
 	}
-	return Literal{Kind: LitInt, Int: n}, nil
+	return Literal{Kind: LitBigInt, Big: b}, nil
 }
 
 func (p *parser) expectKeyword(kw string) error {

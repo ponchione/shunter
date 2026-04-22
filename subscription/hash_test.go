@@ -137,6 +137,12 @@ func TestQueryHashAllKindsRoundTrip(t *testing.T) {
 		types.NewInt256(-1, ^uint64(0), ^uint64(0), ^uint64(0)),
 		types.NewUint256(0, 0, 0, 127),
 		types.NewUint256(^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)),
+		types.NewTimestamp(0),
+		types.NewTimestamp(-1),
+		types.NewTimestamp(1_739_202_330_000_000),
+		types.NewArrayString(nil),
+		types.NewArrayString([]string{"alpha"}),
+		types.NewArrayString([]string{"alpha", "beta"}),
 	}
 	for _, v := range cases {
 		p := ColEq{Table: 1, Column: 0, Value: v}
@@ -144,6 +150,33 @@ func TestQueryHashAllKindsRoundTrip(t *testing.T) {
 		if h == (QueryHash{}) {
 			t.Fatalf("zero hash for kind %s", v.Kind())
 		}
+	}
+}
+
+// TestQueryHashArrayStringVsString pins that an ArrayString with a single
+// element and a scalar String with the same payload hash to different digests
+// (kind tag + length prefix separate them).
+func TestQueryHashArrayStringVsString(t *testing.T) {
+	arr := ColEq{Table: 1, Column: 0, Value: types.NewArrayString([]string{"alpha"})}
+	str := ColEq{Table: 1, Column: 0, Value: types.NewString("alpha")}
+	if ComputeQueryHash(arr, nil) == ComputeQueryHash(str, nil) {
+		t.Fatal("ArrayString{'alpha'} and String 'alpha' should hash differently")
+	}
+}
+
+// TestQueryHashArrayStringDiffersByPayload pins that element-level payload
+// differences (length, ordering, content) each perturb the canonical hash.
+func TestQueryHashArrayStringDiffersByPayload(t *testing.T) {
+	empty := ColEq{Table: 1, Column: 0, Value: types.NewArrayString(nil)}
+	single := ColEq{Table: 1, Column: 0, Value: types.NewArrayString([]string{"alpha"})}
+	pair := ColEq{Table: 1, Column: 0, Value: types.NewArrayString([]string{"alpha", "beta"})}
+	reversed := ColEq{Table: 1, Column: 0, Value: types.NewArrayString([]string{"beta", "alpha"})}
+	h1 := ComputeQueryHash(empty, nil)
+	h2 := ComputeQueryHash(single, nil)
+	h3 := ComputeQueryHash(pair, nil)
+	h4 := ComputeQueryHash(reversed, nil)
+	if h1 == h2 || h1 == h3 || h2 == h3 || h3 == h4 {
+		t.Fatalf("distinct ArrayString payloads hashed to equal: %v %v %v %v", h1, h2, h3, h4)
 	}
 }
 
@@ -194,6 +227,27 @@ func TestQueryHashInt128DiffersByPayload(t *testing.T) {
 	h3 := ComputeQueryHash(c, nil)
 	if h1 == h2 || h1 == h3 || h2 == h3 {
 		t.Fatalf("distinct Int128 payloads hashed to equal: %v %v %v", h1, h2, h3)
+	}
+}
+
+// TestQueryHashTimestampVsInt64 pins that a Timestamp with the same raw i64
+// payload as an Int64 produces a different canonical hash (the kind tag byte
+// separates them).
+func TestQueryHashTimestampVsInt64(t *testing.T) {
+	ts := ColEq{Table: 1, Column: 0, Value: types.NewTimestamp(1_739_202_330_000_000)}
+	i64 := ColEq{Table: 1, Column: 0, Value: types.NewInt64(1_739_202_330_000_000)}
+	if ComputeQueryHash(ts, nil) == ComputeQueryHash(i64, nil) {
+		t.Fatal("Timestamp and Int64 with same i64 payload should produce different hashes")
+	}
+}
+
+// TestQueryHashTimestampDiffersByPayload pins that different timestamp micros
+// produce different canonical hashes.
+func TestQueryHashTimestampDiffersByPayload(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewTimestamp(1_739_202_330_000_000)}
+	b := ColEq{Table: 1, Column: 0, Value: types.NewTimestamp(1_739_202_330_000_001)}
+	if ComputeQueryHash(a, nil) == ComputeQueryHash(b, nil) {
+		t.Fatal("distinct Timestamp micros should hash differently")
 	}
 }
 
