@@ -130,7 +130,8 @@ func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 // (`request_id, total_host_execution_duration_micros, query_id, rows`).
 // Duration sits at position 2. Byte shape is pinned in
 // parity_applied_envelopes_test.go. The flattened TableName + Rows
-// shape is a separate documented divergence — the reference wraps
+// shape is a documented divergence per
+// `docs/parity-phase2-slice4-rows-shape.md` — the reference wraps
 // them in `SubscribeRows`.
 func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeSingleApplied{})
@@ -145,9 +146,9 @@ func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331
 // (`request_id, total_host_execution_duration_micros, query_id, rows`).
 // Duration sits at position 2. Byte shape is pinned in
-// parity_applied_envelopes_test.go. HasRows + Rows still diverges from
-// the reference required `SubscribeRows` wrapper — separate future
-// slice.
+// parity_applied_envelopes_test.go. HasRows + Rows diverges from
+// the reference required `SubscribeRows` wrapper — documented per
+// `docs/parity-phase2-slice4-rows-shape.md`.
 func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeSingleApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "HasRows", "Rows"}
@@ -233,8 +234,9 @@ func TestPhase2UnsubscribeMultiShape(t *testing.T) {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380
 // (`request_id, total_host_execution_duration_micros, query_id, update`).
 // Duration sits at position 2. Byte shape is pinned in
-// parity_applied_envelopes_test.go. Update still flattens the
-// reference `DatabaseUpdate` wrapper — separate future slice.
+// parity_applied_envelopes_test.go. Update flattens the reference
+// `DatabaseUpdate` wrapper — documented per
+// `docs/parity-phase2-slice4-rows-shape.md`.
 func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeMultiApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}
@@ -248,8 +250,9 @@ func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394
 // (`request_id, total_host_execution_duration_micros, query_id, update`).
 // Duration sits at position 2. Byte shape is pinned in
-// parity_applied_envelopes_test.go. Update still flattens the
-// reference `DatabaseUpdate` wrapper — separate future slice.
+// parity_applied_envelopes_test.go. Update flattens the reference
+// `DatabaseUpdate` wrapper — documented per
+// `docs/parity-phase2-slice4-rows-shape.md`.
 func TestPhase2UnsubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeMultiApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}

@@ -47,6 +47,13 @@ Status values:
 
 Phase 1 / 1.5 / 2 / 3 / Phase 4 Slice 2 (2α / 2β / 2γ) / the narrow `P0-RECOVERY-001` recovery slice are all closed for the current phase framing.
 
+Phase 2 sub-slice record (for reference; all closed):
+
+| Sub-slice | Status | Decision doc | Current truth |
+|---|---|---|---|
+| Slice 3 — per-client outbound lag / slow-client policy | `closed (divergences explicit)` | `docs/parity-phase2-slice3-lag-policy.md` | Queue depth aligned to reference `CLIENT_CHANNEL_CAPACITY = 16384`; overflow-disconnect outcome matches; 1008 close-frame mechanism is an intentional parity-explicit divergence. |
+| Slice 4 — applied / light / committed rows shape | `closed (divergences recorded)` | `docs/parity-phase2-slice4-rows-shape.md` | Documented-divergence close covering the flat `[]SubscriptionUpdate` / `TableName+Rows` shape on `Subscribe{Single,Multi}Applied`, `Unsubscribe{Single,Multi}Applied`, `TransactionUpdateLight`, `StatusCommitted`. The wrapper chain (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `BsatnRowList`) collapses onto the SPEC-005 §3.4 row-list deferral, so a partial close produces no parity value. New pin file `protocol/parity_rows_shape_test.go` rolls up the canonical-contract layer. |
+
 Phase 4 Slice 2 sub-slice record (for reference; all closed):
 
 | Sub-slice | Status | Decision doc | Current truth |

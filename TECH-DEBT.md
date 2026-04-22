@@ -24,6 +24,7 @@ Summary:
 - legacy `v1.bsatn.shunter` admission is still accepted as a compatibility deferral
 - brotli remains recognized-but-unsupported
 - several message-family and envelope details remain intentionally divergent
+- rows-shape wrapper-chain parity (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `BsatnRowList`) is closed as a documented divergence — see `docs/parity-phase2-slice4-rows-shape.md`. Carried-forward deferral: a coordinated close of the wrapper chain together with the SPEC-005 §3.4 row-list format is a separate multi-slice phase, not an OI-001 A1 wire-close slice.
 
 Why this matters:
 - protocol behavior is still one of the biggest blockers to serious parity claims
@@ -43,6 +44,7 @@ Primary code surfaces:
 Source docs:
 - `docs/spacetimedb-parity-roadmap.md` Tier A1
 - `docs/parity-phase0-ledger.md`
+- `docs/parity-phase2-slice4-rows-shape.md`
 
 ### OI-002: Query and subscription behavior still diverges from the target runtime model
 

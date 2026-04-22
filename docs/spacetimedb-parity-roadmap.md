@@ -191,13 +191,15 @@ Status: many narrow slices closed; broader parity still open.
 
 What landed already:
 - subscription envelope follow-through
-- lag / slow-client policy parity slice
+- lag / slow-client policy parity slice (`docs/parity-phase2-slice3-lag-policy.md`)
+- rows-shape documented-divergence close covering applied / light / committed envelopes (`docs/parity-phase2-slice4-rows-shape.md`)
 - many narrow SQL/query slices and rejection pins
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
+- coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
 
 ## Phase 3 — Scheduler/reducer lifecycle parity
 Status: current narrow startup/firing slice is closed.
