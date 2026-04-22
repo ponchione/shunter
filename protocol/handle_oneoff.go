@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/schema"
@@ -38,15 +39,16 @@ func handleOneOffQuery(
 	stateAccess CommittedStateAccess,
 	sl SchemaLookup,
 ) {
+	receipt := time.Now()
 	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity)
 	if err != nil {
-		sendOneOffError(conn, msg.MessageID, err.Error())
+		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
 		return
 	}
 
 	tableID, _, ok := sl.TableByName(compiled.TableName)
 	if !ok {
-		sendOneOffError(conn, msg.MessageID, fmt.Sprintf("unknown table %q", compiled.TableName))
+		sendOneOffError(conn, msg.MessageID, fmt.Sprintf("unknown table %q", compiled.TableName), receipt)
 		return
 	}
 
@@ -70,7 +72,7 @@ func handleOneOffQuery(
 		var buf bytes.Buffer
 		if err := bsatn.EncodeProductValue(&buf, pv); err != nil {
 			view.Close()
-			sendOneOffError(conn, msg.MessageID, "encode error: "+err.Error())
+			sendOneOffError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
 			return
 		}
 		rows = append(rows, buf.Bytes())
@@ -84,16 +86,30 @@ func handleOneOffQuery(
 			TableName: compiled.TableName,
 			Rows:      encoded,
 		}},
+		TotalHostExecutionDuration: elapsedMicrosI64(receipt),
 	})
 }
 
 // sendOneOffError emits a failure OneOffQueryResponse matching reference
 // module_host.rs:2300 (`error: Some(msg), results: vec![]`).
-func sendOneOffError(conn *Conn, messageID []byte, errMsg string) {
+func sendOneOffError(conn *Conn, messageID []byte, errMsg string, receipt time.Time) {
 	sendError(conn, OneOffQueryResponse{
-		MessageID: messageID,
-		Error:     &errMsg,
+		MessageID:                  messageID,
+		Error:                      &errMsg,
+		TotalHostExecutionDuration: elapsedMicrosI64(receipt),
 	})
+}
+
+// elapsedMicrosI64 reports the non-zero microsecond delta since receipt
+// as an i64 (reference `TimeDuration` is i64 micros — v1.rs / sats
+// time_duration.rs). Zero is bumped to 1 so the wire value clearly
+// distinguishes measured from the deferred-measurement sentinel.
+func elapsedMicrosI64(receipt time.Time) int64 {
+	us := time.Since(receipt).Microseconds()
+	if us <= 0 {
+		return 1
+	}
+	return us
 }
 
 // matchesAll returns true when pv satisfies every predicate.

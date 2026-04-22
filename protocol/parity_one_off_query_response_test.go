@@ -2,8 +2,12 @@ package protocol
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"testing"
+
+	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/types"
 )
 
 // TestParityOneOffQueryResponseWireShapeSuccess pins the byte-level wire
@@ -161,5 +165,57 @@ func TestParityOneOffQueryResponseWireShapeError(t *testing.T) {
 	}
 	if len(got.Tables) != 0 {
 		t.Errorf("Tables len = %d, want 0 on error", len(got.Tables))
+	}
+}
+
+// TestParityOneOffQueryResponseDurationNonZeroOnSuccess pins the
+// receipt-timestamp seam at handleOneOffQuery entry: success emissions
+// now carry a measured `TotalHostExecutionDuration` in microseconds.
+// Before the seam the field always emitted 0 regardless of how long the
+// scan took.
+func TestParityOneOffQueryResponseDurationNonZeroOnSuccess(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("users", 1, schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32})
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {{types.NewUint32(1)}},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x42},
+		QueryString: "SELECT * FROM users",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	if result.TotalHostExecutionDuration == 0 {
+		t.Fatal("TotalHostExecutionDuration = 0, want non-zero (receipt seam wired)")
+	}
+}
+
+// TestParityOneOffQueryResponseDurationNonZeroOnCompileFail pins the
+// seam on the compile-short-circuit error path.
+func TestParityOneOffQueryResponseDurationNonZeroOnCompileFail(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("users", 1) // schema has no match for garbage query
+	snap := &mockSnapshot{}
+	stateAccess := &mockStateAccess{snap: snap}
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x43},
+		QueryString: "THIS IS NOT SQL",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("Error = nil, want non-nil on compile-fail")
+	}
+	if result.TotalHostExecutionDuration == 0 {
+		t.Fatal("TotalHostExecutionDuration = 0, want non-zero on compile-fail path")
 	}
 }
