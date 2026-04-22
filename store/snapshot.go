@@ -122,18 +122,29 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 	if !ok {
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
+	// SPEC-001 §7.2: IndexRange delegates to Index.SeekBounds so
+	// string/bytes/float exclusive-bound predicates hit the BTree's
+	// binary-search start point instead of a full ordered scan with
+	// per-row Bound filter.
+	//
+	// OI-005 sub-hazard pin: BTreeIndex.SeekBounds is an iter.Seq walking
+	// b.entries live. Under single-writer discipline no concurrent writer
+	// runs while a CommittedSnapshot holds RLock, but a yield callback
+	// reaching into a mutating path (future refactor, direct CommittedState
+	// access from within a reducer) could shift b.entries in place
+	// (slices.Delete when a key's last RowID is removed) and drift the
+	// outer iteration. Collecting the range once at the CommittedReadView
+	// boundary decouples iteration from BTree-internal storage, mirroring
+	// the StateView.SeekIndexBounds precedent
+	// (state_view_seekindexbounds_test.go aliasing pin).
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()
-		for rid := range idx.BTree().Scan() {
+		for _, rid := range slices.Collect(idx.BTree().SeekBounds(lower, upper)) {
 			// OI-005 mid-iter-close defense-in-depth: see TableScan.
 			s.ensureOpen()
 			row, ok := t.GetRow(rid)
 			if !ok {
-				continue
-			}
-			key := ExtractKey(row, idx.schema.Columns)
-			if !matchesLowerBound(key, lower) || !matchesUpperBound(key, upper) {
 				continue
 			}
 			if !yield(rid, row) {

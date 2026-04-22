@@ -4,6 +4,40 @@ Use this file to start the next agent on the next real Shunter parity / hardenin
 
 For provenance of closed slices, use `git log` — this file tracks only current state and forward motion.
 
+## What just landed (2026-04-22, CommittedSnapshot.IndexRange SPEC-001 §7.2 drift fix)
+
+Narrow store-side drift closure against `SPEC-001 §7.2` / `docs/decomposition/001-store/epic-7-read-only-snapshots/story-7.1-committed-read-view.md:56` ("Calls `Index.SeekBounds(lower, upper)`"). Before this slice, `CommittedSnapshot.IndexRange` (`store/snapshot.go:119`) used `idx.BTree().Scan()` + per-row `ExtractKey` + `matchesLowerBound`/`matchesUpperBound` filter — a full ordered BTree walk regardless of bound narrowness. This was the v0 inefficient path referenced indirectly in the OI-010 follow-on queue entry about "Subscription `SeekIndexBounds` migration"; the queue wording said "`StateView.SeekIndexBounds`" but subscription consumes `CommittedReadView`, not `StateView`, so the real prerequisite was closing the SPEC-001 §7.2 drift on the CommittedReadView surface so subscription's eventual rewire to `view.IndexRange(...)` does not regress perf.
+
+Landed:
+
+- `store/snapshot.go` `CommittedSnapshot.IndexRange` rewritten to delegate to `slices.Collect(idx.BTree().SeekBounds(lower, upper))`. Binary-search start point now hits directly via the OI-010 `BTreeIndex.SeekBounds` primitive; per-row key extraction + bound recheck removed (redundant — SeekBounds already filters by Bound semantics). OI-005 aliasing closure preserved by the `slices.Collect` at the CommittedReadView boundary, mirroring the `StateView.SeekIndexBounds` precedent.
+
+Pins landed:
+
+- `store/snapshot_indexrange_seekbounds_test.go` (new, 8 pins):
+  - `ExclusiveLowInclusiveHigh` — `(2,4]` on 1..5 yields {3,4}.
+  - `ExclusiveLowExclusiveHigh` — `(2,4)` yields {3}.
+  - `UnboundedHigh` — `[3,+∞)` yields {3,4,5}.
+  - `BothUnboundedEqualsOrderedScan` — full ordered row-by-row scan.
+  - `EmptyRangeLowGreaterThanHigh` — `[4,2]` yields empty.
+  - `ExclusiveEndpointsAtSameKey` — `(3,3)` yields empty.
+  - `EarlyBreak` — `iter.Seq2` break contract on consumer.
+  - `IteratesIndependentRowIDsAfterBTreeMutation` — OI-005 aliasing pin; BTree `Remove` mid-iter cannot drift iteration (mirrors `TestStateViewSeekIndexBoundsIteratesIndependentRowIDsAfterBTreeMutation`).
+
+No production-code touches outside `store/snapshot.go`. No consumer migration in this slice — subscription's `initialQuery` TableScan+MatchRow fallback for bare `ColRange` predicates remains on the Tier-3-equivalent path pending the follow-on slice (now unblocked).
+
+Verification:
+
+- `rtk go build ./store` → clean
+- `rtk go vet ./store` → `Go vet: No issues found`
+- `rtk go fmt ./store` → clean
+- `rtk go test ./store -count=1` → 117 passed (baseline 108 before OI-010 + 1 existing `TestCommittedSnapshotIndexRangeBoundSemantics` + 8 new)
+- `rtk go test ./... -count=1` → 1611 passed in 11 packages (baseline 1603 + 8 new)
+
+Ledger / debt follow-through:
+
+- Not an OI — narrow drift-closure slice against a landed spec deliverable. No TECH-DEBT entry. Follow-on queue item #1 ("Subscription `SeekIndexBounds` migration") wording is now accurate to reword as "Subscription `IndexRange` migration" — the CommittedReadView surface is efficient; the consumer rewire to `view.IndexRange(t, idxID, lower, upper)` for bare `ColRange` predicates in `subscription/register_set.go` `initialQuery` is the next narrow slice.
+
 ## What just landed (2026-04-22, protocol test-arity cleanup)
 
 Mechanical compile-drift closure against the landed `schema.SchemaRegistry.TableByName` 3-value signature `(TableID, *TableSchema, bool)`. Before this slice, `protocol/handle_oneoff_test.go` (23 sites) and `protocol/handle_subscribe_test.go` (17 call sites + 1 local adapter wrapping `reg.TableByName`) still destructured the old 2-value return, so `go test ./protocol` failed to build and full-repo `go test ./...` excluded `./protocol`. Not an OI — it was Priority 1 on the follow-on queue, a stale-test drift against an already-landed registry change.
@@ -193,7 +227,7 @@ OI-008 / OI-009 / OI-010 / OI-011 / OI-012 are all closed. No remaining `open` O
 
 In priority order, all narrow-ready:
 
-1. **Subscription `SeekIndexBounds` migration** — rewire `subscription/eval.go` predicate scans off the Tier-3 fallback and onto the `StateView.SeekIndexBounds` surface landed in OI-010.
+1. **Subscription `IndexRange` migration** — rewire `subscription/register_set.go` `initialQuery` default branch so a bare `ColRange` predicate on an indexed column uses `view.IndexRange(t, idxID, lower, upper)` instead of the `view.TableScan(t) + MatchRow` fallback. Compound shapes (`And`, `Or`, `ColEq`, `ColNe`, `AllRows`) stay on TableScan. Prerequisite (efficient `CommittedSnapshot.IndexRange` backed by `BTreeIndex.SeekBounds`) landed 2026-04-22. (Queue-entry wording was "`StateView.SeekIndexBounds`" — subscription actually consumes `CommittedReadView`, so the right surface is `view.IndexRange`.)
 2. **Subscription fan-out wiring in `cmd/shunter-example`** — wire `subscription.Manager` + `FanOutWorker` + `protocol.FanOutSenderAdapter` into the example so reducer writes actually fan out to subscribers. Requires an adapter that widens `schema.SchemaRegistry` with `ColumnCount(TableID) int` (subscription `SchemaLookup` demands it; `schema.SchemaRegistry` does not satisfy it). Adds real subscription coverage to the example's smoke tests. Follow-on to OI-008.
 3. **Expose executor inbox for scheduler wiring** — `NewScheduler(inbox chan<- ExecutorCommand, ...)` reaches the executor's unexported `inbox`. Production embedders that want sys_scheduled replay need an exported accessor (e.g. `Executor.SchedulerFor(tableID)` or `Executor.Inbox()`). Lets the OI-008 example pass a real `*Scheduler` to `Startup`.
 
