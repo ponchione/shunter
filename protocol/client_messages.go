@@ -30,12 +30,17 @@ type SubscribeSingleMsg struct {
 //
 // Part of the Phase 2 Slice 2 variant split. UnsubscribeMultiMsg
 // drops every query under a given QueryID; this type drops exactly
-// one. Reference: Unsubscribe at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218.
+// one. Field order and wire shape match reference `Unsubscribe`
+// at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218
+// (`{ request_id: u32, query_id: QueryId }`) — pinned by
+// parity_unsubscribe_test.go against the reference byte shape. Prior
+// Shunter wire carried an extra `send_dropped: u8` byte smuggled onto
+// v1; that concept lives on v2 `UnsubscribeFlags::SendDroppedRows`
+// and is out of scope for v1 parity.
 type UnsubscribeSingleMsg struct {
-	RequestID   uint32
-	QueryID     uint32
-	SendDropped bool
+	RequestID uint32
+	QueryID   uint32
 }
 
 // CallReducerMsg is the client-side CallReducer message (SPEC-005 §7.3).
@@ -121,11 +126,6 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		buf.WriteByte(TagUnsubscribeSingle)
 		writeUint32(&buf, msg.RequestID)
 		writeUint32(&buf, msg.QueryID)
-		if msg.SendDropped {
-			buf.WriteByte(1)
-		} else {
-			buf.WriteByte(0)
-		}
 	case CallReducerMsg:
 		buf.WriteByte(TagCallReducer)
 		writeString(&buf, msg.ReducerName)
@@ -214,13 +214,9 @@ func decodeUnsubscribeSingle(body []byte) (UnsubscribeSingleMsg, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.QueryID, _, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	if len(body)-off < 1 {
-		return m, fmt.Errorf("%w: Unsubscribe send_dropped", ErrMalformedMessage)
-	}
-	m.SendDropped = body[off] != 0
 	return m, nil
 }
 

@@ -109,12 +109,16 @@ func TestPhase2SubscribeSingleShape(t *testing.T) {
 	}
 }
 
-// TestPhase2UnsubscribeSingleShape pins the renamed single-envelope.
+// TestPhase2UnsubscribeSingleShape pins the reference field order.
 // Reference: Unsubscribe at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218.
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218
+// (`{ request_id: u32, query_id: QueryId }`). Byte shape is pinned in
+// parity_unsubscribe_test.go. The prior extra `SendDropped` byte — a
+// Shunter-local smuggle of the v2 `UnsubscribeFlags::SendDroppedRows`
+// concept — has been removed to match reference v1.
 func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeSingleMsg{})
-	want := []string{"RequestID", "QueryID", "SendDropped"}
+	want := []string{"RequestID", "QueryID"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("UnsubscribeSingleMsg fields = %v, want %v", fields, want)
 	}

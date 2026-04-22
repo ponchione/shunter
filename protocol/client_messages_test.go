@@ -53,21 +53,8 @@ func TestSubscribeSingleRoundTripSQLWithPredicates(t *testing.T) {
 	}
 }
 
-func TestUnsubscribeRoundTripSendDroppedFalse(t *testing.T) {
-	in := UnsubscribeSingleMsg{RequestID: 11, QueryID: 22, SendDropped: false}
-	frame, _ := EncodeClientMessage(in)
-	_, out, err := DecodeClientMessage(frame)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := out.(UnsubscribeSingleMsg)
-	if got != in {
-		t.Errorf("got %+v, want %+v", got, in)
-	}
-}
-
-func TestUnsubscribeRoundTripSendDroppedTrue(t *testing.T) {
-	in := UnsubscribeSingleMsg{RequestID: 11, QueryID: 22, SendDropped: true}
+func TestUnsubscribeSingleRoundTrip(t *testing.T) {
+	in := UnsubscribeSingleMsg{RequestID: 11, QueryID: 22}
 	frame, _ := EncodeClientMessage(in)
 	_, out, err := DecodeClientMessage(frame)
 	if err != nil {
