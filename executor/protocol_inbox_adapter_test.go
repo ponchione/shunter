@@ -46,8 +46,8 @@ func (s stubProtocolSchemaRegistry) TableByName(string) (schema.TableID, *schema
 	return 0, nil, false
 }
 
-func (s stubProtocolSchemaRegistry) TableExists(schema.TableID) bool  { return false }
-func (s stubProtocolSchemaRegistry) TableName(schema.TableID) string  { return "" }
+func (s stubProtocolSchemaRegistry) TableExists(schema.TableID) bool { return false }
+func (s stubProtocolSchemaRegistry) TableName(schema.TableID) string { return "" }
 func (s stubProtocolSchemaRegistry) ColumnExists(schema.TableID, types.ColID) bool {
 	return false
 }

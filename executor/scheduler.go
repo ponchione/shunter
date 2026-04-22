@@ -51,6 +51,17 @@ func (e *Executor) advanceOrDeleteSchedule(tx *store.Transaction, id ScheduleID,
 	return nil
 }
 
+// SchedulerFor returns a *Scheduler wired to this executor's inbox,
+// committed state, and sys_scheduled table. Pass the result to
+// Executor.Startup so scheduler replay enqueues past-due rows into the
+// inbox before external admission opens. Callers own Scheduler.Run's
+// goroutine lifecycle and must stop it before Executor.Shutdown closes
+// the inbox — otherwise a late scheduled-reducer send can race a
+// closed channel.
+func (e *Executor) SchedulerFor() *Scheduler {
+	return NewScheduler(e.inbox, e.committed, e.schedTableID)
+}
+
 // newSchedulerHandle builds a fresh SchedulerHandle bound to a reducer's
 // transaction. Each reducer call gets its own handle so that mutations
 // on sys_scheduled roll back with the reducer.

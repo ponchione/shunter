@@ -141,10 +141,22 @@ func buildEngine(ctx context.Context, dataDir string) (*engineGraph, error) {
 		Subscriptions: subs,
 	}, rr, committed, reg, uint64(maxTxID))
 
-	if err := exec.Startup(ctx, nil); err != nil {
+	// Scheduler replays sys_scheduled past-due rows into the executor inbox
+	// during Startup. schedCtx is cancelled by shutdown() so sched.Run exits
+	// before exec.Shutdown closes the inbox — otherwise a late scheduled
+	// reducer send could race a closed channel.
+	sched := exec.SchedulerFor()
+	if err := exec.Startup(ctx, sched); err != nil {
 		dw.Close()
 		return nil, fmt.Errorf("executor startup: %w", err)
 	}
+
+	schedCtx, schedCancel := context.WithCancel(ctx)
+	schedDone := make(chan struct{})
+	go func() {
+		sched.Run(schedCtx)
+		close(schedDone)
+	}()
 
 	runDone := make(chan struct{})
 	go func() {
@@ -174,6 +186,10 @@ func buildEngine(ctx context.Context, dataDir string) (*engineGraph, error) {
 		dw:     dw,
 		subs:   subs,
 		shutdown: func() {
+			// Stop the scheduler first so no in-flight scheduled-reducer
+			// enqueue races exec.Shutdown closing the inbox.
+			schedCancel()
+			<-schedDone
 			exec.Shutdown()
 			<-runDone
 			// Closing the fan-out inbox drains the worker so it does not
