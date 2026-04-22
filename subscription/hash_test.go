@@ -133,6 +133,10 @@ func TestQueryHashAllKindsRoundTrip(t *testing.T) {
 		types.NewInt128(-1, ^uint64(0)),
 		types.NewUint128(0, 127),
 		types.NewUint128(^uint64(0), ^uint64(0)),
+		types.NewInt256(0, 0, 0, 127),
+		types.NewInt256(-1, ^uint64(0), ^uint64(0), ^uint64(0)),
+		types.NewUint256(0, 0, 0, 127),
+		types.NewUint256(^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)),
 	}
 	for _, v := range cases {
 		p := ColEq{Table: 1, Column: 0, Value: v}
@@ -150,6 +154,32 @@ func TestQueryHashInt128VsUint128(t *testing.T) {
 	uv := ColEq{Table: 1, Column: 0, Value: types.NewUint128(0, 127)}
 	if ComputeQueryHash(iv, nil) == ComputeQueryHash(uv, nil) {
 		t.Fatal("Int128 and Uint128 with same payload should produce different hashes")
+	}
+}
+
+// TestQueryHashInt256VsUint256 pins that distinct 256-bit kinds with the same
+// payload produce different canonical hashes (tag byte separates them).
+func TestQueryHashInt256VsUint256(t *testing.T) {
+	iv := ColEq{Table: 1, Column: 0, Value: types.NewInt256(0, 0, 0, 127)}
+	uv := ColEq{Table: 1, Column: 0, Value: types.NewUint256(0, 0, 0, 127)}
+	if ComputeQueryHash(iv, nil) == ComputeQueryHash(uv, nil) {
+		t.Fatal("Int256 and Uint256 with same payload should produce different hashes")
+	}
+}
+
+// TestQueryHashInt256DiffersByPayload pins that different 256-bit payloads
+// produce different canonical hashes across every word slot.
+func TestQueryHashInt256DiffersByPayload(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewInt256(0, 0, 0, 127)}
+	b := ColEq{Table: 1, Column: 0, Value: types.NewInt256(0, 0, 0, 128)}
+	c := ColEq{Table: 1, Column: 0, Value: types.NewInt256(0, 0, 1, 127)}
+	d := ColEq{Table: 1, Column: 0, Value: types.NewInt256(1, 0, 0, 127)}
+	h1 := ComputeQueryHash(a, nil)
+	h2 := ComputeQueryHash(b, nil)
+	h3 := ComputeQueryHash(c, nil)
+	h4 := ComputeQueryHash(d, nil)
+	if h1 == h2 || h1 == h3 || h1 == h4 || h2 == h3 || h2 == h4 || h3 == h4 {
+		t.Fatalf("distinct Int256 payloads hashed to equal: %v %v %v %v", h1, h2, h3, h4)
 	}
 }
 

@@ -28,6 +28,8 @@ const (
 	KindBytes   = types.KindBytes
 	KindInt128  = types.KindInt128
 	KindUint128 = types.KindUint128
+	KindInt256  = types.KindInt256
+	KindUint256 = types.KindUint256
 )
 
 // TableID is a stable identifier for a table, assigned by the builder.

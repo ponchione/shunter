@@ -217,6 +217,18 @@ func encodeValue(e *canonicalEncoder, v Value) {
 		hi, lo := v.AsUint128()
 		e.writeU64(hi)
 		e.writeU64(lo)
+	case types.KindInt256:
+		w0, w1, w2, w3 := v.AsInt256()
+		e.writeU64(uint64(w0))
+		e.writeU64(w1)
+		e.writeU64(w2)
+		e.writeU64(w3)
+	case types.KindUint256:
+		w0, w1, w2, w3 := v.AsUint256()
+		e.writeU64(w0)
+		e.writeU64(w1)
+		e.writeU64(w2)
+		e.writeU64(w3)
 	default:
 		panic("subscription: encodeValue unhandled kind")
 	}

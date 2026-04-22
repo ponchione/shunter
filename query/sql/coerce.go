@@ -110,6 +110,19 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 			return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
 		}
 		return types.NewUint128FromUint64(uint64(lit.Int)), nil
+	case types.KindInt256:
+		if lit.Kind != LitInt {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		return types.NewInt256FromInt64(lit.Int), nil
+	case types.KindUint256:
+		if lit.Kind != LitInt {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		if lit.Int < 0 {
+			return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
+		}
+		return types.NewUint256FromUint64(uint64(lit.Int)), nil
 	default:
 		return types.Value{}, fmt.Errorf("%w: column kind %s not supported by SQL literal coercion", ErrUnsupportedSQL, kind)
 	}

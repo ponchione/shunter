@@ -86,7 +86,8 @@ Current important differences include:
 - no composite `Sum` / `Array` / nested `Product` value model
 - single-column primary-key / auto-increment model is simpler than the reference
 - changeset metadata is thinner than the reference
-- 128-bit integer column kinds `KindInt128` / `KindUint128` landed 2026-04-21 (first column-kind widening slice). BSATN primitive-type tags 13 / 14 (16 bytes LE), coerce promotes `LitInt` via `NewInt128FromInt64` / `NewUint128FromUint64`, subscription canonical hashing writes 16 bytes. Two reference `check.rs:360-370` rows now accept end-to-end (`i128 = 127`, `u128 = 127`). `i256` / `u256` / timestamp / array / product kinds remain unrealizable pending further widening slices.
+- 128-bit integer column kinds `KindInt128` / `KindUint128` landed 2026-04-21 (first column-kind widening slice). BSATN primitive-type tags 13 / 14 (16 bytes LE), coerce promotes `LitInt` via `NewInt128FromInt64` / `NewUint128FromUint64`, subscription canonical hashing writes 16 bytes. Two reference `check.rs:360-370` rows now accept end-to-end (`i128 = 127`, `u128 = 127`).
+- 256-bit integer column kinds `KindInt256` / `KindUint256` landed 2026-04-21 (second column-kind widening slice). `types.Value` grew a `w256 [4]uint64` slot (index 0 most-significant, signed for Int256), BSATN primitive-type tags 15 / 16 (32 bytes LE, lowest word first), coerce promotes `LitInt` via `NewInt256FromInt64` / `NewUint256FromUint64`, subscription canonical hashing writes 32 bytes big-endian. Two further `check.rs:360-370` rows now accept end-to-end (`i256 = 127`, `u256 = 127`); the `u256 = 1e40` reference row at `check.rs:330-332` still needs BigDecimal-style literal widening. Timestamp / array / product column kinds remain unrealizable pending future widening slices.
 
 ### Commit log / recovery
 - Shunter's BSATN is a rewrite, not the same codec contract

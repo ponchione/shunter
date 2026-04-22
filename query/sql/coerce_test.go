@@ -253,3 +253,79 @@ func TestCoerceSenderRejectsInt128Column(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
 	}
 }
+
+// TestCoerceIntLiteralToInt256 pins reference valid_literals_for_type at
+// check.rs:360-370 for the i256 row — `= 127` on an i256 column must
+// type-check. LitInt always fits Int256 via sign-extension from int64.
+func TestCoerceIntLiteralToInt256(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitInt, Int: 127}, types.KindInt256)
+	if err != nil {
+		t.Fatalf("Coerce(127 → Int256) error: %v", err)
+	}
+	if v.Kind() != types.KindInt256 {
+		t.Fatalf("Kind = %v, want Int256", v.Kind())
+	}
+	w0, w1, w2, w3 := v.AsInt256()
+	if w0 != 0 || w1 != 0 || w2 != 0 || w3 != 127 {
+		t.Fatalf("AsInt256 = (%d,%d,%d,%d), want (0,0,0,127)", w0, w1, w2, w3)
+	}
+}
+
+func TestCoerceNegativeIntLiteralToInt256(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitInt, Int: -1}, types.KindInt256)
+	if err != nil {
+		t.Fatalf("Coerce(-1 → Int256) error: %v", err)
+	}
+	w0, w1, w2, w3 := v.AsInt256()
+	if w0 != -1 || w1 != ^uint64(0) || w2 != ^uint64(0) || w3 != ^uint64(0) {
+		t.Fatalf("AsInt256 = (%d,%d,%d,%d), want all-ones", w0, w1, w2, w3)
+	}
+}
+
+// TestCoerceIntLiteralToUint256 pins the u256 row of valid_literals_for_type.
+func TestCoerceIntLiteralToUint256(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitInt, Int: 127}, types.KindUint256)
+	if err != nil {
+		t.Fatalf("Coerce(127 → Uint256) error: %v", err)
+	}
+	if v.Kind() != types.KindUint256 {
+		t.Fatalf("Kind = %v, want Uint256", v.Kind())
+	}
+	w0, w1, w2, w3 := v.AsUint256()
+	if w0 != 0 || w1 != 0 || w2 != 0 || w3 != 127 {
+		t.Fatalf("AsUint256 = (%d,%d,%d,%d), want (0,0,0,127)", w0, w1, w2, w3)
+	}
+}
+
+// TestCoerceNegativeIntoUint256Fails mirrors the reference invalid_literals
+// rejection for `u8 = -1` extended to u256.
+func TestCoerceNegativeIntoUint256Fails(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitInt, Int: -1}, types.KindUint256)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestCoerceStringLiteralOnInt256Rejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitString, Str: "127"}, types.KindInt256)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestCoerceFloatLiteralOnUint256Rejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitFloat, Float: 1.5}, types.KindUint256)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceSenderRejectsInt256Column pins that :sender is rejected on 256-bit
+// integer columns for the same reason the 128-bit case rejects.
+func TestCoerceSenderRejectsInt256Column(t *testing.T) {
+	caller := [32]byte{1}
+	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindInt256, &caller)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}

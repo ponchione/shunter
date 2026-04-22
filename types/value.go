@@ -33,6 +33,8 @@ const (
 	KindBytes
 	KindInt128
 	KindUint128
+	KindInt256
+	KindUint256
 )
 
 var kindNames = [...]string{
@@ -51,6 +53,8 @@ var kindNames = [...]string{
 	KindBytes:   "Bytes",
 	KindInt128:  "Int128",
 	KindUint128: "Uint128",
+	KindInt256:  "Int256",
+	KindUint256: "Uint256",
 }
 
 func (k ValueKind) String() string {
@@ -64,7 +68,9 @@ func (k ValueKind) String() string {
 // Fields not used by the current kind are zero values.
 //
 // 128-bit kinds use hi128/lo128 (two's complement; hi is the signed high word
-// for Int128, unsigned for Uint128). Existing primitive slots are untouched so
+// for Int128, unsigned for Uint128). 256-bit kinds use w256 with index 0 as
+// the most-significant word and index 3 as the least-significant word (the
+// high word is signed for Int256). Existing primitive slots are untouched so
 // the blast radius on unrelated code paths stays zero.
 type Value struct {
 	kind  ValueKind
@@ -77,6 +83,7 @@ type Value struct {
 	buf   []byte
 	hi128 uint64
 	lo128 uint64
+	w256  [4]uint64
 }
 
 // Kind returns the ValueKind of this Value.
@@ -169,6 +176,33 @@ func NewUint128FromUint64(x uint64) Value {
 	return Value{kind: KindUint128, hi128: 0, lo128: x}
 }
 
+// NewInt256 builds a 256-bit signed value. w0 is the signed most-significant
+// word; w1, w2, w3 are unsigned words in descending significance (w3 is the
+// least-significant word).
+func NewInt256(w0 int64, w1, w2, w3 uint64) Value {
+	return Value{kind: KindInt256, w256: [4]uint64{uint64(w0), w1, w2, w3}}
+}
+
+// NewInt256FromInt64 widens an int64 into an Int256 with sign extension.
+func NewInt256FromInt64(x int64) Value {
+	var ext uint64
+	if x < 0 {
+		ext = ^uint64(0)
+	}
+	return Value{kind: KindInt256, w256: [4]uint64{ext, ext, ext, uint64(x)}}
+}
+
+// NewUint256 builds a 256-bit unsigned value from its four words (w0 is the
+// most-significant word, w3 the least-significant).
+func NewUint256(w0, w1, w2, w3 uint64) Value {
+	return Value{kind: KindUint256, w256: [4]uint64{w0, w1, w2, w3}}
+}
+
+// NewUint256FromUint64 widens a uint64 into a Uint256 with zero-extension.
+func NewUint256FromUint64(x uint64) Value {
+	return Value{kind: KindUint256, w256: [4]uint64{0, 0, 0, x}}
+}
+
 // --- Accessors ---
 
 func (v Value) AsBool() bool {
@@ -250,6 +284,20 @@ func (v Value) AsUint128() (hi, lo uint64) {
 	return v.hi128, v.lo128
 }
 
+// AsInt256 returns the signed most-significant word and the three remaining
+// unsigned words of an Int256 (w3 is the least-significant word).
+func (v Value) AsInt256() (w0 int64, w1, w2, w3 uint64) {
+	v.mustKind(KindInt256)
+	return int64(v.w256[0]), v.w256[1], v.w256[2], v.w256[3]
+}
+
+// AsUint256 returns the four words of a Uint256 (w0 most significant, w3
+// least significant).
+func (v Value) AsUint256() (w0, w1, w2, w3 uint64) {
+	v.mustKind(KindUint256)
+	return v.w256[0], v.w256[1], v.w256[2], v.w256[3]
+}
+
 func (v Value) mustKind(want ValueKind) {
 	if v.kind != want {
 		panic(fmt.Sprintf("shunter: Value.As%s called on %s value", want, v.kind))
@@ -281,6 +329,8 @@ func (v Value) Equal(other Value) bool {
 		return bytes.Equal(v.buf, other.buf)
 	case KindInt128, KindUint128:
 		return v.hi128 == other.hi128 && v.lo128 == other.lo128
+	case KindInt256, KindUint256:
+		return v.w256 == other.w256
 	default:
 		panic(fmt.Sprintf("shunter: unhandled ValueKind %d", int(v.kind)))
 	}
@@ -324,6 +374,23 @@ func (v Value) Compare(other Value) int {
 			return c
 		}
 		return cmp.Compare(v.lo128, other.lo128)
+	case KindInt256:
+		if c := cmp.Compare(int64(v.w256[0]), int64(other.w256[0])); c != 0 {
+			return c
+		}
+		for i := 1; i < 4; i++ {
+			if c := cmp.Compare(v.w256[i], other.w256[i]); c != 0 {
+				return c
+			}
+		}
+		return 0
+	case KindUint256:
+		for i := range 4 {
+			if c := cmp.Compare(v.w256[i], other.w256[i]); c != 0 {
+				return c
+			}
+		}
+		return 0
 	default:
 		panic(fmt.Sprintf("shunter: unhandled ValueKind %d", int(v.kind)))
 	}
@@ -375,6 +442,11 @@ func (v Value) writePayload(h hash.Hash64) {
 		h.Write(buf[:])
 		binary.BigEndian.PutUint64(buf[:], v.lo128)
 		h.Write(buf[:])
+	case KindInt256, KindUint256:
+		for i := range 4 {
+			binary.BigEndian.PutUint64(buf[:], v.w256[i])
+			h.Write(buf[:])
+		}
 	}
 }
 
@@ -397,6 +469,8 @@ func (v Value) payloadLen() uint32 {
 		return uint32(len(v.buf))
 	case KindInt128, KindUint128:
 		return 16
+	case KindInt256, KindUint256:
+		return 32
 	default:
 		return 0
 	}

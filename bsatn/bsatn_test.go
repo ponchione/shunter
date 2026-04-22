@@ -53,6 +53,13 @@ func TestValueRoundTrip(t *testing.T) {
 		types.NewUint128(0, 0),
 		types.NewUint128(0, ^uint64(0)),
 		types.NewUint128(^uint64(0), ^uint64(0)),
+		types.NewInt256(0, 0, 0, 127),
+		types.NewInt256(-1, ^uint64(0), ^uint64(0), ^uint64(0)),
+		types.NewInt256(math.MinInt64, 0, 0, 0),
+		types.NewInt256(math.MaxInt64, ^uint64(0), ^uint64(0), ^uint64(0)),
+		types.NewUint256(0, 0, 0, 0),
+		types.NewUint256(0, 0, 0, ^uint64(0)),
+		types.NewUint256(^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)),
 	}
 	for _, v := range cases {
 		var buf bytes.Buffer
@@ -180,5 +187,46 @@ func TestEncodedValueSize128(t *testing.T) {
 		if buf.Len() != 17 {
 			t.Fatalf("%v: expected 17 bytes, got %d", v.Kind(), buf.Len())
 		}
+	}
+}
+
+func TestEncodedValueSize256(t *testing.T) {
+	cases := []types.Value{
+		types.NewInt256(0, 0, 0, 127),
+		types.NewUint256(^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)),
+	}
+	for _, v := range cases {
+		var buf bytes.Buffer
+		if err := EncodeValue(&buf, v); err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		if EncodedValueSize(v) != buf.Len() {
+			t.Fatalf("%v size prediction %d != actual %d", v.Kind(), EncodedValueSize(v), buf.Len())
+		}
+		if buf.Len() != 33 {
+			t.Fatalf("%v: expected 33 bytes, got %d", v.Kind(), buf.Len())
+		}
+	}
+}
+
+// TestEncode256LittleEndian pins the on-wire byte order: the least-significant
+// word must land first and the (signed) most-significant word last.
+func TestEncode256LittleEndian(t *testing.T) {
+	v := types.NewUint256(0x0102030405060708, 0x1112131415161718, 0x2122232425262728, 0x3132333435363738)
+	var buf bytes.Buffer
+	if err := EncodeValue(&buf, v); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	got := buf.Bytes()
+	// tag + 32 bytes little-endian, lowest word first.
+	want := []byte{
+		TagUint256,
+		0x38, 0x37, 0x36, 0x35, 0x34, 0x33, 0x32, 0x31,
+		0x28, 0x27, 0x26, 0x25, 0x24, 0x23, 0x22, 0x21,
+		0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11,
+		0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("encoded = %x\nwant     = %x", got, want)
 	}
 }

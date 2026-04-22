@@ -2830,13 +2830,13 @@ func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnSignedRejec
 // reference/SpacetimeDB/crates/expr/src/check.rs:360-370
 // (`valid_literals_for_type`) at the SubscribeSingle admission surface.
 // The reference test iterates every numeric column kind and asserts that
-// `{ty} = 127` parses and type-checks; Shunter realizes the subset that
-// maps to `schema.ValueKind` (i8/u8/i16/u16/i32/u32/i64/u64/f32/f64 plus
-// i128/u128 added 2026-04-21). Each subtest builds a single-column table,
-// sends `SELECT * FROM t WHERE {colname} = 127`, and asserts the executor
-// receives a ColEq predicate with the width-native value. i256/u256 are
-// deliberately not exercised — no `schema.ValueKind` variant realizes
-// them yet.
+// `{ty} = 127` parses and type-checks; Shunter realizes the full
+// i8/u8/i16/u16/i32/u32/i64/u64/f32/f64/i128/u128/i256/u256 set
+// (128-bit added 2026-04-21 slice 1, 256-bit added 2026-04-21 slice 2).
+// Each subtest builds a single-column table, sends
+// `SELECT * FROM t WHERE {colname} = 127`, and asserts the executor
+// receives a ColEq predicate with the width-native value. The reference
+// `u256 = 1e40` row stays deferred until BigDecimal literal widening.
 func TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
 	f32Want, err := types.NewFloat32(127)
 	if err != nil {
@@ -2864,6 +2864,8 @@ func TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth(t *testing.T
 		{"f64", schema.KindFloat64, f64Want},
 		{"i128", schema.KindInt128, types.NewInt128(0, 127)},
 		{"u128", schema.KindUint128, types.NewUint128(0, 127)},
+		{"i256", schema.KindInt256, types.NewInt256(0, 0, 0, 127)},
+		{"u256", schema.KindUint256, types.NewUint256(0, 0, 0, 127)},
 	}
 
 	for i, tc := range cases {
@@ -2904,6 +2906,35 @@ func TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth(t *testing.T
 				t.Fatalf("filter value = %v, want %v", colEq.Value, tc.want)
 			}
 		})
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUint256NegativeRejected extends the
+// reference invalid_literals bundle at check.rs:382-385 to the Uint256
+// column kind. `-1` parses to LitInt(-1) and coerce's KindUint256 branch
+// rejects negative ints just like the u8 / u128 rows do.
+func TestHandleSubscribeSingle_ParityUint256NegativeRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   242,
+		QueryID:     243,
+		QueryString: "SELECT * FROM t WHERE u256 = -1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 243, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a negative literal targets a Uint256 column")
 	}
 }
 

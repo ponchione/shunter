@@ -130,6 +130,26 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 		lo := binary.LittleEndian.Uint64(wide[0:8])
 		hi := binary.LittleEndian.Uint64(wide[8:16])
 		return types.NewUint128(hi, lo), nil
+	case TagInt256:
+		var wide [32]byte
+		if _, err := io.ReadFull(r, wide[:]); err != nil {
+			return types.Value{}, err
+		}
+		w3 := binary.LittleEndian.Uint64(wide[0:8])
+		w2 := binary.LittleEndian.Uint64(wide[8:16])
+		w1 := binary.LittleEndian.Uint64(wide[16:24])
+		w0 := binary.LittleEndian.Uint64(wide[24:32])
+		return types.NewInt256(int64(w0), w1, w2, w3), nil
+	case TagUint256:
+		var wide [32]byte
+		if _, err := io.ReadFull(r, wide[:]); err != nil {
+			return types.Value{}, err
+		}
+		w3 := binary.LittleEndian.Uint64(wide[0:8])
+		w2 := binary.LittleEndian.Uint64(wide[8:16])
+		w1 := binary.LittleEndian.Uint64(wide[16:24])
+		w0 := binary.LittleEndian.Uint64(wide[24:32])
+		return types.NewUint256(w0, w1, w2, w3), nil
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}

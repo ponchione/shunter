@@ -315,6 +315,127 @@ func TestAccessor128PanicsOnWrongKind(t *testing.T) {
 	v.AsInt128()
 }
 
+func TestRoundTripInt256(t *testing.T) {
+	cases := []struct {
+		w0         int64
+		w1, w2, w3 uint64
+	}{
+		{0, 0, 0, 0},
+		{0, 0, 0, 127},
+		{-1, ^uint64(0), ^uint64(0), ^uint64(0)}, // -1
+		{math.MinInt64, 0, 0, 0},                 // i256 minimum
+		{math.MaxInt64, ^uint64(0), ^uint64(0), ^uint64(0)},
+	}
+	for _, c := range cases {
+		v := NewInt256(c.w0, c.w1, c.w2, c.w3)
+		if v.Kind() != KindInt256 {
+			t.Fatalf("Kind = %v, want Int256", v.Kind())
+		}
+		w0, w1, w2, w3 := v.AsInt256()
+		if w0 != c.w0 || w1 != c.w1 || w2 != c.w2 || w3 != c.w3 {
+			t.Fatalf("AsInt256 = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
+				w0, w1, w2, w3, c.w0, c.w1, c.w2, c.w3)
+		}
+	}
+}
+
+func TestRoundTripUint256(t *testing.T) {
+	cases := []struct{ w0, w1, w2, w3 uint64 }{
+		{0, 0, 0, 0},
+		{0, 0, 0, 127},
+		{0, 0, 0, ^uint64(0)},
+		{0, 0, 1, 0},
+		{^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)}, // u256 maximum
+	}
+	for _, c := range cases {
+		v := NewUint256(c.w0, c.w1, c.w2, c.w3)
+		if v.Kind() != KindUint256 {
+			t.Fatalf("Kind = %v, want Uint256", v.Kind())
+		}
+		w0, w1, w2, w3 := v.AsUint256()
+		if w0 != c.w0 || w1 != c.w1 || w2 != c.w2 || w3 != c.w3 {
+			t.Fatalf("AsUint256 = (%d,%d,%d,%d), want (%d,%d,%d,%d)",
+				w0, w1, w2, w3, c.w0, c.w1, c.w2, c.w3)
+		}
+	}
+}
+
+func TestInt256FromInt64SignExtends(t *testing.T) {
+	v := NewInt256FromInt64(-1)
+	w0, w1, w2, w3 := v.AsInt256()
+	if w0 != -1 || w1 != ^uint64(0) || w2 != ^uint64(0) || w3 != ^uint64(0) {
+		t.Fatalf("NewInt256FromInt64(-1) = (%d,%d,%d,%d), want all-ones", w0, w1, w2, w3)
+	}
+	v = NewInt256FromInt64(127)
+	w0, w1, w2, w3 = v.AsInt256()
+	if w0 != 0 || w1 != 0 || w2 != 0 || w3 != 127 {
+		t.Fatalf("NewInt256FromInt64(127) = (%d,%d,%d,%d), want (0,0,0,127)", w0, w1, w2, w3)
+	}
+}
+
+func TestUint256FromUint64ZeroExtends(t *testing.T) {
+	v := NewUint256FromUint64(^uint64(0))
+	w0, w1, w2, w3 := v.AsUint256()
+	if w0 != 0 || w1 != 0 || w2 != 0 || w3 != ^uint64(0) {
+		t.Fatalf("NewUint256FromUint64(^0) = (%d,%d,%d,%d), want (0,0,0,^0)", w0, w1, w2, w3)
+	}
+}
+
+func TestEqualInt256AndUint256(t *testing.T) {
+	if !NewInt256(1, 2, 3, 4).Equal(NewInt256(1, 2, 3, 4)) {
+		t.Fatal("Int256 Equal: identical not equal")
+	}
+	if NewInt256(1, 2, 3, 4).Equal(NewInt256(1, 2, 3, 5)) {
+		t.Fatal("Int256 Equal: differing w3 reported equal")
+	}
+	if NewInt256(0, 0, 0, 127).Equal(NewUint256(0, 0, 0, 127)) {
+		t.Fatal("Int256 and Uint256 with same payload should not be Equal — cross-kind")
+	}
+	if !NewUint256(0, 0, 0, 127).Equal(NewUint256(0, 0, 0, 127)) {
+		t.Fatal("Uint256 Equal: identical not equal")
+	}
+}
+
+func TestCompareInt256(t *testing.T) {
+	// -1 < 0
+	if NewInt256(-1, ^uint64(0), ^uint64(0), ^uint64(0)).Compare(NewInt256(0, 0, 0, 0)) >= 0 {
+		t.Fatal("Int256 Compare: -1 should be < 0")
+	}
+	// Same high words, larger low word
+	if NewInt256(0, 0, 0, 10).Compare(NewInt256(0, 0, 0, 20)) >= 0 {
+		t.Fatal("Int256 Compare: (…,10) should be < (…,20)")
+	}
+	// Smaller signed high wins
+	if NewInt256(-5, ^uint64(0), ^uint64(0), ^uint64(0)).Compare(NewInt256(-1, 0, 0, 0)) >= 0 {
+		t.Fatal("Int256 Compare: (-5,…) should be < (-1,…)")
+	}
+	if NewInt256(3, 5, 7, 9).Compare(NewInt256(3, 5, 7, 9)) != 0 {
+		t.Fatal("Int256 Compare: equal reported non-zero")
+	}
+}
+
+func TestCompareUint256(t *testing.T) {
+	if NewUint256(0, 0, 0, 10).Compare(NewUint256(0, 0, 0, 20)) >= 0 {
+		t.Fatal("Uint256 Compare: (…,10) should be < (…,20)")
+	}
+	if NewUint256(0, 0, 0, ^uint64(0)).Compare(NewUint256(0, 0, 1, 0)) >= 0 {
+		t.Fatal("Uint256 Compare: (…,0,^0) should be < (…,1,0)")
+	}
+	if NewUint256(3, 5, 7, 9).Compare(NewUint256(3, 5, 7, 9)) != 0 {
+		t.Fatal("Uint256 Compare: equal reported non-zero")
+	}
+}
+
+func TestAccessor256PanicsOnWrongKind(t *testing.T) {
+	v := NewBool(true)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("AsInt256 on Bool did not panic")
+		}
+	}()
+	v.AsInt256()
+}
+
 // --- NaN rejection ---
 
 func TestFloat32RejectsNaN(t *testing.T) {
@@ -420,8 +541,10 @@ func TestValueKindString(t *testing.T) {
 		{KindBytes, "Bytes"},
 		{KindInt128, "Int128"},
 		{KindUint128, "Uint128"},
+		{KindInt256, "Int256"},
+		{KindUint256, "Uint256"},
 		{ValueKind(-1), "ValueKind(-1)"},
-		{ValueKind(len(kindNames)), "ValueKind(15)"},
+		{ValueKind(len(kindNames)), "ValueKind(17)"},
 	}
 	for _, c := range cases {
 		if got := c.k.String(); got != c.want {
