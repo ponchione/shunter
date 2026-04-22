@@ -17,11 +17,7 @@ import (
 type registrySchemaLookup struct{ reg schema.SchemaRegistry }
 
 func (r registrySchemaLookup) TableByName(name string) (schema.TableID, *schema.TableSchema, bool) {
-	ts, ok := r.reg.TableByName(name)
-	if !ok {
-		return 0, nil, false
-	}
-	return ts.ID, ts, true
+	return r.reg.TableByName(name)
 }
 
 func requireOptionalUint32(t *testing.T, got *uint32, want uint32, field string) {
@@ -825,7 +821,7 @@ func TestHandleSubscribeSingle_JoinFilterOnLeftFloatColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, ok := eng.Registry().TableByName("t")
+	_, tReg, ok := eng.Registry().TableByName("t")
 	if !ok {
 		t.Fatal("registry missing table t")
 	}
@@ -925,11 +921,11 @@ func TestHandleSubscribeSingle_JoinFilterOnRightTable(t *testing.T) {
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
 	}
-	orders, ok := eng.Registry().TableByName("Orders")
+	_, orders, ok := eng.Registry().TableByName("Orders")
 	if !ok {
 		t.Fatal("Orders table missing from registry")
 	}
-	inventory, ok := eng.Registry().TableByName("Inventory")
+	_, inventory, ok := eng.Registry().TableByName("Inventory")
 	if !ok {
 		t.Fatal("Inventory table missing from registry")
 	}
@@ -1001,11 +997,11 @@ func TestHandleSubscribeSingle_QuotedIdentifiersJoinFilterOnRightTable(t *testin
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
 	}
-	orders, ok := eng.Registry().TableByName("Orders")
+	_, orders, ok := eng.Registry().TableByName("Orders")
 	if !ok {
 		t.Fatal("Orders table missing from registry")
 	}
-	inventory, ok := eng.Registry().TableByName("Inventory")
+	_, inventory, ok := eng.Registry().TableByName("Inventory")
 	if !ok {
 		t.Fatal("Inventory table missing from registry")
 	}
@@ -1075,11 +1071,11 @@ func TestHandleSubscribeSingle_QuotedIdentifiersJoinFilterWithParenthesizedConju
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
 	}
-	users, ok := eng.Registry().TableByName("users")
+	_, users, ok := eng.Registry().TableByName("users")
 	if !ok {
 		t.Fatal("users table missing from registry")
 	}
-	other, ok := eng.Registry().TableByName("other")
+	_, other, ok := eng.Registry().TableByName("other")
 	if !ok {
 		t.Fatal("other table missing from registry")
 	}
@@ -1162,11 +1158,11 @@ func TestHandleSubscribeSingle_JoinProjectionOnRightTable(t *testing.T) {
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
 	}
-	orders, ok := eng.Registry().TableByName("Orders")
+	_, orders, ok := eng.Registry().TableByName("Orders")
 	if !ok {
 		t.Fatal("Orders table missing from registry")
 	}
-	inventory, ok := eng.Registry().TableByName("Inventory")
+	_, inventory, ok := eng.Registry().TableByName("Inventory")
 	if !ok {
 		t.Fatal("Inventory table missing from registry")
 	}
@@ -1236,11 +1232,11 @@ func TestHandleSubscribeSingle_JoinProjectionOnRightTableWithLeftFilter(t *testi
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
 	}
-	orders, ok := eng.Registry().TableByName("Orders")
+	_, orders, ok := eng.Registry().TableByName("Orders")
 	if !ok {
 		t.Fatal("Orders table missing from registry")
 	}
-	inventory, ok := eng.Registry().TableByName("Inventory")
+	_, inventory, ok := eng.Registry().TableByName("Inventory")
 	if !ok {
 		t.Fatal("Inventory table missing from registry")
 	}
@@ -1294,8 +1290,8 @@ func TestHandleSubscribeSingle_CrossJoinProjection(t *testing.T) {
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want CrossJoinProjected", req.Predicates[0])
 	}
-	orders, _ := eng.Registry().TableByName("Orders")
-	inventory, _ := eng.Registry().TableByName("Inventory")
+	_, orders, _ := eng.Registry().TableByName("Orders")
+	_, inventory, _ := eng.Registry().TableByName("Inventory")
 	if pred.Projected != orders.ID || pred.Other != inventory.ID {
 		t.Fatalf("cross join predicate = %+v, want projected Orders other Inventory", pred)
 	}
@@ -1391,7 +1387,7 @@ func TestHandleSubscribeSingle_AliasedSelfCrossJoin(t *testing.T) {
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want CrossJoinProjected", req.Predicates[0])
 	}
-	tTable, _ := eng.Registry().TableByName("t")
+	_, tTable, _ := eng.Registry().TableByName("t")
 	if pred.Projected != tTable.ID || pred.Other != tTable.ID {
 		t.Fatalf("self cross join predicate = %+v, want projected/other both t", pred)
 	}
@@ -1428,7 +1424,7 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoin(t *testing.T) {
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
 	}
-	tTable, _ := eng.Registry().TableByName("t")
+	_, tTable, _ := eng.Registry().TableByName("t")
 	if pred.Left != tTable.ID || pred.Right != tTable.ID {
 		t.Fatalf("self equi-join predicate = %+v, want Left/Right both t", pred)
 	}
@@ -1511,7 +1507,7 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoinWithWhere(t *testing.T) {
 	if !ok {
 		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
 	}
-	tTable, _ := eng.Registry().TableByName("t")
+	_, tTable, _ := eng.Registry().TableByName("t")
 	if pred.Left != tTable.ID || pred.Right != tTable.ID {
 		t.Fatalf("self equi-join predicate = %+v, want Left/Right both t", pred)
 	}
@@ -1973,7 +1969,7 @@ func TestHandleSubscribeSingle_SenderParameterInJoinFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	sReg, ok := eng.Registry().TableByName("s")
+	_, sReg, ok := eng.Registry().TableByName("s")
 	if !ok {
 		t.Fatal("registry missing table s")
 	}

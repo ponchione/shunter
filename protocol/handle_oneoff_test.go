@@ -575,8 +575,8 @@ func TestHandleOneOffQuery_JoinFilterOnLeftFloatColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, _ := eng.Registry().TableByName("t")
-	sReg, _ := eng.Registry().TableByName("s")
+	_, tReg, _ := eng.Registry().TableByName("t")
+	_, sReg, _ := eng.Registry().TableByName("s")
 	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: tReg.Columns}
 	sl := registrySchemaLookup{reg: eng.Registry()}
 
@@ -650,11 +650,11 @@ func TestHandleOneOffQuery_JoinProjectionOnLeftTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	ordersReg, ok := eng.Registry().TableByName("Orders")
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
 	if !ok {
 		t.Fatal("Orders table missing from registry")
 	}
-	inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
 	if !ok {
 		t.Fatal("Inventory table missing from registry")
 	}
@@ -729,11 +729,11 @@ func TestHandleOneOffQuery_QuotedIdentifiersJoinProjectionOnLeftTable(t *testing
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	ordersReg, ok := eng.Registry().TableByName("Orders")
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
 	if !ok {
 		t.Fatal("Orders table missing from registry")
 	}
-	inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
 	if !ok {
 		t.Fatal("Inventory table missing from registry")
 	}
@@ -801,11 +801,11 @@ func TestHandleOneOffQuery_QuotedIdentifiersJoinProjectionWithParenthesizedConju
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	usersReg, ok := eng.Registry().TableByName("users")
+	_, usersReg, ok := eng.Registry().TableByName("users")
 	if !ok {
 		t.Fatal("users table missing from registry")
 	}
-	otherReg, ok := eng.Registry().TableByName("other")
+	_, otherReg, ok := eng.Registry().TableByName("other")
 	if !ok {
 		t.Fatal("other table missing from registry")
 	}
@@ -875,11 +875,11 @@ func TestHandleOneOffQuery_JoinProjectionOnRightTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	ordersReg, ok := eng.Registry().TableByName("Orders")
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
 	if !ok {
 		t.Fatal("Orders table missing from registry")
 	}
-	inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
 	if !ok {
 		t.Fatal("Inventory table missing from registry")
 	}
@@ -954,11 +954,11 @@ func TestHandleOneOffQuery_JoinProjectionOnRightTableWithLeftFilter(t *testing.T
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	ordersReg, ok := eng.Registry().TableByName("Orders")
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
 	if !ok {
 		t.Fatal("Orders table missing from registry")
 	}
-	inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
 	if !ok {
 		t.Fatal("Inventory table missing from registry")
 	}
@@ -1013,7 +1013,7 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, _ := eng.Registry().TableByName("t")
+	_, tReg, _ := eng.Registry().TableByName("t")
 	tTS.ID = tReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
@@ -1045,7 +1045,7 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereAside(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, _ := eng.Registry().TableByName("t")
+	_, tReg, _ := eng.Registry().TableByName("t")
 	tTS.ID = tReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	// Three rows all share u32=5; only id=1 satisfies `a.id = 1`.
@@ -1083,7 +1083,7 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereBside(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, _ := eng.Registry().TableByName("t")
+	_, tReg, _ := eng.Registry().TableByName("t")
 	tTS.ID = tReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	// Filter on the b-side: every a-side row with matching u32 is emitted
@@ -1122,7 +1122,7 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinProjectsRight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, _ := eng.Registry().TableByName("t")
+	_, tReg, _ := eng.Registry().TableByName("t")
 	tTS.ID = tReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	// Only id=2 matches a-side filter, but projection is b.* so every b with
@@ -1157,7 +1157,7 @@ func TestHandleOneOffQuery_AliasedSelfCrossJoinProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, _ := eng.Registry().TableByName("t")
+	_, tReg, _ := eng.Registry().TableByName("t")
 	tTS.ID = tReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
@@ -1185,7 +1185,7 @@ func TestHandleOneOffQuery_AliasedSelfCrossJoinEmptyTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, _ := eng.Registry().TableByName("t")
+	_, tReg, _ := eng.Registry().TableByName("t")
 	tTS.ID = tReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{tReg.ID: nil}}
@@ -1258,8 +1258,8 @@ func TestHandleOneOffQuery_CrossJoinProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	ordersReg, _ := eng.Registry().TableByName("Orders")
-	inventoryReg, _ := eng.Registry().TableByName("Inventory")
+	_, ordersReg, _ := eng.Registry().TableByName("Orders")
+	_, inventoryReg, _ := eng.Registry().TableByName("Inventory")
 	ordersTS.ID = ordersReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
@@ -1611,8 +1611,8 @@ func TestHandleOneOffQuery_SenderParameterInJoinFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	tReg, _ := eng.Registry().TableByName("t")
-	sReg, _ := eng.Registry().TableByName("s")
+	_, tReg, _ := eng.Registry().TableByName("t")
+	_, sReg, _ := eng.Registry().TableByName("s")
 	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: tReg.Columns}
 	sl := registrySchemaLookup{reg: eng.Registry()}
 

@@ -4,6 +4,29 @@ Use this file to start the next agent on the next real Shunter parity / hardenin
 
 For provenance of closed slices, use `git log` — this file tracks only current state and forward motion.
 
+## What just landed (2026-04-22, protocol test-arity cleanup)
+
+Mechanical compile-drift closure against the landed `schema.SchemaRegistry.TableByName` 3-value signature `(TableID, *TableSchema, bool)`. Before this slice, `protocol/handle_oneoff_test.go` (23 sites) and `protocol/handle_subscribe_test.go` (17 call sites + 1 local adapter wrapping `reg.TableByName`) still destructured the old 2-value return, so `go test ./protocol` failed to build and full-repo `go test ./...` excluded `./protocol`. Not an OI — it was Priority 1 on the follow-on queue, a stale-test drift against an already-landed registry change.
+
+Landed:
+
+- `protocol/handle_oneoff_test.go` — 23 sites rewritten from `xReg, ok := eng.Registry().TableByName(...)` to `_, xReg, ok := eng.Registry().TableByName(...)`. `xReg` was already being consumed as `*TableSchema` (via `xReg.ID`, `xReg.Columns`), so the edit is a prefix-only addition of the ignored TableID.
+- `protocol/handle_subscribe_test.go` — same 17-site destructure rewrite. Additionally the local narrow adapter `registrySchemaLookup.TableByName` (wraps `schema.SchemaRegistry`) simplified from a reassemble-the-tuple body to a straight passthrough `return r.reg.TableByName(name)` now that the wrapped return shape matches the adapter's interface contract.
+
+No production-code touches. No new pins — the handle_oneoff / handle_subscribe test suites already exercise the 3-tuple return end-to-end; this slice just unblocks them.
+
+Verification:
+
+- `rtk go build ./protocol` → clean
+- `rtk go vet ./protocol` → `Go vet: No issues found`
+- `rtk go test ./protocol -count=1` → 435 passed
+- `rtk go vet ./...` → clean
+- `rtk go test ./... -count=1` → 1603 passed in 11 packages (baseline 1589 in 10 — `./protocol` now participates in the full-repo run)
+
+Ledger / debt follow-through:
+
+- Not an OI; TECH-DEBT.md OI-012 carry-forward note at `TECH-DEBT.md:405` is now stale (the described drift is gone) but left as-is for history — future readers verify against the closed-slice `git log` entry and the current green `go test ./...`.
+
 ## What just landed (2026-04-22, OI-008 — cmd/shunter-example bootstrap, closed)
 
 First end-to-end embedding surface. Before this slice, the repo had substantial subsystem code but no runnable consumer binary — `schema.Engine.Start` is not a cohesive runtime bootstrap and there was no `cmd/` or `examples/` directory at repo root. OI-008 scope from the 2026-04-22 audit: prove the product is adoptable by wiring schema → executor → protocol server against a real store + commit-log directory.
@@ -170,10 +193,9 @@ OI-008 / OI-009 / OI-010 / OI-011 / OI-012 are all closed. No remaining `open` O
 
 In priority order, all narrow-ready:
 
-1. **`schema/registry.go` `TableByName` arity commit** — the working-tree diff at `schema/registry.go` returning `(TableID, *TableSchema, bool)` is landed functionally and is what the OI-008 example + `protocol.SchemaLookup` are built against, but `protocol/handle_oneoff_test.go` still calls the 2-value return at ~10 sites and the package does not build under test. Commit the registry diff and update the stale test call sites. First-class slice — unblocks full-repo `go test ./...`.
-2. **Subscription `SeekIndexBounds` migration** — rewire `subscription/eval.go` predicate scans off the Tier-3 fallback and onto the `StateView.SeekIndexBounds` surface landed in OI-010.
-3. **Subscription fan-out wiring in `cmd/shunter-example`** — wire `subscription.Manager` + `FanOutWorker` + `protocol.FanOutSenderAdapter` into the example so reducer writes actually fan out to subscribers. Requires an adapter that widens `schema.SchemaRegistry` with `ColumnCount(TableID) int` (subscription `SchemaLookup` demands it; `schema.SchemaRegistry` does not satisfy it). Adds real subscription coverage to the example's smoke tests. Follow-on to OI-008.
-4. **Expose executor inbox for scheduler wiring** — `NewScheduler(inbox chan<- ExecutorCommand, ...)` reaches the executor's unexported `inbox`. Production embedders that want sys_scheduled replay need an exported accessor (e.g. `Executor.SchedulerFor(tableID)` or `Executor.Inbox()`). Lets the OI-008 example pass a real `*Scheduler` to `Startup`.
+1. **Subscription `SeekIndexBounds` migration** — rewire `subscription/eval.go` predicate scans off the Tier-3 fallback and onto the `StateView.SeekIndexBounds` surface landed in OI-010.
+2. **Subscription fan-out wiring in `cmd/shunter-example`** — wire `subscription.Manager` + `FanOutWorker` + `protocol.FanOutSenderAdapter` into the example so reducer writes actually fan out to subscribers. Requires an adapter that widens `schema.SchemaRegistry` with `ColumnCount(TableID) int` (subscription `SchemaLookup` demands it; `schema.SchemaRegistry` does not satisfy it). Adds real subscription coverage to the example's smoke tests. Follow-on to OI-008.
+3. **Expose executor inbox for scheduler wiring** — `NewScheduler(inbox chan<- ExecutorCommand, ...)` reaches the executor's unexported `inbox`. Production embedders that want sys_scheduled replay need an exported accessor (e.g. `Executor.SchedulerFor(tableID)` or `Executor.Inbox()`). Lets the OI-008 example pass a real `*Scheduler` to `Startup`.
 
 Pick scope before starting. Do not open multiple OIs at once.
 
