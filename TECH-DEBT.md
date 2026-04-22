@@ -113,6 +113,7 @@ Source docs:
 - `docs/parity-phase0-ledger.md`
 - `docs/parity-phase4-slice2-offset-index.md`
 - `docs/parity-phase4-slice2-errors.md`
+- `docs/parity-phase4-slice2-record-shape.md`
 
 ### OI-004: Protocol lifecycle still needs hardening around goroutine ownership and shutdown
 
@@ -218,7 +219,7 @@ Summary:
 - replay-horizon / validated-prefix parity slice is closed
 - Phase 4 Slice 2α offset-index work is closed
 - Phase 4 Slice 2β typed error categorization is closed — five category sentinels (`ErrTraversal`, `ErrOpen`, `ErrDurability`, `ErrSnapshot`, `ErrIndex`) + `wrapCategory` helper + `Is` methods on the nine typed structs; call-site wraps landed at every emission seam; leaf identity / back-compat preserved
-- Phase 4 Slice 2γ (record / log on-disk shape parity) is the next open / deferred sub-slice; needs its own decision doc
+- Phase 4 Slice 2γ (record / log on-disk shape parity) has its decision doc locked at `docs/parity-phase4-slice2-record-shape.md`: Session 1 audit completed reference/Shunter field-by-field delta (26 entries across structural / behavioral / semantic buckets) and decided to close 2γ as documented-divergence rather than byte-parity rewrite; Session 2 lands the 33-pin wire-shape contract suite. Named deferrals (reference magic, commit grouping, epoch field, V0/V1 split, zero-header EOS sentinel, checksum-algorithm negotiation, forked-offset detection, full records-buffer parity) carried forward as tracked tech debt
 - remaining scheduler deferrals stay open
 
 Why this matters:

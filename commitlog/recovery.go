@@ -57,9 +57,9 @@ func OpenAndRecoverDetailed(dir string, reg schema.SchemaRegistry) (*store.Commi
 		}
 		replayFrom = snapshot.TxID
 	} else if len(segments) == 0 {
-		return nil, 0, RecoveryResumePlan{}, wrapCategory(ErrOpen, ErrNoData)
+		return nil, 0, RecoveryResumePlan{}, ErrNoData
 	} else if segments[0].StartTx > 1 {
-		return nil, 0, RecoveryResumePlan{}, wrapCategory(ErrOpen, ErrMissingBaseSnapshot)
+		return nil, 0, RecoveryResumePlan{}, ErrMissingBaseSnapshot
 	}
 
 	maxAppliedTxID, err := ReplayLog(committed, segments, replayFrom, reg)

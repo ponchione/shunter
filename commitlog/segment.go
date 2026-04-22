@@ -60,13 +60,13 @@ func ReadSegmentHeader(r io.Reader) error {
 	}
 	if buf[0] != SegmentMagic[0] || buf[1] != SegmentMagic[1] ||
 		buf[2] != SegmentMagic[2] || buf[3] != SegmentMagic[3] {
-		return wrapCategory(ErrOpen, ErrBadMagic)
+		return ErrBadMagic
 	}
 	if buf[4] != SegmentVersion {
 		return &BadVersionError{Got: buf[4]}
 	}
 	if buf[5] != 0 || buf[6] != 0 || buf[7] != 0 {
-		return wrapCategory(ErrOpen, ErrBadFlags)
+		return ErrBadFlags
 	}
 	return nil
 }
@@ -111,7 +111,7 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	var buf [RecordHeaderSize]byte
 	if _, err := io.ReadFull(r, buf[:]); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
+			return nil, ErrTruncatedRecord
 		}
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	rec.Payload = make([]byte, dataLen)
 	if _, err := io.ReadFull(r, rec.Payload); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
+			return nil, ErrTruncatedRecord
 		}
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	var crcBuf [4]byte
 	if _, err := io.ReadFull(r, crcBuf[:]); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
+			return nil, ErrTruncatedRecord
 		}
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 		return nil, &UnknownRecordTypeError{Type: rec.RecordType}
 	}
 	if rec.Flags != 0 {
-		return nil, wrapCategory(ErrTraversal, ErrBadFlags)
+		return nil, ErrBadFlags
 	}
 
 	return rec, nil

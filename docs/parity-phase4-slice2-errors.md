@@ -288,6 +288,13 @@ wrapping categorially preserves both identity and `errors.Is`.
 
 ### Seam-by-seam wire plan
 
+Slice 2β follow-up simplification: the wrap helper was removed after landing.
+Bare sentinel leaves are now singleton typed errors that carry their category
+via `Is`. For the two historically split leaves (`ErrBadFlags`,
+`ErrTruncatedRecord`), the singleton category is now always `ErrTraversal`.
+That intentionally drops the old `ErrOpen` match at header-parse sites; callers
+that care about that distinction must check the leaf directly.
+
 Each bullet names the file, the existing error flow, and the
 replacement.
 

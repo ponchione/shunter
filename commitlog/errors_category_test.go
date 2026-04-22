@@ -145,46 +145,67 @@ func TestOffsetIndexNonMonotonicErrorCategory(t *testing.T) {
 	}
 }
 
-// --- Pins 10-12: wrap helper pins ---
+// --- Pins 10-12: sentinel singleton pins ---
 
-func TestWrapCategorySentinelBadMagic(t *testing.T) {
-	err := wrapCategory(ErrOpen, ErrBadMagic)
-	if !errors.Is(err, ErrOpen) {
-		t.Fatalf("errors.Is(err, ErrOpen) = false")
+func TestSentinelSingletonBadMagicCategory(t *testing.T) {
+	if !errors.Is(ErrBadMagic, ErrBadMagic) {
+		t.Fatalf("errors.Is(ErrBadMagic, ErrBadMagic) = false")
 	}
-	if !errors.Is(err, ErrBadMagic) {
-		t.Fatalf("errors.Is(err, ErrBadMagic) = false")
+	if !errors.Is(ErrBadMagic, ErrOpen) {
+		t.Fatalf("errors.Is(ErrBadMagic, ErrOpen) = false")
 	}
-	if err.Error() != ErrBadMagic.Error() {
-		t.Fatalf("Error() = %q, want %q", err.Error(), ErrBadMagic.Error())
+	if ErrBadMagic.Error() != "commitlog: bad magic bytes" {
+		t.Fatalf("ErrBadMagic.Error() = %q", ErrBadMagic.Error())
 	}
 }
 
-func TestWrapCategorySentinelTruncatedRecord(t *testing.T) {
-	// Same leaf sentinel, different categories by site.
-	openSite := wrapCategory(ErrOpen, ErrTruncatedRecord)
-	traversalSite := wrapCategory(ErrTraversal, ErrTruncatedRecord)
-
-	if !errors.Is(openSite, ErrOpen) || !errors.Is(openSite, ErrTruncatedRecord) {
-		t.Fatalf("open-site wrap: categories missing")
+func TestSentinelSingletonTruncatedRecordCategory(t *testing.T) {
+	if !errors.Is(ErrTruncatedRecord, ErrTruncatedRecord) {
+		t.Fatalf("errors.Is(ErrTruncatedRecord, ErrTruncatedRecord) = false")
 	}
-	if errors.Is(openSite, ErrTraversal) {
-		t.Fatalf("open-site wrap: unexpectedly matched ErrTraversal")
+	if !errors.Is(ErrTruncatedRecord, ErrTraversal) {
+		t.Fatalf("errors.Is(ErrTruncatedRecord, ErrTraversal) = false")
 	}
-	if !errors.Is(traversalSite, ErrTraversal) || !errors.Is(traversalSite, ErrTruncatedRecord) {
-		t.Fatalf("traversal-site wrap: categories missing")
+	if errors.Is(ErrTruncatedRecord, ErrOpen) {
+		t.Fatalf("errors.Is(ErrTruncatedRecord, ErrOpen) = true")
 	}
-	if errors.Is(traversalSite, ErrOpen) {
-		t.Fatalf("traversal-site wrap: unexpectedly matched ErrOpen")
+	if ErrTruncatedRecord.Error() != "commitlog: truncated record" {
+		t.Fatalf("ErrTruncatedRecord.Error() = %q", ErrTruncatedRecord.Error())
 	}
 }
 
-func TestWrapCategoryNilGuards(t *testing.T) {
-	if got := wrapCategory(nil, ErrBadMagic); got != ErrBadMagic {
-		t.Fatalf("wrapCategory(nil, leaf) = %v, want leaf", got)
+func TestSentinelSingletonCoversEveryBareSentinel(t *testing.T) {
+	cases := []struct {
+		name     string
+		sentinel error
+		category error
+		text     string
+	}{
+		{"BadMagic", ErrBadMagic, ErrOpen, "commitlog: bad magic bytes"},
+		{"BadFlags", ErrBadFlags, ErrTraversal, "commitlog: non-zero flags"},
+		{"TruncatedRecord", ErrTruncatedRecord, ErrTraversal, "commitlog: truncated record"},
+		{"DurabilityFailed", ErrDurabilityFailed, ErrDurability, "commitlog: durability worker failed"},
+		{"SnapshotIncomplete", ErrSnapshotIncomplete, ErrSnapshot, "commitlog: snapshot has lock file (incomplete)"},
+		{"SnapshotInProgress", ErrSnapshotInProgress, ErrSnapshot, "commitlog: snapshot write already in progress"},
+		{"MissingBaseSnapshot", ErrMissingBaseSnapshot, ErrOpen, "commitlog: no valid base snapshot for log replay"},
+		{"NoData", ErrNoData, ErrOpen, "commitlog: no snapshot or log data found"},
+		{"UnknownFsyncMode", ErrUnknownFsyncMode, ErrOpen, "commitlog: unknown fsync mode"},
+		{"OffsetIndexKeyNotFound", ErrOffsetIndexKeyNotFound, ErrIndex, "commitlog: offset index key not found"},
+		{"OffsetIndexFull", ErrOffsetIndexFull, ErrIndex, "commitlog: offset index full"},
+		{"OffsetIndexCorrupt", ErrOffsetIndexCorrupt, ErrIndex, "commitlog: offset index corrupt"},
 	}
-	if got := wrapCategory(ErrOpen, nil); got != nil {
-		t.Fatalf("wrapCategory(cat, nil) = %v, want nil", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !errors.Is(tc.sentinel, tc.sentinel) {
+				t.Fatalf("errors.Is(sentinel, sentinel) = false")
+			}
+			if !errors.Is(tc.sentinel, tc.category) {
+				t.Fatalf("errors.Is(sentinel, category) = false")
+			}
+			if tc.sentinel.Error() != tc.text {
+				t.Fatalf("sentinel.Error() = %q, want %q", tc.sentinel.Error(), tc.text)
+			}
+		})
 	}
 }
 
@@ -525,10 +546,8 @@ func TestBackCompatSentinelIdentityPreserved(t *testing.T) {
 		leaf error
 	}{
 		{"BadMagic", ErrOpen, ErrBadMagic},
-		{"BadFlagsOpen", ErrOpen, ErrBadFlags},
-		{"BadFlagsTraversal", ErrTraversal, ErrBadFlags},
-		{"TruncatedRecordOpen", ErrOpen, ErrTruncatedRecord},
-		{"TruncatedRecordTraversal", ErrTraversal, ErrTruncatedRecord},
+		{"BadFlags", ErrTraversal, ErrBadFlags},
+		{"TruncatedRecord", ErrTraversal, ErrTruncatedRecord},
 		{"NoData", ErrOpen, ErrNoData},
 		{"MissingBaseSnapshot", ErrOpen, ErrMissingBaseSnapshot},
 		{"SnapshotInProgress", ErrSnapshot, ErrSnapshotInProgress},
@@ -539,24 +558,23 @@ func TestBackCompatSentinelIdentityPreserved(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			wrapped := wrapCategory(tc.cat, tc.leaf)
-			if !errors.Is(wrapped, tc.leaf) {
-				t.Fatalf("errors.Is(wrapped, leaf) = false")
+			if !errors.Is(tc.leaf, tc.leaf) {
+				t.Fatalf("errors.Is(leaf, leaf) = false")
 			}
-			if !errors.Is(wrapped, tc.cat) {
-				t.Fatalf("errors.Is(wrapped, cat) = false")
+			if !errors.Is(tc.leaf, tc.cat) {
+				t.Fatalf("errors.Is(leaf, cat) = false")
 			}
 		})
 	}
 	// Sentinels raised via fmt.Errorf %w paths (durability).
-	unknownFsync := fmt.Errorf("%w: %w: %d", ErrOpen, ErrUnknownFsyncMode, 99)
+	unknownFsync := fmt.Errorf("%w: %d", ErrUnknownFsyncMode, 99)
 	if !errors.Is(unknownFsync, ErrUnknownFsyncMode) {
 		t.Fatalf("fmt-wrapped ErrUnknownFsyncMode lost leaf identity")
 	}
 	if !errors.Is(unknownFsync, ErrOpen) {
 		t.Fatalf("fmt-wrapped ErrUnknownFsyncMode lost category")
 	}
-	fatalPanic := fmt.Errorf("%w: %w: %w", ErrDurability, ErrDurabilityFailed, errors.New("x"))
+	fatalPanic := fmt.Errorf("%w: %w", ErrDurabilityFailed, errors.New("x"))
 	if !errors.Is(fatalPanic, ErrDurabilityFailed) {
 		t.Fatalf("fmt-wrapped ErrDurabilityFailed lost leaf identity")
 	}
@@ -639,14 +657,14 @@ func TestBackCompatErrorMessageUnchanged(t *testing.T) {
 		name string
 		err  error
 	}{
-		{"BadMagic", wrapCategory(ErrOpen, ErrBadMagic)},
-		{"BadFlags", wrapCategory(ErrTraversal, ErrBadFlags)},
-		{"TruncatedRecord", wrapCategory(ErrTraversal, ErrTruncatedRecord)},
-		{"NoData", wrapCategory(ErrOpen, ErrNoData)},
-		{"MissingBaseSnapshot", wrapCategory(ErrOpen, ErrMissingBaseSnapshot)},
-		{"SnapshotInProgress", wrapCategory(ErrSnapshot, ErrSnapshotInProgress)},
-		{"OffsetIndexKeyNotFound", wrapCategory(ErrIndex, ErrOffsetIndexKeyNotFound)},
-		{"OffsetIndexFull", wrapCategory(ErrIndex, ErrOffsetIndexFull)},
+		{"BadMagic", ErrBadMagic},
+		{"BadFlags", ErrBadFlags},
+		{"TruncatedRecord", ErrTruncatedRecord},
+		{"NoData", ErrNoData},
+		{"MissingBaseSnapshot", ErrMissingBaseSnapshot},
+		{"SnapshotInProgress", ErrSnapshotInProgress},
+		{"OffsetIndexKeyNotFound", ErrOffsetIndexKeyNotFound},
+		{"OffsetIndexFull", ErrOffsetIndexFull},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -670,4 +688,3 @@ func TestBackCompatErrorMessageUnchanged(t *testing.T) {
 		})
 	}
 }
-

@@ -210,7 +210,7 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	w.mu.Lock()
 	if w.inProgress {
 		w.mu.Unlock()
-		return wrapCategory(ErrSnapshot, ErrSnapshotInProgress)
+		return ErrSnapshotInProgress
 	}
 	w.inProgress = true
 	w.mu.Unlock()
@@ -439,7 +439,7 @@ func readSnapshotHeader(f *os.File) (uint64, uint32, [32]byte, error) {
 		return 0, 0, [32]byte{}, err
 	}
 	if magic != SnapshotMagic {
-		return 0, 0, [32]byte{}, wrapCategory(ErrOpen, ErrBadMagic)
+		return 0, 0, [32]byte{}, ErrBadMagic
 	}
 
 	var versionAndPad [4]byte

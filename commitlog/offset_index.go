@@ -100,7 +100,7 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 func (o *OffsetIndexMut) Append(txID types.TxID, byteOffset uint64) error {
 	key := uint64(txID)
 	if o.numEntries >= o.cap {
-		return wrapCategory(ErrIndex, ErrOffsetIndexFull)
+		return ErrOffsetIndexFull
 	}
 	if key == 0 || key <= o.lastKey {
 		return &OffsetIndexNonMonotonicError{Last: o.lastKey, Got: key}
@@ -285,7 +285,7 @@ func scanOffsetIndexPrefix(f *os.File, cap uint64) (uint64, uint64, error) {
 
 func offsetIndexLookup(f *os.File, n uint64, target types.TxID) (types.TxID, uint64, error) {
 	if n == 0 {
-		return 0, 0, wrapCategory(ErrIndex, ErrOffsetIndexKeyNotFound)
+		return 0, 0, ErrOffsetIndexKeyNotFound
 	}
 	key := uint64(target)
 	lo, hi := uint64(0), n
@@ -302,7 +302,7 @@ func offsetIndexLookup(f *os.File, n uint64, target types.TxID) (types.TxID, uin
 		}
 	}
 	if lo == 0 {
-		return 0, 0, wrapCategory(ErrIndex, ErrOffsetIndexKeyNotFound)
+		return 0, 0, ErrOffsetIndexKeyNotFound
 	}
 	foundKey, val, err := readOffsetIndexEntryAt(f, lo-1)
 	if err != nil {

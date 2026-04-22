@@ -2,7 +2,52 @@
 
 Use this file to start the next agent on the next real Shunter parity / hardening step with no prior context.
 
-## What just landed (2026-04-22, Phase 4 Slice 2β Session 2 — category sentinels + call-site wraps, slice closed)
+## What just landed (2026-04-22, Phase 4 Slice 2γ Session 1 — record / log shape decision doc, divergence audit locked)
+
+Session 1 opens Phase 4 Slice 2γ with a decision-doc-only deliverable. No code. Deliverable: `docs/parity-phase4-slice2-record-shape.md`.
+
+Audit outcome:
+
+- **Reference wire extracted** from `reference/SpacetimeDB/crates/commitlog/src/commit.rs` and `segment.rs`: 10-byte segment header (`(ds)^2` magic + version + checksum-algorithm + 2 reserved), 22-byte V1 commit header (`min_tx_offset u64 LE + epoch u64 LE + n u16 LE + len u32 LE`), opaque N-record buffer, trailing CRC32C. V0 compat (no epoch, 14-byte header). All-zero header = EOS sentinel. CRC32C over header + records, excluding trailing CRC.
+- **Shunter wire documented**: 8-byte segment header (`SHNT` magic + version + flags + 2 padding, all strict-zero), 14-byte per-record header (`TxID u64 LE + record_type u8 + flags u8 + data_len u32 LE`), payload = Shunter-canonical `Changeset` (versioned, BSATN-encoded rows), trailing CRC32C over header + payload.
+- **Delta taxonomy**: 26 entries across 4 categories. 11 match or match-semantically (CRC algo / CRC width / integer endianness / offset index sidecar / history-gap detection / etc.); 7 structural (framing unit is record vs commit; no epoch; no commit `n` / `min_tx_offset`; typed record-type discriminator byte; record-flags byte; header size; reference V0/V1 split absent in Shunter); 5 behavioral (strict reserved bytes; no zero-header EOS; per-record CRC vs per-commit CRC scope; no preallocation tolerance; no `set_epoch` API); 2 semantic renames (byte 7 is `flags` vs `checksum_algorithm`; `len` is per-record vs batch); 1 explicit missing feature (forked-offset detection, already deferred by 2β).
+- **Decision**: 2γ closes as a **documented-divergence slice**, not a byte-parity rewrite. Rationale: (1) scope explosion — delta entry #19 (records-buffer format) would couple commitlog parity to BSATN / schema / types / subscription / executor; (2) no operational-replacement trigger today; (3) migration cost for any header change invalidates existing segments; (4) several structural divergences (1:1 tx:record, no epoch, typed record-type) are deliberate Shunter design.
+- **Session 2 deliverable**: a 33-pin wire-shape contract suite in new file `commitlog/wire_shape_test.go`. No `segment.go` / `changeset_codec.go` / `durability.go` / `replay.go` / `recovery.go` / `snapshot_io.go` changes. Pin categories: segment-header layout (8 pins), record-header layout (8 pins), CRC algorithm (4 pins), changeset payload layout (6 pins), divergence-from-reference behavioral contract (5 pins), constants (1 pin), integration round-trip (1 pin).
+
+Explicitly deferred (each carried forward in the decision doc's out-of-scope list):
+
+- Reference byte-compatible segment magic (`(ds)^2` vs `SHNT`).
+- Reference commit grouping (N transactions per physical unit; requires reshaping durability worker, header, replay).
+- Reference `epoch` field + `set_epoch` API (requires leader election; not on roadmap).
+- Reference V0/V1 version split (Shunter is V1 permanently).
+- All-zero-header EOS sentinel + preallocation-friendly writes (no current consumer).
+- Checksum-algorithm negotiation byte (today byte 5 is `flags`, rejection semantics already match; rename is purely documentary).
+- Forked-offset detection (`Traversal::Forked`) — reconfirmed deferred from 2β.
+- Full records-buffer format parity (couples to BSATN / types / schema / subscription / executor by an order of magnitude).
+- Reference `Append<T>` payload-return API — reconfirmed deferred from 2β.
+
+Verification:
+- `rtk go test ./commitlog -count=1` → `Go test: 185 passed in 1 packages` (clean-tree baseline confirmed before and after session-1 doc edits; no code touched).
+- `rtk go test ./...` → `Go test: 1511 passed in 10 packages` (current clean-tree truth; the handoff's earlier 1501 figure counted only non-subtest runs, re-counting with subtests included yields 1511).
+- Session 1 edits are doc-only: `docs/parity-phase4-slice2-record-shape.md` (new), `docs/parity-phase0-ledger.md` (2γ row flipped to `in_progress`), `TECH-DEBT.md` OI-007 (2γ decision-doc paragraph added), `NEXT_SESSION_HANDOFF.md` (this section).
+
+Clean-tree baseline: `Go test: 1511 passed in 10 packages`.
+
+## Next session: Phase 4 Slice 2γ Session 2 — wire-shape pin suite
+
+Implement the 33-pin `commitlog/wire_shape_test.go` per the decision doc's pin plan. No production-code changes; tests only. Land when:
+
+- `rtk go test ./commitlog -run WireShape -count=1 -v` green;
+- `rtk go test ./commitlog -count=1` baseline rises by ≥33 from 185;
+- `rtk go test ./...` meets or exceeds 1511 + (net-new pin count);
+- `rtk go fmt ./commitlog` / `rtk go vet ./commitlog` clean;
+- `docs/parity-phase0-ledger.md` 2γ row flipped from `in_progress` to `closed (divergences recorded)`;
+- `TECH-DEBT.md` OI-007 updated to name 2γ closed;
+- this handoff's top-of-file "What just landed" section updated to summarize Session 2.
+
+If the Session-2 implementer discovers a byte offset or constant that differs from the decision doc's claims, stop and update `docs/parity-phase4-slice2-record-shape.md` first, land the doc edit, then resume.
+
+## What landed earlier (2026-04-22, Phase 4 Slice 2β Session 2 — category sentinels + call-site wraps, slice closed)
 
 Session 2 closes Phase 4 Slice 2β — typed `Traversal` / `Open` error enums. Decision doc `docs/parity-phase4-slice2-errors.md` is unchanged — Session 2 is pure implementation against the locked spec.
 
@@ -58,20 +103,6 @@ Ledger / debt follow-through:
 - `TECH-DEBT.md` OI-003 — summary paragraph updated to name 2α and 2β closed.
 
 Clean-tree baseline at session close: `Go test: 1501 passed in 10 packages`.
-
-## Next session: Phase 4 Slice 2γ decision doc — or pivot
-
-No forced Slice 2γ start. 2γ is the largest remaining commitlog parity theme (record / log on-disk shape format compatibility with the reference wire) and needs a dedicated decision doc before any code lands. That doc work is session-sized; only start it if the priority is commitlog format parity. Otherwise, prefer a narrower slice.
-
-Alternative priorities:
-
-- **Phase 4 Slice 2γ decision doc** — record / log on-disk shape parity. Biggest scope. Plan: read `reference/SpacetimeDB/crates/commitlog/src/commit.rs` and `segment.rs` for the reference wire layout, then write `docs/parity-phase4-slice2-record-shape.md` with the same structure as `parity-phase4-slice2-errors.md` (reference shape, Shunter shape today, delta taxonomy, session breakdown, pin plan). No code this session.
-- **Tier-B hardening** (OI-004 remaining watch items, OI-008 top-level bootstrap) — don't force without concrete leak evidence.
-- **One of the `P0-SCHED-001` deferrals** (`fn_start`-clamped "now", one-shot panic deletion, past-due intended-time ordering) if workload evidence surfaces.
-- **Generalize array element kinds beyond string** — requires either per-element-kind `Value` slots or a parameterized `KindArray(elem)` representation.
-- **Protocol wire-close follow-through** — tracked at the top of `TECH-DEBT.md`.
-
-Implementation must stay clean-room — re-derive from the reference's behavioral contract, not from the Rust source.
 
 ## What landed earlier (2026-04-22, Phase 4 Slice 2α Session 5 — replay + compaction wiring, slice closed)
 

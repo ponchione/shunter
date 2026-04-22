@@ -120,13 +120,13 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 		return nil, io.EOF
 	}
 	if remaining < RecordHeaderSize {
-		return nil, wrapCategory(ErrOpen, ErrTruncatedRecord)
+		return nil, ErrTruncatedRecord
 	}
 
 	var header [RecordHeaderSize]byte
 	if _, err := io.ReadFull(sr.file, header[:]); err != nil {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, wrapCategory(ErrOpen, ErrTruncatedRecord)
+			return nil, ErrTruncatedRecord
 		}
 		return nil, err
 	}
@@ -138,13 +138,13 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 	}
 	dataLen := binary.LittleEndian.Uint32(header[10:14])
 	if int64(dataLen)+RecordCRCSize > remaining-RecordHeaderSize {
-		return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
+		return nil, ErrTruncatedRecord
 	}
 
 	rec.Payload = make([]byte, dataLen)
 	if _, err := io.ReadFull(sr.file, rec.Payload); err != nil {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
+			return nil, ErrTruncatedRecord
 		}
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 	var crcBuf [RecordCRCSize]byte
 	if _, err := io.ReadFull(sr.file, crcBuf[:]); err != nil {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, wrapCategory(ErrTraversal, ErrTruncatedRecord)
+			return nil, ErrTruncatedRecord
 		}
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 		return nil, &UnknownRecordTypeError{Type: rec.RecordType}
 	}
 	if rec.Flags != 0 {
-		return nil, wrapCategory(ErrTraversal, ErrBadFlags)
+		return nil, ErrBadFlags
 	}
 
 	sr.lastTx = rec.TxID

@@ -93,7 +93,7 @@ func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*
 
 func validateFsyncMode(mode FsyncMode) error {
 	if mode != FsyncBatch {
-		return fmt.Errorf("%w: %w: %d", ErrOpen, ErrUnknownFsyncMode, mode)
+		return fmt.Errorf("%w: %d", ErrUnknownFsyncMode, mode)
 	}
 	return nil
 }
@@ -210,7 +210,7 @@ func (dw *DurabilityWorker) EnqueueCommitted(txID uint64, cs *store.Changeset) {
 	if dw.fatalErr != nil {
 		fatal := dw.fatalErr
 		dw.stateMu.Unlock()
-		panic(fmt.Errorf("%w: %w: %w", ErrDurability, ErrDurabilityFailed, fatal))
+		panic(fmt.Errorf("%w: %w", ErrDurabilityFailed, fatal))
 	}
 	if dw.closing {
 		dw.stateMu.Unlock()
@@ -235,7 +235,7 @@ func (dw *DurabilityWorker) EnqueueCommitted(txID uint64, cs *store.Changeset) {
 		closing := dw.closing
 		dw.stateMu.Unlock()
 		if fatal != nil {
-			panic(fmt.Errorf("%w: %w: %w", ErrDurability, ErrDurabilityFailed, fatal))
+			panic(fmt.Errorf("%w: %w", ErrDurabilityFailed, fatal))
 		}
 		if closing {
 			panic("commitlog: enqueue after close")

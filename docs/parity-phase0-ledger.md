@@ -53,7 +53,7 @@ Current follow-on theme is Phase 4 Slice 2:
 |---|---|---|---|
 | 2α — per-segment offset index file | `closed` | `docs/parity-phase4-slice2-offset-index.md` | Fully landed across Sessions 1-5, including replay seek integration, durability wiring, compaction cleanup, and crash-tail handling. |
 | 2β — typed `Traversal` / `Open` error enums | `closed` | `docs/parity-phase4-slice2-errors.md` | Five category sentinels (`ErrTraversal`, `ErrOpen`, `ErrDurability`, `ErrSnapshot`, `ErrIndex`) + `wrapCategory` helper + `Is` methods on the nine typed structs landed across Sessions 1-2. All call-site wraps in place at the nine emission seams; leaf sentinel / typed-struct identity preserved end-to-end. |
-| 2γ — record / log shape format compatibility | `open (next)` | — | Largest scope; still needs its own decision doc. |
+| 2γ — record / log shape format compatibility | `in_progress` (decision doc locked) | `docs/parity-phase4-slice2-record-shape.md` | Session 1 landed the locked divergence audit: reference vs Shunter wire documented field-by-field, 26 delta entries categorized, decision to close as documented-divergence rather than byte-parity rewrite. Session 2 lands the 33-pin wire-shape contract suite in `commitlog/wire_shape_test.go`. No wire-format change; every named deferral is carried forward in the decision doc's out-of-scope list. |
 
 ## Reading rule
 

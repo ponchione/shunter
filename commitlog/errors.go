@@ -6,26 +6,28 @@ import (
 )
 
 var (
-	ErrBadMagic            = errors.New("commitlog: bad magic bytes")
-	ErrBadFlags            = errors.New("commitlog: non-zero flags")
-	ErrTruncatedRecord     = errors.New("commitlog: truncated record")
-	ErrDurabilityFailed    = errors.New("commitlog: durability worker failed")
-	ErrSnapshotIncomplete  = errors.New("commitlog: snapshot has lock file (incomplete)")
-	ErrSnapshotInProgress  = errors.New("commitlog: snapshot write already in progress")
-	ErrMissingBaseSnapshot = errors.New("commitlog: no valid base snapshot for log replay")
-	ErrNoData              = errors.New("commitlog: no snapshot or log data found")
-	ErrUnknownFsyncMode    = errors.New("commitlog: unknown fsync mode")
+	ErrBadMagic            error = badMagicError{}
+	ErrBadFlags            error = badFlagsError{}
+	ErrTruncatedRecord     error = truncatedRecordError{}
+	ErrDurabilityFailed    error = durabilityFailedError{}
+	ErrSnapshotIncomplete  error = snapshotIncompleteError{}
+	ErrSnapshotInProgress  error = snapshotInProgressError{}
+	ErrMissingBaseSnapshot error = missingBaseSnapshotError{}
+	ErrNoData              error = noDataError{}
+	ErrUnknownFsyncMode    error = unknownFsyncModeError{}
 
-	ErrOffsetIndexKeyNotFound = errors.New("commitlog: offset index key not found")
-	ErrOffsetIndexFull        = errors.New("commitlog: offset index full")
-	ErrOffsetIndexCorrupt     = errors.New("commitlog: offset index corrupt")
+	ErrOffsetIndexKeyNotFound error = offsetIndexKeyNotFoundError{}
+	ErrOffsetIndexFull        error = offsetIndexFullError{}
+	ErrOffsetIndexCorrupt     error = offsetIndexCorruptError{}
 )
 
 // Category sentinels group the errors above by admission seam. A caller can
 // test category membership via errors.Is(err, ErrTraversal) etc. without
-// enumerating every leaf. Leaf identity is preserved: errors.Is(err,
-// ErrBadMagic), errors.As(err, &*BadVersionError{}) etc. continue to match
-// after category wrapping.
+// enumerating every leaf. Converted singleton sentinels now carry their own
+// category via Is. For the two historically split leaves (ErrBadFlags and
+// ErrTruncatedRecord), the singleton category is ErrTraversal; open-time sites
+// still return the same leaf text/identity, but callers wanting the old split
+// must check the leaf directly.
 var (
 	// ErrTraversal categorizes iterator-time errors (record decode, segment
 	// scan mid-record, changeset decode).
@@ -48,26 +50,73 @@ var (
 	ErrIndex = errors.New("commitlog: offset index error")
 )
 
-// wrapCategory wraps leaf in an error whose Unwrap chain contains both cat
-// and leaf. errors.Is matches both. Error() returns leaf.Error() unchanged so
-// surface text, logs, and existing text-equality assertions do not churn.
-func wrapCategory(cat, leaf error) error {
-	if leaf == nil {
-		return nil
-	}
-	if cat == nil {
-		return leaf
-	}
-	return &categorizedError{cat: cat, leaf: leaf}
-}
+type badMagicError struct{}
 
-type categorizedError struct {
-	cat  error
-	leaf error
-}
+func (badMagicError) Error() string        { return "commitlog: bad magic bytes" }
+func (badMagicError) Is(target error) bool { return target == ErrOpen }
 
-func (e *categorizedError) Error() string   { return e.leaf.Error() }
-func (e *categorizedError) Unwrap() []error { return []error{e.leaf, e.cat} }
+type badFlagsError struct{}
+
+func (badFlagsError) Error() string        { return "commitlog: non-zero flags" }
+func (badFlagsError) Is(target error) bool { return target == ErrTraversal }
+
+type truncatedRecordError struct{}
+
+func (truncatedRecordError) Error() string        { return "commitlog: truncated record" }
+func (truncatedRecordError) Is(target error) bool { return target == ErrTraversal }
+
+type durabilityFailedError struct{}
+
+func (durabilityFailedError) Error() string        { return "commitlog: durability worker failed" }
+func (durabilityFailedError) Is(target error) bool { return target == ErrDurability }
+
+type snapshotIncompleteError struct{}
+
+func (snapshotIncompleteError) Error() string {
+	return "commitlog: snapshot has lock file (incomplete)"
+}
+func (snapshotIncompleteError) Is(target error) bool { return target == ErrSnapshot }
+
+type snapshotInProgressError struct{}
+
+func (snapshotInProgressError) Error() string {
+	return "commitlog: snapshot write already in progress"
+}
+func (snapshotInProgressError) Is(target error) bool { return target == ErrSnapshot }
+
+type missingBaseSnapshotError struct{}
+
+func (missingBaseSnapshotError) Error() string {
+	return "commitlog: no valid base snapshot for log replay"
+}
+func (missingBaseSnapshotError) Is(target error) bool { return target == ErrOpen }
+
+type noDataError struct{}
+
+func (noDataError) Error() string        { return "commitlog: no snapshot or log data found" }
+func (noDataError) Is(target error) bool { return target == ErrOpen }
+
+type unknownFsyncModeError struct{}
+
+func (unknownFsyncModeError) Error() string        { return "commitlog: unknown fsync mode" }
+func (unknownFsyncModeError) Is(target error) bool { return target == ErrOpen }
+
+type offsetIndexKeyNotFoundError struct{}
+
+func (offsetIndexKeyNotFoundError) Error() string {
+	return "commitlog: offset index key not found"
+}
+func (offsetIndexKeyNotFoundError) Is(target error) bool { return target == ErrIndex }
+
+type offsetIndexFullError struct{}
+
+func (offsetIndexFullError) Error() string        { return "commitlog: offset index full" }
+func (offsetIndexFullError) Is(target error) bool { return target == ErrIndex }
+
+type offsetIndexCorruptError struct{}
+
+func (offsetIndexCorruptError) Error() string        { return "commitlog: offset index corrupt" }
+func (offsetIndexCorruptError) Is(target error) bool { return target == ErrIndex }
 
 type OffsetIndexNonMonotonicError struct {
 	Last uint64
