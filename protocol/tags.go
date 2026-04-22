@@ -29,7 +29,7 @@ const (
 	TagUnsubscribeSingleApplied uint8 = 3 // renamed from TagUnsubscribeApplied (Phase 2 Slice 2 variant split)
 	TagSubscriptionError        uint8 = 4
 	TagTransactionUpdate        uint8 = 5
-	TagOneOffQueryResult        uint8 = 6
+	TagOneOffQueryResponse      uint8 = 6 // matches reference `OneOffQueryResponse` (v1.rs:287/654); renamed from TagOneOffQueryResult
 	TagReducerCallResult        uint8 = 7 // RESERVED — formerly ReducerCallResult, removed Phase 1.5
 	TagTransactionUpdateLight   uint8 = 8
 	TagSubscribeMultiApplied    uint8 = 9  // Phase 2 Slice 2 variant split

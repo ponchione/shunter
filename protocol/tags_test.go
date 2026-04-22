@@ -20,7 +20,7 @@ func TestClientTagsDistinct(t *testing.T) {
 func TestServerTagsDistinct(t *testing.T) {
 	tags := []uint8{
 		TagIdentityToken, TagSubscribeSingleApplied, TagUnsubscribeSingleApplied,
-		TagSubscriptionError, TagTransactionUpdate, TagOneOffQueryResult,
+		TagSubscriptionError, TagTransactionUpdate, TagOneOffQueryResponse,
 		TagReducerCallResult,
 	}
 	seen := map[uint8]bool{}
@@ -32,7 +32,7 @@ func TestServerTagsDistinct(t *testing.T) {
 	}
 	// Spec-pinned values.
 	if TagIdentityToken != 1 || TagSubscribeSingleApplied != 2 || TagUnsubscribeSingleApplied != 3 ||
-		TagSubscriptionError != 4 || TagTransactionUpdate != 5 || TagOneOffQueryResult != 6 ||
+		TagSubscriptionError != 4 || TagTransactionUpdate != 5 || TagOneOffQueryResponse != 6 ||
 		TagReducerCallResult != 7 {
 		t.Errorf("S2C tag values drifted from SPEC-005 §6")
 	}

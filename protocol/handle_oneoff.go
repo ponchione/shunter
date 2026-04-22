@@ -40,21 +40,13 @@ func handleOneOffQuery(
 ) {
 	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity)
 	if err != nil {
-		sendError(conn, OneOffQueryResult{
-			MessageID: msg.MessageID,
-			Status:    1,
-			Error:     err.Error(),
-		})
+		sendOneOffError(conn, msg.MessageID, err.Error())
 		return
 	}
 
 	tableID, _, ok := sl.TableByName(compiled.TableName)
 	if !ok {
-		sendError(conn, OneOffQueryResult{
-			MessageID: msg.MessageID,
-			Status:    1,
-			Error:     fmt.Sprintf("unknown table %q", compiled.TableName),
-		})
+		sendOneOffError(conn, msg.MessageID, fmt.Sprintf("unknown table %q", compiled.TableName))
 		return
 	}
 
@@ -78,11 +70,7 @@ func handleOneOffQuery(
 		var buf bytes.Buffer
 		if err := bsatn.EncodeProductValue(&buf, pv); err != nil {
 			view.Close()
-			sendError(conn, OneOffQueryResult{
-				MessageID: msg.MessageID,
-				Status:    1,
-				Error:     "encode error: " + err.Error(),
-			})
+			sendOneOffError(conn, msg.MessageID, "encode error: "+err.Error())
 			return
 		}
 		rows = append(rows, buf.Bytes())
@@ -90,10 +78,21 @@ func handleOneOffQuery(
 	view.Close()
 
 	encoded := EncodeRowList(rows)
-	sendError(conn, OneOffQueryResult{
+	sendError(conn, OneOffQueryResponse{
 		MessageID: msg.MessageID,
-		Status:    0,
-		Rows:      encoded,
+		Tables: []OneOffTable{{
+			TableName: compiled.TableName,
+			Rows:      encoded,
+		}},
+	})
+}
+
+// sendOneOffError emits a failure OneOffQueryResponse matching reference
+// module_host.rs:2300 (`error: Some(msg), results: vec![]`).
+func sendOneOffError(conn *Conn, messageID []byte, errMsg string) {
+	sendError(conn, OneOffQueryResponse{
+		MessageID: messageID,
+		Error:     &errMsg,
 	})
 }
 

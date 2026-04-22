@@ -189,16 +189,16 @@ func TestPhase2Slice1COneOffQueryMessageIDBytes(t *testing.T) {
 		t.Fatalf("OneOffQueryMsg.MessageID type = %s, want []byte", got)
 	}
 
-	resultFields := msgFieldNames(OneOffQueryResult{})
-	if want := []string{"MessageID", "Status", "Rows", "Error"}; !reflect.DeepEqual(resultFields, want) {
-		t.Fatalf("OneOffQueryResult fields = %v, want %v (Phase 2 Slice 1c message_id bytes)", resultFields, want)
+	resultFields := msgFieldNames(OneOffQueryResponse{})
+	if want := []string{"MessageID", "Error", "Tables", "TotalHostExecutionDuration"}; !reflect.DeepEqual(resultFields, want) {
+		t.Fatalf("OneOffQueryResponse fields = %v, want %v (reference field order v1.rs:654)", resultFields, want)
 	}
-	resultField, ok := reflect.TypeOf(OneOffQueryResult{}).FieldByName("MessageID")
+	resultField, ok := reflect.TypeOf(OneOffQueryResponse{}).FieldByName("MessageID")
 	if !ok {
-		t.Fatal("OneOffQueryResult.MessageID missing")
+		t.Fatal("OneOffQueryResponse.MessageID missing")
 	}
 	if got := resultField.Type.String(); got != "[]uint8" {
-		t.Fatalf("OneOffQueryResult.MessageID type = %s, want []byte", got)
+		t.Fatalf("OneOffQueryResponse.MessageID type = %s, want []byte", got)
 	}
 }
 
@@ -353,7 +353,7 @@ func TestPhase2TagByteStability(t *testing.T) {
 		{"TagUnsubscribeSingleApplied", TagUnsubscribeSingleApplied, 3},
 		{"TagSubscriptionError", TagSubscriptionError, 4},
 		{"TagTransactionUpdate", TagTransactionUpdate, 5},
-		{"TagOneOffQueryResult", TagOneOffQueryResult, 6},
+		{"TagOneOffQueryResponse", TagOneOffQueryResponse, 6},
 		{"TagReducerCallResult", TagReducerCallResult, 7},
 		{"TagTransactionUpdateLight", TagTransactionUpdateLight, 8},
 		{"TagSubscribeMultiApplied", TagSubscribeMultiApplied, 9},

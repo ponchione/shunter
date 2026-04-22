@@ -32,7 +32,7 @@ type ClientSender interface {
 	// Send encodes msg and enqueues the frame on the connection's
 	// outbound channel. Used for direct response messages
 	// (SubscribeSingleApplied, UnsubscribeSingleApplied, SubscriptionError,
-	// OneOffQueryResult).
+	// OneOffQueryResponse).
 	Send(connID types.ConnectionID, msg any) error
 	// SendTransactionUpdate delivers the heavy caller-bound envelope.
 	SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error

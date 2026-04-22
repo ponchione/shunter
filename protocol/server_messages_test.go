@@ -241,39 +241,46 @@ func TestTransactionUpdateLightRoundTrip(t *testing.T) {
 	}
 }
 
-func TestOneOffQueryResultSuccess(t *testing.T) {
+func TestOneOffQueryResponseSuccess(t *testing.T) {
 	rl := EncodeRowList([][]byte{{0x07}, {0x08}})
-	in := OneOffQueryResult{MessageID: []byte{0x05, 0x06}, Status: 0, Rows: rl}
+	in := OneOffQueryResponse{
+		MessageID: []byte{0x05, 0x06},
+		Tables:    []OneOffTable{{TableName: "users", Rows: rl}},
+	}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.(OneOffQueryResult)
-	if !bytes.Equal(got.MessageID, in.MessageID) || got.Status != 0 {
-		t.Errorf("field mismatch: %+v", got)
+	got := out.(OneOffQueryResponse)
+	if !bytes.Equal(got.MessageID, in.MessageID) {
+		t.Errorf("MessageID mismatch: %+v", got)
 	}
-	if !bytes.Equal(got.Rows, rl) {
-		t.Errorf("rows differ")
+	if got.Error != nil {
+		t.Errorf("Error should be nil on success, got %v", *got.Error)
 	}
-	if got.Error != "" {
-		t.Errorf("Error should be empty on success, got %q", got.Error)
+	if len(got.Tables) != 1 || got.Tables[0].TableName != "users" || !bytes.Equal(got.Tables[0].Rows, rl) {
+		t.Errorf("Tables mismatch: %+v", got.Tables)
 	}
 }
 
-func TestOneOffQueryResultError(t *testing.T) {
-	in := OneOffQueryResult{MessageID: []byte{0x05, 0x06}, Status: 1, Error: "bad query"}
+func TestOneOffQueryResponseError(t *testing.T) {
+	msg := "bad query"
+	in := OneOffQueryResponse{MessageID: []byte{0x05, 0x06}, Error: &msg}
 	frame, _ := EncodeServerMessage(in)
 	_, out, err := DecodeServerMessage(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.(OneOffQueryResult)
-	if !bytes.Equal(got.MessageID, in.MessageID) || got.Status != 1 || got.Error != "bad query" {
-		t.Errorf("field mismatch: %+v", got)
+	got := out.(OneOffQueryResponse)
+	if !bytes.Equal(got.MessageID, in.MessageID) {
+		t.Errorf("MessageID mismatch: %+v", got)
 	}
-	if len(got.Rows) != 0 {
-		t.Errorf("Rows should be empty on error, got len %d", len(got.Rows))
+	if got.Error == nil || *got.Error != "bad query" {
+		t.Errorf("Error = %v, want %q", got.Error, "bad query")
+	}
+	if len(got.Tables) != 0 {
+		t.Errorf("Tables should be empty on error, got len %d", len(got.Tables))
 	}
 }
 

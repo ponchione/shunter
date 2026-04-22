@@ -70,8 +70,8 @@ func (m *mockStateAccess) Snapshot() store.CommittedReadView { return m.snap }
 // --- Helpers ---
 
 // drainOneOff reads one frame from OutboundCh and decodes it as a
-// OneOffQueryResult. Fatals if nothing is queued or decode fails.
-func drainOneOff(t *testing.T, conn *Conn) OneOffQueryResult {
+// OneOffQueryResponse. Fatals if nothing is queued or decode fails.
+func drainOneOff(t *testing.T, conn *Conn) OneOffQueryResponse {
 	t.Helper()
 	select {
 	case frame := <-conn.OutboundCh:
@@ -79,15 +79,25 @@ func drainOneOff(t *testing.T, conn *Conn) OneOffQueryResult {
 		if err != nil {
 			t.Fatalf("DecodeServerMessage: %v", err)
 		}
-		result, ok := msg.(OneOffQueryResult)
+		result, ok := msg.(OneOffQueryResponse)
 		if !ok {
-			t.Fatalf("expected OneOffQueryResult, got %T", msg)
+			t.Fatalf("expected OneOffQueryResponse, got %T", msg)
 		}
 		return result
 	default:
 		t.Fatal("expected a frame on OutboundCh, got none")
-		return OneOffQueryResult{} // unreachable
+		return OneOffQueryResponse{} // unreachable
 	}
+}
+
+// firstTableRows returns the Rows payload of the first OneOffTable, or
+// nil if Tables is empty. Most Phase 2 Slice 1c handler tests populate
+// exactly one table matching `compiled.TableName`.
+func firstTableRows(r OneOffQueryResponse) []byte {
+	if len(r.Tables) == 0 {
+		return nil
+	}
+	return r.Tables[0].Rows
 }
 
 // decodeRows decodes a RowList payload back into ProductValues using
@@ -145,11 +155,11 @@ func TestHandleOneOffQuery_Valid(t *testing.T) {
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -194,11 +204,11 @@ func TestHandleOneOffQuery_QualifiedStarAlias(t *testing.T) {
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -241,10 +251,10 @@ func TestHandleOneOffQuery_LessThanOrEqualComparison(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -284,10 +294,10 @@ func TestHandleOneOffQuery_NotEqualComparison(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -327,10 +337,10 @@ func TestHandleOneOffQuery_OrComparison(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -369,10 +379,10 @@ func TestHandleOneOffQuery_OrComparisonWithAliasAndHexBytes(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -412,10 +422,10 @@ func TestHandleOneOffQuery_OrComparisonWithAlias(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -457,10 +467,10 @@ func TestHandleOneOffQuery_WhereTrueLiteralReturnsAllRows(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -499,10 +509,10 @@ func TestHandleOneOffQuery_QuotedSpecialCharacterIdentifiers(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -541,10 +551,10 @@ func TestHandleOneOffQuery_QuotedReservedIdentifiers(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -609,10 +619,10 @@ func TestHandleOneOffQuery_JoinFilterOnLeftFloatColumn(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, tTS)
+	pvs := decodeRows(t, firstTableRows(result), tTS)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -685,10 +695,10 @@ func TestHandleOneOffQuery_JoinProjectionOnLeftTable(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ordersTS)
+	pvs := decodeRows(t, firstTableRows(result), ordersTS)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -764,10 +774,10 @@ func TestHandleOneOffQuery_QuotedIdentifiersJoinProjectionOnLeftTable(t *testing
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ordersTS)
+	pvs := decodeRows(t, firstTableRows(result), ordersTS)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -834,10 +844,10 @@ func TestHandleOneOffQuery_QuotedIdentifiersJoinProjectionWithParenthesizedConju
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, usersTS)
+	pvs := decodeRows(t, firstTableRows(result), usersTS)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -910,10 +920,10 @@ func TestHandleOneOffQuery_JoinProjectionOnRightTable(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, inventoryTS)
+	pvs := decodeRows(t, firstTableRows(result), inventoryTS)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -989,10 +999,10 @@ func TestHandleOneOffQuery_JoinProjectionOnRightTableWithLeftFilter(t *testing.T
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, inventoryTS)
+	pvs := decodeRows(t, firstTableRows(result), inventoryTS)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -1027,10 +1037,10 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoin(t *testing.T) {
 	msg := &OneOffQueryMsg{MessageID: []byte{0x1f}, QueryString: "SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32"}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, tTS)
+	pvs := decodeRows(t, firstTableRows(result), tTS)
 	if len(pvs) != 3 {
 		t.Fatalf("got %d rows, want 3 (every row matches itself by u32)", len(pvs))
 	}
@@ -1062,10 +1072,10 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereAside(t *testing.T) {
 	msg := &OneOffQueryMsg{MessageID: []byte{0x21}, QueryString: "SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1"}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, tTS)
+	pvs := decodeRows(t, firstTableRows(result), tTS)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1 (only a-side row with id=1)", len(pvs))
 	}
@@ -1100,10 +1110,10 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinWithWhereBside(t *testing.T) {
 	msg := &OneOffQueryMsg{MessageID: []byte{0x22}, QueryString: "SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE b.id = 1"}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, tTS)
+	pvs := decodeRows(t, firstTableRows(result), tTS)
 	if len(pvs) != 3 {
 		t.Fatalf("got %d rows, want 3 (every a-side row has a b partner with id=1 via u32=5)", len(pvs))
 	}
@@ -1139,10 +1149,10 @@ func TestHandleOneOffQuery_AliasedSelfEquiJoinProjectsRight(t *testing.T) {
 	msg := &OneOffQueryMsg{MessageID: []byte{0x2a}, QueryString: "SELECT b.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 2"}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, tTS)
+	pvs := decodeRows(t, firstTableRows(result), tTS)
 	if len(pvs) != 3 {
 		t.Fatalf("got %d rows, want 3 (every b partners with the single a.id=2)", len(pvs))
 	}
@@ -1167,10 +1177,10 @@ func TestHandleOneOffQuery_AliasedSelfCrossJoinProjection(t *testing.T) {
 	msg := &OneOffQueryMsg{MessageID: []byte{0x1d}, QueryString: "SELECT a.* FROM t AS a JOIN t AS b"}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, tTS)
+	pvs := decodeRows(t, firstTableRows(result), tTS)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -1193,10 +1203,10 @@ func TestHandleOneOffQuery_AliasedSelfCrossJoinEmptyTable(t *testing.T) {
 	msg := &OneOffQueryMsg{MessageID: []byte{0x1e}, QueryString: "SELECT a.* FROM t AS a JOIN t AS b"}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, tTS)
+	pvs := decodeRows(t, firstTableRows(result), tTS)
 	if len(pvs) != 0 {
 		t.Fatalf("got %d rows, want 0 (empty table self-join should project nothing)", len(pvs))
 	}
@@ -1238,10 +1248,7 @@ func TestHandleOneOffQuery_MultiWayJoinRejected(t *testing.T) {
 			msg := &OneOffQueryMsg{MessageID: []byte{0x60}, QueryString: c.queryString}
 			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 			result := drainOneOff(t, conn)
-			if result.Status != 1 {
-				t.Fatalf("Status = %d, want 1 (error)", result.Status)
-			}
-			if result.Error == "" {
+			if result.Error == nil || *result.Error == "" {
 				t.Fatal("expected non-empty error message")
 			}
 		})
@@ -1270,10 +1277,10 @@ func TestHandleOneOffQuery_CrossJoinProjection(t *testing.T) {
 	msg := &OneOffQueryMsg{MessageID: []byte{0x1c}, QueryString: "SELECT o.* FROM Orders o JOIN Inventory product"}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ordersTS)
+	pvs := decodeRows(t, firstTableRows(result), ordersTS)
 	if len(pvs) != 2 {
 		t.Fatalf("got %d rows, want 2", len(pvs))
 	}
@@ -1312,11 +1319,11 @@ func TestHandleOneOffQuery_NoMatches(t *testing.T) {
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 
-	rawRows, err := DecodeRowList(result.Rows)
+	rawRows, err := DecodeRowList(firstTableRows(result))
 	if err != nil {
 		t.Fatalf("DecodeRowList: %v", err)
 	}
@@ -1356,11 +1363,11 @@ func TestHandleOneOffQuery_EmptyPredicates(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 3 {
 		t.Fatalf("got %d rows, want 3", len(pvs))
 	}
@@ -1394,10 +1401,10 @@ func TestHandleOneOffQuery_UnknownTable(t *testing.T) {
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1441,10 +1448,10 @@ func TestHandleOneOffQuery_SenderParameterOnBytesColumn(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -1487,10 +1494,10 @@ func TestHandleOneOffQuery_SenderParameterOnIdentityColumn(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -1524,10 +1531,10 @@ func TestHandleOneOffQuery_SenderParameterOnStringColumnRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1571,10 +1578,10 @@ func TestHandleOneOffQuery_SenderParameterOnAliasedSingleTable(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, ts)
+	pvs := decodeRows(t, firstTableRows(result), ts)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -1641,10 +1648,10 @@ func TestHandleOneOffQuery_SenderParameterInJoinFilter(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0; Error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	pvs := decodeRows(t, result.Rows, tTS)
+	pvs := decodeRows(t, firstTableRows(result), tTS)
 	if len(pvs) != 1 {
 		t.Fatalf("got %d rows, want 1", len(pvs))
 	}
@@ -1674,10 +1681,10 @@ func TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1703,10 +1710,10 @@ func TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1738,10 +1745,10 @@ func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Errorf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
 	}
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1766,10 +1773,10 @@ func TestHandleOneOffQuery_ParityUnknownTableRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1794,10 +1801,10 @@ func TestHandleOneOffQuery_ParityUnknownColumnRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1825,10 +1832,10 @@ func TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1853,10 +1860,10 @@ func TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected(t *testing
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1881,10 +1888,10 @@ func TestHandleOneOffQuery_ParityBareColumnProjectionRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1909,10 +1916,10 @@ func TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected(t *testi
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1937,10 +1944,10 @@ func TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1966,10 +1973,10 @@ func TestHandleOneOffQuery_ParityForwardAliasReferenceRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -1994,10 +2001,10 @@ func TestHandleOneOffQuery_ParityLimitClauseRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2021,8 +2028,8 @@ func TestHandleOneOffQuery_ParityLeadingPlusIntLiteral(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 }
 
@@ -2048,10 +2055,10 @@ func TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2075,8 +2082,8 @@ func TestHandleOneOffQuery_ParityScientificNotationUnsignedInteger(t *testing.T)
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 }
 
@@ -2102,8 +2109,8 @@ func TestHandleOneOffQuery_ParityScientificNotationFloatNegativeExponent(t *test
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 }
 
@@ -2129,8 +2136,8 @@ func TestHandleOneOffQuery_ParityLeadingDotFloatLiteral(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 }
 
@@ -2158,8 +2165,8 @@ func TestHandleOneOffQuery_ParityScientificNotationOverflowInfinity(t *testing.T
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 }
 
@@ -2185,10 +2192,10 @@ func TestHandleOneOffQuery_ParityInvalidLiteralNegativeIntOnUnsignedRejected(t *
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2213,10 +2220,10 @@ func TestHandleOneOffQuery_ParityInvalidLiteralScientificOverflowRejected(t *tes
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2241,10 +2248,10 @@ func TestHandleOneOffQuery_ParityInvalidLiteralFloatOnUnsignedRejected(t *testin
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2269,10 +2276,10 @@ func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnUnsignedRejecte
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2297,10 +2304,10 @@ func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected(
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2361,8 +2368,8 @@ func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
 			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 			result := drainOneOff(t, conn)
-			if result.Status != 0 {
-				t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+			if result.Error != nil {
+				t.Fatalf("Error = %q, want nil (success)", *result.Error)
 			}
 		})
 	}
@@ -2397,8 +2404,8 @@ func TestHandleOneOffQuery_ParityValidLiteralU256Scientific(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 0 {
-		t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 }
 
@@ -2420,10 +2427,10 @@ func TestHandleOneOffQuery_ParityUint256NegativeRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2461,8 +2468,8 @@ func TestHandleOneOffQuery_ParityTimestampLiteralAccepted(t *testing.T) {
 			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 			result := drainOneOff(t, conn)
-			if result.Status != 0 {
-				t.Fatalf("Status = %d, want 0 (ok); error = %q", result.Status, result.Error)
+			if result.Error != nil {
+				t.Fatalf("Error = %q, want nil (success)", *result.Error)
 			}
 		})
 	}
@@ -2485,10 +2492,10 @@ func TestHandleOneOffQuery_ParityTimestampMalformedRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2511,10 +2518,10 @@ func TestHandleOneOffQuery_ParityUint128NegativeRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2544,10 +2551,10 @@ func TestHandleOneOffQuery_ParityDMLStatementRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2572,10 +2579,10 @@ func TestHandleOneOffQuery_ParityEmptyStatementRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2600,10 +2607,10 @@ func TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2629,10 +2636,10 @@ func TestHandleOneOffQuery_ParityDistinctProjectionRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2659,10 +2666,10 @@ func TestHandleOneOffQuery_ParitySubqueryInFromRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2688,10 +2695,10 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedSelectLiteralWithoutFromRejected(
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2717,10 +2724,10 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedMultiPartTableNameRejected(t *tes
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2747,10 +2754,10 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedBitStringLiteralRejected(t *testi
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2777,10 +2784,10 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedWildcardWithBareColumnsRejected(t
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2807,10 +2814,10 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedOrderByWithLimitExpressionRejecte
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2837,10 +2844,10 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedAggregateWithGroupByRejected(t *t
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2867,10 +2874,10 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedImplicitCommaJoinRejected(t *test
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2898,10 +2905,10 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected(t *
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2928,10 +2935,10 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptySelectRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2957,10 +2964,10 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptyFromRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -2986,10 +2993,10 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptyWhereRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -3016,10 +3023,10 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptyGroupByRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -3046,10 +3053,10 @@ func TestHandleOneOffQuery_ParitySqlInvalidAggregateWithoutAliasRejected(t *test
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error)", result.Status)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
 	}
 }
@@ -3075,10 +3082,10 @@ func TestHandleOneOffQuery_ParityArraySenderRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error); Error=%q", result.Status, result.Error)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message for :sender on array column")
 	}
 }
@@ -3112,10 +3119,10 @@ func TestHandleOneOffQuery_ParityArrayJoinOnRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Status != 1 {
-		t.Fatalf("Status = %d, want 1 (error); Error=%q", result.Status, result.Error)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == "" {
+	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message for array-on-array join ON")
 	}
 }

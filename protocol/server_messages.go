@@ -193,13 +193,33 @@ type ReducerCallInfo struct {
 	RequestID   uint32
 }
 
-// Phase 2 Slice 1c closes the remaining request/response correlation
-// divergence by carrying the reference-style opaque `message_id` bytes.
-type OneOffQueryResult struct {
-	MessageID []byte
-	Status    uint8  // 0 = success, 1 = error
-	Rows      []byte // encoded RowList; present when Status == 0
-	Error     string // present when Status == 1
+// OneOffQueryResponse is the server reply to a OneOffQuery. Field order
+// matches reference `OneOffQueryResponse<F>` at
+// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:654
+// (`message_id, error: Option<Box<str>>, tables: Box<[OneOffTable]>,
+// total_host_execution_duration: TimeDuration`) — pinned by
+// parity_one_off_query_response_test.go against the reference byte shape.
+// Renamed from `OneOffQueryResult`; the prior Status-byte + single-Rows
+// + Error layout was Shunter-local. `nil Error` signals success and
+// `Tables` carries the matched rows; on failure `Error` is non-nil and
+// `Tables` is empty — matching module_host.rs:2290-2308.
+//
+// TotalHostExecutionDuration is the wire field from reference
+// `TimeDuration` (i64 microseconds). Measurement is deferred — emit
+// sites populate 0 until a receipt-timestamp seam is plumbed through
+// the one-off query path, same pattern as SubscriptionError.
+type OneOffQueryResponse struct {
+	MessageID                  []byte
+	Error                      *string
+	Tables                     []OneOffTable
+	TotalHostExecutionDuration int64
+}
+
+// OneOffTable mirrors reference `OneOffTable<F>` (v1.rs:669). Rows is an
+// encoded F::List payload produced by EncodeRowList.
+type OneOffTable struct {
+	TableName string
+	Rows      []byte
 }
 
 // UpdateStatus tag bytes on the wire.
@@ -259,15 +279,12 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		buf.WriteByte(TagTransactionUpdateLight)
 		writeUint32(&buf, msg.RequestID)
 		writeSubscriptionUpdates(&buf, msg.Update)
-	case OneOffQueryResult:
-		buf.WriteByte(TagOneOffQueryResult)
+	case OneOffQueryResponse:
+		buf.WriteByte(TagOneOffQueryResponse)
 		writeBytes(&buf, msg.MessageID)
-		buf.WriteByte(msg.Status)
-		if msg.Status == 0 {
-			writeBytes(&buf, msg.Rows)
-		} else {
-			writeString(&buf, msg.Error)
-		}
+		writeOptionalString(&buf, msg.Error)
+		writeOneOffTables(&buf, msg.Tables)
+		writeInt64(&buf, msg.TotalHostExecutionDuration)
 	case SubscribeMultiApplied:
 		buf.WriteByte(TagSubscribeMultiApplied)
 		writeUint32(&buf, msg.RequestID)
@@ -290,7 +307,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 // message type. Provided for symmetry and client-side / test use.
 // The returned any is one of IdentityToken, SubscribeSingleApplied,
 // UnsubscribeSingleApplied, SubscriptionError, TransactionUpdate,
-// OneOffQueryResult, TransactionUpdateLight, SubscribeMultiApplied,
+// OneOffQueryResponse, TransactionUpdateLight, SubscribeMultiApplied,
 // UnsubscribeMultiApplied — matching the tag byte.
 // TagReducerCallResult is reserved and rejected here — see
 // `docs/parity-phase1.5-outcome-model.md`.
@@ -319,8 +336,8 @@ func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	case TagTransactionUpdateLight:
 		msg, err := decodeTransactionUpdateLight(body)
 		return tag, msg, err
-	case TagOneOffQueryResult:
-		msg, err := decodeOneOffQueryResult(body)
+	case TagOneOffQueryResponse:
+		msg, err := decodeOneOffQueryResponse(body)
 		return tag, msg, err
 	case TagSubscribeMultiApplied:
 		msg, err := decodeSubscribeMultiApplied(body)
@@ -467,28 +484,75 @@ func decodeTransactionUpdateLight(body []byte) (TransactionUpdateLight, error) {
 	return m, nil
 }
 
-func decodeOneOffQueryResult(body []byte) (OneOffQueryResult, error) {
-	var m OneOffQueryResult
+func decodeOneOffQueryResponse(body []byte) (OneOffQueryResponse, error) {
+	var m OneOffQueryResponse
 	var off int
 	var err error
 	if m.MessageID, off, err = readBytes(body, 0); err != nil {
 		return m, err
 	}
-	if len(body)-off < 1 {
-		return m, fmt.Errorf("%w: OneOffQueryResult status", ErrMalformedMessage)
+	if m.Error, off, err = readOptionalString(body, off); err != nil {
+		return m, err
 	}
-	m.Status = body[off]
-	off++
-	if m.Status == 0 {
-		if m.Rows, _, err = readBytes(body, off); err != nil {
-			return m, err
-		}
-	} else {
-		if m.Error, _, err = readString(body, off); err != nil {
-			return m, err
-		}
+	if m.Tables, off, err = readOneOffTables(body, off); err != nil {
+		return m, err
+	}
+	if m.TotalHostExecutionDuration, _, err = readInt64(body, off); err != nil {
+		return m, err
 	}
 	return m, nil
+}
+
+func writeOneOffTables(buf *bytes.Buffer, tables []OneOffTable) {
+	writeUint32(buf, uint32(len(tables)))
+	for _, t := range tables {
+		writeString(buf, t.TableName)
+		writeBytes(buf, t.Rows)
+	}
+}
+
+func readOneOffTables(body []byte, off int) ([]OneOffTable, int, error) {
+	count, off, err := readUint32(body, off)
+	if err != nil {
+		return nil, off, err
+	}
+	tables := make([]OneOffTable, 0, count)
+	for i := uint32(0); i < count; i++ {
+		var t OneOffTable
+		if t.TableName, off, err = readString(body, off); err != nil {
+			return nil, off, err
+		}
+		if t.Rows, off, err = readBytes(body, off); err != nil {
+			return nil, off, err
+		}
+		tables = append(tables, t)
+	}
+	return tables, off, nil
+}
+
+func writeOptionalString(buf *bytes.Buffer, v *string) {
+	if v == nil {
+		buf.WriteByte(0)
+		return
+	}
+	buf.WriteByte(1)
+	writeString(buf, *v)
+}
+
+func readOptionalString(body []byte, off int) (*string, int, error) {
+	if len(body)-off < 1 {
+		return nil, off, fmt.Errorf("%w: optional string tag truncated at offset %d", ErrMalformedMessage, off)
+	}
+	present := body[off]
+	off++
+	if present == 0 {
+		return nil, off, nil
+	}
+	s, off, err := readString(body, off)
+	if err != nil {
+		return nil, off, err
+	}
+	return &s, off, nil
 }
 
 func decodeSubscribeMultiApplied(body []byte) (SubscribeMultiApplied, error) {

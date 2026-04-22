@@ -66,8 +66,8 @@ func subscriptionErrorQueryIDForLog(msg *SubscriptionError) string {
 	return fmt.Sprintf("%d", *msg.QueryID)
 }
 
-// SendOneOffQueryResult delivers a OneOffQueryResult. No subscription
+// SendOneOffQueryResponse delivers a OneOffQueryResponse. No subscription
 // state change.
-func SendOneOffQueryResult(sender ClientSender, connID types.ConnectionID, msg *OneOffQueryResult) error {
+func SendOneOffQueryResponse(sender ClientSender, connID types.ConnectionID, msg *OneOffQueryResponse) error {
 	return sender.Send(connID, *msg)
 }

@@ -109,14 +109,17 @@ func TestSendSubscriptionErrorEnqueuesFrame(t *testing.T) {
 	}
 }
 
-func TestSendOneOffQueryResult(t *testing.T) {
+func TestSendOneOffQueryResponse(t *testing.T) {
 	c, id := testConn(false)
 	mgr := NewConnManager()
 	mgr.Add(c)
 	s := NewClientSender(mgr, &fakeInbox{})
 
-	msg := &OneOffQueryResult{MessageID: []byte{0x07}, Status: 0, Rows: []byte{0x01}}
-	if err := SendOneOffQueryResult(s, id, msg); err != nil {
+	msg := &OneOffQueryResponse{
+		MessageID: []byte{0x07},
+		Tables:    []OneOffTable{{TableName: "users", Rows: EncodeRowList([][]byte{{0x01}})}},
+	}
+	if err := SendOneOffQueryResponse(s, id, msg); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,11 +128,17 @@ func TestSendOneOffQueryResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, ok := decoded.(OneOffQueryResult)
+	result, ok := decoded.(OneOffQueryResponse)
 	if !ok {
-		t.Fatalf("expected OneOffQueryResult, got %T", decoded)
+		t.Fatalf("expected OneOffQueryResponse, got %T", decoded)
 	}
 	if !bytes.Equal(result.MessageID, msg.MessageID) {
 		t.Fatalf("MessageID = %v, want %v", result.MessageID, msg.MessageID)
+	}
+	if result.Error != nil {
+		t.Fatalf("Error = %v, want nil", result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "users" {
+		t.Fatalf("Tables = %+v, want single users entry", result.Tables)
 	}
 }

@@ -16,6 +16,7 @@ For provenance of closed slices, use `git log` — this file tracks only current
 - OI-001 A1 wire-close slice for applied-envelope field order is closed — `SubscribeSingleApplied`, `UnsubscribeSingleApplied`, `SubscribeMultiApplied`, and `UnsubscribeMultiApplied` now match the reference `request_id, total_host_execution_duration_micros, query_id, rows/update` layout (v1.rs:317/331/380/394). Struct + encode/decode reordered; byte shape pinned by `protocol/parity_applied_envelopes_test.go`; field-order pins updated in `parity_message_family_test.go`. Flattened rows shapes (`TableName+Rows`, `HasRows+Rows`, `[]SubscriptionUpdate`) remain as separate documented divergences from the reference `SubscribeRows` / `DatabaseUpdate` wrappers.
 - OI-001 A1 wire-close slice for `IdentityToken` is closed — Shunter's `InitialConnection` type and `TagInitialConnection` tag are renamed to `IdentityToken` / `TagIdentityToken`, and the wire is reordered to the reference `identity, token, connection_id` layout (v1.rs:445). Tag byte value is unchanged (1); struct + encode/decode reordered; byte shape pinned by `protocol/parity_identity_token_test.go`; tag pin updated in `parity_message_family_test.go`.
 - OI-001 A1 wire-close slice for `Unsubscribe.SendDropped` is closed — the extra `send_dropped: u8` byte has been removed from the `UnsubscribeSingleMsg` wire and struct to match reference `Unsubscribe { request_id: u32, query_id: QueryId }` (v1.rs:218). The `SendDroppedRows` concept lives only on v2 `UnsubscribeFlags` and is out of scope for v1 parity. Byte shape pinned by `protocol/parity_unsubscribe_test.go`; field-order pin updated in `parity_message_family_test.go`; seam doc example updated in `docs/decisions/protocol-executor-seam.md`.
+- OI-001 A1 wire-close slice for `OneOffQueryResponse` is closed — `OneOffQueryResult` (Status-byte + single-Rows + Error layout) has been renamed to `OneOffQueryResponse` with the reference field order `message_id, error: Option<Box<str>>, tables: Box<[OneOffTable]>, total_host_execution_duration: TimeDuration` (v1.rs:654). `OneOffTable { table_name, rows }` mirrors v1.rs:669. Success emission populates a single `OneOffTable` entry carrying the matched rows; failure emission sets `Error: Some(msg), Tables: []`, matching `module_host.rs:2290-2308`. `TagOneOffQueryResult` is renamed to `TagOneOffQueryResponse` (byte value 6 unchanged). Byte shape pinned by `protocol/parity_one_off_query_response_test.go` (success + error variants); field-order pin updated in `parity_message_family_test.go`. `TotalHostExecutionDuration` is on the wire but always 0 — same measurement-deferred pattern as `SubscriptionError.TotalHostExecutionDurationMicros` (no receipt-timestamp seam plumbed through the one-off path).
 - Closed-slice provenance, detailed verification history, and implementation narratives live in `rtk git log`.
 - Before starting a new slice, verify any remembered closure claim against live code; this file is intentionally current-state only.
 
@@ -24,16 +25,16 @@ For provenance of closed slices, use `git log` — this file tracks only current
 - The example remains on anonymous auth; strict auth wiring is still out of scope for this queue.
 - `Scheduler.ReplayFromCommitted` still uses `context.Background()`; a recovered schedule count exceeding the executor inbox capacity would block replay. Inherited backpressure, not introduced here.
 - `SubscriptionError.TotalHostExecutionDurationMicros` is on the wire but always 0 — no receipt-timestamp seam is plumbed through the admission path (`protocol/handle_subscribe_*.go`, `protocol/handle_unsubscribe_*.go`) or the evaluation path (`subscription/eval.go`). Wire shape matches the reference; measured-value parity is a separate future slice.
+- `OneOffQueryResponse.TotalHostExecutionDuration` is on the wire but always 0 — `protocol/handle_oneoff.go` does not thread a receipt-timestamp timer. Wire shape matches the reference; measured-value parity is deferred under the same receipt-timestamp-seam follow-on as `SubscriptionError`.
 
 ## Next session: OI-001 A1 protocol wire-close — next concrete envelope/tag divergence
 
-Prior A1 slices (`SubscriptionError` duration field, `CallReducer` field order, `TransactionUpdate` field order, applied-envelope field order, `IdentityToken` rename + field order, `Unsubscribe.SendDropped` removal) are closed. OI-001 still has remaining visible divergences. Pick one and repeat the scout → pick → close-or-pin pattern.
+Prior A1 slices (`SubscriptionError` duration field, `CallReducer` field order, `TransactionUpdate` field order, applied-envelope field order, `IdentityToken` rename + field order, `Unsubscribe.SendDropped` removal, `OneOffQueryResponse` rename + field-order close) are closed. OI-001 still has remaining visible divergences. Pick one and repeat the scout → pick → close-or-pin pattern.
 
 Known remaining divergences from the 2026-04-22 scout (not exhaustive — re-scout before picking):
 
-- `TransactionUpdateLight.Update` — reference uses `DatabaseUpdate { tables: Vec<TableUpdate> }`; Shunter uses flat `[]SubscriptionUpdate`.
-- `OneOffQueryResult` vs reference `OneOffQueryResponse` — reference uses `Option<error> + Vec<OneOffTable> + duration`; Shunter uses `Status byte + Rows + Error`.
-- Applied-envelope rows shape — reference wraps `SubscribeRows { table_id, table_name, table_rows: TableUpdate }`; Shunter `{Single,Multi}Applied` flatten to `TableName + Rows []byte` / `[]SubscriptionUpdate` (no `table_id`, no `num_rows`). Applied-envelope field order is already closed; only the inner rows shape remains.
+- `TransactionUpdateLight.Update` — reference uses `DatabaseUpdate { tables: Vec<TableUpdate> }` with `TableUpdate { table_id, table_name, num_rows, updates: Vec<QueryUpdate> }` and `QueryUpdate { deletes, inserts }`; Shunter uses flat `[]SubscriptionUpdate` with per-sub `{ SubscriptionID, TableName, Inserts, Deletes }`. Closing this is a coordinated change: the same `DatabaseUpdate` wrapper also appears on `StatusCommitted.Update` (inside heavy `TransactionUpdate`) and on `{Subscribe,Unsubscribe}MultiApplied.Update`, and `SubscribeRows` (below) wraps the same `TableUpdate`.
+- Applied-envelope rows shape — reference wraps `SubscribeRows { table_id, table_name, table_rows: TableUpdate }`; Shunter `{Single,Multi}Applied` flatten to `TableName + Rows []byte` (Single) / `[]SubscriptionUpdate` (Multi). Applied-envelope field order is already closed; only the inner rows shape remains. Shares the same `TableUpdate` introduction with the `TransactionUpdateLight` slice above.
 
 Recommended slice framing for the next session:
 
@@ -45,7 +46,7 @@ Out of scope for that slice: A2 subscription parity, A3 recovery/store parity, O
 
 ## Follow-on queue
 
-- Populate `SubscriptionError.TotalHostExecutionDurationMicros` with a real measured duration. Needs a receipt-timestamp seam threaded through the admission and evaluation paths; current emit sites all populate 0.
+- Populate `SubscriptionError.TotalHostExecutionDurationMicros` and `OneOffQueryResponse.TotalHostExecutionDuration` with real measured durations. Needs a receipt-timestamp seam threaded through the admission and evaluation paths plus the one-off query path; current emit sites all populate 0.
 
 Pick scope before starting. Do not open multiple OIs at once.
 

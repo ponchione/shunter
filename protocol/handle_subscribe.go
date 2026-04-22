@@ -168,7 +168,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 // Query form used by compileQuery. It resolves the table against the
 // schema and coerces each literal against the matching column kind.
 // Errors carry context suitable for SubscriptionError.Error /
-// OneOffQueryResult.Error.
+// OneOffQueryResponse.Error.
 func parseQueryString(qs string, sl SchemaLookup, caller *types.Identity) (Query, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
