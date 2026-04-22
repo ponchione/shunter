@@ -4,6 +4,39 @@ Use this file to start the next agent on the next real Shunter parity / hardenin
 
 For provenance of closed slices, use `git log` — this file tracks only current state and forward motion.
 
+## What just landed (2026-04-22, Subscription `IndexRange` migration — follow-on queue #1, closed)
+
+Narrow consumer-side rewire of `subscription/register_set.go` `initialQuery` default branch onto `CommittedReadView.IndexRange`. Prerequisite (efficient `CommittedSnapshot.IndexRange` backed by `BTreeIndex.SeekBounds`) landed earlier 2026-04-22. Before this slice, a bare `ColRange` predicate on an indexed column still took the `view.TableScan(t) + MatchRow` fallback — a full ordered walk with per-row bound recheck. The range-bounds primitive existed all the way down to the BTree, but subscription did not consume it.
+
+Landed:
+
+- `subscription/register_set.go` `initialQuery` default branch: when the predicate is a bare `ColRange` and `m.resolver.IndexIDForColumn(r.Table, r.Column)` resolves, the branch now calls `view.IndexRange(t, idxID, lower, upper)` directly. `lower`/`upper` are built by shape-copy of the subscription `Bound` into `store.Bound` (identical `Value/Inclusive/Unbounded` fields). Compound shapes (`And`, `Or`), `ColEq`/`ColNe`/`AllRows`, ranges on an unindexed column, and nil-resolver all stay on the `TableScan+MatchRow` fallback. No residual `MatchRow` is applied after `IndexRange` — the BTree range walk already honors `Bound` semantics via `matchesLowerBound/UpperBound` (see `store/snapshot.go:157-177`), and the single-column `IndexKey.Compare` reduces to the same `Value.Compare` ordering the residual would use. `UnregisterSet` final-delta computation rides the same `initialQuery` dispatch and therefore also hits `IndexRange` for indexed `ColRange` subs.
+- `subscription/testharness_test.go` `mockCommitted.IndexRange` — was a stub returning the empty iterator; now honors `Bound` semantics via per-row `Value.Compare` filtered against the column mapped by `idxCol[(tableID, indexID)]`. Required because `buildMockCommitted` registers `syntheticIndexID(t, col)` for every declared-indexed column, so the rewired `initialQuery` now routes through `IndexRange` on fixtures the property-test suite relies on.
+
+Pins landed:
+
+- `subscription/register_set_indexrange_test.go` (new, 9 pins, via `countingCommitted` wrapper recording `tableScanCalls` / `indexRangeCalls` / `indexSeekCalls`):
+  - `IndexedColRangeUsesIndexRange` — inclusive-inclusive on indexed col → 1 `IndexRange`, 0 `TableScan`, 3 rows.
+  - `IndexedColRangeExclusiveBounds` — `(2,5)` on 1..5 → 2 rows.
+  - `IndexedColRangeUnboundedLow` / `UnboundedHigh` — half-open shapes.
+  - `UnindexedColRangeUsesTableScan` — predicate on declared-but-unindexed column 1 → 0 `IndexRange`, 1 `TableScan`.
+  - `NilResolverUsesTableScan` — `NewManager(s, nil)` → fallback even on would-be-indexed col.
+  - `CompoundAndStaysOnTableScan` — `And{ColRange, ColEq}` stays on TableScan+MatchRow (intentional narrow scope).
+  - `IndexedColRangeEmpty` — `low > high` → 1 `IndexRange`, 0 rows (semantic preservation).
+  - `UnregisterSetFinalDeltaIndexedColRangeUsesIndexRange` — tear-down final-delta also uses `IndexRange`.
+
+Verification:
+
+- `rtk go build ./subscription` → clean
+- `rtk go vet ./subscription` → `Go vet: No issues found`
+- `rtk go fmt ./subscription` → clean
+- `rtk go test ./subscription -count=1` → 329 passed (baseline 320 + 9 new)
+- `rtk go test ./... -count=1` → 1620 passed in 11 packages (baseline 1611 + 9 new)
+
+Ledger / debt follow-through:
+
+- Not an OI — narrow consumer migration onto a landed spec deliverable. No TECH-DEBT entry. Follow-on queue item #1 closed; queue reduces to items #2 (subscription fan-out wiring in `cmd/shunter-example`) and #3 (expose executor inbox for scheduler wiring).
+
 ## What just landed (2026-04-22, CommittedSnapshot.IndexRange SPEC-001 §7.2 drift fix)
 
 Narrow store-side drift closure against `SPEC-001 §7.2` / `docs/decomposition/001-store/epic-7-read-only-snapshots/story-7.1-committed-read-view.md:56` ("Calls `Index.SeekBounds(lower, upper)`"). Before this slice, `CommittedSnapshot.IndexRange` (`store/snapshot.go:119`) used `idx.BTree().Scan()` + per-row `ExtractKey` + `matchesLowerBound`/`matchesUpperBound` filter — a full ordered BTree walk regardless of bound narrowness. This was the v0 inefficient path referenced indirectly in the OI-010 follow-on queue entry about "Subscription `SeekIndexBounds` migration"; the queue wording said "`StateView.SeekIndexBounds`" but subscription consumes `CommittedReadView`, not `StateView`, so the real prerequisite was closing the SPEC-001 §7.2 drift on the CommittedReadView surface so subscription's eventual rewire to `view.IndexRange(...)` does not regress perf.
@@ -221,15 +254,14 @@ Non-blockers also surfaced (no OI, intentional / performance-only / spec-deferre
 
 ## Next session: pick one narrow slice from the follow-on queue
 
-OI-008 / OI-009 / OI-010 / OI-011 / OI-012 are all closed. No remaining `open` OIs. Pick one from the queue below, open no more than one at a time.
+OI-008 / OI-009 / OI-010 / OI-011 / OI-012 are all closed. Follow-on queue #1 closed this session. No remaining `open` OIs. Pick one from the queue below, open no more than one at a time.
 
 ## Follow-on queue
 
 In priority order, all narrow-ready:
 
-1. **Subscription `IndexRange` migration** — rewire `subscription/register_set.go` `initialQuery` default branch so a bare `ColRange` predicate on an indexed column uses `view.IndexRange(t, idxID, lower, upper)` instead of the `view.TableScan(t) + MatchRow` fallback. Compound shapes (`And`, `Or`, `ColEq`, `ColNe`, `AllRows`) stay on TableScan. Prerequisite (efficient `CommittedSnapshot.IndexRange` backed by `BTreeIndex.SeekBounds`) landed 2026-04-22. (Queue-entry wording was "`StateView.SeekIndexBounds`" — subscription actually consumes `CommittedReadView`, so the right surface is `view.IndexRange`.)
-2. **Subscription fan-out wiring in `cmd/shunter-example`** — wire `subscription.Manager` + `FanOutWorker` + `protocol.FanOutSenderAdapter` into the example so reducer writes actually fan out to subscribers. Requires an adapter that widens `schema.SchemaRegistry` with `ColumnCount(TableID) int` (subscription `SchemaLookup` demands it; `schema.SchemaRegistry` does not satisfy it). Adds real subscription coverage to the example's smoke tests. Follow-on to OI-008.
-3. **Expose executor inbox for scheduler wiring** — `NewScheduler(inbox chan<- ExecutorCommand, ...)` reaches the executor's unexported `inbox`. Production embedders that want sys_scheduled replay need an exported accessor (e.g. `Executor.SchedulerFor(tableID)` or `Executor.Inbox()`). Lets the OI-008 example pass a real `*Scheduler` to `Startup`.
+1. **Subscription fan-out wiring in `cmd/shunter-example`** — wire `subscription.Manager` + `FanOutWorker` + `protocol.FanOutSenderAdapter` into the example so reducer writes actually fan out to subscribers. Requires an adapter that widens `schema.SchemaRegistry` with `ColumnCount(TableID) int` (subscription `SchemaLookup` demands it; `schema.SchemaRegistry` does not satisfy it). Adds real subscription coverage to the example's smoke tests. Follow-on to OI-008.
+2. **Expose executor inbox for scheduler wiring** — `NewScheduler(inbox chan<- ExecutorCommand, ...)` reaches the executor's unexported `inbox`. Production embedders that want sys_scheduled replay need an exported accessor (e.g. `Executor.SchedulerFor(tableID)` or `Executor.Inbox()`). Lets the OI-008 example pass a real `*Scheduler` to `Startup`.
 
 Pick scope before starting. Do not open multiple OIs at once.
 

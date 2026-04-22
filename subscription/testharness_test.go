@@ -85,7 +85,41 @@ func (m *mockCommitted) IndexScan(tableID TableID, indexID IndexID, value types.
 }
 
 func (m *mockCommitted) IndexRange(tableID TableID, indexID IndexID, low, high store.Bound) iter.Seq2[types.RowID, types.ProductValue] {
-	return func(yield func(types.RowID, types.ProductValue) bool) {}
+	col, ok := m.idxCol[indexRef{Table: tableID, Index: indexID}]
+	if !ok {
+		return func(yield func(types.RowID, types.ProductValue) bool) {}
+	}
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for rid, row := range m.rows[tableID] {
+			if col >= len(row) {
+				continue
+			}
+			v := row[col]
+			if !low.Unbounded {
+				c := v.Compare(low.Value)
+				if low.Inclusive {
+					if c < 0 {
+						continue
+					}
+				} else if c <= 0 {
+					continue
+				}
+			}
+			if !high.Unbounded {
+				c := v.Compare(high.Value)
+				if high.Inclusive {
+					if c > 0 {
+						continue
+					}
+				} else if c >= 0 {
+					continue
+				}
+			}
+			if !yield(rid, row) {
+				return
+			}
+		}
+	}
 }
 
 func (m *mockCommitted) GetRow(tableID TableID, rowID types.RowID) (types.ProductValue, bool) {

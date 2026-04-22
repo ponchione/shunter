@@ -143,6 +143,23 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 			return nil, nil
 		}
 		t := tables[0]
+		// SPEC-001 §7.2 / SPEC-004: bare ColRange on an indexed column hits
+		// view.IndexRange directly; the BTree binary-search start + ordered
+		// range walk replaces the full TableScan + per-row bound recheck.
+		// Compound shapes (And/Or), ColEq/ColNe/AllRows, or ranges on an
+		// unindexed column stay on the TableScan+MatchRow fallback.
+		if r, ok := pred.(ColRange); ok && m.resolver != nil {
+			if idxID, ok := m.resolver.IndexIDForColumn(r.Table, r.Column); ok {
+				lower := store.Bound{Value: r.Lower.Value, Inclusive: r.Lower.Inclusive, Unbounded: r.Lower.Unbounded}
+				upper := store.Bound{Value: r.Upper.Value, Inclusive: r.Upper.Inclusive, Unbounded: r.Upper.Unbounded}
+				for _, row := range view.IndexRange(t, idxID, lower, upper) {
+					if err := add(row); err != nil {
+						return nil, err
+					}
+				}
+				break
+			}
+		}
 		for _, row := range view.TableScan(t) {
 			if MatchRow(pred, t, row) {
 				if err := add(row); err != nil {
