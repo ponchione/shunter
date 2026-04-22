@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"time"
+
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
@@ -56,6 +58,11 @@ type ProtocolCallReducerResponse struct {
 type RegisterSubscriptionSetCmd struct {
 	Request subscription.SubscriptionSetRegisterRequest
 	Reply   func(subscription.SubscriptionSetRegisterResult, error)
+	// Receipt is the protocol-handler receipt timestamp. When non-zero the
+	// executor computes `TotalHostExecutionDurationMicros` as
+	// `time.Since(Receipt)` at reply time so the wire duration reflects the
+	// full admission path rather than only the subs-manager call.
+	Receipt time.Time
 }
 
 func (RegisterSubscriptionSetCmd) isExecutorCommand() {}
@@ -72,6 +79,9 @@ type UnregisterSubscriptionSetCmd struct {
 	ConnID  types.ConnectionID
 	QueryID uint32
 	Reply   func(subscription.SubscriptionSetUnregisterResult, error)
+	// Receipt mirrors RegisterSubscriptionSetCmd.Receipt for the unsubscribe
+	// admission path.
+	Receipt time.Time
 }
 
 func (UnregisterSubscriptionSetCmd) isExecutorCommand() {}

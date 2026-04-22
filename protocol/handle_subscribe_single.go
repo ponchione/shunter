@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"log"
+	"time"
 )
 
 // handleSubscribeSingle processes an incoming SubscribeSingleMsg. It
@@ -13,6 +14,13 @@ import (
 // either a SubscribeSingleApplied or a SubscriptionError onto the
 // connection's outbound channel. Synchronous dispatch here is what
 // enforces ADR §9.4 FIFO between Applied and any subsequent fan-out.
+//
+// Receipt-timestamp seam: `receipt` is captured at handler entry so
+// every `TotalHostExecutionDurationMicros` field emitted on this path
+// reflects the full admission duration. The receipt is passed to the
+// executor via RegisterSubscriptionSetRequest.Receipt for the
+// success/executor-error path, and used locally for handler-short-circuit
+// paths (compile failure, executor-submit failure).
 func handleSubscribeSingle(
 	ctx context.Context,
 	conn *Conn,
@@ -20,12 +28,14 @@ func handleSubscribeSingle(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
+	receipt := time.Now()
 	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity)
 	if err != nil {
 		sendError(conn, SubscriptionError{
-			RequestID: optionalUint32(msg.RequestID),
-			QueryID:   optionalUint32(msg.QueryID),
-			Error:     err.Error(),
+			TotalHostExecutionDurationMicros: elapsedMicros(receipt),
+			RequestID:                        optionalUint32(msg.RequestID),
+			QueryID:                          optionalUint32(msg.QueryID),
+			Error:                            err.Error(),
 		})
 		return
 	}
@@ -53,12 +63,26 @@ func handleSubscribeSingle(
 		Variant:    SubscriptionSetVariantSingle,
 		Predicates: []any{pred},
 		Reply:      reply,
+		Receipt:    receipt,
 	}); submitErr != nil {
 		sendError(conn, SubscriptionError{
-			RequestID: optionalUint32(msg.RequestID),
-			QueryID:   optionalUint32(msg.QueryID),
-			Error:     "executor unavailable: " + submitErr.Error(),
+			TotalHostExecutionDurationMicros: elapsedMicros(receipt),
+			RequestID:                        optionalUint32(msg.RequestID),
+			QueryID:                          optionalUint32(msg.QueryID),
+			Error:                            "executor unavailable: " + submitErr.Error(),
 		})
 		return
 	}
+}
+
+// elapsedMicros reports the non-zero microsecond delta since receipt.
+// A zero measurement is bumped to 1 so downstream consumers can
+// distinguish "measured" from the deferred-measurement sentinel (0)
+// that error-origin SubscriptionError emitters used before the seam.
+func elapsedMicros(receipt time.Time) uint64 {
+	us := uint64(time.Since(receipt).Microseconds())
+	if us == 0 {
+		return 1
+	}
+	return us
 }

@@ -84,6 +84,7 @@ func (a *ProtocolInboxAdapter) RegisterSubscriptionSet(ctx context.Context, req 
 			}
 			req.Reply(a.buildRegisterResponse(req, preds, result, replyErr))
 		},
+		Receipt: req.Receipt,
 	}
 	return a.submitter.SubmitWithContext(ctx, cmd)
 }
@@ -101,6 +102,7 @@ func (a *ProtocolInboxAdapter) UnregisterSubscriptionSet(ctx context.Context, re
 			}
 			req.Reply(a.buildUnregisterResponse(req, result, replyErr))
 		},
+		Receipt: req.Receipt,
 	}
 	return a.submitter.SubmitWithContext(ctx, cmd)
 }
@@ -199,7 +201,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 ) protocol.SubscriptionSetCommandResponse {
 	if replyErr != nil {
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, nil), Error: replyErr.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, nil), Error: replyErr.Error()},
 		}
 	}
 	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))
@@ -207,7 +209,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 		encoded, err := encodeProtocolSubscriptionUpdate(update)
 		if err != nil {
 			return protocol.SubscriptionSetCommandResponse{
-				Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, result.Update), Error: err.Error()},
+				Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, result.Update), Error: err.Error()},
 			}
 		}
 		updates = append(updates, encoded)
@@ -220,7 +222,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 	rows, err := encodeProductRows(collectInsertRows(result.Update))
 	if err != nil {
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, result.Update), Error: err.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, result.Update), Error: err.Error()},
 		}
 	}
 	return protocol.SubscriptionSetCommandResponse{
@@ -241,7 +243,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 ) protocol.UnsubscribeSetCommandResponse {
 	if replyErr != nil {
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: replyErr.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: replyErr.Error()},
 		}
 	}
 	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))
@@ -249,7 +251,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 		encoded, err := encodeProtocolSubscriptionUpdate(update)
 		if err != nil {
 			return protocol.UnsubscribeSetCommandResponse{
-				Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: err.Error()},
+				Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: err.Error()},
 			}
 		}
 		updates = append(updates, encoded)
@@ -262,7 +264,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 	rows, err := encodeProductRows(collectDeleteRows(result.Update))
 	if err != nil {
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: err.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: err.Error()},
 		}
 	}
 	return protocol.UnsubscribeSetCommandResponse{

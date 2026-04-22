@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"log"
+	"time"
 )
 
 // handleSubscribeMulti processes an incoming SubscribeMultiMsg. Every
@@ -15,6 +16,8 @@ import (
 // or a SubscriptionError onto the connection's outbound channel.
 // Synchronous dispatch here is what enforces ADR §9.4 FIFO between
 // Applied and any subsequent fan-out.
+//
+// Receipt-timestamp seam: see handleSubscribeSingle.
 func handleSubscribeMulti(
 	ctx context.Context,
 	conn *Conn,
@@ -22,14 +25,16 @@ func handleSubscribeMulti(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
+	receipt := time.Now()
 	preds := make([]any, 0, len(msg.QueryStrings))
 	for _, qs := range msg.QueryStrings {
 		compiled, err := compileSQLQueryString(qs, sl, &conn.Identity)
 		if err != nil {
 			sendError(conn, SubscriptionError{
-				RequestID: optionalUint32(msg.RequestID),
-				QueryID:   optionalUint32(msg.QueryID),
-				Error:     err.Error(),
+				TotalHostExecutionDurationMicros: elapsedMicros(receipt),
+				RequestID:                        optionalUint32(msg.RequestID),
+				QueryID:                          optionalUint32(msg.QueryID),
+				Error:                            err.Error(),
 			})
 			return
 		}
@@ -58,11 +63,13 @@ func handleSubscribeMulti(
 		Variant:    SubscriptionSetVariantMulti,
 		Predicates: preds,
 		Reply:      reply,
+		Receipt:    receipt,
 	}); submitErr != nil {
 		sendError(conn, SubscriptionError{
-			RequestID: optionalUint32(msg.RequestID),
-			QueryID:   optionalUint32(msg.QueryID),
-			Error:     "executor unavailable: " + submitErr.Error(),
+			TotalHostExecutionDurationMicros: elapsedMicros(receipt),
+			RequestID:                        optionalUint32(msg.RequestID),
+			QueryID:                          optionalUint32(msg.QueryID),
+			Error:                            "executor unavailable: " + submitErr.Error(),
 		})
 		return
 	}

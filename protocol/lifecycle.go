@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -79,6 +80,13 @@ type RegisterSubscriptionSetRequest struct {
 	Variant    SubscriptionSetVariant
 	Predicates []any // []subscription.Predicate
 	Reply      func(SubscriptionSetCommandResponse)
+	// Receipt is the wall-clock instant the protocol handler received the
+	// client request, captured before compile/dispatch. The executor reads
+	// it to compute `TotalHostExecutionDurationMicros` as
+	// `time.Since(Receipt)` at reply time so the wire field reflects the
+	// full admission-path duration rather than only the subs-manager call.
+	// Zero is allowed and means "fall back to the executor's local start".
+	Receipt time.Time
 }
 
 // UnregisterSubscriptionSetRequest drops every internal subscription
@@ -93,6 +101,11 @@ type UnregisterSubscriptionSetRequest struct {
 	RequestID uint32
 	Variant   SubscriptionSetVariant
 	Reply     func(UnsubscribeSetCommandResponse)
+	// Receipt mirrors RegisterSubscriptionSetRequest.Receipt — captured at
+	// handler entry so the executor can populate
+	// `TotalHostExecutionDurationMicros` from the full unsubscribe admission
+	// path. Zero falls back to the executor's local start.
+	Receipt time.Time
 }
 
 // SubscriptionSetCommandResponse is the result envelope the executor
