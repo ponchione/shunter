@@ -84,10 +84,9 @@ type UnsubscribeSingleApplied struct {
 //
 // TotalHostExecutionDurationMicros mirrors the reference field of the
 // same name (v1.rs:350) and is the first wire field for byte-shape
-// parity. Measurement is deferred — emit sites populate 0 until a
-// receipt-timestamp seam is plumbed through the admission and
-// evaluation paths. Zero is a legal reference-side value so the wire
-// shape is closed even though the value is not yet meaningful.
+// parity. Live emit sites now populate a measured non-zero microsecond
+// duration from the admission / evaluation receipt seam; the wire shape
+// and the value semantics are both closed.
 type SubscriptionError struct {
 	TotalHostExecutionDurationMicros uint64
 	RequestID                        *uint32
@@ -236,9 +235,9 @@ type ReducerCallInfo struct {
 // `Tables` is empty — matching module_host.rs:2290-2308.
 //
 // TotalHostExecutionDuration is the wire field from reference
-// `TimeDuration` (i64 microseconds). Measurement is deferred — emit
-// sites populate 0 until a receipt-timestamp seam is plumbed through
-// the one-off query path, same pattern as SubscriptionError.
+// `TimeDuration` (i64 microseconds). Live emit sites populate a measured
+// non-zero microsecond duration from the one-off receipt seam, matching
+// the reference unit semantics.
 type OneOffQueryResponse struct {
 	MessageID                  []byte
 	Error                      *string

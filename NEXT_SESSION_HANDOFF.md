@@ -14,56 +14,61 @@ For provenance of closed slices, use `rtk git log` — this file tracks only cur
 
 ## Live constraints (carry forward)
 
-- `SubscriptionError.TotalHostExecutionDurationMicros`, `OneOffQueryResponse.TotalHostExecutionDuration`, and `Subscribe{Single,Multi}Applied.TotalHostExecutionDurationMicros` / `Unsubscribe{Single,Multi}Applied.TotalHostExecutionDurationMicros` are all on the wire but always 0 — no receipt-timestamp seam is plumbed through the admission path (`protocol/handle_subscribe_*.go`, `protocol/handle_unsubscribe_*.go`), the evaluation path (`subscription/eval.go`), or the one-off path (`protocol/handle_oneoff.go`). Wire shapes match reference; measured-value parity is the receipt-timestamp-seam batch (see below).
-- `TransactionUpdate.Timestamp` and `TransactionUpdate.TotalHostExecutionDuration` are i64 with the same width as reference `Timestamp` / `TimeDuration`, but Shunter populates nanoseconds while reference SATS structs store microseconds (`reference/SpacetimeDB/crates/sats/src/timestamp.rs:11-13`, `.../time_duration.rs:17-19`). Bundled into the receipt-timestamp-seam batch.
+- The OI-001 A1 receipt-timestamp seam batch is closed: `SubscriptionError.TotalHostExecutionDurationMicros`, `OneOffQueryResponse.TotalHostExecutionDuration`, `Subscribe{Single,Multi}Applied.TotalHostExecutionDurationMicros`, and `Unsubscribe{Single,Multi}Applied.TotalHostExecutionDurationMicros` now emit measured non-zero microsecond values through the admission / evaluation / one-off paths, and `TransactionUpdate.Timestamp` / `TransactionUpdate.TotalHostExecutionDuration` now carry microseconds to match reference SATS semantics.
 - `EnergyQuantaUsed` on the wire is a 16-byte u128 LE that always emits zeros. Shunter has no energy model; widening to honest u128 values is not on the roadmap.
 - `cmd/shunter-example` remains on anonymous auth; strict auth wiring is still out of scope for this queue.
 - `Scheduler.ReplayFromCommitted` still uses `context.Background()`; a recovered schedule count exceeding the executor inbox capacity would block replay. Inherited backpressure, not introduced here.
+- `TECH-DEBT.md` now marks OI-002 / Tier A2 as the next active execution issue; use that as the tie-breaker if stale docs suggest reopening A1 protocol work.
 
 ## How to frame a session
 
 Work in *batches*, not single slices. One session = one batch. Within a batch, land one commit per slice so each remains reviewable.
 
-1. **Scout once, at the start of the session.** Read `protocol/tags.go`, `protocol/wire_types.go`, `protocol/client_messages.go`, `protocol/server_messages.go`, `protocol/send_responses.go`, `protocol/send_txupdate.go`, `protocol/fanout_adapter.go`, and diff each against `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs` (read-only). Grep for `parity_` and `documented-divergence` to filter out already-closed items. Produce the full residual list.
+1. **Scout once, at the start of the session.** Read the live code surfaces that match the named batch scope, then diff only those against the corresponding reference/docs source. Grep for `parity_`, `documented-divergence`, and the current OI label to filter out already-closed slices. Produce the residual list for that batch only.
 2. **Pick the batch's scope boundary** (one OI, or one named follow-on). Write out which items from the residual list fall inside it. Items outside stay for a future session — do not widen mid-batch.
 3. **Close each item in turn**, one commit per slice, each with a new `parity_*_test.go` byte-shape pin or a short decision doc under `docs/` matching the Slice 4 / 2γ / subprotocol pattern. Run `rtk go test ./protocol/...` + dependent packages after each, not only at the end.
 4. **Stop when** (a) the batch scope is exhausted, (b) the next item would need a new decision doc (stop and write the doc; do not just ship it), or (c) the next item crosses an OI/scope boundary. Do not stop mid-slice because "one slice is enough for today."
 5. **Update this file + memory at the end**, then commit and hand off.
 
-Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A2/A3 or OI-004/005/006 hardening.
+Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A3 or OI-004/005/006 hardening.
 
-## Next session: receipt-timestamp seam (OI-001 A1 measurement-parity batch)
+## Next session: OI-001 A2 subscription-layer parity batch
 
-OI-001 A1 is exhausted for *wire-shape* residuals. The remaining A1 work is measurement parity: four duration fields on the wire that always emit 0.
+OI-001 A1 is exhausted for both wire-shape and measurement-parity work. The next open protocol-adjacent batch is OI-001 A2: subscription/runtime parity against `reference/SpacetimeDB/crates/core/src/subscription/`.
 
-Fields to populate with real measured values in this batch:
+Batch framing:
 
-- `SubscriptionError.TotalHostExecutionDurationMicros`
-- `OneOffQueryResponse.TotalHostExecutionDuration`
-- `SubscribeSingleApplied.TotalHostExecutionDurationMicros`
-- `SubscribeMultiApplied.TotalHostExecutionDurationMicros`
-- `UnsubscribeSingleApplied.TotalHostExecutionDurationMicros`
-- `UnsubscribeMultiApplied.TotalHostExecutionDurationMicros`
+1. Scout the live subscription surfaces first: `subscription/predicate.go`, `subscription/validate.go`, `subscription/eval.go`, `subscription/manager.go`, `subscription/fanout.go`, `subscription/fanout_worker.go`, plus the protocol compile/admission seams in `protocol/handle_subscribe_*.go`, `protocol/handle_oneoff.go`, and `executor/protocol_inbox_adapter.go`.
+2. Diff those against the relevant reference subscription/runtime paths and produce the residual A2 list only. Ignore already-closed SQL surface pins unless they expose a real subscription-runtime mismatch.
+3. Pick one bounded A2 batch scope (predicate parity, evaluation-ordering parity, or fan-out delivery parity) and keep the session inside it.
+4. Land one commit per slice with parser/runtime/protocol pins as appropriate, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
 
-Also in scope: `TransactionUpdate.Timestamp` and `TransactionUpdate.TotalHostExecutionDuration` unit conversion (ns → µs) to match reference SATS semantics. This is a *unit* change, not a shape change — the wire is still i64.
+Suggested starting reads for this batch:
 
-Seam work required (scout before coding):
+- `subscription/predicate.go`
+- `subscription/validate.go`
+- `subscription/eval.go`
+- `subscription/manager.go`
+- `subscription/fanout.go`
+- `subscription/fanout_worker.go`
+- `protocol/handle_subscribe_single.go`
+- `protocol/handle_subscribe_multi.go`
+- `protocol/handle_oneoff.go`
+- `executor/protocol_inbox_adapter.go`
 
-1. **Admission path**: thread a receipt-timestamp (captured at request decode, before dispatch) through `protocol/handle_subscribe_single.go`, `protocol/handle_subscribe_multi.go`, `protocol/handle_unsubscribe_single.go`, `protocol/handle_unsubscribe_multi.go`, `protocol/handle_oneoff.go`. The emit site computes `time.Since(receipt)` in microseconds at Reply/response time.
-2. **Evaluation path**: `subscription/eval.go` post-commit evaluation-origin `SubscriptionError` emission needs a receipt timestamp from the enclosing commit / fan-out context. `protocol/fanout_adapter.go::SendSubscriptionError` should accept the measured duration rather than defaulting to 0.
-3. **TransactionUpdate unit flip**: change `CallerOutcome.Timestamp` and `CallerOutcome.TotalHostExecutionDuration` semantics from nanoseconds to microseconds at the subscription/executor boundary. Audit every populator (`executor/...`, subscription pipeline) and flip `time.Now().UnixNano()` / `elapsed.Nanoseconds()` to the microsecond equivalent. Update pin tests in `protocol/parity_transaction_update_test.go` to document the unit.
-4. **Per-slice pins**: each of the six duration fields gets an updated parity test that asserts a *non-zero* duration on the wire after seam wiring, not just the field position. Existing byte-shape pins should continue to pass.
+Good candidate seams to scout before choosing the batch:
 
-Close criteria for the batch:
+- predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model
+- evaluation-ordering or fan-out ordering differences that change user-visible delta sequencing
+- subscription-manager/runtime behaviors that differ from reference under multi-query sets, dropped clients, or re-evaluation failures
 
-- All six `*Applied` / error / one-off duration fields populate non-zero values when a real request takes observable time.
-- `TransactionUpdate` timestamp + duration values round-trip cleanly in microseconds.
-- `rtk go test ./protocol/... ./subscription/... ./executor/... ./cmd/shunter-example/...` passes.
-- One commit per sub-slice; final commit updates this file.
+Stop conditions:
 
-If a real blocker surfaces (e.g., the evaluation path needs a new `CommitFanout` field that ripples through SPEC-004 contracts), stop the batch at a clean sub-slice boundary, write the blocker up at the bottom of this file as a new follow-on, and hand off.
+- stop at the first clean batch boundary that would require a new decision doc or would cross into A3 / hardening work
+- do not reopen the rows-shape cluster or A1 wire/message-family work in the same session
+- if the scout shows the next meaningful gap is actually A3 or a new documented divergence, write that up here before handing off
 
-Out of scope for this batch: OI-001 A2 subscription parity, OI-001 A3 recovery/store parity, OI-004/005/006 hardening, rows-shape cluster reopen.
+Out of scope for this batch: OI-001 A3 recovery/store parity, OI-004/005/006 hardening, rows-shape cluster reopen, strict-auth wiring in `cmd/shunter-example`.
 
 ## Follow-on queue (pickable next, one per session)
 

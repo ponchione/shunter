@@ -21,6 +21,7 @@ Status: open
 Severity: high
 
 Summary:
+- all OI-001 A1 wire-shape and measured-duration parity slices identified to date are closed and pinned
 - legacy `v1.bsatn.shunter` admission is still accepted as a compatibility deferral
 - brotli remains recognized-but-unsupported
 - several message-family and envelope details remain intentionally divergent
@@ -46,6 +47,9 @@ Source docs:
 - `docs/parity-phase0-ledger.md`
 - `docs/parity-phase2-slice4-rows-shape.md`
 
+Execution note:
+- OI-001 is no longer the next active batch for handoff purposes; the next execution target is OI-002 / Tier A2 subscription-runtime parity. The remaining OI-001 items are narrower compatibility/divergence follow-ons unless a user explicitly asks to reopen protocol wire-close work.
+
 ### OI-002: Query and subscription behavior still diverges from the target runtime model
 
 Status: open
@@ -56,6 +60,9 @@ Summary:
 - the surface is still intentionally narrower than the reference SQL path
 - row-level security / per-client filtering remains absent
 - broader query/subscription parity is still open beyond the landed narrow shapes
+
+Execution note:
+- this is the next active issue for the handoff queue: scout the live subscription runtime against `reference/SpacetimeDB/crates/core/src/subscription/`, then pick one bounded A2 batch (predicate parity, evaluation ordering, or fan-out delivery) rather than reopening closed A1 protocol slices.
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads
@@ -247,6 +254,89 @@ Source docs:
 - `docs/parity-phase4-slice2-errors.md`
 - `docs/parity-phase4-slice2-record-shape.md`
 
+### OI-013: SchemaRegistry does not satisfy the documented subscription SchemaLookup contract directly
+
+Status: open
+Severity: medium
+
+Summary:
+- SPEC-004 and SPEC-006 still describe `schema.SchemaRegistry` as directly satisfying the canonical subscription `SchemaLookup` interface.
+- The live `subscription.SchemaLookup` requires `ColumnCount(TableID) int`, but `schema.SchemaRegistry` does not expose that method.
+- Real embedders therefore need an extra adapter layer (`schemaLookupAdapter`) to construct `subscription.Manager`, even though the decomposition/docs describe the registry itself as the shared immutable schema surface crossing into SPEC-004.
+
+Why this matters:
+- this is a real spec/runtime seam mismatch in one of the core cross-package contracts
+- it makes the engine harder to embed because the supposedly canonical schema object is not actually plug-compatible with the subscription manager
+- it weakens the execution-order claim that the built schema registry is the direct dependency handoff into later runtime phases
+
+Primary code surfaces:
+- `subscription/validate.go`
+- `subscription/manager.go`
+- `schema/registry.go`
+- `cmd/shunter-example/main.go`
+- `docs/embedding.md`
+
+Grounded evidence:
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md:766-769` says the canonical SPEC-006 `SchemaLookup` is used and that `*SchemaRegistry` satisfies it directly.
+- `docs/decomposition/006-schema/SPEC-006-schema.md:337` says SPEC-004's subscription manager receives the registry as both `SchemaLookup` and `IndexResolver`.
+- `subscription/validate.go:9-21` defines `SchemaLookup` with `ColumnCount(TableID) int`.
+- `subscription/manager.go:77-121` stores that interface directly on `Manager` and requires it at `NewManager(...)`.
+- `docs/embedding.md:113-133` documents a required `schemaLookupAdapter` specifically because `schema.SchemaRegistry` does not expose `ColumnCount`.
+- `cmd/shunter-example/main.go:132-137` uses that adapter in the real bootstrap path.
+- Compile-only audit repro (`rtk go test ./.tmp_audit_schema_lookup`) fails with `cannot use reg ... as subscription.SchemaLookup`.
+
+Recommended resolution options:
+- make `schema.SchemaRegistry` satisfy the canonical subscription lookup surface directly (for example by adding `ColumnCount` to the schema-owned interface)
+- or deliberately keep the adapter seam and update SPEC-004 / SPEC-006 / execution-order text so the docs stop claiming direct satisfaction
+- whichever direction wins, pin it with a compile-only consumer test so this contract cannot silently drift again
+
+Suggested follow-up tests:
+- compile-only pin that `schema.SchemaRegistry` satisfies `subscription.SchemaLookup` if direct compatibility is intended
+- if the adapter seam is intentional, doc/contract pins asserting the narrower schema-owned interface and the embedder adapter requirement
+
+### OI-014: Shunter still lacks a true embeddable library surface despite the new example bootstrap
+
+Status: open
+Severity: medium
+
+Summary:
+- the example/bootstrap story is now real, but the module still does not expose the project-brief-style library surface implied by `go get github.com/ponchione/shunter`.
+- there is no root importable package and no `engine/` package implementing a top-level runtime owner.
+- embedders still have to hand-wire schema, commitlog, executor, subscription, protocol, scheduler, and multiple shim adapters in host code.
+- `schema.EngineOptions` advertises runtime knobs (`DataDir`, `ExecutorQueueCapacity`, `DurabilityQueueCapacity`, `EnableProtocol`) that are not consumed by the live runtime path; only `StartupSnapshotSchema` is read by `Engine.Start()`.
+
+Why this matters:
+- this is now the main remaining gap between "there is a working example" and "Shunter is a usable Go library you can embed"
+- the current public surface is still subsystem-oriented rather than application-embedder-oriented
+- no-op or effectively inert runtime options are risky because embedders may believe they are configuring behavior that the system ignores
+
+Primary code surfaces:
+- `schema/build.go`
+- `schema/builder.go`
+- `schema/version.go`
+- `cmd/shunter-example/main.go`
+- `docs/embedding.md`
+- repo/module root (`go.mod`)
+
+Grounded evidence:
+- `docs/project-brief.md:5-9,28,138,203-210` describes Shunter as an embeddable Go library and sketches an `engine/` package for top-level initialization/lifecycle.
+- `rtk go list` at the repo root fails with `no Go files in /home/gernsback/source/shunter`.
+- `rtk go list ./engine` fails with `stat /home/gernsback/source/shunter/engine: directory not found`.
+- Compile-only audit repro (`rtk go test ./.tmp_audit_rootpkg`) fails because `github.com/ponchione/shunter` is not importable as a package.
+- `cmd/shunter-example/main.go:99-205` shows the real host-facing bring-up still requires manual assembly of all major subsystems plus adapters.
+- `docs/embedding.md:10-40,83-124,191-199` documents three separate adapters (`durabilityAdapter`, `schemaLookupAdapter`, `stateAdapter`) and the explicit subsystem wiring sequence.
+- `schema/builder.go:116-128` defines runtime-facing `EngineOptions`, but `schema/version.go:134-135` only consumes `StartupSnapshotSchema`; the other knobs are not used in the live code path.
+
+Recommended resolution options:
+- introduce a real public engine package (or root package) that owns config, bring-up, and shutdown across the existing subsystems
+- thread the currently advertised `EngineOptions` fields into that surface if they are meant to stay public
+- or explicitly narrow the product/docs claim from "embeddable library" to "subsystem toolkit + example wiring" until a true engine API exists
+
+Suggested follow-up tests:
+- compile-only smoke proving the advertised public import path/package exists
+- minimal start/stop embedder smoke test using the intended top-level API instead of example-local wiring
+- config-effect pins proving the exposed runtime options actually influence runtime construction
+
 ### OI-008: The repo still lacks a coherent top-level engine/bootstrap story (closed 2026-04-22)
 
 Status: closed
@@ -263,9 +353,9 @@ Realized surfaces:
 - `docs/embedding.md` — embedder walkthrough with wiring diagram, seven numbered steps, and scope callouts
 
 Intentionally out of scope (carried forward):
-- Subscription wiring — the example runs with the noop `SubscriptionManager` default. Real fan-out needs an adapter widening `schema.SchemaRegistry` with `ColumnCount` (subscription `SchemaLookup` requirement). Separate slice.
-- Scheduled reducers — `Scheduler.NewScheduler(inbox, ...)` requires the executor's unexported inbox channel; no exported accessor exists yet. Passing `nil` to `Startup` (the documented no-scheduler path) is what the example uses.
 - Strict auth — example uses anonymous so it is dialable without an IdP.
+- The broader embedder/library-surface gap beyond this bootstrap example is tracked separately under OI-014.
+- The subscription `SchemaLookup` adapter seam (`ColumnCount`) is tracked separately under OI-013.
 - `protocol/handle_oneoff_test.go` was already stale against the working-tree `TableByName` 3-value return before this session; still out of scope per OI-011 carry-forward note. Not regressed by this slice.
 
 Verification:
@@ -402,8 +492,8 @@ Source docs:
 - `protocol/tags.go` + `protocol/server_messages.go` + `protocol/client_messages.go` (canonical source for the tag table and envelope shapes)
 
 Explicitly out of scope (carried forward):
-- OI-008: `cmd/shunter-example` bootstrap (still open).
-- Subscription-layer migration to `StateView.SeekIndexBounds` (carried from OI-010).
+- The broader embedder/library-surface gap is tracked under OI-014 rather than this doc-refresh issue.
+- The subscription `SchemaLookup` adapter seam is tracked under OI-013 rather than this doc-refresh issue.
 - `schema/registry.go` working-tree diff expanding `TableByName` to `(TableID, *TableSchema, bool)`; `protocol/handle_oneoff_test.go` is stale against that three-value return. Flag as its own slice when the registry change is committed; explicitly NOT folded into OI-012.
 
 ## Deferred issues
