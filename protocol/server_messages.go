@@ -61,11 +61,19 @@ type UnsubscribeSingleApplied struct {
 // TableID mirrors the reference optional `table_id`; when present it
 // narrows the drop scope to one return-table family rather than the
 // entire subscription set.
+//
+// TotalHostExecutionDurationMicros mirrors the reference field of the
+// same name (v1.rs:350) and is the first wire field for byte-shape
+// parity. Measurement is deferred — emit sites populate 0 until a
+// receipt-timestamp seam is plumbed through the admission and
+// evaluation paths. Zero is a legal reference-side value so the wire
+// shape is closed even though the value is not yet meaningful.
 type SubscriptionError struct {
-	RequestID *uint32
-	QueryID   *uint32
-	TableID   *schema.TableID
-	Error     string
+	TotalHostExecutionDurationMicros uint64
+	RequestID                        *uint32
+	QueryID                          *uint32
+	TableID                          *schema.TableID
+	Error                            string
 }
 
 // SubscribeMultiApplied is the server response to a SubscribeMulti.
@@ -197,6 +205,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 	case SubscriptionError:
 		buf.WriteByte(TagSubscriptionError)
+		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
 		writeOptionalUint32(&buf, msg.RequestID)
 		writeOptionalUint32(&buf, msg.QueryID)
 		writeOptionalTableID(&buf, msg.TableID)
@@ -357,7 +366,10 @@ func decodeSubscriptionError(body []byte) (SubscriptionError, error) {
 	var m SubscriptionError
 	var off int
 	var err error
-	if m.RequestID, off, err = readOptionalUint32(body, 0); err != nil {
+	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, 0); err != nil {
+		return m, err
+	}
+	if m.RequestID, off, err = readOptionalUint32(body, off); err != nil {
 		return m, err
 	}
 	if m.QueryID, off, err = readOptionalUint32(body, off); err != nil {

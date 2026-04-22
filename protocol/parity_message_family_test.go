@@ -256,11 +256,13 @@ func TestPhase2SubscribeAppliedCarriesHostExecutionDuration(t *testing.T) {
 // TestPhase2SubscriptionErrorOptionalShape pins the narrowed
 // SubscriptionError follow-through: request_id / query_id are now
 // explicit optionals and table_id is present on the Go envelope.
-// Reference still also carries total_host_execution_duration_micros
-// (v1.rs:350), which remains deferred.
+// `TotalHostExecutionDurationMicros` is the reference-position first
+// field (v1.rs:350); measurement is deferred — emit sites populate 0
+// until a receipt-timestamp seam lands. See
+// `parity_subscription_error_test.go` for the byte-shape pin.
 func TestPhase2SubscriptionErrorOptionalShape(t *testing.T) {
 	fields := msgFieldNames(SubscriptionError{})
-	want := []string{"RequestID", "QueryID", "TableID", "Error"}
+	want := []string{"TotalHostExecutionDurationMicros", "RequestID", "QueryID", "TableID", "Error"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("SubscriptionError fields = %v, want %v", fields, want)
 	}
