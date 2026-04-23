@@ -108,6 +108,22 @@ func TestQueryHashSameTableOrAssociativeGroupingCanonicalized(t *testing.T) {
 	}
 }
 
+func TestQueryHashSameTableDuplicateAndCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	duplicated := And{Left: a, Right: a}
+	if ComputeQueryHash(a, nil) != ComputeQueryHash(duplicated, nil) {
+		t.Fatal("same-table duplicate And leaf should share canonical hash with single leaf")
+	}
+}
+
+func TestQueryHashSameTableDuplicateOrCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	duplicated := Or{Left: a, Right: a}
+	if ComputeQueryHash(a, nil) != ComputeQueryHash(duplicated, nil) {
+		t.Fatal("same-table duplicate Or leaf should share canonical hash with single leaf")
+	}
+}
+
 func TestQueryHashMultiTableAndOrderMatters(t *testing.T) {
 	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
 	b := ColEq{Table: 2, Column: 0, Value: types.NewUint64(2)}

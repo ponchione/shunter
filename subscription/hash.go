@@ -194,6 +194,23 @@ func sortCanonicalPredicates(preds []Predicate) {
 	}
 }
 
+func dedupeCanonicalPredicates(preds []Predicate) []Predicate {
+	if len(preds) < 2 {
+		return preds
+	}
+	out := preds[:1]
+	prevKey := canonicalPredicateBytes(preds[0])
+	for _, pred := range preds[1:] {
+		key := canonicalPredicateBytes(pred)
+		if bytes.Equal(prevKey, key) {
+			continue
+		}
+		out = append(out, pred)
+		prevKey = key
+	}
+	return out
+}
+
 func rebuildCanonicalAnd(preds []Predicate) Predicate {
 	if len(preds) == 0 {
 		return nil
@@ -234,6 +251,7 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		if table, ok := canonicalGroupTable(combined); ok {
 			children := flattenCanonicalAnd(combined, table, nil)
 			sortCanonicalPredicates(children)
+			children = dedupeCanonicalPredicates(children)
 			return rebuildCanonicalAnd(children)
 		}
 		left, right = orderCanonicalChildren(left, right)
@@ -254,6 +272,7 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		if table, ok := canonicalGroupTable(combined); ok {
 			children := flattenCanonicalOr(combined, table, nil)
 			sortCanonicalPredicates(children)
+			children = dedupeCanonicalPredicates(children)
 			return rebuildCanonicalOr(children)
 		}
 		left, right = orderCanonicalChildren(left, right)
