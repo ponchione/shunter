@@ -211,6 +211,59 @@ func dedupeCanonicalPredicates(preds []Predicate) []Predicate {
 	return out
 }
 
+func absorbCanonicalPredicates(preds []Predicate, groupTag byte, table TableID) []Predicate {
+	if len(preds) < 2 {
+		return preds
+	}
+	present := make(map[string]struct{}, len(preds))
+	for _, pred := range preds {
+		present[string(canonicalPredicateBytes(pred))] = struct{}{}
+	}
+	out := preds[:0]
+	for _, pred := range preds {
+		if shouldAbsorbCanonicalPredicate(pred, groupTag, table, present) {
+			continue
+		}
+		out = append(out, pred)
+	}
+	if len(out) == 0 {
+		return preds
+	}
+	return out
+}
+
+func shouldAbsorbCanonicalPredicate(pred Predicate, groupTag byte, table TableID, present map[string]struct{}) bool {
+	var targetChildren []Predicate
+	switch groupTag {
+	case tagOr:
+		andPred, ok := pred.(And)
+		if !ok {
+			return false
+		}
+		if predTable, ok := canonicalGroupTable(andPred); !ok || predTable != table {
+			return false
+		}
+		targetChildren = flattenCanonicalAnd(andPred, table, nil)
+	case tagAnd:
+		orPred, ok := pred.(Or)
+		if !ok {
+			return false
+		}
+		if predTable, ok := canonicalGroupTable(orPred); !ok || predTable != table {
+			return false
+		}
+		targetChildren = flattenCanonicalOr(orPred, table, nil)
+	default:
+		return false
+	}
+	for _, child := range targetChildren {
+		if _, ok := present[string(canonicalPredicateBytes(child))]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func rebuildCanonicalAnd(preds []Predicate) Predicate {
 	if len(preds) == 0 {
 		return nil
@@ -252,6 +305,7 @@ func canonicalizePredicate(pred Predicate) Predicate {
 			children := flattenCanonicalAnd(combined, table, nil)
 			sortCanonicalPredicates(children)
 			children = dedupeCanonicalPredicates(children)
+			children = absorbCanonicalPredicates(children, tagAnd, table)
 			return rebuildCanonicalAnd(children)
 		}
 		left, right = orderCanonicalChildren(left, right)
@@ -273,6 +327,7 @@ func canonicalizePredicate(pred Predicate) Predicate {
 			children := flattenCanonicalOr(combined, table, nil)
 			sortCanonicalPredicates(children)
 			children = dedupeCanonicalPredicates(children)
+			children = absorbCanonicalPredicates(children, tagOr, table)
 			return rebuildCanonicalOr(children)
 		}
 		left, right = orderCanonicalChildren(left, right)

@@ -124,6 +124,24 @@ func TestQueryHashSameTableDuplicateOrCanonicalized(t *testing.T) {
 	}
 }
 
+func TestQueryHashSameTableOrAbsorptionCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	b := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}
+	absorbed := Or{Left: a, Right: And{Left: a, Right: b}}
+	if ComputeQueryHash(a, nil) != ComputeQueryHash(absorbed, nil) {
+		t.Fatal("same-table Or absorption should share canonical hash with absorbed leaf")
+	}
+}
+
+func TestQueryHashSameTableAndAbsorptionCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	b := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}
+	absorbed := And{Left: a, Right: Or{Left: a, Right: b}}
+	if ComputeQueryHash(a, nil) != ComputeQueryHash(absorbed, nil) {
+		t.Fatal("same-table And absorption should share canonical hash with absorbed leaf")
+	}
+}
+
 func TestQueryHashMultiTableAndOrderMatters(t *testing.T) {
 	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
 	b := ColEq{Table: 2, Column: 0, Value: types.NewUint64(2)}
