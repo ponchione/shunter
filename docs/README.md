@@ -10,7 +10,7 @@ Read these first when deciding what to work on now:
 3. `docs/EXECUTION-ORDER.md` — implementation sequencing
 4. `docs/spacetimedb-parity-roadmap.md` — active parity prioritization
 5. `docs/parity-phase0-ledger.md` — compact scenario ledger
-6. `docs/embedding.md` — current embedder/bootstrap walkthrough
+6. `docs/hosted-runtime-bootstrap.md` — current hosted bootstrap walkthrough
 7. `TECH-DEBT.md` — open issues only
 8. `NEXT_SESSION_HANDOFF.md` — current resume point only
 

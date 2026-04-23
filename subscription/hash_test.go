@@ -242,6 +242,24 @@ func TestQueryHashSelfJoinFilterAssociativeGroupingCanonicalized(t *testing.T) {
 	}
 }
 
+func TestQueryHashSelfJoinFilterDuplicateLeafCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint32(1)}
+	single := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: a}
+	duplicateAnd := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: And{Left: a, Right: a}}
+	duplicateOr := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: Or{Left: a, Right: a}}
+	if ComputeQueryHash(single, nil) != ComputeQueryHash(duplicateAnd, nil) {
+		t.Fatal("self-join duplicate And leaf should share canonical hash with single leaf")
+	}
+	if ComputeQueryHash(single, nil) != ComputeQueryHash(duplicateOr, nil) {
+		t.Fatal("self-join duplicate Or leaf should share canonical hash with single leaf")
+	}
+
+	aliasDrift := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: And{Left: a, Right: ColEq{Table: 1, Column: 0, Alias: 1, Value: types.NewUint32(1)}}}
+	if ComputeQueryHash(single, nil) == ComputeQueryHash(aliasDrift, nil) {
+		t.Fatal("self-join filter alias identity must still change canonical hash")
+	}
+}
+
 func TestQueryHashJoinFilterDiffers(t *testing.T) {
 	withoutF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, Filter: nil}
 	withF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0,

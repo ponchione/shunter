@@ -15,13 +15,13 @@ type ExecutorInbox interface {
 
 Story 3.6 extends the interface with OnDisconnect; later epics add submit-and-return subscription / call-reducer methods. Those later methods use protocol-owned request structs so wire metadata (`RequestID`, `QueryID`) and response channels can cross the seam without importing `executor` internals.
 
-The **adapter** that converts these calls into `executor.OnConnectCmd` + `executor.OnDisconnectCmd` + `ReducerResponse` is owned by the host application for now. Tests use fakes. If a second consumer emerges, the adapter can be promoted into a `protocol/executorbridge` subpackage without breaking the interface.
+The **adapter** that converts these calls into `executor.OnConnectCmd` + `executor.OnDisconnectCmd` + `ReducerResponse` is owned by the current runtime/bootstrap layer for now. Tests use fakes. If a second consumer emerges, the adapter can be promoted into a `protocol/executorbridge` subpackage without breaking the interface.
 
 ## Why
 
 - **Clean-room boundary respected.** Spec §13 explicitly says the protocol layer sends commands via the executor's inbox; it does not import executor internals. A narrow interface prevents vocabulary sprawl and keeps the two packages independently testable.
 - **Per-story granularity.** The interface grows one method at a time as stories land. This avoids defining methods for unimplemented flows (OnDisconnect, subscription commands) and keeps the RED/GREEN cycle small.
-- **Adapter in host code is the path of least resistance.** Shunter is an embedded library; the embedder wires the executor graph anyway. Bridging `OnConnect` to `executor.OnConnectCmd` is ~15 lines and belongs next to the executor's bring-up code. No `executoradapter` subpackage needed until there's a second caller.
+- **Adapter in runtime bootstrap code is the path of least resistance.** Shunter's current hosted bring-up still wires the executor graph explicitly. Bridging `OnConnect` to `executor.OnConnectCmd` is ~15 lines and belongs next to the runtime/server bring-up code. No `executoradapter` subpackage needed until there's a second caller.
 - **Test fakes are trivial.** A struct with a few fields and an error-returning method covers every protocol-layer assertion without spinning up a real executor.
 
 ## Admission ordering (Story 3.4)
@@ -58,4 +58,4 @@ A `NewServer(...)` constructor was considered and rejected: struct-literal init 
 
 ## Tradeoff accepted
 
-The embedder owns the adapter. A misbehaving adapter (never responds, panics, etc.) becomes a protocol-layer hang visible only at runtime. Tests must exercise the adapter separately from the protocol layer. The alternative — pulling the full `executor.OnConnectCmd` shape into `protocol/` — was rejected because it forces `protocol/` to import `executor` (spec-forbidden) or duplicate the command types (guaranteed to drift).
+The runtime/bootstrap layer owns the adapter. A misbehaving adapter (never responds, panics, etc.) becomes a protocol-layer hang visible only at runtime. Tests must exercise the adapter separately from the protocol layer. The alternative — pulling the full `executor.OnConnectCmd` shape into `protocol/` — was rejected because it forces `protocol/` to import `executor` (spec-forbidden) or duplicate the command types (guaranteed to drift).

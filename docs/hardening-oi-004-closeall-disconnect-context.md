@@ -48,7 +48,7 @@ Same hazard class as the two other Background-rooted
 `CloseAll` is the third and final site in that family. Today the only
 callers are tests (`protocol/close_test.go`) that pass
 `context.Background()` and the OI-008 server lifecycle that does not
-yet exist. Pinning the contract now prevents a future embedder from
+yet exist. Pinning the contract now prevents a future runtime/bootstrap layer from
 re-introducing the same latent leak.
 
 ## Fix

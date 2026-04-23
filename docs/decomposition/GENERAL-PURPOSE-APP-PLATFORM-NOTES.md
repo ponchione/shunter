@@ -39,7 +39,7 @@ So the practical design choice for Shunter is:
 
 The current specs are already a credible foundation for:
 
-- embedded realtime stateful backends
+- hosted realtime stateful runtimes
 - reducer-driven application logic
 - push-synchronized clients
 - single-node personal/internal apps
@@ -364,7 +364,7 @@ If this direction is pursued, the most accurate framing would be:
 
 ### Near-term framing
 
-“Shunter is an embeddable realtime application kernel for stateful Go projects.”
+“Shunter is a Go-native hosted realtime application runtime for stateful Go-defined apps.”
 
 This is honest and achievable based on the current specs.
 
@@ -399,9 +399,9 @@ This keeps the core clean while still allowing broad eventual applicability.
 
 ---
 
-## 11. What Layer 2 should look like as a Go library
+## 11. What Layer 2 should look like as a hosted runtime surface
 
-If Shunter is meant to become something you `go get` and embed into many projects, Layer 2 is the real public library surface.
+If Shunter is meant to become the hosted runtime/server that multiple projects define against, Layer 2 is the real public runtime surface.
 
 The critical rule is:
 
@@ -425,7 +425,7 @@ That API should cover at least:
 - client/codegen-facing schema export hooks
 - configuration and observability hooks
 
-In other words, Layer 2 is where Shunter stops feeling like a set of engine subsystems and starts feeling like an embeddable application platform.
+In other words, Layer 2 is where Shunter stops feeling like a set of engine subsystems and starts feeling like a coherent hosted application runtime.
 
 ### 11.2 Internal vs public package boundary
 

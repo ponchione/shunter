@@ -1921,6 +1921,67 @@ func TestHandleOneOffQuery_AliasedSelfJoinFilterChildOrderVisibleRowsMatch(t *te
 	}
 }
 
+func TestHandleOneOffQuery_AliasedSelfJoinFilterDuplicateLeafVisibleRowsMatch(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, tReg, _ := eng.Registry().TableByName("t")
+	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}, {Index: 1, Name: "u32", Type: schema.KindUint32}}}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		tReg.ID: {
+			{types.NewUint32(1), types.NewUint32(5)},
+			{types.NewUint32(2), types.NewUint32(5)},
+			{types.NewUint32(3), types.NewUint32(5)},
+		},
+	}}
+	queries := []string{
+		"SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1",
+		"SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1 AND a.id = 1",
+		"SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1 OR a.id = 1",
+	}
+	decoded := make([][]types.ProductValue, 0, len(queries))
+	for i, query := range queries {
+		conn := testConnDirect(nil)
+		stateAccess := &mockStateAccess{snap: snap}
+		msg := &OneOffQueryMsg{MessageID: []byte{byte(0x25 + i)}, QueryString: query}
+		handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+		result := drainOneOff(t, conn)
+		if result.Error != nil {
+			t.Fatalf("query %d error = %q, want nil", i, *result.Error)
+		}
+		rows := decodeRows(t, firstTableRows(result), tTS)
+		if len(rows) != 3 {
+			t.Fatalf("query %d got %d rows, want 3 multiplicity-expanded rows", i, len(rows))
+		}
+		for j, row := range rows {
+			if !row[0].Equal(types.NewUint32(1)) {
+				t.Fatalf("query %d row %d id=%v, want id=1 on every emitted row", i, j, row[0])
+			}
+		}
+		decoded = append(decoded, rows)
+	}
+	if len(decoded[0]) != len(decoded[1]) || len(decoded[0]) != len(decoded[2]) {
+		t.Fatalf("row counts differ: %d vs %d vs %d", len(decoded[0]), len(decoded[1]), len(decoded[2]))
+	}
+	for i := range decoded[0] {
+		if len(decoded[0][i]) != len(decoded[1][i]) || len(decoded[0][i]) != len(decoded[2][i]) {
+			t.Fatalf("row %d column counts differ: %d vs %d vs %d", i, len(decoded[0][i]), len(decoded[1][i]), len(decoded[2][i]))
+		}
+		for j := range decoded[0][i] {
+			if !decoded[0][i][j].Equal(decoded[1][i][j]) {
+				t.Fatalf("row %d col %d differs between base and duplicate-and: %v vs %v", i, j, decoded[0][i][j], decoded[1][i][j])
+			}
+			if !decoded[0][i][j].Equal(decoded[2][i][j]) {
+				t.Fatalf("row %d col %d differs between base and duplicate-or: %v vs %v", i, j, decoded[0][i][j], decoded[2][i][j])
+			}
+		}
+	}
+}
+
 func TestHandleOneOffQuery_AliasedSelfJoinFilterAssociativeGroupingVisibleRowsMatch(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})

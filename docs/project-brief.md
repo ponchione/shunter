@@ -2,11 +2,11 @@
 
 ## What Shunter Is
 
-Shunter is an embeddable, Go-native real-time database engine that colocates application logic with data and synchronizes state to connected clients via a subscription-driven push model.
+Shunter is a Go-native hosted real-time database/runtime that colocates application logic with data and synchronizes state to connected clients via a subscription-driven push model.
 
 It is architecturally inspired by the publicly documented design of SpacetimeDB (by Clockwork Labs), but is an independent, clean-room implementation. No SpacetimeDB source code is used during implementation. Design specs are derived from public documentation, published architecture descriptions, and independent engineering analysis. Implementation is performed by agents with no exposure to the original codebase.
 
-Shunter is not a hosted service. It is a Go library — `go get` and embed it in your application.
+Shunter is not a hosted cloud service. It is intended to be its own runtime/server that applications define against and connect to.
 
 ## The Core Thesis
 
@@ -22,10 +22,10 @@ SpacetimeDB is written in Rust for reasons specific to their product: zero GC pa
 
 Shunter makes different tradeoffs for different reasons:
 
-- **No WASM runtime.** Modules are native Go functions. The multi-language module system is eliminated entirely. This removes Rust's primary advantage (WASM compilation target).
+- **No WASM runtime.** App logic should be defined in Go-native module/app-definition surfaces. Shunter does not need a WASM or multi-language server-module runtime to get the core Spacetime-like architecture.
 - **Single-goroutine executor.** All mutable state is owned by one goroutine processing transactions sequentially off a channel. No shared mutable state, so Rust's borrow checker provides no structural advantage over Go's simple ownership-by-convention.
 - **GC pauses are manageable.** Go's GC achieves sub-millisecond pauses. CockroachDB, TiDB, InfluxDB, etcd, and Badger are all production database systems in Go. The requirement is allocation discipline on the hot path (buffer pooling, context reuse), not a different language.
-- **The audience is Go developers.** The entire point is `go get github.com/ponchione/shunter` and have a real-time backend. FFI into Rust defeats the purpose.
+- **The audience is Go developers.** The point is a Go-native runtime and Go-native app-definition story, not FFI into Rust and not a multi-language module host.
 - **Throughput ceiling is sufficient.** Rust will reach higher raw transaction throughput on a single node. But tens of thousands of transactions per second — which covers the vast majority of real-time app workloads — is well within Go's capability.
 
 ## Architectural Overview
@@ -135,7 +135,7 @@ Client-side type generation (e.g., TypeScript types from Go struct definitions) 
 
 ## What Shunter Is NOT
 
-- **Not a hosted service.** No cloud, no managed infrastructure. It's a library you embed.
+- **Not a hosted cloud service.** No cloud control plane or managed multi-tenant infrastructure is implied by default.
 - **Not a multi-language module system.** Modules are Go functions. Period.
 - **Not an MMORPG engine.** It can power real-time apps including games, but it's not optimized for spatial simulation or physics-tick workloads.
 - **Not a distributed database.** Single-node, in-memory. Horizontal scaling is out of scope for v1.

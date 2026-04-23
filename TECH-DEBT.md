@@ -56,16 +56,16 @@ Status: open
 Severity: high
 
 Summary:
-- many narrow A2 parity slices are already closed and pinned: fan-out durability gating, join/cross-join multiplicity, shared unindexed-join admission, projected-side bootstrap/final-delta ordering, projected-join delta ordering, `:sender` hash identity, neutral-`TRUE` normalization, same-table canonicalization (child order / grouping / duplicate leaves / absorption), overlength SQL admission, bare/grouped `FALSE`, distinct-table join-filter child-order canonicalization, and self-join alias-sensitive join-filter canonicalization (child order + associative grouping)
+- many narrow A2 parity slices are already closed and pinned: fan-out durability gating, join/cross-join multiplicity, shared unindexed-join admission, projected-side bootstrap/final-delta ordering, projected-join delta ordering, `:sender` hash identity, neutral-`TRUE` normalization, same-table canonicalization (child order / grouping / duplicate leaves / absorption), overlength SQL admission, bare/grouped `FALSE`, distinct-table join-filter child-order canonicalization, and self-join alias-sensitive join-filter canonicalization (child order + associative grouping + duplicate leaves)
 - the supported SQL surface is still intentionally narrower than the reference SQL path
-- the next actionable residual is self-join alias-sensitive join-filter duplicate-leaf idempotence: `subscription/hash.go` now flattens and sorts same-kind self-join filter groups, but the self-join path still does not dedupe exact duplicate alias-aware leaves, so accepted aliased self-join filters can still fork canonical query hash / query-state identity for `a` vs `a AND a` / `a OR a` even when visible one-off rows already match
+- the next actionable residual is self-join alias-sensitive join-filter absorption-law reduction: `subscription/hash.go` now flattens, sorts, and dedupes exact duplicate alias-aware self-join filter leaves, but the self-join-local path still does not remove bounded absorption-equivalent shapes such as `a OR (a AND b)` / `a AND (a OR b)`
 - row-level security / per-client filtering remains absent
-- broader A2/runtime-model gaps remain after the self-join duplicate-leaf seam, but they should be taken one bounded slice at a time
+- broader A2/runtime-model gaps remain after the self-join absorption seam, but they should be taken one bounded slice at a time
 
 Execution note:
 - OI-002 remains the next active handoff issue
-- treat the next batch as a bounded self-join alias-sensitive join-filter duplicate-leaf idempotence slice
-- do not widen that batch into self-join absorption work, parser-surface widening, or non-join predicate work unless focused tests prove the narrower seam is insufficient
+- treat the next batch as a bounded self-join alias-sensitive join-filter absorption-law reduction slice
+- do not widen that batch into parser-surface widening, distinct-table join work, or broader non-join predicate work unless focused tests prove the narrower seam is insufficient
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads

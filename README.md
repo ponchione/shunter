@@ -12,7 +12,7 @@ Latest broad verification during active audit work:
 
 ## What this repo is
 
-Shunter is trying to be an embeddable runtime that combines:
+Shunter is trying to be a hosted runtime that combines:
 - schema definition
 - in-memory relational storage
 - append-only commit log + recovery
@@ -48,7 +48,7 @@ This repo is not yet a clear, finished product experience.
 Specifically:
 - there is no simple top-level "start here" app/demo flow
 - there is no `main` package or polished runnable example server at the repo root
-- there is no stable public embedding story documented end-to-end
+- there is no stable public hosted-runtime story documented end-to-end
 - there is no README-driven quickstart that proves "build app, define schema, run server, connect client"
 - there is still active debt reconciliation work in `TECH-DEBT.md`
 
@@ -71,8 +71,8 @@ A better framing is:
 Continuing makes sense if the goal is one of these:
 - finish a clean-room experimental runtime in Go
 - validate the architecture and core invariants
-- turn the existing subsystem work into one coherent engine API
-- decide whether the system can support a real embedded database/product direction
+- turn the existing subsystem work into one coherent hosted runtime / app-definition model
+
 
 Continuing probably does not make sense if the goal is:
 - "I need a production-ready SpacetimeDB alternative right now"

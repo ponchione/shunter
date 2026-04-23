@@ -345,6 +345,7 @@ func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 		}
 		children := flattenSelfJoinCanonicalAnd(And{Left: left, Right: right}, nil)
 		sortCanonicalPredicates(children)
+		children = dedupeCanonicalPredicates(children)
 		return rebuildCanonicalAnd(children)
 	case Or:
 		left := canonicalizeSelfJoinFilter(p.Left)
@@ -354,6 +355,7 @@ func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 		}
 		children := flattenSelfJoinCanonicalOr(Or{Left: left, Right: right}, nil)
 		sortCanonicalPredicates(children)
+		children = dedupeCanonicalPredicates(children)
 		return rebuildCanonicalOr(children)
 	case Join, CrossJoin:
 		return p

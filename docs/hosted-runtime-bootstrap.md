@@ -1,7 +1,7 @@
-# Embedding Shunter
+# Hosted Shunter bootstrap
 
-This doc walks through the minimal wiring surface for embedding Shunter into
-a Go host program. The companion binary at `cmd/shunter-example/main.go`
+This doc walks through the minimal wiring surface for bringing up the current
+Shunter runtime/server. The companion binary at `cmd/shunter-example/main.go`
 implements everything below; read it alongside this doc.
 
 ## What gets wired
@@ -117,7 +117,7 @@ subs := subscription.NewManager(
 )
 ```
 
-`schema.SchemaRegistry` now satisfies the subscription-side lookup contract directly, including `ColumnCount(TableID) int`, so embedders can pass the registry straight to `subscription.NewManager`.
+`schema.SchemaRegistry` now satisfies the subscription-side lookup contract directly, including `ColumnCount(TableID) int`, so the bootstrap can pass the registry straight to `subscription.NewManager`.
 
 ### 6. Construct and start the executor
 
@@ -135,8 +135,8 @@ go exec.Run(ctx)
 §13.5) then flips the external-admission gate. External protocol traffic is
 rejected with `ErrExecutorNotStarted` until Startup finishes.
 
-The `nil` scheduler is valid when sys_scheduled replay is not needed. Embedders
-that rely on scheduled reducers wire a `Scheduler` here — at the time of
+The `nil` scheduler is valid when sys_scheduled replay is not needed. Hosted
+runtime bring-up that relies on scheduled reducers wires a `Scheduler` here — at the time of
 writing the scheduler constructor reaches the executor's unexported inbox, so
 scheduler wiring is still an internal / test-only path.
 
@@ -196,7 +196,7 @@ log. See `cmd/shunter-example/main.go` for the ordering.
 - **Scheduled reducers** — `executor.Scheduler` reads an unexported executor
   channel; production wiring for that path is still pending.
 - **Authentication in strict mode** — the example uses anonymous auth so it
-  can be dialed without an external IdP. Production embedders wire
+  can be dialed without an external IdP. Production hosted deployments wire
   `AuthModeStrict` with their own JWT issuer.
 
 ## Running the example
