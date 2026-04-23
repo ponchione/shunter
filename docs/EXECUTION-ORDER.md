@@ -375,6 +375,34 @@ Use this checklist before assigning actual work:
 
 ---
 
+## Hosted runtime follow-on track
+
+After the kernel path is ready enough to support a real hosted server, continue with the hosted-runtime roadmap in `docs/hosted-runtime-implementation-roadmap.md`.
+
+That follow-on track starts with v1 hosted-runtime work:
+- top-level `shunter` API surface: `Module`, `Config`, `Runtime`, `Build(...)`
+- module definition and registration surface
+- runtime build/lifecycle/network ownership
+- local reducer/query calls as secondary APIs
+- export/introspection hooks
+- hello-world replacement that no longer hand-wires the subsystem graph
+
+Then it moves to v1.5 usability/platform work:
+- code-first query/view declarations
+- canonical JSON module contract export
+- client codegen/binding export
+- narrow permissions/read-model metadata
+- descriptive migration metadata and contract-diff tooling
+
+Keep v2+ structural ambitions out of the v1/v1.5 track unless a later audit intentionally moves them earlier:
+- multi-module hosting
+- out-of-process module execution
+- broad control plane
+- executable migration systems
+- full SQL/view system
+
+---
+
 ## Bottom line
 
 The safe implementation order is:
@@ -384,5 +412,6 @@ The safe implementation order is:
 - subscription core before executor post-commit wiring
 - protocol core before final fan-out delivery
 - final subscription fan-out delivery last
+- top-level hosted-runtime work after the kernel is ready enough to replace manual bootstrap as the normal app path
 
-That ordering matches the current decomposition docs closely enough to drive real implementation work without reopening the same dependency mistakes.
+That ordering matches the current decomposition docs and hosted-runtime docs closely enough to drive real implementation work without reopening the same dependency mistakes.

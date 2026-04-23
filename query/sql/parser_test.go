@@ -918,6 +918,56 @@ func TestParseRejectsSameAliasBothSidesOfEquiJoin(t *testing.T) {
 	}
 }
 
+func TestParseJoinWhereColumnEquality(t *testing.T) {
+	stmt, err := Parse("SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want parsed cross join")
+	}
+	if stmt.Join.HasOn {
+		t.Fatal("Join.HasOn = true, want false for cross join")
+	}
+	pred, ok := stmt.Predicate.(ColumnComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ColumnComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Op != "=" {
+		t.Fatalf("Op = %q, want =", pred.Op)
+	}
+	if pred.Left.Table != "t" || pred.Left.Alias != "t" || pred.Left.Column != "u32" {
+		t.Fatalf("Left = %+v, want t.u32", pred.Left)
+	}
+	if pred.Right.Table != "s" || pred.Right.Alias != "s" || pred.Right.Column != "u32" {
+		t.Fatalf("Right = %+v, want s.u32", pred.Right)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %+v, want none for column comparison predicate", stmt.Filters)
+	}
+}
+
+func TestParseRejectsJoinWhereColumnEqualityRequiresQualifiedColumns(t *testing.T) {
+	cases := []string{
+		"SELECT t.* FROM t JOIN s WHERE u32 = s.u32",
+		"SELECT t.* FROM t JOIN s WHERE t.u32 = u32",
+	}
+	for _, in := range cases {
+		t.Run(in, func(t *testing.T) {
+			_, err := Parse(in)
+			if err == nil {
+				t.Fatal("expected unqualified column-vs-column join WHERE rejection")
+			}
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+			}
+			if !strings.Contains(err.Error(), "join WHERE columns must be qualified") {
+				t.Fatalf("err = %q, want qualified-column message", err.Error())
+			}
+		})
+	}
+}
+
 // TestParseRejectsMultiWayJoinChain pins the reference-matched rejection of
 // three-way join shapes. The reference type checker accepts this shape
 // (reference/SpacetimeDB/crates/expr/src/check.rs tests at line 459) but the
@@ -980,15 +1030,446 @@ func TestParseRejectsJoinBareStarProjection(t *testing.T) {
 	}
 }
 
+func TestParseSelectAllWithLimit(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users LIMIT 10")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "users" {
+		t.Fatalf("Table = %q, want %q", stmt.Table, "users")
+	}
+	if stmt.ProjectedTable != "users" {
+		t.Fatalf("ProjectedTable = %q, want %q", stmt.ProjectedTable, "users")
+	}
+	if stmt.Predicate != nil {
+		t.Fatalf("Predicate = %T, want nil", stmt.Predicate)
+	}
+	if stmt.Limit == nil {
+		t.Fatal("Limit = nil, want 10")
+	}
+	if *stmt.Limit != 10 {
+		t.Fatalf("*Limit = %d, want 10", *stmt.Limit)
+	}
+}
+
+func TestParseSingleTableColumnProjection(t *testing.T) {
+	stmt, err := Parse("SELECT u32 FROM t")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 1", len(stmt.ProjectionColumns))
+	}
+	col := stmt.ProjectionColumns[0]
+	if col.Table != "t" || col.Column != "u32" || col.SourceQualifier != "" || col.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[0] = %+v, want table=t column=u32 sourceQualifier='' outputAlias=''", col)
+	}
+}
+
+func TestParseMultiColumnProjectionWithWhere(t *testing.T) {
+	stmt, err := Parse("SELECT u32, name FROM t WHERE active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if len(stmt.ProjectionColumns) != 2 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 2", len(stmt.ProjectionColumns))
+	}
+	if stmt.ProjectionColumns[0].Column != "u32" || stmt.ProjectionColumns[1].Column != "name" {
+		t.Fatalf("ProjectionColumns = %+v, want [u32 name]", stmt.ProjectionColumns)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "t" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want t.active = TRUE", pred.Filter)
+	}
+	if pred.Filter.Literal.Kind != LitBool || !pred.Filter.Literal.Bool {
+		t.Fatalf("Predicate.Filter.Literal = %+v, want boolean TRUE", pred.Filter.Literal)
+	}
+}
+
+func TestParseSingleTableColumnProjectionWithAlias(t *testing.T) {
+	stmt, err := Parse("SELECT u32 AS n FROM t")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if stmt.Aggregate != nil {
+		t.Fatalf("Aggregate = %+v, want nil", stmt.Aggregate)
+	}
+	if stmt.Limit != nil {
+		t.Fatalf("Limit = %v, want nil", *stmt.Limit)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 1", len(stmt.ProjectionColumns))
+	}
+	col := stmt.ProjectionColumns[0]
+	if col.Table != "t" || col.Column != "u32" || col.SourceQualifier != "" || col.OutputAlias != "n" {
+		t.Fatalf("ProjectionColumns[0] = %+v, want table=t column=u32 sourceQualifier='' outputAlias='n'", col)
+	}
+}
+
+func TestParseSingleTableColumnProjectionWithBareAliasAndWhere(t *testing.T) {
+	stmt, err := Parse("SELECT u32 n FROM t WHERE active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if stmt.Aggregate != nil {
+		t.Fatalf("Aggregate = %+v, want nil", stmt.Aggregate)
+	}
+	if stmt.Limit != nil {
+		t.Fatalf("Limit = %v, want nil", *stmt.Limit)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 1", len(stmt.ProjectionColumns))
+	}
+	col := stmt.ProjectionColumns[0]
+	if col.Table != "t" || col.Column != "u32" || col.SourceQualifier != "" || col.OutputAlias != "n" {
+		t.Fatalf("ProjectionColumns[0] = %+v, want table=t column=u32 sourceQualifier='' outputAlias='n'", col)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "t" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want t.active = TRUE", pred.Filter)
+	}
+	if pred.Filter.Literal.Kind != LitBool || !pred.Filter.Literal.Bool {
+		t.Fatalf("Predicate.Filter.Literal = %+v, want boolean TRUE", pred.Filter.Literal)
+	}
+}
+
+func TestParseMultiColumnProjectionWithAliasesAndWhere(t *testing.T) {
+	stmt, err := Parse("SELECT u32 AS n, active AS enabled FROM t WHERE active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if len(stmt.ProjectionColumns) != 2 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 2", len(stmt.ProjectionColumns))
+	}
+	if got := stmt.ProjectionColumns[0]; got.Table != "t" || got.Column != "u32" || got.SourceQualifier != "" || got.OutputAlias != "n" {
+		t.Fatalf("ProjectionColumns[0] = %+v, want table=t column=u32 sourceQualifier='' outputAlias='n'", got)
+	}
+	if got := stmt.ProjectionColumns[1]; got.Table != "t" || got.Column != "active" || got.SourceQualifier != "" || got.OutputAlias != "enabled" {
+		t.Fatalf("ProjectionColumns[1] = %+v, want table=t column=active sourceQualifier='' outputAlias='enabled'", got)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "t" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want t.active = TRUE", pred.Filter)
+	}
+	if pred.Filter.Literal.Kind != LitBool || !pred.Filter.Literal.Bool {
+		t.Fatalf("Predicate.Filter.Literal = %+v, want boolean TRUE", pred.Filter.Literal)
+	}
+}
+
+func TestParseQualifiedSingleTableColumnProjectionWithAlias(t *testing.T) {
+	stmt, err := Parse("SELECT t.u32 AS n FROM t")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 1", len(stmt.ProjectionColumns))
+	}
+	col := stmt.ProjectionColumns[0]
+	if col.Table != "t" || col.Column != "u32" || col.SourceQualifier != "t" || col.OutputAlias != "n" {
+		t.Fatalf("ProjectionColumns[0] = %+v, want table=t column=u32 sourceQualifier='t' outputAlias='n'", col)
+	}
+}
+
+func TestParseJoinColumnProjection(t *testing.T) {
+	stmt, err := Parse("SELECT o.id, o.product_id FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.ProjectedTable != "Orders" || stmt.ProjectedAlias != "o" {
+		t.Fatalf("Projected = %q/%q, want Orders/o", stmt.ProjectedTable, stmt.ProjectedAlias)
+	}
+	if len(stmt.ProjectionColumns) != 2 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 2", len(stmt.ProjectionColumns))
+	}
+	if got := stmt.ProjectionColumns[0]; got.Table != "Orders" || got.Column != "id" || got.SourceQualifier != "o" || got.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[0] = %+v", got)
+	}
+	if got := stmt.ProjectionColumns[1]; got.Table != "Orders" || got.Column != "product_id" || got.SourceQualifier != "o" || got.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[1] = %+v", got)
+	}
+}
+
+func TestParseJoinColumnProjectionProjectsRight(t *testing.T) {
+	stmt, err := Parse("SELECT product.id, product.quantity FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.ProjectedTable != "Inventory" || stmt.ProjectedAlias != "product" {
+		t.Fatalf("Projected = %q/%q, want Inventory/product", stmt.ProjectedTable, stmt.ProjectedAlias)
+	}
+	if len(stmt.ProjectionColumns) != 2 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 2", len(stmt.ProjectionColumns))
+	}
+	if got := stmt.ProjectionColumns[0]; got.Table != "Inventory" || got.Column != "id" || got.SourceQualifier != "product" || got.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[0] = %+v", got)
+	}
+	if got := stmt.ProjectionColumns[1]; got.Table != "Inventory" || got.Column != "quantity" || got.SourceQualifier != "product" || got.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[1] = %+v", got)
+	}
+}
+
+func TestParseRejectsJoinProjectionColumnsOutsideProjectedRelation(t *testing.T) {
+	_, err := Parse("SELECT o.id, product.quantity FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err == nil {
+		t.Fatal("expected rejection for mixed projected/non-projected relation columns")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseSelfJoinColumnProjectionProjectsLeft(t *testing.T) {
+	stmt, err := Parse("SELECT a.id FROM t AS a JOIN t AS b ON a.u32 = b.u32")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.ProjectedTable != "t" || stmt.ProjectedAlias != "a" {
+		t.Fatalf("Projected = %q/%q, want t/a", stmt.ProjectedTable, stmt.ProjectedAlias)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 1", len(stmt.ProjectionColumns))
+	}
+	if got := stmt.ProjectionColumns[0]; got.Table != "t" || got.Column != "id" || got.SourceQualifier != "a" || got.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[0] = %+v", got)
+	}
+}
+
+func TestParseSelfJoinColumnProjectionProjectsRight(t *testing.T) {
+	stmt, err := Parse("SELECT b.id FROM t AS a JOIN t AS b ON a.u32 = b.u32")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.ProjectedTable != "t" || stmt.ProjectedAlias != "b" {
+		t.Fatalf("Projected = %q/%q, want t/b", stmt.ProjectedTable, stmt.ProjectedAlias)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 1", len(stmt.ProjectionColumns))
+	}
+	if got := stmt.ProjectionColumns[0]; got.Table != "t" || got.Column != "id" || got.SourceQualifier != "b" || got.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[0] = %+v", got)
+	}
+}
+
+func TestParseRejectsDistinctTableDuplicateJoinAliases(t *testing.T) {
+	_, err := Parse("SELECT x.id FROM t AS x JOIN s AS x")
+	if err == nil {
+		t.Fatal("expected rejection for duplicate join aliases")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseCountStarAliasProjection(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) AS n FROM t")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(*) AS n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	if len(stmt.ProjectionColumns) != 0 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 0", len(stmt.ProjectionColumns))
+	}
+	if stmt.Limit != nil {
+		t.Fatalf("Limit = %v, want nil", *stmt.Limit)
+	}
+}
+
+func TestParseCountStarBareAliasProjection(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) n FROM t")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "t" {
+		t.Fatalf("Table = %q, want t", stmt.Table)
+	}
+	if stmt.ProjectedTable != "t" {
+		t.Fatalf("ProjectedTable = %q, want t", stmt.ProjectedTable)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(*) n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	if len(stmt.ProjectionColumns) != 0 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 0", len(stmt.ProjectionColumns))
+	}
+	if stmt.Limit != nil {
+		t.Fatalf("Limit = %v, want nil", *stmt.Limit)
+	}
+}
+
+func TestParseCountStarAliasProjectionWithWhere(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) AS n FROM t WHERE active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(*) AS n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "t" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want t.active = TRUE", pred.Filter)
+	}
+	if pred.Filter.Literal.Kind != LitBool || !pred.Filter.Literal.Bool {
+		t.Fatalf("Predicate.Filter.Literal = %+v, want boolean TRUE", pred.Filter.Literal)
+	}
+}
+
+func TestParseCountStarBareAliasProjectionWithWhere(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) n FROM t WHERE active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(*) n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "t" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want t.active = TRUE", pred.Filter)
+	}
+	if pred.Filter.Literal.Kind != LitBool || !pred.Filter.Literal.Bool {
+		t.Fatalf("Predicate.Filter.Literal = %+v, want boolean TRUE", pred.Filter.Literal)
+	}
+}
+
+func TestParseJoinCountStarAliasProjection(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.t_id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(*) AS n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if !stmt.Join.HasOn {
+		t.Fatalf("Join.HasOn = false, want true")
+	}
+	if stmt.Join.LeftTable != "t" || stmt.Join.RightTable != "s" || stmt.Join.LeftOn.Column != "id" || stmt.Join.RightOn.Column != "t_id" {
+		t.Fatalf("Join = %+v, want t.id = s.t_id", *stmt.Join)
+	}
+	if len(stmt.ProjectionColumns) != 0 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 0", len(stmt.ProjectionColumns))
+	}
+}
+
+func TestParseJoinCountStarBareAliasProjectionWithWhere(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) n FROM t JOIN s ON t.id = s.t_id WHERE s.active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(*) n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	if stmt.Join == nil || !stmt.Join.HasOn {
+		t.Fatalf("Join = %+v, want ON join", stmt.Join)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "s" || pred.Filter.Alias != "s" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want s.active = TRUE", pred.Filter)
+	}
+	if pred.Filter.Literal.Kind != LitBool || !pred.Filter.Literal.Bool {
+		t.Fatalf("Predicate.Filter.Literal = %+v, want boolean TRUE", pred.Filter.Literal)
+	}
+	if len(stmt.ProjectionColumns) != 0 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 0", len(stmt.ProjectionColumns))
+	}
+}
+
 func TestParseRejectsUnsupported(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
 	}{
-		{"projection", "SELECT id FROM users"},
 		{"qualified_projection_wrong_alias", "SELECT other.* FROM users AS item"},
+		{"mixed_wildcard_projection", "SELECT *, u32 FROM t"},
+		{"mixed_qualified_wildcard_projection", "SELECT t.*, u32 FROM t"},
+		{"join_explicit_projection", "SELECT u32 FROM t JOIN s ON t.id = s.id"},
+		{"aggregate_projection", "SELECT COUNT(*) FROM t"},
+		{"mixed_aggregate_projection", "SELECT u32, COUNT(*) AS n FROM t"},
+		{"aggregate_projection_with_group_by", "SELECT u32, COUNT(*) FROM t GROUP BY u32"},
+		{"aggregate_projection_with_group_by_alias", "SELECT COUNT(*) AS n FROM t GROUP BY u32"},
+		{"aggregate_multi_way_join", "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.id JOIN r ON s.id = r.id"},
 		{"order_by", "SELECT * FROM users ORDER BY id"},
-		{"limit", "SELECT * FROM users LIMIT 10"},
+		{"limit_identifier", "SELECT * FROM users LIMIT foo"},
+		{"limit_negative", "SELECT * FROM users LIMIT -1"},
+		{"limit_float", "SELECT * FROM users LIMIT 1.5"},
 		{"trailing_garbage", "SELECT * FROM users foo bar"},
 		{"missing_from", "SELECT *"},
 		{"missing_table", "SELECT * FROM"},

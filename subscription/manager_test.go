@@ -1065,6 +1065,47 @@ func TestRegisterSet_SelfJoinFilterDuplicateLeafSharesQueryState(t *testing.T) {
 	}
 }
 
+func TestRegisterSet_SelfJoinFilterAbsorptionSharesQueryState(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint32, 1: types.KindUint32}, 1)
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewUint32(7)},
+			{types.NewUint32(2), types.NewUint32(7)},
+			{types.NewUint32(3), types.NewUint32(9)},
+		},
+	})
+	mgr := NewManager(s, s)
+	a := ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint32(1)}
+	b := ColRange{Table: 1, Column: 0, Alias: 0, Lower: Bound{Value: types.NewUint32(0), Inclusive: false}, Upper: Bound{Unbounded: true}}
+	single := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: a}
+	absorbed := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: Or{Left: a, Right: And{Left: a, Right: b}}}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 160, Predicates: []Predicate{single},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 161, Predicates: []Predicate{absorbed},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 1 {
+		t.Fatalf("query-state count = %d, want 1 shared state", got)
+	}
+	h1 := ComputeQueryHash(single, nil)
+	h2 := ComputeQueryHash(absorbed, nil)
+	if h1 != h2 {
+		t.Fatalf("query hashes differ: %v vs %v", h1, h2)
+	}
+	if qs := mgr.registry.byHash[h1]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared query state = %+v, want refCount 2", qs)
+	}
+}
+
 func TestRegisterJoinBootstrapPreservesProjectedRightOrderWhenOnlyRightJoinColumnIndexed(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})

@@ -31,7 +31,7 @@ func handleSubscribeSingle(
 	sl SchemaLookup,
 ) {
 	receipt := time.Now()
-	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity)
+	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity, false, false)
 	if err != nil {
 		sendError(conn, SubscriptionError{
 			TotalHostExecutionDurationMicros: elapsedMicros(receipt),

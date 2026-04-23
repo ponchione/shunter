@@ -14,6 +14,14 @@ type compiledSQLQuery struct {
 	TableName          string
 	Predicate          subscription.Predicate
 	UsesCallerIdentity bool
+	ProjectionColumns  []schema.ColumnSchema
+	Aggregate          *compiledSQLAggregate
+	Limit              *uint64
+}
+
+type compiledSQLAggregate struct {
+	Func         string
+	ResultColumn schema.ColumnSchema
 }
 
 type relationSchema struct {
@@ -147,10 +155,24 @@ func callerHashIdentity(conn *Conn, compiled compiledSQLQuery) *types.Identity {
 	return &id
 }
 
-func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (compiledSQLQuery, error) {
+func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool) (compiledSQLQuery, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
+	}
+	if !allowLimit && stmt.Limit != nil {
+		return compiledSQLQuery{}, fmt.Errorf("LIMIT not supported for subscriptions")
+	}
+	if stmt.Aggregate != nil {
+		if !allowProjection {
+			return compiledSQLQuery{}, fmt.Errorf("aggregate projections not supported for subscriptions")
+		}
+		if stmt.Limit != nil {
+			return compiledSQLQuery{}, fmt.Errorf("aggregate projections with LIMIT not supported")
+		}
+	}
+	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
+		return compiledSQLQuery{}, fmt.Errorf("column-list projections not supported for subscriptions")
 	}
 	stmt.Predicate = normalizeSQLPredicate(stmt.Predicate)
 	usesCallerIdentity := sqlPredicateUsesCallerIdentity(stmt.Predicate)
@@ -164,12 +186,29 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 			return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.Join.RightTable)
 		}
 		projectedID := leftID
+		projectedTS := leftTS
 		if joinProjectsRight(stmt, leftID == rightID) {
 			projectedID = rightID
+			projectedTS = rightTS
+		}
+		projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, projectedTS)
+		if err != nil {
+			return compiledSQLQuery{}, err
+		}
+		aggregate, err := compileAggregateProjection(stmt.Aggregate)
+		if err != nil {
+			return compiledSQLQuery{}, err
 		}
 		if !stmt.Join.HasOn {
 			if stmt.Predicate != nil {
-				return compiledSQLQuery{}, fmt.Errorf("cross join WHERE not supported")
+				if !allowProjection {
+					return compiledSQLQuery{}, fmt.Errorf("cross join WHERE not supported")
+				}
+				join, err := compileCrossJoinWhereColumnEquality(stmt, leftID, leftTS, rightID, rightTS)
+				if err != nil {
+					return compiledSQLQuery{}, err
+				}
+				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
 			}
 			cross := subscription.CrossJoin{Left: leftID, Right: rightID}
 			if leftID == rightID {
@@ -177,10 +216,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 				cross.RightAlias = 1
 			}
 			cross.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity}, nil
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
 		}
 		if _, ok := stmt.Predicate.(sql.FalsePredicate); ok {
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity}, nil
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
 		}
 		leftCol, ok := leftTS.Column(stmt.Join.LeftOn.Column)
 		if !ok {
@@ -198,9 +237,6 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
 			stmt.Join.RightTable: {id: rightID, ts: rightTS},
 		}
-		// Self-join filter leaves need their Alias field stamped so MatchRowSide
-		// can restrict each leaf to the side the user named. Distinct-table
-		// joins leave the tag at zero: the Table check alone is sufficient.
 		aliasTag := func(string) uint8 { return 0 }
 		if leftID == rightID {
 			rightAliasUpper := strings.ToUpper(stmt.Join.RightAlias)
@@ -228,31 +264,110 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 			Filter: filter,
 		}
 		if leftID == rightID {
-			// Self-join: tag the two relation instances so validation and
-			// canonical hashing distinguish them. Parser already enforces
-			// distinct aliases at this point.
 			join.LeftAlias = 0
 			join.RightAlias = 1
 		}
-		// Map the user's projection qualifier to the concrete join side.
-		// For distinct-table joins either the alias or the base table name
-		// disambiguates; for self-joins the alias is the only signal.
 		join.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
 		return compiledSQLQuery{
 			TableName:          stmt.ProjectedTable,
 			Predicate:          join,
 			UsesCallerIdentity: usesCallerIdentity,
+			ProjectionColumns:  projectionColumns,
+			Aggregate:          aggregate,
+			Limit:              stmt.Limit,
 		}, nil
 	}
 	projectedID, ts, ok := sl.TableByName(stmt.ProjectedTable)
 	if !ok {
 		return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.ProjectedTable)
 	}
+	projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, ts)
+	if err != nil {
+		return compiledSQLQuery{}, err
+	}
+	aggregate, err := compileAggregateProjection(stmt.Aggregate)
+	if err != nil {
+		return compiledSQLQuery{}, err
+	}
 	pred, err := compileSQLPredicateForRelations(stmt.Predicate, map[string]relationSchema{stmt.ProjectedTable: {id: projectedID, ts: ts}}, func(string) uint8 { return 0 }, caller)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
-	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity}, nil
+	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
+}
+
+func compileAggregateProjection(agg *sql.AggregateProjection) (*compiledSQLAggregate, error) {
+	if agg == nil {
+		return nil, nil
+	}
+	if !strings.EqualFold(agg.Func, "COUNT") {
+		return nil, fmt.Errorf("aggregate projections not supported")
+	}
+	return &compiledSQLAggregate{
+		Func:         "COUNT",
+		ResultColumn: schema.ColumnSchema{Index: 0, Name: agg.Alias, Type: schema.KindUint64},
+	}, nil
+}
+
+func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.TableID, leftTS *schema.TableSchema, rightID schema.TableID, rightTS *schema.TableSchema) (subscription.Join, error) {
+	if leftID == rightID {
+		return subscription.Join{}, fmt.Errorf("self-join cross join WHERE column equality not supported")
+	}
+	cmp, ok := stmt.Predicate.(sql.ColumnComparisonPredicate)
+	if !ok {
+		return subscription.Join{}, fmt.Errorf("cross join WHERE only supports qualified column equality")
+	}
+	if cmp.Op != "=" {
+		return subscription.Join{}, fmt.Errorf("cross join WHERE column comparisons only support '='")
+	}
+	leftRef, rightRef := cmp.Left, cmp.Right
+	if strings.EqualFold(leftRef.Table, stmt.Join.RightTable) && strings.EqualFold(rightRef.Table, stmt.Join.LeftTable) {
+		leftRef, rightRef = rightRef, leftRef
+	}
+	if !strings.EqualFold(leftRef.Table, stmt.Join.LeftTable) || !strings.EqualFold(rightRef.Table, stmt.Join.RightTable) {
+		return subscription.Join{}, fmt.Errorf("cross join WHERE column equality must compare left and right relations")
+	}
+	leftCol, ok := leftTS.Column(leftRef.Column)
+	if !ok {
+		return subscription.Join{}, fmt.Errorf("unknown column %q on table %q", leftRef.Column, leftTS.Name)
+	}
+	rightCol, ok := rightTS.Column(rightRef.Column)
+	if !ok {
+		return subscription.Join{}, fmt.Errorf("unknown column %q on table %q", rightRef.Column, rightTS.Name)
+	}
+	if isArrayKind(leftCol.Type) || isArrayKind(rightCol.Type) {
+		return subscription.Join{}, fmt.Errorf("cross join WHERE %s.%s = %s.%s: array/product values are not comparable",
+			stmt.Join.LeftTable, leftRef.Column, stmt.Join.RightTable, rightRef.Column)
+	}
+	return subscription.Join{
+		Left:         leftID,
+		Right:        rightID,
+		LeftCol:      types.ColID(leftCol.Index),
+		RightCol:     types.ColID(rightCol.Index),
+		ProjectRight: joinProjectsRight(stmt, false),
+	}, nil
+}
+
+func compileProjectionColumns(projectedTable string, columns []sql.ProjectionColumn, ts *schema.TableSchema) ([]schema.ColumnSchema, error) {
+	if len(columns) == 0 {
+		return nil, nil
+	}
+	resolved := make([]schema.ColumnSchema, 0, len(columns))
+	for _, col := range columns {
+		if !strings.EqualFold(col.Table, projectedTable) {
+			return nil, fmt.Errorf("projection column %q must resolve to table %q", col.Column, projectedTable)
+		}
+		tsCol, ok := ts.Column(col.Column)
+		if !ok {
+			return nil, fmt.Errorf("unknown column %q on table %q", col.Column, ts.Name)
+		}
+		compiledCol := *tsCol
+		if col.OutputAlias != "" {
+			compiledCol.Name = col.OutputAlias
+		}
+		resolved = append(resolved, compiledCol)
+	}
+	return resolved, nil
 }
 
 // parseQueryString turns a client-supplied SQL string into the internal

@@ -31,7 +31,7 @@ func handleSubscribeMulti(
 	preds := make([]any, 0, len(msg.QueryStrings))
 	hashIdentities := make([]*types.Identity, 0, len(msg.QueryStrings))
 	for _, qs := range msg.QueryStrings {
-		compiled, err := compileSQLQueryString(qs, sl, &conn.Identity)
+		compiled, err := compileSQLQueryString(qs, sl, &conn.Identity, false, false)
 		if err != nil {
 			sendError(conn, SubscriptionError{
 				TotalHostExecutionDurationMicros: elapsedMicros(receipt),

@@ -260,6 +260,25 @@ func TestQueryHashSelfJoinFilterDuplicateLeafCanonicalized(t *testing.T) {
 	}
 }
 
+func TestQueryHashSelfJoinFilterAbsorptionCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint32(1)}
+	b := ColRange{Table: 1, Column: 0, Alias: 0, Lower: Bound{Value: types.NewUint32(0), Inclusive: false}, Upper: Bound{Unbounded: true}}
+	single := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: a}
+	absorbedOr := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: Or{Left: a, Right: And{Left: a, Right: b}}}
+	absorbedAnd := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: And{Left: a, Right: Or{Left: a, Right: b}}}
+	if ComputeQueryHash(single, nil) != ComputeQueryHash(absorbedOr, nil) {
+		t.Fatal("self-join absorbed Or shape should share canonical hash with single leaf")
+	}
+	if ComputeQueryHash(single, nil) != ComputeQueryHash(absorbedAnd, nil) {
+		t.Fatal("self-join absorbed And shape should share canonical hash with single leaf")
+	}
+
+	aliasDrift := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: ColEq{Table: 1, Column: 0, Alias: 1, Value: types.NewUint32(1)}}
+	if ComputeQueryHash(single, nil) == ComputeQueryHash(aliasDrift, nil) {
+		t.Fatal("self-join filter alias identity must still change canonical hash")
+	}
+}
+
 func TestQueryHashJoinFilterDiffers(t *testing.T) {
 	withoutF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, Filter: nil}
 	withF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0,

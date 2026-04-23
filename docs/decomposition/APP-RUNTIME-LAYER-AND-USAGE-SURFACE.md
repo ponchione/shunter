@@ -8,7 +8,11 @@ This document does not change the existing six core specs. It describes the prac
 Companion framing:
 - `BRAIN-EXTENSIONS-LLM-HARNESS.md` describes one important app/product layer that could be built on top of Shunter.
 - `GENERAL-PURPOSE-APP-PLATFORM-NOTES.md` describes the broader reusable platform/product surface Shunter may eventually want.
-- This document sits between those two and the core engine specs: it describes the missing runtime/application layer that turns the kernel into something applications define against and clients connect to.
+- `../hosted-runtime-v1-contract.md` captures the concrete v1 public/runtime contract.
+- `../hosted-runtime-v1.5-follow-ons.md` captures near-follow-on usability/platform work.
+- `../hosted-runtime-v2-directions.md` parks later structural/runtime evolution.
+- `../hosted-runtime-implementation-roadmap.md` turns the hosted-runtime direction into an implementation-facing roadmap.
+- This document sits between the product/platform notes and the core engine specs: it describes the missing runtime/application layer that turns the kernel into something applications define against and clients connect to.
 
 Owner-operator framing:
 - This document assumes Shunter is primarily being built for the repo owner’s own Go projects.
@@ -161,7 +165,7 @@ and less like:
 
 Hosted-first means:
 - Shunter's primary identity is its own runtime/server
-- applications define modules/app packages against that runtime
+- applications define Go modules against that runtime
 - clients connect to a canonical Shunter-hosted surface
 - tooling, codegen, and operational workflows target one runtime model
 
@@ -191,6 +195,22 @@ Hosted-first still does not require:
 
 The immediate need is to make Shunter a coherent hosted runtime/server first.
 
+### 4.4 Primary v1 hosting model
+
+For v1, the primary model should be:
+- one Shunter runtime/server process
+- one loaded Go module
+- one canonical client/tooling surface for that module
+
+This keeps the runtime story simple:
+- one bootstrap path
+- one config surface
+- one auth/protocol surface
+- one app/module loaded into the runtime
+
+Multi-module hosting should be treated as a later exploration, not a v1 requirement.
+It may become useful after the hosted runtime is alive and proven through real apps, but it should not shape the first runtime boundary.
+
 ---
 
 ## 5. The primary responsibility of the runtime layer
@@ -206,6 +226,9 @@ It should take care of:
 - first-boot bootstrap vs recovery reopen
 - reducer registration / lifecycle registration
 - wiring store, durability, executor, subscriptions, and protocol pieces together
+
+For v1, this construction surface should stay focused on the core hosted-runtime path.
+Broader operational/control-plane concerns should be treated as later work after the v1 runtime is alive.
 
 ### 5.2 Runtime lifecycle
 
@@ -238,6 +261,9 @@ It should carry sane defaults for:
 - auth mode defaults in local/dev mode
 - local listen address defaults when protocol is enabled
 
+For v1, strict auth should be supported as a real runtime mode, but the default local/dev story should stay easy to boot and test.
+That means Shunter should not require production-style external identity setup just to bring up a runtime locally.
+
 ### 5.5 Introspection/export
 
 It should provide a stable way to introspect the app/runtime definition for later:
@@ -246,6 +272,10 @@ It should provide a stable way to introspect the app/runtime definition for late
 - reducer export
 - admin tooling
 - diagnostics and “describe” style commands
+
+For v1, the required part is introspection/export hooks that keep future codegen and tooling possible.
+Larger admin/CLI/control-plane operations should be explicitly deferred until after the v1 hosted runtime is working end to end.
+Codegen should be treated as a strong v1.5 platform/tooling follow-up: v1 must expose enough module/schema metadata cleanly, even if Shunter does not yet ship the full codegen workflow as a first-class surface.
 
 ---
 
@@ -299,15 +329,29 @@ The handle should make these kinds of operations possible:
 - expose HTTP/WebSocket handler(s)
 - expose metadata/schema export
 
+For v1, the primary client surface should be the realtime WebSocket protocol, with simple in-process runtime calls available for tests/tools.
+Shunter should not be framed as REST-first or MCP-first at the core runtime boundary.
+Those are better treated as adapters layered on top later.
+
+Those local runtime calls should be treated as legitimate secondary APIs, not hacks.
+They matter for tests, tooling, admin/maintenance flows, and in-process integrations, even though the primary external client model remains the hosted realtime protocol.
+
 ### 7.2 Likely sub-surfaces on that handle
 
 A practical runtime handle may expose logical sub-surfaces such as:
 - `Runtime`
+- `Runtime.ListenAndServe(...)`
 - `Runtime.HTTPHandler()`
 - `Runtime.DB()` or `Runtime.ReadView()`
 - `Runtime.CallReducer(...)`
 - `Runtime.ExportSchema()`
 - `Runtime.Close()`
+
+For v1, the top-level API should expose a small network surface rather than only raw handlers or only one rigid serving path.
+In practice that means:
+- a clean default like `ListenAndServe(...)`
+- direct handler access like `HTTPHandler()` when the host app needs composition
+- protocol/network options flowing through top-level runtime config rather than manual low-level protocol wiring
 
 The exact API can vary.
 The important part is that the app or operator sees one stable owner object.
@@ -332,18 +376,30 @@ That concept is useful because it gives Shunter one stable thing to:
 
 ### 8.2 What a Go-native app/module definition should contain
 
-At minimum:
+For v1, module authoring should be explicit and imperative first.
+Reflection and helper layers can exist, but they should not define the core identity of how a Shunter module is authored.
+
+At minimum for v1:
 - schema definitions
 - reducer declarations
 - lifecycle hook declarations
 - version information
 - app/runtime metadata
 
-Potentially later:
+Within that v1 module shape, schema definition should also be explicit-first.
+Reflection/tag-based helpers can exist as convenience layers, but they should not be the primary contract the hosted runtime is built around.
+
+Reducer declaration should also stay simple in v1: plain function registration first.
+Method/handler-object styles can be supported later as additional authoring options, but they should not define the core v1 module model.
+
+Strong follow-up for v1.5:
 - query/view declarations
 - binding export metadata
 - permissions/read-model declarations
 - migration policy metadata
+
+These should be treated as important near-follow-on work, not distant nice-to-haves.
+They matter for making the hosted runtime genuinely usable, but they do not need to block the first v1 runtime shape.
 
 ### 8.3 What it should not require
 
@@ -360,6 +416,12 @@ The app/module concept can exist purely as a Go-native runtime definition.
 ## 9. Recommended layering model
 
 The healthiest architecture still looks like this.
+
+This should also imply a public-surface rule for v1:
+- the top-level Shunter runtime/module API is primary
+- lower-level subsystem packages may remain public, but they are secondary/advanced surfaces
+- normal app development should not require assembling `schema`, `commitlog`, `executor`, `subscription`, and `protocol` directly
+- stricter hiding/internalization can be reconsidered later once the top-level hosted-runtime API is proven
 
 ### Layer 1: Shunter kernel
 
@@ -480,6 +542,11 @@ There should be a clear package and/or top-level runtime surface for operators a
 
 It should not remain a repo where the main usable entrypoint is only a hand-wired example binary.
 
+That top-level surface should be the normal way to build against Shunter.
+It should replace subsystem-by-subsystem manual wiring as the default developer experience.
+For v1, this does not imply any secondary runtime process, sidecar, or control-plane layer.
+The primary shape remains one Shunter runtime/server process hosting one module.
+
 ### 12.2 A stable runtime config surface
 
 There should be one config object that actually controls runtime behavior.
@@ -492,6 +559,10 @@ It should cover at least:
 - listen settings
 - logging/metrics hooks
 
+For v1, this config surface should stay narrow and runtime-focused.
+Module/app metadata should live on the module definition, not be mixed into runtime config.
+Broader feature toggles and richer product/app concerns should be deferred to later versions.
+
 ### 12.3 A stable app-definition surface
 
 There should be one obvious way to define:
@@ -499,6 +570,13 @@ There should be one obvious way to define:
 - reducers
 - lifecycle hooks
 - version metadata
+- module/app metadata
+
+That app/module package should compose domain registrations explicitly.
+A good default shape is:
+- one app/module package that defines the hosted backend module
+- domain packages that contribute schema/reducers through explicit `Register(...)` hooks
+- one top-level runtime entrypoint that builds and runs Shunter with that module
 
 ### 12.4 A stable runtime handle
 
@@ -524,6 +602,30 @@ It should not primarily read like:
 - adapt tx ids
 - build sender adapters
 - hand-wire protocol graph
+
+### 12.6 Proposed v1 API contract
+
+Top-level package shape:
+- `shunter.Module` — authored backend/module definition
+- `shunter.Config` — narrow runtime/server config
+- `shunter.Runtime` — running hosted runtime
+- `shunter.Build(module, config)` — build a runtime from a module definition
+
+Proposed v1 module surface:
+- `shunter.NewModule(name string)`
+- module version + metadata
+- explicit table registration
+- plain-function reducer registration
+- lifecycle hook registration (`OnConnect`, `OnDisconnect`)
+
+Proposed v1 runtime surface:
+- `Start(ctx)` / `Close()`
+- `ListenAndServe(...)` as the easy default serving path
+- `HTTPHandler()` for composition into a larger host app
+- local reducer/query calls for tests, tools, and in-process integrations
+- schema/module export/introspection hooks
+
+This is intentionally a hosted-runtime API, not a subsystem assembly guide.
 
 ---
 
@@ -566,3 +668,21 @@ Without that layer, Shunter remains mostly a promising engine with awkward manua
 
 So this “final piece” is not optional polish.
 It is the bridge between “kernel exists” and “apps can actually live on top of it.”
+
+## 15. Version framing for deferred runtime surface
+
+Working version framing:
+- v1: one hosted Shunter runtime/server, one loaded Go module, one canonical client surface, core startup/shutdown/recovery/config/protocol ownership, introspection hooks that keep future codegen/tooling possible, and a statically linked module model
+- v1.5: code-first query/view declarations, canonical JSON module contract export, binding export metadata, client codegen, narrow permissions/read-model declarations, and descriptive migration policy metadata; this is ergonomics/platform usability work, not a runtime-shape change
+- v2+: larger admin operations, richer CLI/control surfaces, executable migration systems if needed, multi-module hosting exploration, and potential out-of-process module execution once the v1 runtime is alive and proven
+
+The likely v2+ direction for module isolation is an explicit runtime↔module boundary rather than embedding forever.
+That does not need to mean "copy SpacetimeDB exactly," but the reference does reinforce the value of a real host↔module boundary: its module system is not just a plain in-process library call path, and the local reference tree clearly shows Wasmtime/host infrastructure under `reference/SpacetimeDB/crates/core/src/host/wasmtime/`.
+
+So the intended trajectory is:
+- use a pragmatic simplification in v1 to get the hosted runtime alive
+- then push later versions toward a more explicit host/module/runtime model closer in role to how SpacetimeDB operates
+- while still keeping Go-native decisions where they are the better fit for Shunter
+
+This framing is intentionally simple.
+Exact v2/v3 splits can be refined later, but the important rule is that deferred operational/control-plane work should not distort the v1 runtime boundary.

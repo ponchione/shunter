@@ -3,8 +3,12 @@
 //
 // Grammar:
 //
-//	stmt   = "SELECT" ( "*" | ident "." "*" ) "FROM" ident [ [ "AS" ] ident ] [ [ "INNER" ] "JOIN" ident [ [ "AS" ] ident ] "ON" qcol "=" qcol ] [ where ] [ ";" ]
+//	stmt   = "SELECT" projection "FROM" ident [ [ "AS" ] ident ] [ [ "INNER" ] "JOIN" ident [ [ "AS" ] ident ] "ON" qcol "=" qcol ] [ where ] [ limit ] [ ";" ]
+//	projection = "*" | ident "." "*" | projcol ( "," projcol )* | aggregate
+//	projcol = ident | ident "." ident
+//	aggregate = "COUNT" "(" "*" ")" [ "AS" ] ident
 //	where  = "WHERE" pred
+//	limit  = "LIMIT" unsigned-integer
 //	pred   = conj ( "OR" conj )*
 //	conj   = term ( "AND" term )*
 //	term   = cmp | "(" pred ")"
@@ -16,7 +20,7 @@
 //	ident   = [A-Za-z_][A-Za-z0-9_]*
 //
 // Anything outside this grammar (projection other than "*", unsupported JOIN forms,
-// ORDER BY, LIMIT, aggregates,
+// ORDER BY, aggregates other than `COUNT(*) [AS] alias`,
 // subqueries, mismatched qualified columns, etc.) is rejected with
 // ErrUnsupportedSQL.
 //
@@ -126,6 +130,16 @@ type ComparisonPredicate struct {
 
 func (ComparisonPredicate) isPredicate() {}
 
+// ColumnComparisonPredicate compares two qualified columns. It is intentionally
+// limited to join-scoped query-only lowering for now.
+type ColumnComparisonPredicate struct {
+	Left  ColumnRef
+	Op    string
+	Right ColumnRef
+}
+
+func (ColumnComparisonPredicate) isPredicate() {}
+
 // AndPredicate combines two child predicates with AND.
 type AndPredicate struct {
 	Left  Predicate
@@ -156,6 +170,22 @@ type FalsePredicate struct{}
 
 func (FalsePredicate) isPredicate() {}
 
+// ProjectionColumn is one explicit SELECT-list column on the bounded
+// one-relation projection surface.
+type ProjectionColumn struct {
+	Table           string
+	Column          string
+	SourceQualifier string
+	OutputAlias     string
+}
+
+// AggregateProjection is the bounded query-only aggregate surface currently
+// accepted by the parser.
+type AggregateProjection struct {
+	Func  string
+	Alias string
+}
+
 // Statement is the parsed output.
 //
 // ProjectedAlias preserves the qualifier token the user wrote for the
@@ -164,13 +194,22 @@ func (FalsePredicate) isPredicate() {}
 // distinguish `SELECT a.*` from `SELECT b.*` on aliased self-joins, where
 // ProjectedTable alone is insufficient because both aliases resolve to the
 // same base table.
+//
+// ProjectionColumns is populated only for the bounded one-relation explicit
+// column-list surface (for example `SELECT u32, name FROM t` or
+// `SELECT o.id, o.product_id FROM Orders o JOIN Inventory product ...`).
+// Wildcard/full-row projections keep this empty and continue using
+// ProjectedTable / ProjectedAlias.
 type Statement struct {
-	Table          string
-	ProjectedTable string
-	ProjectedAlias string
-	Join           *JoinClause
-	Predicate      Predicate
-	Filters        []Filter
+	Table             string
+	ProjectedTable    string
+	ProjectedAlias    string
+	ProjectionColumns []ProjectionColumn
+	Aggregate         *AggregateProjection
+	Join              *JoinClause
+	Predicate         Predicate
+	Filters           []Filter
+	Limit             *uint64
 }
 
 type relationBindings struct {
@@ -497,12 +536,18 @@ type parser struct {
 
 func (p *parser) peek() token    { return p.toks[p.pos] }
 func (p *parser) advance() token { t := p.toks[p.pos]; p.pos++; return t }
+func (p *parser) peekNext() token {
+	if p.pos+1 >= len(p.toks) {
+		return token{kind: tokEOF}
+	}
+	return p.toks[p.pos+1]
+}
 
 func (p *parser) parseStatement() (Statement, error) {
 	if err := p.expectKeyword("SELECT"); err != nil {
 		return Statement{}, err
 	}
-	projectionQualifier, err := p.parseProjection()
+	projectionQualifier, projectionColumns, aggregate, err := p.parseProjection()
 	if err != nil {
 		return Statement{}, err
 	}
@@ -520,6 +565,7 @@ func (p *parser) parseStatement() (Statement, error) {
 		return Statement{}, err
 	}
 	stmt := Statement{Table: tableName, ProjectedTable: tableName, ProjectedAlias: projectionQualifier}
+	stmt.Aggregate = aggregate
 	bindings := relationBindings{defaultTable: tableName, byQualifier: singleQualifierMap(tableName, leftQualifiers)}
 	if isKeywordToken(p.peek(), "INNER") {
 		p.advance()
@@ -535,14 +581,17 @@ func (p *parser) parseStatement() (Statement, error) {
 			byQualifier:    joinQualifierMap(tableName, leftQualifiers, join.RightTable, rightQualifiers),
 		}
 		if projectionQualifier == "" {
-			return Statement{}, p.unsupported("join queries require a qualified projection")
+			if aggregate == nil && len(projectionColumns) == 0 {
+				return Statement{}, p.unsupported("join queries require a qualified projection")
+			}
+		} else {
+			projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier)
+			if !ok {
+				return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match joined relations", projectionQualifier))
+			}
+			stmt.ProjectedTable = projectedTable
+			stmt.ProjectedAlias = projectionQualifier
 		}
-		projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier)
-		if !ok {
-			return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match joined relations", projectionQualifier))
-		}
-		stmt.ProjectedTable = projectedTable
-		stmt.ProjectedAlias = projectionQualifier
 		// Parity rejection: reference subscription runtime at
 		// reference/SpacetimeDB/crates/subscription/src/lib.rs:251 bails with
 		// "Invalid number of tables in subscription: {N}" for N >= 3. Shunter
@@ -559,6 +608,24 @@ func (p *parser) parseStatement() (Statement, error) {
 	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
 		return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match table %q", projectionQualifier, tableName))
 	}
+	if len(projectionColumns) != 0 {
+		resolvedProjectionColumns, err := resolveProjectionColumns(projectionColumns, bindings)
+		if err != nil {
+			return Statement{}, err
+		}
+		if stmt.Join != nil {
+			if stmt.ProjectedAlias == "" {
+				stmt.ProjectedAlias = resolvedProjectionColumns[0].SourceQualifier
+				stmt.ProjectedTable = resolvedProjectionColumns[0].Table
+			}
+			for _, col := range resolvedProjectionColumns {
+				if !strings.EqualFold(col.Table, stmt.ProjectedTable) || !strings.EqualFold(col.SourceQualifier, stmt.ProjectedAlias) {
+					return Statement{}, p.unsupported("join projection columns must resolve to the projected relation")
+				}
+			}
+		}
+		stmt.ProjectionColumns = resolvedProjectionColumns
+	}
 	if isKeywordToken(p.peek(), "WHERE") {
 		p.advance()
 		pred, filters, err := p.parseWhere(bindings)
@@ -568,6 +635,11 @@ func (p *parser) parseStatement() (Statement, error) {
 		stmt.Predicate = pred
 		stmt.Filters = filters
 	}
+	limit, err := p.parseLimit()
+	if err != nil {
+		return Statement{}, err
+	}
+	stmt.Limit = limit
 	if p.peek().kind == tokSemicolon {
 		p.advance()
 	}
@@ -577,26 +649,146 @@ func (p *parser) parseStatement() (Statement, error) {
 	return stmt, nil
 }
 
-func (p *parser) parseProjection() (string, error) {
+func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjection, error) {
 	t := p.peek()
 	if t.kind == tokStar {
 		p.advance()
-		return "", nil
+		if p.peek().kind == tokComma {
+			return "", nil, nil, p.unsupported("cannot mix '*' with explicit projection columns")
+		}
+		return "", nil, nil, nil
 	}
-	if !isIdentifierToken(t) {
-		return "", p.unsupported("projection must be '*' or 'table.*'")
+	if isIdentifierToken(t) && strings.EqualFold(t.text, "COUNT") && p.pos+1 < len(p.toks) && p.toks[p.pos+1].kind == tokLParen {
+		agg, err := p.parseAggregateProjection()
+		if err != nil {
+			return "", nil, nil, err
+		}
+		if p.peek().kind == tokComma {
+			return "", nil, nil, p.unsupported("cannot mix aggregate and non-aggregate projections")
+		}
+		return "", nil, agg, nil
 	}
-	qualifier := t.text
+	col, qualifier, err := p.parseProjectionItem()
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if qualifier != "" {
+		if p.peek().kind == tokComma {
+			return "", nil, nil, p.unsupported("cannot mix 'table.*' with explicit projection columns")
+		}
+		return qualifier, nil, nil, nil
+	}
+	cols := []ProjectionColumn{col}
+	for p.peek().kind == tokComma {
+		p.advance()
+		col, qualifier, err := p.parseProjectionItem()
+		if err != nil {
+			return "", nil, nil, err
+		}
+		if qualifier != "" {
+			return "", nil, nil, p.unsupported("cannot mix wildcard and explicit projection columns")
+		}
+		cols = append(cols, col)
+	}
+	return "", cols, nil, nil
+}
+
+func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
+	fn := p.peek()
+	if !isIdentifierToken(fn) || !strings.EqualFold(fn.text, "COUNT") {
+		return nil, p.unsupported("aggregate projections not supported")
+	}
 	p.advance()
-	if p.peek().kind != tokDot {
-		return "", p.unsupported("projection must be '*' or 'table.*'")
+	if p.peek().kind != tokLParen {
+		return nil, p.unsupported("aggregate projections not supported")
 	}
 	p.advance()
 	if p.peek().kind != tokStar {
-		return "", p.unsupported("projection must be '*' or 'table.*'")
+		return nil, p.unsupported("only COUNT(*) aggregate projections supported")
 	}
 	p.advance()
-	return qualifier, nil
+	if p.peek().kind != tokRParen {
+		return nil, p.unsupported("only COUNT(*) aggregate projections supported")
+	}
+	p.advance()
+	if isKeywordToken(p.peek(), "AS") {
+		p.advance()
+	}
+	if !isIdentifierToken(p.peek()) {
+		return nil, p.unsupported("aggregate projections require alias")
+	}
+	alias, err := p.parseAlias()
+	if err != nil {
+		return nil, err
+	}
+	return &AggregateProjection{Func: "COUNT", Alias: alias}, nil
+}
+
+func (p *parser) parseProjectionItem() (ProjectionColumn, string, error) {
+	t := p.peek()
+	if !isIdentifierToken(t) {
+		return ProjectionColumn{}, "", p.unsupported("projection must be '*', 'table.*', or a single-table column list")
+	}
+	p.advance()
+	ident := t.text
+	if p.peek().kind == tokLParen {
+		return ProjectionColumn{}, "", p.unsupported("aggregate projections not supported")
+	}
+	if p.peek().kind != tokDot {
+		alias, err := p.parseProjectionOutputAlias()
+		if err != nil {
+			return ProjectionColumn{}, "", err
+		}
+		return ProjectionColumn{Column: ident, OutputAlias: alias}, "", nil
+	}
+	p.advance()
+	t = p.peek()
+	if t.kind == tokStar {
+		p.advance()
+		return ProjectionColumn{}, ident, nil
+	}
+	if !isIdentifierToken(t) {
+		return ProjectionColumn{}, "", p.unsupported(fmt.Sprintf("expected column name after qualifier %q", ident))
+	}
+	p.advance()
+	if p.peek().kind == tokDot {
+		return ProjectionColumn{}, "", p.unsupported("qualified column names not supported")
+	}
+	alias, err := p.parseProjectionOutputAlias()
+	if err != nil {
+		return ProjectionColumn{}, "", err
+	}
+	return ProjectionColumn{Column: t.text, SourceQualifier: ident, OutputAlias: alias}, "", nil
+}
+
+func (p *parser) parseProjectionOutputAlias() (string, error) {
+	if isKeywordToken(p.peek(), "AS") {
+		p.advance()
+		return p.parseAlias()
+	}
+	if isIdentifierToken(p.peek()) {
+		return p.parseAlias()
+	}
+	return "", nil
+}
+
+func resolveProjectionColumns(columns []ProjectionColumn, bindings relationBindings) ([]ProjectionColumn, error) {
+	resolved := make([]ProjectionColumn, 0, len(columns))
+	for _, col := range columns {
+		tableName := bindings.defaultTable
+		qualifier := col.SourceQualifier
+		if qualifier != "" {
+			resolvedTable, ok := resolveQualifier(qualifier, bindings.byQualifier)
+			if !ok {
+				return nil, fmt.Errorf("%w: projection qualifier %q does not match relation", ErrUnsupportedSQL, qualifier)
+			}
+			tableName = resolvedTable
+		} else if bindings.requireQualify {
+			return nil, fmt.Errorf("%w: join projections must be qualified", ErrUnsupportedSQL)
+		}
+		resolved = append(resolved, ProjectionColumn{Table: tableName, Column: col.Column, SourceQualifier: qualifier, OutputAlias: col.OutputAlias})
+	}
+	return resolved, nil
 }
 
 func (p *parser) parseRelationQualifiers(tableName string) ([]string, error) {
@@ -643,8 +835,11 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	}
 	leftAlias := leftQualifiers[0]
 	rightAlias := rightQualifiers[0]
-	if strings.EqualFold(leftTable, rightTable) && strings.EqualFold(leftAlias, rightAlias) {
-		return nil, nil, p.unsupported("self join requires aliases")
+	if strings.EqualFold(leftAlias, rightAlias) {
+		if strings.EqualFold(leftTable, rightTable) {
+			return nil, nil, p.unsupported("self join requires aliases")
+		}
+		return nil, nil, p.unsupported("joined relations must use distinct qualifiers")
 	}
 	if !isKeywordToken(p.peek(), "ON") {
 		return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil
@@ -709,12 +904,29 @@ func (p *parser) parseWhere(bindings relationBindings) (Predicate, []Filter, err
 	}
 	if !p.peek().quoted && p.peek().kind == tokIdent {
 		kw := strings.ToUpper(p.peek().text)
-		if kw == "ORDER" || kw == "LIMIT" || kw == "GROUP" || kw == "HAVING" || kw == "JOIN" {
+		if kw == "ORDER" || kw == "GROUP" || kw == "HAVING" || kw == "JOIN" {
 			return nil, nil, p.unsupported(fmt.Sprintf("%s not supported", kw))
 		}
 	}
 	filters, _ := flattenAndFilters(pred)
 	return pred, filters, nil
+}
+
+func (p *parser) parseLimit() (*uint64, error) {
+	if !isKeywordToken(p.peek(), "LIMIT") {
+		return nil, nil
+	}
+	p.advance()
+	t := p.peek()
+	if t.kind != tokNumber {
+		return nil, p.unsupported("LIMIT requires an unsigned integer literal")
+	}
+	limit, err := strconv.ParseUint(t.text, 10, 64)
+	if err != nil {
+		return nil, p.unsupported("LIMIT requires an unsigned integer literal")
+	}
+	p.advance()
+	return &limit, nil
 }
 
 func (p *parser) parseDisjunction(bindings relationBindings) (Predicate, error) {
@@ -776,11 +988,35 @@ func (p *parser) parsePredicateTerm(bindings relationBindings) (Predicate, error
 }
 
 func (p *parser) parseComparisonPredicate(bindings relationBindings) (Predicate, error) {
-	f, err := p.parseComparison(bindings)
+	left, err := p.parseColumnRefForPredicate(bindings)
 	if err != nil {
 		return nil, err
 	}
-	return ComparisonPredicate{Filter: f}, nil
+	op, err := p.parseOperator()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().kind == tokIdent && p.peekNext().kind == tokDot {
+		if !bindings.requireQualify {
+			return nil, p.unsupported("column-vs-column WHERE predicates are only supported in join contexts")
+		}
+		if op != "=" {
+			return nil, p.unsupported("join WHERE column comparisons only support '='")
+		}
+		right, err := p.parseColumnRefForPredicate(bindings)
+		if err != nil {
+			return nil, err
+		}
+		return ColumnComparisonPredicate{Left: left, Op: op, Right: right}, nil
+	}
+	if bindings.requireQualify && p.peek().kind == tokIdent && !isKeywordToken(p.peek(), "TRUE") && !isKeywordToken(p.peek(), "FALSE") {
+		return nil, p.unsupported("join WHERE columns must be qualified")
+	}
+	lit, err := p.parseLiteral()
+	if err != nil {
+		return nil, err
+	}
+	return ComparisonPredicate{Filter: Filter{Table: left.Table, Column: left.Column, Alias: left.Alias, Op: op, Literal: lit}}, nil
 }
 
 func flattenAndFilters(pred Predicate) ([]Filter, bool) {
@@ -808,10 +1044,10 @@ func flattenAndFilters(pred Predicate) ([]Filter, bool) {
 	}
 }
 
-func (p *parser) parseComparison(bindings relationBindings) (Filter, error) {
+func (p *parser) parseColumnRefForPredicate(bindings relationBindings) (ColumnRef, error) {
 	t := p.peek()
 	if !isIdentifierToken(t) {
-		return Filter{}, p.unsupported(fmt.Sprintf("expected column name, got %q", t.text))
+		return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name, got %q", t.text))
 	}
 	p.advance()
 	columnName := t.text
@@ -822,21 +1058,29 @@ func (p *parser) parseComparison(bindings relationBindings) (Filter, error) {
 		p.advance()
 		t = p.peek()
 		if !isIdentifierToken(t) {
-			return Filter{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
+			return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
 		}
 		resolved, ok := resolveQualifier(qualifier, bindings.byQualifier)
 		if !ok {
-			return Filter{}, p.unsupported(fmt.Sprintf("qualified column %q does not match relation", qualifier))
+			return ColumnRef{}, p.unsupported(fmt.Sprintf("qualified column %q does not match relation", qualifier))
 		}
 		tableName = resolved
 		columnName = t.text
 		alias = qualifier
 		p.advance()
 		if p.peek().kind == tokDot {
-			return Filter{}, p.unsupported("qualified column names not supported")
+			return ColumnRef{}, p.unsupported("qualified column names not supported")
 		}
 	} else if bindings.requireQualify {
-		return Filter{}, p.unsupported("join WHERE columns must be qualified")
+		return ColumnRef{}, p.unsupported("join WHERE columns must be qualified")
+	}
+	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
+}
+
+func (p *parser) parseComparison(bindings relationBindings) (Filter, error) {
+	ref, err := p.parseColumnRefForPredicate(bindings)
+	if err != nil {
+		return Filter{}, err
 	}
 	op, err := p.parseOperator()
 	if err != nil {
@@ -846,7 +1090,7 @@ func (p *parser) parseComparison(bindings relationBindings) (Filter, error) {
 	if err != nil {
 		return Filter{}, err
 	}
-	return Filter{Table: tableName, Column: columnName, Alias: alias, Op: op, Literal: lit}, nil
+	return Filter{Table: ref.Table, Column: ref.Column, Alias: ref.Alias, Op: op, Literal: lit}, nil
 }
 
 func (p *parser) parseOperator() (string, error) {

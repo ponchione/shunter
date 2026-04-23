@@ -335,6 +335,53 @@ func flattenSelfJoinCanonicalOr(pred Predicate, out []Predicate) []Predicate {
 	}
 }
 
+func absorbSelfJoinCanonicalPredicates(preds []Predicate, groupTag byte) []Predicate {
+	if len(preds) < 2 {
+		return preds
+	}
+	present := make(map[string]struct{}, len(preds))
+	for _, pred := range preds {
+		present[string(canonicalPredicateBytes(pred))] = struct{}{}
+	}
+	out := preds[:0]
+	for _, pred := range preds {
+		if shouldAbsorbSelfJoinCanonicalPredicate(pred, groupTag, present) {
+			continue
+		}
+		out = append(out, pred)
+	}
+	if len(out) == 0 {
+		return preds
+	}
+	return out
+}
+
+func shouldAbsorbSelfJoinCanonicalPredicate(pred Predicate, groupTag byte, present map[string]struct{}) bool {
+	var targetChildren []Predicate
+	switch groupTag {
+	case tagOr:
+		andPred, ok := pred.(And)
+		if !ok {
+			return false
+		}
+		targetChildren = flattenSelfJoinCanonicalAnd(andPred, nil)
+	case tagAnd:
+		orPred, ok := pred.(Or)
+		if !ok {
+			return false
+		}
+		targetChildren = flattenSelfJoinCanonicalOr(orPred, nil)
+	default:
+		return false
+	}
+	for _, child := range targetChildren {
+		if _, ok := present[string(canonicalPredicateBytes(child))]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 	switch p := pred.(type) {
 	case And:
@@ -346,6 +393,7 @@ func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 		children := flattenSelfJoinCanonicalAnd(And{Left: left, Right: right}, nil)
 		sortCanonicalPredicates(children)
 		children = dedupeCanonicalPredicates(children)
+		children = absorbSelfJoinCanonicalPredicates(children, tagAnd)
 		return rebuildCanonicalAnd(children)
 	case Or:
 		left := canonicalizeSelfJoinFilter(p.Left)
@@ -356,6 +404,7 @@ func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 		children := flattenSelfJoinCanonicalOr(Or{Left: left, Right: right}, nil)
 		sortCanonicalPredicates(children)
 		children = dedupeCanonicalPredicates(children)
+		children = absorbSelfJoinCanonicalPredicates(children, tagOr)
 		return rebuildCanonicalOr(children)
 	case Join, CrossJoin:
 		return p

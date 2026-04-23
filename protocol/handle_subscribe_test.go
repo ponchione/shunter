@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"strings"
 	"sync"
 	"testing"
 
@@ -189,6 +190,35 @@ func (m *mockSubExecutor) getRegisterSetReq() *RegisterSubscriptionSetRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.registerSetReq
+}
+
+type validatingSubExecutor struct {
+	mockSubExecutor
+	schema subscription.SchemaLookup
+}
+
+func (v *validatingSubExecutor) RegisterSubscriptionSet(ctx context.Context, req RegisterSubscriptionSetRequest) error {
+	v.mockSubExecutor.RegisterSubscriptionSet(ctx, req)
+	for _, pred := range req.Predicates {
+		p, ok := pred.(subscription.Predicate)
+		if !ok {
+			req.Reply(SubscriptionSetCommandResponse{Error: &SubscriptionError{
+				RequestID: optionalUint32(req.RequestID),
+				QueryID:   optionalUint32(req.QueryID),
+				Error:     "invalid predicate request",
+			}})
+			return nil
+		}
+		if err := subscription.ValidatePredicate(p, v.schema); err != nil {
+			req.Reply(SubscriptionSetCommandResponse{Error: &SubscriptionError{
+				RequestID: optionalUint32(req.RequestID),
+				QueryID:   optionalUint32(req.QueryID),
+				Error:     err.Error(),
+			}})
+			return nil
+		}
+	}
+	return nil
 }
 
 // --- NormalizePredicates tests ---
@@ -975,6 +1005,50 @@ func TestHandleSubscribeSingle_CrossJoinWhereFalseStillRejected(t *testing.T) {
 		RequestID:   123,
 		QueryID:     120,
 		QueryString: "SELECT Orders.* FROM Orders JOIN Inventory WHERE FALSE",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.Error != "cross join WHERE not supported" {
+		t.Fatalf("Error = %q, want cross join WHERE not supported", se.Error)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
+	}
+}
+
+func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityStillRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   124,
+		QueryID:     121,
+		QueryString: "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32",
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
@@ -2075,6 +2149,50 @@ func TestHandleSubscribeSingle_ExecutorReject(t *testing.T) {
 	requireOptionalUint32(t, se.RequestID, 3, "SubscriptionError.RequestID")
 }
 
+func TestHandleSubscribeSingle_UnindexedJoinStillRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	executor := &validatingSubExecutor{schema: sl}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   4,
+		QueryID:     51,
+		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 51, "SubscriptionError.QueryID")
+	requireOptionalUint32(t, se.RequestID, 4, "SubscriptionError.RequestID")
+	if !strings.Contains(se.Error, "join column has no index on either side") {
+		t.Fatalf("Error = %q, want subscription unindexed-join rejection", se.Error)
+	}
+}
+
 // --- handleSubscribeMulti tests ---
 
 func TestHandleSubscribeMultiSuccess(t *testing.T) {
@@ -2954,6 +3072,9 @@ func TestHandleSubscribeSingle_ParityLimitClauseRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 101, "QueryID")
+	if se.Error == "" || !strings.Contains(se.Error, "LIMIT") {
+		t.Fatalf("Error = %q, want deliberate LIMIT rejection", se.Error)
+	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when a LIMIT clause trails the query")
 	}
@@ -4179,6 +4300,168 @@ func TestHandleSubscribeSingle_ParitySqlInvalidEmptyGroupByRejected(t *testing.T
 	requireOptionalUint32(t, se.QueryID, 163, "QueryID")
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on empty GROUP BY")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityCountAliasRejected pins the deliberate
+// subscribe-side policy rejection for parsed aggregate projections. Query SQL
+// may widen to accept `COUNT(*) [AS] alias`, but subscriptions must still return
+// SubscriptionError and skip executor registration.
+func TestHandleSubscribeSingle_ParityCountAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   164,
+		QueryID:     165,
+		QueryString: "SELECT COUNT(*) AS n FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 165, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on aggregate projection")
+	}
+}
+
+func TestHandleSubscribeSingle_ParityCountBareAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   174,
+		QueryID:     175,
+		QueryString: "SELECT COUNT(*) n FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 175, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on bare-alias aggregate projection")
+	}
+}
+
+func TestHandleSubscribeSingle_JoinCountAggregateStillRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		}}},
+	}}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   176,
+		QueryID:     177,
+		QueryString: "SELECT COUNT(*) n FROM t JOIN s ON t.id = s.t_id WHERE s.active = TRUE",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 177, "QueryID")
+	if !strings.Contains(se.Error, "aggregate projections not supported for subscriptions") {
+		t.Fatalf("Error = %q, want deliberate aggregate subscription rejection", se.Error)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on join-backed aggregate projection")
+	}
+}
+
+func TestHandleSubscribeSingle_ParityAliasedBareColumnProjectionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   166,
+		QueryID:     167,
+		QueryString: "SELECT u32 AS n FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 167, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on aliased explicit projection")
+	}
+}
+
+func TestHandleSubscribeSingle_ParityJoinColumnProjectionRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_orders_product_id", Columns: []string{"product_id"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   168,
+		QueryID:     169,
+		QueryString: "SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 169, "QueryID")
+	if !strings.Contains(se.Error, "column-list projections not supported for subscriptions") {
+		t.Fatalf("Error = %q, want deliberate subscription projection rejection", se.Error)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called for join-backed column-list projection")
 	}
 }
 

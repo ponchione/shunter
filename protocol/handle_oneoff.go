@@ -40,7 +40,7 @@ func handleOneOffQuery(
 	sl SchemaLookup,
 ) {
 	receipt := time.Now()
-	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity)
+	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity, true, true)
 	if err != nil {
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
 		return
@@ -53,7 +53,7 @@ func handleOneOffQuery(
 	}
 
 	pred := compiled.Predicate
-	if err := subscription.ValidatePredicate(pred, sl); err != nil {
+	if err := subscription.ValidateQueryPredicate(pred, sl); err != nil {
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
 		return
 	}
@@ -71,8 +71,17 @@ func handleOneOffQuery(
 			}
 		}
 	}
+	if compiled.Limit != nil && uint64(len(matchedRows)) > *compiled.Limit {
+		matchedRows = matchedRows[:int(*compiled.Limit)]
+	}
+	encodedRows := matchedRows
+	if compiled.Aggregate != nil {
+		encodedRows = []types.ProductValue{{types.NewUint64(uint64(len(matchedRows)))}}
+	} else if len(compiled.ProjectionColumns) != 0 {
+		encodedRows = projectOneOffRows(matchedRows, compiled.ProjectionColumns)
+	}
 	var rows [][]byte
-	for _, pv := range matchedRows {
+	for _, pv := range encodedRows {
 		var buf bytes.Buffer
 		if err := bsatn.EncodeProductValue(&buf, pv); err != nil {
 			view.Close()
@@ -127,6 +136,21 @@ func matchesAll(pv types.ProductValue, matchers []colMatcher) bool {
 		}
 	}
 	return true
+}
+
+func projectOneOffRows(rows []types.ProductValue, columns []schema.ColumnSchema) []types.ProductValue {
+	projected := make([]types.ProductValue, 0, len(rows))
+	for _, row := range rows {
+		out := make(types.ProductValue, 0, len(columns))
+		for _, col := range columns {
+			if col.Index < 0 || col.Index >= len(row) {
+				continue
+			}
+			out = append(out, row[col.Index])
+		}
+		projected = append(projected, out)
+	}
+	return projected
 }
 
 func evaluateOneOffJoin(view store.CommittedReadView, projectedTable schema.TableID, join subscription.Join) []types.ProductValue {

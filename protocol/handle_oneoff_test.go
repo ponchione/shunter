@@ -1159,7 +1159,7 @@ func TestHandleOneOffQuery_JoinFilterOnLeftFloatColumn(t *testing.T) {
 	}
 }
 
-func TestHandleOneOffQuery_UnindexedJoinRejected(t *testing.T) {
+func TestHandleOneOffQuery_UnindexedJoinReturnsRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -1212,14 +1212,99 @@ func TestHandleOneOffQuery_UnindexedJoinRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("Error = nil, want validation failure")
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (one-off joins do not require subscription indexes)", *result.Error)
 	}
-	if !strings.Contains(*result.Error, "join column has no index on either side") {
-		t.Fatalf("Error = %q, want unindexed-join validation text", *result.Error)
+	if len(result.Tables) != 1 {
+		t.Fatalf("Tables len = %d, want 1", len(result.Tables))
 	}
-	if len(result.Tables) != 0 {
-		t.Fatalf("Tables len = %d, want 0 on validation failure", len(result.Tables))
+	if result.Tables[0].TableName != "Orders" {
+		t.Fatalf("TableName = %q, want Orders", result.Tables[0].TableName)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ordersTS)
+	if len(pvs) != 2 {
+		t.Fatalf("got %d rows, want 2", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[0][1].Equal(types.NewUint32(100)) {
+		t.Fatalf("row 0 = %v, want order 1/product 100", pvs[0])
+	}
+	if !pvs[1][0].Equal(types.NewUint32(2)) || !pvs[1][1].Equal(types.NewUint32(101)) {
+		t.Fatalf("row 1 = %v, want order 2/product 101", pvs[1])
+	}
+}
+
+func TestHandleOneOffQuery_CrossJoinWhereColumnEqualityReturnsProjectedRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, tReg, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("t table missing from registry")
+	}
+	_, sReg, ok := eng.Registry().TableByName("s")
+	if !ok {
+		t.Fatal("s table missing from registry")
+	}
+	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: tReg.Columns}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			tReg.ID: {
+				{types.NewUint32(1), types.NewUint32(10)},
+				{types.NewUint32(2), types.NewUint32(20)},
+				{types.NewUint32(3), types.NewUint32(20)},
+			},
+			sReg.ID: {
+				{types.NewUint32(9), types.NewUint32(20)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x1d},
+		QueryString: "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (one-off cross-join WHERE column equality is query-only accepted)", *result.Error)
+	}
+	if len(result.Tables) != 1 {
+		t.Fatalf("Tables len = %d, want 1", len(result.Tables))
+	}
+	if result.Tables[0].TableName != "t" {
+		t.Fatalf("TableName = %q, want t", result.Tables[0].TableName)
+	}
+	pvs := decodeRows(t, firstTableRows(result), tTS)
+	if len(pvs) != 2 {
+		t.Fatalf("got %d rows, want 2", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(2)) || !pvs[0][1].Equal(types.NewUint32(20)) {
+		t.Fatalf("row 0 = %v, want t id=2/u32=20", pvs[0])
+	}
+	if !pvs[1][0].Equal(types.NewUint32(3)) || !pvs[1][1].Equal(types.NewUint32(20)) {
+		t.Fatalf("row 1 = %v, want t id=3/u32=20", pvs[1])
 	}
 }
 
@@ -1977,6 +2062,67 @@ func TestHandleOneOffQuery_AliasedSelfJoinFilterDuplicateLeafVisibleRowsMatch(t 
 			}
 			if !decoded[0][i][j].Equal(decoded[2][i][j]) {
 				t.Fatalf("row %d col %d differs between base and duplicate-or: %v vs %v", i, j, decoded[0][i][j], decoded[2][i][j])
+			}
+		}
+	}
+}
+
+func TestHandleOneOffQuery_AliasedSelfJoinFilterAbsorptionVisibleRowsMatch(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, tReg, _ := eng.Registry().TableByName("t")
+	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}, {Index: 1, Name: "u32", Type: schema.KindUint32}}}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		tReg.ID: {
+			{types.NewUint32(1), types.NewUint32(5)},
+			{types.NewUint32(2), types.NewUint32(5)},
+			{types.NewUint32(3), types.NewUint32(5)},
+		},
+	}}
+	queries := []string{
+		"SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1",
+		"SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1 OR (a.id = 1 AND a.id > 0)",
+		"SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1 AND (a.id = 1 OR a.id > 0)",
+	}
+	decoded := make([][]types.ProductValue, 0, len(queries))
+	for i, query := range queries {
+		conn := testConnDirect(nil)
+		stateAccess := &mockStateAccess{snap: snap}
+		msg := &OneOffQueryMsg{MessageID: []byte{byte(0x28 + i)}, QueryString: query}
+		handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+		result := drainOneOff(t, conn)
+		if result.Error != nil {
+			t.Fatalf("query %d error = %q, want nil", i, *result.Error)
+		}
+		rows := decodeRows(t, firstTableRows(result), tTS)
+		if len(rows) != 3 {
+			t.Fatalf("query %d got %d rows, want 3 multiplicity-expanded rows", i, len(rows))
+		}
+		for j, row := range rows {
+			if !row[0].Equal(types.NewUint32(1)) {
+				t.Fatalf("query %d row %d id=%v, want id=1 on every emitted row", i, j, row[0])
+			}
+		}
+		decoded = append(decoded, rows)
+	}
+	if len(decoded[0]) != len(decoded[1]) || len(decoded[0]) != len(decoded[2]) {
+		t.Fatalf("row counts differ: %d vs %d vs %d", len(decoded[0]), len(decoded[1]), len(decoded[2]))
+	}
+	for i := range decoded[0] {
+		if len(decoded[0][i]) != len(decoded[1][i]) || len(decoded[0][i]) != len(decoded[2][i]) {
+			t.Fatalf("row %d column counts differ: %d vs %d vs %d", i, len(decoded[0][i]), len(decoded[1][i]), len(decoded[2][i]))
+		}
+		for j := range decoded[0][i] {
+			if !decoded[0][i][j].Equal(decoded[1][i][j]) {
+				t.Fatalf("row %d col %d differs between base and absorbed-or: %v vs %v", i, j, decoded[0][i][j], decoded[1][i][j])
+			}
+			if !decoded[0][i][j].Equal(decoded[2][i][j]) {
+				t.Fatalf("row %d col %d differs between base and absorbed-and: %v vs %v", i, j, decoded[0][i][j], decoded[2][i][j])
 			}
 		}
 	}
@@ -2872,18 +3018,29 @@ func TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected(t *testing
 	}
 }
 
-// TestHandleOneOffQuery_ParityBareColumnProjectionRejected pins the reference
-// type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
-// 510-513 (`select u32 from t` / "Subscriptions must be typed to a single
-// table") onto the OneOff admission surface. Enforced incidentally at
-// parseProjection which only accepts `*` or `table.*`.
-func TestHandleOneOffQuery_ParityBareColumnProjectionRejected(t *testing.T) {
+// TestHandleOneOffQuery_ParityBareColumnProjectionReturnsProjectedRows pins the
+// query-only single-table column-projection slice on the OneOff path: the
+// parser/compile seam may now accept `SELECT u32 FROM t`, and one-off must
+// return only the selected column values while keeping the outer table envelope
+// unchanged.
+func TestHandleOneOffQuery_ParityBareColumnProjectionReturnsProjectedRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
 	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewString("alpha")},
+		{types.NewUint32(2), types.NewString("bravo")},
+	}}}
 	stateAccess := &mockStateAccess{snap: snap}
+	projectedSchema := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "u32", Type: schema.KindUint32},
+		},
+	}
 
 	msg := &OneOffQueryMsg{
 		MessageID:   []byte{0x86},
@@ -2892,12 +3049,386 @@ func TestHandleOneOffQuery_ParityBareColumnProjectionRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
+	gotRows := decodeRows(t, firstTableRows(result), projectedSchema)
+	wantRows := []types.ProductValue{
+		{types.NewUint32(1)},
+		{types.NewUint32(2)},
 	}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityMultiColumnProjectionReturnsProjectedRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
+		schema.ColumnSchema{Index: 2, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewString("alpha"), types.NewBool(false)},
+		{types.NewUint32(2), types.NewString("bravo"), types.NewBool(true)},
+		{types.NewUint32(3), types.NewString("charlie"), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	projectedSchema := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "u32", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x87},
+		QueryString: "SELECT u32, active FROM t WHERE u32 = 2",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), projectedSchema)
+	wantRows := []types.ProductValue{{types.NewUint32(2), types.NewBool(true)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityAliasedBareColumnProjectionReturnsProjectedRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewString("alpha")},
+		{types.NewUint32(2), types.NewString("bravo")},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	projectedSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint32}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x88},
+		QueryString: "SELECT u32 AS n FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
+		t.Fatalf("Tables = %+v, want single base-table envelope for t", result.Tables)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), projectedSchema)
+	wantRows := []types.ProductValue{{types.NewUint32(1)}, {types.NewUint32(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityAliasedBareColumnProjectionWithWhereReturnsProjectedRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(false)},
+		{types.NewUint32(2), types.NewBool(true)},
+		{types.NewUint32(3), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	projectedSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint32}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x89},
+		QueryString: "SELECT u32 n FROM t WHERE active = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), projectedSchema)
+	wantRows := []types.ProductValue{{types.NewUint32(2)}, {types.NewUint32(3)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityAliasedMultiColumnProjectionReturnsProjectedRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+		schema.ColumnSchema{Index: 2, Name: "name", Type: schema.KindString},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(false), types.NewString("alpha")},
+		{types.NewUint32(2), types.NewBool(true), types.NewString("bravo")},
+		{types.NewUint32(3), types.NewBool(true), types.NewString("charlie")},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	projectedSchema := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "n", Type: schema.KindUint32},
+			{Index: 1, Name: "enabled", Type: schema.KindBool},
+		},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8A},
+		QueryString: "SELECT u32 AS n, active AS enabled FROM t WHERE active = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
+		t.Fatalf("Tables = %+v, want single base-table envelope for t", result.Tables)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), projectedSchema)
+	wantRows := []types.ProductValue{{types.NewUint32(2), types.NewBool(true)}, {types.NewUint32(3), types.NewBool(true)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityJoinColumnProjectionReturnsProjectedRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	projectedTS := &schema.TableSchema{
+		ID:   1,
+		Name: "Orders",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "product_id", Type: schema.KindUint32},
+		},
+	}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+			{Name: "note", Type: schema.KindString},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_orders_product_id", Columns: []string{"product_id"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	projectedTS.ID = ordersReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		ordersReg.ID: {
+			{types.NewUint32(1), types.NewUint32(100), types.NewString("alpha")},
+			{types.NewUint32(2), types.NewUint32(100), types.NewString("bravo")},
+			{types.NewUint32(3), types.NewUint32(102), types.NewString("charlie")},
+		},
+		inventoryReg.ID: {
+			{types.NewUint32(100), types.NewUint32(9)},
+			{types.NewUint32(101), types.NewUint32(10)},
+			{types.NewUint32(102), types.NewUint32(3)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8B},
+		QueryString: "SELECT o.id, o.product_id FROM Orders o JOIN Inventory product ON o.product_id = product.id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "Orders" {
+		t.Fatalf("Tables = %+v, want single Orders table envelope", result.Tables)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), projectedTS)
+	wantRows := []types.ProductValue{
+		{types.NewUint32(1), types.NewUint32(100)},
+		{types.NewUint32(2), types.NewUint32(100)},
+		{types.NewUint32(3), types.NewUint32(102)},
+	}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityJoinColumnProjectionProjectsRight(t *testing.T) {
+	conn := testConnDirect(nil)
+	projectedTS := &schema.TableSchema{
+		ID:   2,
+		Name: "Inventory",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "quantity", Type: schema.KindUint32},
+		},
+	}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_orders_product_id", Columns: []string{"product_id"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+			{Name: "sku", Type: schema.KindString},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	projectedTS.ID = inventoryReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		ordersReg.ID: {
+			{types.NewUint32(1), types.NewUint32(100)},
+			{types.NewUint32(2), types.NewUint32(100)},
+			{types.NewUint32(3), types.NewUint32(102)},
+		},
+		inventoryReg.ID: {
+			{types.NewUint32(100), types.NewUint32(9), types.NewString("sku-100")},
+			{types.NewUint32(101), types.NewUint32(10), types.NewString("sku-101")},
+			{types.NewUint32(102), types.NewUint32(3), types.NewString("sku-102")},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x8C},
+		QueryString: "SELECT product.id, product.quantity FROM Orders o JOIN Inventory product ON o.product_id = product.id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "Inventory" {
+		t.Fatalf("Tables = %+v, want single Inventory table envelope", result.Tables)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), projectedTS)
+	wantRows := []types.ProductValue{
+		{types.NewUint32(100), types.NewUint32(9)},
+		{types.NewUint32(100), types.NewUint32(9)},
+		{types.NewUint32(102), types.NewUint32(3)},
+	}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParitySelfJoinColumnProjectionProjectsLeft(t *testing.T) {
+	conn := testConnDirect(nil)
+	projectedTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, tReg, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("t table missing from registry")
+	}
+	projectedTS.ID = tReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		tReg.ID: {
+			{types.NewUint32(1), types.NewUint32(5)},
+			{types.NewUint32(2), types.NewUint32(5)},
+			{types.NewUint32(3), types.NewUint32(9)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{MessageID: []byte{0x8D}, QueryString: "SELECT a.id FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE b.id = 2"}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), projectedTS)
+	wantRows := []types.ProductValue{{types.NewUint32(1)}, {types.NewUint32(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParitySelfJoinColumnProjectionProjectsRight(t *testing.T) {
+	conn := testConnDirect(nil)
+	projectedTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{Name: "t", Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}}, Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}}})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, tReg, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("t table missing from registry")
+	}
+	projectedTS.ID = tReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		tReg.ID: {
+			{types.NewUint32(1), types.NewUint32(5)},
+			{types.NewUint32(2), types.NewUint32(5)},
+			{types.NewUint32(3), types.NewUint32(9)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{MessageID: []byte{0x8E}, QueryString: "SELECT b.id FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 2"}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), projectedTS)
+	wantRows := []types.ProductValue{{types.NewUint32(1)}, {types.NewUint32(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
 // TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected pins the
@@ -2985,32 +3516,44 @@ func TestHandleOneOffQuery_ParityForwardAliasReferenceRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityLimitClauseRejected pins the reference type-
-// check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
-// 530-533 (`select * from t limit 5` / "Subscriptions do not support limit")
-// onto the OneOff admission surface. Enforced incidentally at parseStatement
-// EOF-check which rejects the trailing LIMIT token.
-func TestHandleOneOffQuery_ParityLimitClauseRejected(t *testing.T) {
+// TestHandleOneOffQuery_ParityLimitClauseAppliesToVisibleRows pins the
+// query-only LIMIT slice from the reference SQL grammar onto Shunter's one-off
+// handler: after the existing row-shaped evaluation path produces matches, the
+// handler caps the visible result rows without changing the scan order contract
+// beyond this deterministic mock harness.
+func TestHandleOneOffQuery_ParityLimitClauseAppliesToVisibleRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
 	)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	ts, ok := sl.Table(1)
+	if !ok {
+		t.Fatal("mock schema missing table 1")
+	}
+	wantRows := []types.ProductValue{
+		{types.NewUint32(1), types.NewString("alpha")},
+		{types.NewUint32(2), types.NewString("bravo")},
+	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		wantRows[0],
+		wantRows[1],
+		{types.NewUint32(3), types.NewString("charlie")},
+	}}}
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
 		MessageID:   []byte{0x8A},
-		QueryString: "SELECT * FROM t LIMIT 5",
+		QueryString: "SELECT * FROM t LIMIT 2",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
-	}
+	gotRows := decodeRows(t, firstTableRows(result), ts)
+	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
 // TestHandleOneOffQuery_ParityLeadingPlusIntLiteral pins the reference
@@ -4032,6 +4575,253 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptyGroupByRejected(t *testing.T) {
 	}
 	if result.Error == nil || *result.Error == "" {
 		t.Error("expected non-empty error message")
+	}
+}
+
+func TestHandleOneOffQuery_ParityCountAliasReturnsSingleAggregateRow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(false)},
+		{types.NewUint32(3), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC1},
+		QueryString: "SELECT COUNT(*) AS n FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(3)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityCountBareAliasReturnsSingleAggregateRow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(false)},
+		{types.NewUint32(3), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC4},
+		QueryString: "SELECT COUNT(*) n FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(3)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityCountAliasWithWhereReturnsSingleAggregateRow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(false)},
+		{types.NewUint32(3), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC2},
+		QueryString: "SELECT COUNT(*) AS n FROM t WHERE active = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityCountAliasZeroRowsReturnsSingleZeroRow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(false)},
+		{types.NewUint32(2), types.NewBool(false)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC3},
+		QueryString: "SELECT COUNT(*) AS n FROM t WHERE active = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(0)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityJoinCountAliasReturnsSingleAggregateRow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		}}},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewBool(true)},
+			{types.NewUint32(1), types.NewBool(false)},
+			{types.NewUint32(3), types.NewBool(true)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC5},
+		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.t_id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
+		t.Fatalf("Tables = %+v, want single aggregate envelope for t", result.Tables)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityJoinCountBareAliasWithWhereReturnsSingleAggregateRow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		}}},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewBool(true)},
+			{types.NewUint32(1), types.NewBool(false)},
+			{types.NewUint32(2), types.NewBool(true)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC6},
+		QueryString: "SELECT COUNT(*) n FROM t JOIN s ON t.id = s.t_id WHERE s.active = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ParityJoinCountWithLimitRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{{Index: 0, Name: "t_id", Type: schema.KindUint32}}}},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC7},
+		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.t_id LIMIT 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected aggregate + LIMIT rejection, got nil error")
+	}
+	if !strings.Contains(*result.Error, "aggregate projections with LIMIT not supported") {
+		t.Fatalf("Error = %q, want aggregate LIMIT rejection", *result.Error)
 	}
 }
 

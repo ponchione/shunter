@@ -31,7 +31,7 @@ Guardrails:
 ## Current grounded status
 
 Latest live repo state:
-- `rtk go test ./...` → `Go test: 1751 passed in 11 packages`
+- `rtk go test ./...` → `Go test: 1770 passed in 11 packages`
 - `rtk go build ./...` → `Go build: Success`
 - major runtime packages are already implemented in live Go code
 - `docs/parity-phase0-ledger.md` carries the scenario ledger
@@ -95,7 +95,7 @@ Current grounded state:
 - many narrow SQL/query parity slices are landed and pinned
 - the supported SQL surface remains intentionally narrower than the reference SQL path
 - the join/cross-join multiplicity batch is now closed across compile/hash identity, bootstrap, one-off execution, and delta evaluation
-- one-off SQL now runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing join-index validation
+- one-off SQL now uses a query/ad hoc validation seam before snapshot evaluation, so unindexed two-table joins scan and return projected rows without requiring subscription indexes; subscribe registration still uses `subscription.ValidatePredicate(...)` and still rejects unindexed joins
 - committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
 - post-commit projected join delta rows now preserve the same projected-side semantics on both projected-left and projected-right accepted join shapes: fragments are projected before reconciliation so partner churn cancels at the projected-row bag level, and `ReconcileJoinDelta(...)` no longer reorders surviving rows via map iteration; focused `subscription/delta_dedup_test.go` / `subscription/eval_test.go` pins lock the behavior
 - accepted subscribe SQL using `:sender` now preserves caller-bound parameter provenance through compile/register hashing, so literal bytes queries no longer share a query hash/query-state identity with the parameterized caller form and mixed subscribe batches only parameterize the marked predicates
@@ -109,6 +109,14 @@ Current grounded state:
 - accepted aliased self-joins whose same-side filter differs only by commutative child order now also share one canonical query hash / query-state identity: `subscription/hash.go` now applies a bounded alias-aware child-order canonicalization inside self-join `Join.Filter` without enabling the broader alias-blind same-table flatten/dedupe/absorb pipeline
 - accepted aliased self-joins whose same-side filter differs only by associative grouping now also share one canonical query hash / query-state identity: `subscription/hash.go` now flattens and deterministically rebuilds same-kind self-join filter groups in an alias-aware way while keeping duplicate-leaf / absorption reductions fenced for later slices
 - accepted aliased self-joins whose same-side filter differs only by exact duplicate leaves now also share one canonical query hash / query-state identity: `subscription/hash.go` now dedupes byte-identical alias-aware self-join filter children after the self-join-local flatten/sort step, so `a`, `a AND a`, and `a OR a` no longer fork query-state identity while one-off row semantics stay unchanged
+- accepted aliased self-joins whose same-side filter differs only by bounded absorption-equivalent shapes now also share one canonical query hash / query-state identity: `subscription/hash.go` now applies a bounded self-join-local absorption pass after flatten/sort/dedupe, so `a`, `a OR (a AND b)`, and `a AND (a OR b)` no longer fork query-state identity while alias identity remains encoded in canonical child bytes
+- one-off SQL now accepts a narrow trailing `LIMIT <unsigned int>` on the already-supported row-projection surface while subscribe still rejects `LIMIT`: `query/sql/parser.go` carries optional limit metadata, `protocol/handle_subscribe.go` blocks it deliberately on subscribe admission, and `protocol/handle_oneoff.go` applies the cap after existing row evaluation
+- one-off SQL now also accepts bounded single-table explicit column-list projections such as `SELECT u32 FROM t` and `SELECT u32, active FROM t WHERE ...` while subscribe still rejects non-`*` projections: `query/sql/parser.go` carries resolved projection metadata, `protocol/handle_subscribe.go` validates schema-backed projection columns and rejects the shape deliberately for subscribe callers, and `protocol/handle_oneoff.go` projects rows only after the existing row-match + optional `LIMIT` path
+- one-off SQL now also accepts bounded query-only `COUNT(*) [AS] alias` on already-supported single-table shapes while subscribe still rejects aggregate projections: `query/sql/parser.go` carries aggregate metadata for both `SELECT COUNT(*) AS n FROM t` and reference-style `SELECT COUNT(*) n FROM t`, still rejects missing aliases, `protocol/handle_subscribe.go` rejects parsed aggregates deliberately for subscribe callers while building a one-column uint64 result shape for one-off callers, and `protocol/handle_oneoff.go` returns exactly one count row even when the matched input is empty
+- one-off SQL now also accepts bounded explicit projection-column aliases on the existing single-table column-list projection surface while subscribe still rejects non-`*` projections: `query/sql/parser.go` preserves source qualifier routing separately from output alias metadata, `protocol/handle_subscribe.go` renames one-off output-column schemas without disturbing base-column indexes, and `protocol/handle_oneoff.go` continues projecting row values against the alias-aware compiled schema
+- one-off SQL now also accepts bounded join-backed explicit column-list projections on the existing two-table join surface while subscribe still rejects non-`*` projections: `query/sql/parser.go` now admits qualified join-side column lists and fences them to one projected relation instance, `protocol/handle_subscribe.go` threads schema-backed projection metadata through join compilation, and `protocol/handle_oneoff.go` reuses the existing post-join row-shaping seam so join results are projected after join evaluation and optional `LIMIT`
+- one-off SQL now also accepts the bounded query-only cross-join `WHERE` column-equality shape `SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32`: the parser carries a qualified column-vs-column predicate node, one-off compiles the exact shape into the existing join evaluator, and subscribe still rejects cross-join `WHERE` before executor registration
+- one-off SQL now also accepts bounded join-backed query-only `COUNT(*) [AS] alias` on the existing two-table join surface: the parser carries aggregate metadata on joins, one-off counts matched join rows with multiplicity into a one-column uint64 result using the requested alias, and subscribe still rejects aggregate projections before executor registration
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -213,10 +221,10 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, single-table commutative child-order, single-table associative-grouping, single-table duplicate-leaf idempotence, single-table absorption-law, overlength-SQL admission, false-predicate follow-through, distinct-table join-filter child-order, self-join alias-sensitive join-filter child-order, self-join alias-sensitive join-filter associative-grouping, and self-join alias-sensitive join-filter duplicate-leaf seams
-- the next bounded residual to scout first is self-join alias-sensitive join-filter absorption-law reduction, because live `subscription/hash.go` now flattens, sorts, and dedupes exact duplicate alias-aware leaves in the self-join path but still does not remove bounded absorption-equivalent self-join filter shapes
+- broader query/subscription parity beyond the narrow landed shapes (now after the closed fan-out delivery, multiplicity, one-off-vs-subscribe join-index-validation split, committed bootstrap/final-delta projected-ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, single-table commutative child-order canonicalization, single-table associative-grouping canonicalization, single-table duplicate-leaf idempotence canonicalization, single-table absorption-law canonicalization, overlength-SQL admission guard, bare/grouped `FALSE` predicate follow-through, distinct-table join-filter child-order canonicalization, self-join alias-sensitive join-filter child-order canonicalization, self-join alias-sensitive join-filter associative-grouping canonicalization, self-join alias-sensitive join-filter duplicate-leaf idempotence canonicalization, self-join alias-sensitive join-filter absorption-law reduction, one-off query `LIMIT` support on the existing row-projection surface with subscribe-side rejection retained, one-off-only single-table column-list projection support with subscribe-side rejection retained, one-off-only `COUNT(*) [AS] alias` support with subscribe-side rejection retained, one-off-only explicit projection-column alias support with subscribe-side rejection retained, one-off-only join-backed explicit column-list projection support with subscribe-side rejection retained, one-off/ad hoc unindexed two-table join admission with subscribe-side rejection retained, one-off-only cross-join `WHERE` column-equality admission with subscribe-side rejection retained, and one-off-only join-backed `COUNT(*) [AS] alias` aggregate projection with subscribe-side rejection retained)
+- pick the next bounded A2 residual only after a fresh scout; the pre-projection, unindexed-join, cross-join `WHERE` equality, and join-backed count aggregate targets are now closed
 - any future one-off widening should be deliberate, not accidental
-- RLS/per-client filtering remains absent
+
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
 
 ## Phase 3 — Scheduler/reducer lifecycle parity
@@ -264,10 +272,10 @@ When choosing the next slice:
 
 ## Current best next direction
 
-The self-join alias-sensitive join-filter duplicate-leaf seam is now closed too. The best current direction is a bounded self-join alias-sensitive join-filter absorption-law reduction slice: accepted aliased self-join shapes already compile and execute, and `subscription/hash.go` now canonicalizes same-kind self-join grouping plus exact duplicate leaves, but the self-join path still does not remove bounded absorption-equivalent alias-aware shapes such as `a OR (a AND b)` / `a AND (a OR b)`.
+The one-off join-backed `COUNT(*) [AS] alias` slice is now closed too. The best current direction is a fresh bounded OI-002 scout to identify the next residual with live code/doc evidence rather than carrying forward now-closed projection-family, unindexed-join, cross-join `WHERE` equality, or join-backed count aggregate handoff targets.
 
 Current candidate directions are:
-- self-join alias-sensitive join-filter absorption-law reduction
+- fresh OI-002 scout for the next bounded query/subscription residual
 - Tier B hardening when a concrete live risk is stronger than the next parity slice
 - a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
 - scheduler/bootstrap follow-through only when workload or integration evidence surfaces

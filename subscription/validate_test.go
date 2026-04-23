@@ -142,6 +142,27 @@ func TestValidateJoinUnindexed(t *testing.T) {
 	}
 }
 
+func TestValidateQueryPredicate_UnindexedJoinAllowed(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
+	if err := ValidateQueryPredicate(p, s); err != nil {
+		t.Fatalf("ValidateQueryPredicate = %v, want nil", err)
+	}
+}
+
+func TestValidateQueryPredicate_UnindexedJoinStillValidatesStructure(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindString})
+	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
+	err := ValidateQueryPredicate(p, s)
+	if !errors.Is(err, ErrInvalidPredicate) {
+		t.Fatalf("want ErrInvalidPredicate, got %v", err)
+	}
+}
+
 func TestValidateNoRowsKnownTable(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})

@@ -21,7 +21,7 @@ type SchemaLookup interface {
 }
 
 // ValidatePredicate checks the structural and schema-level constraints
-// defined in SPEC-004 §3.3:
+// defined in SPEC-004 §3.3 for subscription registration:
 //
 //  1. At most two tables
 //  2. Every referenced table exists
@@ -36,11 +36,29 @@ func ValidatePredicate(pred Predicate, schema SchemaLookup) error {
 	if tables := pred.Tables(); len(tables) > 2 {
 		return fmt.Errorf("%w: predicate references %d tables", ErrTooManyTables, len(tables))
 	}
-	return validate(pred, schema)
+	return validateWithOptions(pred, schema, validateOptions{requireJoinIndex: true})
 }
 
-// validate performs recursive structural validation.
-func validate(pred Predicate, s SchemaLookup) error {
+// ValidateQueryPredicate checks the structural/schema constraints needed by
+// ad-hoc query execution. Unlike subscription registration, one-off query
+// execution may scan tables directly, so it does not require join-column
+// indexes.
+func ValidateQueryPredicate(pred Predicate, schema SchemaLookup) error {
+	if pred == nil {
+		return fmt.Errorf("%w: nil predicate", ErrInvalidPredicate)
+	}
+	if tables := pred.Tables(); len(tables) > 2 {
+		return fmt.Errorf("%w: predicate references %d tables", ErrTooManyTables, len(tables))
+	}
+	return validateWithOptions(pred, schema, validateOptions{requireJoinIndex: false})
+}
+
+type validateOptions struct {
+	requireJoinIndex bool
+}
+
+// validateWithOptions performs recursive structural validation.
+func validateWithOptions(pred Predicate, s SchemaLookup, opts validateOptions) error {
 	switch p := pred.(type) {
 	case ColEq:
 		return validateColEq(p, s)
@@ -52,18 +70,18 @@ func validate(pred Predicate, s SchemaLookup) error {
 		if p.Left == nil || p.Right == nil {
 			return fmt.Errorf("%w: And with nil child", ErrInvalidPredicate)
 		}
-		if err := validate(p.Left, s); err != nil {
+		if err := validateWithOptions(p.Left, s, opts); err != nil {
 			return err
 		}
-		return validate(p.Right, s)
+		return validateWithOptions(p.Right, s, opts)
 	case Or:
 		if p.Left == nil || p.Right == nil {
 			return fmt.Errorf("%w: Or with nil child", ErrInvalidPredicate)
 		}
-		if err := validate(p.Left, s); err != nil {
+		if err := validateWithOptions(p.Left, s, opts); err != nil {
 			return err
 		}
-		return validate(p.Right, s)
+		return validateWithOptions(p.Right, s, opts)
 	case AllRows:
 		if !s.TableExists(p.Table) {
 			return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
@@ -75,7 +93,7 @@ func validate(pred Predicate, s SchemaLookup) error {
 		}
 		return nil
 	case Join:
-		return validateJoin(p, s)
+		return validateJoin(p, s, opts)
 	case CrossJoin:
 		return validateCrossJoin(p, s)
 	default:
@@ -128,7 +146,7 @@ func validateColRange(p ColRange, s SchemaLookup) error {
 	return nil
 }
 
-func validateJoin(p Join, s SchemaLookup) error {
+func validateJoin(p Join, s SchemaLookup, opts validateOptions) error {
 	if !s.TableExists(p.Left) {
 		return fmt.Errorf("%w: join left table %d", ErrTableNotFound, p.Left)
 	}
@@ -149,7 +167,7 @@ func validateJoin(p Join, s SchemaLookup) error {
 	if leftKind != rightKind {
 		return fmt.Errorf("%w: join column kinds differ (%s vs %s)", ErrInvalidPredicate, leftKind, rightKind)
 	}
-	if !s.HasIndex(p.Left, p.LeftCol) && !s.HasIndex(p.Right, p.RightCol) {
+	if opts.requireJoinIndex && !s.HasIndex(p.Left, p.LeftCol) && !s.HasIndex(p.Right, p.RightCol) {
 		return fmt.Errorf("%w: join %d.%d = %d.%d", ErrUnindexedJoin, p.Left, p.LeftCol, p.Right, p.RightCol)
 	}
 	if p.Filter != nil {
@@ -163,7 +181,7 @@ func validateJoin(p Join, s SchemaLookup) error {
 				return err
 			}
 		}
-		if err := validate(p.Filter, s); err != nil {
+		if err := validateWithOptions(p.Filter, s, opts); err != nil {
 			return err
 		}
 	}
