@@ -39,6 +39,7 @@ Status values:
 | `P0-SUBSCRIPTION-004` projected join delta ordering | `closed` | `subscription/delta_dedup_test.go`, `subscription/eval_test.go`, `subscription/manager_test.go`, `protocol/handle_oneoff.go` | Accepted projected join shapes now preserve projected-side row semantics across one-off execution, bootstrap/final-delta enumeration, and post-commit delta emission: partner churn cancels at the projected-row bag level, and `ReconcileJoinDelta(...)` emits surviving rows in fragment encounter order instead of map iteration order. |
 | `P0-SUBSCRIPTION-005` `:sender` parameter hash identity | `closed` | `protocol/handle_subscribe_test.go`, `executor/protocol_inbox_adapter_test.go`, `subscription/manager_test.go` | Accepted subscribe SQL using `:sender` now keeps caller-bound parameter provenance through compile/register hashing, so literal bytes queries no longer collide with the parameterized caller form and mixed batches only parameterize the marked predicates. |
 | `P0-SUBSCRIPTION-006` neutral-`TRUE` predicate normalization | `closed` | `protocol/handle_subscribe_test.go`, `protocol/handle_oneoff_test.go`, `subscription/hash_test.go`, `subscription/manager_test.go` | Accepted SQL with neutral `TRUE` terms now normalizes before runtime lowering and canonical hashing: single-table `TRUE AND/OR ...` shapes collapse to the same runtime meaning and query-state identity as their simplified equivalents, and join-backed `TRUE AND rhs-filter` no longer lowers into malformed validation-failing filters. |
+| `P0-SUBSCRIPTION-007` accepted single-table commutative child-order canonicalization | `closed` | `protocol/handle_oneoff_test.go`, `subscription/hash_test.go`, `subscription/manager_test.go` | Accepted single-table same-table `AND` / `OR` SQL whose user-visible row results were already equal now also shares canonical query hash / query-state identity when only child order changes; parser/runtime source order is preserved outside the bounded canonical identity seam. |
 
 ## Scheduler / recovery parity scenarios
 
@@ -76,7 +77,7 @@ If you need implementation detail, read the linked decision doc or the narrow sl
 
 What remains is better thought of as a small set of live themes than as a long historical slice list:
 - protocol wire-close follow-through
-- broader query/subscription parity beyond the narrow landed shapes (now after the closed fan-out delivery, multiplicity, one-off-vs-subscribe join-index-validation, committed bootstrap/final-delta projected-ordering, projected-join delta-ordering, `:sender` hash-identity, and neutral-`TRUE` normalization slices)
+- broader query/subscription parity beyond the narrow landed shapes (now after the closed fan-out delivery, multiplicity, one-off-vs-subscribe join-index-validation, committed bootstrap/final-delta projected-ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, and single-table commutative child-order canonicalization slices)
 - recovery/store parity follow-ons after 2γ (carried-forward deferrals in `TECH-DEBT.md` OI-007)
 - hardening themes tracked in `TECH-DEBT.md`
 

@@ -82,6 +82,85 @@ func TestRegisterDedupSharesQueryState(t *testing.T) {
 	}
 }
 
+func TestRegisterSet_SameTableAndChildOrderSharesQueryState(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("alice")},
+			{types.NewUint64(2), types.NewString("bob")},
+		},
+	})
+	mgr := NewManager(s, s)
+	leftFirst := And{
+		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},
+		Right: ColEq{Table: 1, Column: 1, Value: types.NewString("alice")},
+	}
+	rightFirst := And{
+		Left:  ColEq{Table: 1, Column: 1, Value: types.NewString("alice")},
+		Right: ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},
+	}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 12, Predicates: []Predicate{leftFirst},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 13, Predicates: []Predicate{rightFirst},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 1 {
+		t.Fatalf("query-state count = %d, want 1 shared state", got)
+	}
+	h := ComputeQueryHash(leftFirst, nil)
+	if qs := mgr.registry.byHash[h]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared query state = %+v, want refCount 2", qs)
+	}
+}
+
+func TestRegisterSet_SameTableOrChildOrderSharesQueryState(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("alice")},
+			{types.NewUint64(2), types.NewString("bob")},
+			{types.NewUint64(3), types.NewString("carol")},
+		},
+	})
+	mgr := NewManager(s, s)
+	leftFirst := Or{
+		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},
+		Right: ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)},
+	}
+	rightFirst := Or{
+		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)},
+		Right: ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},
+	}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 14, Predicates: []Predicate{leftFirst},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 15, Predicates: []Predicate{rightFirst},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 1 {
+		t.Fatalf("query-state count = %d, want 1 shared state", got)
+	}
+	h := ComputeQueryHash(leftFirst, nil)
+	if qs := mgr.registry.byHash[h]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared query state = %+v, want refCount 2", qs)
+	}
+}
+
 func TestRegisterParameterizedHashUsesClientIdentity(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)

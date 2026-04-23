@@ -39,24 +39,24 @@ Work in *batches*, not single slices. One session = one batch. Within a batch, l
 
 Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A3 or OI-004/005/006 hardening.
 
-## Next session: continue OI-002 A2 with commutative child-order canonicalization on accepted `AND` / `OR` SQL
+## Next session: continue OI-002 A2 with same-table associative-grouping canonicalization for accepted `AND` / `OR` SQL
 
-OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the first OI-002 fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, the projected-join delta-order seam, the `:sender` subscribe hash-identity seam, and the neutral-`TRUE` accepted-shape normalization seam are now closed. A fresh post-close scout this session found the strongest remaining accepted-shape normalization / hash-identity residual in commutative child-order drift for already-accepted `AND` / `OR` SQL.
+The commutative child-order slice is now closed: `protocol/handle_oneoff_test.go` proves accepted single-table same-table reordered pairs already returned identical rows, while `subscription/hash_test.go` and `subscription/manager_test.go` now pin that reordered pairs share one canonical query hash and one shared query state.
+
+Fresh post-close scout this session:
+- same-table 3-leaf `AND` / `OR` runtime trees still hash differently when only grouping changes, e.g. left-associated vs right-associated forms.
+- a quick local scout program this session produced different hashes for:
+  - `And{And{a,b},c}` vs `And{a,And{b,c}}`
+  - `Or{Or{a,c},b}` vs `Or{a,Or{c,b}}`
+- that keeps the next bounded residual inside the same canonical query-identity seam without reopening parser widening, joins, `:sender`, neutral-`TRUE`, or fan-out work.
 
 Fresh-agent task:
-
-- Close one bounded OI-002 A2 canonicalization slice for accepted same-table `AND` / `OR` SQL that differs only by child order.
-- Start from already-accepted pairs such as:
-  - `SELECT * FROM users WHERE id = 1 AND name = 'alice'`
-  - `SELECT * FROM users WHERE name = 'alice' AND id = 1`
-  - and the analogous `OR` pair when the same-table leaves are already accepted.
-- Prove first that parser acceptance and runtime row results already match while canonical query hash / query-state identity still drifts across child order.
-- Do not reopen projected-join ordering, join multiplicity, join-index validation, `:sender` hash identity, or neutral-`TRUE` normalization unless fresh evidence shows a new regression distinct from those closed slices.
-- Do not start with a broad SQL widening pass. Stay inside already-accepted `AND` / `OR` shapes and prove the mismatch with focused tests before editing production code.
+- close one bounded OI-002 A2 canonicalization slice for accepted same-table `AND` / `OR` SQL with 3+ leaves whose semantics are unchanged by grouping but whose canonical query identity still depends on tree shape
+- prove first that accepted grouped variants already return the same visible rows / query meaning, then pin the hash/query-state drift, then fix only the canonical identity seam
+- keep the fix bounded to accepted same-table shapes; do not widen SQL admission or alter join/cross-join semantics
 
 Fresh-agent context:
-
-- Closed already in OI-002 A2:
+- closed already in OI-002 A2:
   - recipient-level fan-out durability gating + dropped-client cleanup on eval failure
   - join/cross-join multiplicity across compile/hash identity, bootstrap, one-off, and delta
   - one-off vs subscribe unindexed-join admission parity via shared `subscription.ValidatePredicate(...)`
@@ -64,7 +64,8 @@ Fresh-agent context:
   - post-commit projected-join delta ordering via projected-fragment-first reconciliation plus encounter-order-preserving `ReconcileJoinDelta(...)`
   - subscribe-side `:sender` hash identity / mixed-batch parameterization provenance
   - neutral-`TRUE` predicate normalization across compile/hash/register seams
-- Do not reopen:
+  - accepted same-table commutative child-order canonicalization
+- do not reopen:
   - fan-out delivery parity
   - join/cross-join multiplicity
   - one-off-vs-subscribe join-index validation
@@ -72,65 +73,29 @@ Fresh-agent context:
   - projected join delta ordering
   - `:sender` subscribe hash identity
   - neutral-`TRUE` normalization
+  - accepted same-table commutative child-order work
   - rows-shape documented divergence
   - OI-001 A1 wire/message-family work
-- The next strongest live question is whether accepted commutative `AND` / `OR` SQL still compiles into different canonical query identities solely because source child order survives into the runtime tree.
-- Treat `query/sql/parser.go`, `protocol/handle_subscribe.go`, `subscription/hash.go`, `subscription/register_set.go`, and the relevant current tests as the primary seam to compare.
 
-Batch framing:
-
-1. Scout the live parser/compile/runtime surfaces first: `query/sql/parser.go`, `protocol/handle_subscribe.go`, `protocol/handle_oneoff.go`, `subscription/hash.go`, `subscription/register_set.go`, and the relevant current tests.
-2. Build the residual A2 list only for accepted commutative-order drift. Ignore already-closed fan-out delivery, multiplicity, join-index-validation, projected-ordering, `:sender`, and neutral-`TRUE` seams unless they expose fresh evidence.
-3. Prefer accepted same-table `AND` / `OR` shapes where:
-   - parser acceptance already exists
-   - one-off / subscribe execution results are already the same
-   - canonical query hash identity or registry dedup still changes when child order flips
-4. Land one commit per slice with focused protocol/subscription tests, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
-
-Concrete deliverable for the fresh agent:
-
-1. Write down the exact confirmed mismatch in one short bullet before coding.
-2. Add failing focused tests first.
-3. Fix only the minimal canonicalization seam needed.
-4. Re-run focused tests, then `rtk go test ./protocol/... ./subscription/... ./executor/...`, then `rtk go test ./...`.
-5. Update `TECH-DEBT.md`, `docs/parity-phase0-ledger.md`, `docs/spacetimedb-parity-roadmap.md`, and this file in the same session.
-
-Suggested starting reads for this batch:
-
-- `query/sql/parser.go`
-- `protocol/handle_subscribe.go`
-- `protocol/handle_oneoff.go`
+Suggested starting reads for the next batch:
 - `subscription/hash.go`
-- `subscription/register_set.go`
-- `subscription/query_state.go`
-
-Suggested starting test surfaces:
-
-- `query/sql/parser_test.go`
-- `protocol/handle_subscribe_test.go`
-- `protocol/handle_oneoff_test.go`
 - `subscription/hash_test.go`
 - `subscription/manager_test.go`
+- `protocol/handle_oneoff_test.go`
+- `query/sql/parser.go`
+- `protocol/handle_subscribe.go`
 
-Good candidate seam to pin first:
-
-- same-table accepted `AND` / `OR` SQL whose child order changes source text but not user-visible results, yet still changes `ComputeQueryHash(...)` and therefore query-state sharing.
-
-Useful scout heuristic:
-
-- Start from an already-accepted pair of commutative SQL shapes, compile both, confirm they return the same visible rows, then compare whether `ComputeQueryHash(...)` and `subscription.Manager.RegisterSet(...)` still treat them as distinct solely because source order survived normalization.
-
-Stop conditions:
-
-- stop at the first clean batch boundary that would require a new decision doc or would cross into A3 / hardening work
-- do not reopen the just-closed neutral-`TRUE` work, projected-join ordering work, rows-shape cluster, or A1 wire/message-family work in the same session
-- if the scout shows the next meaningful gap is actually A3 or a new documented divergence, write that up here before handing off
+Suggested verification path for the next batch:
+1. Add focused failing tests for grouped same-table `AND` / `OR` shapes.
+2. Re-run focused protocol/subscription tests.
+3. Run `PATH=/usr/local/go/bin:$PATH rtk go test ./protocol ./subscription ./executor -count=1`.
+4. Run `PATH=/usr/local/go/bin:$PATH rtk go test ./... -count=1`.
 
 Out of scope for this batch: OI-001 A3 recovery/store parity, OI-004/005/006 hardening, rows-shape cluster reopen, strict-auth wiring in `cmd/shunter-example`.
 
 ## Follow-on queue (pickable next, one per session)
 
-- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: predicate normalization / validation drift on already-accepted SQL shapes, or another bounded runtime/model residual after the closed fan-out delivery, multiplicity, join-index-validation, committed projected-ordering, and projected-join delta-ordering slices. Do not reopen those closed slices without fresh evidence.
+- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: accepted same-table `AND` / `OR` associative-grouping canonicalization for 3+ leaves, or another bounded predicate normalization / validation residual if a fresh scout shows it is stronger. Do not reopen the closed fan-out delivery, multiplicity, join-index-validation, committed projected-ordering, projected-join delta-ordering, `:sender`, neutral-`TRUE`, or commutative-child-order slices without fresh evidence.
 - **OI-001 A3** — recovery / store parity against `reference/SpacetimeDB/crates/core/src/db/`. Batch scope: snapshot/replay invariants beyond what `P0-RECOVERY-*` already covered.
 - **Coordinated wrapper-chain + row-list close** (Phase 2 Slice 4 carried-forward deferral). Requires a new decision doc reopening the SPEC-005 §3.4 `BsatnRowList` deferral together with the reference `SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `QueryUpdate` wrapper chain. Scope is large — do not start without a named consumer or a bandwidth trigger (SPEC-005 §3.4 "fixed-schema row delivery bottleneck").
 - **Strict-auth wiring in `cmd/shunter-example`**. Currently anonymous-only. Batch scope: JWT identity, token rotation, `IdentityToken` round-trip, upgrade-path handshake.

@@ -66,13 +66,33 @@ func TestQueryHashNoClientVsClient(t *testing.T) {
 	}
 }
 
-func TestQueryHashAndOrderMatters(t *testing.T) {
+func TestQueryHashSameTableAndChildOrderCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	b := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}
+	p1 := And{Left: a, Right: b}
+	p2 := And{Left: b, Right: a}
+	if ComputeQueryHash(p1, nil) != ComputeQueryHash(p2, nil) {
+		t.Fatal("same-table And child order should not change canonical hash")
+	}
+}
+
+func TestQueryHashSameTableOrChildOrderCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	b := ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)}
+	p1 := Or{Left: a, Right: b}
+	p2 := Or{Left: b, Right: a}
+	if ComputeQueryHash(p1, nil) != ComputeQueryHash(p2, nil) {
+		t.Fatal("same-table Or child order should not change canonical hash")
+	}
+}
+
+func TestQueryHashMultiTableAndOrderMatters(t *testing.T) {
 	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
 	b := ColEq{Table: 2, Column: 0, Value: types.NewUint64(2)}
 	p1 := And{Left: a, Right: b}
 	p2 := And{Left: b, Right: a}
 	if ComputeQueryHash(p1, nil) == ComputeQueryHash(p2, nil) {
-		t.Fatal("And order matters")
+		t.Fatal("multi-table And order should still matter")
 	}
 }
 

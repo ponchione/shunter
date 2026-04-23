@@ -204,7 +204,7 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, and neutral-`TRUE` normalization seams
+- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, and single-table commutative child-order seams
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
@@ -254,11 +254,11 @@ When choosing the next slice:
 
 ## Current best next direction
 
-The best current narrow-ready direction is still predicate normalization / validation drift inside OI-002 A2, with the strongest fresh residual now being commutative child-order canonicalization on accepted `AND` / `OR` SQL shapes.
+The best current narrow-ready direction is still predicate normalization / validation drift inside OI-002 A2, and a quick post-fix scout now points at associative grouping drift for accepted same-table `AND` / `OR` SQL with 3+ leaves: child-order no longer changes canonical identity, but different parenthesization / tree shape still does.
 
 Current candidate directions are:
-- accepted `AND` / `OR` SQL whose child order changes source text but not user-visible semantics, yet still changes canonical query hash / query-state identity
-- another bounded OI-002 A2 runtime/model residual only if a fresh scout shows it is stronger than the child-order canonicalization seam
+- accepted same-table `AND` / `OR` SQL with equivalent 3+ leaf semantics but different grouping, e.g. left-associated vs right-associated trees, which still hash differently at the canonical query-identity seam
+- another bounded OI-002 A2 runtime/model residual only if a fresh scout shows it is stronger than the grouping/associativity seam
 - Tier B hardening when a concrete live risk is stronger than the next parity slice
 - a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
 - scheduler/bootstrap follow-through only when workload or integration evidence surfaces

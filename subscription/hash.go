@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"math"
@@ -84,6 +85,48 @@ func isAllRowsPredicate(pred Predicate) bool {
 	return ok
 }
 
+func singlePredicateTable(pred Predicate) (TableID, bool) {
+	if pred == nil {
+		return 0, false
+	}
+	tables := pred.Tables()
+	if len(tables) != 1 {
+		return 0, false
+	}
+	return tables[0], true
+}
+
+func canReorderCommutativeChildren(left, right Predicate) bool {
+	leftTable, ok := singlePredicateTable(left)
+	if !ok {
+		return false
+	}
+	rightTable, ok := singlePredicateTable(right)
+	if !ok {
+		return false
+	}
+	return leftTable == rightTable
+}
+
+func canonicalPredicateBytes(pred Predicate) []byte {
+	enc := acquireCanonicalEncoder()
+	defer releaseCanonicalEncoder(enc)
+	encodePredicate(enc, pred)
+	return append([]byte(nil), enc.buf...)
+}
+
+func orderCanonicalChildren(left, right Predicate) (Predicate, Predicate) {
+	if !canReorderCommutativeChildren(left, right) {
+		return left, right
+	}
+	leftBytes := canonicalPredicateBytes(left)
+	rightBytes := canonicalPredicateBytes(right)
+	if bytes.Compare(leftBytes, rightBytes) <= 0 {
+		return left, right
+	}
+	return right, left
+}
+
 func canonicalizePredicate(pred Predicate) Predicate {
 	switch p := pred.(type) {
 	case And:
@@ -98,6 +141,7 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		if isAllRowsPredicate(right) {
 			return left
 		}
+		left, right = orderCanonicalChildren(left, right)
 		return And{Left: left, Right: right}
 	case Or:
 		left := canonicalizePredicate(p.Left)
@@ -111,6 +155,7 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		if isAllRowsPredicate(right) {
 			return right
 		}
+		left, right = orderCanonicalChildren(left, right)
 		return Or{Left: left, Right: right}
 	default:
 		return pred
