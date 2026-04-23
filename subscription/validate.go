@@ -69,6 +69,11 @@ func validate(pred Predicate, s SchemaLookup) error {
 			return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
 		}
 		return nil
+	case NoRows:
+		if !s.TableExists(p.Table) {
+			return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
+		}
+		return nil
 	case Join:
 		return validateJoin(p, s)
 	case CrossJoin:

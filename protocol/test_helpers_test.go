@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,4 +63,20 @@ func drainServerMsgEventually(t *testing.T, conn *Conn) (uint8, any) {
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
+}
+
+func overlongSQLQuery() string {
+	const maxSQLLength = 50_000
+	const base = "SELECT * FROM users WHERE id = 1"
+	const suffix = " OR id = 1"
+	if len(base) > maxSQLLength {
+		return base
+	}
+	var b strings.Builder
+	b.Grow(maxSQLLength + len(suffix))
+	b.WriteString(base)
+	for b.Len() <= maxSQLLength {
+		b.WriteString(suffix)
+	}
+	return b.String()
 }

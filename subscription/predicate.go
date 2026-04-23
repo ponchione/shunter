@@ -161,6 +161,15 @@ type AllRows struct {
 func (AllRows) sealed()             {}
 func (p AllRows) Tables() []TableID { return []TableID{p.Table} }
 
+// NoRows admits a query shape but guarantees it can never emit rows from the
+// projected table.
+type NoRows struct {
+	Table TableID
+}
+
+func (NoRows) sealed()             {}
+func (p NoRows) Tables() []TableID { return []TableID{p.Table} }
+
 // Join matches rows from two tables joined on a column pair,
 // with an optional filter on either side.
 //

@@ -71,17 +71,30 @@ func isSQLTruePredicate(pred sql.Predicate) bool {
 	return ok
 }
 
+func isSQLFalsePredicate(pred sql.Predicate) bool {
+	_, ok := pred.(sql.FalsePredicate)
+	return ok
+}
+
 func normalizeSQLPredicate(pred sql.Predicate) sql.Predicate {
 	switch p := pred.(type) {
 	case nil:
 		return nil
 	case sql.TruePredicate:
 		return p
+	case sql.FalsePredicate:
+		return p
 	case sql.ComparisonPredicate:
 		return p
 	case sql.AndPredicate:
 		left := normalizeSQLPredicate(p.Left)
 		right := normalizeSQLPredicate(p.Right)
+		if isSQLFalsePredicate(left) {
+			return left
+		}
+		if isSQLFalsePredicate(right) {
+			return right
+		}
 		if isSQLTruePredicate(left) {
 			return right
 		}
@@ -95,6 +108,12 @@ func normalizeSQLPredicate(pred sql.Predicate) sql.Predicate {
 		if isSQLTruePredicate(left) || isSQLTruePredicate(right) {
 			return sql.TruePredicate{}
 		}
+		if isSQLFalsePredicate(left) {
+			return right
+		}
+		if isSQLFalsePredicate(right) {
+			return left
+		}
 		return sql.OrPredicate{Left: left, Right: right}
 	default:
 		return pred
@@ -106,6 +125,8 @@ func sqlPredicateUsesCallerIdentity(pred sql.Predicate) bool {
 	case nil:
 		return false
 	case sql.TruePredicate:
+		return false
+	case sql.FalsePredicate:
 		return false
 	case sql.ComparisonPredicate:
 		return p.Filter.Literal.Kind == sql.LitSender
@@ -142,6 +163,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.Join.RightTable)
 		}
+		projectedID := leftID
+		if joinProjectsRight(stmt, leftID == rightID) {
+			projectedID = rightID
+		}
 		if !stmt.Join.HasOn {
 			if stmt.Predicate != nil {
 				return compiledSQLQuery{}, fmt.Errorf("cross join WHERE not supported")
@@ -153,6 +178,9 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 			}
 			cross.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
 			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity}, nil
+		}
+		if _, ok := stmt.Predicate.(sql.FalsePredicate); ok {
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity}, nil
 		}
 		leftCol, ok := leftTS.Column(stmt.Join.LeftOn.Column)
 		if !ok {
@@ -289,6 +317,14 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 		}
 		for _, rel := range relations {
 			return subscription.AllRows{Table: rel.id}, nil
+		}
+		return nil, nil
+	case sql.FalsePredicate:
+		if len(relations) != 1 {
+			return nil, nil
+		}
+		for _, rel := range relations {
+			return subscription.NoRows{Table: rel.id}, nil
 		}
 		return nil, nil
 	case sql.ComparisonPredicate:

@@ -886,6 +886,126 @@ func TestHandleOneOffQuery_TrueOrComparisonReturnsAllRows(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQuery_SQLWhereFalseReturnsNoRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "flag", Type: schema.KindBool},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(7), types.NewBool(true)},
+				{types.NewUint32(8), types.NewBool(false)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x2c},
+		QueryString: "SELECT * FROM t WHERE FALSE",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 0 {
+		t.Fatalf("got %d rows, want 0", len(pvs))
+	}
+}
+
+func TestHandleOneOffQuery_SQLWhereFalseOrComparisonReturnsComparisonRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "flag", Type: schema.KindBool},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(7), types.NewBool(true)},
+				{types.NewUint32(8), types.NewBool(false)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x2d},
+		QueryString: "SELECT * FROM t WHERE FALSE OR id = 7",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(7)) {
+		t.Fatalf("unexpected row returned: %v", pvs[0])
+	}
+}
+
+func TestHandleOneOffQuery_SQLWhereFalseAndComparisonReturnsNoRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "flag", Type: schema.KindBool},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(7), types.NewBool(true)},
+				{types.NewUint32(8), types.NewBool(false)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x2e},
+		QueryString: "SELECT * FROM t WHERE FALSE AND id = 7",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 0 {
+		t.Fatalf("got %d rows, want 0", len(pvs))
+	}
+}
+
 func TestHandleOneOffQuery_QuotedSpecialCharacterIdentifiers(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{

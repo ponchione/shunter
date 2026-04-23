@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -218,4 +220,34 @@ func TestParityOneOffQueryResponseDurationNonZeroOnCompileFail(t *testing.T) {
 	if result.TotalHostExecutionDuration == 0 {
 		t.Fatal("TotalHostExecutionDuration = 0, want non-zero on compile-fail path")
 	}
+}
+
+func TestHandleOneOffQuery_SQLTooLongRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("users", 1, schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32})
+	stateAccess := snapshotPanicStateAccess{t: t}
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x44},
+		QueryString: overlongSQLQuery(),
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("Error = nil, want non-nil on overlength SQL")
+	}
+	if !strings.Contains(*result.Error, "maximum allowed length") {
+		t.Fatalf("Error = %q, want maximum allowed length message", *result.Error)
+	}
+	if result.TotalHostExecutionDuration == 0 {
+		t.Fatal("TotalHostExecutionDuration = 0, want non-zero on overlength SQL path")
+	}
+}
+
+type snapshotPanicStateAccess struct{ t *testing.T }
+
+func (s snapshotPanicStateAccess) Snapshot() store.CommittedReadView {
+	s.t.Fatal("Snapshot() called, want overlength SQL rejected before snapshot evaluation")
+	return nil
 }

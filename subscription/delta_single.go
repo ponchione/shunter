@@ -84,6 +84,8 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 		return MatchRowSide(p.Left, table, sideAlias, row) || MatchRowSide(p.Right, table, sideAlias, row)
 	case AllRows:
 		return true
+	case NoRows:
+		return false
 	case Join:
 		// A Join is a structural predicate, not a row-level filter.
 		// Treat as pass; the join-delta evaluator handles it directly.

@@ -32,6 +32,7 @@ const (
 	tagJoin      byte = 0x06
 	tagOr        byte = 0x07
 	tagCrossJoin byte = 0x08
+	tagNoRows    byte = 0x09
 )
 
 // Within a canonical Bound encoding.
@@ -84,6 +85,23 @@ func (e *canonicalEncoder) writeU64(v uint64) {
 func isAllRowsPredicate(pred Predicate) bool {
 	_, ok := pred.(AllRows)
 	return ok
+}
+
+func isNoRowsPredicate(pred Predicate) bool {
+	_, ok := pred.(NoRows)
+	return ok
+}
+
+func sameCanonicalTable(left, right Predicate) bool {
+	leftTable, ok := canonicalGroupTable(left)
+	if !ok {
+		return false
+	}
+	rightTable, ok := canonicalGroupTable(right)
+	if !ok {
+		return false
+	}
+	return leftTable == rightTable
 }
 
 func singlePredicateTable(pred Predicate) (TableID, bool) {
@@ -294,10 +312,16 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		if left == nil || right == nil {
 			return And{Left: left, Right: right}
 		}
-		if isAllRowsPredicate(left) {
+		if isNoRowsPredicate(left) && sameCanonicalTable(left, right) {
+			return left
+		}
+		if isNoRowsPredicate(right) && sameCanonicalTable(left, right) {
 			return right
 		}
-		if isAllRowsPredicate(right) {
+		if isAllRowsPredicate(left) && sameCanonicalTable(left, right) {
+			return right
+		}
+		if isAllRowsPredicate(right) && sameCanonicalTable(left, right) {
 			return left
 		}
 		combined := And{Left: left, Right: right}
@@ -316,11 +340,17 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		if left == nil || right == nil {
 			return Or{Left: left, Right: right}
 		}
-		if isAllRowsPredicate(left) {
+		if isAllRowsPredicate(left) && sameCanonicalTable(left, right) {
 			return left
 		}
-		if isAllRowsPredicate(right) {
+		if isAllRowsPredicate(right) && sameCanonicalTable(left, right) {
 			return right
+		}
+		if isNoRowsPredicate(left) && sameCanonicalTable(left, right) {
+			return right
+		}
+		if isNoRowsPredicate(right) && sameCanonicalTable(left, right) {
+			return left
 		}
 		combined := Or{Left: left, Right: right}
 		if table, ok := canonicalGroupTable(combined); ok {
@@ -387,6 +417,9 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 		encodePredicate(e, p.Right)
 	case AllRows:
 		e.writeByte(tagAllRows)
+		e.writeU32(uint32(p.Table))
+	case NoRows:
+		e.writeByte(tagNoRows)
 		e.writeU32(uint32(p.Table))
 	case Join:
 		e.writeByte(tagJoin)

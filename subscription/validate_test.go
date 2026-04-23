@@ -142,6 +142,21 @@ func TestValidateJoinUnindexed(t *testing.T) {
 	}
 }
 
+func TestValidateNoRowsKnownTable(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	if err := ValidatePredicate(NoRows{Table: 1}, s); err != nil {
+		t.Fatalf("ValidatePredicate(NoRows) = %v, want nil", err)
+	}
+}
+
+func TestValidateNoRowsUnknownTable(t *testing.T) {
+	s := newFakeSchema()
+	if err := ValidatePredicate(NoRows{Table: 1}, s); !errors.Is(err, ErrTableNotFound) {
+		t.Fatalf("want ErrTableNotFound, got %v", err)
+	}
+}
+
 func TestValidateColEqMissingTable(t *testing.T) {
 	s := baseSchema()
 	p := ColEq{Table: 999, Column: 0, Value: types.NewUint64(1)}

@@ -40,6 +40,13 @@ func TestAllRowsTablesSingle(t *testing.T) {
 	}
 }
 
+func TestNoRowsTablesSingle(t *testing.T) {
+	p := NoRows{Table: 10}
+	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{10}) {
+		t.Fatalf("NoRows.Tables() = %v, want [10]", got)
+	}
+}
+
 func TestJoinTablesBoth(t *testing.T) {
 	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
 	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{1, 2}) {
@@ -118,5 +125,6 @@ func TestPredicateSealed(t *testing.T) {
 	var _ Predicate = And{}
 	var _ Predicate = Or{}
 	var _ Predicate = AllRows{}
+	var _ Predicate = NoRows{}
 	var _ Predicate = Join{}
 }

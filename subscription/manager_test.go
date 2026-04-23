@@ -523,6 +523,76 @@ func TestRegisterSet_TrueAndComparisonSharesQueryStateWithComparison(t *testing.
 	}
 }
 
+func TestRegisterSet_NoRowsSharesQueryState(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewString("x")}},
+	})
+	mgr := NewManager(s, s)
+	pred := NoRows{Table: 1}
+
+	got, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    42,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Update) != 0 {
+		t.Fatalf("initial update = %+v, want none for NoRows", got.Update)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{2},
+		QueryID:    43,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 1 {
+		t.Fatalf("query-state count = %d, want 1 shared state", got)
+	}
+	h := ComputeQueryHash(pred, nil)
+	if qs := mgr.registry.byHash[h]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared query state = %+v, want refCount 2", qs)
+	}
+}
+
+func TestRegisterSet_SameTableFalseOrComparisonSharesQueryState(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {{types.NewUint64(7), types.NewString("x")}},
+	})
+	mgr := NewManager(s, s)
+	comparison := ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)}
+	withFalse := Or{Left: NoRows{Table: 1}, Right: comparison}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{1},
+		QueryID:    44,
+		Predicates: []Predicate{comparison},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     types.ConnectionID{2},
+		QueryID:    45,
+		Predicates: []Predicate{withFalse},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 1 {
+		t.Fatalf("query-state count = %d, want 1 shared state", got)
+	}
+	h := ComputeQueryHash(comparison, nil)
+	if qs := mgr.registry.byHash[h]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared query state = %+v, want refCount 2", qs)
+	}
+}
+
 func TestRegisterSet_PredicateHashIdentityCountMismatchRejected(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)

@@ -170,6 +170,32 @@ func TestQueryHashTrueAndComparisonMatchesComparison(t *testing.T) {
 	}
 }
 
+func TestQueryHashNoRowsStable(t *testing.T) {
+	pred := NoRows{Table: 1}
+	if ComputeQueryHash(pred, nil) != ComputeQueryHash(pred, nil) {
+		t.Fatal("NoRows hash should be deterministic")
+	}
+}
+
+func TestQueryHashSameTableFalseOrComparisonCanonicalized(t *testing.T) {
+	comparison := ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)}
+	withFalse := Or{Left: NoRows{Table: 1}, Right: comparison}
+	if ComputeQueryHash(withFalse, nil) != ComputeQueryHash(comparison, nil) {
+		t.Fatal("FALSE OR comparison should share canonical hash with comparison")
+	}
+}
+
+func TestQueryHashMixedTableFalseOrComparisonNotCanonicalized(t *testing.T) {
+	mixed := Or{
+		Left:  NoRows{Table: 1},
+		Right: ColEq{Table: 2, Column: 0, Value: types.NewUint64(7)},
+	}
+	right := ColEq{Table: 2, Column: 0, Value: types.NewUint64(7)}
+	if ComputeQueryHash(mixed, nil) == ComputeQueryHash(right, nil) {
+		t.Fatal("mixed-table FALSE OR comparison should not collapse to the right child")
+	}
+}
+
 func TestQueryHashJoinFilterDiffers(t *testing.T) {
 	withoutF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, Filter: nil}
 	withF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0,

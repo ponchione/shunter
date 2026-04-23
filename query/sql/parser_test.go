@@ -298,6 +298,59 @@ func TestParseWhereTrueLiteral(t *testing.T) {
 	}
 }
 
+func TestParseWhereFalseLiteral(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE FALSE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if _, ok := stmt.Predicate.(FalsePredicate); !ok {
+		t.Fatalf("Predicate = %T, want FalsePredicate", stmt.Predicate)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %v, want none", stmt.Filters)
+	}
+}
+
+func TestParseWhereFalseAndComparison(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE FALSE AND id = 7")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	andPred, ok := stmt.Predicate.(AndPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want AndPredicate", stmt.Predicate)
+	}
+	if _, ok := andPred.Left.(FalsePredicate); !ok {
+		t.Fatalf("Left = %T, want FalsePredicate", andPred.Left)
+	}
+	if _, ok := andPred.Right.(ComparisonPredicate); !ok {
+		t.Fatalf("Right = %T, want ComparisonPredicate", andPred.Right)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %v, want none for grouped predicate tree", stmt.Filters)
+	}
+}
+
+func TestParseWhereFalseOrComparison(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE FALSE OR id = 7")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	orPred, ok := stmt.Predicate.(OrPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want OrPredicate", stmt.Predicate)
+	}
+	if _, ok := orPred.Left.(FalsePredicate); !ok {
+		t.Fatalf("Left = %T, want FalsePredicate", orPred.Left)
+	}
+	if _, ok := orPred.Right.(ComparisonPredicate); !ok {
+		t.Fatalf("Right = %T, want ComparisonPredicate", orPred.Right)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %v, want none for grouped predicate tree", stmt.Filters)
+	}
+}
+
 // Reference SQL docs explicitly call out quoted identifiers as the way to use
 // reserved SQL keywords as table/column names (for example `SELECT * FROM
 // "Order"`). Pin that end-to-end on Shunter's current narrow single-table

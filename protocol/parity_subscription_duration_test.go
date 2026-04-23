@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -98,6 +99,58 @@ func TestParitySubscribeMultiDurationNonZeroOnSubmitFail(t *testing.T) {
 	se := decoded.(SubscriptionError)
 	if se.TotalHostExecutionDurationMicros == 0 {
 		t.Fatal("TotalHostExecutionDurationMicros = 0, want non-zero on multi submit-fail path")
+	}
+}
+
+func TestHandleSubscribeSingle_SQLTooLongRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+	msg := &SubscribeSingleMsg{RequestID: 15, QueryID: 115, QueryString: overlongSQLQuery()}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if !strings.Contains(se.Error, "maximum allowed length") {
+		t.Fatalf("Error = %q, want maximum allowed length message", se.Error)
+	}
+	if se.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("TotalHostExecutionDurationMicros = 0, want non-zero on overlength SQL path")
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection before executor", req)
+	}
+}
+
+func TestHandleSubscribeMulti_SQLTooLongRejectedBeforeExecutor(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+	msg := &SubscribeMultiMsg{RequestID: 16, QueryID: 116, QueryStrings: []string{"SELECT * FROM users", overlongSQLQuery()}}
+
+	handleSubscribeMulti(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if !strings.Contains(se.Error, "maximum allowed length") {
+		t.Fatalf("Error = %q, want maximum allowed length message", se.Error)
+	}
+	if se.TotalHostExecutionDurationMicros == 0 {
+		t.Fatal("TotalHostExecutionDurationMicros = 0, want non-zero on overlength SQL path")
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection before executor", req)
 	}
 }
 

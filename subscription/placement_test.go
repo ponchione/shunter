@@ -27,11 +27,24 @@ func TestPlaceAllRowsGoesToTableIndex(t *testing.T) {
 	p := AllRows{Table: 1}
 	h := hashN(1)
 	PlaceSubscription(idx, p, h)
-	if got := idx.Table.Lookup(1); len(got) != 1 {
-		t.Fatalf("TableIndex = %v, want 1", got)
+	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != h {
+		t.Fatalf("Table.Lookup(1) = %v, want [%v]", got, h)
 	}
-	if cols := idx.Value.TrackedColumns(1); len(cols) != 0 {
-		t.Fatalf("ValueIndex should be empty: %v", cols)
+	if got := idx.Value.TrackedColumns(1); len(got) != 0 {
+		t.Fatalf("ValueIndex should be empty, got tracked columns %v", got)
+	}
+}
+
+func TestPlaceNoRowsGoesToTableIndex(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := NoRows{Table: 1}
+	h := hashN(11)
+	PlaceSubscription(idx, p, h)
+	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != h {
+		t.Fatalf("Table.Lookup(1) = %v, want [%v]", got, h)
+	}
+	if got := idx.Value.TrackedColumns(1); len(got) != 0 {
+		t.Fatalf("ValueIndex should be empty, got tracked columns %v", got)
 	}
 }
 

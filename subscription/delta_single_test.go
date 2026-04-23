@@ -107,6 +107,25 @@ func TestMatchRowAllRowsAlways(t *testing.T) {
 	}
 }
 
+func TestMatchRowNoRowsAlwaysRejects(t *testing.T) {
+	p := NoRows{Table: 1}
+	if MatchRow(p, 1, types.ProductValue{types.NewUint64(1)}) {
+		t.Fatal("NoRows should always reject")
+	}
+}
+
+func TestEvalSingleTableDeltaNoRowsProducesNoChanges(t *testing.T) {
+	cs := simpleChangeset(1,
+		[]types.ProductValue{{types.NewUint64(1)}},
+		[]types.ProductValue{{types.NewUint64(2)}},
+	)
+	dv := NewDeltaView(newMockCommitted(), cs, nil)
+	inserts, deletes := EvalSingleTableDelta(dv, NoRows{Table: 1}, 1)
+	if len(inserts) != 0 || len(deletes) != 0 {
+		t.Fatalf("delta = inserts %v deletes %v, want none", inserts, deletes)
+	}
+}
+
 func TestEvalSingleTableDeltaInserts(t *testing.T) {
 	cs := simpleChangeset(1,
 		[]types.ProductValue{

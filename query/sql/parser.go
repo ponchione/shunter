@@ -37,6 +37,8 @@ import (
 // Wrap with fmt.Errorf("%w: ...", ErrUnsupportedSQL, ...) for specifics.
 var ErrUnsupportedSQL = errors.New("unsupported SQL")
 
+const maxSQLLength = 50_000
+
 // LitKind tags a parsed literal's lexical category.
 type LitKind int
 
@@ -147,6 +149,13 @@ type TruePredicate struct{}
 
 func (TruePredicate) isPredicate() {}
 
+// FalsePredicate is a bare boolean WHERE term that can never emit rows.
+// It exists to accept reference-backed shapes such as `WHERE FALSE` without
+// inventing a synthetic comparison.
+type FalsePredicate struct{}
+
+func (FalsePredicate) isPredicate() {}
+
 // Statement is the parsed output.
 //
 // ProjectedAlias preserves the qualifier token the user wrote for the
@@ -172,6 +181,9 @@ type relationBindings struct {
 
 // Parse parses the minimum-viable SELECT surface.
 func Parse(input string) (Statement, error) {
+	if len(input) > maxSQLLength {
+		return Statement{}, fmt.Errorf("%w: SQL query exceeds maximum allowed length: %q", ErrUnsupportedSQL, previewSQL(input, 120))
+	}
 	toks, err := tokenize(input)
 	if err != nil {
 		return Statement{}, err
@@ -182,6 +194,13 @@ func Parse(input string) (Statement, error) {
 		return Statement{}, err
 	}
 	return stmt, nil
+}
+
+func previewSQL(input string, limit int) string {
+	if limit <= 0 || len(input) <= limit {
+		return input
+	}
+	return input[:limit] + "..."
 }
 
 // --- tokenizer ---
@@ -743,9 +762,15 @@ func (p *parser) parsePredicateTerm(bindings relationBindings) (Predicate, error
 		p.advance()
 		return pred, nil
 	}
-	if t := p.peek(); t.kind == tokIdent && !t.quoted && strings.EqualFold(t.text, "TRUE") {
-		p.advance()
-		return TruePredicate{}, nil
+	if t := p.peek(); t.kind == tokIdent && !t.quoted {
+		if strings.EqualFold(t.text, "TRUE") {
+			p.advance()
+			return TruePredicate{}, nil
+		}
+		if strings.EqualFold(t.text, "FALSE") {
+			p.advance()
+			return FalsePredicate{}, nil
+		}
 	}
 	return p.parseComparisonPredicate(bindings)
 }
@@ -764,6 +789,8 @@ func flattenAndFilters(pred Predicate) ([]Filter, bool) {
 		return nil, true
 	case TruePredicate:
 		return nil, true
+	case FalsePredicate:
+		return nil, false
 	case ComparisonPredicate:
 		return []Filter{p.Filter}, true
 	case AndPredicate:
