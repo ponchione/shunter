@@ -983,6 +983,48 @@ func TestRegisterSet_SelfJoinFilterChildOrderSharesQueryState(t *testing.T) {
 	}
 }
 
+func TestRegisterSet_SelfJoinFilterAssociativeGroupingSharesQueryState(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint32, 1: types.KindUint32}, 1)
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewUint32(7)},
+			{types.NewUint32(2), types.NewUint32(7)},
+			{types.NewUint32(3), types.NewUint32(9)},
+		},
+	})
+	mgr := NewManager(s, s)
+	a := ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint32(1)}
+	b := ColRange{Table: 1, Column: 0, Alias: 0, Lower: Bound{Value: types.NewUint32(0), Inclusive: false}, Upper: Bound{Unbounded: true}}
+	c := ColRange{Table: 1, Column: 0, Alias: 0, Lower: Bound{Unbounded: true}, Upper: Bound{Value: types.NewUint32(2), Inclusive: false}}
+	leftGrouped := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: And{Left: And{Left: a, Right: b}, Right: c}}
+	rightGrouped := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: And{Left: a, Right: And{Left: b, Right: c}}}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 156, Predicates: []Predicate{leftGrouped},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 157, Predicates: []Predicate{rightGrouped},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 1 {
+		t.Fatalf("query-state count = %d, want 1 shared state", got)
+	}
+	h1 := ComputeQueryHash(leftGrouped, nil)
+	h2 := ComputeQueryHash(rightGrouped, nil)
+	if h1 != h2 {
+		t.Fatalf("query hashes differ: %v vs %v", h1, h2)
+	}
+	if qs := mgr.registry.byHash[h1]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared query state = %+v, want refCount 2", qs)
+	}
+}
+
 func TestRegisterJoinBootstrapPreservesProjectedRightOrderWhenOnlyRightJoinColumnIndexed(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})

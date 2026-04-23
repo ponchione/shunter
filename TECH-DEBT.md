@@ -56,16 +56,16 @@ Status: open
 Severity: high
 
 Summary:
-- many narrow A2 parity slices are already closed and pinned: fan-out durability gating, join/cross-join multiplicity, shared unindexed-join admission, projected-side bootstrap/final-delta ordering, projected-join delta ordering, `:sender` hash identity, neutral-`TRUE` normalization, same-table canonicalization (child order / grouping / duplicate leaves / absorption), overlength SQL admission, bare/grouped `FALSE`, distinct-table join-filter child-order canonicalization, and self-join alias-sensitive join-filter child-order canonicalization
+- many narrow A2 parity slices are already closed and pinned: fan-out durability gating, join/cross-join multiplicity, shared unindexed-join admission, projected-side bootstrap/final-delta ordering, projected-join delta ordering, `:sender` hash identity, neutral-`TRUE` normalization, same-table canonicalization (child order / grouping / duplicate leaves / absorption), overlength SQL admission, bare/grouped `FALSE`, distinct-table join-filter child-order canonicalization, and self-join alias-sensitive join-filter canonicalization (child order + associative grouping)
 - the supported SQL surface is still intentionally narrower than the reference SQL path
-- the next actionable residual is self-join alias-sensitive join-filter associative-grouping canonicalization: accepted aliased self-join shapes now share identity when only immediate child order changes, but `subscription/hash.go` still fences the broader flatten/dedupe/absorb pipeline away from join-containing predicates and the new self-join helper only reorders immediate `And` / `Or` children, so grouped self-join filters can still fork canonical query hash / query-state identity solely because tree shape differs
+- the next actionable residual is self-join alias-sensitive join-filter duplicate-leaf idempotence: `subscription/hash.go` now flattens and sorts same-kind self-join filter groups, but the self-join path still does not dedupe exact duplicate alias-aware leaves, so accepted aliased self-join filters can still fork canonical query hash / query-state identity for `a` vs `a AND a` / `a OR a` even when visible one-off rows already match
 - row-level security / per-client filtering remains absent
-- broader A2/runtime-model gaps remain after the self-join grouping seam, but they should be taken one bounded slice at a time
+- broader A2/runtime-model gaps remain after the self-join duplicate-leaf seam, but they should be taken one bounded slice at a time
 
 Execution note:
 - OI-002 remains the next active handoff issue
-- treat the next batch as a bounded self-join alias-sensitive join-filter associative-grouping slice
-- do not widen that batch into self-join duplicate-leaf / absorption work, parser-surface widening, or non-join predicate work unless focused tests prove the narrower seam is insufficient
+- treat the next batch as a bounded self-join alias-sensitive join-filter duplicate-leaf idempotence slice
+- do not widen that batch into self-join absorption work, parser-surface widening, or non-join predicate work unless focused tests prove the narrower seam is insufficient
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads
@@ -265,7 +265,7 @@ Severity: medium
 Realized closure:
 - `schema.SchemaLookup` and `schema.SchemaRegistry` now expose `ColumnCount(TableID) int`, so the built registry satisfies `subscription.SchemaLookup` directly.
 - `protocol.SchemaLookup` now embeds the schema-owned lookup surface, which lets one-off query admission reuse `subscription.ValidatePredicate(...)` without a protocol-local adapter seam.
-- The example bootstrap and embedder docs now pass `reg` directly to `subscription.NewManager(...)`; the old `schemaLookupAdapter` shim was removed.
+- The example bootstrap and hosted bootstrap docs now pass `reg` directly to `subscription.NewManager(...)`; the old `schemaLookupAdapter` shim was removed.
 - A compile-time pin now asserts `schema.SchemaRegistry` satisfies `subscription.SchemaLookup` directly.
 
 Verification:
@@ -276,50 +276,50 @@ Source docs / surfaces:
 - `schema/registry.go`
 - `protocol/handle_subscribe.go`
 - `cmd/shunter-example/main.go`
-- `docs/embedding.md`
+- `docs/hosted-runtime-bootstrap.md`
 - `subscription/oi013_registry_lookup_test.go`
 
-### OI-014: Shunter still lacks a true embeddable library surface despite the new example bootstrap
+### OI-014: Shunter still lacks a true hosted runtime surface despite the new example bootstrap
 
 Status: open
 Severity: medium
 
 Summary:
-- the example/bootstrap story is now real, but the module still does not expose the project-brief-style library surface implied by `go get github.com/ponchione/shunter`.
+- the example/bootstrap story is now real, but the repo still does not expose the project-brief-style hosted runtime/app-definition surface.
 - there is no root importable package and no `engine/` package implementing a top-level runtime owner.
-- embedders still have to hand-wire schema, commitlog, executor, subscription, protocol, scheduler, and multiple shim adapters in host code.
+- the current bootstrap still hand-wires schema, commitlog, executor, subscription, protocol, scheduler, and multiple shim adapters in host/runtime code.
 - `schema.EngineOptions` advertises runtime knobs (`DataDir`, `ExecutorQueueCapacity`, `DurabilityQueueCapacity`, `EnableProtocol`) that are not consumed by the live runtime path; only `StartupSnapshotSchema` is read by `Engine.Start()`.
 
 Why this matters:
-- this is now the main remaining gap between "there is a working example" and "Shunter is a usable Go library you can embed"
-- the current public surface is still subsystem-oriented rather than application-embedder-oriented
-- no-op or effectively inert runtime options are risky because embedders may believe they are configuring behavior that the system ignores
+- this is now the main remaining gap between "there is a working example" and "Shunter is a usable hosted runtime/server"
+- the current public surface is still subsystem-oriented rather than application/runtime-oriented
+- no-op or effectively inert runtime options are risky because operators may believe they are configuring behavior that the system ignores
 
 Primary code surfaces:
 - `schema/build.go`
 - `schema/builder.go`
 - `schema/version.go`
 - `cmd/shunter-example/main.go`
-- `docs/embedding.md`
+- `docs/hosted-runtime-bootstrap.md`
 - repo/module root (`go.mod`)
 
 Grounded evidence:
-- `docs/project-brief.md:5-9,28,138,203-210` describes Shunter as an embeddable Go library and sketches an `engine/` package for top-level initialization/lifecycle.
+- `docs/project-brief.md` now frames Shunter as a hosted runtime/server, but the repo still lacks the corresponding top-level runtime surface.
 - `rtk go list` at the repo root fails with `no Go files in /home/gernsback/source/shunter`.
 - `rtk go list ./engine` fails with `stat /home/gernsback/source/shunter/engine: directory not found`.
 - Compile-only audit repro (`rtk go test ./.tmp_audit_rootpkg`) fails because `github.com/ponchione/shunter` is not importable as a package.
 - `cmd/shunter-example/main.go:99-205` shows the real host-facing bring-up still requires manual assembly of the major subsystems plus the remaining glue adapters that are not yet hidden behind a top-level engine API.
-- `docs/embedding.md:10-40,83-124,191-199` documents the explicit subsystem wiring sequence and the two remaining adapter seams (`durabilityAdapter`, `stateAdapter`) that embedders still carry in host code.
+- `docs/hosted-runtime-bootstrap.md:10-40,83-124,191-199` documents the explicit subsystem wiring sequence and the two remaining adapter seams (`durabilityAdapter`, `stateAdapter`) that the current hosted bootstrap still carries in bring-up code.
 - `schema/builder.go:116-128` defines runtime-facing `EngineOptions`, but `schema/version.go:134-135` only consumes `StartupSnapshotSchema`; the other knobs are not used in the live code path.
 
 Recommended resolution options:
-- introduce a real public engine package (or root package) that owns config, bring-up, and shutdown across the existing subsystems
+- introduce a real public runtime package (or root package) that owns config, bring-up, shutdown, and module/app-definition loading across the existing subsystems
 - thread the currently advertised `EngineOptions` fields into that surface if they are meant to stay public
-- or explicitly narrow the product/docs claim from "embeddable library" to "subsystem toolkit + example wiring" until a true engine API exists
+- or explicitly narrow the product/docs claim from "hosted runtime" to "subsystem toolkit + example wiring" until a true runtime API exists
 
 Suggested follow-up tests:
 - compile-only smoke proving the advertised public import path/package exists
-- minimal start/stop embedder smoke test using the intended top-level API instead of example-local wiring
+- minimal start/stop hosted-runtime smoke test using the intended top-level API instead of example-local wiring
 - config-effect pins proving the exposed runtime options actually influence runtime construction
 
 ### OI-008: The repo still lacks a coherent top-level engine/bootstrap story (closed 2026-04-22)
@@ -329,17 +329,17 @@ Severity: medium
 
 Summary (closed):
 - `cmd/shunter-example/main.go` is the first end-to-end bootstrap: schema → committed state → commit-log durability → executor → protocol server, with graceful SIGINT/SIGTERM shutdown. Anonymous auth by default so the server can be dialed without an external IdP.
-- `docs/embedding.md` documents the minimal wiring surface with a diagram and step-by-step walkthrough. Two glue adapters (`durabilityAdapter` for the `uint64`↔`types.TxID` shim, `stateAdapter` for `*CommittedState`↔`CommittedStateAccess`) are called out as the only non-obvious wiring. Adapters live in `main.go`, not in a shared package, so they stay discoverable alongside the example.
+- `docs/hosted-runtime-bootstrap.md` documents the minimal wiring surface with a diagram and step-by-step walkthrough. Two glue adapters (`durabilityAdapter` for the `uint64`↔`types.TxID` shim, `stateAdapter` for `*CommittedState`↔`CommittedStateAccess`) are called out as the only non-obvious wiring. Adapters live in `main.go`, not in a shared package, so they stay discoverable alongside the example.
 - Cold-boot path bootstraps an empty committed state and writes an initial snapshot at TxID 0 when `commitlog.OpenAndRecoverDetailed` returns `ErrNoData`, then re-runs recovery. This is the `main.go openOrBootstrap` helper.
 
 Realized surfaces:
 - `cmd/shunter-example/main.go` — `run(ctx, addr, dataDir)`, `buildEngine(ctx, dataDir)`, `openOrBootstrap(dir, reg)`, `durabilityAdapter`, `stateAdapter`, `sayHello` reducer
 - `cmd/shunter-example/main_test.go` — 3 smoke pins: `TestBuildEngine_BootstrapThenRecover` (cold-boot + recovery-replay), `TestBuildEngine_AdmitsAnonymousConnection` (WebSocket dial → 101 Upgrade → InitialConnection), `TestRun_ShutsDownCleanlyOnContextCancel` (ctx cancel → clean exit)
-- `docs/embedding.md` — embedder walkthrough with wiring diagram, seven numbered steps, and scope callouts
+- `docs/hosted-runtime-bootstrap.md` — hosted bootstrap walkthrough with wiring diagram, seven numbered steps, and scope callouts
 
 Intentionally out of scope (carried forward):
 - Strict auth — example uses anonymous so it is dialable without an IdP.
-- The broader embedder/library-surface gap beyond this bootstrap example is tracked separately under OI-014.
+- The broader hosted-runtime surface gap beyond this bootstrap example is tracked separately under OI-014.
 - The subscription `SchemaLookup` adapter seam (`ColumnCount`) is tracked separately under OI-013.
 - `protocol/handle_oneoff_test.go` was already stale against the working-tree `TableByName` 3-value return before this session; still out of scope per OI-011 carry-forward note. Not regressed by this slice.
 
@@ -351,7 +351,7 @@ Verification:
 - `rtk go test ./schema ./store ./subscription ./executor ./commitlog ./cmd/shunter-example -count=1` → 911 passed (baseline 908 from these 5 packages + 3 new)
 
 Source docs:
-- `docs/embedding.md`
+- `docs/hosted-runtime-bootstrap.md`
 - `cmd/shunter-example/main.go`
 - `cmd/shunter-example/main_test.go`
 
@@ -363,7 +363,7 @@ Severity: high
 Summary (closed):
 - `Executor.Startup(ctx, *Scheduler)` is the single owner for the executor-side startup sequence required by SPEC-003 §10.6 / §13.5 / Story 3.6. Runs scheduler replay → dangling-client sweep → flip `externalReady`. Idempotent via `sync.Once`; if the sweep's post-commit pipeline latches executor-fatal mid-sequence, Startup returns the error and leaves the gate closed.
 - `Executor.sweepDanglingClients` (Story 7.5) iterates surviving `sys_clients` rows from the post-recovery committed state and deletes each via a fresh cleanup transaction — no OnDisconnect reducer is invoked, reusing the cleanup-only pattern already at `executor/lifecycle.go:70-92`. The cleanup commit still runs the post-commit pipeline with `source=CallSourceLifecycle` so subscribers observe each delete.
-- External admission is gated on `SubmitWithContext` (the protocol adapter's only submit entrypoint). Pre-Startup calls return `ErrExecutorNotStarted`; `Submit` (the in-process / test entrypoint) is deliberately ungated so embedder-direct callers own their ordering. Scope matches SPEC-003's "external reducer or subscription-registration command" wording.
+- External admission is gated on `SubmitWithContext` (the protocol adapter's only submit entrypoint). Pre-Startup calls return `ErrExecutorNotStarted`; `Submit` (the in-process / test entrypoint) is deliberately ungated so direct internal callers own their ordering. Scope matches SPEC-003's "external reducer or subscription-registration command" wording.
 - Scheduler `ReplayFromCommitted()` is called before the sweep when a non-nil `*Scheduler` is passed; past-due `sys_scheduled` rows are enqueued into the executor inbox ahead of any external admission.
 
 Realized surfaces:
@@ -477,7 +477,7 @@ Source docs:
 - `protocol/tags.go` + `protocol/server_messages.go` + `protocol/client_messages.go` (canonical source for the tag table and envelope shapes)
 
 Explicitly out of scope (carried forward):
-- The broader embedder/library-surface gap is tracked under OI-014 rather than this doc-refresh issue.
+- The broader hosted-runtime surface gap is tracked under OI-014 rather than this doc-refresh issue.
 - The subscription `SchemaLookup` adapter seam is tracked under OI-013 rather than this doc-refresh issue.
 - `schema/registry.go` working-tree diff expanding `TableByName` to `(TableID, *TableSchema, bool)`; `protocol/handle_oneoff_test.go` is stale against that three-value return. Flag as its own slice when the registry change is committed; explicitly NOT folded into OI-012.
 

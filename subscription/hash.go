@@ -313,6 +313,28 @@ func orderSelfJoinCanonicalChildren(left, right Predicate) (Predicate, Predicate
 	return right, left
 }
 
+func flattenSelfJoinCanonicalAnd(pred Predicate, out []Predicate) []Predicate {
+	switch p := pred.(type) {
+	case And:
+		out = flattenSelfJoinCanonicalAnd(p.Left, out)
+		out = flattenSelfJoinCanonicalAnd(p.Right, out)
+		return out
+	default:
+		return append(out, pred)
+	}
+}
+
+func flattenSelfJoinCanonicalOr(pred Predicate, out []Predicate) []Predicate {
+	switch p := pred.(type) {
+	case Or:
+		out = flattenSelfJoinCanonicalOr(p.Left, out)
+		out = flattenSelfJoinCanonicalOr(p.Right, out)
+		return out
+	default:
+		return append(out, pred)
+	}
+}
+
 func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 	switch p := pred.(type) {
 	case And:
@@ -321,16 +343,18 @@ func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 		if left == nil || right == nil {
 			return And{Left: left, Right: right}
 		}
-		left, right = orderSelfJoinCanonicalChildren(left, right)
-		return And{Left: left, Right: right}
+		children := flattenSelfJoinCanonicalAnd(And{Left: left, Right: right}, nil)
+		sortCanonicalPredicates(children)
+		return rebuildCanonicalAnd(children)
 	case Or:
 		left := canonicalizeSelfJoinFilter(p.Left)
 		right := canonicalizeSelfJoinFilter(p.Right)
 		if left == nil || right == nil {
 			return Or{Left: left, Right: right}
 		}
-		left, right = orderSelfJoinCanonicalChildren(left, right)
-		return Or{Left: left, Right: right}
+		children := flattenSelfJoinCanonicalOr(Or{Left: left, Right: right}, nil)
+		sortCanonicalPredicates(children)
+		return rebuildCanonicalOr(children)
 	case Join, CrossJoin:
 		return p
 	default:

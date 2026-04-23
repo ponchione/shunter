@@ -106,7 +106,8 @@ Current grounded state:
 - overlength SQL is now rejected before recursive parse/compile work on subscribe single, subscribe multi, and one-off query paths via a shared 50,000-byte parser guard, matching the reference's explicit protection against deeply nested boolean-query stack blowups
 - reference-backed bare and grouped `FALSE` predicates now follow through coherently on the already-supported SQL surface: parser acceptance, subscribe lowering, one-off execution, canonical hashing, validation, bootstrap, and single-table delta evaluation all share an explicit `subscription.NoRows` runtime meaning
 - accepted distinct-table joins whose same-table filter leaves differ only by commutative child order now also share one canonical query hash / query-state identity: `subscription/hash.go` canonicalizes `Join.Filter` for distinct-table joins while preserving join structure (`Left`/`Right`, join columns, aliases, projection side)
-- accepted aliased self-joins whose same-side filter leaves differ only by commutative child order now also share one canonical query hash / query-state identity: `subscription/hash.go` now applies a bounded alias-aware child-order canonicalization inside self-join `Join.Filter` without enabling the broader alias-blind same-table flatten/dedupe/absorb pipeline
+- accepted aliased self-joins whose same-side filter differs only by commutative child order now also share one canonical query hash / query-state identity: `subscription/hash.go` now applies a bounded alias-aware child-order canonicalization inside self-join `Join.Filter` without enabling the broader alias-blind same-table flatten/dedupe/absorb pipeline
+- accepted aliased self-joins whose same-side filter differs only by associative grouping now also share one canonical query hash / query-state identity: `subscription/hash.go` now flattens and deterministically rebuilds same-kind self-join filter groups in an alias-aware way while keeping duplicate-leaf / absorption reductions fenced for later slices
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -211,8 +212,8 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, single-table commutative child-order, single-table associative-grouping, single-table duplicate-leaf idempotence, single-table absorption-law, overlength-SQL admission, false-predicate follow-through, distinct-table join-filter child-order, and self-join alias-sensitive join-filter child-order seams
-- the next bounded residual to scout first is self-join alias-sensitive join-filter associative grouping, because self-join filter canonicalization is still immediate-child-only while join-containing predicates remain fenced off from the broader flatten/dedupe/absorb path
+- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, single-table commutative child-order, single-table associative-grouping, single-table duplicate-leaf idempotence, single-table absorption-law, overlength-SQL admission, false-predicate follow-through, distinct-table join-filter child-order, self-join alias-sensitive join-filter child-order, and self-join alias-sensitive join-filter associative-grouping seams
+- the next bounded residual to scout first is self-join alias-sensitive join-filter duplicate-leaf idempotence, because live `subscription/hash.go` now flattens and sorts same-kind self-join filter groups but still leaves exact duplicate alias-aware leaves untouched inside the self-join path
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
@@ -262,10 +263,10 @@ When choosing the next slice:
 
 ## Current best next direction
 
-The distinct-table join-filter child-order canonicalization seam is now closed too. The best current direction is a bounded self-join alias-sensitive join-filter child-order slice: accepted aliased self-join shapes already compile and execute, but `subscription/hash.go` still skips `Join.Filter` canonicalization when `Join.Left == Join.Right`, so reordered self-join filters can still fork canonical query hash / query-state identity solely because source child order survives into the runtime tree.
+The self-join alias-sensitive join-filter associative-grouping seam is now closed too. The best current direction is a bounded self-join alias-sensitive join-filter duplicate-leaf idempotence slice: accepted aliased self-join shapes already compile and execute, and `subscription/hash.go` now canonicalizes same-kind self-join grouping, but the self-join path still does not remove exact duplicate alias-aware leaves, so `a`, `a AND a`, and `a OR a` can still fork canonical query hash / query-state identity solely because redundant leaves survive into the runtime tree.
 
 Current candidate directions are:
-- self-join alias-sensitive join-filter child-order canonicalization
+- self-join alias-sensitive join-filter duplicate-leaf idempotence
 - Tier B hardening when a concrete live risk is stronger than the next parity slice
 - a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
 - scheduler/bootstrap follow-through only when workload or integration evidence surfaces
