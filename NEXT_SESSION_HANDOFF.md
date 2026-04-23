@@ -24,6 +24,7 @@ For provenance of closed slices, use `rtk git log` — this file tracks only cur
 - The one-off-vs-subscribe unindexed-join validation seam is now closed: `protocol/handle_oneoff.go` runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so one-off SQL rejects the same unindexed join admission shapes subscribe registration already rejects.
 - The committed join projected-order seam is now closed: `subscription/register_set.go` enumerates projected-side rows first for bootstrap and unregister final-delta joins, so accepted join SQL no longer flips visible committed-row order solely because the usable index lives on the opposite join side.
 - The projected join delta-order seam is now closed too: `subscription/eval.go` now projects join fragments before reconciliation so partner churn cancels at the projected-row bag level, `subscription/delta_dedup.go` preserves fragment encounter order for surviving rows, and focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right ordering plus no-op churn cases.
+- The `:sender` subscribe hash-identity seam is now closed: `protocol/handle_subscribe.go` preserves caller-bound parameter provenance, `protocol/lifecycle.go` / `executor/protocol_inbox_adapter.go` forward per-predicate hash identities, and `subscription/register_set.go` hashes mixed batches per predicate instead of request-globally. Literal bytes queries no longer collide with the caller-parameterized form, and mixed batches only parameterize marked predicates.
 
 ## How to frame a session
 
@@ -37,15 +38,15 @@ Work in *batches*, not single slices. One session = one batch. Within a batch, l
 
 Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A3 or OI-004/005/006 hardening.
 
-## Next session: OI-002 A2 predicate normalization / validation drift after projected-join ordering closure
+## Next session: continue OI-002 A2 accepted-shape normalization / validation drift after sender-hash closure
 
-OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the first OI-002 fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, and the projected-join delta-order seam are now closed. The next open protocol-adjacent batch stays in OI-002 A2, but it should now move off join-ordering and onto the next bounded runtime/model residual: predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model.
+OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the first OI-002 fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, the projected-join delta-order seam, and the `:sender` subscribe hash-identity seam are now closed. A fresh scout this session did not surface a stronger named residual than the remaining accepted-shape normalization / validation bucket, so the next open protocol-adjacent batch stays in OI-002 A2 and should keep working that bucket rather than reopening any closed join-ordering or `:sender` work.
 
 Fresh-agent task:
 
 - Scout and then close one bounded OI-002 A2 predicate normalization / validation mismatch on an already-accepted SQL shape.
 - Compare the accepted SQL compile path against the runtime predicate model used by subscribe registration and one-off execution; look for a shape where parser acceptance exists but normalization / validation / hash identity / execution behavior still disagrees across seams.
-- Do not reopen projected-join ordering, join multiplicity, or join-index validation unless fresh evidence shows a new regression distinct from those closed slices.
+- Do not reopen projected-join ordering, join multiplicity, join-index validation, or `:sender` hash identity unless fresh evidence shows a new regression distinct from those closed slices.
 - Do not start with a broad SQL widening pass. Stay inside an already-accepted shape and prove the mismatch with focused tests before editing production code.
 - If the scout does not confirm a real normalization / validation residual, stop after updating this handoff with the grounded next-best A2 seam instead of forcing speculative churn.
 
@@ -57,17 +58,19 @@ Fresh-agent context:
   - one-off vs subscribe unindexed-join admission parity via shared `subscription.ValidatePredicate(...)`
   - committed join bootstrap/unregister projected-side ordering regardless of usable index side
   - post-commit projected-join delta ordering via projected-fragment-first reconciliation plus encounter-order-preserving `ReconcileJoinDelta(...)`
+  - subscribe-side `:sender` hash identity / mixed-batch parameterization provenance
 - Do not reopen:
   - fan-out delivery parity
   - join/cross-join multiplicity
   - one-off-vs-subscribe join-index validation
   - committed join bootstrap/final-delta projected ordering
   - projected join delta ordering
+  - `:sender` subscribe hash identity
   - rows-shape documented divergence
   - OI-001 A1 wire/message-family work
-- The highest-yield next check is now accepted SQL whose parser/compile path succeeds but whose normalized runtime predicate, validation outcome, canonical hash, or subscribe/one-off behavior still drifts across seams.
+- The highest-yield next check is still an accepted SQL shape whose parser/compile path succeeds but whose normalized runtime predicate, validation outcome, canonical hash, or subscribe/one-off behavior still drifts across seams.
 - Treat `query/sql/parser.go`, `protocol/handle_subscribe.go`, `protocol/handle_oneoff.go`, `subscription/predicate.go`, `subscription/validate.go`, and `subscription/hash.go` as the primary seam to compare.
-- The question for the fresh agent is not whether projected joins are ordered now; it is whether any already-accepted SQL shape still compiles into a runtime predicate model that disagrees between subscribe admission, one-off execution, and downstream identity/validation behavior.
+- The question for the fresh agent is not whether projected joins are ordered or whether `:sender` hashing is fixed; it is whether any other already-accepted SQL shape still compiles into a runtime predicate model that disagrees between subscribe admission, one-off execution, and downstream identity/validation behavior.
 
 Batch framing:
 

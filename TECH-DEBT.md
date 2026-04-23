@@ -63,11 +63,12 @@ Summary:
 - one-off SQL now reuses `subscription.ValidatePredicate(...)` before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing shared join-index validation
 - committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
 - post-commit projected join deltas now preserve projected-side semantics too: join fragments are projected before reconciliation so partner churn cancels at the projected-row bag level, and `ReconcileJoinDelta(...)` emits surviving rows in fragment encounter order instead of map iteration order; focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right ordering and no-op churn cases
+- accepted subscribe SQL using `:sender` now preserves parameterized hash identity through protocol compile → executor adapter → subscription registration, so literal bytes queries no longer collapse onto the same query hash/state as the parameterized caller-bound form and mixed subscribe batches only parameterize the marked predicates
 - row-level security / per-client filtering remains absent
-- broader query/subscription parity is still open beyond the landed narrow shapes, especially predicate normalization / validation drift and other bounded A2 gaps that remain after the closed join-index-validation + committed-ordering + projected-join-delta-ordering seams
+- broader query/subscription parity is still open beyond the landed narrow shapes, especially predicate normalization / validation drift and other bounded A2 gaps that remain after the closed join-index-validation + committed-ordering + projected-join-delta-ordering + sender-parameter-hash-identity seams
 
 Execution note:
-- OI-002 remains the next active handoff issue, but the fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, and the projected-join delta-order seam are now closed. The next bounded A2 batch should start from another remaining runtime/model gap rather than reopening those closed slices or closed A1 protocol work.
+- OI-002 remains the next active handoff issue, but the fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, the projected-join delta-order seam, and the sender-parameter hash-identity seam are now closed. The next bounded A2 batch should start from another remaining runtime/model gap rather than reopening those closed slices or closed A1 protocol work.
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads

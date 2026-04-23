@@ -31,7 +31,7 @@ Guardrails:
 ## Current grounded status
 
 Latest live repo state:
-- `rtk go test ./...` → `Go test: 1672 passed in 11 packages`
+- `rtk go test ./...` → `Go test: 1690 passed in 11 packages`
 - `rtk go build ./...` → `Go build: Success`
 - major runtime packages are already implemented in live Go code
 - `docs/parity-phase0-ledger.md` carries the scenario ledger
@@ -98,6 +98,7 @@ Current grounded state:
 - one-off SQL now runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so unindexed join admission matches subscribe registration instead of bypassing join-index validation
 - committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
 - post-commit projected join delta rows now preserve the same projected-side semantics on both projected-left and projected-right accepted join shapes: fragments are projected before reconciliation so partner churn cancels at the projected-row bag level, and `ReconcileJoinDelta(...)` no longer reorders surviving rows via map iteration; focused `subscription/delta_dedup_test.go` / `subscription/eval_test.go` pins lock the behavior
+- accepted subscribe SQL using `:sender` now preserves caller-bound parameter provenance through compile/register hashing, so literal bytes queries no longer share a query hash/query-state identity with the parameterized caller form and mixed subscribe batches only parameterize the marked predicates
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -202,7 +203,7 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, and projected-join delta-ordering seams
+- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, and `:sender` hash-identity seams
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4

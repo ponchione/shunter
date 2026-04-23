@@ -120,6 +120,105 @@ func TestRegisterParameterizedHashUsesClientIdentity(t *testing.T) {
 	}
 }
 
+func TestRegisterSet_MixedHashIdentitiesOnlyParameterizeMarkedPredicates(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindBytes}, 0)
+	mgr := NewManager(s, s)
+	literal := ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)}
+	parameterized := ColEq{Table: 1, Column: 1, Value: types.NewBytes([]byte{0x01, 0x02})}
+	idA := &types.Identity{1}
+	idB := &types.Identity{2}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:                  types.ConnectionID{1},
+		QueryID:                 10,
+		Predicates:              []Predicate{literal, parameterized},
+		PredicateHashIdentities: []*types.Identity{nil, idA},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:                  types.ConnectionID{2},
+		QueryID:                 11,
+		Predicates:              []Predicate{literal, parameterized},
+		PredicateHashIdentities: []*types.Identity{nil, idB},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 3 {
+		t.Fatalf("query-state count = %d, want 3 (one shared literal + two parameterized)", got)
+	}
+	literalHash := ComputeQueryHash(literal, nil)
+	if qs := mgr.registry.byHash[literalHash]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared literal query state = %+v, want refCount 2", qs)
+	}
+	if _, ok := mgr.registry.byHash[ComputeQueryHash(parameterized, idA)]; !ok {
+		t.Fatal("missing query state for parameterized predicate with identity A")
+	}
+	if _, ok := mgr.registry.byHash[ComputeQueryHash(parameterized, idB)]; !ok {
+		t.Fatal("missing query state for parameterized predicate with identity B")
+	}
+}
+
+func TestRegisterSet_ParameterizedSenderHashDiffersFromLiteralEquivalent(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindBytes}, 0)
+	mgr := NewManager(s, s)
+	pred := ColEq{Table: 1, Column: 1, Value: types.NewBytes([]byte{0x01, 0x02})}
+	id := &types.Identity{9}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:                  types.ConnectionID{1},
+		QueryID:                 20,
+		Predicates:              []Predicate{pred},
+		PredicateHashIdentities: []*types.Identity{nil},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:                  types.ConnectionID{2},
+		QueryID:                 21,
+		Predicates:              []Predicate{pred},
+		PredicateHashIdentities: []*types.Identity{id},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	literalHash := ComputeQueryHash(pred, nil)
+	parameterizedHash := ComputeQueryHash(pred, id)
+	if literalHash == parameterizedHash {
+		t.Fatal("literal hash and parameterized sender hash should differ")
+	}
+	if _, ok := mgr.registry.byHash[literalHash]; !ok {
+		t.Fatal("missing literal query state")
+	}
+	if _, ok := mgr.registry.byHash[parameterizedHash]; !ok {
+		t.Fatal("missing parameterized query state")
+	}
+}
+
+func TestRegisterSet_PredicateHashIdentityCountMismatchRejected(t *testing.T) {
+	s := testSchema()
+	mgr := NewManager(s, s)
+	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	id := &types.Identity{1}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:                  types.ConnectionID{1},
+		QueryID:                 30,
+		Predicates:              []Predicate{pred},
+		PredicateHashIdentities: []*types.Identity{nil, id},
+	}, nil)
+	if err == nil {
+		t.Fatal("RegisterSet error = nil, want predicate hash identity count mismatch")
+	}
+	if got := len(mgr.registry.byHash); got != 0 {
+		t.Fatalf("query-state count = %d, want 0 after rejected request", got)
+	}
+}
+
 func TestRegisterAllowsSameQueryIDAcrossConnections(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)

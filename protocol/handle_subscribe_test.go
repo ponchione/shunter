@@ -1989,6 +1989,116 @@ func TestHandleSubscribeSingle_SenderParameterOnBytesColumn(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_SenderParameterCarriesHashIdentity(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{9, 8, 7, 6}
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   126,
+		QueryID:     141,
+		QueryString: "SELECT * FROM s WHERE bytes = :sender",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	if len(req.PredicateHashIdentities) != 1 {
+		t.Fatalf("len(PredicateHashIdentities) = %d, want 1", len(req.PredicateHashIdentities))
+	}
+	if req.PredicateHashIdentities[0] == nil {
+		t.Fatal("PredicateHashIdentities[0] = nil, want conn.Identity")
+	}
+	if *req.PredicateHashIdentities[0] != conn.Identity {
+		t.Fatalf("PredicateHashIdentities[0] = %x, want %x", *req.PredicateHashIdentities[0], conn.Identity)
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	want := types.NewBytes(conn.Identity[:])
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("predicate value = %v, want caller identity bytes", colEq.Value)
+	}
+}
+
+func TestHandleSubscribeSingle_LiteralBytesDoesNotCarryHashIdentity(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{5, 4, 3, 2}
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   127,
+		QueryID:     142,
+		QueryString: "SELECT * FROM s WHERE bytes = 0x0102",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.PredicateHashIdentities) != 1 {
+		t.Fatalf("len(PredicateHashIdentities) = %d, want 1", len(req.PredicateHashIdentities))
+	}
+	if req.PredicateHashIdentities[0] != nil {
+		t.Fatalf("PredicateHashIdentities[0] = %x, want nil for literal bytes", *req.PredicateHashIdentities[0])
+	}
+}
+
+func TestHandleSubscribeMulti_MixedLiteralAndSenderParameterCarriesPerPredicateHashIdentity(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Identity = types.Identity{1, 3, 5, 7}
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+
+	msg := &SubscribeMultiMsg{
+		RequestID: 211,
+		QueryID:   212,
+		QueryStrings: []string{
+			"SELECT * FROM s WHERE u32 = 7",
+			"SELECT * FROM s WHERE bytes = :sender",
+		},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, executor, sl)
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 2 {
+		t.Fatalf("len(Predicates) = %d, want 2", len(req.Predicates))
+	}
+	if len(req.PredicateHashIdentities) != 2 {
+		t.Fatalf("len(PredicateHashIdentities) = %d, want 2", len(req.PredicateHashIdentities))
+	}
+	if req.PredicateHashIdentities[0] != nil {
+		t.Fatalf("PredicateHashIdentities[0] = %x, want nil for literal predicate", *req.PredicateHashIdentities[0])
+	}
+	if req.PredicateHashIdentities[1] == nil {
+		t.Fatal("PredicateHashIdentities[1] = nil, want conn.Identity")
+	}
+	if *req.PredicateHashIdentities[1] != conn.Identity {
+		t.Fatalf("PredicateHashIdentities[1] = %x, want %x", *req.PredicateHashIdentities[1], conn.Identity)
+	}
+}
+
 // Reference expr rejects :sender on any non-identity / non-bytes column
 // (`crates/expr/src/check.rs` lines 487-488: `select * from t where arr =
 // :sender`). Shunter's column-kind surface lacks a distinct identity kind,

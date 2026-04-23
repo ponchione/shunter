@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"time"
+
+	"github.com/ponchione/shunter/types"
 )
 
 // handleSubscribeSingle processes an incoming SubscribeSingleMsg. It
@@ -57,13 +59,14 @@ func handleSubscribeSingle(
 		}
 	}
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
-		ConnID:     conn.ID,
-		QueryID:    msg.QueryID,
-		RequestID:  msg.RequestID,
-		Variant:    SubscriptionSetVariantSingle,
-		Predicates: []any{pred},
-		Reply:      reply,
-		Receipt:    receipt,
+		ConnID:                  conn.ID,
+		QueryID:                 msg.QueryID,
+		RequestID:               msg.RequestID,
+		Variant:                 SubscriptionSetVariantSingle,
+		Predicates:              []any{pred},
+		PredicateHashIdentities: []*types.Identity{callerHashIdentity(conn, compiled)},
+		Reply:                   reply,
+		Receipt:                 receipt,
 	}); submitErr != nil {
 		sendError(conn, SubscriptionError{
 			TotalHostExecutionDurationMicros: elapsedMicros(receipt),

@@ -233,6 +233,21 @@ func (m *Manager) RegisterSet(
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate validation: %w", err)
 		}
 	}
+	var hashIdentities []*types.Identity
+	switch {
+	case req.PredicateHashIdentities != nil:
+		if len(req.PredicateHashIdentities) != len(req.Predicates) {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate hash identity count = %d, want %d", len(req.PredicateHashIdentities), len(req.Predicates))
+		}
+		hashIdentities = req.PredicateHashIdentities
+	case req.ClientIdentity != nil:
+		hashIdentities = make([]*types.Identity, len(req.Predicates))
+		for i := range hashIdentities {
+			hashIdentities[i] = req.ClientIdentity
+		}
+	default:
+		hashIdentities = make([]*types.Identity, len(req.Predicates))
+	}
 	// Duplicate QueryID rejection.
 	if byQ, ok := m.querySets[req.ConnID]; ok {
 		if _, live := byQ[req.QueryID]; live {
@@ -242,22 +257,24 @@ func (m *Manager) RegisterSet(
 	}
 	// Dedup identical predicates within this call.
 	deduped := make([]Predicate, 0, len(req.Predicates))
+	dedupedHashIdentities := make([]*types.Identity, 0, len(req.Predicates))
 	seen := make(map[QueryHash]struct{}, len(req.Predicates))
-	for _, p := range req.Predicates {
-		h := ComputeQueryHash(p, req.ClientIdentity)
+	for i, p := range req.Predicates {
+		h := ComputeQueryHash(p, hashIdentities[i])
 		if _, dup := seen[h]; dup {
 			continue
 		}
 		seen[h] = struct{}{}
 		deduped = append(deduped, p)
+		dedupedHashIdentities = append(dedupedHashIdentities, hashIdentities[i])
 	}
 	// Allocate internal IDs + run initial snapshot per predicate.
 	allocated := make([]types.SubscriptionID, 0, len(deduped))
 	updates := make([]SubscriptionUpdate, 0, len(deduped))
-	for _, p := range deduped {
+	for i, p := range deduped {
 		m.nextSubID++
 		subID := m.nextSubID
-		hash := ComputeQueryHash(p, req.ClientIdentity)
+		hash := ComputeQueryHash(p, dedupedHashIdentities[i])
 		rows, err := m.initialQuery(p, view)
 		if err != nil {
 			// Unwind any partial state. dropSub handles registry maps + PruningIndexes

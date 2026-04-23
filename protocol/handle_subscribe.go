@@ -11,8 +11,9 @@ import (
 )
 
 type compiledSQLQuery struct {
-	TableName string
-	Predicate subscription.Predicate
+	TableName          string
+	Predicate          subscription.Predicate
+	UsesCallerIdentity bool
 }
 
 type relationSchema struct {
@@ -65,11 +66,37 @@ func joinProjectsRight(stmt sql.Statement, selfJoin bool) bool {
 	return strings.EqualFold(alias, stmt.Join.RightTable)
 }
 
+func sqlPredicateUsesCallerIdentity(pred sql.Predicate) bool {
+	switch p := pred.(type) {
+	case nil:
+		return false
+	case sql.TruePredicate:
+		return false
+	case sql.ComparisonPredicate:
+		return p.Filter.Literal.Kind == sql.LitSender
+	case sql.AndPredicate:
+		return sqlPredicateUsesCallerIdentity(p.Left) || sqlPredicateUsesCallerIdentity(p.Right)
+	case sql.OrPredicate:
+		return sqlPredicateUsesCallerIdentity(p.Left) || sqlPredicateUsesCallerIdentity(p.Right)
+	default:
+		return false
+	}
+}
+
+func callerHashIdentity(conn *Conn, compiled compiledSQLQuery) *types.Identity {
+	if !compiled.UsesCallerIdentity {
+		return nil
+	}
+	id := conn.Identity
+	return &id
+}
+
 func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (compiledSQLQuery, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
 	}
+	usesCallerIdentity := sqlPredicateUsesCallerIdentity(stmt.Predicate)
 	if stmt.Join != nil {
 		leftID, leftTS, ok := sl.TableByName(stmt.Join.LeftTable)
 		if !ok {
@@ -89,7 +116,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 				cross.RightAlias = 1
 			}
 			cross.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross}, nil
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity}, nil
 		}
 		leftCol, ok := leftTS.Column(stmt.Join.LeftOn.Column)
 		if !ok {
@@ -148,8 +175,9 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 		// disambiguates; for self-joins the alias is the only signal.
 		join.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
 		return compiledSQLQuery{
-			TableName: stmt.ProjectedTable,
-			Predicate: join,
+			TableName:          stmt.ProjectedTable,
+			Predicate:          join,
+			UsesCallerIdentity: usesCallerIdentity,
 		}, nil
 	}
 	projectedID, ts, ok := sl.TableByName(stmt.ProjectedTable)
@@ -160,7 +188,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
-	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred}, nil
+	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity}, nil
 }
 
 // parseQueryString turns a client-supplied SQL string into the internal

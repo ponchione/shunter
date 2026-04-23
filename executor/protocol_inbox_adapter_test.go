@@ -226,6 +226,81 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorReply(t *tes
 	}
 }
 
+func TestProtocolInboxAdapter_RegisterSubscriptionSet_ForwardsPerPredicateHashIdentity(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	id := types.Identity{0xAA, 0xBB}
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			reg, ok := cmd.(RegisterSubscriptionSetCmd)
+			if !ok {
+				t.Fatalf("command type = %T, want RegisterSubscriptionSetCmd", cmd)
+			}
+			if len(reg.Request.PredicateHashIdentities) != 1 {
+				t.Fatalf("len(PredicateHashIdentities) = %d, want 1", len(reg.Request.PredicateHashIdentities))
+			}
+			if reg.Request.PredicateHashIdentities[0] == nil {
+				t.Fatal("PredicateHashIdentities[0] = nil, want forwarded identity")
+			}
+			if *reg.Request.PredicateHashIdentities[0] != id {
+				t.Fatalf("PredicateHashIdentities[0] = %x, want %x", *reg.Request.PredicateHashIdentities[0], id)
+			}
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.RegisterSubscriptionSet(context.Background(), protocol.RegisterSubscriptionSetRequest{
+		ConnID:                  conn.ID,
+		QueryID:                 71,
+		RequestID:               72,
+		Variant:                 protocol.SubscriptionSetVariantSingle,
+		Predicates:              []any{subscription.AllRows{Table: 1}},
+		PredicateHashIdentities: []*types.Identity{&id},
+	})
+	if err != nil {
+		t.Fatalf("RegisterSubscriptionSet: %v", err)
+	}
+}
+
+func TestProtocolInboxAdapter_RegisterSubscriptionSet_ForwardsMixedPerPredicateHashIdentity(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	id := types.Identity{0x11, 0x22}
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			reg, ok := cmd.(RegisterSubscriptionSetCmd)
+			if !ok {
+				t.Fatalf("command type = %T, want RegisterSubscriptionSetCmd", cmd)
+			}
+			if len(reg.Request.PredicateHashIdentities) != 2 {
+				t.Fatalf("len(PredicateHashIdentities) = %d, want 2", len(reg.Request.PredicateHashIdentities))
+			}
+			if reg.Request.PredicateHashIdentities[0] != nil {
+				t.Fatalf("PredicateHashIdentities[0] = %x, want nil", *reg.Request.PredicateHashIdentities[0])
+			}
+			if reg.Request.PredicateHashIdentities[1] == nil {
+				t.Fatal("PredicateHashIdentities[1] = nil, want forwarded identity")
+			}
+			if *reg.Request.PredicateHashIdentities[1] != id {
+				t.Fatalf("PredicateHashIdentities[1] = %x, want %x", *reg.Request.PredicateHashIdentities[1], id)
+			}
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.RegisterSubscriptionSet(context.Background(), protocol.RegisterSubscriptionSetRequest{
+		ConnID:                  conn.ID,
+		QueryID:                 81,
+		RequestID:               82,
+		Variant:                 protocol.SubscriptionSetVariantMulti,
+		Predicates:              []any{subscription.AllRows{Table: 1}, subscription.AllRows{Table: 2}},
+		PredicateHashIdentities: []*types.Identity{nil, &id},
+	})
+	if err != nil {
+		t.Fatalf("RegisterSubscriptionSet: %v", err)
+	}
+}
+
 func TestProtocolInboxAdapter_UnregisterSubscriptionSet_SingleSuccessReply(t *testing.T) {
 	conn, _, sender := newAdapterTestConn(t)
 	adapter := newProtocolInboxAdapter(

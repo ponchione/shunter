@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"time"
+
+	"github.com/ponchione/shunter/types"
 )
 
 // handleSubscribeMulti processes an incoming SubscribeMultiMsg. Every
@@ -27,6 +29,7 @@ func handleSubscribeMulti(
 ) {
 	receipt := time.Now()
 	preds := make([]any, 0, len(msg.QueryStrings))
+	hashIdentities := make([]*types.Identity, 0, len(msg.QueryStrings))
 	for _, qs := range msg.QueryStrings {
 		compiled, err := compileSQLQueryString(qs, sl, &conn.Identity)
 		if err != nil {
@@ -39,6 +42,7 @@ func handleSubscribeMulti(
 			return
 		}
 		preds = append(preds, compiled.Predicate)
+		hashIdentities = append(hashIdentities, callerHashIdentity(conn, compiled))
 	}
 
 	sender := connOnlySender{conn: conn}
@@ -57,13 +61,14 @@ func handleSubscribeMulti(
 		}
 	}
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
-		ConnID:     conn.ID,
-		QueryID:    msg.QueryID,
-		RequestID:  msg.RequestID,
-		Variant:    SubscriptionSetVariantMulti,
-		Predicates: preds,
-		Reply:      reply,
-		Receipt:    receipt,
+		ConnID:                  conn.ID,
+		QueryID:                 msg.QueryID,
+		RequestID:               msg.RequestID,
+		Variant:                 SubscriptionSetVariantMulti,
+		Predicates:              preds,
+		PredicateHashIdentities: hashIdentities,
+		Reply:                   reply,
+		Receipt:                 receipt,
 	}); submitErr != nil {
 		sendError(conn, SubscriptionError{
 			TotalHostExecutionDurationMicros: elapsedMicros(receipt),

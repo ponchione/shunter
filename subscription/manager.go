@@ -16,11 +16,12 @@ var ErrQueryIDAlreadyLive = errors.New("subscription: query id already live on c
 // SubscriptionSetRegisterRequest is the set-based register request.
 // Predicates may have length >= 1; length 1 is the Single path.
 type SubscriptionSetRegisterRequest struct {
-	ConnID         types.ConnectionID
-	QueryID        uint32
-	Predicates     []Predicate
-	ClientIdentity *types.Identity
-	RequestID      uint32
+	ConnID                  types.ConnectionID
+	QueryID                 uint32
+	Predicates              []Predicate
+	PredicateHashIdentities []*types.Identity
+	ClientIdentity          *types.Identity
+	RequestID               uint32
 }
 
 // SubscriptionSetRegisterResult carries the merged initial snapshot.

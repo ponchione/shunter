@@ -73,10 +73,11 @@ func (a *ProtocolInboxAdapter) RegisterSubscriptionSet(ctx context.Context, req 
 	}
 	cmd := RegisterSubscriptionSetCmd{
 		Request: subscription.SubscriptionSetRegisterRequest{
-			ConnID:     req.ConnID,
-			QueryID:    req.QueryID,
-			RequestID:  req.RequestID,
-			Predicates: preds,
+			ConnID:                  req.ConnID,
+			QueryID:                 req.QueryID,
+			RequestID:               req.RequestID,
+			Predicates:              preds,
+			PredicateHashIdentities: req.PredicateHashIdentities,
 		},
 		Reply: func(result subscription.SubscriptionSetRegisterResult, replyErr error) {
 			if req.Reply == nil {

@@ -74,12 +74,13 @@ const (
 // invocation on the executor goroutine is what enforces ADR §9.4
 // per-connection FIFO between Applied and subsequent fan-out.
 type RegisterSubscriptionSetRequest struct {
-	ConnID     types.ConnectionID
-	QueryID    uint32
-	RequestID  uint32
-	Variant    SubscriptionSetVariant
-	Predicates []any // []subscription.Predicate
-	Reply      func(SubscriptionSetCommandResponse)
+	ConnID                  types.ConnectionID
+	QueryID                 uint32
+	RequestID               uint32
+	Variant                 SubscriptionSetVariant
+	Predicates              []any // []subscription.Predicate
+	PredicateHashIdentities []*types.Identity
+	Reply                   func(SubscriptionSetCommandResponse)
 	// Receipt is the wall-clock instant the protocol handler received the
 	// client request, captured before compile/dispatch. The executor reads
 	// it to compute `TotalHostExecutionDurationMicros` as
