@@ -227,26 +227,29 @@ func (m *Manager) RegisterSet(
 	req SubscriptionSetRegisterRequest,
 	view store.CommittedReadView,
 ) (SubscriptionSetRegisterResult, error) {
+	canonicalPreds := make([]Predicate, 0, len(req.Predicates))
 	// Pre-validate every predicate before touching registry state.
 	for _, p := range req.Predicates {
-		if err := ValidatePredicate(p, m.schema); err != nil {
+		canonical := canonicalizePredicate(p)
+		if err := ValidatePredicate(canonical, m.schema); err != nil {
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate validation: %w", err)
 		}
+		canonicalPreds = append(canonicalPreds, canonical)
 	}
 	var hashIdentities []*types.Identity
 	switch {
 	case req.PredicateHashIdentities != nil:
-		if len(req.PredicateHashIdentities) != len(req.Predicates) {
-			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate hash identity count = %d, want %d", len(req.PredicateHashIdentities), len(req.Predicates))
+		if len(req.PredicateHashIdentities) != len(canonicalPreds) {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate hash identity count = %d, want %d", len(req.PredicateHashIdentities), len(canonicalPreds))
 		}
 		hashIdentities = req.PredicateHashIdentities
 	case req.ClientIdentity != nil:
-		hashIdentities = make([]*types.Identity, len(req.Predicates))
+		hashIdentities = make([]*types.Identity, len(canonicalPreds))
 		for i := range hashIdentities {
 			hashIdentities[i] = req.ClientIdentity
 		}
 	default:
-		hashIdentities = make([]*types.Identity, len(req.Predicates))
+		hashIdentities = make([]*types.Identity, len(canonicalPreds))
 	}
 	// Duplicate QueryID rejection.
 	if byQ, ok := m.querySets[req.ConnID]; ok {
@@ -256,10 +259,10 @@ func (m *Manager) RegisterSet(
 		}
 	}
 	// Dedup identical predicates within this call.
-	deduped := make([]Predicate, 0, len(req.Predicates))
-	dedupedHashIdentities := make([]*types.Identity, 0, len(req.Predicates))
-	seen := make(map[QueryHash]struct{}, len(req.Predicates))
-	for i, p := range req.Predicates {
+	deduped := make([]Predicate, 0, len(canonicalPreds))
+	dedupedHashIdentities := make([]*types.Identity, 0, len(canonicalPreds))
+	seen := make(map[QueryHash]struct{}, len(canonicalPreds))
+	for i, p := range canonicalPreds {
 		h := ComputeQueryHash(p, hashIdentities[i])
 		if _, dup := seen[h]; dup {
 			continue

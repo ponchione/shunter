@@ -758,6 +758,85 @@ func TestHandleSubscribeSingle_WhereTrueLiteralCompilesToAllRows(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_TrueAndComparisonNormalizesToComparison(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "flag", Type: schema.KindBool},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   118,
+		QueryID:     115,
+		QueryString: "SELECT * FROM t WHERE TRUE AND id = 7",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Table != 1 || colEq.Column != 0 {
+		t.Fatalf("predicate target = table %d col %d, want table 1 col 0", colEq.Table, colEq.Column)
+	}
+	if !colEq.Value.Equal(types.NewUint32(7)) {
+		t.Fatalf("predicate value = %v, want 7", colEq.Value)
+	}
+}
+
+func TestHandleSubscribeSingle_TrueOrComparisonNormalizesToAllRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "flag", Type: schema.KindBool},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   119,
+		QueryID:     116,
+		QueryString: "SELECT * FROM t WHERE TRUE OR id = 7",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	allRows, ok := req.Predicates[0].(subscription.AllRows)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want AllRows", req.Predicates[0])
+	}
+	if allRows.Table != 1 {
+		t.Fatalf("AllRows.Table = %d, want 1", allRows.Table)
+	}
+}
+
 func TestHandleSubscribeSingle_QuotedSpecialCharacterIdentifiers(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -1029,6 +1108,66 @@ func TestHandleSubscribeSingle_JoinFilterOnRightTable(t *testing.T) {
 	}
 	if rng.Table != inventory.ID || rng.Column != 1 {
 		t.Fatalf("range table/column = %d/%d, want %d/1", rng.Table, rng.Column, inventory.ID)
+	}
+	if !rng.Upper.Value.Equal(types.NewUint32(10)) || rng.Upper.Inclusive || rng.Upper.Unbounded {
+		t.Fatalf("upper bound = %+v, want exclusive bounded 10", rng.Upper)
+	}
+}
+
+func TestHandleSubscribeSingle_JoinFilterTrueAndComparisonNormalizesFilter(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_orders_product_id", Columns: []string{"product_id"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   120,
+		QueryID:     117,
+		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE TRUE AND product.quantity < 10",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	rng, ok := joinPred.Filter.(subscription.ColRange)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want ColRange", joinPred.Filter)
 	}
 	if !rng.Upper.Value.Equal(types.NewUint32(10)) || rng.Upper.Inclusive || rng.Upper.Unbounded {
 		t.Fatalf("upper bound = %+v, want exclusive bounded 10", rng.Upper)

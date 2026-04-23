@@ -76,6 +76,14 @@ func TestQueryHashAndOrderMatters(t *testing.T) {
 	}
 }
 
+func TestQueryHashTrueAndComparisonMatchesComparison(t *testing.T) {
+	comparison := ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)}
+	withTrue := And{Left: AllRows{Table: 1}, Right: comparison}
+	if ComputeQueryHash(withTrue, nil) != ComputeQueryHash(comparison, nil) {
+		t.Fatal("TRUE AND comparison should share canonical hash with comparison")
+	}
+}
+
 func TestQueryHashJoinFilterDiffers(t *testing.T) {
 	withoutF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, Filter: nil}
 	withF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0,

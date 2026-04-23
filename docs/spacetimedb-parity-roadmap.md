@@ -99,6 +99,7 @@ Current grounded state:
 - committed join bootstrap plus unregister final-delta rows now preserve projected-side enumeration order regardless of which join side provides the usable index, matching the existing one-off projected-side baseline for accepted join shapes
 - post-commit projected join delta rows now preserve the same projected-side semantics on both projected-left and projected-right accepted join shapes: fragments are projected before reconciliation so partner churn cancels at the projected-row bag level, and `ReconcileJoinDelta(...)` no longer reorders surviving rows via map iteration; focused `subscription/delta_dedup_test.go` / `subscription/eval_test.go` pins lock the behavior
 - accepted subscribe SQL using `:sender` now preserves caller-bound parameter provenance through compile/register hashing, so literal bytes queries no longer share a query hash/query-state identity with the parameterized caller form and mixed subscribe batches only parameterize the marked predicates
+- accepted SQL with neutral `TRUE` terms now normalizes before runtime lowering and canonical hashing, so single-table `TRUE AND/OR ...` shapes share the same runtime identity as their simplified equivalents and join-backed `TRUE AND rhs-filter` shapes no longer fail later via malformed runtime filters
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -203,7 +204,7 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, and `:sender` hash-identity seams
+- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, and neutral-`TRUE` normalization seams
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
@@ -253,11 +254,11 @@ When choosing the next slice:
 
 ## Current best next direction
 
-The best current narrow-ready direction is predicate normalization / validation drift inside OI-002 A2 now that the multiplicity, join-index-validation, committed join bootstrap/final-delta ordering, and projected-join delta-ordering batches are closed.
+The best current narrow-ready direction is still predicate normalization / validation drift inside OI-002 A2, with the strongest fresh residual now being commutative child-order canonicalization on accepted `AND` / `OR` SQL shapes.
 
 Current candidate directions are:
-- predicate normalization / validation drift between accepted SQL shapes and the runtime predicate model
-- another bounded OI-002 A2 runtime/model residual only if a fresh scout shows it is stronger than the normalization/validation seam
+- accepted `AND` / `OR` SQL whose child order changes source text but not user-visible semantics, yet still changes canonical query hash / query-state identity
+- another bounded OI-002 A2 runtime/model residual only if a fresh scout shows it is stronger than the child-order canonicalization seam
 - Tier B hardening when a concrete live risk is stronger than the next parity slice
 - a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
 - scheduler/bootstrap follow-through only when workload or integration evidence surfaces

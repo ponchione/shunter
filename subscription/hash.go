@@ -79,6 +79,44 @@ func (e *canonicalEncoder) writeU64(v uint64) {
 	e.buf = append(e.buf, tmp[:]...)
 }
 
+func isAllRowsPredicate(pred Predicate) bool {
+	_, ok := pred.(AllRows)
+	return ok
+}
+
+func canonicalizePredicate(pred Predicate) Predicate {
+	switch p := pred.(type) {
+	case And:
+		left := canonicalizePredicate(p.Left)
+		right := canonicalizePredicate(p.Right)
+		if left == nil || right == nil {
+			return And{Left: left, Right: right}
+		}
+		if isAllRowsPredicate(left) {
+			return right
+		}
+		if isAllRowsPredicate(right) {
+			return left
+		}
+		return And{Left: left, Right: right}
+	case Or:
+		left := canonicalizePredicate(p.Left)
+		right := canonicalizePredicate(p.Right)
+		if left == nil || right == nil {
+			return Or{Left: left, Right: right}
+		}
+		if isAllRowsPredicate(left) {
+			return left
+		}
+		if isAllRowsPredicate(right) {
+			return right
+		}
+		return Or{Left: left, Right: right}
+	default:
+		return pred
+	}
+}
+
 // ComputeQueryHash returns the blake3-32 digest of the predicate's canonical
 // form. When clientID is non-nil, the identity is appended so structurally
 // identical predicates from different clients produce different hashes
@@ -87,6 +125,7 @@ func ComputeQueryHash(pred Predicate, clientID *types.Identity) QueryHash {
 	if pred == nil {
 		panic("subscription: ComputeQueryHash on nil predicate")
 	}
+	pred = canonicalizePredicate(pred)
 	enc := acquireCanonicalEncoder()
 	defer releaseCanonicalEncoder(enc)
 	encodePredicate(enc, pred)

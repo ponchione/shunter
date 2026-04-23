@@ -480,6 +480,87 @@ func TestHandleOneOffQuery_WhereTrueLiteralReturnsAllRows(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQuery_TrueAndComparisonMatchesComparison(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "flag", Type: schema.KindBool},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(7), types.NewBool(true)},
+				{types.NewUint32(8), types.NewBool(false)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x2a},
+		QueryString: "SELECT * FROM t WHERE TRUE AND id = 7",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(7)) {
+		t.Fatalf("unexpected row returned: %v", pvs[0])
+	}
+}
+
+func TestHandleOneOffQuery_TrueOrComparisonReturnsAllRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "flag", Type: schema.KindBool},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(7), types.NewBool(true)},
+				{types.NewUint32(8), types.NewBool(false)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x2b},
+		QueryString: "SELECT * FROM t WHERE TRUE OR id = 7",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 2 {
+		t.Fatalf("got %d rows, want 2", len(pvs))
+	}
+}
+
 func TestHandleOneOffQuery_QuotedSpecialCharacterIdentifiers(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{
@@ -773,6 +854,83 @@ func TestHandleOneOffQuery_JoinProjectionOnLeftTable(t *testing.T) {
 	}
 	if !pvs[0][1].Equal(types.NewUint32(100)) || !pvs[1][1].Equal(types.NewUint32(102)) {
 		t.Fatalf("unexpected product ids returned: %v, %v", pvs[0][1], pvs[1][1])
+	}
+}
+
+func TestHandleOneOffQuery_JoinFilterTrueAndComparisonSucceeds(t *testing.T) {
+	conn := testConnDirect(nil)
+	ordersTS := &schema.TableSchema{
+		ID:   1,
+		Name: "Orders",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "product_id", Type: schema.KindUint32},
+		},
+	}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_orders_product_id", Columns: []string{"product_id"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	ordersTS.ID = ordersReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			ordersReg.ID: {
+				{types.NewUint32(1), types.NewUint32(100)},
+				{types.NewUint32(2), types.NewUint32(101)},
+				{types.NewUint32(3), types.NewUint32(102)},
+			},
+			inventoryReg.ID: {
+				{types.NewUint32(100), types.NewUint32(9)},
+				{types.NewUint32(101), types.NewUint32(10)},
+				{types.NewUint32(102), types.NewUint32(3)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x29},
+		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE TRUE AND product.quantity < 10",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ordersTS)
+	if len(pvs) != 2 {
+		t.Fatalf("got %d rows, want 2", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[1][0].Equal(types.NewUint32(3)) {
+		t.Fatalf("unexpected order ids returned: %v, %v", pvs[0][0], pvs[1][0])
 	}
 }
 

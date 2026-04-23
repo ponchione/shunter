@@ -66,6 +66,41 @@ func joinProjectsRight(stmt sql.Statement, selfJoin bool) bool {
 	return strings.EqualFold(alias, stmt.Join.RightTable)
 }
 
+func isSQLTruePredicate(pred sql.Predicate) bool {
+	_, ok := pred.(sql.TruePredicate)
+	return ok
+}
+
+func normalizeSQLPredicate(pred sql.Predicate) sql.Predicate {
+	switch p := pred.(type) {
+	case nil:
+		return nil
+	case sql.TruePredicate:
+		return p
+	case sql.ComparisonPredicate:
+		return p
+	case sql.AndPredicate:
+		left := normalizeSQLPredicate(p.Left)
+		right := normalizeSQLPredicate(p.Right)
+		if isSQLTruePredicate(left) {
+			return right
+		}
+		if isSQLTruePredicate(right) {
+			return left
+		}
+		return sql.AndPredicate{Left: left, Right: right}
+	case sql.OrPredicate:
+		left := normalizeSQLPredicate(p.Left)
+		right := normalizeSQLPredicate(p.Right)
+		if isSQLTruePredicate(left) || isSQLTruePredicate(right) {
+			return sql.TruePredicate{}
+		}
+		return sql.OrPredicate{Left: left, Right: right}
+	default:
+		return pred
+	}
+}
+
 func sqlPredicateUsesCallerIdentity(pred sql.Predicate) bool {
 	switch p := pred.(type) {
 	case nil:
@@ -96,6 +131,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity) (
 	if err != nil {
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
 	}
+	stmt.Predicate = normalizeSQLPredicate(stmt.Predicate)
 	usesCallerIdentity := sqlPredicateUsesCallerIdentity(stmt.Predicate)
 	if stmt.Join != nil {
 		leftID, leftTS, ok := sl.TableByName(stmt.Join.LeftTable)

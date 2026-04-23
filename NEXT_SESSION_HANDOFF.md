@@ -25,6 +25,7 @@ For provenance of closed slices, use `rtk git log` — this file tracks only cur
 - The committed join projected-order seam is now closed: `subscription/register_set.go` enumerates projected-side rows first for bootstrap and unregister final-delta joins, so accepted join SQL no longer flips visible committed-row order solely because the usable index lives on the opposite join side.
 - The projected join delta-order seam is now closed too: `subscription/eval.go` now projects join fragments before reconciliation so partner churn cancels at the projected-row bag level, `subscription/delta_dedup.go` preserves fragment encounter order for surviving rows, and focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right ordering plus no-op churn cases.
 - The `:sender` subscribe hash-identity seam is now closed: `protocol/handle_subscribe.go` preserves caller-bound parameter provenance, `protocol/lifecycle.go` / `executor/protocol_inbox_adapter.go` forward per-predicate hash identities, and `subscription/register_set.go` hashes mixed batches per predicate instead of request-globally. Literal bytes queries no longer collide with the caller-parameterized form, and mixed batches only parameterize marked predicates.
+- The neutral-`TRUE` accepted-shape normalization seam is now closed too: `protocol/handle_subscribe.go` normalizes SQL predicate trees before runtime lowering, and `subscription/hash.go` / `subscription/register_set.go` canonicalize neutral-`AllRows` runtime forms so single-table `TRUE AND/OR ...` shapes share the same runtime meaning/query-state identity as their simplified equivalents while join-backed `TRUE AND rhs-filter` shapes no longer drift into malformed validation-failing filters.
 
 ## How to frame a session
 
@@ -38,17 +39,20 @@ Work in *batches*, not single slices. One session = one batch. Within a batch, l
 
 Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A3 or OI-004/005/006 hardening.
 
-## Next session: continue OI-002 A2 accepted-shape normalization / validation drift after sender-hash closure
+## Next session: continue OI-002 A2 with commutative child-order canonicalization on accepted `AND` / `OR` SQL
 
-OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the first OI-002 fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, the projected-join delta-order seam, and the `:sender` subscribe hash-identity seam are now closed. A fresh scout this session did not surface a stronger named residual than the remaining accepted-shape normalization / validation bucket, so the next open protocol-adjacent batch stays in OI-002 A2 and should keep working that bucket rather than reopening any closed join-ordering or `:sender` work.
+OI-001 A1 is exhausted for both wire-shape and measurement-parity work, and the first OI-002 fan-out delivery batch, the join/cross-join multiplicity batch, the one-off-vs-subscribe join-index validation seam, the committed join bootstrap/final-delta projected-order seam, the projected-join delta-order seam, the `:sender` subscribe hash-identity seam, and the neutral-`TRUE` accepted-shape normalization seam are now closed. A fresh post-close scout this session found the strongest remaining accepted-shape normalization / hash-identity residual in commutative child-order drift for already-accepted `AND` / `OR` SQL.
 
 Fresh-agent task:
 
-- Scout and then close one bounded OI-002 A2 predicate normalization / validation mismatch on an already-accepted SQL shape.
-- Compare the accepted SQL compile path against the runtime predicate model used by subscribe registration and one-off execution; look for a shape where parser acceptance exists but normalization / validation / hash identity / execution behavior still disagrees across seams.
-- Do not reopen projected-join ordering, join multiplicity, join-index validation, or `:sender` hash identity unless fresh evidence shows a new regression distinct from those closed slices.
-- Do not start with a broad SQL widening pass. Stay inside an already-accepted shape and prove the mismatch with focused tests before editing production code.
-- If the scout does not confirm a real normalization / validation residual, stop after updating this handoff with the grounded next-best A2 seam instead of forcing speculative churn.
+- Close one bounded OI-002 A2 canonicalization slice for accepted same-table `AND` / `OR` SQL that differs only by child order.
+- Start from already-accepted pairs such as:
+  - `SELECT * FROM users WHERE id = 1 AND name = 'alice'`
+  - `SELECT * FROM users WHERE name = 'alice' AND id = 1`
+  - and the analogous `OR` pair when the same-table leaves are already accepted.
+- Prove first that parser acceptance and runtime row results already match while canonical query hash / query-state identity still drifts across child order.
+- Do not reopen projected-join ordering, join multiplicity, join-index validation, `:sender` hash identity, or neutral-`TRUE` normalization unless fresh evidence shows a new regression distinct from those closed slices.
+- Do not start with a broad SQL widening pass. Stay inside already-accepted `AND` / `OR` shapes and prove the mismatch with focused tests before editing production code.
 
 Fresh-agent context:
 
@@ -59,6 +63,7 @@ Fresh-agent context:
   - committed join bootstrap/unregister projected-side ordering regardless of usable index side
   - post-commit projected-join delta ordering via projected-fragment-first reconciliation plus encounter-order-preserving `ReconcileJoinDelta(...)`
   - subscribe-side `:sender` hash identity / mixed-batch parameterization provenance
+  - neutral-`TRUE` predicate normalization across compile/hash/register seams
 - Do not reopen:
   - fan-out delivery parity
   - join/cross-join multiplicity
@@ -66,67 +71,59 @@ Fresh-agent context:
   - committed join bootstrap/final-delta projected ordering
   - projected join delta ordering
   - `:sender` subscribe hash identity
+  - neutral-`TRUE` normalization
   - rows-shape documented divergence
   - OI-001 A1 wire/message-family work
-- The highest-yield next check is still an accepted SQL shape whose parser/compile path succeeds but whose normalized runtime predicate, validation outcome, canonical hash, or subscribe/one-off behavior still drifts across seams.
-- Treat `query/sql/parser.go`, `protocol/handle_subscribe.go`, `protocol/handle_oneoff.go`, `subscription/predicate.go`, `subscription/validate.go`, and `subscription/hash.go` as the primary seam to compare.
-- The question for the fresh agent is not whether projected joins are ordered or whether `:sender` hashing is fixed; it is whether any other already-accepted SQL shape still compiles into a runtime predicate model that disagrees between subscribe admission, one-off execution, and downstream identity/validation behavior.
+- The next strongest live question is whether accepted commutative `AND` / `OR` SQL still compiles into different canonical query identities solely because source child order survives into the runtime tree.
+- Treat `query/sql/parser.go`, `protocol/handle_subscribe.go`, `subscription/hash.go`, `subscription/register_set.go`, and the relevant current tests as the primary seam to compare.
 
 Batch framing:
 
-1. Scout the live parser/compile/runtime surfaces first: `query/sql/parser.go`, `query/sql/coerce.go`, `protocol/handle_subscribe.go`, `protocol/handle_oneoff.go`, `subscription/predicate.go`, `subscription/validate.go`, `subscription/hash.go`, and the relevant current tests.
-2. Build the residual A2 list only for accepted-shape normalization / validation drift. Ignore already-closed fan-out delivery, multiplicity, join-index-validation, and projected-ordering seams unless they expose fresh evidence.
-3. Prefer one accepted SQL shape whose parser acceptance already exists but where one of these still disagrees across seams:
-   - normalized predicate structure
-   - `ValidatePredicate(...)`
-   - canonical query hash identity
-   - subscribe vs one-off execution result/behavior
-4. Land one commit per slice with focused parser/protocol/subscription tests, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
+1. Scout the live parser/compile/runtime surfaces first: `query/sql/parser.go`, `protocol/handle_subscribe.go`, `protocol/handle_oneoff.go`, `subscription/hash.go`, `subscription/register_set.go`, and the relevant current tests.
+2. Build the residual A2 list only for accepted commutative-order drift. Ignore already-closed fan-out delivery, multiplicity, join-index-validation, projected-ordering, `:sender`, and neutral-`TRUE` seams unless they expose fresh evidence.
+3. Prefer accepted same-table `AND` / `OR` shapes where:
+   - parser acceptance already exists
+   - one-off / subscribe execution results are already the same
+   - canonical query hash identity or registry dedup still changes when child order flips
+4. Land one commit per slice with focused protocol/subscription tests, then finish with `rtk go test ./protocol/... ./subscription/... ./executor/...`.
 
 Concrete deliverable for the fresh agent:
 
 1. Write down the exact confirmed mismatch in one short bullet before coding.
 2. Add failing focused tests first.
-3. Fix only the minimal compile/runtime seam needed.
+3. Fix only the minimal canonicalization seam needed.
 4. Re-run focused tests, then `rtk go test ./protocol/... ./subscription/... ./executor/...`, then `rtk go test ./...`.
 5. Update `TECH-DEBT.md`, `docs/parity-phase0-ledger.md`, `docs/spacetimedb-parity-roadmap.md`, and this file in the same session.
 
 Suggested starting reads for this batch:
 
 - `query/sql/parser.go`
-- `query/sql/coerce.go`
 - `protocol/handle_subscribe.go`
 - `protocol/handle_oneoff.go`
-- `subscription/predicate.go`
-- `subscription/validate.go`
 - `subscription/hash.go`
 - `subscription/register_set.go`
-- `subscription/eval.go`
+- `subscription/query_state.go`
 
 Suggested starting test surfaces:
 
 - `query/sql/parser_test.go`
-- `query/sql/coerce_test.go`
-- `protocol/handle_oneoff_test.go`
 - `protocol/handle_subscribe_test.go`
-- `subscription/validate_test.go`
+- `protocol/handle_oneoff_test.go`
 - `subscription/hash_test.go`
+- `subscription/manager_test.go`
 
-Good candidate seams to scout before choosing the batch:
+Good candidate seam to pin first:
 
-- accepted SQL shapes whose subscribe compile path and one-off compile path build different runtime predicates
-- accepted shapes whose runtime predicate normalizes but then hashes or validates differently than the same shape admitted through another path
-- parameter/literal coercion or alias/qualification follow-ons where parser acceptance already exists but runtime predicate structure still drifts
+- same-table accepted `AND` / `OR` SQL whose child order changes source text but not user-visible results, yet still changes `ComputeQueryHash(...)` and therefore query-state sharing.
 
 Useful scout heuristic:
 
-- Start from an already-accepted SQL shape that has parser and public-path tests, then compare whether `compileSQLQueryString(...)`, `subscription.ValidatePredicate(...)`, `ComputeQueryHash(...)`, subscribe admission, and one-off execution all agree on the same runtime meaning.
-- The ideal next mismatch is: parser acceptance already exists, but one of normalization / validation / hash identity / execution still diverges between accepted subscribe and one-off paths.
+- Start from an already-accepted pair of commutative SQL shapes, compile both, confirm they return the same visible rows, then compare whether `ComputeQueryHash(...)` and `subscription.Manager.RegisterSet(...)` still treat them as distinct solely because source order survived normalization.
 
 Stop conditions:
 
 - stop at the first clean batch boundary that would require a new decision doc or would cross into A3 / hardening work
-- do not reopen the just-closed projected-join ordering work, the rows-shape cluster, or A1 wire/message-family work in the same session
+- do not reopen the just-closed neutral-`TRUE` work, projected-join ordering work, rows-shape cluster, or A1 wire/message-family work in the same session
 - if the scout shows the next meaningful gap is actually A3 or a new documented divergence, write that up here before handing off
 
 Out of scope for this batch: OI-001 A3 recovery/store parity, OI-004/005/006 hardening, rows-shape cluster reopen, strict-auth wiring in `cmd/shunter-example`.
