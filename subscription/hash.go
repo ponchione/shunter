@@ -304,6 +304,40 @@ func rebuildCanonicalOr(preds []Predicate) Predicate {
 	return result
 }
 
+func orderSelfJoinCanonicalChildren(left, right Predicate) (Predicate, Predicate) {
+	leftBytes := canonicalPredicateBytes(left)
+	rightBytes := canonicalPredicateBytes(right)
+	if bytes.Compare(leftBytes, rightBytes) <= 0 {
+		return left, right
+	}
+	return right, left
+}
+
+func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
+	switch p := pred.(type) {
+	case And:
+		left := canonicalizeSelfJoinFilter(p.Left)
+		right := canonicalizeSelfJoinFilter(p.Right)
+		if left == nil || right == nil {
+			return And{Left: left, Right: right}
+		}
+		left, right = orderSelfJoinCanonicalChildren(left, right)
+		return And{Left: left, Right: right}
+	case Or:
+		left := canonicalizeSelfJoinFilter(p.Left)
+		right := canonicalizeSelfJoinFilter(p.Right)
+		if left == nil || right == nil {
+			return Or{Left: left, Right: right}
+		}
+		left, right = orderSelfJoinCanonicalChildren(left, right)
+		return Or{Left: left, Right: right}
+	case Join, CrossJoin:
+		return p
+	default:
+		return pred
+	}
+}
+
 func canonicalizePredicate(pred Predicate) Predicate {
 	switch p := pred.(type) {
 	case And:
@@ -363,7 +397,11 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		left, right = orderCanonicalChildren(left, right)
 		return Or{Left: left, Right: right}
 	case Join:
-		if p.Filter == nil || p.Left == p.Right {
+		if p.Filter == nil {
+			return p
+		}
+		if p.Left == p.Right {
+			p.Filter = canonicalizeSelfJoinFilter(p.Filter)
 			return p
 		}
 		p.Filter = canonicalizePredicate(p.Filter)

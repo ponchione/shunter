@@ -1,135 +1,149 @@
 # Next session handoff
 
-Use this file to start the next agent on the next real Shunter parity / hardening step with no prior context.
+Use this file to start the next agent on the next real Shunter parity step with no prior context.
 
-For provenance of closed slices, use `rtk git log` — this file tracks only current state and forward motion. Do not re-narrate closed slices here.
+For provenance of closed slices, use `rtk git log`. This file tracks current state and the next concrete batch only.
 
-## Current state (live only)
+## Current state
 
-- All OIs referenced in the 2026-04-22 audit chain (OI-008 through OI-012) are closed.
-- All OI-001 A1 protocol wire-close slices identified to date are closed: `SubscriptionError` duration field + RequestID/QueryID None parity, `CallReducer` field order, `TransactionUpdate` field order + `EnergyQuantaUsed` u64→u128 width, applied-envelope field order (all four variants), `IdentityToken` rename + field order, `Unsubscribe.SendDropped` removal, `OneOffQueryResponse` rename + field order. All pinned in `protocol/parity_*_test.go`.
-- Phase 2 Slice 4 rows-shape cluster (flat `[]SubscriptionUpdate` / `TableName+Rows` vs reference `SubscribeRows` / `DatabaseUpdate` wrapper chain) is closed as documented divergence — `docs/parity-phase2-slice4-rows-shape.md`. Reopening requires a new decision doc that *also* closes SPEC-005 §3.4 `BsatnRowList` row-list deferral. Do not attempt a partial close.
-- `cmd/shunter-example` runs schema → commitlog recovery → durability → executor → WebSocket with anonymous auth, subscription fan-out, and a real `*Scheduler` owned by the example.
-- Before changing a file, verify against live code — memory/ledger claims can drift.
+- OI-001 A1 wire-close slices identified so far are closed and pinned in `protocol/parity_*_test.go`.
+- Phase 2 Slice 4 rows-shape wrapper-chain parity remains a documented divergence. Do not reopen it without a new decision doc that also reopens SPEC-005 §3.4 row-list format work.
+- `cmd/shunter-example` still provides the working bootstrap path and remains anonymous-auth only.
+- OI-002 / Tier A2 remains the next active execution issue.
+- The self-join alias-sensitive join-filter child-order slice is now closed across one-off semantics, canonical query hashing, and manager query-state sharing.
 
-## Live constraints (carry forward)
+## OI-002 A2 slices already closed
 
-- The OI-001 A1 receipt-timestamp seam batch is closed: `SubscriptionError.TotalHostExecutionDurationMicros`, `OneOffQueryResponse.TotalHostExecutionDuration`, `Subscribe{Single,Multi}Applied.TotalHostExecutionDurationMicros`, and `Unsubscribe{Single,Multi}Applied.TotalHostExecutionDurationMicros` now emit measured non-zero microsecond values through the admission / evaluation / one-off paths, and `TransactionUpdate.Timestamp` / `TransactionUpdate.TotalHostExecutionDuration` now carry microseconds to match reference SATS semantics.
-- `EnergyQuantaUsed` on the wire is a 16-byte u128 LE that always emits zeros. Shunter has no energy model; widening to honest u128 values is not on the roadmap.
-- `cmd/shunter-example` remains on anonymous auth; strict auth wiring is still out of scope for this queue.
-- `Scheduler.ReplayFromCommitted` still uses `context.Background()`; a recovered schedule count exceeding the executor inbox capacity would block replay. Inherited backpressure, not introduced here.
-- `TECH-DEBT.md` now marks OI-002 / Tier A2 as the next active execution issue; use that as the tie-breaker if stale docs suggest reopening A1 protocol work.
-- The first OI-002 fan-out delivery batch is now closed: `subscription/fanout_worker.go` delivers fast-read recipients without global `TxDurable` blocking while confirmed-read recipients still wait, and `subscription/eval.go` now marks eval-failure connections dropped for executor-side cleanup instead of pruning only the failing subscription.
-- The OI-002 join/cross-join multiplicity batch is now closed: `subscription.CrossJoin` carries projection-side/self-alias identity, cross joins preserve cartesian multiplicity across bootstrap/one-off/delta paths, and one-off equi-join projection now preserves bag semantics instead of semijoin-style dedup.
-- The one-off-vs-subscribe unindexed-join validation seam is now closed: `protocol/handle_oneoff.go` runs the shared `subscription.ValidatePredicate(...)` gate before snapshot evaluation, so one-off SQL rejects the same unindexed join admission shapes subscribe registration already rejects.
-- The committed join projected-order seam is now closed: `subscription/register_set.go` enumerates projected-side rows first for bootstrap and unregister final-delta joins, so accepted join SQL no longer flips visible committed-row order solely because the usable index lives on the opposite join side.
-- The projected join delta-order seam is now closed too: `subscription/eval.go` now projects join fragments before reconciliation so partner churn cancels at the projected-row bag level, `subscription/delta_dedup.go` preserves fragment encounter order for surviving rows, and focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right ordering plus no-op churn cases.
-- The `:sender` subscribe hash-identity seam is now closed: `protocol/handle_subscribe.go` preserves caller-bound parameter provenance, `protocol/lifecycle.go` / `executor/protocol_inbox_adapter.go` forward per-predicate hash identities, and `subscription/register_set.go` hashes mixed batches per predicate instead of request-globally. Literal bytes queries no longer collide with the caller-parameterized form, and mixed batches only parameterize marked predicates.
-- The neutral-`TRUE` accepted-shape normalization seam is now closed too: `protocol/handle_subscribe.go` normalizes SQL predicate trees before runtime lowering, and `subscription/hash.go` / `subscription/register_set.go` canonicalize neutral-`AllRows` runtime forms so single-table `TRUE AND/OR ...` shapes share the same runtime meaning/query-state identity as their simplified equivalents while join-backed `TRUE AND rhs-filter` shapes no longer drift into malformed validation-failing filters.
-- The accepted same-table commutative child-order, associative-grouping, duplicate-leaf-idempotence, and absorption-law seams are now all closed: `subscription/hash.go` canonicalizes same-table `AND` / `OR` groups by flattening same-kind children, sorting them by canonical child bytes, deduplicating exact duplicate leaves, applying a narrow post-dedupe absorption pass, and rebuilding one deterministic tree shape so child order, 3+-leaf grouping, redundant duplicate leaves, and bounded absorption-equivalent forms no longer fork query hash/query-state identity while one-off row meaning stays unchanged.
-- The overlength-SQL admission seam is now closed too: `query/sql/parser.go` rejects SQL longer than 50,000 bytes before tokenization/parsing, and `protocol/parity_one_off_query_response_test.go` plus `protocol/parity_subscription_duration_test.go` pin that one-off, subscribe single, and subscribe multi all surface the reference-aligned maximum-length error before snapshot or executor work.
-- The bare/grouped `FALSE` predicate follow-through seam is now closed too: `query/sql/parser.go` accepts bare `FALSE`, `protocol/handle_subscribe.go` normalizes `FALSE AND/OR` identities and lowers admitted false-only queries to `subscription.NoRows`, and `subscription/{predicate,validate,hash,manager,delta_single,placement}.go` now share that explicit no-result runtime meaning across validation, hashing, bootstrap, and evaluation.
-- The distinct-table join-filter child-order canonicalization seam is now closed too: `subscription/hash.go` now canonicalizes `Join.Filter` for distinct-table joins only, so accepted joins whose same-table filter leaves differ only by commutative child order share one canonical query hash and one shared query state while one-off visible rows stay unchanged; self-join alias-sensitive join-filter canonicalization remains intentionally out of scope. Focused pins now include `TestHandleOneOffQuery_JoinFilterChildOrderReturnsSameRows`, `TestQueryHashJoinFilterChildOrderCanonicalized`, and `TestRegisterSet_DistinctTableJoinFilterChildOrderSharesQueryState`.
-- Important guardrails from the just-landed same-table canonicalization closes:
-  - `subscription/register_set.go` still validates the original predicate before canonicalization and validates the canonicalized form again afterward, so reductions cannot mask wider invalid shapes such as `ErrTooManyTables`.
-  - the canonicalization fence is intentionally narrower than `Tables()==1`: join-containing compounds are excluded from flatten/sort/dedupe/absorb/rebuild so this closure stays bounded to accepted same-table non-join boolean trees.
-  - authoritative slice tests now also include `TestHandleOneOffQuery_SameTableDuplicateAndReturnsSameRows`, `TestHandleOneOffQuery_SameTableDuplicateOrReturnsSameRows`, `TestHandleOneOffQuery_SameTableOrAbsorptionReturnsSameRows`, `TestHandleOneOffQuery_SameTableAndAbsorptionReturnsSameRows`, `TestQueryHashSameTableDuplicateAndCanonicalized`, `TestQueryHashSameTableDuplicateOrCanonicalized`, `TestQueryHashSameTableOrAbsorptionCanonicalized`, `TestQueryHashSameTableAndAbsorptionCanonicalized`, `TestRegisterSet_SameTableDuplicateAndSharesQueryState`, `TestRegisterSet_SameTableDuplicateOrSharesQueryState`, `TestRegisterSet_SameTableOrAbsorptionSharesQueryState`, and `TestRegisterSet_SameTableAndAbsorptionSharesQueryState` in addition to the earlier child-order/grouping pins and `TestQueryHashJoinCompoundOrderMatters`.
+Do not reopen these without fresh evidence:
+- fan-out durability gating + dropped-client cleanup on eval failure
+- join/cross-join multiplicity across compile/hash/bootstrap/one-off/delta
+- one-off vs subscribe unindexed-join admission parity via shared `subscription.ValidatePredicate(...)`
+- committed join bootstrap/final-delta projected-side ordering
+- projected-join delta ordering
+- subscribe-side `:sender` hash identity / mixed-batch parameterization provenance
+- neutral-`TRUE` normalization across compile/hash/register seams
+- same-table canonicalization family:
+  - commutative child order
+  - associative grouping
+  - duplicate-leaf idempotence
+  - absorption-law reduction
+- overlength SQL admission rejection before recursive compile work
+- bare/grouped `FALSE` follow-through across parse/normalize/hash/bootstrap/one-off/eval
+- distinct-table join-filter child-order canonicalization
+- self-join alias-sensitive join-filter child-order canonicalization
 
-## How to frame a session
+## Next batch: self-join alias-sensitive join-filter associative-grouping canonicalization
 
-Work in *batches*, not single slices. One session = one batch. Within a batch, land one commit per slice so each remains reviewable.
+Take this exact slice next.
 
-1. **Scout once, at the start of the session.** Read the live code surfaces that match the named batch scope, then diff only those against the corresponding reference/docs source. Grep for `parity_`, `documented-divergence`, and the current OI label to filter out already-closed slices. Produce the residual list for that batch only.
-2. **Pick the batch's scope boundary** (one OI, or one named follow-on). Write out which items from the residual list fall inside it. Items outside stay for a future session — do not widen mid-batch.
-3. **Close each item in turn**, one commit per slice, each with a new `parity_*_test.go` byte-shape pin or a short decision doc under `docs/` matching the Slice 4 / 2γ / subprotocol pattern. Run `rtk go test ./protocol/...` + dependent packages after each, not only at the end.
-4. **Stop when** (a) the batch scope is exhausted, (b) the next item would need a new decision doc (stop and write the doc; do not just ship it), or (c) the next item crosses an OI/scope boundary. Do not stop mid-slice because "one slice is enough for today."
-5. **Update this file + memory at the end**, then commit and hand off.
+Problem statement:
+- accepted aliased self-join SQL now compiles, executes, and shares canonical identity when only immediate filter child order changes
+- `subscription/hash.go` still keeps join-containing predicates out of the broader same-table flatten/dedupe/absorb pipeline via `containsJoinLikePredicate(...)` / `canonicalGroupTable(...)`
+- the new self-join helper only reorders the two immediate children of self-join `And` / `Or` nodes
+- that means grouped self-join filters such as `(a.id = 1 AND a.id > 0) AND a.id < 10` vs `a.id = 1 AND (a.id > 0 AND a.id < 10)` can still hash/register differently even though visible one-off row semantics should match
 
-Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A3 or OI-004/005/006 hardening.
+Why this is the next actionable seam:
+- it stays inside OI-002 A2's accepted-shape normalization / runtime-identity family
+- it directly follows the now-closed self-join child-order slice without widening into alias-blind reductions
+- live code already isolates self-join filter canonicalization in one bounded seam inside `subscription/hash.go`
 
-## Next session: continue OI-002 A2 with a fresh bounded scout after the closed distinct-table join-filter child-order seam
+## Grounded evidence to re-read before editing
 
-The distinct-table join-filter child-order slice is now closed: `protocol/handle_oneoff_test.go` proves reordered same-table leaves inside an accepted distinct-table join filter already returned the same visible rows, `subscription/hash.go` now canonicalizes `Join.Filter` for distinct-table joins without rewriting join structure, and `subscription/hash_test.go` plus `subscription/manager_test.go` pin shared canonical hash/query-state identity for those accepted permutations.
+Read these first:
+- `subscription/hash.go`
+- `subscription/validate.go`
+- `protocol/handle_oneoff_test.go`
+- `subscription/hash_test.go`
+- `subscription/manager_test.go`
+- `TECH-DEBT.md`
+- `docs/spacetimedb-parity-roadmap.md`
+- `docs/parity-phase0-ledger.md`
 
-Fresh-agent task:
-- perform one fresh OI-002 A2 scout across the same bounded predicate-normalization / validation / runtime-model family and identify the strongest still-open residual after the now-closed fan-out, multiplicity, join-index-validation, committed projected-ordering, projected-join delta-ordering, `:sender`, neutral-`TRUE`, commutative-child-order, associative-grouping, duplicate-leaf-idempotence, same-table-absorption, overlength-SQL-admission, false-predicate-follow-through, and distinct-table-join-filter-child-order slices
-- start the scout by comparing the shared SQL compile/lowering path against the shared runtime identity/admission path for already-accepted shapes: inspect `protocol/handle_subscribe.go`, `protocol/handle_oneoff.go`, `subscription/hash.go`, `subscription/register_set.go`, and `subscription/validate.go` before looking for deeper evaluator bugs
-- prefer a residual where subscribe admission, one-off execution, and canonical query identity are not yet fully aligned even though the SQL surface is already accepted; do not spend the next batch on a brand-new parser widening unless the scout produces direct reference-backed evidence
-- only start implementation if the scout finds a concrete residual with a tight test-first shape; otherwise stop with an updated bounded plan/handoff rather than guessing
-- keep the next slice inside OI-002 A2; do not widen into parser-surface feature work, recovery, hardening, or rows-shape reopen without fresh evidence
-- deliver either (a) one bounded landed slice with tests + docs, or (b) a grounded scout result that names the next exact slice and why the other nearby seams stay out of scope
+Specific live facts:
+- `subscription/hash.go`
+  - `containsJoinLikePredicate(...)` still makes `canonicalGroupTable(...)` return false for join-containing predicates, so the broader flatten/sort/dedupe/absorb pipeline still does not apply to self-join filters
+  - `canonicalizeSelfJoinFilter(...)` only canonicalizes recursively and reorders the two immediate children of self-join `And` / `Or` nodes by canonical bytes
+- `subscription/validate.go`
+  - `validateJoin(...)` still enforces distinct aliases for self-joins
+  - `validateSelfJoinFilterAliases(...)` still guarantees each self-join filter leaf alias matches `Join.LeftAlias` or `Join.RightAlias`
+- `protocol/handle_oneoff_test.go`
+  - `TestHandleOneOffQuery_AliasedSelfJoinFilterChildOrderVisibleRowsMatch` now proves visible rows were already equal for the child-order-only accepted shape
+- `subscription/hash_test.go`
+  - `TestQueryHashSelfJoinFilterChildOrderCanonicalized` now pins the closed immediate-child ordering seam
+- `subscription/manager_test.go`
+  - `TestRegisterSet_SelfJoinFilterChildOrderSharesQueryState` now pins shared registration/query-state reuse for that closed seam
 
-Fresh-agent context:
-- closed already in OI-002 A2:
-  - recipient-level fan-out durability gating + dropped-client cleanup on eval failure
-  - join/cross-join multiplicity across compile/hash identity, bootstrap, one-off, and delta
-  - one-off vs subscribe unindexed-join admission parity via shared `subscription.ValidatePredicate(...)`
-  - committed join bootstrap/unregister projected-side ordering regardless of usable index side
-  - post-commit projected-join delta ordering via projected-fragment-first reconciliation plus encounter-order-preserving `ReconcileJoinDelta(...)`
-  - subscribe-side `:sender` hash identity / mixed-batch parameterization provenance
-  - neutral-`TRUE` predicate normalization across compile/hash/register seams
-  - accepted same-table commutative child-order canonicalization
-  - accepted same-table associative-grouping canonicalization
-  - accepted same-table duplicate-leaf idempotence canonicalization
-  - accepted same-table absorption-law canonicalization
-  - overlength SQL admission rejection before recursive compile work on one-off + subscribe seams
-  - bare/grouped `FALSE` predicate follow-through across parse/normalize/hash/bootstrap/one-off/eval seams
-  - distinct-table join-filter child-order canonicalization at the query-hash/query-state seam
-- do not reopen:
-  - fan-out delivery parity
-  - join/cross-join multiplicity
-  - one-off-vs-subscribe join-index validation
-  - committed join bootstrap/final-delta projected ordering
-  - projected join delta ordering
-  - `:sender` subscribe hash identity
-  - neutral-`TRUE` normalization
-  - accepted same-table commutative child-order work
-  - accepted same-table associative-grouping work
-  - accepted same-table duplicate-leaf idempotence work
-  - accepted same-table absorption-law work
-  - overlength SQL admission guard work
-  - bare/grouped `FALSE` predicate follow-through work
-  - distinct-table join-filter child-order canonicalization work
-  - rows-shape documented divergence
-  - OI-001 A1 wire/message-family work
+## Batch boundary
 
-Suggested starting reads for the next batch:
+In scope:
+- canonical query identity for accepted aliased self-join filters when only associative grouping changes
+- one-off semantic pin proving visible rows are already equal for the regrouped accepted shape
+- hash + manager query-state-sharing pins for that accepted self-join grouped shape
+- minimal `subscription/hash.go` change to flatten/rebuild only same-kind self-join filter groups in an alias-aware way
+
+Out of scope:
+- self-join duplicate-leaf idempotence
+- self-join absorption-law reductions
+- parser widening
+- distinct-table join changes
+- rows-shape reopen
+- OI-001 / OI-003 / hardening work
+
+## TDD shape for the next agent
+
+1. Add one public one-off semantic pin first.
+   - File: `protocol/handle_oneoff_test.go`
+   - Shape: accepted aliased self-join with three same-side leaves where only grouping changes
+   - Suggested query pair:
+     - `SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE (a.id = 1 AND a.id > 0) AND a.id < 2`
+     - `SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32 WHERE a.id = 1 AND (a.id > 0 AND a.id < 2)`
+   - Expected: both succeed and return the same visible rows
+
+2. Add the failing canonical-hash pin.
+   - File: `subscription/hash_test.go`
+   - Build a self-join `Join{Left: 1, Right: 1, LeftAlias: 0, RightAlias: 1, ...}`
+   - Use three leaves on the same alias side only
+   - Assert regrouped self-join `And` / `Or` forms share one hash inside `Join.Filter`
+   - Keep a negative guard nearby proving alias identity still matters
+
+3. Add the failing manager dedup/query-state pin.
+   - File: `subscription/manager_test.go`
+   - Register the same accepted self-join twice with grouping A vs B only
+   - Assert one query state, not two
+
+4. Implement the minimum fix in `subscription/hash.go`.
+   - Keep it bounded to self-join filter associative grouping only
+   - Important guardrail: do not simply enable the existing same-table flatten/dedupe/absorb pipeline for all join-containing predicates; it is alias-blind at the grouping seam and broader than this batch
+   - Preferred fix shape:
+     - recurse through self-join filter children
+     - flatten only same-kind self-join-local `And` or `Or` groups
+     - sort children by canonical bytes that already include alias identity
+     - rebuild one deterministic grouped shape
+     - leave duplicate-leaf and absorption reductions for later bounded scouts
+
+5. Validate in this order.
+   - focused new tests first
+   - `PATH=/usr/local/go/bin:$PATH rtk go test ./protocol ./subscription -count=1`
+   - `PATH=/usr/local/go/bin:$PATH rtk go vet ./protocol ./subscription`
+   - `PATH=/usr/local/go/bin:$PATH rtk go test ./... -count=1`
+
+## What to update in the same session
+
+If the slice lands, update:
 - `TECH-DEBT.md`
 - `docs/spacetimedb-parity-roadmap.md`
 - `docs/parity-phase0-ledger.md`
 - `NEXT_SESSION_HANDOFF.md`
-- `query/sql/parser.go`
-- `protocol/handle_subscribe.go`
-- `protocol/handle_oneoff.go`
-- `subscription/hash.go`
-- `subscription/register_set.go`
-- `subscription/validate.go`
-- `reference/SpacetimeDB/crates/query/src/lib.rs`
 
-Planning note:
-- stale `.hermes/plans/*.md` execution plans were cleaned up after the join-filter child-order slice landed; treat the handoff + live docs + live worktree as the only planning source of truth for the next batch
+## Out of scope for the next batch
 
-Suggested verification path for the next batch:
-1. Scout first; write down the exact residual, the exact live code/doc/reference surfaces inspected, and why the closed seams do not already cover it.
-2. Add focused failing tests for that residual before production edits.
-3. Re-run focused protocol/subscription tests.
-4. Run `PATH=/usr/local/go/bin:$PATH rtk go test ./protocol ./subscription ./executor -count=1`.
-5. Run `PATH=/usr/local/go/bin:$PATH rtk go test ./... -count=1`.
-6. Refresh `TECH-DEBT.md`, `docs/spacetimedb-parity-roadmap.md`, `docs/parity-phase0-ledger.md`, and `NEXT_SESSION_HANDOFF.md` in the same session so the next fresh agent does not have to infer current reality.
-
-Out of scope for this batch: OI-001 A3 recovery/store parity, OI-004/005/006 hardening, rows-shape cluster reopen, strict-auth wiring in `cmd/shunter-example`.
-
-## Follow-on queue (pickable next, one per session)
-
-- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/` plus the SQL admission/runtime seams in `reference/SpacetimeDB/crates/query/src/lib.rs`. Next candidate batch: another bounded predicate normalization / validation / runtime-model residual found by a fresh scout after the now-closed distinct-table join-filter child-order seam. Do not reopen the closed fan-out delivery, multiplicity, join-index-validation, committed projected-ordering, projected-join delta-ordering, `:sender`, neutral-`TRUE`, commutative-child-order, associative-grouping, duplicate-leaf-idempotence, same-table-absorption, overlength-SQL-admission, false-predicate-follow-through, or distinct-table join-filter child-order slices without fresh evidence.
-- **OI-001 A3** — recovery / store parity against `reference/SpacetimeDB/crates/core/src/db/`. Batch scope: snapshot/replay invariants beyond what `P0-RECOVERY-*` already covered.
-- **Coordinated wrapper-chain + row-list close** (Phase 2 Slice 4 carried-forward deferral). Requires a new decision doc reopening the SPEC-005 §3.4 `BsatnRowList` deferral together with the reference `SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `QueryUpdate` wrapper chain. Scope is large — do not start without a named consumer or a bandwidth trigger (SPEC-005 §3.4 "fixed-schema row delivery bottleneck").
-- **Strict-auth wiring in `cmd/shunter-example`**. Currently anonymous-only. Batch scope: JWT identity, token rotation, `IdentityToken` round-trip, upgrade-path handshake.
-
-Pick one follow-on per session and treat it as the batch scope. Do not interleave.
+- OI-001 A3 recovery/store parity
+- OI-004 / OI-005 / OI-006 hardening
+- rows-shape cluster reopen
+- strict-auth wiring in `cmd/shunter-example`
 
 ## Startup notes
 
-- Read `CLAUDE.md` first, then `RTK.md` for command rules, then `docs/EXECUTION-ORDER.md` for sequencing.
-- Use `rtk git log` for slice provenance; this file is current-state only.
-- Before changing a file, verify against live code — memory/ledger claims can drift.
+- Read `CLAUDE.md`, then `RTK.md`, then `docs/project-brief.md`, then `docs/EXECUTION-ORDER.md`
+- Use `rtk git log` for slice provenance
+- Before changing a file, verify against live code rather than trusting stale notes

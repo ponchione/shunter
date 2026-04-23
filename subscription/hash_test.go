@@ -211,6 +211,21 @@ func TestQueryHashJoinFilterChildOrderCanonicalized(t *testing.T) {
 	}
 }
 
+func TestQueryHashSelfJoinFilterChildOrderCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Alias: 0, Value: types.NewUint32(1)}
+	b := ColRange{Table: 1, Column: 0, Alias: 0, Lower: Bound{Value: types.NewUint32(0), Inclusive: false}, Upper: Bound{Unbounded: true}}
+	joinA := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: And{Left: a, Right: b}}
+	joinB := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: And{Left: b, Right: a}}
+	if ComputeQueryHash(joinA, nil) != ComputeQueryHash(joinB, nil) {
+		t.Fatal("self-join filter child order should not change canonical hash")
+	}
+
+	aliasDrift := Join{Left: 1, Right: 1, LeftCol: 1, RightCol: 1, LeftAlias: 0, RightAlias: 1, Filter: And{Left: ColEq{Table: 1, Column: 0, Alias: 1, Value: types.NewUint32(1)}, Right: b}}
+	if ComputeQueryHash(joinA, nil) == ComputeQueryHash(aliasDrift, nil) {
+		t.Fatal("self-join filter alias identity must still change canonical hash")
+	}
+}
+
 func TestQueryHashJoinFilterDiffers(t *testing.T) {
 	withoutF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, Filter: nil}
 	withF := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0,
