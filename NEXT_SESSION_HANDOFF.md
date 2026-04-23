@@ -26,6 +26,11 @@ For provenance of closed slices, use `rtk git log` — this file tracks only cur
 - The projected join delta-order seam is now closed too: `subscription/eval.go` now projects join fragments before reconciliation so partner churn cancels at the projected-row bag level, `subscription/delta_dedup.go` preserves fragment encounter order for surviving rows, and focused `subscription/delta_dedup_test.go` + `subscription/eval_test.go` pins cover projected-left/right ordering plus no-op churn cases.
 - The `:sender` subscribe hash-identity seam is now closed: `protocol/handle_subscribe.go` preserves caller-bound parameter provenance, `protocol/lifecycle.go` / `executor/protocol_inbox_adapter.go` forward per-predicate hash identities, and `subscription/register_set.go` hashes mixed batches per predicate instead of request-globally. Literal bytes queries no longer collide with the caller-parameterized form, and mixed batches only parameterize marked predicates.
 - The neutral-`TRUE` accepted-shape normalization seam is now closed too: `protocol/handle_subscribe.go` normalizes SQL predicate trees before runtime lowering, and `subscription/hash.go` / `subscription/register_set.go` canonicalize neutral-`AllRows` runtime forms so single-table `TRUE AND/OR ...` shapes share the same runtime meaning/query-state identity as their simplified equivalents while join-backed `TRUE AND rhs-filter` shapes no longer drift into malformed validation-failing filters.
+- The accepted same-table commutative child-order and associative-grouping seams are now both closed: `subscription/hash.go` canonicalizes same-table `AND` / `OR` groups by flattening same-kind children, sorting them by canonical child bytes, and rebuilding one deterministic tree shape so child order and 3+-leaf grouping no longer fork query hash/query-state identity while one-off row meaning stays unchanged.
+- Important guardrails from the just-landed associative-grouping close:
+  - `subscription/register_set.go` now validates the original predicate before canonicalization and validates the canonicalized form again afterward, so reductions cannot mask wider invalid shapes such as `ErrTooManyTables`.
+  - the canonicalization fence is intentionally narrower than `Tables()==1`: join-containing compounds are excluded from flatten/sort/rebuild so this closure stays bounded to accepted same-table non-join boolean trees.
+  - authoritative slice tests now include `TestHandleOneOffQuery_SameTableGroupedAndReturnsSameRows`, `TestHandleOneOffQuery_SameTableGroupedOrReturnsSameRows`, `TestQueryHashSameTableAndAssociativeGroupingCanonicalized`, `TestQueryHashSameTableOrAssociativeGroupingCanonicalized`, `TestRegisterSet_SameTableAndAssociativeGroupingSharesQueryState`, `TestRegisterSet_SameTableOrAssociativeGroupingSharesQueryState`, `TestRegisterSet_CanonicalizationDoesNotMaskTooManyTables`, and `TestQueryHashJoinCompoundOrderMatters`.
 
 ## How to frame a session
 
@@ -39,20 +44,22 @@ Work in *batches*, not single slices. One session = one batch. Within a batch, l
 
 Do not open multiple OIs in one batch. Do not reopen closed slices. Do not silently widen into A3 or OI-004/005/006 hardening.
 
-## Next session: continue OI-002 A2 with same-table associative-grouping canonicalization for accepted `AND` / `OR` SQL
+## Next session: continue OI-002 A2 with same-table duplicate-leaf idempotence canonicalization for accepted `AND` / `OR` SQL
 
-The commutative child-order slice is now closed: `protocol/handle_oneoff_test.go` proves accepted single-table same-table reordered pairs already returned identical rows, while `subscription/hash_test.go` and `subscription/manager_test.go` now pin that reordered pairs share one canonical query hash and one shared query state.
+The commutative child-order and associative-grouping slices are now closed: `protocol/handle_oneoff_test.go` proves accepted single-table same-table reordered/grouped variants already returned identical rows, while `subscription/hash_test.go` and `subscription/manager_test.go` now pin that reordered and regrouped variants share one canonical query hash and one shared query state.
 
 Fresh post-close scout this session:
-- same-table 3-leaf `AND` / `OR` runtime trees still hash differently when only grouping changes, e.g. left-associated vs right-associated forms.
-- a quick local scout program this session produced different hashes for:
-  - `And{And{a,b},c}` vs `And{a,And{b,c}}`
-  - `Or{Or{a,c},b}` vs `Or{a,Or{c,b}}`
-- that keeps the next bounded residual inside the same canonical query-identity seam without reopening parser widening, joins, `:sender`, neutral-`TRUE`, or fan-out work.
+- the next bounded residual at the same identity seam is duplicate-leaf idempotence drift on already-accepted same-table shapes.
+- a local scout program this session now shows:
+  - `hash(a)=6980b026b01eacb3b587a919a32b6605eb2c6092ffbd6d15ca8056baf934dbd2`
+  - `hash(a AND a)=3dd0e1eea6b84bcda11b722f9bbcdd68b63fd215cd374ce817af431520d575c3`
+  - `hash(a OR a)=b468624ee0cafdd1a6df81fbc078616761823bc1dd0b67dcfedb2048cb31d18a`
+- the same scout also showed identical row-level meaning for sample matching and non-matching rows via `subscription.MatchRow(...)`, so this still looks like a canonical query-identity seam rather than a runtime-evaluation bug.
+- that keeps the next bounded residual inside OI-002 A2 predicate normalization/canonical identity work without reopening parser widening, joins, `:sender`, neutral-`TRUE`, or fan-out work.
 
 Fresh-agent task:
-- close one bounded OI-002 A2 canonicalization slice for accepted same-table `AND` / `OR` SQL with 3+ leaves whose semantics are unchanged by grouping but whose canonical query identity still depends on tree shape
-- prove first that accepted grouped variants already return the same visible rows / query meaning, then pin the hash/query-state drift, then fix only the canonical identity seam
+- close one bounded OI-002 A2 canonicalization slice for accepted same-table duplicate-leaf SQL such as `a`, `a AND a`, and `a OR a`, where visible row meaning is unchanged but canonical query hash/query-state identity still diverges because redundant leaves survive into hashing
+- prove first that accepted duplicate-leaf variants already return the same visible rows / query meaning, then pin the hash/query-state drift, then fix only the canonical identity seam
 - keep the fix bounded to accepted same-table shapes; do not widen SQL admission or alter join/cross-join semantics
 
 Fresh-agent context:
@@ -65,6 +72,7 @@ Fresh-agent context:
   - subscribe-side `:sender` hash identity / mixed-batch parameterization provenance
   - neutral-`TRUE` predicate normalization across compile/hash/register seams
   - accepted same-table commutative child-order canonicalization
+  - accepted same-table associative-grouping canonicalization
 - do not reopen:
   - fan-out delivery parity
   - join/cross-join multiplicity
@@ -74,6 +82,7 @@ Fresh-agent context:
   - `:sender` subscribe hash identity
   - neutral-`TRUE` normalization
   - accepted same-table commutative child-order work
+  - accepted same-table associative-grouping work
   - rows-shape documented divergence
   - OI-001 A1 wire/message-family work
 
@@ -86,7 +95,7 @@ Suggested starting reads for the next batch:
 - `protocol/handle_subscribe.go`
 
 Suggested verification path for the next batch:
-1. Add focused failing tests for grouped same-table `AND` / `OR` shapes.
+1. Add focused failing tests for same-table duplicate-leaf `AND` / `OR` shapes.
 2. Re-run focused protocol/subscription tests.
 3. Run `PATH=/usr/local/go/bin:$PATH rtk go test ./protocol ./subscription ./executor -count=1`.
 4. Run `PATH=/usr/local/go/bin:$PATH rtk go test ./... -count=1`.
@@ -95,7 +104,7 @@ Out of scope for this batch: OI-001 A3 recovery/store parity, OI-004/005/006 har
 
 ## Follow-on queue (pickable next, one per session)
 
-- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: accepted same-table `AND` / `OR` associative-grouping canonicalization for 3+ leaves, or another bounded predicate normalization / validation residual if a fresh scout shows it is stronger. Do not reopen the closed fan-out delivery, multiplicity, join-index-validation, committed projected-ordering, projected-join delta-ordering, `:sender`, neutral-`TRUE`, or commutative-child-order slices without fresh evidence.
+- **OI-002 A2** — subscription-layer parity against `reference/SpacetimeDB/crates/core/src/subscription/`. Next candidate batch: accepted same-table duplicate-leaf idempotence canonicalization for already-supported `AND` / `OR` SQL, or another bounded predicate normalization / validation residual if a fresh scout shows it is stronger. Do not reopen the closed fan-out delivery, multiplicity, join-index-validation, committed projected-ordering, projected-join delta-ordering, `:sender`, neutral-`TRUE`, commutative-child-order, or associative-grouping slices without fresh evidence.
 - **OI-001 A3** — recovery / store parity against `reference/SpacetimeDB/crates/core/src/db/`. Batch scope: snapshot/replay invariants beyond what `P0-RECOVERY-*` already covered.
 - **Coordinated wrapper-chain + row-list close** (Phase 2 Slice 4 carried-forward deferral). Requires a new decision doc reopening the SPEC-005 §3.4 `BsatnRowList` deferral together with the reference `SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `QueryUpdate` wrapper chain. Scope is large — do not start without a named consumer or a bandwidth trigger (SPEC-005 §3.4 "fixed-schema row delivery bottleneck").
 - **Strict-auth wiring in `cmd/shunter-example`**. Currently anonymous-only. Batch scope: JWT identity, token rotation, `IdentityToken` round-trip, upgrade-path handshake.

@@ -161,6 +161,80 @@ func TestRegisterSet_SameTableOrChildOrderSharesQueryState(t *testing.T) {
 	}
 }
 
+func TestRegisterSet_SameTableAndAssociativeGroupingSharesQueryState(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString, 2: types.KindUint64}, 0)
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("alice"), types.NewUint64(30)},
+			{types.NewUint64(1), types.NewString("alice"), types.NewUint64(31)},
+		},
+	})
+	mgr := NewManager(s, s)
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	b := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}
+	c := ColEq{Table: 1, Column: 2, Value: types.NewUint64(30)}
+	leftGrouped := And{Left: And{Left: a, Right: b}, Right: c}
+	rightGrouped := And{Left: a, Right: And{Left: b, Right: c}}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 16, Predicates: []Predicate{leftGrouped},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 17, Predicates: []Predicate{rightGrouped},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 1 {
+		t.Fatalf("query-state count = %d, want 1 shared state", got)
+	}
+	h := ComputeQueryHash(leftGrouped, nil)
+	if qs := mgr.registry.byHash[h]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared query state = %+v, want refCount 2", qs)
+	}
+}
+
+func TestRegisterSet_SameTableOrAssociativeGroupingSharesQueryState(t *testing.T) {
+	s := testSchema()
+	view := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("alice")},
+			{types.NewUint64(2), types.NewString("bob")},
+			{types.NewUint64(3), types.NewString("carol")},
+		},
+	})
+	mgr := NewManager(s, s)
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	b := ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)}
+	c := ColEq{Table: 1, Column: 0, Value: types.NewUint64(3)}
+	leftGrouped := Or{Left: Or{Left: a, Right: b}, Right: c}
+	rightGrouped := Or{Left: a, Right: Or{Left: b, Right: c}}
+
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 18, Predicates: []Predicate{leftGrouped},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{2}, QueryID: 19, Predicates: []Predicate{rightGrouped},
+	}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(mgr.registry.byHash); got != 1 {
+		t.Fatalf("query-state count = %d, want 1 shared state", got)
+	}
+	h := ComputeQueryHash(leftGrouped, nil)
+	if qs := mgr.registry.byHash[h]; qs == nil || qs.refCount != 2 {
+		t.Fatalf("shared query state = %+v, want refCount 2", qs)
+	}
+}
+
 func TestRegisterParameterizedHashUsesClientIdentity(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
@@ -362,6 +436,27 @@ func TestRegisterThreeTableError(t *testing.T) {
 	mgr := NewManager(s, s)
 	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
 		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{p},
+	}, nil)
+	if !errors.Is(err, ErrTooManyTables) {
+		t.Fatalf("want ErrTooManyTables, got %v", err)
+	}
+}
+
+func TestRegisterSet_CanonicalizationDoesNotMaskTooManyTables(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(3, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	p := Or{
+		Left: AllRows{Table: 1},
+		Right: And{
+			Left:  ColEq{Table: 2, Column: 0, Value: types.NewUint64(2)},
+			Right: ColEq{Table: 3, Column: 0, Value: types.NewUint64(3)},
+		},
+	}
+	mgr := NewManager(s, s)
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 11, Predicates: []Predicate{p},
 	}, nil)
 	if !errors.Is(err, ErrTooManyTables) {
 		t.Fatalf("want ErrTooManyTables, got %v", err)

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"math"
+	"sort"
 	"sync"
 
 	"lukechampine.com/blake3"
@@ -96,12 +97,34 @@ func singlePredicateTable(pred Predicate) (TableID, bool) {
 	return tables[0], true
 }
 
+func containsJoinLikePredicate(pred Predicate) bool {
+	switch p := pred.(type) {
+	case nil:
+		return false
+	case And:
+		return containsJoinLikePredicate(p.Left) || containsJoinLikePredicate(p.Right)
+	case Or:
+		return containsJoinLikePredicate(p.Left) || containsJoinLikePredicate(p.Right)
+	case Join, CrossJoin:
+		return true
+	default:
+		return false
+	}
+}
+
+func canonicalGroupTable(pred Predicate) (TableID, bool) {
+	if containsJoinLikePredicate(pred) {
+		return 0, false
+	}
+	return singlePredicateTable(pred)
+}
+
 func canReorderCommutativeChildren(left, right Predicate) bool {
-	leftTable, ok := singlePredicateTable(left)
+	leftTable, ok := canonicalGroupTable(left)
 	if !ok {
 		return false
 	}
-	rightTable, ok := singlePredicateTable(right)
+	rightTable, ok := canonicalGroupTable(right)
 	if !ok {
 		return false
 	}
@@ -127,6 +150,72 @@ func orderCanonicalChildren(left, right Predicate) (Predicate, Predicate) {
 	return right, left
 }
 
+func flattenCanonicalAnd(pred Predicate, table TableID, out []Predicate) []Predicate {
+	switch p := pred.(type) {
+	case And:
+		if predTable, ok := canonicalGroupTable(p); ok && predTable == table {
+			out = flattenCanonicalAnd(p.Left, table, out)
+			out = flattenCanonicalAnd(p.Right, table, out)
+			return out
+		}
+	}
+	return append(out, pred)
+}
+
+func flattenCanonicalOr(pred Predicate, table TableID, out []Predicate) []Predicate {
+	switch p := pred.(type) {
+	case Or:
+		if predTable, ok := canonicalGroupTable(p); ok && predTable == table {
+			out = flattenCanonicalOr(p.Left, table, out)
+			out = flattenCanonicalOr(p.Right, table, out)
+			return out
+		}
+	}
+	return append(out, pred)
+}
+
+func sortCanonicalPredicates(preds []Predicate) {
+	if len(preds) < 2 {
+		return
+	}
+	type canonicalPredicate struct {
+		pred Predicate
+		key  []byte
+	}
+	ordered := make([]canonicalPredicate, len(preds))
+	for i, pred := range preds {
+		ordered[i] = canonicalPredicate{pred: pred, key: canonicalPredicateBytes(pred)}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return bytes.Compare(ordered[i].key, ordered[j].key) < 0
+	})
+	for i := range ordered {
+		preds[i] = ordered[i].pred
+	}
+}
+
+func rebuildCanonicalAnd(preds []Predicate) Predicate {
+	if len(preds) == 0 {
+		return nil
+	}
+	result := preds[0]
+	for i := 1; i < len(preds); i++ {
+		result = And{Left: result, Right: preds[i]}
+	}
+	return result
+}
+
+func rebuildCanonicalOr(preds []Predicate) Predicate {
+	if len(preds) == 0 {
+		return nil
+	}
+	result := preds[0]
+	for i := 1; i < len(preds); i++ {
+		result = Or{Left: result, Right: preds[i]}
+	}
+	return result
+}
+
 func canonicalizePredicate(pred Predicate) Predicate {
 	switch p := pred.(type) {
 	case And:
@@ -141,6 +230,12 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		if isAllRowsPredicate(right) {
 			return left
 		}
+		combined := And{Left: left, Right: right}
+		if table, ok := canonicalGroupTable(combined); ok {
+			children := flattenCanonicalAnd(combined, table, nil)
+			sortCanonicalPredicates(children)
+			return rebuildCanonicalAnd(children)
+		}
 		left, right = orderCanonicalChildren(left, right)
 		return And{Left: left, Right: right}
 	case Or:
@@ -154,6 +249,12 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		}
 		if isAllRowsPredicate(right) {
 			return right
+		}
+		combined := Or{Left: left, Right: right}
+		if table, ok := canonicalGroupTable(combined); ok {
+			children := flattenCanonicalOr(combined, table, nil)
+			sortCanonicalPredicates(children)
+			return rebuildCanonicalOr(children)
 		}
 		left, right = orderCanonicalChildren(left, right)
 		return Or{Left: left, Right: right}

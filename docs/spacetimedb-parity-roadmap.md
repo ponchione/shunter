@@ -31,7 +31,7 @@ Guardrails:
 ## Current grounded status
 
 Latest live repo state:
-- `rtk go test ./...` → `Go test: 1690 passed in 11 packages`
+- `rtk go test ./...` → `Go test: 1712 passed in 11 packages`
 - `rtk go build ./...` → `Go build: Success`
 - major runtime packages are already implemented in live Go code
 - `docs/parity-phase0-ledger.md` carries the scenario ledger
@@ -100,6 +100,7 @@ Current grounded state:
 - post-commit projected join delta rows now preserve the same projected-side semantics on both projected-left and projected-right accepted join shapes: fragments are projected before reconciliation so partner churn cancels at the projected-row bag level, and `ReconcileJoinDelta(...)` no longer reorders surviving rows via map iteration; focused `subscription/delta_dedup_test.go` / `subscription/eval_test.go` pins lock the behavior
 - accepted subscribe SQL using `:sender` now preserves caller-bound parameter provenance through compile/register hashing, so literal bytes queries no longer share a query hash/query-state identity with the parameterized caller form and mixed subscribe batches only parameterize the marked predicates
 - accepted SQL with neutral `TRUE` terms now normalizes before runtime lowering and canonical hashing, so single-table `TRUE AND/OR ...` shapes share the same runtime identity as their simplified equivalents and join-backed `TRUE AND rhs-filter` shapes no longer fail later via malformed runtime filters
+- accepted single-table same-table associative `AND` / `OR` SQL with 3+ leaves now canonicalizes grouping at the query-hash/query-state seam too, so left- vs right-associated trees no longer diverge solely because of parenthesization while parser/runtime semantics stay unchanged
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -204,7 +205,7 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, and single-table commutative child-order seams
+- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, single-table commutative child-order, and single-table associative-grouping seams
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
@@ -254,11 +255,11 @@ When choosing the next slice:
 
 ## Current best next direction
 
-The best current narrow-ready direction is still predicate normalization / validation drift inside OI-002 A2, and a quick post-fix scout now points at associative grouping drift for accepted same-table `AND` / `OR` SQL with 3+ leaves: child-order no longer changes canonical identity, but different parenthesization / tree shape still does.
+The best current narrow-ready direction is still predicate normalization / validation drift inside OI-002 A2, but the associative-grouping seam is now closed. A fresh post-fix scout points at same-table duplicate-leaf idempotence drift at the same canonical identity seam: a local probe now shows `hash(a) != hash(a AND a) != hash(a OR a)` even though `subscription.MatchRow(...)` returns identical booleans for sample matching and non-matching rows.
 
 Current candidate directions are:
-- accepted same-table `AND` / `OR` SQL with equivalent 3+ leaf semantics but different grouping, e.g. left-associated vs right-associated trees, which still hash differently at the canonical query-identity seam
-- another bounded OI-002 A2 runtime/model residual only if a fresh scout shows it is stronger than the grouping/associativity seam
+- accepted same-table duplicate-leaf SQL such as `a`, `a AND a`, and `a OR a`, whose user-visible row semantics are already identical but whose canonical query hash / query-state identity still diverges solely because redundant leaves survive into hashing
+- another bounded OI-002 A2 runtime/model residual only if a fresh scout shows it is stronger than the duplicate-leaf idempotence seam
 - Tier B hardening when a concrete live risk is stronger than the next parity slice
 - a carried-forward 2γ deferral only if a workload trigger justifies opening a new decision doc
 - scheduler/bootstrap follow-through only when workload or integration evidence surfaces

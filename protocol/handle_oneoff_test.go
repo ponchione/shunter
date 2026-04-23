@@ -442,6 +442,89 @@ func TestHandleOneOffQuery_SameTableOrChildOrderReturnsSameRows(t *testing.T) {
 	assertProductRowsEqual(t, rows[0], rows[1])
 }
 
+func TestHandleOneOffQuery_SameTableGroupedAndReturnsSameRows(t *testing.T) {
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "users",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "name", Type: schema.KindString},
+			{Index: 2, Name: "age", Type: schema.KindUint32},
+		},
+	}
+	sl := newMockSchema("users", 1, ts.Columns...)
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewString("alice"), types.NewUint32(30)},
+				{types.NewUint32(1), types.NewString("alice"), types.NewUint32(31)},
+				{types.NewUint32(2), types.NewString("alice"), types.NewUint32(30)},
+				{types.NewUint32(1), types.NewString("bob"), types.NewUint32(30)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+	queries := []string{
+		"SELECT * FROM users WHERE (id = 1 AND name = 'alice') AND age = 30",
+		"SELECT * FROM users WHERE id = 1 AND (name = 'alice' AND age = 30)",
+	}
+
+	var rows [][]types.ProductValue
+	for i, query := range queries {
+		conn := testConnDirect(nil)
+		msg := &OneOffQueryMsg{MessageID: []byte{0x34 + byte(i)}, QueryString: query}
+		handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+		result := drainOneOff(t, conn)
+		if result.Error != nil {
+			t.Fatalf("query %q error = %q, want nil", query, *result.Error)
+		}
+		rows = append(rows, decodeRows(t, firstTableRows(result), ts))
+	}
+
+	assertProductRowsEqual(t, rows[0], rows[1])
+}
+
+func TestHandleOneOffQuery_SameTableGroupedOrReturnsSameRows(t *testing.T) {
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "users",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "name", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("users", 1, ts.Columns...)
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewString("alice")},
+				{types.NewUint32(2), types.NewString("bob")},
+				{types.NewUint32(3), types.NewString("carol")},
+				{types.NewUint32(4), types.NewString("dave")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+	queries := []string{
+		"SELECT * FROM users WHERE (id = 1 OR id = 2) OR id = 3",
+		"SELECT * FROM users WHERE id = 1 OR (id = 2 OR id = 3)",
+	}
+
+	var rows [][]types.ProductValue
+	for i, query := range queries {
+		conn := testConnDirect(nil)
+		msg := &OneOffQueryMsg{MessageID: []byte{0x36 + byte(i)}, QueryString: query}
+		handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+		result := drainOneOff(t, conn)
+		if result.Error != nil {
+			t.Fatalf("query %q error = %q, want nil", query, *result.Error)
+		}
+		rows = append(rows, decodeRows(t, firstTableRows(result), ts))
+	}
+
+	assertProductRowsEqual(t, rows[0], rows[1])
+}
+
 func TestHandleOneOffQuery_OrComparisonWithAliasAndHexBytes(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{

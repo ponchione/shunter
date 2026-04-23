@@ -230,6 +230,9 @@ func (m *Manager) RegisterSet(
 	canonicalPreds := make([]Predicate, 0, len(req.Predicates))
 	// Pre-validate every predicate before touching registry state.
 	for _, p := range req.Predicates {
+		if err := ValidatePredicate(p, m.schema); err != nil {
+			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate validation: %w", err)
+		}
 		canonical := canonicalizePredicate(p)
 		if err := ValidatePredicate(canonical, m.schema); err != nil {
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate validation: %w", err)

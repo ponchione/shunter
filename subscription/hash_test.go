@@ -86,6 +86,28 @@ func TestQueryHashSameTableOrChildOrderCanonicalized(t *testing.T) {
 	}
 }
 
+func TestQueryHashSameTableAndAssociativeGroupingCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	b := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}
+	c := ColEq{Table: 1, Column: 2, Value: types.NewUint64(30)}
+	leftGrouped := And{Left: And{Left: a, Right: b}, Right: c}
+	rightGrouped := And{Left: a, Right: And{Left: b, Right: c}}
+	if ComputeQueryHash(leftGrouped, nil) != ComputeQueryHash(rightGrouped, nil) {
+		t.Fatal("same-table And grouping should not change canonical hash")
+	}
+}
+
+func TestQueryHashSameTableOrAssociativeGroupingCanonicalized(t *testing.T) {
+	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	b := ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)}
+	c := ColEq{Table: 1, Column: 0, Value: types.NewUint64(3)}
+	leftGrouped := Or{Left: Or{Left: a, Right: b}, Right: c}
+	rightGrouped := Or{Left: a, Right: Or{Left: b, Right: c}}
+	if ComputeQueryHash(leftGrouped, nil) != ComputeQueryHash(rightGrouped, nil) {
+		t.Fatal("same-table Or grouping should not change canonical hash")
+	}
+}
+
 func TestQueryHashMultiTableAndOrderMatters(t *testing.T) {
 	a := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
 	b := ColEq{Table: 2, Column: 0, Value: types.NewUint64(2)}
@@ -93,6 +115,16 @@ func TestQueryHashMultiTableAndOrderMatters(t *testing.T) {
 	p2 := And{Left: b, Right: a}
 	if ComputeQueryHash(p1, nil) == ComputeQueryHash(p2, nil) {
 		t.Fatal("multi-table And order should still matter")
+	}
+}
+
+func TestQueryHashJoinCompoundOrderMatters(t *testing.T) {
+	join := Join{Left: 1, Right: 1, LeftCol: 0, RightCol: 0, LeftAlias: 0, RightAlias: 1}
+	leaf := ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)}
+	p1 := And{Left: join, Right: leaf}
+	p2 := And{Left: leaf, Right: join}
+	if ComputeQueryHash(p1, nil) == ComputeQueryHash(p2, nil) {
+		t.Fatal("join-containing compound order should still matter")
 	}
 }
 
