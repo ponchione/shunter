@@ -1302,6 +1302,80 @@ func TestHandleOneOffQuery_JoinProjectionOnLeftTable(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQuery_JoinFilterChildOrderReturnsSameRows(t *testing.T) {
+	ordersTS := &schema.TableSchema{
+		ID:   1,
+		Name: "users",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "group_id", Type: schema.KindUint32},
+		},
+	}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "users",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "group_id", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_users_group_id", Columns: []string{"group_id"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "other",
+		Columns: []schema.ColumnDefinition{
+			{Name: "uid", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "flag", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, usersReg, ok := eng.Registry().TableByName("users")
+	if !ok {
+		t.Fatal("users table missing from registry")
+	}
+	_, otherReg, ok := eng.Registry().TableByName("other")
+	if !ok {
+		t.Fatal("other table missing from registry")
+	}
+	ordersTS.ID = usersReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			usersReg.ID: {
+				{types.NewUint32(1), types.NewUint32(100)},
+				{types.NewUint32(2), types.NewUint32(101)},
+			},
+			otherReg.ID: {
+				{types.NewUint32(100), types.NewUint32(1)},
+				{types.NewUint32(101), types.NewUint32(1)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+	queries := []string{
+		`SELECT "users".* FROM "users" JOIN "other" ON "users"."group_id" = "other"."uid" WHERE (("users"."id" = 1) AND ("users"."id" > 0))`,
+		`SELECT "users".* FROM "users" JOIN "other" ON "users"."group_id" = "other"."uid" WHERE (("users"."id" > 0) AND ("users"."id" = 1))`,
+	}
+
+	var rows [][]types.ProductValue
+	for i, query := range queries {
+		conn := testConnDirect(nil)
+		msg := &OneOffQueryMsg{MessageID: []byte{0x28 + byte(i)}, QueryString: query}
+		handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+		result := drainOneOff(t, conn)
+		if result.Error != nil {
+			t.Fatalf("query %q error = %q, want nil", query, *result.Error)
+		}
+		rows = append(rows, decodeRows(t, firstTableRows(result), ordersTS))
+	}
+
+	want := []types.ProductValue{{types.NewUint32(1), types.NewUint32(100)}}
+	assertProductRowsEqual(t, rows[0], want)
+	assertProductRowsEqual(t, rows[1], want)
+}
+
 func TestHandleOneOffQuery_JoinFilterTrueAndComparisonSucceeds(t *testing.T) {
 	conn := testConnDirect(nil)
 	ordersTS := &schema.TableSchema{

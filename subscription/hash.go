@@ -362,6 +362,12 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		}
 		left, right = orderCanonicalChildren(left, right)
 		return Or{Left: left, Right: right}
+	case Join:
+		if p.Filter == nil || p.Left == p.Right {
+			return p
+		}
+		p.Filter = canonicalizePredicate(p.Filter)
+		return p
 	default:
 		return pred
 	}

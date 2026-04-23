@@ -105,6 +105,7 @@ Current grounded state:
 - accepted single-table same-table absorption-equivalent `AND` / `OR` SQL now canonicalizes bounded absorption-law variants at that same query-hash/query-state seam, so `a OR (a AND b)` and `a AND (a OR b)` share one canonical query hash and one shared query state with `a` while one-off row semantics stay unchanged
 - overlength SQL is now rejected before recursive parse/compile work on subscribe single, subscribe multi, and one-off query paths via a shared 50,000-byte parser guard, matching the reference's explicit protection against deeply nested boolean-query stack blowups
 - reference-backed bare and grouped `FALSE` predicates now follow through coherently on the already-supported SQL surface: parser acceptance, subscribe lowering, one-off execution, canonical hashing, validation, bootstrap, and single-table delta evaluation all share an explicit `subscription.NoRows` runtime meaning
+- accepted distinct-table joins whose same-table filter leaves differ only by commutative child order now also share one canonical query hash / query-state identity: `subscription/hash.go` canonicalizes `Join.Filter` for distinct-table joins while preserving join structure (`Left`/`Right`, join columns, aliases, projection side) and leaving self-join alias-sensitive filter canonicalization for a future bounded scout
 - row-level security / per-client filtering remains absent
 - subscription behavior still spans multiple seams rather than one fully parity-locked contract
 
@@ -209,7 +210,7 @@ What landed already:
 
 What remains:
 - broader query/subscription parity beyond the narrow landed shapes
-- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, single-table commutative child-order, single-table associative-grouping, single-table duplicate-leaf idempotence, single-table absorption-law, overlength-SQL admission, and false-predicate follow-through seams
+- predicate normalization / validation drift and other remaining bounded A2 runtime/model gaps still need follow-on slices after the now-closed one-off-vs-subscribe join-index validation, committed join bootstrap/final-delta ordering, projected-join delta-ordering, `:sender` hash-identity, neutral-`TRUE` normalization, single-table commutative child-order, single-table associative-grouping, single-table duplicate-leaf idempotence, single-table absorption-law, overlength-SQL admission, false-predicate follow-through, and distinct-table join-filter child-order seams
 - any future one-off widening should be deliberate, not accidental
 - RLS/per-client filtering remains absent
 - coordinated wrapper-chain + `BsatnRowList` close is a carried-forward deferral under `docs/parity-phase2-slice4-rows-shape.md` and SPEC-005 §3.4
@@ -259,7 +260,7 @@ When choosing the next slice:
 
 ## Current best next direction
 
-The bare/grouped `FALSE` predicate follow-through seam is now closed too. The best current direction is therefore a fresh OI-002 A2 scout for the next bounded predicate normalization / validation / runtime-model residual rather than assuming the next seam in advance.
+The distinct-table join-filter child-order canonicalization seam is now closed too. The best current direction is therefore a fresh OI-002 A2 scout for the next bounded predicate normalization / validation / runtime-model residual rather than assuming the next seam in advance.
 
 Current candidate directions are:
 - another bounded OI-002 A2 runtime/model residual identified by a fresh scout
