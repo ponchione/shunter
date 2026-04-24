@@ -4648,3 +4648,50 @@ func TestHandleSubscribeSingle_JoinOnEqualityWithFilterAccepted(t *testing.T) {
 		t.Fatalf("upper bound = %+v, want exclusive bounded 10", rng.Upper)
 	}
 }
+
+// TestHandleSubscribeSingle_JoinOnEqualityWithFilterUnindexedRejected pins
+// that the subscription unindexed-join gate (validate.go:170) is independent
+// of filter presence. The shape admitted by P0-SUBSCRIPTION-027 does not
+// weaken the index requirement; it only opens a parser-level surface.
+func TestHandleSubscribeSingle_JoinOnEqualityWithFilterUnindexedRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	executor := &validatingSubExecutor{schema: sl}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   19,
+		QueryID:     52,
+		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 52, "SubscriptionError.QueryID")
+	requireOptionalUint32(t, se.RequestID, 19, "SubscriptionError.RequestID")
+	if !strings.Contains(se.Error, "join column has no index on either side") {
+		t.Fatalf("Error = %q, want subscription unindexed-join rejection", se.Error)
+	}
+}
