@@ -169,13 +169,8 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	if !allowLimit && stmt.Limit != nil {
 		return compiledSQLQuery{}, fmt.Errorf("LIMIT not supported for subscriptions")
 	}
-	if stmt.Aggregate != nil {
-		if !allowProjection {
-			return compiledSQLQuery{}, fmt.Errorf("aggregate projections not supported for subscriptions")
-		}
-		if stmt.Limit != nil {
-			return compiledSQLQuery{}, fmt.Errorf("aggregate projections with LIMIT not supported")
-		}
+	if stmt.Aggregate != nil && !allowProjection {
+		return compiledSQLQuery{}, fmt.Errorf("aggregate projections not supported for subscriptions")
 	}
 	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
 		return compiledSQLQuery{}, fmt.Errorf("column-list projections not supported for subscriptions")

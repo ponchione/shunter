@@ -1,20 +1,14 @@
 # Next session handoff
 
-Use this file to start the next agent on the current Shunter TECH-DEBT / parity task with no prior chat context.
+Use this file to start the next build agent on the current Shunter TECH-DEBT / parity task with no prior chat context.
 
-This file is not the hosted-runtime planning handoff. Hosted-runtime planning now lives in:
-
-- `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
+This is not the hosted-runtime planning handoff. Hosted-runtime planning lives in `HOSTED_RUNTIME_PLANNING_HANDOFF.md`.
 
 ## Current objective
 
-Continue working through `TECH-DEBT.md`, prioritizing externally visible parity gaps first.
+Implement the next OI-002 / Tier A2 subscription-runtime parity slice:
 
-Current active TECH-DEBT issue for handoff purposes:
-
-- `OI-002`: query and subscription behavior still diverges from the target runtime model.
-
-`OI-002` remains open after the latest one-off cross-join `WHERE` + `COUNT(*)` aggregate combination closure. The next bounded A2 batch should be chosen from fresh live evidence, not by reopening a just-closed SQL, fanout-ordering, or QueryID wire-correlation slice.
+`OI-008` / same-connection reused subscription-hash initial-snapshot elision: when a client subscribes to the same predicate hash twice on the same connection under different client `QueryID`s, the second `SubscribeMultiApplied` should carry an empty update rather than re-sending the full initial snapshot. This is already scoped out in `TECH-DEBT.md::OI-008` with reference anchors and a test-first plan; do not reopen closed P0-SUBSCRIPTION-001 through P0-SUBSCRIPTION-033 rows.
 
 Use `rtk` for every shell command, including git. Do not push unless explicitly asked.
 
@@ -24,92 +18,108 @@ Read in this order before editing:
 
 1. `RTK.md`
 2. `README.md`
-3. `TECH-DEBT.md`
-4. `docs/spacetimedb-parity-roadmap.md`
-5. `docs/parity-phase0-ledger.md`
-6. relevant spec/decomposition files for the chosen slice
+3. `TECH-DEBT.md` — read OI-002 (campaign) and OI-008 (concrete slice + implementation notes). Do not switch to another tech-debt item from this handoff.
+4. `docs/spacetimedb-parity-roadmap.md` — Tier A2.
+5. `docs/parity-phase0-ledger.md` — `P0-SUBSCRIPTION-001` through `P0-SUBSCRIPTION-033` are closed baselines.
+6. `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md`
+7. `docs/decomposition/005-protocol/SPEC-005-protocol.md`
 
-If the task is hosted-runtime planning or implementation instead, stop and read `HOSTED_RUNTIME_PLANNING_HANDOFF.md` instead of using this handoff.
+Then inspect the live code with Go tools before editing:
 
-## Latest OI-002 state to preserve
+- `rtk go doc ./subscription.Manager`
+- `rtk go doc ./subscription.RegisterSet`
+- `rtk go list -json ./subscription ./protocol ./executor`
 
-Do not reopen the closed P0-SUBSCRIPTION-001 through P0-SUBSCRIPTION-032 rows without new failing regression evidence.
+## Why this is the next path
 
-`P0-SUBSCRIPTION-032` is the latest OI-002 query/subscription slice. A fresh scout found that after P0-SUBSCRIPTION-024 (cross-join `WHERE` column-equality), P0-SUBSCRIPTION-031 (cross-join `WHERE` equality-plus-literal-filter), and P0-SUBSCRIPTION-025 (join-backed `COUNT(*) [AS] alias`) had all closed, the bounded combination of cross-join `WHERE` + `COUNT(*)` aggregate on the existing two-table join surface was already latently admitted by the parser and compile seam but had no end-to-end pin. The slice adds parser + one-off + subscribe-rejection pins without any production code change; the combination behavior is now locked by explicit tests.
+`P0-SUBSCRIPTION-033` (one-off `COUNT(*) [AS] alias` + `LIMIT` aggregate composition) closed the last queued bounded SQL widening for OI-002. `OI-008` is the already-scoped-out named OI-002 residual with concrete reference anchors, a bounded implementation surface (the set-registration hot path), and a test-first plan already written in `TECH-DEBT.md::OI-008`. It does not widen the SQL surface; it fixes a standing-query-reuse bandwidth/latency bug on the subscribe path.
 
-Latest closed OI-002 slice:
+Reference anchors (from `TECH-DEBT.md::OI-008`):
 
-- `P0-SUBSCRIPTION-032`: one-off/ad hoc SQL now accepts the bounded combination of cross-join `WHERE` column-equality (with optional one qualified column-literal filter) and join-backed `COUNT(*) [AS] alias` aggregate projection, for example `SELECT COUNT(*) AS n FROM t JOIN s WHERE t.id = s.t_id AND s.active = TRUE`. The parser preserves aggregate metadata on the cross-join WHERE shape, one-off routes the query through the existing `subscription.Join` evaluator with matched-pair counting into one uint64 aggregate row using the requested alias, and subscribe rejects with "aggregate projections not supported for subscriptions" (the aggregate guard fires before the cross-join `WHERE` guard).
+- `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs::add_subscription_multi` lines 1083-1094: already-attached `(ConnID, query-hash)` paths skip adding the predicate to `new_queries`.
+- `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_actor.rs` lines 1357-1369: empty `new_queries` becomes empty applied update data.
+- reference test `test_subscribe_and_unsubscribe_with_duplicate_queries_multi` lines 2498-2535: the second same-connection reused-plan add has `second_one.is_empty()`.
 
-Behavior now pinned:
+Current Shunter behavior (to verify with a scout before editing):
 
-- `query/sql/parser_test.go::TestParseJoinCountStarAliasProjectionOnCrossJoinWhereEquality` pins the parser aggregate metadata + `ColumnComparisonPredicate` structure on the equality-only cross-join WHERE shape
-- `query/sql/parser_test.go::TestParseJoinCountStarBareAliasProjectionOnCrossJoinWhereEqualityAndFilter` pins the parser aggregate metadata + `AndPredicate{ColumnComparisonPredicate, ComparisonPredicate}` structure on the equality-plus-filter shape with bare alias
-- `protocol/handle_oneoff_test.go::TestHandleOneOffQuery_ParityJoinCountAliasOnCrossJoinWhereEqualityReturnsAggregate` fails if one-off rejects the shape or miscounts matched pairs
-- `protocol/handle_oneoff_test.go::TestHandleOneOffQuery_ParityJoinCountBareAliasOnCrossJoinWhereEqualityAndFilterReturnsAggregate` fails if one-off ignores the literal filter or mis-projects the aggregate
-- `protocol/handle_subscribe_test.go::TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected` fails if subscribe accepts the combination or surfaces an unexpected rejection message
+- `subscription/register_set.go::RegisterSet` calls `initialQuery` for every deduped per-call predicate before checking whether the same connection already has that query hash live, so the second same-connection/different-QueryID subscribe re-emits the full initial rows.
+- `subscription/query_state.go::addSubscriber` already tracks multiple internal `SubscriptionID`s per `(ConnID, hash)`.
+- post-commit fanout already stamps each update with the stored client `QueryID` (closed under `P0-SUBSCRIPTION-030`).
 
-Previous latest query/subscription slices:
+## TDD-first implementation plan
 
-- `P0-SUBSCRIPTION-031`: one-off/ad hoc SQL accepts `SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32 AND s.enabled = TRUE` shapes with cross-join `WHERE` equality plus one literal filter; subscribe still rejects cross-join `WHERE`.
-- `P0-SUBSCRIPTION-030`: subscription updates retain manager-internal `SubscriptionID` only inside the subscription package; fanout / protocol carry the client `QueryID`.
-- `P0-SUBSCRIPTION-029`: evaluator-produced fanout is stabilized per connection by internal subscription-registration/SubscriptionID order before fanout worker handoff.
+Add or flip tests first, and confirm the important ones fail before production edits.
 
-Primary files touched by the latest OI-002 work:
+### 1. Manager-level regression in `subscription/register_set_test.go`
 
-- `query/sql/parser_test.go`
-- `protocol/handle_oneoff_test.go`
-- `protocol/handle_subscribe_test.go`
-- `TECH-DEBT.md`
-- `docs/parity-phase0-ledger.md`
-- `docs/spacetimedb-parity-roadmap.md`
-- `NEXT_SESSION_HANDOFF.md`
+- First register for `(connA, queryID=1, predicate P)` returns initial inserts.
+- Second register for `(connA, queryID=2, same predicate/hash P)` succeeds, records queryID=2, and returns an empty `Update`.
+- A later register for `(connB, queryID=1, same predicate/hash P)` still returns initial inserts. This pins that the elision is same-connection only.
 
-Latest validation reported for that slice:
+### 2. Preserve existing hard-error pins
 
-- `rtk go test ./query/sql -run 'TestParseJoinCountStarAliasProjectionOnCrossJoinWhereEquality|TestParseJoinCountStarBareAliasProjectionOnCrossJoinWhereEqualityAndFilter' -count=1 -v`
-- `rtk go test ./protocol -run 'TestHandleOneOffQuery_ParityJoinCountAliasOnCrossJoinWhereEqualityReturnsAggregate|TestHandleOneOffQuery_ParityJoinCountBareAliasOnCrossJoinWhereEqualityAndFilterReturnsAggregate|TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected' -count=1 -v`
-- `rtk go fmt ./query/sql ./protocol`
-- `rtk go vet ./query/sql ./protocol`
-- `rtk go test ./query/sql ./protocol ./subscription ./executor -count=1`
-- `rtk go test ./... -count=1`
+- Duplicate `(connA, queryID=1)` subscribe still returns `ErrQueryIDAlreadyLive`.
+- Non-existent unsubscribe still errors.
 
-Before calling the next slice done, still run the appropriate touched-package tests and prefer `rtk go test ./... -count=1` when time allows.
+### 3. Protocol-level pin in `protocol/handle_subscribe_test.go` (or nearby multi-subscribe coverage)
 
-## Good next OI-002 candidates
+- Two `SubscribeMulti` requests from the same connection using different `QueryID`s and equivalent SQL should produce a second `SubscribeMultiApplied` with empty `Update`.
 
-Choose from fresh live evidence. The next bounded candidate should be chosen by scouting live code/docs/tests after the `P0-SUBSCRIPTION-032` landing; do not carry forward older candidate notes without re-verification.
+### 4. Post-commit sanity pin (only if cheap)
 
-Candidates carried forward from prior handoffs:
+- Show both `QueryID`s still receive future deltas after the second attachment. Do not redesign fanout if the existing `QueryID` metadata already satisfies this.
 
-1. Runtime/fanout lanes.
-   - Choose only from fresh evidence; the known QueryID-level fanout/protocol correlation and deterministic per-connection ordering candidates are closed.
+## Production edit shape
 
-2. Row-level security / per-client filtering.
-   - This remains real but is too large to mix with a narrow SQL or fanout slice unless the user explicitly requests that broader work.
+Primary files (per `TECH-DEBT.md::OI-008`):
 
-3. A TBD parser/compile seam continuation, to be chosen from fresh scout.
-   - Use this route only when the parity claim is exactly bounded and reference-backed.
-   - Do not reopen the now-closed projection-family, unindexed-join, cross-join `WHERE` equality/equality-plus-filter, cross-join `WHERE` + `COUNT(*)` combination, join-backed count aggregate, JOIN ON filter, SubscriptionError durability-gating, per-connection ordering, or QueryID fanout/protocol targets without new failing regression evidence.
-   - During the P0-SUBSCRIPTION-032 scout, verified that reference's SQL parser rejects `SELECT DISTINCT ...` (sql.rs `distinct: None` match), supports only `COUNT(*) AS alias` aggregate (rejecting `SUM`, `COUNT(DISTINCT col)`), and errors hard on duplicate-QueryID subscribe + non-existent-QueryID unsubscribe — so those are NOT parity gaps. The parser agent's initial "subscribe-duplicate-idempotent" / "unsubscribe-nonexistent-idempotent" / "sender-caller-filtering" candidates were all wrong against the reference; do not reopen them without fresh counter-evidence.
+- `subscription/register_set.go`
+- `subscription/query_state.go`
+- `subscription/manager.go`
+- `protocol/handle_subscribe_multi.go`
 
-4. Deferred but real candidate: same-connection-plus-reused-hash subscribe initial-snapshot elision.
-   - Reference (`module_subscription_manager.rs::add_subscription_multi` lines 1083-1094 + `module_subscription_actor.rs` line 1357-1369): when a client calls `SubscribeMulti` with a predicate whose hash is already attached to that same connection under a different QueryID, reference only tracks the new `(ConnID, QueryID)` pair and returns an EMPTY `new_queries` vec, so the `SubscribeMultiApplied` arrives with empty data — avoiding redundant initial-snapshot bytes on the wire.
-   - Shunter (`subscription/register_set.go` RegisterSet loop) currently re-runs `initialQuery` for every per-call predicate regardless of whether `(ConnID, hash)` already has another live `SubscriptionID` for this connection, so the second `SubscribeMultiApplied` re-emits the full initial snapshot under the new QueryID.
-   - Post-commit fanout already emits per-QueryID updates correctly via `qs.subscribers[connID][subID].QueryID`, so the behavioral gap is strictly about redundant initial snapshots, not about ongoing delivery.
-   - Verified reference behavior by test `test_subscribe_and_unsubscribe_with_duplicate_queries_multi` (lines 2498-2535) which asserts `second_one.is_empty()` on the second reused-plan add.
-   - This would be a real OI-002 behavioral slice (not just a test-only pin). Scope: `register_set.go` (skip `initialQuery` + emit empty `SubscriptionUpdate` when the per-conn hash is already live), `query_state.go` (no change needed — `addSubscriber` already handles per-subID bookkeeping), plus new tests in `register_set_test.go` and `handle_subscribe_test.go`. Blast radius is moderate — touches the subscribe hot path.
-   - Not landed this session; flagged for a future deliberate slice.
+Likely production changes:
 
-## Recommended next command checklist
+1. Detect same-connection `(ConnID, hash)` reuse in `RegisterSet` BEFORE adding the newly allocated internal `SubscriptionID` via `addSubscriber` (after addSubscriber every new subscription would look like a reuse).
+2. On reuse: still allocate and attach the new internal `SubscriptionID`, still populate `querySets[ConnID][QueryID]`, but skip `initialQuery` and leave `SubscriptionSetRegisterResult.Update` empty for that predicate.
+3. Keep same-call hash deduplication unchanged (it already avoids duplicate predicates inside one register request).
+4. Keep `ErrQueryIDAlreadyLive` for duplicate `(ConnID, QueryID)`.
+5. Keep `UnregisterSet` semantics unchanged unless a test proves final-delta behavior needs a matching reference split.
+6. If a later predicate in a multi-register request fails `initialQuery`, unwind all allocated subIDs, including same-connection reused-hash subIDs that skipped the snapshot.
+
+## Out of scope
+
+Do not include these in this slice:
+
+- Any non-OI-002 tech-debt item.
+- Reopening `P0-SUBSCRIPTION-001` through `P0-SUBSCRIPTION-033` without a new failing regression.
+- Further SQL surface widening.
+- Fanout/QueryID correlation changes (closed under `P0-SUBSCRIPTION-030`).
+- Changing `UnregisterSet` / final-delta semantics unless a test forces it.
+- Cross-connection elision (reference does not elide cross-connection, only same-connection).
+
+## Validation commands
+
+Run in this order:
 
 ```bash
-rtk git status --short --branch
-rtk go test ./query/sql ./protocol ./subscription -count=1
+rtk go test ./subscription -run 'TestRegisterSet.*Reused|TestRegisterSet.*Duplicate' -count=1 -v
+rtk go test ./protocol -run 'TestHandleSubscribeMulti.*Reused|TestHandleSubscribeMulti.*Duplicate' -count=1 -v
+rtk go fmt ./subscription ./protocol
+rtk go test ./subscription ./protocol ./executor -count=1
+rtk go vet ./subscription ./protocol ./executor
+rtk go test ./... -count=1
 ```
 
-Then inspect touched Go surfaces with `rtk go doc` / `rtk go list -json` before editing.
+If a regex misses renamed tests, run the specific new test names explicitly.
 
-## Working tree caution
+## Documentation follow-through after implementation
 
-The repo may contain unrelated hosted-runtime planning files and/or broader docs moves. Do not mix those into a TECH-DEBT/OI-002 implementation slice unless the user explicitly asks.
+After the code/tests are green, update only the docs needed to record this slice:
+
+- Add a new `P0-SUBSCRIPTION-034` row (or the next free number) to `docs/parity-phase0-ledger.md` covering the same-connection reused-hash initial-snapshot elision.
+- Update `TECH-DEBT.md` OI-002 summary / execution note and mark `OI-008` as closed (or delete the OI-008 section if no residual remains).
+- Update `docs/spacetimedb-parity-roadmap.md` A2 current state.
+- Rewrite this `NEXT_SESSION_HANDOFF.md` again so the following session starts from the next real open OI-002 target, not from this just-closed slice.
+
+Do not push unless explicitly asked.

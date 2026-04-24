@@ -1448,6 +1448,54 @@ func TestParseCountStarBareAliasProjectionWithWhere(t *testing.T) {
 	}
 }
 
+func TestParseCountStarAliasProjectionWithLimit(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) AS n FROM t LIMIT 1")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(*) AS n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	if stmt.Limit == nil {
+		t.Fatal("Limit = nil, want 1")
+	}
+	if *stmt.Limit != 1 {
+		t.Fatalf("Limit = %d, want 1", *stmt.Limit)
+	}
+}
+
+func TestParseCountStarBareAliasProjectionWithWhereAndLimitZero(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) n FROM t WHERE active = TRUE LIMIT 0")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(*) n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	if stmt.Limit == nil {
+		t.Fatal("Limit = nil, want 0")
+	}
+	if *stmt.Limit != 0 {
+		t.Fatalf("Limit = %d, want 0", *stmt.Limit)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "t" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want t.active = TRUE", pred.Filter)
+	}
+	if pred.Filter.Literal.Kind != LitBool || !pred.Filter.Literal.Bool {
+		t.Fatalf("Predicate.Filter.Literal = %+v, want boolean TRUE", pred.Filter.Literal)
+	}
+}
+
 func TestParseJoinCountStarAliasProjection(t *testing.T) {
 	stmt, err := Parse("SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.t_id")
 	if err != nil {

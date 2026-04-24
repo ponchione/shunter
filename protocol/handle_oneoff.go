@@ -75,14 +75,25 @@ func handleOneOffQuery(
 			}
 		}
 	}
-	if compiled.Limit != nil && uint64(len(matchedRows)) > *compiled.Limit {
-		matchedRows = matchedRows[:int(*compiled.Limit)]
-	}
-	encodedRows := matchedRows
+	var encodedRows []types.ProductValue
 	if compiled.Aggregate != nil {
+		// Aggregate shape happens over the full matched input; LIMIT then
+		// constrains the one-row aggregate output (reference ProjectList::Limit
+		// wraps ProjectList::Agg). LIMIT 0 drops the aggregate row entirely;
+		// LIMIT >= 1 keeps the single count row.
 		encodedRows = []types.ProductValue{{types.NewUint64(uint64(len(matchedRows)))}}
-	} else if len(compiled.ProjectionColumns) != 0 {
-		encodedRows = projectOneOffRows(matchedRows, compiled.ProjectionColumns)
+		if compiled.Limit != nil && uint64(len(encodedRows)) > *compiled.Limit {
+			encodedRows = encodedRows[:int(*compiled.Limit)]
+		}
+	} else {
+		if compiled.Limit != nil && uint64(len(matchedRows)) > *compiled.Limit {
+			matchedRows = matchedRows[:int(*compiled.Limit)]
+		}
+		if len(compiled.ProjectionColumns) != 0 {
+			encodedRows = projectOneOffRows(matchedRows, compiled.ProjectionColumns)
+		} else {
+			encodedRows = matchedRows
+		}
 	}
 	var rows [][]byte
 	for _, pv := range encodedRows {

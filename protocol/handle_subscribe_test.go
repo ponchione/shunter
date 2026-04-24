@@ -4455,6 +4455,41 @@ func TestHandleSubscribeSingle_ParityCountBareAliasRejected(t *testing.T) {
 	}
 }
 
+// TestHandleSubscribeSingle_ParityCountAliasWithLimitRejected pins the
+// deliberate subscribe-side rejection for aggregate projections composed with
+// LIMIT. One-off/ad hoc SQL accepts the combination, but subscriptions must
+// still return SubscriptionError and skip executor registration. The
+// compileSQLQueryString guard order means allowLimit=false catches LIMIT before
+// the aggregate guard fires, so the visible error stays "LIMIT not supported
+// for subscriptions".
+func TestHandleSubscribeSingle_ParityCountAliasWithLimitRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   184,
+		QueryID:     185,
+		QueryString: "SELECT COUNT(*) AS n FROM t LIMIT 1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 185, "QueryID")
+	if !strings.Contains(se.Error, "LIMIT not supported for subscriptions") {
+		t.Fatalf("Error = %q, want deliberate LIMIT subscription rejection", se.Error)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on aggregate+LIMIT projection")
+	}
+}
+
 func TestHandleSubscribeSingle_JoinCountAggregateStillRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

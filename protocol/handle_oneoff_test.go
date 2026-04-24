@@ -6,7 +6,6 @@ import (
 	"iter"
 	"math"
 	"math/big"
-	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/bsatn"
@@ -5049,17 +5048,115 @@ func TestHandleOneOffQuery_ParityJoinCountBareAliasOnCrossJoinWhereEqualityAndFi
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityJoinCountWithLimitRejected(t *testing.T) {
+// TestHandleOneOffQuery_ParityCountAliasWithLimitOneReturnsFullAggregate pins
+// that one-off/ad hoc SQL counts the full matched input before applying LIMIT
+// to the one-row aggregate output. A naive implementation that limited
+// matchedRows before aggregate shaping would count uint64(1); the correct
+// behavior is uint64(2), the full matched-input count.
+func TestHandleOneOffQuery_ParityCountAliasWithLimitOneReturnsFullAggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(false)},
+		{types.NewUint32(3), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCA},
+		QueryString: "SELECT COUNT(*) AS n FROM t WHERE active = TRUE LIMIT 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (aggregate + LIMIT is one-off-only accepted)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+// TestHandleOneOffQuery_ParityCountAliasWithLimitZeroReturnsNoRows pins that
+// LIMIT 0 drops the one-row aggregate output entirely (reference
+// ProjectList::Limit on top of ProjectList::Agg(Count)), rather than emitting
+// one row containing zero.
+func TestHandleOneOffQuery_ParityCountAliasWithLimitZeroReturnsNoRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCB},
+		QueryString: "SELECT COUNT(*) AS n FROM t LIMIT 0",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (LIMIT 0 is one-off-only accepted)", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
+		t.Fatalf("Tables = %+v, want single aggregate envelope for t", result.Tables)
+	}
+	rawRows, err := DecodeRowList(firstTableRows(result))
+	if err != nil {
+		t.Fatalf("DecodeRowList: %v", err)
+	}
+	if len(rawRows) != 0 {
+		t.Fatalf("rows = %d, want 0 (LIMIT 0 drops aggregate output row)", len(rawRows))
+	}
+}
+
+// TestHandleOneOffQuery_ParityJoinCountWithLimitReturnsFullAggregate replaces
+// the prior aggregate+LIMIT rejection pin. It proves that join multiplicity is
+// counted across the full matched input before LIMIT is applied to the one-row
+// aggregate output. A naive implementation that limited matchedRows first would
+// report uint64(1); the correct behavior is uint64(2), the full matched-pair
+// count.
+func TestHandleOneOffQuery_ParityJoinCountWithLimitReturnsFullAggregate(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
 		schema *schema.TableSchema
 	}{
-		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}},
-		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{{Index: 0, Name: "t_id", Type: schema.KindUint32}}}},
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		}}},
 	}}
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewBool(true)},
+			{types.NewUint32(1), types.NewBool(false)},
+			{types.NewUint32(3), types.NewBool(true)},
+		},
+	}}
 	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}}}
 
 	msg := &OneOffQueryMsg{
 		MessageID:   []byte{0xC7},
@@ -5068,12 +5165,63 @@ func TestHandleOneOffQuery_ParityJoinCountWithLimitRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected aggregate + LIMIT rejection, got nil error")
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (join COUNT + LIMIT is one-off-only accepted)", *result.Error)
 	}
-	if !strings.Contains(*result.Error, "aggregate projections with LIMIT not supported") {
-		t.Fatalf("Error = %q, want aggregate LIMIT rejection", *result.Error)
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
+		t.Fatalf("Tables = %+v, want single aggregate envelope for t", result.Tables)
 	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+// TestHandleOneOffQuery_ParityCrossJoinWhereCountWithLimitReturnsFullAggregate
+// extends the LIMIT-on-aggregate composition onto the cross-join WHERE
+// equality-plus-literal-filter surface already accepted by one-off. Join
+// multiplicity and filtering happen first; LIMIT 1 applies only to the one-row
+// aggregate output.
+func TestHandleOneOffQuery_ParityCrossJoinWhereCountWithLimitReturnsFullAggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		}}},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewBool(true)},
+			{types.NewUint32(1), types.NewBool(false)},
+			{types.NewUint32(2), types.NewBool(true)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCC},
+		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s WHERE t.id = s.t_id AND s.active = TRUE LIMIT 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (cross-join WHERE + COUNT + LIMIT is one-off-only accepted)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
 // TestHandleOneOffQuery_ParitySqlInvalidAggregateWithoutAliasRejected pins the
