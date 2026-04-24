@@ -5,7 +5,7 @@ import "github.com/ponchione/shunter/types"
 // FanOutMessage is the handoff payload between the executor's evaluation
 // loop and the fan-out worker (SPEC-004 §8.1 / Story 6.1).
 //
-// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
+// Phase 1.5 outcome-model decision (`docs/parity-decisions.md#outcome-model`):
 // when the commit originated from a caller-addressable reducer call,
 // `CallerConnID` identifies the caller so the fan-out worker can keep that
 // connection out of non-caller light delivery. `CallerOutcome` is populated
@@ -81,7 +81,7 @@ type SubscriptionError struct {
 
 // CallerOutcomeKind is the discriminant for `CallerOutcome`. It maps
 // directly onto the reference `UpdateStatus` tagged union. See
-// `docs/parity-phase1.5-outcome-model.md`.
+// `docs/parity-decisions.md#outcome-model`.
 type CallerOutcomeKind uint8
 
 const (

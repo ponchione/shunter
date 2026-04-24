@@ -11,7 +11,7 @@ import (
 // current message-family shape so the divergence is either explicit or
 // closed. The Phase 1.5 outcome-model decision flipped the
 // TransactionUpdate / ReducerCallResult pins to assert the new heavy /
-// light / `UpdateStatus` shape; see `docs/parity-phase1.5-outcome-model.md`.
+// light / `UpdateStatus` shape; see `docs/parity-decisions.md#outcome-model`.
 
 // TestPhase15TransactionUpdateHeavyShape pins the Phase 1.5 adoption
 // of the reference heavy `TransactionUpdate` envelope. Reference field
@@ -65,7 +65,7 @@ func TestPhase15ReducerCallInfoShape(t *testing.T) {
 // `UpdateStatus`. Reference: `pub enum UpdateStatus<F> { Committed,
 // Failed, OutOfEnergy }`. `OutOfEnergy` is present for shape parity but
 // is never emitted by Shunter in Phase 1.5 — see
-// `docs/parity-phase1.5-outcome-model.md`.
+// `docs/parity-decisions.md#outcome-model`.
 func TestPhase15UpdateStatusVariants(t *testing.T) {
 	var _ UpdateStatus = StatusCommitted{}
 	var _ UpdateStatus = StatusFailed{}
@@ -131,7 +131,7 @@ func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 // Duration sits at position 2. Byte shape is pinned in
 // parity_applied_envelopes_test.go. The flattened TableName + Rows
 // shape is a documented divergence per
-// `docs/parity-phase2-slice4-rows-shape.md` — the reference wraps
+// `docs/parity-decisions.md#protocol-rows-shape` — the reference wraps
 // them in `SubscribeRows`.
 func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeSingleApplied{})
@@ -148,7 +148,7 @@ func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 // Duration sits at position 2. Byte shape is pinned in
 // parity_applied_envelopes_test.go. HasRows + Rows diverges from
 // the reference required `SubscribeRows` wrapper — documented per
-// `docs/parity-phase2-slice4-rows-shape.md`.
+// `docs/parity-decisions.md#protocol-rows-shape`.
 func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeSingleApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "HasRows", "Rows"}
@@ -236,7 +236,7 @@ func TestPhase2UnsubscribeMultiShape(t *testing.T) {
 // Duration sits at position 2. Byte shape is pinned in
 // parity_applied_envelopes_test.go. Update flattens the reference
 // `DatabaseUpdate` wrapper — documented per
-// `docs/parity-phase2-slice4-rows-shape.md`.
+// `docs/parity-decisions.md#protocol-rows-shape`.
 func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeMultiApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}
@@ -252,7 +252,7 @@ func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 // Duration sits at position 2. Byte shape is pinned in
 // parity_applied_envelopes_test.go. Update flattens the reference
 // `DatabaseUpdate` wrapper — documented per
-// `docs/parity-phase2-slice4-rows-shape.md`.
+// `docs/parity-decisions.md#protocol-rows-shape`.
 func TestPhase2UnsubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeMultiApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}

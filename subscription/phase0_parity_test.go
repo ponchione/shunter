@@ -32,7 +32,7 @@ func waitForPhase0Delivery(t *testing.T, mock *mockFanOutSender, wantHeavy, want
 // non-caller light, with confirmed-read gating on TxDurable. Phase 1.5
 // flipped the caller-side envelope from `ReducerCallResult` to the
 // reference heavy `TransactionUpdate` (see
-// `docs/parity-phase1.5-outcome-model.md`).
+// `docs/parity-decisions.md#outcome-model`).
 func TestPhase0ParityCanonicalReducerDeliveryFlow(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)

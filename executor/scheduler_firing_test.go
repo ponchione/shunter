@@ -201,7 +201,7 @@ var errFireFailed = stubError("scheduled reducer failed on purpose")
 // preserves sys_scheduled rows on reducer panic (consistent with
 // reducer-error), while the reference deletes one-shot rows in a
 // fresh tx regardless of panic outcome. See
-// docs/parity-p0-sched-001-startup-firing.md.
+// docs/parity-decisions.md#scheduler-startup-and-firing.
 func TestParityP0Sched001PanicRetainsScheduledRow(t *testing.T) {
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)

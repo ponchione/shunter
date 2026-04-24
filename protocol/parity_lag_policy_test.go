@@ -4,7 +4,7 @@ import "testing"
 
 // TestPhase2Slice3DefaultOutgoingBufferMatchesReference pins the Phase 2
 // Slice 3 decision recorded in
-// `docs/parity-phase2-slice3-lag-policy.md`: the per-connection outbound
+// `docs/parity-decisions.md#outbound-lag-policy`: the per-connection outbound
 // queue default matches the reference SpacetimeDB constant
 // `CLIENT_CHANNEL_CAPACITY = 16 * KB` at
 // `reference/SpacetimeDB/crates/core/src/client/client_connection.rs:657`.

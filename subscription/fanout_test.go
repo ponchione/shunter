@@ -8,7 +8,7 @@ import (
 
 // TestCallerOutcomeShape pins the Phase 1.5 forward-declared shape that
 // the protocol-side adapter consumes when assembling the heavy
-// `TransactionUpdate` envelope. See `docs/parity-phase1.5-outcome-model.md`.
+// `TransactionUpdate` envelope. See `docs/parity-decisions.md#outcome-model`.
 func TestCallerOutcomeShape(t *testing.T) {
 	outcome := CallerOutcome{
 		Kind:      CallerOutcomeFailed,

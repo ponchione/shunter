@@ -14,7 +14,7 @@ import (
 // protocol-backed adapter wired at server startup (SPEC-004 §8 /
 // Story 6.1).
 //
-// Phase 1.5 outcome-model split (`docs/parity-phase1.5-outcome-model.md`):
+// Phase 1.5 outcome-model split (`docs/parity-decisions.md#outcome-model`):
 //   - `SendTransactionUpdateHeavy` delivers the caller-bound envelope
 //     with caller metadata and, for `CallerOutcomeCommitted`, the
 //     caller's visible row delta.

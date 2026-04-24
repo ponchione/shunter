@@ -34,7 +34,7 @@ type memoizedResult struct {
 // Pinned by
 // `eval_view_lifetime_test.go::TestEvalAndBroadcastDoesNotUseViewAfterReturn_{Join,SingleTable}`.
 //
-// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
+// Phase 1.5 outcome-model decision (`docs/parity-decisions.md#outcome-model`):
 // a caller-addressable commit MUST NOT short-circuit on "no active
 // subscriptions" or "empty changeset" — the caller still needs its
 // heavy `TransactionUpdate` envelope to observe the reducer outcome.

@@ -132,7 +132,7 @@ type UnsubscribeSetCommandResponse struct {
 // CallReducerRequest carries the fields for a reducer invocation
 // (SPEC-003 §10.3).
 //
-// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
+// Phase 1.5 outcome-model decision (`docs/parity-decisions.md#outcome-model`):
 // the caller-visible reducer outcome is delivered as a heavy
 // `TransactionUpdate` envelope through the subscription fan-out seam.
 // ResponseCh carries that final heavy envelope back to the protocol

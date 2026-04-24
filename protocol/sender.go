@@ -23,7 +23,7 @@ var ErrConnNotFound = errors.New("protocol: connection not found")
 // messages to connected clients (SPEC-005 §13). The fan-out worker
 // (SPEC-004 E6) and executor response paths call these methods.
 //
-// Phase 1.5 outcome-model split (`docs/parity-phase1.5-outcome-model.md`):
+// Phase 1.5 outcome-model split (`docs/parity-decisions.md#outcome-model`):
 // callers receive the heavy `TransactionUpdate` via SendTransactionUpdate;
 // non-caller subscribers receive `TransactionUpdateLight` via
 // SendTransactionUpdateLight. The removed `SendReducerResult` is

@@ -16,7 +16,7 @@ const (
 
 // Server→client message tags (SPEC-005 §6).
 //
-// Phase 1.5 outcome-model decision (`docs/parity-phase1.5-outcome-model.md`):
+// Phase 1.5 outcome-model decision (`docs/parity-decisions.md#outcome-model`):
 //   - `TagTransactionUpdate` carries the heavy caller-bound envelope.
 //   - `TagTransactionUpdateLight` carries the non-caller delta-only envelope.
 //   - `TagReducerCallResult` is reserved. The former `ReducerCallResult` wire

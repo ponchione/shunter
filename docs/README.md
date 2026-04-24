@@ -1,38 +1,44 @@
-# Docs guide
+# Docs Guide
 
-This directory has three different doc classes. Do not treat them all as equally current.
+Keep this directory small. Do not add archives, stale handoffs, source-reading
+logs, or one-off planning prompts.
 
-## Active driver docs
+## Startup Docs
 
-Read these first when deciding what to work on now:
-1. `docs/current-status.md` — short current-truth snapshot
-2. `docs/project-brief.md` — original thesis / architecture intent
-3. `docs/EXECUTION-ORDER.md` — implementation sequencing
-4. `docs/spacetimedb-parity-roadmap.md` — active parity prioritization
-5. `docs/parity-phase0-ledger.md` — compact scenario ledger
-6. `docs/hosted-runtime-bootstrap.md` — current hosted bootstrap walkthrough
-7. `TECH-DEBT.md` — open issues only
-8. `NEXT_SESSION_HANDOFF.md` — current resume point only
+Agent startup is intentionally narrow:
 
-## Stable reference / decision docs
+1. `RTK.md`
+2. The active root handoff:
+   - `NEXT_SESSION_HANDOFF.md` for parity / TECH-DEBT work
+   - `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
+3. Only code, package docs, and narrow spec sections named by that handoff or
+   by the slice being touched
 
-These are worth keeping, but they are narrower than the active driver docs:
-- `docs/parity-*.md` and `docs/parity-p0-*.md` — closed or targeted parity decision records
-- `docs/adr/` — architectural decisions
-- `docs/decisions/` — local design decisions
-- `docs/archive/` — historical snapshots and source-reading notes that are not active drivers
+Do not read broad roadmap, ledger, project-brief, or full decomposition specs by
+default.
 
-## Decomposition docs
+## Current Docs
 
-`docs/decomposition/` is the implementation decomposition and should stay usable as its own system of record.
+- `docs/hosted-runtime-bootstrap.md` — current hosted-runtime quickstart.
+- `docs/hosted-runtime-implementation-roadmap.md` — hosted-runtime phase tracker
+  while that implementation track is active.
+- `docs/spacetimedb-parity-roadmap.md` — parity priority framing; open only for
+  priority questions.
+- `docs/parity-phase0-ledger.md` — compact current parity status.
+- `docs/parity-decisions.md` — consolidated current parity decisions that code
+  and tests still cite.
+- `TECH-DEBT.md` — open issue list and follow-up ownership.
+- `docs/project-brief.md` — original product and architecture thesis; open only
+  for product-intent questions.
 
-## Cleanup rule
+## Baseline Specs
 
-If a doc disagrees with live code or the active-driver set above, prefer:
-1. live code
-2. `docs/EXECUTION-ORDER.md`
-3. `docs/spacetimedb-parity-roadmap.md`
-4. `docs/parity-phase0-ledger.md`
-5. `TECH-DEBT.md`
+- `docs/decomposition/` — implementation specs, epics, and tasks.
+- `docs/hosted-runtime-planning/` — active hosted-runtime implementation plans.
+- `docs/adr/` and `docs/decisions/` — durable architecture decisions.
 
-Older one-off assessments and old handoff docs should either be removed or clearly marked as historical snapshots.
+## Cleanup Rule
+
+Prefer live code and tests over docs. If a doc stops being current and is not a
+baseline spec, delete it or fold its current contract into the smallest active
+doc. Do not keep history-only files in this tree.

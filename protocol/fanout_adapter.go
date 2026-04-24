@@ -16,7 +16,7 @@ import (
 // subscription.FanOutSender. Converts subscription-domain types to
 // protocol wire format before delivery.
 //
-// Phase 1.5 outcome-model split (`docs/parity-phase1.5-outcome-model.md`):
+// Phase 1.5 outcome-model split (`docs/parity-decisions.md#outcome-model`):
 //   - Caller receives the heavy `TransactionUpdate` via
 //     SendTransactionUpdateHeavy. Caller's visible row delta is carried
 //     inside `StatusCommitted.Update` (or omitted for `StatusFailed` /

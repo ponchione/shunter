@@ -18,7 +18,7 @@ import (
 //
 // Shunter flattens `SubscribeRows { table_id, table_name, table_rows }`
 // to `TableName (Box<str>) + Rows (Bytes)`. That rows-shape divergence is
-// accepted as documented per `docs/parity-phase2-slice4-rows-shape.md`
+// accepted as documented per `docs/parity-decisions.md#protocol-rows-shape`
 // (Phase 2 Slice 4). This test pins the field order.
 func TestParitySubscribeSingleAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x11223344
@@ -92,7 +92,7 @@ func TestParitySubscribeSingleAppliedWireShape(t *testing.T) {
 //
 // Shunter models `rows` as `HasRows (u8) + optional Rows (Bytes)`; the
 // reference required-rows shape is accepted as documented per
-// `docs/parity-phase2-slice4-rows-shape.md` (Phase 2 Slice 4).
+// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
 func TestParityUnsubscribeSingleAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x44332211
 	const queryID uint32 = 0xDDCCBBAA
@@ -200,7 +200,7 @@ func TestParityUnsubscribeSingleAppliedWireShapeNoRows(t *testing.T) {
 //
 // Shunter flattens `DatabaseUpdate { tables: Vec<TableUpdate> }` to
 // `[]SubscriptionUpdate`; that rows-shape divergence is accepted as
-// documented per `docs/parity-phase2-slice4-rows-shape.md` (Phase 2
+// documented per `docs/parity-decisions.md#protocol-rows-shape` (Phase 2
 // Slice 4).
 func TestParitySubscribeMultiAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x01020304

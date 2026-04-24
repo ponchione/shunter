@@ -11,7 +11,7 @@ import (
 // Server→client message types (SPEC-005 §8).
 //
 // Phase 1.5 outcome-model decision is pinned in
-// `docs/parity-phase1.5-outcome-model.md` and
+// `docs/parity-decisions.md#outcome-model` and
 // `protocol/parity_message_family_test.go`:
 //   - `TransactionUpdate` is the heavy caller-bound envelope matching
 //     `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`.
@@ -45,7 +45,7 @@ type IdentityToken struct {
 // by parity_applied_envelopes_test.go. TableName + Rows flatten the
 // reference `SubscribeRows` wrapper; that rows-shape divergence is
 // accepted as documented per
-// `docs/parity-phase2-slice4-rows-shape.md` (Phase 2 Slice 4).
+// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
 type SubscribeSingleApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -65,7 +65,7 @@ type SubscribeSingleApplied struct {
 // reference required `SubscribeRows` wrapper; that rows-shape
 // divergence (including the Shunter-local `HasRows` optionality) is
 // accepted as documented per
-// `docs/parity-phase2-slice4-rows-shape.md` (Phase 2 Slice 4).
+// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
 type UnsubscribeSingleApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -105,7 +105,7 @@ type SubscriptionError struct {
 // by parity_applied_envelopes_test.go. Update flattens the reference
 // `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
 // divergence is accepted as documented per
-// `docs/parity-phase2-slice4-rows-shape.md` (Phase 2 Slice 4).
+// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
 type SubscribeMultiApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -122,7 +122,7 @@ type SubscribeMultiApplied struct {
 // by parity_applied_envelopes_test.go. Update flattens the reference
 // `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
 // divergence is accepted as documented per
-// `docs/parity-phase2-slice4-rows-shape.md` (Phase 2 Slice 4).
+// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
 type UnsubscribeMultiApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -173,7 +173,7 @@ type TransactionUpdate struct {
 // parity_rows_shape_test.go. Update flattens the reference
 // `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
 // divergence is accepted as documented per
-// `docs/parity-phase2-slice4-rows-shape.md` (Phase 2 Slice 4).
+// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
 type TransactionUpdateLight struct {
 	RequestID uint32
 	Update    []SubscriptionUpdate
@@ -192,7 +192,7 @@ type UpdateStatus interface {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:526.
 // Update flattens the reference `DatabaseUpdate` wrapper to
 // `[]SubscriptionUpdate`; that rows-shape divergence is accepted as
-// documented per `docs/parity-phase2-slice4-rows-shape.md` (Phase 2
+// documented per `docs/parity-decisions.md#protocol-rows-shape` (Phase 2
 // Slice 4). Byte-shape pin lives in parity_transaction_update_test.go.
 type StatusCommitted struct {
 	Update []SubscriptionUpdate
@@ -340,7 +340,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 // OneOffQueryResponse, TransactionUpdateLight, SubscribeMultiApplied,
 // UnsubscribeMultiApplied — matching the tag byte.
 // TagReducerCallResult is reserved and rejected here — see
-// `docs/parity-phase1.5-outcome-model.md`.
+// `docs/parity-decisions.md#outcome-model`.
 func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	if len(frame) < 1 {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)

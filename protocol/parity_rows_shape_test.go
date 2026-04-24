@@ -9,7 +9,7 @@ import (
 
 // The pins in this file are the rolled-up canonical-contract layer for
 // the rows-shape cluster decided in
-// `docs/parity-phase2-slice4-rows-shape.md`. Individual byte-shape
+// `docs/parity-decisions.md#protocol-rows-shape`. Individual byte-shape
 // pins continue to live in `parity_applied_envelopes_test.go` and
 // `parity_transaction_update_test.go`; this file adds:
 //
@@ -27,7 +27,7 @@ import (
 // TestParityRowsShapeEnvelopesFlatShape pins the current Shunter flat-
 // rows shape across every envelope that carries subscription row data.
 // See delta audit rows #1-#6 in
-// `docs/parity-phase2-slice4-rows-shape.md`.
+// `docs/parity-decisions.md#protocol-rows-shape`.
 func TestParityRowsShapeEnvelopesFlatShape(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -68,7 +68,7 @@ func TestParityRowsShapeEnvelopesFlatShape(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := msgFieldNames(c.envelope); !reflect.DeepEqual(got, c.fields) {
-				t.Fatalf("%s fields = %v, want %v (see docs/parity-phase2-slice4-rows-shape.md)",
+				t.Fatalf("%s fields = %v, want %v (see docs/parity-decisions.md#protocol-rows-shape)",
 					c.name, got, c.fields)
 			}
 		})
@@ -84,7 +84,7 @@ func TestParityRowsShapeEnvelopesFlatShape(t *testing.T) {
 //
 // Shunter flattens `DatabaseUpdate { tables: Vec<TableUpdate> }` to
 // `[]SubscriptionUpdate`. That inner divergence is delta #5 / #10 in
-// `docs/parity-phase2-slice4-rows-shape.md` and is accepted as a
+// `docs/parity-decisions.md#protocol-rows-shape` and is accepted as a
 // documented divergence. This pin locks the current flat shape so
 // accidental wire drift is loudly visible.
 func TestParityTransactionUpdateLightWireShape(t *testing.T) {
@@ -150,7 +150,7 @@ func TestParityTransactionUpdateLightWireShape(t *testing.T) {
 // TestParitySubscriptionUpdateInnerLayout pins the SubscriptionUpdate
 // inner wire layout as a canonical contract. Locks:
 //   - the flattened per-entry `QueryID` field (delta #3 in
-//     `docs/parity-phase2-slice4-rows-shape.md`; reference carries query
+//     `docs/parity-decisions.md#protocol-rows-shape`; reference carries query
 //     correlation through the fuller wrapper chain rather than this flat slot), and
 //   - the inserts-before-deletes field order (delta #7; reference
 //     QueryUpdate is deletes-first).
@@ -199,7 +199,7 @@ func TestParitySubscriptionUpdateInnerLayout(t *testing.T) {
 // prefix EncodeRowList layout as the canonical Shunter rows-data
 // format. See SPEC-005 §3.4
 // (`docs/decomposition/005-protocol/SPEC-005-protocol.md:132-143`) and
-// delta #10 in `docs/parity-phase2-slice4-rows-shape.md`. The reference
+// delta #10 in `docs/parity-decisions.md#protocol-rows-shape`. The reference
 // `BsatnRowList { size_hint: RowSizeHint, rows_data: Bytes }` layout
 // is deliberately deferred to v2.
 func TestParityRowsShapeRowListFormatReference(t *testing.T) {

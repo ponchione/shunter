@@ -60,13 +60,16 @@ Do not reopen V1-A through V1-H unless a new failing regression proves drift.
 
 ## Startup reading for hosted-runtime work
 
+Required:
 1. `RTK.md`
-2. `README.md`
-3. `docs/hosted-runtime-bootstrap.md`
-4. `docs/decomposition/hosted-runtime-version-phases.md`
-5. `docs/decomposition/hosted-runtime-v1-contract.md`
-6. `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
-7. `docs/hosted-runtime-implementation-roadmap.md`
-8. the relevant `docs/hosted-runtime-planning/` plan for the slice being touched
+2. this file
+
+Then inspect the live root package and the specific hosted-runtime files you will touch with Go tools.
+
+Open these only when needed:
+- `docs/hosted-runtime-bootstrap.md` for the current quickstart surface
+- `docs/decomposition/hosted-runtime-version-phases.md` for phase boundaries
+- `docs/decomposition/hosted-runtime-v1-contract.md` or `docs/decomposition/hosted-runtime-v1.5-follow-ons.md` for contract questions
+- the relevant `docs/hosted-runtime-planning/` plan for an active slice
 
 Use `rtk` for every shell command. Do not push unless explicitly asked.

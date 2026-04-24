@@ -287,7 +287,7 @@ func TestOneOffQueryResponseError(t *testing.T) {
 // TagReducerCallResult is reserved in Phase 1.5. The decoder must
 // reject it as unknown so a future reintroduction cannot silently
 // collide with the removed shape. See
-// `docs/parity-phase1.5-outcome-model.md`.
+// `docs/parity-decisions.md#outcome-model`.
 func TestTagReducerCallResultIsReserved(t *testing.T) {
 	_, _, err := DecodeServerMessage([]byte{TagReducerCallResult})
 	if err == nil {

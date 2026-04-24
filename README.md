@@ -111,14 +111,17 @@ That gap is exactly what this README is trying to close.
 
 ## Recommended way to read the repo
 
-If you want orientation instead of another audit spiral, read in this order:
+For agent work, do not use this list as startup context. Read `RTK.md`, then the active root handoff (`NEXT_SESSION_HANDOFF.md` or `HOSTED_RUNTIME_PLANNING_HANDOFF.md`), then inspect live code.
+
+For human orientation instead of another audit spiral, read in this order:
 1. `README.md` — this file
 2. `docs/project-brief.md` — original thesis and architecture intent
 3. `docs/hosted-runtime-bootstrap.md` — current hosted-runtime quickstart
 4. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
-5. `docs/spacetimedb-parity-roadmap.md` — active parity development driver
-6. `docs/parity-phase0-ledger.md` — named parity scenarios and pinned tests
-7. `TECH-DEBT.md` — live debt and follow-up ledger
+5. `docs/spacetimedb-parity-roadmap.md` — parity priority framing
+6. `docs/parity-phase0-ledger.md` — compact current parity truth
+7. `docs/parity-decisions.md` — consolidated current parity decisions
+8. `TECH-DEBT.md` — live debt and follow-up ledger
 
 Then inspect the main implementation packages:
 - `schema/`
@@ -136,13 +139,13 @@ If you want the blunt summary:
 - The repo is not yet worth pretending it is "done."
 - The next high-leverage work is not more tiny audit slices by default.
 - If continuing hosted-runtime usability, plan V1.5-A query/view declarations from `HOSTED_RUNTIME_PLANNING_HANDOFF.md`.
-- If continuing parity/completeness, use `docs/spacetimedb-parity-roadmap.md` as the active driver.
+- If continuing parity/completeness, use `NEXT_SESSION_HANDOFF.md` as the active driver and open the roadmap only for priority questions.
 
 ## What I would do next
 
 If continuing parity/completeness work, the most useful next step is:
 
-1. Use `docs/spacetimedb-parity-roadmap.md` as the active driver
+1. Use `NEXT_SESSION_HANDOFF.md` as the active driver
 - wire-level protocol parity first
 - one end-to-end delivery parity slice second
 - query/subscription-surface parity third

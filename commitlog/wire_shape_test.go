@@ -5,7 +5,7 @@ package commitlog
 // These 33 pins latch the current Shunter on-disk wire format as a
 // canonical contract. Any accidental drift in byte layout, constant
 // value, CRC algorithm, or framing invariant is intended to fail one
-// of these pins loudly. See docs/parity-phase4-slice2-record-shape.md
+// of these pins loudly. See docs/parity-decisions.md#commitlog-record-shape
 // for the divergence audit against reference SpacetimeDB.
 
 import (

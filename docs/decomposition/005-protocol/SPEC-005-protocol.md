@@ -240,7 +240,7 @@ The `SubscribeSingle` / `UnsubscribeSingle` tags are the Phase 2 Slice 2 rename 
 | 9 | SubscribeMultiApplied |
 | 10 | UnsubscribeMultiApplied |
 
-Tag 7 is reserved and MUST NOT be reallocated. The Phase 1.5 outcome-model closure (`docs/parity-phase1.5-outcome-model.md`) removed the standalone `ReducerCallResult` envelope, merging the caller outcome into the heavy `TransactionUpdate` (tag 5) and adding `TransactionUpdateLight` (tag 8) for non-callers. Holding tag 7 reserved prevents silent re-allocation if a future contributor reintroduces a separate caller envelope. Canonical source is `protocol/tags.go`.
+Tag 7 is reserved and MUST NOT be reallocated. The Phase 1.5 outcome-model closure (`docs/parity-decisions.md#outcome-model`) removed the standalone `ReducerCallResult` envelope, merging the caller outcome into the heavy `TransactionUpdate` (tag 5) and adding `TransactionUpdateLight` (tag 8) for non-callers. Holding tag 7 reserved prevents silent re-allocation if a future contributor reintroduces a separate caller envelope. Canonical source is `protocol/tags.go`.
 
 ---
 
@@ -349,7 +349,7 @@ args:          bytes            — BSATN-encoded ProductValue of reducer argume
 flags:         uint8            — CallReducerFlags byte (see below)
 ```
 
-**Response:** the caller receives the heavy `TransactionUpdate` (§8.5) carrying the reducer's `UpdateStatus`. No separate `ReducerCallResult` envelope exists on the wire — tag 7 is reserved (see §6, §8.7, and `docs/parity-phase1.5-outcome-model.md`).
+**Response:** the caller receives the heavy `TransactionUpdate` (§8.5) carrying the reducer's `UpdateStatus`. No separate `ReducerCallResult` envelope exists on the wire — tag 7 is reserved (see §6, §8.7, and `docs/parity-decisions.md#outcome-model`).
 
 The client is responsible for encoding `args` as a `ProductValue` matching the reducer's declared parameter types. Type mismatch is detected by the executor and returned as a heavy `TransactionUpdate` with `Status = StatusFailed{Error}`.
 
@@ -449,7 +449,7 @@ On receiving this, the client must discard all cached rows for the affected `que
 
 ### 8.5 TransactionUpdate (heavy, caller-bound)
 
-The Phase 1.5 outcome-model closure (`docs/parity-phase1.5-outcome-model.md`) made `TransactionUpdate` the **single caller-bound envelope** for every reducer outcome — success, failure, and (shape-parity only) OutOfEnergy. Non-callers whose subscribed rows are touched receive `TransactionUpdateLight` (§8.8) instead. Non-callers with no matching rows receive nothing.
+The Phase 1.5 outcome-model closure (`docs/parity-decisions.md#outcome-model`) made `TransactionUpdate` the **single caller-bound envelope** for every reducer outcome — success, failure, and (shape-parity only) OutOfEnergy. Non-callers whose subscribed rows are touched receive `TransactionUpdateLight` (§8.8) instead. Non-callers with no matching rows receive nothing.
 
 ```
 tag: 5
@@ -512,7 +512,7 @@ A single `Committed.update` (or `TransactionUpdateLight.update`) may contain ent
 
 **Important:** If the same row matches multiple subscriptions, it appears in the update for each matching subscription independently. There is no deduplication across subscriptions.
 
-**`tx_id` exposure.** The caller's commit TxID is **not** a standalone wire field on `TransactionUpdate` in v1. Clients recover commit identity through their `SubscribeSingleApplied` / `SubscribeMultiApplied` seeding and successive deltas; v1 provides no `resume_from_tx_id` mechanism. A client that disconnects must re-subscribe and rebuild state from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`. (For rejection paths where no transaction was ever opened, the executor emits a synthetic heavy `TransactionUpdate` with `Status = Failed{Error}` and `ReducerCallInfo` populated from the request; the "no committed transaction" signal is implicit in the `Failed` arm. See `docs/parity-phase1.5-outcome-model.md`.)
+**`tx_id` exposure.** The caller's commit TxID is **not** a standalone wire field on `TransactionUpdate` in v1. Clients recover commit identity through their `SubscribeSingleApplied` / `SubscribeMultiApplied` seeding and successive deltas; v1 provides no `resume_from_tx_id` mechanism. A client that disconnects must re-subscribe and rebuild state from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`. (For rejection paths where no transaction was ever opened, the executor emits a synthetic heavy `TransactionUpdate` with `Status = Failed{Error}` and `ReducerCallInfo` populated from the request; the "no committed transaction" signal is implicit in the `Failed` arm. See `docs/parity-decisions.md#outcome-model`.)
 
 **Dispatch rule (repeated from the decision doc):**
 - Caller always receives this heavy `TransactionUpdate` on `Committed` / `Failed` / `OutOfEnergy`, subject to the `CallReducerFlags::NoSuccessNotify` opt-out on `Committed` (§7.3).
@@ -537,7 +537,7 @@ error:      string       — present if status = 1
 
 ### 8.7 (RESERVED) — formerly ReducerCallResult
 
-**Tag 7 is reserved.** The former `ReducerCallResult` envelope was removed from the wire surface in the Phase 1.5 outcome-model closure (`docs/parity-phase1.5-outcome-model.md`). The caller outcome is now carried by the heavy `TransactionUpdate` (§8.5); non-callers receive `TransactionUpdateLight` (§8.8). The tag byte is held reserved so it cannot be silently re-allocated if a future contributor reintroduces a separate caller envelope. A server decoder MUST reject tag 7 with `ErrUnknownMessageTag`; a client decoder MUST treat tag 7 as a fatal protocol error (§3.2).
+**Tag 7 is reserved.** The former `ReducerCallResult` envelope was removed from the wire surface in the Phase 1.5 outcome-model closure (`docs/parity-decisions.md#outcome-model`). The caller outcome is now carried by the heavy `TransactionUpdate` (§8.5); non-callers receive `TransactionUpdateLight` (§8.8). The tag byte is held reserved so it cannot be silently re-allocated if a future contributor reintroduces a separate caller envelope. A server decoder MUST reject tag 7 with `ErrUnknownMessageTag`; a client decoder MUST treat tag 7 as a fatal protocol error (§3.2).
 
 Authoritative pins:
 - `protocol/parity_message_family_test.go::TestPhase15TagReducerCallResultReserved`
@@ -731,7 +731,7 @@ The protocol layer sends commands to the executor via its inbox (`ExecutorComman
 - `UnregisterSubscriptionSetCmd` — for `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg` messages (Phase 2 Slice 2 rename from the former `UnregisterSubscriptionCmd`)
 - `DisconnectClientSubscriptionsCmd` — on client disconnect
 
-The executor sends the reducer-call outcome back to the protocol layer via the `ResponseCh` embedded in `CallReducerCmd`. Phase 1.5 replaced the former `ReducerCallResult` Go shape with the heavy `TransactionUpdate` envelope (§8.5); the response carries `UpdateStatus`, `ReducerCallInfo`, and caller metadata so the fan-out integration can route the caller's delta through the heavy envelope and the non-callers' deltas through `TransactionUpdateLight` (§8.8). See `docs/parity-phase1.5-outcome-model.md` for the dispatch rule.
+The executor sends the reducer-call outcome back to the protocol layer via the `ResponseCh` embedded in `CallReducerCmd`. Phase 1.5 replaced the former `ReducerCallResult` Go shape with the heavy `TransactionUpdate` envelope (§8.5); the response carries `UpdateStatus`, `ReducerCallInfo`, and caller metadata so the fan-out integration can route the caller's delta through the heavy envelope and the non-callers' deltas through `TransactionUpdateLight` (§8.8). See `docs/parity-decisions.md#outcome-model` for the dispatch rule.
 
 ```go
 type ExecutorInbox interface {

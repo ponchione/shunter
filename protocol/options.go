@@ -49,7 +49,7 @@ type ProtocolOptions struct {
 // per-client outbound channel capacity (`CLIENT_CHANNEL_CAPACITY = 16 *
 // KB`) at
 // `reference/SpacetimeDB/crates/core/src/client/client_connection.rs:657`.
-// Phase 2 Slice 3 (`docs/parity-phase2-slice3-lag-policy.md`) aligned
+// Phase 2 Slice 3 (`docs/parity-decisions.md#outbound-lag-policy`) aligned
 // the default so realistic bursty workloads tolerate the same lag before
 // the connection is torn down.
 const DefaultOutgoingBufferMessages = 16 * 1024

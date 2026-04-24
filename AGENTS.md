@@ -1,22 +1,25 @@
 # AGENTS.md
 
-Read in this order:
+Default startup reading:
 1. `RTK.md`
-2. `docs/project-brief.md`
-3. `docs/EXECUTION-ORDER.md`
-4. The relevant spec and decomposition files for the slice you are touching
+2. The active root handoff:
+   - `NEXT_SESSION_HANDOFF.md` for parity / TECH-DEBT work
+   - `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
+3. Only the code, package docs, and narrow spec sections named by that handoff or by the slice you are touching
+
+Do not read broad roadmap, ledger, project-brief, or full decomposition specs by default. Open them only when the active handoff says they are required, when a dependency question cannot be answered from code, or when you are editing that document.
 
 ## Repo Reality
 
 - This repo is no longer docs-only. It contains substantial Go implementation across the core subsystem packages.
-- The implementation plan still lives in `docs/EXECUTION-ORDER.md` and `docs/decomposition/`, but those docs must now be checked against live code.
+- The implementation plan still lives in `docs/decomposition/EXECUTION-ORDER.md` and `docs/decomposition/`, but those docs must now be checked against live code.
 - Do not act like there is no codebase; do not assume the docs are perfectly current either.
 
 ## Agent Rules
 
 - Stay inside the assigned slice.
-- Use the execution order document for sequencing and dependency checks.
-- Use decomposition stories/epics for concrete scope.
+- Use `docs/decomposition/EXECUTION-ORDER.md` for cross-subsystem sequencing and dependency checks only when the active slice needs it.
+- Use decomposition stories/epics for concrete scope only when touching the corresponding contract surface.
 - Keep docs concise and implementation-facing.
 - Keep `reference/SpacetimeDB/` read-only and research-only; never copy source from it.
 - Do not add speculative scaffolding or repo structure early.
@@ -63,6 +66,6 @@ Examples:
 
 Resolve in this order:
 1. task-specific user instruction
-2. `docs/EXECUTION-ORDER.md` for sequencing
+2. `docs/decomposition/EXECUTION-ORDER.md` for sequencing
 3. relevant spec/decomposition files for scope and contracts
 4. `docs/project-brief.md` for product intent
