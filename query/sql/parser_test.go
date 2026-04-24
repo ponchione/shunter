@@ -1741,3 +1741,16 @@ func TestParseJoinOnEqualityParityWithWhereForm(t *testing.T) {
 		t.Fatalf("Filters divergence:\n  ON-form    = %+v\n  WHERE-form = %+v", onForm.Filters, whereForm.Filters)
 	}
 }
+
+func TestParseRejectsJoinOnFilterMultipleConjuncts(t *testing.T) {
+	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 AND o.id > 0")
+	if err == nil {
+		t.Fatal("expected error for multi-conjunct ON filter")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+	if !strings.Contains(err.Error(), "JOIN ON filter accepts at most one AND-conjunct") {
+		t.Fatalf("err = %q, want substring 'JOIN ON filter accepts at most one AND-conjunct'", err.Error())
+	}
+}
