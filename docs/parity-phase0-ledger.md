@@ -12,7 +12,7 @@ Status values:
 | Theme | Status | Authority | Current truth |
 |---|---|---|---|
 | `OI-001` protocol wire-close follow-through | `open` | `TECH-DEBT.md`, protocol tests | Core protocol behavior is substantial, but legacy admission, brotli, and envelope/message-family divergences remain explicit. |
-| `OI-002` subscription/query runtime parity | `open` | `NEXT_SESSION_HANDOFF.md` | No queued active slice; next batch is chosen by fresh scout. Same-connection reused-hash initial-snapshot elision is closed. Closed `P0-SUBSCRIPTION-001` through `P0-SUBSCRIPTION-033` and same-connection reused-hash elision are not startup context. |
+| `OI-002` subscription/query runtime parity | `open` | `NEXT_SESSION_HANDOFF.md` | No queued active slice; next batch is chosen by fresh scout. Same-connection reused-hash initial-snapshot elision is closed. `SubscriptionError.table_id` on request-origin error paths now always emits `None` to match reference v1. Closed `P0-SUBSCRIPTION-001` through `P0-SUBSCRIPTION-033`, reused-hash elision, and the `table_id: None` request-origin closure are not startup context. |
 | `OI-003` recovery/store parity | `open` | `TECH-DEBT.md` | Value model, changeset, commitlog/recovery, replay, and snapshot differences remain user-visible risk areas. |
 | `OI-005` raw read-view/snapshot lifetime discipline | `open` | `TECH-DEBT.md` | Normal hosted-runtime read path is narrowed; lower-level raw snapshot APIs remain expert APIs. |
 | `OI-007` recovery format/scheduler deferrals | `open` | `TECH-DEBT.md` | Reader-side zero-header EOS is closed; format and scheduler deferrals remain explicit. |

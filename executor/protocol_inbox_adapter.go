@@ -171,29 +171,13 @@ func optionalUint32(v uint32) *uint32 {
 	return &v
 }
 
-func firstErrorTableID(preds []subscription.Predicate, updates []subscription.SubscriptionUpdate) *schema.TableID {
-	seen := make(map[schema.TableID]struct{})
-	var only schema.TableID
-	for _, pred := range preds {
-		for _, tableID := range pred.Tables() {
-			seen[schema.TableID(tableID)] = struct{}{}
-		}
-	}
-	for _, update := range updates {
-		if update.TableID == 0 {
-			continue
-		}
-		seen[schema.TableID(update.TableID)] = struct{}{}
-	}
-	if len(seen) != 1 {
-		return nil
-	}
-	for tableID := range seen {
-		only = tableID
-	}
-	return &only
-}
-
+// Subscribe / unsubscribe request-origin SubscriptionError always emits
+// table_id: None to match reference v1 (module_subscription_actor.rs
+// :625, :731, :805, :1308; module_subscription_manager.rs:2014). The
+// field is retained in SubscriptionError for wire-shape parity and to
+// allow a future opt-in drop-scope hint, but narrowing the drop scope
+// from the request's referenced tables is a Shunter-only behavior that
+// never matched reference semantics.
 func (a *ProtocolInboxAdapter) buildRegisterResponse(
 	req protocol.RegisterSubscriptionSetRequest,
 	preds []subscription.Predicate,
@@ -202,7 +186,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 ) protocol.SubscriptionSetCommandResponse {
 	if replyErr != nil {
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, nil), Error: replyErr.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: replyErr.Error()},
 		}
 	}
 	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))
@@ -210,7 +194,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 		encoded, err := encodeProtocolSubscriptionUpdate(update)
 		if err != nil {
 			return protocol.SubscriptionSetCommandResponse{
-				Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, result.Update), Error: err.Error()},
+				Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: err.Error()},
 			}
 		}
 		updates = append(updates, encoded)
@@ -223,7 +207,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 	rows, err := encodeProductRows(collectInsertRows(result.Update))
 	if err != nil {
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(preds, result.Update), Error: err.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: err.Error()},
 		}
 	}
 	return protocol.SubscriptionSetCommandResponse{
@@ -244,7 +228,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 ) protocol.UnsubscribeSetCommandResponse {
 	if replyErr != nil {
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: replyErr.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: replyErr.Error()},
 		}
 	}
 	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))
@@ -252,7 +236,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 		encoded, err := encodeProtocolSubscriptionUpdate(update)
 		if err != nil {
 			return protocol.UnsubscribeSetCommandResponse{
-				Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: err.Error()},
+				Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: err.Error()},
 			}
 		}
 		updates = append(updates, encoded)
@@ -265,7 +249,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 	rows, err := encodeProductRows(collectDeleteRows(result.Update))
 	if err != nil {
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), TableID: firstErrorTableID(nil, result.Update), Error: err.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: err.Error()},
 		}
 	}
 	return protocol.UnsubscribeSetCommandResponse{

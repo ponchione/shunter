@@ -226,6 +226,51 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorReply(t *tes
 	}
 }
 
+// TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID
+// pins that subscribe-request-origin SubscriptionError carries
+// table_id: None even when every referenced predicate points at the
+// same table. Reference v1 emit sites always populate
+// SubscriptionError.table_id with None in the request-origin error
+// paths — module_subscription_actor.rs:625 (add_single_subscription
+// send_err_msg), :731 (remove_single_subscription send_err_msg), :805
+// (remove_multi_subscription send_err_msg), :1308
+// (add_multi_subscription_inner send_err_msg); the post-commit
+// TransactionUpdate-origin emit at module_subscription_manager.rs:2014
+// is the same. Shunter must match that by never narrowing the drop
+// scope opportunistically from the error-path predicate surface.
+func TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	var captured *protocol.SubscriptionError
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			reg := cmd.(RegisterSubscriptionSetCmd)
+			reg.Reply(subscription.SubscriptionSetRegisterResult{}, subscription.ErrQueryIDAlreadyLive)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.RegisterSubscriptionSet(context.Background(), protocol.RegisterSubscriptionSetRequest{
+		ConnID:     conn.ID,
+		QueryID:    9,
+		RequestID:  4,
+		Variant:    protocol.SubscriptionSetVariantSingle,
+		Predicates: []any{subscription.AllRows{Table: 1}},
+		Reply: func(resp protocol.SubscriptionSetCommandResponse) {
+			captured = resp.Error
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterSubscriptionSet: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected SubscriptionError captured, got nil")
+	}
+	if captured.TableID != nil {
+		t.Fatalf("SubscriptionError.TableID = %v, want nil (reference v1 always None on request-origin error paths)", *captured.TableID)
+	}
+}
+
 func TestProtocolInboxAdapter_RegisterSubscriptionSet_ForwardsPerPredicateHashIdentity(t *testing.T) {
 	conn, _, _ := newAdapterTestConn(t)
 	id := types.Identity{0xAA, 0xBB}
