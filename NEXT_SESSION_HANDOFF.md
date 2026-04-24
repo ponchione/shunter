@@ -24,9 +24,13 @@ Use `rtk` for every shell command, including git. Do not push unless explicitly 
 
 ## Current Objective
 
-Scout for the next bounded OI-002 subscription/runtime residual. There is no queued target.
+Continue closing `InvalidLiteral` text parity on the remaining literal-category mismatches routed through `sql.mismatch` (`query/sql/coerce.go`). The integer-range paths are closed; the next bounded candidate is **LitFloat → non-float numeric column** (e.g. `SELECT * FROM t WHERE u32 = 1.3`), because it reconstructs cleanly via `strconv.FormatFloat(lit.Float, 'g', -1, 64)` and has no behavioral-divergence trap.
 
-Start from live code, pick one small observable mismatch, and write the failing test before changing behavior.
+Reference anchor: `expr/src/errors.rs:84` + emit site `expr/src/lib.rs:99` via `parse_int` on a non-integer `BigDecimal`. Reuse the existing `sql.InvalidLiteralError` and `sql.algebraicName` helpers landed 2026-04-24; extend `sql.mismatch` to branch on LitFloat into non-float kinds. The `handle_subscribe.go::normalizeSQLFilterForRelations` bypass already passes `InvalidLiteralError` through unwrapped.
+
+Do **not** widen to LitString/LitBytes in the same slice — LitString carries a behavioral-divergence trap on `KindString` (reference `parse(text, String)` succeeds where Shunter rejects), and LitBytes has no preserved source text so its `{literal}` rendering would require either a canonical-hex reconstruction choice or a `Text string` field on `sql.Literal`. Both are called out separately under Scout Directions.
+
+Write the failing parity test first on the OneOff surface (raw) and the SubscribeSingle surface (WithSql-wrapped) before touching `coerce.go`.
 
 ## Closed Guardrails
 
