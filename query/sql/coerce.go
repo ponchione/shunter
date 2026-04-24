@@ -204,12 +204,39 @@ func mismatch(lit Literal, kind types.ValueKind) error {
 	// `UnexpectedType` text verbatim (expr/src/errors.rs:100, emitted at
 	// expr/src/lib.rs:94 for `(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty))`).
 	// Other mismatch categories keep the current coerce-level text; their
-	// reference counterparts (`InvalidLiteral` for Str/Num/Hex) are
+	// reference counterparts (`InvalidLiteral` for Str/Hex) are
 	// separate parity slices.
 	if lit.Kind == LitBool && kind != types.KindBool {
 		return UnexpectedTypeError{Expected: "Bool", Inferred: algebraicName(kind)}
 	}
+	// Float literal into a non-float numeric (integer) column: reference
+	// `parse_int(BigDecimal, ty)` (expr/src/lib.rs:99) rejects fractional
+	// BigDecimals via `BigDecimal::to_{i,u}{8..256}` returning None, and
+	// the outer `.map_err` folds the anyhow into `InvalidLiteral::new`
+	// (expr/src/errors.rs:84). Render via `strconv.FormatFloat('g', -1, 64)`
+	// so the canonical decimal text of the float carries into the literal
+	// slot; source-text preservation for forms that round-trip differently
+	// (e.g. `1.10` → "1.1") is a separate future slice.
+	if lit.Kind == LitFloat && isIntegerKind(kind) {
+		return InvalidLiteralError{Literal: strconv.FormatFloat(lit.Float, 'g', -1, 64), Type: algebraicName(kind)}
+	}
 	return fmt.Errorf("%w: %s literal cannot be coerced to %s", ErrUnsupportedSQL, lit.Kind, kind)
+}
+
+// isIntegerKind reports whether a ValueKind is one of the signed or
+// unsigned integer primitives (I8..I256, U8..U256). Used by `mismatch` to
+// route LitFloat→integer-column failures onto the reference
+// `InvalidLiteral` text path.
+func isIntegerKind(k types.ValueKind) bool {
+	switch k {
+	case types.KindInt8, types.KindInt16, types.KindInt32, types.KindInt64,
+		types.KindInt128, types.KindInt256,
+		types.KindUint8, types.KindUint16, types.KindUint32, types.KindUint64,
+		types.KindUint128, types.KindUint256:
+		return true
+	default:
+		return false
+	}
 }
 
 // UnexpectedTypeError mirrors reference `expr::errors::UnexpectedType`

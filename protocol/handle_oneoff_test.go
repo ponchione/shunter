@@ -5827,3 +5827,39 @@ func TestHandleOneOffQuery_ParityNegativeIntOnUint256RejectText(t *testing.T) {
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityFloatLiteralOnUint32RejectText pins the
+// reference `InvalidLiteral` literal for a fractional LitFloat targeted at
+// an integer column. Reference path: `parse_int(BigDecimal, U32)` where
+// `BigDecimal::to_u32` returns None for 1.3 and the outer `.map_err` at
+// lib.rs:99 folds the anyhow into `InvalidLiteral::new(...)` (errors.rs:84).
+// Shunter previously routed LitFloat→integer through the generic
+// `mismatch` path ("float literal cannot be coerced to uint32"); this slice
+// extends `sql.mismatch` to emit `InvalidLiteralError` with the literal
+// rendered via `strconv.FormatFloat('g', -1, 64)` so `1.3` carries verbatim.
+// Source-text preservation for formats that round-trip differently (e.g.
+// `1.10` → "1.1") is a separate slice — this pin uses `1.3` whose canonical
+// text matches the original token.
+func TestHandleOneOffQuery_ParityFloatLiteralOnUint32RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x9a},
+		QueryString: "SELECT * FROM t WHERE u32 = 1.3",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `1.3` cannot be parsed as type `U32`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}

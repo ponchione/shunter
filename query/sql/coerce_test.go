@@ -83,6 +83,48 @@ func TestCoerceRejectsFloatLiteralOnUint32Column(t *testing.T) {
 	}
 }
 
+// TestCoerceFloatLiteralOnIntegerEmitsInvalidLiteral pins the reference
+// `InvalidLiteral` literal at errors.rs:84 for LitFloat against integer
+// column kinds. Reference path: `parse_int(BigDecimal, ty)` at lib.rs:99
+// where `BigDecimal::to_{i,u}{8..256}` returns None for fractional values
+// and the outer `.map_err` folds the anyhow into InvalidLiteral. Rendered
+// via `strconv.FormatFloat('g', -1, 64)` so `1.3` carries verbatim. Covers
+// 32-bit signed, 32-bit unsigned, and a 128-bit default-branch kind to
+// exercise the three `mismatch` entry points (`coerceSigned`,
+// `coerceUnsigned`, 128/256-bit default arms).
+func TestCoerceFloatLiteralOnIntegerEmitsInvalidLiteral(t *testing.T) {
+	cases := []struct {
+		name    string
+		kind    types.ValueKind
+		wantTy  string
+		float   float64
+		wantLit string
+	}{
+		{"U32", types.KindUint32, "U32", 1.3, "1.3"},
+		{"I32", types.KindInt32, "I32", -1.3, "-1.3"},
+		{"U128", types.KindUint128, "U128", 1.5, "1.5"},
+		{"I256", types.KindInt256, "I256", 2.5, "2.5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Coerce(Literal{Kind: LitFloat, Float: tc.float}, tc.kind)
+			if err == nil {
+				t.Fatalf("want error, got nil")
+			}
+			var ilErr InvalidLiteralError
+			if !errors.As(err, &ilErr) {
+				t.Fatalf("err = %v, want InvalidLiteralError", err)
+			}
+			if ilErr.Literal != tc.wantLit || ilErr.Type != tc.wantTy {
+				t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, tc.wantLit, tc.wantTy)
+			}
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+			}
+		})
+	}
+}
+
 func TestCoerceBoolToBool(t *testing.T) {
 	v, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindBool)
 	if err != nil {
