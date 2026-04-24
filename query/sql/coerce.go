@@ -130,7 +130,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		switch lit.Kind {
 		case LitInt:
 			if lit.Int < 0 {
-				return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
+				return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
 			}
 			return types.NewUint128FromUint64(uint64(lit.Int)), nil
 		case LitBigInt:
@@ -151,7 +151,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		switch lit.Kind {
 		case LitInt:
 			if lit.Int < 0 {
-				return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
+				return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
 			}
 			return types.NewUint256FromUint64(uint64(lit.Int)), nil
 		case LitBigInt:
@@ -348,7 +348,7 @@ func parseTimestampLiteral(s string) (int64, bool) {
 // layout.
 func coerceBigIntToInt128(x *big.Int, kind types.ValueKind) (types.Value, error) {
 	if x.Cmp(int128Max) > 0 || x.Cmp(int128Min) < 0 {
-		return types.Value{}, fmt.Errorf("%w: literal %s out of range for %s", ErrUnsupportedSQL, x.String(), kind)
+		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
 	}
 	t := new(big.Int).Set(x)
 	if t.Sign() < 0 {
@@ -365,10 +365,10 @@ func coerceBigIntToInt128(x *big.Int, kind types.ValueKind) (types.Value, error)
 // Rejects negative values and values >= 2^128.
 func coerceBigIntToUint128(x *big.Int, kind types.ValueKind) (types.Value, error) {
 	if x.Sign() < 0 {
-		return types.Value{}, fmt.Errorf("%w: negative literal %s cannot fit unsigned %s", ErrUnsupportedSQL, x.String(), kind)
+		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
 	}
 	if x.Cmp(uint128Max) >= 0 {
-		return types.Value{}, fmt.Errorf("%w: literal %s out of range for %s", ErrUnsupportedSQL, x.String(), kind)
+		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
 	}
 	var buf [16]byte
 	x.FillBytes(buf[:])
@@ -382,7 +382,7 @@ func coerceBigIntToUint128(x *big.Int, kind types.ValueKind) (types.Value, error
 // through `x + 2^256` for two's-complement encoding.
 func coerceBigIntToInt256(x *big.Int, kind types.ValueKind) (types.Value, error) {
 	if x.Cmp(int256Max) > 0 || x.Cmp(int256Min) < 0 {
-		return types.Value{}, fmt.Errorf("%w: literal %s out of range for %s", ErrUnsupportedSQL, x.String(), kind)
+		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
 	}
 	t := new(big.Int).Set(x)
 	if t.Sign() < 0 {
@@ -403,10 +403,10 @@ func coerceBigIntToInt256(x *big.Int, kind types.ValueKind) (types.Value, error)
 // comfortably in u256 (max ~1.16e77).
 func coerceBigIntToUint256(x *big.Int, kind types.ValueKind) (types.Value, error) {
 	if x.Sign() < 0 {
-		return types.Value{}, fmt.Errorf("%w: negative literal %s cannot fit unsigned %s", ErrUnsupportedSQL, x.String(), kind)
+		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
 	}
 	if x.Cmp(uint256Max) >= 0 {
-		return types.Value{}, fmt.Errorf("%w: literal %s out of range for %s", ErrUnsupportedSQL, x.String(), kind)
+		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
 	}
 	var buf [32]byte
 	x.FillBytes(buf[:])

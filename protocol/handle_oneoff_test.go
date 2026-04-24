@@ -5708,3 +5708,122 @@ func TestHandleOneOffQuery_ParityIntOverflowOnInt8RejectText(t *testing.T) {
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityNegativeIntOnUint128RejectText pins the
+// reference `InvalidLiteral` literal for the LitInt-negative branch against
+// a 128-bit unsigned column (coerce.go:133 in the Uint128 case arm). The
+// reference path `parse_int` + `BigDecimal::to_u128` returns None for
+// negative inputs; the outer `.map_err` folds the anyhow into
+// InvalidLiteral. Scope: LitInt branch — the LitBigInt branch is covered
+// by the BigInt cases below.
+func TestHandleOneOffQuery_ParityNegativeIntOnUint128RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint128(0, 1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x96},
+		QueryString: "SELECT * FROM t WHERE u128 = -1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `-1` cannot be parsed as type `U128`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityBigIntOverflowOnUint128RejectText pins the
+// reference `InvalidLiteral` literal for the LitBigInt branch against a
+// 128-bit unsigned column (coerceBigIntToUint128 in coerce.go). Input
+// `2^128` exceeds U128's max and `BigDecimal::to_u128` returns None in
+// the reference `parse_int` path.
+func TestHandleOneOffQuery_ParityBigIntOverflowOnUint128RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint128(0, 1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	// 2^128 = 340282366920938463463374607431768211456 — one past u128::MAX.
+	const bigOverflow = "340282366920938463463374607431768211456"
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x97},
+		QueryString: "SELECT * FROM t WHERE u128 = " + bigOverflow,
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `" + bigOverflow + "` cannot be parsed as type `U128`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityBigIntOverflowOnInt128RejectText pins the
+// reference `InvalidLiteral` literal for the signed variant.
+// `2^127` overflows I128::MAX (2^127 - 1) and reference
+// `BigDecimal::to_i128` returns None.
+func TestHandleOneOffQuery_ParityBigIntOverflowOnInt128RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "i128", Type: schema.KindInt128},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewInt128(0, 1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	// 2^127 = 170141183460469231731687303715884105728 — one past i128::MAX.
+	const bigOverflow = "170141183460469231731687303715884105728"
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x98},
+		QueryString: "SELECT * FROM t WHERE i128 = " + bigOverflow,
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `" + bigOverflow + "` cannot be parsed as type `I128`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityNegativeIntOnUint256RejectText pins the
+// reference `InvalidLiteral` literal for the LitInt-negative branch
+// against a 256-bit unsigned column (coerce.go:154 in the Uint256 arm).
+func TestHandleOneOffQuery_ParityNegativeIntOnUint256RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint256(0, 0, 0, 1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x99},
+		QueryString: "SELECT * FROM t WHERE u256 = -1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `-1` cannot be parsed as type `U256`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
