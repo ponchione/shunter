@@ -578,11 +578,16 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 	}
 	v, err := coerceLiteral(f.Literal, col.Type, caller)
 	if err != nil {
-		// UnexpectedTypeError carries the reference `UnexpectedType`
-		// literal verbatim; do not prefix with "coerce column" so the
-		// text matches reference expr/src/errors.rs:100.
+		// Parity error types carry the reference literal verbatim; do
+		// not prefix with "coerce column" so the text matches
+		// reference expr/src/errors.rs (UnexpectedType:100,
+		// InvalidLiteral:84).
 		var utErr sql.UnexpectedTypeError
 		if errors.As(err, &utErr) {
+			return nil, err
+		}
+		var ilErr sql.InvalidLiteralError
+		if errors.As(err, &ilErr) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("coerce column %q: %v", f.Column, err)

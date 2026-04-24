@@ -180,7 +180,7 @@ func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64
 		return types.Value{}, mismatch(lit, kind)
 	}
 	if lit.Int < lo || lit.Int > hi {
-		return types.Value{}, fmt.Errorf("%w: literal %d out of range for %s", ErrUnsupportedSQL, lit.Int, kind)
+		return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
 	}
 	return mk(lit.Int), nil
 }
@@ -190,11 +190,11 @@ func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64
 		return types.Value{}, mismatch(lit, kind)
 	}
 	if lit.Int < 0 {
-		return types.Value{}, fmt.Errorf("%w: negative literal %d cannot fit unsigned %s", ErrUnsupportedSQL, lit.Int, kind)
+		return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
 	}
 	u := uint64(lit.Int)
 	if u > hi {
-		return types.Value{}, fmt.Errorf("%w: literal %d out of range for %s", ErrUnsupportedSQL, lit.Int, kind)
+		return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
 	}
 	return mk(u), nil
 }
@@ -227,6 +227,27 @@ func (e UnexpectedTypeError) Error() string {
 }
 
 func (e UnexpectedTypeError) Unwrap() error { return ErrUnsupportedSQL }
+
+// InvalidLiteralError mirrors reference `expr::errors::InvalidLiteral`
+// (reference/SpacetimeDB/crates/expr/src/errors.rs:83-97). Emitted by the
+// coerce boundary when an integer literal is out of range for the target
+// column kind (reference emits this via `lib.rs:99` when `parse(v, ty)`
+// rejects the source text). Unwrap()s to ErrUnsupportedSQL so callers that
+// classify by sentinel still match. `Literal` carries the reconstructed
+// decimal text of the integer value; scientific-notation literals collapse
+// to LitInt at the Shunter parser and so render via `strconv.FormatInt`
+// rather than the original source token — parity for that surface requires
+// preserving the source text on Literal and is out of scope here.
+type InvalidLiteralError struct {
+	Literal string
+	Type    string
+}
+
+func (e InvalidLiteralError) Error() string {
+	return fmt.Sprintf("The literal expression `%s` cannot be parsed as type `%s`", e.Literal, e.Type)
+}
+
+func (e InvalidLiteralError) Unwrap() error { return ErrUnsupportedSQL }
 
 // algebraicName returns the reference `fmt_algebraic_type` short name for a
 // ValueKind (reference/SpacetimeDB/crates/sats/src/algebraic_type/fmt.rs

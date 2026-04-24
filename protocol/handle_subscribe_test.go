@@ -5252,3 +5252,39 @@ func TestHandleSubscribeSingle_ParityBoolLiteralOnIntegerColumnRejectText(t *tes
 		t.Error("executor should not be called when a bool literal targets an integer column")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityIntOverflowOnUint8RejectText pins the
+// reference `InvalidLiteral` literal from
+// reference/SpacetimeDB/crates/expr/src/errors.rs:108 (emitted at lib.rs:99
+// when `parse(v, ty)` fails) onto the SubscribeSingle admission surface.
+// SubscribeSingle wraps compile errors with `DBError::WithSql`
+// (module_subscription_actor.rs:643 via `return_on_err_with_sql_bool!`).
+// Scope: plain integer literal — scientific-notation parity is deferred.
+func TestHandleSubscribeSingle_ParityIntOverflowOnUint8RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+
+	const sqlText = "SELECT * FROM t WHERE u8 = 1000"
+	msg := &SubscribeSingleMsg{
+		RequestID:   256,
+		QueryID:     257,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "The literal expression `1000` cannot be parsed as type `U8`, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when an integer literal overflows an unsigned column")
+	}
+}

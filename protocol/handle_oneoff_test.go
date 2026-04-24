@@ -5610,3 +5610,101 @@ func TestHandleOneOffQuery_ParityBoolLiteralOnIntegerColumnRejectText(t *testing
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityIntOverflowOnUint8RejectText pins the reference
+// `InvalidLiteral` literal from
+// reference/SpacetimeDB/crates/expr/src/errors.rs:108
+// ("The literal expression `{literal}` cannot be parsed as type `{ty}`"),
+// emitted at lib.rs:99 when `parse(v, ty)` fails. On U8, the reference path
+// `parse_int` → `BigDecimal::to_u8` returns None for values > 255 and the
+// outer `.map_err(|_| InvalidLiteral::new(...))` folds the anyhow overflow
+// into the parity literal. OneOff admission emits the raw text with no
+// `DBError::WithSql` wrap. Scope: plain integer literal (`1000`) whose
+// reconstructed decimal text matches the original SQL token. Scientific
+// notation (`1e3`) collapses to LitInt(1000) at the Shunter parser, which
+// loses the original token; the parity slice for that shape requires
+// preserving the source text on Literal and is deferred.
+func TestHandleOneOffQuery_ParityIntOverflowOnUint8RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x93},
+		QueryString: "SELECT * FROM t WHERE u8 = 1000",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `1000` cannot be parsed as type `U8`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityNegativeIntOnUint8RejectText pins the same
+// reference `InvalidLiteral` literal for the negative-on-unsigned case.
+// Reference `parse_int` calls `BigDecimal::to_u8` which returns None for
+// negative inputs; the outer anyhow error is folded into InvalidLiteral by
+// the `.map_err` at lib.rs:99. Shunter emits via the negative branch of
+// `coerceUnsigned` rather than a dedicated typecheck pass; the text must
+// still match the reference literal.
+func TestHandleOneOffQuery_ParityNegativeIntOnUint8RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x94},
+		QueryString: "SELECT * FROM t WHERE u8 = -1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `-1` cannot be parsed as type `U8`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityIntOverflowOnInt8RejectText pins the signed
+// variant of the same reference `InvalidLiteral` literal. Reference
+// `parse_int` → `BigDecimal::to_i8` returns None for 200 (>127); the outer
+// anyhow error is folded into InvalidLiteral by `.map_err` at lib.rs:99.
+// Shunter emits via the range-check branch of `coerceSigned`; the text
+// must match reference.
+func TestHandleOneOffQuery_ParityIntOverflowOnInt8RejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "i8", Type: schema.KindInt8},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewInt8(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x95},
+		QueryString: "SELECT * FROM t WHERE i8 = 200",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `200` cannot be parsed as type `I8`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
