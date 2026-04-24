@@ -1690,3 +1690,31 @@ func TestParseJoinOnEqualityWithFilterOnLeftSide(t *testing.T) {
 		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
 	}
 }
+
+func TestParseJoinOnEqualityWithFilterAndWhere(t *testing.T) {
+	stmt, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 WHERE o.id > 0")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	andPred, ok := stmt.Predicate.(AndPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want AndPredicate", stmt.Predicate)
+	}
+	leftCmp, ok := andPred.Left.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("AndPredicate.Left type = %T, want ComparisonPredicate (ON-filter)", andPred.Left)
+	}
+	if leftCmp.Filter.Table != "Inventory" || leftCmp.Filter.Column != "quantity" || leftCmp.Filter.Op != "<" || leftCmp.Filter.Literal.Int != 10 {
+		t.Fatalf("AndPredicate.Left filter = %+v, want Inventory.quantity < 10", leftCmp.Filter)
+	}
+	rightCmp, ok := andPred.Right.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("AndPredicate.Right type = %T, want ComparisonPredicate (WHERE-filter)", andPred.Right)
+	}
+	if rightCmp.Filter.Table != "Orders" || rightCmp.Filter.Column != "id" || rightCmp.Filter.Op != ">" || rightCmp.Filter.Literal.Int != 0 {
+		t.Fatalf("AndPredicate.Right filter = %+v, want Orders.id > 0", rightCmp.Filter)
+	}
+	if len(stmt.Filters) != 2 {
+		t.Fatalf("Filters len = %d, want 2", len(stmt.Filters))
+	}
+}
