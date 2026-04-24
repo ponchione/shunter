@@ -98,7 +98,9 @@ on-filter   = qualified-col comparison-op literal
 
 ### Semantic-equivalence invariant
 
-For any SQL string of the form `... ON eq AND F` with no WHERE clause, the parsed `Statement.Predicate` is structurally equal to the predicate produced by the same query rewritten as `... ON eq WHERE F`. For `... ON eq AND F1 WHERE F2`, the parsed predicate is structurally equal to that of `... ON eq WHERE F1 AND F2`, modulo child-order canonicalization (`P0-SUBSCRIPTION-013` and descendants handle deterministic ordering downstream).
+- `... ON eq AND F` (no WHERE): `Statement.Predicate` is structurally identical to the predicate produced by `... ON eq WHERE F`. Both are a single `ComparisonPredicate`.
+- `... ON eq AND F1 WHERE F2` (each a single comparison): `Statement.Predicate` is `AndPredicate{Left: F1, Right: F2}`, structurally identical to the predicate from `... ON eq WHERE F1 AND F2` (since `parseConjunction` builds the same `And(F1, F2)` tree for a two-conjunct WHERE).
+- `... ON eq AND F0 WHERE F1 AND F2`: the fold produces a right-leaning `And(F0, And(F1, F2))`, whereas the pure-WHERE equivalent `... WHERE F0 AND F1 AND F2` produces a left-leaning `And(And(F0, F1), F2)`. This lean difference is absorbed by the subscription-side associative-grouping canonicalization (`P0-SUBSCRIPTION-015`) and does not affect dedup or runtime behavior. The parser-level parity pin (`TestParseJoinOnEqualityParityWithWhereForm`) targets the single-filter form where structural identity holds without canonicalization.
 
 ## Data flow
 
@@ -108,7 +110,9 @@ SQL string
   ▼
 sql.Parse  ─►  Statement{
                 Join: {LeftOn, RightOn, HasOn: true},
-                Predicate: <ON-filter ANDed with WHERE, or either alone, or nil>,
+                Predicate: nil,                            // neither ON-filter nor WHERE
+                        or ComparisonPredicate{...},        // exactly one of ON-filter or WHERE
+                        or AndPredicate{ON-filter, WHERE}, // both present
                 Filters:   flattenAndFilters(Predicate),
               }
   │
