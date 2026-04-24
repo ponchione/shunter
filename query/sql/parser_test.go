@@ -2,6 +2,7 @@ package sql
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -1716,5 +1717,27 @@ func TestParseJoinOnEqualityWithFilterAndWhere(t *testing.T) {
 	}
 	if len(stmt.Filters) != 2 {
 		t.Fatalf("Filters len = %d, want 2", len(stmt.Filters))
+	}
+}
+
+// TestParseJoinOnEqualityParityWithWhereForm locks the B (transparent-fold)
+// invariant: for a single-filter case, the ON-form parses to a Statement
+// structurally identical to the equivalent WHERE-form. See
+// docs/superpowers/specs/2026-04-23-join-on-filter-widening-design.md §
+// "Semantic-equivalence invariant".
+func TestParseJoinOnEqualityParityWithWhereForm(t *testing.T) {
+	onForm, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10")
+	if err != nil {
+		t.Fatalf("ON-form Parse error: %v", err)
+	}
+	whereForm, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10")
+	if err != nil {
+		t.Fatalf("WHERE-form Parse error: %v", err)
+	}
+	if !reflect.DeepEqual(onForm.Predicate, whereForm.Predicate) {
+		t.Fatalf("Predicate divergence:\n  ON-form    = %+v\n  WHERE-form = %+v", onForm.Predicate, whereForm.Predicate)
+	}
+	if !reflect.DeepEqual(onForm.Filters, whereForm.Filters) {
+		t.Fatalf("Filters divergence:\n  ON-form    = %+v\n  WHERE-form = %+v", onForm.Filters, whereForm.Filters)
 	}
 }
