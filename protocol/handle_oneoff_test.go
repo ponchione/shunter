@@ -4948,6 +4948,107 @@ func TestHandleOneOffQuery_ParityJoinCountBareAliasWithWhereReturnsSingleAggrega
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
+// TestHandleOneOffQuery_ParityJoinCountAliasOnCrossJoinWhereEqualityReturnsAggregate
+// pins that one-off/ad hoc SQL counts matched rows for the already-accepted
+// cross-join WHERE column-equality shape (P0-SUBSCRIPTION-024) with the
+// already-accepted join-backed COUNT(*) AS alias aggregate (P0-SUBSCRIPTION-025).
+// The bounded combination yields one uint64 aggregate row equal to the number
+// of matched join pairs, with multiplicity preserved on duplicates.
+func TestHandleOneOffQuery_ParityJoinCountAliasOnCrossJoinWhereEqualityReturnsAggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		}}},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewBool(true)},
+			{types.NewUint32(1), types.NewBool(false)},
+			{types.NewUint32(3), types.NewBool(true)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC8},
+		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s WHERE t.id = s.t_id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (cross-join WHERE + COUNT aggregate is one-off-only accepted)", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
+		t.Fatalf("Tables = %+v, want single aggregate envelope for t", result.Tables)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+// TestHandleOneOffQuery_ParityJoinCountBareAliasOnCrossJoinWhereEqualityAndFilterReturnsAggregate
+// pins the bounded combination of the cross-join WHERE equality-plus-single-
+// literal-filter shape (P0-SUBSCRIPTION-031) with the join-backed COUNT(*)
+// alias aggregate (P0-SUBSCRIPTION-025). Only matched-and-filtered join pairs
+// are counted, the bare alias form is accepted, and the result is a single
+// uint64 row under the requested alias.
+func TestHandleOneOffQuery_ParityJoinCountBareAliasOnCrossJoinWhereEqualityAndFilterReturnsAggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		}}},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewBool(true)},
+			{types.NewUint32(1), types.NewBool(false)},
+			{types.NewUint32(2), types.NewBool(true)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xC9},
+		QueryString: "SELECT COUNT(*) n FROM t JOIN s WHERE t.id = s.t_id AND s.active = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (cross-join WHERE equality + filter + COUNT aggregate is one-off-only accepted)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
 func TestHandleOneOffQuery_ParityJoinCountWithLimitRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {

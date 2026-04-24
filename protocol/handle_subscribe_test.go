@@ -1111,6 +1111,59 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterStill
 	}
 }
 
+// TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected
+// pins that even after one-off admits the bounded combination of cross-join
+// WHERE column-equality (+ optional one-column-literal filter) with
+// COUNT(*) [AS] alias aggregate, subscriptions still deliberately reject
+// both the cross-join WHERE shape and the aggregate projection before
+// executor registration. Reference subscription SQL grammar allows only
+// STAR / ident.STAR projection and has no cross-join WHERE form; the
+// subscribe-side rejection is the outer guard. The rejection message is
+// "cross join WHERE not supported" because the cross-join guard fires
+// before the aggregate-projection guard on subscribe.
+func TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "t_id", Type: schema.KindUint32},
+			{Name: "active", Type: schema.KindBool},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   126,
+		QueryID:     123,
+		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s WHERE t.id = s.t_id AND s.active = TRUE",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.Error != "aggregate projections not supported for subscriptions" {
+		t.Fatalf("Error = %q, want %q (aggregate guard fires before cross-join WHERE guard)", se.Error, "aggregate projections not supported for subscriptions")
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
+	}
+}
+
 func TestHandleSubscribeSingle_QuotedSpecialCharacterIdentifiers(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

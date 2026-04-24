@@ -1502,6 +1502,86 @@ func TestParseJoinCountStarBareAliasProjectionWithWhere(t *testing.T) {
 	}
 }
 
+// TestParseJoinCountStarAliasProjectionOnCrossJoinWhereEquality pins that the
+// parser admits COUNT(*) aggregate projection on the already-accepted
+// cross-join WHERE column-equality shape (P0-SUBSCRIPTION-024). The
+// statement carries the aggregate metadata plus a cross-join (HasOn=false)
+// and a ColumnComparisonPredicate that equates the two relations' columns.
+func TestParseJoinCountStarAliasProjectionOnCrossJoinWhereEquality(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) AS n FROM t JOIN s WHERE t.u32 = s.u32")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil || stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", stmt.Aggregate)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.HasOn {
+		t.Fatalf("Join.HasOn = true, want false (cross-join WHERE form)")
+	}
+	cmp, ok := stmt.Predicate.(ColumnComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ColumnComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Op != "=" {
+		t.Fatalf("Predicate.Op = %q, want %q", cmp.Op, "=")
+	}
+	if cmp.Left.Table != "t" || cmp.Left.Column != "u32" {
+		t.Fatalf("Predicate.Left = %+v, want t.u32", cmp.Left)
+	}
+	if cmp.Right.Table != "s" || cmp.Right.Column != "u32" {
+		t.Fatalf("Predicate.Right = %+v, want s.u32", cmp.Right)
+	}
+	if len(stmt.ProjectionColumns) != 0 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 0", len(stmt.ProjectionColumns))
+	}
+}
+
+// TestParseJoinCountStarBareAliasProjectionOnCrossJoinWhereEqualityAndFilter
+// pins that the parser admits COUNT(*) aggregate projection with bare alias
+// on the already-accepted cross-join WHERE equality-plus-single-literal-filter
+// shape (P0-SUBSCRIPTION-031). The statement carries the aggregate metadata
+// plus the AndPredicate{ColumnComparisonPredicate, ComparisonPredicate}
+// shape without flattening.
+func TestParseJoinCountStarBareAliasProjectionOnCrossJoinWhereEqualityAndFilter(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) n FROM t JOIN s WHERE t.u32 = s.u32 AND s.enabled = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil || stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", stmt.Aggregate)
+	}
+	if stmt.Join == nil || stmt.Join.HasOn {
+		t.Fatalf("Join = %+v, want cross-join (HasOn=false)", stmt.Join)
+	}
+	and, ok := stmt.Predicate.(AndPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want AndPredicate", stmt.Predicate)
+	}
+	cmp, ok := and.Left.(ColumnComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate.Left = %T, want ColumnComparisonPredicate", and.Left)
+	}
+	if cmp.Left.Table != "t" || cmp.Left.Column != "u32" || cmp.Right.Table != "s" || cmp.Right.Column != "u32" {
+		t.Fatalf("Predicate.Left = %+v, want t.u32 = s.u32", cmp)
+	}
+	filter, ok := and.Right.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate.Right = %T, want ComparisonPredicate", and.Right)
+	}
+	if filter.Filter.Table != "s" || filter.Filter.Column != "enabled" || filter.Filter.Op != "=" {
+		t.Fatalf("Predicate.Right.Filter = %+v, want s.enabled =", filter.Filter)
+	}
+	if filter.Filter.Literal.Kind != LitBool || !filter.Filter.Literal.Bool {
+		t.Fatalf("Predicate.Right.Filter.Literal = %+v, want TRUE", filter.Filter.Literal)
+	}
+	if len(stmt.ProjectionColumns) != 0 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 0", len(stmt.ProjectionColumns))
+	}
+}
+
 func TestParseRejectsUnsupported(t *testing.T) {
 	cases := []struct {
 		name string
