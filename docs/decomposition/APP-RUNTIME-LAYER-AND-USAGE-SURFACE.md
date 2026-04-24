@@ -8,9 +8,9 @@ This document does not change the existing six core specs. It describes the prac
 Companion framing:
 - `BRAIN-EXTENSIONS-LLM-HARNESS.md` describes one important app/product layer that could be built on top of Shunter.
 - `GENERAL-PURPOSE-APP-PLATFORM-NOTES.md` describes the broader reusable platform/product surface Shunter may eventually want.
-- `../hosted-runtime-v1-contract.md` captures the concrete v1 public/runtime contract.
-- `../hosted-runtime-v1.5-follow-ons.md` captures near-follow-on usability/platform work.
-- `../hosted-runtime-v2-directions.md` parks later structural/runtime evolution.
+- `hosted-runtime-v1-contract.md` captures the concrete v1 public/runtime contract.
+- `hosted-runtime-v1.5-follow-ons.md` captures near-follow-on usability/platform work.
+- `hosted-runtime-v2-directions.md` parks later structural/runtime evolution.
 - `../hosted-runtime-implementation-roadmap.md` turns the hosted-runtime direction into an implementation-facing roadmap.
 - This document sits between the product/platform notes and the core engine specs: it describes the missing runtime/application layer that turns the kernel into something applications define against and clients connect to.
 

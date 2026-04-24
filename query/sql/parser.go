@@ -195,11 +195,11 @@ type AggregateProjection struct {
 // ProjectedTable alone is insufficient because both aliases resolve to the
 // same base table.
 //
-// ProjectionColumns is populated only for the bounded one-relation explicit
-// column-list surface (for example `SELECT u32, name FROM t` or
-// `SELECT o.id, o.product_id FROM Orders o JOIN Inventory product ...`).
-// Wildcard/full-row projections keep this empty and continue using
-// ProjectedTable / ProjectedAlias.
+// ProjectionColumns is populated for explicit column-list projections (for
+// example `SELECT u32, name FROM t`, `SELECT o.id, o.product_id FROM Orders o
+// JOIN Inventory product ...`, or one-off mixed-relation join projections such
+// as `SELECT o.id, product.quantity ...`). Wildcard/full-row projections keep
+// this empty and continue using ProjectedTable / ProjectedAlias.
 type Statement struct {
 	Table             string
 	ProjectedTable    string
@@ -613,16 +613,9 @@ func (p *parser) parseStatement() (Statement, error) {
 		if err != nil {
 			return Statement{}, err
 		}
-		if stmt.Join != nil {
-			if stmt.ProjectedAlias == "" {
-				stmt.ProjectedAlias = resolvedProjectionColumns[0].SourceQualifier
-				stmt.ProjectedTable = resolvedProjectionColumns[0].Table
-			}
-			for _, col := range resolvedProjectionColumns {
-				if !strings.EqualFold(col.Table, stmt.ProjectedTable) || !strings.EqualFold(col.SourceQualifier, stmt.ProjectedAlias) {
-					return Statement{}, p.unsupported("join projection columns must resolve to the projected relation")
-				}
-			}
+		if stmt.Join != nil && stmt.ProjectedAlias == "" {
+			stmt.ProjectedAlias = resolvedProjectionColumns[0].SourceQualifier
+			stmt.ProjectedTable = resolvedProjectionColumns[0].Table
 		}
 		stmt.ProjectionColumns = resolvedProjectionColumns
 	}

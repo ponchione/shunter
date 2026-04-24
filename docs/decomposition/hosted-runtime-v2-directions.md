@@ -11,8 +11,8 @@ Current framing:
 - v2+ is where Shunter can revisit larger runtime shape, operational control, module isolation, and migration execution
 
 Related docs:
-- `docs/hosted-runtime-v1-contract.md` defines the base runtime shape v2 should not distort retroactively
-- `docs/hosted-runtime-v1.5-follow-ons.md` defines the transitional usability/platform surfaces v2 may later clean up
+- `docs/decomposition/hosted-runtime-v1-contract.md` defines the base runtime shape v2 should not distort retroactively
+- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md` defines the transitional usability/platform surfaces v2 may later clean up
 - `docs/hosted-runtime-implementation-roadmap.md` keeps v2 items parked until v1/v1.5 usage proves the need
 
 The goal is not to commit to every v2 feature now.

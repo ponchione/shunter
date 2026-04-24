@@ -5,9 +5,10 @@ Scope: implementation-facing roadmap for turning the hosted-runtime architecture
 
 This roadmap follows:
 - `docs/decomposition/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md`
-- `docs/hosted-runtime-v1-contract.md`
-- `docs/hosted-runtime-v1.5-follow-ons.md`
-- `docs/hosted-runtime-v2-directions.md`
+- `docs/decomposition/hosted-runtime-version-phases.md`
+- `docs/decomposition/hosted-runtime-v1-contract.md`
+- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
+- `docs/decomposition/hosted-runtime-v2-directions.md`
 - `docs/EXECUTION-ORDER.md`
 
 Audit result:
@@ -74,7 +75,7 @@ Likely work:
 
 Acceptance criteria:
 - a consumer can import the top-level package and construct a module/config/runtime without touching subsystem constructors directly
-- the API shape matches `docs/hosted-runtime-v1-contract.md`
+- the API shape matches `docs/decomposition/hosted-runtime-v1-contract.md`
 - no v1.5 declarations are required yet
 
 Non-goals:
@@ -390,7 +391,7 @@ Do not implement these as part of v1/v1.5 unless a later audit explicitly moves 
 - broad standalone policy framework
 - cross-language module authoring
 
-These belong in `docs/hosted-runtime-v2-directions.md` until real app usage proves the need.
+These belong in `docs/decomposition/hosted-runtime-v2-directions.md` until real app usage proves the need.
 
 ---
 
@@ -398,15 +399,15 @@ These belong in `docs/hosted-runtime-v2-directions.md` until real app usage prov
 
 As implementation lands, keep these docs aligned:
 
-- `docs/hosted-runtime-v1-contract.md`
+- `docs/decomposition/hosted-runtime-v1-contract.md`
   - update when public v1 API names settle
   - update when lifecycle/network/local-call behavior changes
 
-- `docs/hosted-runtime-v1.5-follow-ons.md`
+- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
   - update when export/codegen/query/migration details become concrete
   - keep transitional "both" surfaces documented
 
-- `docs/hosted-runtime-v2-directions.md`
+- `docs/decomposition/hosted-runtime-v2-directions.md`
   - move items out only when they are intentionally pulled earlier
   - add cleanup notes when v1.5 overlaps become obsolete
 

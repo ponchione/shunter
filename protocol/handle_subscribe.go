@@ -14,9 +14,15 @@ type compiledSQLQuery struct {
 	TableName          string
 	Predicate          subscription.Predicate
 	UsesCallerIdentity bool
-	ProjectionColumns  []schema.ColumnSchema
+	ProjectionColumns  []compiledSQLProjectionColumn
 	Aggregate          *compiledSQLAggregate
 	Limit              *uint64
+}
+
+type compiledSQLProjectionColumn struct {
+	Schema schema.ColumnSchema
+	Table  schema.TableID
+	Alias  uint8
 }
 
 type compiledSQLAggregate struct {
@@ -186,12 +192,26 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.Join.RightTable)
 		}
 		projectedID := leftID
-		projectedTS := leftTS
 		if joinProjectsRight(stmt, leftID == rightID) {
 			projectedID = rightID
-			projectedTS = rightTS
 		}
-		projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, projectedTS)
+		aliasTag := func(string) uint8 { return 0 }
+		if leftID == rightID {
+			rightAliasUpper := strings.ToUpper(stmt.Join.RightAlias)
+			aliasTag = func(a string) uint8 {
+				if strings.EqualFold(a, "") {
+					return 0
+				}
+				if strings.ToUpper(a) == rightAliasUpper {
+					return 1
+				}
+				return 0
+			}
+		}
+		projectionColumns, err := compileJoinProjectionColumns(stmt.ProjectionColumns,
+			relationSchema{id: leftID, ts: leftTS}, stmt.Join.LeftTable,
+			relationSchema{id: rightID, ts: rightTS}, stmt.Join.RightTable,
+			aliasTag)
 		if err != nil {
 			return compiledSQLQuery{}, err
 		}
@@ -237,19 +257,6 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
 			stmt.Join.RightTable: {id: rightID, ts: rightTS},
 		}
-		aliasTag := func(string) uint8 { return 0 }
-		if leftID == rightID {
-			rightAliasUpper := strings.ToUpper(stmt.Join.RightAlias)
-			aliasTag = func(a string) uint8 {
-				if strings.EqualFold(a, "") {
-					return 0
-				}
-				if strings.ToUpper(a) == rightAliasUpper {
-					return 1
-				}
-				return 0
-			}
-		}
 		var filter subscription.Predicate
 		if stmt.Predicate != nil {
 			var err error
@@ -281,7 +288,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	if !ok {
 		return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.ProjectedTable)
 	}
-	projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, ts)
+	projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, projectedID, ts)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
@@ -348,26 +355,58 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 	}, nil
 }
 
-func compileProjectionColumns(projectedTable string, columns []sql.ProjectionColumn, ts *schema.TableSchema) ([]schema.ColumnSchema, error) {
+func compileProjectionColumns(projectedTable string, columns []sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema) ([]compiledSQLProjectionColumn, error) {
 	if len(columns) == 0 {
 		return nil, nil
 	}
-	resolved := make([]schema.ColumnSchema, 0, len(columns))
+	resolved := make([]compiledSQLProjectionColumn, 0, len(columns))
 	for _, col := range columns {
 		if !strings.EqualFold(col.Table, projectedTable) {
 			return nil, fmt.Errorf("projection column %q must resolve to table %q", col.Column, projectedTable)
 		}
-		tsCol, ok := ts.Column(col.Column)
-		if !ok {
-			return nil, fmt.Errorf("unknown column %q on table %q", col.Column, ts.Name)
-		}
-		compiledCol := *tsCol
-		if col.OutputAlias != "" {
-			compiledCol.Name = col.OutputAlias
+		compiledCol, err := compileProjectionColumn(col, tableID, ts, 0)
+		if err != nil {
+			return nil, err
 		}
 		resolved = append(resolved, compiledCol)
 	}
 	return resolved, nil
+}
+
+func compileJoinProjectionColumns(columns []sql.ProjectionColumn, left relationSchema, leftTable string, right relationSchema, rightTable string, aliasTag func(string) uint8) ([]compiledSQLProjectionColumn, error) {
+	if len(columns) == 0 {
+		return nil, nil
+	}
+	resolved := make([]compiledSQLProjectionColumn, 0, len(columns))
+	for _, col := range columns {
+		var rel relationSchema
+		switch {
+		case strings.EqualFold(col.Table, leftTable):
+			rel = left
+		case strings.EqualFold(col.Table, rightTable):
+			rel = right
+		default:
+			return nil, fmt.Errorf("projection column %q resolved to unknown table %q", col.Column, col.Table)
+		}
+		compiledCol, err := compileProjectionColumn(col, rel.id, rel.ts, aliasTag(col.SourceQualifier))
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, compiledCol)
+	}
+	return resolved, nil
+}
+
+func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema, alias uint8) (compiledSQLProjectionColumn, error) {
+	tsCol, ok := ts.Column(col.Column)
+	if !ok {
+		return compiledSQLProjectionColumn{}, fmt.Errorf("unknown column %q on table %q", col.Column, ts.Name)
+	}
+	compiledCol := *tsCol
+	if col.OutputAlias != "" {
+		compiledCol.Name = col.OutputAlias
+	}
+	return compiledSQLProjectionColumn{Schema: compiledCol, Table: tableID, Alias: alias}, nil
 }
 
 // parseQueryString turns a client-supplied SQL string into the internal

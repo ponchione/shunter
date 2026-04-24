@@ -61,7 +61,11 @@ func handleOneOffQuery(
 	view := stateAccess.Snapshot()
 	var matchedRows []types.ProductValue
 	if joinPred, ok := pred.(subscription.Join); ok {
-		matchedRows = evaluateOneOffJoin(view, tableID, joinPred)
+		if len(compiled.ProjectionColumns) != 0 && compiled.Aggregate == nil {
+			matchedRows = evaluateOneOffJoinProjection(view, joinPred, compiled.ProjectionColumns)
+		} else {
+			matchedRows = evaluateOneOffJoin(view, tableID, joinPred)
+		}
 	} else if crossPred, ok := pred.(subscription.CrossJoin); ok {
 		matchedRows = evaluateOneOffCrossJoin(view, tableID, crossPred)
 	} else {
@@ -138,15 +142,16 @@ func matchesAll(pv types.ProductValue, matchers []colMatcher) bool {
 	return true
 }
 
-func projectOneOffRows(rows []types.ProductValue, columns []schema.ColumnSchema) []types.ProductValue {
+func projectOneOffRows(rows []types.ProductValue, columns []compiledSQLProjectionColumn) []types.ProductValue {
 	projected := make([]types.ProductValue, 0, len(rows))
 	for _, row := range rows {
 		out := make(types.ProductValue, 0, len(columns))
 		for _, col := range columns {
-			if col.Index < 0 || col.Index >= len(row) {
+			idx := col.Schema.Index
+			if idx < 0 || idx >= len(row) {
 				continue
 			}
-			out = append(out, row[col.Index])
+			out = append(out, row[idx])
 		}
 		projected = append(projected, out)
 	}
@@ -198,6 +203,52 @@ func evaluateOneOffJoin(view store.CommittedReadView, projectedTable schema.Tabl
 				}
 			}
 			rows = append(rows, projectedRow)
+		}
+	}
+	return rows
+}
+
+func evaluateOneOffJoinProjection(view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn) []types.ProductValue {
+	var rows []types.ProductValue
+	for _, leftRow := range view.TableScan(join.Left) {
+		if int(join.LeftCol) >= len(leftRow) {
+			continue
+		}
+		for _, rightRow := range view.TableScan(join.Right) {
+			if int(join.RightCol) >= len(rightRow) {
+				continue
+			}
+			if !leftRow[join.LeftCol].Equal(rightRow[join.RightCol]) {
+				continue
+			}
+			if join.Filter != nil {
+				if !subscription.MatchRowSide(join.Filter, join.Left, join.LeftAlias, leftRow) ||
+					!subscription.MatchRowSide(join.Filter, join.Right, join.RightAlias, rightRow) {
+					continue
+				}
+			}
+			out := make(types.ProductValue, 0, len(columns))
+			for _, col := range columns {
+				var source types.ProductValue
+				switch {
+				case col.Table == join.Left && col.Alias == join.LeftAlias:
+					source = leftRow
+				case col.Table == join.Right && col.Alias == join.RightAlias:
+					source = rightRow
+				case col.Table == join.Left && join.Left != join.Right:
+					source = leftRow
+				case col.Table == join.Right && join.Left != join.Right:
+					source = rightRow
+				default:
+					continue
+				}
+				idx := col.Schema.Index
+				if idx < 0 || idx >= len(source) {
+					continue
+				}
+				out = append(out, source[idx])
+			}
+			rows = append(rows, out)
 		}
 	}
 	return rows

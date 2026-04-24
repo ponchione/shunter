@@ -13,8 +13,8 @@ Current framing:
 - v1.5 should improve ergonomics and platform usefulness without reopening the core v1 runtime boundary
 
 Related docs:
-- `docs/hosted-runtime-v1-contract.md` defines the base hosted-runtime contract v1.5 extends
-- `docs/hosted-runtime-v2-directions.md` parks larger structural/runtime evolution
+- `docs/decomposition/hosted-runtime-v1-contract.md` defines the base hosted-runtime contract v1.5 extends
+- `docs/decomposition/hosted-runtime-v2-directions.md` parks larger structural/runtime evolution
 - `docs/hosted-runtime-implementation-roadmap.md` breaks v1 and v1.5 into implementation epics
 
 ---

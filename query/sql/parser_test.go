@@ -1250,13 +1250,22 @@ func TestParseJoinColumnProjectionProjectsRight(t *testing.T) {
 	}
 }
 
-func TestParseRejectsJoinProjectionColumnsOutsideProjectedRelation(t *testing.T) {
-	_, err := Parse("SELECT o.id, product.quantity FROM Orders o JOIN Inventory product ON o.product_id = product.id")
-	if err == nil {
-		t.Fatal("expected rejection for mixed projected/non-projected relation columns")
+func TestParseJoinColumnProjectionAllowsMixedRelations(t *testing.T) {
+	stmt, err := Parse("SELECT o.id, product.quantity FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	if stmt.ProjectedTable != "Orders" || stmt.ProjectedAlias != "o" {
+		t.Fatalf("Projected = %q/%q, want first projected relation Orders/o", stmt.ProjectedTable, stmt.ProjectedAlias)
+	}
+	if len(stmt.ProjectionColumns) != 2 {
+		t.Fatalf("len(ProjectionColumns) = %d, want 2", len(stmt.ProjectionColumns))
+	}
+	if got := stmt.ProjectionColumns[0]; got.Table != "Orders" || got.Column != "id" || got.SourceQualifier != "o" || got.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[0] = %+v", got)
+	}
+	if got := stmt.ProjectionColumns[1]; got.Table != "Inventory" || got.Column != "quantity" || got.SourceQualifier != "product" || got.OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[1] = %+v", got)
 	}
 }
 
