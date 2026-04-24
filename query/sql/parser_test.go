@@ -1670,3 +1670,23 @@ func TestParseJoinOnEqualityWithFilter(t *testing.T) {
 		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
 	}
 }
+
+func TestParseJoinOnEqualityWithFilterOnLeftSide(t *testing.T) {
+	stmt, err := Parse("SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND o.id = 5")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "Orders" || cmp.Filter.Column != "id" || cmp.Filter.Alias != "o" {
+		t.Fatalf("ON-filter = %+v, want Orders.id (alias o)", cmp.Filter)
+	}
+	if cmp.Filter.Op != "=" || cmp.Filter.Literal.Int != 5 {
+		t.Fatalf("ON-filter op/literal = %+v, want = 5", cmp.Filter)
+	}
+	if len(stmt.Filters) != 1 {
+		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
+	}
+}
