@@ -301,7 +301,7 @@ func (m *Manager) RegisterSet(
 				for _, sid := range allocated {
 					m.dropSub(req.ConnID, sid)
 				}
-				return SubscriptionSetRegisterResult{}, fmt.Errorf("initial query: %w", err)
+				return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: %w", ErrInitialQuery, err)
 			}
 		}
 		qs := existing

@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ponchione/shunter/bsatn"
@@ -185,8 +186,19 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 	replyErr error,
 ) protocol.SubscriptionSetCommandResponse {
 	if replyErr != nil {
+		errText := replyErr.Error()
+		// Reference `DBError::WithSql` suffix for SubscribeSingle
+		// initial-eval errors (`error.rs:140`,
+		// `module_subscription_actor.rs:672` via
+		// `return_on_err_with_sql_bool!`). SubscribeMulti's reference
+		// initial-eval path emits a canned message without SQL suffix
+		// (`module_subscription_actor.rs:1383`); Multi handlers leave
+		// req.SQLText empty so this wrap is skipped for them.
+		if req.SQLText != "" && errors.Is(replyErr, subscription.ErrInitialQuery) {
+			errText = fmt.Sprintf("%s, executing: `%s`", errText, req.SQLText)
+		}
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: replyErr.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: errText},
 		}
 	}
 	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))

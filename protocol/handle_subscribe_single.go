@@ -67,6 +67,7 @@ func handleSubscribeSingle(
 		PredicateHashIdentities: []*types.Identity{callerHashIdentity(conn, compiled)},
 		Reply:                   reply,
 		Receipt:                 receipt,
+		SQLText:                 msg.QueryString,
 	}); submitErr != nil {
 		sendError(conn, SubscriptionError{
 			TotalHostExecutionDurationMicros: elapsedMicros(receipt),

@@ -26,6 +26,14 @@ var (
 var (
 	// ErrInitialRowLimit — initial snapshot exceeded the configured row limit.
 	ErrInitialRowLimit = errors.New("subscription: initial row limit exceeded")
+	// ErrInitialQuery — wraps any error surfaced by the initial-snapshot
+	// evaluation inside RegisterSet so the protocol-side adapter can
+	// discriminate it from admission-time (validation / duplicate) errors
+	// and mirror the reference `DBError::WithSql` suffix shape
+	// (`reference/SpacetimeDB/crates/core/src/error.rs:140`,
+	// `module_subscription_actor.rs:672` SubscribeSingle initial-eval).
+	// Concrete cause (e.g. ErrInitialRowLimit) remains `errors.Is`-unwrappable.
+	ErrInitialQuery = errors.New("initial query")
 	// ErrSubscriptionNotFound — unknown query ID/subscription set for unregister.
 	ErrSubscriptionNotFound = errors.New("subscription: subscription not found")
 	// ErrJoinIndexUnresolved — validation confirmed a join-side index exists

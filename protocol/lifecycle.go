@@ -88,6 +88,14 @@ type RegisterSubscriptionSetRequest struct {
 	// full admission-path duration rather than only the subs-manager call.
 	// Zero is allowed and means "fall back to the executor's local start".
 	Receipt time.Time
+	// SQLText is the original subscribe-query SQL string for SingleSubscribe
+	// admission. The adapter reads it to wrap initial-snapshot evaluation
+	// errors with the reference `DBError::WithSql` suffix (`", executing:
+	// \`<sql>\`"`) — reference `module_subscription_actor.rs:672` via
+	// `return_on_err_with_sql_bool!`. Empty on Multi (reference emits a
+	// canned message for multi-initial-eval; no SQL-suffix path) and on
+	// paths that do not originate from a single SQL string.
+	SQLText string
 }
 
 // UnregisterSubscriptionSetRequest drops every internal subscription

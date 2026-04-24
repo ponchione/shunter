@@ -3,6 +3,8 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -268,6 +270,94 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTa
 	}
 	if captured.TableID != nil {
 		t.Fatalf("SubscriptionError.TableID = %v, want nil (reference v1 always None on request-origin error paths)", *captured.TableID)
+	}
+}
+
+// TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleInitialEvalErrorWrapsWithSql
+// pins the reference `DBError::WithSql` shape on the SubscribeSingle
+// initial-snapshot evaluation error path (reference
+// `error.rs:140` = `"{error}, executing: \`{sql}\`"`;
+// `module_subscription_actor.rs:672` wraps
+// `evaluate_initial_subscription` via `return_on_err_with_sql_bool!`).
+// Admission-time errors that are not initial-eval (duplicate QID,
+// validation) stay unwrapped, matching reference where only compile
+// and initial-eval errors flow through the WithSql macro.
+func TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleInitialEvalErrorWrapsWithSql(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	const sqlText = "SELECT * FROM users WHERE id = 42"
+	initialEvalErr := fmt.Errorf("%w: %w", subscription.ErrInitialQuery, subscription.ErrInitialRowLimit)
+	var captured *protocol.SubscriptionError
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			reg := cmd.(RegisterSubscriptionSetCmd)
+			reg.Reply(subscription.SubscriptionSetRegisterResult{}, initialEvalErr)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.RegisterSubscriptionSet(context.Background(), protocol.RegisterSubscriptionSetRequest{
+		ConnID:     conn.ID,
+		QueryID:    9,
+		RequestID:  4,
+		Variant:    protocol.SubscriptionSetVariantSingle,
+		Predicates: []any{subscription.AllRows{Table: 1}},
+		SQLText:    sqlText,
+		Reply: func(resp protocol.SubscriptionSetCommandResponse) {
+			captured = resp.Error
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterSubscriptionSet: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected SubscriptionError captured, got nil")
+	}
+	wantSuffix := ", executing: `" + sqlText + "`"
+	if !strings.HasSuffix(captured.Error, wantSuffix) {
+		t.Fatalf("SubscriptionError.Error = %q, want suffix %q (reference DBError::WithSql)", captured.Error, wantSuffix)
+	}
+}
+
+// TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorIsNotWrappedWithSql
+// pins the negative complement of the WithSql wrap: a non-initial-eval
+// admission error (here `ErrQueryIDAlreadyLive`) must not gain the
+// `", executing: \`<sql>\`"` suffix even when SQLText is populated.
+// Reference wraps only compile + initial-eval errors
+// (`module_subscription_actor.rs:643,:672,:756`); `add_subscription`
+// duplicate-QID errors propagate unwrapped.
+func TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorIsNotWrappedWithSql(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	const sqlText = "SELECT * FROM users"
+	var captured *protocol.SubscriptionError
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			reg := cmd.(RegisterSubscriptionSetCmd)
+			reg.Reply(subscription.SubscriptionSetRegisterResult{}, subscription.ErrQueryIDAlreadyLive)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.RegisterSubscriptionSet(context.Background(), protocol.RegisterSubscriptionSetRequest{
+		ConnID:     conn.ID,
+		QueryID:    9,
+		RequestID:  4,
+		Variant:    protocol.SubscriptionSetVariantSingle,
+		Predicates: []any{subscription.AllRows{Table: 1}},
+		SQLText:    sqlText,
+		Reply: func(resp protocol.SubscriptionSetCommandResponse) {
+			captured = resp.Error
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterSubscriptionSet: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected SubscriptionError captured, got nil")
+	}
+	if strings.Contains(captured.Error, "executing: `") {
+		t.Fatalf("SubscriptionError.Error = %q, must not carry executing-SQL suffix for non-initial-eval admission error", captured.Error)
 	}
 }
 
