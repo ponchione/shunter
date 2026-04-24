@@ -5863,3 +5863,50 @@ func TestHandleOneOffQuery_ParityFloatLiteralOnUint32RejectText(t *testing.T) {
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityNonBoolLiteralOnBoolRejectText pins the
+// reference `InvalidLiteral` literal for non-Bool primitive literals
+// targeted at a Bool column. Reference path: `parse(value, Bool)` at
+// lib.rs:99 has no Bool arm in its type-match and falls to the catch-all
+// `bail!("Literal values for type Bool are not supported")`, which the
+// outer `.map_err` folds into `InvalidLiteral::new(v.into_string(), Bool)`.
+// OneOff admission emits the raw text with no `DBError::WithSql` wrap.
+// Covers LitInt, LitFloat, LitString in one table; LitBigInt is exercised
+// by the coerce-layer unit test and LitBytes is deferred pending a
+// canonical-hex / Text-field decision on `sql.Literal`.
+func TestHandleOneOffQuery_ParityNonBoolLiteralOnBoolRejectText(t *testing.T) {
+	cases := []struct {
+		name        string
+		queryString string
+		wantLit     string
+	}{
+		{"LitInt", "SELECT * FROM t WHERE b = 1", "1"},
+		{"LitFloat", "SELECT * FROM t WHERE b = 1.3", "1.3"},
+		{"LitString", "SELECT * FROM t WHERE b = 'foo'", "foo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "b", Type: schema.KindBool},
+			)
+			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewBool(true)}}}}
+			stateAccess := &mockStateAccess{snap: snap}
+
+			msg := &OneOffQueryMsg{
+				MessageID:   []byte{0x9b},
+				QueryString: tc.queryString,
+			}
+			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+			result := drainOneOff(t, conn)
+			if result.Error == nil {
+				t.Fatal("expected error, got nil (success)")
+			}
+			want := "The literal expression `" + tc.wantLit + "` cannot be parsed as type `Bool`"
+			if *result.Error != want {
+				t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+			}
+		})
+	}
+}

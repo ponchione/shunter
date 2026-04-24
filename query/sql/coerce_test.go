@@ -83,6 +83,48 @@ func TestCoerceRejectsFloatLiteralOnUint32Column(t *testing.T) {
 	}
 }
 
+// TestCoerceNonBoolLiteralOnBoolEmitsInvalidLiteral pins the reference
+// `InvalidLiteral` literal at errors.rs:84 for non-Bool primitive literals
+// against a Bool column. Reference path: `parse(value, AlgebraicType::Bool)`
+// at lib.rs:99 has no Bool arm and falls to the `bail!` catch-all, which
+// the outer `.map_err` folds into InvalidLiteral. Covers LitInt, LitFloat,
+// LitString, LitBigInt — each reconstructed via `renderLiteralSourceText`
+// (FormatInt / FormatFloat / lit.Str / Big.String). LitBytes is skipped
+// because the Shunter Literal does not preserve a canonical hex source
+// text; that surface is a separate slice.
+func TestCoerceNonBoolLiteralOnBoolEmitsInvalidLiteral(t *testing.T) {
+	big128 := new(big.Int)
+	big128.SetString("340282366920938463463374607431768211456", 10)
+	cases := []struct {
+		name    string
+		lit     Literal
+		wantLit string
+	}{
+		{"LitInt", Literal{Kind: LitInt, Int: 1}, "1"},
+		{"LitFloat", Literal{Kind: LitFloat, Float: 1.3}, "1.3"},
+		{"LitString", Literal{Kind: LitString, Str: "foo"}, "foo"},
+		{"LitBigInt", Literal{Kind: LitBigInt, Big: big128}, "340282366920938463463374607431768211456"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Coerce(tc.lit, types.KindBool)
+			if err == nil {
+				t.Fatalf("want error, got nil")
+			}
+			var ilErr InvalidLiteralError
+			if !errors.As(err, &ilErr) {
+				t.Fatalf("err = %v, want InvalidLiteralError", err)
+			}
+			if ilErr.Literal != tc.wantLit || ilErr.Type != "Bool" {
+				t.Fatalf("got {%q, %q}, want {%q, \"Bool\"}", ilErr.Literal, ilErr.Type, tc.wantLit)
+			}
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+			}
+		})
+	}
+}
+
 // TestCoerceFloatLiteralOnIntegerEmitsInvalidLiteral pins the reference
 // `InvalidLiteral` literal at errors.rs:84 for LitFloat against integer
 // column kinds. Reference path: `parse_int(BigDecimal, ty)` at lib.rs:99

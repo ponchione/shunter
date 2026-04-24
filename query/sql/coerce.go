@@ -220,7 +220,41 @@ func mismatch(lit Literal, kind types.ValueKind) error {
 	if lit.Kind == LitFloat && isIntegerKind(kind) {
 		return InvalidLiteralError{Literal: strconv.FormatFloat(lit.Float, 'g', -1, 64), Type: algebraicName(kind)}
 	}
+	// Non-Bool primitive literal into a Bool column: reference
+	// `parse(value, AlgebraicType::Bool)` has no Bool arm in the type-match
+	// and falls through to the catch-all `bail!("Literal values for type
+	// {} are not supported")`, which the outer `.map_err` at lib.rs:99
+	// folds into `InvalidLiteral::new(v.into_string(), Bool)`. Shunter's
+	// LitBytes has no preserved source text and is skipped here (separate
+	// slice once `Literal` carries a canonical hex or `Text` field).
+	if kind == types.KindBool {
+		if text, ok := renderLiteralSourceText(lit); ok {
+			return InvalidLiteralError{Literal: text, Type: "Bool"}
+		}
+	}
 	return fmt.Errorf("%w: %s literal cannot be coerced to %s", ErrUnsupportedSQL, lit.Kind, kind)
+}
+
+// renderLiteralSourceText reconstructs the reference source text for a
+// Literal for use in `InvalidLiteralError.Literal`. Matches the reference
+// `SqlLiteral::Str(v) | SqlLiteral::Num(v) | SqlLiteral::Hex(v)` →
+// `v.into_string()` renderings (expr/src/lib.rs:94). Returns false for
+// LitBool (which never reaches InvalidLiteral in reference), LitSender
+// (a Shunter-only marker), and LitBytes (no preserved source text — a
+// canonical hex or `Text` field on Literal is a separate slice).
+func renderLiteralSourceText(lit Literal) (string, bool) {
+	switch lit.Kind {
+	case LitInt:
+		return strconv.FormatInt(lit.Int, 10), true
+	case LitFloat:
+		return strconv.FormatFloat(lit.Float, 'g', -1, 64), true
+	case LitString:
+		return lit.Str, true
+	case LitBigInt:
+		return lit.Big.String(), true
+	default:
+		return "", false
+	}
 }
 
 // isIntegerKind reports whether a ValueKind is one of the signed or

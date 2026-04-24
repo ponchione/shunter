@@ -5327,3 +5327,52 @@ func TestHandleSubscribeSingle_ParityFloatLiteralOnUint32RejectText(t *testing.T
 		t.Error("executor should not be called when a float literal targets an integer column")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityNonBoolLiteralOnBoolRejectText pins the
+// reference `InvalidLiteral` literal for non-Bool primitive literals
+// targeted at a Bool column on the SubscribeSingle admission surface.
+// Reference catch-all `bail!` on parse(v, Bool) folds into
+// `InvalidLiteral::new(v.into_string(), Bool)` at lib.rs:99 (errors.rs:84);
+// SubscribeSingle wraps compile errors with `DBError::WithSql` so the pin
+// carries the `, executing: ` suffix. LitBytes deferred (no preserved
+// source text).
+func TestHandleSubscribeSingle_ParityNonBoolLiteralOnBoolRejectText(t *testing.T) {
+	cases := []struct {
+		name        string
+		queryString string
+		wantLit     string
+	}{
+		{"LitInt", "SELECT * FROM t WHERE b = 1", "1"},
+		{"LitFloat", "SELECT * FROM t WHERE b = 1.3", "1.3"},
+		{"LitString", "SELECT * FROM t WHERE b = 'foo'", "foo"},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "b", Type: schema.KindBool},
+			)
+
+			msg := &SubscribeSingleMsg{
+				RequestID:   uint32(260 + i*2),
+				QueryID:     uint32(261 + i*2),
+				QueryString: tc.queryString,
+			}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			tag, decoded := drainServerMsgEventually(t, conn)
+			if tag != TagSubscriptionError {
+				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+			}
+			se := decoded.(SubscriptionError)
+			want := "The literal expression `" + tc.wantLit + "` cannot be parsed as type `Bool`, executing: `" + tc.queryString + "`"
+			if se.Error != want {
+				t.Fatalf("Error = %q, want %q", se.Error, want)
+			}
+			if req := executor.getRegisterSetReq(); req != nil {
+				t.Error("executor should not be called when a non-Bool literal targets a Bool column")
+			}
+		})
+	}
+}
