@@ -3082,6 +3082,55 @@ func TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected(t *t
 	}
 }
 
+// TestHandleSubscribeSingle_ParityJoinStarProjectionRejectText pins the
+// reference type-check rejection text at
+// reference/SpacetimeDB/crates/expr/src/errors.rs:41 (`InvalidWildcard::Join`
+// = "SELECT * is not supported for joins"), emitted at
+// reference/SpacetimeDB/crates/expr/src/lib.rs:56 when `type_proj` sees
+// `ast::Project::Star(None)` against an input with `nfields() > 1`. The
+// SubscribeSingle compile-origin error path wraps the inner text with
+// `DBError::WithSql` (reference error.rs:140) → `"{error}, executing:
+// `{sql}`"`. This pin is the exact-text companion to the shape-only
+// rejection pin at TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected.
+func TestHandleSubscribeSingle_ParityJoinStarProjectionRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+
+	const sqlText = "SELECT * FROM t JOIN s"
+	msg := &SubscribeSingleMsg{
+		RequestID:   220,
+		QueryID:     221,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "SELECT * is not supported for joins, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on SELECT * JOIN rejection")
+	}
+}
+
 // TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
@@ -4908,5 +4957,53 @@ func TestHandleSubscribeMulti_ParityCompileErrorIncludesExecutingSqlSuffix(t *te
 	}
 	if req := exec.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on a compile-error admission")
+	}
+}
+
+// TestHandleSubscribeMulti_ParityJoinStarProjectionRejectText pins
+// reference/SpacetimeDB/crates/expr/src/errors.rs:41
+// (`InvalidWildcard::Join` = "SELECT * is not supported for joins",
+// emit reference/SpacetimeDB/crates/expr/src/lib.rs:56) on the
+// SubscribeMulti admission surface. SubscribeMulti routes each SQL
+// through `compile_query_with_hashes` at
+// module_subscription_actor.rs:1068 via `return_on_err_with_sql_bool!`,
+// so the per-item compile failure wraps the inner text with the
+// `DBError::WithSql` suffix (error.rs:140).
+func TestHandleSubscribeMulti_ParityJoinStarProjectionRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+
+	const badSQL = "SELECT * FROM t JOIN s"
+	msg := &SubscribeMultiMsg{
+		RequestID:    222,
+		QueryID:      223,
+		QueryStrings: []string{"SELECT * FROM t", badSQL},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, registrySchemaLookup{reg: eng.Registry()})
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "SELECT * is not supported for joins, executing: `" + badSQL + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := exec.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on SELECT * JOIN rejection")
 	}
 }

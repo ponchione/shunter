@@ -582,11 +582,7 @@ func (p *parser) parseStatement() (Statement, error) {
 			requireQualify: true,
 			byQualifier:    joinQualifierMap(tableName, leftQualifiers, join.RightTable, rightQualifiers),
 		}
-		if projectionQualifier == "" {
-			if aggregate == nil && len(projectionColumns) == 0 {
-				return Statement{}, p.unsupported("join queries require a qualified projection")
-			}
-		} else {
+		if projectionQualifier != "" {
 			projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier)
 			if !ok {
 				return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match joined relations", projectionQualifier))

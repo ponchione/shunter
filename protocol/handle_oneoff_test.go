@@ -3608,6 +3608,49 @@ func TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected(t *testi
 	}
 }
 
+// TestHandleOneOffQuery_ParityJoinStarProjectionRejectText pins the
+// reference type-check rejection text at
+// reference/SpacetimeDB/crates/expr/src/errors.rs:41
+// (`InvalidWildcard::Join` = "SELECT * is not supported for joins"),
+// emit site reference/SpacetimeDB/crates/expr/src/lib.rs:56 via
+// `type_proj` when `ast::Project::Star(None)` meets an input with
+// `nfields() > 1`. The OneOff admission surface (module_host.rs:2252
+// `compile_subscription`, :2316 `format!("{err}")`) emits the raw error
+// text with no `DBError::WithSql` wrap, unlike the subscribe paths.
+func TestHandleOneOffQuery_ParityJoinStarProjectionRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	stateAccess := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x88},
+		QueryString: "SELECT * FROM t JOIN s",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "SELECT * is not supported for joins"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
 // TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 519-521 (`select t.* from t join t` / "Self join requires

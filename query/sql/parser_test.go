@@ -1061,13 +1061,26 @@ func TestParseRejectsMultiWayJoinOnForwardReference(t *testing.T) {
 	}
 }
 
-func TestParseRejectsJoinBareStarProjection(t *testing.T) {
-	_, err := Parse("SELECT * FROM Orders o JOIN Inventory product ON o.product_id = product.id")
-	if err == nil {
-		t.Fatal("expected error for bare * projection on join")
+// TestParseAcceptsJoinBareStarProjection pins that the SQL parser accepts
+// `SELECT *` on a join at the syntactic layer. Semantic rejection of bare
+// `*` on joins lives in protocol.compileSQLQueryString to match reference
+// `InvalidWildcard::Join` (reference/SpacetimeDB/crates/expr/src/errors.rs:41,
+// emit site lib.rs:56) with the literal text
+// "SELECT * is not supported for joins", without the parser's
+// `unsupported SQL: ` prefix.
+func TestParseAcceptsJoinBareStarProjection(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err != nil {
+		t.Fatalf("Parse err = %v, want nil (semantic rejection lives at compile stage)", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	if stmt.Join == nil {
+		t.Fatal("stmt.Join = nil, want non-nil")
+	}
+	if stmt.ProjectedAlias != "" {
+		t.Fatalf("ProjectedAlias = %q, want \"\" (bare * leaves alias empty)", stmt.ProjectedAlias)
+	}
+	if len(stmt.ProjectionColumns) != 0 {
+		t.Fatalf("ProjectionColumns len = %d, want 0 (bare * has no explicit columns)", len(stmt.ProjectionColumns))
 	}
 }
 

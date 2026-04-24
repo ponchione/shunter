@@ -200,6 +200,16 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.Join.RightTable)
 		}
+		// Reference `InvalidWildcard::Join` at
+		// reference/SpacetimeDB/crates/expr/src/errors.rs:41 emits
+		// "SELECT * is not supported for joins" via `type_proj` at
+		// reference/SpacetimeDB/crates/expr/src/lib.rs:56 when
+		// `ast::Project::Star(None)` meets `input.nfields() > 1`. Match
+		// the raw text so SubscribeSingle/Multi WithSql-wrap and OneOff's
+		// unwrapped emit both carry the reference literal.
+		if stmt.ProjectedAlias == "" && len(stmt.ProjectionColumns) == 0 && stmt.Aggregate == nil {
+			return compiledSQLQuery{}, fmt.Errorf("SELECT * is not supported for joins")
+		}
 		projectedID := leftID
 		if joinProjectsRight(stmt, leftID == rightID) {
 			projectedID = rightID
