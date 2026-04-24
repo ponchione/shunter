@@ -571,7 +571,7 @@ func (p *parser) parseStatement() (Statement, error) {
 		p.advance()
 	}
 	if isKeywordToken(p.peek(), "JOIN") {
-		join, rightQualifiers, err := p.parseJoinClause(tableName, leftQualifiers)
+		join, rightQualifiers, _, err := p.parseJoinClause(tableName, leftQualifiers)
 		if err != nil {
 			return Statement{}, err
 		}
@@ -812,60 +812,60 @@ func (p *parser) parseAlias() (string, error) {
 	return t.text, nil
 }
 
-func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*JoinClause, []string, error) {
+func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*JoinClause, []string, Predicate, error) {
 	if err := p.expectKeyword("JOIN"); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	rightTok := p.peek()
 	if !isIdentifierToken(rightTok) {
-		return nil, nil, p.unsupported("expected joined table name")
+		return nil, nil, nil, p.unsupported("expected joined table name")
 	}
 	p.advance()
 	rightTable := rightTok.text
 	rightQualifiers, err := p.parseRelationQualifiers(rightTable)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	leftAlias := leftQualifiers[0]
 	rightAlias := rightQualifiers[0]
 	if strings.EqualFold(leftAlias, rightAlias) {
 		if strings.EqualFold(leftTable, rightTable) {
-			return nil, nil, p.unsupported("self join requires aliases")
+			return nil, nil, nil, p.unsupported("self join requires aliases")
 		}
-		return nil, nil, p.unsupported("joined relations must use distinct qualifiers")
+		return nil, nil, nil, p.unsupported("joined relations must use distinct qualifiers")
 	}
 	if !isKeywordToken(p.peek(), "ON") {
-		return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil
+		return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil, nil
 	}
 	if err := p.expectKeyword("ON"); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	lookup := joinQualifierMap(leftTable, leftQualifiers, rightTable, rightQualifiers)
 	leftOn, err := p.parseQualifiedColumnRef(lookup)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	op, err := p.parseOperator()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if op != "=" {
-		return nil, nil, p.unsupported("JOIN ON only supports '='")
+		return nil, nil, nil, p.unsupported("JOIN ON only supports '='")
 	}
 	rightOn, err := p.parseQualifiedColumnRef(lookup)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if strings.EqualFold(leftOn.Alias, rightOn.Alias) {
-		return nil, nil, p.unsupported("JOIN ON must compare columns from different relations")
+		return nil, nil, nil, p.unsupported("JOIN ON must compare columns from different relations")
 	}
 	if strings.EqualFold(leftOn.Alias, rightAlias) && strings.EqualFold(rightOn.Alias, leftAlias) {
 		leftOn, rightOn = rightOn, leftOn
 	}
 	if !strings.EqualFold(leftOn.Alias, leftAlias) || !strings.EqualFold(rightOn.Alias, rightAlias) {
-		return nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
+		return nil, nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
 	}
-	return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}, rightQualifiers, nil
+	return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}, rightQualifiers, nil, nil
 }
 
 func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, error) {
