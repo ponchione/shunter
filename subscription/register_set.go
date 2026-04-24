@@ -281,16 +281,30 @@ func (m *Manager) RegisterSet(
 		m.nextSubID++
 		subID := m.nextSubID
 		hash := ComputeQueryHash(p, dedupedHashIdentities[i])
-		rows, err := m.initialQuery(p, view)
-		if err != nil {
-			// Unwind any partial state. dropSub handles registry maps + PruningIndexes
-			// eviction on last-ref; each allocated sub is dropped independently.
-			for _, sid := range allocated {
-				m.dropSub(req.ConnID, sid)
+		// Same-connection reused-hash elision: if this connection already
+		// has a subscriber attached to the query hash under a different
+		// client QueryID, skip the initial snapshot for the new attachment
+		// (reference add_subscription_multi lines 1083-1094). The new
+		// internal SubscriptionID is still allocated and bookkept so future
+		// post-commit fanout stamps both client QueryIDs. The elision is
+		// same-connection only; a different connection reusing the hash
+		// still receives its own initial snapshot.
+		existing := m.registry.getQuery(hash)
+		sameConnReuse := existing != nil && len(existing.subscribers[req.ConnID]) > 0
+		var rows []types.ProductValue
+		if !sameConnReuse {
+			var err error
+			rows, err = m.initialQuery(p, view)
+			if err != nil {
+				// Unwind any partial state. dropSub handles registry maps + PruningIndexes
+				// eviction on last-ref; each allocated sub is dropped independently.
+				for _, sid := range allocated {
+					m.dropSub(req.ConnID, sid)
+				}
+				return SubscriptionSetRegisterResult{}, fmt.Errorf("initial query: %w", err)
 			}
-			return SubscriptionSetRegisterResult{}, fmt.Errorf("initial query: %w", err)
 		}
-		qs := m.registry.getQuery(hash)
+		qs := existing
 		if qs == nil {
 			qs = m.registry.createQueryState(hash, p)
 			PlaceSubscription(m.indexes, p, hash)

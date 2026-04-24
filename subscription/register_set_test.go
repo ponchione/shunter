@@ -152,6 +152,87 @@ func TestRegisterSetDedupsIdenticalPredicates(t *testing.T) {
 	}
 }
 
+// TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate — second
+// RegisterSet from the same connection under a different client QueryID
+// referencing the same predicate hash attaches a new internal subscription
+// but does not re-emit the initial snapshot. Reference:
+// reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs::add_subscription_multi
+// lines 1083-1094 (already-attached (ConnID, query-hash) paths skip
+// new_queries) and module_subscription_actor.rs lines 1357-1369 (empty
+// new_queries becomes empty applied update data). The cross-connection
+// case is covered by TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot
+// below.
+func TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	pred := AllRows{Table: 1}
+
+	first, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    1,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatalf("first RegisterSet: %v", err)
+	}
+	if len(first.Update) != 1 || len(first.Update[0].Inserts) == 0 {
+		t.Fatalf("first Update = %+v, want one SubscriptionUpdate with initial inserts", first.Update)
+	}
+
+	second, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    2,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatalf("second RegisterSet: %v", err)
+	}
+	if len(second.Update) != 0 {
+		t.Fatalf("second Update = %+v, want empty (same-connection reused hash)", second.Update)
+	}
+	if sids := mgr.querySets[connID][2]; len(sids) != 1 {
+		t.Fatalf("querySets[conn][2] = %v, want one allocated subID", sids)
+	}
+	if sids1 := mgr.querySets[connID][1]; len(sids1) != 1 {
+		t.Fatalf("querySets[conn][1] = %v, want first allocation still present", sids1)
+	}
+	if mgr.querySets[connID][1][0] == mgr.querySets[connID][2][0] {
+		t.Fatalf("queryID=1 and queryID=2 must map to distinct internal SubscriptionIDs: %v", mgr.querySets[connID])
+	}
+}
+
+// TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot —
+// reuse-hash elision is same-connection only. A different connection
+// subscribing to the same predicate hash still receives its own initial
+// snapshot. Reference: add_subscription_multi predicates reused across
+// connections still add new_queries entries for the new client.
+func TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connA := types.ConnectionID{1}
+	connB := types.ConnectionID{2}
+	pred := AllRows{Table: 1}
+
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connA,
+		QueryID:    1,
+		Predicates: []Predicate{pred},
+	}, view); err != nil {
+		t.Fatalf("connA RegisterSet: %v", err)
+	}
+
+	second, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID:     connB,
+		QueryID:    1,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatalf("connB RegisterSet: %v", err)
+	}
+	if len(second.Update) != 1 || len(second.Update[0].Inserts) == 0 {
+		t.Fatalf("connB Update = %+v, want one SubscriptionUpdate with initial inserts (cross-connection is not elided)", second.Update)
+	}
+}
+
 // TestUnregisterSetDropsAllInSet — UnsubscribeMulti drops every internal
 // sub mapped under the QueryID.
 func TestUnregisterSetDropsAllInSet(t *testing.T) {
