@@ -663,6 +663,46 @@ func TestFanOutWorker_ConfirmedRead_Waits(t *testing.T) {
 	}
 }
 
+func TestFanOutWorker_SubscriptionError_PublicProtocolDefault_WaitsForDurability(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 1)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	durableCh := make(chan types.TxID, 1)
+	conn1 := cid(1)
+	inbox <- FanOutMessage{
+		TxID:      types.TxID(1),
+		TxDurable: durableCh,
+		Errors: map[types.ConnectionID][]SubscriptionError{
+			conn1: {{SubscriptionID: 5, Message: "eval failed"}},
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	mock.mu.Lock()
+	preCount := len(mock.errCalls)
+	mock.mu.Unlock()
+	if preCount != 0 {
+		t.Fatalf("errCalls = %d before TxDurable, want 0", preCount)
+	}
+
+	durableCh <- types.TxID(1)
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.errCalls) != 1 {
+		t.Fatalf("errCalls = %d after TxDurable, want 1", len(mock.errCalls))
+	}
+}
+
 // TestFanOutWorker_ConfirmedReadCallerOnly_Waits verifies Phase 1.5
 // confirmed-read gating for caller-only batches: a heavy delivery with
 // no non-caller fanout still waits for TxDurable before delivery.

@@ -160,8 +160,16 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		effCallerOutcome = nil
 	}
 
-	// Deliver subscription errors first (before updates).
+	var durableWaited bool
+	var durableReady bool
+
+	// Deliver subscription errors first (before updates). These are still
+	// post-commit client-visible outcomes, so confirmed-read recipients wait
+	// for the same durability signal as normal transaction updates.
 	for connID, errs := range msg.Errors {
+		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+			return
+		}
 		for _, se := range errs {
 			if err := w.sender.SendSubscriptionError(connID, se); err != nil {
 				w.handleSendError(connID, err)
@@ -184,8 +192,6 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	if msg.CallerOutcome != nil {
 		lightRequestID = msg.CallerOutcome.RequestID
 	}
-	var durableWaited bool
-	var durableReady bool
 	for connID, updates := range msg.Fanout {
 		if msg.CallerConnID != nil && connID == *msg.CallerConnID {
 			continue
