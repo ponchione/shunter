@@ -567,14 +567,16 @@ func (p *parser) parseStatement() (Statement, error) {
 	stmt := Statement{Table: tableName, ProjectedTable: tableName, ProjectedAlias: projectionQualifier}
 	stmt.Aggregate = aggregate
 	bindings := relationBindings{defaultTable: tableName, byQualifier: singleQualifierMap(tableName, leftQualifiers)}
+	var onFilter Predicate
 	if isKeywordToken(p.peek(), "INNER") {
 		p.advance()
 	}
 	if isKeywordToken(p.peek(), "JOIN") {
-		join, rightQualifiers, _, err := p.parseJoinClause(tableName, leftQualifiers)
+		join, rightQualifiers, onPred, err := p.parseJoinClause(tableName, leftQualifiers)
 		if err != nil {
 			return Statement{}, err
 		}
+		onFilter = onPred
 		stmt.Join = join
 		bindings = relationBindings{
 			requireQualify: true,
@@ -627,6 +629,14 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		stmt.Predicate = pred
 		stmt.Filters = filters
+	}
+	if onFilter != nil {
+		if stmt.Predicate != nil {
+			stmt.Predicate = AndPredicate{Left: onFilter, Right: stmt.Predicate}
+		} else {
+			stmt.Predicate = onFilter
+		}
+		stmt.Filters, _ = flattenAndFilters(stmt.Predicate)
 	}
 	limit, err := p.parseLimit()
 	if err != nil {
@@ -865,7 +875,17 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	if !strings.EqualFold(leftOn.Alias, leftAlias) || !strings.EqualFold(rightOn.Alias, rightAlias) {
 		return nil, nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
 	}
-	return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}, rightQualifiers, nil, nil
+	jc := &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}
+	if !isKeywordToken(p.peek(), "AND") {
+		return jc, rightQualifiers, nil, nil
+	}
+	p.advance()
+	onBindings := relationBindings{requireQualify: true, byQualifier: lookup}
+	onPred, err := p.parseComparisonPredicate(onBindings)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return jc, rightQualifiers, onPred, nil
 }
 
 func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, error) {

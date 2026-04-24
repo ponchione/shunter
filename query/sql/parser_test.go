@@ -1638,3 +1638,35 @@ func TestParseWhereSenderParameterInJoinFilter(t *testing.T) {
 		t.Fatalf("Literal.Kind = %v, want LitSender", cmp.Filter.Literal.Kind)
 	}
 }
+
+func TestParseJoinOnEqualityWithFilter(t *testing.T) {
+	stmt, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if !stmt.Join.HasOn {
+		t.Fatal("Join.HasOn = false, want true")
+	}
+	if stmt.Join.LeftOn.Table != "Orders" || stmt.Join.LeftOn.Column != "product_id" {
+		t.Fatalf("left ON = %+v, want Orders.product_id", stmt.Join.LeftOn)
+	}
+	if stmt.Join.RightOn.Table != "Inventory" || stmt.Join.RightOn.Column != "id" {
+		t.Fatalf("right ON = %+v, want Inventory.id", stmt.Join.RightOn)
+	}
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate type = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "Inventory" || cmp.Filter.Column != "quantity" || cmp.Filter.Alias != "product" {
+		t.Fatalf("ON-filter = %+v, want Inventory.quantity (alias product)", cmp.Filter)
+	}
+	if cmp.Filter.Op != "<" || cmp.Filter.Literal.Int != 10 {
+		t.Fatalf("ON-filter op/literal = %+v, want < 10", cmp.Filter)
+	}
+	if len(stmt.Filters) != 1 {
+		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
+	}
+}
