@@ -151,7 +151,9 @@ exceeds `MaxRowBytes`.
   Batch size is a queue-drain parameter (`DrainBatchSize`), not a
   wire-level concept.
 - **Strict header rejection** — the 8-byte segment header rejects
-  non-zero reserved bytes; preallocation is not supported today.
+  non-zero reserved bytes. Reader-side all-zero record-header tails
+  are now treated as end-of-stream for recovery/preallocation
+  tolerance; Shunter still does not emit writer-side preallocation.
 - **No epoch field** — neither the segment header nor the record
   header carries an `epoch`. Single-node-only deployments; no leader
   term tracking.
@@ -177,7 +179,7 @@ Every field-level / semantic divergence between reference and Shunter.
 | 2 | Segment header length | 10 bytes | 8 bytes | structural |
 | 3 | Segment header byte 7 | `checksum_algorithm` (u8) | `flags` (u8, must be zero) | semantic |
 | 4 | Segment reserved bytes | tolerated non-zero | rejected non-zero | behavioral |
-| 5 | Zero-header EOS sentinel | yes (all-zero header → EOS) | no (rejects with type!=1) | behavioral |
+| 5 | Zero-header EOS sentinel | yes (all-zero header → EOS) | yes, using Shunter's 14-byte record header as the EOS marker | **match semantically** |
 | 6 | Framing unit | Commit (groups N transactions) | Record (1 tx per physical record) | structural |
 | 7 | Commit `min_tx_offset` | present (u64 LE) | absent; per-record `TxID` u64 LE stored instead | structural |
 | 8 | Commit `epoch` field | present (u64 LE) | absent | structural |
@@ -195,20 +197,20 @@ Every field-level / semantic divergence between reference and Shunter.
 | 20 | Row-size limit | payload crate concern (not commit layer) | enforced at `decodeRow` with `RowTooLargeError` | semantic |
 | 21 | `set_epoch` API | writer-level, requires external leader election | absent | missing feature |
 | 22 | Segment metadata extraction | `Metadata::extract` walks commits for `max_epoch`, `max_commit` etc. | `ScanSegments` walks per-record, returns `SegmentInfo` with last TxID | structural |
-| 23 | All-zero header tolerance (preallocation) | yes | no | behavioral |
+| 23 | All-zero header tolerance (preallocation) | yes | yes for reader/recovery tolerance; writer-side preallocation is still not emitted | partial match |
 | 24 | Offset index sidecar | `.idx` per segment, 16-byte entries (u64 key + u64 byte offset) | `.idx` per segment, 16-byte entries (u64 key + u64 byte offset) | **match** (closed in Slice 2α) |
 | 25 | History-gap detection | reference uses `Traversal::OutOfOrder` on iterator; `Metadata::extract` rejects mid-segment gap | Shunter uses `*HistoryGapError` at both inter-segment and intra-segment boundaries | **match semantically** (Slice 2β categorized as `ErrOpen`) |
 | 26 | Fork detection (same offset, different CRC) | `Traversal::Forked` | absent; not detected | missing feature (deferred to its own decision doc per Slice 2β) |
 
-**Summary**: 11 "match" / "match semantically" entries; 7 structural
-differences (framing unit, magic length, version byte positions,
-header length, epoch, record-type byte, records-buffer shape); 5
-behavioral differences (reserved-byte strictness, zero-header EOS,
-CRC scope per-commit-vs-per-record, all-zero tolerance,
-set_epoch API); 2 semantic renames (byte 7 meaning; len field role);
-2 explicit missing features (epoch, forked-offset detection); 1
-scope-explosion entry (records-buffer format couples to types /
-bsatn / schema).
+**Summary**: 12 "match" / "match semantically" entries plus one
+partial match for reader-side all-zero preallocation tolerance; 7
+structural differences (framing unit, magic length, version byte
+positions, header length, epoch, record-type byte, records-buffer
+shape); 3 remaining behavioral differences (reserved-byte strictness,
+CRC scope per-commit-vs-per-record, set_epoch API); 2 semantic renames
+(byte 7 meaning; len field role); 2 explicit missing features (epoch,
+forked-offset detection); 1 scope-explosion entry (records-buffer
+format couples to types / bsatn / schema).
 
 ## Decision: what 2γ becomes
 
@@ -267,8 +269,9 @@ this phase. Rationale:
 - No new leaf errors, no new sentinels, no new typed structs. The
   Slice 2β error taxonomy is complete for the current wire.
 - No reference `epoch` field. No reference commit grouping. No
-  reference V0/V1 split. No byte-compatible magic. No zero-header
-  EOS sentinel. No forked-offset detection.
+  reference V0/V1 split. No byte-compatible magic. No forked-offset
+  detection. Reader-side zero-header EOS tolerance was added later;
+  Shunter still does not emit writer-side preallocation.
 
 These deferrals are explicit and named in the "Out-of-scope
 follow-ons" section at the bottom.
@@ -384,12 +387,12 @@ All pins land in new file `commitlog/wire_shape_test.go` in session
     with `Flags = 1`; `DecodeRecord` returns error matching
     `errors.Is(_, ErrBadFlags)` and `errors.Is(_, ErrTraversal)`.
     Documents the strict-flags choice (delta entry #12).
-31. `TestShunterStrictHeaderRejectsPreallocatedZeros` — write a
-    segment header followed by 14 zero bytes (simulated
-    preallocated tail); `scanOneSegment` reports a
-    non-damaged-tail error (the first zero-payload record fails
-    `RecordType != 1`). Documents the absence of the reference
-    all-zero-header EOS sentinel (delta entries #5, #23).
+31. `TestWireShapeShunterZeroRecordHeaderActsAsEOS` — write a
+    segment header followed by an all-zero record-header region
+    (simulated preallocated tail); `scanOneSegment` accepts it as
+    end-of-stream and leaves the segment appendable in place. This
+    documents the post-2γ reader-side zero-header EOS follow-through
+    (delta entries #5, #23).
 
 ### Constants / structural pins
 
@@ -479,10 +482,11 @@ must open its own decision doc.
 - **Reference V0/V1 version split**. Shunter is at V1 permanently;
   adding V0 support is pointless without a reference-created log to
   decode.
-- **Reference all-zero-header EOS sentinel**. Requires teaching the
-  record decoder to treat 14 consecutive zero bytes as end-of-stream
-  rather than a zero-TxID / zero-type record (which rejects today).
-  Low cost; no current consumer needs file preallocation.
+- **Reference all-zero-header EOS sentinel**. Closed for Shunter's
+  reader/recovery path: an all-zero 14-byte record header is now
+  treated as end-of-stream and pinned by
+  `commitlog/wire_shape_test.go::TestWireShapeShunterZeroRecordHeaderActsAsEOS`
+  plus `commitlog/replay_test.go::TestReplayLogPreallocatedZeroTailStopsAtLastRecord`.
 - **Checksum-algorithm negotiation**. Today byte 5 of the segment
   header is `flags` (must be zero). Renaming it to
   `checksum_algorithm` (value 0 = CRC32C; reject non-zero) is a
@@ -503,7 +507,8 @@ must open its own decision doc.
 - **Writer `set_epoch` API**. Dead code without leader election.
   Defer with the epoch-field item.
 - **Preallocation-friendly writes** (`fallocate` + zero-filled
-  tail). Conditional on the zero-header EOS sentinel; same trigger.
+  tail). Reader-side tolerance is in place; emitting preallocated
+  segment files remains deferred until a workload needs it.
 
 ## Clean-room reminder
 

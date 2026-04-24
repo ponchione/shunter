@@ -130,6 +130,9 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 		}
 		return nil, err
 	}
+	if isZeroRecordHeader(header) {
+		return nil, io.EOF
+	}
 
 	rec := &Record{
 		TxID:       binary.LittleEndian.Uint64(header[:8]),

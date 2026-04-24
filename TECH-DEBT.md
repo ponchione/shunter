@@ -180,18 +180,20 @@ Source docs:
 Audit note:
 - keep OI-005 as the accepted lower-level/expert API discipline marker; do not reopen it for the now-pinned executor post-commit panic-close gap unless a fresh concrete leak/reproducer appears
 
-### OI-007: Recovery sequencing and replay-edge behavior still needs targeted parity closure
+### OI-007: Recovery sequencing and replay-edge behavior is narrowed to remaining format/scheduler deferrals
 
-Status: open
+Status: open — narrowed after reader-side zero-header EOS closure
 Severity: medium
 
 Summary:
-- live carried-forward deferrals from Phase 4 Slice 2γ (no wire-format change landed; rejected as documented-divergence slice):
+- reader-side zero-header EOS / preallocated-zero-tail tolerance is now closed and pinned: `DecodeRecord` and recovery scanning treat an all-zero Shunter record header as end-of-stream, so `ScanSegments` / `ReplayLog` stop at the last real tx instead of classifying preallocated zero tails as damaged user data
+- authoritative pins: `commitlog/replay_test.go::TestReplayLogPreallocatedZeroTailStopsAtLastRecord` and `commitlog/wire_shape_test.go::TestWireShapeShunterZeroRecordHeaderActsAsEOS`
+- remaining live carried-forward deferrals from Phase 4 Slice 2γ (no broader wire-format rewrite landed; 2γ remains a documented-divergence slice):
   - reference byte-compatible magic (`(ds)^2` vs `SHNT`)
   - commit grouping (N-tx framing unit)
   - `epoch` field + `set_epoch` API
   - V0/V1 version split
-  - zero-header EOS sentinel + preallocation-friendly writes
+  - writer-side preallocation/fallocate support (reader tolerance is in place, but Shunter still does not emit preallocated segment files)
   - checksum-algorithm negotiation rename
   - forked-offset detection (`Traversal::Forked`)
   - full records-buffer format parity (couples to BSATN / types / schema / subscription / executor)

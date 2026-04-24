@@ -157,6 +157,50 @@ func TestReplayLogSkipsDamagedTailSegmentWhenFromTxIDAlreadyAtValidatedPrefix(t 
 	assertReplayPlayerRows(t, committed, map[uint64]string{1: "alice", 2: "bob"})
 }
 
+func TestReplayLogPreallocatedZeroTailStopsAtLastRecord(t *testing.T) {
+	root := t.TempDir()
+	committed, reg := buildReplayCommittedState(t)
+	path := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+	)
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(make([]byte, RecordOverhead)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	segments, horizon, err := ScanSegments(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if horizon != 2 {
+		t.Fatalf("horizon = %d, want 2", horizon)
+	}
+	if len(segments) != 1 {
+		t.Fatalf("len(segments) = %d, want 1", len(segments))
+	}
+	if segments[0].AppendMode != AppendInPlace {
+		t.Fatalf("append mode = %d, want %d", segments[0].AppendMode, AppendInPlace)
+	}
+
+	maxTxID, err := ReplayLog(committed, segments, 0, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("ReplayLog max tx = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, committed, map[uint64]string{1: "alice", 2: "bob"})
+}
+
 // writeDenseReplaySegment writes n monotonically-tx'd inserts and returns the
 // segment path plus the (txID, segment byte offset) pair for every record.
 // Useful for populating a sparse offset index on top of a real segment.

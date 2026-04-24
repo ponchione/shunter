@@ -89,7 +89,7 @@ Phase 4 Slice 2 sub-slice record (for reference; all closed):
 |---|---|---|---|
 | 2α — per-segment offset index file | `closed` | `docs/parity-phase4-slice2-offset-index.md` | Fully landed across Sessions 1-5, including replay seek integration, durability wiring, compaction cleanup, and crash-tail handling. |
 | 2β — typed `Traversal` / `Open` error enums | `closed` | `docs/parity-phase4-slice2-errors.md` | Five category sentinels (`ErrTraversal`, `ErrOpen`, `ErrDurability`, `ErrSnapshot`, `ErrIndex`) + `wrapCategory` helper + `Is` methods on the nine typed structs landed across Sessions 1-2. |
-| 2γ — record / log shape format compatibility | `closed (divergences recorded)` | `docs/parity-phase4-slice2-record-shape.md` | Sessions 1-2 landed: Session 1 locked the field-by-field divergence audit (documented-divergence close rather than byte-parity rewrite); Session 2 landed the 33-pin wire-shape contract suite at `commitlog/wire_shape_test.go`. Named out-of-scope deferrals carried forward in `TECH-DEBT.md` OI-007. |
+| 2γ — record / log shape format compatibility | `closed (divergences recorded)` | `docs/parity-phase4-slice2-record-shape.md` | Sessions 1-2 landed: Session 1 locked the field-by-field divergence audit (documented-divergence close rather than byte-parity rewrite); Session 2 landed the wire-shape contract suite at `commitlog/wire_shape_test.go`; post-2γ follow-through now treats an all-zero Shunter record header as EOS so preallocated zero tails recover cleanly. Remaining named out-of-scope deferrals are carried forward in `TECH-DEBT.md` OI-007. |
 
 ## Reading rule
 

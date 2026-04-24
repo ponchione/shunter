@@ -605,12 +605,10 @@ func TestWireShapeShunterRejectsNonZeroFlagsMidRecord(t *testing.T) {
 	}
 }
 
-// Pin 31 — delta entries #5, #23: Shunter does NOT treat an all-zero
-// record-header region as end-of-stream. Preallocated-zero tails are
-// rejected by scanOneSegment (ChecksumMismatchError for 14 zero
-// header bytes + 4 zero CRC bytes, since CRC32C of 14 zero bytes is
-// non-zero). Pin guards against an accidental EOS-sentinel softening.
-func TestWireShapeShunterStrictHeaderRejectsPreallocatedZeros(t *testing.T) {
+// Pin 31 — delta entries #5, #23: an all-zero record-header region is
+// treated as end-of-stream. This lets recovery tolerate preallocated zero
+// tails without classifying the tail as damaged user data.
+func TestWireShapeShunterZeroRecordHeaderActsAsEOS(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, SegmentFileName(1))
 
@@ -620,22 +618,23 @@ func TestWireShapeShunterStrictHeaderRejectsPreallocatedZeros(t *testing.T) {
 	}
 	// 18 bytes of zero following the header: 14-byte header region
 	// (TxID=0, RecordType=0, Flags=0, data_len=0) + 4-byte CRC region
-	// (stored CRC=0). Decoded header looks like a zero-TxID zero-type
-	// record; CRC mismatches (CRC32C of 14 zero bytes is non-zero).
+	// (stored CRC=0). The zero header is the EOS sentinel; the trailing
+	// zero CRC bytes are preallocated tail bytes and are ignored.
 	buf.Write(make([]byte, 18))
 
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := scanOneSegment(path, true)
-	if err == nil {
-		t.Fatal("scanOneSegment accepted all-zero tail; reference-style EOS sentinel must remain absent")
+	info, err := scanOneSegment(path, true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// The error surfaces with recordCount==0 so canTreatAsDamagedTail
-	// returns false and scanOneSegment propagates. Category = Traversal.
-	if !errors.Is(err, ErrTraversal) {
-		t.Fatalf("errors.Is(err, ErrTraversal) = false: %v", err)
+	if info.LastTx != 0 {
+		t.Fatalf("LastTx = %d, want 0 for empty preallocated segment", info.LastTx)
+	}
+	if info.AppendMode != AppendInPlace {
+		t.Fatalf("AppendMode = %d, want %d", info.AppendMode, AppendInPlace)
 	}
 }
 

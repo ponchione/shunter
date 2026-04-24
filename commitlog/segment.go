@@ -106,7 +106,18 @@ func EncodeRecord(w io.Writer, rec *Record) error {
 	return err
 }
 
-// DecodeRecord reads and validates a record.
+func isZeroRecordHeader(buf [RecordHeaderSize]byte) bool {
+	for _, b := range buf {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// DecodeRecord reads and validates a record. An all-zero record header is
+// treated as an end-of-stream sentinel so preallocated zero tails are ignored
+// during recovery/replay instead of surfacing as corrupt records.
 func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	var buf [RecordHeaderSize]byte
 	if _, err := io.ReadFull(r, buf[:]); err != nil {
@@ -114,6 +125,9 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 			return nil, ErrTruncatedRecord
 		}
 		return nil, err
+	}
+	if isZeroRecordHeader(buf) {
+		return nil, io.EOF
 	}
 
 	rec := &Record{
