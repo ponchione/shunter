@@ -48,7 +48,7 @@ func handleOneOffQuery(
 
 	tableID, _, ok := sl.TableByName(compiled.TableName)
 	if !ok {
-		sendOneOffError(conn, msg.MessageID, fmt.Sprintf("unknown table %q", compiled.TableName), receipt)
+		sendOneOffError(conn, msg.MessageID, fmt.Sprintf("no such table: `%s`. If the table exists, it may be marked private.", compiled.TableName), receipt)
 		return
 	}
 

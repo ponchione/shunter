@@ -354,8 +354,8 @@ func TestNormalizePredicates_UnknownColumn(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown column")
 	}
-	if got := err.Error(); got != `unknown column "nonexistent" on table "users"` {
-		t.Errorf("error = %q, want mention of unknown column", got)
+	if got := err.Error(); got != "`users` does not have a field `nonexistent`" {
+		t.Errorf("error = %q, want reference Unresolved::Field literal", got)
 	}
 }
 
@@ -1163,7 +1163,7 @@ func TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected(t
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	want := "aggregate projections not supported for subscriptions, executing: `" + sqlText + "`"
+	want := "Column projections are not supported in subscriptions; Subscriptions must return a table type, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q (aggregate guard fires before cross-join WHERE guard)", se.Error, want)
 	}
@@ -4576,7 +4576,7 @@ func TestHandleSubscribeSingle_JoinCountAggregateStillRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 177, "QueryID")
-	if !strings.Contains(se.Error, "aggregate projections not supported for subscriptions") {
+	if !strings.Contains(se.Error, "Column projections are not supported in subscriptions; Subscriptions must return a table type") {
 		t.Fatalf("Error = %q, want deliberate aggregate subscription rejection", se.Error)
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
@@ -4647,7 +4647,7 @@ func TestHandleSubscribeSingle_ParityJoinColumnProjectionRejected(t *testing.T) 
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 169, "QueryID")
-	if !strings.Contains(se.Error, "column-list projections not supported for subscriptions") {
+	if !strings.Contains(se.Error, "Column projections are not supported in subscriptions; Subscriptions must return a table type") {
 		t.Fatalf("Error = %q, want deliberate subscription projection rejection", se.Error)
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
@@ -5005,5 +5005,213 @@ func TestHandleSubscribeMulti_ParityJoinStarProjectionRejectText(t *testing.T) {
 	}
 	if req := exec.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on SELECT * JOIN rejection")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnknownTableRejectText pins the reference
+// type-check rejection literal at
+// reference/SpacetimeDB/crates/expr/src/errors.rs:14
+// (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
+// be marked private."). SubscribeSingle compile-origin wraps the inner text
+// with `DBError::WithSql` (reference error.rs:140) → `"{error}, executing:
+// `{sql}`"`. Exact-text companion to TestHandleSubscribeSingle_ParityUnknownTableRejected.
+func TestHandleSubscribeSingle_ParityUnknownTableRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT * FROM r"
+	msg := &SubscribeSingleMsg{
+		RequestID:   230,
+		QueryID:     231,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "no such table: `r`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when the FROM table is unknown")
+	}
+}
+
+// TestHandleSubscribeMulti_ParityUnknownTableRejectText pins the same
+// `Unresolved::Table` literal on the SubscribeMulti admission surface.
+// Reference SubscribeMulti wraps each per-item compile error with
+// `DBError::WithSql` (module_subscription_actor.rs:1068 via
+// `return_on_err_with_sql_bool!`).
+func TestHandleSubscribeMulti_ParityUnknownTableRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const badSQL = "SELECT * FROM r"
+	msg := &SubscribeMultiMsg{
+		RequestID:    232,
+		QueryID:      233,
+		QueryStrings: []string{"SELECT * FROM t", badSQL},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "no such table: `r`. If the table exists, it may be marked private., executing: `" + badSQL + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := exec.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when the FROM table is unknown")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnknownFieldRejectText pins the reference
+// type-check rejection literal at
+// reference/SpacetimeDB/crates/expr/src/errors.rs:16
+// (`Unresolved::Field` = "`{0}` does not have a field `{1}`" with args
+// (TableName, field)). SubscribeSingle compile-origin wraps with
+// `DBError::WithSql` (error.rs:140).
+func TestHandleSubscribeSingle_ParityUnknownFieldRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT * FROM t WHERE t.missing_col = 1"
+	msg := &SubscribeSingleMsg{
+		RequestID:   240,
+		QueryID:     241,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`t` does not have a field `missing_col`, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a WHERE column is unknown")
+	}
+}
+
+// TestHandleSubscribeMulti_ParityUnknownFieldRejectText pins the same
+// `Unresolved::Field` literal on the SubscribeMulti admission surface.
+func TestHandleSubscribeMulti_ParityUnknownFieldRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const badSQL = "SELECT * FROM t WHERE t.missing_col = 1"
+	msg := &SubscribeMultiMsg{
+		RequestID:    242,
+		QueryID:      243,
+		QueryStrings: []string{"SELECT * FROM t", badSQL},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`t` does not have a field `missing_col`, executing: `" + badSQL + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := exec.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a WHERE column is unknown")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityAggregateReturnTypeRejectText pins the
+// reference `Unsupported::ReturnType` literal at
+// reference/SpacetimeDB/crates/expr/src/errors.rs:47 ("Column projections
+// are not supported in subscriptions; Subscriptions must return a table
+// type"). Reference emit site expr/src/check.rs:174 via
+// `expect_table_type` on the `parse_and_type_sub` path: aggregate
+// (ProjectList::Agg) and column-list (ProjectList::List) projections both
+// fall through to the unified literal on the v1 subscribe surface.
+// SubscribeSingle wraps the inner text with `DBError::WithSql`.
+func TestHandleSubscribeSingle_ParityAggregateReturnTypeRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT COUNT(*) AS n FROM t"
+	msg := &SubscribeSingleMsg{
+		RequestID:   250,
+		QueryID:     251,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Column projections are not supported in subscriptions; Subscriptions must return a table type, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on aggregate projection in subscription")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityColumnListReturnTypeRejectText pins the
+// same reference `Unsupported::ReturnType` literal onto the column-list
+// projection path: `ProjectList::List` in reference expr/src/check.rs:174
+// likewise fails `expect_table_type` and emits the unified subscription
+// literal.
+func TestHandleSubscribeSingle_ParityColumnListReturnTypeRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT u32 AS n FROM t"
+	msg := &SubscribeSingleMsg{
+		RequestID:   252,
+		QueryID:     253,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Column projections are not supported in subscriptions; Subscriptions must return a table type, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on column-list projection in subscription")
 	}
 }

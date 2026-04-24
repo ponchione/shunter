@@ -51,7 +51,7 @@ type SchemaLookup interface {
 func compileQuery(q Query, sl SchemaLookup) (subscription.Predicate, error) {
 	tableID, ts, ok := sl.TableByName(q.TableName)
 	if !ok {
-		return nil, fmt.Errorf("unknown table %q", q.TableName)
+		return nil, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", q.TableName)
 	}
 	return NormalizePredicates(tableID, ts, q.Predicates)
 }
@@ -184,21 +184,21 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		return compiledSQLQuery{}, fmt.Errorf("LIMIT not supported for subscriptions")
 	}
 	if stmt.Aggregate != nil && !allowProjection {
-		return compiledSQLQuery{}, fmt.Errorf("aggregate projections not supported for subscriptions")
+		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
 	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
-		return compiledSQLQuery{}, fmt.Errorf("column-list projections not supported for subscriptions")
+		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
 	stmt.Predicate = normalizeSQLPredicate(stmt.Predicate)
 	usesCallerIdentity := sqlPredicateUsesCallerIdentity(stmt.Predicate)
 	if stmt.Join != nil {
 		leftID, leftTS, ok := sl.TableByName(stmt.Join.LeftTable)
 		if !ok {
-			return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.Join.LeftTable)
+			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.LeftTable)
 		}
 		rightID, rightTS, ok := sl.TableByName(stmt.Join.RightTable)
 		if !ok {
-			return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.Join.RightTable)
+			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.RightTable)
 		}
 		// Reference `InvalidWildcard::Join` at
 		// reference/SpacetimeDB/crates/expr/src/errors.rs:41 emits
@@ -262,11 +262,11 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		leftCol, ok := leftTS.Column(stmt.Join.LeftOn.Column)
 		if !ok {
-			return compiledSQLQuery{}, fmt.Errorf("unknown column %q on table %q", stmt.Join.LeftOn.Column, leftTS.Name)
+			return compiledSQLQuery{}, fmt.Errorf("`%s` does not have a field `%s`", leftTS.Name, stmt.Join.LeftOn.Column)
 		}
 		rightCol, ok := rightTS.Column(stmt.Join.RightOn.Column)
 		if !ok {
-			return compiledSQLQuery{}, fmt.Errorf("unknown column %q on table %q", stmt.Join.RightOn.Column, rightTS.Name)
+			return compiledSQLQuery{}, fmt.Errorf("`%s` does not have a field `%s`", rightTS.Name, stmt.Join.RightOn.Column)
 		}
 		if isArrayKind(leftCol.Type) || isArrayKind(rightCol.Type) {
 			return compiledSQLQuery{}, fmt.Errorf("join ON %s.%s = %s.%s: array/product values are not comparable",
@@ -305,7 +305,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	}
 	projectedID, ts, ok := sl.TableByName(stmt.ProjectedTable)
 	if !ok {
-		return compiledSQLQuery{}, fmt.Errorf("unknown table %q", stmt.ProjectedTable)
+		return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.ProjectedTable)
 	}
 	projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, projectedID, ts)
 	if err != nil {
@@ -355,11 +355,11 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 	}
 	leftCol, ok := leftTS.Column(leftRef.Column)
 	if !ok {
-		return subscription.Join{}, fmt.Errorf("unknown column %q on table %q", leftRef.Column, leftTS.Name)
+		return subscription.Join{}, fmt.Errorf("`%s` does not have a field `%s`", leftTS.Name, leftRef.Column)
 	}
 	rightCol, ok := rightTS.Column(rightRef.Column)
 	if !ok {
-		return subscription.Join{}, fmt.Errorf("unknown column %q on table %q", rightRef.Column, rightTS.Name)
+		return subscription.Join{}, fmt.Errorf("`%s` does not have a field `%s`", rightTS.Name, rightRef.Column)
 	}
 	if isArrayKind(leftCol.Type) || isArrayKind(rightCol.Type) {
 		return subscription.Join{}, fmt.Errorf("cross join WHERE %s.%s = %s.%s: array/product values are not comparable",
@@ -458,7 +458,7 @@ func compileJoinProjectionColumns(columns []sql.ProjectionColumn, left relationS
 func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema, alias uint8) (compiledSQLProjectionColumn, error) {
 	tsCol, ok := ts.Column(col.Column)
 	if !ok {
-		return compiledSQLProjectionColumn{}, fmt.Errorf("unknown column %q on table %q", col.Column, ts.Name)
+		return compiledSQLProjectionColumn{}, fmt.Errorf("`%s` does not have a field `%s`", ts.Name, col.Column)
 	}
 	compiledCol := *tsCol
 	if col.OutputAlias != "" {
@@ -479,13 +479,13 @@ func parseQueryString(qs string, sl SchemaLookup, caller *types.Identity) (Query
 	}
 	_, ts, ok := sl.TableByName(stmt.Table)
 	if !ok {
-		return Query{}, fmt.Errorf("unknown table %q", stmt.Table)
+		return Query{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Table)
 	}
 	q := Query{TableName: stmt.Table}
 	for _, f := range stmt.Filters {
 		col, ok := ts.Column(f.Column)
 		if !ok {
-			return Query{}, fmt.Errorf("unknown column %q on table %q", f.Column, ts.Name)
+			return Query{}, fmt.Errorf("`%s` does not have a field `%s`", ts.Name, f.Column)
 		}
 		v, err := coerceLiteral(f.Literal, col.Type, caller)
 		if err != nil {
@@ -573,7 +573,7 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 	}
 	col, ok := rel.ts.Column(f.Column)
 	if !ok {
-		return nil, fmt.Errorf("unknown column %q on table %q", f.Column, rel.ts.Name)
+		return nil, fmt.Errorf("`%s` does not have a field `%s`", rel.ts.Name, f.Column)
 	}
 	v, err := coerceLiteral(f.Literal, col.Type, caller)
 	if err != nil {
@@ -620,7 +620,7 @@ func NormalizePredicates(
 	for _, p := range preds {
 		col, ok := ts.Column(p.Column)
 		if !ok {
-			return nil, fmt.Errorf("unknown column %q on table %q", p.Column, ts.Name)
+			return nil, fmt.Errorf("`%s` does not have a field `%s`", ts.Name, p.Column)
 		}
 		normalized, err := normalizePredicate(tableID, col.Index, 0, p.Op, p.Value)
 		if err != nil {

@@ -5515,3 +5515,64 @@ func TestHandleOneOffQuery_JoinOnEqualityWithFilterMatchesWhereForm(t *testing.T
 		}
 	}
 }
+
+// TestHandleOneOffQuery_ParityUnknownTableRejectText pins the reference
+// type-check rejection literal at
+// reference/SpacetimeDB/crates/expr/src/errors.rs:14
+// (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
+// be marked private."). The OneOff admission surface
+// (module_host.rs:2252 `compile_subscription`, :2316 `format!("{err}")`)
+// emits the raw error text with no `DBError::WithSql` wrap.
+func TestHandleOneOffQuery_ParityUnknownTableRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x90},
+		QueryString: "SELECT * FROM r",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "no such table: `r`. If the table exists, it may be marked private."
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnknownFieldRejectText pins the reference
+// type-check rejection literal at
+// reference/SpacetimeDB/crates/expr/src/errors.rs:16
+// (`Unresolved::Field` = "`{0}` does not have a field `{1}`" with args
+// (TableName, field)). OneOff admission emits the raw error text with no
+// `DBError::WithSql` wrap.
+func TestHandleOneOffQuery_ParityUnknownFieldRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x91},
+		QueryString: "SELECT * FROM t WHERE t.missing_col = 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`t` does not have a field `missing_col`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
