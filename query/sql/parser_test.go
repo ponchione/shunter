@@ -1754,3 +1754,16 @@ func TestParseRejectsJoinOnFilterMultipleConjuncts(t *testing.T) {
 		t.Fatalf("err = %q, want substring 'JOIN ON filter accepts at most one AND-conjunct'", err.Error())
 	}
 }
+
+func TestParseRejectsJoinOnFilterOr(t *testing.T) {
+	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 OR o.id > 0")
+	if err == nil {
+		t.Fatal("expected error for OR in ON filter")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+	if !strings.Contains(err.Error(), "OR not supported in JOIN ON") {
+		t.Fatalf("err = %q, want substring 'OR not supported in JOIN ON'", err.Error())
+	}
+}
