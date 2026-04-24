@@ -11,8 +11,7 @@ import (
 
 // TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs
 // pins the OI-004 Tier-B hardening fix for the `forwardReducerResponse`
-// goroutine leak
-// (docs/hardening-oi-004-forward-reducer-response-context.md).
+// goroutine leak. This test is the regression record for that contract.
 //
 // Sharp edge: the production dispatch ctx is rooted at
 // context.Background() (protocol/upgrade.go:201 through

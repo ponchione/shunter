@@ -19,8 +19,7 @@ import (
 // iteration does not produce the entry, so the observable drift is the
 // iteration silently skipping rows present at iter-construction time.
 // StateView.ScanTable now materializes the committed scan at iter call
-// time, mirroring docs/hardening-oi-005-state-view-seekindex-aliasing.md
-// and docs/hardening-oi-005-state-view-seekindexrange-aliasing.md.
+// time, mirroring the SeekIndex and SeekIndexRange regression contracts.
 //
 // This test drives the contract-violating mutation directly via
 // Table.DeleteRow to simulate a future path in which an iteration reaches

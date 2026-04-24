@@ -16,8 +16,8 @@ import (
 // tail of b.entries down in place. The outer loop's i++ then skips over
 // an entry that would otherwise have been yielded. Materializing the
 // range at the StateView boundary decouples iteration from BTree-internal
-// storage. Mirrors docs/hardening-oi-005-state-view-seekindex-aliasing.md
-// and docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md.
+// storage. Mirrors the SeekIndex and CommittedSnapshot IndexSeek
+// regression contracts.
 //
 // Under executor single-writer discipline no concurrent writer runs
 // during a reducer's synchronous iteration, so this test drives the

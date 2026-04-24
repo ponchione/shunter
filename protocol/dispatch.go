@@ -52,8 +52,7 @@ func closeProtocolError(conn *Conn, reason string) {
 //
 // Exit conditions: ctx cancelled, c.closed closed, or ws.Read error.
 //
-// OI-004 sub-hazard pin
-// (docs/hardening-oi-004-dispatch-handler-context.md): handlerCtx is
+// OI-004 sub-hazard pin: handlerCtx is
 // derived from the outer ctx and additionally cancels when c.closed
 // fires (SPEC-005 §5.3 step 4 teardown signal). Handler closures
 // spawned below forward handlerCtx into inbox.CallReducer /

@@ -24,8 +24,7 @@ import (
 // That is the hazard the post-commit row-immutability contract
 // prevents — this file documents the hazard shape so a future
 // change that claimed to make row-payload mutation safe would have
-// to update these tests. See
-// `docs/hardening-oi-006-row-payload-sharing.md`.
+// to update these tests.
 
 func TestEvalFanoutRowPayloadsSharedAcrossSubscribersForInserts(t *testing.T) {
 	s := testSchema()

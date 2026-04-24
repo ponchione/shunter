@@ -135,9 +135,7 @@ func (m *ConnManager) Get(id types.ConnectionID) *Conn {
 // (SPEC-005 §11.1, close code 1000). Connections are closed
 // concurrently with a bounded wait for all teardowns to complete.
 //
-// OI-004 sub-hazard pin
-// (docs/hardening-oi-004-closeall-disconnect-context.md): the caller-
-// supplied ctx is forwarded into each Conn.Disconnect, which threads it
+// OI-004 sub-hazard pin: the caller-supplied ctx is forwarded into each Conn.Disconnect, which threads it
 // into inbox.DisconnectClientSubscriptions and inbox.OnDisconnect (steps
 // 1-2 of the SPEC-005 §5.3 teardown). Every caller-supplied ctx is
 // additionally wrapped per-conn by context.WithTimeout(ctx,

@@ -29,8 +29,7 @@ type ProtocolOptions struct {
 	// connManagerSender.enqueueOnConn. It is the ceiling for how long
 	// inbox.DisconnectClientSubscriptions + inbox.OnDisconnect may
 	// run before the teardown proceeds to close(c.closed) anyway.
-	// OI-004 sub-hazard pin
-	// (docs/hardening-oi-004-sender-disconnect-context.md): with a
+	// OI-004 sub-hazard pin: with a
 	// Background ctx the detached goroutine was unbounded if either
 	// inbox call hung; the bounded ctx makes the leak observable
 	// and collectible.

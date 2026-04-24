@@ -18,7 +18,6 @@ Read these first when deciding what to work on now:
 
 These are worth keeping, but they are narrower than the active driver docs:
 - `docs/parity-*.md` and `docs/parity-p0-*.md` — closed or targeted parity decision records
-- `docs/hardening-oi-*.md` — narrow hardening slices backing open higher-level themes in `TECH-DEBT.md`
 - `docs/adr/` — architectural decisions
 - `docs/decisions/` — local design decisions
 - `docs/archive/` — historical snapshots and source-reading notes that are not active drivers

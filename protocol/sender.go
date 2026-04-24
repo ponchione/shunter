@@ -103,9 +103,7 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 	case conn.OutboundCh <- wrapped:
 		return nil
 	default:
-		// OI-004 sub-hazard pin
-		// (docs/hardening-oi-004-sender-disconnect-context.md): the
-		// overflow-driven teardown used to spawn
+		// OI-004 sub-hazard pin: the overflow-driven teardown used to spawn
 		// `go conn.Disconnect(context.Background(), ...)`. With a
 		// Background ctx the detached goroutine was unbounded if
 		// inbox.DisconnectClientSubscriptions or inbox.OnDisconnect

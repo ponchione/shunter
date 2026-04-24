@@ -59,9 +59,7 @@ func (sv *StateView) GetRow(tableID schema.TableID, rowID types.RowID) (types.Pr
 // the entry, so the observable drift is the iteration silently skipping
 // rows present at iter-construction time. Collecting (RowID, rowCopy)
 // pairs once at iter call time decouples the yield loop from t.rows,
-// mirroring the SeekIndex / SeekIndexRange precedents
-// (docs/hardening-oi-005-state-view-seekindex-aliasing.md,
-// docs/hardening-oi-005-state-view-seekindexrange-aliasing.md). Pin test:
+// mirroring the SeekIndex / SeekIndexRange precedents. Pin test:
 // TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete.
 func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
@@ -104,9 +102,7 @@ func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 // the backing array in place when capacity allows — iteration over the
 // aliased slice would observe the shift. Cloning at the seek boundary
 // decouples the iteration from BTree-internal storage, mirroring the
-// CommittedSnapshot.IndexSeek precedent
-// (docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md). Pin
-// test: TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation.
+// CommittedSnapshot.IndexSeek precedent. Pin test: TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation.
 func (sv *StateView) SeekIndex(tableID schema.TableID, indexID schema.IndexID, key IndexKey) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {
 		if sv.committed != nil {
@@ -146,8 +142,7 @@ func (sv *StateView) SeekIndex(tableID schema.TableID, indexID schema.IndexID, k
 // from a reducer) could shift b.entries in place (slices.Delete when an
 // entry's last RowID is removed) and drift the outer iteration. Collecting
 // the range once at the StateView boundary decouples iteration from
-// BTree-internal storage, mirroring the StateView.SeekIndex precedent
-// (docs/hardening-oi-005-state-view-seekindex-aliasing.md). Pin test:
+// BTree-internal storage, mirroring the StateView.SeekIndex precedent. Pin test:
 // TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation.
 func (sv *StateView) SeekIndexRange(tableID schema.TableID, indexID schema.IndexID, low, high *IndexKey) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {

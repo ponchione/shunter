@@ -354,8 +354,8 @@ func encodeProductRows(rows []types.ProductValue) ([]byte, error) {
 // that never feeds respCh (crash mid-commit, hung reducer, engine shutdown
 // mid-flight) would leak the goroutine indefinitely and hold the *Conn and
 // its transitive state alive past disconnect. Direct analog to the
-// watchReducerResponse hardening on the protocol-side watcher (closed
-// 2026-04-20; see docs/hardening-oi-004-watch-reducer-response-lifecycle.md).
+// watchReducerResponse hardening on the protocol-side watcher. The pin tests
+// document that analogous lifecycle contract.
 // A nil req.Done disables the arm, matching pre-wire behavior for callers
 // that do not attach a lifecycle signal. Pin test:
 // TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs.

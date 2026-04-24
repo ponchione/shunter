@@ -14,7 +14,7 @@ import (
 // tail down inside the same backing) is visible to the iteration even
 // though the iteration's captured len/cap are stale. Cloning at the
 // seek boundary decouples iteration from BTree-internal storage.
-// Mirrors docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md.
+// This test pins that regression contract.
 //
 // Under executor single-writer discipline no writer runs during a real
 // iteration, so this test drives the mutation directly via the BTree

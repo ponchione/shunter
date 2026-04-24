@@ -1,7 +1,7 @@
 # TECH-DEBT
 
 This file tracks open issues only.
-Resolved audit history belongs in git history and the narrow slice docs, not here.
+Resolved audit history belongs in git history, not here.
 
 Status conventions:
 - open: confirmed issue or parity gap still requiring work
@@ -139,7 +139,7 @@ Status: open
 Severity: high
 
 Summary:
-- several concrete sub-hazards were closed and pinned in narrow slice docs
+- several concrete sub-hazards were closed and pinned by regression tests
 - the remaining issue is the broader lifecycle/shutdown theme, not those already-closed sub-slices
 - other detached goroutine sites and ownership seams remain watch items if a concrete leak site surfaces
 - `ClientSender.Send` is still synchronous without its own ctx, but no concrete consumer currently requires widening that surface
@@ -161,13 +161,6 @@ Primary code surfaces:
 Source docs:
 - `docs/current-status.md`
 - `docs/spacetimedb-parity-roadmap.md` Tier B
-- `docs/hardening-oi-004-watch-reducer-response-lifecycle.md`
-- `docs/hardening-oi-004-sender-disconnect-context.md`
-- `docs/hardening-oi-004-supervise-disconnect-context.md`
-- `docs/hardening-oi-004-closeall-disconnect-context.md`
-- `docs/hardening-oi-004-forward-reducer-response-context.md`
-- `docs/hardening-oi-004-dispatch-handler-context.md`
-- `docs/hardening-oi-004-outbound-writer-supervision.md`
 
 ### OI-005: Snapshot and committed-read-view lifetime rules still need stronger safety guarantees
 
@@ -175,7 +168,7 @@ Status: open
 Severity: high
 
 Summary:
-- the enumerated narrow sub-hazards were closed and pinned
+- the enumerated narrow sub-hazards were closed and pinned by regression tests
 - the remaining issue is the broader lifetime/ownership theme around read handles and raw access surfaces
 - current safety still relies partly on discipline and observational pins rather than machine-enforced lifetime
 
@@ -193,15 +186,6 @@ Primary code surfaces:
 Source docs:
 - `docs/current-status.md`
 - `docs/spacetimedb-parity-roadmap.md` Tier B
-- `docs/hardening-oi-005-snapshot-iter-retention.md`
-- `docs/hardening-oi-005-snapshot-iter-useafterclose.md`
-- `docs/hardening-oi-005-snapshot-iter-mid-iter-close.md`
-- `docs/hardening-oi-005-subscription-seam-read-view-lifetime.md`
-- `docs/hardening-oi-005-committed-snapshot-indexseek-aliasing.md`
-- `docs/hardening-oi-005-state-view-seekindex-aliasing.md`
-- `docs/hardening-oi-005-state-view-seekindexrange-aliasing.md`
-- `docs/hardening-oi-005-state-view-scan-aliasing.md`
-- `docs/hardening-oi-005-committed-state-table-raw-pointer.md`
 
 ### OI-006: Subscription fanout still carries aliasing and cross-subscriber mutation risk concerns
 
@@ -209,7 +193,7 @@ Status: open
 Severity: medium
 
 Summary:
-- the known narrow slice-header and row-payload-sharing sub-hazards were closed and pinned
+- the known narrow slice-header and row-payload-sharing sub-hazards were closed and pinned by regression tests
 - the remaining issue is broader fanout/read-only-discipline risk if future code introduces in-place mutation or shared-state assumptions
 
 Why this matters:
@@ -225,8 +209,6 @@ Primary code surfaces:
 Source docs:
 - `docs/current-status.md`
 - `docs/spacetimedb-parity-roadmap.md` Tier B
-- `docs/hardening-oi-006-fanout-aliasing.md`
-- `docs/hardening-oi-006-row-payload-sharing.md`
 
 ### OI-007: Recovery sequencing and replay-edge behavior still needs targeted parity closure
 

@@ -62,9 +62,7 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 // a no-op, so the supervisor can safely wait for both goroutines
 // before returning.
 //
-// OI-004 sub-hazard pin
-// (docs/hardening-oi-004-supervise-disconnect-context.md): the
-// incoming ctx is hardcoded to context.Background() at the only
+// OI-004 sub-hazard pin: the incoming ctx is hardcoded to context.Background() at the only
 // production call site (upgrade.go HandleSubscribe), so the
 // inbox.DisconnectClientSubscriptions / inbox.OnDisconnect calls
 // threaded through c.Disconnect would be non-cancellable if the

@@ -29,8 +29,8 @@ import (
 // backing arrays across subscribers under the post-commit
 // row-immutability contract. Implementations must only read row
 // payloads; in-place mutation of `Value` elements corrupts every
-// other subscriber's view of the same commit. See
-// `docs/hardening-oi-006-row-payload-sharing.md`.
+// other subscriber's view of the same commit. Pinned by the row-payload
+// sharing regression tests.
 //
 // Errors: implementations must return ErrSendBufferFull when the
 // client's outbound buffer is full, and ErrSendConnGone when the
