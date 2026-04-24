@@ -1308,6 +1308,80 @@ func TestHandleOneOffQuery_CrossJoinWhereColumnEqualityReturnsProjectedRows(t *t
 	}
 }
 
+func TestHandleOneOffQuery_CrossJoinWhereColumnEqualityAndLiteralFilterReturnsProjectedRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+			{Name: "enabled", Type: schema.KindBool},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, tReg, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("t table missing from registry")
+	}
+	_, sReg, ok := eng.Registry().TableByName("s")
+	if !ok {
+		t.Fatal("s table missing from registry")
+	}
+	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: tReg.Columns}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			tReg.ID: {
+				{types.NewUint32(1), types.NewUint32(10)},
+				{types.NewUint32(2), types.NewUint32(20)},
+				{types.NewUint32(3), types.NewUint32(30)},
+			},
+			sReg.ID: {
+				{types.NewUint32(9), types.NewUint32(20), types.NewBool(false)},
+				{types.NewUint32(10), types.NewUint32(30), types.NewBool(true)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x7d},
+		QueryString: "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32 AND s.enabled = TRUE",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (one-off cross-join WHERE equality plus filter is query-only accepted)", *result.Error)
+	}
+	if len(result.Tables) != 1 {
+		t.Fatalf("Tables len = %d, want 1", len(result.Tables))
+	}
+	if result.Tables[0].TableName != "t" {
+		t.Fatalf("TableName = %q, want t", result.Tables[0].TableName)
+	}
+	pvs := decodeRows(t, firstTableRows(result), tTS)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(3)) || !pvs[0][1].Equal(types.NewUint32(30)) {
+		t.Fatalf("row 0 = %v, want t id=3/u32=30", pvs[0])
+	}
+}
+
 func TestHandleOneOffQuery_JoinProjectionOnLeftTable(t *testing.T) {
 	conn := testConnDirect(nil)
 	ordersTS := &schema.TableSchema{

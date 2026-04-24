@@ -948,6 +948,46 @@ func TestParseJoinWhereColumnEquality(t *testing.T) {
 	}
 }
 
+func TestParseJoinWhereColumnEqualityAndLiteralFilter(t *testing.T) {
+	stmt, err := Parse("SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32 AND s.enabled = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want parsed cross join")
+	}
+	if stmt.Join.HasOn {
+		t.Fatal("Join.HasOn = true, want false for cross join")
+	}
+	pred, ok := stmt.Predicate.(AndPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want AndPredicate", stmt.Predicate)
+	}
+	cmp, ok := pred.Left.(ColumnComparisonPredicate)
+	if !ok {
+		t.Fatalf("Left predicate = %T, want ColumnComparisonPredicate", pred.Left)
+	}
+	if cmp.Left.Table != "t" || cmp.Left.Alias != "t" || cmp.Left.Column != "u32" {
+		t.Fatalf("Left = %+v, want t.u32", cmp.Left)
+	}
+	if cmp.Right.Table != "s" || cmp.Right.Alias != "s" || cmp.Right.Column != "u32" {
+		t.Fatalf("Right = %+v, want s.u32", cmp.Right)
+	}
+	filter, ok := pred.Right.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Right predicate = %T, want ComparisonPredicate", pred.Right)
+	}
+	if filter.Filter.Table != "s" || filter.Filter.Alias != "s" || filter.Filter.Column != "enabled" {
+		t.Fatalf("Filter = %+v, want s.enabled", filter.Filter)
+	}
+	if filter.Filter.Literal.Kind != LitBool || !filter.Filter.Literal.Bool {
+		t.Fatalf("Filter literal = %+v, want TRUE bool", filter.Filter.Literal)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %+v, want none because predicate includes column comparison", stmt.Filters)
+	}
+}
+
 func TestParseRejectsJoinWhereColumnEqualityRequiresQualifiedColumns(t *testing.T) {
 	cases := []string{
 		"SELECT t.* FROM t JOIN s WHERE u32 = s.u32",

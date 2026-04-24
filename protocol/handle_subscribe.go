@@ -224,7 +224,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				if !allowProjection {
 					return compiledSQLQuery{}, fmt.Errorf("cross join WHERE not supported")
 				}
-				join, err := compileCrossJoinWhereColumnEquality(stmt, leftID, leftTS, rightID, rightTS)
+				join, err := compileCrossJoinWhereColumnEquality(stmt, leftID, leftTS, rightID, rightTS, caller)
 				if err != nil {
 					return compiledSQLQuery{}, err
 				}
@@ -316,13 +316,13 @@ func compileAggregateProjection(agg *sql.AggregateProjection) (*compiledSQLAggre
 	}, nil
 }
 
-func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.TableID, leftTS *schema.TableSchema, rightID schema.TableID, rightTS *schema.TableSchema) (subscription.Join, error) {
+func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.TableID, leftTS *schema.TableSchema, rightID schema.TableID, rightTS *schema.TableSchema, caller *types.Identity) (subscription.Join, error) {
 	if leftID == rightID {
 		return subscription.Join{}, fmt.Errorf("self-join cross join WHERE column equality not supported")
 	}
-	cmp, ok := stmt.Predicate.(sql.ColumnComparisonPredicate)
-	if !ok {
-		return subscription.Join{}, fmt.Errorf("cross join WHERE only supports qualified column equality")
+	cmp, filterPred, err := splitCrossJoinWherePredicate(stmt.Predicate)
+	if err != nil {
+		return subscription.Join{}, err
 	}
 	if cmp.Op != "=" {
 		return subscription.Join{}, fmt.Errorf("cross join WHERE column comparisons only support '='")
@@ -346,13 +346,52 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 		return subscription.Join{}, fmt.Errorf("cross join WHERE %s.%s = %s.%s: array/product values are not comparable",
 			stmt.Join.LeftTable, leftRef.Column, stmt.Join.RightTable, rightRef.Column)
 	}
+	var filter subscription.Predicate
+	if filterPred != nil {
+		filter, err = compileCrossJoinWhereLiteralFilter(filterPred, map[string]relationSchema{
+			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
+			stmt.Join.RightTable: {id: rightID, ts: rightTS},
+		}, caller)
+		if err != nil {
+			return subscription.Join{}, err
+		}
+	}
 	return subscription.Join{
 		Left:         leftID,
 		Right:        rightID,
 		LeftCol:      types.ColID(leftCol.Index),
 		RightCol:     types.ColID(rightCol.Index),
+		Filter:       filter,
 		ProjectRight: joinProjectsRight(stmt, false),
 	}, nil
+}
+
+func splitCrossJoinWherePredicate(pred sql.Predicate) (sql.ColumnComparisonPredicate, sql.Predicate, error) {
+	switch p := pred.(type) {
+	case sql.ColumnComparisonPredicate:
+		return p, nil, nil
+	case sql.AndPredicate:
+		if cmp, ok := p.Left.(sql.ColumnComparisonPredicate); ok {
+			if _, rightIsColumnComparison := p.Right.(sql.ColumnComparisonPredicate); rightIsColumnComparison {
+				return sql.ColumnComparisonPredicate{}, nil, fmt.Errorf("cross join WHERE supports exactly one qualified column equality")
+			}
+			return cmp, p.Right, nil
+		}
+		if cmp, ok := p.Right.(sql.ColumnComparisonPredicate); ok {
+			return cmp, p.Left, nil
+		}
+		return sql.ColumnComparisonPredicate{}, nil, fmt.Errorf("cross join WHERE only supports qualified column equality")
+	default:
+		return sql.ColumnComparisonPredicate{}, nil, fmt.Errorf("cross join WHERE only supports qualified column equality")
+	}
+}
+
+func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string]relationSchema, caller *types.Identity) (subscription.Predicate, error) {
+	cmp, ok := pred.(sql.ComparisonPredicate)
+	if !ok {
+		return nil, fmt.Errorf("cross join WHERE filter supports exactly one column-literal predicate")
+	}
+	return normalizeSQLFilterForRelations(cmp.Filter, relations, func(string) uint8 { return 0 }, caller)
 }
 
 func compileProjectionColumns(projectedTable string, columns []sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema) ([]compiledSQLProjectionColumn, error) {

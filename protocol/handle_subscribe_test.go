@@ -1066,6 +1066,51 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityStillRejected(t *test
 	}
 }
 
+func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterStillRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+			{Name: "enabled", Type: schema.KindBool},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   125,
+		QueryID:     122,
+		QueryString: "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32 AND s.enabled = TRUE",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.Error != "cross join WHERE not supported" {
+		t.Fatalf("Error = %q, want cross join WHERE not supported", se.Error)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
+	}
+}
+
 func TestHandleSubscribeSingle_QuotedSpecialCharacterIdentifiers(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
