@@ -1,211 +1,104 @@
-# Hosted Shunter bootstrap
+# Hosted runtime quickstart
 
-This doc walks through the minimal wiring surface for bringing up the current
-Shunter runtime/server. The companion binary at `cmd/shunter-example/main.go`
-implements everything below; read it alongside this doc.
+This is the current start-here path for running Shunter as a hosted runtime/server.
 
-## What gets wired
+The normal runnable example is `cmd/shunter-example`. It defines a tiny module through the top-level `github.com/ponchione/shunter` API, builds a `shunter.Runtime`, serves the WebSocket protocol at `/subscribe`, and shuts down through runtime ownership.
 
-```
-schema.Builder → schema.SchemaRegistry
-                      │
-                      ▼
-commitlog.OpenAndRecoverDetailed ──► store.CommittedState
-                      │                      │
-                      ▼                      │
-commitlog.DurabilityWorker ──► durabilityAdapter
-                      │                      │
-                      │                      ▼
-                      │    subscription.Manager (reg, reg, WithFanOutInbox)
-                      │                      │
-                      ▼                      ▼
-                executor.NewExecutor(cfg{Durability, Subscriptions}, reducerRegistry, committed, schemaReg, maxTxID)
-                      │
-                      ▼
-                executor.Startup(ctx, nil) ─── flips external-admission gate
-                      │
-                      ▼
-                protocol.NewClientSender(conns, inboxAdapter)
-                      │
-                      ▼
-                protocol.NewFanOutSenderAdapter(clientSender)
-                      │
-                      ▼
-                subscription.NewFanOutWorker(inbox, sender, subs.DroppedChanSend()) — go worker.Run(ctx)
-                      │
-                      ▼
-                protocol.Server { Executor: inboxAdapter, Conns: conns, ... }
-                      │
-                      ▼
-                http.Server mux.Handle("/subscribe", server.HandleSubscribe)
-```
+This doc is no longer a manual subsystem-wiring guide. Low-level packages such as `schema`, `commitlog`, `executor`, `subscription`, and `protocol` remain available for internal/advanced work, but normal app code should not assemble that graph directly.
 
-## Step by step
-
-### 1. Declare the schema
-
-```go
-b := schema.NewBuilder()
-b.SchemaVersion(1)
-b.TableDef(schema.TableDefinition{
-    Name: "greetings",
-    Columns: []schema.ColumnDefinition{
-        {Name: "id", Type: types.KindUint64, PrimaryKey: true, AutoIncrement: true},
-        {Name: "message", Type: types.KindString},
-    },
-})
-eng, err := b.Build(schema.EngineOptions{})
-reg := eng.Registry()
-```
-
-`schema.SchemaRegistry` is the hub consumed by every downstream subsystem.
-
-### 2. Open the data directory
-
-```go
-committed, maxTxID, plan, err := commitlog.OpenAndRecoverDetailed(dataDir, reg)
-```
-
-- Returns `ErrNoData` on first boot. Bootstrap by creating an empty
-  `store.CommittedState`, registering every table from the registry, writing
-  an initial snapshot at TxID 0 via `commitlog.NewSnapshotWriter`, then
-  re-running `OpenAndRecoverDetailed`.
-- On subsequent boots the call replays snapshot + segments up to the durable
-  horizon, returns the recovered `*store.CommittedState`, the highest
-  applied `TxID`, and the resume plan used to reopen the commit-log tail.
-
-### 3. Start the durability worker
-
-```go
-dw, err := commitlog.NewDurabilityWorkerWithResumePlan(dataDir, plan, commitlog.DefaultCommitLogOptions())
-```
-
-The executor expects a `DurabilityHandle` taking `types.TxID`. The commit-log
-worker uses `uint64` — a four-line adapter bridges them:
-
-```go
-type durabilityAdapter struct{ dw *commitlog.DurabilityWorker }
-func (a durabilityAdapter) EnqueueCommitted(txID types.TxID, cs *store.Changeset) {
-    a.dw.EnqueueCommitted(uint64(txID), cs)
-}
-func (a durabilityAdapter) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
-    return a.dw.WaitUntilDurable(txID)
-}
-```
-
-### 4. Register reducers
-
-```go
-rr := executor.NewReducerRegistry()
-rr.Register(executor.RegisteredReducer{Name: "say_hello", Handler: sayHello})
-rr.Freeze()
-```
-
-`ReducerRegistry` is separate from the schema builder's reducer list — the
-schema builder records reducers for declarative purposes (export, validation),
-while the executor's registry owns runtime dispatch. Freeze before constructing
-the executor.
-
-### 5. Wire the subscription fan-out graph
-
-```go
-fanOutInbox := make(chan subscription.FanOutMessage, 256)
-subs := subscription.NewManager(
-    reg,
-    reg, // schema.SchemaRegistry also satisfies subscription.IndexResolver
-    subscription.WithFanOutInbox(fanOutInbox),
-)
-```
-
-`schema.SchemaRegistry` now satisfies the subscription-side lookup contract directly, including `ColumnCount(TableID) int`, so the bootstrap can pass the registry straight to `subscription.NewManager`.
-
-### 6. Construct and start the executor
-
-```go
-exec := executor.NewExecutor(executor.ExecutorConfig{
-    Durability:    durabilityAdapter{dw},
-    Subscriptions: subs,
-}, rr, committed, reg, uint64(maxTxID))
-
-if err := exec.Startup(ctx, nil); err != nil { return err }
-go exec.Run(ctx)
-```
-
-`Startup` runs the scheduler-replay + dangling-client sweep (SPEC-003 §10.6,
-§13.5) then flips the external-admission gate. External protocol traffic is
-rejected with `ErrExecutorNotStarted` until Startup finishes.
-
-The `nil` scheduler is valid when sys_scheduled replay is not needed. Hosted
-runtime bring-up that relies on scheduled reducers wires a `Scheduler` here — at the time of
-writing the scheduler constructor reaches the executor's unexported inbox, so
-scheduler wiring is still an internal / test-only path.
-
-### 7. Wire the fan-out worker
-
-```go
-conns := protocol.NewConnManager()
-inboxAdapter := executor.NewProtocolInboxAdapter(exec)
-clientSender := protocol.NewClientSender(conns, inboxAdapter)
-fanOutSender := protocol.NewFanOutSenderAdapter(clientSender)
-worker := subscription.NewFanOutWorker(fanOutInbox, fanOutSender, subs.DroppedChanSend())
-go worker.Run(ctx)
-```
-
-The `ConnManager` is shared between `protocol.Server` (admission) and
-`NewClientSender` (delivery) so resolved `ConnectionID`s point at the same
-`*Conn` in both directions. On shutdown, close `fanOutInbox` after the
-executor has drained so the worker exits before durability is closed.
-
-### 8. Stand up the protocol server
-
-```go
-server := &protocol.Server{
-    JWT:      &auth.JWTConfig{SigningKey: key, AuthMode: auth.AuthModeAnonymous},
-    Mint:     &auth.MintConfig{Issuer: "...", Audience: "...", SigningKey: key, Expiry: 24 * time.Hour},
-    Options:  protocol.DefaultProtocolOptions(),
-    Executor: inboxAdapter,
-    Conns:    conns,
-    Schema:   reg,
-    State:    stateAdapter{committed},
-}
-
-mux := http.NewServeMux()
-mux.HandleFunc("/subscribe", server.HandleSubscribe)
-http.ListenAndServe(addr, mux)
-```
-
-`*store.CommittedState` returns a concrete `*CommittedSnapshot` from its
-`Snapshot()` method; the protocol layer's `CommittedStateAccess` interface
-expects the `CommittedReadView` interface. A two-line adapter bridges the
-shape:
-
-```go
-type stateAdapter struct{ cs *store.CommittedState }
-func (a stateAdapter) Snapshot() store.CommittedReadView { return a.cs.Snapshot() }
-```
-
-### 9. Graceful shutdown
-
-On SIGINT/SIGTERM, cancel the root context, shut the HTTP server down with
-a bounded timeout, call `exec.Shutdown()` (waits for Run to drain), close
-`fanOutInbox` so the worker exits, then `dw.Close()` to flush the commit
-log. See `cmd/shunter-example/main.go` for the ordering.
-
-## What is deliberately out of scope
-
-- **Scheduled reducers** — `executor.Scheduler` reads an unexported executor
-  channel; production wiring for that path is still pending.
-- **Authentication in strict mode** — the example uses anonymous auth so it
-  can be dialed without an external IdP. Production hosted deployments wire
-  `AuthModeStrict` with their own JWT issuer.
-
-## Running the example
+## Run the example
 
 ```sh
-go build ./cmd/shunter-example
-./shunter-example -addr :8080 -data ./shunter-data
+rtk go run ./cmd/shunter-example -addr :8080 -data ./shunter-data
 ```
 
-Dial `/subscribe` with a WebSocket client using one of the accepted
-subprotocols (`v1.bsatn.spacetimedb` or `v1.bsatn.shunter`) to verify the
-server admits an anonymous connection. Ctrl-C exits cleanly.
+The server listens on the configured address and exposes the subscription/reducer WebSocket endpoint at:
+
+```text
+ws://localhost:8080/subscribe
+```
+
+Use one of the accepted subprotocols:
+
+- `v1.bsatn.spacetimedb`
+- `v1.bsatn.shunter`
+
+The example uses `shunter.AuthModeDev`, so it is dialable locally without an external identity provider. Strict auth remains a runtime mode for non-demo configurations.
+
+## What the example proves
+
+`cmd/shunter-example` is intentionally small:
+
+- module: `hello`
+- table: `greetings`
+- reducer: `say_hello`
+- runtime: built with `shunter.Build(...)`
+- serving: `Runtime.ListenAndServe(ctx)` / `Runtime.HTTPHandler()`
+- external proof path: WebSocket protocol, not local-only calls
+
+The test file `cmd/shunter-example/main_test.go` verifies:
+
+- cold boot and recovery against the same data directory
+- development WebSocket admission and identity-token handshake
+- subscription to `SELECT * FROM greetings`
+- reducer call to `say_hello` over protocol messages
+- non-caller subscriber receives a `TransactionUpdateLight` insert
+- context cancellation shuts serving/runtime ownership down cleanly
+- the example source does not manually assemble the kernel graph
+
+Run the proof with:
+
+```sh
+rtk go test ./cmd/shunter-example -count=1
+```
+
+## App code shape
+
+The example should read like app code:
+
+```go
+mod := shunter.NewModule("hello").
+    SchemaVersion(1).
+    TableDef(schema.TableDefinition{
+        Name: "greetings",
+        Columns: []schema.ColumnDefinition{
+            {Name: "id", Type: types.KindUint64, PrimaryKey: true, AutoIncrement: true},
+            {Name: "message", Type: types.KindString},
+        },
+    }).
+    Reducer("say_hello", sayHello)
+
+rt, err := shunter.Build(mod, shunter.Config{
+    DataDir:        dataDir,
+    ListenAddr:     addr,
+    AuthMode:       shunter.AuthModeDev,
+    EnableProtocol: true,
+})
+if err != nil {
+    return err
+}
+return rt.ListenAndServe(ctx)
+```
+
+Normal example code may import the top-level `shunter` package plus small schema/types helpers needed to declare a module. It should not instantiate the commit-log worker, executor, subscription manager, protocol server, fan-out worker, or connection manager directly.
+
+## Where the subsystem wiring lives now
+
+Runtime assembly moved behind the top-level runtime owner:
+
+- `runtime_build.go` owns config normalization, schema build, recovery/bootstrap, and reducer-registry construction.
+- `runtime_lifecycle.go` owns start/close ordering for durability, executor, scheduler, subscription fan-out, and lifecycle state.
+- `runtime_network.go` owns protocol server construction, `HTTPHandler()`, and `ListenAndServe(ctx)`.
+- `runtime_local.go` owns secondary local reducer/read helpers.
+- `runtime_describe.go` owns v1 describe/export foundations.
+
+That internal wiring is still real, but it is no longer the normal app-author bootstrap story.
+
+## Deliberately out of scope
+
+- full tutorial site
+- generated frontend/client app
+- canonical contract JSON or client codegen
+- v1.5 query/view declarations
+- production auth walkthrough
+- multi-module hosting or admin/control-plane work

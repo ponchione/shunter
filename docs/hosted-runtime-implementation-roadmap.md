@@ -1,6 +1,6 @@
 # Hosted runtime implementation roadmap
 
-Status: audited; ready for post-audit implementation planning
+Status: v1 hosted-runtime proof landed; ready for V1.5 planning if hosted-runtime work continues
 Scope: implementation-facing roadmap for turning the hosted-runtime architecture docs into ordered epics. This is not a detailed first-patch implementation plan.
 
 This roadmap follows:
@@ -9,7 +9,7 @@ This roadmap follows:
 - `docs/decomposition/hosted-runtime-v1-contract.md`
 - `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
 - `docs/decomposition/hosted-runtime-v2-directions.md`
-- `docs/EXECUTION-ORDER.md`
+- `docs/decomposition/EXECUTION-ORDER.md`
 
 Audit result:
 - the hosted-runtime doc set has been reconciled for v1/v1.5/v2 scope boundaries
@@ -18,8 +18,8 @@ Audit result:
 
 Current repo reality:
 - Shunter already has substantial kernel packages: `schema`, `store`, `commitlog`, `executor`, `subscription`, `protocol`, and `query`.
-- The current runnable hosted path is still the manual bootstrap around `cmd/shunter-example/main.go`.
-- The hosted-runtime work should replace manual subsystem assembly as the normal app-author/operator path.
+- The current runnable hosted path is `cmd/shunter-example/main.go`, which uses the top-level `shunter` API instead of manual subsystem assembly.
+- V1-H now proves the normal app-author/operator path: module definition, runtime build/start/serve, WebSocket subscription, reducer call, live update, recovery, and shutdown.
 - This roadmap starts after the relevant kernel pieces are ready enough to wire through a top-level runtime.
 
 ---
@@ -32,9 +32,9 @@ That means the next major product of the repo should not be another manually wir
 It should be a top-level Shunter API that lets an app define a module, build a runtime, and serve clients without directly assembling the kernel graph.
 
 The target progression is:
-1. v1: top-level hosted runtime API
-2. v1 hardening: hello-world/app-author path replaces manual bootstrap
-3. v1.5: query/view declarations, export, codegen, permissions metadata, migration metadata
+1. v1: top-level hosted runtime API — initial implementation landed
+2. v1 hardening: hello-world/app-author path replaces manual bootstrap — V1-H landed
+3. v1.5: query/view declarations, export, codegen, permissions metadata, migration metadata — not started
 4. v2+: larger structural runtime evolution after real apps prove the pressure
 
 ---
@@ -214,6 +214,8 @@ Non-goals:
 - permissions/migration metadata
 
 ### Epic V1-7: Hello-world replacement
+
+Status: landed in `cmd/shunter-example`.
 
 Goal: replace the manual bootstrap story with a true hosted-runtime example.
 
@@ -414,41 +416,23 @@ As implementation lands, keep these docs aligned:
 - `docs/decomposition/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md`
   - keep as the high-level model, not the detailed task tracker
 
-- `docs/EXECUTION-ORDER.md`
+- `docs/decomposition/EXECUTION-ORDER.md`
   - add hosted-runtime phases after the core kernel execution order when implementation work begins
 
 ---
 
-## 9. First implementation slice marker
+## 9. Current hosted-runtime slice marker
 
-The first concrete implementation slice should remain narrow. The next step is a detailed implementation plan for this marker, not immediate v1.5/v2 work.
+The initial v1 hosted-runtime sequence through V1-H has landed in live code.
 
-Marker name:
-- hosted runtime top-level API skeleton
+Landed proof points:
+- root package imports as `github.com/ponchione/shunter`
+- `Module`, `Config`, `Runtime`, and `Build(...)` exist
+- `Runtime.Start`, `Close`, `HTTPHandler`, `ListenAndServe`, local calls, describe, and schema export exist
+- `cmd/shunter-example` is the normal hosted-runtime hello-world path and no longer manually assembles the kernel graph
+- `cmd/shunter-example/main_test.go` proves recovery, WebSocket admission, subscription, reducer call, live update delivery, shutdown, and source-level no-manual-assembly guard
 
-Marker goal:
-- introduce the top-level package/types without moving all subsystem wiring at once
-
-Expected deliverable categories:
-- `Module` type with name/version/metadata shell
-- `Config` type with narrow runtime fields
-- `Runtime` type shell
-- `Build(module, config)` validation stub
-- tests that establish basic construction/validation behavior
-- no network serving yet
-
-Why this is the first marker:
-- gives all later runtime work a home
-- keeps the first implementation patch reviewable
-- avoids rewriting `cmd/shunter-example/main.go` before the public API shape exists
-
-Next roadmap slices after that:
-1. module schema/reducer registration wrappers
-2. build pipeline that assembles the existing kernel graph
-3. lifecycle start/close ownership
-4. network surface and `HTTPHandler()`
-5. local reducer/query calls
-6. example rewrite
+If hosted-runtime work continues, the next marker is planning V1.5-A query/view declarations. Do not start v1.5 implementation until the plan is grounded against the live v1 API and keeps codegen/contract/migration work out of the first query/view slice.
 
 ---
 
@@ -456,8 +440,8 @@ Next roadmap slices after that:
 
 The architecture docs are now clear enough to stop asking broad design questions.
 
-The implementation path should be:
-- build the v1 top-level runtime surface first
-- prove it by replacing the manual example path
-- then add v1.5 declarations/export/codegen/migration metadata
+The hosted-runtime implementation path is now:
+- keep the v1 top-level runtime proof green
+- if continuing hosted-runtime usability work, plan V1.5-A query/view declarations next
+- only after query/view declarations exist, continue toward canonical export, codegen, permissions metadata, and migration metadata
 - leave v2 structural ambitions parked until real hosted apps create pressure

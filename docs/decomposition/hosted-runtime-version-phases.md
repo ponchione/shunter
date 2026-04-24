@@ -1,6 +1,6 @@
 # Hosted runtime version phases
 
-Status: planning baseline
+Status: v1 initial implementation landed; v1.5 planning is next if hosted-runtime work continues
 Scope: version-phase plan for hosted-runtime work. This is not an implementation plan and should not be used as permission to write code directly.
 
 This document sits between the architecture contracts and detailed implementation plans:
@@ -11,10 +11,15 @@ This document sits between the architecture contracts and detailed implementatio
 
 Decision baseline:
 - Hosted-first remains locked.
-- v1 is the coherent hosted runtime/server shape.
+- v1 is the coherent hosted runtime/server shape, and the initial V1-A through V1-H implementation is live.
 - v1.5 is developer/platform usability on top of v1.
 - v2+ is structural/runtime evolution after real v1/v1.5 usage creates pressure.
-- No v1.5 or v2 implementation should start until the v1 module/runtime owner is real.
+- No v1.5 or v2 implementation should start without a fresh, bounded plan grounded against the live v1 module/runtime owner.
+
+Current live proof:
+- `cmd/shunter-example` is the hosted-runtime hello-world path.
+- The example uses `shunter.NewModule`, module schema/reducer registration, `shunter.Build`, `Runtime.ListenAndServe(ctx)`, and the WebSocket protocol surface.
+- Its tests prove recovery, WebSocket admission, subscribe, reducer call, live update delivery, shutdown, and a guard against manual kernel assembly in the normal example.
 
 ---
 
@@ -501,12 +506,12 @@ V2 planning posture:
 
 ## Next planning step
 
-The next planning artifact should be a revised first implementation plan for V1-A, not code.
+The next hosted-runtime planning artifact should be for V1.5-A query/view declarations, not more V1 bootstrap work.
 
 That plan must decide:
-- empty-module behavior
-- schema-version defaulting vs explicit version registration
-- whether lower-level schema semantics may be touched
-- exact tests proving the root package surface without drifting into V1-B
+- the smallest declared read surface that attaches to `shunter.Module`
+- how query/view declarations are described/exported without implementing the full canonical contract yet
+- which tests prove declarations are module-owned while keeping codegen, permissions metadata, and migration metadata out of the first V1.5 slice
+- how the new declarations coexist with the existing WebSocket-first v1 runtime surface
 
-After V1-A is accepted, the next implementation plan should be V1-B module registration wrappers.
+Do not start V1.5 implementation until that bounded plan exists.

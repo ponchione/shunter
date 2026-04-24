@@ -684,9 +684,14 @@ func TestPostCommitPanicInDurabilitySetsFatal(t *testing.T) {
 	}
 }
 
-// Story 5.3 AC: panic in EvalAndBroadcast sets fatal.
+// Story 5.3 AC: panic in EvalAndBroadcast sets fatal and closes the
+// post-commit snapshot acquired for evaluation.
 func TestPostCommitPanicInEvalSetsFatal(t *testing.T) {
 	h := newPipelineHarness(t)
+	h.exec.snapshotFn = func() store.CommittedReadView {
+		raw := h.cs.Snapshot()
+		return &trackedView{CommittedReadView: raw, rec: h.rec}
+	}
 	h.subs.panicOn = true
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -701,6 +706,16 @@ func TestPostCommitPanicInEvalSetsFatal(t *testing.T) {
 	}
 	if !h.exec.fatal.Load() {
 		t.Fatal("executor.fatal not set after eval panic")
+	}
+	events := h.rec.snapshot()
+	want := []string{"durability", "eval-start", "view-close"}
+	if len(events) != len(want) {
+		t.Fatalf("events=%v, want %v", events, want)
+	}
+	for i, w := range want {
+		if events[i] != w {
+			t.Fatalf("events[%d]=%s, want %s (full=%v)", i, events[i], w, events)
+		}
 	}
 }
 

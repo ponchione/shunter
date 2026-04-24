@@ -575,19 +575,18 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 // Stories 5.1–5.3):
 //
 //  1. hand the committed changeset to durability (queue admission, not fsync)
-//  2. acquire a stable committed read view
+//  2. acquire a stable committed read view and defer its release
 //  3. evaluate subscriptions synchronously against that view
-//  4. release the read view
-//  5. deliver the reducer response to the caller
-//  6. non-blocking drain of dropped-client signals
+//  4. deliver the reducer response to the caller
+//  5. non-blocking drain of dropped-client signals
 //
 // Crash-loss semantics: the response is acknowledged before fsync, so a crash
-// between step 5 and durability persistence may lose the transaction on
-// restart. This is an allowed state per SPEC-003 §5.1.
+// after response delivery but before durability persistence may lose the
+// transaction on restart. This is an allowed state per SPEC-003 §5.1.
 //
 // Fatal-state semantics (Story 5.3, SPEC-003 §5.4): the transaction is
-// already visible in memory once commit returns. Any panic in steps 1–6
-// leaves committed state that was never handed off for durability or
+// already visible in memory once commit returns. Any panic in the post-commit
+// pipeline leaves committed state that may not have been durably handed off or
 // evaluated for subscribers. The executor therefore latches a fatal flag
 // and rejects future write-affecting commands until restart.
 func (e *Executor) postCommit(
@@ -618,6 +617,7 @@ func (e *Executor) postCommit(
 
 	e.durability.EnqueueCommitted(txID, changeset)
 	view := e.snapshotFn()
+	defer view.Close()
 	meta := subscription.PostCommitMeta{TxDurable: e.durability.WaitUntilDurable(txID)}
 	if opts.source == CallSourceExternal && opts.callerConnID != nil {
 		callerConnID := *opts.callerConnID
@@ -651,7 +651,6 @@ func (e *Executor) postCommit(
 		}
 	}
 	e.subs.EvalAndBroadcast(txID, changeset, view, meta)
-	view.Close()
 
 	responded = sendCallReducerResponse(cmd, ReducerResponse{
 		Status:      StatusCommitted,

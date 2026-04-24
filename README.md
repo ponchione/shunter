@@ -38,21 +38,37 @@ There is working code in these packages:
 - `protocol` — wire codecs, upgrade/auth path, connection lifecycle, dispatch, outbound delivery, backpressure handling
 - `query/sql` — the current narrow SQL surface used by subscribe and one-off query paths
 - `bsatn` — binary value encoding used across the system
+- root `shunter` package — hosted-runtime API (`Module`, `Config`, `Runtime`, `Build`, lifecycle/serving/local/describe helpers)
 
 In other words: this is not vaporware anymore. There is a real subsystem implementation here.
+
+## Hosted-runtime hello world
+
+The normal runnable example is now `cmd/shunter-example`.
+
+It defines a `greetings` table and `say_hello` reducer through the top-level
+`shunter.Module` API, builds a `shunter.Runtime`, serves `/subscribe`, and proves
+live updates over the WebSocket protocol.
+
+Run:
+
+```bash
+rtk go run ./cmd/shunter-example -addr :8080 -data ./shunter-data
+```
+
+The companion quickstart is `docs/hosted-runtime-bootstrap.md`.
 
 ## What is not true yet
 
 This repo is not yet a clear, finished product experience.
 
 Specifically:
-- there is no simple top-level "start here" app/demo flow
-- there is no `main` package or polished runnable example server at the repo root
-- there is no stable public hosted-runtime story documented end-to-end
-- there is no README-driven quickstart that proves "build app, define schema, run server, connect client"
+- the top-level hosted-runtime path exists, but it is still early and intentionally narrow
+- there is no full tutorial site, generated frontend, or client-binding/codegen workflow yet
+- v1.5 query/view declarations, contract export, permissions metadata, and migration metadata are not implemented yet
 - there is still active debt reconciliation work in `TECH-DEBT.md`
 
-Also important: the current `schema.Engine.Start(...)` is not a full unified runtime bootstrap. It currently performs startup schema compatibility checks, but this repo does not yet present a single polished engine package that wires every subsystem into one obvious developer-facing API.
+Also important: `schema.Engine.Start(...)` is not the app-facing runtime owner. The root `shunter.Runtime` is now the hosted-runtime owner that wires the subsystem graph behind a top-level API.
 
 ## So is the clean-room effort functional?
 
@@ -97,9 +113,9 @@ That gap is exactly what this README is trying to close.
 
 If you want orientation instead of another audit spiral, read in this order:
 1. `README.md` — this file
-2. `docs/current-status.md` — blunt completion/parity snapshot
-3. `docs/project-brief.md` — original thesis and architecture intent
-4. `docs/EXECUTION-ORDER.md` — implementation sequencing and dependency map
+2. `docs/project-brief.md` — original thesis and architecture intent
+3. `docs/hosted-runtime-bootstrap.md` — current hosted-runtime quickstart
+4. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
 5. `docs/spacetimedb-parity-roadmap.md` — active parity development driver
 6. `docs/parity-phase0-ledger.md` — named parity scenarios and pinned tests
 7. `TECH-DEBT.md` — live debt and follow-up ledger
@@ -111,6 +127,7 @@ Then inspect the main implementation packages:
 - `executor/`
 - `subscription/`
 - `protocol/`
+- root `shunter` package files (`module.go`, `runtime*.go`, `config.go`)
 
 ## Current practical status
 
@@ -118,11 +135,12 @@ If you want the blunt summary:
 - The repo is worth keeping if you still care about building your own SpacetimeDB-like runtime.
 - The repo is not yet worth pretending it is "done."
 - The next high-leverage work is not more tiny audit slices by default.
-- The next high-leverage work is parity work against SpacetimeDB outcomes.
+- If continuing hosted-runtime usability, plan V1.5-A query/view declarations from `HOSTED_RUNTIME_PLANNING_HANDOFF.md`.
+- If continuing parity/completeness, use `docs/spacetimedb-parity-roadmap.md` as the active driver.
 
 ## What I would do next
 
-If continuing, the most useful next step is:
+If continuing parity/completeness work, the most useful next step is:
 
 1. Use `docs/spacetimedb-parity-roadmap.md` as the active driver
 - wire-level protocol parity first

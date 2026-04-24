@@ -1,7 +1,7 @@
 # APP-RUNTIME-LAYER-AND-USAGE-SURFACE
 
-Status: exploratory design note
-Scope: additive design document describing the missing coherent layer above the current Shunter engine/kernel so real applications can use Shunter through one hosted runtime model instead of hand-wiring the subsystem graph each time.
+Status: design baseline; initial v1 hosted-runtime layer now exists
+Scope: additive design document describing the coherent layer above the Shunter engine/kernel so real applications can use Shunter through one hosted runtime model instead of hand-wiring the subsystem graph each time.
 
 This document does not change the existing six core specs. It describes the practical runtime/application surface that would make the current engine actually usable across multiple projects.
 
@@ -25,22 +25,22 @@ Owner-operator framing:
 ## 1. Core conclusion
 
 The current Shunter code/spec set is far enough along to justify an engine/kernel.
-What is still missing is the coherent hosted app-facing runtime layer above that kernel.
+The initial coherent hosted app-facing runtime layer now exists, and this document remains the design baseline for keeping that layer coherent as it grows.
 
-Right now, Shunter mostly exists as:
+The kernel still exists as these subsystems:
 - schema subsystem
 - store subsystem
 - executor subsystem
 - commit-log/recovery subsystem
 - subscription subsystem
 - protocol subsystem
-- one manual bootstrap example that wires them together
+- a top-level `shunter.Runtime` owner that wires them for normal app code
 
-That is enough to prove the engine pieces are real.
-It is not yet enough to make Shunter feel like a natural runtime/server that multiple apps define against.
+That is enough to prove the engine pieces are real, and V1-H now proves the first hosted-runtime example path.
+Further work should make this runtime/server feel natural for more than the tiny hello-world module.
 
-So the next missing piece is not another app-specific product document.
-It is a document that defines the runtime/application surface that sits above the kernel and below specific products.
+So the next hosted-runtime piece is not another app-specific product document.
+It is continued evolution of the runtime/application surface that sits above the kernel and below specific products.
 
 In plain terms:
 - the kernel already explains how Shunter works internally
@@ -52,9 +52,9 @@ In plain terms:
 
 ## 2. The problem this document is solving
 
-### 2.1 The current gap
+### 2.1 The gap this layer closes
 
-Today, using Shunter requires understanding and wiring the engine graph directly:
+Before the hosted runtime layer, using Shunter required understanding and wiring the engine graph directly:
 - schema builder / registry
 - recovery / committed state bootstrap
 - durability worker

@@ -1,6 +1,6 @@
 # Hosted runtime v1 contract
 
-Status: draft
+Status: initial v1 implementation landed; contract remains the v1 reference
 Scope: the concrete v1 contract for Shunter's hosted runtime surface.
 
 This document turns the current hosted-runtime decisions into a compact implementation-facing contract.
@@ -8,8 +8,9 @@ It is the v1 target shape for making Shunter feel like a real hosted runtime/ser
 
 Current repo reality behind this contract:
 - the repo already has working kernel packages (`schema`, `store`, `commitlog`, `executor`, `subscription`, `protocol`)
-- the current runnable path is still the manual bootstrap in `cmd/shunter-example/main.go` and `docs/hosted-runtime-bootstrap.md`
-- this document describes the v1 contract that should replace that manual assembly as the normal developer-facing story
+- the root `github.com/ponchione/shunter` package now exposes the initial v1 hosted-runtime surface
+- the current runnable path is the hosted-runtime hello world in `cmd/shunter-example/main.go` and `docs/hosted-runtime-bootstrap.md`
+- this document remains the v1 contract and reference point for polish/follow-on work
 
 Related docs:
 - `docs/decomposition/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md` explains the high-level hosted-runtime layer
@@ -24,8 +25,8 @@ Related docs:
 For v1, Shunter should be a hosted runtime/server first.
 It is not an embedded-first system.
 
-This contract should be read as the next public/runtime layer above the current kernel, not as a claim that the repo already exposes this surface today.
-The live repo still reflects the earlier subsystem-first bring-up path; v1 is the contract that should make that internal complexity no longer be the default experience.
+This contract should be read as the public/runtime layer above the current kernel.
+The live repo now exposes the initial v1 surface, and the normal example no longer requires app authors to assemble the subsystem graph directly.
 
 The normal model is:
 - application authors define a Go module against Shunter
@@ -106,7 +107,7 @@ if err != nil {
     return err
 }
 
-return rt.ListenAndServe()
+return rt.ListenAndServe(ctx)
 ```
 
 This is intentionally close in role to the SpacetimeDB module model, but simpler in v1 implementation.

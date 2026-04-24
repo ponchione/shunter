@@ -412,6 +412,6 @@ The safe implementation order is:
 - subscription core before executor post-commit wiring
 - protocol core before final fan-out delivery
 - final subscription fan-out delivery last
-- top-level hosted-runtime work after the kernel is ready enough to replace manual bootstrap as the normal app path
+- top-level hosted-runtime work after the kernel is ready enough to replace manual bootstrap as the normal app path (initial V1-H proof is now landed)
 
-That ordering matches the current decomposition docs and hosted-runtime docs closely enough to drive real implementation work without reopening the same dependency mistakes.
+That ordering matches the current decomposition docs and hosted-runtime docs closely enough to drive real implementation work without reopening the same dependency mistakes. Future hosted-runtime work should now start from V1.5 planning rather than reopening the v1 bootstrap sequence.
