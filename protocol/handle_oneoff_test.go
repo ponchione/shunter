@@ -4996,3 +4996,77 @@ func TestHandleOneOffQuery_ParityArrayJoinOnRejected(t *testing.T) {
 		t.Error("expected non-empty error message for array-on-array join ON")
 	}
 }
+
+func TestHandleOneOffQuery_JoinOnEqualityWithFilterReturnsFilteredRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ordersTS := &schema.TableSchema{
+		ID:   1,
+		Name: "Orders",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "product_id", Type: schema.KindUint32},
+		},
+	}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ordersReg, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	ordersTS.ID = ordersReg.ID
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			ordersReg.ID: {
+				{types.NewUint32(1), types.NewUint32(100)},
+				{types.NewUint32(2), types.NewUint32(101)},
+				{types.NewUint32(3), types.NewUint32(102)},
+			},
+			inventoryReg.ID: {
+				{types.NewUint32(100), types.NewUint32(9)},
+				{types.NewUint32(101), types.NewUint32(10)},
+				{types.NewUint32(102), types.NewUint32(3)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x1e},
+		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (ON-filter is query-only accepted)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ordersTS)
+	if len(pvs) != 2 {
+		t.Fatalf("got %d rows, want 2 (orders 1 and 3 match the quantity<10 filter)", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[1][0].Equal(types.NewUint32(3)) {
+		t.Fatalf("unexpected order ids returned: %v, %v (want 1 and 3)", pvs[0][0], pvs[1][0])
+	}
+}
