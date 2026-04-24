@@ -13,6 +13,12 @@ Priority order:
 3. capability gaps that block realistic usage
 4. cleanup after parity direction is locked
 
+Active audit note (2026-04-24):
+- hosted-runtime V1 implementation is the current active campaign, tracked under `docs/hosted-runtime-planning/V1-*`
+- that campaign is the resolution path for OI-014 and overlaps materially with OI-004, OI-005, and OI-006
+- OI-002 remains the next parity/runtime-model campaign after the hosted-runtime V1 pass unless a fresh post-V1 audit changes priority
+- do not close parity items solely because they are reachable through the new hosted-runtime API; close or narrow them only when the underlying parity/correctness gap is pinned by live tests
+
 ## Open issues
 
 ### OI-001: Protocol surface is still not wire-close enough to SpacetimeDB
@@ -48,7 +54,7 @@ Source docs:
 - `docs/parity-phase2-slice4-rows-shape.md`
 
 Execution note:
-- OI-001 is no longer the next active batch for handoff purposes; the next execution target is OI-002 / Tier A2 subscription-runtime parity. The remaining OI-001 items are narrower compatibility/divergence follow-ons unless a user explicitly asks to reopen protocol wire-close work.
+- OI-001 is no longer the next active batch for handoff purposes; after the active hosted-runtime V1 campaign, the next parity execution target is expected to be OI-002 / Tier A2 subscription-runtime parity unless a fresh post-V1 audit changes priority. The remaining OI-001 items are narrower compatibility/divergence follow-ons unless a user explicitly asks to reopen protocol wire-close work.
 
 ### OI-002: Query and subscription behavior still diverges from the target runtime model
 
@@ -70,7 +76,7 @@ Summary:
 - broader A2/runtime-model gaps remain; after the join-backed `COUNT(*) [AS] alias` closure, the next bounded residual should be chosen from fresh live evidence rather than carried forward from stale pre-closure handoff notes
 
 Execution note:
-- OI-002 remains the next active handoff issue
+- OI-002 remains the next parity/runtime-model handoff issue after the active hosted-runtime V1 campaign; it is not the current implementation handoff while `docs/hosted-runtime-planning/V1-*` work is in progress
 - the JOIN ON equality-plus-single-relation-filter widening slice is now closed and pinned; subscribe acceptance is treated as a transparent parser admission rather than a one-off-only divergence because the ON-form and WHERE-form produce indistinguishable parser output
 - choose the next OI-002 batch only after a fresh post-change scout; do not blindly carry forward old handoff targets
 
@@ -141,6 +147,7 @@ Severity: high
 Summary:
 - several concrete sub-hazards were closed and pinned by regression tests
 - the remaining issue is the broader lifecycle/shutdown theme, not those already-closed sub-slices
+- hosted-runtime V1-D/V1-E now provide live mitigation for the normal root-runtime path: `Runtime.Start`, `Runtime.Close`, protocol graph ownership, `HTTPHandler`, `ListenAndServe`, swappable fan-out sender wiring, and `ConnManager.CloseAll(ctx, inbox)` before executor shutdown
 - other detached goroutine sites and ownership seams remain watch items if a concrete leak site surfaces
 - `ClientSender.Send` is still synchronous without its own ctx, but no concrete consumer currently requires widening that surface
 
@@ -149,6 +156,8 @@ Why this matters:
 - this is still one of the main blockers to calling the runtime trustworthy for serious private use
 
 Primary code surfaces:
+- `runtime_lifecycle.go`
+- `runtime_network.go`
 - `protocol/upgrade.go`
 - `protocol/conn.go`
 - `protocol/disconnect.go`
@@ -159,8 +168,13 @@ Primary code surfaces:
 - `protocol/async_responses.go`
 
 Source docs:
+- `docs/hosted-runtime-planning/V1-D/`
+- `docs/hosted-runtime-planning/V1-E/`
 - `docs/current-status.md`
 - `docs/spacetimedb-parity-roadmap.md` Tier B
+
+Audit note:
+- do not close OI-004 until V1-E/V1-H verification proves the hosted runtime can serve WebSocket clients, close connections, stop protocol delivery, and shut down without stranded goroutines; after that, either close this issue or replace it with concrete remaining lower-level protocol lifecycle hazards
 
 ### OI-005: Snapshot and committed-read-view lifetime rules still need stronger safety guarantees
 
@@ -170,6 +184,7 @@ Severity: high
 Summary:
 - the enumerated narrow sub-hazards were closed and pinned by regression tests
 - the remaining issue is the broader lifetime/ownership theme around read handles and raw access surfaces
+- hosted-runtime V1-F mitigates the normal root-runtime read path by exposing callback-scoped `Runtime.Read(ctx, fn)` and closing the committed snapshot before returning
 - current safety still relies partly on discipline and observational pins rather than machine-enforced lifetime
 
 Why this matters:
@@ -177,6 +192,7 @@ Why this matters:
 - this weakens confidence in subscription evaluation and recovery-side read paths
 
 Primary code surfaces:
+- `runtime_local.go`
 - `store/snapshot.go`
 - `store/committed_state.go`
 - `store/state_view.go`
@@ -184,8 +200,12 @@ Primary code surfaces:
 - `executor/executor.go`
 
 Source docs:
+- `docs/hosted-runtime-planning/V1-F/`
 - `docs/current-status.md`
 - `docs/spacetimedb-parity-roadmap.md` Tier B
+
+Audit note:
+- after V1-F verification, narrow this issue to any remaining lower-level raw snapshot/read-view surfaces if the root hosted-runtime API is pinned safe
 
 ### OI-006: Subscription fanout still carries aliasing and cross-subscriber mutation risk concerns
 
@@ -194,6 +214,7 @@ Severity: medium
 
 Summary:
 - the known narrow slice-header and row-payload-sharing sub-hazards were closed and pinned by regression tests
+- hosted-runtime V1-E adds protocol-backed fan-out delivery through a private swappable sender, so the new root-runtime delivery path should be included in the next fanout aliasing audit
 - the remaining issue is broader fanout/read-only-discipline risk if future code introduces in-place mutation or shared-state assumptions
 
 Why this matters:
@@ -201,14 +222,19 @@ Why this matters:
 - this weakens confidence in both parity and correctness claims
 
 Primary code surfaces:
+- `runtime_network.go`
 - `subscription/eval.go`
 - `subscription/fanout.go`
 - `subscription/fanout_worker.go`
 - `protocol/fanout_adapter.go`
 
 Source docs:
+- `docs/hosted-runtime-planning/V1-E/`
 - `docs/current-status.md`
 - `docs/spacetimedb-parity-roadmap.md` Tier B
+
+Audit note:
+- keep open until the protocol-backed hosted-runtime fanout path has explicit aliasing/no-cross-subscriber-mutation coverage, or until the audit confirms existing lower-level pins fully cover the new sender path
 
 ### OI-007: Recovery sequencing and replay-edge behavior still needs targeted parity closure
 
@@ -268,48 +294,46 @@ Source docs / surfaces:
 - `docs/hosted-runtime-bootstrap.md`
 - `subscription/oi013_registry_lookup_test.go`
 
-### OI-014: Shunter still lacks a true hosted runtime surface despite the new example bootstrap
+### OI-014: Hosted runtime V1 surface is in progress but not fully proven as the normal app path
 
-Status: open
+Status: open — actively resolving under hosted-runtime V1
 Severity: medium
 
 Summary:
-- the example/bootstrap story is now real, but the repo still does not expose the project-brief-style hosted runtime/app-definition surface.
-- there is no root importable package and no `engine/` package implementing a top-level runtime owner.
-- the current bootstrap still hand-wires schema, commitlog, executor, subscription, protocol, scheduler, and multiple shim adapters in host/runtime code.
-- `schema.EngineOptions` advertises runtime knobs (`DataDir`, `ExecutorQueueCapacity`, `DurabilityQueueCapacity`, `EnableProtocol`) that are not consumed by the live runtime path; only `StartupSnapshotSchema` is read by `Engine.Start()`.
+- the root importable package now exists and exposes the core hosted-runtime vocabulary: `Module`, `Config`, `Runtime`, and `Build`
+- the live root runtime now owns build/recovery foundation, lifecycle start/close, protocol serving hooks, local reducer/read helpers, and initial describe/export helpers
+- V1-H hello-world replacement is still the remaining proof that the top-level API has replaced manual subsystem wiring as the normal app-author path
+- the old manual example/docs may still make subsystem assembly look like the primary hosted-runtime story until V1-H demotes or replaces them
 
 Why this matters:
-- this is now the main remaining gap between "there is a working example" and "Shunter is a usable hosted runtime/server"
-- the current public surface is still subsystem-oriented rather than application/runtime-oriented
-- no-op or effectively inert runtime options are risky because operators may believe they are configuring behavior that the system ignores
+- this is the active bridge between "working subsystems/example" and "Shunter is a usable hosted runtime/server"
+- until the V1-H proof lands, the public API may exist without being the demonstrated default user path
+- the residual risk is now less about missing root symbols and more about end-to-end proof, docs/examples, and any remaining V1 polish
 
 Primary code surfaces:
-- `schema/build.go`
-- `schema/builder.go`
-- `schema/version.go`
+- `module.go`
+- `config.go`
+- `runtime.go`
+- `runtime_build.go`
+- `runtime_lifecycle.go`
+- `runtime_network.go`
+- `runtime_local.go`
+- `runtime_describe.go`
 - `cmd/shunter-example/main.go`
 - `docs/hosted-runtime-bootstrap.md`
-- repo/module root (`go.mod`)
 
-Grounded evidence:
-- `docs/project-brief.md` now frames Shunter as a hosted runtime/server, but the repo still lacks the corresponding top-level runtime surface.
-- `rtk go list` at the repo root fails with `no Go files in /home/gernsback/source/shunter`.
-- `rtk go list ./engine` fails with `stat /home/gernsback/source/shunter/engine: directory not found`.
-- Compile-only audit repro (`rtk go test ./.tmp_audit_rootpkg`) fails because `github.com/ponchione/shunter` is not importable as a package.
-- `cmd/shunter-example/main.go:99-205` shows the real host-facing bring-up still requires manual assembly of the major subsystems plus the remaining glue adapters that are not yet hidden behind a top-level engine API.
-- `docs/hosted-runtime-bootstrap.md:10-40,83-124,191-199` documents the explicit subsystem wiring sequence and the two remaining adapter seams (`durabilityAdapter`, `stateAdapter`) that the current hosted bootstrap still carries in bring-up code.
-- `schema/builder.go:116-128` defines runtime-facing `EngineOptions`, but `schema/version.go:134-135` only consumes `StartupSnapshotSchema`; the other knobs are not used in the live code path.
+Grounded evidence from the 2026-04-24 audit pass:
+- `rtk go list .` now succeeds for `github.com/ponchione/shunter`
+- `rtk go doc . Runtime` lists `Build`, `Start`, `Close`, `HTTPHandler`, `ListenAndServe`, `CallReducer`, `Read`, `Describe`, and `ExportSchema`
+- `runtime.go` stores module identity/config plus recovered state, reducer registry, lifecycle-owned workers, protocol graph fields, and serving state
+- `runtime_network.go` wires `protocol.Server`, `executor.ProtocolInboxAdapter`, `protocol.ConnManager`, `protocol.NewClientSender`, protocol-backed fan-out delivery, `HTTPHandler`, and `ListenAndServe`
+- `runtime_local.go` provides local reducer calls through the runtime-owned executor and callback-scoped snapshot reads
+- `runtime_describe.go` provides initial detached module/runtime description and schema export helpers
 
-Recommended resolution options:
-- introduce a real public runtime package (or root package) that owns config, bring-up, shutdown, and module/app-definition loading across the existing subsystems
-- thread the currently advertised `EngineOptions` fields into that surface if they are meant to stay public
-- or explicitly narrow the product/docs claim from "hosted runtime" to "subsystem toolkit + example wiring" until a true runtime API exists
-
-Suggested follow-up tests:
-- compile-only smoke proving the advertised public import path/package exists
-- minimal start/stop hosted-runtime smoke test using the intended top-level API instead of example-local wiring
-- config-effect pins proving the exposed runtime options actually influence runtime construction
+Remaining resolution criteria:
+- complete and verify V1-H: a hosted hello-world example must build/start/serve through the top-level API, connect over WebSocket, call a reducer, observe subscription updates, and shut down cleanly
+- update or demote the old manual bootstrap docs/example so new app authors do not treat subsystem assembly as the normal path
+- after V1-H verification, close OI-014 or split only concrete residual polish items into narrower issues
 
 ### OI-008: The repo still lacks a coherent top-level engine/bootstrap story (closed 2026-04-22)
 

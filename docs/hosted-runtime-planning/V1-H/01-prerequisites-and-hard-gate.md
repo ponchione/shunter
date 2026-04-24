@@ -6,13 +6,13 @@ Objective: verify V1-H only begins after V1-A through V1-G exist in live code.
 
 Checks:
 - `rtk go list .`
-- `rtk go doc .Module`
-- `rtk go doc .Runtime`
-- `rtk go doc .Runtime.Start`
-- `rtk go doc .Runtime.Close`
-- `rtk go doc .Runtime.ListenAndServe`
-- `rtk go doc .Runtime.HTTPHandler`
-- `rtk go doc .Runtime.ExportSchema`
+- `rtk go doc . Module`
+- `rtk go doc . Runtime`
+- `rtk go doc . Runtime.Start`
+- `rtk go doc . Runtime.Close`
+- `rtk go doc . Runtime.ListenAndServe`
+- `rtk go doc . Runtime.HTTPHandler`
+- `rtk go doc . Runtime.ExportSchema`
 
 Stop if:
 - any of the required root APIs are still missing

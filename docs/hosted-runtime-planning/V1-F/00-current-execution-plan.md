@@ -41,11 +41,13 @@ Task progress:
 - Task 01 complete: prerequisite seams and prior runtime slices reconfirmed.
 - Task 02 complete: RED local reducer-call tests added in `runtime_local_test.go` and confirmed failing on the missing public API before implementation.
 - Task 03 complete: `runtime_local.go` now exposes executor-aligned local reducer result/status aliases, caller options, deterministic local identity defaults, and `Runtime.CallReducer` using `executor.CallReducerCmd` plus `executor.Executor.Submit`.
+- Task 04 complete: `runtime_local.go` now exposes `ErrLocalReadNilCallback`, callback-scoped `LocalReadView`, and `Runtime.Read(ctx, func(LocalReadView) error)` over committed snapshots; `runtime_local_test.go` verifies nil callback ordering, readiness/starting/closed sentinels, committed row access, and snapshot closure via a post-read reducer call.
+- Task 05 complete: V1-F format/test/vet gates passed for the root package and touched executor/store/query seams.
 
-Latest Task 03 validation:
-- `rtk go test . -run 'TestCallReducer' -count=1` -> passed, 6 tests.
+Latest Task 05 validation:
 - `rtk go fmt .` -> passed.
-- `rtk go test . -count=1` -> passed, 55 tests.
-- `rtk go vet .` -> passed.
+- `rtk go test . -count=1` -> passed, 59 tests.
+- `rtk go test ./executor ./store ./query/sql -count=1` -> passed, 420 tests across 3 packages.
+- `rtk go vet . ./executor ./store ./query/sql` -> passed.
 
-Immediate next task after Task 03: `docs/hosted-runtime-planning/V1-F/04-read-snapshot-api.md`.
+Immediate next V1 slice after V1-F: `docs/hosted-runtime-planning/V1-G/` export/introspection foundation.

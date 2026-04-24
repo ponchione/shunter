@@ -3,8 +3,12 @@ package shunter
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
+	"iter"
 
 	"github.com/ponchione/shunter/executor"
+	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -24,6 +28,16 @@ const (
 
 // ReducerResult is the result of a local reducer execution.
 type ReducerResult = executor.ReducerResponse
+
+// ErrLocalReadNilCallback reports that Runtime.Read was called without a read callback.
+var ErrLocalReadNilCallback = errors.New("shunter: local read callback must not be nil")
+
+// LocalReadView is the callback-scoped read-only view exposed by Runtime.Read.
+type LocalReadView interface {
+	TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue]
+	GetRow(tableID schema.TableID, rowID types.RowID) (types.ProductValue, bool)
+	RowCount(tableID schema.TableID) int
+}
 
 // ReducerCallOption configures a local reducer call.
 type ReducerCallOption func(*reducerCallOptions)
@@ -118,4 +132,45 @@ func (r *Runtime) readyExecutor() (*executor.Executor, error) {
 		return nil, ErrRuntimeNotReady
 	}
 	return r.executor, nil
+}
+
+// Read acquires a committed snapshot, passes a callback-scoped read view to fn,
+// and closes the snapshot before returning.
+func (r *Runtime) Read(ctx context.Context, fn func(LocalReadView) error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if fn == nil {
+		return ErrLocalReadNilCallback
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	state, err := r.readyState()
+	if err != nil {
+		return err
+	}
+	snapshot := state.Snapshot()
+	defer snapshot.Close()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn(snapshot)
+}
+
+func (r *Runtime) readyState() (*store.CommittedState, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stateName == RuntimeStateStarting {
+		return nil, ErrRuntimeStarting
+	}
+	if r.stateName == RuntimeStateClosing || r.stateName == RuntimeStateClosed {
+		return nil, ErrRuntimeClosed
+	}
+	if r.stateName != RuntimeStateReady || !r.ready.Load() || r.state == nil {
+		return nil, ErrRuntimeNotReady
+	}
+	return r.state, nil
 }

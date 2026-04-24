@@ -19,16 +19,18 @@ import (
 // Runtime owns a built module, its recovered committed state, lifecycle-owned
 // workers, and the protocol serving graph exposed by the hosted runtime.
 type Runtime struct {
-	moduleName    string
-	config        Config
-	buildConfig   Config
-	engine        *schema.Engine
-	registry      schema.SchemaRegistry
-	dataDir       string
-	state         *store.CommittedState
-	recoveredTxID types.TxID
-	resumePlan    commitlog.RecoveryResumePlan
-	reducers      *executor.ReducerRegistry
+	moduleName     string
+	moduleVersion  string
+	moduleMetadata map[string]string
+	config         Config
+	buildConfig    Config
+	engine         *schema.Engine
+	registry       schema.SchemaRegistry
+	dataDir        string
+	state          *store.CommittedState
+	recoveredTxID  types.TxID
+	resumePlan     commitlog.RecoveryResumePlan
+	reducers       *executor.ReducerRegistry
 
 	mu              sync.Mutex
 	stateName       RuntimeState
@@ -89,17 +91,19 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		moduleName:    mod.name,
-		config:        cfg,
-		buildConfig:   normalized,
-		engine:        engine,
-		registry:      registry,
-		dataDir:       dataDir,
-		state:         state,
-		recoveredTxID: recoveredTxID,
-		resumePlan:    resumePlan,
-		reducers:      reducers,
-		stateName:     RuntimeStateBuilt,
+		moduleName:     mod.name,
+		moduleVersion:  mod.version,
+		moduleMetadata: mod.MetadataMap(),
+		config:         cfg,
+		buildConfig:    normalized,
+		engine:         engine,
+		registry:       registry,
+		dataDir:        dataDir,
+		state:          state,
+		recoveredTxID:  recoveredTxID,
+		resumePlan:     resumePlan,
+		reducers:       reducers,
+		stateName:      RuntimeStateBuilt,
 	}, nil
 }
 

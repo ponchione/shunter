@@ -24,13 +24,13 @@ Commands run during planning:
 
 - `rtk go list .`
   - result now: `no Go files in /home/ponchione/source/shunter`
-- `rtk go doc .Module`
+- `rtk go doc . Module`
   - result now: no root package yet
-- `rtk go doc .Runtime`
+- `rtk go doc . Runtime`
   - result now: no root package yet
-- `rtk go doc .Runtime.ListenAndServe`
+- `rtk go doc . Runtime.ListenAndServe`
   - result now: no root package yet
-- `rtk go doc .Runtime.ExportSchema`
+- `rtk go doc . Runtime.ExportSchema`
   - result now: no root package yet
 
 This means the live code has not yet implemented the V1-A through V1-G top-level runtime surfaces that V1-H must consume. Therefore V1-H implementation must be gated on those code slices actually landing. The V1-A through V1-G planning artifacts are prerequisites, not proof that code exists.
@@ -85,10 +85,10 @@ V1-H must not copy the manual architecture into a new normal example. It should 
 Do not start V1-H implementation until all of these are true in live code:
 
 1. `rtk go list .` succeeds for the root package.
-2. `rtk go doc .Module` shows the V1 module authoring surface from V1-A/V1-B.
-3. `rtk go doc .Runtime` shows the V1 runtime owner surface.
-4. `rtk go doc .Runtime.Start` and `rtk go doc .Runtime.Close` exist from V1-D.
-5. `rtk go doc .Runtime.ListenAndServe` and `rtk go doc .Runtime.HTTPHandler` exist from V1-E.
+2. `rtk go doc . Module` shows the V1 module authoring surface from V1-A/V1-B.
+3. `rtk go doc . Runtime` shows the V1 runtime owner surface.
+4. `rtk go doc . Runtime.Start` and `rtk go doc . Runtime.Close` exist from V1-D.
+5. `rtk go doc . Runtime.ListenAndServe` and `rtk go doc . Runtime.HTTPHandler` exist from V1-E.
 6. Local calls from V1-F exist only as optional helper paths; V1-H's primary proof must still use WebSocket as the external client model.
 7. Export/introspection from V1-G exists for optional diagnostics, but V1-H must not add new export APIs.
 8. Focused tests for V1-A through V1-G pass.
@@ -297,12 +297,12 @@ Run:
 
 ```bash
 rtk go list .
-rtk go doc .Module
-rtk go doc .Runtime
-rtk go doc .Runtime.Start
-rtk go doc .Runtime.Close
-rtk go doc .Runtime.ListenAndServe
-rtk go doc .Runtime.HTTPHandler
+rtk go doc . Module
+rtk go doc . Runtime
+rtk go doc . Runtime.Start
+rtk go doc . Runtime.Close
+rtk go doc . Runtime.ListenAndServe
+rtk go doc . Runtime.HTTPHandler
 rtk go test . -count=1
 ```
 
