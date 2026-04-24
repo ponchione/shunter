@@ -24,7 +24,9 @@ import (
 // contribute above the horizon. Same externally visible outcome; the
 // mechanism difference is pinned here as intentional.
 //
-// See `docs/parity-p0-recovery-001-replay-horizon.md`.
+// The deleted P0-RECOVERY-001 decision doc was condensed into the
+// phase ledger; this test is now the direct parity anchor for the
+// segment-level short-circuit divergence.
 func TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment(t *testing.T) {
 	root := t.TempDir()
 	committed, reg := buildReplayCommittedState(t)
