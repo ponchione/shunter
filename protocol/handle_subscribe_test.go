@@ -4568,3 +4568,83 @@ func TestHandleSubscribeSingle_ParityArrayJoinOnRejected(t *testing.T) {
 		t.Error("executor should not be called on array-on-array join ON")
 	}
 }
+
+// TestHandleSubscribeSingle_JoinOnEqualityWithFilterAccepted pins the
+// subscribe-side acceptance of the new ON-filter shape. Subscribe accepts
+// because the parser transparently folds the ON-extracted filter into
+// Statement.Predicate, producing output indistinguishable from the already-
+// accepted WHERE-form (see design
+// docs/superpowers/specs/2026-04-23-join-on-filter-widening-design.md §
+// "Divergence-discipline framing"). Mirrors the WHERE-form pin at
+// TestHandleSubscribeSingle_JoinFilterOnRightTable.
+func TestHandleSubscribeSingle_JoinOnEqualityWithFilterAccepted(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "Orders",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "product_id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "Inventory",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "quantity", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   18,
+		QueryID:     15,
+		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	_, orders, ok := eng.Registry().TableByName("Orders")
+	if !ok {
+		t.Fatal("Orders table missing from registry")
+	}
+	_, inventory, ok := eng.Registry().TableByName("Inventory")
+	if !ok {
+		t.Fatal("Inventory table missing from registry")
+	}
+	if joinPred.Left != orders.ID || joinPred.Right != inventory.ID {
+		t.Fatalf("join tables = %d/%d, want %d/%d", joinPred.Left, joinPred.Right, orders.ID, inventory.ID)
+	}
+	rng, ok := joinPred.Filter.(subscription.ColRange)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want ColRange", joinPred.Filter)
+	}
+	if rng.Table != inventory.ID || rng.Column != 1 {
+		t.Fatalf("range table/column = %d/%d, want %d/1", rng.Table, rng.Column, inventory.ID)
+	}
+	if !rng.Upper.Value.Equal(types.NewUint32(10)) || rng.Upper.Inclusive || rng.Upper.Unbounded {
+		t.Fatalf("upper bound = %+v, want exclusive bounded 10", rng.Upper)
+	}
+}
