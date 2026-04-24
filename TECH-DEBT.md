@@ -13,6 +13,23 @@ Priority order:
 3. capability gaps that block realistic usage
 4. cleanup after parity direction is locked
 
+Parity principles:
+- parity is judged by named client-visible scenarios, not helper-level resemblance
+- same observable outcome beats same internal mechanism
+- every parity change needs an observable test
+- divergences must stay explicit
+- closed slice history belongs in tests and git history, not in startup docs
+
+Closed parity baselines are not startup context and should not be reopened
+without fresh failing regression evidence:
+- protocol subprotocol/compression/lifecycle/message-family baselines
+- canonical reducer delivery and empty-fanout caller outcomes
+- subscription rows through `P0-SUBSCRIPTION-033`
+- same-connection reused subscription-hash initial-snapshot elision
+- scheduler startup/firing narrow slice
+- recovery replay horizon and snapshot/replay invariant slices
+- Phase 4 Slice 2 offset-index, typed error category, and record/log documented-divergence slices
+
 Active audit note (2026-04-24):
 - hosted-runtime V1 is landed and verified; `docs/hosted-runtime-planning/V1-*` is no longer the active implementation campaign
 - OI-004 and OI-006 were removed after the post-V1 audit found no concrete remaining open lifecycle or fanout-aliasing defect on the hosted-runtime path
@@ -32,6 +49,7 @@ Summary:
 - legacy `v1.bsatn.shunter` admission is still accepted as a compatibility deferral
 - brotli remains recognized-but-unsupported
 - several message-family and envelope details remain intentionally divergent
+- reducer failure-arm collapse remains an explicit outcome-model follow-up; see `docs/parity-decisions.md#outcome-model`
 - rows-shape wrapper-chain parity (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `BsatnRowList`) is closed as a documented divergence — see `docs/parity-decisions.md#protocol-rows-shape`. Carried-forward deferral: a coordinated close of the wrapper chain together with the SPEC-005 §3.4 row-list format is a separate multi-slice phase, not an OI-001 A1 wire-close slice.
 
 Why this matters:
@@ -50,12 +68,11 @@ Primary code surfaces:
 - `protocol/fanout_adapter.go`
 
 Source docs:
-- `docs/spacetimedb-parity-roadmap.md` Tier A1
-- `docs/parity-phase0-ledger.md`
+- `docs/parity-decisions.md#outcome-model`
 - `docs/parity-decisions.md#protocol-rows-shape`
 
 Execution note:
-- With hosted-runtime V1 landed, the next parity execution target is expected to be OI-002 / Tier A2 subscription-runtime parity unless a fresh post-V1 audit changes priority. The remaining OI-001 items are narrower compatibility/divergence follow-ons unless a user explicitly asks to reopen protocol wire-close work.
+- With hosted-runtime V1 landed, the next parity execution target is expected to be OI-002 subscription-runtime parity unless a fresh post-V1 audit changes priority. The remaining OI-001 items are narrower compatibility/divergence follow-ons unless a user explicitly asks to reopen protocol wire-close work.
 
 ### OI-002: Query and subscription behavior still diverges from the target runtime model
 
@@ -90,11 +107,6 @@ Primary code surfaces:
 - `executor/executor.go`
 - `executor/scheduler.go`
 
-Source docs:
-- `docs/spacetimedb-parity-roadmap.md` Tier A2
-- `docs/parity-phase0-ledger.md`
-
-
 ### OI-003: Recovery and store semantics still differ in user-visible ways
 
 Status: open
@@ -126,8 +138,6 @@ Primary code surfaces:
 - `executor/executor.go`
 
 Source docs:
-- `docs/spacetimedb-parity-roadmap.md` Tier A3
-- `docs/parity-phase0-ledger.md`
 - `docs/parity-decisions.md#commitlog-record-shape`
 
 ### OI-005: Lower-level read-view/snapshot lifetime discipline remains an expert-API contract
@@ -159,7 +169,6 @@ Source docs:
 - `docs/hosted-runtime-planning/V1-F/`
 - `docs/decomposition/hosted-runtime-v1-contract.md`
 - `docs/hosted-runtime-implementation-roadmap.md`
-- `docs/spacetimedb-parity-roadmap.md` Tier B
 
 Audit note:
 - keep OI-005 as the accepted lower-level/expert API discipline marker; do not reopen it for the now-pinned executor post-commit panic-close gap unless a fresh concrete leak/reproducer appears
@@ -196,7 +205,6 @@ Primary code surfaces:
 
 Source docs:
 - `docs/parity-decisions.md#scheduler-startup-and-firing`
-- `docs/parity-phase0-ledger.md`
 - `docs/parity-decisions.md#commitlog-record-shape`
 
 ## Deferred issues
@@ -214,4 +222,3 @@ Why this matters:
 
 Source docs:
 - `docs/parity-decisions.md#outcome-model`
-- `docs/parity-phase0-ledger.md`

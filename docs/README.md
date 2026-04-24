@@ -14,22 +14,16 @@ Agent startup is intentionally narrow:
 3. Only code, package docs, and narrow spec sections named by that handoff or
    by the slice being touched
 
-Do not read broad roadmap, ledger, project-brief, or full decomposition specs by
-default.
+Do not read broad roadmap, ledger, or full decomposition specs by default.
 
 ## Current Docs
 
 - `docs/hosted-runtime-bootstrap.md` — current hosted-runtime quickstart.
 - `docs/hosted-runtime-implementation-roadmap.md` — hosted-runtime phase tracker
   while that implementation track is active.
-- `docs/spacetimedb-parity-roadmap.md` — parity priority framing; open only for
-  priority questions.
-- `docs/parity-phase0-ledger.md` — compact current parity status.
 - `docs/parity-decisions.md` — consolidated current parity decisions that code
   and tests still cite.
 - `TECH-DEBT.md` — open issue list and follow-up ownership.
-- `docs/project-brief.md` — original product and architecture thesis; open only
-  for product-intent questions.
 
 ## Baseline Specs
 

@@ -10,7 +10,7 @@ import (
 )
 
 // Phase 1.5 caller-metadata wiring sub-slice
-// (docs/parity-phase0-ledger.md P0-DELIVERY-001 follow-ups). Pins that
+// (TECH-DEBT.md reducer-outcome follow-ups). Pins that
 // an external CallReducer populates the caller-bound metadata on
 // subscription.CallerOutcome so the heavy TransactionUpdate envelope
 // carries real values instead of the Phase 1.5 zero stubs. Reference

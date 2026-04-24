@@ -14,7 +14,7 @@ import (
 
 // SubprotocolV1 is the Shunter-native WebSocket subprotocol token,
 // retained for backward compatibility while Phase 1 parity work
-// introduces the reference token. See docs/parity-phase0-ledger.md
+// introduces the reference token. See TECH-DEBT.md
 // P0-PROTOCOL-001 for the retention rationale.
 const SubprotocolV1 = "v1.bsatn.shunter"
 

@@ -292,7 +292,7 @@ Still rejected in protocol v1 (each as `SubscriptionError`):
 - the same `query_id` is already active **or pending** on the connection
 - the expression shape is not part of the v1 subset
 
-**Design decision — SQL in v1.** The structured-predicate shape was rejected for Phase 2 once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and matches the reference's `query_strings: Box<[Box<str>]>` in shape without copying Rust source. The original structured-predicate design (pre-Phase-2) is now superseded by the SQL wire surface. See `docs/spacetimedb-parity-roadmap.md` Phase 2 and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for the migration record.
+**Design decision — SQL in v1.** The structured-predicate shape was rejected for Phase 2 once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and matches the reference's `query_strings: Box<[Box<str>]>` in shape without copying Rust source. The original structured-predicate design (pre-Phase-2) is now superseded by the SQL wire surface. See `TECH-DEBT.md::OI-002` and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for current status.
 
 **Design decision — still single-table in v1.** Equality / range predicates on one table remain the common hot-path subscription shape and map cleanly onto SPEC-004's pruning indexes. Range and join subscriptions remain part of the evaluator's internal model, but joins are still not exposed on the public wire protocol in v1.
 
@@ -376,7 +376,7 @@ query_string: string    — SQL query per §7.1.1
 
 The executor runs a read-only query against `CommittedState.Snapshot()` directly. This read is not atomic with subscription registration because it does not register subscription state; it only returns a point-in-time result from committed state.
 
-Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset and is tracked by `docs/parity-phase0-ledger.md`. Current query-only widenings include `LIMIT`, column projections, `COUNT(*) [AS] alias`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject cross-join `WHERE` before executor registration.
+Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset and is tracked under `TECH-DEBT.md::OI-002`. Current query-only widenings include `LIMIT`, column projections, `COUNT(*) [AS] alias`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject cross-join `WHERE` before executor registration.
 
 ---
 
@@ -521,7 +521,7 @@ A single `Committed.update` (or `TransactionUpdateLight.update`) may contain ent
 
 **Divergence from reference — OutOfEnergy.** `OutOfEnergy` is present in the union for shape parity but is never emitted by the Phase 1.5 executor. `energy_quanta_used` is permanently `0` unless an energy subsystem is introduced (deferred past Phase 3).
 
-**Divergence from reference — failure-arm collapse.** Shunter's internal executor distinguishes `failed_user`, `failed_panic`, and `not_found` reducer outcomes. Phase 1.5 collapses all three onto `Failed{Error}` on the wire, retaining the distinguishing information in the error string. This is tracked as an explicit Phase 3 reducer-outcome follow-up in `docs/spacetimedb-parity-roadmap.md`.
+**Divergence from reference — failure-arm collapse.** Shunter's internal executor distinguishes `failed_user`, `failed_panic`, and `not_found` reducer outcomes. Phase 1.5 collapses all three onto `Failed{Error}` on the wire, retaining the distinguishing information in the error string. This is tracked as an explicit reducer-outcome follow-up in `TECH-DEBT.md`.
 
 ### 8.6 OneOffQueryResult
 

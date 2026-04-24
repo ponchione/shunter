@@ -4231,7 +4231,7 @@ func TestHandleOneOffQuery_ParityUint128NegativeRejected(t *testing.T) {
 //
 // One-off shares the subscription-shape admission path in Shunter; the
 // intentional divergence from reference's wider parse_and_type_sql path is
-// recorded in docs/parity-phase0-ledger.md.
+// recorded in TECH-DEBT.md.
 func TestHandleOneOffQuery_ParityDMLStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,

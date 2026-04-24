@@ -12,8 +12,7 @@ import (
 // standard usage.
 //
 // TestCloseConstants in close_test.go already asserts the same values;
-// this test is the *parity-named* pin so the ledger (P0-PROTOCOL-003)
-// can cite a purpose-built test rather than a unit helper.
+// this test is the parity-named pin for the close-code contract.
 func TestPhase1ParityCloseCodeConstants(t *testing.T) {
 	if CloseNormal != websocket.StatusNormalClosure {
 		t.Errorf("CloseNormal = %d, want %d (1000 Normal Closure)", CloseNormal, websocket.StatusNormalClosure)

@@ -1,9 +1,8 @@
 # Parity Decisions
 
 This file keeps current implementation-facing parity decisions that are
-still cited by code or tests. It is not a history log. For active status,
-use `docs/parity-phase0-ledger.md`; for prioritization, use `TECH-DEBT.md`
-and the active root handoff.
+still cited by code or tests. It is not a history log. For active status and
+prioritization, use `TECH-DEBT.md` and the active root handoff.
 
 Reference paths are grounding only. Do not copy or port source from
 `reference/SpacetimeDB/`.

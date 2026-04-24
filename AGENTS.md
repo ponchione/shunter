@@ -7,7 +7,7 @@ Default startup reading:
    - `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
 3. Only the code, package docs, and narrow spec sections named by that handoff or by the slice you are touching
 
-Do not read broad roadmap, ledger, project-brief, or full decomposition specs by default. Open them only when the active handoff says they are required, when a dependency question cannot be answered from code, or when you are editing that document.
+Do not read broad roadmap, ledger, or full decomposition specs by default. Open them only when the active handoff says they are required, when a dependency question cannot be answered from code, or when you are editing that document.
 
 ## Repo Reality
 
@@ -68,4 +68,4 @@ Resolve in this order:
 1. task-specific user instruction
 2. `docs/decomposition/EXECUTION-ORDER.md` for sequencing
 3. relevant spec/decomposition files for scope and contracts
-4. `docs/project-brief.md` for product intent
+4. `README.md` for product intent

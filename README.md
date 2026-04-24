@@ -25,6 +25,18 @@ The implementation is intended to be clean-room:
 - not copied from SpacetimeDB source
 - developed from independent specs, decomposition docs, tests, and audit passes
 
+## Core thesis and boundaries
+
+Traditional app architecture separates the database, application server, and
+client-side state layer. Shunter's thesis is that a single runtime can own the
+data, run app logic next to it, evaluate subscriptions at commit time, and push
+precise deltas to clients without a separate cache/API/WebSocket glue layer.
+
+The intended developer surface is Go-native: applications define modules,
+tables, reducers, and runtime configuration in Go. Shunter is not a managed
+cloud service, not a multi-language module host, not a distributed database,
+and not a full SQL database.
+
 ## What is actually implemented today
 
 There is working code in these packages:
@@ -115,13 +127,10 @@ For agent work, do not use this list as startup context. Read `RTK.md`, then the
 
 For human orientation instead of another audit spiral, read in this order:
 1. `README.md` — this file
-2. `docs/project-brief.md` — original thesis and architecture intent
-3. `docs/hosted-runtime-bootstrap.md` — current hosted-runtime quickstart
-4. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
-5. `docs/spacetimedb-parity-roadmap.md` — parity priority framing
-6. `docs/parity-phase0-ledger.md` — compact current parity truth
-7. `docs/parity-decisions.md` — consolidated current parity decisions
-8. `TECH-DEBT.md` — live debt and follow-up ledger
+2. `docs/hosted-runtime-bootstrap.md` — current hosted-runtime quickstart
+3. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
+4. `TECH-DEBT.md` — live debt and parity priority framing
+5. `docs/parity-decisions.md` — consolidated current parity decisions
 
 Then inspect the main implementation packages:
 - `schema/`

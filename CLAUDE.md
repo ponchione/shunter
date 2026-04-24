@@ -4,7 +4,7 @@ Read `RTK.md` first for command rules.
 
 ## What to Use
 
-- `docs/project-brief.md` = product and architectural intent
+- `README.md` = product and repo orientation
 - `docs/decomposition/EXECUTION-ORDER.md` = implementation sequencing and dependency gates
 - `docs/decomposition/` = executable epic/story breakdown
 - `reference/SpacetimeDB/` = read-only research input only
