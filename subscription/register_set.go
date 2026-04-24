@@ -307,6 +307,12 @@ func (m *Manager) RegisterSet(
 		qs := existing
 		if qs == nil {
 			qs = m.registry.createQueryState(hash, p)
+			// SQLText is set only when the admission path knows the original
+			// SQL string (Single subscribe). Multi leaves it empty —
+			// reference `module_subscription_actor.rs:836` uses raw
+			// `return_on_err!` on the unsubscribe path and does not apply
+			// the `DBError::WithSql` suffix.
+			qs.sqlText = req.SQLText
 			PlaceSubscription(m.indexes, p, hash)
 		}
 		m.registry.addSubscriber(hash, req.ConnID, subID, req.RequestID, req.QueryID)
@@ -332,9 +338,19 @@ func (m *Manager) RegisterSet(
 
 // UnregisterSet drops every internal subscription registered under
 // (ConnID, QueryID). Reference: remove_subscription at
-// reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:841.
+// reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:841,
+// invoked from `module_subscription_actor.rs:741` (Single) and `:826`
+// (Multi). The reference drops the queries from the manager *before*
+// evaluating `evaluate_initial_subscription` / `evaluate_queries` against
+// committed state, so an eval failure still leaves the subscriptions
+// removed. On eval failure the reference bails via `return_on_err_with_sql!`
+// (Single, `:756`) or `return_on_err!` (Multi, `:836`) and emits a
+// SubscriptionError; we mirror that by returning an `ErrFinalQuery` wrap
+// (plus the first-errored queryState's SQLText so the protocol-side
+// adapter can apply the `DBError::WithSql` suffix on the Single path).
 // If view is nil, no final-delta rows are computed and Update is empty —
-// suitable for disconnect-time cleanup.
+// suitable for disconnect-time cleanup; in that case no eval error can
+// be raised.
 func (m *Manager) UnregisterSet(
 	connID types.ConnectionID,
 	queryID uint32,
@@ -346,6 +362,8 @@ func (m *Manager) UnregisterSet(
 		return SubscriptionSetUnregisterResult{}, ErrSubscriptionNotFound
 	}
 	deletes := make([]SubscriptionUpdate, 0, len(sids))
+	var evalErr error
+	var evalSQL string
 	for _, sid := range sids {
 		hash, found := m.registry.hashForSub(connID, sid)
 		if !found {
@@ -355,25 +373,35 @@ func (m *Manager) UnregisterSet(
 		if qs == nil {
 			continue
 		}
-		if view != nil {
-			rows, err := m.initialQuery(qs.predicate, view)
-			// Final-delta errors are non-fatal — the subscription still drops.
-			if err == nil && len(rows) > 0 {
-				tableID := emittedTableID(qs.predicate)
-				deletes = append(deletes, SubscriptionUpdate{
-					SubscriptionID: sid,
-					QueryID:        queryID,
-					TableID:        tableID,
-					TableName:      m.schema.TableName(tableID),
-					Deletes:        rows,
-				})
-			}
+		if view == nil || evalErr != nil {
+			continue
 		}
+		rows, err := m.initialQuery(qs.predicate, view)
+		if err != nil {
+			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
+			evalSQL = qs.sqlText
+			continue
+		}
+		if len(rows) > 0 {
+			tableID := emittedTableID(qs.predicate)
+			deletes = append(deletes, SubscriptionUpdate{
+				SubscriptionID: sid,
+				QueryID:        queryID,
+				TableID:        tableID,
+				TableName:      m.schema.TableName(tableID),
+				Deletes:        rows,
+			})
+		}
+	}
+	for _, sid := range sids {
 		m.dropSub(connID, sid)
 	}
 	delete(byQ, queryID)
 	if len(byQ) == 0 {
 		delete(m.querySets, connID)
+	}
+	if evalErr != nil {
+		return SubscriptionSetUnregisterResult{QueryID: queryID, SQLText: evalSQL}, evalErr
 	}
 	return SubscriptionSetUnregisterResult{QueryID: queryID, Update: deletes}, nil
 }

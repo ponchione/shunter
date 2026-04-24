@@ -629,6 +629,138 @@ func TestProtocolInboxAdapter_UnregisterSubscriptionSet_NotFoundErrorReply(t *te
 	}
 }
 
+// TestProtocolInboxAdapter_UnregisterSubscriptionSet_SingleFinalEvalErrorWrapsWithSql
+// pins the reference UnsubscribeSingle final-eval error shape
+// (`module_subscription_actor.rs:756` via `return_on_err_with_sql!`):
+// an ErrFinalQuery-wrapped reply with a non-empty result SQLText
+// gets the `DBError::WithSql` suffix `", executing: \`<sql>\`"` on
+// the Single Variant only. The WithSql suffix format is defined at
+// `reference/.../error.rs:140`.
+func TestProtocolInboxAdapter_UnregisterSubscriptionSet_SingleFinalEvalErrorWrapsWithSql(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	const sqlText = "SELECT * FROM users WHERE id = 42"
+	finalEvalErr := fmt.Errorf("%w: %w", subscription.ErrFinalQuery, subscription.ErrInitialRowLimit)
+	var captured *protocol.SubscriptionError
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			unreg := cmd.(UnregisterSubscriptionSetCmd)
+			unreg.Reply(subscription.SubscriptionSetUnregisterResult{SQLText: sqlText}, finalEvalErr)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.UnregisterSubscriptionSet(context.Background(), protocol.UnregisterSubscriptionSetRequest{
+		ConnID:    conn.ID,
+		QueryID:   31,
+		RequestID: 32,
+		Variant:   protocol.SubscriptionSetVariantSingle,
+		Reply: func(resp protocol.UnsubscribeSetCommandResponse) {
+			captured = resp.Error
+		},
+	})
+	if err != nil {
+		t.Fatalf("UnregisterSubscriptionSet: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected SubscriptionError captured, got nil")
+	}
+	wantSuffix := ", executing: `" + sqlText + "`"
+	if !strings.HasSuffix(captured.Error, wantSuffix) {
+		t.Fatalf("SubscriptionError.Error = %q, want suffix %q (reference DBError::WithSql)", captured.Error, wantSuffix)
+	}
+}
+
+// TestProtocolInboxAdapter_UnregisterSubscriptionSet_MultiFinalEvalErrorRawText
+// pins the reference UnsubscribeMulti final-eval shape
+// (`module_subscription_actor.rs:836` via plain `return_on_err!`): an
+// ErrFinalQuery-wrapped reply on the Multi Variant emits raw error text
+// — no `DBError::WithSql` suffix and no canned SubscribeMulti text. The
+// SubscribeMulti canned-message branch is admission-only (reference
+// `:1383`) and does not apply to the unsubscribe path.
+func TestProtocolInboxAdapter_UnregisterSubscriptionSet_MultiFinalEvalErrorRawText(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	finalEvalErr := fmt.Errorf("%w: %w", subscription.ErrFinalQuery, subscription.ErrInitialRowLimit)
+	var captured *protocol.SubscriptionError
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			unreg := cmd.(UnregisterSubscriptionSetCmd)
+			// Multi path never populates SQLText on queryState, so the
+			// result SQLText is empty; the adapter would not apply the
+			// Single suffix even if Variant were Single in this case.
+			unreg.Reply(subscription.SubscriptionSetUnregisterResult{}, finalEvalErr)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.UnregisterSubscriptionSet(context.Background(), protocol.UnregisterSubscriptionSetRequest{
+		ConnID:    conn.ID,
+		QueryID:   41,
+		RequestID: 42,
+		Variant:   protocol.SubscriptionSetVariantMulti,
+		Reply: func(resp protocol.UnsubscribeSetCommandResponse) {
+			captured = resp.Error
+		},
+	})
+	if err != nil {
+		t.Fatalf("UnregisterSubscriptionSet: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected SubscriptionError captured, got nil")
+	}
+	if strings.Contains(captured.Error, "executing: `") {
+		t.Fatalf("SubscriptionError.Error = %q, must not carry Single-path WithSql suffix on Multi unsubscribe", captured.Error)
+	}
+	if captured.Error == "Internal error evaluating queries" {
+		t.Fatalf("SubscriptionError.Error = %q, must not use the admission-path canned text on the unsubscribe path", captured.Error)
+	}
+	if captured.Error == "" {
+		t.Fatal("SubscriptionError.Error is empty, want raw ErrFinalQuery-wrapped text")
+	}
+}
+
+// TestProtocolInboxAdapter_UnregisterSubscriptionSet_NotFoundErrorIsNotWrappedWithSql
+// pins the negative complement of the Single WithSql wrap on the
+// unsubscribe path: admission-time errors that are not final-eval (here
+// `ErrSubscriptionNotFound`) must not gain the `", executing: \`<sql>\`"`
+// suffix even if Variant is Single. Reference only WithSql-wraps the
+// evaluate_initial_subscription result (`module_subscription_actor.rs:756`);
+// `remove_subscription` failures (`:741`) propagate raw.
+func TestProtocolInboxAdapter_UnregisterSubscriptionSet_NotFoundErrorIsNotWrappedWithSql(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	var captured *protocol.SubscriptionError
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			unreg := cmd.(UnregisterSubscriptionSetCmd)
+			// SQLText empty because remove_subscription-equivalent failures
+			// never observe a queryState on the erroring path.
+			unreg.Reply(subscription.SubscriptionSetUnregisterResult{}, subscription.ErrSubscriptionNotFound)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.UnregisterSubscriptionSet(context.Background(), protocol.UnregisterSubscriptionSetRequest{
+		ConnID:    conn.ID,
+		QueryID:   51,
+		RequestID: 52,
+		Variant:   protocol.SubscriptionSetVariantSingle,
+		Reply: func(resp protocol.UnsubscribeSetCommandResponse) {
+			captured = resp.Error
+		},
+	})
+	if err != nil {
+		t.Fatalf("UnregisterSubscriptionSet: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected SubscriptionError captured, got nil")
+	}
+	if strings.Contains(captured.Error, "executing: `") {
+		t.Fatalf("SubscriptionError.Error = %q, must not carry WithSql suffix on non-final-eval unsubscribe error", captured.Error)
+	}
+}
+
 func TestProtocolInboxAdapter_RegisterSubscriptionSet_ClosedConnectionReplyDiscarded(t *testing.T) {
 	conn, mgr, sender := newAdapterTestConn(t)
 	var deliveryErr error

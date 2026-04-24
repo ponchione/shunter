@@ -22,6 +22,14 @@ type SubscriptionSetRegisterRequest struct {
 	PredicateHashIdentities []*types.Identity
 	ClientIdentity          *types.Identity
 	RequestID               uint32
+	// SQLText is the original subscribe-query SQL string used for the
+	// Single admission path. RegisterSet persists it on each newly
+	// created queryState so UnregisterSet can surface it when wrapping a
+	// final-eval failure with `ErrFinalQuery`. Empty on Multi paths and
+	// callers that do not originate from a single SQL string; the Multi
+	// UnsubscribeSingle WithSql wrap does not apply there
+	// (`module_subscription_actor.rs:836` uses raw `return_on_err!`).
+	SQLText string
 }
 
 // SubscriptionSetRegisterResult carries the merged initial snapshot.
@@ -37,10 +45,18 @@ type SubscriptionSetRegisterResult struct {
 // SubscriptionSetUnregisterResult carries the final-delta rows that
 // were still live at unsubscribe time. Update entries have Deletes
 // populated and Inserts empty.
+//
+// SQLText is populated only when UnregisterSet returns an `ErrFinalQuery`
+// wrap — it carries the stored queryState.sqlText of the first query
+// whose final-delta evaluation failed, so the protocol-side adapter can
+// apply the reference `DBError::WithSql` suffix on the UnsubscribeSingle
+// path (`module_subscription_actor.rs:756`). On success or non-eval
+// errors the field remains empty.
 type SubscriptionSetUnregisterResult struct {
 	QueryID                          uint32
 	Update                           []SubscriptionUpdate
 	TotalHostExecutionDurationMicros uint64
+	SQLText                          string
 }
 
 // SubscriptionUpdate is the per-subscription component of a transaction

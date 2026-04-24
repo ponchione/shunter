@@ -7,6 +7,16 @@ import "github.com/ponchione/shunter/types"
 type queryState struct {
 	hash      QueryHash
 	predicate Predicate // v1 executable plan == the validated predicate itself
+	// sqlText is the original SQL the Single-subscribe admission path
+	// registered this query with. Populated when RegisterSet's request
+	// carries a non-empty SQLText (length-1 Single path today); Multi
+	// leaves it empty because the reference UnsubscribeMulti branch
+	// (`module_subscription_actor.rs:836`) does not WithSql-wrap errors.
+	// UnregisterSet surfaces this text on `SubscriptionSetUnregisterResult`
+	// when a final-eval error is wrapped with `ErrFinalQuery` so the
+	// protocol-side adapter can apply the `DBError::WithSql` suffix
+	// (`reference/.../error.rs:140`).
+	sqlText string
 	// subscribers is keyed first by connection and then by subscription ID so
 	// one connection may hold multiple independent subscriptions to the same
 	// query hash.

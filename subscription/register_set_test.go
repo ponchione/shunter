@@ -257,6 +257,99 @@ func TestUnregisterSetDropsAllInSet(t *testing.T) {
 	}
 }
 
+// TestUnregisterSetFinalEvalErrorWrapsErrFinalQueryAndDropsAll — when
+// final-delta evaluation fails during UnregisterSet, every internal
+// subscription in the set is still dropped, and the returned error
+// wraps `ErrFinalQuery` (so the protocol-side adapter can apply the
+// reference `DBError::WithSql` suffix on the Single path). The result
+// carries `SQLText` = the first-errored queryState's stored SQL so the
+// adapter has what it needs to build the suffix without re-querying
+// subscription internals. Reference anchors:
+// `module_subscription_actor.rs:756` (Single, `return_on_err_with_sql!`)
+// and `:826..:830` (query-set drop happens before eval; eval failure
+// does not un-drop). The Single subscribe admission path is the only
+// one that persists SQLText into queryState today, so this test uses
+// length-1 predicates and a non-empty register-time SQLText.
+func TestUnregisterSetFinalEvalErrorWrapsErrFinalQueryAndDropsAll(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	const sqlText = "SELECT * FROM t1"
+	reg := SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    11,
+		Predicates: []Predicate{AllRows{Table: 1}},
+		SQLText:    sqlText,
+	}
+	if _, err := mgr.RegisterSet(reg, view); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	// Force initialQuery to trip ErrInitialRowLimit on the unsubscribe
+	// final-delta evaluation. InitialRowLimit is consulted at evaluation
+	// time, so setting it after register keeps the register path clean.
+	mgr.InitialRowLimit = 1
+	res, err := mgr.UnregisterSet(connID, 11, view)
+	if err == nil {
+		t.Fatal("UnregisterSet should surface initialQuery error")
+	}
+	if !errors.Is(err, ErrFinalQuery) {
+		t.Fatalf("err = %v, want errors.Is ErrFinalQuery", err)
+	}
+	if !errors.Is(err, ErrInitialRowLimit) {
+		t.Fatalf("err = %v, want errors.Is ErrInitialRowLimit (concrete cause)", err)
+	}
+	if res.SQLText != sqlText {
+		t.Fatalf("res.SQLText = %q, want %q", res.SQLText, sqlText)
+	}
+	if len(res.Update) != 0 {
+		t.Fatalf("res.Update = %+v, want empty on eval-error path (reference bails via return_on_err)", res.Update)
+	}
+	if _, ok := mgr.querySets[connID]; ok {
+		t.Fatalf("querySets not cleared after eval-error unregister: %+v", mgr.querySets)
+	}
+	if mgr.registry.hasActive() {
+		t.Fatal("registry still holds queries after eval-error unregister")
+	}
+}
+
+// TestUnregisterSetMultiFinalEvalErrorEmptySQLText — Multi register does
+// not populate SQLText on any queryState (handleSubscribeMulti leaves
+// `RegisterSubscriptionSetRequest.SQLText` empty because reference
+// `module_subscription_actor.rs:836` uses raw `return_on_err!` for the
+// UnsubscribeMulti eval — no `DBError::WithSql` suffix). The subscription
+// layer still wraps the failure with `ErrFinalQuery` and drops every
+// internal sub; the adapter-layer variant switch is what keeps the wire
+// text raw.
+func TestUnregisterSetMultiFinalEvalErrorEmptySQLText(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	reg := SubscriptionSetRegisterRequest{
+		ConnID:  connID,
+		QueryID: 12,
+		Predicates: []Predicate{
+			AllRows{Table: 1},
+			AllRows{Table: 2},
+		},
+		// Multi path leaves SQLText empty.
+	}
+	if _, err := mgr.RegisterSet(reg, view); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	mgr.InitialRowLimit = 1
+	res, err := mgr.UnregisterSet(connID, 12, view)
+	if err == nil {
+		t.Fatal("UnregisterSet should surface initialQuery error")
+	}
+	if !errors.Is(err, ErrFinalQuery) {
+		t.Fatalf("err = %v, want errors.Is ErrFinalQuery", err)
+	}
+	if res.SQLText != "" {
+		t.Fatalf("res.SQLText = %q, want empty (Multi register never persisted SQL)", res.SQLText)
+	}
+	if _, ok := mgr.querySets[connID]; ok {
+		t.Fatalf("querySets not cleared after eval-error unregister: %+v", mgr.querySets)
+	}
+}
+
 // TestRegisterSetUnwindsPartialStateOnInitialQueryError — exercises the
 // atomic unwind when initialQuery fails partway through a Multi set.
 // With InitialRowLimit(1), the second predicate trips ErrInitialRowLimit

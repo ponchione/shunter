@@ -79,6 +79,7 @@ func (a *ProtocolInboxAdapter) RegisterSubscriptionSet(ctx context.Context, req 
 			RequestID:               req.RequestID,
 			Predicates:              preds,
 			PredicateHashIdentities: req.PredicateHashIdentities,
+			SQLText:                 req.SQLText,
 		},
 		Reply: func(result subscription.SubscriptionSetRegisterResult, replyErr error) {
 			if req.Reply == nil {
@@ -244,8 +245,20 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 	replyErr error,
 ) protocol.UnsubscribeSetCommandResponse {
 	if replyErr != nil {
+		errText := replyErr.Error()
+		// Reference `module_subscription_actor.rs:756` wraps the
+		// UnsubscribeSingle final-eval error via
+		// `return_on_err_with_sql!` (DBError::WithSql suffix). The
+		// UnsubscribeMulti path at `:836` uses plain `return_on_err!`
+		// and emits raw err text. Non-ErrFinalQuery errors (e.g.
+		// admission-time `ErrSubscriptionNotFound`) are never wrapped.
+		if errors.Is(replyErr, subscription.ErrFinalQuery) &&
+			req.Variant == protocol.SubscriptionSetVariantSingle &&
+			result.SQLText != "" {
+			errText = fmt.Sprintf("%s, executing: `%s`", errText, result.SQLText)
+		}
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: replyErr.Error()},
+			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: errText},
 		}
 	}
 	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))

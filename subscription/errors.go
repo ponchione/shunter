@@ -34,6 +34,14 @@ var (
 	// `module_subscription_actor.rs:672` SubscribeSingle initial-eval).
 	// Concrete cause (e.g. ErrInitialRowLimit) remains `errors.Is`-unwrappable.
 	ErrInitialQuery = errors.New("initial query")
+	// ErrFinalQuery — wraps any error surfaced by the final-delta
+	// evaluation inside UnregisterSet so the protocol-side adapter can
+	// apply the reference `DBError::WithSql` suffix on the
+	// UnsubscribeSingle path (`module_subscription_actor.rs:756` via
+	// `return_on_err_with_sql!`) while keeping the UnsubscribeMulti path
+	// raw (`:836` via `return_on_err!`). Concrete cause (e.g.
+	// ErrInitialRowLimit) remains `errors.Is`-unwrappable.
+	ErrFinalQuery = errors.New("final query")
 	// ErrSubscriptionNotFound — unknown query ID/subscription set for unregister.
 	ErrSubscriptionNotFound = errors.New("subscription: subscription not found")
 	// ErrJoinIndexUnresolved — validation confirmed a join-side index exists
