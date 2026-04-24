@@ -361,6 +361,94 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorIsNotWrapped
 	}
 }
 
+// TestProtocolInboxAdapter_RegisterSubscriptionSet_MultiInitialEvalErrorEmitsCannedMessage
+// pins the reference SubscribeMulti initial-eval error shape
+// (`module_subscription_actor.rs:1383`): on any
+// `evaluate_queries` failure during a Multi admission, reference
+// substitutes the underlying error text with the canned
+// `"Internal error evaluating queries"` and then rolls back the
+// subscription. The adapter must emit the same canned text for
+// Variant=Multi ErrInitialQuery replies — clients coded against
+// reference expect that literal string, and per-query detail must not
+// leak out on Multi the way it does on Single's WithSql-wrapped path.
+func TestProtocolInboxAdapter_RegisterSubscriptionSet_MultiInitialEvalErrorEmitsCannedMessage(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	initialEvalErr := fmt.Errorf("%w: %w", subscription.ErrInitialQuery, subscription.ErrInitialRowLimit)
+	var captured *protocol.SubscriptionError
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			reg := cmd.(RegisterSubscriptionSetCmd)
+			reg.Reply(subscription.SubscriptionSetRegisterResult{}, initialEvalErr)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.RegisterSubscriptionSet(context.Background(), protocol.RegisterSubscriptionSetRequest{
+		ConnID:     conn.ID,
+		QueryID:    22,
+		RequestID:  23,
+		Variant:    protocol.SubscriptionSetVariantMulti,
+		Predicates: []any{subscription.AllRows{Table: 1}, subscription.AllRows{Table: 2}},
+		Reply: func(resp protocol.SubscriptionSetCommandResponse) {
+			captured = resp.Error
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterSubscriptionSet: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected SubscriptionError captured, got nil")
+	}
+	if captured.Error != "Internal error evaluating queries" {
+		t.Fatalf("SubscriptionError.Error = %q, want exactly %q (reference canned text)", captured.Error, "Internal error evaluating queries")
+	}
+	if strings.Contains(captured.Error, "executing: `") {
+		t.Fatalf("SubscriptionError.Error = %q, must not carry Single-path WithSql suffix on Multi initial-eval", captured.Error)
+	}
+}
+
+// TestProtocolInboxAdapter_RegisterSubscriptionSet_MultiDuplicateErrorNotCanned
+// pins the negative complement: non-initial-eval admission errors on
+// the Multi path (here `ErrQueryIDAlreadyLive`) are not substituted with
+// the canned text — only initial-eval failures funnel through the
+// reference `evaluate_queries` canned-message shape.
+func TestProtocolInboxAdapter_RegisterSubscriptionSet_MultiDuplicateErrorNotCanned(t *testing.T) {
+	conn, _, _ := newAdapterTestConn(t)
+	var captured *protocol.SubscriptionError
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			reg := cmd.(RegisterSubscriptionSetCmd)
+			reg.Reply(subscription.SubscriptionSetRegisterResult{}, subscription.ErrQueryIDAlreadyLive)
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.RegisterSubscriptionSet(context.Background(), protocol.RegisterSubscriptionSetRequest{
+		ConnID:     conn.ID,
+		QueryID:    24,
+		RequestID:  25,
+		Variant:    protocol.SubscriptionSetVariantMulti,
+		Predicates: []any{subscription.AllRows{Table: 1}, subscription.AllRows{Table: 2}},
+		Reply: func(resp protocol.SubscriptionSetCommandResponse) {
+			captured = resp.Error
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterSubscriptionSet: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected SubscriptionError captured, got nil")
+	}
+	if captured.Error == "Internal error evaluating queries" {
+		t.Fatalf("SubscriptionError.Error = %q, must not use the canned initial-eval text for admission errors", captured.Error)
+	}
+	if captured.Error == "" {
+		t.Fatal("SubscriptionError.Error is empty, want ErrQueryIDAlreadyLive text")
+	}
+}
+
 func TestProtocolInboxAdapter_RegisterSubscriptionSet_ForwardsPerPredicateHashIdentity(t *testing.T) {
 	conn, _, _ := newAdapterTestConn(t)
 	id := types.Identity{0xAA, 0xBB}

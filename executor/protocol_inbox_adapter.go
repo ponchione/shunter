@@ -187,14 +187,19 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 ) protocol.SubscriptionSetCommandResponse {
 	if replyErr != nil {
 		errText := replyErr.Error()
-		// Reference `DBError::WithSql` suffix for SubscribeSingle
-		// initial-eval errors (`error.rs:140`,
-		// `module_subscription_actor.rs:672` via
-		// `return_on_err_with_sql_bool!`). SubscribeMulti's reference
-		// initial-eval path emits a canned message without SQL suffix
-		// (`module_subscription_actor.rs:1383`); Multi handlers leave
-		// req.SQLText empty so this wrap is skipped for them.
-		if req.SQLText != "" && errors.Is(replyErr, subscription.ErrInitialQuery) {
+		switch {
+		case errors.Is(replyErr, subscription.ErrInitialQuery) && req.Variant == protocol.SubscriptionSetVariantMulti:
+			// Reference `module_subscription_actor.rs:1383` substitutes
+			// the underlying initial-eval error with a canned
+			// "Internal error evaluating queries" message on the
+			// SubscribeMulti path, discarding per-query detail. Match
+			// that text exactly.
+			errText = "Internal error evaluating queries"
+		case errors.Is(replyErr, subscription.ErrInitialQuery) && req.SQLText != "":
+			// Reference `DBError::WithSql` suffix for SubscribeSingle
+			// initial-eval errors (`error.rs:140`,
+			// `module_subscription_actor.rs:672` via
+			// `return_on_err_with_sql_bool!`).
 			errText = fmt.Sprintf("%s, executing: `%s`", errText, req.SQLText)
 		}
 		return protocol.SubscriptionSetCommandResponse{
