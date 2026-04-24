@@ -14,7 +14,7 @@ Current active TECH-DEBT issue for handoff purposes:
 
 - `OI-002`: query and subscription behavior still diverges from the target runtime model.
 
-`OI-002` remains open after the latest query-only closures. The next bounded A2 batch should be chosen from fresh live evidence, not by reopening a just-closed SQL slice.
+`OI-002` remains open after the latest QueryID fanout/protocol closure. The next bounded A2 batch should be chosen from fresh live evidence, not by reopening a just-closed SQL, fanout-ordering, or QueryID wire-correlation slice.
 
 Use `rtk` for every shell command, including git. Do not push unless explicitly asked.
 
@@ -33,55 +33,69 @@ If the task is hosted-runtime planning or implementation instead, stop and read 
 
 ## Latest OI-002 state to preserve
 
-Do not reopen the closed P0-SUBSCRIPTION-001 through P0-SUBSCRIPTION-028 rows without new failing regression evidence.
+Do not reopen the closed P0-SUBSCRIPTION-001 through P0-SUBSCRIPTION-030 rows without new failing regression evidence.
 
-`P0-SUBSCRIPTION-028` is the latest OI-002 runtime/fanout slice. A fresh post-V1 scout found that `subscription/fanout_worker.go` delivered evaluation-origin `SubscriptionError` messages before checking `TxDurable`, while normal updates already honored the public/default confirmed-read gate.
+`P0-SUBSCRIPTION-030` is the latest OI-002 runtime/protocol slice. A fresh scout found that `protocol.SubscriptionUpdate` still exposed the subscription manager's internal `SubscriptionID` on the wire, while the client-visible correlator should be the `QueryID` chosen in `SubscribeSingle` / `SubscribeMulti`.
 
 Latest closed OI-002 slice:
 
-- `P0-SUBSCRIPTION-028`: post-commit `SubscriptionError` fan-out now waits on `TxDurable` for default/public confirmed-read recipients, using the same durability gate as normal transaction updates.
+- `P0-SUBSCRIPTION-030`: subscription updates now retain manager-internal `SubscriptionID` only inside the subscription package, while initial subscribe snapshots, post-commit fanout, final unsubscribe deltas, protocol adapters, and protocol encode/decode stamp/carry the client `QueryID` visible to clients.
 
 Behavior now pinned:
 
-- `TestFanOutWorker_SubscriptionError_PublicProtocolDefault_WaitsForDurability` fails if an evaluation-origin `SubscriptionError` is delivered before `TxDurable` is ready
-- error-before-update ordering is preserved after durability is ready; the fix only moves error delivery behind the confirmed-read gate
-- this closes the carried runtime/fanout candidate "Confirmed-read durability gating for `SubscriptionError`"
+- `subscription/eval_test.go::TestEvalFanoutCarriesClientQueryIDForEachSubscription` fails if eval fanout stamps internal `SubscriptionID` instead of the client `QueryID`
+- `protocol/fanout_adapter_test.go::TestEncodeSubscriptionUpdate_CarriesClientQueryID` fails if protocol projection exposes `SubscriptionID` or ignores `QueryID`
+- protocol server-message round trips and applied/light/heavy row-shape pins now serialize the first `SubscriptionUpdate` field as `QueryID`
+- this closes the carried runtime/fanout candidate "QueryID-level fanout correlation / SubscriptionID wire cleanup"
 
-Previous latest query-only slice:
+Previous latest runtime/fanout slice:
 
-- `P0-SUBSCRIPTION-027`: one-off and subscription SQL accept bounded `JOIN ... ON col = col AND <qualified-column op literal>` on the existing two-table join surface by transparently folding the ON-extracted filter into the already-supported WHERE-form. Use this subscribe-widening precedent only when the new parser shape is provably identical to an already-accepted form.
+- `P0-SUBSCRIPTION-029`: evaluator-produced fanout is stabilized per connection by internal subscription-registration/SubscriptionID order before fanout worker handoff and before caller-update capture.
 
 Primary files touched by the latest OI-002 work:
 
-- `subscription/fanout_worker.go`
-- `subscription/fanout_worker_test.go`
+- `subscription/manager.go`
+- `subscription/query_state.go`
+- `subscription/register_set.go`
+- `subscription/eval.go`
+- `subscription/eval_test.go`
+- `protocol/wire_types.go`
+- `protocol/server_messages.go`
+- `protocol/fanout_adapter.go`
+- `protocol/fanout_adapter_test.go`
+- `executor/protocol_inbox_adapter.go`
 - `TECH-DEBT.md`
 - `docs/parity-phase0-ledger.md`
 - `docs/spacetimedb-parity-roadmap.md`
+- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md`
+- `docs/decomposition/005-protocol/SPEC-005-protocol.md`
+- `docs/parity-phase2-slice4-rows-shape.md`
 - `NEXT_SESSION_HANDOFF.md`
 
 Latest validation reported for that slice:
 
-- `rtk go test ./subscription -run TestFanOutWorker_SubscriptionError_PublicProtocolDefault_WaitsForDurability -count=1 -v`
-- `rtk go test ./subscription -run 'FanOutWorker|SubscriptionError' -count=1`
+- `rtk go test ./subscription -run TestEvalFanoutCarriesClientQueryIDForEachSubscription -count=1 -v`
+- `rtk go test ./protocol -run TestEncodeSubscriptionUpdate_CarriesClientQueryID -count=1 -v`
+- `rtk go test ./protocol -count=1`
 - `rtk go test ./subscription -count=1`
-- `rtk go vet ./subscription`
+- `rtk go test ./executor -count=1`
+- `rtk go test ./query/sql ./protocol ./subscription ./executor -count=1`
+- `rtk go vet ./subscription ./protocol ./executor`
 - `rtk go test ./... -count=1`
 
 Before calling the next slice done, still run the appropriate touched-package tests and prefer `rtk go test ./... -count=1` when time allows.
 
 ## Good next OI-002 candidates
 
-Choose from fresh live evidence. The next bounded candidate should be chosen by scouting live code/docs/tests after the `P0-SUBSCRIPTION-028` landing; do not carry forward older candidate notes without re-verification.
+Choose from fresh live evidence. The next bounded candidate should be chosen by scouting live code/docs/tests after the `P0-SUBSCRIPTION-030` landing; do not carry forward older candidate notes without re-verification.
 
 Candidates carried forward from prior handoffs:
 
 1. Runtime/fanout lanes.
-   - QueryID-level fanout correlation / SubscriptionID wire cleanup.
-   - Deterministic per-connection update ordering.
+   - Choose only from fresh evidence; the known QueryID-level fanout/protocol correlation and deterministic per-connection ordering candidates are closed.
 
 2. Row-level security / per-client filtering.
-   - This remains real but is too large to mix with a narrow SQL slice unless the user explicitly requests that broader work.
+   - This remains real but is too large to mix with a narrow SQL or fanout slice unless the user explicitly requests that broader work.
 
 3. A TBD parser/compile seam continuation, to be chosen from fresh scout — for example, additional bounded widenings that can be admitted via transparent parser-level parity against an already-accepted shape (use this route only when the parity claim is exactly as tight as P0-SUBSCRIPTION-027's).
 

@@ -45,15 +45,15 @@ func TestAdmissionOrdering_AppliedPrecedesFanoutOnOutboundCh(t *testing.T) {
 		t.Fatalf("SendSubscribeMultiApplied: %v", err)
 	}
 
-	// Step 2: first fan-out for the same (conn, subscription). Use the
+	// Step 2: first fan-out for the same (conn, query_id). Use the
 	// production fan-out entry point so the test exercises the real
 	// transport path.
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
 		connID: {
 			{
-				SubscriptionID: 9001, // manager-allocated internal id
-				TableName:      "users",
-				Inserts:        []byte{0x01},
+				QueryID:   42,
+				TableName: "users",
+				Inserts:   []byte{0x01},
 			},
 		},
 	}

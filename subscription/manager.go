@@ -26,7 +26,8 @@ type SubscriptionSetRegisterRequest struct {
 
 // SubscriptionSetRegisterResult carries the merged initial snapshot.
 // Update entries have Inserts populated and Deletes empty; one entry
-// per (allocated internal SubscriptionID, table) pair.
+// per (allocated internal SubscriptionID, table) pair, carrying the
+// client QueryID for protocol projection.
 type SubscriptionSetRegisterResult struct {
 	QueryID                          uint32
 	Update                           []SubscriptionUpdate
@@ -43,9 +44,11 @@ type SubscriptionSetUnregisterResult struct {
 }
 
 // SubscriptionUpdate is the per-subscription component of a transaction
-// delta. One per subscription affected by a commit (SPEC-004 §10.2).
+// delta. SubscriptionID is manager-internal; QueryID is the client-chosen
+// subscription-set identifier projected onto the wire (SPEC-004 §10.2).
 type SubscriptionUpdate struct {
 	SubscriptionID types.SubscriptionID
+	QueryID        uint32
 	TableID        TableID
 	TableName      string
 	Inserts        []types.ProductValue

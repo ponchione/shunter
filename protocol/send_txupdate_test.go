@@ -21,7 +21,7 @@ func TestDeliverTransactionUpdateLightSingleConn(t *testing.T) {
 
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
 		id: {
-			{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}, Deletes: []byte{}},
+			{QueryID: 1, TableName: "t", Inserts: []byte{0x01}, Deletes: []byte{}},
 		},
 	}
 
@@ -60,8 +60,8 @@ func TestDeliverTransactionUpdateLightMultiConn(t *testing.T) {
 	s := NewClientSender(mgr, &fakeInbox{})
 
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
-		id1: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
-		id2: {{SubscriptionID: 2, TableName: "t", Inserts: []byte{0x02}}},
+		id1: {{QueryID: 1, TableName: "t", Inserts: []byte{0x01}}},
+		id2: {{QueryID: 2, TableName: "t", Inserts: []byte{0x02}}},
 	}
 
 	errs := DeliverTransactionUpdateLight(s, mgr, 99, fanout)
@@ -86,7 +86,7 @@ func TestDeliverTransactionUpdateLightSkipsDisconnected(t *testing.T) {
 	s := NewClientSender(mgr, &fakeInbox{})
 
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
-		{99}: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
+		{99}: {{QueryID: 1, TableName: "t", Inserts: []byte{0x01}}},
 	}
 
 	errs := DeliverTransactionUpdateLight(s, mgr, 1, fanout)
@@ -134,7 +134,7 @@ func TestDeliverTransactionUpdateLightBufferFull(t *testing.T) {
 	c.OutboundCh <- []byte{0xFF}
 
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
-		id: {{SubscriptionID: 1, TableName: "t", Inserts: []byte{0x01}}},
+		id: {{QueryID: 1, TableName: "t", Inserts: []byte{0x01}}},
 	}
 
 	errs := DeliverTransactionUpdateLight(s, mgr, 1, fanout)

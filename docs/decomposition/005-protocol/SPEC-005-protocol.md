@@ -310,7 +310,7 @@ query_strings: [query_count] × string    — each a SQL query per §7.1.1
 
 **Response:** `SubscribeMultiApplied` or `SubscriptionError`
 
-Each string is parsed and validated independently with `query/sql.Parse`; any failure aborts the set and emits `SubscriptionError`. The applied response (§8.10) carries the merged initial snapshot as one `[]SubscriptionUpdate` with per-`(internal SubscriptionID, table)` entries.
+Each string is parsed and validated independently with `query/sql.Parse`; any failure aborts the set and emits `SubscriptionError`. The applied response (§8.10) carries the merged initial snapshot as one `[]SubscriptionUpdate` with per-query/table entries stamped with the client `QueryID`; manager-internal `SubscriptionID` values stay below the protocol boundary.
 
 ### 7.2 UnsubscribeSingle
 
@@ -441,7 +441,7 @@ error:      string                 — diagnostic message; not machine-parseable
 
 On receiving this, the client must discard all cached rows for the affected `query_id` (or the `(query_id, table_id)` sub-family when `table_id` is present). A bare `query_id` may be reused immediately.
 
-**Go↔wire mapping.** The subscription evaluator's internal `SubscriptionError` Go value (SPEC-004 §10.2) still carries a typed Go `SubscriptionID` plus additional diagnostic fields (`QueryHash`, `Predicate`) that are not otherwise on the wire; the protocol adapter projects Go→wire by emitting `request_id = RequestID` (present when non-zero), `query_id = SubscriptionID`, optional `table_id`, and `error = Message`.
+**Go↔wire mapping.** Subscribe/unsubscribe admission paths build this envelope with the client-chosen `query_id`. The subscription evaluator's post-commit `SubscriptionError` Go value (SPEC-004 §10.2) still carries a typed internal `SubscriptionID` plus diagnostic fields (`QueryHash`, `Predicate`) for server logging, but the fan-out adapter does not expose those internals: evaluation-origin errors are emitted with absent `request_id`, absent `query_id`, absent `table_id`, and `error = Message`.
 
 **Absent-`request_id` semantics.** An absent `request_id` is a spontaneous failure where the server no longer has any originating subscribe request identity to report. A present `request_id` MUST echo the `request_id` of the triggering `SubscribeSingle` / `SubscribeMulti`, including post-register reevaluation failures when the subscription manager still retains that metadata. Clients that omit `request_id` on subscribe accept that correlated failures and genuinely uncorrelated failures are indistinguishable; recommend setting `request_id >= 1` for robust client-side correlation.
 
@@ -482,14 +482,14 @@ request_id:   uint32 LE     — echoes CallReducer.request_id
 
 ```
 SubscriptionUpdate:
-  subscription_id: uint32 LE
+  query_id:        uint32 LE
   table_name:      string
   inserts:         RowList    — rows newly entering the result set
   deletes:         RowList    — rows leaving the result set
 ```
 
 Mapping from the Go value to the wire:
-- `subscription_id uint32 LE` ← `SubscriptionUpdate.SubscriptionID`
+- `query_id uint32 LE` ← `SubscriptionUpdate.QueryID`
 - `table_name string` ← `SubscriptionUpdate.TableName`
 - `inserts RowList` ← encoded from `SubscriptionUpdate.Inserts []ProductValue`
 - `deletes RowList` ← encoded from `SubscriptionUpdate.Deletes []ProductValue`
@@ -506,7 +506,7 @@ For a row update, treat the old row version and new row version separately:
 - old row does not match, new row matches → encode as `insert(new)` only
 - neither version matches → omit the row entirely
 
-A single `Committed.update` (or `TransactionUpdateLight.update`) may contain entries for multiple subscriptions. A subscription with no changes in a given transaction does not appear.
+A single `Committed.update` (or `TransactionUpdateLight.update`) may contain entries for multiple client query IDs or multiple query/table entries under the same query ID. A subscription query with no changes in a given transaction does not appear.
 
 **Important:** If the same row matches multiple subscriptions, it appears in the update for each matching subscription independently. There is no deduplication across subscriptions.
 
@@ -563,7 +563,7 @@ Response to `SubscribeMulti` (§7.1b). Carries the merged initial snapshot for a
 tag: 9
 request_id:                         uint32 LE
 query_id:                           uint32 LE
-update:                             []SubscriptionUpdate    — one entry per (internal SubscriptionID, table) with Inserts populated, Deletes empty
+update:                             []SubscriptionUpdate    — one entry per emitted query/table family, with query_id set and Inserts populated
 total_host_execution_duration_us:   uint64 LE
 ```
 
@@ -577,7 +577,7 @@ Response to `UnsubscribeMulti` (§7.2b). Carries the Deletes-populated entries f
 tag: 10
 request_id:                         uint32 LE
 query_id:                           uint32 LE
-update:                             []SubscriptionUpdate    — Deletes populated, Inserts empty
+update:                             []SubscriptionUpdate    — one entry per emitted query/table family, with query_id set and Deletes populated
 total_host_execution_duration_us:   uint64 LE
 ```
 
@@ -802,8 +802,8 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 | `ErrUnknownCompressionTag` | Server or client observed a compression tag not defined by this protocol version |
 | `ErrMalformedMessage` | Message body could not be decoded |
 | `ErrDecompressionFailed` | Compressed frame could not be decompressed |
-| `ErrDuplicateSubscriptionID` | Subscribe with a `subscription_id` already active or pending |
-| `ErrSubscriptionNotFound` | Unsubscribe for a `subscription_id` not active |
+| `ErrQueryIDAlreadyLive` | Subscribe with a `query_id` already active or pending on the connection |
+| `ErrSubscriptionNotFound` | Unsubscribe for a `query_id` not active on the connection |
 | `ErrReducerNotFound` | CallReducer named a reducer not registered |
 | `ErrLifecycleReducer` | CallReducer named a lifecycle reducer (OnConnect/OnDisconnect) |
 | `ErrClientBufferFull` | Server cannot send to this client (triggers disconnect) |

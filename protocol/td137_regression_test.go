@@ -27,10 +27,10 @@ func (s *recordingUpdateSender) SendTransactionUpdateLight(connID types.Connecti
 
 // TestTD137_DeliverTransactionUpdateLightNoAdmissionGate pins the C2
 // regression from TD-140/TD-137: DeliverTransactionUpdateLight must NOT
-// reject a SubscriptionUpdate whose SubscriptionID is a manager-allocated
-// internal id. Pre-fix, validateActiveSubscriptionUpdates compared this
-// against the wire-QueryID tracker map and returned ErrSubscriptionNotActive
-// for every fan-out delivery.
+// run a second protocol-layer admission gate over manager-authored fanout.
+// Admission is owned by subscription.Manager.querySets; by the time fanout
+// reaches this transport helper, the update already carries the client QueryID
+// selected at subscribe time.
 func TestTD137_DeliverTransactionUpdateLightNoAdmissionGate(t *testing.T) {
 	t.Parallel()
 
@@ -42,9 +42,9 @@ func TestTD137_DeliverTransactionUpdateLightNoAdmissionGate(t *testing.T) {
 	fanout := map[types.ConnectionID][]SubscriptionUpdate{
 		connID: {
 			{
-				SubscriptionID: 9001,
-				TableName:      "users",
-				Inserts:        []byte{0x01},
+				QueryID:   9001,
+				TableName: "users",
+				Inserts:   []byte{0x01},
 			},
 		},
 	}

@@ -295,13 +295,14 @@ func (m *Manager) RegisterSet(
 			qs = m.registry.createQueryState(hash, p)
 			PlaceSubscription(m.indexes, p, hash)
 		}
-		m.registry.addSubscriber(hash, req.ConnID, subID, req.RequestID)
+		m.registry.addSubscriber(hash, req.ConnID, subID, req.RequestID, req.QueryID)
 		allocated = append(allocated, subID)
 		_ = qs
 		if len(rows) > 0 {
 			tableID := emittedTableID(p)
 			updates = append(updates, SubscriptionUpdate{
 				SubscriptionID: subID,
+				QueryID:        req.QueryID,
 				TableID:        tableID,
 				TableName:      m.schema.TableName(tableID),
 				Inserts:        rows,
@@ -347,6 +348,7 @@ func (m *Manager) UnregisterSet(
 				tableID := emittedTableID(qs.predicate)
 				deletes = append(deletes, SubscriptionUpdate{
 					SubscriptionID: sid,
+					QueryID:        queryID,
 					TableID:        tableID,
 					TableName:      m.schema.TableName(tableID),
 					Deletes:        rows,

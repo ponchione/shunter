@@ -26,7 +26,7 @@ var (
 var (
 	// ErrInitialRowLimit — initial snapshot exceeded the configured row limit.
 	ErrInitialRowLimit = errors.New("subscription: initial row limit exceeded")
-	// ErrSubscriptionNotFound — unknown subscription ID for unregister.
+	// ErrSubscriptionNotFound — unknown query ID/subscription set for unregister.
 	ErrSubscriptionNotFound = errors.New("subscription: subscription not found")
 	// ErrJoinIndexUnresolved — validation confirmed a join-side index exists
 	// but the runtime IndexResolver could not produce an IndexID for it (or

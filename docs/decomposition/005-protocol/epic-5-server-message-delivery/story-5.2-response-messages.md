@@ -9,21 +9,20 @@
 
 ## Summary
 
-Deliver the four response messages that are direct replies to client requests: SubscribeApplied, UnsubscribeApplied, SubscriptionError, OneOffQueryResult.
+Deliver direct response messages: SubscribeSingleApplied / SubscribeMultiApplied, UnsubscribeSingleApplied / UnsubscribeMultiApplied, SubscriptionError, and OneOffQueryResult.
 
 ## Deliverables
 
-- `func SendSubscribeApplied(sender ClientSender, connID ConnectionID, msg *SubscribeApplied) error`:
-  - Verify the connection is still open and the `subscription_id` is still pending; if the connection closed or the subscription was already discarded, drop the result
-  - Activate subscription in tracker (pending → active) immediately before successful delivery commitment
+- `func SendSubscribeSingleApplied(sender ClientSender, conn *Conn, msg *SubscribeSingleApplied) error` and `SendSubscribeMultiApplied`:
+  - Verify the connection is still open; closed connections return `ErrConnNotFound`
   - Send via `sender.Send`
 
-- `func SendUnsubscribeApplied(sender ClientSender, connID ConnectionID, msg *UnsubscribeApplied) error`:
-  - Remove subscription from tracker
+- `func SendUnsubscribeSingleApplied(sender ClientSender, conn *Conn, msg *UnsubscribeSingleApplied) error` and `SendUnsubscribeMultiApplied`:
+  - Verify the connection is still open; closed connections return `ErrConnNotFound`
   - Send via `sender.Send`
 
-- `func SendSubscriptionError(sender ClientSender, connID ConnectionID, msg *SubscriptionError) error`:
-  - Release subscription_id from tracker (available for reuse)
+- `func SendSubscriptionError(sender ClientSender, conn *Conn, msg *SubscriptionError) error`:
+  - Send the wire error keyed by optional `query_id`; no protocol tracker release occurs
   - Send via `sender.Send`
 
 - `func SendOneOffQueryResult(sender ClientSender, connID ConnectionID, msg *OneOffQueryResult) error`:
@@ -31,14 +30,13 @@ Deliver the four response messages that are direct replies to client requests: S
 
 ## Acceptance Criteria
 
-- [ ] SubscribeApplied: subscription transitions pending → active
-- [ ] SubscribeApplied: rows are the correct committed-state snapshot for that subscription at registration time
+- [ ] SubscribeApplied: rows are the correct committed-state snapshot for that client `query_id` at registration time
 - [ ] SubscribeApplied: initial rows encoded as RowList in message
-- [ ] Disconnect while subscription is pending → later SubscribeApplied result is discarded and the subscription never becomes active
+- [ ] Disconnect before response delivery → send fails with `ErrConnNotFound` and does not resurrect protocol state
 - [ ] UnsubscribeApplied with `send_dropped=1`: includes current rows
 - [ ] UnsubscribeApplied with `send_dropped=0`: no rows
-- [ ] UnsubscribeApplied: subscription removed from tracker
-- [ ] SubscriptionError: subscription_id released, immediately reusable
+- [ ] UnsubscribeApplied: response enqueued without protocol tracker mutation
+- [ ] SubscriptionError: optional `query_id` is encoded when known; manager state owns reuse
 - [ ] SubscriptionError: `request_id` echoed when known; `0` only for genuinely uncorrelated spontaneous failures
 - [ ] OneOffQueryResult success: rows present, error empty
 - [ ] OneOffQueryResult error: error present, rows absent
@@ -48,5 +46,5 @@ Deliver the four response messages that are direct replies to client requests: S
 
 - These are 1:1 responses (one client message → one server response). No fan-out or broadcast involved.
 - `SubscribeApplied` contains a consistent snapshot of matching rows. The executor ensures this by running subscription registration within the commit serialization window (SPEC-003 §2.5).
-- The pending-subscription discard rule from SPEC-005 §9.1 is enforced here at the activation point: a late registration result must not resurrect a subscription after disconnect or explicit unsubscribe while still pending.
-- `SubscriptionError` makes the `subscription_id` immediately reusable. The client can send a new `Subscribe` with the same ID right away. Tracker cleanup is idempotent: if disconnect or pending-discard already released the ID, response handling must treat the second removal as a no-op rather than a new state transition.
+- The pending-subscription discard rule from SPEC-005 §9.1 is enforced by the manager and by connection-scoped send failure handling; response delivery is a straight transport push and must not resurrect state after disconnect.
+- `SubscriptionError` reports the optional client `query_id` when known. Reuse is controlled by the manager-owned `(ConnID, QueryID)` registry, not by protocol tracker cleanup.

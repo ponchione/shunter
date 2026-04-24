@@ -138,8 +138,8 @@ func TestTransactionUpdateHeavyCommittedRoundTrip(t *testing.T) {
 	rl := EncodeRowList([][]byte{{0x01}})
 	in := TransactionUpdate{
 		Status: StatusCommitted{Update: []SubscriptionUpdate{
-			{SubscriptionID: 1, TableName: "a", Inserts: rl, Deletes: nil},
-			{SubscriptionID: 2, TableName: "b", Inserts: nil, Deletes: rl},
+			{QueryID: 1, TableName: "a", Inserts: rl, Deletes: nil},
+			{QueryID: 2, TableName: "b", Inserts: nil, Deletes: rl},
 		}},
 		ReducerCall: ReducerCallInfo{ReducerName: "doit", ReducerID: 5, Args: []byte{0xCA}, RequestID: 7},
 	}
@@ -220,8 +220,8 @@ func TestTransactionUpdateLightRoundTrip(t *testing.T) {
 	in := TransactionUpdateLight{
 		RequestID: 7,
 		Update: []SubscriptionUpdate{
-			{SubscriptionID: 1, TableName: "a", Inserts: rl},
-			{SubscriptionID: 2, TableName: "b", Deletes: rl},
+			{QueryID: 1, TableName: "a", Inserts: rl},
+			{QueryID: 2, TableName: "b", Deletes: rl},
 		},
 	}
 	frame, err := EncodeServerMessage(in)
@@ -326,8 +326,8 @@ func TestSubscribeMultiAppliedRoundTrip(t *testing.T) {
 		QueryID:                          2,
 		TotalHostExecutionDurationMicros: 55,
 		Update: []SubscriptionUpdate{
-			{SubscriptionID: 10, TableName: "users", Inserts: []byte{0x01}},
-			{SubscriptionID: 11, TableName: "orders", Inserts: []byte{0x02}},
+			{QueryID: 10, TableName: "users", Inserts: []byte{0x01}},
+			{QueryID: 11, TableName: "orders", Inserts: []byte{0x02}},
 		},
 	}
 	frame, err := EncodeServerMessage(orig)
@@ -348,10 +348,10 @@ func TestSubscribeMultiAppliedRoundTrip(t *testing.T) {
 	if got.RequestID != 1 || got.QueryID != 2 || len(got.Update) != 2 || got.TotalHostExecutionDurationMicros != orig.TotalHostExecutionDurationMicros {
 		t.Fatalf("decoded = %+v", got)
 	}
-	if got.Update[0].SubscriptionID != 10 || got.Update[0].TableName != "users" {
+	if got.Update[0].QueryID != 10 || got.Update[0].TableName != "users" {
 		t.Fatalf("update[0] = %+v", got.Update[0])
 	}
-	if got.Update[1].SubscriptionID != 11 || got.Update[1].TableName != "orders" {
+	if got.Update[1].QueryID != 11 || got.Update[1].TableName != "orders" {
 		t.Fatalf("update[1] = %+v", got.Update[1])
 	}
 }
@@ -362,7 +362,7 @@ func TestUnsubscribeMultiAppliedRoundTrip(t *testing.T) {
 		QueryID:                          9,
 		TotalHostExecutionDurationMicros: 66,
 		Update: []SubscriptionUpdate{
-			{SubscriptionID: 10, TableName: "users", Deletes: []byte{0x03}},
+			{QueryID: 10, TableName: "users", Deletes: []byte{0x03}},
 		},
 	}
 	frame, err := EncodeServerMessage(orig)
@@ -380,7 +380,7 @@ func TestUnsubscribeMultiAppliedRoundTrip(t *testing.T) {
 	if !ok || got.RequestID != 5 || got.QueryID != 9 || len(got.Update) != 1 || got.TotalHostExecutionDurationMicros != orig.TotalHostExecutionDurationMicros {
 		t.Fatalf("decoded = %+v", decoded)
 	}
-	if got.Update[0].SubscriptionID != 10 || got.Update[0].TableName != "users" {
+	if got.Update[0].QueryID != 10 || got.Update[0].TableName != "users" {
 		t.Fatalf("update[0] = %+v", got.Update[0])
 	}
 }

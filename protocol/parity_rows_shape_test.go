@@ -91,7 +91,7 @@ func TestParityTransactionUpdateLightWireShape(t *testing.T) {
 	const requestID uint32 = 0x01020304
 	rl := EncodeRowList([][]byte{{0xAA, 0xBB}})
 	update := []SubscriptionUpdate{
-		{SubscriptionID: 7, TableName: "users", Inserts: rl, Deletes: nil},
+		{QueryID: 7, TableName: "users", Inserts: rl, Deletes: nil},
 	}
 
 	in := TransactionUpdateLight{RequestID: requestID, Update: update}
@@ -109,7 +109,7 @@ func TestParityTransactionUpdateLightWireShape(t *testing.T) {
 
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(update)))
 	want.Write(u32Buf[:])
-	binary.LittleEndian.PutUint32(u32Buf[:], update[0].SubscriptionID)
+	binary.LittleEndian.PutUint32(u32Buf[:], update[0].QueryID)
 	want.Write(u32Buf[:])
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(update[0].TableName)))
 	want.Write(u32Buf[:])
@@ -139,7 +139,7 @@ func TestParityTransactionUpdateLightWireShape(t *testing.T) {
 	if got.RequestID != requestID {
 		t.Fatalf("RequestID = %d, want %d", got.RequestID, requestID)
 	}
-	if len(got.Update) != 1 || got.Update[0].SubscriptionID != 7 ||
+	if len(got.Update) != 1 || got.Update[0].QueryID != 7 ||
 		got.Update[0].TableName != "users" ||
 		!bytes.Equal(got.Update[0].Inserts, rl) ||
 		len(got.Update[0].Deletes) != 0 {
@@ -149,9 +149,9 @@ func TestParityTransactionUpdateLightWireShape(t *testing.T) {
 
 // TestParitySubscriptionUpdateInnerLayout pins the SubscriptionUpdate
 // inner wire layout as a canonical contract. Locks:
-//   - the Shunter-local `SubscriptionID` field (delta #3 in
-//     `docs/parity-phase2-slice4-rows-shape.md`; reference has no
-//     per-TableUpdate subscription id), and
+//   - the flattened per-entry `QueryID` field (delta #3 in
+//     `docs/parity-phase2-slice4-rows-shape.md`; reference carries query
+//     correlation through the fuller wrapper chain rather than this flat slot), and
 //   - the inserts-before-deletes field order (delta #7; reference
 //     QueryUpdate is deletes-first).
 //
@@ -159,7 +159,7 @@ func TestParityTransactionUpdateLightWireShape(t *testing.T) {
 // decision doc until the wrapper-chain close lands as its own slice.
 func TestParitySubscriptionUpdateInnerLayout(t *testing.T) {
 	fields := msgFieldNames(SubscriptionUpdate{})
-	want := []string{"SubscriptionID", "TableName", "Inserts", "Deletes"}
+	want := []string{"QueryID", "TableName", "Inserts", "Deletes"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("SubscriptionUpdate fields = %v, want %v", fields, want)
 	}
@@ -167,7 +167,7 @@ func TestParitySubscriptionUpdateInnerLayout(t *testing.T) {
 	inserts := []byte{0x01, 0x02}
 	deletes := []byte{0x03}
 	in := []SubscriptionUpdate{
-		{SubscriptionID: 11, TableName: "rooms", Inserts: inserts, Deletes: deletes},
+		{QueryID: 11, TableName: "rooms", Inserts: inserts, Deletes: deletes},
 	}
 
 	var got bytes.Buffer
@@ -177,7 +177,7 @@ func TestParitySubscriptionUpdateInnerLayout(t *testing.T) {
 	var u32Buf [4]byte
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(in)))
 	wantBuf.Write(u32Buf[:])
-	binary.LittleEndian.PutUint32(u32Buf[:], in[0].SubscriptionID)
+	binary.LittleEndian.PutUint32(u32Buf[:], in[0].QueryID)
 	wantBuf.Write(u32Buf[:])
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(in[0].TableName)))
 	wantBuf.Write(u32Buf[:])

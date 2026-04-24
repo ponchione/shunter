@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -13,17 +14,17 @@ import (
 
 func TestEncodeSubscriptionUpdate_SingleInsertDelete(t *testing.T) {
 	su := subscription.SubscriptionUpdate{
-		SubscriptionID: 42,
-		TableName:      "users",
-		Inserts:        []types.ProductValue{{types.NewUint32(1)}},
-		Deletes:        []types.ProductValue{{types.NewUint32(2)}},
+		QueryID:   42,
+		TableName: "users",
+		Inserts:   []types.ProductValue{{types.NewUint32(1)}},
+		Deletes:   []types.ProductValue{{types.NewUint32(2)}},
 	}
 	pu, err := encodeSubscriptionUpdate(su)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pu.SubscriptionID != 42 {
-		t.Fatalf("SubscriptionID = %d, want 42", pu.SubscriptionID)
+	if pu.QueryID != 42 {
+		t.Fatalf("QueryID = %d, want 42", pu.QueryID)
 	}
 	if pu.TableName != "users" {
 		t.Fatalf("TableName = %q, want %q", pu.TableName, "users")
@@ -44,10 +45,33 @@ func TestEncodeSubscriptionUpdate_SingleInsertDelete(t *testing.T) {
 	}
 }
 
+func TestEncodeSubscriptionUpdate_CarriesClientQueryID(t *testing.T) {
+	su := subscription.SubscriptionUpdate{
+		SubscriptionID: 77,
+		QueryID:        910,
+		TableName:      "users",
+		Inserts:        []types.ProductValue{{types.NewUint32(1)}},
+	}
+	pu, err := encodeSubscriptionUpdate(su)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if field := reflect.ValueOf(pu).FieldByName("SubscriptionID"); field.IsValid() {
+		t.Fatalf("protocol update still exposes internal SubscriptionID field: %+v", pu)
+	}
+	field := reflect.ValueOf(pu).FieldByName("QueryID")
+	if !field.IsValid() {
+		t.Fatalf("protocol update missing QueryID field: %+v", pu)
+	}
+	if got := uint32(field.Uint()); got != su.QueryID {
+		t.Fatalf("QueryID = %d, want %d", got, su.QueryID)
+	}
+}
+
 func TestEncodeSubscriptionUpdate_Empty(t *testing.T) {
 	su := subscription.SubscriptionUpdate{
-		SubscriptionID: 1,
-		TableName:      "empty",
+		QueryID:   1,
+		TableName: "empty",
 	}
 	pu, err := encodeSubscriptionUpdate(su)
 	if err != nil {
@@ -64,8 +88,8 @@ func TestEncodeSubscriptionUpdate_Empty(t *testing.T) {
 
 func TestEncodeSubscriptionUpdate_MultiRow(t *testing.T) {
 	su := subscription.SubscriptionUpdate{
-		SubscriptionID: 7,
-		TableName:      "data",
+		QueryID:   7,
+		TableName: "data",
 		Inserts: []types.ProductValue{
 			{types.NewUint32(10), types.NewString("alice")},
 			{types.NewUint32(20), types.NewString("bob")},
@@ -135,9 +159,9 @@ func TestFanOutSenderAdapter_SendTransactionUpdateLight(t *testing.T) {
 	err := adapter.SendTransactionUpdateLight(
 		connID(1), 11,
 		[]subscription.SubscriptionUpdate{{
-			SubscriptionID: 5,
-			TableName:      "t1",
-			Inserts:        []types.ProductValue{{types.NewUint32(42)}},
+			QueryID:   5,
+			TableName: "t1",
+			Inserts:   []types.ProductValue{{types.NewUint32(42)}},
 		}},
 		nil,
 	)
@@ -159,7 +183,7 @@ func TestFanOutSenderAdapter_BufferFull_MapsError(t *testing.T) {
 	adapter := NewFanOutSenderAdapter(mock)
 	err := adapter.SendTransactionUpdateLight(
 		connID(1), 1,
-		[]subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "t"}},
+		[]subscription.SubscriptionUpdate{{QueryID: 1, TableName: "t"}},
 		nil,
 	)
 	if !errors.Is(err, subscription.ErrSendBufferFull) {
@@ -172,7 +196,7 @@ func TestFanOutSenderAdapter_ConnNotFound_MapsError(t *testing.T) {
 	adapter := NewFanOutSenderAdapter(mock)
 	err := adapter.SendTransactionUpdateLight(
 		connID(1), 1,
-		[]subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "t"}},
+		[]subscription.SubscriptionUpdate{{QueryID: 1, TableName: "t"}},
 		nil,
 	)
 	if !errors.Is(err, subscription.ErrSendConnGone) {
@@ -184,8 +208,8 @@ func TestFanOutSenderAdapter_RowPayloadRoundTrip(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)
 	updates := []subscription.SubscriptionUpdate{{
-		SubscriptionID: 5,
-		TableName:      "players",
+		QueryID:   5,
+		TableName: "players",
 		Inserts: []types.ProductValue{
 			{types.NewUint32(42), types.NewString("alice")},
 		},
@@ -235,9 +259,9 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyCommitted(t *testing.T) {
 		RequestID: 9,
 	}
 	callerUpdates := []subscription.SubscriptionUpdate{{
-		SubscriptionID: 1,
-		TableName:      "players",
-		Inserts:        []types.ProductValue{{types.NewUint32(1)}},
+		QueryID:   1,
+		TableName: "players",
+		Inserts:   []types.ProductValue{{types.NewUint32(1)}},
 	}}
 	if err := adapter.SendTransactionUpdateHeavy(connID(1), outcome, callerUpdates, nil); err != nil {
 		t.Fatal(err)
@@ -295,7 +319,7 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 // emits `SubscriptionError { request_id: None, query_id: None, ... }`
 // in this exact case, and `core/src/client/messages.rs:622-629`
 // propagates the Options straight through. Per-connection diagnostics
-// (`subscription.SubscriptionError.RequestID`/`SubscriptionID`) are
+// (`subscription.SubscriptionError.RequestID`/`QueryID`) are
 // internal logging state; they must not appear on the wire.
 func TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs(t *testing.T) {
 	mock := &mockClientSender{}
@@ -340,8 +364,8 @@ func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossLightCalls(t *testing.T) {
 	}
 	defer func() { encodeRowsUnmemoized = oldEncodeRows }()
 
-	updates1 := []subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "players", Inserts: sharedRows}}
-	updates2 := []subscription.SubscriptionUpdate{{SubscriptionID: 2, TableName: "players", Inserts: sharedRows}}
+	updates1 := []subscription.SubscriptionUpdate{{QueryID: 1, TableName: "players", Inserts: sharedRows}}
+	updates2 := []subscription.SubscriptionUpdate{{QueryID: 2, TableName: "players", Inserts: sharedRows}}
 	if err := adapter.SendTransactionUpdateLight(connID(1), 55, updates1, memo); err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +390,7 @@ func TestFanOutSenderAdapter_MemoCacheDoesNotLeakAcrossTransactions(t *testing.T
 	}
 	defer func() { encodeRowsUnmemoized = oldEncodeRows }()
 
-	updates := []subscription.SubscriptionUpdate{{SubscriptionID: 1, TableName: "players", Inserts: sharedRows}}
+	updates := []subscription.SubscriptionUpdate{{QueryID: 1, TableName: "players", Inserts: sharedRows}}
 	if err := adapter.SendTransactionUpdateLight(connID(1), 60, updates, subscription.NewEncodingMemo()); err != nil {
 		t.Fatal(err)
 	}

@@ -68,13 +68,13 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 
 	var mu sync.Mutex
-	var gotSubID uint32
+	var gotQueryID uint32
 	called := make(chan struct{})
 
 	handlers := &MessageHandlers{
 		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
-			gotSubID = msg.QueryID
+			gotQueryID = msg.QueryID
 			mu.Unlock()
 			close(called)
 		},
@@ -108,8 +108,8 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	}
 
 	mu.Lock()
-	if gotSubID != 42 {
-		t.Errorf("SubscriptionID = %d, want 42", gotSubID)
+	if gotQueryID != 42 {
+		t.Errorf("QueryID = %d, want 42", gotQueryID)
 	}
 	mu.Unlock()
 

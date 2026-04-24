@@ -208,7 +208,7 @@ func TestParitySubscribeMultiAppliedWireShape(t *testing.T) {
 	const duration uint64 = 0x1112131415161718
 	rl := EncodeRowList([][]byte{{0x01}})
 	update := []SubscriptionUpdate{
-		{SubscriptionID: 9, TableName: "users", Inserts: rl, Deletes: nil},
+		{QueryID: 9, TableName: "users", Inserts: rl, Deletes: nil},
 	}
 
 	in := SubscribeMultiApplied{
@@ -235,7 +235,7 @@ func TestParitySubscribeMultiAppliedWireShape(t *testing.T) {
 	want.Write(u32Buf[:])
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(update)))
 	want.Write(u32Buf[:])
-	binary.LittleEndian.PutUint32(u32Buf[:], update[0].SubscriptionID)
+	binary.LittleEndian.PutUint32(u32Buf[:], update[0].QueryID)
 	want.Write(u32Buf[:])
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(update[0].TableName)))
 	want.Write(u32Buf[:])
@@ -264,7 +264,7 @@ func TestParitySubscribeMultiAppliedWireShape(t *testing.T) {
 	}
 	if got.RequestID != requestID || got.QueryID != queryID ||
 		got.TotalHostExecutionDurationMicros != duration ||
-		len(got.Update) != 1 || got.Update[0].SubscriptionID != 9 ||
+		len(got.Update) != 1 || got.Update[0].QueryID != 9 ||
 		got.Update[0].TableName != "users" {
 		t.Errorf("round-trip mismatch: got %+v, want %+v", got, in)
 	}
@@ -281,7 +281,7 @@ func TestParityUnsubscribeMultiAppliedWireShape(t *testing.T) {
 	const duration uint64 = 0xF0E0D0C0B0A09080
 	rl := EncodeRowList([][]byte{{0xFE, 0xDC}})
 	update := []SubscriptionUpdate{
-		{SubscriptionID: 1, TableName: "orders", Inserts: nil, Deletes: rl},
+		{QueryID: 1, TableName: "orders", Inserts: nil, Deletes: rl},
 	}
 
 	in := UnsubscribeMultiApplied{
@@ -308,7 +308,7 @@ func TestParityUnsubscribeMultiAppliedWireShape(t *testing.T) {
 	want.Write(u32Buf[:])
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(update)))
 	want.Write(u32Buf[:])
-	binary.LittleEndian.PutUint32(u32Buf[:], update[0].SubscriptionID)
+	binary.LittleEndian.PutUint32(u32Buf[:], update[0].QueryID)
 	want.Write(u32Buf[:])
 	binary.LittleEndian.PutUint32(u32Buf[:], uint32(len(update[0].TableName)))
 	want.Write(u32Buf[:])
@@ -337,7 +337,7 @@ func TestParityUnsubscribeMultiAppliedWireShape(t *testing.T) {
 	}
 	if got.RequestID != requestID || got.QueryID != queryID ||
 		got.TotalHostExecutionDurationMicros != duration ||
-		len(got.Update) != 1 || got.Update[0].SubscriptionID != 1 ||
+		len(got.Update) != 1 || got.Update[0].QueryID != 1 ||
 		got.Update[0].TableName != "orders" {
 		t.Errorf("round-trip mismatch: got %+v, want %+v", got, in)
 	}

@@ -19,10 +19,10 @@ type DeliveryError struct {
 // caller can trigger disconnects.
 //
 // Phase 2 Slice 2 admission-model slice (TD-140): the former per-update
-// IsActive(SubscriptionID) gate is gone — admission is owned by
+// active-subscription gate is gone — admission is owned by
 // subscription.Manager.querySets, and fan-out enumerates only live
-// subs. Transport-level guards in connOnlySender.Send (<-c.closed,
-// ErrConnNotFound, ErrClientBufferFull) handle disconnect races.
+// client QueryIDs. Transport-level guards in connOnlySender.Send
+// (<-c.closed, ErrConnNotFound, ErrClientBufferFull) handle disconnect races.
 // See docs/adr/2026-04-19-subscription-admission-model.md.
 func DeliverTransactionUpdateLight(
 	sender ClientSender,

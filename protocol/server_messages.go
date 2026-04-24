@@ -96,9 +96,9 @@ type SubscriptionError struct {
 }
 
 // SubscribeMultiApplied is the server response to a SubscribeMulti.
-// Update is a merged initial snapshot, one SubscriptionUpdate per
-// (allocated internal SubscriptionID, table) pair, with Inserts
-// populated and Deletes empty. Reference: SubscribeMultiApplied at
+// Update is a merged initial snapshot, one SubscriptionUpdate per emitted
+// query/table family carrying the client QueryID, with Inserts populated and
+// Deletes empty. Reference: SubscribeMultiApplied at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380
 // (`request_id, total_host_execution_duration_micros, query_id, update`).
 // Duration sits at position 2 to match the reference byte shape — pinned
@@ -699,7 +699,7 @@ func readReducerCallInfo(body []byte, off int) (ReducerCallInfo, int, error) {
 func writeSubscriptionUpdates(buf *bytes.Buffer, ups []SubscriptionUpdate) {
 	writeUint32(buf, uint32(len(ups)))
 	for _, u := range ups {
-		writeUint32(buf, u.SubscriptionID)
+		writeUint32(buf, u.QueryID)
 		writeString(buf, u.TableName)
 		writeBytes(buf, u.Inserts)
 		writeBytes(buf, u.Deletes)
@@ -714,7 +714,7 @@ func readSubscriptionUpdates(body []byte, off int) ([]SubscriptionUpdate, int, e
 	ups := make([]SubscriptionUpdate, 0, count)
 	for i := uint32(0); i < count; i++ {
 		var u SubscriptionUpdate
-		if u.SubscriptionID, off, err = readUint32(body, off); err != nil {
+		if u.QueryID, off, err = readUint32(body, off); err != nil {
 			return nil, off, err
 		}
 		if u.TableName, off, err = readString(body, off); err != nil {

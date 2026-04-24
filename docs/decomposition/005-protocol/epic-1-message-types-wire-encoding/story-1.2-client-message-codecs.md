@@ -9,25 +9,24 @@
 
 ## Summary
 
-BSATN encode/decode for all four client→server message types. Each message is decoded from a binary frame: `[tag: uint8][body: BSATN fields]`.
+BSATN encode/decode for all six client→server message types. Each message is decoded from a binary frame: `[tag: uint8][body: BSATN fields]`.
 
 ## Deliverables
 
-- `SubscribeMsg` struct + decode:
+- `SubscribeSingleMsg` struct + decode:
   ```go
-  type SubscribeMsg struct {
-      RequestID      uint32
-      SubscriptionID uint32
-      Query          Query
+  type SubscribeSingleMsg struct {
+      RequestID   uint32
+      QueryID     uint32
+      QueryString string
   }
   ```
 
-- `UnsubscribeMsg` struct + decode:
+- `UnsubscribeSingleMsg` struct + decode:
   ```go
-  type UnsubscribeMsg struct {
-      RequestID      uint32
-      SubscriptionID uint32
-      SendDropped    bool   // wire: uint8, 0 or 1
+  type UnsubscribeSingleMsg struct {
+      RequestID uint32
+      QueryID   uint32
   }
   ```
 
@@ -43,9 +42,22 @@ BSATN encode/decode for all four client→server message types. Each message is 
 - `OneOffQueryMsg` struct + decode:
   ```go
   type OneOffQueryMsg struct {
-      RequestID  uint32
-      TableName  string
-      Predicates []Predicate
+      MessageID   []byte
+      QueryString string
+  }
+  ```
+
+- `SubscribeMultiMsg` / `UnsubscribeMultiMsg` structs + decode:
+  ```go
+  type SubscribeMultiMsg struct {
+      RequestID    uint32
+      QueryID      uint32
+      QueryStrings []string
+  }
+
+  type UnsubscribeMultiMsg struct {
+      RequestID uint32
+      QueryID   uint32
   }
   ```
 
@@ -54,9 +66,9 @@ BSATN encode/decode for all four client→server message types. Each message is 
 ## Acceptance Criteria
 
 - [ ] Round-trip each C2S message type: encode → decode → fields match
-- [ ] Subscribe with empty predicates decodes correctly
-- [ ] Subscribe with 3 predicates decodes all three
-- [ ] Unsubscribe `SendDropped` wire byte `0` → `false`, `1` → `true`
+- [ ] SubscribeSingle with one SQL query string decodes correctly
+- [ ] SubscribeMulti with 3 query strings decodes all three
+- [ ] UnsubscribeSingle / UnsubscribeMulti decode `query_id` without a `send_dropped` byte
 - [ ] CallReducer with empty `Args` (zero-length byte slice) is valid
 - [ ] Unknown tag byte → `ErrUnknownMessageTag`
 - [ ] Truncated body → `ErrMalformedMessage`
@@ -66,4 +78,4 @@ BSATN encode/decode for all four client→server message types. Each message is 
 
 - Client→server messages are never compressed in v1. No compression handling needed in decode path.
 - `CallReducerMsg.Args` is kept as raw bytes. The protocol layer does not validate argument types — that's the executor's job (SPEC-003).
-- `DecodeClientMessage` returns `any` because the caller (dispatch loop) switches on the tag anyway. A type-switch on the concrete type is the expected pattern.
+- `DecodeClientMessage` returns `any` because the caller (dispatch loop) switches on the tag anyway. A type-switch on `SubscribeSingleMsg`, `SubscribeMultiMsg`, and the other concrete message types is the expected pattern.

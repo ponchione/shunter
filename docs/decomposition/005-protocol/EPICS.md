@@ -12,8 +12,8 @@ Serialization foundation. Every other epic sends or receives these types.
 
 **Scope:**
 - Client→server and server→client message tag constants (§6)
-- Go structs for all 11 message types (4 C2S, 7 S2C)
-- `Query` and `Predicate` wire types for structured subscription predicates (§7.1.1)
+- Go structs for the current message set (6 C2S, 10 S2C, with tag 7 reserved server→client)
+- SQL query-string payloads for SubscribeSingle / SubscribeMulti / OneOffQuery (§7.1.1, §7.4)
 - `RowList` encode/decode with per-row length prefix (§3.4)
 - BSATN encode/decode for each message type (§3.1)
 - Message framing: `[tag][body]` (§3.2)
@@ -21,7 +21,7 @@ Serialization foundation. Every other epic sends or receives these types.
 - Unknown tag handling: close with protocol error `1002`
 
 **Testable outcomes:**
-- Round-trip encode/decode each of 11 message types
+- Round-trip encode/decode each current message type
 - RowList: encode N rows, decode back — row count and data match
 - Compression: encode with gzip, decode — matches uncompressed original
 - Uncompressed envelope (`0x00` prefix) round-trips correctly
@@ -114,14 +114,14 @@ Parse incoming binary frames and route to subsystems.
 - **Unsubscribe handlers (§7.2):** decode `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg`, validate `query_id` names a live set on this connection, send `UnregisterSubscriptionSetCmd` to executor
 - **CallReducer handler (§7.3):** decode `CallReducer`, reject lifecycle reducer names (`OnConnect`, `OnDisconnect`), send `CallReducerCmd` to executor inbox with `ResponseCh`
 - **OneOffQuery handler (§7.4):** decode `OneOffQuery`, execute read-only query against `CommittedState.Snapshot()`, return `OneOffQueryResult`
-- Per-connection subscription state machine (§9.1): track pending/active/removed states per `subscription_id`; `subscription_id` reserved on accept, reusable after error or unsubscribe
+- Per-connection query state (§9.1): client `query_id` uniqueness and reuse are manager-authoritative through `(ConnID, QueryID)`; no protocol-local subscription tracker
 
 **Testable outcomes:**
 - Valid SubscribeSingle / SubscribeMulti → `RegisterSubscriptionSetCmd` sent to executor
 - Subscribe with nonexistent table → `SubscriptionError`
 - Subscribe with nonexistent column → `SubscriptionError`
-- Subscribe with duplicate active subscription_id → `SubscriptionError`
-- Subscribe with duplicate pending subscription_id → `SubscriptionError`
+- Subscribe with duplicate active `query_id` → `SubscriptionError`
+- Subscribe with duplicate pending `query_id` → `SubscriptionError`
 - Multi-predicate normalization: `[P1, P2, P3]` → `And{And{P1, P2}, P3}`
 - No predicates → `AllRows(table)`
 - Range predicate → rejected (v1)
@@ -144,11 +144,11 @@ Parse incoming binary frames and route to subsystems.
 Outbound message construction and delivery to WebSocket connections.
 
 **Scope:**
-- `ClientSender` interface (§13): `Send(connID, msg any) error`, `SendTransactionUpdate(connID, *TransactionUpdate) error`, `SendReducerResult(connID, *ReducerCallResult) error`
+- `ClientSender` interface (§13): `Send(connID, msg any) error`, `SendTransactionUpdate(connID, *TransactionUpdate) error`, `SendTransactionUpdateLight(connID, *TransactionUpdateLight) error`
 - Per-connection outbound writer: serialize message, apply optional compression, write to WebSocket
 - **SubscribeApplied** delivery: initial rows as RowList, consistent snapshot
 - **UnsubscribeApplied** delivery: optionally include dropped rows (`send_dropped`)
-- **SubscriptionError** delivery: diagnostic message, `query_id` now dead on the wire (projected from the internal Go `SubscriptionID`)
+- **SubscriptionError** delivery: diagnostic message plus optional client `query_id`; manager-internal `SubscriptionID` is not exposed on the wire
 - **OneOffQueryResult** delivery: success with RowList or error with message
 - **TransactionUpdate** construction from `CommitFanout` (SPEC-004 §7): iterate `map[ConnectionID][]SubscriptionUpdate`, build `TransactionUpdate{TxID, Updates}`, send per connection
 - **ReducerCallResult** with embedded `transaction_update`:
@@ -170,7 +170,7 @@ Outbound message construction and delivery to WebSocket connections.
 - ReducerCallResult: no active subscriptions → empty embedded update, no separate TransactionUpdate
 - ReducerCallResult: failed reducer → status set, empty embedded update
 - Caller does NOT receive standalone TransactionUpdate for same tx_id
-- SubscribeApplied always delivered before TransactionUpdate for that subscription_id
+- SubscribeApplied always delivered before TransactionUpdate for that `query_id`
 - Unsubscribe with `send_dropped=1` → UnsubscribeApplied includes current rows
 
 **Dependencies:** Epic 1 (message encoding, RowList), Epic 3 (connection send channel), Epic 4 (subscription state for routing)
@@ -245,7 +245,7 @@ Errors introduced where first needed:
 | `ErrMalformedMessage` | Epic 1 (body decode) |
 | `ErrDecompressionFailed` | Epic 1 (gzip decompress) |
 | `ErrZeroConnectionID` | Epic 3 (upgrade handler) |
-| `ErrDuplicateSubscriptionID` | Epic 4 (subscribe handler) |
+| `ErrQueryIDAlreadyLive` | Epic 4 (subscribe handler) |
 | `ErrSubscriptionNotFound` | Epic 4 (unsubscribe handler) |
 | `ErrReducerNotFound` | Epic 4 (call reducer — surfaced from SPEC-003) |
 | `ErrLifecycleReducer` | Epic 4 (call reducer — OnConnect/OnDisconnect blocked) |

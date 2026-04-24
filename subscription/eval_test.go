@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"log"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -153,6 +155,88 @@ func TestEvalSameConnectionSameQueryProducesIndependentUpdates(t *testing.T) {
 	}
 	if !seen[wantA] || !seen[wantB] {
 		t.Fatalf("expected updates for subIDs %d and %d, got %v", wantA, wantB, updates)
+	}
+}
+
+func TestEvalFanoutCarriesClientQueryIDForEachSubscription(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	c := types.ConnectionID{1}
+	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	queryIDs := []uint32{410, 920}
+	for _, queryID := range queryIDs {
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: queryID, Predicates: []Predicate{pred}}, nil); err != nil {
+			t.Fatalf("RegisterSet queryID=%d: %v", queryID, err)
+		}
+	}
+
+	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[c]
+	if len(updates) != len(queryIDs) {
+		t.Fatalf("updates for shared connection = %v, want %d", updates, len(queryIDs))
+	}
+	seen := make(map[uint32]bool, len(updates))
+	for _, update := range updates {
+		queryID := queryIDForUpdate(t, update)
+		if queryID == uint32(update.SubscriptionID) {
+			t.Fatalf("QueryID should be the client-chosen ID, not internal SubscriptionID: update=%+v", update)
+		}
+		seen[queryID] = true
+	}
+	for _, queryID := range queryIDs {
+		if !seen[queryID] {
+			t.Fatalf("missing QueryID %d in fanout updates %+v", queryID, updates)
+		}
+	}
+}
+
+func queryIDForUpdate(t *testing.T, update SubscriptionUpdate) uint32 {
+	t.Helper()
+	field := reflect.ValueOf(update).FieldByName("QueryID")
+	if !field.IsValid() {
+		t.Fatalf("SubscriptionUpdate is missing client QueryID; update=%+v", update)
+	}
+	return uint32(field.Uint())
+}
+
+func TestEvalFanoutOrdersUpdatesByRegistrationWithinConnection(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	c := types.ConnectionID{1}
+	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
+
+	const subscriptionCount = 32
+	for i := 0; i < subscriptionCount; i++ {
+		queryID := uint32(100 + i)
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: queryID, Predicates: []Predicate{pred}}, nil); err != nil {
+			t.Fatalf("RegisterSet queryID=%d: %v", queryID, err)
+		}
+	}
+	want := mgr.registry.subscriptionsForConn(c)
+	if len(want) != subscriptionCount {
+		t.Fatalf("registered subscriptions = %v, want %d", want, subscriptionCount)
+	}
+
+	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
+	for attempt := 0; attempt < 64; attempt++ {
+		mgr.EvalAndBroadcast(types.TxID(attempt+1), cs, nil, PostCommitMeta{})
+		msg := <-inbox
+		updates := msg.Fanout[c]
+		if len(updates) != len(want) {
+			t.Fatalf("attempt %d: updates for shared connection = %v, want %d", attempt, updates, len(want))
+		}
+		got := make([]types.SubscriptionID, len(updates))
+		for i, u := range updates {
+			got[i] = u.SubscriptionID
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("attempt %d: update order = %v, want registration order %v", attempt, got, want)
+		}
 	}
 }
 

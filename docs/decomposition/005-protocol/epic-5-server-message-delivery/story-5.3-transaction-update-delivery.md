@@ -20,9 +20,9 @@ After each committed transaction, deliver per-connection `TransactionUpdate` mes
   2. For each connection: build or accept `TransactionUpdate{TxID, Updates}` using the grouped `[]SubscriptionUpdate`
   3. Send via `ClientSender.SendTransactionUpdate`
 
-- Per-connection ordering guarantee enforcement:
-  - `TransactionUpdate` referencing a `subscription_id` MUST NOT be sent before `SubscribeApplied` for that ID
-  - Implementation: check subscription state is `SubActive` before including that subscription's update; if the state is not active, treat that as a pipeline invariant violation and do not silently drop the delta
+- Per-connection ordering guarantee:
+  - `TransactionUpdate` / `TransactionUpdateLight` entries reference client `query_id` values and MUST NOT be delivered before the corresponding `SubscribeSingleApplied` / `SubscribeMultiApplied`
+  - Implementation: rely on executor serialization plus per-connection `OutboundCh` FIFO; there is no protocol-side active-subscription gate or manager-internal `SubscriptionID` check
 
 - Delta semantics (informational — produced by SPEC-004, not constructed here):
   - `inserts`: rows newly entering the subscription result set
@@ -45,7 +45,7 @@ After each committed transaction, deliver per-connection `TransactionUpdate` mes
 - [ ] Row update where the row enters the predicate → `insert` only
 - [ ] Row update where the row leaves the predicate → `delete` only
 - [ ] Insert+delete of the same row in one transaction → no row appears in delivered updates
-- [ ] SubscribeApplied for subscription X always delivered before any TransactionUpdate containing X
+- [ ] SubscribeApplied for `query_id` X always delivered before any TransactionUpdate containing X
 - [ ] Empty update for a connection (no matching subscriptions in this commit) → no message sent
 - [ ] `ErrClientBufferFull` from send → trigger client disconnect
 
@@ -54,4 +54,4 @@ After each committed transaction, deliver per-connection `TransactionUpdate` mes
 - The protocol layer does not compute deltas. It receives pre-computed `CommitFanout` from SPEC-004's fan-out worker and translates entries into wire messages.
 - The `TxDurable` channel in `FanOutMessage` supports confirmed-reads clients (SPEC-004 §8.4). For v1, the fan-out worker handles the wait. The protocol layer just sends what it receives.
 - The protocol layer still verifies delivered wire semantics even though delta computation originates in SPEC-004. These acceptance tests are end-to-end protocol guarantees, not a second implementation of the evaluator.
-- The ordering guarantee (SubscribeApplied before TransactionUpdate) is naturally satisfied if the executor serializes subscription registration with commits. The check here is defensive and must not silently drop required deltas.
+- The ordering guarantee (SubscribeApplied before TransactionUpdate) is satisfied by executor serialization and per-connection FIFO delivery; protocol send helpers must not reintroduce a stale `SubscriptionID`-based gate.

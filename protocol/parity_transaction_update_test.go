@@ -50,7 +50,7 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 	}
 	rl := EncodeRowList([][]byte{{0x01}, {0x02, 0x03}})
 	status := StatusCommitted{Update: []SubscriptionUpdate{
-		{SubscriptionID: 7, TableName: "users", Inserts: rl, Deletes: nil},
+		{QueryID: 7, TableName: "users", Inserts: rl, Deletes: nil},
 	}}
 
 	in := TransactionUpdate{
@@ -73,7 +73,7 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 
 	// status: UpdateStatus — Committed tag (0) then SubscriptionUpdate
 	// list: LE u32 count, then for each entry:
-	// subscription_id (u32), table_name (Box<str>), inserts (Bytes),
+	// query_id (u32), table_name (Box<str>), inserts (Bytes),
 	// deletes (Bytes).
 	want.WriteByte(updateStatusTagCommitted)
 	var u32Buf [4]byte
@@ -162,7 +162,7 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("Status = %T, want StatusCommitted", got.Status)
 	}
-	if len(committed.Update) != 1 || committed.Update[0].SubscriptionID != 7 ||
+	if len(committed.Update) != 1 || committed.Update[0].QueryID != 7 ||
 		committed.Update[0].TableName != "users" {
 		t.Errorf("Status Update mismatch: %+v", committed.Update)
 	}

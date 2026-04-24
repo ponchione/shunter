@@ -7,12 +7,10 @@
 
 **Cross-spec:** SPEC-003 (executor inbox: `UnregisterSubscriptionSetCmd`, `CallReducerCmd`)
 
-> **Updated 2026-04-19 (Phase 2 Slice 2).** `Unsubscribe` was split
-> into `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg` and the executor
-> command is now `UnregisterSubscriptionSetCmd` keyed by
-> `(ConnID, QueryID)`. References below still using the pre-split
-> symbol names are historical; see
-> `docs/superpowers/plans/2026-04-18-subscribe-multi-single-split.md`.
+> **Updated 2026-04-24 (OI-002 QueryID cleanup).** Unsubscribe is keyed by
+> client `QueryID` / wire `query_id`. The protocol layer no longer owns a
+> subscription tracker; manager-internal `SubscriptionID` values stay below
+> the protocol boundary.
 
 ---
 
@@ -24,10 +22,10 @@ Two handlers grouped together because they share the same E4 shape: validate loc
 
 ### Unsubscribe
 
-- `func handleUnsubscribe(conn *Conn, msg *UnsubscribeMsg, executor ExecutorInbox)`:
-  1. Validate `subscription_id` is active → `ErrSubscriptionNotFound` if pending or not found
-  2. Send `UnregisterSubscriptionRequest` to the executor using the SPEC-003 fields (`ConnID`, `SubscriptionID`, `RequestID`, `SendDropped`, `ResponseCh`)
-  3. On executor submission success: remove subscription from tracker immediately; E5 watches the response channel and delivers `UnsubscribeApplied` / `SubscriptionError`
+- `func handleUnsubscribeSingle(conn *Conn, msg *UnsubscribeSingleMsg, executor ExecutorInbox)` and the matching multi-query path:
+  1. Forward `ConnID`, client `QueryID`, and `RequestID` to `UnregisterSubscriptionSetCmd`
+  2. Let the subscription manager validate that the `(ConnID, QueryID)` set is live, returning `ErrSubscriptionNotFound` when absent
+  3. Deliver `UnsubscribeSingleApplied` / `UnsubscribeMultiApplied` or `SubscriptionError` through the response callback; no protocol tracker is mutated
 
 ### CallReducer
 
@@ -40,9 +38,9 @@ Two handlers grouped together because they share the same E4 shape: validate loc
 
 ## Acceptance Criteria
 
-- [ ] Unsubscribe active subscription → `UnregisterSubscriptionSetCmd` sent, subscription removed from tracker
-- [ ] Unsubscribe pending subscription → `ErrSubscriptionNotFound` (cannot unsubscribe what has not become active)
-- [ ] Unsubscribe unknown subscription_id → `ErrSubscriptionNotFound`
+- [ ] Unsubscribe active `query_id` → `UnregisterSubscriptionSetCmd` sent
+- [ ] Unsubscribe pending or not-yet-registered `query_id` → `ErrSubscriptionNotFound`
+- [ ] Unsubscribe unknown `query_id` → `ErrSubscriptionNotFound`
 - [ ] CallReducer valid name → `CallReducerCmd` sent to executor
 - [ ] CallReducer `"OnConnect"` → `ReducerCallResult` with `status=3` (not_found)
 - [ ] CallReducer `"OnDisconnect"` → `ReducerCallResult` with `status=3` (not_found)
@@ -50,6 +48,6 @@ Two handlers grouped together because they share the same E4 shape: validate loc
 
 ## Design Notes
 
-- Unsubscribe for a pending subscription is rejected because SPEC-005 §9.1 defines `ErrSubscriptionNotFound` for any subscription_id that is not active. The client should wait for `SubscribeApplied` before unsubscribing. If the subscription fails, `SubscriptionError` will be sent and the ID released. Tracker removal is single-owner: unsubscribe removes active entries, while pending-path cleanup is handled by error/disconnect discard logic rather than a second blind delete.
+- Unsubscribe for a missing/pending `query_id` returns `ErrSubscriptionNotFound`; the manager-owned `(ConnID, QueryID)` registry is the single source of truth, so there is no duplicate protocol-side tracker removal.
 - Lifecycle reducers are blocked at the protocol layer, not the executor. The executor should never receive a `CallReducerCmd` for `OnConnect`/`OnDisconnect`.
 - `CallReducerMsg.Args` is forwarded as raw bytes. Type validation happens in the executor.

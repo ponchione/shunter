@@ -131,12 +131,12 @@ type SubscriptionSetRegisterRequest struct {
 // executes and the subscription set is fully registered.
 type SubscriptionSetRegisterResult struct {
     QueryID uint32
-    Update  []SubscriptionUpdate // merged initial snapshot; one entry per (internal SubscriptionID, table)
+    Update  []SubscriptionUpdate // merged initial snapshot; entries retain internal SubscriptionID and client QueryID
 }
 ```
 
 ```
-Subscribe(connID ConnectionID, predicate) → (initialRows []ProductValue, subscriptionID SubscriptionID, error)
+RegisterSet(req SubscriptionSetRegisterRequest, view CommittedReadView) → (SubscriptionSetRegisterResult, error)
 ```
 
 1. **Validate** the predicate: at most 2 tables, required indexes exist, column types match.
@@ -456,13 +456,14 @@ EvalAndBroadcast(changeset *Changeset, meta PostCommitMeta) → CommitFanout:
 
          // Fan out to all subscribers
          For each client subscribed to queryHash:
-           fanout[client.ConnID] = append(fanout[client.ConnID], SubscriptionUpdate{
-             SubscriptionID: client.SubID,
-             TableID:        tc.TableID,
-             TableName:      tc.TableName,
-             Inserts:        deltaInserts,
-             Deletes:        deltaDeletes,
-           })
+          fanout[client.ConnID] = append(fanout[client.ConnID], SubscriptionUpdate{
+            SubscriptionID: client.SubID,
+            QueryID:        client.QueryID,
+            TableID:        tc.TableID,
+            TableName:      tc.TableName,
+            Inserts:        deltaInserts,
+            Deletes:        deltaDeletes,
+          })
 
   5. Send FanOutMessage{TxID: txID, TxDurable: meta.TxDurable, Fanout: fanout, Errors: errors, CallerConnID: meta.CallerConnID, CallerResult: meta.CallerResult} to FanOutWorker.inbox.
 ```
@@ -568,7 +569,7 @@ For each FanOutMessage received:
   3. For each connection:
      Build a TransactionUpdate message for `msg.TxID` containing `Updates []SubscriptionUpdate`
      for that connection only. Preserve one update entry per affected subscription;
-     do not merge entries across distinct SubscriptionIDs.
+     do not merge entries across distinct internal SubscriptionIDs/query entries.
      Send via the protocol layer.
   4. Special case: if this commit came from `CallReducer`, the caller connection's
      update slice is routed into `ReducerCallResult.transaction_update` instead of
@@ -582,7 +583,7 @@ Multiple subscriptions for the same connection may produce deltas for the same t
 ```
 Per-connection packaging:
   Start from CommitFanout[connID] = []SubscriptionUpdate.
-  Preserve SubscriptionUpdate boundaries so each entry retains its SubscriptionID.
+  Preserve SubscriptionUpdate boundaries so each entry retains its internal SubscriptionID and client QueryID.
   A single TransactionUpdate may therefore contain multiple entries for the same table
   when they belong to different subscriptions.
 ```
@@ -700,7 +701,8 @@ The evaluator produces per-client deltas:
 // SubscriptionUpdate is the per-subscription component of a transaction delta.
 // One per subscription affected by a commit.
 type SubscriptionUpdate struct {
-    SubscriptionID SubscriptionID  // which subscription this update is for
+    SubscriptionID SubscriptionID  // manager-internal subscription allocation; never exposed on the wire
+    QueryID        uint32          // client-chosen SubscribeSingle/SubscribeMulti query_id projected onto the wire
     TableID        TableID         // for join subscriptions, use Join.Left as the canonical table anchor
     TableName      string          // duplicates TableChangeset naming intentionally for protocol/logging convenience; for joins use a diagnostic-only composite label because protocol v1 never puts joined updates on the wire
     Inserts        []ProductValue
@@ -714,9 +716,10 @@ type TransactionUpdate struct {
 }
 
 // SubscriptionError is the client-facing evaluation-failure payload.
-// The wire projection (SPEC-005 §8.4) carries only `SubscriptionID`
-// and `Message`; `QueryHash` and `Predicate` are retained in the Go
-// value for server-side logging and are not sent to clients.
+// The protocol adapter does not expose the manager-internal SubscriptionID on
+// the wire. Post-commit evaluation-origin errors are emitted with absent
+// request_id/query_id and a Message; QueryHash and Predicate are retained in
+// the Go value for server-side logging and are not sent to clients.
 type SubscriptionError struct {
     RequestID      uint32
     SubscriptionID SubscriptionID

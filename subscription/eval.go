@@ -3,6 +3,7 @@ package subscription
 import (
 	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/ponchione/shunter/store"
@@ -124,10 +125,11 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 		}
 		memo[hash] = &memoizedResult{}
 		for connID, subIDs := range qs.subscribers {
-			for subID := range subIDs {
+			for subID, delivery := range subIDs {
 				for _, u := range updates {
 					cloned := u
 					cloned.SubscriptionID = subID
+					cloned.QueryID = delivery.QueryID
 					// OI-006 fanout aliasing: give each subscriber an
 					// independent outer slice header for Inserts/Deletes
 					// so downstream replace/append on one subscriber's
@@ -194,7 +196,31 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 			}
 		}
 	}
+	sortFanoutBySubscription(fanout)
 	return fanout, errs
+}
+
+func sortFanoutBySubscription(fanout CommitFanout) {
+	// Evaluation assembles fanout through hash/subscriber maps. Stabilize each
+	// connection's payload before protocol delivery so multi-subscription updates
+	// follow registration order (internal SubscriptionID allocation order), not
+	// Go map iteration order.
+	for connID, updates := range fanout {
+		if len(updates) < 2 {
+			continue
+		}
+		sort.SliceStable(updates, func(i, j int) bool {
+			left, right := updates[i], updates[j]
+			if left.SubscriptionID != right.SubscriptionID {
+				return left.SubscriptionID < right.SubscriptionID
+			}
+			if left.TableID != right.TableID {
+				return left.TableID < right.TableID
+			}
+			return left.TableName < right.TableName
+		})
+		fanout[connID] = updates
+	}
 }
 
 func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.ConnectionID][]SubscriptionError) {

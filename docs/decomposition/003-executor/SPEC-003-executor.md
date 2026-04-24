@@ -104,8 +104,9 @@ If two commands are accepted into `inbox`, the one received first is fully proce
 At minimum the executor must support these command types:
 
 ```go
-// SubscriptionID is a client-chosen uint32 that uniquely identifies one subscription
-// within an active connection. Matches the subscription_id field on the wire (SPEC-005).
+// SubscriptionID is an executor/subscription-internal uint32 allocation used
+// for manager bookkeeping and deterministic fanout ordering. Client-visible
+// wire correlation uses QueryID (SPEC-005).
 type SubscriptionID uint32
 
 type CallReducerCmd struct {

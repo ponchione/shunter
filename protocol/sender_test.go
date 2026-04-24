@@ -100,7 +100,7 @@ func TestSendTransactionUpdateTypedHeavy(t *testing.T) {
 
 	update := &TransactionUpdate{
 		Status: StatusCommitted{Update: []SubscriptionUpdate{
-			{SubscriptionID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
+			{QueryID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
 		}},
 		ReducerCall: ReducerCallInfo{ReducerName: "x", RequestID: 9},
 	}
@@ -130,7 +130,7 @@ func TestSendTransactionUpdateTypedLight(t *testing.T) {
 	update := &TransactionUpdateLight{
 		RequestID: 42,
 		Update: []SubscriptionUpdate{
-			{SubscriptionID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
+			{QueryID: 1, TableName: "t", Inserts: []byte{1}, Deletes: []byte{}},
 		},
 	}
 	if err := s.SendTransactionUpdateLight(id, update); err != nil {

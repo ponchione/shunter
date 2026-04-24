@@ -324,10 +324,10 @@ func encodeProtocolSubscriptionUpdate(update subscription.SubscriptionUpdate) (p
 		return protocol.SubscriptionUpdate{}, fmt.Errorf("encode deletes: %w", err)
 	}
 	return protocol.SubscriptionUpdate{
-		SubscriptionID: uint32(update.SubscriptionID),
-		TableName:      update.TableName,
-		Inserts:        inserts,
-		Deletes:        deletes,
+		QueryID:   update.QueryID,
+		TableName: update.TableName,
+		Inserts:   inserts,
+		Deletes:   deletes,
 	}, nil
 }
 

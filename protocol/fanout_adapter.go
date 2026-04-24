@@ -162,10 +162,10 @@ func encodeSubscriptionUpdateMemoized(su subscription.SubscriptionUpdate, memo *
 		return SubscriptionUpdate{}, fmt.Errorf("encode deletes: %w", err)
 	}
 	return SubscriptionUpdate{
-		SubscriptionID: uint32(su.SubscriptionID),
-		TableName:      su.TableName,
-		Inserts:        inserts,
-		Deletes:        deletes,
+		QueryID:   su.QueryID,
+		TableName: su.TableName,
+		Inserts:   inserts,
+		Deletes:   deletes,
 	}, nil
 }
 

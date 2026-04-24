@@ -17,6 +17,9 @@ type queryState struct {
 
 type subscriptionDeliveryMeta struct {
 	RequestID uint32
+	// QueryID is the client-chosen subscription-set identifier to stamp on
+	// fanout updates for this internal SubscriptionID.
+	QueryID uint32
 }
 
 type subscriptionRef struct {
@@ -61,7 +64,7 @@ func (r *queryRegistry) removeQueryState(hash QueryHash) {
 }
 
 // addSubscriber attaches a client to an existing query state.
-func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID, subID types.SubscriptionID, requestID uint32) {
+func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID, subID types.SubscriptionID, requestID uint32, queryID uint32) {
 	qs, ok := r.byHash[hash]
 	if !ok {
 		panic("subscription: addSubscriber on unknown hash")
@@ -75,7 +78,7 @@ func (r *queryRegistry) addSubscriber(hash QueryHash, connID types.ConnectionID,
 		perConn = make(map[types.SubscriptionID]subscriptionDeliveryMeta)
 		qs.subscribers[connID] = perConn
 	}
-	perConn[subID] = subscriptionDeliveryMeta{RequestID: requestID}
+	perConn[subID] = subscriptionDeliveryMeta{RequestID: requestID, QueryID: queryID}
 	r.bySub[ref] = hash
 	r.byConn[connID] = append(r.byConn[connID], subID)
 	qs.refCount++

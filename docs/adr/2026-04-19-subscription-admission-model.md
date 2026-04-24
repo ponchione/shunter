@@ -49,8 +49,8 @@ and how the other becomes derived state (or is removed).
 ## Constraints
 
 - **SPEC-005 §9.4 is load-bearing contract:**
-  > "`SubscribeApplied(subscription_id)` MUST be delivered before any
-  > `TransactionUpdate` that references that `subscription_id`."
+  > "`SubscribeApplied(query_id)` MUST be delivered before any
+  > `TransactionUpdate` that references that `query_id`."
 
   Any admission model must preserve this ordering guarantee on a single
   connection.
@@ -111,9 +111,8 @@ Concretely:
    and no tracker-state resurrection is possible.
 7. Duplicate-wire-id rejection (§9.1 rule 1) is served by
    `subscription.ErrQueryIDAlreadyLive`, returned from `RegisterSet`
-   when `querySets[conn][queryID]` is already populated. The
-   `ErrDuplicateSubscriptionID` sentinel on the deleted tracker
-   disappears along with it.
+   when `querySets[conn][queryID]` is already populated. The old
+   tracker-local duplicate sentinel disappears with the deleted tracker.
 
 ## Rationale
 
@@ -240,7 +239,7 @@ tracker activation." The updated prose will re-frame this as:
 
 > Once `SubscribeApplied` is enqueued on the connection's outbound
 > queue during registration, any subsequent `TransactionUpdate` for
-> that `subscription_id` is guaranteed (by per-connection outbound
+> that `query_id` is guaranteed (by per-connection outbound
 > queue FIFO) to be delivered after it. A disconnect between
 > registration and the flush of `SubscribeApplied` causes the
 > outbound queue to close; the registration result is discarded by

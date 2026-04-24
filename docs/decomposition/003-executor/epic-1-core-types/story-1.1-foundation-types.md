@@ -61,4 +61,4 @@ Named types, numeric IDs, and enums that everything else builds on.
 ## Design Notes
 
 - TxID counter initialization from recovery is handled in Epic 3 (executor constructor). This story only defines the type.
-- SubscriptionID is uint32 to match SPEC-005 wire format. Not to be confused with internal subscription tracking in SPEC-004.
+- SubscriptionID is uint32 for executor/subscription-internal bookkeeping and deterministic fanout ordering. Client-visible subscription correlation on SPEC-005 wire messages uses QueryID.

@@ -146,7 +146,7 @@ StatusCommitted (server_messages.go:167)
 
 ```
 SubscriptionUpdate (wire_types.go:26)
-  SubscriptionID : uint32  — Shunter-local; no reference analogue
+  QueryID        : uint32  — flattened client query_id carried per update entry
   TableName      : string
   Inserts        : []byte  — EncodeRowList payload (inserts first)
   Deletes        : []byte  — EncodeRowList payload
@@ -154,7 +154,7 @@ SubscriptionUpdate (wire_types.go:26)
 writeSubscriptionUpdates wire layout (server_messages.go:667):
   count                  : u32 LE
   for each:
-    subscription_id      : u32 LE
+    query_id             : u32 LE
     table_name           : Box<str>
     inserts              : Bytes
     deletes              : Bytes
@@ -182,7 +182,7 @@ fixed-schema tables" deferred to v2.
 |---|---|---|---|---|
 | 1 | `SubscribeSingleApplied.rows` | `SubscribeRows { table_id, table_name, table_rows: TableUpdate }` | flat `TableName + Rows []byte` | rows-wrapper elision (inner BsatnRowList still divergent) |
 | 2 | `UnsubscribeSingleApplied.rows` | `SubscribeRows` (required) | flat `HasRows + Rows []byte` (optional) | optional-flag smuggle + rows-wrapper elision |
-| 3 | `SubscribeMultiApplied.update` | `DatabaseUpdate { tables: Vec<TableUpdate> }` | `[]SubscriptionUpdate` | DatabaseUpdate elision; extra Shunter-local `SubscriptionID` field |
+| 3 | `SubscribeMultiApplied.update` | `DatabaseUpdate { tables: Vec<TableUpdate> }` | `[]SubscriptionUpdate` | DatabaseUpdate elision; extra flattened per-entry `QueryID` field |
 | 4 | `UnsubscribeMultiApplied.update` | `DatabaseUpdate` | `[]SubscriptionUpdate` | same as #3 |
 | 5 | `TransactionUpdateLight.update` | `DatabaseUpdate` | `[]SubscriptionUpdate` | same as #3 |
 | 6 | `StatusCommitted` (payload of `UpdateStatus::Committed`) | `DatabaseUpdate` | `[]SubscriptionUpdate` | same as #3 |
@@ -233,9 +233,9 @@ shape, and an on-the-wire migration story.
      `parity_transaction_update_test.go`,
      `send_txupdate_test.go`, `handle_subscribe_test.go`,
      `handle_unsubscribe_test.go`);
-   - the `SubscriptionID` plumbing currently carried on the wire per
-     update (reference has no analogue — it correlates by QueryID at
-     the envelope level, not per-TableUpdate);
+   - the per-entry query correlation plumbing carried on the flattened
+     update wire shape (now `QueryID`; the manager-internal
+     `SubscriptionID` stays below the protocol boundary);
    - the caller-side heavy/light split in
      `subscription/fanout_worker.go`.
 
@@ -244,11 +244,11 @@ shape, and an on-the-wire migration story.
    multi-slice phase with an explicit SPEC-005 §3.4 revisit doc.
 
 4. **Deliberate architectural divergence in #3 / #6 / #9.**
-   - `SubscriptionID` on `SubscriptionUpdate` (delta #3) is
-     load-bearing for Shunter's per-connection subscription
-     accounting and is not accidental — removing it would force the
-     executor and fan-out worker to rederive correlation from query
-     ids and table names.
+   - `QueryID` on the flattened `SubscriptionUpdate` wire shape
+     (delta #3) is load-bearing for client-side correlation in
+     Shunter's current no-`DatabaseUpdate` representation. The
+     manager-internal `SubscriptionID` remains below the protocol
+     boundary for registration/order bookkeeping.
    - `StatusCommitted` (delta #6) is emitted by the heavy envelope
      for the caller only; Shunter routes the same row delta to
      non-callers via `TransactionUpdateLight`, so a single
@@ -280,7 +280,7 @@ shape, and an on-the-wire migration story.
      with the decision-doc reference embedded in the comment so
      future readers land on this doc without having to grep;
    - an explicit `SubscriptionUpdate` inner layout pin (inserts-
-     before-deletes, Shunter-local `SubscriptionID` presence).
+     before-deletes, flattened per-entry `QueryID` presence).
 
 3. **A ledger update** flipping the rows-shape line under the Phase
    2 protocol bucket from `open` (implicit, tracked only in OI-001)
@@ -296,14 +296,18 @@ shape, and an on-the-wire migration story.
 
 ### What this slice does *not* produce
 
-- No wire change. `EncodeServerMessage` / `DecodeServerMessage`
-  bytes are unchanged for every affected envelope.
-- No new wire types. `SubscribeRows`, `DatabaseUpdate`,
+At the original Phase 2 Slice 4 close, this slice did not produce the
+wrapper-chain / row-list rewrite. Later OI-002 work replaced the flat
+wire field's internal `SubscriptionID` with client `QueryID`; the
+remaining deferral is still the coordinated wrapper + `BsatnRowList`
+shape.
+
+- No wrapper-chain rewrite. `SubscribeRows`, `DatabaseUpdate`,
   `TableUpdate`, `QueryUpdate`, `CompressableQueryUpdate`,
   `BsatnRowList`, `RowSizeHint` remain absent from Go.
 - No changes to `protocol/rowlist.go` or per-row length prefixing.
-- No changes to `SubscriptionUpdate` field order, field set, or
-  serialization.
+- No changes to `SubscriptionUpdate` field order or serialization
+  beyond the later OI-002 QueryID cleanup recorded in current code/docs.
 - No changes to emit sites in `fanout_adapter.go`,
   `send_txupdate.go`, or `executor/protocol_inbox_adapter.go`.
 - No on-the-wire migration, no compatibility window, no dual-
@@ -338,8 +342,8 @@ cross-link and fills the one gap (TransactionUpdateLight byte shape).
 
 3. `TestParitySubscriptionUpdateInnerLayout` — pins
    `writeSubscriptionUpdates` produces the
-   `count + (subscription_id, table_name, inserts, deletes)` wire
-   layout. Locks the Shunter-local `SubscriptionID` field presence
+   `count + (query_id, table_name, inserts, deletes)` wire
+   layout. Locks the flattened per-entry `QueryID` field presence
    and the inserts-before-deletes order (delta #7) as explicit
    contract, not accident.
 
@@ -390,13 +394,13 @@ must open its own decision doc.
   Deferred; closing requires either retiring outer compression or
   accepting the double-layer as intentional.
 
-- **`SubscriptionID` field removal from `SubscriptionUpdate`**
-  (delta #3 consequence). Reference has no per-TableUpdate
-  subscription id — correlation happens at the envelope QueryID
-  level. Removing `SubscriptionID` on the wire requires the fan-out
-  worker and per-connection subscription accounting to rederive
-  correlation. Nontrivial; carry as a separate slice under OI-002
-  rather than OI-001.
+- **Flattened per-entry `QueryID` removal from `SubscriptionUpdate`**
+  (delta #3 consequence). The OI-002 QueryID cleanup removed the
+  manager-internal `SubscriptionID` from the wire, but the current flat
+  `[]SubscriptionUpdate` shape still carries query correlation per entry.
+  A future full wrapper-chain close should decide whether that flat slot
+  disappears into `DatabaseUpdate` / `TableUpdate` structure rather than
+  treating this as a standalone micro-slice.
 
 - **`inserts`/`deletes` field-order flip inside `QueryUpdate`**
   (delta #7). Cosmetic on its own but part of the wrapper-chain
