@@ -93,6 +93,14 @@ Candidates carried forward from prior handoffs:
    - Do not reopen the now-closed projection-family, unindexed-join, cross-join `WHERE` equality/equality-plus-filter, cross-join `WHERE` + `COUNT(*)` combination, join-backed count aggregate, JOIN ON filter, SubscriptionError durability-gating, per-connection ordering, or QueryID fanout/protocol targets without new failing regression evidence.
    - During the P0-SUBSCRIPTION-032 scout, verified that reference's SQL parser rejects `SELECT DISTINCT ...` (sql.rs `distinct: None` match), supports only `COUNT(*) AS alias` aggregate (rejecting `SUM`, `COUNT(DISTINCT col)`), and errors hard on duplicate-QueryID subscribe + non-existent-QueryID unsubscribe — so those are NOT parity gaps. The parser agent's initial "subscribe-duplicate-idempotent" / "unsubscribe-nonexistent-idempotent" / "sender-caller-filtering" candidates were all wrong against the reference; do not reopen them without fresh counter-evidence.
 
+4. Deferred but real candidate: same-connection-plus-reused-hash subscribe initial-snapshot elision.
+   - Reference (`module_subscription_manager.rs::add_subscription_multi` lines 1083-1094 + `module_subscription_actor.rs` line 1357-1369): when a client calls `SubscribeMulti` with a predicate whose hash is already attached to that same connection under a different QueryID, reference only tracks the new `(ConnID, QueryID)` pair and returns an EMPTY `new_queries` vec, so the `SubscribeMultiApplied` arrives with empty data — avoiding redundant initial-snapshot bytes on the wire.
+   - Shunter (`subscription/register_set.go` RegisterSet loop) currently re-runs `initialQuery` for every per-call predicate regardless of whether `(ConnID, hash)` already has another live `SubscriptionID` for this connection, so the second `SubscribeMultiApplied` re-emits the full initial snapshot under the new QueryID.
+   - Post-commit fanout already emits per-QueryID updates correctly via `qs.subscribers[connID][subID].QueryID`, so the behavioral gap is strictly about redundant initial snapshots, not about ongoing delivery.
+   - Verified reference behavior by test `test_subscribe_and_unsubscribe_with_duplicate_queries_multi` (lines 2498-2535) which asserts `second_one.is_empty()` on the second reused-plan add.
+   - This would be a real OI-002 behavioral slice (not just a test-only pin). Scope: `register_set.go` (skip `initialQuery` + emit empty `SubscriptionUpdate` when the per-conn hash is already live), `query_state.go` (no change needed — `addSubscriber` already handles per-subID bookkeeping), plus new tests in `register_set_test.go` and `handle_subscribe_test.go`. Blast radius is moderate — touches the subscribe hot path.
+   - Not landed this session; flagged for a future deliberate slice.
+
 ## Recommended next command checklist
 
 ```bash
