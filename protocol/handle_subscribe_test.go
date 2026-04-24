@@ -1001,10 +1001,11 @@ func TestHandleSubscribeSingle_CrossJoinWhereFalseStillRejected(t *testing.T) {
 		t.Fatalf("Build schema = %v", err)
 	}
 
+	const sqlText = "SELECT Orders.* FROM Orders JOIN Inventory WHERE FALSE"
 	msg := &SubscribeSingleMsg{
 		RequestID:   123,
 		QueryID:     120,
-		QueryString: "SELECT Orders.* FROM Orders JOIN Inventory WHERE FALSE",
+		QueryString: sqlText,
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
@@ -1014,8 +1015,9 @@ func TestHandleSubscribeSingle_CrossJoinWhereFalseStillRejected(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.Error != "cross join WHERE not supported" {
-		t.Fatalf("Error = %q, want cross join WHERE not supported", se.Error)
+	want := "cross join WHERE not supported, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
@@ -1045,10 +1047,11 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityStillRejected(t *test
 		t.Fatalf("Build schema = %v", err)
 	}
 
+	const sqlText = "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32"
 	msg := &SubscribeSingleMsg{
 		RequestID:   124,
 		QueryID:     121,
-		QueryString: "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32",
+		QueryString: sqlText,
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
@@ -1058,8 +1061,9 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityStillRejected(t *test
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.Error != "cross join WHERE not supported" {
-		t.Fatalf("Error = %q, want cross join WHERE not supported", se.Error)
+	want := "cross join WHERE not supported, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
@@ -1090,10 +1094,11 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterStill
 		t.Fatalf("Build schema = %v", err)
 	}
 
+	const sqlText = "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32 AND s.enabled = TRUE"
 	msg := &SubscribeSingleMsg{
 		RequestID:   125,
 		QueryID:     122,
-		QueryString: "SELECT t.* FROM t JOIN s WHERE t.u32 = s.u32 AND s.enabled = TRUE",
+		QueryString: sqlText,
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
@@ -1103,8 +1108,9 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterStill
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.Error != "cross join WHERE not supported" {
-		t.Fatalf("Error = %q, want cross join WHERE not supported", se.Error)
+	want := "cross join WHERE not supported, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
@@ -1143,10 +1149,11 @@ func TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected(t
 		t.Fatalf("Build schema = %v", err)
 	}
 
+	const sqlText = "SELECT COUNT(*) AS n FROM t JOIN s WHERE t.id = s.t_id AND s.active = TRUE"
 	msg := &SubscribeSingleMsg{
 		RequestID:   126,
 		QueryID:     123,
-		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s WHERE t.id = s.t_id AND s.active = TRUE",
+		QueryString: sqlText,
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, registrySchemaLookup{reg: eng.Registry()})
@@ -1156,8 +1163,9 @@ func TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected(t
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	if se.Error != "aggregate projections not supported for subscriptions" {
-		t.Fatalf("Error = %q, want %q (aggregate guard fires before cross-join WHERE guard)", se.Error, "aggregate projections not supported for subscriptions")
+	want := "aggregate projections not supported for subscriptions, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q (aggregate guard fires before cross-join WHERE guard)", se.Error, want)
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile rejection", req)
@@ -4826,5 +4834,79 @@ func TestHandleSubscribeSingle_JoinOnEqualityWithFilterUnindexedRejected(t *test
 	requireOptionalUint32(t, se.RequestID, 19, "SubscriptionError.RequestID")
 	if !strings.Contains(se.Error, "join column has no index on either side") {
 		t.Fatalf("Error = %q, want subscription unindexed-join rejection", se.Error)
+	}
+}
+
+// TestHandleSubscribeSingle_ParityCompileErrorIncludesExecutingSqlSuffix pins
+// the reference `DBError::WithSql` shape at
+// reference/SpacetimeDB/crates/core/src/error.rs:140
+// (`"{error}, executing: `{sql}`"`): subscribe-admission compile failures
+// carry the offending SQL text in the SubscriptionError wire message so
+// clients can correlate errors with the exact query they sent. Reference
+// emit site: module_subscription_actor.rs:643 (SubscribeSingle
+// `compile_query_with_hashes`) via the `return_on_err_with_sql_bool!`
+// macro.
+func TestHandleSubscribeSingle_ParityCompileErrorIncludesExecutingSqlSuffix(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("users", 1)
+
+	const badSQL = "SELECT * FROM missing"
+	msg := &SubscribeSingleMsg{
+		RequestID:   210,
+		QueryID:     211,
+		QueryString: badSQL,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	wantSuffix := ", executing: `" + badSQL + "`"
+	if !strings.HasSuffix(se.Error, wantSuffix) {
+		t.Fatalf("Error = %q, want suffix %q (reference DBError::WithSql)", se.Error, wantSuffix)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a compile-error admission")
+	}
+}
+
+// TestHandleSubscribeMulti_ParityCompileErrorIncludesExecutingSqlSuffix pins
+// the reference `DBError::WithSql` shape at
+// reference/SpacetimeDB/crates/core/src/error.rs:140
+// (`"{error}, executing: `{sql}`"`) on the SubscribeMulti admission
+// surface. Reference emit site: module_subscription_actor.rs:1068
+// (SubscribeMulti `compile_query_with_hashes`), where each SQL string is
+// wrapped per-item; the first failing SQL's text is what appears in the
+// SubscriptionError message.
+func TestHandleSubscribeMulti_ParityCompileErrorIncludesExecutingSqlSuffix(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	sl := newMockSchema("users", 1)
+
+	const badSQL = "SELECT * FROM missing"
+	msg := &SubscribeMultiMsg{
+		RequestID: 212,
+		QueryID:   213,
+		QueryStrings: []string{
+			"SELECT * FROM users",
+			badSQL,
+		},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	wantSuffix := ", executing: `" + badSQL + "`"
+	if !strings.HasSuffix(se.Error, wantSuffix) {
+		t.Fatalf("Error = %q, want suffix %q (reference DBError::WithSql names the offending SQL)", se.Error, wantSuffix)
+	}
+	if req := exec.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a compile-error admission")
 	}
 }

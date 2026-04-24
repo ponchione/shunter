@@ -161,6 +161,20 @@ func callerHashIdentity(conn *Conn, compiled compiledSQLQuery) *types.Identity {
 	return &id
 }
 
+// wrapSubscribeCompileErrorSQL mirrors reference `DBError::WithSql`
+// (reference/SpacetimeDB/crates/core/src/error.rs:140,
+// `"{error}, executing: `{sql}`"`). SubscribeSingle/SubscribeMulti
+// admission surfaces emit this suffixed shape so clients can correlate
+// the rejection with the exact offending query string. Reference emit
+// sites: module_subscription_actor.rs:643 (SubscribeSingle
+// `compile_query_with_hashes`), :1068 (SubscribeMulti per-SQL
+// `compile_query_with_hashes`) — both go through the
+// `return_on_err_with_sql_bool!` macro that wraps the inner error via
+// `DBError::WithSql`.
+func wrapSubscribeCompileErrorSQL(err error, sqlText string) string {
+	return fmt.Sprintf("%s, executing: `%s`", err.Error(), sqlText)
+}
+
 func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool) (compiledSQLQuery, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {

@@ -37,7 +37,7 @@ func handleSubscribeMulti(
 				TotalHostExecutionDurationMicros: elapsedMicros(receipt),
 				RequestID:                        optionalUint32(msg.RequestID),
 				QueryID:                          optionalUint32(msg.QueryID),
-				Error:                            err.Error(),
+				Error:                            wrapSubscribeCompileErrorSQL(err, qs),
 			})
 			return
 		}

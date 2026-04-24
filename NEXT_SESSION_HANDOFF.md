@@ -24,23 +24,24 @@ Use `rtk` for every shell command, including git. Do not push unless explicitly 
 
 ## Current Objective
 
-Scout for the next bounded OI-002 / Tier A2 residual. There is no queued target.
+Scout for the next bounded OI-002 subscription/runtime residual. There is no queued target.
 
 Recent closures removed the previously queued items:
 
 - `P0-SUBSCRIPTION-033` (one-off `COUNT(*) [AS] alias` + `LIMIT` aggregate composition) closed in `700af6c`.
 - Same-connection reused subscription-hash initial-snapshot elision closed in `febc389`; pinned by `subscription/register_set_test.go::TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate` and `TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot`.
-- `SubscriptionError.table_id` always-`None` on subscribe/unsubscribe request-origin error paths closed in the latest commit; pinned by `executor/protocol_inbox_adapter_test.go::TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID` alongside the pre-existing `TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorReply` multi-table nil assertion. Reference emit sites: `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_actor.rs:625`, `:731`, `:805`, `:1308`; `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:2014`.
+- `SubscriptionError.table_id` always-`None` on subscribe/unsubscribe request-origin error paths closed in `d75d970`; pinned by `executor/protocol_inbox_adapter_test.go::TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID` alongside the pre-existing `TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorReply` multi-table nil assertion. Reference emit sites: `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_actor.rs:625`, `:731`, `:805`, `:1308`; `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:2014`.
+- SubscribeSingle / SubscribeMulti compile-origin `SubscriptionError.Error` now carries the reference `DBError::WithSql` suffix `", executing: `{sql}`"` closed in the latest commit; pinned by `protocol/handle_subscribe_test.go::TestHandleSubscribe{Single,Multi}_ParityCompileErrorIncludesExecutingSqlSuffix`. Reference anchor: `reference/SpacetimeDB/crates/core/src/error.rs:140` (`DBError::WithSql { error, sql }` = `"{error}, executing: `{sql}`"`), emit sites `module_subscription_actor.rs:643` (SubscribeSingle `compile_query_with_hashes`) and `:1068` (SubscribeMulti per-SQL `compile_query_with_hashes`) via the `return_on_err_with_sql_bool!` macro. Helper: `protocol/handle_subscribe.go::wrapSubscribeCompileErrorSQL`.
 
-Do not reopen `P0-SUBSCRIPTION-001` through `P0-SUBSCRIPTION-033`, the reused-hash elision, or the `SubscriptionError.table_id: None` closure without fresh failing regression evidence.
+Do not reopen `P0-SUBSCRIPTION-001` through `P0-SUBSCRIPTION-033`, the reused-hash elision, the `SubscriptionError.table_id: None` closure, or the compile-origin `WithSql` suffix without fresh failing regression evidence.
 
 ## Scout Prompts
 
 Before starting implementation, answer one of these with live-code evidence:
 
-- Is there a reference subscribe/unsubscribe error-path behavior Shunter still diverges on — for example, `SubscriptionError.message` text shape (reference uses `"Subscription not found: (client_id, query_id)"` and `"Subscription with id {query_id} already exists for client: {client_id}"`; Shunter emits the raw Go `error.Error()` strings), unknown-hash vs unknown-QueryID separation, or mid-batch initial-query failure visibility?
-- Is there a bounded SQL surface shape latently admitted by parser+compile but not pinned end-to-end — check parser operator combinations that compile cleanly but have no one-off or subscribe-rejection pin?
-- Is there a post-commit fanout ordering, QueryID stamping, or durability-gate edge case not yet pinned for a specific combined scenario (multi-subscription-per-connection with partial table overlap, self-join aliased delta under concurrent update, or reused-hash attachment receiving first post-elision delta with both QueryIDs stamped)?
+- Is there a reference subscribe/unsubscribe error-path behavior Shunter still diverges on? Candidates: `evaluate_initial_subscription` / initial-query error path also gets `DBError::WithSql` wrapped in reference (`module_subscription_actor.rs:672`, `:756`) — Shunter can't close without plumbing SQL text through the protocol→executor→`subscription.RegisterSet` seam (today the executor sees `[]Predicate`, not SQL). The duplicate-QID `"Subscription with id {query_id} already exists for client: {client_id}"` message shape (`module_subscription_manager.rs:989`, `:1055`) is likely fragile in Go because the reference text formats a Rust tuple via Debug `{:?}`; treat message-text parity as only bounded where reference uses fixed literals.
+- Is there a bounded SQL surface shape latently admitted by parser+compile but not pinned end-to-end — check parser operator combinations that compile cleanly but have no one-off or subscribe-rejection pin? The current subscribe/one-off parity surface in `protocol/handle_subscribe_test.go` and `protocol/handle_oneoff_test.go` is heavily populated (40+ pins each); scout for specific operator combinations not yet covered rather than whole-shape audits.
+- Is there a post-commit fanout ordering, QueryID stamping, or durability-gate edge case not yet pinned for a specific combined scenario (multi-subscription-per-connection with partial table overlap on actual overlapping tables, self-join aliased delta under concurrent update)? Disjoint-table multi-sub and same-connection reused-hash post-elision stamping are already pinned by `TestEvalMultipleTableUpdatesGrouped` and `TestEvalFanoutCarriesClientQueryIDForEachSubscription` respectively.
 
 Pick the smallest bounded slice with a reference anchor and a concrete failing test you can write first.
 
@@ -63,7 +64,6 @@ rtk go test ./... -count=1
 ## Doc Follow-Through
 
 After the implementation is green:
-- update `docs/parity-phase0-ledger.md` only if the new closure changes current truth
 - update `TECH-DEBT.md::OI-002` summary only if the closure removes a risk listed there
 - rewrite this handoff to the next live target, keeping startup reading minimal
 
