@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -577,6 +578,13 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 	}
 	v, err := coerceLiteral(f.Literal, col.Type, caller)
 	if err != nil {
+		// UnexpectedTypeError carries the reference `UnexpectedType`
+		// literal verbatim; do not prefix with "coerce column" so the
+		// text matches reference expr/src/errors.rs:100.
+		var utErr sql.UnexpectedTypeError
+		if errors.As(err, &utErr) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("coerce column %q: %v", f.Column, err)
 	}
 	return normalizePredicate(rel.id, col.Index, aliasTag(f.Alias), f.Op, v)

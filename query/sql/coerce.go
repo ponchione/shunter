@@ -200,7 +200,79 @@ func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64
 }
 
 func mismatch(lit Literal, kind types.ValueKind) error {
+	// Bool literal into a non-bool column: emit the reference
+	// `UnexpectedType` text verbatim (expr/src/errors.rs:100, emitted at
+	// expr/src/lib.rs:94 for `(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty))`).
+	// Other mismatch categories keep the current coerce-level text; their
+	// reference counterparts (`InvalidLiteral` for Str/Num/Hex) are
+	// separate parity slices.
+	if lit.Kind == LitBool && kind != types.KindBool {
+		return UnexpectedTypeError{Expected: "Bool", Inferred: algebraicName(kind)}
+	}
 	return fmt.Errorf("%w: %s literal cannot be coerced to %s", ErrUnsupportedSQL, lit.Kind, kind)
+}
+
+// UnexpectedTypeError mirrors reference `expr::errors::UnexpectedType`
+// (reference/SpacetimeDB/crates/expr/src/errors.rs:99-114). Emitted by the
+// coerce boundary when a literal's algebraic type cannot bind to the
+// column's algebraic type. Unwrap()s to ErrUnsupportedSQL so callers that
+// classify by sentinel still match.
+type UnexpectedTypeError struct {
+	Expected string
+	Inferred string
+}
+
+func (e UnexpectedTypeError) Error() string {
+	return fmt.Sprintf("Unexpected type: (expected) %s != %s (inferred)", e.Expected, e.Inferred)
+}
+
+func (e UnexpectedTypeError) Unwrap() error { return ErrUnsupportedSQL }
+
+// algebraicName returns the reference `fmt_algebraic_type` short name for a
+// ValueKind (reference/SpacetimeDB/crates/sats/src/algebraic_type/fmt.rs
+// lines 15-40). Primitives use capitalized short tokens (`Bool`, `U32`,
+// `F32`, etc.); bytes renders as `Array<U8>`. Non-primitive kinds
+// (Timestamp, ArrayString) are not reachable through the bool-literal
+// mismatch path today; they fall back to the ValueKind stringer.
+func algebraicName(k types.ValueKind) string {
+	switch k {
+	case types.KindBool:
+		return "Bool"
+	case types.KindInt8:
+		return "I8"
+	case types.KindUint8:
+		return "U8"
+	case types.KindInt16:
+		return "I16"
+	case types.KindUint16:
+		return "U16"
+	case types.KindInt32:
+		return "I32"
+	case types.KindUint32:
+		return "U32"
+	case types.KindInt64:
+		return "I64"
+	case types.KindUint64:
+		return "U64"
+	case types.KindInt128:
+		return "I128"
+	case types.KindUint128:
+		return "U128"
+	case types.KindInt256:
+		return "I256"
+	case types.KindUint256:
+		return "U256"
+	case types.KindFloat32:
+		return "F32"
+	case types.KindFloat64:
+		return "F64"
+	case types.KindString:
+		return "String"
+	case types.KindBytes:
+		return "Array<U8>"
+	default:
+		return k.String()
+	}
 }
 
 // String returns a human-readable label for a LitKind.

@@ -5576,3 +5576,37 @@ func TestHandleOneOffQuery_ParityUnknownFieldRejectText(t *testing.T) {
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityBoolLiteralOnIntegerColumnRejectText pins the
+// reference type-check rejection literal at
+// reference/SpacetimeDB/crates/expr/src/errors.rs:100
+// (`UnexpectedType` = "Unexpected type: (expected) {expected} != {inferred}
+// (inferred)") via the emit site at
+// reference/SpacetimeDB/crates/expr/src/lib.rs:94
+// (`(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty)) =>
+// Err(UnexpectedType::new(&AlgebraicType::Bool, ty).into())`) — a bool
+// literal in a non-bool column. OneOff admission emits the raw error text
+// with no `DBError::WithSql` wrap.
+func TestHandleOneOffQuery_ParityBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x92},
+		QueryString: "SELECT * FROM t WHERE u32 = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Unexpected type: (expected) Bool != U32 (inferred)"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}

@@ -5215,3 +5215,40 @@ func TestHandleSubscribeSingle_ParityColumnListReturnTypeRejectText(t *testing.T
 		t.Error("executor should not be called on column-list projection in subscription")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityBoolLiteralOnIntegerColumnRejectText pins
+// the reference `UnexpectedType` literal from
+// reference/SpacetimeDB/crates/expr/src/errors.rs:100 (via the emit site at
+// lib.rs:94 for a bool literal in a non-bool column) onto the
+// SubscribeSingle admission surface. SubscribeSingle wraps compile errors
+// with `DBError::WithSql` (module_subscription_actor.rs:643 via
+// `return_on_err_with_sql_bool!`), so the client sees the
+// `, executing: `{sql}“ suffix.
+func TestHandleSubscribeSingle_ParityBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT * FROM t WHERE u32 = TRUE"
+	msg := &SubscribeSingleMsg{
+		RequestID:   254,
+		QueryID:     255,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Unexpected type: (expected) Bool != U32 (inferred), executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a bool literal targets an integer column")
+	}
+}
