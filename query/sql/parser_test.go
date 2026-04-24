@@ -1780,3 +1780,23 @@ func TestParseRejectsJoinOnFilterColumnVsColumn(t *testing.T) {
 		t.Fatalf("err = %q, want substring 'JOIN ON filter must compare a column to a literal'", err.Error())
 	}
 }
+
+func TestParseRejectsJoinOnFilterUnqualifiedColumn(t *testing.T) {
+	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND quantity < 10")
+	if err == nil {
+		t.Fatal("expected error for unqualified column in ON filter")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseRejectsJoinOnFilterThirdRelation(t *testing.T) {
+	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND z.x < 10")
+	if err == nil {
+		t.Fatal("expected error for third-relation qualifier in ON filter")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
