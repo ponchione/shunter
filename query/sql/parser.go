@@ -885,6 +885,9 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if _, ok := onPred.(ComparisonPredicate); !ok {
+		return nil, nil, nil, p.unsupported("JOIN ON filter must compare a column to a literal")
+	}
 	if isKeywordToken(p.peek(), "AND") {
 		return nil, nil, nil, p.unsupported("JOIN ON filter accepts at most one AND-conjunct")
 	}

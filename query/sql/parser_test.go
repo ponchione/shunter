@@ -1767,3 +1767,16 @@ func TestParseRejectsJoinOnFilterOr(t *testing.T) {
 		t.Fatalf("err = %q, want substring 'OR not supported in JOIN ON'", err.Error())
 	}
 }
+
+func TestParseRejectsJoinOnFilterColumnVsColumn(t *testing.T) {
+	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.id = o.id")
+	if err == nil {
+		t.Fatal("expected error for column-vs-column ON filter")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+	if !strings.Contains(err.Error(), "JOIN ON filter must compare a column to a literal") {
+		t.Fatalf("err = %q, want substring 'JOIN ON filter must compare a column to a literal'", err.Error())
+	}
+}
