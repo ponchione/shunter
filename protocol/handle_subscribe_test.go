@@ -3447,13 +3447,12 @@ func TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected(t *testing.T)
 
 // TestHandleSubscribeSingle_ParityLimitClauseRejected pins the reference type-
 // check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
-// 530-533 (`select * from t limit 5` / "Subscriptions do not support limit")
-// onto the SubscribeSingle admission surface. Shunter's parser rejects the
-// trailing LIMIT clause at the statement's EOF-check in parseStatement
-// (query/sql/parser.go:505-507); the WHERE-trailing keyword fast path at
-// parseWhere (query/sql/parser.go:641-645) handles the case where LIMIT
-// follows a WHERE. The pin names the rejection as a parity contract on the
-// protocol boundary.
+// TestHandleSubscribeSingle_ParityLimitClauseRejected pins reference
+// `SubParser::parse_query` (sql-parser/src/parser/sub.rs:94-107)
+// rejection of subscription queries carrying `limit: Some(...)` through
+// `SubscriptionUnsupported::feature(query)`, rendered as
+// `Unsupported: {query}` (parser/errors.rs:18-19) and wrapped with
+// `DBError::WithSql` for SubscribeSingle.
 func TestHandleSubscribeSingle_ParityLimitClauseRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -3461,10 +3460,11 @@ func TestHandleSubscribeSingle_ParityLimitClauseRejected(t *testing.T) {
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
 	)
 
+	const sqlText = "SELECT * FROM t LIMIT 5"
 	msg := &SubscribeSingleMsg{
 		RequestID:   100,
 		QueryID:     101,
-		QueryString: "SELECT * FROM t LIMIT 5",
+		QueryString: sqlText,
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
@@ -3474,8 +3474,9 @@ func TestHandleSubscribeSingle_ParityLimitClauseRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 101, "QueryID")
-	if se.Error == "" || !strings.Contains(se.Error, "LIMIT") {
-		t.Fatalf("Error = %q, want deliberate LIMIT rejection", se.Error)
+	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q (LIMIT-in-subscription must emit SubscriptionUnsupported::Feature)", se.Error, want)
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when a LIMIT clause trails the query")
@@ -4918,12 +4919,13 @@ func TestHandleSubscribeSingle_ParityCountBareAliasRejected(t *testing.T) {
 }
 
 // TestHandleSubscribeSingle_ParityCountAliasWithLimitRejected pins the
-// deliberate subscribe-side rejection for aggregate projections composed with
-// LIMIT. One-off/ad hoc SQL accepts the combination, but subscriptions must
-// still return SubscriptionError and skip executor registration. The
-// compileSQLQueryString guard order means allowLimit=false catches LIMIT before
-// the aggregate guard fires, so the visible error stays "LIMIT not supported
-// for subscriptions".
+// deliberate subscribe-side rejection for aggregate projections composed
+// with LIMIT. One-off/ad hoc SQL accepts the combination, but
+// subscriptions must still return SubscriptionError and skip executor
+// registration. The compileSQLQueryString guard order means
+// allowLimit=false catches LIMIT before the aggregate guard fires, so
+// the visible error is the reference `SubscriptionUnsupported::Feature`
+// shape `Unsupported: {sql}` wrapped with `DBError::WithSql`.
 func TestHandleSubscribeSingle_ParityCountAliasWithLimitRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -4931,10 +4933,11 @@ func TestHandleSubscribeSingle_ParityCountAliasWithLimitRejected(t *testing.T) {
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
 	)
 
+	const sqlText = "SELECT COUNT(*) AS n FROM t LIMIT 1"
 	msg := &SubscribeSingleMsg{
 		RequestID:   184,
 		QueryID:     185,
-		QueryString: "SELECT COUNT(*) AS n FROM t LIMIT 1",
+		QueryString: sqlText,
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
@@ -4944,8 +4947,9 @@ func TestHandleSubscribeSingle_ParityCountAliasWithLimitRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 185, "QueryID")
-	if !strings.Contains(se.Error, "LIMIT not supported for subscriptions") {
-		t.Fatalf("Error = %q, want deliberate LIMIT subscription rejection", se.Error)
+	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q (LIMIT-in-subscription must emit SubscriptionUnsupported::Feature)", se.Error, want)
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on aggregate+LIMIT projection")

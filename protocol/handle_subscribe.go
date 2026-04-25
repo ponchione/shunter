@@ -220,7 +220,13 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
 	}
 	if !allowLimit && stmt.Limit != nil {
-		return compiledSQLQuery{}, fmt.Errorf("LIMIT not supported for subscriptions")
+		// Reference `SubParser::parse_query`
+		// (sql-parser/src/parser/sub.rs:94-107) rejects subscription
+		// queries carrying `limit: Some(...)` through
+		// `SubscriptionUnsupported::feature(query)`, rendered as
+		// `Unsupported: {query}` via parser/errors.rs:18-19. The full
+		// original SQL stands in for the formatted Query.
+		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
 	}
 	if stmt.Aggregate != nil && !allowProjection {
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")

@@ -638,6 +638,35 @@ func (e UnsupportedExprError) Error() string {
 
 func (e UnsupportedExprError) Unwrap() error { return ErrUnsupportedSQL }
 
+// UnsupportedFeatureError mirrors reference
+// `SubscriptionUnsupported::Feature` (parser/errors.rs:18-19) and the
+// sibling `SqlUnsupported::Feature` (parser/errors.rs:64-65). Both
+// variants carry a stringified expression and render as
+// `Unsupported: {expr}` — the same prefix on both surfaces, unlike
+// `SubscriptionUnsupported::Select` which uses `Unsupported SELECT: `.
+//
+// Reference subscription routing for LIMIT: `SubParser::parse_query`
+// (sql-parser/src/parser/sub.rs:94-107) rejects any subscription Query
+// with `limit: Some(...)` (or any non-None for `offset`/`fetch`) through
+// `SubscriptionUnsupported::feature(query)`, formatting the offending
+// Query through its Display impl.
+//
+// Shunter's local reroute covers the `compileSQLQueryString` LIMIT
+// guard on the subscribe surfaces (allowLimit=false). The OneOff
+// surface enables LIMIT and never reaches this typed error.
+//
+// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
+// still match.
+type UnsupportedFeatureError struct {
+	SQL string
+}
+
+func (e UnsupportedFeatureError) Error() string {
+	return "Unsupported: " + e.SQL
+}
+
+func (e UnsupportedFeatureError) Unwrap() error { return ErrUnsupportedSQL }
+
 // AlgebraicName exports the reference `fmt_algebraic_type` short-name
 // renderer for a ValueKind so cross-package compile-stage checks (in
 // `protocol`) can produce reference-shape `UnexpectedType` / `InvalidOp`
