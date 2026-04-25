@@ -478,6 +478,53 @@ func (e InvalidLiteralError) Error() string {
 
 func (e InvalidLiteralError) Unwrap() error { return ErrUnsupportedSQL }
 
+// DuplicateNameError mirrors reference `expr::errors::DuplicateName`
+// (reference/SpacetimeDB/crates/expr/src/errors.rs:119-121). Emitted at
+// compile-stage validation when a projection alias or join alias collides
+// with another in the same scope. Reference emit sites:
+//
+//   - lib.rs:88-89 (join alias collision in `type_from`)
+//   - check.rs:67-72 (duplicate projection alias in `type_proj::Exprs`)
+//
+// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel still
+// match.
+type DuplicateNameError struct {
+	Name string
+}
+
+func (e DuplicateNameError) Error() string {
+	return fmt.Sprintf("Duplicate name `%s`", e.Name)
+}
+
+func (e DuplicateNameError) Unwrap() error { return ErrUnsupportedSQL }
+
+// InvalidOpError mirrors reference `expr::errors::InvalidOp`
+// (reference/SpacetimeDB/crates/expr/src/errors.rs:71-85). Emitted at
+// compile-stage validation when a binary operator targets a type that
+// `op_supports_type` (lib.rs:155) rejects — practically reachable for
+// Array<…> and Product columns when an equi-join ON expression compares
+// such columns. Reference emit sites: lib.rs:130, lib.rs:138 (both routed
+// through `type_expr` on the ON binop). Unwrap()s to ErrUnsupportedSQL so
+// callers that classify by sentinel still match.
+type InvalidOpError struct {
+	Op   string
+	Type string
+}
+
+func (e InvalidOpError) Error() string {
+	return fmt.Sprintf("Invalid binary operator `%s` for type `%s`", e.Op, e.Type)
+}
+
+func (e InvalidOpError) Unwrap() error { return ErrUnsupportedSQL }
+
+// AlgebraicName exports the reference `fmt_algebraic_type` short-name
+// renderer for a ValueKind so cross-package compile-stage checks (in
+// `protocol`) can produce reference-shape `UnexpectedType` / `InvalidOp`
+// strings without duplicating the table.
+func AlgebraicName(k types.ValueKind) string {
+	return algebraicName(k)
+}
+
 // algebraicName returns the reference `fmt_algebraic_type` short name for a
 // ValueKind (reference/SpacetimeDB/crates/sats/src/algebraic_type/fmt.rs
 // lines 15-40). Primitives use capitalized short tokens (`Bool`, `U32`,

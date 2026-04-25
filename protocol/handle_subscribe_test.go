@@ -5738,3 +5738,171 @@ func TestHandleSubscribeSingle_ParityNonBoolLiteralOnBoolRejectText(t *testing.T
 		})
 	}
 }
+
+// TestHandleSubscribeSingle_ParityDuplicateJoinAliasRejectText pins the
+// reference `DuplicateName` literal for an explicitly-aliased join where
+// both sides share the same alias. Reference path: `type_from`
+// (lib.rs:88-89) emits `DuplicateName(alias)` after seeing the alias
+// inserted twice into `Relvars`. SubscribeSingle wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityDuplicateJoinAliasRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT dup.* FROM t AS dup JOIN s AS dup ON dup.u32 = dup.u32"
+	msg := &SubscribeSingleMsg{
+		RequestID:   400,
+		QueryID:     401,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Duplicate name `dup`, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a join uses duplicate aliases")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityDuplicateSelfJoinRejectText pins the
+// `DuplicateName` literal for an unaliased self-join — the right side's
+// derived alias collides with the left side's base table name `t`.
+func TestHandleSubscribeSingle_ParityDuplicateSelfJoinRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT t.* FROM t JOIN t"
+	msg := &SubscribeSingleMsg{
+		RequestID:   402,
+		QueryID:     403,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Duplicate name `t`, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on an unaliased self-join")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityJoinColumnKindMismatchRejectText pins
+// the reference `UnexpectedType` literal for an ON binop whose two field
+// references resolve to different algebraic kinds. SubscribeSingle wraps
+// with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityJoinColumnKindMismatchRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "name", Type: schema.KindString}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.u32 = s.name"
+	msg := &SubscribeSingleMsg{
+		RequestID:   404,
+		QueryID:     405,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Unexpected type: (expected) String != U32 (inferred), executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a join column kind mismatch")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityJoinArrayColumnInvalidOpRejectText pins
+// the reference `InvalidOp` literal for an ON binop comparing two
+// Array<…> columns. SubscribeSingle wraps with DBError::WithSql. Schema
+// uses a hand-built `mockSchemaLookup` because `schema.NewBuilder`
+// rejects `KindArrayString` as a column-storage kind.
+func TestHandleSubscribeSingle_ParityJoinArrayColumnInvalidOpRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}
+	sTS := &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: tTS},
+		"s": {id: 2, schema: sTS},
+	}}
+
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.arr = s.arr"
+	msg := &SubscribeSingleMsg{
+		RequestID:   406,
+		QueryID:     407,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Invalid binary operator `=` for type `Array<String>`, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when ON compares Array columns")
+	}
+}

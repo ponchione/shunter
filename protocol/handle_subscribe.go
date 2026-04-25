@@ -179,6 +179,17 @@ func wrapSubscribeCompileErrorSQL(err error, sqlText string) string {
 func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool) (compiledSQLQuery, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
+		// Reference compile-stage typed errors (DuplicateName for join
+		// alias collisions) carry the literal text verbatim. The
+		// generic `parse:` prefix would obscure the reference shape on
+		// both OneOff (raw) and SubscribeSingle/Multi (WithSql-wrapped)
+		// surfaces, so let typed errors flow through unwrapped — same
+		// pattern as the `normalizeSQLFilterForRelations` bypass for
+		// `InvalidLiteralError` / `UnexpectedTypeError`.
+		var dupErr sql.DuplicateNameError
+		if errors.As(err, &dupErr) {
+			return compiledSQLQuery{}, err
+		}
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
 	}
 	if !allowLimit && stmt.Limit != nil {
@@ -269,9 +280,36 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("`%s` does not have a field `%s`", rightTS.Name, stmt.Join.RightOn.Column)
 		}
-		if isArrayKind(leftCol.Type) || isArrayKind(rightCol.Type) {
-			return compiledSQLQuery{}, fmt.Errorf("join ON %s.%s = %s.%s: array/product values are not comparable",
-				stmt.Join.LeftTable, stmt.Join.LeftOn.Column, stmt.Join.RightTable, stmt.Join.RightOn.Column)
+		// Reference `type_expr` (expr/src/lib.rs:134-140) types the ON
+		// binop's LEFT side first with no expectation, then types the
+		// RIGHT side with the LEFT type as the expected. The mismatch
+		// arm at lib.rs:111-112 calls `UnexpectedType::new(col_type,
+		// ty)` — `col_type` is the RIGHT side's column type (renders in
+		// the `(expected)` slot per errors.rs:104) and `ty` is the LEFT
+		// side's column type that was passed as expected (renders in
+		// the `(inferred)` slot). Mirror the slot ordering so both
+		// surfaces (OneOff raw, SubscribeSingle WithSql-wrapped) carry
+		// the reference text instead of the late `subscription:
+		// invalid predicate: join column kinds differ` from
+		// `subscription/validate.go::validateJoin`.
+		if leftCol.Type != rightCol.Type {
+			return compiledSQLQuery{}, sql.UnexpectedTypeError{
+				Expected: sql.AlgebraicName(rightCol.Type),
+				Inferred: sql.AlgebraicName(leftCol.Type),
+			}
+		}
+		// Reference `type_expr` (expr/src/lib.rs:138) routes equality
+		// against an Array/Product column through `op_supports_type`
+		// (lib.rs:155), which rejects non-primitive types and emits
+		// `InvalidOp{op, ty}`. The ON binop reaches lib.rs:134-140
+		// (neither side a Lit) so the type comes from the LEFT field
+		// after the `leftCol.Type != rightCol.Type` mismatch arm above
+		// has already returned.
+		if isArrayKind(leftCol.Type) {
+			return compiledSQLQuery{}, sql.InvalidOpError{
+				Op:   "=",
+				Type: sql.AlgebraicName(leftCol.Type),
+			}
 		}
 		relations := map[string]relationSchema{
 			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
@@ -362,9 +400,17 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 	if !ok {
 		return subscription.Join{}, fmt.Errorf("`%s` does not have a field `%s`", rightTS.Name, rightRef.Column)
 	}
-	if isArrayKind(leftCol.Type) || isArrayKind(rightCol.Type) {
-		return subscription.Join{}, fmt.Errorf("cross join WHERE %s.%s = %s.%s: array/product values are not comparable",
-			stmt.Join.LeftTable, leftRef.Column, stmt.Join.RightTable, rightRef.Column)
+	if leftCol.Type != rightCol.Type {
+		return subscription.Join{}, sql.UnexpectedTypeError{
+			Expected: sql.AlgebraicName(rightCol.Type),
+			Inferred: sql.AlgebraicName(leftCol.Type),
+		}
+	}
+	if isArrayKind(leftCol.Type) {
+		return subscription.Join{}, sql.InvalidOpError{
+			Op:   "=",
+			Type: sql.AlgebraicName(leftCol.Type),
+		}
 	}
 	var filter subscription.Predicate
 	if filterPred != nil {
@@ -419,7 +465,11 @@ func compileProjectionColumns(projectedTable string, columns []sql.ProjectionCol
 		return nil, nil
 	}
 	resolved := make([]compiledSQLProjectionColumn, 0, len(columns))
+	seen := make(map[string]struct{}, len(columns))
 	for _, col := range columns {
+		if err := checkDuplicateProjectionName(col, seen); err != nil {
+			return nil, err
+		}
 		if !strings.EqualFold(col.Table, projectedTable) {
 			return nil, fmt.Errorf("projection column %q must resolve to table %q", col.Column, projectedTable)
 		}
@@ -437,7 +487,11 @@ func compileJoinProjectionColumns(columns []sql.ProjectionColumn, left relationS
 		return nil, nil
 	}
 	resolved := make([]compiledSQLProjectionColumn, 0, len(columns))
+	seen := make(map[string]struct{}, len(columns))
 	for _, col := range columns {
+		if err := checkDuplicateProjectionName(col, seen); err != nil {
+			return nil, err
+		}
 		var rel relationSchema
 		switch {
 		case strings.EqualFold(col.Table, leftTable):
@@ -454,6 +508,27 @@ func compileJoinProjectionColumns(columns []sql.ProjectionColumn, left relationS
 		resolved = append(resolved, compiledCol)
 	}
 	return resolved, nil
+}
+
+// checkDuplicateProjectionName mirrors the duplicate-alias guard inside
+// reference `type_proj::Exprs` (expr/src/check.rs:67-72): each projection
+// element's effective output name (its `AS` alias, or the column name when
+// no alias was written) must be unique across the SELECT list. Reference
+// emits `DuplicateName(alias)` from `lib.rs:67` which renders as
+// `Duplicate name `{alias}“. The check is interleaved with the column
+// resolution loop so iteration order matches reference: a duplicate alias
+// is reported on the SECOND occurrence, after the FIRST has already been
+// type-checked.
+func checkDuplicateProjectionName(col sql.ProjectionColumn, seen map[string]struct{}) error {
+	name := col.OutputAlias
+	if name == "" {
+		name = col.Column
+	}
+	if _, dup := seen[name]; dup {
+		return sql.DuplicateNameError{Name: name}
+	}
+	seen[name] = struct{}{}
+	return nil
 }
 
 func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema, alias uint8) (compiledSQLProjectionColumn, error) {

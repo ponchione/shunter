@@ -847,10 +847,14 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	leftAlias := leftQualifiers[0]
 	rightAlias := rightQualifiers[0]
 	if strings.EqualFold(leftAlias, rightAlias) {
-		if strings.EqualFold(leftTable, rightTable) {
-			return nil, nil, nil, p.unsupported("self join requires aliases")
-		}
-		return nil, nil, nil, p.unsupported("joined relations must use distinct qualifiers")
+		// Reference `type_from` (expr/src/lib.rs:88-89) rejects a join whose
+		// right-side alias collides with the left side using
+		// `DuplicateName(alias)`. Same reference text covers both the
+		// explicitly-aliased shape (`FROM t AS dup JOIN s AS dup`) and the
+		// unaliased self-join shape (`FROM t JOIN t`) because the parser
+		// derives each side's alias from its base table when no `AS` is
+		// written.
+		return nil, nil, nil, DuplicateNameError{Name: rightAlias}
 	}
 	if !isKeywordToken(p.peek(), "ON") {
 		return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil, nil

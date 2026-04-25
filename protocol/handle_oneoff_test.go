@@ -6242,3 +6242,233 @@ func TestHandleOneOffQuery_ParityNonBoolLiteralOnBoolRejectText(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleOneOffQuery_ParityDuplicateProjectionAliasRejectText pins the
+// reference `DuplicateName` literal (errors.rs:120) for a SELECT list whose
+// explicit `AS` aliases collide. Reference path: `type_proj::Exprs`
+// (check.rs:67-72) tracks each element's alias in a HashSet and emits
+// `DuplicateName(alias)` on the second occurrence. OneOff is the only
+// surface that reaches this branch — SubscribeSingle rejects the
+// column-list projection earlier with `Unsupported::ReturnType` at
+// `compileSQLQueryString`'s `allowProjection=false` guard.
+func TestHandleOneOffQuery_ParityDuplicateProjectionAliasRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "i32", Type: schema.KindInt32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1), types.NewInt32(-1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE0},
+		QueryString: "SELECT u32 AS dup, i32 AS dup FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Duplicate name `dup`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityDuplicateImplicitProjectionRejectText pins
+// the same `DuplicateName` literal for a SELECT list with no explicit
+// aliases — the effective output name falls back to the column name, so
+// `SELECT u32, u32 FROM t` collides on `u32`. Reference reads each
+// element's effective name from `ProjectElem(_, SqlIdent(alias))` where
+// `alias` is the column name when no `AS` was written.
+func TestHandleOneOffQuery_ParityDuplicateImplicitProjectionRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE1},
+		QueryString: "SELECT u32, u32 FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Duplicate name `u32`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityDuplicateJoinAliasRejectText pins the
+// reference `DuplicateName` literal for a join whose right-side alias
+// collides with the left side. Reference path: `type_from`
+// (lib.rs:88-89) inserts each alias into a HashSet keyed by `Relvars`
+// and emits `DuplicateName(alias.clone())` on collision. Shunter routes
+// the same shape through the parser so OneOff (raw) and SubscribeSingle
+// (WithSql-wrapped) both carry the reference text.
+func TestHandleOneOffQuery_ParityDuplicateJoinAliasRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE2},
+		QueryString: "SELECT dup.* FROM t AS dup JOIN s AS dup ON dup.u32 = dup.u32",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Duplicate name `dup`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityDuplicateSelfJoinRejectText pins the same
+// `DuplicateName` literal for an unaliased self-join — `FROM t JOIN t`
+// derives both sides' alias from the base table name, so the collision
+// surfaces on `t`. Reference treats the unaliased and explicitly-aliased
+// shapes identically because `parse_relvar` synthesizes the alias from the
+// base table when no `AS` is written.
+func TestHandleOneOffQuery_ParityDuplicateSelfJoinRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE3},
+		QueryString: "SELECT t.* FROM t JOIN t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Duplicate name `t`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityJoinColumnKindMismatchRejectText pins the
+// reference `UnexpectedType` literal for an ON binop whose two field
+// references resolve to different algebraic kinds. Reference path:
+// `type_expr` (lib.rs:134-140) types the LEFT side with no expectation
+// (`None`), then types the RIGHT side with the LEFT type as expected; a
+// kind mismatch raises `UnexpectedType{expected: <left>, inferred:
+// <right>}`. Mirror at the Shunter compile boundary so both surfaces
+// carry the reference text instead of the late `subscription:
+// invalid predicate: join column kinds differ` from
+// `subscription/validate.go::validateJoin`.
+func TestHandleOneOffQuery_ParityJoinColumnKindMismatchRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "name", Type: schema.KindString}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE4},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.name",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Unexpected type: (expected) String != U32 (inferred)"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityJoinArrayColumnInvalidOpRejectText pins the
+// reference `InvalidOp` literal for an ON binop comparing two Array<…>
+// columns. Reference path: `type_expr` (lib.rs:138) routes equality
+// against a non-primitive type through `op_supports_type` (lib.rs:155),
+// which rejects Array kinds and emits `InvalidOp{op: "=", ty:
+// "Array<String>"}`. The previous Shunter literal embedded contextual
+// `join ON t.arr = s.arr: ...` which does not match the reference shape.
+//
+// Schema is wired through a hand-built `mockSchemaLookup` because
+// `schema.NewBuilder` rejects `KindArrayString` as a column-storage kind
+// (see `schema/validate_structure.go::isValidValueKind`). The mock
+// schema lookup goes only as deep as the protocol-layer compile checks
+// reach.
+func TestHandleOneOffQuery_ParityJoinArrayColumnInvalidOpRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}
+	sTS := &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: tTS},
+		"s": {id: 2, schema: sTS},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE5},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.arr = s.arr",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Invalid binary operator `=` for type `Array<String>`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
