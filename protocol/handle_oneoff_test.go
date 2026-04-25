@@ -2941,6 +2941,84 @@ func TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
 	}
 }
 
+// TestHandleOneOffQuery_ParityStringDigitsOnIntegerColumnWidens pins the
+// reference widening at expr/src/lib.rs:255-352. `WHERE u32 = '42'` must
+// now succeed: parse_int → BigDecimal::from_str("42") → BigDecimal::to_u32
+// → Uint32(42). Shunter routes the LitString through `parseNumericLiteral`
+// at the coerce boundary and recurses with the resulting LitInt, so the
+// admission accepts and the executor scans for u32 == 42.
+func TestHandleOneOffQuery_ParityStringDigitsOnIntegerColumnWidens(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "u32", Type: schema.KindUint32},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1)},
+				{types.NewUint32(42)},
+				{types.NewUint32(99)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x91},
+		QueryString: "SELECT * FROM t WHERE u32 = '42'",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (digit-only widening must succeed)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1 matching u32 == 42", len(pvs))
+	}
+	if pvs[0][0].AsUint32() != 42 {
+		t.Errorf("row[0].u32 = %d, want 42", pvs[0][0].AsUint32())
+	}
+}
+
+// TestHandleOneOffQuery_ParityNonNumericStringOnIntegerEmitsInvalidLiteral
+// pins the reference reject text at expr/src/errors.rs:84 flowing through
+// the new LitString-on-numeric path. `WHERE u32 = 'foo'` must emit “ The
+// literal expression `foo` cannot be parsed as type `U32` “ rather than
+// the prior generic "string literal cannot be coerced to uint32" text.
+// Reference parse_int → BigDecimal::from_str("foo") → None → folds to
+// InvalidLiteral via the lib.rs:99 .map_err. The wrapper-bypass in
+// `normalizeSQLFilterForRelations` already passes InvalidLiteralError
+// through unwrapped.
+func TestHandleOneOffQuery_ParityNonNumericStringOnIntegerEmitsInvalidLiteral(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x92},
+		QueryString: "SELECT * FROM t WHERE u32 = 'foo'",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	want := "The literal expression `foo` cannot be parsed as type `U32`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+}
+
 // TestHandleOneOffQuery_ParityNumericLiteralOnStringColumnWidens pins the
 // reference widening at expr/src/lib.rs:353 onto the OneOffQuery admission
 // surface. `WHERE name = 42` must succeed and return the row whose `name`

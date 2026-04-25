@@ -61,6 +61,24 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		copy(out, caller[:])
 		return types.NewBytes(out), nil
 	}
+	// LitString → numeric column: route through `parseNumericLiteral` and
+	// recurse with the parsed numeric Literal so the existing LitInt /
+	// LitBigInt / LitFloat coerce arms apply. Mirrors reference parse_int /
+	// parse_float at expr/src/lib.rs:168-208 — `BigDecimal::from_str(value)`
+	// either succeeds (driving range and is_integer checks downstream) or
+	// fails, with the lib.rs:99 .map_err folding any failure into
+	// `InvalidLiteral::new(v.into_string(), ty)`. KindString is excluded
+	// because the KindString case widens LitString through
+	// renderLiteralSourceText; KindBool / KindBytes / KindTimestamp etc.
+	// route through their own type-specific branches and so are not
+	// numeric-kinds for this seam.
+	if lit.Kind == LitString && isNumericKind(kind) {
+		parsed, err := parseNumericLiteral(lit.Str)
+		if err != nil {
+			return types.Value{}, InvalidLiteralError{Literal: lit.Str, Type: algebraicName(kind)}
+		}
+		return coerceValue(parsed, kind, caller)
+	}
 	switch kind {
 	case types.KindBool:
 		if lit.Kind != LitBool {
@@ -190,6 +208,14 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 }
 
 func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64) types.Value) (types.Value, error) {
+	// `parseNumericLiteral` only produces LitBigInt when the source decimal
+	// overflows int64, so the value always overflows any 32/64-bit signed
+	// kind. Reference parse_int → BigDecimal::to_iN returns None →
+	// InvalidLiteral (lib.rs:99). Mirrors the 128/256-bit emit shape in
+	// `coerceBigIntToInt{128,256}`.
+	if lit.Kind == LitBigInt {
+		return types.Value{}, InvalidLiteralError{Literal: lit.Big.String(), Type: algebraicName(kind)}
+	}
 	if lit.Kind != LitInt {
 		return types.Value{}, mismatch(lit, kind)
 	}
@@ -200,6 +226,12 @@ func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64
 }
 
 func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64) types.Value) (types.Value, error) {
+	// LitBigInt overflow on 32/64-bit unsigned columns: same parity shape
+	// as `coerceSigned`. Negative LitBigInt also overflows the unsigned
+	// range; the same emit shape covers both reject directions.
+	if lit.Kind == LitBigInt {
+		return types.Value{}, InvalidLiteralError{Literal: lit.Big.String(), Type: algebraicName(kind)}
+	}
 	if lit.Kind != LitInt {
 		return types.Value{}, mismatch(lit, kind)
 	}
@@ -285,6 +317,16 @@ func isIntegerKind(k types.ValueKind) bool {
 	default:
 		return false
 	}
+}
+
+// isNumericKind reports whether a ValueKind is reachable through reference
+// `parse_int` / `parse_float` (expr/src/lib.rs:255-352) — every signed /
+// unsigned integer primitive plus the two float primitives. The
+// LitString-on-numeric routing in `coerceValue` uses this to decide
+// whether to drive a LitString through `parseNumericLiteral` (mirrors
+// reference `BigDecimal::from_str`).
+func isNumericKind(k types.ValueKind) bool {
+	return isIntegerKind(k) || k == types.KindFloat32 || k == types.KindFloat64
 }
 
 // UnexpectedTypeError mirrors reference `expr::errors::UnexpectedType`

@@ -2886,6 +2886,78 @@ func TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected(t *testing.T)
 	}
 }
 
+// TestHandleSubscribeSingle_ParityStringDigitsOnIntegerColumnWidens pins
+// the reference widening at expr/src/lib.rs:255-352 onto the
+// SubscribeSingle admission surface. `WHERE u32 = '42'` must compile
+// (no SubscriptionError) and bind `u32` against `types.NewUint32(42)`
+// via the new LitString-on-numeric routing through `parseNumericLiteral`.
+func TestHandleSubscribeSingle_ParityStringDigitsOnIntegerColumnWidens(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	msg := &SubscribeSingleMsg{
+		RequestID:   86,
+		QueryID:     87,
+		QueryString: "SELECT * FROM t WHERE u32 = '42'",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet — widening rejected")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if !colEq.Value.Equal(types.NewUint32(42)) {
+		t.Fatalf("Predicates[0].Value = %v, want Uint32(42)", colEq.Value)
+	}
+}
+
+// TestHandleSubscribeSingle_ParityNonNumericStringOnIntegerEmitsInvalidLiteral
+// pins the reference reject text on the SubscribeSingle admission
+// surface. `WHERE u32 = 'foo'` rejects with “ The literal expression
+// `foo` cannot be parsed as type `U32` “, WithSql-wrapped via the
+// existing `wrapSubscribeCompileErrorSQL` seam (the suffix added per
+// `error.rs:140` `DBError::WithSql`).
+func TestHandleSubscribeSingle_ParityNonNumericStringOnIntegerEmitsInvalidLiteral(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	msg := &SubscribeSingleMsg{
+		RequestID:   88,
+		QueryID:     89,
+		QueryString: "SELECT * FROM t WHERE u32 = 'foo'",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "The literal expression `foo` cannot be parsed as type `U32`, executing: `SELECT * FROM t WHERE u32 = 'foo'`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when LitString rejects via InvalidLiteral")
+	}
+}
+
 // TestHandleSubscribeSingle_ParityNumericLiteralOnStringColumnWidens pins the
 // reference widening at expr/src/lib.rs:353 (`AlgebraicType::String =>
 // Ok(AlgebraicValue::String(value.into()))`) onto the SubscribeSingle

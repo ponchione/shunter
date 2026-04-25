@@ -50,10 +50,19 @@ func TestCoerceStringToString(t *testing.T) {
 	}
 }
 
-func TestCoerceStringToIntFails(t *testing.T) {
-	_, err := Coerce(Literal{Kind: LitString, Str: "42"}, types.KindUint64)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+// TestCoerceStringDigitsWidensToInteger pins reference parse_int at
+// expr/src/lib.rs:168-188 — `BigDecimal::from_str("42")` succeeds and
+// flows through `BigDecimal::to_u64` to produce `Uint64(42)`. The 2026-04-
+// 24 LitString-on-numeric widening replaces the prior coerce-boundary
+// rejection on digit-only strings; non-numeric LitString continues to
+// reject (`TestCoerceRejectsStringLiteralOnUint32Column`).
+func TestCoerceStringDigitsWidensToInteger(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitString, Str: "42"}, types.KindUint64)
+	if err != nil {
+		t.Fatalf("Coerce error: %v", err)
+	}
+	if v.Kind() != types.KindUint64 || v.AsUint64() != 42 {
+		t.Fatalf("got %+v, want Uint64(42)", v)
 	}
 }
 
@@ -313,10 +322,19 @@ func TestCoerceNegativeIntoUint128Fails(t *testing.T) {
 	}
 }
 
-func TestCoerceStringLiteralOnInt128Rejected(t *testing.T) {
-	_, err := Coerce(Literal{Kind: LitString, Str: "127"}, types.KindInt128)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+// TestCoerceStringDigitsWidensToInt128 pins reference parse_int at the
+// 128-bit row of the lib.rs:255-352 dispatch — `BigDecimal::from_str("127")`
+// → `BigDecimal::to_i128` → `Int128(127)`. The 2026-04-24 LitString-on-
+// numeric widening replaces the prior 128-bit reject; non-numeric forms
+// continue to reject through the InvalidLiteral path.
+func TestCoerceStringDigitsWidensToInt128(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitString, Str: "127"}, types.KindInt128)
+	if err != nil {
+		t.Fatalf("Coerce error: %v", err)
+	}
+	hi, lo := v.AsInt128()
+	if hi != 0 || lo != 127 {
+		t.Fatalf("AsInt128 = (%d,%d), want (0,127)", hi, lo)
 	}
 }
 
@@ -391,10 +409,19 @@ func TestCoerceNegativeIntoUint256Fails(t *testing.T) {
 	}
 }
 
-func TestCoerceStringLiteralOnInt256Rejected(t *testing.T) {
-	_, err := Coerce(Literal{Kind: LitString, Str: "127"}, types.KindInt256)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+// TestCoerceStringDigitsWidensToInt256 pins the 256-bit row of the
+// lib.rs:255-352 dispatch; reference `BigDecimal::from_str("127")` flows
+// through the I256 to_int closure (lib.rs:238-245) to produce `Int256(127)`.
+// Same 2026-04-24 LitString-on-numeric widening that closes the I128
+// row.
+func TestCoerceStringDigitsWidensToInt256(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitString, Str: "127"}, types.KindInt256)
+	if err != nil {
+		t.Fatalf("Coerce error: %v", err)
+	}
+	_, _, _, w3 := v.AsInt256()
+	if w3 != 127 {
+		t.Fatalf("AsInt256.lo = %d, want 127", w3)
 	}
 }
 
@@ -767,5 +794,173 @@ func TestCoerceLitBoolOnStringColumnEmitsUnexpectedType(t *testing.T) {
 	}
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+	}
+}
+
+// TestCoerceLitStringNumericTokenWidensOntoNumericKinds pins the reference
+// widening at expr/src/lib.rs:255-352 (parse_int / parse_float route the
+// SqlLiteral source text through `BigDecimal::from_str` and into
+// `to_iN/uN/fN`). Shunter routes a LitString hitting an integer or float
+// kind through `parseNumericLiteral(lit.Str)` and recurses with the parsed
+// numeric Literal so the existing LitInt / LitBigInt / LitFloat coerce
+// arms apply. Digit-only and scientific-notation source text widens to
+// the target kind value when in range; out-of-range, fractional, or
+// non-numeric source text emits `InvalidLiteralError` carrying the
+// original `lit.Str` (or, for forms that collapse at parseNumericLiteral,
+// the canonicalized rendering — same documented divergence as prior
+// InvalidLiteral 128/256-bit slice).
+func TestCoerceLitStringNumericTokenWidensOntoNumericKinds(t *testing.T) {
+	cases := []struct {
+		name    string
+		litStr  string
+		kind    types.ValueKind
+		checkOK func(t *testing.T, v types.Value)
+	}{
+		{"digits_to_U32", "123", types.KindUint32, func(t *testing.T, v types.Value) {
+			if v.AsUint32() != 123 {
+				t.Fatalf("AsUint32 = %d, want 123", v.AsUint32())
+			}
+		}},
+		{"digits_to_I32", "-7", types.KindInt32, func(t *testing.T, v types.Value) {
+			if v.AsInt32() != -7 {
+				t.Fatalf("AsInt32 = %d, want -7", v.AsInt32())
+			}
+		}},
+		{"digits_to_U64", "42", types.KindUint64, func(t *testing.T, v types.Value) {
+			if v.AsUint64() != 42 {
+				t.Fatalf("AsUint64 = %d, want 42", v.AsUint64())
+			}
+		}},
+		{"scientific_to_U32", "1e3", types.KindUint32, func(t *testing.T, v types.Value) {
+			if v.AsUint32() != 1000 {
+				t.Fatalf("AsUint32 = %d, want 1000", v.AsUint32())
+			}
+		}},
+		{"digits_to_I128", "127", types.KindInt128, func(t *testing.T, v types.Value) {
+			hi, lo := v.AsInt128()
+			if hi != 0 || lo != 127 {
+				t.Fatalf("AsInt128 = (%d,%d), want (0,127)", hi, lo)
+			}
+		}},
+		{"digits_to_I256", "127", types.KindInt256, func(t *testing.T, v types.Value) {
+			_, _, _, w3 := v.AsInt256()
+			if w3 != 127 {
+				t.Fatalf("AsInt256.lo = %d, want 127", w3)
+			}
+		}},
+		{"digits_to_F32", "1.5", types.KindFloat32, func(t *testing.T, v types.Value) {
+			if v.AsFloat32() != 1.5 {
+				t.Fatalf("AsFloat32 = %v, want 1.5", v.AsFloat32())
+			}
+		}},
+		{"integer_to_F64", "42", types.KindFloat64, func(t *testing.T, v types.Value) {
+			if v.AsFloat64() != 42.0 {
+				t.Fatalf("AsFloat64 = %v, want 42", v.AsFloat64())
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := Coerce(Literal{Kind: LitString, Str: tc.litStr}, tc.kind)
+			if err != nil {
+				t.Fatalf("Coerce(%q → %s) error: %v", tc.litStr, tc.kind, err)
+			}
+			if v.Kind() != tc.kind {
+				t.Fatalf("Kind = %v, want %v", v.Kind(), tc.kind)
+			}
+			tc.checkOK(t, v)
+		})
+	}
+}
+
+// TestCoerceLitStringFailingNumericEmitsInvalidLiteral pins the reject
+// shape on the LitString → numeric path. Reference parse_int / parse_float
+// fold any anyhow error from BigDecimal/to_iN into `InvalidLiteral::new(
+// v.into_string(), ty)` at lib.rs:99; Shunter mirrors via the new
+// LitString-routing branch (parse failure) and via the recursive arms
+// (LitInt range overflow, LitFloat-on-integer fractional rejection,
+// LitBigInt overflow on 32/64-bit kinds). `lit.Str` carries verbatim for
+// non-numeric inputs and digit-only inputs that overflow the target;
+// fractional inputs render the parsed-canonical float text (round-trip-
+// lossy forms documented as Shunter divergence). Scientific-notation
+// inputs that collapse to LitBigInt at the parser render `Big.String()`
+// canonical decimal — same documented divergence as the prior 128/256-bit
+// InvalidLiteral slice.
+func TestCoerceLitStringFailingNumericEmitsInvalidLiteral(t *testing.T) {
+	cases := []struct {
+		name    string
+		litStr  string
+		kind    types.ValueKind
+		wantTy  string
+		wantLit string
+	}{
+		{"non_numeric_on_U32", "foo", types.KindUint32, "U32", "foo"},
+		{"empty_on_U32", "", types.KindUint32, "U32", ""},
+		{"fractional_on_U32", "1.3", types.KindUint32, "U32", "1.3"},
+		{"negative_on_U32", "-1", types.KindUint32, "U32", "-1"},
+		{"overflow_on_U8", "256", types.KindUint8, "U8", "256"},
+		{"scientific_overflow_on_U32", "1e40", types.KindUint32, "U32", "10000000000000000000000000000000000000000"},
+		{"non_numeric_on_F32", "foo", types.KindFloat32, "F32", "foo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Coerce(Literal{Kind: LitString, Str: tc.litStr}, tc.kind)
+			if err == nil {
+				t.Fatal("want error, got nil")
+			}
+			var ilErr InvalidLiteralError
+			if !errors.As(err, &ilErr) {
+				t.Fatalf("err = %v, want InvalidLiteralError", err)
+			}
+			if ilErr.Literal != tc.wantLit || ilErr.Type != tc.wantTy {
+				t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, tc.wantLit, tc.wantTy)
+			}
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+			}
+		})
+	}
+}
+
+// TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral pins the previously
+// missing parity on direct LitBigInt input against 32/64-bit integer
+// kinds. The parser only produces LitBigInt when a numeric token
+// overflows int64 (e.g. `1e40` → LitBigInt(10^40)), so the value always
+// overflows U32/I32/U64/I64. Reference parse_int → BigDecimal::to_uN/iN
+// returns None → folds to InvalidLiteral at lib.rs:99. Pre-2026-04-24
+// Shunter emitted a generic mismatch error here — only the 128/256-bit
+// LitBigInt path was wired through `coerceBigIntTo*`. The slice extends
+// `coerceUnsigned` / `coerceSigned` to emit InvalidLiteral via
+// `Big.String()`, mirroring the 128/256-bit emit shape.
+func TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral(t *testing.T) {
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000") // 10^40
+	cases := []struct {
+		name    string
+		kind    types.ValueKind
+		wantTy  string
+		wantLit string
+	}{
+		{"on_U32", types.KindUint32, "U32", x.String()},
+		{"on_I32", types.KindInt32, "I32", x.String()},
+		{"on_U64", types.KindUint64, "U64", x.String()},
+		{"on_I64", types.KindInt64, "I64", x.String()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, tc.kind)
+			if err == nil {
+				t.Fatal("want error, got nil")
+			}
+			var ilErr InvalidLiteralError
+			if !errors.As(err, &ilErr) {
+				t.Fatalf("err = %v, want InvalidLiteralError", err)
+			}
+			if ilErr.Literal != tc.wantLit || ilErr.Type != tc.wantTy {
+				t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, tc.wantLit, tc.wantTy)
+			}
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+			}
+		})
 	}
 }
