@@ -213,6 +213,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if errors.As(err, &unqualErr) {
 			return compiledSQLQuery{}, err
 		}
+		var joinTypeErr sql.UnsupportedJoinTypeError
+		if errors.As(err, &joinTypeErr) {
+			return compiledSQLQuery{}, err
+		}
 		var unsupExprErr sql.UnsupportedExprError
 		if errors.As(err, &unsupExprErr) {
 			return compiledSQLQuery{}, err

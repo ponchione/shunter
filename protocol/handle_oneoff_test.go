@@ -5729,16 +5729,8 @@ func TestHandleOneOffQuery_ParityArrayJoinOnRejected(t *testing.T) {
 	}
 }
 
-func TestHandleOneOffQuery_JoinOnEqualityWithFilterReturnsFilteredRows(t *testing.T) {
+func TestHandleOneOffQuery_ParityJoinOnStrictEqualityRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
-	ordersTS := &schema.TableSchema{
-		ID:   1,
-		Name: "Orders",
-		Columns: []schema.ColumnSchema{
-			{Index: 0, Name: "id", Type: schema.KindUint32},
-			{Index: 1, Name: "product_id", Type: schema.KindUint32},
-		},
-	}
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
 		Name: "Orders",
@@ -5758,30 +5750,8 @@ func TestHandleOneOffQuery_JoinOnEqualityWithFilterReturnsFilteredRows(t *testin
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	_, ordersReg, ok := eng.Registry().TableByName("Orders")
-	if !ok {
-		t.Fatal("Orders table missing from registry")
-	}
-	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
-	if !ok {
-		t.Fatal("Inventory table missing from registry")
-	}
-	ordersTS.ID = ordersReg.ID
 	sl := registrySchemaLookup{reg: eng.Registry()}
-	snap := &mockSnapshot{
-		rows: map[schema.TableID][]types.ProductValue{
-			ordersReg.ID: {
-				{types.NewUint32(1), types.NewUint32(100)},
-				{types.NewUint32(2), types.NewUint32(101)},
-				{types.NewUint32(3), types.NewUint32(102)},
-			},
-			inventoryReg.ID: {
-				{types.NewUint32(100), types.NewUint32(9)},
-				{types.NewUint32(101), types.NewUint32(10)},
-				{types.NewUint32(102), types.NewUint32(3)},
-			},
-		},
-	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
@@ -5791,94 +5761,12 @@ func TestHandleOneOffQuery_JoinOnEqualityWithFilterReturnsFilteredRows(t *testin
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Error != nil {
-		t.Fatalf("Error = %q, want nil (ON-filter is query-only accepted)", *result.Error)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
 	}
-	pvs := decodeRows(t, firstTableRows(result), ordersTS)
-	if len(pvs) != 2 {
-		t.Fatalf("got %d rows, want 2 (orders 1 and 3 match the quantity<10 filter)", len(pvs))
-	}
-	if !pvs[0][0].Equal(types.NewUint32(1)) || !pvs[1][0].Equal(types.NewUint32(3)) {
-		t.Fatalf("unexpected order ids returned: %v, %v (want 1 and 3)", pvs[0][0], pvs[1][0])
-	}
-}
-
-func TestHandleOneOffQuery_JoinOnEqualityWithFilterMatchesWhereForm(t *testing.T) {
-	buildSnap := func() (*mockSnapshot, *schema.TableSchema, schema.SchemaRegistry) {
-		b := schema.NewBuilder().SchemaVersion(1)
-		b.TableDef(schema.TableDefinition{
-			Name: "Orders",
-			Columns: []schema.ColumnDefinition{
-				{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
-				{Name: "product_id", Type: schema.KindUint32},
-			},
-		})
-		b.TableDef(schema.TableDefinition{
-			Name: "Inventory",
-			Columns: []schema.ColumnDefinition{
-				{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
-				{Name: "quantity", Type: schema.KindUint32},
-			},
-		})
-		eng, err := b.Build(schema.EngineOptions{})
-		if err != nil {
-			t.Fatalf("Build failed: %v", err)
-		}
-		_, ordersReg, ok := eng.Registry().TableByName("Orders")
-		if !ok {
-			t.Fatal("Orders table missing from registry")
-		}
-		_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
-		if !ok {
-			t.Fatal("Inventory table missing from registry")
-		}
-		ordersTS := &schema.TableSchema{ID: ordersReg.ID, Name: "Orders", Columns: ordersReg.Columns}
-		snap := &mockSnapshot{
-			rows: map[schema.TableID][]types.ProductValue{
-				ordersReg.ID: {
-					{types.NewUint32(1), types.NewUint32(100)},
-					{types.NewUint32(2), types.NewUint32(101)},
-					{types.NewUint32(3), types.NewUint32(102)},
-				},
-				inventoryReg.ID: {
-					{types.NewUint32(100), types.NewUint32(9)},
-					{types.NewUint32(101), types.NewUint32(10)},
-					{types.NewUint32(102), types.NewUint32(3)},
-				},
-			},
-		}
-		return snap, ordersTS, eng.Registry()
-	}
-
-	runQuery := func(q string, id byte) []types.ProductValue {
-		conn := testConnDirect(nil)
-		snap, ordersTS, reg := buildSnap()
-		sl := registrySchemaLookup{reg: reg}
-		stateAccess := &mockStateAccess{snap: snap}
-		msg := &OneOffQueryMsg{MessageID: []byte{id}, QueryString: q}
-		handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-		result := drainOneOff(t, conn)
-		if result.Error != nil {
-			t.Fatalf("query %q error = %q", q, *result.Error)
-		}
-		return decodeRows(t, firstTableRows(result), ordersTS)
-	}
-
-	onRows := runQuery("SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10", 0x20)
-	whereRows := runQuery("SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10", 0x21)
-
-	if len(onRows) != len(whereRows) {
-		t.Fatalf("row count diverges: ON=%d, WHERE=%d", len(onRows), len(whereRows))
-	}
-	for i := range onRows {
-		if len(onRows[i]) != len(whereRows[i]) {
-			t.Fatalf("row %d column count diverges: ON=%d, WHERE=%d", i, len(onRows[i]), len(whereRows[i]))
-		}
-		for j := range onRows[i] {
-			if !onRows[i][j].Equal(whereRows[i][j]) {
-				t.Fatalf("row %d col %d diverges: ON=%v, WHERE=%v", i, j, onRows[i][j], whereRows[i][j])
-			}
-		}
+	want := "Non-inner joins are not supported"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
 	}
 }
 

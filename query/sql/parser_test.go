@@ -2,7 +2,6 @@ package sql
 
 import (
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -1850,163 +1849,29 @@ func TestParseWhereSenderParameterInJoinFilter(t *testing.T) {
 	}
 }
 
-func TestParseJoinOnEqualityWithFilter(t *testing.T) {
-	stmt, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10")
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-	if stmt.Join == nil {
-		t.Fatal("Join = nil, want join metadata")
-	}
-	if !stmt.Join.HasOn {
-		t.Fatal("Join.HasOn = false, want true")
-	}
-	if stmt.Join.LeftOn.Table != "Orders" || stmt.Join.LeftOn.Column != "product_id" {
-		t.Fatalf("left ON = %+v, want Orders.product_id", stmt.Join.LeftOn)
-	}
-	if stmt.Join.RightOn.Table != "Inventory" || stmt.Join.RightOn.Column != "id" {
-		t.Fatalf("right ON = %+v, want Inventory.id", stmt.Join.RightOn)
-	}
-	cmp, ok := stmt.Predicate.(ComparisonPredicate)
-	if !ok {
-		t.Fatalf("Predicate type = %T, want ComparisonPredicate", stmt.Predicate)
-	}
-	if cmp.Filter.Table != "Inventory" || cmp.Filter.Column != "quantity" || cmp.Filter.Alias != "product" {
-		t.Fatalf("ON-filter = %+v, want Inventory.quantity (alias product)", cmp.Filter)
-	}
-	if cmp.Filter.Op != "<" || cmp.Filter.Literal.Int != 10 {
-		t.Fatalf("ON-filter op/literal = %+v, want < 10", cmp.Filter)
-	}
-	if len(stmt.Filters) != 1 {
-		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
-	}
-}
-
-func TestParseJoinOnEqualityWithFilterOnLeftSide(t *testing.T) {
-	stmt, err := Parse("SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND o.id = 5")
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-	cmp, ok := stmt.Predicate.(ComparisonPredicate)
-	if !ok {
-		t.Fatalf("Predicate type = %T, want ComparisonPredicate", stmt.Predicate)
-	}
-	if cmp.Filter.Table != "Orders" || cmp.Filter.Column != "id" || cmp.Filter.Alias != "o" {
-		t.Fatalf("ON-filter = %+v, want Orders.id (alias o)", cmp.Filter)
-	}
-	if cmp.Filter.Op != "=" || cmp.Filter.Literal.Int != 5 {
-		t.Fatalf("ON-filter op/literal = %+v, want = 5", cmp.Filter)
-	}
-	if len(stmt.Filters) != 1 {
-		t.Fatalf("Filters len = %d, want 1", len(stmt.Filters))
-	}
-}
-
-func TestParseJoinOnEqualityWithFilterAndWhere(t *testing.T) {
-	stmt, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 WHERE o.id > 0")
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-	andPred, ok := stmt.Predicate.(AndPredicate)
-	if !ok {
-		t.Fatalf("Predicate type = %T, want AndPredicate", stmt.Predicate)
-	}
-	leftCmp, ok := andPred.Left.(ComparisonPredicate)
-	if !ok {
-		t.Fatalf("AndPredicate.Left type = %T, want ComparisonPredicate (ON-filter)", andPred.Left)
-	}
-	if leftCmp.Filter.Table != "Inventory" || leftCmp.Filter.Column != "quantity" || leftCmp.Filter.Op != "<" || leftCmp.Filter.Literal.Int != 10 {
-		t.Fatalf("AndPredicate.Left filter = %+v, want Inventory.quantity < 10", leftCmp.Filter)
-	}
-	rightCmp, ok := andPred.Right.(ComparisonPredicate)
-	if !ok {
-		t.Fatalf("AndPredicate.Right type = %T, want ComparisonPredicate (WHERE-filter)", andPred.Right)
-	}
-	if rightCmp.Filter.Table != "Orders" || rightCmp.Filter.Column != "id" || rightCmp.Filter.Op != ">" || rightCmp.Filter.Literal.Int != 0 {
-		t.Fatalf("AndPredicate.Right filter = %+v, want Orders.id > 0", rightCmp.Filter)
-	}
-	if len(stmt.Filters) != 2 {
-		t.Fatalf("Filters len = %d, want 2", len(stmt.Filters))
-	}
-}
-
-// TestParseJoinOnEqualityParityWithWhereForm locks the B (transparent-fold)
-// invariant: for a single-filter case, the ON-form parses to a Statement
-// structurally identical to the equivalent WHERE-form. See
-// docs/superpowers/specs/2026-04-23-join-on-filter-widening-design.md §
-// "Semantic-equivalence invariant".
-func TestParseJoinOnEqualityParityWithWhereForm(t *testing.T) {
-	onForm, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10")
-	if err != nil {
-		t.Fatalf("ON-form Parse error: %v", err)
-	}
-	whereForm, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id WHERE product.quantity < 10")
-	if err != nil {
-		t.Fatalf("WHERE-form Parse error: %v", err)
-	}
-	if !reflect.DeepEqual(onForm.Predicate, whereForm.Predicate) {
-		t.Fatalf("Predicate divergence:\n  ON-form    = %+v\n  WHERE-form = %+v", onForm.Predicate, whereForm.Predicate)
-	}
-	if !reflect.DeepEqual(onForm.Filters, whereForm.Filters) {
-		t.Fatalf("Filters divergence:\n  ON-form    = %+v\n  WHERE-form = %+v", onForm.Filters, whereForm.Filters)
-	}
-}
-
-func TestParseRejectsJoinOnFilterMultipleConjuncts(t *testing.T) {
-	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 AND o.id > 0")
-	if err == nil {
-		t.Fatal("expected error for multi-conjunct ON filter")
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
-	if !strings.Contains(err.Error(), "JOIN ON filter accepts at most one AND-conjunct") {
-		t.Fatalf("err = %q, want substring 'JOIN ON filter accepts at most one AND-conjunct'", err.Error())
-	}
-}
-
-func TestParseRejectsJoinOnFilterOr(t *testing.T) {
-	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 OR o.id > 0")
-	if err == nil {
-		t.Fatal("expected error for OR in ON filter")
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
-	if !strings.Contains(err.Error(), "OR not supported in JOIN ON") {
-		t.Fatalf("err = %q, want substring 'OR not supported in JOIN ON'", err.Error())
-	}
-}
-
-func TestParseRejectsJoinOnFilterColumnVsColumn(t *testing.T) {
-	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.id = o.id")
-	if err == nil {
-		t.Fatal("expected error for column-vs-column ON filter")
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
-	if !strings.Contains(err.Error(), "JOIN ON filter must compare a column to a literal") {
-		t.Fatalf("err = %q, want substring 'JOIN ON filter must compare a column to a literal'", err.Error())
-	}
-}
-
-func TestParseRejectsJoinOnFilterUnqualifiedColumn(t *testing.T) {
-	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND quantity < 10")
-	if err == nil {
-		t.Fatal("expected error for unqualified column in ON filter")
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
-}
-
-func TestParseRejectsJoinOnFilterThirdRelation(t *testing.T) {
-	_, err := Parse("SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND z.x < 10")
-	if err == nil {
-		t.Fatal("expected error for third-relation qualifier in ON filter")
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+func TestParseRejectsJoinOnNonPureEquality(t *testing.T) {
+	for _, sqlText := range []string{
+		"SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10",
+		"SELECT product.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND o.id = 5",
+		"SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 WHERE o.id > 0",
+		"SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 AND o.id > 0",
+		"SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10 OR o.id > 0",
+		"SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.id = o.id",
+		"SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND quantity < 10",
+		"SELECT o.id FROM Orders o JOIN Inventory product ON o.product_id = product.id AND z.x < 10",
+	} {
+		t.Run(sqlText, func(t *testing.T) {
+			_, err := Parse(sqlText)
+			if err == nil {
+				t.Fatal("expected error for non-pure JOIN ON equality")
+			}
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+			}
+			want := "Non-inner joins are not supported"
+			if err.Error() != want {
+				t.Fatalf("err = %q, want %q", err.Error(), want)
+			}
+		})
 	}
 }

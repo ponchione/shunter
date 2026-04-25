@@ -937,7 +937,7 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 		return nil, nil, nil, err
 	}
 	if op != "=" {
-		return nil, nil, nil, p.unsupported("JOIN ON only supports '='")
+		return nil, nil, nil, UnsupportedJoinTypeError{}
 	}
 	rightOn, err := p.parseQualifiedColumnRef(lookup)
 	if err != nil {
@@ -953,25 +953,10 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 		return nil, nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
 	}
 	jc := &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}
-	if !isKeywordToken(p.peek(), "AND") {
-		return jc, rightQualifiers, nil, nil
+	if isKeywordToken(p.peek(), "AND") || isKeywordToken(p.peek(), "OR") {
+		return nil, nil, nil, UnsupportedJoinTypeError{}
 	}
-	p.advance()
-	onBindings := relationBindings{requireQualify: true, byQualifier: lookup}
-	onPred, err := p.parseComparisonPredicate(onBindings)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if _, ok := onPred.(ComparisonPredicate); !ok {
-		return nil, nil, nil, p.unsupported("JOIN ON filter must compare a column to a literal")
-	}
-	if isKeywordToken(p.peek(), "AND") {
-		return nil, nil, nil, p.unsupported("JOIN ON filter accepts at most one AND-conjunct")
-	}
-	if isKeywordToken(p.peek(), "OR") {
-		return nil, nil, nil, p.unsupported("OR not supported in JOIN ON")
-	}
-	return jc, rightQualifiers, onPred, nil
+	return jc, rightQualifiers, nil, nil
 }
 
 func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, error) {

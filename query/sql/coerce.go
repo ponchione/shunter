@@ -610,6 +610,23 @@ func (e UnqualifiedNamesError) Error() string {
 
 func (e UnqualifiedNamesError) Unwrap() error { return ErrUnsupportedSQL }
 
+// UnsupportedJoinTypeError mirrors reference
+// `parser::errors::SqlUnsupported::JoinType`
+// (reference/SpacetimeDB/crates/sql-parser/src/parser/errors.rs:66).
+// Reference `parse_join` routes every join operator/constraint other
+// than cross join and pure `qualified_identifier = qualified_identifier`
+// inner-join ON equality through this literal.
+//
+// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
+// still match.
+type UnsupportedJoinTypeError struct{}
+
+func (e UnsupportedJoinTypeError) Error() string {
+	return "Non-inner joins are not supported"
+}
+
+func (e UnsupportedJoinTypeError) Unwrap() error { return ErrUnsupportedSQL }
+
 // UnsupportedExprError mirrors reference
 // `parser::errors::SqlUnsupported::Expr`
 // (reference/SpacetimeDB/crates/sql-parser/src/parser/errors.rs:38-39).

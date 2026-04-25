@@ -5168,15 +5168,11 @@ func TestHandleSubscribeSingle_ParityArrayJoinOnRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_JoinOnEqualityWithFilterAccepted pins the
-// subscribe-side acceptance of the new ON-filter shape. Subscribe accepts
-// because the parser transparently folds the ON-extracted filter into
-// Statement.Predicate, producing output indistinguishable from the already-
-// accepted WHERE-form (see design
-// docs/superpowers/specs/2026-04-23-join-on-filter-widening-design.md §
-// "Divergence-discipline framing"). Mirrors the WHERE-form pin at
-// TestHandleSubscribeSingle_JoinFilterOnRightTable.
-func TestHandleSubscribeSingle_JoinOnEqualityWithFilterAccepted(t *testing.T) {
+// TestHandleSubscribeSingle_ParityJoinOnStrictEqualityRejectText pins the
+// reference subscription parser's `JoinType` rejection for any JOIN ON shape
+// other than a pure qualified-column equality. SubscribeSingle wraps the raw
+// parser text with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityJoinOnStrictEqualityRejectText(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
 		Name: "Orders",
@@ -5208,90 +5204,19 @@ func TestHandleSubscribeSingle_JoinOnEqualityWithFilterAccepted(t *testing.T) {
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
-	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
-	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
-	}
-	joinPred, ok := req.Predicates[0].(subscription.Join)
-	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
-	}
-	_, orders, ok := eng.Registry().TableByName("Orders")
-	if !ok {
-		t.Fatal("Orders table missing from registry")
-	}
-	_, inventory, ok := eng.Registry().TableByName("Inventory")
-	if !ok {
-		t.Fatal("Inventory table missing from registry")
-	}
-	if joinPred.Left != orders.ID || joinPred.Right != inventory.ID {
-		t.Fatalf("join tables = %d/%d, want %d/%d", joinPred.Left, joinPred.Right, orders.ID, inventory.ID)
-	}
-	rng, ok := joinPred.Filter.(subscription.ColRange)
-	if !ok {
-		t.Fatalf("Join.Filter type = %T, want ColRange", joinPred.Filter)
-	}
-	if rng.Table != inventory.ID || rng.Column != 1 {
-		t.Fatalf("range table/column = %d/%d, want %d/1", rng.Table, rng.Column, inventory.ID)
-	}
-	if !rng.Upper.Value.Equal(types.NewUint32(10)) || rng.Upper.Inclusive || rng.Upper.Unbounded {
-		t.Fatalf("upper bound = %+v, want exclusive bounded 10", rng.Upper)
-	}
-}
-
-// TestHandleSubscribeSingle_JoinOnEqualityWithFilterUnindexedRejected pins
-// that the subscription unindexed-join gate (validate.go:170) is independent
-// of filter presence. The shape admitted by P0-SUBSCRIPTION-027 does not
-// weaken the index requirement; it only opens a parser-level surface.
-func TestHandleSubscribeSingle_JoinOnEqualityWithFilterUnindexedRejected(t *testing.T) {
-	conn := testConnDirect(nil)
-	b := schema.NewBuilder().SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "Orders",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
-			{Name: "product_id", Type: schema.KindUint32},
-		},
-	})
-	b.TableDef(schema.TableDefinition{
-		Name: "Inventory",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: schema.KindUint32},
-			{Name: "quantity", Type: schema.KindUint32},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
-	sl := registrySchemaLookup{reg: eng.Registry()}
-	executor := &validatingSubExecutor{schema: sl}
-
-	msg := &SubscribeSingleMsg{
-		RequestID:   19,
-		QueryID:     52,
-		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id AND product.quantity < 10",
-	}
-	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
-
 	tag, decoded := drainServerMsgEventually(t, conn)
 	if tag != TagSubscriptionError {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 52, "SubscriptionError.QueryID")
-	requireOptionalUint32(t, se.RequestID, 19, "SubscriptionError.RequestID")
-	if !strings.Contains(se.Error, "join column has no index on either side") {
-		t.Fatalf("Error = %q, want subscription unindexed-join rejection", se.Error)
+	requireOptionalUint32(t, se.QueryID, 15, "SubscriptionError.QueryID")
+	requireOptionalUint32(t, se.RequestID, 18, "SubscriptionError.RequestID")
+	want := "Non-inner joins are not supported, executing: `" + msg.QueryString + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when JOIN ON is not a pure equality")
 	}
 }
 
