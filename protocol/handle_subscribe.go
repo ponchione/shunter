@@ -358,6 +358,17 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	if !ok {
 		return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.ProjectedTable)
 	}
+	// Reference type-checker order: `type_select` (WHERE) precedes
+	// `type_proj` (projection columns). Reference path:
+	// `SubChecker::type_set` (check.rs:139-146) wraps the projection in
+	// `type_proj(type_select(input, expr, vars)?, project, vars)`, so a
+	// missing WHERE column raises `Unresolved::Var` before the
+	// projection list is walked. The WHERE pass also captures the
+	// resolved predicate for the final compiledSQLQuery.
+	pred, err := compileSQLPredicateForRelations(stmt.Predicate, map[string]relationSchema{stmt.ProjectedTable: {id: projectedID, ts: ts}}, func(string) uint8 { return 0 }, caller)
+	if err != nil {
+		return compiledSQLQuery{}, err
+	}
 	projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, projectedID, ts)
 	if err != nil {
 		return compiledSQLQuery{}, err
@@ -366,10 +377,6 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
 	aggregate, err := compileAggregateProjection(stmt.Aggregate)
-	if err != nil {
-		return compiledSQLQuery{}, err
-	}
-	pred, err := compileSQLPredicateForRelations(stmt.Predicate, map[string]relationSchema{stmt.ProjectedTable: {id: projectedID, ts: ts}}, func(string) uint8 { return 0 }, caller)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}

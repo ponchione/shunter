@@ -6651,3 +6651,34 @@ func TestHandleOneOffQuery_ParityUnresolvedVarBaseTableAfterAliasRejectText(t *t
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityUnresolvedVarWherePrecedesProjectionRejectText
+// pins the reference type-checker order: `type_select` (WHERE) runs
+// before `type_proj` (projection columns). Reference path:
+// `SubChecker::type_set` (check.rs:139-146) computes
+// `type_proj(type_select(input, expr, vars)?, project, vars)`, so the
+// WHERE expression types first and a missing WHERE column raises
+// `Unresolved::Var` before the projection list is walked.
+func TestHandleOneOffQuery_ParityUnresolvedVarWherePrecedesProjectionRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xEB},
+		QueryString: "SELECT missing FROM t WHERE other_missing = 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`other_missing` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (WHERE column-resolution must precede projection-column resolution)", *result.Error, want)
+	}
+}

@@ -6136,3 +6136,38 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarBaseTableAfterAliasRejectText(
 		t.Error("executor should not be called when a WHERE qualifier is out of scope")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityUnresolvedVarWherePrecedesProjectionRejectText
+// pins the reference type-checker order: `type_select` (WHERE) runs
+// before `type_proj` (projection columns). Reference path:
+// `SubChecker::type_set` (check.rs:139-146) computes
+// `type_proj(type_select(input, expr, vars)?, project, vars)`.
+// SubscribeSingle wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnresolvedVarWherePrecedesProjectionRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT missing FROM t WHERE other_missing = 1"
+	msg := &SubscribeSingleMsg{
+		RequestID:   416,
+		QueryID:     417,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`other_missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a WHERE column is unknown")
+	}
+}
