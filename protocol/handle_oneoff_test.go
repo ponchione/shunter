@@ -6800,3 +6800,65 @@ func TestHandleOneOffQuery_ParityUnresolvedVarWherePrecedesProjectionRejectText(
 		t.Fatalf("Error = %q, want %q (WHERE column-resolution must precede projection-column resolution)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityUnresolvedVarQualifiedProjectionQualifierRejectText
+// pins reference `type_proj::Exprs` (`expr/src/lib.rs:65-78`): a
+// qualified column whose qualifier is not a declared relvar routes
+// through `type_expr` and emits `Unresolved::var(&table)`
+// (`expr/src/lib.rs:103`). Shunter's parser previously rejected at
+// projection-qualifier resolution with `parse: unsupported SQL:
+// projection qualifier "x" does not match relation`; reroute now emits
+// the reference `Unresolved::Var` text.
+func TestHandleOneOffQuery_ParityUnresolvedVarQualifiedProjectionQualifierRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xEF},
+		QueryString: "SELECT x.u32 FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`x` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (qualified column qualifier mismatch must emit Unresolved::Var)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnresolvedVarQualifiedWildcardQualifierRejectText
+// pins reference `type_proj` for `Project::Star(Some(var))`:
+// `input.has_field(&var)` miss emits `Unresolved::var(&var)`. Shunter's
+// parser previously rejected with `parse: unsupported SQL: projection
+// qualifier "x" does not match table "t"`; reroute now emits the
+// reference `Unresolved::Var` text.
+func TestHandleOneOffQuery_ParityUnresolvedVarQualifiedWildcardQualifierRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xF0},
+		QueryString: "SELECT x.* FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`x` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (qualified wildcard qualifier mismatch must emit Unresolved::Var)", *result.Error, want)
+	}
+}

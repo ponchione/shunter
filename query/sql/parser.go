@@ -602,7 +602,12 @@ func (p *parser) parseStatement() (Statement, error) {
 		if projectionQualifier != "" {
 			projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier)
 			if !ok {
-				return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match joined relations", projectionQualifier))
+				// Reference `type_proj` for `Project::Star(Some(var))`
+				// checks `input.has_field(&var)` and otherwise emits
+				// `Unresolved::var(&var)` — same emit shape used for
+				// the qualified column branch in
+				// `resolveProjectionColumns`.
+				return Statement{}, UnresolvedVarError{Name: projectionQualifier}
 			}
 			stmt.ProjectedTable = projectedTable
 			stmt.ProjectedAlias = projectionQualifier
@@ -621,7 +626,10 @@ func (p *parser) parseStatement() (Statement, error) {
 			return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
 		}
 	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
-		return Statement{}, p.unsupported(fmt.Sprintf("projection qualifier %q does not match table %q", projectionQualifier, tableName))
+		// Reference `type_proj` `Project::Star(Some(var))` lookup miss
+		// emits `Unresolved::var(&var)`; mirror on the single-table
+		// branch.
+		return Statement{}, UnresolvedVarError{Name: projectionQualifier}
 	}
 	if len(projectionColumns) != 0 {
 		resolvedProjectionColumns, err := resolveProjectionColumns(projectionColumns, bindings)
@@ -807,7 +815,13 @@ func resolveProjectionColumns(columns []ProjectionColumn, bindings relationBindi
 		if qualifier != "" {
 			resolvedTable, ok := resolveQualifier(qualifier, bindings.byQualifier)
 			if !ok {
-				return nil, fmt.Errorf("%w: projection qualifier %q does not match relation", ErrUnsupportedSQL, qualifier)
+				// Reference `type_proj::Exprs` (`expr/src/lib.rs:65-78`)
+				// sends each qualified projection field through
+				// `type_expr`, whose relvar lookup miss emits
+				// `Unresolved::var(&table)` (`expr/src/lib.rs:103`).
+				// Mirror that text here on both surfaces (OneOff raw,
+				// SubscribeSingle WithSql-wrapped).
+				return nil, UnresolvedVarError{Name: qualifier}
 			}
 			tableName = resolvedTable
 		} else if bindings.requireQualify {

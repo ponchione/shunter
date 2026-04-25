@@ -6302,3 +6302,68 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarWherePrecedesProjectionRejectT
 		t.Error("executor should not be called when a WHERE column is unknown")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedProjectionQualifierRejectText
+// pins reference `type_proj::Exprs` `Unresolved::var(&table)` emit on
+// the SubscribeSingle WithSql-wrapped surface.
+func TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedProjectionQualifierRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT x.u32 FROM t"
+	msg := &SubscribeSingleMsg{
+		RequestID:   422,
+		QueryID:     423,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`x` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a projection qualifier is out of scope")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedWildcardQualifierRejectText
+// pins reference `type_proj` `Project::Star(Some(var))`
+// `Unresolved::var(&var)` emit on the SubscribeSingle WithSql-wrapped
+// surface.
+func TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedWildcardQualifierRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT x.* FROM t"
+	msg := &SubscribeSingleMsg{
+		RequestID:   424,
+		QueryID:     425,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`x` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a wildcard projection qualifier is out of scope")
+	}
+}
