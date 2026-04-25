@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/types"
@@ -262,11 +263,50 @@ func TestCoerceSenderWithCallerToBytes(t *testing.T) {
 	}
 }
 
-func TestCoerceSenderRejectsNonBytesColumn(t *testing.T) {
-	caller := [32]byte{1}
-	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindString, &caller)
+// TestCoerceSenderResolvesToHexOnStringColumn pins the reference behavior at
+// sql-parser/src/ast/mod.rs:159 (resolve_sender) → expr/src/lib.rs:353 — the
+// Param(Sender) AST node becomes `Lit(SqlLiteral::Hex(identity.to_hex()))`
+// before type-checking, and the String arm of `parse(value, ty)` wraps the
+// 64-char identity hex as `String(value)`. Shunter materializes the same
+// shape via the LitSender→LitBytes-with-Text resolver at the top of
+// coerceValue so the existing KindString widening picks up the hex source
+// text and binds. Earlier versions of this test asserted ErrUnsupportedSQL
+// on the assumption that `:sender` rejected on non-bytes columns; reference
+// accepts on String (the `arr = :sender` rejection at check.rs:487-488 is
+// for the Array<String> kind, not String).
+func TestCoerceSenderResolvesToHexOnStringColumn(t *testing.T) {
+	caller := [32]byte{1, 2, 3}
+	v, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindString, &caller)
+	if err != nil {
+		t.Fatalf("CoerceWithCaller error: %v", err)
+	}
+	want := "010203" + strings.Repeat("00", 29)
+	if v.Kind() != types.KindString || v.AsString() != want {
+		t.Fatalf("got %+v, want String(%q)", v, want)
+	}
+}
+
+// TestCoerceSenderResolvesToInvalidLiteralOnBoolColumn pins the reference
+// reject text for `:sender` against a Bool column. resolve_sender substitutes
+// a Hex source-text literal; lib.rs:359 has no Bool arm so parse falls to
+// the `bail!` catch-all and folds to InvalidLiteral with the hex source
+// text and type "Bool".
+func TestCoerceSenderResolvesToInvalidLiteralOnBoolColumn(t *testing.T) {
+	caller := [32]byte{1, 2, 3}
+	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindBool, &caller)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	wantHex := "010203" + strings.Repeat("00", 29)
+	if ilErr.Literal != wantHex || ilErr.Type != "Bool" {
+		t.Fatalf("got {%q, %q}, want {%q, \"Bool\"}", ilErr.Literal, ilErr.Type, wantHex)
+	}
 	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
 	}
 }
 
@@ -345,15 +385,30 @@ func TestCoerceFloatLiteralOnUint128Rejected(t *testing.T) {
 	}
 }
 
-// TestCoerceSenderRejectsInt128Column pins that :sender is rejected on 128-bit
-// integer columns — they are not KindBytes, so the existing :sender guard
-// applies.
-func TestCoerceSenderRejectsInt128Column(t *testing.T) {
+// TestCoerceSenderEmitsInvalidLiteralOnInt128Column pins reference parse on
+// the I128 arm: resolve_sender substitutes Hex(identity hex) → parse_int →
+// BigDecimal::from_str(hex) on a hex string containing a-f digits fails
+// immediately, folding to InvalidLiteral{hex, "I128"}. A caller chosen with
+// non-decimal hex digits guarantees the BigDecimal parse fails universally
+// (a caller with all-digit hex would parse as a huge BigInt and route
+// through the 128-bit overflow rejection — same shape, different code path).
+func TestCoerceSenderEmitsInvalidLiteralOnInt128Column(t *testing.T) {
 	_ = math.MaxInt8 // keep math import live if the underlying file trims it
-	caller := [32]byte{1}
+	caller := [32]byte{0xab, 0xcd, 0xef}
 	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindInt128, &caller)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	wantHex := "abcdef" + strings.Repeat("00", 29)
+	if ilErr.Literal != wantHex || ilErr.Type != "I128" {
+		t.Fatalf("got {%q, %q}, want {%q, \"I128\"}", ilErr.Literal, ilErr.Type, wantHex)
+	}
 	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
 	}
 }
 
@@ -432,13 +487,26 @@ func TestCoerceFloatLiteralOnUint256Rejected(t *testing.T) {
 	}
 }
 
-// TestCoerceSenderRejectsInt256Column pins that :sender is rejected on 256-bit
-// integer columns for the same reason the 128-bit case rejects.
-func TestCoerceSenderRejectsInt256Column(t *testing.T) {
-	caller := [32]byte{1}
+// TestCoerceSenderEmitsInvalidLiteralOnInt256Column mirrors the I128 shape
+// with the I256 BigDecimal closure (lib.rs:238-245). Caller with non-decimal
+// hex digits forces the BigDecimal parse to fail before reaching the I256
+// range check.
+func TestCoerceSenderEmitsInvalidLiteralOnInt256Column(t *testing.T) {
+	caller := [32]byte{0xab, 0xcd, 0xef}
 	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindInt256, &caller)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	wantHex := "abcdef" + strings.Repeat("00", 29)
+	if ilErr.Literal != wantHex || ilErr.Type != "I256" {
+		t.Fatalf("got {%q, %q}, want {%q, \"I256\"}", ilErr.Literal, ilErr.Type, wantHex)
+	}
 	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
 	}
 }
 
@@ -876,16 +944,17 @@ func TestCoerceLitStringNumericTokenWidensOntoNumericKinds(t *testing.T) {
 // TestCoerceLitStringFailingNumericEmitsInvalidLiteral pins the reject
 // shape on the LitString → numeric path. Reference parse_int / parse_float
 // fold any anyhow error from BigDecimal/to_iN into `InvalidLiteral::new(
-// v.into_string(), ty)` at lib.rs:99; Shunter mirrors via the new
-// LitString-routing branch (parse failure) and via the recursive arms
-// (LitInt range overflow, LitFloat-on-integer fractional rejection,
-// LitBigInt overflow on 32/64-bit kinds). `lit.Str` carries verbatim for
-// non-numeric inputs and digit-only inputs that overflow the target;
-// fractional inputs render the parsed-canonical float text (round-trip-
-// lossy forms documented as Shunter divergence). Scientific-notation
-// inputs that collapse to LitBigInt at the parser render `Big.String()`
-// canonical decimal — same documented divergence as the prior 128/256-bit
-// InvalidLiteral slice.
+// v.into_string(), ty)` at lib.rs:99; Shunter mirrors via the LitString-
+// routing branch (parse failure) and via the recursive arms (LitInt range
+// overflow, LitFloat-on-integer fractional rejection, LitBigInt overflow on
+// 32/64-bit kinds). `lit.Str` carries verbatim for non-numeric inputs and
+// digit-only inputs that overflow the target. The 2026-04-25 source-text
+// seam preserves scientific-notation tokens through `parseNumericLiteral`'s
+// `Text` field, so `'1e40'` now reports the original token rather than the
+// canonical decimal expansion. Test-constructed LitFloat with empty Text
+// still falls back to `strconv.FormatFloat`, which is why
+// `fractional_on_U32` here drives `1.3` → "1.3" through the fallback
+// rather than the preserved-text path.
 func TestCoerceLitStringFailingNumericEmitsInvalidLiteral(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -899,7 +968,7 @@ func TestCoerceLitStringFailingNumericEmitsInvalidLiteral(t *testing.T) {
 		{"fractional_on_U32", "1.3", types.KindUint32, "U32", "1.3"},
 		{"negative_on_U32", "-1", types.KindUint32, "U32", "-1"},
 		{"overflow_on_U8", "256", types.KindUint8, "U8", "256"},
-		{"scientific_overflow_on_U32", "1e40", types.KindUint32, "U32", "10000000000000000000000000000000000000000"},
+		{"scientific_overflow_on_U32", "1e40", types.KindUint32, "U32", "1e40"},
 		{"non_numeric_on_F32", "foo", types.KindFloat32, "F32", "foo"},
 	}
 	for _, tc := range cases {
@@ -963,4 +1032,174 @@ func TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral(t *testing.T) {
 			}
 		})
 	}
+}
+
+// parseFilterLiteral drives Parse() on a one-filter SELECT and returns the
+// parsed Literal. Used by the parity-pins below to exercise the full source-
+// text-preservation seam (parser → Literal.Text → coerce) rather than
+// constructing a Literal directly.
+func parseFilterLiteral(t *testing.T, sql string) Literal {
+	t.Helper()
+	stmt, err := Parse(sql)
+	if err != nil {
+		t.Fatalf("Parse(%q) error: %v", sql, err)
+	}
+	if len(stmt.Filters) != 1 {
+		t.Fatalf("Parse(%q) Filters = %d, want 1", sql, len(stmt.Filters))
+	}
+	return stmt.Filters[0].Literal
+}
+
+// TestCoerceParserPreservedSourceTextOnInvalidLiteral pins the source-text
+// preservation seam end-to-end through the parser → coerce path. Reference
+// `parse(value, ty)` at expr/src/lib.rs takes the SqlLiteral source-text body
+// directly; Shunter's parser preserves the original numeric / hex / string
+// token in `Literal.Text` so `renderLiteralSourceText` returns the original
+// form even when `parseNumericLiteral` collapses (`1e3` → 1000) or rounds
+// (`1.10` → 1.1). Each row drives `Parse(<sql>)` → `Coerce(filter.Literal,
+// kind)` and asserts the resulting `InvalidLiteralError.Literal` matches the
+// raw source token, not the canonical numeric form.
+func TestCoerceParserPreservedSourceTextOnInvalidLiteral(t *testing.T) {
+	cases := []struct {
+		name    string
+		sql     string
+		kind    types.ValueKind
+		wantLit string
+		wantTy  string
+	}{
+		{"u8_scientific_overflows", "SELECT * FROM t WHERE u8 = 1e3", types.KindUint8, "1e3", "U8"},
+		{"u8_leading_plus_overflow", "SELECT * FROM t WHERE u8 = +1000", types.KindUint8, "+1000", "U8"},
+		{"u8_round_trip_lossy_float", "SELECT * FROM t WHERE u8 = 1.10", types.KindUint8, "1.10", "U8"},
+		{"u32_quoted_scientific", "SELECT * FROM t WHERE u32 = '1e40'", types.KindUint32, "1e40", "U32"},
+		{"u32_hex_token", "SELECT * FROM t WHERE u32 = 0x01", types.KindUint32, "0x01", "U32"},
+		{"bool_hex_token", "SELECT * FROM t WHERE b = 0x01", types.KindBool, "0x01", "Bool"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lit := parseFilterLiteral(t, tc.sql)
+			_, err := Coerce(lit, tc.kind)
+			if err == nil {
+				t.Fatal("want error, got nil")
+			}
+			var ilErr InvalidLiteralError
+			if !errors.As(err, &ilErr) {
+				t.Fatalf("err = %v, want InvalidLiteralError", err)
+			}
+			if ilErr.Literal != tc.wantLit || ilErr.Type != tc.wantTy {
+				t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, tc.wantLit, tc.wantTy)
+			}
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+			}
+		})
+	}
+}
+
+// TestCoerceParserPreservedSourceTextWidensOntoString pins the same
+// source-text seam onto the `KindString` widening arm at lib.rs:353. Forms
+// that the parser collapses or rounds (`1e3` → LitInt(1000), `001` →
+// LitInt(1), `1.10` → LitFloat(1.1)) keep the original token through `Text`
+// so the widened String value mirrors the reference `String(value.into())`
+// renderings. Hex literals (`0xDEADBEEF`) widen as the original token text.
+func TestCoerceParserPreservedSourceTextWidensOntoString(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		want string
+	}{
+		{"leading_zeros", "SELECT * FROM t WHERE name = 001", "001"},
+		{"round_trip_lossy_float", "SELECT * FROM t WHERE name = 1.10", "1.10"},
+		{"scientific_collapses", "SELECT * FROM t WHERE name = 1e3", "1e3"},
+		{"hex_literal", "SELECT * FROM t WHERE name = 0xDEADBEEF", "0xDEADBEEF"},
+		{"big_int_scientific", "SELECT * FROM t WHERE name = 1e40", "1e40"},
+		{"leading_plus", "SELECT * FROM t WHERE name = +1000", "+1000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lit := parseFilterLiteral(t, tc.sql)
+			v, err := Coerce(lit, types.KindString)
+			if err != nil {
+				t.Fatalf("Coerce error: %v", err)
+			}
+			if v.Kind() != types.KindString || v.AsString() != tc.want {
+				t.Fatalf("got %+v, want String(%q)", v, tc.want)
+			}
+		})
+	}
+}
+
+// TestCoerceParserStrNumHexOnBytesViaFromHexPad pins the reference
+// `parse(value, AlgebraicType::Bytes)` arm at expr/src/lib.rs:218 onto the
+// parser-driven `KindBytes` path. `from_hex_pad` strips an optional `0x`
+// prefix and decodes even-length hex digit pairs; Str / Num / Hex source
+// text all flow through the same routing. Decode failure folds to
+// `InvalidLiteral` with `Type = "Array<U8>"`.
+func TestCoerceParserStrNumHexOnBytesViaFromHexPad(t *testing.T) {
+	t.Run("string_with_0x_prefix_binds", func(t *testing.T) {
+		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = '0x0102'")
+		v, err := Coerce(lit, types.KindBytes)
+		if err != nil {
+			t.Fatalf("Coerce error: %v", err)
+		}
+		got := v.AsBytes()
+		if len(got) != 2 || got[0] != 0x01 || got[1] != 0x02 {
+			t.Fatalf("AsBytes = %x, want 0102", got)
+		}
+	})
+	t.Run("numeric_token_binds_as_hex", func(t *testing.T) {
+		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 42")
+		v, err := Coerce(lit, types.KindBytes)
+		if err != nil {
+			t.Fatalf("Coerce error: %v", err)
+		}
+		got := v.AsBytes()
+		if len(got) != 1 || got[0] != 0x42 {
+			t.Fatalf("AsBytes = %x, want 42", got)
+		}
+	})
+	t.Run("hex_token_binds_via_decoded_bytes", func(t *testing.T) {
+		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 0xDEADBEEF")
+		v, err := Coerce(lit, types.KindBytes)
+		if err != nil {
+			t.Fatalf("Coerce error: %v", err)
+		}
+		got := v.AsBytes()
+		want := []byte{0xde, 0xad, 0xbe, 0xef}
+		if len(got) != len(want) {
+			t.Fatalf("AsBytes len = %d, want %d", len(got), len(want))
+		}
+		for i, b := range want {
+			if got[i] != b {
+				t.Fatalf("AsBytes[%d] = %x, want %x", i, got[i], b)
+			}
+		}
+	})
+	t.Run("non_hex_string_emits_invalid_literal_array_u8", func(t *testing.T) {
+		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 'not-hex'")
+		_, err := Coerce(lit, types.KindBytes)
+		if err == nil {
+			t.Fatal("want error, got nil")
+		}
+		var ilErr InvalidLiteralError
+		if !errors.As(err, &ilErr) {
+			t.Fatalf("err = %v, want InvalidLiteralError", err)
+		}
+		if ilErr.Literal != "not-hex" || ilErr.Type != "Array<U8>" {
+			t.Fatalf("got {%q, %q}, want {%q, \"Array<U8>\"}", ilErr.Literal, ilErr.Type, "not-hex")
+		}
+	})
+	t.Run("float_emits_invalid_literal_array_u8", func(t *testing.T) {
+		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 1.3")
+		_, err := Coerce(lit, types.KindBytes)
+		if err == nil {
+			t.Fatal("want error, got nil")
+		}
+		var ilErr InvalidLiteralError
+		if !errors.As(err, &ilErr) {
+			t.Fatalf("err = %v, want InvalidLiteralError", err)
+		}
+		if ilErr.Literal != "1.3" || ilErr.Type != "Array<U8>" {
+			t.Fatalf("got {%q, %q}, want {%q, \"Array<U8>\"}", ilErr.Literal, ilErr.Type, "1.3")
+		}
+	})
 }

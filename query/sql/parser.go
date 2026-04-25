@@ -69,6 +69,17 @@ const (
 )
 
 // Literal is a parsed SQL literal in raw lexical form.
+//
+// Text preserves the source text of the literal token for the categories that
+// the reference parser carries through `parse(value, ty)` at expr/src/lib.rs:
+// numeric tokens (raw `tokNumber` body, including leading `+`, leading zeros,
+// trailing fractional zeros, and scientific-notation exponents that collapse
+// at parseNumericLiteral), hex literals (`0x...` / `X'...'` token text), and
+// string bodies (the unquoted contents). Bool / :sender literals do not use
+// Text. Coerce paths that emit reference `InvalidLiteral` text or widen onto
+// `KindString` consume Text via `renderLiteralSourceText` so the source token
+// survives parser collapses (e.g. `1e40` → `LitBigInt(10^40)` keeps the
+// `1e40` token, `1.10` → `LitFloat(1.1)` keeps the `1.10` token).
 type Literal struct {
 	Kind  LitKind
 	Int   int64
@@ -77,6 +88,7 @@ type Literal struct {
 	Str   string
 	Bytes []byte
 	Big   *big.Int
+	Text  string
 }
 
 // Filter is a single column comparison against a literal value.
@@ -1139,10 +1151,10 @@ func (p *parser) parseLiteral() (Literal, error) {
 		if err != nil {
 			return Literal{}, err
 		}
-		return Literal{Kind: LitBytes, Bytes: b}, nil
+		return Literal{Kind: LitBytes, Bytes: b, Text: t.text}, nil
 	case tokString:
 		p.advance()
-		return Literal{Kind: LitString, Str: t.text}, nil
+		return Literal{Kind: LitString, Str: t.text, Text: t.text}, nil
 	case tokIdent:
 		if !t.quoted && strings.EqualFold(t.text, "TRUE") {
 			p.advance()
@@ -1181,27 +1193,27 @@ func parseNumericLiteral(text string) (Literal, error) {
 		if ok && r.IsInt() {
 			n := r.Num()
 			if n.IsInt64() {
-				return Literal{Kind: LitInt, Int: n.Int64()}, nil
+				return Literal{Kind: LitInt, Int: n.Int64(), Text: text}, nil
 			}
-			return Literal{Kind: LitBigInt, Big: new(big.Int).Set(n)}, nil
+			return Literal{Kind: LitBigInt, Big: new(big.Int).Set(n), Text: text}, nil
 		}
 		f, err := strconv.ParseFloat(text, 64)
 		if err != nil {
 			return Literal{}, fmt.Errorf("%w: numeric literal %q out of range", ErrUnsupportedSQL, text)
 		}
 		if !math.IsInf(f, 0) && !math.IsNaN(f) && f == math.Trunc(f) && f >= math.MinInt64 && f <= math.MaxInt64 {
-			return Literal{Kind: LitInt, Int: int64(f)}, nil
+			return Literal{Kind: LitInt, Int: int64(f), Text: text}, nil
 		}
-		return Literal{Kind: LitFloat, Float: f}, nil
+		return Literal{Kind: LitFloat, Float: f, Text: text}, nil
 	}
 	if n, err := strconv.ParseInt(text, 10, 64); err == nil {
-		return Literal{Kind: LitInt, Int: n}, nil
+		return Literal{Kind: LitInt, Int: n, Text: text}, nil
 	}
 	b, ok := new(big.Int).SetString(text, 10)
 	if !ok {
 		return Literal{}, fmt.Errorf("%w: integer literal %q out of range", ErrUnsupportedSQL, text)
 	}
-	return Literal{Kind: LitBigInt, Big: b}, nil
+	return Literal{Kind: LitBigInt, Big: b, Text: text}, nil
 }
 
 func (p *parser) expectKeyword(kw string) error {

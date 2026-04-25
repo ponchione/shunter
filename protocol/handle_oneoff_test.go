@@ -2728,13 +2728,19 @@ func TestHandleOneOffQuery_SenderParameterOnIdentityColumn(t *testing.T) {
 	}
 }
 
-// Reference expr rejects :sender on columns whose algebraic type is neither
-// identity nor bytes (`crates/expr/src/check.rs` lines 487-488). Shunter
-// emits a one-off error reply with Status=1 when :sender targets a
-// non-bytes column.
-func TestHandleOneOffQuery_SenderParameterOnStringColumnRejected(t *testing.T) {
+// TestHandleOneOffQuery_ParitySenderResolvesToHexOnStringColumn pins the
+// reference behavior at sql-parser/src/ast/mod.rs:159 (resolve_sender) →
+// expr/src/lib.rs:353: `:sender` on a String column substitutes the caller
+// identity hex literal and the String arm wraps it as
+// `String(identity.to_hex())`. The OneOff admission surface routes the
+// value through the existing single-relation predicate path so the snapshot
+// row whose `name` equals the caller hex string survives the filter. Earlier
+// versions of this test asserted a rejection on the assumption that
+// `:sender` was bytes-only; the rejection at check.rs:487-488 is for
+// `Array<String>` (the array-kind catch-all in `parse`), not String.
+func TestHandleOneOffQuery_ParitySenderResolvesToHexOnStringColumn(t *testing.T) {
 	conn := testConnDirect(nil)
-	conn.Identity = types.Identity{1}
+	conn.Identity = types.Identity{1, 2, 3}
 	ts := &schema.TableSchema{
 		ID:   1,
 		Name: "t",
@@ -2743,7 +2749,16 @@ func TestHandleOneOffQuery_SenderParameterOnStringColumnRejected(t *testing.T) {
 		},
 	}
 	sl := newMockSchema("t", 1, ts.Columns...)
-	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewString("x")}}}}
+	callerHex := conn.Identity.Hex()
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewString("alice")},
+				{types.NewString(callerHex)},
+				{types.NewString("zach")},
+			},
+		},
+	}
 	stateAccess := &mockStateAccess{snap: snap}
 
 	msg := &OneOffQueryMsg{
@@ -2753,11 +2768,15 @@ func TestHandleOneOffQuery_SenderParameterOnStringColumnRejected(t *testing.T) {
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	if result.Error == nil {
-		t.Fatal("expected error, got nil (success)")
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (resolve_sender → String widening)", *result.Error)
 	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1 matching caller hex", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewString(callerHex)) {
+		t.Errorf("row[0].name = %v, want String(%q)", pvs[0][0], callerHex)
 	}
 }
 
@@ -3078,6 +3097,85 @@ func TestHandleOneOffQuery_ParityNumericLiteralOnStringColumnWidens(t *testing.T
 				t.Errorf("row[0].name = %v, want String(%q)", pvs[0][0], tc.matchString)
 			}
 		})
+	}
+}
+
+// TestHandleOneOffQuery_ParityScientificLiteralOverflowPreservesSourceText
+// pins the source-text seam through the OneOff (raw) admission surface:
+// `WHERE u8 = 1e3` collapses at the parser to LitInt(1000) but keeps the
+// `1e3` source token in `Literal.Text`. Reference parse_int folds the
+// to_u8 None into `InvalidLiteral::new("1e3", U8)` (lib.rs:99); Shunter
+// renders the same text via `renderLiteralSourceText`. The wrapper bypass
+// in `normalizeSQLFilterForRelations` already passes InvalidLiteralError
+// through unwrapped, so the OneOff error reply carries the verbatim
+// reference literal.
+func TestHandleOneOffQuery_ParityScientificLiteralOverflowPreservesSourceText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint8(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x93},
+		QueryString: "SELECT * FROM t WHERE u8 = 1e3",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	want := "The literal expression `1e3` cannot be parsed as type `U8`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityHexLiteralWidensOntoStringColumn pins the
+// reference `parse(value, String)` widening at lib.rs:353 onto the OneOff
+// admission surface for a Hex source-text literal. `WHERE name =
+// 0xDEADBEEF` keeps the original token through `Literal.Text` (parser sets
+// it on tokHex), so the widened String value is the original token
+// `"0xDEADBEEF"` and the snapshot row matches.
+func TestHandleOneOffQuery_ParityHexLiteralWidensOntoStringColumn(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "t",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "name", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("t", 1, ts.Columns...)
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewString("alice")},
+				{types.NewString("0xDEADBEEF")},
+				{types.NewString("zach")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x94},
+		QueryString: "SELECT * FROM t WHERE name = 0xDEADBEEF",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (hex widening must succeed)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1 matching String(\"0xDEADBEEF\")", len(pvs))
+	}
+	if !pvs[0][0].Equal(types.NewString("0xDEADBEEF")) {
+		t.Errorf("row[0].name = %v, want String(\"0xDEADBEEF\")", pvs[0][0])
 	}
 }
 

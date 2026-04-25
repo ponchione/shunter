@@ -2617,14 +2617,16 @@ func TestHandleSubscribeMulti_MixedLiteralAndSenderParameterCarriesPerPredicateH
 	}
 }
 
-// Reference expr rejects :sender on any non-identity / non-bytes column
-// (`crates/expr/src/check.rs` lines 487-488: `select * from t where arr =
-// :sender`). Shunter's column-kind surface lacks a distinct identity kind,
-// so the equivalent rejection applies to non-bytes columns such as a
-// string column.
-func TestHandleSubscribeSingle_SenderParameterOnStringColumnRejected(t *testing.T) {
+// TestHandleSubscribeSingle_ParitySenderResolvesToHexOnStringColumn pins
+// reference resolve_sender → lib.rs:353 onto the SubscribeSingle admission
+// surface. The compiled predicate must carry the caller hex string as the
+// equality target on a `KindString` column so the executor receives a
+// well-formed ColEq predicate (no protocol-level rejection). The earlier
+// rejection assertion was based on a misread of check.rs:487-488; that
+// reject case is `arr = :sender` (Array<String>), not String.
+func TestHandleSubscribeSingle_ParitySenderResolvesToHexOnStringColumn(t *testing.T) {
 	conn := testConnDirect(nil)
-	conn.Identity = types.Identity{1}
+	conn.Identity = types.Identity{0xab, 0xcd}
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "name", Type: schema.KindString},
@@ -2637,14 +2639,26 @@ func TestHandleSubscribeSingle_SenderParameterOnStringColumnRejected(t *testing.
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x (resolve_sender on KindString must succeed)", frame)
+	default:
 	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 42, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when :sender targets a non-bytes column")
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	want := types.NewString(conn.Identity.Hex())
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("predicate value = %v, want String(caller hex)", colEq.Value)
 	}
 }
 
@@ -2771,13 +2785,15 @@ func TestHandleSubscribeSingle_SenderParameterInJoinFilter(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_SenderParameterInJoinFilterNonBytesRejected
-// mirrors the reference rejection at check.rs lines 487-488
-// (`select * from t where arr = :sender`) onto the join-backed surface.
-// Targeting a non-bytes column on the joined relation must surface as an
-// admission error and skip the executor call, the same way it does on the
-// standalone single-table shape.
-func TestHandleSubscribeSingle_SenderParameterInJoinFilterNonBytesRejected(t *testing.T) {
+// TestHandleSubscribeSingle_ParitySenderInJoinFilterResolvesOnStringColumn
+// pins resolve_sender → lib.rs:353 on the join-WHERE surface. With
+// `WHERE s.label = :sender` against a `KindString` column on the joined
+// relation, the compiled join predicate must carry a String(caller hex)
+// equality leaf (no protocol-level rejection). Earlier versions asserted a
+// rejection on the assumption that `:sender` was bytes-only on join sides;
+// reference admits the same widening on join WHERE leaves as on standalone
+// single-table predicates.
+func TestHandleSubscribeSingle_ParitySenderInJoinFilterResolvesOnStringColumn(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
 		Name: "t",
@@ -2798,9 +2814,13 @@ func TestHandleSubscribeSingle_SenderParameterInJoinFilterNonBytesRejected(t *te
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
+	_, sReg, ok := eng.Registry().TableByName("s")
+	if !ok {
+		t.Fatal("registry missing table s")
+	}
 
 	conn := testConnDirect(nil)
-	conn.Identity = types.Identity{1}
+	conn.Identity = types.Identity{0xab, 0xcd}
 	executor := &mockSubExecutor{}
 	sl := registrySchemaLookup{reg: eng.Registry()}
 
@@ -2811,14 +2831,33 @@ func TestHandleSubscribeSingle_SenderParameterInJoinFilterNonBytesRejected(t *te
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x (resolve_sender on KindString join leaf must succeed)", frame)
+	default:
 	}
-	se := decoded.(SubscriptionError)
-	requireOptionalUint32(t, se.QueryID, 75, "QueryID")
-	if req := executor.getRegisterSetReq(); req != nil {
-		t.Error("executor should not be called when :sender targets a non-bytes column on join side")
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	joinPred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	colEq, ok := joinPred.Filter.(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Join.Filter type = %T, want ColEq", joinPred.Filter)
+	}
+	if colEq.Table != sReg.ID || colEq.Column != 2 {
+		t.Fatalf("filter target = table %d col %d, want table %d col 2", colEq.Table, colEq.Column, sReg.ID)
+	}
+	want := types.NewString(conn.Identity.Hex())
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("filter value = %v, want String(caller hex)", colEq.Value)
 	}
 }
 
@@ -3015,6 +3054,82 @@ func TestHandleSubscribeSingle_ParityNumericLiteralOnStringColumnWidens(t *testi
 				t.Fatalf("Predicates[0].Value = %v, want %v", colEq.Value, tc.wantValue)
 			}
 		})
+	}
+}
+
+// TestHandleSubscribeSingle_ParityScientificLiteralOverflowPreservesSourceText
+// pins the source-text seam through the SubscribeSingle (WithSql wrapper)
+// admission surface. `WHERE u8 = 1e3` collapses at the parser to LitInt(1000)
+// but keeps `Literal.Text = "1e3"`. Reference parse_int folds to_u8 None
+// into `InvalidLiteral::new("1e3", U8)`; Shunter renders the same text
+// via `renderLiteralSourceText`, then `wrapSubscribeCompileErrorSQL`
+// suffixes the SQL per `error.rs:140` `DBError::WithSql`.
+func TestHandleSubscribeSingle_ParityScientificLiteralOverflowPreservesSourceText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
+	)
+	msg := &SubscribeSingleMsg{
+		RequestID:   90,
+		QueryID:     91,
+		QueryString: "SELECT * FROM t WHERE u8 = 1e3",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "The literal expression `1e3` cannot be parsed as type `U8`, executing: `SELECT * FROM t WHERE u8 = 1e3`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when LitInt overflow source-text rejects via InvalidLiteral")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityHexLiteralWidensOntoStringColumn pins the
+// reference `parse(value, String)` arm at lib.rs:353 onto the SubscribeSingle
+// admission surface for a Hex source-text literal. `WHERE name =
+// 0xDEADBEEF` keeps the original token through `Literal.Text` (parser sets
+// it on tokHex), so the compiled predicate carries `String("0xDEADBEEF")`
+// as the equality target — no SubscriptionError, executor receives a
+// well-formed ColEq.
+func TestHandleSubscribeSingle_ParityHexLiteralWidensOntoStringColumn(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "name", Type: schema.KindString},
+	)
+	msg := &SubscribeSingleMsg{
+		RequestID:   92,
+		QueryID:     93,
+		QueryString: "SELECT * FROM t WHERE name = 0xDEADBEEF",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x (hex widening must succeed)", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if !colEq.Value.Equal(types.NewString("0xDEADBEEF")) {
+		t.Fatalf("Predicates[0].Value = %v, want String(\"0xDEADBEEF\")", colEq.Value)
 	}
 }
 

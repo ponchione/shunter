@@ -2,10 +2,12 @@ package sql
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ponchione/shunter/types"
@@ -54,28 +56,50 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		if caller == nil {
 			return types.Value{}, fmt.Errorf("%w: :sender requires caller identity", ErrUnsupportedSQL)
 		}
-		if kind != types.KindBytes {
-			return types.Value{}, fmt.Errorf("%w: :sender parameter cannot be coerced to %s", ErrUnsupportedSQL, kind)
-		}
-		out := make([]byte, len(caller))
-		copy(out, caller[:])
-		return types.NewBytes(out), nil
+		// Mirror reference `resolve_sender` at sql-parser/src/ast/mod.rs:159 —
+		// the AST step replaces `Param(Sender)` with `Lit(SqlLiteral::Hex(
+		// identity.to_hex()))` BEFORE type-checking, so every downstream
+		// `parse(value, ty)` arm consumes the 64-char identity hex as a
+		// source-text literal. Shunter materializes the same shape here:
+		// LitBytes carries the 32-byte payload (so KindBytes returns the raw
+		// caller bytes as today) AND the hex source text (so KindString,
+		// KindBool, and numeric kinds route through the existing source-text
+		// seams to produce the reference renderings — String(hex),
+		// InvalidLiteral{hex, "Bool"}, InvalidLiteral{hex, "U32"}, etc.).
+		// caller=nil on recursion is defensive; the recursive Literal is no
+		// longer LitSender so the entry-point check would not re-trigger.
+		buf := make([]byte, len(caller))
+		copy(buf, caller[:])
+		resolved := Literal{Kind: LitBytes, Bytes: buf, Text: hex.EncodeToString(caller[:])}
+		return coerceValue(resolved, kind, nil)
 	}
-	// LitString → numeric column: route through `parseNumericLiteral` and
-	// recurse with the parsed numeric Literal so the existing LitInt /
-	// LitBigInt / LitFloat coerce arms apply. Mirrors reference parse_int /
-	// parse_float at expr/src/lib.rs:168-208 — `BigDecimal::from_str(value)`
-	// either succeeds (driving range and is_integer checks downstream) or
-	// fails, with the lib.rs:99 .map_err folding any failure into
-	// `InvalidLiteral::new(v.into_string(), ty)`. KindString is excluded
-	// because the KindString case widens LitString through
-	// renderLiteralSourceText; KindBool / KindBytes / KindTimestamp etc.
-	// route through their own type-specific branches and so are not
-	// numeric-kinds for this seam.
+	// LitString / LitBytes (with preserved source text) → numeric column:
+	// route through `parseNumericLiteral` and recurse with the parsed numeric
+	// Literal so the existing LitInt / LitBigInt / LitFloat coerce arms apply.
+	// Mirrors reference parse_int / parse_float at expr/src/lib.rs:168-208 —
+	// `BigDecimal::from_str(value)` either succeeds (driving range and
+	// is_integer checks downstream) or fails, with the lib.rs:99 .map_err
+	// folding any failure into `InvalidLiteral::new(v.into_string(), ty)`.
+	// LitBytes routing covers parser-produced hex literals (`u32 = 0x01` → hex
+	// text rejects through BigDecimal) and `:sender`-resolved hex (caller hex
+	// also rejects, since BigDecimal does not accept the a-f digits). For
+	// all-decimal hex (e.g. caller bytes that happen to decode as a digit
+	// string), parseNumericLiteral succeeds and produces a LitBigInt that the
+	// integer-column branches reject as out-of-range — same shape as the
+	// reference path. KindString is excluded because that case widens through
+	// `renderLiteralSourceText`; KindBool / KindBytes / KindTimestamp etc.
+	// route through their own type-specific branches.
 	if lit.Kind == LitString && isNumericKind(kind) {
 		parsed, err := parseNumericLiteral(lit.Str)
 		if err != nil {
 			return types.Value{}, InvalidLiteralError{Literal: lit.Str, Type: algebraicName(kind)}
+		}
+		return coerceValue(parsed, kind, caller)
+	}
+	if lit.Kind == LitBytes && lit.Text != "" && isNumericKind(kind) {
+		parsed, err := parseNumericLiteral(lit.Text)
+		if err != nil {
+			return types.Value{}, InvalidLiteralError{Literal: lit.Text, Type: algebraicName(kind)}
 		}
 		return coerceValue(parsed, kind, caller)
 	}
@@ -105,10 +129,28 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		}
 		return types.Value{}, mismatch(lit, kind)
 	case types.KindBytes:
-		if lit.Kind != LitBytes {
-			return types.Value{}, mismatch(lit, kind)
+		// Reference `parse(value, AlgebraicType::Bytes)` at expr/src/lib.rs:218
+		// routes the SqlLiteral source text through `from_hex_pad`, which
+		// strips an optional `0x` prefix and decodes the remaining even-length
+		// hex digit pairs. Shunter parser-produced LitBytes already carries
+		// the decoded `Bytes` payload, so it binds directly. LitString /
+		// LitInt / LitFloat / LitBigInt with preserved source text route
+		// through the same hex-decode helper to mirror reference shapes such
+		// as `bytes = '0x0102'` (Str), `bytes = 42` (Num — decoded as the
+		// single byte 0x42), and `:sender`-resolved hex on a bytes column.
+		// Decode failure folds to InvalidLiteral with the source text and
+		// type `Array<U8>`, matching the reference outer `.map_err`.
+		if lit.Kind == LitBytes {
+			return types.NewBytes(lit.Bytes), nil
 		}
-		return types.NewBytes(lit.Bytes), nil
+		if text, ok := renderLiteralSourceText(lit); ok {
+			b, err := decodeReferenceHex(text)
+			if err == nil {
+				return types.NewBytes(b), nil
+			}
+			return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		}
+		return types.Value{}, mismatch(lit, kind)
 	case types.KindFloat32:
 		switch lit.Kind {
 		case LitFloat:
@@ -154,7 +196,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		case LitInt:
 			return types.NewInt128FromInt64(lit.Int), nil
 		case LitBigInt:
-			return coerceBigIntToInt128(lit.Big, kind)
+			return coerceBigIntToInt128(lit, kind)
 		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
@@ -162,11 +204,12 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		switch lit.Kind {
 		case LitInt:
 			if lit.Int < 0 {
-				return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
+				text, _ := renderLiteralSourceText(lit)
+				return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 			}
 			return types.NewUint128FromUint64(uint64(lit.Int)), nil
 		case LitBigInt:
-			return coerceBigIntToUint128(lit.Big, kind)
+			return coerceBigIntToUint128(lit, kind)
 		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
@@ -175,7 +218,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		case LitInt:
 			return types.NewInt256FromInt64(lit.Int), nil
 		case LitBigInt:
-			return coerceBigIntToInt256(lit.Big, kind)
+			return coerceBigIntToInt256(lit, kind)
 		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
@@ -183,11 +226,12 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		switch lit.Kind {
 		case LitInt:
 			if lit.Int < 0 {
-				return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
+				text, _ := renderLiteralSourceText(lit)
+				return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 			}
 			return types.NewUint256FromUint64(uint64(lit.Int)), nil
 		case LitBigInt:
-			return coerceBigIntToUint256(lit.Big, kind)
+			return coerceBigIntToUint256(lit, kind)
 		default:
 			return types.Value{}, mismatch(lit, kind)
 		}
@@ -212,15 +256,21 @@ func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64
 	// overflows int64, so the value always overflows any 32/64-bit signed
 	// kind. Reference parse_int → BigDecimal::to_iN returns None →
 	// InvalidLiteral (lib.rs:99). Mirrors the 128/256-bit emit shape in
-	// `coerceBigIntToInt{128,256}`.
+	// `coerceBigIntToInt{128,256}`. Source-text seam: prefer the preserved
+	// numeric token (e.g. `1e40` → "1e40", `+1000` → "+1000") so the literal
+	// rendering survives parser collapses; falls back to the canonical
+	// decimal `Big.String()` when no Text was preserved (test-constructed
+	// Literals).
 	if lit.Kind == LitBigInt {
-		return types.Value{}, InvalidLiteralError{Literal: lit.Big.String(), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	if lit.Kind != LitInt {
 		return types.Value{}, mismatch(lit, kind)
 	}
 	if lit.Int < lo || lit.Int > hi {
-		return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	return mk(lit.Int), nil
 }
@@ -228,19 +278,24 @@ func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64
 func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64) types.Value) (types.Value, error) {
 	// LitBigInt overflow on 32/64-bit unsigned columns: same parity shape
 	// as `coerceSigned`. Negative LitBigInt also overflows the unsigned
-	// range; the same emit shape covers both reject directions.
+	// range; the same emit shape covers both reject directions. Source-text
+	// seam preserved through `renderLiteralSourceText` so collapsed forms
+	// (`1e3` → 1000 → "1e3") render the original token.
 	if lit.Kind == LitBigInt {
-		return types.Value{}, InvalidLiteralError{Literal: lit.Big.String(), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	if lit.Kind != LitInt {
 		return types.Value{}, mismatch(lit, kind)
 	}
 	if lit.Int < 0 {
-		return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	u := uint64(lit.Int)
 	if u > hi {
-		return types.Value{}, InvalidLiteralError{Literal: strconv.FormatInt(lit.Int, 10), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	return mk(u), nil
 }
@@ -259,12 +314,13 @@ func mismatch(lit Literal, kind types.ValueKind) error {
 	// `parse_int(BigDecimal, ty)` (expr/src/lib.rs:99) rejects fractional
 	// BigDecimals via `BigDecimal::to_{i,u}{8..256}` returning None, and
 	// the outer `.map_err` folds the anyhow into `InvalidLiteral::new`
-	// (expr/src/errors.rs:84). Render via `strconv.FormatFloat('g', -1, 64)`
-	// so the canonical decimal text of the float carries into the literal
-	// slot; source-text preservation for forms that round-trip differently
-	// (e.g. `1.10` → "1.1") is a separate future slice.
+	// (expr/src/errors.rs:84). Source-text seam: prefer the preserved
+	// numeric token (e.g. `1.10` → "1.10") and fall back to
+	// `strconv.FormatFloat('g', -1, 64)` for test-constructed literals
+	// without a Text field.
 	if lit.Kind == LitFloat && isIntegerKind(kind) {
-		return InvalidLiteralError{Literal: strconv.FormatFloat(lit.Float, 'g', -1, 64), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	// Non-Bool primitive literal into a Bool column: reference
 	// `parse(value, AlgebraicType::Bool)` has no Bool arm in the type-match
@@ -282,13 +338,24 @@ func mismatch(lit Literal, kind types.ValueKind) error {
 }
 
 // renderLiteralSourceText reconstructs the reference source text for a
-// Literal for use in `InvalidLiteralError.Literal`. Matches the reference
-// `SqlLiteral::Str(v) | SqlLiteral::Num(v) | SqlLiteral::Hex(v)` →
-// `v.into_string()` renderings (expr/src/lib.rs:94). Returns false for
-// LitBool (which never reaches InvalidLiteral in reference), LitSender
-// (a Shunter-only marker), and LitBytes (no preserved source text — a
-// canonical hex or `Text` field on Literal is a separate slice).
+// Literal for use in `InvalidLiteralError.Literal` and `KindString`
+// widening. Matches the reference `SqlLiteral::Str(v) | SqlLiteral::Num(v) |
+// SqlLiteral::Hex(v)` → `v.into_string()` renderings (expr/src/lib.rs:94).
+//
+// Prefers `lit.Text` when populated by the parser — that path preserves
+// scientific-notation tokens (`1e40`), leading-sign / leading-zero tokens
+// (`+1000`, `001`), round-trip-lossy float tokens (`1.10`), and hex tokens
+// (`0xDEADBEEF`, `X'01'`) verbatim through coerce-time renderings.
+// Test-constructed Literals with empty Text fall back to canonical
+// reconstructions (`strconv.FormatInt`, `strconv.FormatFloat('g', -1, 64)`,
+// `Big.String()`). LitBool returns false (Bool literals route through the
+// dedicated `UnexpectedType` shape, not InvalidLiteral). LitSender returns
+// false (the entry-point :sender resolver swaps it for a LitBytes-with-Text
+// before any source-text rendering).
 func renderLiteralSourceText(lit Literal) (string, bool) {
+	if lit.Text != "" {
+		return lit.Text, true
+	}
 	switch lit.Kind {
 	case LitInt:
 		return strconv.FormatInt(lit.Int, 10), true
@@ -301,6 +368,23 @@ func renderLiteralSourceText(lit Literal) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// decodeReferenceHex mirrors reference `from_hex_pad` (lib/src/lib.rs:310)
+// for SQL-source-text routing onto `KindBytes`. Strips an optional `0x`/`0X`
+// prefix or `X'...'` wrapper, then decodes the remaining even-length hex
+// digit pairs via `encoding/hex`. Empty body decodes to a zero-length slice
+// (matching `hex::FromHex` on empty input). Decode failure returns the
+// underlying `encoding/hex` error so the caller can fold to InvalidLiteral.
+func decodeReferenceHex(text string) ([]byte, error) {
+	body := text
+	switch {
+	case strings.HasPrefix(body, "0x") || strings.HasPrefix(body, "0X"):
+		body = body[2:]
+	case len(body) >= 3 && (body[0] == 'X' || body[0] == 'x') && body[1] == '\'' && body[len(body)-1] == '\'':
+		body = body[2 : len(body)-1]
+	}
+	return hex.DecodeString(body)
 }
 
 // isIntegerKind reports whether a ValueKind is one of the signed or
@@ -462,10 +546,13 @@ func parseTimestampLiteral(s string) (int64, bool) {
 // Rejects |x| that overflows [-2^127, 2^127-1]. For negative values the
 // two's-complement encoding is materialized via `x + 2^128` before splitting
 // into (hi, lo) uint64 words — matches types.NewInt128's hi(signed)/lo(unsigned)
-// layout.
-func coerceBigIntToInt128(x *big.Int, kind types.ValueKind) (types.Value, error) {
+// layout. InvalidLiteral text routes through `renderLiteralSourceText` so
+// the preserved numeric token (`1e40` etc.) survives over canonical decimal.
+func coerceBigIntToInt128(lit Literal, kind types.ValueKind) (types.Value, error) {
+	x := lit.Big
 	if x.Cmp(int128Max) > 0 || x.Cmp(int128Min) < 0 {
-		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	t := new(big.Int).Set(x)
 	if t.Sign() < 0 {
@@ -480,12 +567,15 @@ func coerceBigIntToInt128(x *big.Int, kind types.ValueKind) (types.Value, error)
 
 // coerceBigIntToUint128 binds a big.Int literal to a 128-bit unsigned column.
 // Rejects negative values and values >= 2^128.
-func coerceBigIntToUint128(x *big.Int, kind types.ValueKind) (types.Value, error) {
+func coerceBigIntToUint128(lit Literal, kind types.ValueKind) (types.Value, error) {
+	x := lit.Big
 	if x.Sign() < 0 {
-		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	if x.Cmp(uint128Max) >= 0 {
-		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	var buf [16]byte
 	x.FillBytes(buf[:])
@@ -497,9 +587,11 @@ func coerceBigIntToUint128(x *big.Int, kind types.ValueKind) (types.Value, error
 // coerceBigIntToInt256 binds a big.Int literal to a 256-bit signed column.
 // Rejects |x| that overflows [-2^255, 2^255-1]. Negative values materialize
 // through `x + 2^256` for two's-complement encoding.
-func coerceBigIntToInt256(x *big.Int, kind types.ValueKind) (types.Value, error) {
+func coerceBigIntToInt256(lit Literal, kind types.ValueKind) (types.Value, error) {
+	x := lit.Big
 	if x.Cmp(int256Max) > 0 || x.Cmp(int256Min) < 0 {
-		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	t := new(big.Int).Set(x)
 	if t.Sign() < 0 {
@@ -518,12 +610,15 @@ func coerceBigIntToInt256(x *big.Int, kind types.ValueKind) (types.Value, error)
 // Rejects negative values and values >= 2^256. The reference parity target
 // `u256 = 1e40` (check.rs:330-332) goes through this path — 10^40 fits
 // comfortably in u256 (max ~1.16e77).
-func coerceBigIntToUint256(x *big.Int, kind types.ValueKind) (types.Value, error) {
+func coerceBigIntToUint256(lit Literal, kind types.ValueKind) (types.Value, error) {
+	x := lit.Big
 	if x.Sign() < 0 {
-		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	if x.Cmp(uint256Max) >= 0 {
-		return types.Value{}, InvalidLiteralError{Literal: x.String(), Type: algebraicName(kind)}
+		text, _ := renderLiteralSourceText(lit)
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	var buf [32]byte
 	x.FillBytes(buf[:])
