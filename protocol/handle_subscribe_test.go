@@ -6101,3 +6101,38 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarJoinWhereQualifiedMissingRejec
 		t.Error("executor should not be called when a join WHERE column is unknown")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityUnresolvedVarBaseTableAfterAliasRejectText
+// pins the reference `Unresolved::Var` literal for a WHERE column
+// qualified by the base table name AFTER an `AS` alias has been declared
+// on the FROM relvar. Reference `_type_expr` (lib.rs:103) emits
+// `Unresolved::var(&table)` when the qualifier name is absent from
+// `Relvars`. SubscribeSingle wraps compile errors with `DBError::WithSql`.
+func TestHandleSubscribeSingle_ParityUnresolvedVarBaseTableAfterAliasRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT * FROM t AS r WHERE t.u32 = 5"
+	msg := &SubscribeSingleMsg{
+		RequestID:   414,
+		QueryID:     415,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`t` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a WHERE qualifier is out of scope")
+	}
+}

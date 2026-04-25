@@ -927,7 +927,12 @@ func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, e
 	p.advance()
 	tableName, ok := resolveQualifier(qualifierTok.text, lookup)
 	if !ok {
-		return ColumnRef{}, p.unsupported(fmt.Sprintf("qualified column %q does not match relation", qualifierTok.text))
+		// Reference `_type_expr` (expr/src/lib.rs:103) emits
+		// `Unresolved::var(&table)` when `vars.deref().get(&*table)`
+		// returns None — the qualifier identifier is absent from the
+		// declared relvars (e.g. base table name `t` referenced after
+		// the FROM clause was rebound with `AS r`).
+		return ColumnRef{}, UnresolvedVarError{Name: qualifierTok.text}
 	}
 	return ColumnRef{Table: tableName, Column: columnTok.text, Alias: qualifierTok.text}, nil
 }
@@ -1097,7 +1102,11 @@ func (p *parser) parseColumnRefForPredicate(bindings relationBindings) (ColumnRe
 		}
 		resolved, ok := resolveQualifier(qualifier, bindings.byQualifier)
 		if !ok {
-			return ColumnRef{}, p.unsupported(fmt.Sprintf("qualified column %q does not match relation", qualifier))
+			// Reference `_type_expr` (expr/src/lib.rs:103) emits
+			// `Unresolved::var(&table)` when the qualifier identifier
+			// is absent from the declared relvars (e.g. base table
+			// name `t` after `AS r` rebinds the FROM relvar).
+			return ColumnRef{}, UnresolvedVarError{Name: qualifier}
 		}
 		tableName = resolved
 		columnName = t.text

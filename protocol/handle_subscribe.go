@@ -180,14 +180,19 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	stmt, err := sql.Parse(qs)
 	if err != nil {
 		// Reference compile-stage typed errors (DuplicateName for join
-		// alias collisions) carry the literal text verbatim. The
-		// generic `parse:` prefix would obscure the reference shape on
-		// both OneOff (raw) and SubscribeSingle/Multi (WithSql-wrapped)
-		// surfaces, so let typed errors flow through unwrapped — same
-		// pattern as the `normalizeSQLFilterForRelations` bypass for
+		// alias collisions, UnresolvedVar for qualifier-not-in-scope)
+		// carry the literal text verbatim. The generic `parse:` prefix
+		// would obscure the reference shape on both OneOff (raw) and
+		// SubscribeSingle/Multi (WithSql-wrapped) surfaces, so let
+		// typed errors flow through unwrapped — same pattern as the
+		// `normalizeSQLFilterForRelations` bypass for
 		// `InvalidLiteralError` / `UnexpectedTypeError`.
 		var dupErr sql.DuplicateNameError
 		if errors.As(err, &dupErr) {
+			return compiledSQLQuery{}, err
+		}
+		var unresolvedErr sql.UnresolvedVarError
+		if errors.As(err, &unresolvedErr) {
 			return compiledSQLQuery{}, err
 		}
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)

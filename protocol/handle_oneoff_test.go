@@ -6619,3 +6619,35 @@ func TestHandleOneOffQuery_ParityUnresolvedVarJoinWhereQualifiedMissingRejectTex
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityUnresolvedVarBaseTableAfterAliasRejectText pins
+// the reference `Unresolved::Var` literal for a WHERE column qualified
+// by the base table name AFTER an `AS` alias has been declared on the
+// FROM relvar. Reference `_type_expr` (lib.rs:103) emits
+// `Unresolved::var(&table)` when `vars.deref().get(&*table)` returns
+// None — the base name `t` is no longer in scope once `AS r` rebinds
+// the relvar to `r`. The text carries the qualifier name (the table /
+// alias identifier), not the column.
+func TestHandleOneOffQuery_ParityUnresolvedVarBaseTableAfterAliasRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xEA},
+		QueryString: "SELECT * FROM t AS r WHERE t.u32 = 5",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`t` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
