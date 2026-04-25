@@ -198,9 +198,13 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	if stmt.Aggregate != nil && !allowProjection {
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
-	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
-		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
-	}
+	// Column-list projection guard fires AFTER compileProjectionColumns /
+	// compileJoinProjectionColumns resolves each projection element, so a
+	// missing column raises `Unresolved::Var` first. Reference path:
+	// `type_proj::Exprs` (check.rs:67-80) walks each projection element
+	// through `type_expr` (which emits `Unresolved::Var` for missing
+	// fields) BEFORE `expect_table_type` runs the `Unsupported::ReturnType`
+	// check at check.rs:174.
 	stmt.Predicate = normalizeSQLPredicate(stmt.Predicate)
 	usesCallerIdentity := sqlPredicateUsesCallerIdentity(stmt.Predicate)
 	if stmt.Join != nil {
@@ -245,6 +249,9 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			aliasTag)
 		if err != nil {
 			return compiledSQLQuery{}, err
+		}
+		if !allowProjection && len(stmt.ProjectionColumns) != 0 {
+			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 		}
 		aggregate, err := compileAggregateProjection(stmt.Aggregate)
 		if err != nil {
@@ -349,6 +356,9 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, projectedID, ts)
 	if err != nil {
 		return compiledSQLQuery{}, err
+	}
+	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
+		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
 	aggregate, err := compileAggregateProjection(stmt.Aggregate)
 	if err != nil {
