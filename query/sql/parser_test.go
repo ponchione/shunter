@@ -1768,17 +1768,21 @@ func TestParseWhereSenderParameterOnBytesColumn(t *testing.T) {
 	}
 }
 
-func TestParseWhereSenderParameterIsCaseInsensitive(t *testing.T) {
-	stmt, err := Parse("SELECT * FROM s WHERE id = :SENDER")
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+// TestParseWhereSenderParameterIsCaseSensitive pins reference `parse_expr`
+// (sql-parser/src/parser/mod.rs:223) byte-equal `":sender"` admission.
+// Any other casing falls through to `SqlUnsupported::Expr` rendered as
+// `Unsupported expression: {expr}` (parser/errors.rs:38-39).
+func TestParseWhereSenderParameterIsCaseSensitive(t *testing.T) {
+	_, err := Parse("SELECT * FROM s WHERE id = :SENDER")
+	if err == nil {
+		t.Fatal("expected error for non-byte-equal :sender placeholder")
 	}
-	cmp, ok := stmt.Predicate.(ComparisonPredicate)
-	if !ok {
-		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
 	}
-	if cmp.Filter.Literal.Kind != LitSender {
-		t.Fatalf("Literal.Kind = %v, want LitSender", cmp.Filter.Literal.Kind)
+	want := "Unsupported expression: :SENDER"
+	if err.Error() != want {
+		t.Fatalf("err = %q, want %q", err.Error(), want)
 	}
 }
 

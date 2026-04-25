@@ -1258,8 +1258,14 @@ func (p *parser) parseLiteral() (Literal, error) {
 		}
 		return Literal{}, p.unsupported(fmt.Sprintf("expected literal, got identifier %q", t.text))
 	case tokParam:
-		if !strings.EqualFold(t.text, "sender") {
-			return Literal{}, p.unsupported(fmt.Sprintf("unknown SQL parameter %q", ":"+t.text))
+		// Reference `parse_expr`
+		// (sql-parser/src/parser/mod.rs:223) only accepts the exact
+		// byte-equal placeholder `:sender`; any other placeholder
+		// (different casing, unknown name) falls through to
+		// `_ => SqlUnsupported::Expr(expr)` (line 270), which renders
+		// `Unsupported expression: {expr}` via parser/errors.rs:38-39.
+		if t.text != "sender" {
+			return Literal{}, UnsupportedExprError{Expr: ":" + t.text}
 		}
 		p.advance()
 		return Literal{Kind: LitSender}, nil

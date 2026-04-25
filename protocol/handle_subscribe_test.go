@@ -6537,3 +6537,38 @@ func TestHandleSubscribeSingle_ParityUnqualifiedNamesJoinOnRejectText(t *testing
 		t.Error("executor should not be called when JOIN ON operand is unqualified")
 	}
 }
+
+// TestHandleSubscribeSingle_ParitySenderParameterCaseSensitiveRejectText
+// pins reference `parse_expr` (sql-parser/src/parser/mod.rs:223)
+// byte-equal `":sender"` admission. Any other casing (e.g. `:SENDER`)
+// falls through to `SqlUnsupported::Expr` rendered as
+// `Unsupported expression: {expr}`. SubscribeSingle wraps with
+// DBError::WithSql.
+func TestHandleSubscribeSingle_ParitySenderParameterCaseSensitiveRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT * FROM s WHERE id = :SENDER"
+	msg := &SubscribeSingleMsg{
+		RequestID:   434,
+		QueryID:     435,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Unsupported expression: :SENDER, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when :sender placeholder is byte-mismatched")
+	}
+}

@@ -610,6 +610,34 @@ func (e UnqualifiedNamesError) Error() string {
 
 func (e UnqualifiedNamesError) Unwrap() error { return ErrUnsupportedSQL }
 
+// UnsupportedExprError mirrors reference
+// `parser::errors::SqlUnsupported::Expr`
+// (reference/SpacetimeDB/crates/sql-parser/src/parser/errors.rs:38-39).
+// Reference `parse_expr`
+// (reference/SpacetimeDB/crates/sql-parser/src/parser/mod.rs:219-271)
+// routes any expression shape outside the supported grammar through
+// this variant — including placeholders other than the exact
+// `:sender` byte-equal string (line 223). The variant carries the
+// rendered expression text; both surfaces render
+// `Unsupported expression: {expr}`.
+//
+// Shunter's local reroute covers `parseLiteral`'s `tokParam` branch:
+// any parameter placeholder whose body is not exactly `sender`
+// (byte-equal) emits this typed error with the full `:{text}`
+// rendering.
+//
+// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
+// still match.
+type UnsupportedExprError struct {
+	Expr string
+}
+
+func (e UnsupportedExprError) Error() string {
+	return "Unsupported expression: " + e.Expr
+}
+
+func (e UnsupportedExprError) Unwrap() error { return ErrUnsupportedSQL }
+
 // AlgebraicName exports the reference `fmt_algebraic_type` short-name
 // renderer for a ValueKind so cross-package compile-stage checks (in
 // `protocol`) can produce reference-shape `UnexpectedType` / `InvalidOp`

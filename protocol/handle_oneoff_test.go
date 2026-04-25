@@ -7024,3 +7024,32 @@ func TestHandleOneOffQuery_ParityUnqualifiedNamesJoinOnRejectText(t *testing.T) 
 		t.Fatalf("Error = %q, want %q (unqualified JOIN ON operand must emit UnqualifiedNames)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParitySenderParameterCaseSensitiveRejectText pins
+// reference `parse_expr` (sql-parser/src/parser/mod.rs:223) byte-equal
+// `":sender"` admission. Any other casing (e.g. `:SENDER`) falls through
+// to `_ => SqlUnsupported::Expr(expr)` (line 270), rendered as
+// `Unsupported expression: {expr}` (parser/errors.rs:38-39).
+func TestHandleOneOffQuery_ParitySenderParameterCaseSensitiveRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xF5},
+		QueryString: "SELECT * FROM s WHERE id = :SENDER",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Unsupported expression: :SENDER"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (case-mismatched :sender placeholder must emit SqlUnsupported::Expr)", *result.Error, want)
+	}
+}
