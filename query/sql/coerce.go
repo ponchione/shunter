@@ -498,6 +498,30 @@ func (e DuplicateNameError) Error() string {
 
 func (e DuplicateNameError) Unwrap() error { return ErrUnsupportedSQL }
 
+// UnresolvedVarError mirrors reference `expr::errors::Unresolved::Var`
+// (reference/SpacetimeDB/crates/expr/src/errors.rs:11-13). Emitted at
+// compile-stage validation when a SQL expression references an
+// identifier that does not resolve to a known table relvar or column.
+// Reference emit sites:
+//
+//   - lib.rs:103 (relvar lookup miss in `_type_expr` field branch)
+//   - lib.rs:107 (column lookup miss inside an existing relvar)
+//
+// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
+// still match. Replaces the older `Unresolved::Field`-shape text
+// (“ `{table}` does not have a field `{field}` “); reference does not
+// reach `Unresolved::Field` from any subscription/one-off SELECT path
+// (statement.rs DML emit sites are out of scope here).
+type UnresolvedVarError struct {
+	Name string
+}
+
+func (e UnresolvedVarError) Error() string {
+	return fmt.Sprintf("`%s` is not in scope", e.Name)
+}
+
+func (e UnresolvedVarError) Unwrap() error { return ErrUnsupportedSQL }
+
 // InvalidOpError mirrors reference `expr::errors::InvalidOp`
 // (reference/SpacetimeDB/crates/expr/src/errors.rs:71-85). Emitted at
 // compile-stage validation when a binary operator targets a type that

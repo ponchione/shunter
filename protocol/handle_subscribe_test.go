@@ -354,8 +354,8 @@ func TestNormalizePredicates_UnknownColumn(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown column")
 	}
-	if got := err.Error(); got != "`users` does not have a field `nonexistent`" {
-		t.Errorf("error = %q, want reference Unresolved::Field literal", got)
+	if got := err.Error(); got != "`nonexistent` is not in scope" {
+		t.Errorf("error = %q, want reference Unresolved::Var literal", got)
 	}
 }
 
@@ -5442,10 +5442,11 @@ func TestHandleSubscribeMulti_ParityUnknownTableRejectText(t *testing.T) {
 
 // TestHandleSubscribeSingle_ParityUnknownFieldRejectText pins the reference
 // type-check rejection literal at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:16
-// (`Unresolved::Field` = "`{0}` does not have a field `{1}`" with args
-// (TableName, field)). SubscribeSingle compile-origin wraps with
-// `DBError::WithSql` (error.rs:140).
+// reference/SpacetimeDB/crates/expr/src/errors.rs:11-13
+// (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
+// `_type_expr` lib.rs:107: a missing column inside an existing relvar
+// surfaces as `Unresolved::var(&field)`. SubscribeSingle compile-origin
+// wraps with `DBError::WithSql` (error.rs:140).
 func TestHandleSubscribeSingle_ParityUnknownFieldRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -5466,7 +5467,7 @@ func TestHandleSubscribeSingle_ParityUnknownFieldRejectText(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	want := "`t` does not have a field `missing_col`, executing: `" + sqlText + "`"
+	want := "`missing_col` is not in scope, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
@@ -5476,7 +5477,7 @@ func TestHandleSubscribeSingle_ParityUnknownFieldRejectText(t *testing.T) {
 }
 
 // TestHandleSubscribeMulti_ParityUnknownFieldRejectText pins the same
-// `Unresolved::Field` literal on the SubscribeMulti admission surface.
+// `Unresolved::Var` literal on the SubscribeMulti admission surface.
 func TestHandleSubscribeMulti_ParityUnknownFieldRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}
@@ -5497,7 +5498,7 @@ func TestHandleSubscribeMulti_ParityUnknownFieldRejectText(t *testing.T) {
 		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
 	se := decoded.(SubscriptionError)
-	want := "`t` does not have a field `missing_col`, executing: `" + badSQL + "`"
+	want := "`missing_col` is not in scope, executing: `" + badSQL + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
@@ -5904,5 +5905,129 @@ func TestHandleSubscribeSingle_ParityJoinArrayColumnInvalidOpRejectText(t *testi
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when ON compares Array columns")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnresolvedVarUnqualifiedWhereRejectText
+// pins the reference `Unresolved::Var` literal for an unqualified
+// single-table WHERE column whose name does not exist on the relvar.
+// SubscribeSingle wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnresolvedVarUnqualifiedWhereRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT * FROM t WHERE missing = 1"
+	msg := &SubscribeSingleMsg{
+		RequestID:   408,
+		QueryID:     409,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a WHERE column is unknown")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingRejectText
+// pins the reference `Unresolved::Var` literal for an unknown JOIN ON
+// equality operand. SubscribeSingle wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.missing = s.id"
+	msg := &SubscribeSingleMsg{
+		RequestID:   410,
+		QueryID:     411,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a JOIN ON column is unknown")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnresolvedVarJoinWhereQualifiedMissingRejectText
+// pins the reference `Unresolved::Var` literal for a qualified WHERE
+// column on the right side of a join whose field does not exist.
+// SubscribeSingle wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnresolvedVarJoinWhereQualifiedMissingRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "t_id", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.id = s.t_id WHERE s.missing = 1"
+	msg := &SubscribeSingleMsg{
+		RequestID:   412,
+		QueryID:     413,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a join WHERE column is unknown")
 	}
 }

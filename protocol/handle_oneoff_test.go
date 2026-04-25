@@ -5881,10 +5881,11 @@ func TestHandleOneOffQuery_ParityUnknownTableRejectText(t *testing.T) {
 
 // TestHandleOneOffQuery_ParityUnknownFieldRejectText pins the reference
 // type-check rejection literal at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:16
-// (`Unresolved::Field` = "`{0}` does not have a field `{1}`" with args
-// (TableName, field)). OneOff admission emits the raw error text with no
-// `DBError::WithSql` wrap.
+// reference/SpacetimeDB/crates/expr/src/errors.rs:11-13
+// (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
+// `_type_expr` lib.rs:107: a missing column inside an existing relvar
+// surfaces as `Unresolved::var(&field)`. OneOff admission emits the raw
+// error text with no `DBError::WithSql` wrap.
 func TestHandleOneOffQuery_ParityUnknownFieldRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -5903,7 +5904,7 @@ func TestHandleOneOffQuery_ParityUnknownFieldRejectText(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error, got nil (success)")
 	}
-	want := "`t` does not have a field `missing_col`"
+	want := "`missing_col` is not in scope"
 	if *result.Error != want {
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
@@ -6468,6 +6469,152 @@ func TestHandleOneOffQuery_ParityJoinArrayColumnInvalidOpRejectText(t *testing.T
 		t.Fatal("expected error, got nil (success)")
 	}
 	want := "Invalid binary operator `=` for type `Array<String>`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnresolvedVarUnqualifiedWhereRejectText pins
+// the reference `Unresolved::Var` literal (errors.rs:11-13) for an
+// unqualified single-table WHERE column that does not exist on the
+// resolved relvar. Reference path: `_type_expr` (lib.rs:107) maps the
+// missing-field branch through `Unresolved::var(&field)`. The text
+// carries only the field name — the table name does not appear.
+func TestHandleOneOffQuery_ParityUnresolvedVarUnqualifiedWhereRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE6},
+		QueryString: "SELECT * FROM t WHERE missing = 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`missing` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnresolvedVarProjectionColumnRejectText pins
+// the reference `Unresolved::Var` literal for an unknown projection
+// column. Reference path: `type_proj::Exprs` (check.rs:74) routes each
+// projection element through `type_expr`, whose missing-field branch at
+// lib.rs:107 emits `Unresolved::var(&field)`. OneOff-only: SubscribeSingle
+// rejects column-list projections earlier with `Unsupported::ReturnType`.
+func TestHandleOneOffQuery_ParityUnresolvedVarProjectionColumnRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE7},
+		QueryString: "SELECT missing FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`missing` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingRejectText pins
+// the reference `Unresolved::Var` literal for an unknown JOIN ON
+// equality operand. Reference `type_from` types the ON binop through
+// `type_expr` (lib.rs:101-102), whose field-lookup branch at lib.rs:107
+// emits `Unresolved::var(&field)` when the qualified column does not
+// exist on its declared relvar.
+func TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE8},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.missing = s.id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`missing` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnresolvedVarJoinWhereQualifiedMissingRejectText
+// pins the reference `Unresolved::Var` literal for a qualified WHERE
+// column on the right side of a join whose field does not exist.
+// Reference `type_select` routes the WHERE expression through Bool
+// `type_expr`, whose field-lookup branch at lib.rs:107 emits
+// `Unresolved::var(&field)`.
+func TestHandleOneOffQuery_ParityUnresolvedVarJoinWhereQualifiedMissingRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "t_id", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE9},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.id = s.t_id WHERE s.missing = 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`missing` is not in scope"
 	if *result.Error != want {
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}

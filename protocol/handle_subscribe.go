@@ -274,11 +274,11 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		leftCol, ok := leftTS.Column(stmt.Join.LeftOn.Column)
 		if !ok {
-			return compiledSQLQuery{}, fmt.Errorf("`%s` does not have a field `%s`", leftTS.Name, stmt.Join.LeftOn.Column)
+			return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.Join.LeftOn.Column}
 		}
 		rightCol, ok := rightTS.Column(stmt.Join.RightOn.Column)
 		if !ok {
-			return compiledSQLQuery{}, fmt.Errorf("`%s` does not have a field `%s`", rightTS.Name, stmt.Join.RightOn.Column)
+			return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.Join.RightOn.Column}
 		}
 		// Reference `type_expr` (expr/src/lib.rs:134-140) types the ON
 		// binop's LEFT side first with no expectation, then types the
@@ -394,11 +394,11 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 	}
 	leftCol, ok := leftTS.Column(leftRef.Column)
 	if !ok {
-		return subscription.Join{}, fmt.Errorf("`%s` does not have a field `%s`", leftTS.Name, leftRef.Column)
+		return subscription.Join{}, sql.UnresolvedVarError{Name: leftRef.Column}
 	}
 	rightCol, ok := rightTS.Column(rightRef.Column)
 	if !ok {
-		return subscription.Join{}, fmt.Errorf("`%s` does not have a field `%s`", rightTS.Name, rightRef.Column)
+		return subscription.Join{}, sql.UnresolvedVarError{Name: rightRef.Column}
 	}
 	if leftCol.Type != rightCol.Type {
 		return subscription.Join{}, sql.UnexpectedTypeError{
@@ -534,7 +534,7 @@ func checkDuplicateProjectionName(col sql.ProjectionColumn, seen map[string]stru
 func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema, alias uint8) (compiledSQLProjectionColumn, error) {
 	tsCol, ok := ts.Column(col.Column)
 	if !ok {
-		return compiledSQLProjectionColumn{}, fmt.Errorf("`%s` does not have a field `%s`", ts.Name, col.Column)
+		return compiledSQLProjectionColumn{}, sql.UnresolvedVarError{Name: col.Column}
 	}
 	compiledCol := *tsCol
 	if col.OutputAlias != "" {
@@ -561,7 +561,7 @@ func parseQueryString(qs string, sl SchemaLookup, caller *types.Identity) (Query
 	for _, f := range stmt.Filters {
 		col, ok := ts.Column(f.Column)
 		if !ok {
-			return Query{}, fmt.Errorf("`%s` does not have a field `%s`", ts.Name, f.Column)
+			return Query{}, sql.UnresolvedVarError{Name: f.Column}
 		}
 		v, err := coerceLiteral(f.Literal, col.Type, caller)
 		if err != nil {
@@ -649,7 +649,7 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 	}
 	col, ok := rel.ts.Column(f.Column)
 	if !ok {
-		return nil, fmt.Errorf("`%s` does not have a field `%s`", rel.ts.Name, f.Column)
+		return nil, sql.UnresolvedVarError{Name: f.Column}
 	}
 	v, err := coerceLiteral(f.Literal, col.Type, caller)
 	if err != nil {
@@ -708,7 +708,7 @@ func NormalizePredicates(
 	for _, p := range preds {
 		col, ok := ts.Column(p.Column)
 		if !ok {
-			return nil, fmt.Errorf("`%s` does not have a field `%s`", ts.Name, p.Column)
+			return nil, sql.UnresolvedVarError{Name: p.Column}
 		}
 		normalized, err := normalizePredicate(tableID, col.Index, 0, p.Op, p.Value)
 		if err != nil {
