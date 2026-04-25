@@ -24,7 +24,7 @@ Read and verified while writing this plan:
 - `docs/decomposition/hosted-runtime-v1-contract.md` says the primary external client surface is the realtime WebSocket protocol, not REST or MCP.
 - `docs/hosted-runtime-planning/V1-D/2026-04-23_210537-hosted-runtime-v1d-runtime-lifecycle-ownership-implplan.md` deliberately keeps network serving out of V1-D and says V1-E owns protocol-backed fan-out delivery.
 - Live repo reality at validation time: the root `shunter` package is still absent in this checkout (`rtk go list .` reports `no Go files in /home/ponchione/source/shunter`). This V1-E plan is therefore stacked after the V1-A, V1-B, V1-C, and V1-D implementation plans.
-- `cmd/shunter-example` / shunter-example remains a demo consumer, not an implementation source of truth for runtime architecture.
+- The former bundled demo command remains a demo consumer, not an implementation source of truth for runtime architecture.
 
 Go API facts verified with `rtk go doc` and file inspection:
 

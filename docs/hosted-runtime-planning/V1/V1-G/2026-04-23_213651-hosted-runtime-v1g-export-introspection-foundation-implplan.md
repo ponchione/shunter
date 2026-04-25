@@ -22,7 +22,7 @@ Read and verified while writing this plan:
 - `docs/hosted-runtime-implementation-roadmap.md` V1-6 says the export/introspection hook should reuse existing schema export work, define a small module description structure, and avoid the full v1.5 canonical contract.
 - V1-A through V1-F plans under `docs/hosted-runtime-planning/` define the root `Module`, `Config`, `Runtime`, `Build`, module registration wrappers, private runtime build/lifecycle/network/local-call state, and explicitly defer export/introspection to V1-G.
 - Live repo reality at validation time: the root `shunter` package is still absent in this checkout (`rtk go list .` reports `no Go files in /home/ponchione/source/shunter`). This plan is therefore stacked after the V1-A through V1-F implementation plans.
-- `cmd/shunter-example` / shunter-example is a demo consumer, not an implementation source of truth for V1-G runtime architecture.
+- The former bundled demo command is a demo consumer, not an implementation source of truth for V1-G runtime architecture.
 
 Go API facts verified with `rtk go doc` and file inspection:
 
@@ -785,7 +785,7 @@ Expected:
 - Do not require `Start(ctx)` for static export/introspection; build-time module/schema data should be inspectable before serving.
 - Do not add new lifecycle or network behavior in this slice. Describe existing state only.
 - Keep all returned maps/slices/export structs detached so diagnostics/tools cannot mutate runtime state.
-- Do not use `cmd/shunter-example` as an implementation source of truth.
+- Do not use the former bundled demo command as an implementation source of truth.
 - If `schema.Engine.ExportSchema()` lacks a V1-G-needed schema detail, prefer documenting the limitation over widening lower-level schema export into v1.5 territory.
 
 ## Immediate next slice

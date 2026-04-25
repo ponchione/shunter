@@ -36,8 +36,8 @@ The kernel still exists as these subsystems:
 - protocol subsystem
 - a top-level `shunter.Runtime` owner that wires them for normal app code
 
-That is enough to prove the engine pieces are real, and V1-H now proves the first hosted-runtime example path.
-Further work should make this runtime/server feel natural for more than the tiny hello-world module.
+That is enough to prove the engine pieces are real, and V1-H proved the first hosted-runtime app-author path.
+The temporary bundled hello-world command has since been removed; future examples should be tied to real maintained product or integration paths.
 
 So the next hosted-runtime piece is not another app-specific product document.
 It is continued evolution of the runtime/application surface that sits above the kernel and below specific products.

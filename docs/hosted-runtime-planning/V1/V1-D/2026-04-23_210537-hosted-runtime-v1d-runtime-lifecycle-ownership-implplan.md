@@ -27,7 +27,7 @@ Read and verified while writing this plan:
 - `docs/decomposition/hosted-runtime-v1-contract.md` says `Runtime` is the stable owner object for lifecycle and later network/local/export surfaces.
 - `docs/hosted-runtime-planning/V1-C/2026-04-23_205158-hosted-runtime-v1c-runtime-build-pipeline-implplan.md` deliberately defers started goroutines, public lifecycle APIs, network serving, and public shutdown APIs to V1-D/V1-E.
 - Live repo reality at validation time: the root `shunter` package is still not present in this checkout (`rtk go list .` reports `no Go files`). This plan is therefore stacked after the V1-A, V1-B, and V1-C implementation plans.
-- `cmd/shunter-example` / shunter-example remains a demo consumer, not an implementation source of truth for this slice.
+- The former bundled demo command remains a demo consumer, not an implementation source of truth for this slice.
 
 Go API facts verified with `rtk go doc` and file inspection:
 

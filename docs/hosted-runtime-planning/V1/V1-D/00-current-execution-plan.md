@@ -40,7 +40,7 @@ Execution sequence:
 5. Verify GREEN with focused lifecycle tests, then root/touched package tests and vet, then broad `rtk go test ./... -count=1`.
 
 Guardrails:
-- Do not inspect or copy `cmd/shunter-example` as implementation source of truth.
+- Do not inspect or copy the former bundled demo command as implementation source of truth.
 - Do not add public network or local-call methods.
 - Do not instantiate protocol server or listeners.
 - Do not leave long-lived goroutines after tests; every started runtime is closed.

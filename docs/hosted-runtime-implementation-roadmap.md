@@ -18,8 +18,8 @@ Audit result:
 
 Current repo reality:
 - Shunter already has substantial kernel packages: `schema`, `store`, `commitlog`, `executor`, `subscription`, `protocol`, and `query`.
-- The current runnable hosted path is `cmd/shunter-example/main.go`, which uses the top-level `shunter` API instead of manual subsystem assembly.
-- V1-H now proves the normal app-author/operator path: module definition, runtime build/start/serve, WebSocket subscription, reducer call, live update, recovery, and shutdown.
+- The root `shunter` package uses the top-level API instead of exposing manual subsystem assembly as the normal app path.
+- V1-H proved the app-author/operator path, but the temporary bundled example command has since been removed because it did not serve a maintained product or integration purpose.
 - This roadmap starts after the relevant kernel pieces are ready enough to wire through a top-level runtime.
 
 ---
@@ -33,7 +33,7 @@ It should be a top-level Shunter API that lets an app define a module, build a r
 
 The target progression is:
 1. v1: top-level hosted runtime API — initial implementation landed
-2. v1 hardening: hello-world/app-author path replaces manual bootstrap — V1-H landed
+2. v1 hardening: app-author path replaces manual bootstrap — V1-H landed, bundled demo removed
 3. v1.5: query/view declarations, export, codegen, permissions metadata, migration metadata — not started
 4. v2+: larger structural runtime evolution after real apps prove the pressure
 
@@ -123,7 +123,7 @@ Target capabilities:
 - return one `Runtime` owner object
 
 Likely work:
-- lift the working assembly pattern from `cmd/shunter-example/main.go`
+- move the working assembly pattern into root runtime ownership
 - move lifecycle/shutdown ordering into runtime ownership
 - avoid leaking internal worker/channel wiring into app code
 - keep config limited to runtime concerns: data dir, queues, protocol/listen, auth mode, logging/metrics hooks
@@ -215,7 +215,7 @@ Non-goals:
 
 ### Epic V1-7: Hello-world replacement
 
-Status: landed in `cmd/shunter-example`.
+Status: V1-H landed; bundled demo command later removed.
 
 Goal: replace the manual bootstrap story with a true hosted-runtime example.
 
@@ -229,7 +229,7 @@ Target example shape:
 Likely work:
 - rewrite or add an example that uses the top-level API
 - keep any low-level manual bootstrap example only as an internal/reference example if still useful
-- update docs that point at `cmd/shunter-example/main.go` as the normal path
+- keep docs from pointing at throwaway demo commands as the normal path
 
 Acceptance criteria:
 - the main example no longer reads like subsystem assembly
@@ -247,8 +247,8 @@ Before calling v1 hosted runtime complete:
 
 1. Build/test the new top-level package.
 2. Run focused tests for touched packages.
-3. Run the hosted-runtime example end to end.
-4. Confirm the example exercises:
+3. Run a maintained hosted-runtime proof end to end when one exists.
+4. Confirm that proof exercises:
    - module definition
    - runtime build
    - serving path
@@ -429,8 +429,8 @@ Landed proof points:
 - root package imports as `github.com/ponchione/shunter`
 - `Module`, `Config`, `Runtime`, and `Build(...)` exist
 - `Runtime.Start`, `Close`, `HTTPHandler`, `ListenAndServe`, local calls, describe, and schema export exist
-- `cmd/shunter-example` is the normal hosted-runtime hello-world path and no longer manually assembles the kernel graph
-- `cmd/shunter-example/main_test.go` proves recovery, WebSocket admission, subscription, reducer call, live update delivery, shutdown, and source-level no-manual-assembly guard
+- root/runtime tests now carry the maintained hosted-runtime proof
+- the prior bundled demo command was removed because it was throwaway code, not a durable product surface
 
 If hosted-runtime work continues, the next marker is planning V1.5-A query/view declarations. Do not start v1.5 implementation until the plan is grounded against the live v1 API and keeps codegen/contract/migration work out of the first query/view slice.
 

@@ -5,8 +5,10 @@ Shunter is a Go-native, clean-room real-time database/runtime inspired by the pu
 Important reality check: this repo is no longer just a docs/spec exercise. It contains substantial implementation across the core subsystem packages, and the test suite currently passes. But it is also not a polished, production-ready database you can confidently drop into an app today.
 
 Latest broad verification during active audit work:
-- `rtk go test ./...`
-- Result: `Go test: 1104 passed in 10 packages`
+- `rtk go test ./... -count=1`
+- Result: `Go test: 2006 passed in 11 packages`
+- `rtk go vet ./...`
+- Result: `Go vet: No issues found`
 - `rtk go build ./...`
 - Result: `Go build: Success`
 
@@ -54,21 +56,16 @@ There is working code in these packages:
 
 In other words: this is not vaporware anymore. There is a real subsystem implementation here.
 
-## Hosted-runtime hello world
+## Hosted-runtime entrypoint
 
-The normal runnable example is now `cmd/shunter-example`.
+The prior bundled demo command has been removed. It no longer served a useful
+role as a maintained app surface, and the root `shunter` package is the
+supported hosted-runtime entrypoint.
 
-It defines a `greetings` table and `say_hello` reducer through the top-level
-`shunter.Module` API, builds a `shunter.Runtime`, serves `/subscribe`, and proves
-live updates over the WebSocket protocol.
-
-Run:
-
-```bash
-rtk go run ./cmd/shunter-example -addr :8080 -data ./shunter-data
-```
-
-The companion quickstart is `docs/hosted-runtime-bootstrap.md`.
+Current app-facing proof lives in the root runtime API and package tests:
+`Module`, `Config`, `Runtime`, `Build`, lifecycle/serving helpers, local calls,
+and schema/export helpers. A new runnable example should be added only when it
+proves a real product or integration path rather than another throwaway demo.
 
 ## What is not true yet
 
@@ -76,6 +73,7 @@ This repo is not yet a clear, finished product experience.
 
 Specifically:
 - the top-level hosted-runtime path exists, but it is still early and intentionally narrow
+- there is no maintained bundled runnable hello-world command
 - there is no full tutorial site, generated frontend, or client-binding/codegen workflow yet
 - v1.5 query/view declarations, contract export, permissions metadata, and migration metadata are not implemented yet
 - there is still active debt reconciliation work in `TECH-DEBT.md`
@@ -127,10 +125,9 @@ For agent work, do not use this list as startup context. Read `RTK.md`, then the
 
 For human orientation instead of another audit spiral, read in this order:
 1. `README.md` — this file
-2. `docs/hosted-runtime-bootstrap.md` — current hosted-runtime quickstart
-3. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
-4. `TECH-DEBT.md` — live debt and parity priority framing
-5. `docs/parity-decisions.md` — consolidated current parity decisions
+2. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
+3. `TECH-DEBT.md` — live debt and parity priority framing
+4. `docs/parity-decisions.md` — consolidated current parity decisions
 
 Then inspect the main implementation packages:
 - `schema/`

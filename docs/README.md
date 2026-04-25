@@ -18,7 +18,6 @@ Do not read broad roadmap, ledger, or full decomposition specs by default.
 
 ## Current Docs
 
-- `docs/hosted-runtime-bootstrap.md` — current hosted-runtime quickstart.
 - `docs/hosted-runtime-implementation-roadmap.md` — hosted-runtime phase tracker
   while that implementation track is active.
 - `docs/parity-decisions.md` — consolidated current parity decisions that code

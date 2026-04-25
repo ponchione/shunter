@@ -17,9 +17,9 @@ Decision baseline:
 - No v1.5 or v2 implementation should start without a fresh, bounded plan grounded against the live v1 module/runtime owner.
 
 Current live proof:
-- `cmd/shunter-example` is the hosted-runtime hello-world path.
-- The example uses `shunter.NewModule`, module schema/reducer registration, `shunter.Build`, `Runtime.ListenAndServe(ctx)`, and the WebSocket protocol surface.
-- Its tests prove recovery, WebSocket admission, subscribe, reducer call, live update delivery, shutdown, and a guard against manual kernel assembly in the normal example.
+- The root `github.com/ponchione/shunter` package exposes `Module`, `Config`, `Runtime`, and `Build(...)`.
+- Runtime package tests cover hosted-runtime ownership, lifecycle, serving helpers, local calls, describe, and schema export.
+- The prior bundled hello-world command has been removed; do not treat a demo command as the current v1 proof surface.
 
 ---
 
@@ -138,7 +138,7 @@ Target behavior:
 Dependencies:
 - V1-A root owner types.
 - V1-B module registration wrappers.
-- Working manual assembly pattern in `cmd/shunter-example/main.go`.
+- Existing root runtime, schema, store, commitlog, executor, subscription, and protocol package code.
 
 Acceptance criteria:
 - App code calls `shunter.Build(...)` instead of constructing kernel subsystems directly.
@@ -283,7 +283,7 @@ Planning decisions still needed:
 
 ## V1-H: Hello-world replacement and v1 proof
 
-Goal: replace the manual subsystem bootstrap story with a true hosted-runtime example.
+Goal: replace the manual subsystem bootstrap story with a true hosted-runtime proof.
 
 Target example shape:
 - Define a table.
@@ -302,6 +302,9 @@ Acceptance criteria:
 - The example exercises module definition, runtime build, serving path, reducer call, subscription/live update, and shutdown.
 - Existing low-level manual example is either removed from the normal path or clearly retained as internal/reference material.
 
+Current note:
+- The bundled demo proof was later removed as non-product code. Keep future examples tied to a real maintained integration path.
+
 Explicit non-goals:
 - Full tutorial site.
 - Generated frontend app.
@@ -318,7 +321,7 @@ V1 is complete only when:
 - WebSocket remains the primary external client model.
 - Local calls exist as secondary test/tool/admin APIs.
 - Basic export/introspection exists for schema/reducer/module metadata.
-- The hello-world path no longer requires manual kernel graph wiring.
+- The app-author path no longer requires manual kernel graph wiring.
 
 V1 is not complete merely because `Module`, `Config`, `Runtime`, and `Build` names exist.
 

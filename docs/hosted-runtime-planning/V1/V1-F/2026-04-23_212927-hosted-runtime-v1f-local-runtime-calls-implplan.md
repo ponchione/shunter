@@ -22,7 +22,7 @@ Read and verified while writing this plan:
 - `docs/hosted-runtime-planning/V1-D/2026-04-23_210537-hosted-runtime-v1d-runtime-lifecycle-ownership-implplan.md` defines `Start(ctx)`, `Close()`, `Ready()`, lifecycle state, and lifecycle-owned executor/scheduler/fan-out resources.
 - `docs/hosted-runtime-planning/V1-E/2026-04-23_212032-hosted-runtime-v1e-runtime-network-surface-implplan.md` defines the protocol-backed network surface and keeps local reducer/query APIs out of V1-E.
 - Live repo reality at validation time: the root `shunter` package is still absent in this checkout (`rtk go list .` reports `no Go files in /home/ponchione/source/shunter`). This plan is therefore stacked after V1-A, V1-B, V1-C, V1-D, and V1-E implementation plans.
-- `cmd/shunter-example` / shunter-example is a demo consumer, not an implementation source of truth for V1-F runtime architecture.
+- The former bundled demo command is a demo consumer, not an implementation source of truth for V1-F runtime architecture.
 
 Go API facts verified with `rtk go doc` and file inspection:
 
@@ -755,7 +755,7 @@ Expected:
 - Protocol adapter reuse is tempting but wrong for the primary local reducer API because it is designed around WebSocket response envelopes and connection lifecycle.
 - Local APIs must not become a REST/MCP/admin/control-plane surface. Keep them in-process methods on `Runtime` only.
 - Do not invent v1.5 declared queries/views in this slice. A local `Read` helper is runtime access, not module query declaration.
-- Do not use `cmd/shunter-example` as an implementation source of truth.
+- Do not use the former bundled demo command as an implementation source of truth.
 - Keep unknown table/reducer behavior clear and testable; preserve executor/schema sentinel errors where existing contracts already provide them.
 
 ## Immediate next slice

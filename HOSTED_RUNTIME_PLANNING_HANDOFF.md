@@ -10,20 +10,17 @@ Live proof points:
 - root package imports as `github.com/ponchione/shunter`
 - `Module`, `Config`, `Runtime`, and `Build(...)` exist
 - `Runtime.Start`, `Close`, `HTTPHandler`, `ListenAndServe`, local calls, describe, and schema export exist
-- `cmd/shunter-example` is now the normal hosted-runtime hello-world path
-- the example defines `greetings` and `say_hello` through `shunter.Module`
-- the example builds/serves through `shunter.Build` and `Runtime.ListenAndServe(ctx)`
-- the example test proves recovery, WebSocket dev admission, subscribe, reducer call, non-caller live update delivery, shutdown, and no manual kernel-assembly regression
+- the prior bundled hello-world command has been removed because it no longer served a maintained product or integration purpose
+- root/runtime package tests are now the live proof for hosted-runtime ownership, serving, local calls, describe, export, and lifecycle behavior
 
 Docs updated with this state:
 - `README.md`
-- `docs/hosted-runtime-bootstrap.md`
 - `docs/hosted-runtime-implementation-roadmap.md`
 - `docs/decomposition/hosted-runtime-v1-contract.md`
 - `docs/decomposition/hosted-runtime-version-phases.md`
 - `docs/decomposition/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md`
 - `docs/decomposition/EXECUTION-ORDER.md`
-- `TECH-DEBT.md` (`OI-014` closed)
+- `TECH-DEBT.md`
 
 ## Validation from the V1-H audit
 
@@ -36,10 +33,9 @@ Commands run:
 - `rtk go doc . Runtime.ListenAndServe`
 - `rtk go doc . Runtime.HTTPHandler`
 - `rtk go doc . Runtime.ExportSchema`
-- `rtk go fmt . ./cmd/shunter-example`
-- `rtk go test ./cmd/shunter-example -count=1`
+- `rtk go fmt .`
 - `rtk go test . -count=1`
-- `rtk go vet ./cmd/shunter-example .`
+- `rtk go vet .`
 - `rtk go test ./... -count=1`
 - `rtk go build ./...`
 
@@ -67,7 +63,6 @@ Required:
 Then inspect the live root package and the specific hosted-runtime files you will touch with Go tools.
 
 Open these only when needed:
-- `docs/hosted-runtime-bootstrap.md` for the current quickstart surface
 - `docs/decomposition/hosted-runtime-version-phases.md` for phase boundaries
 - `docs/decomposition/hosted-runtime-v1-contract.md` or `docs/decomposition/hosted-runtime-v1.5-follow-ons.md` for contract questions
 - the relevant `docs/hosted-runtime-planning/` plan for an active slice

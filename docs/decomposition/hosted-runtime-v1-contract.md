@@ -9,7 +9,7 @@ It is the v1 target shape for making Shunter feel like a real hosted runtime/ser
 Current repo reality behind this contract:
 - the repo already has working kernel packages (`schema`, `store`, `commitlog`, `executor`, `subscription`, `protocol`)
 - the root `github.com/ponchione/shunter` package now exposes the initial v1 hosted-runtime surface
-- the current runnable path is the hosted-runtime hello world in `cmd/shunter-example/main.go` and `docs/hosted-runtime-bootstrap.md`
+- there is no maintained bundled hello-world command; the prior throwaway example was removed after V1-H
 - this document remains the v1 contract and reference point for polish/follow-on work
 
 Related docs:

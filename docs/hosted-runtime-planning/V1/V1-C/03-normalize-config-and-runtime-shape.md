@@ -14,4 +14,4 @@ Implementation requirements:
 - store private built-state fields such as `registry`, `dataDir`, committed state, recovered tx id, and resume plan
 - keep the root public API narrow; private fields are acceptable
 - do not start durability workers, executor loops, scheduler loops, fan-out workers, or HTTP serving
-- do not use `cmd/shunter-example` as implementation source of truth
+- do not use the former bundled demo command as implementation source of truth

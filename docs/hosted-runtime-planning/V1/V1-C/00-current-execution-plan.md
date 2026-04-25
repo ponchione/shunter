@@ -26,7 +26,7 @@ Execution sequence:
 6. Verify GREEN with focused V1-C tests, then root/schema/commitlog/executor vet/test gates and broad `rtk go test ./... -count=1` if feasible.
 
 Guardrails:
-- Do not inspect or copy `cmd/shunter-example` implementation as source of truth.
+- Do not inspect or copy the former bundled demo command as source of truth.
 - Preserve schema-layer error wrapping via `errors.Is`.
 - Preserve V1-A validation ordering before schema build.
 - Do not create any started resource in `Build`.
