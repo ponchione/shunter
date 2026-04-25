@@ -5579,6 +5579,76 @@ func TestHandleSubscribeSingle_ParityColumnListReturnTypeRejectText(t *testing.T
 	}
 }
 
+// TestHandleSubscribeSingle_ParityUnresolvedVarProjectionColumnRejectText pins
+// reference `Unresolved::Var` (errors.rs:11-13, "`{name}` is not in scope")
+// for a SubscribeSingle column-list projection where the named column does
+// not exist on the FROM-clause table. Reference path: `type_proj::Exprs`
+// (check.rs:67-80) walks each projection element through `type_expr` BEFORE
+// `expect_table_type` runs the `Unsupported::ReturnType` check at
+// check.rs:174 — so a missing-column projection emits `Unresolved::Var`,
+// not the column-projection-not-supported literal. SubscribeSingle wraps
+// compile errors with `DBError::WithSql`.
+func TestHandleSubscribeSingle_ParityUnresolvedVarProjectionColumnRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT missing FROM t"
+	msg := &SubscribeSingleMsg{
+		RequestID:   256,
+		QueryID:     257,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a projection column is unknown")
+	}
+}
+
+// TestHandleSubscribeMulti_ParityUnresolvedVarProjectionColumnRejectText
+// pins the same `Unresolved::Var` literal on the SubscribeMulti admission
+// surface for a column-list projection naming a missing column.
+func TestHandleSubscribeMulti_ParityUnresolvedVarProjectionColumnRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	exec := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const badSQL = "SELECT missing FROM t"
+	msg := &SubscribeMultiMsg{
+		RequestID:    258,
+		QueryID:      259,
+		QueryStrings: []string{"SELECT * FROM t", badSQL},
+	}
+	handleSubscribeMulti(context.Background(), conn, msg, exec, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + badSQL + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := exec.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a projection column is unknown")
+	}
+}
+
 // TestHandleSubscribeSingle_ParityBoolLiteralOnIntegerColumnRejectText pins
 // the reference `UnexpectedType` literal from
 // reference/SpacetimeDB/crates/expr/src/errors.rs:100 (via the emit site at
