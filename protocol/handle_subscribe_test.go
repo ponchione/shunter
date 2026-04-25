@@ -2886,6 +2886,66 @@ func TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected(t *testing.T)
 	}
 }
 
+// TestHandleSubscribeSingle_ParityNumericLiteralOnStringColumnWidens pins the
+// reference widening at expr/src/lib.rs:353 (`AlgebraicType::String =>
+// Ok(AlgebraicValue::String(value.into()))`) onto the SubscribeSingle
+// admission surface. `WHERE name = 42` and `WHERE name = 1.3` must compile
+// (no SubscriptionError) and bind `name` against the widened String value
+// derived from the source literal — Shunter renders LitInt via
+// `strconv.FormatInt` and LitFloat via `strconv.FormatFloat('g', -1, 64)`
+// at the coerce boundary, so the executor sees a `ColEq` carrying
+// `types.NewString("42")` / `types.NewString("1.3")` respectively.
+func TestHandleSubscribeSingle_ParityNumericLiteralOnStringColumnWidens(t *testing.T) {
+	cases := []struct {
+		name      string
+		sql       string
+		wantValue types.Value
+	}{
+		{"LitInt", "SELECT * FROM t WHERE t.name = 42", types.NewString("42")},
+		{"LitFloat", "SELECT * FROM t WHERE t.name = 1.3", types.NewString("1.3")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "name", Type: schema.KindString},
+			)
+
+			msg := &SubscribeSingleMsg{
+				RequestID:   84,
+				QueryID:     85,
+				QueryString: tc.sql,
+			}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			select {
+			case frame := <-conn.OutboundCh:
+				t.Fatalf("unexpected message on OutboundCh: %x", frame)
+			default:
+			}
+
+			req := executor.getRegisterSetReq()
+			if req == nil {
+				t.Fatal("executor did not receive RegisterSubscriptionSet — widening rejected")
+			}
+			if len(req.Predicates) != 1 {
+				t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+			}
+			colEq, ok := req.Predicates[0].(subscription.ColEq)
+			if !ok {
+				t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+			}
+			if colEq.Column != 0 {
+				t.Fatalf("Predicates[0].Column = %d, want 0", colEq.Column)
+			}
+			if !colEq.Value.Equal(tc.wantValue) {
+				t.Fatalf("Predicates[0].Value = %v, want %v", colEq.Value, tc.wantValue)
+			}
+		})
+	}
+}
+
 // TestHandleSubscribeSingle_ParityUnknownTableRejected pins the reference
 // type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs
 // lines 483-485 (`select * from r` / "Table r does not exist") onto the

@@ -68,10 +68,24 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		}
 		return types.NewBool(lit.Bool), nil
 	case types.KindString:
-		if lit.Kind != LitString {
-			return types.Value{}, mismatch(lit, kind)
+		// Reference `parse(value, AlgebraicType::String)` at
+		// expr/src/lib.rs:353 wraps the SqlLiteral source text as
+		// `AlgebraicValue::String(value.into())` for any of `Str | Num | Hex`
+		// literal categories. Shunter widens LitString / LitInt / LitFloat /
+		// LitBigInt onto KindString through `renderLiteralSourceText`
+		// (FormatInt / FormatFloat / lit.Str / Big.String). LitBytes is
+		// deferred — Shunter's parser decodes the hex source token into bytes
+		// at `parseHexLiteral`, so the original `0x...` / `X'...'` form is
+		// not recoverable; it falls through to `mismatch` until the
+		// source-text-preservation slice lands. LitBool falls through to
+		// `mismatch` and emits `UnexpectedType{Bool, String}` matching
+		// reference lib.rs:94 (only `Str | Num | Hex` reach the lib.rs:353
+		// String arm). LitSender is short-circuited above for non-Bytes
+		// columns.
+		if text, ok := renderLiteralSourceText(lit); ok {
+			return types.NewString(text), nil
 		}
-		return types.NewString(lit.Str), nil
+		return types.Value{}, mismatch(lit, kind)
 	case types.KindBytes:
 		if lit.Kind != LitBytes {
 			return types.Value{}, mismatch(lit, kind)

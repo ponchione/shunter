@@ -650,12 +650,122 @@ func TestCoerceBigIntLiteralToFloat64(t *testing.T) {
 	}
 }
 
-// TestCoerceBigIntLiteralOnStringColumnRejected pins that a BigInt literal
-// rejects on non-numeric column kinds (string/bytes/bool/timestamp).
-func TestCoerceBigIntLiteralOnStringColumnRejected(t *testing.T) {
-	x := bigIntFromStr(t, "10000000000000000000000000000000000000000")
-	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindString)
+// TestCoerceLitIntOnStringColumnWidens pins the reference widening at
+// expr/src/lib.rs:353 (`AlgebraicType::String => Ok(AlgebraicValue::String(
+// value.into()))`). Reference `parse(value, String)` wraps the SqlLiteral
+// source text as String for any of `Str | Num | Hex` literal categories;
+// Shunter routes LitInt through `renderLiteralSourceText` (FormatInt) so
+// `WHERE strcol = 42` binds as the string `"42"` rather than rejecting.
+func TestCoerceLitIntOnStringColumnWidens(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int64
+		want string
+	}{
+		{"positive", 42, "42"},
+		{"zero", 0, "0"},
+		{"negative", -7, "-7"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := Coerce(Literal{Kind: LitInt, Int: tc.in}, types.KindString)
+			if err != nil {
+				t.Fatalf("Coerce error: %v", err)
+			}
+			if v.Kind() != types.KindString || v.AsString() != tc.want {
+				t.Fatalf("got %+v, want String(%q)", v, tc.want)
+			}
+		})
+	}
+}
+
+// TestCoerceLitFloatOnStringColumnWidens mirrors the LitInt widening for
+// LitFloat. Reference accepts via the same lib.rs:353 String arm; Shunter
+// renders via `strconv.FormatFloat('g', -1, 64)`. Round-trip-lossy forms
+// (`1.10` → "1.1") and scientific-notation forms (parser collapses `1e3`
+// to LitInt) carry the documented Shunter-canonical form pending source-
+// text preservation on `sql.Literal`.
+func TestCoerceLitFloatOnStringColumnWidens(t *testing.T) {
+	cases := []struct {
+		name string
+		in   float64
+		want string
+	}{
+		{"plain", 1.3, "1.3"},
+		{"negative", -2.5, "-2.5"},
+		{"integral_float", 7.0, "7"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := Coerce(Literal{Kind: LitFloat, Float: tc.in}, types.KindString)
+			if err != nil {
+				t.Fatalf("Coerce error: %v", err)
+			}
+			if v.Kind() != types.KindString || v.AsString() != tc.want {
+				t.Fatalf("got %+v, want String(%q)", v, tc.want)
+			}
+		})
+	}
+}
+
+// TestCoerceLitBigIntOnStringColumnWidens pins that LitBigInt also widens
+// onto a KindString column. Reference flows scientific-notation source
+// text (`1e40`) through `parse(value, String)` unchanged; Shunter parser
+// collapses the source token to `*big.Int` at `parseNumericLiteral` so the
+// widened string carries the canonical decimal form (`Big.String()`)
+// rather than the original token. Documented Shunter-side divergence
+// pending source-text preservation on `sql.Literal` (matches the existing
+// pattern for InvalidLiteral 128/256-bit overflow text).
+func TestCoerceLitBigIntOnStringColumnWidens(t *testing.T) {
+	x := bigIntFromStr(t, "10000000000000000000000000000000000000000") // 10^40
+	v, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindString)
+	if err != nil {
+		t.Fatalf("Coerce error: %v", err)
+	}
+	if v.Kind() != types.KindString {
+		t.Fatalf("Kind = %v, want KindString", v.Kind())
+	}
+	if got := v.AsString(); got != x.String() {
+		t.Fatalf("AsString = %q, want %q", got, x.String())
+	}
+}
+
+// TestCoerceLitBytesOnStringColumnDeferred pins that LitBytes does not yet
+// widen onto a KindString column. Reference accepts the source-text form
+// (e.g. `0xdeadbeef` → String("0xdeadbeef")) via lib.rs:353. Shunter's
+// parser decodes the hex token into bytes at `parseHexLiteral`, losing
+// the original `0x...`/`X'...'` source text; `renderLiteralSourceText`
+// returns false for LitBytes for that reason. Closing this case requires
+// the source-text preservation slice (separate). Until then, LitBytes →
+// KindString must still reject with `ErrUnsupportedSQL` so Shunter never
+// invents a rendering that diverges from any reference source token.
+func TestCoerceLitBytesOnStringColumnDeferred(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitBytes, Bytes: []byte{0xde, 0xad, 0xbe, 0xef}}, types.KindString)
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+// TestCoerceLitBoolOnStringColumnEmitsUnexpectedType pins that the widening
+// onto KindString does not include LitBool. Reference lib.rs:94 routes
+// `(SqlLiteral::Bool(_), Some(ty))` (with ty != Bool) to UnexpectedType;
+// only `Str | Num | Hex` reach the lib.rs:353 String arm. Shunter mirrors
+// this via the existing `mismatch` LitBool branch, which returns
+// `UnexpectedTypeError{Expected:"Bool", Inferred:"String"}`. Strengthens
+// `TestCoerceBoolToStringFails` (which only asserts ErrUnsupportedSQL).
+func TestCoerceLitBoolOnStringColumnEmitsUnexpectedType(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindString)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var utErr UnexpectedTypeError
+	if !errors.As(err, &utErr) {
+		t.Fatalf("err = %v, want UnexpectedTypeError", err)
+	}
+	if utErr.Expected != "Bool" || utErr.Inferred != "String" {
+		t.Fatalf("got {%q, %q}, want {\"Bool\", \"String\"}", utErr.Expected, utErr.Inferred)
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
 	}
 }

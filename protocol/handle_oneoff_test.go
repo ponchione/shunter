@@ -2941,6 +2941,68 @@ func TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
 	}
 }
 
+// TestHandleOneOffQuery_ParityNumericLiteralOnStringColumnWidens pins the
+// reference widening at expr/src/lib.rs:353 onto the OneOffQuery admission
+// surface. `WHERE name = 42` must succeed and return the row whose `name`
+// column equals the string `"42"`; `WHERE name = 1.3` must succeed and
+// return the row whose `name` equals `"1.3"`. Reference flows the
+// SqlLiteral source text through `parse(value, String)` →
+// `AlgebraicValue::String(value.into())`; Shunter renders LitInt via
+// `strconv.FormatInt` and LitFloat via `strconv.FormatFloat('g', -1, 64)`
+// at the coerce boundary so the bound predicate is `name = "<literal>"`.
+func TestHandleOneOffQuery_ParityNumericLiteralOnStringColumnWidens(t *testing.T) {
+	cases := []struct {
+		name        string
+		sql         string
+		matchString string
+	}{
+		{"LitInt", "SELECT * FROM t WHERE name = 42", "42"},
+		{"LitFloat", "SELECT * FROM t WHERE name = 1.3", "1.3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			ts := &schema.TableSchema{
+				ID:   1,
+				Name: "t",
+				Columns: []schema.ColumnSchema{
+					{Index: 0, Name: "name", Type: schema.KindString},
+				},
+			}
+			sl := newMockSchema("t", 1, ts.Columns...)
+
+			snap := &mockSnapshot{
+				rows: map[schema.TableID][]types.ProductValue{
+					1: {
+						{types.NewString("alice")},
+						{types.NewString(tc.matchString)},
+						{types.NewString("zach")},
+					},
+				},
+			}
+			stateAccess := &mockStateAccess{snap: snap}
+
+			msg := &OneOffQueryMsg{
+				MessageID:   []byte{0x90},
+				QueryString: tc.sql,
+			}
+			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+			result := drainOneOff(t, conn)
+			if result.Error != nil {
+				t.Fatalf("Error = %q, want nil (widening must succeed)", *result.Error)
+			}
+			pvs := decodeRows(t, firstTableRows(result), ts)
+			if len(pvs) != 1 {
+				t.Fatalf("got %d rows, want 1 matching %q", len(pvs), tc.matchString)
+			}
+			if !pvs[0][0].Equal(types.NewString(tc.matchString)) {
+				t.Errorf("row[0].name = %v, want String(%q)", pvs[0][0], tc.matchString)
+			}
+		})
+	}
+}
+
 func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("users", 1,
