@@ -846,14 +846,15 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	}
 	leftAlias := leftQualifiers[0]
 	rightAlias := rightQualifiers[0]
-	if strings.EqualFold(leftAlias, rightAlias) {
+	if leftAlias == rightAlias {
 		// Reference `type_from` (expr/src/lib.rs:88-89) rejects a join whose
 		// right-side alias collides with the left side using
 		// `DuplicateName(alias)`. Same reference text covers both the
 		// explicitly-aliased shape (`FROM t AS dup JOIN s AS dup`) and the
 		// unaliased self-join shape (`FROM t JOIN t`) because the parser
 		// derives each side's alias from its base table when no `AS` is
-		// written.
+		// written. `Relvars` is byte-equal `SqlIdent`, so case-distinct
+		// aliases (e.g. `"R"` and `r`) do NOT collide.
 		return nil, nil, nil, DuplicateNameError{Name: rightAlias}
 	}
 	if !isKeywordToken(p.peek(), "ON") {
