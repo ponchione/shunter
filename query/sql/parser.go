@@ -835,7 +835,13 @@ func resolveProjectionColumns(columns []ProjectionColumn, bindings relationBindi
 			}
 			tableName = resolvedTable
 		} else if bindings.requireQualify {
-			return nil, fmt.Errorf("%w: join projections must be qualified", ErrUnsupportedSQL)
+			// Reference `SqlSelect::find_unqualified_vars`
+			// (sql-parser/src/ast/sql.rs:84-95) routes any unqualified
+			// var in a JOIN scope through
+			// `SqlUnsupported::UnqualifiedNames`
+			// (parser/errors.rs:78-79). The projection branch fires
+			// when a join projection column has no qualifier.
+			return nil, UnqualifiedNamesError{}
 		}
 		resolved = append(resolved, ProjectionColumn{Table: tableName, Column: col.Column, SourceQualifier: qualifier, OutputAlias: col.OutputAlias})
 	}
@@ -975,7 +981,13 @@ func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, e
 	}
 	p.advance()
 	if p.peek().kind != tokDot {
-		return ColumnRef{}, p.unsupported("expected qualified column reference")
+		// Reference `SqlSelect::find_unqualified_vars`
+		// (sql-parser/src/ast/sql.rs:84-95) routes any unqualified var
+		// in a JOIN scope through `SqlUnsupported::UnqualifiedNames`
+		// (parser/errors.rs:78-79). Bare-identifier ON-operand —
+		// `JOIN s ON id = s.id` parses an `Expr::Identifier` on the
+		// left, which `find_unqualified_vars` flags.
+		return ColumnRef{}, UnqualifiedNamesError{}
 	}
 	p.advance()
 	columnTok := p.peek()
@@ -1108,7 +1120,11 @@ func (p *parser) parseComparisonPredicate(bindings relationBindings) (Predicate,
 		return ColumnComparisonPredicate{Left: left, Op: op, Right: right}, nil
 	}
 	if bindings.requireQualify && p.peek().kind == tokIdent && !isKeywordToken(p.peek(), "TRUE") && !isKeywordToken(p.peek(), "FALSE") {
-		return nil, p.unsupported("join WHERE columns must be qualified")
+		// Reference `SqlSelect::find_unqualified_vars`
+		// (sql-parser/src/ast/sql.rs:84-95) routes any unqualified var
+		// in a JOIN scope through `SqlUnsupported::UnqualifiedNames`
+		// (parser/errors.rs:78-79). RHS-of-WHERE-comparison branch.
+		return nil, UnqualifiedNamesError{}
 	}
 	lit, err := p.parseLiteral()
 	if err != nil {
@@ -1174,7 +1190,11 @@ func (p *parser) parseColumnRefForPredicate(bindings relationBindings) (ColumnRe
 			return ColumnRef{}, p.unsupported("qualified column names not supported")
 		}
 	} else if bindings.requireQualify {
-		return ColumnRef{}, p.unsupported("join WHERE columns must be qualified")
+		// Reference `SqlSelect::find_unqualified_vars`
+		// (sql-parser/src/ast/sql.rs:84-95) routes any unqualified var
+		// in a JOIN scope through `SqlUnsupported::UnqualifiedNames`
+		// (parser/errors.rs:78-79). LHS-of-WHERE-comparison branch.
+		return ColumnRef{}, UnqualifiedNamesError{}
 	}
 	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
 }

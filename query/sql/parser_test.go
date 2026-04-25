@@ -1013,7 +1013,7 @@ func TestParseRejectsJoinWhereColumnEqualityRequiresQualifiedColumns(t *testing.
 			if !errors.Is(err, ErrUnsupportedSQL) {
 				t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
 			}
-			if !strings.Contains(err.Error(), "join WHERE columns must be qualified") {
+			if !strings.Contains(err.Error(), "Names must be qualified when using joins") {
 				t.Fatalf("err = %q, want qualified-column message", err.Error())
 			}
 		})

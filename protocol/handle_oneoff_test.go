@@ -6899,3 +6899,128 @@ func TestHandleOneOffQuery_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejec
 		t.Fatalf("Error = %q, want %q (left-table schema lookup must precede duplicate-alias rejection)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityUnqualifiedNamesProjectionRejectText pins
+// the reference `SqlUnsupported::UnqualifiedNames` literal
+// (`Names must be qualified when using joins`) for an unqualified
+// projection column inside a JOIN scope. Reference
+// `SqlSelect::find_unqualified_vars` (sql-parser/src/ast/sql.rs:84-95)
+// flags `Project::has_unqualified_vars()` and routes through
+// `parser/errors.rs:78-79`.
+func TestHandleOneOffQuery_ParityUnqualifiedNamesProjectionRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xF2},
+		QueryString: "SELECT id FROM t JOIN s ON t.id = s.id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Names must be qualified when using joins"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (unqualified projection column in join must emit UnqualifiedNames)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnqualifiedNamesWhereRejectText pins the
+// reference `SqlUnsupported::UnqualifiedNames` literal for an
+// unqualified WHERE column inside a JOIN scope. Reference
+// `SqlSelect::find_unqualified_vars` flags
+// `expr.has_unqualified_vars()` (`SqlExpr::Var(_)` case in
+// `ast/mod.rs:140-145`).
+func TestHandleOneOffQuery_ParityUnqualifiedNamesWhereRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xF3},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.id = s.id WHERE id = 7",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Names must be qualified when using joins"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (unqualified WHERE column in join must emit UnqualifiedNames)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnqualifiedNamesJoinOnRejectText pins the
+// reference `SqlUnsupported::UnqualifiedNames` literal for an
+// unqualified JOIN ON operand. Reference `parse_join`
+// (sql-parser/src/parser/mod.rs:50-77) accepts
+// `Identifier = CompoundIdentifier` at parse time, then
+// `find_unqualified_vars` flags the bare `Identifier` and routes
+// through `UnqualifiedNames`.
+func TestHandleOneOffQuery_ParityUnqualifiedNamesJoinOnRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xF4},
+		QueryString: "SELECT t.* FROM t JOIN s ON id = s.id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Names must be qualified when using joins"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (unqualified JOIN ON operand must emit UnqualifiedNames)", *result.Error, want)
+	}
+}

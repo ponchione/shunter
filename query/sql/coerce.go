@@ -583,6 +583,33 @@ func (e UnsupportedSelectError) SubscribeError() string {
 
 func (e UnsupportedSelectError) Unwrap() error { return ErrUnsupportedSQL }
 
+// UnqualifiedNamesError mirrors reference
+// `parser::errors::SqlUnsupported::UnqualifiedNames`
+// (reference/SpacetimeDB/crates/sql-parser/src/parser/errors.rs:78-79).
+// Reference `SqlSelect::find_unqualified_vars` (ast/sql.rs:84-95) emits
+// this variant when any FROM/projection/filter expression contains an
+// unqualified `Var` while a JOIN is in scope. The variant carries no
+// payload; both surfaces render the literal text
+// `Names must be qualified when using joins`.
+//
+// Shunter has three local rejection sites that route here:
+//
+//   - `resolveProjectionColumns` when a join projection column is bare
+//   - `parseQualifiedColumnRef` when the JOIN ON token sequence is
+//     `ident` without a following `.` (a bare identifier in ON scope)
+//   - `parseColumnRefForPredicate` / `parseComparisonPredicate` when a
+//     join WHERE comparison column is bare
+//
+// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
+// still match.
+type UnqualifiedNamesError struct{}
+
+func (e UnqualifiedNamesError) Error() string {
+	return "Names must be qualified when using joins"
+}
+
+func (e UnqualifiedNamesError) Unwrap() error { return ErrUnsupportedSQL }
+
 // AlgebraicName exports the reference `fmt_algebraic_type` short-name
 // renderer for a ValueKind so cross-package compile-stage checks (in
 // `protocol`) can produce reference-shape `UnexpectedType` / `InvalidOp`

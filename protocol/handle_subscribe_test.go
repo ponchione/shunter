@@ -6406,3 +6406,134 @@ func TestHandleSubscribeSingle_ParityMissingLeftTablePrecedesDuplicateJoinAliasR
 		t.Error("executor should not be called when the left join table is missing")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityUnqualifiedNamesProjectionRejectText
+// pins the reference `SqlUnsupported::UnqualifiedNames` literal for an
+// unqualified projection column inside a JOIN scope. SubscribeSingle
+// wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnqualifiedNamesProjectionRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT id FROM t JOIN s ON t.id = s.id"
+	msg := &SubscribeSingleMsg{
+		RequestID:   428,
+		QueryID:     429,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Names must be qualified when using joins, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when projection column is unqualified in join scope")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnqualifiedNamesWhereRejectText pins
+// the reference `SqlUnsupported::UnqualifiedNames` literal for an
+// unqualified WHERE column inside a JOIN scope. SubscribeSingle wraps
+// with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnqualifiedNamesWhereRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.id = s.id WHERE id = 7"
+	msg := &SubscribeSingleMsg{
+		RequestID:   430,
+		QueryID:     431,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Names must be qualified when using joins, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when WHERE column is unqualified in join scope")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnqualifiedNamesJoinOnRejectText pins
+// the reference `SqlUnsupported::UnqualifiedNames` literal for an
+// unqualified JOIN ON operand. SubscribeSingle wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnqualifiedNamesJoinOnRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT t.* FROM t JOIN s ON id = s.id"
+	msg := &SubscribeSingleMsg{
+		RequestID:   432,
+		QueryID:     433,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Names must be qualified when using joins, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when JOIN ON operand is unqualified")
+	}
+}

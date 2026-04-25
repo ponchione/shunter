@@ -209,6 +209,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if errors.As(err, &unsupSelectErr) {
 			return compiledSQLQuery{}, err
 		}
+		var unqualErr sql.UnqualifiedNamesError
+		if errors.As(err, &unqualErr) {
+			return compiledSQLQuery{}, err
+		}
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
 	}
 	if !allowLimit && stmt.Limit != nil {
