@@ -221,13 +221,69 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.RightTable)
 		}
+		// Reference `type_from` (check.rs:99-104) types the JOIN ON
+		// expression through `type_expr` (lib.rs:101-102) BEFORE the
+		// resulting `RelExpr` is handed to `type_proj` for projection
+		// typing or to `type_select` for WHERE folding. Resolve ON
+		// columns + their type/array checks here so:
+		//   - `SELECT * FROM t JOIN s ON t.missing = s.id` raises
+		//     `Unresolved::Var{missing}` BEFORE the bare-wildcard
+		//     `InvalidWildcard::Join` rejection below.
+		//   - `... ON t.missing = s.id WHERE FALSE` raises
+		//     `Unresolved::Var{missing}` BEFORE the FalsePredicate
+		//     short-circuit later in this branch returns NoRows.
+		var leftCol, rightCol *schema.ColumnSchema
+		if stmt.Join.HasOn {
+			var ok bool
+			leftCol, ok = leftTS.Column(stmt.Join.LeftOn.Column)
+			if !ok {
+				return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.Join.LeftOn.Column}
+			}
+			rightCol, ok = rightTS.Column(stmt.Join.RightOn.Column)
+			if !ok {
+				return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.Join.RightOn.Column}
+			}
+			// Reference `type_expr` (expr/src/lib.rs:134-140) types the ON
+			// binop's LEFT side first with no expectation, then types the
+			// RIGHT side with the LEFT type as the expected. The mismatch
+			// arm at lib.rs:111-112 calls `UnexpectedType::new(col_type,
+			// ty)` — `col_type` is the RIGHT side's column type (renders in
+			// the `(expected)` slot per errors.rs:104) and `ty` is the LEFT
+			// side's column type that was passed as expected (renders in
+			// the `(inferred)` slot). Mirror the slot ordering so both
+			// surfaces (OneOff raw, SubscribeSingle WithSql-wrapped) carry
+			// the reference text instead of the late `subscription:
+			// invalid predicate: join column kinds differ` from
+			// `subscription/validate.go::validateJoin`.
+			if leftCol.Type != rightCol.Type {
+				return compiledSQLQuery{}, sql.UnexpectedTypeError{
+					Expected: sql.AlgebraicName(rightCol.Type),
+					Inferred: sql.AlgebraicName(leftCol.Type),
+				}
+			}
+			// Reference `type_expr` (expr/src/lib.rs:138) routes equality
+			// against an Array/Product column through `op_supports_type`
+			// (lib.rs:155), which rejects non-primitive types and emits
+			// `InvalidOp{op, ty}`. The ON binop reaches lib.rs:134-140
+			// (neither side a Lit) so the type comes from the LEFT field
+			// after the `leftCol.Type != rightCol.Type` mismatch arm above
+			// has already returned.
+			if isArrayKind(leftCol.Type) {
+				return compiledSQLQuery{}, sql.InvalidOpError{
+					Op:   "=",
+					Type: sql.AlgebraicName(leftCol.Type),
+				}
+			}
+		}
 		// Reference `InvalidWildcard::Join` at
 		// reference/SpacetimeDB/crates/expr/src/errors.rs:41 emits
 		// "SELECT * is not supported for joins" via `type_proj` at
 		// reference/SpacetimeDB/crates/expr/src/lib.rs:56 when
 		// `ast::Project::Star(None)` meets `input.nfields() > 1`. Match
 		// the raw text so SubscribeSingle/Multi WithSql-wrap and OneOff's
-		// unwrapped emit both carry the reference literal.
+		// unwrapped emit both carry the reference literal. ON-column
+		// resolution above runs first so JOIN ON type errors are not
+		// masked by this guard.
 		if stmt.ProjectedAlias == "" && len(stmt.ProjectionColumns) == 0 && stmt.Aggregate == nil {
 			return compiledSQLQuery{}, fmt.Errorf("SELECT * is not supported for joins")
 		}
@@ -283,45 +339,6 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		if _, ok := stmt.Predicate.(sql.FalsePredicate); ok {
 			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
-		}
-		leftCol, ok := leftTS.Column(stmt.Join.LeftOn.Column)
-		if !ok {
-			return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.Join.LeftOn.Column}
-		}
-		rightCol, ok := rightTS.Column(stmt.Join.RightOn.Column)
-		if !ok {
-			return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.Join.RightOn.Column}
-		}
-		// Reference `type_expr` (expr/src/lib.rs:134-140) types the ON
-		// binop's LEFT side first with no expectation, then types the
-		// RIGHT side with the LEFT type as the expected. The mismatch
-		// arm at lib.rs:111-112 calls `UnexpectedType::new(col_type,
-		// ty)` — `col_type` is the RIGHT side's column type (renders in
-		// the `(expected)` slot per errors.rs:104) and `ty` is the LEFT
-		// side's column type that was passed as expected (renders in
-		// the `(inferred)` slot). Mirror the slot ordering so both
-		// surfaces (OneOff raw, SubscribeSingle WithSql-wrapped) carry
-		// the reference text instead of the late `subscription:
-		// invalid predicate: join column kinds differ` from
-		// `subscription/validate.go::validateJoin`.
-		if leftCol.Type != rightCol.Type {
-			return compiledSQLQuery{}, sql.UnexpectedTypeError{
-				Expected: sql.AlgebraicName(rightCol.Type),
-				Inferred: sql.AlgebraicName(leftCol.Type),
-			}
-		}
-		// Reference `type_expr` (expr/src/lib.rs:138) routes equality
-		// against an Array/Product column through `op_supports_type`
-		// (lib.rs:155), which rejects non-primitive types and emits
-		// `InvalidOp{op, ty}`. The ON binop reaches lib.rs:134-140
-		// (neither side a Lit) so the type comes from the LEFT field
-		// after the `leftCol.Type != rightCol.Type` mismatch arm above
-		// has already returned.
-		if isArrayKind(leftCol.Type) {
-			return compiledSQLQuery{}, sql.InvalidOpError{
-				Op:   "=",
-				Type: sql.AlgebraicName(leftCol.Type),
-			}
 		}
 		relations := map[string]relationSchema{
 			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},

@@ -6652,6 +6652,90 @@ func TestHandleOneOffQuery_ParityUnresolvedVarBaseTableAfterAliasRejectText(t *t
 	}
 }
 
+// TestHandleOneOffQuery_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText
+// pins reference `type_from` ordering: the JOIN ON expression types
+// before `type_proj` runs the bare-wildcard rejection. Reference path:
+// `SubChecker::type_from` (check.rs:99-104) types the ON binop through
+// `type_expr` (lib.rs:101-102) before the join `RelExpr` is handed to
+// `type_proj`. So `SELECT * FROM t JOIN s ON t.missing = s.id` emits
+// `Unresolved::Var{missing}` before the `InvalidWildcard::Join` text.
+func TestHandleOneOffQuery_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xEC},
+		QueryString: "SELECT * FROM t JOIN s ON t.missing = s.id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`missing` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (JOIN ON resolution must precede bare-wildcard rejection)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
+// pins the reference order in which `type_from` types the ON expression
+// before the WHERE predicate is folded. Even when WHERE is `FALSE`,
+// reference still types ON first (check.rs:99-104). Shunter's
+// FalsePredicate short-circuit must therefore fire AFTER ON-column
+// resolution, so a missing ON column raises `Unresolved::Var` before
+// the WHERE-FALSE→NoRows rewrite.
+func TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xED},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.missing = s.id WHERE FALSE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success — FALSE pruning should not skip ON resolution)")
+	}
+	want := "`missing` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (FALSE-WHERE pruning must not bypass ON-column resolution)", *result.Error, want)
+	}
+}
+
 // TestHandleOneOffQuery_ParityUnresolvedVarWherePrecedesProjectionRejectText
 // pins the reference type-checker order: `type_select` (WHERE) runs
 // before `type_proj` (projection columns). Reference path:

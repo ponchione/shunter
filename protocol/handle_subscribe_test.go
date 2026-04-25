@@ -6137,6 +6137,94 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarBaseTableAfterAliasRejectText(
 	}
 }
 
+// TestHandleSubscribeSingle_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText
+// pins reference `type_from` ordering: the JOIN ON expression types
+// before `type_proj` runs the bare-wildcard rejection. SubscribeSingle
+// wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT * FROM t JOIN s ON t.missing = s.id"
+	msg := &SubscribeSingleMsg{
+		RequestID:   418,
+		QueryID:     419,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when JOIN ON column is unknown")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
+// pins the reference order in which `type_from` types the ON expression
+// before the WHERE predicate is folded. SubscribeSingle wraps with
+// DBError::WithSql.
+func TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "t",
+		Columns: []schema.ColumnDefinition{{Name: "u32", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT t.* FROM t JOIN s ON t.missing = s.id WHERE FALSE"
+	msg := &SubscribeSingleMsg{
+		RequestID:   420,
+		QueryID:     421,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError) — FALSE-WHERE pruning must not bypass ON resolution", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when JOIN ON column is unknown under WHERE FALSE")
+	}
+}
+
 // TestHandleSubscribeSingle_ParityUnresolvedVarWherePrecedesProjectionRejectText
 // pins the reference type-checker order: `type_select` (WHERE) runs
 // before `type_proj` (projection columns). Reference path:
