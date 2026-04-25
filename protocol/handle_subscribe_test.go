@@ -6576,3 +6576,136 @@ func TestHandleSubscribeSingle_ParitySenderParameterCaseSensitiveRejectText(t *t
 		t.Error("executor should not be called when :sender placeholder is byte-mismatched")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityProjectionGuardYieldsToTableNotFound pins
+// reference `SubChecker::type_set` (check.rs:137-156) ordering: `type_from`
+// runs BEFORE `expect_table_type` (check.rs:168-176), so a missing FROM
+// table emits the no-such-table text instead of the
+// `Unsupported::ReturnType` projection-return guard.
+func TestHandleSubscribeSingle_ParityProjectionGuardYieldsToTableNotFound(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT u32 FROM missing_table"
+	msg := &SubscribeSingleMsg{
+		RequestID:   436,
+		QueryID:     437,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
+	}
+	se := decoded.(SubscriptionError)
+	want := "no such table: `missing_table`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q (table-not-found must precede table-type return guard)", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when FROM table is missing")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityProjectionGuardYieldsToWhereResolution
+// pins reference `SubChecker::type_set` (check.rs:137-156) ordering:
+// `type_select` runs BEFORE `expect_table_type` (check.rs:168-176), so a
+// missing WHERE column emits `Unresolved::Var` instead of the
+// `Unsupported::ReturnType` projection-return guard.
+func TestHandleSubscribeSingle_ParityProjectionGuardYieldsToWhereResolution(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT u32 FROM t WHERE missing = 1"
+	msg := &SubscribeSingleMsg{
+		RequestID:   438,
+		QueryID:     439,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q (WHERE resolution must precede table-type return guard)", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when WHERE column is unresolved")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityAggregateGuardYieldsToTableNotFound pins
+// the same `SubChecker::type_set` ordering on the aggregate path:
+// `type_from` precedes the `Unsupported::ReturnType` guard for
+// `ProjectList::Agg`. Locks the prior early-aggregate guard reorder so
+// `SELECT COUNT(*) FROM missing_table` emits the no-such-table text.
+func TestHandleSubscribeSingle_ParityAggregateGuardYieldsToTableNotFound(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT COUNT(*) AS n FROM missing_table"
+	msg := &SubscribeSingleMsg{
+		RequestID:   440,
+		QueryID:     441,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
+	}
+	se := decoded.(SubscriptionError)
+	want := "no such table: `missing_table`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q (aggregate path: table-not-found must precede table-type return guard)", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when aggregate FROM table is missing")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityAggregateGuardYieldsToWhereResolution
+// pins the aggregate-path WHERE-precedes-return-guard ordering.
+func TestHandleSubscribeSingle_ParityAggregateGuardYieldsToWhereResolution(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT COUNT(*) AS n FROM t WHERE missing = 1"
+	msg := &SubscribeSingleMsg{
+		RequestID:   442,
+		QueryID:     443,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
+	}
+	se := decoded.(SubscriptionError)
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q (aggregate path: WHERE resolution must precede table-type return guard)", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when aggregate WHERE column is unresolved")
+	}
+}

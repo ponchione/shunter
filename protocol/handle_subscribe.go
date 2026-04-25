@@ -228,16 +228,15 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		// original SQL stands in for the formatted Query.
 		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
 	}
-	if stmt.Aggregate != nil && !allowProjection {
-		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
-	}
-	// Column-list projection guard fires AFTER compileProjectionColumns /
-	// compileJoinProjectionColumns resolves each projection element, so a
-	// missing column raises `Unresolved::Var` first. Reference path:
-	// `type_proj::Exprs` (check.rs:67-80) walks each projection element
-	// through `type_expr` (which emits `Unresolved::Var` for missing
-	// fields) BEFORE `expect_table_type` runs the `Unsupported::ReturnType`
-	// check at check.rs:174.
+	// Aggregate / column-list projection-return guards fire AFTER
+	// `type_from` (schema lookup) and `type_select` (WHERE resolution) and
+	// `type_proj` (projection resolution). Reference path:
+	// `SubChecker::type_set` (check.rs:137-156) typechecks `type_from` →
+	// `type_select` → `type_proj` BEFORE `expect_table_type` (check.rs:168-176)
+	// emits `Unsupported::ReturnType` for `ProjectList::List` / `Agg`. So
+	// missing-table / `Unresolved::Var` text takes precedence over the
+	// table-type return guard. The guards live below at the tails of the
+	// join branch and single-table branch.
 	stmt.Predicate = normalizeSQLPredicate(stmt.Predicate)
 	usesCallerIdentity := sqlPredicateUsesCallerIdentity(stmt.Predicate)
 	if stmt.Join != nil {
@@ -354,6 +353,14 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if err != nil {
 			return compiledSQLQuery{}, err
 		}
+		// Reference `expect_table_type` (check.rs:168-176) rejects
+		// `ProjectList::Agg` with `Unsupported::ReturnType` AFTER
+		// `type_proj` resolves the projection. Aggregate guard mirrors
+		// the column-list guard above so schema/WHERE/JOIN-ON errors
+		// surface first.
+		if !allowProjection && stmt.Aggregate != nil {
+			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
+		}
 		if !stmt.Join.HasOn {
 			if stmt.Predicate != nil {
 				if !allowProjection {
@@ -432,6 +439,13 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	aggregate, err := compileAggregateProjection(stmt.Aggregate)
 	if err != nil {
 		return compiledSQLQuery{}, err
+	}
+	// Reference `expect_table_type` (check.rs:168-176) rejects
+	// `ProjectList::Agg` with `Unsupported::ReturnType` AFTER `type_proj`
+	// resolves the projection. Aggregate guard mirrors the column-list
+	// guard above so schema/WHERE errors surface first.
+	if !allowProjection && stmt.Aggregate != nil {
+		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
 	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
 }
