@@ -4387,10 +4387,11 @@ func TestHandleSubscribeSingle_ParityDistinctProjectionRejected(t *testing.T) {
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
 	)
 
+	const sqlText = "SELECT DISTINCT u32 FROM t"
 	msg := &SubscribeSingleMsg{
 		RequestID:   136,
 		QueryID:     137,
-		QueryString: "SELECT DISTINCT u32 FROM t",
+		QueryString: sqlText,
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
@@ -4400,8 +4401,50 @@ func TestHandleSubscribeSingle_ParityDistinctProjectionRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 137, "QueryID")
+	want := "Unsupported SELECT: " + sqlText + ", executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on a DISTINCT projection")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityAllModifierRejected pins the reference
+// subscription-parser rejection at sub.rs:120-149 (and the inner SQL
+// parser at sql.rs:362-394). The set quantifier `ALL` produces a non-None
+// `distinct` field which the subscribe `parse_select` arm rejects through
+// `SubscriptionUnsupported::Select(select)` rendered as
+// `Unsupported SELECT: {select}`, then wrapped via `DBError::WithSql`.
+// The test schema deliberately includes a column named `ALL` to confirm
+// the parser detects the modifier rather than reinterpreting the keyword
+// as a column reference with output alias `u32`.
+func TestHandleSubscribeSingle_ParityAllModifierRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "ALL", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT ALL u32 FROM t"
+	msg := &SubscribeSingleMsg{
+		RequestID:   422,
+		QueryID:     423,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Unsupported SELECT: " + sqlText + ", executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on a SELECT ALL projection")
 	}
 }
 

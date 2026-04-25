@@ -239,7 +239,7 @@ func Parse(input string) (Statement, error) {
 	if err != nil {
 		return Statement{}, err
 	}
-	p := &parser{toks: toks}
+	p := &parser{toks: toks, sql: input}
 	stmt, err := p.parseStatement()
 	if err != nil {
 		return Statement{}, err
@@ -544,6 +544,11 @@ func isKeywordToken(t token, kw string) bool {
 type parser struct {
 	toks []token
 	pos  int
+	// sql holds the original input string passed to Parse. Used by
+	// rejection arms whose reference text is the offending SELECT
+	// rendered verbatim (e.g. UnsupportedSelectError for the
+	// `SELECT ALL ...` / `SELECT DISTINCT ...` set quantifiers).
+	sql string
 }
 
 func (p *parser) peek() token    { return p.toks[p.pos] }
@@ -662,6 +667,17 @@ func (p *parser) parseStatement() (Statement, error) {
 
 func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjection, error) {
 	t := p.peek()
+	// Reference SQL/subscription parsers reject any SELECT carrying a
+	// non-None set quantifier (`SELECT ALL ...` / `SELECT DISTINCT ...`)
+	// at `parse_select`'s `_ => ...feature(select)` arm
+	// (`sql-parser/src/parser/sql.rs:362-394` and
+	// `sql-parser/src/parser/sub.rs:120-149`). Detect the modifier here
+	// instead of letting `parseProjectionItem` reinterpret the keyword
+	// as a column reference (which masks the rejection when a column
+	// happens to share the keyword's name).
+	if !t.quoted && t.kind == tokIdent && (strings.EqualFold(t.text, "ALL") || strings.EqualFold(t.text, "DISTINCT")) {
+		return "", nil, nil, UnsupportedSelectError{SQL: p.sql}
+	}
 	if t.kind == tokStar {
 		p.advance()
 		if p.peek().kind == tokComma {

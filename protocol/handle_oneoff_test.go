@@ -4687,11 +4687,11 @@ func TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected(t *testing.T) {
 }
 
 // TestHandleOneOffQuery_ParityDistinctProjectionRejected pins the reference
-// subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
-// (`select distinct a from t` / "DISTINCT not supported") onto the OneOff
-// admission surface. Enforced incidentally at parseProjection which only
-// accepts `*` or `table.*`.
+// SQL parser rejection at
+// reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs:362-394 — the
+// `parse_select` arm requires `distinct: None`; any non-None set quantifier
+// falls into `_ => SqlUnsupported::feature(select)`, which the OneOff
+// surface renders as `Unsupported: {select}`.
 func TestHandleOneOffQuery_ParityDistinctProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -4700,9 +4700,10 @@ func TestHandleOneOffQuery_ParityDistinctProjectionRejected(t *testing.T) {
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1)}}}}
 	stateAccess := &mockStateAccess{snap: snap}
 
+	const sqlText = "SELECT DISTINCT u32 FROM t"
 	msg := &OneOffQueryMsg{
 		MessageID:   []byte{0xB3},
-		QueryString: "SELECT DISTINCT u32 FROM t",
+		QueryString: sqlText,
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
@@ -4710,8 +4711,41 @@ func TestHandleOneOffQuery_ParityDistinctProjectionRejected(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
+	want := "Unsupported: " + sqlText
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityAllModifierRejected pins the reference SQL
+// parser rejection at sql.rs:362-394 for `SELECT ALL ...`. The set
+// quantifier `ALL` produces a non-None `distinct` field which the
+// `parse_select` arm rejects through `SqlUnsupported::feature(select)`.
+// The test schema deliberately includes a column named `ALL` to confirm
+// the parser detects the modifier rather than reinterpreting the keyword
+// as a column reference with output alias `u32`.
+func TestHandleOneOffQuery_ParityAllModifierRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "ALL", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(7)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	const sqlText = "SELECT ALL u32 FROM t"
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xEE},
+		QueryString: sqlText,
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Unsupported: " + sqlText
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
 

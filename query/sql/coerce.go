@@ -541,6 +541,48 @@ func (e InvalidOpError) Error() string {
 
 func (e InvalidOpError) Unwrap() error { return ErrUnsupportedSQL }
 
+// UnsupportedSelectError mirrors the reference SQL/subscription parsers'
+// rejection arm at `sql.rs:362-394` (OneOff) and `sub.rs:120-149`
+// (subscription) when `parse_select` encounters a `Select` whose
+// `distinct` field is non-None (i.e. `SELECT ALL ...` / `SELECT DISTINCT
+// ...`). Reference renders two distinct prefixes per surface, both
+// wrapping the offending SQL text:
+//
+//   - OneOff path: `SqlUnsupported::feature(select)` ->
+//     `Unsupported: {select}` via `parser/errors.rs:38-39` /
+//     `parser/errors.rs:25-26`.
+//   - Subscription path: `SubscriptionUnsupported::Select(select)` ->
+//     `Unsupported SELECT: {select}` via `parser/errors.rs:15-17`.
+//
+// Both surfaces operate on the same parsed-and-redisplayed SQL string,
+// which round-trips through the `sqlparser` crate's `Display` impl.
+// Shunter stores the original input verbatim instead, since our test
+// shapes match the reference's normalized output for the unmodified
+// SELECT.
+//
+// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
+// still match.
+type UnsupportedSelectError struct {
+	SQL string
+}
+
+// Error renders the OneOff/raw form. Callers wrapping for the
+// subscription surface should call SubscribeError() instead before
+// applying the `DBError::WithSql` wrap.
+func (e UnsupportedSelectError) Error() string {
+	return "Unsupported: " + e.SQL
+}
+
+// SubscribeError renders the subscription-surface form, which carries
+// the `Unsupported SELECT:` prefix from `SubscriptionUnsupported::Select`
+// rather than the OneOff `Unsupported:` prefix from
+// `SqlUnsupported::feature`.
+func (e UnsupportedSelectError) SubscribeError() string {
+	return "Unsupported SELECT: " + e.SQL
+}
+
+func (e UnsupportedSelectError) Unwrap() error { return ErrUnsupportedSQL }
+
 // AlgebraicName exports the reference `fmt_algebraic_type` short-name
 // renderer for a ValueKind so cross-package compile-stage checks (in
 // `protocol`) can produce reference-shape `UnexpectedType` / `InvalidOp`

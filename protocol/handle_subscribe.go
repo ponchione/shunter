@@ -173,6 +173,16 @@ func callerHashIdentity(conn *Conn, compiled compiledSQLQuery) *types.Identity {
 // `return_on_err_with_sql_bool!` macro that wraps the inner error via
 // `DBError::WithSql`.
 func wrapSubscribeCompileErrorSQL(err error, sqlText string) string {
+	// Reference subscription parser routes the `SELECT ALL ...` /
+	// `SELECT DISTINCT ...` rejection through
+	// `SubscriptionUnsupported::Select`, which renders with the
+	// `Unsupported SELECT:` prefix instead of OneOff's `Unsupported:`.
+	// Detect the typed error and switch the inner rendering before
+	// applying the `DBError::WithSql` `, executing: ...` wrap.
+	var unsupSelectErr sql.UnsupportedSelectError
+	if errors.As(err, &unsupSelectErr) {
+		return fmt.Sprintf("%s, executing: `%s`", unsupSelectErr.SubscribeError(), sqlText)
+	}
 	return fmt.Sprintf("%s, executing: `%s`", err.Error(), sqlText)
 }
 
@@ -193,6 +203,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		var unresolvedErr sql.UnresolvedVarError
 		if errors.As(err, &unresolvedErr) {
+			return compiledSQLQuery{}, err
+		}
+		var unsupSelectErr sql.UnsupportedSelectError
+		if errors.As(err, &unsupSelectErr) {
 			return compiledSQLQuery{}, err
 		}
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
