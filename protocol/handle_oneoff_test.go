@@ -4452,8 +4452,13 @@ func TestHandleOneOffQuery_ParityTimestampLiteralAccepted(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityTimestampMalformedRejected mirrors the
-// subscribe-side pin: a non-RFC3339 string on a Timestamp column must reject.
+// TestHandleOneOffQuery_ParityTimestampMalformedRejected pins reference
+// `InvalidLiteral` text for a non-RFC3339 string on a Timestamp column.
+// Reference path: `parse(value, Timestamp)` (expr/src/lib.rs:359) hits the
+// catch-all `bail!`, folded by lib.rs:99 `.map_err` into
+// `InvalidLiteral::new(v.into_string(), ty)`. Timestamp renders as the
+// Product `(__timestamp_micros_since_unix_epoch__: I64)`. OneOff admission
+// has no DBError::WithSql wrap.
 func TestHandleOneOffQuery_ParityTimestampMalformedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -4472,8 +4477,97 @@ func TestHandleOneOffQuery_ParityTimestampMalformedRejected(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected error, got nil (success)")
 	}
-	if result.Error == nil || *result.Error == "" {
-		t.Error("expected non-empty error message")
+	want := "The literal expression `not-a-timestamp` cannot be parsed as type `(__timestamp_micros_since_unix_epoch__: I64)`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityBoolLiteralOnTimestampRejectText pins the
+// reference `UnexpectedType` literal for a bool literal targeting a
+// Timestamp column. Reference path: lib.rs:94 routes
+// `(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty))` directly to
+// `UnexpectedType` (errors.rs:100). Timestamp inferred name comes from the
+// SATS Product fmt.
+func TestHandleOneOffQuery_ParityBoolLiteralOnTimestampRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewTimestamp(0)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD6},
+		QueryString: "SELECT * FROM t WHERE ts = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Unexpected type: (expected) Bool != (__timestamp_micros_since_unix_epoch__: I64) (inferred)"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityStringLiteralOnArrayStringRejectText pins
+// reference `InvalidLiteral` text for a scalar literal on a KindArrayString
+// column. Reference `parse(value, Array<String>)` at lib.rs:359 falls
+// through the array-kind catch-all, folded by lib.rs:99 into
+// `InvalidLiteral::new(v.into_string(), ty)`. Array<String> renders through
+// the parameterized array form.
+func TestHandleOneOffQuery_ParityStringLiteralOnArrayStringRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD7},
+		QueryString: "SELECT * FROM t WHERE arr = 'x'",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "The literal expression `x` cannot be parsed as type `Array<String>`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+// TestHandleOneOffQuery_ParityBoolLiteralOnArrayStringRejectText pins the
+// reference `UnexpectedType` literal for a bool literal targeting an
+// Array<String> column. Reference lib.rs:94 routes the bool arm to
+// `UnexpectedType` ahead of the lib.rs:99 InvalidLiteral fallback.
+func TestHandleOneOffQuery_ParityBoolLiteralOnArrayStringRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD8},
+		QueryString: "SELECT * FROM t WHERE arr = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Unexpected type: (expected) Bool != Array<String> (inferred)"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
 	}
 }
 

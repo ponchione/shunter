@@ -236,16 +236,44 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 			return types.Value{}, mismatch(lit, kind)
 		}
 	case types.KindTimestamp:
-		if lit.Kind != LitString {
+		// Reference `parse(value, Timestamp)` at expr/src/lib.rs:359 has no
+		// Timestamp arm in the type-match and falls to the catch-all
+		// `bail!("Literal values for type {} are not supported")`. The outer
+		// `.map_err` at lib.rs:99 folds the anyhow into
+		// `InvalidLiteral::new(v.into_string(), ty)` for non-Bool literals;
+		// LitBool routes through `mismatch` → `UnexpectedTypeError` matching
+		// the lib.rs:94 Bool arm. The Shunter parser still drives the happy
+		// path (RFC3339-shaped LitString → Timestamp micros); only the reject
+		// branch is parity-routed.
+		if lit.Kind == LitString {
+			if micros, ok := parseTimestampLiteral(lit.Str); ok {
+				return types.NewTimestamp(micros), nil
+			}
+		}
+		if lit.Kind == LitBool {
 			return types.Value{}, mismatch(lit, kind)
 		}
-		micros, ok := parseTimestampLiteral(lit.Str)
+		text, ok := renderLiteralSourceText(lit)
 		if !ok {
-			return types.Value{}, fmt.Errorf("%w: malformed timestamp literal %q (expected RFC3339)", ErrUnsupportedSQL, lit.Str)
+			return types.Value{}, mismatch(lit, kind)
 		}
-		return types.NewTimestamp(micros), nil
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	case types.KindArrayString:
-		return types.Value{}, mismatch(lit, kind)
+		// Reference `parse(value, Array<String>)` at expr/src/lib.rs:359
+		// hits the array-kind catch-all `bail!("Literal values for type {}
+		// are not supported")`, folded by lib.rs:99 `.map_err` into
+		// `InvalidLiteral::new(v.into_string(), ty)`. LitBool stays on the
+		// lib.rs:94 `UnexpectedType` arm via `mismatch`. There is no array
+		// literal in the Shunter grammar today, so every literal kind is a
+		// reject; the source-text seam carries the literal verbatim.
+		if lit.Kind == LitBool {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		text, ok := renderLiteralSourceText(lit)
+		if !ok {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	default:
 		return types.Value{}, fmt.Errorf("%w: column kind %s not supported by SQL literal coercion", ErrUnsupportedSQL, kind)
 	}
@@ -453,9 +481,11 @@ func (e InvalidLiteralError) Unwrap() error { return ErrUnsupportedSQL }
 // algebraicName returns the reference `fmt_algebraic_type` short name for a
 // ValueKind (reference/SpacetimeDB/crates/sats/src/algebraic_type/fmt.rs
 // lines 15-40). Primitives use capitalized short tokens (`Bool`, `U32`,
-// `F32`, etc.); bytes renders as `Array<U8>`. Non-primitive kinds
-// (Timestamp, ArrayString) are not reachable through the bool-literal
-// mismatch path today; they fall back to the ValueKind stringer.
+// `F32`, etc.); `KindBytes` renders as `Array<U8>` and `KindArrayString` as
+// `Array<String>` via the parameterized array form. `KindTimestamp` is a
+// Product type in reference SATS (sats/src/timestamp.rs:11-13) and renders
+// as `(__timestamp_micros_since_unix_epoch__: I64)` through
+// `fmt_algebraic_type`'s product arm.
 func algebraicName(k types.ValueKind) string {
 	switch k {
 	case types.KindBool:
@@ -492,6 +522,10 @@ func algebraicName(k types.ValueKind) string {
 		return "String"
 	case types.KindBytes:
 		return "Array<U8>"
+	case types.KindTimestamp:
+		return "(__timestamp_micros_since_unix_epoch__: I64)"
+	case types.KindArrayString:
+		return "Array<String>"
 	default:
 		return k.String()
 	}

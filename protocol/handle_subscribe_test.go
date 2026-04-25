@@ -4104,9 +4104,14 @@ func TestHandleSubscribeSingle_ParityTimestampLiteralAccepted(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityTimestampMalformedRejected pins that a
-// non-RFC3339 string literal targeting a Timestamp column is rejected by the
-// coerce layer rather than silently becoming zero micros.
+// TestHandleSubscribeSingle_ParityTimestampMalformedRejected pins reference
+// `InvalidLiteral` text for a non-RFC3339 string on a Timestamp column on
+// the SubscribeSingle admission surface. Reference path: `parse(value,
+// Timestamp)` (expr/src/lib.rs:359) falls through the catch-all `bail!`,
+// folded by lib.rs:99 into `InvalidLiteral::new(v.into_string(), ty)`.
+// SubscribeSingle wraps compile errors with `DBError::WithSql`
+// (module_subscription_actor.rs:643), so the pin carries the
+// `, executing: ` suffix.
 func TestHandleSubscribeSingle_ParityTimestampMalformedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -4114,10 +4119,11 @@ func TestHandleSubscribeSingle_ParityTimestampMalformedRejected(t *testing.T) {
 		schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
 	)
 
+	const sqlText = "SELECT * FROM t WHERE ts = 'not-a-timestamp'"
 	msg := &SubscribeSingleMsg{
 		RequestID:   270,
 		QueryID:     271,
-		QueryString: "SELECT * FROM t WHERE ts = 'not-a-timestamp'",
+		QueryString: sqlText,
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
@@ -4127,8 +4133,117 @@ func TestHandleSubscribeSingle_ParityTimestampMalformedRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 271, "QueryID")
+	want := "The literal expression `not-a-timestamp` cannot be parsed as type `(__timestamp_micros_since_unix_epoch__: I64)`, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on a malformed timestamp literal")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityBoolLiteralOnTimestampRejectText pins
+// reference `UnexpectedType` text for a bool literal on a Timestamp column.
+// Reference lib.rs:94 routes the bool arm directly to UnexpectedType
+// (errors.rs:100) ahead of the lib.rs:99 InvalidLiteral fallback. Timestamp
+// inferred name is the SATS Product fmt. SubscribeSingle wraps with
+// DBError::WithSql.
+func TestHandleSubscribeSingle_ParityBoolLiteralOnTimestampRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
+	)
+
+	const sqlText = "SELECT * FROM t WHERE ts = TRUE"
+	msg := &SubscribeSingleMsg{
+		RequestID:   272,
+		QueryID:     273,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Unexpected type: (expected) Bool != (__timestamp_micros_since_unix_epoch__: I64) (inferred), executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a bool literal targets a Timestamp column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityStringLiteralOnArrayStringRejectText pins
+// reference `InvalidLiteral` text for a scalar string literal targeting an
+// Array<String> column. Reference `parse(value, Array<String>)` at
+// lib.rs:359 hits the array-kind catch-all `bail!`, folded by lib.rs:99
+// into `InvalidLiteral::new(v.into_string(), ty)`. Array<String> renders
+// through the parameterized array fmt. SubscribeSingle wraps with
+// DBError::WithSql.
+func TestHandleSubscribeSingle_ParityStringLiteralOnArrayStringRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
+	)
+
+	const sqlText = "SELECT * FROM t WHERE arr = 'x'"
+	msg := &SubscribeSingleMsg{
+		RequestID:   274,
+		QueryID:     275,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "The literal expression `x` cannot be parsed as type `Array<String>`, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a scalar literal targets an Array<String> column")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityBoolLiteralOnArrayStringRejectText pins
+// reference `UnexpectedType` text for a bool literal on an Array<String>
+// column. Reference lib.rs:94 routes the bool arm to UnexpectedType ahead
+// of the lib.rs:99 InvalidLiteral fallback. SubscribeSingle wraps with
+// DBError::WithSql.
+func TestHandleSubscribeSingle_ParityBoolLiteralOnArrayStringRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
+	)
+
+	const sqlText = "SELECT * FROM t WHERE arr = TRUE"
+	msg := &SubscribeSingleMsg{
+		RequestID:   276,
+		QueryID:     277,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "Unexpected type: (expected) Bool != Array<String> (inferred), executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when a bool literal targets an Array<String> column")
 	}
 }
 

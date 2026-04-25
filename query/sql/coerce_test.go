@@ -538,28 +538,85 @@ func TestCoerceStringLiteralToTimestamp(t *testing.T) {
 	}
 }
 
-// TestCoerceMalformedTimestampRejected pins that non-RFC3339 strings fail on a
-// Timestamp column rather than silently becoming zero micros.
+// TestCoerceMalformedTimestampRejected pins reference `InvalidLiteral` parity
+// for non-RFC3339 strings against a `KindTimestamp` column. Reference path:
+// `parse(value, Timestamp)` at expr/src/lib.rs:359 hits the catch-all
+// `bail!("Literal values for type {} are not supported")`, folded by
+// lib.rs:99 `.map_err` into `InvalidLiteral::new(v.into_string(), ty)`. The
+// type renders through `fmt_algebraic_type` for the Product Timestamp shape
+// `(__timestamp_micros_since_unix_epoch__: I64)`.
 func TestCoerceMalformedTimestampRejected(t *testing.T) {
+	const tsType = "(__timestamp_micros_since_unix_epoch__: I64)"
 	for _, s := range []string{"", "2025-02-10", "not-a-timestamp", "2025-02-10T15:45"} {
 		_, err := Coerce(Literal{Kind: LitString, Str: s}, types.KindTimestamp)
+		var ilErr InvalidLiteralError
+		if !errors.As(err, &ilErr) {
+			t.Fatalf("Coerce(%q) err = %v, want InvalidLiteralError", s, err)
+		}
+		if ilErr.Literal != s || ilErr.Type != tsType {
+			t.Fatalf("Coerce(%q) got {%q, %q}, want {%q, %q}", s, ilErr.Literal, ilErr.Type, s, tsType)
+		}
 		if !errors.Is(err, ErrUnsupportedSQL) {
-			t.Fatalf("Coerce(%q) err = %v, want ErrUnsupportedSQL", s, err)
+			t.Fatalf("Coerce(%q) err does not unwrap to ErrUnsupportedSQL: %v", s, err)
 		}
 	}
 }
 
+// TestCoerceIntLiteralOnTimestampRejected pins LitInt on KindTimestamp ->
+// `InvalidLiteral` with the integer source text and the reference Timestamp
+// Product type. Mirrors the malformed-string shape; reference parses every
+// non-Timestamp literal through the same catch-all.
 func TestCoerceIntLiteralOnTimestampRejected(t *testing.T) {
-	_, err := Coerce(Literal{Kind: LitInt, Int: 0}, types.KindTimestamp)
+	const tsType = "(__timestamp_micros_since_unix_epoch__: I64)"
+	_, err := Coerce(Literal{Kind: LitInt, Int: 42}, types.KindTimestamp)
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	if ilErr.Literal != "42" || ilErr.Type != tsType {
+		t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, "42", tsType)
+	}
 	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
 	}
 }
 
+// TestCoerceFloatLiteralOnTimestampRejected pins LitFloat on KindTimestamp ->
+// `InvalidLiteral` with the float source text and the reference Timestamp
+// Product type.
 func TestCoerceFloatLiteralOnTimestampRejected(t *testing.T) {
-	_, err := Coerce(Literal{Kind: LitFloat, Float: 0}, types.KindTimestamp)
+	const tsType = "(__timestamp_micros_since_unix_epoch__: I64)"
+	_, err := Coerce(Literal{Kind: LitFloat, Float: 1.3}, types.KindTimestamp)
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	if ilErr.Literal != "1.3" || ilErr.Type != tsType {
+		t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, "1.3", tsType)
+	}
 	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+	}
+}
+
+// TestCoerceBoolLiteralOnTimestampRejected pins LitBool on KindTimestamp ->
+// `UnexpectedType` with `Bool` expected and the reference Timestamp Product
+// type inferred. Reference path: lib.rs:94 routes
+// `(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty))` directly to
+// `UnexpectedType` (errors.rs:100), bypassing the lib.rs:99 InvalidLiteral
+// fallback used by other literal kinds.
+func TestCoerceBoolLiteralOnTimestampRejected(t *testing.T) {
+	const tsType = "(__timestamp_micros_since_unix_epoch__: I64)"
+	_, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindTimestamp)
+	var utErr UnexpectedTypeError
+	if !errors.As(err, &utErr) {
+		t.Fatalf("err = %v, want UnexpectedTypeError", err)
+	}
+	if utErr.Expected != "Bool" || utErr.Inferred != tsType {
+		t.Fatalf("got {%q, %q}, want {Bool, %q}", utErr.Expected, utErr.Inferred, tsType)
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
 	}
 }
 
@@ -583,23 +640,49 @@ func TestCoerceSenderRejectsArrayStringColumn(t *testing.T) {
 	}
 }
 
-// TestCoerceLiteralsRejectedOnArrayStringColumn pins that no SQL literal
-// grammar can bind to an ArrayString column — there is no array literal in
-// the Shunter grammar, and every scalar literal shape fails with a
-// type-mismatch error.
+// TestCoerceLiteralsRejectedOnArrayStringColumn pins reference error class
+// routing on `KindArrayString`. Reference path: `parse(value, Array<String>)`
+// at expr/src/lib.rs:359 hits the array-kind catch-all
+// `bail!("Literal values for type {} are not supported")`, folded by
+// lib.rs:99 `.map_err` into `InvalidLiteral::new(v.into_string(), ty)` for
+// non-Bool literals. LitBool stays on the lib.rs:94 `UnexpectedType` arm.
+// The type renders through `fmt_algebraic_type` for the `Array<...>`
+// parameterized form: `Array<String>`.
 func TestCoerceLiteralsRejectedOnArrayStringColumn(t *testing.T) {
-	cases := []Literal{
-		{Kind: LitInt, Int: 0},
-		{Kind: LitFloat, Float: 1.0},
-		{Kind: LitBool, Bool: true},
-		{Kind: LitString, Str: "alpha"},
-		{Kind: LitBytes, Bytes: []byte{0x01}},
+	const arrType = "Array<String>"
+	invalidCases := []struct {
+		lit  Literal
+		want string
+	}{
+		{Literal{Kind: LitInt, Int: 1}, "1"},
+		{Literal{Kind: LitFloat, Float: 1.3}, "1.3"},
+		{Literal{Kind: LitString, Str: "alpha"}, "alpha"},
+		{Literal{Kind: LitBytes, Bytes: []byte{0xFF}, Text: "0xFF"}, "0xFF"},
+		{Literal{Kind: LitBigInt, Big: bigIntFromStr(t, "10000000000000000000")}, "10000000000000000000"},
 	}
-	for _, lit := range cases {
-		_, err := Coerce(lit, types.KindArrayString)
-		if !errors.Is(err, ErrUnsupportedSQL) {
-			t.Fatalf("literal %v on KindArrayString: err = %v, want ErrUnsupportedSQL", lit.Kind, err)
+	for _, c := range invalidCases {
+		_, err := Coerce(c.lit, types.KindArrayString)
+		var ilErr InvalidLiteralError
+		if !errors.As(err, &ilErr) {
+			t.Fatalf("literal %v: err = %v, want InvalidLiteralError", c.lit.Kind, err)
 		}
+		if ilErr.Literal != c.want || ilErr.Type != arrType {
+			t.Fatalf("literal %v: got {%q, %q}, want {%q, %q}", c.lit.Kind, ilErr.Literal, ilErr.Type, c.want, arrType)
+		}
+		if !errors.Is(err, ErrUnsupportedSQL) {
+			t.Fatalf("literal %v: err does not unwrap to ErrUnsupportedSQL: %v", c.lit.Kind, err)
+		}
+	}
+	_, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindArrayString)
+	var utErr UnexpectedTypeError
+	if !errors.As(err, &utErr) {
+		t.Fatalf("LitBool: err = %v, want UnexpectedTypeError", err)
+	}
+	if utErr.Expected != "Bool" || utErr.Inferred != arrType {
+		t.Fatalf("LitBool: got {%q, %q}, want {Bool, %q}", utErr.Expected, utErr.Inferred, arrType)
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("LitBool: err does not unwrap to ErrUnsupportedSQL: %v", err)
 	}
 }
 
