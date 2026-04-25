@@ -825,13 +825,24 @@ func TestParseJoinQualifiedProjectionOnCrossJoin(t *testing.T) {
 	}
 }
 
-func TestParseRejectsUnaliasedSelfCrossJoin(t *testing.T) {
-	_, err := Parse("SELECT t.* FROM t JOIN t")
-	if err == nil {
-		t.Fatal("expected error for unaliased self cross join")
+// TestParseDefersUnaliasedSelfCrossJoin pins the parser's
+// deferred-rejection behavior for the unaliased self-join shape: both
+// sides' alias is derived from the base table `t` so they collide,
+// but the rejection is deferred to the compile stage so the reference
+// `type_relvar` ordering holds.
+func TestParseDefersUnaliasedSelfCrossJoin(t *testing.T) {
+	stmt, err := Parse("SELECT t.* FROM t JOIN t")
+	if err != nil {
+		t.Fatalf("Parse error: %v (parser must defer dup-alias rejection to compile stage)", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata with AliasCollision=true")
+	}
+	if !stmt.Join.AliasCollision {
+		t.Fatal("Join.AliasCollision = false, want true")
+	}
+	if stmt.Join.LeftAlias != "t" || stmt.Join.RightAlias != "t" {
+		t.Fatalf("aliases = %q/%q, want t/t", stmt.Join.LeftAlias, stmt.Join.RightAlias)
 	}
 }
 
@@ -1355,13 +1366,27 @@ func TestParseSelfJoinColumnProjectionProjectsRight(t *testing.T) {
 	}
 }
 
-func TestParseRejectsDistinctTableDuplicateJoinAliases(t *testing.T) {
-	_, err := Parse("SELECT x.id FROM t AS x JOIN s AS x")
-	if err == nil {
-		t.Fatal("expected rejection for duplicate join aliases")
+// TestParseDefersDistinctTableDuplicateJoinAliases pins the parser's
+// deferred-rejection behavior: `LeftAlias == RightAlias` no longer
+// emits a parser-time `DuplicateName` error. Reference `type_from`
+// (`expr/src/check.rs:79-89`) resolves the left relvar BEFORE the
+// HashSet duplicate-alias check, so missing-table rejections must
+// precede the dup-alias error. The compile stage emits
+// `DuplicateNameError{Name: LeftAlias}` after both schema lookups
+// succeed.
+func TestParseDefersDistinctTableDuplicateJoinAliases(t *testing.T) {
+	stmt, err := Parse("SELECT x.id FROM t AS x JOIN s AS x")
+	if err != nil {
+		t.Fatalf("Parse error: %v (parser must defer dup-alias rejection to compile stage)", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	if stmt.Join == nil {
+		t.Fatal("stmt.Join is nil; parser should still build a JoinClause for the deferred case")
+	}
+	if !stmt.Join.AliasCollision {
+		t.Fatal("stmt.Join.AliasCollision = false, want true (parser must mark dup-alias for the compile stage)")
+	}
+	if stmt.Join.LeftAlias != "x" || stmt.Join.RightAlias != "x" {
+		t.Fatalf("aliases = %q/%q, want x/x", stmt.Join.LeftAlias, stmt.Join.RightAlias)
 	}
 }
 

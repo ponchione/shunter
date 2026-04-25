@@ -6367,3 +6367,42 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedWildcardQualifierReje
 		t.Error("executor should not be called when a wildcard projection qualifier is out of scope")
 	}
 }
+
+// TestHandleSubscribeSingle_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejectText
+// pins reference `type_from` ordering: left-relvar resolution precedes
+// duplicate-alias detection. SubscribeSingle wraps with DBError::WithSql.
+func TestHandleSubscribeSingle_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	const sqlText = "SELECT dup.* FROM missing AS dup JOIN s AS dup ON dup.id = dup.id"
+	msg := &SubscribeSingleMsg{
+		RequestID:   426,
+		QueryID:     427,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "no such table: `missing`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when the left join table is missing")
+	}
+}

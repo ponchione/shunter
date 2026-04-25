@@ -6862,3 +6862,40 @@ func TestHandleOneOffQuery_ParityUnresolvedVarQualifiedWildcardQualifierRejectTe
 		t.Fatalf("Error = %q, want %q (qualified wildcard qualifier mismatch must emit Unresolved::Var)", *result.Error, want)
 	}
 }
+
+// TestHandleOneOffQuery_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejectText
+// pins reference `type_from` (`expr/src/check.rs:79-89`) ordering: the
+// left relvar is resolved via `type_relvar` BEFORE the join loop's
+// duplicate-alias HashSet check fires. So
+// `SELECT dup.* FROM missing AS dup JOIN s AS dup ON dup.id = dup.id`
+// emits the missing-table text for the left side, not `Duplicate name`.
+func TestHandleOneOffQuery_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejectText(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "s",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build schema = %v", err)
+	}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xF1},
+		QueryString: "SELECT dup.* FROM missing AS dup JOIN s AS dup ON dup.id = dup.id",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "no such table: `missing`. If the table exists, it may be marked private."
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q (left-table schema lookup must precede duplicate-alias rejection)", *result.Error, want)
+	}
+}

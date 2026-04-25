@@ -120,14 +120,24 @@ type ColumnRef struct {
 // JoinClause is the parsed two-table join metadata for a narrow join-backed SQL slice.
 // LeftAlias / RightAlias carry the relation-instance identity separately from the
 // physical table name so callers can detect aliased self-joins.
+//
+// AliasCollision marks a parser-detected `LeftAlias == RightAlias` shape whose
+// `DuplicateName` rejection has been deferred to the compile stage. Reference
+// `type_from` (`expr/src/check.rs:79-89`) resolves the left relvar through
+// `type_relvar` BEFORE entering the join loop's HashSet duplicate-alias check,
+// so missing-table rejections must precede the dup-alias error. The compile
+// stage emits `DuplicateNameError{Name: LeftAlias}` after both schema lookups
+// succeed; ON-clause / WHERE / projection-column resolution is skipped on the
+// parser side because either side's relvar may be absent.
 type JoinClause struct {
-	LeftTable  string
-	RightTable string
-	LeftAlias  string
-	RightAlias string
-	HasOn      bool
-	LeftOn     ColumnRef
-	RightOn    ColumnRef
+	LeftTable      string
+	RightTable     string
+	LeftAlias      string
+	RightAlias     string
+	HasOn          bool
+	LeftOn         ColumnRef
+	RightOn        ColumnRef
+	AliasCollision bool
 }
 
 // Predicate is the structured WHERE tree for parsed SQL.
@@ -885,7 +895,25 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 		// derives each side's alias from its base table when no `AS` is
 		// written. `Relvars` is byte-equal `SqlIdent`, so case-distinct
 		// aliases (e.g. `"R"` and `r`) do NOT collide.
-		return nil, nil, nil, DuplicateNameError{Name: rightAlias}
+		//
+		// Defer the rejection to the compile stage so reference
+		// `type_relvar` ordering holds: if the LEFT or RIGHT base table
+		// is missing, the schema lookup at `compileSQLQueryString`
+		// emits the missing-table text BEFORE the dup-alias check fires.
+		// Skip ON-clause resolution because the qualifier map collapses
+		// when both aliases are byte-equal — we don't need it; the
+		// compile-stage dup rejection subsumes any ON-clause findings.
+		// Drain remaining tokens up to the statement terminator so the
+		// outer parseStatement EOF guard sees a clean tail.
+		p.consumeUntilStatementEnd()
+		return &JoinClause{
+			LeftTable:      leftTable,
+			RightTable:     rightTable,
+			LeftAlias:      leftAlias,
+			RightAlias:     rightAlias,
+			HasOn:          false,
+			AliasCollision: true,
+		}, rightQualifiers, nil, nil
 	}
 	if !isKeywordToken(p.peek(), "ON") {
 		return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil, nil
@@ -1274,6 +1302,22 @@ func (p *parser) expectKeyword(kw string) error {
 
 func (p *parser) unsupported(msg string) error {
 	return fmt.Errorf("%w: %s", ErrUnsupportedSQL, msg)
+}
+
+// consumeUntilStatementEnd advances the parser past every remaining token in
+// the current statement (any optional trailing semicolon and the EOF marker
+// are left in place for the outer parseStatement EOF guard). Used after a
+// deferred parser rejection (alias collision) to keep the outer EOF check
+// from emitting an `unexpected token` parse error before the deferred
+// compile-stage rejection has a chance to fire.
+func (p *parser) consumeUntilStatementEnd() {
+	for {
+		k := p.peek().kind
+		if k == tokEOF || k == tokSemicolon {
+			return
+		}
+		p.advance()
+	}
 }
 
 func matchesQualifier(candidate string, qualifiers []string) bool {
