@@ -15,7 +15,8 @@ Then inspect live code with Go tools:
 
 ```bash
 rtk go list -json ./query/sql ./subscription ./protocol ./executor
-rtk go doc ./query/sql.Coerce
+rtk go doc ./query/sql.UnsupportedSelectError
+rtk go doc ./query/sql.UnresolvedVarError
 ```
 
 Open `TECH-DEBT.md` only if you need the broader backlog. Open `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md` or `docs/decomposition/005-protocol/SPEC-005-protocol.md` only for a specific contract question.
@@ -24,22 +25,21 @@ Use `rtk` for every shell command, including git. Do not push unless explicitly 
 
 ## Current Objective
 
-Slices A, B, C, and D are landed (source-text seam, reference parse routing, compound algebraic names + Timestamp / Array<String> error class routing, compile-stage `DuplicateName` + join `UnexpectedType` / `InvalidOp` parity, `Unresolved::Var` text for missing-field lookups — see closure summary below). The next batch is **Slice E: SubscribeSingle column-projection guard reorder + base-table-after-alias `Unresolved::Var` parity**. Both shapes touch the same compile-stage seam in `protocol/handle_subscribe.go::compileSQLQueryString` (the `allowProjection=false` projection-column-list rejection at lines 187-192) and in `query/sql/parser.go::parseQualifiedColumnRef` respectively, so the slice naturally batches as one parser-side change plus one ordering swap on the protocol side.
+Slices A, B, C, D, E.1, E.2, F.1, F.2, F.3, F.4 are landed (source-text seam, reference parse routing, compound algebraic names + Timestamp / Array<String> error class routing, compile-stage `DuplicateName` + join `UnexpectedType` / `InvalidOp` parity, `Unresolved::Var` text for missing-field lookups, SubscribeSingle projection-column reorder, base-table-after-alias `Unresolved::Var`, SELECT ALL/DISTINCT set-quantifier rejection, WHERE-precedes-projection on single-table SELECT, JOIN ON resolution precedes wildcard guard + WHERE FALSE pruning — see closure summary below).
 
-The handoff intentionally lists the Slice E shapes by reject text rather than implementation sketch. Scout the live code first before deciding emit sites; the order in which Shunter currently rejects each shape changes the cheapest cut point.
+The next batch is **Slice G**: pick one of the following well-scouted, well-bounded shapes from `TECH-DEBT.md::OI-002`. They are small, self-contained, and do not require additional reference scouting:
 
-Slice E confirmed test shapes (write failing first; pin OneOff raw + SubscribeSingle WithSql per shape):
+1. **G.1 `missing-left-table-precedence`** — `SELECT dup.* FROM missing AS dup JOIN s AS dup ON dup.id = dup.id` should return `` no such table: `missing`. If the table exists, it may be marked private. `` instead of `` Duplicate name `dup` ``. Reorder `query/sql/parser.go::parseJoinClause` (or `parseStatement`) so left-table schema lookup fires BEFORE duplicate-alias detection. Reference `type_from` resolves the left relvar (`type_relvar`) before entering the join-loop duplicate-alias check (`expr/src/check.rs:79-89`). Note: schema lookup currently happens in `protocol/handle_subscribe.go::compileSQLQueryString` AFTER parsing — but the duplicate-alias rejection happens at parse time. Closing the parity gap likely requires either deferring the parser-side dup-alias check or threading a typed `MissingTableError` through that pre-empts the dup-alias arm.
 
-- `SELECT missing FROM t` on the SubscribeSingle / SubscribeMulti surfaces -> `` `missing` is not in scope `` (currently SubscribeSingle rejects earlier with `Column projections are not supported in subscriptions; Subscriptions must return a table type`). OneOff is already pinned (Slice D). Need to swap the column-resolution pass to fire BEFORE the `allowProjection=false` guard — reference `type_proj::Exprs` (check.rs:67-80) walks each projection element through `type_expr` (which would emit `Unresolved::Var`) BEFORE `expect_table_type` runs the `Unsupported::ReturnType` check at check.rs:174.
-- `SELECT * FROM t AS r WHERE t.u32 = 5` -> raw OneOff `` `t` is not in scope `` and SubscribeSingle `` `t` is not in scope, executing: ... `` (currently both surfaces reject at the parser with `parse: unsupported SQL: qualified column "t" does not match relation`). The base-table qualifier `t` is no longer in scope once the alias `r` is declared; reference `_type_expr` lib.rs:103 emits `Unresolved::var(&table)` when `vars.deref().get(&*table)` returns None.
+2. **G.2 `qualified-projection-qualifier-not-in-scope`** — `SELECT x.u32 FROM t` should return `` `x` is not in scope `` instead of `parse: unsupported SQL: projection qualifier "x" does not match relation`. Parser-side: route `parser.go::resolveProjectionColumns` (or wherever the projection qualifier mismatch fires) through `UnresolvedVarError{Name: qualifier}`. Reference `type_proj::Exprs` (`expr/src/lib.rs:65-78`) sends the field expression through `type_expr`, whose relvar lookup miss emits `Unresolved::var(&table)` (`expr/src/lib.rs:103`). Mirrors Slice E.2's parser-side reroute pattern.
 
-Both shapes route through the existing `sql.UnresolvedVarError` typed error landed in Slice D. The SubscribeSingle column-projection guard reorder requires updating the existing `TestHandleSubscribeSingle_Parity{Aggregate,ColumnList}ReturnTypeRejectText` pins to use a column reference whose name DOES exist on the table (the new flow: missing column → `Unresolved::Var`; existing column with column-list projection → `Unsupported::ReturnType`).
+3. **G.3 `qualified-wildcard-qualifier-not-in-scope`** — `SELECT x.* FROM t` should return `` `x` is not in scope ``. Parser-side: route `parser.go`'s wildcard-qualifier mismatch through `UnresolvedVarError{Name: qualifier}`. Reference `type_proj` checks `input.has_field(&var)` for `Project::Star(Some(var))` and otherwise emits `Unresolved::var(&var)`. Companion to G.2.
 
-## Adjacent Slice E Candidates (Optional Bundle)
+G.2 + G.3 share the same parser locus (projection qualifier resolution) and naturally bundle together. G.1 is independent.
 
-Recorded in `TECH-DEBT.md::OI-002`. Group with Slice E only if the change locus overlaps; otherwise keep them as separate slices.
+## Confirmed Work Queue
 
-- Quoted-identifier case preservation (`SELECT * FROM "T"`, `SELECT * FROM t WHERE "U32" = 7`, `SELECT * FROM t AS "R" WHERE r.u32 = 7`, `SELECT t.* FROM t AS "R" JOIN s AS r ON "R".id = r.id`). Reference `SqlIdent` is case-sensitive; Shunter currently uses `strings.EqualFold` across schema lookup, column lookup, and alias matching. Pinned by `protocol/oi002_case_alias_duplicate_scout_tmp_test.go::TestOI002Scout_CaseDistinctQuotedAliasesDoNotCollide` (and presumably the other two scout files that disappeared during the last session — re-add if still relevant). This is a parser-side identifier-handling slice; large blast radius across alias/column/table resolution. Larger than Slice E.
+The above (G.1, G.2, G.3) are already live-code scouted and recorded in `TECH-DEBT.md::OI-002`. Add failing tests first, then implement.
 
 ## Closed Guardrails
 
@@ -53,45 +53,40 @@ Also treat these recently closed surfaces as done unless a new failing test prov
 - SubscribeSingle / SubscribeMulti initial-eval error text parity
 - UnsubscribeSingle / UnsubscribeMulti final-eval error text parity
 - `SELECT *` on `JOIN` rejection text across subscribe and one-off paths
-- `Unresolved::Table` literal (`` no such table: `{t}`. If the table exists, it may be marked private. ``) across subscribe (WithSql-wrapped) and one-off (raw)
-- `Unresolved::Var` literal (`` `{name}` is not in scope ``) across all eight compile-stage emit sites in `protocol/handle_subscribe.go` (Slice D, 2026-04-25). The previous `Unresolved::Field`-shape text (`` `{table}` does not have a field `{column}` ``) was a misclassification — reference does NOT reach `Unresolved::Field` from any subscription/one-off SELECT path.
-- `Unsupported::ReturnType` literal (`Column projections are not supported in subscriptions; Subscriptions must return a table type`) unified across the aggregate and column-list subscribe-projection guards at `protocol/handle_subscribe.go::compileSQLQueryString`. **Slice E will reorder this guard so missing-column resolution fires first; the existing pins use a column name that DOES exist on the table, so the reorder will not change their text — but new test shapes for missing columns under SubscribeSingle column-list projection are needed.**
-- `UnexpectedType` literal (`Unexpected type: (expected) Bool != {ty} (inferred)`) for bool literals against non-bool primitive columns. Emitted at the Shunter coerce boundary via `sql.UnexpectedTypeError` (Unwrap → `ErrUnsupportedSQL`) and passed through the `normalizeSQLFilterForRelations` wrapper bypass.
-- `InvalidLiteral` literal (`` The literal expression `{literal}` cannot be parsed as type `{ty}` ``) for integer-range overflow / negative-on-unsigned (32/64/128/256-bit), LitFloat → integer, and non-Bool primitive → KindBool. Routed through `sql.InvalidLiteralError`.
-- **Widening** parity for LitInt / LitFloat / LitBigInt / LitBytes (parser-source) → `KindString` and LitString numeric token / LitBytes-with-Text → integer/float kinds via `parseNumericLiteral`.
-- **Source-text seam** on `sql.Literal.Text` populated at `parseLiteral` and `parseNumericLiteral`. `renderLiteralSourceText` prefers `Text` over canonical numeric formatting.
-- **`KindBytes` reference routing** through `decodeReferenceHex` (mirrors `from_hex_pad`).
-- **`:sender` reference resolution** at the top of `coerceValue` mirrors reference `resolve_sender`.
-- **`KindTimestamp` / `KindArrayString` algebraic-name + error-class parity (Slice B, 2026-04-25).** `algebraicName` renders the SATS Product `(__timestamp_micros_since_unix_epoch__: I64)` for `KindTimestamp` and the parameterized `Array<String>` for `KindArrayString`.
-- **Compile-stage `DuplicateName` / `UnexpectedType` / `InvalidOp` parity (Slice C, 2026-04-25).** Three new typed errors land in `query/sql/coerce.go`. Slot ordering for `UnexpectedType` matches reference `UnexpectedType::new(col_type, ty)` at `lib.rs:111-112` — RIGHT side's column type renders in `(expected)` slot, LEFT side's column type in `(inferred)` slot.
-- **`Unresolved::Var` parity for missing-field lookups (Slice D, 2026-04-25).** New typed error `sql.UnresolvedVarError{Name string}` mirrors `expr/src/errors.rs:11-13` (renders `` `{name}` is not in scope ``). All eight compile-stage `` does not have a field `` emit sites in `protocol/handle_subscribe.go` re-routed onto `UnresolvedVarError{Name: column}`. SubscribeSingle column-list projection still hits `Unsupported::ReturnType` first for `SELECT missing FROM t` (this is the Slice E target). Pinned by `TestHandleOneOffQuery_ParityUnresolvedVar{UnqualifiedWhere,ProjectionColumn,JoinOnMissing,JoinWhereQualifiedMissing}RejectText` and the SubscribeSingle counterparts for the three scenarios that survive the column-projection guard.
+- `Unresolved::Table` literal across subscribe (WithSql-wrapped) and one-off (raw)
+- `Unresolved::Var` literal across all eight compile-stage emit sites in `protocol/handle_subscribe.go` (Slice D)
+- `Unsupported::ReturnType` literal unified across the aggregate and column-list subscribe-projection guards
+- `UnexpectedType` literal for bool literals against non-bool primitive columns
+- `InvalidLiteral` literal for integer-range overflow / negative-on-unsigned (32/64/128/256-bit), LitFloat → integer, and non-Bool primitive → KindBool
+- **Widening** parity for LitInt / LitFloat / LitBigInt / LitBytes (parser-source) → `KindString` and LitString numeric token / LitBytes-with-Text → integer/float kinds
+- **Source-text seam** on `sql.Literal.Text` populated at `parseLiteral` and `parseNumericLiteral`
+- **`KindBytes` reference routing** through `decodeReferenceHex`
+- **`:sender` reference resolution** at the top of `coerceValue` mirrors reference `resolve_sender`
+- **`KindTimestamp` / `KindArrayString` algebraic-name + error-class parity (Slice B)**
+- **Compile-stage `DuplicateName` / `UnexpectedType` / `InvalidOp` parity (Slice C)**
+- **`Unresolved::Var` parity for missing-field lookups (Slice D)**
+- **SubscribeSingle `SELECT missing FROM t` projection-column reorder (Slice E.1)** — `compileProjectionColumns` runs BEFORE the `allowProjection=false` column-list guard. The `TestHandleSubscribeSingle_Parity{Aggregate,ColumnList}ReturnTypeRejectText` pins now use existing column names; new pin `TestHandleSubscribeSingle_ParityUnresolvedVarProjectionColumnRejectText` covers the missing-column case under SubscribeSingle column-list projection.
+- **Base-table-after-alias `Unresolved::Var` parity (Slice E.2)** — `query/sql/parser.go::parseQualifiedColumnRef` and `parseColumnRefForPredicate` route the `qualified column %q does not match relation` rejection through `UnresolvedVarError{Name: qualifier}`. Pinned by OneOff raw + SubscribeSingle WithSql pairs `TestHandle{OneOffQuery,SubscribeSingle}_ParityUnresolvedVarBaseTableAfterAliasRejectText`.
+- **`SELECT ALL` / `SELECT DISTINCT` set-quantifier rejection (Slice F.1, 2026-04-25)** — New typed error `sql.UnsupportedSelectError{SQL string}` with two render forms (`Error()` for OneOff `Unsupported: ...`, `SubscribeError()` for subscribe `Unsupported SELECT: ...`). `parseProjection` rejects unquoted `ALL`/`DISTINCT` first-projection token through the typed error before column reinterpretation. `wrapSubscribeCompileErrorSQL` switches to `SubscribeError()` before applying the WithSql wrap. Pinned by OneOff raw + SubscribeSingle WithSql pairs `TestHandle{OneOffQuery,SubscribeSingle}_Parity{AllModifierRejected,DistinctProjectionRejected}`.
+- **WHERE precedes projection on single-table SELECT (Slice F.2, 2026-04-25)** — `compileSQLQueryString`'s single-table branch resolves WHERE BEFORE projection-column resolution. Pinned by `TestHandle{OneOffQuery,SubscribeSingle}_ParityUnresolvedVarWherePrecedesProjectionRejectText` (`SELECT missing FROM t WHERE other_missing = 1` → `` `other_missing` is not in scope ``).
+- **JOIN ON resolution precedes bare-wildcard guard + WHERE FALSE pruning (Slice F.3+F.4, 2026-04-25)** — `compileSQLQueryString`'s join branch resolves the ON columns + ON type-mismatch / Array-type checks BEFORE `InvalidWildcard::Join` and BEFORE the `FalsePredicate` short-circuit. Pinned by OneOff raw + SubscribeSingle WithSql pairs `TestHandle{OneOffQuery,SubscribeSingle}_ParityUnresolvedVar{BareJoinWildcardOnMissing,JoinOnMissingNotHiddenByWhereFalse}RejectText`.
 
 If proof is needed, use `rtk git log`, `rtk git show`, and the relevant tests instead of expanding this handoff with closure archaeology.
 
-## Confirmed Work Queue
+## Adjacent OI-002 Candidates
 
-These items are already live-code scouted and recorded in `TECH-DEBT.md::OI-002`. Do **not** spend the next turn rescouting them unless an implementation detail becomes ambiguous. Add failing tests first, then implement.
+Recorded in `TECH-DEBT.md::OI-002`. Group with Slice G only if the change locus overlaps; otherwise keep them as separate slices.
 
-### Slice E: SubscribeSingle Projection-Column Reorder + Base-Table-After-Alias Parity
-
-This is the next implementation slice. It touches compile-stage validation in `protocol/handle_subscribe.go::compileSQLQueryString` and parser-stage qualified-column resolution in `query/sql/parser.go`.
-
-Confirmed test shapes:
-- `SELECT missing FROM t` on SubscribeSingle / SubscribeMulti -> `` `missing` is not in scope, executing: `...` ``. Requires reordering the `allowProjection=false` column-list rejection to fire AFTER `compileProjectionColumns` resolves each column through `compileProjectionColumn` (which now emits `UnresolvedVarError`).
-- `SELECT * FROM t AS r WHERE t.u32 = 5` on OneOff (raw) and SubscribeSingle (WithSql) -> `` `t` is not in scope ``. Requires routing `parser.go::parseQualifiedColumnRef`'s `qualified column %q does not match relation` rejection through `UnresolvedVarError{Name: qualifier}` instead of the parser `unsupported` text. Mirrors reference `_type_expr` lib.rs:103 which raises `Unresolved::var(&table)` when the qualifier is absent from `Relvars`.
-
-Suggested targeted packages (confirm by scout):
-- `query/sql/parser.go::parseQualifiedColumnRef`: convert the `qualified column %q does not match relation` rejection into a typed `UnresolvedVarError`. The existing `compileSQLQueryString` `errors.As(err, &sql.DuplicateNameError{})` bypass on the `parse:` wrap should be extended to also bypass `UnresolvedVarError`.
-- `protocol/handle_subscribe.go::compileSQLQueryString` (lines 187-192): swap the order so `compileProjectionColumns` runs before the `allowProjection=false` column-list guard, OR pre-resolve each projection column's existence inside the guard branch. Update existing pins for `Aggregate,ColumnList` ReturnType tests to use a column name that exists.
-- Existing pins to update: `TestHandleSubscribeSingle_Parity{Aggregate,ColumnList}ReturnTypeRejectText` should keep using existing column names so they continue testing the `Unsupported::ReturnType` text; new pins cover the missing-column case under SubscribeSingle column-list projection.
-
-### Adjacent OI-002 Candidates (May or May Not Bundle)
-
-Recorded in `TECH-DEBT.md::OI-002`. Group with Slice E only if the change locus overlaps; otherwise keep them as separate slices.
-
-- Quoted-identifier case preservation across schema lookup, column lookup, and alias matching. Reference `SqlIdent` is byte-equal case-sensitive; Shunter uses `strings.EqualFold` throughout. Pinned by `protocol/oi002_case_alias_duplicate_scout_tmp_test.go::TestOI002Scout_CaseDistinctQuotedAliasesDoNotCollide`. Larger blast radius than Slice E; keep separate.
-- SubscribeSingle `LIMIT` rejection text (`Unsupported: SELECT * FROM t LIMIT 5, executing: ...` from the reference subscription parser). The previous scout pin was at `protocol/oi002_scout_tmp_test.go::TestOI002Scout_SubscribeSingleLimitRejectText` but that file was deleted during the last session — re-add if still relevant.
-- Cross-join WHERE column equality on the SubscribeSingle path (the OneOff side closed in Slice C; SubscribeSingle still hits the admission gate). Wider work — separate slice.
+- Quoted-identifier case preservation (`SELECT * FROM "T"`, `SELECT * FROM t WHERE "U32" = 7`, alias case preservation, etc.). Reference `SqlIdent` is byte-equal case-sensitive; Shunter currently uses `strings.EqualFold` across schema lookup, column lookup, and alias matching. Larger blast radius; keep separate.
+- `JOIN ON` strict-equality guard (`SELECT t.* FROM t JOIN s ON t.id = s.id AND s.id = 7` → `Non-inner joins are not supported`).
+- Unqualified-names-in-join unified text (`Names must be qualified when using joins` reference literal across three Shunter-local strings).
+- Boolean-constant simplification masking type errors (`SELECT * FROM t WHERE FALSE AND missing = 1` should still emit `` `missing` is not in scope ``). Different from F.3+F.4 (which closed the JOIN ON variant); this is the WHERE-only variant in non-join scope.
+- `:sender` exact-case parameter matching (`:SENDER` should reject as `Unsupported expression: :SENDER`).
+- SubscribeSingle / OneOff cross-join WHERE Bool-expression admission.
+- Inner-join WHERE column comparisons (field-vs-field) admission.
+- SubscribeSingle's projection-return guard masking FROM/WHERE errors on projection queries (`SELECT u32 FROM missing_table` should emit the table-not-found text, not the column-projection guard).
+- OneOff `LIMIT` numeric parsing (`SELECT * FROM t LIMIT 1e3` should parse as `1000`).
+- SubscribeSingle `LIMIT` rejection text (`Unsupported: SELECT * FROM t LIMIT 5` from the reference subscription parser).
 
 ### Remaining Scout Budget
 
