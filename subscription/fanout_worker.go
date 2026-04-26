@@ -138,12 +138,10 @@ func waitForDurable(ctx context.Context, durable <-chan types.TxID, waited *bool
 func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	memo := NewEncodingMemo()
 
-	// Phase 1.5 CallReducerFlags::NoSuccessNotify: when the caller opted
+	// CallReducerFlags::NoSuccessNotify: when the caller opted
 	// out of the success echo and the outcome committed, suppress the
-	// caller's heavy delivery entirely. Failure / out-of-energy
-	// outcomes still flow so the caller observes non-success states.
-	// Mirrors the reference behavior of dropping the caller from the
-	// fan-out recipient set entirely in that case.
+	// caller's heavy delivery entirely. Failure outcomes still flow so
+	// the caller observes non-success states.
 	callerSuppressed := msg.CallerConnID != nil && msg.CallerOutcome != nil &&
 		msg.CallerOutcome.Kind == CallerOutcomeCommitted &&
 		msg.CallerOutcome.Flags == CallerOutcomeFlagNoSuccessNotify
@@ -204,13 +202,13 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		}
 	}
 
-	// Deliver heavy TransactionUpdate to caller. Phase 1.5 invariant:
+	// Deliver heavy TransactionUpdate to caller:
 	// when CallerConnID is set the caller ALWAYS receives a heavy
-	// envelope — success with possibly-empty update, failure, or
-	// out-of-energy — so the caller never silently loses its outcome
-	// even on empty changesets or no-active-subscription paths. The
-	// NoSuccessNotify caller-echo opt-out (above) is the one exception:
-	// effCallerConnID / effCallerOutcome are nil in that case.
+	// envelope — success with possibly-empty update or failure — so the
+	// caller never silently loses its outcome even on empty changesets
+	// or no-active-subscription paths. The NoSuccessNotify caller-echo
+	// opt-out (above) is the one exception: effCallerConnID /
+	// effCallerOutcome are nil in that case.
 	if effCallerConnID != nil && effCallerOutcome != nil {
 		if w.requiresConfirmedRead(*effCallerConnID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
 			return

@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"reflect"
@@ -16,11 +15,10 @@ import (
 // subscription.FanOutSender. Converts subscription-domain types to
 // protocol wire format before delivery.
 //
-// Phase 1.5 outcome-model split (`docs/parity-decisions.md#outcome-model`):
+// Outcome-model split:
 //   - Caller receives the heavy `TransactionUpdate` via
 //     SendTransactionUpdateHeavy. Caller's visible row delta is carried
-//     inside `StatusCommitted.Update` (or omitted for `StatusFailed` /
-//     `StatusOutOfEnergy`).
+//     inside `StatusCommitted.Update` (or omitted for `StatusFailed`).
 //   - Non-callers whose rows were touched receive
 //     `TransactionUpdateLight` via SendTransactionUpdateLight.
 type FanOutSenderAdapter struct {
@@ -34,8 +32,7 @@ func NewFanOutSenderAdapter(sender ClientSender) *FanOutSenderAdapter {
 // SendTransactionUpdateHeavy delivers the caller's heavy
 // `TransactionUpdate`. For `StatusCommitted` outcomes the caller's
 // visible row delta is encoded into `StatusCommitted.Update`. For
-// `StatusFailed` / `StatusOutOfEnergy` outcomes the update slice is
-// ignored to match the reference wire contract.
+// `StatusFailed` outcomes the update slice is ignored.
 func (a *FanOutSenderAdapter) SendTransactionUpdateHeavy(
 	connID types.ConnectionID,
 	outcome subscription.CallerOutcome,
@@ -69,19 +66,8 @@ func BuildTransactionUpdateHeavy(
 		CallerConnectionID:         connID,
 		ReducerCall:                reducerCallInfoFrom(outcome),
 		Timestamp:                  outcome.Timestamp,
-		EnergyQuantaUsed:           energyQuantaU128LE(outcome.EnergyQuantaUsed),
 		TotalHostExecutionDuration: outcome.TotalHostExecutionDuration,
 	}, nil
-}
-
-// energyQuantaU128LE widens the subscription-domain u64 energy count to
-// the reference-wire u128 little-endian layout. Shunter has no energy
-// model so the value is always 0, but the wire width must match
-// reference `EnergyQuanta { quanta: u128 }` (energy.rs:12).
-func energyQuantaU128LE(quanta uint64) [16]byte {
-	var out [16]byte
-	binary.LittleEndian.PutUint64(out[:8], quanta)
-	return out
 }
 
 // SendTransactionUpdateLight delivers the delta-only envelope to
@@ -241,8 +227,6 @@ func buildUpdateStatus(
 		return StatusCommitted{Update: encoded}, nil
 	case subscription.CallerOutcomeFailed:
 		return StatusFailed{Error: outcome.Error}, nil
-	case subscription.CallerOutcomeOutOfEnergy:
-		return StatusOutOfEnergy{}, nil
 	default:
 		return nil, fmt.Errorf("unknown CallerOutcome kind %d", outcome.Kind)
 	}

@@ -574,9 +574,9 @@ For each FanOutMessage received:
      Preserve one update entry per affected subscription; do not merge entries
      across distinct internal SubscriptionIDs/query entries.
   4. Deliver the heavy TransactionUpdate to the caller when CallerOutcome is present.
-     For Committed, include the caller's row-update slice; for Failed / OutOfEnergy,
-     send the heavy outcome with no row update. If NoSuccessNotify is set on a
-     committed caller outcome, suppress the caller's success echo.
+     For Committed, include the caller's row-update slice; for Failed, send the
+     heavy outcome with no row update. If NoSuccessNotify is set on a committed
+     caller outcome, suppress the caller's success echo.
 ```
 
 ### 8.3 Aggregation
@@ -733,13 +733,11 @@ type CallerOutcomeKind uint8
 const (
     CallerOutcomeCommitted CallerOutcomeKind = iota
     CallerOutcomeFailed
-    CallerOutcomeOutOfEnergy
 )
 
 // CallerOutcome carries the caller-visible reducer outcome plus metadata
 // needed by the protocol layer to assemble the heavy TransactionUpdate
-// envelope. Shunter has no energy economy; EnergyQuantaUsed is reserved and
-// remains zero unless a future local quota system is designed.
+// envelope.
 type CallerOutcome struct {
     Kind                       CallerOutcomeKind
     Error                      string
@@ -749,7 +747,6 @@ type CallerOutcome struct {
     Args                       []byte
     RequestID                  uint32
     Timestamp                  int64
-    EnergyQuantaUsed           uint64
     TotalHostExecutionDuration int64
     Flags                      byte
 }

@@ -24,17 +24,15 @@ Current contract:
 - `ReducerCallResult` is removed from the protocol surface; its old tag is
   reserved and must not be reused.
 - `TransactionUpdate` carries `UpdateStatus`, caller identity/connection,
-  reducer call metadata, timestamp, execution duration, and a reserved energy
-  field.
-- `UpdateStatus` has `Committed`, `Failed`, and `OutOfEnergy` arms.
+  reducer call metadata, timestamp, and execution duration.
+- `UpdateStatus` has `Committed` and `Failed` arms.
 - Rejections that happen before a transaction opens return a synthetic
   failed `TransactionUpdate` with `TxID == 0`.
 
 Shunter-specific decisions:
 
-- `EnergyQuantaUsed` is always zero because Shunter is not a hosted billing
-  product and has no energy/quota subsystem.
-- `OutOfEnergy` is wire-present for shape stability but not emitted.
+- Shunter is not a hosted billing product and has no energy/quota subsystem.
+  The protocol has no energy field and no out-of-energy outcome arm.
 - Failure strings remain Shunter-specific. Any future reducer-outcome work
   should be framed as a Shunter client-contract slice before changing the exact
   failure surface.

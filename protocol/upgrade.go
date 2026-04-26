@@ -16,17 +16,9 @@ import (
 // and is the product protocol identifier Shunter-owned clients should use.
 const SubprotocolV1 = "v1.bsatn.shunter"
 
-// SubprotocolReference is the SpacetimeDB reference WebSocket
-// subprotocol token. It is still admitted for historical compatibility
-// with earlier reference-parity work, but it is not a Shunter product
-// compatibility target.
-const SubprotocolReference = "v1.bsatn.spacetimedb"
-
 // acceptedSubprotocols lists every token the server admits, in the
-// order selected when multiple are offered. The current order is kept
-// stable for existing tests/clients; future Shunter-native cleanup may
-// prefer or require SubprotocolV1.
-var acceptedSubprotocols = []string{SubprotocolReference, SubprotocolV1}
+// order selected when multiple are offered.
+var acceptedSubprotocols = []string{SubprotocolV1}
 
 // Server is the HTTP-level entry point for WebSocket upgrades. One
 // Server serves many concurrent connections; HandleSubscribe is
@@ -135,13 +127,11 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. subprotocol check — client MUST offer at least one of the
-	// accepted tokens. Reference token is preferred.
+	// 4. subprotocol check — client MUST offer the Shunter-native token.
 	selected, ok := negotiateSubprotocol(r, acceptedSubprotocols)
 	if !ok {
 		http.Error(w,
-			"Sec-WebSocket-Protocol must include "+SubprotocolReference+
-				" or "+SubprotocolV1,
+			"Sec-WebSocket-Protocol must include "+SubprotocolV1,
 			http.StatusBadRequest)
 		return
 	}

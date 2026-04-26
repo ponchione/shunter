@@ -431,43 +431,6 @@ func TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnFailed(t *testing.T) {
 	}
 }
 
-// TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnOutOfEnergy pins
-// that out-of-energy outcomes still deliver the heavy envelope.
-func TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnOutOfEnergy(t *testing.T) {
-	mock := &mockFanOutSender{}
-	inbox := make(chan FanOutMessage, 1)
-	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go w.Run(ctx)
-
-	caller := cid(1)
-	inbox <- FanOutMessage{
-		TxID:         types.TxID(43),
-		Fanout:       CommitFanout{},
-		CallerConnID: &caller,
-		CallerOutcome: &CallerOutcome{
-			Kind:      CallerOutcomeOutOfEnergy,
-			RequestID: 7,
-			Flags:     CallerOutcomeFlagNoSuccessNotify,
-		},
-	}
-
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	mock.mu.Lock()
-	defer mock.mu.Unlock()
-	if len(mock.heavyCalls) != 1 {
-		t.Fatalf("heavyCalls = %d, want 1 (out-of-energy always delivered)", len(mock.heavyCalls))
-	}
-	if mock.heavyCalls[0].Outcome.Kind != CallerOutcomeOutOfEnergy {
-		t.Fatalf("outcome Kind = %d, want CallerOutcomeOutOfEnergy", mock.heavyCalls[0].Outcome.Kind)
-	}
-}
-
 func TestFanOutWorker_BufferFull_DropsClient(t *testing.T) {
 	mock := &mockFanOutSender{sendErr: ErrSendBufferFull}
 	inbox := make(chan FanOutMessage, 1)

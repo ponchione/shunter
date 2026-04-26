@@ -74,8 +74,8 @@ const (
 	// CallReducerFlagsNoSuccessNotify opts the caller out of the success
 	// caller-echo. On `StatusCommitted` the fan-out worker skips the
 	// caller's heavy delivery entirely. Failure envelopes
-	// (`StatusFailed`, `StatusOutOfEnergy`) are still delivered so the
-	// caller observes non-success outcomes.
+	// (`StatusFailed`) are still delivered so the caller observes
+	// non-success outcomes.
 	CallReducerFlagsNoSuccessNotify byte = 1
 )
 

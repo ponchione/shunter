@@ -55,14 +55,14 @@ Severity: high
 Summary:
 - all OI-001 A1 wire-shape and measured-duration comparison slices identified to date are closed and pinned
 - the product contract is Shunter-native; SpacetimeDB client/wire compatibility is no longer a correctness goal
-- `v1.bsatn.shunter` is the only intended Shunter token. Remove `v1.bsatn.spacetimedb` admission and update negotiation/tests/specs so Shunter does not advertise or accept a SpacetimeDB-specific protocol token.
+- `v1.bsatn.shunter` is the only Shunter token. Shunter does not advertise or accept the SpacetimeDB-specific protocol token.
 - brotli remains recognized-but-unsupported; implement it only if Shunter clients need it
 - several message-family and envelope details are intentionally Shunter-specific
 - client-message decoders still need a body-consumption audit: some decoder paths can accept a valid prefix while ignoring trailing bytes, even though tests/comments around legacy payload rejection imply stricter behavior
 - subscribe/unsubscribe handler logic still has avoidable duplication around parsing, lifecycle checks, and response shaping; clean it after the protocol behavior target is pinned
 - reducer failure-arm collapse remains an explicit outcome-model follow-up only if Shunter clients need more machine-readable failure classes; see `docs/parity-decisions.md#outcome-model`
 - Shunter's flat rows/update shape is the current native protocol contract — see `docs/parity-decisions.md#protocol-rows-shape`. Do not rewrite it solely to match SpacetimeDB's wrapper chain (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `BsatnRowList`).
-- energy accounting is explicitly out of scope for Shunter's product model. Remove the energy-shaped protocol surface entirely: `TransactionUpdate.EnergyQuantaUsed`, `StatusOutOfEnergy`, `CallerOutcomeOutOfEnergy`, subscription/fanout energy fields, encoders/decoders/tests, and docs that describe `OutOfEnergy` as a reserved wire arm. Do not replace this with a quota/metering abstraction unless a future Shunter-local product need appears.
+- energy accounting is explicitly out of scope for Shunter's product model. The energy-shaped protocol surface has been removed: no `TransactionUpdate.EnergyQuantaUsed`, no `StatusOutOfEnergy`, no `CallerOutcomeOutOfEnergy`, and no subscription/fanout energy fields. Do not replace this with a quota/metering abstraction unless a future Shunter-local product need appears.
 
 Why this matters:
 - protocol behavior is still one of the biggest blockers to serious Shunter client/runtime claims
@@ -84,7 +84,7 @@ Source docs:
 - `docs/parity-decisions.md#protocol-rows-shape`
 
 Execution note:
-- OI-001 now has two concrete Shunter-native protocol cleanup slices before lower-priority protocol cleanup: remove SpacetimeDB subprotocol-token admission, then remove the energy-shaped wire/status fields. Keep both as behavior changes with explicit tests.
+- The Shunter-native subprotocol and energy-removal cleanup slices are closed and pinned. Remaining OI-001 work is lower-priority protocol cleanup: client-message body-consumption auditing, subscribe/unsubscribe handler consolidation, and failure-arm redesign only if Shunter clients need a more machine-readable outcome contract.
 
 ### OI-002: Query and subscription behavior needs a Shunter-owned correctness pass
 

@@ -1,36 +1,25 @@
 package protocol
 
-import (
-	"testing"
-)
+import "testing"
 
-// TestPhase1ParityReferenceSubprotocolAccepted pins the historical
-// compatibility behavior: the upgrade handler still admits a client
-// that offers the SpacetimeDB reference subprotocol token
-// "v1.bsatn.spacetimedb" and returns that exact token as selected.
-// This is not a current Shunter product-compatibility target.
-func TestPhase1ParityReferenceSubprotocolAccepted(t *testing.T) {
+const referenceSubprotocolToken = "v1.bsatn.spacetimedb"
+
+func TestSubprotocolReferenceTokenRejected(t *testing.T) {
 	s, _ := anonymousServer(t)
 	srv := newTestServer(t, s)
 
-	conn, resp, err := dialWS(t, srv, wsDialOpts{
-		subprotocols: []string{SubprotocolReference},
+	_, resp, err := dialWS(t, srv, wsDialOpts{
+		subprotocols: []string{referenceSubprotocolToken},
 	})
-	if err != nil {
-		t.Fatalf("dial with reference subprotocol: %v (resp=%v)", err, resp)
+	if err == nil {
+		t.Fatal("dial with reference subprotocol should fail")
 	}
-	defer conn.CloseNow()
-
-	if got := conn.Subprotocol(); got != SubprotocolReference {
-		t.Fatalf("server selected subprotocol = %q, want %q",
-			got, SubprotocolReference)
+	if resp == nil || resp.StatusCode != 400 {
+		t.Fatalf("status = %v, want 400", resp)
 	}
 }
 
-// TestPhase1ParityLegacyShunterSubprotocolStillAccepted pins the
-// Shunter-native token "v1.bsatn.shunter". This is the token new
-// Shunter-owned clients should offer.
-func TestPhase1ParityLegacyShunterSubprotocolStillAccepted(t *testing.T) {
+func TestSubprotocolShunterTokenAccepted(t *testing.T) {
 	s, _ := anonymousServer(t)
 	srv := newTestServer(t, s)
 
@@ -38,7 +27,7 @@ func TestPhase1ParityLegacyShunterSubprotocolStillAccepted(t *testing.T) {
 		subprotocols: []string{SubprotocolV1},
 	})
 	if err != nil {
-		t.Fatalf("dial with legacy subprotocol: %v (resp=%v)", err, resp)
+		t.Fatalf("dial with Shunter subprotocol: %v (resp=%v)", err, resp)
 	}
 	defer conn.CloseNow()
 
@@ -48,23 +37,20 @@ func TestPhase1ParityLegacyShunterSubprotocolStillAccepted(t *testing.T) {
 	}
 }
 
-// TestPhase1ParityReferenceSubprotocolPreferred pins the current
-// selection order when a client offers both tokens. This is historical
-// behavior and may change in a Shunter-native cleanup slice.
-func TestPhase1ParityReferenceSubprotocolPreferred(t *testing.T) {
+func TestSubprotocolShunterTokenSelectedWhenBothOffered(t *testing.T) {
 	s, _ := anonymousServer(t)
 	srv := newTestServer(t, s)
 
 	conn, resp, err := dialWS(t, srv, wsDialOpts{
-		subprotocols: []string{SubprotocolV1, SubprotocolReference},
+		subprotocols: []string{referenceSubprotocolToken, SubprotocolV1},
 	})
 	if err != nil {
 		t.Fatalf("dial with both subprotocols: %v (resp=%v)", err, resp)
 	}
 	defer conn.CloseNow()
 
-	if got := conn.Subprotocol(); got != SubprotocolReference {
-		t.Fatalf("server selected subprotocol = %q, want %q (reference should be preferred)",
-			got, SubprotocolReference)
+	if got := conn.Subprotocol(); got != SubprotocolV1 {
+		t.Fatalf("server selected subprotocol = %q, want %q",
+			got, SubprotocolV1)
 	}
 }

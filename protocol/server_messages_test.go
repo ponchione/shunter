@@ -196,22 +196,37 @@ func TestTransactionUpdateHeavyFailedRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTransactionUpdateHeavyOutOfEnergyRoundTrip(t *testing.T) {
+func TestTransactionUpdateRejectsOutOfEnergyStatusTag(t *testing.T) {
+	_, _, err := DecodeServerMessage([]byte{TagTransactionUpdate, 2})
+	if err == nil {
+		t.Fatal("DecodeServerMessage accepted retired OutOfEnergy status tag")
+	}
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
+func TestTransactionUpdateRejectsLegacyEnergyField(t *testing.T) {
 	in := TransactionUpdate{
-		Status:      StatusOutOfEnergy{},
-		ReducerCall: ReducerCallInfo{ReducerName: "doit", RequestID: 1},
+		Status:                     StatusFailed{Error: "boom"},
+		ReducerCall:                ReducerCallInfo{ReducerName: "doit", RequestID: 3},
+		TotalHostExecutionDuration: 77,
 	}
 	frame, err := EncodeServerMessage(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out, err := DecodeServerMessage(frame)
-	if err != nil {
-		t.Fatal(err)
+	legacy := make([]byte, 0, len(frame)+16)
+	legacy = append(legacy, frame[:len(frame)-8]...)
+	legacy = append(legacy, make([]byte, 16)...)
+	legacy = append(legacy, frame[len(frame)-8:]...)
+
+	_, _, err = DecodeServerMessage(legacy)
+	if err == nil {
+		t.Fatal("DecodeServerMessage accepted legacy energy-bearing TransactionUpdate")
 	}
-	got := out.(TransactionUpdate)
-	if _, ok := got.Status.(StatusOutOfEnergy); !ok {
-		t.Fatalf("Status = %T, want StatusOutOfEnergy", got.Status)
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
 	}
 }
 

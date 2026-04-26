@@ -6,25 +6,17 @@ import (
 	"testing"
 )
 
-// TestParityTransactionUpdateWireShape pins the byte-level wire shape
-// of TransactionUpdate against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:458`
-// (`pub struct TransactionUpdate<F>`). Reference field order:
+// TestParityTransactionUpdateWireShape pins the byte-level Shunter-native
+// wire shape of TransactionUpdate:
 //
 //	status:                     UpdateStatus     (tagged union)
-//	timestamp:                  Timestamp        (i64 µs since Unix epoch — sats/timestamp.rs:11-13)
+//	timestamp:                  i64 µs since Unix epoch
 //	caller_identity:            Identity         (32 bytes)
 //	caller_connection_id:       ConnectionId     (16 bytes)
 //	reducer_call:               ReducerCallInfo
-//	energy_quanta_used:         EnergyQuanta     (u128 LE)
-//	total_host_execution_duration: TimeDuration  (i64 µs — sats/time_duration.rs:17-19)
+//	total_host_execution_duration: i64 µs
 //
-// `energy_quanta_used` is 16 bytes little-endian to match reference
-// `EnergyQuanta { quanta: u128 }` (energy.rs:12); the prior Shunter
-// wire carried 8 bytes (u64), which is the divergence closed by this
-// slice.
-//
-// The test constructs the reference byte shape by hand and compares
+// The test constructs the expected byte shape by hand and compares
 // against EncodeServerMessage, then round-trips through
 // DecodeServerMessage to prove the field-order change is symmetric.
 func TestParityTransactionUpdateWireShape(t *testing.T) {
@@ -37,10 +29,6 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 		connID[i] = byte(0xA0 + i)
 	}
 	const timestamp int64 = 0x0102030405060708
-	energy := [16]byte{
-		0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
-		0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88, 0x77,
-	}
 	const duration int64 = 0x7766554433221100
 	rci := ReducerCallInfo{
 		ReducerName: "transfer",
@@ -59,7 +47,6 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 		CallerIdentity:             identity,
 		CallerConnectionID:         connID,
 		ReducerCall:                rci,
-		EnergyQuantaUsed:           energy,
 		TotalHostExecutionDuration: duration,
 	}
 
@@ -114,9 +101,6 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 	binary.LittleEndian.PutUint32(u32Buf[:], rci.RequestID)
 	want.Write(u32Buf[:])
 
-	// energy_quanta_used: u128 little-endian (16 bytes)
-	want.Write(energy[:])
-
 	// total_host_execution_duration: i64
 	binary.LittleEndian.PutUint64(i64Buf[:], uint64(duration))
 	want.Write(i64Buf[:])
@@ -151,9 +135,6 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 		got.ReducerCall.RequestID != rci.RequestID ||
 		!bytes.Equal(got.ReducerCall.Args, rci.Args) {
 		t.Errorf("ReducerCall mismatch: got %+v, want %+v", got.ReducerCall, rci)
-	}
-	if got.EnergyQuantaUsed != energy {
-		t.Errorf("EnergyQuantaUsed = % x, want % x", got.EnergyQuantaUsed, energy)
 	}
 	if got.TotalHostExecutionDuration != duration {
 		t.Errorf("TotalHostExecutionDuration = %d, want %d", got.TotalHostExecutionDuration, duration)
@@ -220,8 +201,7 @@ func TestParityTransactionUpdateWireShapeFailed(t *testing.T) {
 	binary.LittleEndian.PutUint32(u32Buf[:], 3)
 	want.Write(u32Buf[:])
 
-	// energy_quanta_used (u128 LE) + total_host_execution_duration (i64) — zeros
-	want.Write(make([]byte, 16))
+	// total_host_execution_duration (i64) — zero
 	want.Write(make([]byte, 8))
 
 	if !bytes.Equal(frame, want.Bytes()) {

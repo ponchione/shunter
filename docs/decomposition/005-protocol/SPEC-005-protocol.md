@@ -48,12 +48,11 @@ Shunter uses WebSocket (RFC 6455) over HTTP/1.1 or HTTP/2. All application messa
 
 ### 2.2 Protocol Identifier
 
-Current implementation admits two subprotocol tokens for historical reasons:
+Shunter accepts exactly one subprotocol token:
 
-- `v1.bsatn.shunter` — Shunter-native token; this is the product protocol identifier Shunter clients should use.
-- `v1.bsatn.spacetimedb` — historical reference-compatibility token; current code still accepts it, but it is not a product requirement and may be removed.
+- `v1.bsatn.shunter` — Shunter-native token; this is the product protocol identifier Shunter clients must use.
 
-The client includes one or both tokens in the `Sec-WebSocket-Protocol` request header. The server echoes the selected token in the response header. If the client offers neither token, the server closes the connection with status 400.
+The client includes this token in the `Sec-WebSocket-Protocol` request header. The server echoes the selected token in the response header. If the client does not offer this token, the server rejects the upgrade with status 400.
 
 ```
 Client: Sec-WebSocket-Protocol: v1.bsatn.shunter
@@ -363,8 +362,8 @@ The client is responsible for encoding `args` as a `ProductValue` matching the r
 
 | Value | Name | Meaning |
 |---|---|---|
-| 0 | `FullUpdate` | Caller always receives the heavy `TransactionUpdate` on success / failure / OOE. Default. |
-| 1 | `NoSuccessNotify` | On `StatusCommitted` the caller is not echoed. Failure envelopes (`StatusFailed`, `StatusOutOfEnergy`) are still delivered so the caller observes non-success outcomes. |
+| 0 | `FullUpdate` | Caller always receives the heavy `TransactionUpdate` on success or failure. Default. |
+| 1 | `NoSuccessNotify` | On `StatusCommitted` the caller is not echoed. Failure envelopes (`StatusFailed`) are still delivered so the caller observes non-success outcomes. |
 
 Any other value is rejected as `ErrMalformedMessage`.
 
@@ -456,16 +455,15 @@ On receiving this, the client must discard all cached rows for the affected `que
 
 ### 8.5 TransactionUpdate (heavy, caller-bound)
 
-The current v1 outcome model makes `TransactionUpdate` the **single caller-bound envelope** for every reducer outcome — success, failure, and a reserved `OutOfEnergy` arm. Non-callers whose subscribed rows are touched receive `TransactionUpdateLight` (§8.8) instead. Non-callers with no matching rows receive nothing.
+The current v1 outcome model makes `TransactionUpdate` the **single caller-bound envelope** for every reducer outcome — success or failure. Non-callers whose subscribed rows are touched receive `TransactionUpdateLight` (§8.8) instead. Non-callers with no matching rows receive nothing.
 
 ```
 tag: 5
-status:                         UpdateStatus            — three-arm tagged union (see below)
+status:                         UpdateStatus            — two-arm tagged union (see below)
+timestamp:                      int64 LE                — server-captured reducer dispatch time (Unix epoch microseconds)
 caller_identity:                bytes (32)              — the caller's Identity
 caller_connection_id:           bytes (16)              — the caller's ConnectionID
 reducer_call:                   ReducerCallInfo         — see below
-timestamp:                      int64 LE                — server-captured reducer dispatch time (Unix epoch microseconds)
-energy_quanta_used:             bytes (16)              — reserved u128 LE; always 0 in v1 (no billing/quota model)
 total_host_execution_duration:  int64 LE                — measured reducer wall time, microseconds
 ```
 
@@ -475,7 +473,6 @@ total_host_execution_duration:  int64 LE                — measured reducer wal
 arm tag (uint8):
   0 = Committed{update: []SubscriptionUpdate}       — caller's visible row-delta slice (may be empty)
   1 = Failed{error: string}                         — reducer-side failure or pre-commit rejection
-  2 = OutOfEnergy{}                                 — reserved; never emitted by the v1 executor
 ```
 
 **`ReducerCallInfo`:**
@@ -521,12 +518,10 @@ A single `Committed.update` (or `TransactionUpdateLight.update`) may contain ent
 
 **`tx_id` exposure.** The caller's commit TxID is **not** a standalone wire field on `TransactionUpdate` in v1. Clients recover commit identity through their `SubscribeSingleApplied` / `SubscribeMultiApplied` seeding and successive deltas; v1 provides no `resume_from_tx_id` mechanism. A client that disconnects must re-subscribe and rebuild state from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`. (For rejection paths where no transaction was ever opened, the executor emits a synthetic heavy `TransactionUpdate` with `Status = Failed{Error}` and `ReducerCallInfo` populated from the request; the "no committed transaction" signal is implicit in the `Failed` arm. See `docs/parity-decisions.md#outcome-model`.)
 
-**Dispatch rule (repeated from the decision doc):**
-- Caller always receives this heavy `TransactionUpdate` on `Committed` / `Failed` / `OutOfEnergy`, subject to the `CallReducerFlags::NoSuccessNotify` opt-out on `Committed` (§7.3).
+**Dispatch rule:**
+- Caller always receives this heavy `TransactionUpdate` on `Committed` / `Failed`, subject to the `CallReducerFlags::NoSuccessNotify` opt-out on `Committed` (§7.3).
 - Non-callers with row-touches receive `TransactionUpdateLight` (§8.8).
 - Non-callers with no row-touches receive nothing.
-
-**Shunter decision — no energy economy.** `OutOfEnergy` is present in the union for wire stability but is never emitted by the v1 executor. `energy_quanta_used` is permanently `0` unless Shunter later adds its own local quota system. SpacetimeDB-style hosted billing/metering is not a Shunter product goal.
 
 **Shunter decision — failure-arm collapse.** Shunter's internal executor distinguishes `failed_user`, `failed_panic`, and `not_found` reducer outcomes. v1 collapses all three onto `Failed{Error}` on the wire, retaining the distinguishing information in the error string. This should change only if Shunter clients need a more machine-readable failure contract.
 
@@ -766,7 +761,7 @@ Delivery contract:
 1. evaluator computes `CommitFanout` for the committed transaction and sends `FanOutMessage{TxDurable, Fanout, Errors, CallerConnID, CallerResult}` to the fan-out worker inbox
 2. the fan-out worker treats each `CommitFanout[connID]` entry as the `[]SubscriptionUpdate` payload for one post-commit envelope
 3. any `SubscriptionError` entries in `FanOutMessage.Errors` are delivered before normal updates for the same batch
-4. if the commit originated from `CallReducer`, the fan-out/protocol integration routes the caller connection's update slice into `TransactionUpdate.Status::Committed.update` (§8.5); on `Failed` / `OutOfEnergy` the caller receives the heavy envelope with an empty `update`. The caller is not also delivered a standalone `TransactionUpdateLight`.
+4. if the commit originated from `CallReducer`, the fan-out/protocol integration routes the caller connection's update slice into `TransactionUpdate.Status::Committed.update` (§8.5); on `Failed` the caller receives the heavy envelope with an empty `update`. The caller is not also delivered a standalone `TransactionUpdateLight`.
 5. all remaining connection entries are delivered as `TransactionUpdateLight` messages (§8.8)
 6. protocol layer serializes, optionally compresses, and enqueues those messages to websocket connections
 
@@ -847,15 +842,15 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 
 ## 16. Reference-Informed Shunter Decisions
 
-- **Protocol identifier:** Shunter-owned clients should use `v1.bsatn.shunter` (§2.2). Current code still admits `v1.bsatn.spacetimedb` for historical compatibility with earlier reference-comparison work, but SpacetimeDB client compatibility is not a product goal.
+- **Protocol identifier:** Shunter-owned clients must use `v1.bsatn.shunter` (§2.2). Shunter does not admit the SpacetimeDB reference token.
 - **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). Brotli should be implemented only if Shunter clients need it.
 - **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `16 * 1024` (§10.1, §12). Shunter disconnects lagging clients to keep memory bounded.
-- **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `energy_quanta_used` is stubbed to `0`, `OutOfEnergy` is never emitted, and `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
+- **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
 - **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args, flags}` (§7.3). The `flags` byte matches the reference `CallReducerFlags` (FullUpdate / NoSuccessNotify); no other flag values are defined in v1.
 - **OneOffQuery language:** v1 `OneOffQuery` uses the same SQL subset as `SubscribeSingle` / `SubscribeMulti` (§7.4 / §7.1.1), giving Shunter clients one read-query surface.
 - **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror SpacetimeDB's full close-code/reason matrix.
-- **Energy model:** v1 has no energy subsystem. `TransactionUpdate.energy_quanta_used` is reserved and always `0`; `UpdateStatus::OutOfEnergy` is present in the tagged union for wire stability but is never emitted (§8.5). SpacetimeDB-style hosted billing/metering is not a Shunter product goal.
+- **Energy model:** v1 has no energy subsystem. There is no `energy_quanta_used` field and no `UpdateStatus::OutOfEnergy` arm. SpacetimeDB-style hosted billing/metering is not a Shunter product goal.
 - **ConnectionID reuse semantics:** reusing `connection_id` on reconnect is only a client hint for future resume features; it has no server-side resume semantics in v1 (§2.3, §11.3).
 - **Reserved tag 7:** the former `ReducerCallResult` tag byte is held reserved rather than reused (§6, §8.7). A future contributor reintroducing a separate caller envelope MUST pick a fresh tag, not reclaim 7.
 

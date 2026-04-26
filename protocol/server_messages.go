@@ -10,17 +10,13 @@ import (
 
 // Server→client message types (SPEC-005 §8).
 //
-// Phase 1.5 outcome-model decision is pinned in
-// `docs/parity-decisions.md#outcome-model` and
-// `protocol/parity_message_family_test.go`:
-//   - `TransactionUpdate` is the heavy caller-bound envelope matching
-//     `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`.
+// Outcome-model decision:
+//   - `TransactionUpdate` is the heavy caller-bound envelope.
 //   - `TransactionUpdateLight` is the delta-only envelope delivered to
 //     non-callers whose subscribed rows were touched.
 //   - `ReducerCallResult` is removed from the wire surface; `TagReducerCallResult`
 //     stays reserved (unused) so the byte cannot silently be reallocated.
-//   - `UpdateStatus` is a three-arm tagged union. `OutOfEnergy` is present for
-//     shape parity but is never emitted by the Phase 1.5 executor.
+//   - `UpdateStatus` is a two-arm tagged union: committed or failed.
 
 // IdentityToken is the first server→client frame on every connection.
 // Field order matches reference `IdentityToken` at
@@ -130,38 +126,18 @@ type UnsubscribeMultiApplied struct {
 	Update                           []SubscriptionUpdate
 }
 
-// TransactionUpdate is the heavy caller-bound envelope (Phase 1.5).
-// Non-callers receive `TransactionUpdateLight` instead. `Timestamp` and
+// TransactionUpdate is the heavy caller-bound envelope. Non-callers
+// receive `TransactionUpdateLight` instead. `Timestamp` and
 // `TotalHostExecutionDuration` are populated from the executor seam in
-// microseconds to match the reference SATS semantics (§docs/parity…);
-// `EnergyQuantaUsed` remains zero because Shunter has no energy model —
-// see the decision doc.
-//
-// Field order matches reference `TransactionUpdate<F>` at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:458
-// (`status, timestamp, caller_identity, caller_connection_id,
-// reducer_call, energy_quanta_used, total_host_execution_duration`) —
-// pinned by parity_transaction_update_test.go against the reference
-// byte shape.
-//
-// EnergyQuantaUsed is the 16-byte little-endian u128 quanta field of
-// reference `EnergyQuanta { quanta: u128 }` at
-// reference/SpacetimeDB/crates/client-api-messages/src/energy.rs:12.
-// The wire width was widened from u64 to u128 to match the reference
-// byte shape; Shunter emits all-zero bytes because there is no energy
-// model.
+// microseconds.
 type TransactionUpdate struct {
 	Status UpdateStatus
-	// Timestamp is microseconds since Unix epoch, matching reference
-	// `Timestamp` (sats/timestamp.rs:11-13 — `i64` micros). Wire width
-	// is i64 regardless; only the unit flipped ns→µs here.
+	// Timestamp is microseconds since Unix epoch.
 	Timestamp          int64
 	CallerIdentity     [32]byte
 	CallerConnectionID [16]byte
 	ReducerCall        ReducerCallInfo
-	EnergyQuantaUsed   [16]byte // u128 little-endian, reference `EnergyQuanta.quanta`
-	// TotalHostExecutionDuration is microseconds, matching reference
-	// `TimeDuration` (sats/time_duration.rs:17-19 — `i64` micros).
+	// TotalHostExecutionDuration is microseconds.
 	TotalHostExecutionDuration int64
 }
 
@@ -179,9 +155,9 @@ type TransactionUpdateLight struct {
 	Update    []SubscriptionUpdate
 }
 
-// UpdateStatus is the three-arm tagged union carried by
+// UpdateStatus is the two-arm tagged union carried by
 // `TransactionUpdate.Status`. Implementations: `StatusCommitted`,
-// `StatusFailed`, `StatusOutOfEnergy`.
+// `StatusFailed`.
 type UpdateStatus interface {
 	isUpdateStatus()
 }
@@ -205,14 +181,8 @@ type StatusFailed struct {
 	Error string
 }
 
-// StatusOutOfEnergy is present for shape parity but is never emitted
-// by the Phase 1.5 executor. Flipping this deferral is a Phase 3
-// runtime-parity concern.
-type StatusOutOfEnergy struct{}
-
-func (StatusCommitted) isUpdateStatus()   {}
-func (StatusFailed) isUpdateStatus()      {}
-func (StatusOutOfEnergy) isUpdateStatus() {}
+func (StatusCommitted) isUpdateStatus() {}
+func (StatusFailed) isUpdateStatus()    {}
 
 // ReducerCallInfo mirrors the reference-side metadata embedded in every
 // heavy `TransactionUpdate`.
@@ -254,9 +224,8 @@ type OneOffTable struct {
 
 // UpdateStatus tag bytes on the wire.
 const (
-	updateStatusTagCommitted   uint8 = 0
-	updateStatusTagFailed      uint8 = 1
-	updateStatusTagOutOfEnergy uint8 = 2
+	updateStatusTagCommitted uint8 = 0
+	updateStatusTagFailed    uint8 = 1
 )
 
 // EncodeServerMessage produces the uncompressed wire frame
@@ -303,7 +272,6 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		buf.Write(msg.CallerIdentity[:])
 		buf.Write(msg.CallerConnectionID[:])
 		writeReducerCallInfo(&buf, msg.ReducerCall)
-		buf.Write(msg.EnergyQuantaUsed[:])
 		writeInt64(&buf, msg.TotalHostExecutionDuration)
 	case TransactionUpdateLight:
 		buf.WriteByte(TagTransactionUpdateLight)
@@ -490,13 +458,11 @@ func decodeTransactionUpdate(body []byte) (TransactionUpdate, error) {
 		return m, err
 	}
 	m.ReducerCall = rci
-	if len(body)-off < 16 {
-		return m, fmt.Errorf("%w: TransactionUpdate energy_quanta_used truncated", ErrMalformedMessage)
-	}
-	copy(m.EnergyQuantaUsed[:], body[off:off+16])
-	off += 16
-	if m.TotalHostExecutionDuration, _, err = readInt64(body, off); err != nil {
+	if m.TotalHostExecutionDuration, off, err = readInt64(body, off); err != nil {
 		return m, err
+	}
+	if off != len(body) {
+		return m, fmt.Errorf("%w: TransactionUpdate trailing bytes at offset %d", ErrMalformedMessage, off)
 	}
 	return m, nil
 }
@@ -633,8 +599,6 @@ func writeUpdateStatus(buf *bytes.Buffer, s UpdateStatus) error {
 	case StatusFailed:
 		buf.WriteByte(updateStatusTagFailed)
 		writeString(buf, v.Error)
-	case StatusOutOfEnergy:
-		buf.WriteByte(updateStatusTagOutOfEnergy)
 	case nil:
 		return fmt.Errorf("%w: nil UpdateStatus", ErrMalformedMessage)
 	default:
@@ -662,8 +626,6 @@ func readUpdateStatus(body []byte, off int) (UpdateStatus, int, error) {
 			return nil, off, err
 		}
 		return StatusFailed{Error: s}, off, nil
-	case updateStatusTagOutOfEnergy:
-		return StatusOutOfEnergy{}, off, nil
 	default:
 		return nil, off, fmt.Errorf("%w: UpdateStatus tag=%d", ErrMalformedMessage, tag)
 	}

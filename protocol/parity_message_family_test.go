@@ -13,13 +13,8 @@ import (
 // TransactionUpdate / ReducerCallResult pins to assert the new heavy /
 // light / `UpdateStatus` shape; see `docs/parity-decisions.md#outcome-model`.
 
-// TestPhase15TransactionUpdateHeavyShape pins the Phase 1.5 adoption
-// of the reference heavy `TransactionUpdate` envelope. Reference field
-// order at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:458`
-// (`status, timestamp, caller_identity, caller_connection_id,
-// reducer_call, energy_quanta_used, total_host_execution_duration`).
-// The wire byte shape is pinned separately in
+// TestPhase15TransactionUpdateHeavyShape pins the Shunter-native heavy
+// `TransactionUpdate` envelope. The wire byte shape is pinned separately in
 // parity_transaction_update_test.go.
 func TestPhase15TransactionUpdateHeavyShape(t *testing.T) {
 	fields := msgFieldNames(TransactionUpdate{})
@@ -29,11 +24,10 @@ func TestPhase15TransactionUpdateHeavyShape(t *testing.T) {
 		"CallerIdentity",
 		"CallerConnectionID",
 		"ReducerCall",
-		"EnergyQuantaUsed",
 		"TotalHostExecutionDuration",
 	}
 	if !reflect.DeepEqual(fields, want) {
-		t.Errorf("TransactionUpdate fields = %v, want %v (reference field order)",
+		t.Errorf("TransactionUpdate fields = %v, want %v",
 			fields, want)
 	}
 }
@@ -61,24 +55,17 @@ func TestPhase15ReducerCallInfoShape(t *testing.T) {
 	}
 }
 
-// TestPhase15UpdateStatusVariants pins the three-arm tagged-union
-// `UpdateStatus`. Reference: `pub enum UpdateStatus<F> { Committed,
-// Failed, OutOfEnergy }`. `OutOfEnergy` is present for shape parity but
-// is never emitted by Shunter in Phase 1.5 — see
-// `docs/parity-decisions.md#outcome-model`.
+// TestPhase15UpdateStatusVariants pins the two-arm Shunter-native
+// `UpdateStatus` tagged union.
 func TestPhase15UpdateStatusVariants(t *testing.T) {
 	var _ UpdateStatus = StatusCommitted{}
 	var _ UpdateStatus = StatusFailed{}
-	var _ UpdateStatus = StatusOutOfEnergy{}
 
 	if got := msgFieldNames(StatusCommitted{}); !reflect.DeepEqual(got, []string{"Update"}) {
 		t.Errorf("StatusCommitted fields = %v, want [Update]", got)
 	}
 	if got := msgFieldNames(StatusFailed{}); !reflect.DeepEqual(got, []string{"Error"}) {
 		t.Errorf("StatusFailed fields = %v, want [Error]", got)
-	}
-	if got := msgFieldNames(StatusOutOfEnergy{}); !reflect.DeepEqual(got, []string{}) {
-		t.Errorf("StatusOutOfEnergy fields = %v, want []", got)
 	}
 }
 
