@@ -201,7 +201,10 @@ func decodeSubscribeSingle(body []byte) (SubscribeSingleMsg, error) {
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	if m.QueryString, _, err = readString(body, off); err != nil {
+	if m.QueryString, off, err = readString(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "SubscribeSingle"); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -214,7 +217,10 @@ func decodeUnsubscribeSingle(body []byte) (UnsubscribeSingleMsg, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.QueryID, _, err = readUint32(body, off); err != nil {
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "UnsubscribeSingle"); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -237,10 +243,14 @@ func decodeCallReducer(body []byte) (CallReducerMsg, error) {
 		return m, fmt.Errorf("%w: CallReducer flags byte truncated", ErrMalformedMessage)
 	}
 	m.Flags = body[off]
+	off++
 	switch m.Flags {
 	case CallReducerFlagsFullUpdate, CallReducerFlagsNoSuccessNotify:
 	default:
 		return m, fmt.Errorf("%w: invalid CallReducer flags byte %d", ErrMalformedMessage, m.Flags)
+	}
+	if err := requireFullyConsumed(body, off, "CallReducer"); err != nil {
+		return m, err
 	}
 	return m, nil
 }
@@ -252,7 +262,10 @@ func decodeOneOffQuery(body []byte) (OneOffQueryMsg, error) {
 	if m.MessageID, off, err = readBytes(body, 0); err != nil {
 		return m, err
 	}
-	if m.QueryString, _, err = readString(body, off); err != nil {
+	if m.QueryString, off, err = readString(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "OneOffQuery"); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -281,6 +294,9 @@ func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 		off = next
 		m.QueryStrings = append(m.QueryStrings, s)
 	}
+	if err := requireFullyConsumed(body, off, "SubscribeMulti"); err != nil {
+		return m, err
+	}
 	return m, nil
 }
 
@@ -291,7 +307,10 @@ func decodeUnsubscribeMulti(body []byte) (UnsubscribeMultiMsg, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	if m.QueryID, _, err = readUint32(body, off); err != nil {
+	if m.QueryID, off, err = readUint32(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "UnsubscribeMulti"); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -345,4 +364,11 @@ func readBytes(body []byte, off int) ([]byte, int, error) {
 	out := make([]byte, n)
 	copy(out, body[off:off+int(n)])
 	return out, off + int(n), nil
+}
+
+func requireFullyConsumed(body []byte, off int, msgName string) error {
+	if off != len(body) {
+		return fmt.Errorf("%w: %s trailing bytes at offset %d", ErrMalformedMessage, msgName, off)
+	}
+	return nil
 }

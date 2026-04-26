@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/ponchione/shunter/types"
@@ -33,31 +32,11 @@ func handleSubscribeSingle(
 	receipt := time.Now()
 	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity, false, false)
 	if err != nil {
-		sendError(conn, SubscriptionError{
-			TotalHostExecutionDurationMicros: elapsedMicros(receipt),
-			RequestID:                        optionalUint32(msg.RequestID),
-			QueryID:                          optionalUint32(msg.QueryID),
-			Error:                            wrapSubscribeCompileErrorSQL(err, msg.QueryString),
-		})
+		sendSubscribeCompileError(conn, receipt, msg.RequestID, msg.QueryID, err, msg.QueryString)
 		return
 	}
 	pred := compiled.Predicate
 
-	sender := connOnlySender{conn: conn}
-	reply := func(resp SubscriptionSetCommandResponse) {
-		switch {
-		case resp.Error != nil:
-			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: SubscriptionError delivery failed for conn %x query_id=%s: %v", conn.ID[:], subscriptionErrorQueryIDForLog(resp.Error), err)
-			}
-		case resp.SingleApplied != nil:
-			if err := SendSubscribeSingleApplied(sender, conn, resp.SingleApplied); err != nil {
-				log.Printf("protocol: SubscribeSingleApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.SingleApplied.QueryID, err)
-			}
-		default:
-			log.Printf("protocol: malformed SubscriptionSetCommandResponse (req=%d query=%d)", msg.RequestID, msg.QueryID)
-		}
-	}
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
 		ConnID:                  conn.ID,
 		QueryID:                 msg.QueryID,
@@ -65,16 +44,11 @@ func handleSubscribeSingle(
 		Variant:                 SubscriptionSetVariantSingle,
 		Predicates:              []any{pred},
 		PredicateHashIdentities: []*types.Identity{callerHashIdentity(conn, compiled)},
-		Reply:                   reply,
+		Reply:                   makeSubscribeSetReply(conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle),
 		Receipt:                 receipt,
 		SQLText:                 msg.QueryString,
 	}); submitErr != nil {
-		sendError(conn, SubscriptionError{
-			TotalHostExecutionDurationMicros: elapsedMicros(receipt),
-			RequestID:                        optionalUint32(msg.RequestID),
-			QueryID:                          optionalUint32(msg.QueryID),
-			Error:                            "executor unavailable: " + submitErr.Error(),
-		})
+		sendExecutorUnavailableError(conn, receipt, msg.RequestID, msg.QueryID, submitErr)
 		return
 	}
 }

@@ -363,6 +363,10 @@ func decodeIdentityToken(body []byte) (IdentityToken, error) {
 		return m, fmt.Errorf("%w: IdentityToken connection_id field", ErrMalformedMessage)
 	}
 	copy(m.ConnectionID[:], body[off:off+16])
+	off += 16
+	if err := requireFullyConsumed(body, off, "IdentityToken"); err != nil {
+		return m, err
+	}
 	return m, nil
 }
 
@@ -382,7 +386,10 @@ func decodeSubscribeSingleApplied(body []byte) (SubscribeSingleApplied, error) {
 	if m.TableName, off, err = readString(body, off); err != nil {
 		return m, err
 	}
-	if m.Rows, _, err = readBytes(body, off); err != nil {
+	if m.Rows, off, err = readBytes(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "SubscribeSingleApplied"); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -407,9 +414,12 @@ func decodeUnsubscribeSingleApplied(body []byte) (UnsubscribeSingleApplied, erro
 	m.HasRows = body[off] != 0
 	off++
 	if m.HasRows {
-		if m.Rows, _, err = readBytes(body, off); err != nil {
+		if m.Rows, off, err = readBytes(body, off); err != nil {
 			return m, err
 		}
+	}
+	if err := requireFullyConsumed(body, off, "UnsubscribeSingleApplied"); err != nil {
+		return m, err
 	}
 	return m, nil
 }
@@ -430,7 +440,10 @@ func decodeSubscriptionError(body []byte) (SubscriptionError, error) {
 	if m.TableID, off, err = readOptionalTableID(body, off); err != nil {
 		return m, err
 	}
-	if m.Error, _, err = readString(body, off); err != nil {
+	if m.Error, off, err = readString(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "SubscriptionError"); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -461,8 +474,8 @@ func decodeTransactionUpdate(body []byte) (TransactionUpdate, error) {
 	if m.TotalHostExecutionDuration, off, err = readInt64(body, off); err != nil {
 		return m, err
 	}
-	if off != len(body) {
-		return m, fmt.Errorf("%w: TransactionUpdate trailing bytes at offset %d", ErrMalformedMessage, off)
+	if err := requireFullyConsumed(body, off, "TransactionUpdate"); err != nil {
+		return m, err
 	}
 	return m, nil
 }
@@ -474,11 +487,14 @@ func decodeTransactionUpdateLight(body []byte) (TransactionUpdateLight, error) {
 	if m.RequestID, off, err = readUint32(body, 0); err != nil {
 		return m, err
 	}
-	ups, _, err := readSubscriptionUpdates(body, off)
+	ups, off, err := readSubscriptionUpdates(body, off)
 	if err != nil {
 		return m, err
 	}
 	m.Update = ups
+	if err := requireFullyConsumed(body, off, "TransactionUpdateLight"); err != nil {
+		return m, err
+	}
 	return m, nil
 }
 
@@ -495,7 +511,10 @@ func decodeOneOffQueryResponse(body []byte) (OneOffQueryResponse, error) {
 	if m.Tables, off, err = readOneOffTables(body, off); err != nil {
 		return m, err
 	}
-	if m.TotalHostExecutionDuration, _, err = readInt64(body, off); err != nil {
+	if m.TotalHostExecutionDuration, off, err = readInt64(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "OneOffQueryResponse"); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -566,7 +585,10 @@ func decodeSubscribeMultiApplied(body []byte) (SubscribeMultiApplied, error) {
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	if m.Update, _, err = readSubscriptionUpdates(body, off); err != nil {
+	if m.Update, off, err = readSubscriptionUpdates(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "SubscribeMultiApplied"); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -585,7 +607,10 @@ func decodeUnsubscribeMultiApplied(body []byte) (UnsubscribeMultiApplied, error)
 	if m.QueryID, off, err = readUint32(body, off); err != nil {
 		return m, err
 	}
-	if m.Update, _, err = readSubscriptionUpdates(body, off); err != nil {
+	if m.Update, off, err = readSubscriptionUpdates(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "UnsubscribeMultiApplied"); err != nil {
 		return m, err
 	}
 	return m, nil

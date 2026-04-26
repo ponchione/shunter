@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"log"
 	"time"
 )
 
@@ -23,35 +22,15 @@ func handleUnsubscribeMulti(
 	executor ExecutorInbox,
 ) {
 	receipt := time.Now()
-	sender := connOnlySender{conn: conn}
-	reply := func(resp UnsubscribeSetCommandResponse) {
-		switch {
-		case resp.Error != nil:
-			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: unsubscribe SubscriptionError delivery failed for conn %x query_id=%s: %v", conn.ID[:], subscriptionErrorQueryIDForLog(resp.Error), err)
-			}
-		case resp.MultiApplied != nil:
-			if err := SendUnsubscribeMultiApplied(sender, conn, resp.MultiApplied); err != nil {
-				log.Printf("protocol: UnsubscribeMultiApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.MultiApplied.QueryID, err)
-			}
-		default:
-			log.Printf("protocol: malformed UnsubscribeSetCommandResponse (req=%d query=%d)", msg.RequestID, msg.QueryID)
-		}
-	}
 	if err := executor.UnregisterSubscriptionSet(ctx, UnregisterSubscriptionSetRequest{
 		ConnID:    conn.ID,
 		QueryID:   msg.QueryID,
 		RequestID: msg.RequestID,
 		Variant:   SubscriptionSetVariantMulti,
-		Reply:     reply,
+		Reply:     makeUnsubscribeSetReply(conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantMulti),
 		Receipt:   receipt,
 	}); err != nil {
-		sendError(conn, SubscriptionError{
-			TotalHostExecutionDurationMicros: elapsedMicros(receipt),
-			RequestID:                        optionalUint32(msg.RequestID),
-			QueryID:                          optionalUint32(msg.QueryID),
-			Error:                            "executor unavailable: " + err.Error(),
-		})
+		sendExecutorUnavailableError(conn, receipt, msg.RequestID, msg.QueryID, err)
 		return
 	}
 }

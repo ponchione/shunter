@@ -230,6 +230,41 @@ func TestTransactionUpdateRejectsLegacyEnergyField(t *testing.T) {
 	}
 }
 
+func TestDecodeServerMessageRejectsTrailingBytes(t *testing.T) {
+	requestID := uint32(10)
+	queryID := uint32(20)
+	tableID := schema.TableID(30)
+	rows := EncodeRowList([][]byte{{0x01}})
+	cases := []struct {
+		name string
+		msg  any
+	}{
+		{"IdentityToken", IdentityToken{Token: "token"}},
+		{"SubscribeSingleApplied", SubscribeSingleApplied{RequestID: 1, QueryID: 2, TableName: "users", Rows: rows}},
+		{"UnsubscribeSingleAppliedNoRows", UnsubscribeSingleApplied{RequestID: 3, QueryID: 4}},
+		{"UnsubscribeSingleAppliedRows", UnsubscribeSingleApplied{RequestID: 5, QueryID: 6, HasRows: true, Rows: rows}},
+		{"SubscriptionError", SubscriptionError{RequestID: &requestID, QueryID: &queryID, TableID: &tableID, Error: "boom"}},
+		{"TransactionUpdate", TransactionUpdate{Status: StatusCommitted{}, ReducerCall: ReducerCallInfo{ReducerName: "doit"}}},
+		{"TransactionUpdateLight", TransactionUpdateLight{RequestID: 7, Update: []SubscriptionUpdate{{QueryID: 8, TableName: "users", Inserts: rows}}}},
+		{"OneOffQueryResponse", OneOffQueryResponse{MessageID: []byte{0x09}, Tables: []OneOffTable{{TableName: "users", Rows: rows}}}},
+		{"SubscribeMultiApplied", SubscribeMultiApplied{RequestID: 11, QueryID: 12, Update: []SubscriptionUpdate{{QueryID: 13, TableName: "users", Inserts: rows}}}},
+		{"UnsubscribeMultiApplied", UnsubscribeMultiApplied{RequestID: 14, QueryID: 15, Update: []SubscriptionUpdate{{QueryID: 16, TableName: "users", Deletes: rows}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			frame, err := EncodeServerMessage(tc.msg)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			frame = append(frame, 0xAA, 0xBB)
+			_, _, err = DecodeServerMessage(frame)
+			if !errors.Is(err, ErrMalformedMessage) {
+				t.Fatalf("err = %v, want ErrMalformedMessage", err)
+			}
+		})
+	}
+}
+
 func TestTransactionUpdateLightRoundTrip(t *testing.T) {
 	rl := EncodeRowList([][]byte{{0x01}})
 	in := TransactionUpdateLight{

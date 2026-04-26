@@ -187,6 +187,33 @@ func TestDecodeClientMessageTruncatedBody(t *testing.T) {
 	}
 }
 
+func TestDecodeClientMessageRejectsTrailingBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  any
+	}{
+		{"SubscribeSingle", SubscribeSingleMsg{RequestID: 1, QueryID: 2, QueryString: "SELECT * FROM users"}},
+		{"UnsubscribeSingle", UnsubscribeSingleMsg{RequestID: 3, QueryID: 4}},
+		{"CallReducer", CallReducerMsg{ReducerName: "doit", Args: []byte{0x01}, RequestID: 5, Flags: CallReducerFlagsFullUpdate}},
+		{"OneOffQuery", OneOffQueryMsg{MessageID: []byte{0x06}, QueryString: "SELECT * FROM users"}},
+		{"SubscribeMulti", SubscribeMultiMsg{RequestID: 7, QueryID: 8, QueryStrings: []string{"SELECT * FROM users", "SELECT * FROM orders"}}},
+		{"UnsubscribeMulti", UnsubscribeMultiMsg{RequestID: 9, QueryID: 10}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			frame, err := EncodeClientMessage(tc.msg)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			frame = append(frame, 0xAA, 0xBB)
+			_, _, err = DecodeClientMessage(frame)
+			if !errors.Is(err, ErrMalformedMessage) {
+				t.Fatalf("err = %v, want ErrMalformedMessage", err)
+			}
+		})
+	}
+}
+
 func TestEncodeClientMessageUnknownType(t *testing.T) {
 	type bogus struct{}
 	_, err := EncodeClientMessage(bogus{})

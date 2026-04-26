@@ -716,6 +716,42 @@ func TestHandleOneOffQuery_OrComparisonWithAliasAndHexBytes(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQuery_LowercaseXEscapedStringOnBytesRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "s",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "bytes", Type: schema.KindBytes},
+		},
+	}
+	sl := newMockSchema("s", 1, ts.Columns...)
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewBytes([]byte{0xAB})},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x1a},
+		QueryString: "SELECT * FROM s WHERE bytes = 'x''AB'",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	want := "The literal expression `x'AB` cannot be parsed as type `Array<U8>`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+}
+
 func TestHandleOneOffQuery_OrComparisonWithAlias(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{

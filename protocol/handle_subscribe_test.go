@@ -698,6 +698,35 @@ func TestHandleSubscribeSingle_OrComparisonWithAliasAndHexBytes(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_LowercaseXEscapedStringOnBytesRejectedWithSQL(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("s", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "bytes", Type: schema.KindBytes},
+	)
+	msg := &SubscribeSingleMsg{
+		RequestID:   18,
+		QueryID:     15,
+		QueryString: "SELECT * FROM s WHERE bytes = 'x''AB'",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "The literal expression `x'AB` cannot be parsed as type `Array<U8>`, executing: `SELECT * FROM s WHERE bytes = 'x''AB'`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when lowercase x string content rejects as Array<U8>")
+	}
+}
+
 func TestHandleSubscribeSingle_OrComparisonWithAlias(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
