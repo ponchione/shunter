@@ -2993,8 +2993,9 @@ func TestHandleOneOffQuery_SenderParameterInJoinFilter(t *testing.T) {
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 498-501 (`select * from t where u32 = 'str'` /
 // "Field u32 is not a string") onto the OneOffQuery admission surface. The
-// rejection fires at the coerce boundary inside parseQueryString, so the
-// one-off reply must arrive with Status=1 and a non-empty Error.
+// rejection fires while coercing the parsed SQL literal against the resolved
+// column type, so the one-off reply must arrive with Status=1 and a non-empty
+// Error.
 func TestHandleOneOffQuery_StringLiteralOnIntegerColumnRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -4350,8 +4351,8 @@ func TestHandleOneOffQuery_ParityScientificNotationOverflowInfinity(t *testing.T
 // where u8 = -1` / "Negative integer for unsigned column") onto the
 // OneOffQuery admission surface. `-1` is LitInt(-1); coerceUnsigned
 // (query/sql/coerce.go:119) rejects negative literals against unsigned
-// columns inside parseQueryString, producing Status=1 with a non-empty
-// Error message.
+// columns during SQL predicate compilation, producing Status=1 with a
+// non-empty Error message.
 func TestHandleOneOffQuery_ParityInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -6064,6 +6065,41 @@ func TestHandleOneOffQuery_ParityUnknownTableRejectText(t *testing.T) {
 	want := "no such table: `r`. If the table exists, it may be marked private."
 	if *result.Error != want {
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+func TestHandleOneOffQuery_AmbiguousCaseFoldedTableNameRejected(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "Users",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "users",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	stateAccess := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x91},
+		QueryString: "SELECT * FROM USERS WHERE id = 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected ambiguous case-folded table name to reject, got nil error")
+	}
+	want := "no such table: `USERS`. If the table exists, it may be marked private."
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
 	}
 }
 

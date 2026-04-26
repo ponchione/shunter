@@ -10,15 +10,6 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// memoizedResult holds per-query-hash encoded delta bytes for one evaluation
-// cycle. Encoding is lazy — the binary / json slices stay nil until the
-// first client of that format needs them (SPEC-004 §7.4). Actual encoding
-// lives in the protocol layer (Phase 7/8); Phase 5 only plumbs the cache.
-type memoizedResult struct {
-	binary []byte
-	json   []byte
-}
-
 // EvalAndBroadcast runs the post-commit evaluation loop (SPEC-004 §7.2).
 // Fills a CommitFanout and hands it to the fan-out worker inbox.
 //
@@ -107,8 +98,6 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 
 	fanout := CommitFanout{}
 	errs := make(map[types.ConnectionID][]SubscriptionError)
-	memo := make(map[QueryHash]*memoizedResult)
-	_ = memo
 
 	for hash := range candidates {
 		qs := m.registry.getQuery(hash)
@@ -123,7 +112,6 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 		if len(updates) == 0 {
 			continue
 		}
-		memo[hash] = &memoizedResult{}
 		for connID, subIDs := range qs.subscribers {
 			for subID, delivery := range subIDs {
 				for _, u := range updates {

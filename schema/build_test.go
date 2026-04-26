@@ -224,6 +224,47 @@ func TestBuildDuplicateTableName(t *testing.T) {
 	}
 }
 
+func TestRegistryTableByNameAmbiguousCaseFoldReturnsMissing(t *testing.T) {
+	b := NewBuilder().SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name:    "Users",
+		Columns: []ColumnDefinition{{Name: "id", Type: KindUint64}},
+	})
+	b.TableDef(TableDefinition{
+		Name:    "users",
+		Columns: []ColumnDefinition{{Name: "id", Type: KindUint64}},
+	})
+	eng, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	upperID, _, ok := eng.Registry().TableByName("Users")
+	if !ok {
+		t.Fatal("TableByName(\"Users\") failed")
+	}
+	lowerID, _, ok := eng.Registry().TableByName("users")
+	if !ok {
+		t.Fatal("TableByName(\"users\") failed")
+	}
+	if upperID == lowerID {
+		t.Fatalf("exact case-distinct table names resolved to same ID %d", upperID)
+	}
+	if _, _, ok := eng.Registry().TableByName("USERS"); ok {
+		t.Fatal("TableByName(\"USERS\") succeeded despite ambiguous case-folded table names")
+	}
+}
+
+func TestRegistryTableByNameUniqueCaseFoldStillMatches(t *testing.T) {
+	eng, err := validBuilder().Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	if _, ts, ok := eng.Registry().TableByName("PLAYERS"); !ok || ts.Name != "players" {
+		t.Fatalf("TableByName(\"PLAYERS\") = (%v, %v), want players", ok, ts)
+	}
+}
+
 func TestBuildDuplicatePK(t *testing.T) {
 	b := NewBuilder()
 	b.SchemaVersion(1)

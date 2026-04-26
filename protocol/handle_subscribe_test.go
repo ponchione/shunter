@@ -511,6 +511,46 @@ func TestHandleSubscribeSingle_MixedCaseTableAndColumns(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_AmbiguousCaseFoldedTableNameRejectedBeforeRegistration(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name:    "Users",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name:    "users",
+		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{
+		RequestID:   13,
+		QueryID:     10,
+		QueryString: "SELECT * FROM USERS WHERE id = 1",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	want := "no such table: `USERS`. If the table exists, it may be marked private., executing: `SELECT * FROM USERS WHERE id = 1`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called for ambiguous case-folded table names")
+	}
+}
+
 func TestHandleSubscribeSingle_GreaterThanComparison(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

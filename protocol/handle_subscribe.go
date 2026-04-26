@@ -45,18 +45,6 @@ type SchemaLookup interface {
 	schema.SchemaLookup
 }
 
-// compileQuery resolves a wire Query against the schema and returns the
-// compiled subscription predicate. Errors carry context suitable for
-// SubscriptionError.Error. Shared between handleSubscribeSingle and
-// handleSubscribeMulti.
-func compileQuery(q Query, sl SchemaLookup) (subscription.Predicate, error) {
-	tableID, ts, ok := sl.TableByName(q.TableName)
-	if !ok {
-		return nil, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", q.TableName)
-	}
-	return NormalizePredicates(tableID, ts, q.Predicates)
-}
-
 // joinProjectsRight decides whether the SELECT target names the right side of
 // the join. For distinct-table joins a match against the right table's alias
 // (or its base name when unaliased) is sufficient. For self-joins the table
@@ -793,35 +781,6 @@ func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, t
 		compiledCol.Name = col.OutputAlias
 	}
 	return compiledSQLProjectionColumn{Schema: compiledCol, Table: tableID, Alias: alias}, nil
-}
-
-// parseQueryString turns a client-supplied SQL string into the internal
-// Query form used by compileQuery. It resolves the table against the
-// schema and coerces each literal against the matching column kind.
-// Errors carry context suitable for SubscriptionError.Error /
-// OneOffQueryResponse.Error.
-func parseQueryString(qs string, sl SchemaLookup, caller *types.Identity) (Query, error) {
-	stmt, err := sql.Parse(qs)
-	if err != nil {
-		return Query{}, fmt.Errorf("parse: %v", err)
-	}
-	_, ts, ok := sl.TableByName(stmt.Table)
-	if !ok {
-		return Query{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Table)
-	}
-	q := Query{TableName: stmt.Table}
-	for _, f := range stmt.Filters {
-		col, ok := ts.Column(f.Column)
-		if !ok {
-			return Query{}, sql.UnresolvedVarError{Name: f.Column}
-		}
-		v, err := coerceLiteral(f.Literal, col.Type, caller)
-		if err != nil {
-			return Query{}, fmt.Errorf("coerce column %q: %v", f.Column, err)
-		}
-		q.Predicates = append(q.Predicates, Predicate{Column: f.Column, Op: f.Op, Value: v})
-	}
-	return q, nil
 }
 
 // isArrayKind reports whether a column kind is an array/product kind that

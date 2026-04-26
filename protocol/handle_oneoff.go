@@ -19,12 +19,6 @@ type CommittedStateAccess interface {
 	Snapshot() store.CommittedReadView
 }
 
-// colMatcher pairs a column index with the value to match against.
-type colMatcher struct {
-	colIdx int
-	value  types.Value
-}
-
 // handleOneOffQuery executes a one-off table scan with optional
 // comparison predicates against committed state and sends the result
 // back to the client (SPEC-005 §7.4).
@@ -138,19 +132,6 @@ func elapsedMicrosI64(receipt time.Time) int64 {
 		return 1
 	}
 	return us
-}
-
-// matchesAll returns true when pv satisfies every predicate.
-func matchesAll(pv types.ProductValue, matchers []colMatcher) bool {
-	for _, m := range matchers {
-		if m.colIdx >= len(pv) {
-			return false
-		}
-		if !pv[m.colIdx].Equal(m.value) {
-			return false
-		}
-	}
-	return true
 }
 
 func projectOneOffRows(rows []types.ProductValue, columns []compiledSQLProjectionColumn) []types.ProductValue {

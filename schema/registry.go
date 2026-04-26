@@ -117,11 +117,18 @@ func (r *schemaRegistry) TableByName(name string) (TableID, *TableSchema, bool) 
 		ts := cloneTableSchema(r.tables[i])
 		return ts.ID, &ts, true
 	}
+	match := -1
 	for i := range r.tables {
 		if strings.EqualFold(r.tables[i].Name, name) {
-			ts := cloneTableSchema(r.tables[i])
-			return ts.ID, &ts, true
+			if match != -1 {
+				return 0, nil, false
+			}
+			match = i
 		}
+	}
+	if match != -1 {
+		ts := cloneTableSchema(r.tables[match])
+		return ts.ID, &ts, true
 	}
 	return 0, nil, false
 }

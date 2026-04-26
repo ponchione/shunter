@@ -99,16 +99,15 @@ Current contract:
 - SpacetimeDB behavior may guide tricky ordering/type decisions, but byte-for-byte parser error parity is not a product goal.
 
 Current open work:
-- Identifier handling is still too case-insensitive. Table names and column names currently resolve through case-folding in several paths; decide the Shunter rule, document it, then make quoted and unquoted identifiers follow it consistently across OneOff, SubscribeSingle, and SubscribeMulti. Explicit case-distinct relation aliases are now pinned through parser and join routing, but broader table/column identifier policy remains open.
+- Identifier handling is still too case-insensitive. Table-name lookup now rejects ambiguous case-folded matches after exact lookup, and explicit case-distinct relation aliases are pinned through parser and join routing. Broader table/column identifier policy remains open: decide the Shunter rule, document it, then make quoted and unquoted identifiers follow it consistently across OneOff, SubscribeSingle, and SubscribeMulti.
 - Join WHERE support is inconsistent. Inner-join field-vs-field comparisons and boolean filters that span both relation sides are parsed in some cases but not evaluated correctly. Cross-join WHERE handling is even narrower and should either be fully admitted/evaluated for the documented subset or rejected before registration.
 - Projection on joined rows is fragile. OneOff join projection can project from the wrong relation or project twice, producing malformed rows for realistic explicit projections.
 - Validation ordering still matters where it changes user-visible outcomes. Keep ordering work only when it prevents wrong acceptance, wrong rows, misleading errors, or subscribe/one-off drift; do not chase message text for its own sake.
-- Legacy structured-query remnants remain alongside the SQL path: `Query` / `Predicate` wire types, `compileQuery`, `parseQueryString`, and one-off column match helpers make the live query model harder to reason about.
+- Legacy structured-query remnants remain alongside the SQL path: `Query` / `Predicate` wire types and exported structured-predicate normalization helpers make the live query model harder to reason about. The unused `compileQuery`, `parseQueryString`, and one-off matcher helpers have been removed.
 - One-off and subscription tests duplicate large scenario blocks. Consolidate shared fixtures where the same syntax/typing contract is being tested.
-- `subscription/eval.go` contains a dead per-evaluation memoization map: it stores query hash results but never reads them. Remove it or reconnect it deliberately.
 
 Closed context to keep out of startup work:
-- The literal source-text, literal-keyword identifier leak, case-distinct relation-alias routing, typed error, LIMIT, JOIN ON ordering, boolean-constant masking, join-keyword, unindexed-subscription-join, and missing-field text slices closed on 2026-04-25 / 2026-04-26 and are pinned by tests. Do not repeat that history here or reopen it without a fresh Shunter-visible regression.
+- The literal source-text, literal-keyword identifier leak, case-distinct relation-alias routing, ambiguous case-folded table lookup rejection, dead eval memoization cleanup, dead structured-query helper cleanup, typed error, LIMIT, JOIN ON ordering, boolean-constant masking, join-keyword, unindexed-subscription-join, and missing-field text slices closed on 2026-04-25 / 2026-04-26 and are pinned by tests or compile-time removal. Do not repeat that history here or reopen it without a fresh Shunter-visible regression.
 - Same-connection reused subscription-hash initial-snapshot elision is closed and pinned by `subscription/register_set_test.go::TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate` and `TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot`.
 - `SubscriptionError.table_id` on request-origin error paths now emits `None`; this is pinned by `executor/protocol_inbox_adapter_test.go::TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID`.
 
@@ -255,5 +254,4 @@ Primary code surfaces:
 - `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
 - `protocol/*_test.go`
 - `subscription/fanout_worker_test.go`
-- `subscription/eval.go`
 - `docs/hosted-runtime-planning/`
