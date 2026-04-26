@@ -142,3 +142,80 @@ func TestOI002LimitScout_LeadingPlusLimitRejectedByReferenceParser(t *testing.T)
 		t.Fatalf("Error = %q, want %q", *result.Error, want)
 	}
 }
+
+func TestOI002LimitScout_NegativeLimitRejectedByReferenceParser(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {{types.NewUint32(7)}},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	const sqlText = "SELECT * FROM t LIMIT -1"
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE5},
+		QueryString: sqlText,
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	want := "Unsupported: " + sqlText
+	if result.Error == nil || *result.Error != want {
+		if result.Error == nil {
+			t.Fatalf("Error = nil, want %q", want)
+		}
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+}
+
+func TestOI002LimitScout_SignedLimitRejectedBeforeMissingTable(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	const sqlText = "SELECT * FROM missing LIMIT +1"
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE6},
+		QueryString: sqlText,
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	want := "Unsupported: " + sqlText
+	if result.Error == nil || *result.Error != want {
+		if result.Error == nil {
+			t.Fatalf("Error = nil, want %q", want)
+		}
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+}
+
+func TestOI002LimitScout_NonNumericLimitRejectedBeforeProjection(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	const sqlText = "SELECT missing FROM t LIMIT '5'"
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE7},
+		QueryString: sqlText,
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	want := "Unsupported: " + sqlText
+	if result.Error == nil || *result.Error != want {
+		if result.Error == nil {
+			t.Fatalf("Error = nil, want %q", want)
+		}
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+}

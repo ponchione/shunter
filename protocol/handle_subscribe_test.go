@@ -6232,6 +6232,51 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarWherePrecedesProjectionRejectT
 	}
 }
 
+// TestHandleSubscribeSingle_ParityBooleanConstantWhereDoesNotMaskBranchErrors
+// pins reference `_type_expr` order for logical WHERE expressions on the
+// SubscribeSingle WithSql-wrapped surface: both operands are typed before
+// Bool operators are lowered.
+func TestHandleSubscribeSingle_ParityBooleanConstantWhereDoesNotMaskBranchErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		want string
+	}{
+		{"FalseAndMissing", "SELECT * FROM t WHERE FALSE AND missing = 1", "`missing` is not in scope"},
+		{"TrueOrMissing", "SELECT * FROM t WHERE TRUE OR missing = 1", "`missing` is not in scope"},
+		{"FalseAndInvalidLiteral", "SELECT * FROM t WHERE FALSE AND u32 = 1.5", "The literal expression `1.5` cannot be parsed as type `U32`"},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+			)
+
+			msg := &SubscribeSingleMsg{
+				RequestID:   uint32(500 + i*2),
+				QueryID:     uint32(501 + i*2),
+				QueryString: tc.sql,
+			}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			tag, decoded := drainServerMsgEventually(t, conn)
+			if tag != TagSubscriptionError {
+				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+			}
+			se := decoded.(SubscriptionError)
+			want := tc.want + ", executing: `" + tc.sql + "`"
+			if se.Error != want {
+				t.Fatalf("Error = %q, want %q", se.Error, want)
+			}
+			if req := executor.getRegisterSetReq(); req != nil {
+				t.Error("executor should not be called when a logical branch fails type-checking")
+			}
+		})
+	}
+}
+
 // TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedProjectionQualifierRejectText
 // pins reference `type_proj::Exprs` `Unresolved::var(&table)` emit on
 // the SubscribeSingle WithSql-wrapped surface.

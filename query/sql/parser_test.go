@@ -775,33 +775,37 @@ func TestParseJoinQualifiedProjectionOnRightTableWithLeftFilter(t *testing.T) {
 	}
 }
 
-func TestParseRejectsAliasedBaseTableProjection(t *testing.T) {
-	_, err := Parse("SELECT users.* FROM users AS item")
-	if err == nil {
-		t.Fatal("expected error for base-table projection after alias")
+func TestParseDefersAliasedBaseTableProjection(t *testing.T) {
+	stmt, err := Parse("SELECT users.* FROM users AS item")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
-}
-
-func TestParseRejectsAliasedBaseTableQualifiedWhere(t *testing.T) {
-	_, err := Parse("SELECT item.* FROM users AS item WHERE users.id = 1")
-	if err == nil {
-		t.Fatal("expected error for base-table qualified WHERE after alias")
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	if !stmt.ProjectedAliasUnknown || stmt.ProjectedAlias != "users" {
+		t.Fatalf("ProjectedAliasUnknown/ProjectedAlias = %v/%q, want true/users", stmt.ProjectedAliasUnknown, stmt.ProjectedAlias)
 	}
 }
 
-func TestParseRejectsAliasedBaseTableJoinProjection(t *testing.T) {
-	_, err := Parse("SELECT Orders.* FROM Orders o JOIN Inventory product ON o.product_id = product.id")
-	if err == nil {
-		t.Fatal("expected error for base-table projection after join alias")
+func TestParseDefersAliasedBaseTableQualifiedWhere(t *testing.T) {
+	stmt, err := Parse("SELECT item.* FROM users AS item WHERE users.id = 1")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	cmp, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if cmp.Filter.Table != "users" || cmp.Filter.Alias != "users" || cmp.Filter.Column != "id" {
+		t.Fatalf("Filter = %+v, want deferred users.id", cmp.Filter)
+	}
+}
+
+func TestParseDefersAliasedBaseTableJoinProjection(t *testing.T) {
+	stmt, err := Parse("SELECT Orders.* FROM Orders o JOIN Inventory product ON o.product_id = product.id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if !stmt.ProjectedAliasUnknown || stmt.ProjectedAlias != "Orders" {
+		t.Fatalf("ProjectedAliasUnknown/ProjectedAlias = %v/%q, want true/Orders", stmt.ProjectedAliasUnknown, stmt.ProjectedAlias)
 	}
 }
 
@@ -821,6 +825,49 @@ func TestParseJoinQualifiedProjectionOnCrossJoin(t *testing.T) {
 	}
 	if stmt.Join.HasOn {
 		t.Fatal("Join.HasOn = true, want false for cross join")
+	}
+}
+
+func TestParseCrossJoinKeywordIsJoinOperator(t *testing.T) {
+	stmt, err := Parse("SELECT t.* FROM t CROSS JOIN s")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.LeftAlias != "t" || stmt.Join.RightAlias != "s" {
+		t.Fatalf("aliases = %q/%q, want t/s", stmt.Join.LeftAlias, stmt.Join.RightAlias)
+	}
+	if stmt.Join.HasOn {
+		t.Fatal("Join.HasOn = true, want false for CROSS JOIN")
+	}
+	if stmt.ProjectedAlias != "t" || stmt.ProjectedAliasUnknown {
+		t.Fatalf("ProjectedAlias/Unknown = %q/%v, want t/false", stmt.ProjectedAlias, stmt.ProjectedAliasUnknown)
+	}
+}
+
+func TestParseRejectsNonInnerJoinKeyword(t *testing.T) {
+	_, err := Parse("SELECT LEFT.* FROM t LEFT JOIN s ON LEFT.id = s.id")
+	if err == nil {
+		t.Fatal("expected LEFT JOIN rejection")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+	want := "Non-inner joins are not supported"
+	if err.Error() != want {
+		t.Fatalf("err = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestParseRejectsDanglingInnerJoinKeyword(t *testing.T) {
+	_, err := Parse("SELECT * FROM t INNER")
+	if err == nil {
+		t.Fatal("expected dangling INNER rejection")
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
 	}
 }
 
@@ -1672,7 +1719,6 @@ func TestParseRejectsUnsupported(t *testing.T) {
 		name string
 		in   string
 	}{
-		{"qualified_projection_wrong_alias", "SELECT other.* FROM users AS item"},
 		{"mixed_wildcard_projection", "SELECT *, u32 FROM t"},
 		{"mixed_qualified_wildcard_projection", "SELECT t.*, u32 FROM t"},
 		{"join_explicit_projection", "SELECT u32 FROM t JOIN s ON t.id = s.id"},
@@ -1682,9 +1728,6 @@ func TestParseRejectsUnsupported(t *testing.T) {
 		{"aggregate_projection_with_group_by_alias", "SELECT COUNT(*) AS n FROM t GROUP BY u32"},
 		{"aggregate_multi_way_join", "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.id JOIN r ON s.id = r.id"},
 		{"order_by", "SELECT * FROM users ORDER BY id"},
-		{"limit_identifier", "SELECT * FROM users LIMIT foo"},
-		{"limit_negative", "SELECT * FROM users LIMIT -1"},
-		{"limit_float", "SELECT * FROM users LIMIT 1.5"},
 		{"trailing_garbage", "SELECT * FROM users foo bar"},
 		{"missing_from", "SELECT *"},
 		{"missing_table", "SELECT * FROM"},
@@ -1692,7 +1735,6 @@ func TestParseRejectsUnsupported(t *testing.T) {
 		{"empty", ""},
 		{"unterminated_string", "SELECT * FROM t WHERE s = 'abc"},
 		{"malformed_integer", "SELECT * FROM t WHERE n = 12abc"},
-		{"qualified_column_other_table", "SELECT * FROM users WHERE posts.id = 1"},
 		{"missing_where_rhs", "SELECT * FROM t WHERE id ="},
 		{"missing_where_op", "SELECT * FROM t WHERE id 1"},
 		{"and_without_lhs", "SELECT * FROM t WHERE AND id = 1"},

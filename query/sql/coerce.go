@@ -399,18 +399,17 @@ func renderLiteralSourceText(lit Literal) (string, bool) {
 }
 
 // decodeReferenceHex mirrors reference `from_hex_pad` (lib/src/lib.rs:310)
-// for SQL-source-text routing onto `KindBytes`. Strips an optional `0x`/`0X`
-// prefix or `X'...'` wrapper, then decodes the remaining even-length hex
-// digit pairs via `encoding/hex`. Empty body decodes to a zero-length slice
-// (matching `hex::FromHex` on empty input). Decode failure returns the
-// underlying `encoding/hex` error so the caller can fold to InvalidLiteral.
+// for SQL-source-text routing onto `KindBytes`. Strips an optional lowercase
+// `0x` prefix, then decodes the remaining even-length hex digit pairs via
+// `encoding/hex`. Empty body decodes to a zero-length slice (matching
+// `hex::FromHex` on empty input). Decode failure returns the underlying
+// `encoding/hex` error so the caller can fold to InvalidLiteral.
 func decodeReferenceHex(text string) ([]byte, error) {
 	body := text
-	switch {
-	case strings.HasPrefix(body, "0x") || strings.HasPrefix(body, "0X"):
+	if strings.HasPrefix(body, "0x") {
 		body = body[2:]
-	case len(body) >= 3 && (body[0] == 'X' || body[0] == 'x') && body[1] == '\'' && body[len(body)-1] == '\'':
-		body = body[2 : len(body)-1]
+	} else if len(body) >= 2 && (body[0] == 'X' || body[0] == 'x') && body[1] == '\'' {
+		body = body[2:]
 	}
 	return hex.DecodeString(body)
 }

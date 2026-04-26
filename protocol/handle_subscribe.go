@@ -223,7 +223,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
 	}
-	if !allowLimit && stmt.Limit != nil {
+	if stmt.UnsupportedLimit {
+		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
+	}
+	if !allowLimit && stmt.HasLimit {
 		// Reference `SubParser::parse_query`
 		// (sql-parser/src/parser/sub.rs:94-107) rejects subscription
 		// queries carrying `limit: Some(...)` through
@@ -241,8 +244,13 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	// missing-table / `Unresolved::Var` text takes precedence over the
 	// table-type return guard. The guards live below at the tails of the
 	// join branch and single-table branch.
-	stmt.Predicate = normalizeSQLPredicate(stmt.Predicate)
-	usesCallerIdentity := sqlPredicateUsesCallerIdentity(stmt.Predicate)
+	//
+	// Keep the original predicate tree for type resolution. Reference
+	// `_type_expr` types both operands of logical Bool expressions before
+	// lowering AND/OR, so constant folding must not hide errors in the
+	// folded-away branch.
+	normalizedPredicate := normalizeSQLPredicate(stmt.Predicate)
+	usesCallerIdentity := sqlPredicateUsesCallerIdentity(normalizedPredicate)
 	if stmt.Join != nil {
 		leftID, leftTS, ok := sl.TableByName(stmt.Join.LeftTable)
 		if !ok {
@@ -273,15 +281,25 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		//     short-circuit later in this branch returns NoRows.
 		var leftCol, rightCol *schema.ColumnSchema
 		if stmt.Join.HasOn {
-			var ok bool
-			leftCol, ok = leftTS.Column(stmt.Join.LeftOn.Column)
-			if !ok {
-				return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.Join.LeftOn.Column}
+			leftSide, resolvedLeftCol, err := resolveJoinOnColumn(stmt.Join.LeftOn, stmt, leftTS, rightTS)
+			if err != nil {
+				return compiledSQLQuery{}, err
 			}
-			rightCol, ok = rightTS.Column(stmt.Join.RightOn.Column)
-			if !ok {
-				return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.Join.RightOn.Column}
+			rightSide, resolvedRightCol, err := resolveJoinOnColumn(stmt.Join.RightOn, stmt, leftTS, rightTS)
+			if err != nil {
+				return compiledSQLQuery{}, err
 			}
+			if leftSide == rightSide {
+				return compiledSQLQuery{}, fmt.Errorf("JOIN ON must compare columns from different relations")
+			}
+			if leftSide == "right" && rightSide == "left" {
+				resolvedLeftCol, resolvedRightCol = resolvedRightCol, resolvedLeftCol
+				leftSide, rightSide = rightSide, leftSide
+			}
+			if leftSide != "left" || rightSide != "right" {
+				return compiledSQLQuery{}, fmt.Errorf("JOIN ON must compare left relation to right relation")
+			}
+			leftCol, rightCol = resolvedLeftCol, resolvedRightCol
 			// Reference `type_expr` (expr/src/lib.rs:134-140) types the ON
 			// binop's LEFT side first with no expectation, then types the
 			// RIGHT side with the LEFT type as the expected. The mismatch
@@ -314,15 +332,29 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				}
 			}
 		}
+		relations := map[string]relationSchema{
+			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
+			stmt.Join.RightTable: {id: rightID, ts: rightTS},
+		}
+		if stmt.Join.HasOn && stmt.Predicate != nil {
+			if _, err := compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTagForJoin(stmt, leftID == rightID), caller); err != nil {
+				return compiledSQLQuery{}, err
+			}
+		}
+		if stmt.ProjectedAlias != "" && len(stmt.ProjectionColumns) == 0 {
+			if _, ok := resolveProjectedJoinRelation(stmt, leftID, rightID); !ok || stmt.ProjectedAliasUnknown {
+				return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.ProjectedAlias}
+			}
+		}
 		// Reference `InvalidWildcard::Join` at
 		// reference/SpacetimeDB/crates/expr/src/errors.rs:41 emits
 		// "SELECT * is not supported for joins" via `type_proj` at
 		// reference/SpacetimeDB/crates/expr/src/lib.rs:56 when
 		// `ast::Project::Star(None)` meets `input.nfields() > 1`. Match
 		// the raw text so SubscribeSingle/Multi WithSql-wrap and OneOff's
-		// unwrapped emit both carry the reference literal. ON-column
-		// resolution above runs first so JOIN ON type errors are not
-		// masked by this guard.
+		// unwrapped emit both carry the reference literal. ON-column and
+		// WHERE resolution above run first so type errors are not masked
+		// by this guard.
 		if stmt.ProjectedAlias == "" && len(stmt.ProjectionColumns) == 0 && stmt.Aggregate == nil {
 			return compiledSQLQuery{}, fmt.Errorf("SELECT * is not supported for joins")
 		}
@@ -330,19 +362,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if joinProjectsRight(stmt, leftID == rightID) {
 			projectedID = rightID
 		}
-		aliasTag := func(string) uint8 { return 0 }
-		if leftID == rightID {
-			rightAliasUpper := strings.ToUpper(stmt.Join.RightAlias)
-			aliasTag = func(a string) uint8 {
-				if strings.EqualFold(a, "") {
-					return 0
-				}
-				if strings.ToUpper(a) == rightAliasUpper {
-					return 1
-				}
-				return 0
-			}
-		}
+		aliasTag := aliasTagForJoin(stmt, leftID == rightID)
 		projectionColumns, err := compileJoinProjectionColumns(stmt.ProjectionColumns,
 			relationSchema{id: leftID, ts: leftTS}, stmt.Join.LeftTable,
 			relationSchema{id: rightID, ts: rightTS}, stmt.Join.RightTable,
@@ -365,6 +385,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if !allowProjection && stmt.Aggregate != nil {
 			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 		}
+		limit, err := compileStatementLimit(stmt, qs)
+		if err != nil {
+			return compiledSQLQuery{}, err
+		}
 		if !stmt.Join.HasOn {
 			if stmt.Predicate != nil {
 				if !allowProjection {
@@ -374,7 +398,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				if err != nil {
 					return compiledSQLQuery{}, err
 				}
-				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
+				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: limit}, nil
 			}
 			cross := subscription.CrossJoin{Left: leftID, Right: rightID}
 			if leftID == rightID {
@@ -382,19 +406,15 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				cross.RightAlias = 1
 			}
 			cross.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: limit}, nil
 		}
-		if _, ok := stmt.Predicate.(sql.FalsePredicate); ok {
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
-		}
-		relations := map[string]relationSchema{
-			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
-			stmt.Join.RightTable: {id: rightID, ts: rightTS},
+		if _, ok := normalizedPredicate.(sql.FalsePredicate); ok {
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: limit}, nil
 		}
 		var filter subscription.Predicate
-		if stmt.Predicate != nil {
+		if stmt.Join.HasOn && normalizedPredicate != nil {
 			var err error
-			filter, err = compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTag, caller)
+			filter, err = compileSQLPredicateForRelations(normalizedPredicate, relations, aliasTag, caller)
 			if err != nil {
 				return compiledSQLQuery{}, err
 			}
@@ -415,7 +435,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			UsesCallerIdentity: usesCallerIdentity,
 			ProjectionColumns:  projectionColumns,
 			Aggregate:          aggregate,
-			Limit:              stmt.Limit,
+			Limit:              limit,
 		}, nil
 	}
 	projectedID, ts, ok := sl.TableByName(stmt.ProjectedTable)
@@ -429,11 +449,17 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	// missing WHERE column raises `Unresolved::Var` before the
 	// projection list is walked. The WHERE pass also captures the
 	// resolved predicate for the final compiledSQLQuery.
-	pred, err := compileSQLPredicateForRelations(stmt.Predicate, map[string]relationSchema{stmt.ProjectedTable: {id: projectedID, ts: ts}}, func(string) uint8 { return 0 }, caller)
+	if _, err := compileSQLPredicateForSingleRelation(stmt.Predicate, relationSchema{id: projectedID, ts: ts}, stmt.TableAlias, caller); err != nil {
+		return compiledSQLQuery{}, err
+	}
+	pred, err := compileSQLPredicateForSingleRelation(normalizedPredicate, relationSchema{id: projectedID, ts: ts}, stmt.TableAlias, caller)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
-	projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.ProjectionColumns, projectedID, ts)
+	if stmt.ProjectedAliasUnknown && len(stmt.ProjectionColumns) == 0 {
+		return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.ProjectedAlias}
+	}
+	projectionColumns, err := compileProjectionColumns(stmt.ProjectedTable, stmt.TableAlias, stmt.ProjectionColumns, projectedID, ts)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
@@ -451,7 +477,88 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	if !allowProjection && stmt.Aggregate != nil {
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
-	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: stmt.Limit}, nil
+	limit, err := compileStatementLimit(stmt, qs)
+	if err != nil {
+		return compiledSQLQuery{}, err
+	}
+	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: limit}, nil
+}
+
+func aliasTagForJoin(stmt sql.Statement, selfJoin bool) func(string) uint8 {
+	if !selfJoin {
+		return func(string) uint8 { return 0 }
+	}
+	rightAliasUpper := strings.ToUpper(stmt.Join.RightAlias)
+	return func(a string) uint8 {
+		if strings.EqualFold(a, "") {
+			return 0
+		}
+		if strings.ToUpper(a) == rightAliasUpper {
+			return 1
+		}
+		return 0
+	}
+}
+
+func resolveProjectedJoinRelation(stmt sql.Statement, leftID, rightID schema.TableID) (schema.TableID, bool) {
+	switch {
+	case strings.EqualFold(stmt.ProjectedAlias, stmt.Join.LeftAlias):
+		return leftID, true
+	case strings.EqualFold(stmt.ProjectedAlias, stmt.Join.RightAlias):
+		return rightID, true
+	case leftID != rightID && strings.EqualFold(stmt.ProjectedAlias, stmt.Join.LeftTable):
+		return leftID, true
+	case leftID != rightID && strings.EqualFold(stmt.ProjectedAlias, stmt.Join.RightTable):
+		return rightID, true
+	default:
+		return 0, false
+	}
+}
+
+func resolveJoinOnColumn(ref sql.ColumnRef, stmt sql.Statement, leftTS, rightTS *schema.TableSchema) (string, *schema.ColumnSchema, error) {
+	switch {
+	case strings.EqualFold(ref.Alias, stmt.Join.LeftAlias):
+		col, ok := leftTS.Column(ref.Column)
+		if !ok {
+			return "", nil, sql.UnresolvedVarError{Name: ref.Column}
+		}
+		return "left", col, nil
+	case strings.EqualFold(ref.Alias, stmt.Join.RightAlias):
+		col, ok := rightTS.Column(ref.Column)
+		if !ok {
+			return "", nil, sql.UnresolvedVarError{Name: ref.Column}
+		}
+		return "right", col, nil
+	default:
+		return "", nil, sql.UnresolvedVarError{Name: ref.Alias}
+	}
+}
+
+func compileStatementLimit(stmt sql.Statement, sqlText string) (*uint64, error) {
+	if stmt.UnsupportedLimit {
+		return nil, sql.UnsupportedFeatureError{SQL: sqlText}
+	}
+	if stmt.InvalidLimit != nil {
+		return nil, sql.InvalidLiteralError{Literal: limitLiteralText(*stmt.InvalidLimit), Type: "U64"}
+	}
+	return stmt.Limit, nil
+}
+
+func limitLiteralText(lit sql.Literal) string {
+	if lit.Text != "" {
+		return lit.Text
+	}
+	if lit.Big != nil {
+		return lit.Big.String()
+	}
+	switch lit.Kind {
+	case sql.LitInt:
+		return fmt.Sprintf("%d", lit.Int)
+	case sql.LitFloat:
+		return fmt.Sprintf("%g", lit.Float)
+	default:
+		return ""
+	}
 }
 
 func compileAggregateProjection(agg *sql.AggregateProjection) (*compiledSQLAggregate, error) {
@@ -553,7 +660,47 @@ func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string
 	return normalizeSQLFilterForRelations(cmp.Filter, relations, func(string) uint8 { return 0 }, caller)
 }
 
-func compileProjectionColumns(projectedTable string, columns []sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema) ([]compiledSQLProjectionColumn, error) {
+func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema, tableAlias string, caller *types.Identity) (subscription.Predicate, error) {
+	switch p := pred.(type) {
+	case nil:
+		return subscription.AllRows{Table: rel.id}, nil
+	case sql.TruePredicate:
+		return subscription.AllRows{Table: rel.id}, nil
+	case sql.FalsePredicate:
+		return subscription.NoRows{Table: rel.id}, nil
+	case sql.ComparisonPredicate:
+		if p.Filter.Alias != "" && !strings.EqualFold(p.Filter.Alias, tableAlias) {
+			return nil, sql.UnresolvedVarError{Name: p.Filter.Alias}
+		}
+		f := p.Filter
+		f.Table = tableAlias
+		return normalizeSQLFilterForRelations(f, map[string]relationSchema{tableAlias: rel}, func(string) uint8 { return 0 }, caller)
+	case sql.AndPredicate:
+		left, err := compileSQLPredicateForSingleRelation(p.Left, rel, tableAlias, caller)
+		if err != nil {
+			return nil, err
+		}
+		right, err := compileSQLPredicateForSingleRelation(p.Right, rel, tableAlias, caller)
+		if err != nil {
+			return nil, err
+		}
+		return subscription.And{Left: left, Right: right}, nil
+	case sql.OrPredicate:
+		left, err := compileSQLPredicateForSingleRelation(p.Left, rel, tableAlias, caller)
+		if err != nil {
+			return nil, err
+		}
+		right, err := compileSQLPredicateForSingleRelation(p.Right, rel, tableAlias, caller)
+		if err != nil {
+			return nil, err
+		}
+		return subscription.Or{Left: left, Right: right}, nil
+	default:
+		return nil, fmt.Errorf("unsupported SQL predicate %T", pred)
+	}
+}
+
+func compileProjectionColumns(projectedTable string, tableAlias string, columns []sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema) ([]compiledSQLProjectionColumn, error) {
 	if len(columns) == 0 {
 		return nil, nil
 	}
@@ -563,8 +710,8 @@ func compileProjectionColumns(projectedTable string, columns []sql.ProjectionCol
 		if err := checkDuplicateProjectionName(col, seen); err != nil {
 			return nil, err
 		}
-		if !strings.EqualFold(col.Table, projectedTable) {
-			return nil, fmt.Errorf("projection column %q must resolve to table %q", col.Column, projectedTable)
+		if col.SourceQualifier != "" && !strings.EqualFold(col.SourceQualifier, tableAlias) {
+			return nil, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
 		}
 		compiledCol, err := compileProjectionColumn(col, tableID, ts, 0)
 		if err != nil {
@@ -592,7 +739,7 @@ func compileJoinProjectionColumns(columns []sql.ProjectionColumn, left relationS
 		case strings.EqualFold(col.Table, rightTable):
 			rel = right
 		default:
-			return nil, fmt.Errorf("projection column %q resolved to unknown table %q", col.Column, col.Table)
+			return nil, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
 		}
 		compiledCol, err := compileProjectionColumn(col, rel.id, rel.ts, aliasTag(col.SourceQualifier))
 		if err != nil {
@@ -622,6 +769,13 @@ func checkDuplicateProjectionName(col sql.ProjectionColumn, seen map[string]stru
 	}
 	seen[name] = struct{}{}
 	return nil
+}
+
+func projectionQualifierName(col sql.ProjectionColumn) string {
+	if col.SourceQualifier != "" {
+		return col.SourceQualifier
+	}
+	return col.Table
 }
 
 func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema, alias uint8) (compiledSQLProjectionColumn, error) {
@@ -738,7 +892,11 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity) (subscription.Predicate, error) {
 	rel, ok := relations[f.Table]
 	if !ok {
-		return nil, fmt.Errorf("unknown table %q in SQL filter", f.Table)
+		name := f.Alias
+		if name == "" {
+			name = f.Table
+		}
+		return nil, sql.UnresolvedVarError{Name: name}
 	}
 	col, ok := rel.ts.Column(f.Column)
 	if !ok {

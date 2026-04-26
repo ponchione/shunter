@@ -223,15 +223,20 @@ type AggregateProjection struct {
 // as `SELECT o.id, product.quantity ...`). Wildcard/full-row projections keep
 // this empty and continue using ProjectedTable / ProjectedAlias.
 type Statement struct {
-	Table             string
-	ProjectedTable    string
-	ProjectedAlias    string
-	ProjectionColumns []ProjectionColumn
-	Aggregate         *AggregateProjection
-	Join              *JoinClause
-	Predicate         Predicate
-	Filters           []Filter
-	Limit             *uint64
+	Table                 string
+	TableAlias            string
+	ProjectedTable        string
+	ProjectedAlias        string
+	ProjectedAliasUnknown bool
+	ProjectionColumns     []ProjectionColumn
+	Aggregate             *AggregateProjection
+	Join                  *JoinClause
+	Predicate             Predicate
+	Filters               []Filter
+	Limit                 *uint64
+	HasLimit              bool
+	InvalidLimit          *Literal
+	UnsupportedLimit      bool
 }
 
 type relationBindings struct {
@@ -549,6 +554,20 @@ func isKeywordToken(t token, kw string) bool {
 	return !t.quoted && t.kind == tokIdent && strings.EqualFold(t.text, kw)
 }
 
+func isJoinModifierToken(t token) bool {
+	return isKeywordToken(t, "INNER") ||
+		isKeywordToken(t, "CROSS") ||
+		isUnsupportedJoinStartToken(t)
+}
+
+func isUnsupportedJoinStartToken(t token) bool {
+	return isKeywordToken(t, "LEFT") ||
+		isKeywordToken(t, "RIGHT") ||
+		isKeywordToken(t, "FULL") ||
+		isKeywordToken(t, "OUTER") ||
+		isKeywordToken(t, "NATURAL")
+}
+
 // --- parser ---
 
 type parser struct {
@@ -591,12 +610,22 @@ func (p *parser) parseStatement() (Statement, error) {
 	if err != nil {
 		return Statement{}, err
 	}
-	stmt := Statement{Table: tableName, ProjectedTable: tableName, ProjectedAlias: projectionQualifier}
+	stmt := Statement{Table: tableName, TableAlias: leftQualifiers[0], ProjectedTable: tableName, ProjectedAlias: projectionQualifier}
 	stmt.Aggregate = aggregate
 	bindings := relationBindings{defaultTable: tableName, byQualifier: singleQualifierMap(tableName, leftQualifiers)}
 	var onFilter Predicate
 	if isKeywordToken(p.peek(), "INNER") {
 		p.advance()
+		if !isKeywordToken(p.peek(), "JOIN") {
+			return Statement{}, p.unsupported("expected JOIN after INNER")
+		}
+	} else if isKeywordToken(p.peek(), "CROSS") {
+		p.advance()
+		if !isKeywordToken(p.peek(), "JOIN") {
+			return Statement{}, p.unsupported("expected JOIN after CROSS")
+		}
+	} else if isUnsupportedJoinStartToken(p.peek()) {
+		return Statement{}, UnsupportedJoinTypeError{}
 	}
 	if isKeywordToken(p.peek(), "JOIN") {
 		join, rightQualifiers, onPred, err := p.parseJoinClause(tableName, leftQualifiers)
@@ -610,16 +639,12 @@ func (p *parser) parseStatement() (Statement, error) {
 			byQualifier:    joinQualifierMap(tableName, leftQualifiers, join.RightTable, rightQualifiers),
 		}
 		if projectionQualifier != "" {
-			projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier)
-			if !ok {
-				// Reference `type_proj` for `Project::Star(Some(var))`
-				// checks `input.has_field(&var)` and otherwise emits
-				// `Unresolved::var(&var)` — same emit shape used for
-				// the qualified column branch in
-				// `resolveProjectionColumns`.
-				return Statement{}, UnresolvedVarError{Name: projectionQualifier}
+			if projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier); ok {
+				stmt.ProjectedTable = projectedTable
+			} else {
+				stmt.ProjectedTable = projectionQualifier
+				stmt.ProjectedAliasUnknown = true
 			}
-			stmt.ProjectedTable = projectedTable
 			stmt.ProjectedAlias = projectionQualifier
 		}
 		// Parity rejection: reference subscription runtime at
@@ -631,15 +656,22 @@ func (p *parser) parseStatement() (Statement, error) {
 			if p.pos+1 < len(p.toks) && isKeywordToken(p.toks[p.pos+1], "JOIN") {
 				return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
 			}
+			return Statement{}, p.unsupported("expected JOIN after INNER")
+		}
+		if isKeywordToken(p.peek(), "CROSS") {
+			if p.pos+1 < len(p.toks) && isKeywordToken(p.toks[p.pos+1], "JOIN") {
+				return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
+			}
+			return Statement{}, p.unsupported("expected JOIN after CROSS")
+		}
+		if isUnsupportedJoinStartToken(p.peek()) {
+			return Statement{}, UnsupportedJoinTypeError{}
 		}
 		if isKeywordToken(p.peek(), "JOIN") {
 			return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
 		}
 	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
-		// Reference `type_proj` `Project::Star(Some(var))` lookup miss
-		// emits `Unresolved::var(&var)`; mirror on the single-table
-		// branch.
-		return Statement{}, UnresolvedVarError{Name: projectionQualifier}
+		stmt.ProjectedAliasUnknown = true
 	}
 	if len(projectionColumns) != 0 {
 		resolvedProjectionColumns, err := resolveProjectionColumns(projectionColumns, bindings)
@@ -669,11 +701,14 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		stmt.Filters, _ = flattenAndFilters(stmt.Predicate)
 	}
-	limit, err := p.parseLimit()
+	limit, invalidLimit, hasLimit, unsupportedLimit, err := p.parseLimit()
 	if err != nil {
 		return Statement{}, err
 	}
 	stmt.Limit = limit
+	stmt.InvalidLimit = invalidLimit
+	stmt.HasLimit = hasLimit
+	stmt.UnsupportedLimit = unsupportedLimit
 	if p.peek().kind == tokSemicolon {
 		p.advance()
 	}
@@ -824,16 +859,11 @@ func resolveProjectionColumns(columns []ProjectionColumn, bindings relationBindi
 		qualifier := col.SourceQualifier
 		if qualifier != "" {
 			resolvedTable, ok := resolveQualifier(qualifier, bindings.byQualifier)
-			if !ok {
-				// Reference `type_proj::Exprs` (`expr/src/lib.rs:65-78`)
-				// sends each qualified projection field through
-				// `type_expr`, whose relvar lookup miss emits
-				// `Unresolved::var(&table)` (`expr/src/lib.rs:103`).
-				// Mirror that text here on both surfaces (OneOff raw,
-				// SubscribeSingle WithSql-wrapped).
-				return nil, UnresolvedVarError{Name: qualifier}
+			if ok {
+				tableName = resolvedTable
+			} else {
+				tableName = qualifier
 			}
-			tableName = resolvedTable
 		} else if bindings.requireQualify {
 			// Reference `SqlSelect::find_unqualified_vars`
 			// (sql-parser/src/ast/sql.rs:84-95) routes any unqualified
@@ -856,6 +886,9 @@ func (p *parser) parseRelationQualifiers(tableName string) ([]string, error) {
 			return nil, err
 		}
 		return []string{alias}, nil
+	}
+	if isJoinModifierToken(p.peek()) {
+		return []string{tableName}, nil
 	}
 	if isIdentifierToken(p.peek()) {
 		alias, err := p.parseAlias()
@@ -943,14 +976,18 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if strings.EqualFold(leftOn.Alias, rightOn.Alias) {
-		return nil, nil, nil, p.unsupported("JOIN ON must compare columns from different relations")
-	}
-	if strings.EqualFold(leftOn.Alias, rightAlias) && strings.EqualFold(rightOn.Alias, leftAlias) {
-		leftOn, rightOn = rightOn, leftOn
-	}
-	if !strings.EqualFold(leftOn.Alias, leftAlias) || !strings.EqualFold(rightOn.Alias, rightAlias) {
-		return nil, nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
+	_, leftKnown := resolveQualifier(leftOn.Alias, lookup)
+	_, rightKnown := resolveQualifier(rightOn.Alias, lookup)
+	if leftKnown && rightKnown {
+		if strings.EqualFold(leftOn.Alias, rightOn.Alias) {
+			return nil, nil, nil, p.unsupported("JOIN ON must compare columns from different relations")
+		}
+		if strings.EqualFold(leftOn.Alias, rightAlias) && strings.EqualFold(rightOn.Alias, leftAlias) {
+			leftOn, rightOn = rightOn, leftOn
+		}
+		if !strings.EqualFold(leftOn.Alias, leftAlias) || !strings.EqualFold(rightOn.Alias, rightAlias) {
+			return nil, nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
+		}
 	}
 	jc := &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}
 	if isKeywordToken(p.peek(), "AND") || isKeywordToken(p.peek(), "OR") {
@@ -982,12 +1019,7 @@ func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, e
 	p.advance()
 	tableName, ok := resolveQualifier(qualifierTok.text, lookup)
 	if !ok {
-		// Reference `_type_expr` (expr/src/lib.rs:103) emits
-		// `Unresolved::var(&table)` when `vars.deref().get(&*table)`
-		// returns None — the qualifier identifier is absent from the
-		// declared relvars (e.g. base table name `t` referenced after
-		// the FROM clause was rebound with `AS r`).
-		return ColumnRef{}, UnresolvedVarError{Name: qualifierTok.text}
+		tableName = qualifierTok.text
 	}
 	return ColumnRef{Table: tableName, Column: columnTok.text, Alias: qualifierTok.text}, nil
 }
@@ -1007,21 +1039,43 @@ func (p *parser) parseWhere(bindings relationBindings) (Predicate, []Filter, err
 	return pred, filters, nil
 }
 
-func (p *parser) parseLimit() (*uint64, error) {
+func (p *parser) parseLimit() (*uint64, *Literal, bool, bool, error) {
 	if !isKeywordToken(p.peek(), "LIMIT") {
-		return nil, nil
+		return nil, nil, false, false, nil
 	}
 	p.advance()
 	t := p.peek()
 	if t.kind != tokNumber {
-		return nil, p.unsupported("LIMIT requires an unsigned integer literal")
-	}
-	limit, err := strconv.ParseUint(t.text, 10, 64)
-	if err != nil {
-		return nil, p.unsupported("LIMIT requires an unsigned integer literal")
+		p.consumeUntilStatementEnd()
+		return nil, nil, true, true, nil
 	}
 	p.advance()
-	return &limit, nil
+	if strings.HasPrefix(t.text, "+") {
+		return nil, nil, true, true, nil
+	}
+	if strings.HasPrefix(t.text, "-") {
+		return nil, nil, true, true, nil
+	}
+	lit, err := parseNumericLiteral(t.text)
+	if err != nil {
+		return nil, nil, false, false, err
+	}
+	switch lit.Kind {
+	case LitInt:
+		if lit.Int < 0 {
+			return nil, &lit, true, false, nil
+		}
+		limit := uint64(lit.Int)
+		return &limit, nil, true, false, nil
+	case LitBigInt:
+		if lit.Big.Sign() < 0 || !lit.Big.IsUint64() {
+			return nil, &lit, true, false, nil
+		}
+		limit := lit.Big.Uint64()
+		return &limit, nil, true, false, nil
+	default:
+		return nil, &lit, true, false, nil
+	}
 }
 
 func (p *parser) parseDisjunction(bindings relationBindings) (Predicate, error) {
@@ -1161,11 +1215,7 @@ func (p *parser) parseColumnRefForPredicate(bindings relationBindings) (ColumnRe
 		}
 		resolved, ok := resolveQualifier(qualifier, bindings.byQualifier)
 		if !ok {
-			// Reference `_type_expr` (expr/src/lib.rs:103) emits
-			// `Unresolved::var(&table)` when the qualifier identifier
-			// is absent from the declared relvars (e.g. base table
-			// name `t` after `AS r` rebinds the FROM relvar).
-			return ColumnRef{}, UnresolvedVarError{Name: qualifier}
+			resolved = qualifier
 		}
 		tableName = resolved
 		columnName = t.text
