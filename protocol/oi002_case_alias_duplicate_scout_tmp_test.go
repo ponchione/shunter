@@ -15,14 +15,15 @@ import (
 // rejected as a `DuplicateName` collision. Reference path: `type_from`
 // (expr/src/lib.rs:88-89) inserts each alias into a HashSet keyed by
 // `Relvars`; `Relvars` is a byte-equal `SqlIdent`, so `"R"` and `r` are
-// distinct keys and the second insert does not collide. Shunter currently
-// uses `strings.EqualFold` at `parser.go::parseJoinClause` line 849, which
-// incorrectly raises `DuplicateName` for any case-folded alias pair.
+// distinct keys and the second insert does not collide. This pin keeps the
+// collision check exact so case-distinct aliases cannot regress into a
+// `DuplicateName` rejection.
 //
 // Scope: this scout pins ONLY the collision-detection seam. Downstream
-// alias-resolution (the qualifier-map ToUpper keying and the JOIN ON
-// EqualFold checks) remains case-insensitive in this slice and is tracked
-// as a separate, larger case-preservation slice in OI-002.
+// parser/protocol alias routing for the same case-distinct shape is pinned by
+// `TestParseCaseDistinctRelationAliasesResolveIndependently`,
+// `TestHandleOneOffQuery_CaseDistinctRelationAliasesRouteJoinSides`, and
+// `TestHandleSubscribeSingle_CaseDistinctRelationAliasesRouteJoinSides`.
 func TestOI002Scout_CaseDistinctQuotedAliasesDoNotCollide(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)

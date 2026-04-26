@@ -99,8 +99,7 @@ Current contract:
 - SpacetimeDB behavior may guide tricky ordering/type decisions, but byte-for-byte parser error parity is not a product goal.
 
 Current open work:
-- Identifier handling is still too case-insensitive. Table names, column names, and relation aliases currently resolve through case-folding in several paths. Decide the Shunter rule, document it, then make quoted and unquoted identifiers follow it consistently across OneOff, SubscribeSingle, and SubscribeMulti.
-- Literal keyword handling is leaky. Unquoted `TRUE`, `FALSE`, and `NULL` can fall through as column names in some projection/filter shapes when real lowercase columns exist. They should remain literals or be rejected according to Shunter's SQL subset.
+- Identifier handling is still too case-insensitive. Table names and column names currently resolve through case-folding in several paths; decide the Shunter rule, document it, then make quoted and unquoted identifiers follow it consistently across OneOff, SubscribeSingle, and SubscribeMulti. Explicit case-distinct relation aliases are now pinned through parser and join routing, but broader table/column identifier policy remains open.
 - Join WHERE support is inconsistent. Inner-join field-vs-field comparisons and boolean filters that span both relation sides are parsed in some cases but not evaluated correctly. Cross-join WHERE handling is even narrower and should either be fully admitted/evaluated for the documented subset or rejected before registration.
 - Projection on joined rows is fragile. OneOff join projection can project from the wrong relation or project twice, producing malformed rows for realistic explicit projections.
 - Validation ordering still matters where it changes user-visible outcomes. Keep ordering work only when it prevents wrong acceptance, wrong rows, misleading errors, or subscribe/one-off drift; do not chase message text for its own sake.
@@ -109,7 +108,7 @@ Current open work:
 - `subscription/eval.go` contains a dead per-evaluation memoization map: it stores query hash results but never reads them. Remove it or reconnect it deliberately.
 
 Closed context to keep out of startup work:
-- The literal source-text, typed error, LIMIT, JOIN ON ordering, boolean-constant masking, join-keyword, unindexed-subscription-join, and missing-field text slices closed on 2026-04-25 / 2026-04-26 and are pinned by tests. Do not repeat that history here or reopen it without a fresh Shunter-visible regression.
+- The literal source-text, literal-keyword identifier leak, case-distinct relation-alias routing, typed error, LIMIT, JOIN ON ordering, boolean-constant masking, join-keyword, unindexed-subscription-join, and missing-field text slices closed on 2026-04-25 / 2026-04-26 and are pinned by tests. Do not repeat that history here or reopen it without a fresh Shunter-visible regression.
 - Same-connection reused subscription-hash initial-snapshot elision is closed and pinned by `subscription/register_set_test.go::TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate` and `TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot`.
 - `SubscriptionError.table_id` on request-origin error paths now emits `None`; this is pinned by `executor/protocol_inbox_adapter_test.go::TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID`.
 

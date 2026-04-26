@@ -2071,6 +2071,63 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoin(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_CaseDistinctRelationAliasesRouteJoinSides(t *testing.T) {
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_s_u32", Columns: []string{"u32"}}},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+	msg := &SubscribeSingleMsg{
+		RequestID:   34,
+		QueryID:     35,
+		QueryString: `SELECT "R".* FROM t AS "R" JOIN s AS r ON "R".u32 = r.u32`,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	pred, ok := req.Predicates[0].(subscription.Join)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want Join", req.Predicates[0])
+	}
+	tID, _, _ := eng.Registry().TableByName("t")
+	sID, _, _ := eng.Registry().TableByName("s")
+	if pred.Left != tID || pred.Right != sID {
+		t.Fatalf("join sides = %d/%d, want %d/%d", pred.Left, pred.Right, tID, sID)
+	}
+	if pred.ProjectRight {
+		t.Fatal(`SELECT "R".* must compile to ProjectRight=false`)
+	}
+}
+
 // TD-142 Slice 14: self-join `SELECT b.*` threads ProjectRight=true so the
 // runtime emits rows shaped like the b-side instance. The parser-side
 // ProjectedAlias="b" drives this decision; the physical table is the same on
@@ -3334,6 +3391,31 @@ func TestHandleSubscribeSingle_ParityBareColumnProjectionRejected(t *testing.T) 
 	requireOptionalUint32(t, se.QueryID, 93, "QueryID")
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on a bare column projection")
+	}
+}
+
+func TestHandleSubscribeSingle_UnquotedNullWhereRejectedBeforeRegistration(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "null", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   92,
+		QueryID:     94,
+		QueryString: "SELECT * FROM t WHERE NULL = 1",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 94, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when unquoted NULL appears in column position")
 	}
 }
 

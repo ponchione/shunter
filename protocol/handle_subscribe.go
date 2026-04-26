@@ -69,16 +69,16 @@ func joinProjectsRight(stmt sql.Statement, selfJoin bool) bool {
 	if alias == "" {
 		return false
 	}
-	if strings.EqualFold(alias, stmt.Join.LeftAlias) {
+	if alias == stmt.Join.LeftAlias {
 		return false
 	}
-	if strings.EqualFold(alias, stmt.Join.RightAlias) {
+	if alias == stmt.Join.RightAlias {
 		return true
 	}
 	if selfJoin {
 		return false
 	}
-	return strings.EqualFold(alias, stmt.Join.RightTable)
+	return alias == stmt.Join.RightTable
 }
 
 func isSQLTruePredicate(pred sql.Predicate) bool {
@@ -494,12 +494,11 @@ func aliasTagForJoin(stmt sql.Statement, selfJoin bool) func(string) uint8 {
 	if !selfJoin {
 		return func(string) uint8 { return 0 }
 	}
-	rightAliasUpper := strings.ToUpper(stmt.Join.RightAlias)
 	return func(a string) uint8 {
-		if strings.EqualFold(a, "") {
+		if a == "" {
 			return 0
 		}
-		if strings.ToUpper(a) == rightAliasUpper {
+		if a == stmt.Join.RightAlias {
 			return 1
 		}
 		return 0
@@ -508,13 +507,13 @@ func aliasTagForJoin(stmt sql.Statement, selfJoin bool) func(string) uint8 {
 
 func resolveProjectedJoinRelation(stmt sql.Statement, leftID, rightID schema.TableID) (schema.TableID, bool) {
 	switch {
-	case strings.EqualFold(stmt.ProjectedAlias, stmt.Join.LeftAlias):
+	case stmt.ProjectedAlias == stmt.Join.LeftAlias:
 		return leftID, true
-	case strings.EqualFold(stmt.ProjectedAlias, stmt.Join.RightAlias):
+	case stmt.ProjectedAlias == stmt.Join.RightAlias:
 		return rightID, true
-	case leftID != rightID && strings.EqualFold(stmt.ProjectedAlias, stmt.Join.LeftTable):
+	case leftID != rightID && stmt.ProjectedAlias == stmt.Join.LeftTable:
 		return leftID, true
-	case leftID != rightID && strings.EqualFold(stmt.ProjectedAlias, stmt.Join.RightTable):
+	case leftID != rightID && stmt.ProjectedAlias == stmt.Join.RightTable:
 		return rightID, true
 	default:
 		return 0, false
@@ -523,13 +522,13 @@ func resolveProjectedJoinRelation(stmt sql.Statement, leftID, rightID schema.Tab
 
 func resolveJoinOnColumn(ref sql.ColumnRef, stmt sql.Statement, leftTS, rightTS *schema.TableSchema) (string, *schema.ColumnSchema, error) {
 	switch {
-	case strings.EqualFold(ref.Alias, stmt.Join.LeftAlias):
+	case ref.Alias == stmt.Join.LeftAlias:
 		col, ok := leftTS.Column(ref.Column)
 		if !ok {
 			return "", nil, sql.UnresolvedVarError{Name: ref.Column}
 		}
 		return "left", col, nil
-	case strings.EqualFold(ref.Alias, stmt.Join.RightAlias):
+	case ref.Alias == stmt.Join.RightAlias:
 		col, ok := rightTS.Column(ref.Column)
 		if !ok {
 			return "", nil, sql.UnresolvedVarError{Name: ref.Column}
@@ -592,10 +591,10 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 		return subscription.Join{}, fmt.Errorf("cross join WHERE column comparisons only support '='")
 	}
 	leftRef, rightRef := cmp.Left, cmp.Right
-	if strings.EqualFold(leftRef.Table, stmt.Join.RightTable) && strings.EqualFold(rightRef.Table, stmt.Join.LeftTable) {
+	if leftRef.Table == stmt.Join.RightTable && rightRef.Table == stmt.Join.LeftTable {
 		leftRef, rightRef = rightRef, leftRef
 	}
-	if !strings.EqualFold(leftRef.Table, stmt.Join.LeftTable) || !strings.EqualFold(rightRef.Table, stmt.Join.RightTable) {
+	if leftRef.Table != stmt.Join.LeftTable || rightRef.Table != stmt.Join.RightTable {
 		return subscription.Join{}, fmt.Errorf("cross join WHERE column equality must compare left and right relations")
 	}
 	leftCol, ok := leftTS.Column(leftRef.Column)
@@ -740,9 +739,9 @@ func compileJoinProjectionColumns(columns []sql.ProjectionColumn, left relationS
 		}
 		var rel relationSchema
 		switch {
-		case strings.EqualFold(col.Table, leftTable):
+		case col.Table == leftTable:
 			rel = left
-		case strings.EqualFold(col.Table, rightTable):
+		case col.Table == rightTable:
 			rel = right
 		default:
 			return nil, sql.UnresolvedVarError{Name: projectionQualifierName(col)}

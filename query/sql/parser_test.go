@@ -951,6 +951,35 @@ func TestParseAliasedSelfEquiJoinProjection(t *testing.T) {
 	}
 }
 
+func TestParseCaseDistinctRelationAliasesResolveIndependently(t *testing.T) {
+	stmt, err := Parse(`SELECT "R".* FROM t AS "R" JOIN s AS r ON "R".u32 = r.u32 WHERE r.u32 = 1`)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.ProjectedAlias != "R" || stmt.ProjectedTable != "t" || stmt.ProjectedAliasUnknown {
+		t.Fatalf("projected alias/table/unknown = %q/%q/%v, want R/t/false", stmt.ProjectedAlias, stmt.ProjectedTable, stmt.ProjectedAliasUnknown)
+	}
+	if stmt.Join == nil {
+		t.Fatal("Join = nil, want join metadata")
+	}
+	if stmt.Join.LeftAlias != "R" || stmt.Join.RightAlias != "r" {
+		t.Fatalf("join aliases = %q/%q, want R/r", stmt.Join.LeftAlias, stmt.Join.RightAlias)
+	}
+	if stmt.Join.LeftOn.Table != "t" || stmt.Join.RightOn.Table != "s" {
+		t.Fatalf("ON tables = %q/%q, want t/s", stmt.Join.LeftOn.Table, stmt.Join.RightOn.Table)
+	}
+	if stmt.Join.LeftOn.Alias != "R" || stmt.Join.RightOn.Alias != "r" {
+		t.Fatalf("ON aliases = %q/%q, want R/r", stmt.Join.LeftOn.Alias, stmt.Join.RightOn.Alias)
+	}
+	filter, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want comparison", stmt.Predicate)
+	}
+	if filter.Filter.Table != "s" || filter.Filter.Alias != "r" {
+		t.Fatalf("WHERE filter table/alias = %q/%q, want s/r", filter.Filter.Table, filter.Filter.Alias)
+	}
+}
+
 // TD-142 Slice 14: RHS-side self-join projection must carry the b-alias so
 // the compile path can thread ProjectRight=true.
 func TestParseAliasedSelfEquiJoinProjectsRight(t *testing.T) {
@@ -1180,6 +1209,49 @@ func TestParseSingleTableColumnProjection(t *testing.T) {
 	col := stmt.ProjectionColumns[0]
 	if col.Table != "t" || col.Column != "u32" || col.SourceQualifier != "" || col.OutputAlias != "" {
 		t.Fatalf("ProjectionColumns[0] = %+v, want table=t column=u32 sourceQualifier='' outputAlias=''", col)
+	}
+}
+
+func TestParseRejectsUnquotedLiteralKeywordProjectionColumns(t *testing.T) {
+	for _, query := range []string{
+		"SELECT TRUE FROM t",
+		"SELECT FALSE FROM t",
+		"SELECT NULL FROM t",
+	} {
+		t.Run(query, func(t *testing.T) {
+			_, err := Parse(query)
+			if !errors.Is(err, ErrUnsupportedSQL) {
+				t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
+			}
+		})
+	}
+}
+
+func TestParseRejectsUnquotedNullAsWhereColumn(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM t WHERE NULL = 1")
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters = %+v, want none after rejected NULL LHS", stmt.Filters)
+	}
+}
+
+func TestParseQuotedLiteralKeywordColumnsStillIdentifiers(t *testing.T) {
+	stmt, err := Parse(`SELECT "true" FROM t`)
+	if err != nil {
+		t.Fatalf("Parse quoted projection: %v", err)
+	}
+	if len(stmt.ProjectionColumns) != 1 || stmt.ProjectionColumns[0].Column != "true" {
+		t.Fatalf("ProjectionColumns = %+v, want quoted column true", stmt.ProjectionColumns)
+	}
+
+	stmt, err = Parse(`SELECT * FROM t WHERE "null" = 1`)
+	if err != nil {
+		t.Fatalf("Parse quoted WHERE column: %v", err)
+	}
+	if len(stmt.Filters) != 1 || stmt.Filters[0].Column != "null" {
+		t.Fatalf("Filters = %+v, want quoted column null", stmt.Filters)
 	}
 }
 

@@ -554,6 +554,12 @@ func isKeywordToken(t token, kw string) bool {
 	return !t.quoted && t.kind == tokIdent && strings.EqualFold(t.text, kw)
 }
 
+func isLiteralKeywordToken(t token) bool {
+	return isKeywordToken(t, "TRUE") ||
+		isKeywordToken(t, "FALSE") ||
+		isKeywordToken(t, "NULL")
+}
+
 func isJoinModifierToken(t token) bool {
 	return isKeywordToken(t, "INNER") ||
 		isKeywordToken(t, "CROSS") ||
@@ -998,13 +1004,13 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	_, leftKnown := resolveQualifier(leftOn.Alias, lookup)
 	_, rightKnown := resolveQualifier(rightOn.Alias, lookup)
 	if leftKnown && rightKnown {
-		if strings.EqualFold(leftOn.Alias, rightOn.Alias) {
+		if leftOn.Alias == rightOn.Alias {
 			return nil, nil, nil, p.unsupported("JOIN ON must compare columns from different relations")
 		}
-		if strings.EqualFold(leftOn.Alias, rightAlias) && strings.EqualFold(rightOn.Alias, leftAlias) {
+		if leftOn.Alias == rightAlias && rightOn.Alias == leftAlias {
 			leftOn, rightOn = rightOn, leftOn
 		}
-		if !strings.EqualFold(leftOn.Alias, leftAlias) || !strings.EqualFold(rightOn.Alias, rightAlias) {
+		if leftOn.Alias != leftAlias || rightOn.Alias != rightAlias {
 			return nil, nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
 		}
 	}
@@ -1177,7 +1183,7 @@ func (p *parser) parseComparisonPredicate(bindings relationBindings) (Predicate,
 		}
 		return ColumnComparisonPredicate{Left: left, Op: op, Right: right}, nil
 	}
-	if bindings.requireQualify && p.peek().kind == tokIdent && !isKeywordToken(p.peek(), "TRUE") && !isKeywordToken(p.peek(), "FALSE") {
+	if bindings.requireQualify && p.peek().kind == tokIdent && !isLiteralKeywordToken(p.peek()) {
 		// Reference `SqlSelect::find_unqualified_vars`
 		// (sql-parser/src/ast/sql.rs:84-95) routes any unqualified var
 		// in a JOIN scope through `SqlUnsupported::UnqualifiedNames`
@@ -1310,6 +1316,9 @@ func (p *parser) parseLiteral() (Literal, error) {
 			p.advance()
 			return Literal{Kind: LitBool, Bool: false}, nil
 		}
+		if !t.quoted && strings.EqualFold(t.text, "NULL") {
+			return Literal{}, p.unsupported("NULL literal not supported")
+		}
 		return Literal{}, p.unsupported(fmt.Sprintf("expected literal, got identifier %q", t.text))
 	case tokParam:
 		// Reference `parse_expr`
@@ -1402,17 +1411,27 @@ func (p *parser) consumeUntilStatementEnd() {
 
 func matchesQualifier(candidate string, qualifiers []string) bool {
 	for _, qualifier := range qualifiers {
-		if strings.EqualFold(candidate, qualifier) {
+		if candidate == qualifier {
 			return true
 		}
 	}
-	return false
+	matched := false
+	for _, qualifier := range qualifiers {
+		if strings.EqualFold(candidate, qualifier) {
+			if matched {
+				return false
+			}
+			matched = true
+		}
+	}
+	return matched
 }
 
 var reservedWords = map[string]struct{}{
 	"SELECT": {}, "FROM": {}, "WHERE": {}, "AND": {}, "OR": {},
 	"ORDER": {}, "BY": {}, "LIMIT": {}, "GROUP": {}, "HAVING": {},
 	"JOIN": {}, "ON": {}, "AS": {}, "INNER": {},
+	"TRUE": {}, "FALSE": {}, "NULL": {},
 }
 
 func isReserved(s string) bool {
@@ -1423,7 +1442,7 @@ func isReserved(s string) bool {
 func singleQualifierMap(tableName string, qualifiers []string) map[string]string {
 	out := make(map[string]string, len(qualifiers))
 	for _, qualifier := range qualifiers {
-		out[strings.ToUpper(qualifier)] = tableName
+		out[qualifier] = tableName
 	}
 	return out
 }
@@ -1431,12 +1450,25 @@ func singleQualifierMap(tableName string, qualifiers []string) map[string]string
 func joinQualifierMap(leftTable string, leftQualifiers []string, rightTable string, rightQualifiers []string) map[string]string {
 	out := singleQualifierMap(leftTable, leftQualifiers)
 	for _, qualifier := range rightQualifiers {
-		out[strings.ToUpper(qualifier)] = rightTable
+		out[qualifier] = rightTable
 	}
 	return out
 }
 
 func resolveQualifier(qualifier string, lookup map[string]string) (string, bool) {
-	resolved, ok := lookup[strings.ToUpper(qualifier)]
-	return resolved, ok
+	if resolved, ok := lookup[qualifier]; ok {
+		return resolved, true
+	}
+	var resolved string
+	matched := false
+	for candidate, tableName := range lookup {
+		if strings.EqualFold(candidate, qualifier) {
+			if matched {
+				return "", false
+			}
+			resolved = tableName
+			matched = true
+		}
+	}
+	return resolved, matched
 }
