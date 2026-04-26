@@ -665,9 +665,9 @@ Recovery applies replayed `Changeset` values to `CommittedState`. The snapshot w
 
 ---
 
-## 12. Divergences from SpacetimeDB
+## 12. Reference-Informed Shunter Decisions
 
-Shunter's clean-room spec intentionally departs from SpacetimeDB in several places. Each divergence below is grounded in `reference/SpacetimeDB/` behavior but is an explicit v1 choice. Future specs or implementations should not "add parity" without revisiting the tradeoff documented here. (§3.1 — BSATN naming — is documented inline at §3.1 / §3.3 as the canonical disclaimer; not repeated here.)
+SpacetimeDB is useful design evidence for durability choices, but Shunter owns its commit-log and snapshot formats. Each entry below is an explicit v1 choice for Shunter's single-node runtime. Future specs or implementations should change these only when a Shunter workload, correctness issue, or product need justifies the tradeoff. (§3.1 — BSATN naming — is documented inline at §3.1 / §3.3 as the canonical disclaimer; not repeated here.)
 
 ### 12.1 No offset index file; recovery performs a linear scan
 
@@ -685,13 +685,13 @@ Rationale: per-record framing overhead (18 bytes) is small relative to per-trans
 
 Story 6.3 (`ReplayLog`) treats any `ApplyChangeset` error during replay as fatal. SPEC-002 §6.5 is symmetric for log-history conditions (gaps, overlaps, out-of-order). SpacetimeDB's `replay_insert` tolerates idempotent duplicates for system-meta rows.
 
-Rationale: fail-fast during recovery surfaces corrupt-log / schema-mismatch conditions immediately rather than masking them. Shunter has no system-meta tables that need duplicate-tolerance (system tables in v1 are deferred to SPEC-006 §3.3). The cost is that idempotent re-replay after a crash-during-replay will abort; paired with SPEC-001 §2.7 (`ApplyChangeset` is not idempotent) and SPEC-002's exactly-once replay guarantee, this is the intended shape.
+Rationale: fail-fast during recovery surfaces corrupt-log / schema-mismatch conditions immediately rather than masking them. Shunter's system tables are ordinary runtime tables and do not require duplicate-tolerant replay. The cost is that idempotent re-replay after a crash-during-replay will abort; paired with SPEC-001 §2.7 (`ApplyChangeset` is not idempotent) and SPEC-002's exactly-once replay guarantee, this is the intended shape.
 
 ### 12.4 First TxID is 1, not 0
 
-The first committed transaction has `tx_id = 1`. `tx_id = 0` is reserved as the pre-commit sentinel returned by `DurableTxID()` before any fsync lands and surfaced through SPEC-005 `ReducerCallResult.TxID = 0` for failed-before-allocation cases (SPEC-005 §2.2 / §8.7). SpacetimeDB's `tx_offset` starts at 0.
+The first committed transaction has `tx_id = 1`. `tx_id = 0` is reserved as the pre-commit sentinel returned by `DurableTxID()` before any fsync lands and as the internal "no committed transaction" marker for failures that happen before transaction allocation. SpacetimeDB's `tx_offset` starts at 0.
 
-Rationale: keeping `0` as a "no transaction" sentinel makes uninitialized-reads loud throughout the system (executor dequeue, durability handle, wire protocol, fan-out metadata). Cost is one offset bit of address space, which is irrelevant at v1 scale.
+Rationale: keeping `0` as a "no transaction" sentinel makes uninitialized reads loud throughout the system (executor dequeue, durability handle, and fan-out metadata). Cost is one offset bit of address space, which is irrelevant at v1 scale.
 
 ### 12.5 Single auto-increment sequence per table (implicit)
 

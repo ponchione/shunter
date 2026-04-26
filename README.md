@@ -2,6 +2,12 @@
 
 Shunter is a Go-native, clean-room real-time database/runtime inspired by the publicly documented design of SpacetimeDB.
 
+SpacetimeDB is an architectural inspiration, not a product-compatibility target.
+Shunter is for local/self-hosted apps built against Shunter-owned Go APIs and
+Shunter-owned clients. It is not trying to be wire-compatible with SpacetimeDB
+clients, mirror SpacetimeDB's hosted business model, or implement usage
+metering as a billing primitive.
+
 Important reality check: this repo is no longer just a docs/spec exercise. It contains substantial implementation across the core subsystem packages, and the test suite currently passes. But it is also not a polished, production-ready database you can confidently drop into an app today.
 
 Latest broad verification during active audit work:
@@ -37,7 +43,12 @@ precise deltas to clients without a separate cache/API/WebSocket glue layer.
 The intended developer surface is Go-native: applications define modules,
 tables, reducers, and runtime configuration in Go. Shunter is not a managed
 cloud service, not a multi-language module host, not a distributed database,
-and not a full SQL database.
+not a full SQL database, and not a SpacetimeDB client-compatibility layer.
+
+SpacetimeDB remains useful as a reference design for hard runtime questions:
+transaction ordering, subscription delta semantics, reducer outcomes, binary
+encoding tradeoffs, and hosted-runtime ergonomics. When those ideas conflict
+with Shunter's simpler self-hosted product goals, Shunter's goals win.
 
 ## What is actually implemented today
 
@@ -126,8 +137,8 @@ For agent work, do not use this list as startup context. Read `RTK.md`, then the
 For human orientation instead of another audit spiral, read in this order:
 1. `README.md` — this file
 2. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
-3. `TECH-DEBT.md` — live debt and parity priority framing
-4. `docs/parity-decisions.md` — consolidated current parity decisions
+3. `TECH-DEBT.md` — live debt and Shunter correctness priority framing
+4. `docs/parity-decisions.md` — historical name; current Shunter design decisions informed by SpacetimeDB
 
 Then inspect the main implementation packages:
 - `schema/`
@@ -145,20 +156,20 @@ If you want the blunt summary:
 - The repo is not yet worth pretending it is "done."
 - The next high-leverage work is not more tiny audit slices by default.
 - If continuing hosted-runtime usability, plan V1.5-A query/view declarations from `HOSTED_RUNTIME_PLANNING_HANDOFF.md`.
-- If continuing parity/completeness, use `NEXT_SESSION_HANDOFF.md` as the active driver and open the roadmap only for priority questions.
+- If continuing correctness/completeness, use `NEXT_SESSION_HANDOFF.md` as the active driver and open the roadmap only for priority questions.
 
 ## What I would do next
 
-If continuing parity/completeness work, the most useful next step is:
+If continuing correctness/completeness work, the most useful next step is:
 
 1. Use `NEXT_SESSION_HANDOFF.md` as the active driver
-- wire-level protocol parity first
-- one end-to-end delivery parity slice second
-- query/subscription-surface parity third
+- Shunter protocol correctness first
+- one end-to-end delivery correctness slice second
+- query/subscription-surface correctness third
 - runtime/recovery semantics immediately after that, with scheduling pulled forward when the workload depends on it
-- cleanup after the parity target is locked
+- cleanup after the product contract is locked
 
-2. Build parity harnesses before broad refactors
+2. Build scenario harnesses before broad refactors
 - protocol scenario tests
 - subscribe/reducer/update end-to-end tests
 - recovery/replay scenario tests
@@ -169,7 +180,8 @@ If continuing parity/completeness work, the most useful next step is:
 - reducer/update semantics
 - recovery/store behavior
 
-If that sequence is not followed, it is easy to keep improving local correctness while still not ending up with your own operational SpacetimeDB.
+If that sequence is not followed, it is easy to keep improving isolated
+internals without ending up with one coherent app runtime.
 
 ## Validation
 

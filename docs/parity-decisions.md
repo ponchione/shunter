@@ -7,6 +7,11 @@ prioritization, use `TECH-DEBT.md` and the active root handoff.
 Reference paths are grounding only. Do not copy or port source from
 `reference/SpacetimeDB/`.
 
+Despite the historical filename, this document is not a promise of
+SpacetimeDB client, wire, or business-model compatibility. Shunter uses
+SpacetimeDB as a reference design for runtime semantics, then owns the final
+contract for Shunter APIs and Shunter clients.
+
 ## Outcome Model
 
 The reducer outcome protocol uses the reference-style heavy/light split.
@@ -19,18 +24,20 @@ Current contract:
 - `ReducerCallResult` is removed from the protocol surface; its old tag is
   reserved and must not be reused.
 - `TransactionUpdate` carries `UpdateStatus`, caller identity/connection,
-  reducer call metadata, timestamp, execution duration, and energy.
+  reducer call metadata, timestamp, execution duration, and a reserved energy
+  field.
 - `UpdateStatus` has `Committed`, `Failed`, and `OutOfEnergy` arms.
 - Rejections that happen before a transaction opens return a synthetic
   failed `TransactionUpdate` with `TxID == 0`.
 
-Accepted deferrals:
+Shunter-specific decisions:
 
-- `EnergyQuantaUsed` is always zero because Shunter has no energy/quota
-  subsystem.
-- `OutOfEnergy` is wire-present but not emitted.
-- Failure strings remain Shunter-specific. A future reducer-outcome parity
-  slice can revisit the exact failure surface.
+- `EnergyQuantaUsed` is always zero because Shunter is not a hosted billing
+  product and has no energy/quota subsystem.
+- `OutOfEnergy` is wire-present for shape stability but not emitted.
+- Failure strings remain Shunter-specific. Any future reducer-outcome work
+  should be framed as a Shunter client-contract slice before changing the exact
+  failure surface.
 
 Authoritative pins:
 
@@ -41,7 +48,7 @@ Authoritative pins:
 
 ## Protocol Rows Shape
 
-The current row/update wire shape is a documented Shunter divergence, not a
+The current row/update wire shape is Shunter's native protocol contract, not a
 reference byte-compatible wrapper chain.
 
 Current contract:
@@ -57,18 +64,19 @@ Current contract:
 - The remaining wrapper-chain differences are consequences of that inner
   row-list divergence.
 
-Accepted deferrals:
+Shunter-specific decisions:
 
 - `SubscribeRows`, `DatabaseUpdate`, `TableUpdate`, `QueryUpdate`,
   `CompressableQueryUpdate`, `BsatnRowList`, and `RowSizeHint` remain absent.
 - `TableUpdate.num_rows` and deletes-before-inserts reference ordering are
-  deferred with the full wrapper-chain rewrite.
-- Removing the flat per-entry `QueryID` should happen only as part of a full
-  wrapper-chain close.
+  not part of the Shunter v1 protocol.
+- Removing the flat per-entry `QueryID` should happen only if Shunter clients
+  need a different correlation model.
 - Inner compression remains deferred because Shunter already has outer
   envelope compression.
 
-Reopen only with a concrete compatibility, migration, or bandwidth trigger.
+Reopen only with a concrete Shunter client, migration, ergonomics, or bandwidth
+trigger. Do not reopen solely to match SpacetimeDB's client wire shape.
 
 Authoritative pins:
 
@@ -94,8 +102,7 @@ Accepted divergence:
 - The reference lets the socket disappear without a clean close frame.
   Shunter sends WebSocket close code `1008` with reason `send buffer full`.
 
-Reopen only if a real client or compatibility target requires the
-reference's unclean close mechanism.
+Reopen only if a real Shunter client requires different lag behavior.
 
 Authoritative pins:
 

@@ -114,7 +114,7 @@ type CallReducerCmd struct {
     ResponseCh chan<- ReducerResponse
 }
 
-// Updated 2026-04-19 (Phase 2 Slice 2): set-based commands replace the
+// Updated 2026-04-19: set-based commands replace the
 // former single-subscription RegisterSubscriptionCmd / UnregisterSubscriptionCmd.
 type RegisterSubscriptionSetCmd struct {
     Request    SubscriptionSetRegisterRequest
@@ -535,7 +535,7 @@ This intentionally avoids a post-commit recoverable error path. A live executor 
 The executor depends on a subscription manager, not just a post-commit callback.
 
 ```go
-// Updated 2026-04-19 (Phase 2 Slice 2): set-based RegisterSet / UnregisterSet
+// Updated 2026-04-19: set-based RegisterSet / UnregisterSet
 // replace the former single-subscription Register / Unregister.
 type SubscriptionManager interface {
     RegisterSet(req SubscriptionSetRegisterRequest, view CommittedReadView) (SubscriptionSetRegisterResult, error)
@@ -750,7 +750,7 @@ Additional catalog rules:
 
 ---
 
-## 12. Divergences from SpacetimeDB
+## 12. Reference-Informed Shunter Decisions
 
 ### 12.1 Fixed-rate repeat semantics vs explicit reducer-driven reschedule
 

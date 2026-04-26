@@ -4,14 +4,11 @@ import (
 	"testing"
 )
 
-// TestPhase1ParityReferenceSubprotocolAccepted locks the Phase 1
-// parity decision: the upgrade handler admits a client that offers the
-// SpacetimeDB reference subprotocol token "v1.bsatn.spacetimedb", and
-// returns that exact token as the selected subprotocol.
-//
-// Reference outcome matched: reference/SpacetimeDB subprotocol token
-// v1.bsatn.spacetimedb declared in
-// crates/client-api-messages/src/websocket/v1.rs (ref constant).
+// TestPhase1ParityReferenceSubprotocolAccepted pins the historical
+// compatibility behavior: the upgrade handler still admits a client
+// that offers the SpacetimeDB reference subprotocol token
+// "v1.bsatn.spacetimedb" and returns that exact token as selected.
+// This is not a current Shunter product-compatibility target.
 func TestPhase1ParityReferenceSubprotocolAccepted(t *testing.T) {
 	s, _ := anonymousServer(t)
 	srv := newTestServer(t, s)
@@ -31,9 +28,8 @@ func TestPhase1ParityReferenceSubprotocolAccepted(t *testing.T) {
 }
 
 // TestPhase1ParityLegacyShunterSubprotocolStillAccepted pins the
-// intentional deferral: the Shunter-native token "v1.bsatn.shunter"
-// remains accepted so existing clients do not break. Update this test
-// when the retention window closes.
+// Shunter-native token "v1.bsatn.shunter". This is the token new
+// Shunter-owned clients should offer.
 func TestPhase1ParityLegacyShunterSubprotocolStillAccepted(t *testing.T) {
 	s, _ := anonymousServer(t)
 	srv := newTestServer(t, s)
@@ -52,9 +48,9 @@ func TestPhase1ParityLegacyShunterSubprotocolStillAccepted(t *testing.T) {
 	}
 }
 
-// TestPhase1ParityReferenceSubprotocolPreferred verifies that when a
-// client offers both tokens, the server selects the reference token
-// (preferred in acceptedSubprotocols order).
+// TestPhase1ParityReferenceSubprotocolPreferred pins the current
+// selection order when a client offers both tokens. This is historical
+// behavior and may change in a Shunter-native cleanup slice.
 func TestPhase1ParityReferenceSubprotocolPreferred(t *testing.T) {
 	s, _ := anonymousServer(t)
 	srv := newTestServer(t, s)

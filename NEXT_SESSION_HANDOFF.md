@@ -1,6 +1,6 @@
 # Next Session Handoff
 
-Use this file to start the next parity / TECH-DEBT agent with no prior chat context.
+Use this file to start the next Shunter correctness / TECH-DEBT agent with no prior chat context.
 
 Hosted-runtime planning uses `HOSTED_RUNTIME_PLANNING_HANDOFF.md` instead.
 
@@ -26,11 +26,18 @@ Use `rtk` for every shell command, including git. Do not push unless explicitly 
 
 ## Current Objective
 
+Project framing was clarified on 2026-04-26:
+
+- SpacetimeDB is an architectural reference, not a wire/client/business compatibility target.
+- Shunter is for self-hosted / personally operated apps with Shunter-owned Go APIs and clients.
+- Energy accounting is not a Shunter product goal; `EnergyQuantaUsed == 0` and no emitted `OutOfEnergy` are intentional unless a future local quota system is designed.
+- Use reference behavior as evidence for runtime semantics, but prefer Shunter's own simpler contract when compatibility-only details add cost without value.
+
 Slices A, B, C, D, E.1, E.2, F.1, F.2, F.3, F.4, G.1, G.2, G.3, H, I, `sender-exact-case`, scout cleanup, boolean-constant WHERE masking, signed-LIMIT feature rejection, join-keyword handling, SubscribeSingle unindexed-join rejection text, and SubscribeSingle LIMIT-before-set-quantifier ordering are landed / confirmed green (source-text seam, reference parse routing, compound algebraic names + Timestamp / Array<String> error class routing, compile-stage `DuplicateName` + join `UnexpectedType` / `InvalidOp` parity, `Unresolved::Var` text for missing-field lookups, SubscribeSingle projection-column reorder, base-table-after-alias `Unresolved::Var`, SELECT ALL/DISTINCT set-quantifier rejection, WHERE-precedes-projection on single-table SELECT, JOIN ON resolution precedes wildcard guard + WHERE FALSE pruning, missing-table precedes duplicate-join-alias, qualified projection / wildcard qualifier not in scope, unqualified names in joins, strict JOIN ON equality, exact-case `:sender`, subscription LIMIT text, one-off LIMIT numeric parsing, qualified-name ordering, logical-WHERE branch typechecking, signed LIMIT feature-text ordering, explicit join keyword parsing, indexed-join plan enforcement on SubscribeSingle, and subscribe LIMIT rejection before SELECT set-quantifier rejection).
 
-Pick the next batch from `TECH-DEBT.md::OI-002`. The remaining well-bounded fixed-literal shape that has already been scouted and does not require fresh reference research:
+Pick the next batch from `TECH-DEBT.md::OI-002` using the Shunter correctness framing above. The remaining well-bounded fixed-literal shape that has already been scouted and does not require fresh reference research:
 
-1. **`lowercase-x-string-bytes-prefix`** — string-literal bytes coercion should not strip a lowercase `x'` prefix. Example: `SELECT * FROM s WHERE bytes = 'x''AB'` should emit the reference `InvalidLiteral` text for `Array<U8>` on OneOff raw and SubscribeSingle `WithSql`, instead of accepting/registering the query. Locus should stay in `query/sql/coerce.go` plus protocol pins; keep separate from case-preservation and runtime join semantics.
+1. **`lowercase-x-string-bytes-prefix`** — string-literal bytes coercion should not strip a lowercase `x'` prefix. Example: `SELECT * FROM s WHERE bytes = 'x''AB'` should reject as an invalid `Array<U8>` literal on OneOff raw and SubscribeSingle `WithSql`, instead of accepting/registering the query. Locus should stay in `query/sql/coerce.go` plus protocol pins; keep separate from case-preservation and runtime join semantics.
 
 Keep case-preservation and broader join/cross-join runtime semantics separate unless the chosen fix naturally requires them.
 

@@ -780,9 +780,9 @@ Recovery uses `RegisterTable` once per snapshot table, then loops `InsertRow` ov
 
 ---
 
-## 12. Divergences from SpacetimeDB
+## 12. Reference-Informed Shunter Decisions
 
-Shunter's clean-room spec intentionally departs from SpacetimeDB in several places. Each entry below is grounded in `reference/SpacetimeDB/` behavior but is an explicit v1 choice. Future specs or implementations MUST NOT "add parity" without revisiting the tradeoff documented here.
+SpacetimeDB is useful design evidence for storage choices, but Shunter owns its store contract. Each entry below is an explicit v1 choice for Shunter's in-memory runtime. Future specs or implementations should change these only when a Shunter workload, correctness issue, or product need justifies the tradeoff.
 
 ### 12.1 NaN rejected at construction vs total-ordering via `decorum::Total`
 

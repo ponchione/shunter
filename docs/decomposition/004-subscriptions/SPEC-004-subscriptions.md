@@ -1,7 +1,7 @@
 # SPEC-004: Subscription Evaluator
 
 **Status:** Draft
-**Depends on:** SPEC-001 (`CommittedReadView`, `Changeset`, `ProductValue`, `Bound`), SPEC-003 (`TxID`, `ConnectionID`, `Identity`, `ReducerCallResult`), SPEC-005 (`ClientSender` / `FanOutSender` delivery surface, backpressure contract), SPEC-006 (`SchemaLookup`, `IndexResolver`)
+**Depends on:** SPEC-001 (`CommittedReadView`, `Changeset`, `ProductValue`, `Bound`), SPEC-003 (`TxID`, `ConnectionID`, `Identity`, reducer caller-outcome metadata), SPEC-005 (`ClientSender` / `FanOutSender` delivery surface, backpressure contract), SPEC-006 (`SchemaLookup`, `IndexResolver`)
 **Depended on by:** SPEC-003 (executor hands changesets to the evaluator post-commit), SPEC-005 (protocol layer consumes `FanOutMessage` / `SubscriptionUpdate` / `SubscriptionError` and registers subscriptions via the manager)
 
 ---
@@ -109,7 +109,7 @@ Two clients with structurally identical predicates and identical parameter value
 
 ### 4.1 Registration
 
-> **Updated 2026-04-19 (Phase 2 Slice 2).** The registration surface is
+> **Updated 2026-04-19.** The registration surface is
 > set-based: one `QueryID` names a query set whose `Predicates` list
 > has length >= 1 (length 1 = Single path). The former single-
 > subscription `Register` entry point and its
@@ -517,6 +517,7 @@ type FanOutWorker struct {
 
     // Per-connection delivery policy needed by the fan-out worker.
     confirmedReads map[ConnectionID]bool
+    fastReads      map[ConnectionID]bool
 
     // Write end of the manager-owned dropped-client stream.
     dropped chan<- ConnectionID
@@ -526,8 +527,8 @@ type FanOutWorker struct {
 // SPEC-005 owns concrete websocket/outbound-buffer behavior; SPEC-004
 // consumes that behavior through this narrow interface.
 type FanOutSender interface {
-    SendTransactionUpdate(connID ConnectionID, txID TxID, updates []SubscriptionUpdate) error
-    SendReducerResult(connID ConnectionID, result *ReducerCallResult) error
+    SendTransactionUpdateHeavy(connID ConnectionID, outcome CallerOutcome, callerUpdates []SubscriptionUpdate, memo *EncodingMemo) error
+    SendTransactionUpdateLight(connID ConnectionID, requestID uint32, updates []SubscriptionUpdate, memo *EncodingMemo) error
     SendSubscriptionError(connID ConnectionID, subErr SubscriptionError) error
 }
 
@@ -548,11 +549,14 @@ type FanOutMessage struct {
     // must be delivered before normal updates for the same batch.
     Errors map[ConnectionID][]SubscriptionError
 
-    // Optional caller metadata for reducer-originated commits. When present, the
-    // caller's per-connection update is routed into ReducerCallResult instead of
-    // being emitted as a standalone TransactionUpdate.
+    // Optional caller metadata for reducer-originated commits. When present,
+    // CallerConnID identifies the caller so the fan-out worker can suppress the
+    // caller's light delivery. CallerOutcome is populated only when the fan-out
+    // worker owns the caller's heavy TransactionUpdate envelope; protocol-originated
+    // reducer replies may carry CallerConnID with nil CallerOutcome because the
+    // protocol inbox adapter owns that direct heavy reply.
     CallerConnID *ConnectionID
-    CallerResult *ReducerCallResult
+    CallerOutcome *CallerOutcome
 }
 ```
 
@@ -563,22 +567,21 @@ Ownership rule: once `FanOutMessage` is sent to `FanOutWorker.inbox`, ownership 
 ```
 For each FanOutMessage received:
   0. Deliver any queued SubscriptionError entries in msg.Errors before normal updates.
-  1. Wait for TxDurable (if confirmed reads required by any client).
+  1. Wait for TxDurable before each recipient delivery when that connection requires confirmed reads.
   2. Read the pre-grouped CommitFanout entries keyed by ConnectionID.
      A connection may have multiple subscriptions affected by one transaction.
-  3. For each connection:
-     Build a TransactionUpdate message for `msg.TxID` containing `Updates []SubscriptionUpdate`
-     for that connection only. Preserve one update entry per affected subscription;
-     do not merge entries across distinct internal SubscriptionIDs/query entries.
-     Send via the protocol layer.
-  4. Special case: if this commit came from `CallReducer`, the caller connection's
-     update slice is routed into `ReducerCallResult.transaction_update` instead of
-     also receiving a standalone TransactionUpdate for the same `tx_id`.
+  3. Deliver TransactionUpdateLight to non-caller connections with row-touches.
+     Preserve one update entry per affected subscription; do not merge entries
+     across distinct internal SubscriptionIDs/query entries.
+  4. Deliver the heavy TransactionUpdate to the caller when CallerOutcome is present.
+     For Committed, include the caller's row-update slice; for Failed / OutOfEnergy,
+     send the heavy outcome with no row update. If NoSuccessNotify is set on a
+     committed caller outcome, suppress the caller's success echo.
 ```
 
 ### 8.3 Aggregation
 
-Multiple subscriptions for the same connection may produce deltas for the same table in one transaction. These are packaged together in one `TransactionUpdate`, while preserving one `SubscriptionUpdate` entry per subscription:
+Multiple subscriptions for the same connection may produce deltas for the same table in one transaction. These are packaged together in one `TransactionUpdateLight` for non-callers or one heavy `TransactionUpdate.Status::Committed.update` for the caller, while preserving one `SubscriptionUpdate` entry per subscription:
 
 ```
 Per-connection packaging:
@@ -666,19 +669,22 @@ type SubscriptionManager interface {
 // subscription fan-out seam. Zero value means ordinary non-caller,
 // fast-read delivery.
 type PostCommitMeta struct {
-    TxDurable    <-chan TxID
-    CallerConnID *ConnectionID
-    CallerResult *ReducerCallResult
+    TxDurable     <-chan TxID
+    CallerConnID  *ConnectionID
+    CallerOutcome *CallerOutcome
+    // CaptureCallerUpdates, when non-nil, receives the caller-visible update
+    // slice extracted from the same per-connection fanout map entry that would
+    // otherwise be delivered to the caller connection.
+    CaptureCallerUpdates func([]SubscriptionUpdate)
 }
 
 // TxDurable contract:
 // - Non-nil for every post-commit invocation the executor makes, regardless of
 //   whether Fanout is empty. The executor allocates the channel from
 //   DurabilityHandle.WaitUntilDurable(txID) (SPEC-002 §4.2 / SPEC-003 §7)
-//   before calling EvalAndBroadcast. An empty-fanout transaction may still
-//   need durability gating for a caller-reducer's ReducerCallResult.
-// - TxDurable == nil is reserved for the zero-value PostCommitMeta used by
-//   tests that bypass the executor; production code paths never observe it.
+//   before calling EvalAndBroadcast.
+// - TxDurable == nil is allowed for tests and fast-read/internal paths and
+//   means "treat as already durable."
 
 // Changeset and TableChangeset are defined in SPEC-001 §6.1.
 // The evaluator receives *Changeset from the executor after each commit.
@@ -709,38 +715,43 @@ type SubscriptionUpdate struct {
     Deletes        []ProductValue
 }
 
-// TransactionUpdate is sent to a client after evaluation.
-type TransactionUpdate struct {
-    TxID    TxID
-    Updates []SubscriptionUpdate  // one entry per affected subscription
-}
-
 // SubscriptionError is the client-facing evaluation-failure payload.
 // The protocol adapter does not expose the manager-internal SubscriptionID on
 // the wire. Post-commit evaluation-origin errors are emitted with absent
 // request_id/query_id and a Message; QueryHash and Predicate are retained in
 // the Go value for server-side logging and are not sent to clients.
 type SubscriptionError struct {
-    RequestID      uint32
-    SubscriptionID SubscriptionID
-    QueryHash      QueryHash
-    Predicate      string
-    Message        string
+    RequestID                        uint32
+    SubscriptionID                   SubscriptionID
+    QueryHash                        QueryHash
+    Predicate                        string
+    Message                          string
+    TotalHostExecutionDurationMicros uint64
 }
 
-// ReducerCallResult is forward-declared here to document the caller-diversion
-// seam. SPEC-005 §8.7 owns the concrete wire shape; the Go fields here are
-// a one-to-one mapping of those wire fields (see §8.7 for LE widths and
-// status-enum values). The subscription evaluator never constructs the wire
-// form directly — the protocol adapter (SPEC-005 §13
-// `FanOutSenderAdapter.SendReducerResult`) encodes it.
-type ReducerCallResult struct {
-    RequestID         uint32
-    Status            uint8
-    TxID              TxID
-    Error             string
-    Energy            uint64
-    TransactionUpdate []SubscriptionUpdate
+type CallerOutcomeKind uint8
+const (
+    CallerOutcomeCommitted CallerOutcomeKind = iota
+    CallerOutcomeFailed
+    CallerOutcomeOutOfEnergy
+)
+
+// CallerOutcome carries the caller-visible reducer outcome plus metadata
+// needed by the protocol layer to assemble the heavy TransactionUpdate
+// envelope. Shunter has no energy economy; EnergyQuantaUsed is reserved and
+// remains zero unless a future local quota system is designed.
+type CallerOutcome struct {
+    Kind                       CallerOutcomeKind
+    Error                      string
+    CallerIdentity             [32]byte
+    ReducerName                string
+    ReducerID                  uint32
+    Args                       []byte
+    RequestID                  uint32
+    Timestamp                  int64
+    EnergyQuantaUsed           uint64
+    TotalHostExecutionDuration int64
+    Flags                      byte
 }
 
 // QueryHash is the 32-byte blake3 digest of the canonical predicate byte stream
@@ -750,7 +761,7 @@ type QueryHash [32]byte
 ```
 
 Encoding of `[]ProductValue` into the wire `RowList` format and actual enqueueing to per-client outbound buffers happen in the protocol layer (SPEC-005 §3.4 / delivery contract), not in the evaluator.
-The fan-out worker talks to the protocol layer through the narrow `FanOutSender` seam described in §8.1; protocol satisfies that seam via a `FanOutSenderAdapter` over its broader `ClientSender` surface (SPEC-005 §13). The adapter converts subscription-domain values (`[]SubscriptionUpdate`, `*ReducerCallResult`, full `SubscriptionError` payloads) into protocol-wire structs before calling `ClientSender`; `SendSubscriptionError` is routed through `ClientSender.Send(connID, msg)` with a wire `SubscriptionError` that preserves `RequestID` when the failure can still be correlated to the original subscribe request. Delivery errors are mapped back to `ErrSendBufferFull` / `ErrSendConnGone` subscription-layer sentinels so the fan-out worker can react without importing protocol types.
+The fan-out worker talks to the protocol layer through the narrow `FanOutSender` seam described in §8.1; protocol satisfies that seam via a `FanOutSenderAdapter` over its broader `ClientSender` surface (SPEC-005 §13). The adapter converts subscription-domain values (`[]SubscriptionUpdate`, `CallerOutcome`, full `SubscriptionError` payloads) into protocol-wire structs before calling `ClientSender`; `SendSubscriptionError` is routed through `ClientSender.Send(connID, msg)` with a wire `SubscriptionError` that preserves `RequestID` when the failure can still be correlated to the original subscribe request. Delivery errors are mapped back to `ErrSendBufferFull` / `ErrSendConnGone` subscription-layer sentinels so the fan-out worker can react without importing protocol types.
 
 ### 10.3 From In-Memory Store (SPEC-001)
 
@@ -779,7 +790,7 @@ Both interfaces are produced by SPEC-006 `Build()` and are immutable for the eng
 
 If delta computation fails for a subscription (e.g., corrupted index, type mismatch):
 1. Log the error with the subscription's query hash and SQL/predicate representation.
-2. Emit the error through the `FanOutSender.SendSubscriptionError` seam (§8.1) for each affected client. The protocol adapter (SPEC-005 §13) translates this into a wire-format `SubscriptionError` delivered via `ClientSender.Send`; if the failed subscription still has an originating subscribe `RequestID`, preserve it on the wire, otherwise use `request_id = 0` for genuinely uncorrelated spontaneous failures (see SPEC-005 §8.4 `request_id` semantics).
+2. Emit the error through the `FanOutSender.SendSubscriptionError` seam (§8.1) for each affected client. The protocol adapter (SPEC-005 §13) translates this into a wire-format `SubscriptionError` delivered via `ClientSender.Send`; if the failed subscription still has an originating subscribe `RequestID`, preserve it on the wire, otherwise leave `request_id` absent for genuinely uncorrelated spontaneous failures (see SPEC-005 §8.4 `request_id` semantics).
 3. Unregister the affected subscription(s) / query state without disconnecting unrelated subscriptions on the same connection.
 4. Do **not** abort the evaluation loop — other subscriptions are unaffected.
 
@@ -851,14 +862,14 @@ Should delta delivery wait for the transaction to be durable (fsync'd to commit 
 - **Yes (confirmed reads)**: Client only sees data that will survive a crash. Higher latency.
 - **No (fast reads)**: Client sees data immediately after in-memory commit. Lower latency, but client could see data that is lost on crash.
 
-**v1 protocol contract:** the public WebSocket protocol (SPEC-005) does not expose a client-selectable confirmed-read flag, so v1 protocol clients always observe confirmed-read behavior. The fan-out worker still carries per-connection policy metadata so non-wire/internal callers can evolve independently, but public opt-in/opt-out negotiation is deferred.
+**v1 protocol contract:** the public WebSocket protocol (SPEC-005) does not expose a client-selectable confirmed-read flag. Non-caller fan-out delivery defaults to confirmed reads: the fan-out worker waits on `TxDurable` before sending `SubscriptionError` or `TransactionUpdateLight` unless an internal fast-read policy opts a connection out. Protocol-originated caller-heavy `TransactionUpdate` responses are emitted after commit and synchronous subscription evaluation, but before fsync completion; clients must not treat reducer success as a durable-commit acknowledgement unless a future explicit durability acknowledgement is added.
 
-### 12.4 Divergence Notes vs SpacetimeDB
+### 12.4 Reference-Informed Shunter Decisions
 
-- **Predicate surface:** v1 public subscriptions are exposed through a Go predicate model and a protocol-level structured equality subset, not SpacetimeDB's SQL-first subscription surface.
+- **Predicate surface:** v1 public subscriptions are exposed through Shunter's Go predicate model and a protocol-level SQL subset selected for Shunter clients.
 - **Backpressure:** Shunter bounds fan-out and outbound buffers and disconnects lagging clients rather than using an unbounded queue with lazy dropped-client cleanup.
 - **Row-level security:** v1 applies no extra SchemaViewer-style per-caller filtering beyond the submitted predicate. Applications that need additional filtering must enforce it before registration or at reducer boundaries.
-- **Join-delta execution:** Shunter materializes the 4+4 join fragments and deduplicates post-hoc; it does not use SpacetimeDB's in-fragment count tracking implementation.
+- **Join-delta execution:** Shunter materializes the 4+4 join fragments and deduplicates post-hoc. This is the Shunter v1 algorithm unless profiling or correctness evidence justifies replacing it.
 
 ---
 

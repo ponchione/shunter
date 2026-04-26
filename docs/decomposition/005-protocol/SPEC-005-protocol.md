@@ -23,6 +23,12 @@ This spec does not cover:
 - Reducer execution (SPEC-003)
 - Subscription evaluation algorithm (SPEC-004)
 
+Shunter's client protocol is Shunter-native. SpacetimeDB is an architectural
+reference, not a wire-compatibility target, and Shunter clients should be built
+against this protocol rather than assuming SpacetimeDB client interoperability.
+Where reference behavior is cited below, treat it as design evidence unless
+the section explicitly says it is part of Shunter's own contract.
+
 ---
 
 ## 2. Transport
@@ -42,16 +48,16 @@ Shunter uses WebSocket (RFC 6455) over HTTP/1.1 or HTTP/2. All application messa
 
 ### 2.2 Protocol Identifier
 
-Shunter admits two subprotocol tokens. The reference token is preferred when a client offers both.
+Current implementation admits two subprotocol tokens for historical reasons:
 
-- `v1.bsatn.spacetimedb` — SpacetimeDB reference token (preferred, Phase 1 parity target).
-- `v1.bsatn.shunter` — Shunter-native token, retained for backward compatibility. **[RETAINED-DEFERRAL]** This token is accepted until existing Shunter-token clients are cut over.
+- `v1.bsatn.shunter` — Shunter-native token; this is the product protocol identifier Shunter clients should use.
+- `v1.bsatn.spacetimedb` — historical reference-compatibility token; current code still accepts it, but it is not a product requirement and may be removed.
 
 The client includes one or both tokens in the `Sec-WebSocket-Protocol` request header. The server echoes the selected token in the response header. If the client offers neither token, the server closes the connection with status 400.
 
 ```
-Client: Sec-WebSocket-Protocol: v1.bsatn.spacetimedb
-Server: Sec-WebSocket-Protocol: v1.bsatn.spacetimedb
+Client: Sec-WebSocket-Protocol: v1.bsatn.shunter
+Server: Sec-WebSocket-Protocol: v1.bsatn.shunter
 ```
 
 ### 2.3 Endpoint
@@ -110,9 +116,9 @@ When compression is enabled for a connection and the server chooses to compress 
 
 Where `compressed_body` is the gzip-compressed form of the BSATN body bytes only. The message tag itself is never compressed.
 
-Compression values (parity-aligned with reference SERVER_MSG_COMPRESSION_TAG_*):
+Compression values:
 - `0x00` = uncompressed body, but explicit compression envelope present for this message: `[0x00][tag][body]`
-- `0x01` = brotli (reserved; Shunter does not implement — returns `ErrBrotliUnsupported` and closes with 1002 reason `brotli unsupported`; implementation deferred to Phase 2+)
+- `0x01` = brotli (reserved; Shunter does not implement — returns `ErrBrotliUnsupported` and closes with 1002 reason `brotli unsupported`; implement only if Shunter clients need it)
 - `0x02` = gzip-compressed body: `[0x02][tag][gzip(body)]`
 
 If compression is negotiated as `none`, the explicit compression byte is omitted entirely and all server messages use `[tag][body]`.
@@ -165,7 +171,7 @@ Shunter validates client identity via a JWT. The JWT must be signed with a key r
 Shunter supports two authentication modes:
 
 1. **Strict auth mode**: a valid externally issued JWT is required. Missing or invalid credentials cause the HTTP upgrade to fail with `401`.
-2. **Anonymous minting mode**: if no token is presented, the server generates a fresh `Identity`, signs a local JWT for it, and returns that token in `InitialConnection.token`. The client should persist this token and send it on reconnect to preserve identity.
+2. **Anonymous minting mode**: if no token is presented, the server generates a fresh `Identity`, signs a local JWT for it, and returns that token in `IdentityToken.token`. The client should persist this token and send it on reconnect to preserve identity.
 
 When the server mints a token in anonymous mode, it MUST define:
 - the local issuer string
@@ -190,7 +196,7 @@ For production deployments, an external identity provider may sign tokens. The e
 
 ```
 1. HTTP upgrade (authentication validated, protocol negotiated)
-2. WebSocket open → server sends InitialConnection
+2. WebSocket open → server sends IdentityToken
 3. Client ready: may send Subscribe, CallReducer, OneOffQuery, Unsubscribe
 4. Ongoing: server sends TransactionUpdate after relevant commits
 5. Disconnect: either side sends Close frame
@@ -198,7 +204,7 @@ For production deployments, an external identity provider may sign tokens. The e
 
 ### 5.2 OnConnect Hook
 
-After the WebSocket opens and before `InitialConnection` is sent, the protocol layer dispatches `OnConnectCmd` (SPEC-003 §2.4) into the executor, which runs the `OnConnect` lifecycle flow (SPEC-003 §10.3). Lifecycle dispatch does NOT use `CallReducerCmd`; the insert-then-reducer transaction shape is not expressible through the normal reducer-call path. If `OnConnect` returns an error, the connection is closed with a Close frame (code 1008: Policy Violation). No `InitialConnection` is sent.
+After the WebSocket opens and before `IdentityToken` is sent, the protocol layer dispatches `OnConnectCmd` (SPEC-003 §2.4) into the executor, which runs the `OnConnect` lifecycle flow (SPEC-003 §10.3). Lifecycle dispatch does NOT use `CallReducerCmd`; the insert-then-reducer transaction shape is not expressible through the normal reducer-call path. If `OnConnect` returns an error, the connection is closed with a Close frame (code 1008: Policy Violation). No `IdentityToken` is sent.
 
 ### 5.3 OnDisconnect Hook
 
@@ -223,24 +229,24 @@ The server sends a WebSocket Ping frame every `PingInterval` (default: 15 second
 | 5 | SubscribeMulti |
 | 6 | UnsubscribeMulti |
 
-The `SubscribeSingle` / `UnsubscribeSingle` tags are the Phase 2 Slice 2 rename of the former `Subscribe` / `Unsubscribe` tags; the byte values (1 and 2) are stable. `SubscribeMulti` / `UnsubscribeMulti` were added in the same slice to carry a query-set under one `query_id`. Canonical source is `protocol/tags.go`.
+The `SubscribeSingle` / `UnsubscribeSingle` tags are the current v1 names for the former `Subscribe` / `Unsubscribe` byte values (1 and 2), which remain stable. `SubscribeMulti` / `UnsubscribeMulti` carry a query-set under one `query_id`. Canonical source is `protocol/tags.go`.
 
 ### Server→Client tags
 
 | Tag | Message |
 |---|---|
-| 1 | InitialConnection |
+| 1 | IdentityToken |
 | 2 | SubscribeSingleApplied |
 | 3 | UnsubscribeSingleApplied |
 | 4 | SubscriptionError |
 | 5 | TransactionUpdate (heavy, caller-bound) |
-| 6 | OneOffQueryResult |
+| 6 | OneOffQueryResponse |
 | 7 | **RESERVED** (formerly `ReducerCallResult`; see §8.7) |
 | 8 | TransactionUpdateLight (non-caller delta-only) |
 | 9 | SubscribeMultiApplied |
 | 10 | UnsubscribeMultiApplied |
 
-Tag 7 is reserved and MUST NOT be reallocated. The Phase 1.5 outcome-model closure (`docs/parity-decisions.md#outcome-model`) removed the standalone `ReducerCallResult` envelope, merging the caller outcome into the heavy `TransactionUpdate` (tag 5) and adding `TransactionUpdateLight` (tag 8) for non-callers. Holding tag 7 reserved prevents silent re-allocation if a future contributor reintroduces a separate caller envelope. Canonical source is `protocol/tags.go`.
+Tag 7 is reserved and MUST NOT be reallocated. The current v1 outcome model removed the standalone `ReducerCallResult` envelope, merging the caller outcome into the heavy `TransactionUpdate` (tag 5) and adding `TransactionUpdateLight` (tag 8) for non-callers. Holding tag 7 reserved prevents silent re-allocation if a future contributor reintroduces a separate caller envelope. Canonical source is `protocol/tags.go`.
 
 ---
 
@@ -259,11 +265,11 @@ query_string: string       — SQL subscription query (see §7.1.1)
 
 **Response:** `SubscribeSingleApplied` or `SubscriptionError`
 
-After `SubscribeSingleApplied`, the caller receives the heavy `TransactionUpdate` (§8.5) for commits it originates, and non-callers with matching row-touches receive `TransactionUpdateLight` (§8.7).
+After `SubscribeSingleApplied`, the caller receives the heavy `TransactionUpdate` (§8.5) for commits it originates, and non-callers with matching row-touches receive `TransactionUpdateLight` (§8.8).
 
 #### 7.1.1 Query Format
 
-Phase 2 Slice 1 flipped the wire from a structured `Query{table_name, predicates[]}` value to a **SQL query string**. The handler parses the string with `query/sql.Parse` and lowers it into the same SPEC-004 predicate tree the structured wire used to build directly. The structured wire shape is gone; only the `QueryString` field exists on the envelope.
+The current v1 wire carries a **SQL query string** rather than the older structured `Query{table_name, predicates[]}` value. The handler parses the string with `query/sql.Parse` and lowers it into the same SPEC-004 predicate tree the structured wire used to build directly. The structured wire shape is gone; only the `QueryString` field exists on the envelope.
 
 ```
 query_string : string    — SQL SELECT against exactly one table; single-row result set per match
@@ -292,13 +298,13 @@ Still rejected in protocol v1 (each as `SubscriptionError`):
 - the same `query_id` is already active **or pending** on the connection
 - the expression shape is not part of the v1 subset
 
-**Design decision — SQL in v1.** The structured-predicate shape was rejected for Phase 2 once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and matches the reference's `query_strings: Box<[Box<str>]>` in shape without copying Rust source. The original structured-predicate design (pre-Phase-2) is now superseded by the SQL wire surface. See `TECH-DEBT.md::OI-002` and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for current status.
+**Design decision — SQL in v1.** The structured-predicate shape was rejected once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and gives Shunter clients one query language across subscribe and one-off reads. The original structured-predicate design is now superseded by the SQL wire surface. See `TECH-DEBT.md::OI-002` and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for current status.
 
 **Design decision — still single-table in v1.** Equality / range predicates on one table remain the common hot-path subscription shape and map cleanly onto SPEC-004's pruning indexes. Range and join subscriptions remain part of the evaluator's internal model, but joins are still not exposed on the public wire protocol in v1.
 
 #### 7.1b SubscribeMulti
 
-Register a query-set under a single `query_id`. Phase 2 Slice 2 introduced this as the multi-query counterpart to `SubscribeSingle`. Reference: `SubscribeMulti.query_strings: Box<[Box<str>]>` at `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`.
+Register a query-set under a single `query_id`. This is the multi-query counterpart to `SubscribeSingle`.
 
 ```
 tag: 5
@@ -327,7 +333,7 @@ send_dropped: uint8        — 0 = no dropped rows; 1 = include current rows in 
 
 #### 7.2b UnsubscribeMulti
 
-Drop every query registered under the given `query_id` in one call. Phase 2 Slice 2.
+Drop every query registered under the given `query_id` in one call. This is the set-level counterpart to `UnsubscribeSingle`.
 
 ```
 tag: 6
@@ -364,7 +370,7 @@ Any other value is rejected as `ErrMalformedMessage`.
 
 ### 7.4 OneOffQuery
 
-Execute a read-only SQL query that returns current matching rows, without establishing an ongoing subscription. Phase 2 Slice 1 flipped the structured `table_name + predicates[]` wire to a SQL string. Phase 2 Slice 1c flipped the caller's correlator from a numeric `request_id` to the reference-style opaque `message_id: Box<[u8]>`.
+Execute a read-only SQL query that returns current matching rows, without establishing an ongoing subscription. The current v1 wire uses a SQL string and an opaque client-chosen `message_id` byte slice for correlation.
 
 ```
 tag: 4
@@ -372,7 +378,7 @@ message_id:   bytes     — opaque client-chosen correlator (matches reference `
 query_string: string    — SQL query per §7.1.1
 ```
 
-**Response:** `OneOffQueryResult` (§8.6) carrying the same `message_id`.
+**Response:** `OneOffQueryResponse` (§8.6) carrying the same `message_id`.
 
 The executor runs a read-only query against `CommittedState.Snapshot()` directly. This read is not atomic with subscription registration because it does not register subscription state; it only returns a point-in-time result from committed state.
 
@@ -382,15 +388,15 @@ Implementation status: the one-off SELECT surface is intentionally broader than 
 
 ## 8. Server→Client Messages
 
-### 8.1 InitialConnection
+### 8.1 IdentityToken
 
 First message sent after WebSocket opens (before any client message is processed).
 
 ```
 tag: 1
 identity:      bytes (32)     — client's Identity in canonical 32-byte wire form
-connection_id: bytes (16)     — server-assigned or client-provided connection ID
 token:         string          — JWT for reconnection; client should persist
+connection_id: bytes (16)     — server-assigned or client-provided connection ID
 ```
 
 ### 8.2 SubscribeSingleApplied
@@ -400,13 +406,13 @@ Single-query subscription registered successfully. Contains all currently matchi
 ```
 tag: 2
 request_id:                         uint32 LE
+total_host_execution_duration_us:   uint64 LE     — server-measured wall time
 query_id:                           uint32 LE
 table_name:                         string
 rows:                               RowList       — all rows matching the query at subscribe time
-total_host_execution_duration_us:   uint64 LE     — server-measured wall time
 ```
 
-`query_id` mirrors the reference `QueryId` naming used by the subscribe / unsubscribe envelopes. In Shunter Phase 2, it still identifies one logical subscription on the connection.
+`query_id` identifies one logical subscription on the connection.
 
 The rows in `SubscribeSingleApplied` represent a consistent snapshot. They are the starting state the client should use to populate its local cache.
 
@@ -419,10 +425,10 @@ Single-query subscription removed.
 ```
 tag: 3
 request_id:                         uint32 LE
+total_host_execution_duration_us:   uint64 LE
 query_id:                           uint32 LE
 has_rows:                           uint8               — 0 = no rows; 1 = rows follow
 rows:                               RowList (if has_rows = 1)   — rows that were in the result set at unsubscribe time
-total_host_execution_duration_us:   uint64 LE
 ```
 
 The `UnsubscribeMulti` counterpart is `UnsubscribeMultiApplied` (§8.11).
@@ -433,6 +439,7 @@ Subscription failed. The subscription identified by `query_id` (if present) is n
 
 ```
 tag: 4
+total_host_execution_duration_us: uint64 LE       — server-measured wall time
 request_id: Optional<uint32 LE>    — echoes Subscribe request_id when still known
 query_id:   Optional<uint32 LE>    — identifies the affected subscription when known
 table_id:   Optional<TableID>      — narrows the drop scope to one return-table family when known
@@ -449,7 +456,7 @@ On receiving this, the client must discard all cached rows for the affected `que
 
 ### 8.5 TransactionUpdate (heavy, caller-bound)
 
-The Phase 1.5 outcome-model closure (`docs/parity-decisions.md#outcome-model`) made `TransactionUpdate` the **single caller-bound envelope** for every reducer outcome — success, failure, and (shape-parity only) OutOfEnergy. Non-callers whose subscribed rows are touched receive `TransactionUpdateLight` (§8.8) instead. Non-callers with no matching rows receive nothing.
+The current v1 outcome model makes `TransactionUpdate` the **single caller-bound envelope** for every reducer outcome — success, failure, and a reserved `OutOfEnergy` arm. Non-callers whose subscribed rows are touched receive `TransactionUpdateLight` (§8.8) instead. Non-callers with no matching rows receive nothing.
 
 ```
 tag: 5
@@ -457,9 +464,9 @@ status:                         UpdateStatus            — three-arm tagged uni
 caller_identity:                bytes (32)              — the caller's Identity
 caller_connection_id:           bytes (16)              — the caller's ConnectionID
 reducer_call:                   ReducerCallInfo         — see below
-timestamp:                      int64 LE                — server-captured reducer dispatch time (Unix epoch nanoseconds)
-energy_quanta_used:             uint64 LE               — reserved; always 0 in v1 (no energy model)
-total_host_execution_duration:  int64 LE                — measured reducer wall time, nanoseconds
+timestamp:                      int64 LE                — server-captured reducer dispatch time (Unix epoch microseconds)
+energy_quanta_used:             bytes (16)              — reserved u128 LE; always 0 in v1 (no billing/quota model)
+total_host_execution_duration:  int64 LE                — measured reducer wall time, microseconds
 ```
 
 **`UpdateStatus` (tagged union):**
@@ -468,7 +475,7 @@ total_host_execution_duration:  int64 LE                — measured reducer wal
 arm tag (uint8):
   0 = Committed{update: []SubscriptionUpdate}       — caller's visible row-delta slice (may be empty)
   1 = Failed{error: string}                         — reducer-side failure or pre-commit rejection
-  2 = OutOfEnergy{}                                 — shape-parity only; never emitted by Phase 1.5 executor
+  2 = OutOfEnergy{}                                 — reserved; never emitted by the v1 executor
 ```
 
 **`ReducerCallInfo`:**
@@ -519,25 +526,32 @@ A single `Committed.update` (or `TransactionUpdateLight.update`) may contain ent
 - Non-callers with row-touches receive `TransactionUpdateLight` (§8.8).
 - Non-callers with no row-touches receive nothing.
 
-**Divergence from reference — OutOfEnergy.** `OutOfEnergy` is present in the union for shape parity but is never emitted by the Phase 1.5 executor. `energy_quanta_used` is permanently `0` unless an energy subsystem is introduced (deferred past Phase 3).
+**Shunter decision — no energy economy.** `OutOfEnergy` is present in the union for wire stability but is never emitted by the v1 executor. `energy_quanta_used` is permanently `0` unless Shunter later adds its own local quota system. SpacetimeDB-style hosted billing/metering is not a Shunter product goal.
 
-**Divergence from reference — failure-arm collapse.** Shunter's internal executor distinguishes `failed_user`, `failed_panic`, and `not_found` reducer outcomes. Phase 1.5 collapses all three onto `Failed{Error}` on the wire, retaining the distinguishing information in the error string. This is tracked as an explicit reducer-outcome follow-up in `TECH-DEBT.md`.
+**Shunter decision — failure-arm collapse.** Shunter's internal executor distinguishes `failed_user`, `failed_panic`, and `not_found` reducer outcomes. v1 collapses all three onto `Failed{Error}` on the wire, retaining the distinguishing information in the error string. This should change only if Shunter clients need a more machine-readable failure contract.
 
-### 8.6 OneOffQueryResult
+### 8.6 OneOffQueryResponse
 
-Response to `OneOffQuery`. Phase 2 Slice 1c mirrors the reference opaque-correlator shape.
+Response to `OneOffQuery`.
 
 ```
 tag: 6
-message_id: bytes        — echoes OneOffQueryMsg.MessageID
-status:     uint8        — 0 = success; 1 = error
-rows:       RowList      — present if status = 0
-error:      string       — present if status = 1
+message_id: bytes                  — echoes OneOffQueryMsg.MessageID
+error:      Optional<string>       — absent on success, present on failure
+tables:     []OneOffTable          — empty on failure
+total_host_execution_duration: int64 LE — server-measured wall time in microseconds
+```
+
+`OneOffTable` is:
+
+```
+table_name: string
+rows:       RowList
 ```
 
 ### 8.7 (RESERVED) — formerly ReducerCallResult
 
-**Tag 7 is reserved.** The former `ReducerCallResult` envelope was removed from the wire surface in the Phase 1.5 outcome-model closure (`docs/parity-decisions.md#outcome-model`). The caller outcome is now carried by the heavy `TransactionUpdate` (§8.5); non-callers receive `TransactionUpdateLight` (§8.8). The tag byte is held reserved so it cannot be silently re-allocated if a future contributor reintroduces a separate caller envelope. A server decoder MUST reject tag 7 with `ErrUnknownMessageTag`; a client decoder MUST treat tag 7 as a fatal protocol error (§3.2).
+**Tag 7 is reserved.** The former `ReducerCallResult` envelope was removed from the wire surface. The caller outcome is now carried by the heavy `TransactionUpdate` (§8.5); non-callers receive `TransactionUpdateLight` (§8.8). The tag byte is held reserved so it cannot be silently re-allocated if a future contributor reintroduces a separate caller envelope. A server decoder MUST reject tag 7 with `ErrUnknownMessageTag`; a client decoder MUST treat tag 7 as a fatal protocol error (§3.2).
 
 Authoritative pins:
 - `protocol/parity_message_family_test.go::TestPhase15TagReducerCallResultReserved`
@@ -545,7 +559,7 @@ Authoritative pins:
 
 ### 8.8 TransactionUpdateLight
 
-Delivered to non-caller connections whose subscribed rows were touched by a commit. Delta-only — no caller identity, reducer call info, timestamp, or duration fields. Phase 1.5.
+Delivered to non-caller connections whose subscribed rows were touched by a commit. Delta-only — no caller identity, reducer call info, timestamp, or duration fields.
 
 ```
 tag: 8
@@ -564,9 +578,9 @@ Response to `SubscribeMulti` (§7.1b). Carries the merged initial snapshot for a
 ```
 tag: 9
 request_id:                         uint32 LE
+total_host_execution_duration_us:   uint64 LE
 query_id:                           uint32 LE
 update:                             []SubscriptionUpdate    — one entry per emitted query/table family, with query_id set and Inserts populated
-total_host_execution_duration_us:   uint64 LE
 ```
 
 Reference: `SubscribeMultiApplied` at `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`.
@@ -578,9 +592,9 @@ Response to `UnsubscribeMulti` (§7.2b). Carries the Deletes-populated entries f
 ```
 tag: 10
 request_id:                         uint32 LE
+total_host_execution_duration_us:   uint64 LE
 query_id:                           uint32 LE
 update:                             []SubscriptionUpdate    — one entry per emitted query/table family, with query_id set and Deletes populated
-total_host_execution_duration_us:   uint64 LE
 ```
 
 ---
@@ -644,7 +658,7 @@ Ordering guarantee on one connection:
 
 ### 10.1 Server → Client
 
-The server buffers outgoing messages per-client up to `OutgoingBufferMessages` (default: 256 messages). If enqueueing the **next** outbound message would exceed that limit, the server MUST:
+The server buffers outgoing messages per-client up to `OutgoingBufferMessages` (default: `16 * 1024` messages). If enqueueing the **next** outbound message would exceed that limit, the server MUST:
 1. leave already-queued messages untouched
 2. enqueue or send a Close frame if possible (`1008`, reason: `"send buffer full"`)
 3. stop accepting further outbound application messages for that connection
@@ -680,7 +694,7 @@ If the underlying TCP connection drops without a Close frame, the server detects
 ### 11.3 Reconnection
 
 Clients should reconnect with exponential backoff. On reconnect:
-1. Present the same `token` from `InitialConnection` to preserve `Identity`
+1. Present the same `token` from `IdentityToken` to preserve `Identity`
 2. Re-subscribe to all desired subscriptions (server has no subscription state from previous connection)
 3. There is no `tx_id` wire field on post-commit envelopes in v1 (see §8.5); clients cannot use a commit ID to detect changes since disconnect. v1 has no gap-fill mechanism — clients re-fetch initial state via `SubscribeSingleApplied` / `SubscribeMultiApplied`.
 
@@ -706,7 +720,7 @@ type ProtocolOptions struct {
     CloseHandshakeTimeout time.Duration
 
     // OutgoingBufferMessages: max queued outgoing messages per client.
-    // Default: 256.
+    // Default: 16 * 1024.
     OutgoingBufferMessages int
 
     // IncomingQueueMessages: max queued incoming messages per client.
@@ -727,11 +741,11 @@ type ProtocolOptions struct {
 
 The protocol layer sends commands to the executor via its inbox (`ExecutorCommand`):
 - `CallReducerCmd` — for `CallReducer` messages
-- `RegisterSubscriptionSetCmd` — for `SubscribeSingleMsg` / `SubscribeMultiMsg` messages (Phase 2 Slice 2 rename from the former `RegisterSubscriptionCmd`)
-- `UnregisterSubscriptionSetCmd` — for `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg` messages (Phase 2 Slice 2 rename from the former `UnregisterSubscriptionCmd`)
+- `RegisterSubscriptionSetCmd` — for `SubscribeSingleMsg` / `SubscribeMultiMsg` messages
+- `UnregisterSubscriptionSetCmd` — for `UnsubscribeSingleMsg` / `UnsubscribeMultiMsg` messages
 - `DisconnectClientSubscriptionsCmd` — on client disconnect
 
-The executor sends the reducer-call outcome back to the protocol layer via the `ResponseCh` embedded in `CallReducerCmd`. Phase 1.5 replaced the former `ReducerCallResult` Go shape with the heavy `TransactionUpdate` envelope (§8.5); the response carries `UpdateStatus`, `ReducerCallInfo`, and caller metadata so the fan-out integration can route the caller's delta through the heavy envelope and the non-callers' deltas through `TransactionUpdateLight` (§8.8). See `docs/parity-decisions.md#outcome-model` for the dispatch rule.
+The executor sends protocol-originated reducer outcomes back through `CallReducerCmd.ProtocolResponseCh`. The former standalone `ReducerCallResult` Go shape was replaced by the heavy `TransactionUpdate` envelope (§8.5); the response carries `UpdateStatus`, `ReducerCallInfo`, and caller metadata so the fan-out integration can route the caller's delta through the heavy envelope and the non-callers' deltas through `TransactionUpdateLight` (§8.8).
 
 ```go
 type ExecutorInbox interface {
@@ -758,7 +772,7 @@ Delivery contract:
 
 The fan-out worker constructs the heavy `TransactionUpdate` from the caller's `CommitFanout` slice plus the reducer-outcome metadata (`UpdateStatus`, `CallerIdentity`, `CallerConnectionID`, `ReducerCall`, `Timestamp`, `TotalHostExecutionDuration`) returned by the executor on `CallReducerCmd.ResponseCh`. Non-caller entries become `TransactionUpdateLight{RequestID, Update}`.
 
-Protocol v1 exposes no wire-level confirmed-read flag. WebSocket clients therefore observe confirmed-read delivery for all post-commit messages; the fan-out worker waits on `TxDurable` before protocol-visible delivery.
+Protocol v1 exposes no wire-level confirmed-read flag. Non-caller fan-out delivery defaults to confirmed reads: the fan-out worker waits on `TxDurable` before sending `SubscriptionError` or `TransactionUpdateLight` to a connection unless an internal fast-read policy opts that connection out. Protocol-originated caller-heavy `TransactionUpdate` responses are emitted after commit and synchronous subscription evaluation, but before fsync completion; clients that need crash-survivable acknowledgement must treat the commit log durability boundary as a future explicit feature.
 
 ```go
 type ClientSender interface {
@@ -767,7 +781,7 @@ type ClientSender interface {
     // messages that do not have a dedicated typed method:
     // SubscribeSingleApplied, SubscribeMultiApplied,
     // UnsubscribeSingleApplied, UnsubscribeMultiApplied,
-    // SubscriptionError, OneOffQueryResult. Returns
+    // SubscriptionError, OneOffQueryResponse. Returns
     // ErrClientBufferFull if the client's outgoing buffer is full.
     Send(connID ConnectionID, msg any) error
 
@@ -819,7 +833,7 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 
 ## 15. Open Questions
 
-1. **Query language evolution.** *Closed by Phase 2 Slice 1.* v1 carries SQL query strings on `SubscribeSingle` / `SubscribeMulti` / `OneOffQuery` (§7.1.1). The supported SQL subset is single-table equality/range predicates with `AND`; OR/join/aggregation remain rejected. Further language widening is a Phase 2+ concern.
+1. **Query language evolution.** *Closed for v1.* v1 carries SQL query strings on `SubscribeSingle` / `SubscribeMulti` / `OneOffQuery` (§7.1.1). The supported SQL subset is single-table equality/range predicates with `AND`; OR/join/aggregation remain rejected. Further language widening should be driven by Shunter client needs.
 
 2. **Gap-fill / resume protocol.** v1 has no commit-id wire field on post-commit envelopes and no way to request missed deltas. Clients must re-subscribe and accept a full `SubscribeSingleApplied` / `SubscribeMultiApplied`. Should the server support `resume_from_tx_id` for short disconnections? This requires the server to retain a short delta buffer and expose a commit-id. Deferred to v2.
 
@@ -831,17 +845,17 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 
 ---
 
-## 16. Divergences from SpacetimeDB
+## 16. Reference-Informed Shunter Decisions
 
-- **Protocol identifier:** Shunter admits both `v1.bsatn.spacetimedb` (reference, preferred) and `v1.bsatn.shunter` (legacy, retained — see §2.2). This closes the Phase 1 subprotocol parity gap; the legacy token is an intentional deferral until existing Shunter-token clients are cut over.
-- **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). These values are now parity-aligned with SpacetimeDB's SERVER_MSG_COMPRESSION_TAG_* constants. Brotli implementation is deferred to Phase 2+.
-- **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `256` (§10.1, §12), rather than SpacetimeDB's much larger default buffering. Shunter chooses earlier disconnect-on-lag to keep memory bounded.
-- **TransactionUpdate shape:** Phase 1.5 closure aligned v1 with the reference's heavy/light envelope split (§8.5, §8.8). Remaining shape divergences are narrowed to field values: `energy_quanta_used` stubbed to `0`, `OutOfEnergy` never emitted, and `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string (Phase 3 follow-up).
+- **Protocol identifier:** Shunter-owned clients should use `v1.bsatn.shunter` (§2.2). Current code still admits `v1.bsatn.spacetimedb` for historical compatibility with earlier reference-comparison work, but SpacetimeDB client compatibility is not a product goal.
+- **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). Brotli should be implemented only if Shunter clients need it.
+- **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `16 * 1024` (§10.1, §12). Shunter disconnects lagging clients to keep memory bounded.
+- **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `energy_quanta_used` is stubbed to `0`, `OutOfEnergy` is never emitted, and `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
 - **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
 - **CallReducer wire shape:** v1 `CallReducer` carries `{request_id, reducer_name, args, flags}` (§7.3). The `flags` byte matches the reference `CallReducerFlags` (FullUpdate / NoSuccessNotify); no other flag values are defined in v1.
-- **OneOffQuery language:** v1 `OneOffQuery` uses the same SQL subset as `SubscribeSingle` / `SubscribeMulti` (§7.4 / §7.1.1). The Phase 2 Slice 1 flip aligned the wire surface with the reference's query-string shape.
+- **OneOffQuery language:** v1 `OneOffQuery` uses the same SQL subset as `SubscribeSingle` / `SubscribeMulti` (§7.4 / §7.1.1), giving Shunter clients one read-query surface.
 - **Close-code policy:** Shunter's documented close behavior includes `1000`, `1002`, `1008`, and `1011` with Shunter-specific reason strings for protocol/policy failures (§11.1). It does not try to mirror SpacetimeDB's full close-code/reason matrix.
-- **Energy model:** v1 has no energy subsystem. `TransactionUpdate.energy_quanta_used` is reserved and always `0`; `UpdateStatus::OutOfEnergy` is present in the tagged union for shape parity but is never emitted (§8.5).
+- **Energy model:** v1 has no energy subsystem. `TransactionUpdate.energy_quanta_used` is reserved and always `0`; `UpdateStatus::OutOfEnergy` is present in the tagged union for wire stability but is never emitted (§8.5). SpacetimeDB-style hosted billing/metering is not a Shunter product goal.
 - **ConnectionID reuse semantics:** reusing `connection_id` on reconnect is only a client hint for future resume features; it has no server-side resume semantics in v1 (§2.3, §11.3).
 - **Reserved tag 7:** the former `ReducerCallResult` tag byte is held reserved rather than reused (§6, §8.7). A future contributor reintroducing a separate caller envelope MUST pick a fresh tag, not reclaim 7.
 
@@ -851,7 +865,7 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 
 | Test | What it verifies |
 |---|---|
-| Connect, receive InitialConnection | Connection establishment |
+| Connect, receive IdentityToken | Connection establishment |
 | Connect with invalid JWT → 401 | Authentication rejection |
 | Connect with `connection_id = 0x00...00` → 400 | Zero connection_id rejection |
 | SubscribeSingle, receive SubscribeSingleApplied with correct rows | Subscription registration and initial state |
@@ -884,6 +898,6 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 | Idle connection for > IdleTimeout → connection closed | Idle timeout |
 | Client disconnects cleanly → OnDisconnect fires, sys_clients row removed | Disconnect lifecycle |
 | Client disconnects without Close frame → server detects via Ping timeout | Network failure detection |
-| Reconnect with same token → same Identity in InitialConnection | Identity preservation |
-| OnConnect reducer returns error → connection closed before InitialConnection | OnConnect rejection |
+| Reconnect with same token → same Identity in IdentityToken | Identity preservation |
+| OnConnect reducer returns error → connection closed before IdentityToken | OnConnect rejection |
 | Applied envelope for `query_id` always arrives before any delta envelope referencing that ID | Per-connection ordering guarantee |

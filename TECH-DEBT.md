@@ -3,60 +3,70 @@
 This file tracks open issues only.
 Resolved audit history belongs in git history, not here.
 
-Status conventions:
-- open: confirmed issue or parity gap still requiring work
-- deferred: intentionally not being closed now
+Status convention:
+- every issue listed below is open until the concrete Shunter gap is closed and pinned by tests/docs
 
 Priority order:
-1. externally visible parity gaps
-2. correctness / concurrency bugs that undermine parity claims
+1. externally visible Shunter correctness and product-contract gaps
+2. correctness / concurrency bugs that undermine runtime claims
 3. capability gaps that block realistic usage
-4. cleanup after parity direction is locked
+4. cleanup after the Shunter product contract is locked
 
-Parity principles:
-- parity is judged by named client-visible scenarios, not helper-level resemblance
-- same observable outcome beats same internal mechanism
-- every parity change needs an observable test
-- divergences must stay explicit
+Reference-use principles:
+- SpacetimeDB is an architectural reference, not a wire/client/business compatibility target
+- correctness is judged by named Shunter client-visible scenarios, not helper-level resemblance
+- same observable Shunter outcome beats same internal mechanism
+- every behavior change needs an observable test
+- intentional differences from SpacetimeDB must stay explicit when they affect docs, tests, or client behavior
 - closed slice history belongs in tests and git history, not in startup docs
+- non-goals are not tech debt; do not track SpacetimeDB-only compatibility gaps unless a Shunter client, runtime, or operator scenario needs them
 
-Closed parity baselines are not startup context and should not be reopened
-without fresh failing regression evidence:
+Project direction (2026-04-26):
+- Shunter is for self-hosted / personally operated apps with Shunter-owned Go APIs and clients
+- SpacetimeDB compatibility matters only when it helps choose a proven runtime model
+- SpacetimeDB client wire compatibility is not a product goal
+- SpacetimeDB-style energy accounting is not a product goal; Shunter has no billing/metering/quota economy, and energy-shaped protocol fields should be removed rather than kept as inert compatibility baggage
+- use reference behavior as evidence for runtime semantics, but prefer a simpler Shunter contract when compatibility-only details add cost without value
+- SQL/query work is useful when it makes Shunter clients more correct, predictable, and expressive; it should not continue as open-ended reference-message or parser-error parity chasing
+
+Closed reference-comparison baselines are not startup context and should not be reopened without fresh failing Shunter regression evidence:
 - protocol subprotocol/compression/lifecycle/message-family baselines
 - canonical reducer delivery and empty-fanout caller outcomes
 - subscription rows through `P0-SUBSCRIPTION-033`
 - same-connection reused subscription-hash initial-snapshot elision
 - scheduler startup/firing narrow slice
 - recovery replay horizon and snapshot/replay invariant slices
-- Phase 4 Slice 2 offset-index, typed error category, and record/log documented-divergence slices
+- offset-index, typed error category, and record/log documented-decision slices
 
-Active audit note (2026-04-24):
+Active audit note (2026-04-26):
 - hosted-runtime V1 is landed and verified; `docs/hosted-runtime-planning/V1/` is no longer the active implementation campaign
 - OI-004 and OI-006 were removed after the post-V1 audit found no concrete remaining open lifecycle or fanout-aliasing defect on the hosted-runtime path
 - OI-005 remains open but narrowed to lower-level raw read-view/snapshot lifetime discipline as an accepted expert-API risk
-- OI-002 is the expected next parity/runtime-model campaign unless a fresh post-V1 scout changes priority
-- do not close parity items solely because they are reachable through the hosted-runtime API; close or narrow them only when the underlying parity/correctness gap is pinned by live tests
+- OI-002 remains the expected next runtime-model campaign unless a fresh post-V1 scout changes priority
+- do not close behavior items solely because they are reachable through the hosted-runtime API; close or narrow them only when the underlying Shunter correctness gap is pinned by live tests
 
 ## Open issues
 
-### OI-001: Protocol surface is still not wire-close enough to SpacetimeDB
+### OI-001: Protocol surface still needs a Shunter-owned contract cleanup
 
 Status: open
 Severity: high
 
 Summary:
-- all OI-001 A1 wire-shape and measured-duration parity slices identified to date are closed and pinned
-- legacy `v1.bsatn.shunter` admission is still accepted as a compatibility deferral
-- brotli remains recognized-but-unsupported
-- several message-family and envelope details remain intentionally divergent
+- all OI-001 A1 wire-shape and measured-duration comparison slices identified to date are closed and pinned
+- the product contract is Shunter-native; SpacetimeDB client/wire compatibility is no longer a correctness goal
+- `v1.bsatn.shunter` is the only intended Shunter token. Remove `v1.bsatn.spacetimedb` admission and update negotiation/tests/specs so Shunter does not advertise or accept a SpacetimeDB-specific protocol token.
+- brotli remains recognized-but-unsupported; implement it only if Shunter clients need it
+- several message-family and envelope details are intentionally Shunter-specific
 - client-message decoders still need a body-consumption audit: some decoder paths can accept a valid prefix while ignoring trailing bytes, even though tests/comments around legacy payload rejection imply stricter behavior
 - subscribe/unsubscribe handler logic still has avoidable duplication around parsing, lifecycle checks, and response shaping; clean it after the protocol behavior target is pinned
-- reducer failure-arm collapse remains an explicit outcome-model follow-up; see `docs/parity-decisions.md#outcome-model`
-- rows-shape wrapper-chain parity (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `BsatnRowList`) is closed as a documented divergence — see `docs/parity-decisions.md#protocol-rows-shape`. Carried-forward deferral: a coordinated close of the wrapper chain together with the SPEC-005 §3.4 row-list format is a separate multi-slice phase, not an OI-001 A1 wire-close slice.
+- reducer failure-arm collapse remains an explicit outcome-model follow-up only if Shunter clients need more machine-readable failure classes; see `docs/parity-decisions.md#outcome-model`
+- Shunter's flat rows/update shape is the current native protocol contract — see `docs/parity-decisions.md#protocol-rows-shape`. Do not rewrite it solely to match SpacetimeDB's wrapper chain (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `BsatnRowList`).
+- energy accounting is explicitly out of scope for Shunter's product model. Remove the energy-shaped protocol surface entirely: `TransactionUpdate.EnergyQuantaUsed`, `StatusOutOfEnergy`, `CallerOutcomeOutOfEnergy`, subscription/fanout energy fields, encoders/decoders/tests, and docs that describe `OutOfEnergy` as a reserved wire arm. Do not replace this with a quota/metering abstraction unless a future Shunter-local product need appears.
 
 Why this matters:
-- protocol behavior is still one of the biggest blockers to serious parity claims
-- even where semantics are close, the wire contract is still visibly Shunter-specific
+- protocol behavior is still one of the biggest blockers to serious Shunter client/runtime claims
+- the wire contract needs to be owned, documented, and tested as Shunter's protocol instead of treated as a compatibility exercise
 
 Primary code surfaces:
 - `protocol/upgrade.go`
@@ -74,63 +84,43 @@ Source docs:
 - `docs/parity-decisions.md#protocol-rows-shape`
 
 Execution note:
-- With hosted-runtime V1 landed, the next parity execution target is expected to be OI-002 subscription-runtime parity unless a fresh post-V1 audit changes priority. The remaining OI-001 items are narrower compatibility/divergence follow-ons unless a user explicitly asks to reopen protocol wire-close work.
+- OI-001 now has two concrete Shunter-native protocol cleanup slices before lower-priority protocol cleanup: remove SpacetimeDB subprotocol-token admission, then remove the energy-shaped wire/status fields. Keep both as behavior changes with explicit tests.
 
-### OI-002: Query and subscription behavior still diverges from the target runtime model
+### OI-002: Query and subscription behavior needs a Shunter-owned correctness pass
 
 Status: open
 Severity: high
 
 Summary:
-- A2 is still open, but the closed SQL/query slice history is intentionally not repeated here.
-- Slice A (source-text seam + reference parse routing) closed 2026-04-25 (`sql.Literal.Text` + reference `parse(value, ty)` routing on `KindString`, `KindBytes`, `KindBool`, integer / float ranges, plus `:sender` → identity-hex resolver). Closes the source-text-preservation cluster: hex / scientific / leading-sign / leading-zero / round-trip-lossy float forms survive `InvalidLiteral` rendering and `KindString` widening, hex tokens reject on Bool / numeric kinds with the original token, `LitString` and numeric literals route through reference `from_hex_pad` on `KindBytes`, and `:sender` resolves to the identity hex literal before target coerce so non-bytes column kinds route through the same reference shapes (`String(hex)`, `InvalidLiteral{hex, "Bool"}`, etc.).
-- Slice B (algebraic-name compound rendering + compound error classes) closed 2026-04-25. `algebraicName` now renders `KindTimestamp` as the SATS Product `(__timestamp_micros_since_unix_epoch__: I64)` and `KindArrayString` as the parameterized `Array<String>`. `KindTimestamp` reject branches route LitString / LitInt / LitFloat / LitBigInt / LitBytes (source-text-bearing) through `InvalidLiteralError` carrying `renderLiteralSourceText(lit)`; LitBool stays on the lib.rs:94 `UnexpectedType` arm. `KindArrayString` routes the same source-text categories to `InvalidLiteralError{Type: Array<String>}` and LitBool to `UnexpectedTypeError{Bool, Array<String>}`. Pinned by coerce-layer unit tests and OneOff raw + SubscribeSingle `WithSql` pairs per error class (`TestHandleOneOffQuery_Parity{TimestampMalformed,BoolLiteralOnTimestamp,StringLiteralOnArrayString,BoolLiteralOnArrayString}RejectText` and the SubscribeSingle counterparts). The `normalizeSQLFilterForRelations` wrapper bypass already passes both error classes through unwrapped, so no protocol-seam change was needed.
-- Slice C (compile-stage validation text) closed 2026-04-25. Three new typed errors land alongside the existing `InvalidLiteralError` / `UnexpectedTypeError` cluster: `sql.DuplicateNameError` (renders `` Duplicate name `{name}` ``, mirrors `expr/src/errors.rs:119-121`), `sql.InvalidOpError` (renders `` Invalid binary operator `{op}` for type `{type}` ``, mirrors `expr/src/errors.rs:71-85`), and a re-exported `sql.AlgebraicName(kind)` helper for cross-package compile-stage rendering. Emit sites: (1) `query/sql/parser.go::parseJoinClause` returns `DuplicateNameError{Name: rightAlias}` for both the explicitly-aliased shape (`FROM t AS dup JOIN s AS dup`) and the unaliased self-join shape (`FROM t JOIN t`) — reference treats both identically because `parse_relvar` derives the alias from the base table when no `AS` is written. (2) `protocol/handle_subscribe.go::compileSQLQueryString` adds an `errors.As(err, &sql.DuplicateNameError{})` bypass on the `parse:` wrap so the typed error flows through unwrapped on both OneOff and SubscribeSingle/Multi surfaces. (3) `compileProjectionColumns` and `compileJoinProjectionColumns` interleave a `seen[effectiveName]` HashSet check (effective name = `OutputAlias` if non-empty, else `Column`) so OneOff `SELECT u32 AS dup, i32 AS dup FROM t` and `SELECT u32, u32 FROM t` emit reference `DuplicateName` text. SubscribeSingle still rejects column projections earlier at `Unsupported::ReturnType`, so projection dup-name parity is OneOff-only by design. (4) The JOIN ON kind-mismatch and Array/Product equality arms now emit `UnexpectedTypeError` / `InvalidOpError` from `compileSQLQueryString`'s join branch, BEFORE `subscription/validate.go::validateJoin` would otherwise emit `subscription: invalid predicate: join column kinds differ`. Slot ordering matches reference `UnexpectedType::new(col_type, ty)` at `lib.rs:111-112` — the RIGHT side's column type renders in the `(expected)` slot and the LEFT side's column type (which was passed as the expected for the right) renders in the `(inferred)` slot. The `cross join WHERE column equality` lowering at `compileCrossJoinWhereColumnEquality` mirrors the same routing; the parallel cross-join WHERE admission gating still fires earlier on SubscribeSingle so cross-join WHERE parity remains an open scout candidate. Pinned by OneOff raw + SubscribeSingle WithSql pairs (`TestHandleOneOffQuery_Parity{DuplicateProjectionAlias,DuplicateImplicitProjection,DuplicateJoinAlias,DuplicateSelfJoin,JoinColumnKindMismatch,JoinArrayColumnInvalidOp}RejectText` and the SubscribeSingle counterparts for the four scenarios that survive the column-projection guard).
-- Slice F.1 (SELECT ALL / SELECT DISTINCT set-quantifier parser rejection) closed 2026-04-25. New typed error `sql.UnsupportedSelectError{SQL string}` mirrors reference parser/errors.rs:15-19 (`SubscriptionUnsupported::Select` → `Unsupported SELECT: {select}`) and parser/errors.rs:25-26 (`SqlUnsupported::feature` → `Unsupported: {select}`). Two render forms: `Error()` returns the OneOff `Unsupported: ...` shape; `SubscribeError()` returns the subscribe `Unsupported SELECT: ...` shape. `query/sql/parser.go::parseProjection` now rejects an unquoted `ALL` or `DISTINCT` first-projection token through `UnsupportedSelectError{SQL: p.sql}` before `parseProjectionItem` could reinterpret the keyword as a column reference (the reinterpretation previously made OneOff succeed when a column named `ALL`/`DISTINCT` existed and made SubscribeSingle fall through to the column-projection return-type guard). `compileSQLQueryString` lets the typed error flow through unwrapped via the existing `parse:` bypass cluster, and `wrapSubscribeCompileErrorSQL` switches to `SubscribeError()` before applying the `DBError::WithSql` `, executing: ...` wrap. Pinned by OneOff raw + SubscribeSingle WithSql pairs `TestHandle{OneOffQuery,SubscribeSingle}_ParityAllModifierRejected` and the existing `TestHandle{OneOffQuery,SubscribeSingle}_ParityDistinctProjectionRejected` pins were tightened from a non-empty-error assertion to the exact reference text.
-- Slice F.3+F.4 (JOIN ON resolution precedes bare-wildcard guard and WHERE-FALSE pruning) closed 2026-04-25. `compileSQLQueryString`'s join branch now resolves the ON columns + the JOIN ON type-mismatch / Array-type checks BEFORE the `InvalidWildcard::Join` guard at the bare-`SELECT *` site and BEFORE the `FalsePredicate` short-circuit that was rewriting `WHERE FALSE` to `NoRows`. Mirrors reference `SubChecker::type_from` (check.rs:99-104) which types the ON binop through `type_expr` (lib.rs:101-102) BEFORE `type_proj` runs the bare-wildcard rejection or `type_select` folds WHERE. Pinned by OneOff raw + SubscribeSingle WithSql pairs `TestHandle{OneOffQuery,SubscribeSingle}_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText` (`SELECT * FROM t JOIN s ON t.missing = s.id`) and `TestHandle{OneOffQuery,SubscribeSingle}_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText` (`SELECT t.* FROM t JOIN s ON t.missing = s.id WHERE FALSE`).
-- Slice I (strict JOIN ON equality) closed 2026-04-25. New typed error `sql.UnsupportedJoinTypeError` mirrors reference `SqlUnsupported::JoinType` (`Non-inner joins are not supported`). `query/sql/parser.go::parseJoinClause` no longer admits an extra `AND`/`OR` expression after the qualified-column equality and routes non-`=` JOIN ON operators through that typed error. `compileSQLQueryString` lets the typed error bypass the generic `parse:` wrapper so OneOff emits the raw literal and SubscribeSingle emits the `WithSql` counterpart. Pinned by `TestParseRejectsJoinOnNonPureEquality`, `TestHandleOneOffQuery_ParityJoinOnStrictEqualityRejectText`, and `TestHandleSubscribeSingle_ParityJoinOnStrictEqualityRejectText`.
-- Scout cleanup slice (qualified-name / LIMIT / bytes-hex ordering) closed 2026-04-25. Parser resolution now carries table aliases, unresolved projection / WHERE / JOIN ON qualifiers, and invalid/unsupported LIMIT clauses through to `compileSQLQueryString` so `type_from` / duplicate-alias / JOIN ON / WHERE / projection / LIMIT ordering matches reference. `compileSQLQueryString` resolves JOIN WHERE before projection/aggregate return guards, validates qualified wildcard projections after FROM/JOIN checks, routes unknown qualified filters/projections through `Unresolved::Var`, and applies one-off LIMIT parsing through the reference U64 literal path after earlier type checks. `KindBytes` string-literal hex routing now strips only lowercase `0x` or a leading `X'` prefix. Pinned by the tracked `protocol/oi002_*_scout_tmp_test.go` files plus `TestHandleOneOffQuery_Parity{ScientificLimitLiteralApplies,FractionalLimitLiteralRejected}` and the updated parser deferral pins.
-- Boolean-constant WHERE masking slice closed 2026-04-25. `compileSQLQueryString` now preserves the original SQL predicate tree for type resolution and only applies `normalizeSQLPredicate` after that validation, matching reference `_type_expr` ordering for `SqlExpr::Log` operands. `FALSE AND missing = 1`, `TRUE OR missing = 1`, and `FALSE AND u32 = 1.5` now emit the branch `Unresolved::Var` / `InvalidLiteral` text on OneOff and SubscribeSingle instead of folding to success first. Pinned by `TestHandle{OneOffQuery,SubscribeSingle}_ParityBooleanConstantWhereDoesNotMaskBranchErrors`.
-- LIMIT feature rejection ordering slice closed 2026-04-25. Leading `+` / `-` LIMIT tokens and non-numeric LIMIT expressions are now classified as reference query-feature rejections (`Unsupported: {sql}`) before OneOff schema/type checking, so `SELECT * FROM t LIMIT -1` no longer routes through `InvalidLiteral{U64}`, `SELECT * FROM missing LIMIT +1` no longer loses to missing-table resolution, and `SELECT missing FROM t LIMIT '5'` no longer loses to projection resolution. Pinned by `TestOI002LimitScout_{LeadingPlusLimitRejectedByReferenceParser,NegativeLimitRejectedByReferenceParser,SignedLimitRejectedBeforeMissingTable,NonNumericLimitRejectedBeforeProjection}`.
-- Join keyword handling slice closed 2026-04-25. `parseRelationQualifiers` no longer swallows explicit join modifiers as implicit aliases; `CROSS JOIN` is parsed as a cross join, non-inner join starts route through `Non-inner joins are not supported`, and dangling `INNER` / `CROSS` modifiers are rejected instead of being ignored. Pinned by parser tests `TestParse{CrossJoinKeywordIsJoinOperator,RejectsNonInnerJoinKeyword,RejectsDanglingInnerJoinKeyword}` and protocol tests `TestHandleOneOffQuery_Parity{CrossJoinKeywordNotAlias,LeftJoinKeywordRejected}`.
-- SubscribeSingle unindexed join rejection slice closed 2026-04-26. `compileSQLQueryString` now rejects subscription `JOIN ON` plans with no single-column index on either join column before executor submission, returning the reference compile-stage text `Subscriptions require indexes on join columns` through the existing `DBError::WithSql` wrapper. OneOff joins still use `ValidateQueryPredicate` and may scan unindexed joins. Pinned by `TestHandleSubscribeSingle_UnindexedJoinRejectedAtCompileStage`; existing valid SubscribeSingle join fixtures now declare an index on one join column.
-- SubscribeSingle LIMIT-before-set-quantifier slice closed 2026-04-26. `query/sql/parser.go` now records when `SELECT ALL` / `SELECT DISTINCT` rejection happens on a statement carrying `LIMIT`, and `compileSQLQueryString` maps that subscribe-only ordering to `UnsupportedFeatureError` before the `Unsupported SELECT:` wrapper path. `SELECT DISTINCT * FROM t LIMIT 5` and `SELECT ALL * FROM t LIMIT 5` now emit the feature-shaped `Unsupported: ...` `WithSql` text, not `Unsupported SELECT: ...`, and skip executor submission. Pinned by `TestHandleSubscribeSingle_ParityLimitPrecedesSetQuantifierRejectText`.
-- Slice F.2 (WHERE-error precedes projection-error on single-table explicit projections) closed 2026-04-25. `compileSQLQueryString`'s single-table branch now resolves the WHERE predicate (`compileSQLPredicateForRelations`) BEFORE projection-column resolution (`compileProjectionColumns`), mirroring reference `SubChecker::type_set` (check.rs:139-146) `type_proj(type_select(input, expr, vars)?, project, vars)`. Pinned by OneOff raw + SubscribeSingle WithSql pair `TestHandle{OneOffQuery,SubscribeSingle}_ParityUnresolvedVarWherePrecedesProjectionRejectText` (`SELECT missing FROM t WHERE other_missing = 1` → `` `other_missing` is not in scope ``).
-- Slice D (`Unresolved::Var` text parity for missing-field lookups) closed 2026-04-25. New typed error `sql.UnresolvedVarError{Name string}` mirrors reference `expr::errors::Unresolved::Var` at `errors.rs:11-13` (renders `` `{name}` is not in scope ``, Unwrap → `ErrUnsupportedSQL`). Reference emit sites: `_type_expr` lib.rs:103 (relvar lookup miss) and lib.rs:107 (column lookup miss inside an existing relvar). All eight Shunter compile-stage `` `{table}` does not have a field `{column}` `` emit sites in `protocol/handle_subscribe.go` re-routed onto `UnresolvedVarError{Name: column}` — the JOIN ON resolver, cross-join WHERE column-equality resolver, projection-column resolver, `parseQueryString` filter resolver, `normalizeSQLFilterForRelations`, and `NormalizePredicates`. Reference does NOT emit `Unresolved::Field` from any subscription/one-off SELECT path (the two `Unresolved::field` emit sites at `statement.rs:220,340` belong to DML / sub_query statements, out of scope for this slice). Existing pins flipped: `TestNormalizePredicates_UnknownColumn` at handle_subscribe_test.go:357, `TestHandleSubscribe{Single,Multi}_ParityUnknownFieldRejectText`, and `TestHandleOneOffQuery_ParityUnknownFieldRejectText` updated to assert the new `Unresolved::Var` text. New pins: OneOff raw + SubscribeSingle WithSql pairs `TestHandleOneOffQuery_ParityUnresolvedVar{UnqualifiedWhere,ProjectionColumn,JoinOnMissing,JoinWhereQualifiedMissing}RejectText` and the SubscribeSingle counterparts for the three scenarios that survive the column-projection guard (`UnqualifiedWhere`, `JoinOnMissing`, `JoinWhereQualifiedMissing`). Subscription-domain `subscription.ErrColumnNotFound` and `subscription.ErrTableNotFound` paths in `subscription/validate.go` are unchanged — they're a defense-in-depth check on programmatic predicates that don't go through the SQL surface.
-- Other open scout candidates (separate, not-yet-bundled):
-  - quoted table identifiers should preserve case through table resolution, e.g. with only table `t` registered, `SELECT * FROM "T"` should return raw OneOff ``no such table: `T`. If the table exists, it may be marked private.`` and SubscribeSingle ``no such table: `T`. If the table exists, it may be marked private., executing: `SELECT * FROM "T"` ``. Current Shunter accepts/registers the query through the case-insensitive schema lookup. Reference `SqlIdent` is explicitly case-sensitive and `type_relvar` routes the preserved name through `Unresolved::table`.
-  - quoted column identifiers should preserve case through column resolution, e.g. with only column `u32` registered on `t`, `SELECT * FROM t WHERE "U32" = 7` should return raw OneOff `` `U32` is not in scope `` and SubscribeSingle `` `U32` is not in scope, executing: `SELECT * FROM t WHERE "U32" = 7` ``. Current Shunter accepts/registers the query through the case-insensitive column lookup. Reference `SqlIdent` is case-sensitive and `type_expr` field lookup routes the preserved field name through `Unresolved::var`.
-  - quoted relation aliases should preserve case through qualifier resolution, e.g. with alias `"R"` declared in `SELECT * FROM t AS "R" WHERE r.u32 = 7`, the lowercase qualifier `r` should return raw OneOff `` `r` is not in scope `` and SubscribeSingle `` `r` is not in scope, executing: `SELECT * FROM t AS "R" WHERE r.u32 = 7` ``. Current Shunter accepts/registers the query through the case-insensitive qualifier map. Reference `SqlIdent` is case-sensitive and unresolved qualifiers are reported through the `Unresolved::var` surface.
-  - unquoted identifiers should also preserve case through table resolution, e.g. with only table `t` registered, `SELECT * FROM T` should return raw OneOff ``no such table: `T`. If the table exists, it may be marked private.`` and SubscribeSingle ``no such table: `T`. If the table exists, it may be marked private., executing: `SELECT * FROM T` ``. Current Shunter accepts/registers the query through the case-insensitive schema lookup. Reference `SqlIdent` is explicitly case-sensitive (`sql-parser/src/ast/mod.rs` says case insensitivity would belong in `SqlIdent::from`, but it is not implemented).
-  - unquoted column identifiers should preserve case through column resolution, e.g. with only column `u32` registered on `t`, `SELECT * FROM t WHERE U32 = 7` should return raw OneOff `` `U32` is not in scope `` and SubscribeSingle `` `U32` is not in scope, executing: `SELECT * FROM t WHERE U32 = 7` ``. Current Shunter accepts/registers the query through the case-insensitive column lookup. Reference `type_expr` field lookup routes the preserved field name through `Unresolved::var`.
-  - unquoted relation aliases should preserve case through qualifier resolution, e.g. with alias `R` declared in `SELECT * FROM t AS R WHERE r.u32 = 7`, the lowercase qualifier `r` should return raw OneOff `` `r` is not in scope `` and SubscribeSingle `` `r` is not in scope, executing: `SELECT * FROM t AS R WHERE r.u32 = 7` ``. Current Shunter accepts/registers the query through the case-insensitive qualifier map. Reference relation variables are keyed by case-sensitive `RawIdentifier`.
-  - aliases that differ only by case should not collide, e.g. `SELECT "R".* FROM t AS "R" JOIN s AS r ON "R".id = r.id` and `SELECT R.* FROM t AS R JOIN s AS r ON R.id = r.id` should be accepted when schemas/columns exist. Current Shunter rejects both on OneOff raw and SubscribeSingle `WithSql` with ``Duplicate name `r` `` because `parseJoinClause` uses `strings.EqualFold` for alias collisions. Reference `type_from` checks a `HashMap<RawIdentifier, ...>` (`expr/src/check.rs:82-89`), and `RawIdentifier` derives case-sensitive `Eq` / `Hash`.
-  - duplicate join-alias validation should precede right-table resolution, e.g. with only table `t` registered, `SELECT dup.* FROM t AS dup JOIN missing AS dup ON dup.id = dup.id` should return raw OneOff ``Duplicate name `dup` `` and SubscribeSingle ``Duplicate name `dup`, executing: `SELECT dup.* FROM t AS dup JOIN missing AS dup ON dup.id = dup.id` ``. Current Shunter returns ``no such table: `missing`. If the table exists, it may be marked private.`` because `compileSQLQueryString` looks up the right table before emitting the deferred `AliasCollision`. Reference `type_from` checks `vars.contains_key(&alias)` before `Self::type_relvar(tx, &name)` for each joined RHS (`expr/src/check.rs:82-94`).
-  - unquoted boolean keywords in projection should stay literal expressions rather than falling through as column names, e.g. with a real lowercase column `true` on table `t`, `SELECT true FROM t` should return raw OneOff `Unsupported projection expression: true` and SubscribeSingle ``Unsupported projection expression: true, executing: `SELECT true FROM t` ``. Current Shunter accepts the OneOff query when the column exists and SubscribeSingle reports the column-projection return guard. Reference `parse_project_elem` / `parse_proj` routes `Expr::Value(Value::Boolean(_))` through `SqlUnsupported::ProjectionExpr` (`sql-parser/src/parser/mod.rs:186-206`); scope is unquoted `TRUE` / `FALSE` projection tokens only, not quoted `"true"` / `"false"` identifiers.
-  - unquoted `NULL` should stay a literal expression instead of resolving as an identifier, e.g. with a real lowercase column `null` on table `t`, `SELECT NULL FROM t` should return raw OneOff `Unsupported projection expression: NULL` and SubscribeSingle ``Unsupported projection expression: NULL, executing: `SELECT NULL FROM t` ``, while `SELECT * FROM t WHERE NULL = 7` should return raw OneOff `Unsupported literal expression: NULL` and SubscribeSingle ``Unsupported literal expression: NULL, executing: `SELECT * FROM t WHERE NULL = 7` ``. Current Shunter accepts both OneOff shapes when the `null` column exists; SubscribeSingle reports the column-projection return guard for the projection shape and registers the WHERE shape. Reference `parse_proj` routes `Expr::Value(Value::Null)` through `SqlUnsupported::ProjectionExpr`, and `parse_literal` routes `Value::Null` through `SqlUnsupported::Literal` (`sql-parser/src/parser/mod.rs:202-206,330-338`).
-  - reversed column-equality type mismatches should preserve the SQL expression's lexical operand order in `UnexpectedType`, e.g. with `t.id: U32` and `s.id: String`, `SELECT t.* FROM t JOIN s ON s.id = t.id` should emit raw OneOff ``Unexpected type: (expected) U32 != String (inferred)`` and SubscribeSingle the same text with `WithSql`; the OneOff cross-join equality shape `SELECT t.* FROM t JOIN s WHERE s.id = t.id` should do the same. Current Shunter normalizes operands to left/right relation order before checking types and emits ``Unexpected type: (expected) String != U32 (inferred)``. Reference `_type_expr` types the left operand first, then types the right operand with the left type as expected (`expr/src/lib.rs:135-140`).
-  - cross-join WHERE resolution should precede projection validation, e.g. `SELECT x.* FROM t JOIN s WHERE t.missing = 1` should return raw OneOff `` `missing` is not in scope `` and SubscribeSingle `` `missing` is not in scope, executing: `SELECT x.* FROM t JOIN s WHERE t.missing = 1` ``. Current Shunter validates the projected wildcard qualifier first and emits `` `x` is not in scope `` because the join branch only resolves WHERE before projection when `stmt.Join.HasOn` is true. Reference `SqlChecker::type_set` / `SubChecker::type_set` run `type_select(Self::type_from(...), expr, vars)` before `type_proj` for filtered selects (`expr/src/statement.rs:431-437`, `expr/src/check.rs:145-153`).
-  - string-literal bytes coercion should not strip a lowercase `x'` prefix, e.g. `SELECT * FROM s WHERE bytes = 'x''AB'` should return raw OneOff ``The literal expression `x'AB` cannot be parsed as type `Array<U8>` `` and SubscribeSingle the same text with `WithSql`. Current Shunter accepts/registers the query because `decodeReferenceHex` strips lowercase `x'` and decodes `AB`. Reference `from_hex_pad` strips only lowercase `0x` and uppercase `X'` prefixes before hex decoding (`lib/src/lib.rs:310-318`).
-  - OneOff inner-join explicit projections should not be projected twice, e.g. with `Inventory.quantity` at schema index 1, `SELECT product.quantity FROM Orders o JOIN Inventory product ON o.product_id = product.id` should emit one projected `U32(9)` field. Current Shunter materializes the projected row in `evaluateOneOffJoinProjection`, then `handleOneOffQuery` calls `projectOneOffRows` again using the original schema index, producing a zero-column row for this shape. Reference `type_proj::Exprs` resolves each `ProjectExpr::Field` once against the full joined relvar set (`expr/src/lib.rs:65-78`).
-  - inner-join `WHERE` column comparisons should be admitted and evaluated against the joined row, e.g. `SELECT t.* FROM t JOIN s ON t.id = s.t_id WHERE t.code = s.code` should return only joined pairs whose `code` columns match. Current Shunter parses the shape but OneOff raw returns `unsupported SQL predicate sql.ColumnComparisonPredicate`, and SubscribeSingle wraps the same text with `WithSql`. Reference `type_select` sends the full `WHERE` expression through Bool `type_expr` on the joined `RelExpr`, and `type_expr` supports field-vs-field binary comparisons.
-  - join `WHERE` filters with `OR` across both relation sides should evaluate the boolean expression against each joined pair, e.g. `SELECT t.* FROM t JOIN s ON t.id = s.t_id WHERE t.keep = TRUE OR s.keep = TRUE` should reject the `(FALSE, FALSE)` pair. Current Shunter evaluates `Join.Filter` side-by-side with `MatchRowSide`; other-side leaves pass through as true under `Or`, so the `(FALSE, FALSE)` joined row is admitted. Reference `type_select` routes the whole `WHERE` expression through Bool `type_expr` on the joined `RelExpr`; scope is bounded to `OR` disjuncts that reference different join sides.
-  - cross joins with ordinary boolean `WHERE` filters should be admitted and evaluated, e.g. `SELECT t.* FROM t JOIN s WHERE t.keep = TRUE` should return the cartesian rows for matching `t` rows. Current Shunter's cross-join lowering requires exactly one qualified column equality and raw OneOff returns `cross join WHERE only supports qualified column equality` (SubscribeSingle wraps the related `cross join WHERE not supported` admission path with `WithSql`). Reference `SubChecker` / `SqlChecker` applies `type_select` to filtered joins before projection, so this is a parser-admitted query/runtime gap separate from the existing cross-join column-equality lowering.
-  - OneOff cross joins with mixed explicit projection columns should source each projected field from its named relation, e.g. with rows `t.value = 10` and `s.value = 20`, `SELECT t.value AS tv, s.value AS sv FROM t JOIN s` should emit `(10, 20)`. Current Shunter emits `(10, 10)` because the CrossJoin one-off path materializes only the projected side's rows and then `projectOneOffRows` indexes both projection columns into that same row. Reference `SqlChecker::type_set` applies `type_proj(Self::type_from(...), project, vars)` for SELECT without WHERE (`expr/src/statement.rs:419`) and `type_proj::Exprs` resolves each `ProjectExpr::Field` against the full joined relvar set (`expr/src/lib.rs:65-78`).
-  - cross-join `WHERE` column equality type mismatches now emit the reference `UnexpectedType` text on the OneOff surface (closed by Slice C — `compileCrossJoinWhereColumnEquality` mirrors the JOIN ON pre-check). SubscribeSingle still rejects earlier with `cross join WHERE not supported, executing: ...` because the cross-join WHERE admission gate is tied to `allowProjection`. Closing the SubscribeSingle side requires routing cross-join WHERE through the same compile path that OneOff uses, which is the broader cross-join-WHERE-as-Bool-expression slice above and not a fixed-literal parity slice.
-- No queued active child issue; same-connection reused subscription-hash initial-snapshot elision is closed and pinned by `subscription/register_set_test.go::TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate` and `TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot`. `SubscriptionError.table_id` on request-origin error paths now always emits `None` (reference v1 parity); pinned by `executor/protocol_inbox_adapter_test.go::TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID` alongside the pre-existing multi-table nil pin.
-- Remaining broad risks: the supported SQL surface is still narrower than the reference path, row-level security / per-client filtering is absent, and subscription behavior still spans several seams rather than one fully parity-locked contract.
+Current contract:
+- Shunter's v1 SQL surface is intentionally narrow: single-table equality/range predicates with `AND`, plus the subset of joins and one-off projections already documented in SPEC-005.
+- One-off reads and subscriptions should agree anywhere they share syntax and type semantics.
+- Observable behavior should be stable for Shunter clients: accepted queries should return correct rows, rejected queries should fail before registration/execution, and errors should be diagnosable.
+- SpacetimeDB behavior may guide tricky ordering/type decisions, but byte-for-byte parser error parity is not a product goal.
+
+Current open work:
+- Identifier handling is still too case-insensitive. Table names, column names, and relation aliases currently resolve through case-folding in several paths. Decide the Shunter rule, document it, then make quoted and unquoted identifiers follow it consistently across OneOff, SubscribeSingle, and SubscribeMulti.
+- Literal keyword handling is leaky. Unquoted `TRUE`, `FALSE`, and `NULL` can fall through as column names in some projection/filter shapes when real lowercase columns exist. They should remain literals or be rejected according to Shunter's SQL subset.
+- Join WHERE support is inconsistent. Inner-join field-vs-field comparisons and boolean filters that span both relation sides are parsed in some cases but not evaluated correctly. Cross-join WHERE handling is even narrower and should either be fully admitted/evaluated for the documented subset or rejected before registration.
+- Projection on joined rows is fragile. OneOff join projection can project from the wrong relation or project twice, producing malformed rows for realistic explicit projections.
+- Validation ordering still matters where it changes user-visible outcomes. Keep ordering work only when it prevents wrong acceptance, wrong rows, misleading errors, or subscribe/one-off drift; do not chase message text for its own sake.
 - Legacy structured-query remnants remain alongside the SQL path: `Query` / `Predicate` wire types, `compileQuery`, `parseQueryString`, and one-off column match helpers make the live query model harder to reason about.
-- One-off and subscription tests duplicate large scenario blocks; this makes future query behavior changes more expensive and increases the chance that one path drifts from the other.
-- `subscription/eval.go` contains a dead per-evaluation memoization map: it stores query hash results but never reads them. The actual useful duplicate suppression appears to live in fanout batching, so this should be removed or reconnected deliberately.
+- One-off and subscription tests duplicate large scenario blocks. Consolidate shared fixtures where the same syntax/typing contract is being tested.
+- `subscription/eval.go` contains a dead per-evaluation memoization map: it stores query hash results but never reads them. Remove it or reconnect it deliberately.
+
+Closed context to keep out of startup work:
+- The literal source-text, typed error, LIMIT, JOIN ON ordering, boolean-constant masking, join-keyword, unindexed-subscription-join, and missing-field text slices closed on 2026-04-25 / 2026-04-26 and are pinned by tests. Do not repeat that history here or reopen it without a fresh Shunter-visible regression.
+- Same-connection reused subscription-hash initial-snapshot elision is closed and pinned by `subscription/register_set_test.go::TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate` and `TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot`.
+- `SubscriptionError.table_id` on request-origin error paths now emits `None`; this is pinned by `executor/protocol_inbox_adapter_test.go::TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID`.
 
 Execution note:
 - `NEXT_SESSION_HANDOFF.md` owns the immediate OI-002 startup path.
 - Do not read or reproduce the closed `P0-SUBSCRIPTION-*` sequence for new work; tests and git history are the archive.
-- Choose the next OI-002 batch by a fresh scout; do not carry forward historical handoff targets.
+- Choose the next OI-002 batch by a fresh scout organized around the current open-work bullets above.
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads
-- query-surface limitations still cap how close clients can get to reference behavior
+- query-surface limitations and subscribe/one-off drift directly cap what Shunter clients can build safely
 
 Primary code surfaces:
 - `query/sql/parser.go`
@@ -147,19 +137,19 @@ Primary code surfaces:
 - `executor/executor.go`
 - `executor/scheduler.go`
 
-### OI-003: Recovery and store semantics still differ in user-visible ways
+### OI-003: Recovery and store semantics need Shunter operational hardening
 
 Status: open
 Severity: high
 
 Summary:
-- value-model and changeset semantics remain simpler than the reference
-- commitlog/recovery behavior is intentionally rewritten rather than format-compatible
-- replay tolerance, sequencing, and snapshot/recovery behavior still need follow-through
+- Shunter's value model, changeset format, commit log, and snapshot/recovery flow are intentionally Shunter-owned, not byte-format compatible with SpacetimeDB.
+- remaining work should focus on crash/restart correctness, deterministic replay, snapshot compatibility, compaction safety, and clear operator failure modes.
+- format differences are tech debt only when they produce a Shunter data-loss, recovery, observability, or operational limitation.
 
 Why this matters:
-- storage and recovery semantics are central to the operational-replacement claim
-- sequencing and replay mismatches are the kind of differences users feel after crash/restart
+- storage and recovery semantics are central to the "run my apps on this" claim
+- restart behavior is where runtime correctness becomes operational trust
 
 Primary code surfaces:
 - `types/`
@@ -176,9 +166,6 @@ Primary code surfaces:
 - `commitlog/snapshot_io.go`
 - `commitlog/compaction.go`
 - `executor/executor.go`
-
-Source docs:
-- `docs/parity-decisions.md#commitlog-record-shape`
 
 ### OI-005: Lower-level read-view/snapshot lifetime discipline remains an expert-API contract
 
@@ -213,7 +200,7 @@ Source docs:
 Audit note:
 - keep OI-005 as the accepted lower-level/expert API discipline marker; do not reopen it for the now-pinned executor post-commit panic-close gap unless a fresh concrete leak/reproducer appears
 
-### OI-007: Recovery sequencing and replay-edge behavior is narrowed to remaining format/scheduler deferrals
+### OI-007: Replay-edge and scheduler restart behavior still need operational pins
 
 Status: open — narrowed after reader-side zero-header EOS closure
 Severity: medium
@@ -221,21 +208,16 @@ Severity: medium
 Summary:
 - reader-side zero-header EOS / preallocated-zero-tail tolerance is now closed and pinned: `DecodeRecord` and recovery scanning treat an all-zero Shunter record header as end-of-stream, so `ScanSegments` / `ReplayLog` stop at the last real tx instead of classifying preallocated zero tails as damaged user data
 - authoritative pins: `commitlog/replay_test.go::TestReplayLogPreallocatedZeroTailStopsAtLastRecord` and `commitlog/wire_shape_test.go::TestWireShapeShunterZeroRecordHeaderActsAsEOS`
-- remaining live carried-forward deferrals from Phase 4 Slice 2γ (no broader wire-format rewrite landed; 2γ remains a documented-divergence slice):
-  - reference byte-compatible magic (`(ds)^2` vs `SHNT`)
-  - commit grouping (N-tx framing unit)
-  - `epoch` field + `set_epoch` API
-  - V0/V1 version split
-  - writer-side preallocation/fallocate support (reader tolerance is in place, but Shunter still does not emit preallocated segment files)
-  - checksum-algorithm negotiation rename
-  - forked-offset detection (`Traversal::Forked`)
-  - full records-buffer format parity (couples to BSATN / types / schema / subscription / executor)
-  - `Append<T>` payload-return API
-- remaining scheduler deferrals stay open (see `docs/parity-decisions.md#scheduler-startup-and-firing`)
+- remaining work should be scoped to Shunter restart scenarios:
+  - replay ordering around partial final records, damaged segment tails, and snapshot/log boundaries
+  - clearer corruption/fork detection where it helps a single-node operator distinguish "recoverable tail" from "unsafe history"
+  - writer-side preallocation/fallocate support only if it materially improves Shunter durability or startup behavior
+  - scheduler replay/firing pins for restart, missed timers, and dangling-client lifecycle interactions
+- byte-compatible record headers, epoch APIs, multi-transaction commit grouping, V0/V1 reference versioning, records-buffer format parity, and `Append<T>` payload-return APIs are not tracked debt unless a Shunter operational requirement appears
 
 Why this matters:
 - these gaps mainly show up under restart, crash, and replay conditions
-- they materially affect the operational-replacement claim
+- they materially affect whether Shunter is trustworthy for personally operated apps
 
 Primary code surfaces:
 - `commitlog/replay.go`
@@ -243,17 +225,17 @@ Primary code surfaces:
 - `commitlog/replay_test.go`
 - `commitlog/recovery_test.go`
 
-Source docs:
-- `docs/parity-decisions.md#scheduler-startup-and-firing`
-- `docs/parity-decisions.md#commitlog-record-shape`
-
 ### OI-008: Cleanup-only test and label debt obscures the live behavior
 
 Status: open
 Severity: medium
 
 Summary:
-- stale test names and labels still point at retired docs or closed audit slices, including `OI-004`, `OI-006`, `TD-057`, `P0-DELIVERY-*`, and phase-style acceptance labels
+- stale test names and labels still point at retired docs or closed audit slices, including `OI-004`, `OI-006`, `TD-057`, `P0-DELIVERY-*`, `parity`, and phase-style acceptance labels
+- `docs/parity-decisions.md` has a historical filename and several "accepted deferral" sections. Rename/reframe it as Shunter design decisions once code/tests no longer cite the old path, or keep a short redirect doc if a rename would create churn.
+- `AGENTS.md`, `docs/README.md`, `HOSTED_RUNTIME_PLANNING_HANDOFF.md`, and `NEXT_SESSION_HANDOFF.md` still describe TECH-DEBT work as "parity" work in places. Update those labels to "correctness / TECH-DEBT" and keep SpacetimeDB reference language scoped to design evidence.
+- protocol and subscription tests still use `parity_*` filenames and `Test*Parity*` names for many Shunter-owned contract pins. Rename opportunistically when touching those packages; do not do a repository-wide churn-only rename unless the tree is otherwise quiet.
+- comments in `protocol/`, `subscription/`, `query/sql/`, `executor/`, and `commitlog/` still cite reference paths or parity history. Keep citations that explain why a Shunter decision was made, but rewrite comments that imply ongoing SpacetimeDB interop or byte-for-byte compatibility goals.
 - `commitlog/phase4_acceptance_test.go::TestDurabilityWorkerBatchesAndFsyncs` has dead fsync-count instrumentation (`countingSegmentWriter`, `syncCount`, and `_ = counting`) that no longer validates the behavior its name implies
 - several async tests rely on fixed `time.Sleep` windows, especially in fanout-worker coverage; these should move to condition/event based waits before the suite grows more parallel or slower
 - duplicated protocol scenario tests should be collapsed where they are testing shared behavior rather than genuinely different one-off vs subscription contracts
@@ -267,23 +249,12 @@ Why this matters:
 
 Primary code surfaces:
 - `commitlog/phase4_acceptance_test.go`
+- `docs/parity-decisions.md`
+- `AGENTS.md`
+- `docs/README.md`
+- `NEXT_SESSION_HANDOFF.md`
+- `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
 - `protocol/*_test.go`
 - `subscription/fanout_worker_test.go`
 - `subscription/eval.go`
 - `docs/hosted-runtime-planning/`
-
-## Deferred issues
-
-### DI-001: Energy accounting remains a permanent parity deferral
-
-Status: deferred
-Severity: low
-
-Summary:
-- `EnergyQuantaUsed` remains pinned at zero because Shunter does not implement an energy/quota subsystem
-
-Why this matters:
-- this is an intentional parity gap and should stay explicit
-
-Source docs:
-- `docs/parity-decisions.md#outcome-model`

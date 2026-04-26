@@ -8,12 +8,14 @@
 
 ## 1. Purpose and Scope
 
-The schema definition system is the developer-facing API surface of Shunter. It provides:
+The schema definition system is the lower-level registration and validation layer behind Shunter's root hosted runtime. Application code should normally enter through the root `shunter.Module` / `shunter.Build` / `shunter.Runtime` API; this spec defines the schema surfaces that runtime uses internally.
+
+It provides:
 
 - A way to declare tables as Go structs with struct tags (reflection path)
 - An explicit builder API for programmatic registration (builder path)
 - Reducer registration
-- Engine assembly: combining schema, store, executor, commit log, and protocol into a running engine
+- Schema freeze and immutable registry construction consumed by the hosted runtime
 - A defined interface for client code generation tools
 
 This spec covers:
@@ -38,7 +40,7 @@ Cross-spec engine identifier types (`RowID`, `Identity`, `ConnectionID`, `TxID`,
 
 Reducer arguments (`argBSATN []byte` in §4.3) and return values travel as BSATN bytes. BSATN is the binary encoding defined in SPEC-002 §3.3; the name is imported from SpacetimeDB and is non-standard — see the canonical disclaimer in **SPEC-002 §3.1**. SPEC-006 does not encode or decode BSATN itself; it only declares the byte-oriented handler surface.
 
-### 1.3 v1 simplifications vs SpacetimeDB
+### 1.3 Reference-Informed v1 Scope Choices
 
 Shunter is intentionally schema-simpler than SpacetimeDB in v1. The differences below are deliberate product-scope choices, not missing hidden machinery:
 
@@ -51,7 +53,7 @@ Shunter is intentionally schema-simpler than SpacetimeDB in v1. The differences 
 | Reducer argument metadata | Typed reducer argument schemas available to bindings/codegen | Byte-oriented reducer handlers only; reducer argument schemas are intentionally omitted from `ReducerExport` in v1 |
 | Schedule identifier width | `u32` schedule IDs | `uint64` `ScheduleID` / `schedule_id` for headroom |
 
-These simplifications are the baseline contract for the docs-first v1 plan. A future parity pass may revisit them, but implementers should not infer hidden proc-macro, `SequenceSchema`, or `AlgebraicType` machinery behind the current API.
+These simplifications are the baseline contract for Shunter v1. Future extensions may revisit them, but implementers should not infer hidden proc-macro, `SequenceSchema`, or `AlgebraicType` machinery behind the current API.
 
 ---
 
@@ -314,7 +316,7 @@ func (b *Builder) Build(opts EngineOptions) (*Engine, error)
 
 `Build` performs all validation synchronously before returning. If `Build` returns nil error, the engine is structurally valid and has an immutable `SchemaRegistry`, but it has not yet opened files, recovered state, started goroutines, or accepted network traffic.
 
-`Engine.Start(ctx)` is intentionally narrow in SPEC-006 v1: it performs the startup schema-compatibility preflight from §6 / Story 5.6 against `EngineOptions.StartupSnapshotSchema` and returns `ErrSchemaMismatch` if the frozen registry and recovery-time snapshot schema disagree. Full runtime bring-up (commit-log open/recovery, store construction, executor/durability start, protocol listen) is owned by the downstream integration/runtime work described in §5.2 and the dependent specs, not by this schema spec alone.
+`schema.Engine.Start(ctx)` is intentionally narrow in SPEC-006 v1: it performs the startup schema-compatibility preflight from §6 / Story 5.6 against `EngineOptions.StartupSnapshotSchema` and returns `ErrSchemaMismatch` if the frozen registry and recovery-time snapshot schema disagree. It is not the app-facing runtime owner. Full runtime bring-up (commit-log open/recovery, store construction, executor/durability start, protocol listen) is owned by the root `shunter.Runtime`, which consumes this schema engine and the dependent subsystems.
 
 ### 5.1 Freeze Semantics
 
@@ -333,8 +335,8 @@ The full engine bring-up sequence — the SPEC-003 audit §5.5 / SPEC-006 audit 
 1. **Schema registration.** Application calls `NewBuilder()` and then `TableDef` / `SchemaVersion` to register all user tables and the schema version.
 2. **Reducer registration.** Application calls `Reducer`, `OnConnect`, and `OnDisconnect` for every handler.
 3. **Freeze.** Application calls `Build(opts)`. System tables are appended, IDs are assigned, validation runs, and `*Engine` is returned with an immutable `SchemaRegistry`. After this point the registry is the canonical schema for SPEC-001/002/003/004/005.
-4. **Startup schema-compatibility preflight.** `Engine.Start(ctx)` compares the frozen registry against `opts.StartupSnapshotSchema` (when non-nil) and fails early with `ErrSchemaMismatch` on version or structure drift.
-5. **Subsystem construction.** The integration/runtime layer constructs `*store.CommittedState` (SPEC-001), the commit-log durability worker (SPEC-002), the executor (SPEC-003 — `NewExecutor` reads the frozen registry), the subscription manager (SPEC-004 — receives the registry as both `SchemaLookup` and `IndexResolver`), and the protocol layer (SPEC-005, when `EnableProtocol = true`).
+4. **Startup schema-compatibility preflight.** `schema.Engine.Start(ctx)` compares the frozen registry against `opts.StartupSnapshotSchema` (when non-nil) and fails early with `ErrSchemaMismatch` on version or structure drift. The root runtime may perform equivalent preflight as part of its broader startup path.
+5. **Subsystem construction.** The root `shunter.Runtime` integration layer constructs `*store.CommittedState` (SPEC-001), the commit-log durability worker (SPEC-002), the executor (SPEC-003 — `NewExecutor` reads the frozen registry), the subscription manager (SPEC-004 — receives the registry as both `SchemaLookup` and `IndexResolver`), and the protocol layer (SPEC-005, when `EnableProtocol = true`).
 6. **Recovery.** Commit log is opened and recovery runs against the new `CommittedState` (SPEC-002 §6).
 7. **Scheduler replay.** The executor reads `sys_scheduled` rows from `CommittedState` and rearms timers (SPEC-003 §10.3).
 8. **Dangling-client sweep.** The executor reads `sys_clients` rows and synthesizes `OnDisconnect` calls for any client present in the table without a live connection (SPEC-003 §5.3 / audit §2.2).
@@ -626,7 +628,7 @@ The `shunter-codegen` tool generates client-side type definitions from registere
 
 ### 12.1 Schema Export
 
-The engine exposes a schema dump function:
+The lower-level schema engine and the root runtime both expose a schema dump function. Application tooling should prefer `Runtime.ExportSchema()` when a built runtime is available; `schema.Engine.ExportSchema()` remains the lower-level source used by tests and runtime internals.
 
 ```go
 // ExportSchema returns a serializable description of all registered tables
@@ -671,7 +673,7 @@ type ReducerExport struct {
 
 ### 12.2 Codegen Tool
 
-`shunter-codegen` is the planned build-time tool surface for this spec. The docs-first repo does not yet ship `cmd/shunter-codegen`; Story 6.3 defines the future contract so later implementation work has a pinned interface. When implemented, it is invoked as:
+`shunter-codegen` is the planned build-time tool surface for this spec. The repo does not yet ship `cmd/shunter-codegen`; this section defines the future contract so later implementation work has a pinned interface. When implemented, it is invoked as:
 
 ```
 shunter-codegen --lang typescript --schema schema.json --out ./generated/
