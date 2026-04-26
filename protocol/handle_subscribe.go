@@ -207,6 +207,9 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		var unsupSelectErr sql.UnsupportedSelectError
 		if errors.As(err, &unsupSelectErr) {
+			if !allowLimit && unsupSelectErr.HasLimit {
+				return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: unsupSelectErr.SQL}
+			}
 			return compiledSQLQuery{}, err
 		}
 		var unqualErr sql.UnqualifiedNamesError
@@ -418,6 +421,9 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			if err != nil {
 				return compiledSQLQuery{}, err
 			}
+		}
+		if !allowProjection && !sl.HasIndex(leftID, types.ColID(leftCol.Index)) && !sl.HasIndex(rightID, types.ColID(rightCol.Index)) {
+			return compiledSQLQuery{}, fmt.Errorf("Subscriptions require indexes on join columns")
 		}
 		join := subscription.Join{
 			Left: leftID, Right: rightID,

@@ -589,6 +589,23 @@ func (p *parser) peekNext() token {
 	return p.toks[p.pos+1]
 }
 
+func (p *parser) hasLimitClauseAhead() bool {
+	seenFrom := false
+	for i := p.pos + 1; i < len(p.toks); i++ {
+		if p.toks[i].kind == tokEOF || p.toks[i].kind == tokSemicolon {
+			return false
+		}
+		if isKeywordToken(p.toks[i], "FROM") {
+			seenFrom = true
+			continue
+		}
+		if isKeywordToken(p.toks[i], "LIMIT") {
+			return seenFrom
+		}
+	}
+	return false
+}
+
 func (p *parser) parseStatement() (Statement, error) {
 	if err := p.expectKeyword("SELECT"); err != nil {
 		return Statement{}, err
@@ -727,9 +744,11 @@ func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjec
 	// `sql-parser/src/parser/sub.rs:120-149`). Detect the modifier here
 	// instead of letting `parseProjectionItem` reinterpret the keyword
 	// as a column reference (which masks the rejection when a column
-	// happens to share the keyword's name).
+	// happens to share the keyword's name). On the subscribe surface,
+	// query-level LIMIT rejection precedes parse_select's set-quantifier
+	// rejection, so preserve that ordering when both clauses are present.
 	if !t.quoted && t.kind == tokIdent && (strings.EqualFold(t.text, "ALL") || strings.EqualFold(t.text, "DISTINCT")) {
-		return "", nil, nil, UnsupportedSelectError{SQL: p.sql}
+		return "", nil, nil, UnsupportedSelectError{SQL: p.sql, HasLimit: p.hasLimitClauseAhead()}
 	}
 	if t.kind == tokStar {
 		p.advance()

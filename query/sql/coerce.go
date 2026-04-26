@@ -559,10 +559,17 @@ func (e InvalidOpError) Unwrap() error { return ErrUnsupportedSQL }
 // shapes match the reference's normalized output for the unmodified
 // SELECT.
 //
+// HasLimit records whether the parser saw a LIMIT clause token in the same
+// statement before rejecting the set quantifier. Reference subscription
+// parsing rejects Query.limit through SubscriptionUnsupported::Feature before
+// parse_select reaches the set-quantifier branch; compile callers use this bit
+// to mirror that ordering without changing the OneOff/raw render.
+//
 // Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
 // still match.
 type UnsupportedSelectError struct {
-	SQL string
+	SQL      string
+	HasLimit bool
 }
 
 // Error renders the OneOff/raw form. Callers wrapping for the
@@ -668,8 +675,10 @@ func (e UnsupportedExprError) Unwrap() error { return ErrUnsupportedSQL }
 // Query through its Display impl.
 //
 // Shunter's local reroute covers the `compileSQLQueryString` LIMIT
-// guard on the subscribe surfaces (allowLimit=false). The OneOff
-// surface enables LIMIT and never reaches this typed error.
+// guard on the subscribe surfaces (allowLimit=false), including
+// set-quantifier shapes where the parser reports UnsupportedSelectError
+// with HasLimit=true so the compile path can preserve the subscription
+// parser's query-level ordering.
 //
 // Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
 // still match.

@@ -1311,6 +1311,7 @@ func TestHandleSubscribeSingle_JoinFilterOnLeftFloatColumn(t *testing.T) {
 			{Name: "u32", Type: schema.KindUint32},
 			{Name: "f32", Type: schema.KindFloat32},
 		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	b.TableDef(schema.TableDefinition{
 		Name: "s",
@@ -1999,6 +2000,7 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoin(t *testing.T) {
 	b.TableDef(schema.TableDefinition{
 		Name:    "t",
 		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	eng, err := b.Build(schema.EngineOptions{})
 	if err != nil {
@@ -2049,6 +2051,7 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoinProjectsRight(t *testing.T) {
 	b.TableDef(schema.TableDefinition{
 		Name:    "t",
 		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	eng, err := b.Build(schema.EngineOptions{})
 	if err != nil {
@@ -2082,6 +2085,7 @@ func TestHandleSubscribeSingle_AliasedSelfEquiJoinWithWhere(t *testing.T) {
 	b.TableDef(schema.TableDefinition{
 		Name:    "t",
 		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	eng, err := b.Build(schema.EngineOptions{})
 	if err != nil {
@@ -2255,7 +2259,7 @@ func TestHandleSubscribeSingle_ExecutorReject(t *testing.T) {
 	requireOptionalUint32(t, se.RequestID, 3, "SubscriptionError.RequestID")
 }
 
-func TestHandleSubscribeSingle_UnindexedJoinStillRejected(t *testing.T) {
+func TestHandleSubscribeSingle_UnindexedJoinRejectedAtCompileStage(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -2277,12 +2281,13 @@ func TestHandleSubscribeSingle_UnindexedJoinStillRejected(t *testing.T) {
 		t.Fatalf("Build failed: %v", err)
 	}
 	sl := registrySchemaLookup{reg: eng.Registry()}
-	executor := &validatingSubExecutor{schema: sl}
+	executor := &mockSubExecutor{}
 
+	const sqlText = "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id"
 	msg := &SubscribeSingleMsg{
 		RequestID:   4,
 		QueryID:     51,
-		QueryString: "SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id",
+		QueryString: sqlText,
 	}
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
@@ -2294,8 +2299,12 @@ func TestHandleSubscribeSingle_UnindexedJoinStillRejected(t *testing.T) {
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 51, "SubscriptionError.QueryID")
 	requireOptionalUint32(t, se.RequestID, 4, "SubscriptionError.RequestID")
-	if !strings.Contains(se.Error, "join column has no index on either side") {
-		t.Fatalf("Error = %q, want subscription unindexed-join rejection", se.Error)
+	want := "Subscriptions require indexes on join columns, executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatalf("RegisterSubscriptionSet called with %+v, want compile-stage rejection", req)
 	}
 }
 
@@ -2725,6 +2734,7 @@ func TestHandleSubscribeSingle_SenderParameterInJoinFilter(t *testing.T) {
 			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
 			{Name: "u32", Type: schema.KindUint32},
 		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	b.TableDef(schema.TableDefinition{
 		Name: "s",
@@ -2801,6 +2811,7 @@ func TestHandleSubscribeSingle_ParitySenderInJoinFilterResolvesOnStringColumn(t 
 			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
 			{Name: "u32", Type: schema.KindUint32},
 		},
+		Indexes: []schema.IndexDefinition{{Name: "idx_t_u32", Columns: []string{"u32"}}},
 	})
 	b.TableDef(schema.TableDefinition{
 		Name: "s",
@@ -3480,6 +3491,52 @@ func TestHandleSubscribeSingle_ParityLimitClauseRejected(t *testing.T) {
 	}
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called when a LIMIT clause trails the query")
+	}
+}
+
+// TestHandleSubscribeSingle_ParityLimitPrecedesSetQuantifierRejectText pins
+// reference `SubParser::parse_query` ordering: subscription LIMIT rejection
+// fires before `parse_select` can route SELECT ALL / DISTINCT to the
+// `Unsupported SELECT:` arm.
+func TestHandleSubscribeSingle_ParityLimitPrecedesSetQuantifierRejectText(t *testing.T) {
+	cases := []struct {
+		name    string
+		sqlText string
+		queryID uint32
+	}{
+		{name: "distinct", sqlText: "SELECT DISTINCT * FROM t LIMIT 5", queryID: 106},
+		{name: "all", sqlText: "SELECT ALL * FROM t LIMIT 5", queryID: 107},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnDirect(nil)
+			executor := &mockSubExecutor{}
+			sl := newMockSchema("t", 1,
+				schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+			)
+
+			msg := &SubscribeSingleMsg{
+				RequestID:   tc.queryID - 1,
+				QueryID:     tc.queryID,
+				QueryString: tc.sqlText,
+			}
+			handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+			tag, decoded := drainServerMsgEventually(t, conn)
+			if tag != TagSubscriptionError {
+				t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+			}
+			se := decoded.(SubscriptionError)
+			requireOptionalUint32(t, se.QueryID, tc.queryID, "QueryID")
+			want := "Unsupported: " + tc.sqlText + ", executing: `" + tc.sqlText + "`"
+			if se.Error != want {
+				t.Fatalf("Error = %q, want %q (subscription LIMIT rejection must precede set quantifier)", se.Error, want)
+			}
+			if req := executor.getRegisterSetReq(); req != nil {
+				t.Error("executor should not be called when LIMIT and a set quantifier are rejected")
+			}
+		})
 	}
 }
 
