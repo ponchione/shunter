@@ -1,9 +1,12 @@
 # OI-003 Session Handoff
 
-Use this handoff for OI-003 recovery and store semantics work.
+Use this handoff only when auditing the completed OI-003 recovery and store
+semantics campaign.
 
-Do not use `NEXT_SESSION_HANDOFF.md` for OI-003. That file remains the active
-handoff for OI-002 query/subscription parity agents.
+Do not use this as the next implementation queue. OI-003 is closed for current
+evidence in `OI-003.md`. New runtime confidence work should start from
+`docs/RUNTIME-HARDENING-GAUNTLET.md`; new OI-003 work requires a fresh
+Shunter-visible recovery/store failing example.
 
 ## Startup
 
@@ -28,9 +31,11 @@ rtk go doc ./commitlog.RecoveryResumePlan
 rtk go doc ./commitlog.ReplayLog
 ```
 
-## Current Objective
+## Current Status
 
-OI-003 is now governed by `OI-003.md`, not by the short `TECH-DEBT.md` entry.
+OI-003 is governed by `OI-003.md`, not by the short `TECH-DEBT.md` entry.
+`OI-003.md` records all workstreams and locked decisions as complete for the
+current evidence set.
 
 Initial decisions D-001 through D-019 are locked in `OI-003.md`:
 
@@ -68,24 +73,9 @@ Initial decisions D-001 through D-019 are locked in `OI-003.md`:
 
 ## Next Work
 
-Start with `OI-003-A Recovery Contract Inventory`.
-
-Suggested first slice:
-
-- inventory existing tests against D-001 through D-019
-- identify the smallest missing contract pins
-- add failing or contract-pinning tests before changing behavior
-- prioritize sequence/autoincrement recovery, compaction safety, and snapshot
-  compatibility because those have the clearest data-loss risk
-- specifically audit sequence recovery around `commitlog/recovery.go` helpers
-  before claiming D-005 is implemented
-- audit snapshot txID/horizon discipline before claiming D-015 is implemented
-- audit snapshot write atomicity and temp-file rename requirements before
-  claiming D-017 is implemented
-- audit compaction partial-failure states before claiming D-019 is implemented
-
-Do not begin broad rewrites of commitlog, snapshot, or executor internals until
-the missing invariant is represented by a test.
+None queued under OI-003. Do not begin broad rewrites of commitlog, snapshot,
+or executor internals unless a missing invariant is represented by a fresh
+failing or contract-pinning test.
 
 ## Boundaries
 

@@ -66,7 +66,7 @@ func (s *CommittedSnapshot) close(fromFinalizer bool) {
 
 func (s *CommittedSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
 	s.ensureOpen()
-	t, ok := s.cs.Table(id)
+	t, ok := s.cs.tableLocked(id)
 	if !ok {
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
@@ -177,7 +177,7 @@ func matchesUpperBound(key IndexKey, bound Bound) bool {
 }
 
 func (s *CommittedSnapshot) lookupIndex(tableID schema.TableID, indexID schema.IndexID) (*Table, *Index, bool) {
-	t, ok := s.cs.Table(tableID)
+	t, ok := s.cs.tableLocked(tableID)
 	if !ok {
 		return nil, nil, false
 	}
@@ -208,7 +208,7 @@ func (s *CommittedSnapshot) rowsFromRowIDs(t *Table, rowIDs []types.RowID) iter.
 
 func (s *CommittedSnapshot) GetRow(tableID schema.TableID, rowID types.RowID) (types.ProductValue, bool) {
 	s.ensureOpen()
-	t, ok := s.cs.Table(tableID)
+	t, ok := s.cs.tableLocked(tableID)
 	if !ok {
 		return nil, false
 	}
@@ -217,7 +217,7 @@ func (s *CommittedSnapshot) GetRow(tableID schema.TableID, rowID types.RowID) (t
 
 func (s *CommittedSnapshot) RowCount(tableID schema.TableID) int {
 	s.ensureOpen()
-	t, ok := s.cs.Table(tableID)
+	t, ok := s.cs.tableLocked(tableID)
 	if !ok {
 		return 0
 	}

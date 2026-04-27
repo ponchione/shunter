@@ -9,8 +9,12 @@ Agent startup is intentionally narrow:
 
 1. `RTK.md`
 2. The active root handoff:
-   - `NEXT_SESSION_HANDOFF.md` for parity / TECH-DEBT work
+   - `NEXT_SESSION_HANDOFF.md` for future correctness / TECH-DEBT regressions
+   - `OI-003_SESSION_HANDOFF.md` only when auditing completed OI-003 recovery /
+     store semantics work
    - `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
+   - `docs/RUNTIME-HARDENING-GAUNTLET.md` for the post-tech-debt runtime
+     hardening test campaign
 3. Only code, package docs, and narrow spec sections named by that handoff or
    by the slice being touched
 

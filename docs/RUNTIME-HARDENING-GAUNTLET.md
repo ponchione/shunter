@@ -10,6 +10,16 @@ means testing Shunter through public surfaces, comparing behavior against a
 simple independent model, injecting faults, and running long randomized
 workloads with reproducible seeds.
 
+Current status:
+
+- OI-002 is closed for current query/subscription evidence.
+- OI-003 is closed for current recovery/store evidence.
+- `runtime_gauntlet_test.go` now carries short deterministic public-surface
+  checks for reducer/read modeling, clean restart equivalence, protocol
+  one-off reads, subscription initial rows, live subscription deltas,
+  predicate subscription deltas, rejected subscribe cleanup, unsubscribe, and
+  protocol `CallReducer`.
+
 ## Goals
 
 - Prove that Shunter preserves committed state correctly across reducers,

@@ -1,10 +1,12 @@
 # TECH-DEBT
 
-This file tracks open issues only.
-Resolved audit history belongs in git history, not here.
+This file tracks open issues and short closure markers for recently completed
+campaigns that startup docs still reference. Resolved audit history belongs in
+git history, not here.
 
 Status convention:
-- every issue listed below is open until the concrete Shunter gap is closed and pinned by tests/docs
+- open issues stay listed until the concrete Shunter gap is closed and pinned by tests/docs
+- closed entries are lightweight guardrails against reopening completed campaigns without fresh Shunter-visible evidence
 
 Priority order:
 1. externally visible Shunter correctness and product-contract gaps
@@ -41,11 +43,13 @@ Closed reference-comparison baselines are not startup context and should not be 
 Active audit note (2026-04-26):
 - hosted-runtime V1 is landed and verified; `docs/hosted-runtime-planning/V1/` is no longer the active implementation campaign
 - OI-004 and OI-006 were removed after the post-V1 audit found no concrete remaining open lifecycle or fanout-aliasing defect on the hosted-runtime path
+- OI-002 is closed for current evidence and should reopen only from a fresh Shunter-visible failing example
+- OI-003 is complete; `OI-003.md` remains the audit/progress authority for the closed recovery/store semantics campaign
 - OI-005 remains open but narrowed to lower-level raw read-view/snapshot lifetime discipline as an accepted expert-API risk
-- OI-002 remains the expected next runtime-model campaign unless a fresh post-V1 scout changes priority
+- the next broad confidence campaign is `docs/RUNTIME-HARDENING-GAUNTLET.md`, not another known-issue parity pass
 - do not close behavior items solely because they are reachable through the hosted-runtime API; close or narrow them only when the underlying Shunter correctness gap is pinned by live tests
 
-## Open issues
+## Issue index
 
 ### OI-001: Protocol surface still needs a Shunter-owned contract cleanup
 
@@ -125,21 +129,22 @@ Primary code surfaces:
 - `executor/executor.go`
 - `executor/scheduler.go`
 
-### OI-003: Recovery and store semantics need Shunter operational hardening
+### OI-003: Recovery and store semantics needed Shunter operational hardening
 
-Status: open
+Status: closed for current evidence
 Severity: high
 
 Planning/progress authority: `OI-003.md`
 
-This `TECH-DEBT.md` entry is now only an index and severity marker for OI-003.
-Use `OI-003.md` for design decisions, workstream boundaries, progress tracking,
-and current campaign scope.
+This `TECH-DEBT.md` entry is now only a closure marker for OI-003. Use
+`OI-003.md` for design decisions, workstream boundaries, progress tracking, and
+audit history.
 
 Summary:
 - Shunter's value model, changeset format, commit log, and snapshot/recovery flow are intentionally Shunter-owned, not byte-format compatible with SpacetimeDB.
-- remaining work should focus on crash/restart correctness, deterministic replay, snapshot compatibility, compaction safety, and clear operator failure modes.
+- the OI-003 campaign pinned crash/restart correctness, deterministic replay, snapshot compatibility, compaction safety, and clear operator failure modes for the current evidence set.
 - format differences are tech debt only when they produce a Shunter data-loss, recovery, observability, or operational limitation.
+- future recovery/store work should start from a fresh Shunter-visible failing example or from the runtime hardening gauntlet finding a concrete gap.
 
 Why this matters:
 - storage and recovery semantics are central to the "run my apps on this" claim

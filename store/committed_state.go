@@ -38,10 +38,10 @@ func (cs *CommittedState) RegisterTable(id schema.TableID, t *Table) {
 // envelope that serializes with CommittedState writers for the entire window
 // they use the pointer. Three legal envelopes exist in this codebase:
 //
-//  1. CommittedSnapshot — s.cs.Table(id) is only called while the snapshot
-//     holds cs.RLock() (acquired in Snapshot(), released in Close()); the
-//     snapshot's open→Close lifetime bounds every method call on the
-//     returned *Table. Iterator surfaces additionally runtime.KeepAlive the
+//  1. CommittedSnapshot — snapshot methods resolve tables through tableLocked
+//     while the snapshot holds cs.RLock() (acquired in Snapshot(), released in
+//     Close()); the snapshot's open→Close lifetime bounds every method call on
+//     the returned *Table. Iterator surfaces additionally runtime.KeepAlive the
 //     snapshot so the RLock is not released mid-iteration.
 //  2. Transaction / StateView — the reducer runs on the single executor
 //     goroutine under single-writer discipline (executor.executor.go). No
