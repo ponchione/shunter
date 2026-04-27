@@ -32,7 +32,7 @@ rtk go doc ./commitlog.ReplayLog
 
 OI-003 is now governed by `OI-003.md`, not by the short `TECH-DEBT.md` entry.
 
-Initial decisions D-001 through D-009 are locked in `OI-003.md`:
+Initial decisions D-001 through D-019 are locked in `OI-003.md`:
 
 - `StatusCommitted` is an accepted-commit acknowledgement, not an fsync
   durability acknowledgement.
@@ -50,6 +50,21 @@ Initial decisions D-001 through D-009 are locked in `OI-003.md`:
 - recovered store equivalence includes rows, indexes, uniqueness, sequences,
   and next-row-ID state.
 - unknown storage versions fail closed; migration is out of scope.
+- complete snapshots require no lock file, valid file/header/hash, and schema
+  compatibility; direct-write-plus-lock is live behavior to inventory, while
+  temp-file-plus-rename is the OI-003 target.
+- OI-003 crash tests target observable file artifacts, not kernel/fsync lies or
+  arbitrary torn-sector models.
+- recovery report shape should be defined, but initial slices should not widen
+  public APIs solely for observability.
+- OI-003 does not add a durable-response mode.
+- offset indexes are advisory replay accelerators, never recovery truth.
+- snapshot txID is the replay boundary and must describe state through that txID.
+- recovery reporting should become a first-class detailed API/report surface.
+- snapshot writing should move toward temp-file-plus-rename completion.
+- snapshot writers should receive or verify a committed-state horizon instead
+  of permanently trusting caller txID discipline.
+- compaction should be idempotent and resumable after partial cleanup failures.
 
 ## Next Work
 
@@ -57,13 +72,17 @@ Start with `OI-003-A Recovery Contract Inventory`.
 
 Suggested first slice:
 
-- inventory existing tests against D-001 through D-009
+- inventory existing tests against D-001 through D-019
 - identify the smallest missing contract pins
 - add failing or contract-pinning tests before changing behavior
 - prioritize sequence/autoincrement recovery, compaction safety, and snapshot
   compatibility because those have the clearest data-loss risk
 - specifically audit sequence recovery around `commitlog/recovery.go` helpers
   before claiming D-005 is implemented
+- audit snapshot txID/horizon discipline before claiming D-015 is implemented
+- audit snapshot write atomicity and temp-file rename requirements before
+  claiming D-017 is implemented
+- audit compaction partial-failure states before claiming D-019 is implemented
 
 Do not begin broad rewrites of commitlog, snapshot, or executor internals until
 the missing invariant is represented by a test.

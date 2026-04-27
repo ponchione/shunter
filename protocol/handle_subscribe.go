@@ -267,17 +267,20 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.LeftTable)
 		}
+		// Reference `type_from` (`expr/src/check.rs:79-89`) resolves the
+		// left relvar through `type_relvar` BEFORE entering the join
+		// loop's HashSet duplicate-alias check, and the duplicate-alias
+		// check happens BEFORE resolving the right relvar. Parser stage
+		// detects `LeftAlias == RightAlias` and defers the rejection here
+		// so a missing left table emits no-such-table while a present left
+		// plus colliding right alias emits DuplicateName before right-table
+		// resolution.
+		if stmt.Join.AliasCollision {
+			return compiledSQLQuery{}, sql.DuplicateNameError{Name: stmt.Join.LeftAlias}
+		}
 		rightID, rightTS, ok := lookupSQLTableExact(sl, stmt.Join.RightTable)
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.RightTable)
-		}
-		// Reference `type_from` (`expr/src/check.rs:79-89`) resolves the
-		// left relvar through `type_relvar` BEFORE entering the join
-		// loop's HashSet duplicate-alias check. Parser stage detects
-		// `LeftAlias == RightAlias` and defers the rejection here so a
-		// missing left/right table emits the no-such-table text first.
-		if stmt.Join.AliasCollision {
-			return compiledSQLQuery{}, sql.DuplicateNameError{Name: stmt.Join.LeftAlias}
 		}
 		// Reference `type_from` (check.rs:99-104) types the JOIN ON
 		// expression through `type_expr` (lib.rs:101-102) BEFORE the

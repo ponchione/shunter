@@ -74,3 +74,47 @@ func TestOI002JoinProjectionDuplicate_SubscribeDuplicateAliasPrecedesProjectionQ
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
 }
+
+func TestOI002JoinProjectionDuplicate_DuplicateAliasPrecedesRightTableResolution(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	const sqlText = "SELECT dup.* FROM t AS dup JOIN missing AS dup ON dup.id = dup.id"
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xF7},
+		QueryString: sqlText,
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	const want = "Duplicate name `dup`"
+	if result.Error == nil || *result.Error != want {
+		if result.Error == nil {
+			t.Fatalf("Error = nil, want %q", want)
+		}
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+}
+
+func TestOI002JoinProjectionDuplicate_SubscribeDuplicateAliasPrecedesRightTableResolution(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT dup.* FROM t AS dup JOIN missing AS dup ON dup.id = dup.id"
+	msg := &SubscribeSingleMsg{
+		RequestID:   744,
+		QueryID:     745,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	requireSubscriptionError(t, conn, 744, 745, "Duplicate name `dup`, executing: `"+sqlText+"`")
+	requireNoSubscriptionRegistration(t, executor)
+}

@@ -130,10 +130,11 @@ type ColumnRef struct {
 // `DuplicateName` rejection has been deferred to the compile stage. Reference
 // `type_from` (`expr/src/check.rs:79-89`) resolves the left relvar through
 // `type_relvar` BEFORE entering the join loop's HashSet duplicate-alias check,
-// so missing-table rejections must precede the dup-alias error. The compile
-// stage emits `DuplicateNameError{Name: LeftAlias}` after both schema lookups
-// succeed; ON-clause / WHERE / projection-column resolution is skipped on the
-// parser side because either side's relvar may be absent.
+// so a missing left table must precede the dup-alias error. The right-side
+// duplicate-alias check precedes right-table resolution, so the compile stage
+// emits `DuplicateNameError{Name: LeftAlias}` after the left schema lookup
+// succeeds; ON-clause / WHERE / projection-column resolution is skipped on the
+// parser side because the qualifier map collapses when both aliases match.
 type JoinClause struct {
 	LeftTable      string
 	RightTable     string
@@ -966,9 +967,10 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 		// aliases (e.g. `"R"` and `r`) do NOT collide.
 		//
 		// Defer the rejection to the compile stage so reference
-		// `type_relvar` ordering holds: if the LEFT or RIGHT base table
-		// is missing, the schema lookup at `compileSQLQueryString`
-		// emits the missing-table text BEFORE the dup-alias check fires.
+		// `type_relvar` ordering holds: if the LEFT base table is
+		// missing, the schema lookup at `compileSQLQueryString` emits
+		// the missing-table text BEFORE the dup-alias check fires. The
+		// RIGHT duplicate-alias check precedes right-table resolution.
 		// Skip ON-clause resolution because the qualifier map collapses
 		// when both aliases are byte-equal — we don't need it; the
 		// compile-stage dup rejection subsumes any ON-clause findings.

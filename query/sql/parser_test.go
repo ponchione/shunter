@@ -1488,10 +1488,10 @@ func TestParseSelfJoinColumnProjectionProjectsRight(t *testing.T) {
 // deferred-rejection behavior: `LeftAlias == RightAlias` no longer
 // emits a parser-time `DuplicateName` error. Reference `type_from`
 // (`expr/src/check.rs:79-89`) resolves the left relvar BEFORE the
-// HashSet duplicate-alias check, so missing-table rejections must
-// precede the dup-alias error. The compile stage emits
-// `DuplicateNameError{Name: LeftAlias}` after both schema lookups
-// succeed.
+// HashSet duplicate-alias check, so left-table resolution must precede
+// the dup-alias error. The compile stage emits
+// `DuplicateNameError{Name: LeftAlias}` after the left schema lookup
+// succeeds.
 func TestParseDefersDistinctTableDuplicateJoinAliases(t *testing.T) {
 	stmt, err := Parse("SELECT x.id FROM t AS x JOIN s AS x")
 	if err != nil {
