@@ -16,9 +16,22 @@ Current status:
 - OI-003 is closed for current recovery/store evidence.
 - `runtime_gauntlet_test.go` now carries short deterministic public-surface
   checks for reducer/read modeling, clean restart equivalence, protocol
-  one-off reads, subscription initial rows, live subscription deltas,
-  predicate subscription deltas, rejected subscribe cleanup, unsubscribe, and
-  protocol `CallReducer`.
+  `CallReducer` restart equivalence, one-off reads and isolated one-off errors,
+  same-connection one-off/subscription interleaving, subscription initial rows,
+  subscribe-initial/one-off equivalence, live subscription deltas,
+  multi-subscriber fanout parity, same-connection subscription multiplexing,
+  same-connection `SubscribeMulti`/`SubscribeSingle` coexistence, predicate
+  subscription deltas, rejected subscribe cleanup and same-connection recovery,
+  rejected subscribe-multi cleanup and same-connection recovery,
+  unsubscribe and unknown unsubscribe isolation including same-connection
+  subscription preservation, mixed-surface protocol/runtime traces,
+  multi-client mixed workloads with dual subscribers and resubscribe, protocol
+  `CallReducer` read-your-writes one-offs, protocol `CallReducer` subscribed
+  caller heavy deltas, heavy multiplexed caller deltas, and `NoSuccessNotify`
+  subscribed-caller suppression, disconnect/reconnect fanout, live-client
+  close/restart, subscribe/unsubscribe multi, repeated subscribe/unsubscribe
+  cycles, rejected subscribe multi atomicity, panic rollback, unknown reducer
+  admission failures, and reserved lifecycle reducer rejection.
 
 ## Goals
 
