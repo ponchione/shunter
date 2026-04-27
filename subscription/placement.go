@@ -181,38 +181,51 @@ func collectCandidatesForTableInto(
 	return out
 }
 
-// findColEqs returns every ColEq predicate in the tree whose Table matches t.
+// findColEqs returns ColEq predicates whose values cover every matching row
+// for table t. Equality placement is safe through AND when any child
+// constrains t, and through OR only when every branch constrains t; otherwise
+// callers must fall back to a broader tier.
 func findColEqs(pred Predicate, t TableID) []ColEq {
-	var out []ColEq
-	walkColEqs(pred, t, &out)
+	out, ok := requiredColEqs(pred, t)
+	if !ok {
+		return nil
+	}
 	return out
 }
 
-func walkColEqs(pred Predicate, t TableID, out *[]ColEq) {
+func requiredColEqs(pred Predicate, t TableID) ([]ColEq, bool) {
 	switch p := pred.(type) {
 	case ColEq:
 		if p.Table == t {
-			*out = append(*out, p)
+			return []ColEq{p}, true
 		}
+		return nil, false
 	case And:
-		if p.Left != nil {
-			walkColEqs(p.Left, t, out)
-		}
-		if p.Right != nil {
-			walkColEqs(p.Right, t, out)
+		left, leftOK := requiredColEqs(p.Left, t)
+		right, rightOK := requiredColEqs(p.Right, t)
+		switch {
+		case leftOK && rightOK:
+			return append(left, right...), true
+		case leftOK:
+			return left, true
+		case rightOK:
+			return right, true
+		default:
+			return nil, false
 		}
 	case Or:
-		if p.Left != nil {
-			walkColEqs(p.Left, t, out)
+		left, leftOK := requiredColEqs(p.Left, t)
+		right, rightOK := requiredColEqs(p.Right, t)
+		if !leftOK || !rightOK {
+			return nil, false
 		}
-		if p.Right != nil {
-			walkColEqs(p.Right, t, out)
-		}
+		return append(left, right...), true
 	case Join:
 		if p.Filter != nil {
-			walkColEqs(p.Filter, t, out)
+			return requiredColEqs(p.Filter, t)
 		}
 	}
+	return nil, false
 }
 
 // findJoin returns the first Join in the tree, or nil if there is none.

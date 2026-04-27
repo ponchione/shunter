@@ -145,6 +145,49 @@ func TestCompactionToleratesMissingSidecar(t *testing.T) {
 	assertFileMissing(t, seg1)
 }
 
+func TestRunCompactionRemovesOrphanedCoveredSidecarOnRetry(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	seg2 := makeScanTestSegment(t, dir, 4, 4, 5, 6)
+
+	idx1Path := filepath.Join(dir, OffsetIndexFileName(1))
+	idx2Path := filepath.Join(dir, OffsetIndexFileName(4))
+	for _, p := range []string{idx1Path, idx2Path} {
+		idx, err := CreateOffsetIndex(p, 4)
+		if err != nil {
+			t.Fatalf("CreateOffsetIndex(%s): %v", p, err)
+		}
+		_ = idx.Close()
+	}
+
+	// Simulate a crash after the covered segment was deleted but before its
+	// sidecar index was cleaned up.
+	if err := os.Remove(seg1); err != nil {
+		t.Fatal(err)
+	}
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		syncCalls++
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	if syncCalls != 1 {
+		t.Fatalf("syncDir calls = %d, want 1", syncCalls)
+	}
+	assertFileMissing(t, idx1Path)
+	assertFileExists(t, seg2)
+	assertFileExists(t, idx2Path)
+}
+
 func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	dir := t.TempDir()
 	boundary := makeScanTestSegment(t, dir, 900, contiguousTxs(900, 1100)...)

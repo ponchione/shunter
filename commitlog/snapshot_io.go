@@ -23,8 +23,10 @@ import (
 var SnapshotMagic = [4]byte{'S', 'H', 'S', 'N'}
 
 const (
-	SnapshotVersion    uint8 = 1
-	SnapshotHeaderSize       = 52
+	SnapshotVersion      uint8 = 1
+	SnapshotHeaderSize         = 52
+	snapshotFileName           = "snapshot"
+	snapshotTempFileName       = "snapshot.tmp"
 )
 
 type ErrSnapshotHashMismatch = SnapshotHashMismatchError
@@ -35,6 +37,11 @@ func ComputeSnapshotHash(data []byte) [32]byte {
 
 func HasLockFile(snapshotDir string) bool {
 	_, err := os.Stat(filepath.Join(snapshotDir, ".lock"))
+	return err == nil
+}
+
+func HasSnapshotTempFile(snapshotDir string) bool {
+	_, err := os.Stat(filepath.Join(snapshotDir, snapshotTempFileName))
 	return err == nil
 }
 
@@ -224,12 +231,27 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
 		return err
 	}
+	if err := syncDir(w.baseDir); err != nil {
+		return err
+	}
 	if err := CreateLockFile(snapshotDir); err != nil {
 		return err
 	}
 	defer func() {
 		_ = RemoveLockFile(snapshotDir)
 	}()
+
+	tmpPath := filepath.Join(snapshotDir, snapshotTempFileName)
+	completed := false
+	defer func() {
+		if !completed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
 	if w.beforeWrite != nil {
 		w.beforeWrite <- struct{}{}
 	}
@@ -237,11 +259,6 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 		<-w.continueWrite
 	}
 
-	path := filepath.Join(snapshotDir, "snapshot")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
 	if err := w.writeSnapshotFile(f, committed, txID); err != nil {
 		f.Close()
 		return err
@@ -253,16 +270,18 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if dir, err := os.Open(snapshotDir); err == nil {
-		_ = dir.Sync()
-		_ = dir.Close()
+	if err := os.Rename(tmpPath, filepath.Join(snapshotDir, snapshotFileName)); err != nil {
+		return err
+	}
+	completed = true
+	if err := syncDir(snapshotDir); err != nil {
+		return err
 	}
 	if err := RemoveLockFile(snapshotDir); err != nil {
 		return err
 	}
-	if dir, err := os.Open(snapshotDir); err == nil {
-		_ = dir.Sync()
-		_ = dir.Close()
+	if err := syncDir(snapshotDir); err != nil {
+		return err
 	}
 	return nil
 }
@@ -392,7 +411,7 @@ type SnapshotTableData struct {
 }
 
 func ReadSnapshot(dir string) (*SnapshotData, error) {
-	f, err := os.Open(filepath.Join(dir, "snapshot"))
+	f, err := os.Open(filepath.Join(dir, snapshotFileName))
 	if err != nil {
 		return nil, err
 	}
@@ -603,7 +622,7 @@ func ListSnapshots(baseDir string) ([]types.TxID, error) {
 			continue
 		}
 		dir := filepath.Join(baseDir, entry.Name())
-		if HasLockFile(dir) {
+		if HasLockFile(dir) || HasSnapshotTempFile(dir) {
 			continue
 		}
 		ids = append(ids, types.TxID(txID))

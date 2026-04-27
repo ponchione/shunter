@@ -867,6 +867,37 @@ func TestEvalPruningFallbackVsBaseline(t *testing.T) {
 	}
 }
 
+func TestEvalOrWithRangeBranchFallsBackToTableCandidates(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 0)
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := Or{
+		Left: ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},
+		Right: ColRange{Table: 1, Column: 1,
+			Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+			Upper: Bound{Unbounded: true},
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+
+	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(2), types.NewUint64(60)}}, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 || len(updates[0].Inserts) != 1 {
+		t.Fatalf("mixed OR predicate missed range-only insert: %v", updates)
+	}
+	if !updates[0].Inserts[0][0].Equal(types.NewUint64(2)) || !updates[0].Inserts[0][1].Equal(types.NewUint64(60)) {
+		t.Fatalf("insert row = %v, want id=2 score=60", updates[0].Inserts[0])
+	}
+}
+
 func TestEvalChangesetNotMutated(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)

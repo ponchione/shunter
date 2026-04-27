@@ -44,6 +44,24 @@ func TestSelectSnapshotCorruptNewestFallsBack(t *testing.T) {
 	}
 }
 
+func TestSelectSnapshotTempFileCandidateFallsBack(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+	writeSelectionSnapshot(t, root, reg, cs, 10)
+	if err := os.WriteFile(filepath.Join(root, "snapshots", "10", "snapshot.tmp"), []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := SelectSnapshot(root, 10, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap == nil || snap.TxID != 5 {
+		t.Fatalf("selected snapshot = %+v, want tx 5 fallback", snap)
+	}
+}
+
 func TestSelectSnapshotAllCorruptLogStartsAtTx1ReturnsNil(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)

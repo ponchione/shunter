@@ -68,7 +68,73 @@ func TestOpenAndRecoverSnapshotAndLogRecovery(t *testing.T) {
 	}
 }
 
-func TestOpenAndRecoverDetailedSnapshotReplayIgnoresExplicitAutoincrementRowsWhenRestoringSequence(t *testing.T) {
+func TestOpenAndRecoverDetailedSnapshotReplayDoesNotRegressSequenceFromExplicitAutoincrementRows(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoveryAutoIncrementRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+
+	jobs, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("jobs table missing")
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("seed-1")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewUint64(2), types.NewString("seed-2")}); err != nil {
+		t.Fatal(err)
+	}
+	jobs.SetSequenceValue(50)
+	jobs.SetNextID(10)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	if err := writer.CreateSnapshot(committed, 2); err != nil {
+		t.Fatal(err)
+	}
+	writeRecoverySegment(t, root, reg, 3,
+		recoveryRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(42), types.NewString("explicit-42")}}},
+	)
+
+	recovered, maxTxID, plan, err := OpenAndRecoverDetailed(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID = %d, want 3", maxTxID)
+	}
+	if plan.NextTxID != 4 {
+		t.Fatalf("resume plan next tx = %d, want 4", plan.NextTxID)
+	}
+
+	recoveredJobs, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("recovered jobs table missing")
+	}
+	assertRecoveryRows(t, recoveredJobs, map[uint64]string{1: "seed-1", 2: "seed-2", 42: "explicit-42"})
+	if recoveredJobs.NextID() != 11 {
+		t.Fatalf("NextID after recovery = %d, want 11", recoveredJobs.NextID())
+	}
+	if seq, has := recoveredJobs.SequenceValue(); !has || seq != 50 {
+		t.Fatalf("SequenceValue after recovery = (%d, %v), want (50, true)", seq, has)
+	}
+
+	tx := store.NewTransaction(recovered, reg)
+	rowID, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("post-recovery-auto")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := tx.GetRow(0, rowID)
+	if !ok {
+		t.Fatal("post-recovery row missing from transaction view")
+	}
+	if got := row[0].AsUint64(); got != 50 {
+		t.Fatalf("post-recovery autoincrement value = %d, want 50", got)
+	}
+	if seq, has := recoveredJobs.SequenceValue(); !has || seq != 51 {
+		t.Fatalf("SequenceValue after post-recovery insert = (%d, %v), want (51, true)", seq, has)
+	}
+}
+
+func TestOpenAndRecoverDetailedReplayExplicitAutoincrementValueRaisesRecoveredSequence(t *testing.T) {
 	root := t.TempDir()
 	reg := buildRecoveryAutoIncrementRegistry(t)
 	committed := buildRecoveryCommittedState(t, reg)
@@ -110,8 +176,8 @@ func TestOpenAndRecoverDetailedSnapshotReplayIgnoresExplicitAutoincrementRowsWhe
 		t.Fatal("recovered jobs table missing")
 	}
 	assertRecoveryRows(t, recoveredJobs, map[uint64]string{1: "seed-1", 2: "seed-2", 42: "explicit-42"})
-	if recoveredJobs.NextID() != 11 {
-		t.Fatalf("NextID after recovery = %d, want 11", recoveredJobs.NextID())
+	if seq, has := recoveredJobs.SequenceValue(); !has || seq != 43 {
+		t.Fatalf("SequenceValue after recovery = (%d, %v), want (43, true)", seq, has)
 	}
 
 	tx := store.NewTransaction(recovered, reg)
@@ -123,11 +189,8 @@ func TestOpenAndRecoverDetailedSnapshotReplayIgnoresExplicitAutoincrementRowsWhe
 	if !ok {
 		t.Fatal("post-recovery row missing from transaction view")
 	}
-	if got := row[0].AsUint64(); got != 3 {
-		t.Fatalf("post-recovery autoincrement value = %d, want 3", got)
-	}
-	if seq, has := recoveredJobs.SequenceValue(); !has || seq != 4 {
-		t.Fatalf("SequenceValue after post-recovery insert = (%d, %v), want (4, true)", seq, has)
+	if got := row[0].AsUint64(); got != 43 {
+		t.Fatalf("post-recovery autoincrement value = %d, want 43", got)
 	}
 }
 

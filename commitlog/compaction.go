@@ -1,7 +1,10 @@
 package commitlog
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/ponchione/shunter/types"
@@ -59,20 +62,80 @@ func RunCompaction(dir string, snapshotTxID types.TxID) error {
 		return err
 	}
 	deleted, _ := Compact(SegmentCoverage(segments), snapshotTxID)
-	if len(deleted) == 0 {
+	orphanedIndexes, err := orphanedCoveredOffsetIndexes(dir, segments, snapshotTxID)
+	if err != nil {
+		return err
+	}
+	if len(deleted) == 0 && len(orphanedIndexes) == 0 {
 		return nil
 	}
 	for _, path := range deleted {
 		if err := os.Remove(path); err != nil {
-			return err
+			return fmt.Errorf("commitlog: compact remove covered segment %s: %w", path, err)
 		}
 		if idxPath := offsetIndexPathForSegment(path); idxPath != "" {
 			if err := os.Remove(idxPath); err != nil && !os.IsNotExist(err) {
-				return err
+				return fmt.Errorf("commitlog: compact remove covered offset index %s: %w", idxPath, err)
 			}
 		}
 	}
+	for _, path := range orphanedIndexes {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("commitlog: compact remove orphaned offset index %s: %w", path, err)
+		}
+	}
 	return syncDir(dir)
+}
+
+func orphanedCoveredOffsetIndexes(dir string, segments []SegmentInfo, snapshotTxID types.TxID) ([]string, error) {
+	if snapshotTxID == 0 {
+		return nil, nil
+	}
+
+	liveIndexes := make(map[string]struct{}, len(segments))
+	for _, seg := range segments {
+		idxPath := offsetIndexPathForSegment(seg.Path)
+		if idxPath == "" {
+			continue
+		}
+		liveIndexes[filepath.Clean(idxPath)] = struct{}{}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var orphaned []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		startTxID, ok := parseOffsetIndexFileStartTx(entry.Name())
+		if !ok || types.TxID(startTxID) > snapshotTxID {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if _, live := liveIndexes[filepath.Clean(path)]; live {
+			continue
+		}
+		orphaned = append(orphaned, path)
+	}
+	return orphaned, nil
+}
+
+func parseOffsetIndexFileStartTx(name string) (uint64, bool) {
+	if !strings.HasSuffix(name, ".idx") {
+		return 0, false
+	}
+	startTxID, err := strconv.ParseUint(strings.TrimSuffix(name, ".idx"), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return startTxID, name == OffsetIndexFileName(startTxID)
 }
 
 // offsetIndexPathForSegment returns the sidecar offset index path that pairs

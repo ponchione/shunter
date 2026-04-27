@@ -218,6 +218,53 @@ func TestConcurrentSnapshotReturnsInProgress(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshotUsesTempFileUntilRename(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	blocking := writer.(*FileSnapshotWriter)
+	blocking.beforeWrite = make(chan struct{})
+	blocking.continueWrite = make(chan struct{})
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- writer.CreateSnapshot(cs, 91) }()
+	<-blocking.beforeWrite
+
+	released := false
+	release := func() {
+		if !released {
+			close(blocking.continueWrite)
+			released = true
+		}
+	}
+	defer release()
+
+	snapshotDir := filepath.Join(baseDir, "snapshots", "91")
+	if !HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should exist while temp file is pending")
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotTempFileName)); err != nil {
+		t.Fatalf("snapshot temp file should exist before rename: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); !os.IsNotExist(err) {
+		t.Fatalf("final snapshot should not exist before rename, stat err=%v", err)
+	}
+
+	release()
+	if err := <-errCh; err != nil {
+		t.Fatalf("snapshot should complete successfully: %v", err)
+	}
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed after completion")
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotTempFileName)); !os.IsNotExist(err) {
+		t.Fatalf("snapshot temp file should be removed after completion, stat err=%v", err)
+	}
+	if _, err := ReadSnapshot(snapshotDir); err != nil {
+		t.Fatalf("final snapshot should be readable: %v", err)
+	}
+}
+
 func buildLargeSnapshotCommittedState(t testing.TB, rowCount int) (*store.CommittedState, schema.SchemaRegistry) {
 	t.Helper()
 	_, reg := testSchema()
