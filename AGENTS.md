@@ -3,7 +3,8 @@
 Default startup reading:
 1. `RTK.md`
 2. The active root handoff:
-   - `NEXT_SESSION_HANDOFF.md` for parity / TECH-DEBT work
+   - `NEXT_SESSION_HANDOFF.md` for OI-002 parity / query / subscription TECH-DEBT work
+   - `OI-003_SESSION_HANDOFF.md` for OI-003 recovery / store semantics work
    - `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
 3. Only the code, package docs, and narrow spec sections named by that handoff or by the slice you are touching
 

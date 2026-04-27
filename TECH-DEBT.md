@@ -103,22 +103,9 @@ Current open work:
 - Validation ordering still matters where it changes user-visible outcomes. Keep ordering work only when it prevents wrong acceptance, wrong rows, misleading errors, or subscribe/one-off drift; do not chase message text for its own sake.
 - One-off and subscription tests duplicate large scenario blocks. Consolidate shared fixtures where the same syntax/typing contract is being tested.
 
-Closed findings (2026-04-27):
-- SQL identifier lookup is now byte-exact for table names, column names, aliases, and qualifiers after quoted-identifier unescaping, including rejecting base-table qualifiers once a relation alias is introduced in join WHERE/projection scopes. The SQL compiler uses exact local table/column lookup helpers while `schema.SchemaRegistry.TableByName` and `TableSchema.Column` keep their non-SQL case-folding behavior. Pinned across OneOff, SubscribeSingle, and SubscribeMulti by `protocol/oi002_identifier_policy_test.go`.
-- Case-distinct projection columns are now routed byte-exactly; `SELECT u32, U32 FROM t` projects distinct physical columns when the schema declares both names. A case-mismatched single declared column rejects as `Unresolved::Var`.
-- One-off cross-join explicit column projections now materialize values from both sides of the cartesian pair before RowList encoding, preserve the first-projected-relation envelope/order, and avoid re-projecting already projected join rows. Pinned by `protocol/oi002_join_projection_cross_test.go`.
-- Join WHERE policy is explicit: OneOff cross-join WHERE remains query-only for the documented equality and equality-plus-one-literal-filter shapes, SubscribeSingle/Multi reject cross-join WHERE before registration, and inner-join WHERE field-vs-field comparisons reject with `join WHERE column comparisons not supported`. Pinned by `protocol/oi002_join_where_policy_test.go` plus the existing cross-join tests.
-- Legacy structured-query remnants have been removed from the protocol package. `Query` / `Predicate` wire structs and `NormalizePredicates` no longer exist; the only client query wire path is SQL `QueryString` / `QueryStrings`.
-
-Closed context to keep out of startup work:
-- The literal source-text, literal-keyword identifier leak, case-distinct relation-alias routing, ambiguous case-folded table lookup rejection, exact SQL identifier policy, join-WHERE field-vs-field rejection, cross-join WHERE policy pins, dead eval memoization cleanup, dead structured-query helper cleanup, dead structured-query wire type cleanup, typed error, LIMIT, JOIN ON ordering, boolean-constant masking, join-keyword, unindexed-subscription-join, and missing-field text slices closed on 2026-04-25 / 2026-04-27 and are pinned by tests or compile-time removal. Do not repeat that history here or reopen it without a fresh Shunter-visible regression.
-- The 2026-04-27 scout also found substantial pins around explicit join projection routing and ordering (`TestHandleOneOffQuery_ParityJoinColumnProjection*`, `TestHandleOneOffQuery_ParitySelfJoinColumnProjection*`, and `protocol/oi002_join_projection_*_test.go`). Do not reopen the old "wrong relation/project twice" concern without a new failing example.
-- Same-connection reused subscription-hash initial-snapshot elision is closed and pinned by `subscription/register_set_test.go::TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate` and `TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot`.
-- `SubscriptionError.table_id` on request-origin error paths now emits `None`; this is pinned by `executor/protocol_inbox_adapter_test.go::TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID`.
-
 Execution note:
 - `NEXT_SESSION_HANDOFF.md` owns the immediate OI-002 startup path.
-- Do not read or reproduce the closed `P0-SUBSCRIPTION-*` sequence for new work; tests and git history are the archive.
+- Completed OI-002 slices belong in tests and git history, not this open-issues file. Do not reopen them without a fresh Shunter-visible failing example.
 - Choose the next OI-002 batch by a fresh scout organized around the current open-work bullets above.
 
 Why this matters:
@@ -144,6 +131,12 @@ Primary code surfaces:
 
 Status: open
 Severity: high
+
+Planning/progress authority: `OI-003.md`
+
+This `TECH-DEBT.md` entry is now only an index and severity marker for OI-003.
+Use `OI-003.md` for design decisions, workstream boundaries, progress tracking,
+and current campaign scope.
 
 Summary:
 - Shunter's value model, changeset format, commit log, and snapshot/recovery flow are intentionally Shunter-owned, not byte-format compatible with SpacetimeDB.

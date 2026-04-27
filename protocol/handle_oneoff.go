@@ -209,36 +209,38 @@ func evaluateOneOffJoin(view store.CommittedReadView, projectedTable schema.Tabl
 
 func evaluateOneOffJoinProjection(view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn) []types.ProductValue {
 	var rows []types.ProductValue
+	appendIfMatch := func(leftRow, rightRow types.ProductValue) {
+		if int(join.LeftCol) >= len(leftRow) || int(join.RightCol) >= len(rightRow) {
+			return
+		}
+		if !leftRow[join.LeftCol].Equal(rightRow[join.RightCol]) {
+			return
+		}
+		if join.Filter != nil {
+			if !subscription.MatchRowSide(join.Filter, join.Left, join.LeftAlias, leftRow) ||
+				!subscription.MatchRowSide(join.Filter, join.Right, join.RightAlias, rightRow) {
+				return
+			}
+		}
+		rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, columns))
+	}
+	if join.ProjectRight {
+		for _, rightRow := range view.TableScan(join.Right) {
+			if int(join.RightCol) >= len(rightRow) {
+				continue
+			}
+			for _, leftRow := range view.TableScan(join.Left) {
+				appendIfMatch(leftRow, rightRow)
+			}
+		}
+		return rows
+	}
 	for _, leftRow := range view.TableScan(join.Left) {
 		if int(join.LeftCol) >= len(leftRow) {
 			continue
 		}
 		for _, rightRow := range view.TableScan(join.Right) {
-			if int(join.RightCol) >= len(rightRow) {
-				continue
-			}
-			if !leftRow[join.LeftCol].Equal(rightRow[join.RightCol]) {
-				continue
-			}
-			if join.Filter != nil {
-				if !subscription.MatchRowSide(join.Filter, join.Left, join.LeftAlias, leftRow) ||
-					!subscription.MatchRowSide(join.Filter, join.Right, join.RightAlias, rightRow) {
-					continue
-				}
-			}
-			out := make(types.ProductValue, 0, len(columns))
-			for _, col := range columns {
-				source, ok := projectedJoinColumnSource(col, join.Left, join.LeftAlias, leftRow, join.Right, join.RightAlias, rightRow)
-				if !ok {
-					continue
-				}
-				idx := col.Schema.Index
-				if idx < 0 || idx >= len(source) {
-					continue
-				}
-				out = append(out, source[idx])
-			}
-			rows = append(rows, out)
+			appendIfMatch(leftRow, rightRow)
 		}
 	}
 	return rows
