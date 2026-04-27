@@ -54,14 +54,21 @@ func handleOneOffQuery(
 
 	view := stateAccess.Snapshot()
 	var matchedRows []types.ProductValue
+	rowsAlreadyProjected := false
 	if joinPred, ok := pred.(subscription.Join); ok {
 		if len(compiled.ProjectionColumns) != 0 && compiled.Aggregate == nil {
 			matchedRows = evaluateOneOffJoinProjection(view, joinPred, compiled.ProjectionColumns)
+			rowsAlreadyProjected = true
 		} else {
 			matchedRows = evaluateOneOffJoin(view, tableID, joinPred)
 		}
 	} else if crossPred, ok := pred.(subscription.CrossJoin); ok {
-		matchedRows = evaluateOneOffCrossJoin(view, tableID, crossPred)
+		if len(compiled.ProjectionColumns) != 0 && compiled.Aggregate == nil {
+			matchedRows = evaluateOneOffCrossJoinProjection(view, crossPred, compiled.ProjectionColumns)
+			rowsAlreadyProjected = true
+		} else {
+			matchedRows = evaluateOneOffCrossJoin(view, tableID, crossPred)
+		}
 	} else {
 		for _, pv := range view.TableScan(tableID) {
 			if subscription.MatchRow(pred, tableID, pv) {
@@ -83,7 +90,7 @@ func handleOneOffQuery(
 		if compiled.Limit != nil && uint64(len(matchedRows)) > *compiled.Limit {
 			matchedRows = matchedRows[:int(*compiled.Limit)]
 		}
-		if len(compiled.ProjectionColumns) != 0 {
+		if len(compiled.ProjectionColumns) != 0 && !rowsAlreadyProjected {
 			encodedRows = projectOneOffRows(matchedRows, compiled.ProjectionColumns)
 		} else {
 			encodedRows = matchedRows
@@ -221,17 +228,8 @@ func evaluateOneOffJoinProjection(view store.CommittedReadView, join subscriptio
 			}
 			out := make(types.ProductValue, 0, len(columns))
 			for _, col := range columns {
-				var source types.ProductValue
-				switch {
-				case col.Table == join.Left && col.Alias == join.LeftAlias:
-					source = leftRow
-				case col.Table == join.Right && col.Alias == join.RightAlias:
-					source = rightRow
-				case col.Table == join.Left && join.Left != join.Right:
-					source = leftRow
-				case col.Table == join.Right && join.Left != join.Right:
-					source = rightRow
-				default:
+				source, ok := projectedJoinColumnSource(col, join.Left, join.LeftAlias, leftRow, join.Right, join.RightAlias, rightRow)
+				if !ok {
 					continue
 				}
 				idx := col.Schema.Index
@@ -244,6 +242,61 @@ func evaluateOneOffJoinProjection(view store.CommittedReadView, join subscriptio
 		}
 	}
 	return rows
+}
+
+func evaluateOneOffCrossJoinProjection(view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn) []types.ProductValue {
+	var rows []types.ProductValue
+	if cross.ProjectRight {
+		for _, rightRow := range view.TableScan(cross.Right) {
+			for _, leftRow := range view.TableScan(cross.Left) {
+				rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns))
+			}
+		}
+		return rows
+	}
+	for _, leftRow := range view.TableScan(cross.Left) {
+		for _, rightRow := range view.TableScan(cross.Right) {
+			rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns))
+		}
+	}
+	return rows
+}
+
+func projectOneOffJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn) types.ProductValue {
+	out := make(types.ProductValue, 0, len(columns))
+	for _, col := range columns {
+		source, ok := projectedJoinColumnSource(col, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
+		if !ok {
+			continue
+		}
+		idx := col.Schema.Index
+		if idx < 0 || idx >= len(source) {
+			continue
+		}
+		out = append(out, source[idx])
+	}
+	return out
+}
+
+func projectedJoinColumnSource(col compiledSQLProjectionColumn, leftID schema.TableID, leftAlias uint8, leftRow types.ProductValue, rightID schema.TableID, rightAlias uint8, rightRow types.ProductValue) (types.ProductValue, bool) {
+	if leftID == rightID {
+		switch {
+		case col.Table == leftID && col.Alias == leftAlias:
+			return leftRow, true
+		case col.Table == rightID && col.Alias == rightAlias:
+			return rightRow, true
+		default:
+			return nil, false
+		}
+	}
+	switch col.Table {
+	case leftID:
+		return leftRow, true
+	case rightID:
+		return rightRow, true
+	default:
+		return nil, false
+	}
 }
 
 func evaluateOneOffCrossJoin(view store.CommittedReadView, projectedTable schema.TableID, cross subscription.CrossJoin) []types.ProductValue {
