@@ -1746,9 +1746,15 @@ func buildGauntletMixedProtocolClientWorkload(seed int64, steps int) []string {
 		"runtime_reducer",
 		"protocol_reducer",
 		"one_off_query",
+		"rejected_one_off_query",
 		"runtime_failed_reducer",
+		"rejected_subscribe_single",
+		"rejected_unsubscribe_single",
+		"runtime_reducer",
 		"unsubscribe_single",
 		"subscribe_multi",
+		"rejected_subscribe_multi",
+		"rejected_unsubscribe_multi",
 		"runtime_reducer",
 		"disconnect_reconnect",
 		"protocol_reducer",
@@ -1756,6 +1762,10 @@ func buildGauntletMixedProtocolClientWorkload(seed int64, steps int) []string {
 		"unsubscribe_multi",
 		"subscribed_no_success_reducer",
 		"protocol_failed_reducer",
+		"runtime_panic_reducer",
+		"protocol_panic_reducer",
+		"runtime_unknown_reducer",
+		"protocol_unknown_reducer",
 		"runtime_reducer",
 	}
 	if steps <= len(required) {
@@ -1769,6 +1779,11 @@ func buildGauntletMixedProtocolClientWorkload(seed int64, steps int) []string {
 		"protocol_reducer",
 		"protocol_reducer",
 		"one_off_query",
+		"rejected_one_off_query",
+		"rejected_subscribe_single",
+		"rejected_subscribe_multi",
+		"rejected_unsubscribe_single",
+		"rejected_unsubscribe_multi",
 		"subscribe_single",
 		"subscribe_multi",
 		"unsubscribe_single",
@@ -1778,6 +1793,10 @@ func buildGauntletMixedProtocolClientWorkload(seed int64, steps int) []string {
 		"subscribed_no_success_reducer",
 		"runtime_failed_reducer",
 		"protocol_failed_reducer",
+		"runtime_panic_reducer",
+		"protocol_panic_reducer",
+		"runtime_unknown_reducer",
+		"protocol_unknown_reducer",
 	}
 	rng := rand.New(rand.NewSource(seed))
 	for len(ops) < steps {
@@ -1817,6 +1836,23 @@ func (state *gauntletMixedClientWorkloadState) nextCommittedOp(model gauntletMod
 
 func (state *gauntletMixedClientWorkloadState) nextFailedOp() gauntletOp {
 	return failAfterInsertOp(state.nextPlayerID, gauntletName(state.rng))
+}
+
+func (state *gauntletMixedClientWorkloadState) nextPanicOp() gauntletOp {
+	return panicAfterInsertOp(state.nextPlayerID, gauntletName(state.rng))
+}
+
+func (state *gauntletMixedClientWorkloadState) nextProtocolPanicOp() gauntletOp {
+	op := panicAfterInsertOp(state.nextPlayerID, gauntletName(state.rng))
+	op.kind = "protocol_panic_after_insert"
+	op.wantStatus = shunter.StatusFailedUser
+	return op
+}
+
+func (state *gauntletMixedClientWorkloadState) nextUnknownReducerOp(status shunter.ReducerStatus) gauntletOp {
+	op := unknownReducerOp(state.nextPlayerID, gauntletName(state.rng))
+	op.wantStatus = status
+	return op
 }
 
 type gauntletMixedClientActiveSubscription struct {
@@ -1978,6 +2014,86 @@ func runGauntletMixedProtocolClientWorkloadSegment(t *testing.T, rt *shunter.Run
 			if diff := diffGauntletPlayers(got, query.want); diff != "" {
 				t.Fatalf("%s one-off query %q protocol/model mismatch:\n%s", queryLabel, query.sql, diff)
 			}
+		}
+	}
+	runRejectedOneOffQuery := func(opIndex int) {
+		queryLabel := stepLabel(opIndex, "rejected_one_off_query")
+		client := dialGauntletProtocol(t, rt)
+		resp := queryGauntletProtocolExpectErrorWithLabel(t, client, "SELECT * FROM players WHERE missing = 1", []byte(fmt.Sprintf("bad-one-off-%d", opIndex)), queryLabel)
+		if resp.Error == nil || *resp.Error == "" {
+			t.Fatalf("%s error = empty, want query failure detail", queryLabel)
+		}
+		if len(resp.Tables) != 0 {
+			t.Fatalf("%s returned %d tables, want 0", queryLabel, len(resp.Tables))
+		}
+		assertGauntletReadMatchesModel(t, rt, *model, queryLabel)
+		got := queryGauntletProtocolPlayersWithLabel(t, client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-one-off-%d", opIndex)), queryLabel+" recovery one-off")
+		if diff := diffGauntletPlayers(got, model.players); diff != "" {
+			t.Fatalf("%s recovery one-off mismatch:\n%s", queryLabel, diff)
+		}
+		if err := client.Close(websocket.StatusNormalClosure, "rejected one-off complete"); err != nil {
+			t.Fatalf("%s close client: %v", queryLabel, err)
+		}
+	}
+	runRejectedSubscribeSingle := func(opIndex int) {
+		subLabel := stepLabel(opIndex, "rejected_subscribe_single")
+		client := dialGauntletProtocol(t, rt)
+		subErr := subscribeGauntletProtocolExpectErrorWithLabel(t, client, "SELECT * FROM players WHERE missing = 1", state.nextProtocolIDValue(), state.nextProtocolIDValue(), subLabel)
+		if subErr.Error == "" {
+			t.Fatalf("%s error = empty", subLabel)
+		}
+		assertGauntletReadMatchesModel(t, rt, *model, subLabel)
+		got := queryGauntletProtocolPlayersWithLabel(t, client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-sub-%d", opIndex)), subLabel+" recovery one-off")
+		if diff := diffGauntletPlayers(got, model.players); diff != "" {
+			t.Fatalf("%s recovery one-off mismatch:\n%s", subLabel, diff)
+		}
+		quiet = append(quiet, gauntletMixedClientQuietClient{client: client, reason: subLabel})
+	}
+	runRejectedSubscribeMulti := func(opIndex int) {
+		subLabel := stepLabel(opIndex, "rejected_subscribe_multi")
+		client := dialGauntletProtocol(t, rt)
+		subErr := subscribeMultiGauntletProtocolExpectErrorWithLabel(t, client, []string{
+			"SELECT * FROM players WHERE id = 1",
+			"SELECT * FROM missing",
+		}, state.nextProtocolIDValue(), state.nextProtocolIDValue(), subLabel)
+		if subErr.Error == "" {
+			t.Fatalf("%s error = empty", subLabel)
+		}
+		assertGauntletReadMatchesModel(t, rt, *model, subLabel)
+		got := queryGauntletProtocolPlayersWithLabel(t, client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-multi-sub-%d", opIndex)), subLabel+" recovery one-off")
+		if diff := diffGauntletPlayers(got, model.players); diff != "" {
+			t.Fatalf("%s recovery one-off mismatch:\n%s", subLabel, diff)
+		}
+		quiet = append(quiet, gauntletMixedClientQuietClient{client: client, reason: subLabel})
+	}
+	runRejectedUnsubscribeSingle := func(opIndex int) {
+		sub := active[0]
+		unsubscribeLabel := stepLabel(opIndex, "rejected_unsubscribe_single "+sub.role)
+		requestID := state.nextProtocolIDValue()
+		missingQueryID := state.nextProtocolIDValue() + 500000
+		subErr := unsubscribeGauntletProtocolExpectErrorWithLabel(t, sub.client, requestID, missingQueryID, unsubscribeLabel)
+		if subErr.Error == "" {
+			t.Fatalf("%s error = empty", unsubscribeLabel)
+		}
+		assertGauntletReadMatchesModel(t, rt, *model, unsubscribeLabel)
+		got := queryGauntletProtocolPlayersWithLabel(t, sub.client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-unsub-%d", opIndex)), unsubscribeLabel+" recovery one-off")
+		if diff := diffGauntletPlayers(got, model.players); diff != "" {
+			t.Fatalf("%s recovery one-off mismatch:\n%s", unsubscribeLabel, diff)
+		}
+	}
+	runRejectedUnsubscribeMulti := func(opIndex int) {
+		sub := active[0]
+		unsubscribeLabel := stepLabel(opIndex, "rejected_unsubscribe_multi "+sub.role)
+		requestID := state.nextProtocolIDValue()
+		missingQueryID := state.nextProtocolIDValue() + 500000
+		subErr := unsubscribeMultiGauntletProtocolExpectErrorWithLabel(t, sub.client, requestID, missingQueryID, unsubscribeLabel)
+		if subErr.Error == "" {
+			t.Fatalf("%s error = empty", unsubscribeLabel)
+		}
+		assertGauntletReadMatchesModel(t, rt, *model, unsubscribeLabel)
+		got := queryGauntletProtocolPlayersWithLabel(t, sub.client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-unsub-multi-%d", opIndex)), unsubscribeLabel+" recovery one-off")
+		if diff := diffGauntletPlayers(got, model.players); diff != "" {
+			t.Fatalf("%s recovery one-off mismatch:\n%s", unsubscribeLabel, diff)
 		}
 	}
 	assertQuietAfterCommittedUpdate := func(updateLabel string) {
@@ -2152,6 +2268,16 @@ func runGauntletMixedProtocolClientWorkloadSegment(t *testing.T, rt *shunter.Run
 			subscribeSingle(opIndex, "reconnected")
 		case "one_off_query":
 			assertOneOffQueries(opIndex, "one_off_query")
+		case "rejected_one_off_query":
+			runRejectedOneOffQuery(opIndex)
+		case "rejected_subscribe_single":
+			runRejectedSubscribeSingle(opIndex)
+		case "rejected_subscribe_multi":
+			runRejectedSubscribeMulti(opIndex)
+		case "rejected_unsubscribe_single":
+			runRejectedUnsubscribeSingle(opIndex)
+		case "rejected_unsubscribe_multi":
+			runRejectedUnsubscribeMulti(opIndex)
 		case "runtime_reducer":
 			runReducer(opIndex, "runtime CallReducer", state.nextCommittedOp(*model), false)
 		case "protocol_reducer":
@@ -2164,6 +2290,14 @@ func runGauntletMixedProtocolClientWorkloadSegment(t *testing.T, rt *shunter.Run
 			runReducer(opIndex, "runtime failed CallReducer", state.nextFailedOp(), false)
 		case "protocol_failed_reducer":
 			runReducer(opIndex, "protocol failed CallReducer", state.nextFailedOp(), true)
+		case "runtime_panic_reducer":
+			runReducer(opIndex, "runtime panic CallReducer", state.nextPanicOp(), false)
+		case "protocol_panic_reducer":
+			runReducer(opIndex, "protocol panic CallReducer", state.nextProtocolPanicOp(), true)
+		case "runtime_unknown_reducer":
+			runReducer(opIndex, "runtime unknown CallReducer", state.nextUnknownReducerOp(shunter.StatusFailedInternal), false)
+		case "protocol_unknown_reducer":
+			runReducer(opIndex, "protocol unknown CallReducer", state.nextUnknownReducerOp(shunter.StatusFailedUser), true)
 		default:
 			t.Fatalf("%s unknown workload operation %q", stepLabel(opIndex, "dispatch"), workloadOp)
 		}
@@ -2745,14 +2879,19 @@ func queryGauntletProtocolPlayersWithLabel(t *testing.T, client *websocket.Conn,
 
 func queryGauntletProtocolExpectError(t *testing.T, client *websocket.Conn, sql string, messageID []byte) protocol.OneOffQueryResponse {
 	t.Helper()
+	return queryGauntletProtocolExpectErrorWithLabel(t, client, sql, messageID, "one-off query "+sql)
+}
+
+func queryGauntletProtocolExpectErrorWithLabel(t *testing.T, client *websocket.Conn, sql string, messageID []byte, label string) protocol.OneOffQueryResponse {
+	t.Helper()
 	writeGauntletProtocolMessage(t, client, protocol.OneOffQueryMsg{
 		MessageID:   messageID,
 		QueryString: sql,
-	}, "one-off query "+sql)
+	}, label)
 
-	resp := readGauntletOneOffQueryResponse(t, client, sql, messageID)
+	resp := readGauntletOneOffQueryResponseWithLabel(t, client, messageID, label)
 	if resp.Error == nil {
-		t.Fatalf("one-off query %q error = nil, want error", sql)
+		t.Fatalf("%s error = nil, want error", label)
 	}
 	return resp
 }
@@ -2811,25 +2950,30 @@ func subscribeGauntletProtocolPlayersWithLabel(t *testing.T, client *websocket.C
 
 func subscribeGauntletProtocolExpectError(t *testing.T, client *websocket.Conn, sql string, requestID, queryID uint32) protocol.SubscriptionError {
 	t.Helper()
+	return subscribeGauntletProtocolExpectErrorWithLabel(t, client, sql, requestID, queryID, "rejected subscribe query "+sql)
+}
+
+func subscribeGauntletProtocolExpectErrorWithLabel(t *testing.T, client *websocket.Conn, sql string, requestID, queryID uint32, label string) protocol.SubscriptionError {
+	t.Helper()
 	writeGauntletProtocolMessage(t, client, protocol.SubscribeSingleMsg{
 		RequestID:   requestID,
 		QueryID:     queryID,
 		QueryString: sql,
-	}, "rejected subscribe query "+sql)
+	}, label)
 
-	tag, msg := readGauntletProtocolMessage(t, client, "rejected subscribe query "+sql)
+	tag, msg := readGauntletProtocolMessage(t, client, label)
 	if tag != protocol.TagSubscriptionError {
-		t.Fatalf("rejected subscribe query %q tag = %d, want SubscriptionError", sql, tag)
+		t.Fatalf("%s tag = %d, want SubscriptionError", label, tag)
 	}
 	subErr, ok := msg.(protocol.SubscriptionError)
 	if !ok {
-		t.Fatalf("rejected subscribe query %q response = %T, want SubscriptionError", sql, msg)
+		t.Fatalf("%s response = %T, want SubscriptionError", label, msg)
 	}
 	if subErr.RequestID == nil || *subErr.RequestID != requestID {
-		t.Fatalf("rejected subscribe query %q request ID = %v, want %d", sql, subErr.RequestID, requestID)
+		t.Fatalf("%s request ID = %v, want %d", label, subErr.RequestID, requestID)
 	}
 	if subErr.QueryID == nil || *subErr.QueryID != queryID {
-		t.Fatalf("rejected subscribe query %q query ID = %v, want %d", sql, subErr.QueryID, queryID)
+		t.Fatalf("%s query ID = %v, want %d", label, subErr.QueryID, queryID)
 	}
 	return subErr
 }
@@ -2867,25 +3011,30 @@ func subscribeMultiGauntletProtocolPlayersWithLabel(t *testing.T, client *websoc
 
 func subscribeMultiGauntletProtocolExpectError(t *testing.T, client *websocket.Conn, sql []string, requestID, queryID uint32) protocol.SubscriptionError {
 	t.Helper()
+	return subscribeMultiGauntletProtocolExpectErrorWithLabel(t, client, sql, requestID, queryID, "rejected subscribe multi query")
+}
+
+func subscribeMultiGauntletProtocolExpectErrorWithLabel(t *testing.T, client *websocket.Conn, sql []string, requestID, queryID uint32, label string) protocol.SubscriptionError {
+	t.Helper()
 	writeGauntletProtocolMessage(t, client, protocol.SubscribeMultiMsg{
 		RequestID:    requestID,
 		QueryID:      queryID,
 		QueryStrings: sql,
-	}, "rejected subscribe multi query")
+	}, label)
 
-	tag, msg := readGauntletProtocolMessage(t, client, "rejected subscribe multi query")
+	tag, msg := readGauntletProtocolMessage(t, client, label)
 	if tag != protocol.TagSubscriptionError {
-		t.Fatalf("rejected subscribe multi query tag = %d, want SubscriptionError", tag)
+		t.Fatalf("%s tag = %d, want SubscriptionError", label, tag)
 	}
 	subErr, ok := msg.(protocol.SubscriptionError)
 	if !ok {
-		t.Fatalf("rejected subscribe multi query response = %T, want SubscriptionError", msg)
+		t.Fatalf("%s response = %T, want SubscriptionError", label, msg)
 	}
 	if subErr.RequestID == nil || *subErr.RequestID != requestID {
-		t.Fatalf("rejected subscribe multi query request ID = %v, want %d", subErr.RequestID, requestID)
+		t.Fatalf("%s request ID = %v, want %d", label, subErr.RequestID, requestID)
 	}
 	if subErr.QueryID == nil || *subErr.QueryID != queryID {
-		t.Fatalf("rejected subscribe multi query query ID = %v, want %d", subErr.QueryID, queryID)
+		t.Fatalf("%s query ID = %v, want %d", label, subErr.QueryID, queryID)
 	}
 	return subErr
 }
@@ -2927,6 +3076,11 @@ func unsubscribeGauntletProtocolPlayersWithLabel(t *testing.T, client *websocket
 func unsubscribeGauntletProtocolExpectError(t *testing.T, client *websocket.Conn, requestID, queryID uint32) protocol.SubscriptionError {
 	t.Helper()
 	label := fmt.Sprintf("rejected unsubscribe query %d", queryID)
+	return unsubscribeGauntletProtocolExpectErrorWithLabel(t, client, requestID, queryID, label)
+}
+
+func unsubscribeGauntletProtocolExpectErrorWithLabel(t *testing.T, client *websocket.Conn, requestID, queryID uint32, label string) protocol.SubscriptionError {
+	t.Helper()
 	writeGauntletProtocolMessage(t, client, protocol.UnsubscribeSingleMsg{
 		RequestID: requestID,
 		QueryID:   queryID,
@@ -2983,6 +3137,11 @@ func unsubscribeMultiGauntletProtocolPlayersWithLabel(t *testing.T, client *webs
 func unsubscribeMultiGauntletProtocolExpectError(t *testing.T, client *websocket.Conn, requestID, queryID uint32) protocol.SubscriptionError {
 	t.Helper()
 	label := fmt.Sprintf("rejected unsubscribe multi query %d", queryID)
+	return unsubscribeMultiGauntletProtocolExpectErrorWithLabel(t, client, requestID, queryID, label)
+}
+
+func unsubscribeMultiGauntletProtocolExpectErrorWithLabel(t *testing.T, client *websocket.Conn, requestID, queryID uint32, label string) protocol.SubscriptionError {
+	t.Helper()
 	writeGauntletProtocolMessage(t, client, protocol.UnsubscribeMultiMsg{
 		RequestID: requestID,
 		QueryID:   queryID,
