@@ -18,7 +18,10 @@ type SegmentRange struct {
 	Active  bool
 }
 
-var syncDir = syncDirPath
+var (
+	syncDir    = syncDirPath
+	removeFile = os.Remove
+)
 
 // SegmentCoverage projects recovery-produced SegmentInfo into compaction ranges.
 func SegmentCoverage(segments []SegmentInfo) []SegmentRange {
@@ -57,9 +60,12 @@ func Compact(segments []SegmentRange, snapshotTxID types.TxID) (deleted []string
 
 // RunCompaction deletes sealed segments fully covered by snapshotTxID.
 func RunCompaction(dir string, snapshotTxID types.TxID) error {
-	segments, _, err := ScanSegments(dir)
+	segments, durableHorizon, err := ScanSegments(dir)
 	if err != nil {
 		return err
+	}
+	if snapshotTxID != 0 && len(segments) > 0 && snapshotTxID > durableHorizon {
+		return fmt.Errorf("commitlog: compact snapshot tx %d beyond durable log horizon %d", snapshotTxID, durableHorizon)
 	}
 	deleted, _ := Compact(SegmentCoverage(segments), snapshotTxID)
 	orphanedIndexes, err := orphanedCoveredOffsetIndexes(dir, segments, snapshotTxID)
@@ -67,24 +73,35 @@ func RunCompaction(dir string, snapshotTxID types.TxID) error {
 		return err
 	}
 	if len(deleted) == 0 && len(orphanedIndexes) == 0 {
+		// A prior attempt may have deleted the covered prefix and then failed
+		// while syncing the directory. Once the remaining log no longer starts
+		// at tx 1, a no-op retry still needs to make that cleanup durable.
+		if snapshotTxID != 0 && len(segments) > 0 && segments[0].StartTx > 1 {
+			if err := syncDir(dir); err != nil {
+				return fmt.Errorf("commitlog: compact sync directory %s: %w", dir, err)
+			}
+		}
 		return nil
 	}
 	for _, path := range deleted {
-		if err := os.Remove(path); err != nil {
+		if err := removeFile(path); err != nil {
 			return fmt.Errorf("commitlog: compact remove covered segment %s: %w", path, err)
 		}
 		if idxPath := offsetIndexPathForSegment(path); idxPath != "" {
-			if err := os.Remove(idxPath); err != nil && !os.IsNotExist(err) {
+			if err := removeFile(idxPath); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("commitlog: compact remove covered offset index %s: %w", idxPath, err)
 			}
 		}
 	}
 	for _, path := range orphanedIndexes {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := removeFile(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("commitlog: compact remove orphaned offset index %s: %w", path, err)
 		}
 	}
-	return syncDir(dir)
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("commitlog: compact sync directory %s: %w", dir, err)
+	}
+	return nil
 }
 
 func orphanedCoveredOffsetIndexes(dir string, segments []SegmentInfo, snapshotTxID types.TxID) ([]string, error) {

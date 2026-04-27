@@ -200,6 +200,31 @@ func TestReadSnapshotHashMismatch(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsHeaderVersionMismatch(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 89)
+	path := filepath.Join(baseDir, "snapshots", "89", snapshotFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[4] = SnapshotVersion + 1
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ReadSnapshot(filepath.Join(baseDir, "snapshots", "89"))
+	var versionErr *BadVersionError
+	if !errors.As(err, &versionErr) {
+		t.Fatalf("expected BadVersionError, got %v", err)
+	}
+	if versionErr.Got != SnapshotVersion+1 {
+		t.Fatalf("bad version got = %d, want %d", versionErr.Got, SnapshotVersion+1)
+	}
+}
+
 func TestConcurrentSnapshotReturnsInProgress(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
@@ -266,6 +291,118 @@ func TestCreateSnapshotUsesTempFileUntilRename(t *testing.T) {
 	}
 	if _, err := ReadSnapshot(snapshotDir); err != nil {
 		t.Fatalf("final snapshot should be readable: %v", err)
+	}
+}
+
+func TestCreateSnapshotRenameFailureReturnsSnapshotErrorAndCleansArtifacts(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	fileWriter := writer.(*FileSnapshotWriter)
+	renameErr := errors.New("rename failed")
+	fileWriter.rename = func(oldPath, newPath string) error {
+		if filepath.Base(oldPath) != snapshotTempFileName || filepath.Base(newPath) != snapshotFileName {
+			t.Fatalf("rename paths = (%q, %q), want temp to final snapshot", oldPath, newPath)
+		}
+		return renameErr
+	}
+
+	cs.SetCommittedTxID(92)
+	err := writer.CreateSnapshot(cs, 92)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("rename error should be categorized as snapshot error, got %v", err)
+	}
+	if !errors.Is(err, renameErr) {
+		t.Fatalf("rename error should wrap original error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "rename" || completionErr.Path == "" {
+		t.Fatalf("completion error = %+v, want rename phase and path", completionErr)
+	}
+
+	snapshotDir := filepath.Join(baseDir, "snapshots", "92")
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed after rename failure")
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotTempFileName)); !os.IsNotExist(err) {
+		t.Fatalf("snapshot temp file should be removed after rename failure, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); !os.IsNotExist(err) {
+		t.Fatalf("final snapshot should not exist after rename failure, stat err=%v", err)
+	}
+}
+
+func TestCreateSnapshotDirectorySyncFailureReturnsSnapshotCompletionError(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	fileWriter := writer.(*FileSnapshotWriter)
+	syncErr := errors.New("sync failed")
+	snapshotDir := filepath.Join(baseDir, "snapshots", "93")
+	fileWriter.syncDir = func(path string) error {
+		if path == snapshotDir {
+			return syncErr
+		}
+		return nil
+	}
+
+	cs.SetCommittedTxID(93)
+	err := writer.CreateSnapshot(cs, 93)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("sync error should be categorized as snapshot error, got %v", err)
+	}
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("sync error should wrap original error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "sync-snapshot" || completionErr.Path != snapshotDir {
+		t.Fatalf("completion error = %+v, want sync-snapshot phase and snapshot dir", completionErr)
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); err != nil {
+		t.Fatalf("final snapshot should exist after rename before sync failure: %v", err)
+	}
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed during sync-failure cleanup")
+	}
+}
+
+func TestCreateSnapshotRemoveLockFailureReturnsSnapshotCompletionError(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	fileWriter := writer.(*FileSnapshotWriter)
+	removeErr := errors.New("remove lock failed")
+	fileWriter.removeLock = func(string) error {
+		return removeErr
+	}
+
+	cs.SetCommittedTxID(94)
+	err := writer.CreateSnapshot(cs, 94)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("remove-lock error should be categorized as snapshot error, got %v", err)
+	}
+	if !errors.Is(err, removeErr) {
+		t.Fatalf("remove-lock error should wrap original error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "remove-lock" || filepath.Base(completionErr.Path) != ".lock" {
+		t.Fatalf("completion error = %+v, want remove-lock phase and lock path", completionErr)
+	}
+	snapshotDir := filepath.Join(baseDir, "snapshots", "94")
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); err != nil {
+		t.Fatalf("final snapshot should exist before lock removal failure: %v", err)
+	}
+	if !HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should remain when lock removal fails")
 	}
 }
 

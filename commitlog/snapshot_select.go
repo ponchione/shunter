@@ -11,34 +11,49 @@ import (
 )
 
 func SelectSnapshot(baseDir string, durableHorizon types.TxID, reg schema.SchemaRegistry) (*SnapshotData, error) {
+	snapshot, _, err := selectSnapshotWithReport(baseDir, durableHorizon, reg)
+	return snapshot, err
+}
+
+func selectSnapshotWithReport(baseDir string, durableHorizon types.TxID, reg schema.SchemaRegistry) (*SnapshotData, []SkippedSnapshotReport, error) {
 	snapshotDir, logDir := resolveSnapshotAndLogDirs(baseDir)
 
 	ids, err := ListSnapshots(snapshotDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	var skipped []SkippedSnapshotReport
 	for _, txID := range ids {
 		if txID > durableHorizon {
+			skipped = append(skipped, SkippedSnapshotReport{
+				TxID:   txID,
+				Reason: SnapshotSkipPastDurableHorizon,
+			})
 			continue
 		}
 		snapshot, err := ReadSnapshot(filepath.Join(snapshotDir, fmt.Sprintf("%d", txID)))
 		if err != nil {
+			skipped = append(skipped, SkippedSnapshotReport{
+				TxID:   txID,
+				Reason: SnapshotSkipReadFailed,
+				Detail: err.Error(),
+			})
 			continue
 		}
 		if err := compareSnapshotSchema(snapshot, reg); err != nil {
-			return nil, err
+			return nil, skipped, err
 		}
-		return snapshot, nil
+		return snapshot, skipped, nil
 	}
 
 	segments, _, err := ScanSegments(logDir)
 	if err != nil {
-		return nil, err
+		return nil, skipped, err
 	}
 	if len(segments) == 0 || segments[0].StartTx <= 1 {
-		return nil, nil
+		return nil, skipped, nil
 	}
-	return nil, ErrMissingBaseSnapshot
+	return nil, skipped, ErrMissingBaseSnapshot
 }
 
 func resolveSnapshotAndLogDirs(baseDir string) (string, string) {
@@ -56,6 +71,9 @@ func resolveSnapshotAndLogDirs(baseDir string) (string, string) {
 func compareSnapshotSchema(snapshot *SnapshotData, reg schema.SchemaRegistry) error {
 	if snapshot.SchemaVersion != reg.Version() {
 		return &SchemaMismatchError{Detail: fmt.Sprintf("schema version mismatch: snapshot=%d registry=%d", snapshot.SchemaVersion, reg.Version())}
+	}
+	if snapshot.SchemaSnapshotVersion != reg.Version() {
+		return &SchemaMismatchError{Detail: fmt.Sprintf("schema snapshot version mismatch: snapshot=%d registry=%d", snapshot.SchemaSnapshotVersion, reg.Version())}
 	}
 
 	snapshotByID := make(map[schema.TableID]schema.TableSchema, len(snapshot.Schema))

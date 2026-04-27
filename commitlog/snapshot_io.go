@@ -207,10 +207,13 @@ type FileSnapshotWriter struct {
 	inProgress    bool
 	beforeWrite   chan struct{}
 	continueWrite chan struct{}
+	rename        func(string, string) error
+	syncDir       func(string) error
+	removeLock    func(string) error
 }
 
 func NewSnapshotWriter(baseDir string, reg schema.SchemaRegistry) SnapshotWriter {
-	return &FileSnapshotWriter{baseDir: baseDir, reg: reg}
+	return &FileSnapshotWriter{baseDir: baseDir, reg: reg, rename: os.Rename, syncDir: syncDir, removeLock: RemoveLockFile}
 }
 
 func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txID types.TxID) error {
@@ -235,14 +238,14 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
 		return err
 	}
-	if err := syncDir(w.baseDir); err != nil {
-		return err
+	if err := w.syncDir(w.baseDir); err != nil {
+		return &SnapshotCompletionError{Phase: "sync-parent", Path: w.baseDir, Err: err}
 	}
 	if err := CreateLockFile(snapshotDir); err != nil {
-		return err
+		return &SnapshotCompletionError{Phase: "create-lock", Path: filepath.Join(snapshotDir, ".lock"), Err: err}
 	}
 	defer func() {
-		_ = RemoveLockFile(snapshotDir)
+		_ = w.removeLock(snapshotDir)
 	}()
 
 	tmpPath := filepath.Join(snapshotDir, snapshotTempFileName)
@@ -269,23 +272,25 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
-		return err
+		return &SnapshotCompletionError{Phase: "sync-temp", Path: tmpPath, Err: err}
 	}
 	if err := f.Close(); err != nil {
-		return err
+		return &SnapshotCompletionError{Phase: "close-temp", Path: tmpPath, Err: err}
 	}
-	if err := os.Rename(tmpPath, filepath.Join(snapshotDir, snapshotFileName)); err != nil {
-		return err
+	finalPath := filepath.Join(snapshotDir, snapshotFileName)
+	if err := w.rename(tmpPath, finalPath); err != nil {
+		return &SnapshotCompletionError{Phase: "rename", Path: finalPath, Err: err}
 	}
 	completed = true
-	if err := syncDir(snapshotDir); err != nil {
-		return err
+	if err := w.syncDir(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "sync-snapshot", Path: snapshotDir, Err: err}
 	}
-	if err := RemoveLockFile(snapshotDir); err != nil {
-		return err
+	lockPath := filepath.Join(snapshotDir, ".lock")
+	if err := w.removeLock(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "remove-lock", Path: lockPath, Err: err}
 	}
-	if err := syncDir(snapshotDir); err != nil {
-		return err
+	if err := w.syncDir(snapshotDir); err != nil {
+		return &SnapshotCompletionError{Phase: "sync-unlock", Path: snapshotDir, Err: err}
 	}
 	return nil
 }
@@ -419,12 +424,13 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 }
 
 type SnapshotData struct {
-	TxID          types.TxID
-	SchemaVersion uint32
-	Tables        []SnapshotTableData
-	Sequences     map[schema.TableID]uint64
-	NextIDs       map[schema.TableID]uint64
-	Schema        []schema.TableSchema
+	TxID                  types.TxID
+	SchemaVersion         uint32
+	SchemaSnapshotVersion uint32
+	Tables                []SnapshotTableData
+	Sequences             map[schema.TableID]uint64
+	NextIDs               map[schema.TableID]uint64
+	Schema                []schema.TableSchema
 }
 
 type SnapshotTableData struct {
@@ -447,7 +453,7 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 		return nil, err
 	}
 
-	tables, schemaByID, err := readSnapshotSchema(f)
+	tables, schemaSnapshotVersion, schemaByID, err := readSnapshotSchema(f)
 	if err != nil {
 		return nil, err
 	}
@@ -465,12 +471,13 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 	}
 
 	return &SnapshotData{
-		TxID:          types.TxID(txID),
-		SchemaVersion: schemaVersion,
-		Tables:        snapshotTables,
-		Sequences:     sequences,
-		NextIDs:       nextIDs,
-		Schema:        tables,
+		TxID:                  types.TxID(txID),
+		SchemaVersion:         schemaVersion,
+		SchemaSnapshotVersion: schemaSnapshotVersion,
+		Tables:                snapshotTables,
+		Sequences:             sequences,
+		NextIDs:               nextIDs,
+		Schema:                tables,
 	}, nil
 }
 
@@ -521,25 +528,25 @@ func verifySnapshotPayloadHash(f *os.File, expected [32]byte) error {
 	return err
 }
 
-func readSnapshotSchema(payload io.Reader) ([]schema.TableSchema, map[schema.TableID]*schema.TableSchema, error) {
+func readSnapshotSchema(payload io.Reader) ([]schema.TableSchema, uint32, map[schema.TableID]*schema.TableSchema, error) {
 	var schemaLen uint32
 	if err := binary.Read(payload, binary.LittleEndian, &schemaLen); err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	schemaBytes := make([]byte, schemaLen)
 	if _, err := io.ReadFull(payload, schemaBytes); err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
-	tables, _, err := DecodeSchemaSnapshot(bytes.NewReader(schemaBytes))
+	tables, schemaSnapshotVersion, err := DecodeSchemaSnapshot(bytes.NewReader(schemaBytes))
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	schemaByID := make(map[schema.TableID]*schema.TableSchema, len(tables))
 	for i := range tables {
 		ts := &tables[i]
 		schemaByID[ts.ID] = ts
 	}
-	return tables, schemaByID, nil
+	return tables, schemaSnapshotVersion, schemaByID, nil
 }
 
 func readSnapshotSequences(payload io.Reader) (map[schema.TableID]uint64, error) {

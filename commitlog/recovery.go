@@ -14,6 +14,48 @@ type RecoveryResumePlan struct {
 	AppendMode     AppendMode
 }
 
+// RecoveryTxIDRange describes the inclusive transaction IDs replayed from log
+// records during recovery. The zero value means no records were replayed.
+type RecoveryTxIDRange struct {
+	Start types.TxID
+	End   types.TxID
+}
+
+// SnapshotSkipReason is the diagnostic reason a snapshot candidate was not
+// selected during recovery.
+type SnapshotSkipReason string
+
+const (
+	// SnapshotSkipPastDurableHorizon means the snapshot was newer than the
+	// contiguous durable log horizon.
+	SnapshotSkipPastDurableHorizon SnapshotSkipReason = "past_durable_horizon"
+	// SnapshotSkipReadFailed means the snapshot candidate could not be read or
+	// failed payload validation.
+	SnapshotSkipReadFailed SnapshotSkipReason = "read_failed"
+)
+
+// SkippedSnapshotReport records one snapshot candidate that recovery skipped.
+type SkippedSnapshotReport struct {
+	TxID   types.TxID
+	Reason SnapshotSkipReason
+	Detail string
+}
+
+// RecoveryReport captures operator-facing facts observed while recovering
+// committed state.
+type RecoveryReport struct {
+	HasSelectedSnapshot  bool
+	SelectedSnapshotTxID types.TxID
+	HasDurableLog        bool
+	DurableLogHorizon    types.TxID
+	ReplayedTxRange      RecoveryTxIDRange
+	RecoveredTxID        types.TxID
+	ResumePlan           RecoveryResumePlan
+	SkippedSnapshots     []SkippedSnapshotReport
+	DamagedTailSegments  []SegmentInfo
+	SegmentCoverage      []SegmentRange
+}
+
 // OpenAndRecover reconstructs committed state from the latest valid snapshot
 // plus any durable segment records after that snapshot.
 func OpenAndRecover(dir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, error) {
@@ -28,58 +70,91 @@ func OpenAndRecover(dir string, reg schema.SchemaRegistry) (*store.CommittedStat
 // append-resume plan needed to decide whether durability should reopen the
 // active segment or start a fresh next segment.
 func OpenAndRecoverDetailed(dir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, RecoveryResumePlan, error) {
+	committed, maxAppliedTxID, plan, _, err := OpenAndRecoverWithReport(dir, reg)
+	return committed, maxAppliedTxID, plan, err
+}
+
+// OpenAndRecoverWithReport reconstructs committed state and returns a
+// structured recovery report for diagnostics.
+func OpenAndRecoverWithReport(dir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, RecoveryResumePlan, RecoveryReport, error) {
 	segments, durableHorizon, err := ScanSegments(dir)
 	if err != nil {
-		return nil, 0, RecoveryResumePlan{}, err
+		return nil, 0, RecoveryResumePlan{}, RecoveryReport{}, err
+	}
+	report := RecoveryReport{
+		HasDurableLog:       len(segments) > 0,
+		DamagedTailSegments: damagedTailSegments(segments),
+		SegmentCoverage:     SegmentCoverage(segments),
+	}
+	if report.HasDurableLog {
+		report.DurableLogHorizon = durableHorizon
 	}
 	if len(segments) == 0 {
 		durableHorizon = types.TxID(^uint64(0))
 	}
 
-	snapshot, err := SelectSnapshot(dir, durableHorizon, reg)
+	snapshot, skippedSnapshots, err := selectSnapshotWithReport(dir, durableHorizon, reg)
+	report.SkippedSnapshots = skippedSnapshots
 	if err != nil {
-		return nil, 0, RecoveryResumePlan{}, err
+		return nil, 0, RecoveryResumePlan{}, report, err
 	}
 
 	committed := store.NewCommittedState()
 	for _, tableID := range reg.Tables() {
 		tableSchema, ok := reg.Table(tableID)
 		if !ok {
-			return nil, 0, RecoveryResumePlan{}, fmt.Errorf("commitlog: registry missing table %d", tableID)
+			return nil, 0, RecoveryResumePlan{}, report, fmt.Errorf("commitlog: registry missing table %d", tableID)
 		}
 		committed.RegisterTable(tableID, store.NewTable(tableSchema))
 	}
 
 	var replayFrom types.TxID
 	if snapshot != nil {
+		report.HasSelectedSnapshot = true
+		report.SelectedSnapshotTxID = snapshot.TxID
 		if err := restoreSnapshot(committed, snapshot); err != nil {
-			return nil, 0, RecoveryResumePlan{}, err
+			return nil, 0, RecoveryResumePlan{}, report, err
 		}
 		replayFrom = snapshot.TxID
 	} else if len(segments) == 0 {
-		return nil, 0, RecoveryResumePlan{}, ErrNoData
+		return nil, 0, RecoveryResumePlan{}, report, ErrNoData
 	} else if segments[0].StartTx > 1 {
-		return nil, 0, RecoveryResumePlan{}, ErrMissingBaseSnapshot
+		return nil, 0, RecoveryResumePlan{}, report, ErrMissingBaseSnapshot
 	}
 
 	maxAppliedTxID, err := ReplayLog(committed, segments, replayFrom, reg)
 	if err != nil {
-		return nil, 0, RecoveryResumePlan{}, err
+		return nil, 0, RecoveryResumePlan{}, report, err
+	}
+	if maxAppliedTxID > replayFrom {
+		report.ReplayedTxRange = RecoveryTxIDRange{Start: replayFrom + 1, End: maxAppliedTxID}
 	}
 	if err := advanceRecoveredSequences(committed); err != nil {
-		return nil, 0, RecoveryResumePlan{}, err
+		return nil, 0, RecoveryResumePlan{}, report, err
 	}
 	if snapshot != nil && maxAppliedTxID < snapshot.TxID {
 		maxAppliedTxID = snapshot.TxID
 	}
 	committed.SetCommittedTxID(maxAppliedTxID)
+	report.RecoveredTxID = maxAppliedTxID
 
 	plan, err := planRecoveryResume(segments, maxAppliedTxID)
 	if err != nil {
-		return nil, 0, RecoveryResumePlan{}, err
+		return nil, 0, RecoveryResumePlan{}, report, err
 	}
+	report.ResumePlan = plan
 
-	return committed, maxAppliedTxID, plan, nil
+	return committed, maxAppliedTxID, plan, report, nil
+}
+
+func damagedTailSegments(segments []SegmentInfo) []SegmentInfo {
+	var damaged []SegmentInfo
+	for _, segment := range segments {
+		if segment.AppendMode == AppendByFreshNextSegment {
+			damaged = append(damaged, segment)
+		}
+	}
+	return damaged
 }
 
 func restoreSnapshot(committed *store.CommittedState, snapshot *SnapshotData) error {

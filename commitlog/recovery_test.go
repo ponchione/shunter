@@ -69,6 +69,63 @@ func TestOpenAndRecoverSnapshotAndLogRecovery(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverWithReportReturnsStructuredRecoveryReport(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	base := buildRecoveryCommittedState(t, reg)
+	players, _ := base.Table(0)
+	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("alice")}); err != nil {
+		t.Fatal(err)
+	}
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, base, 5)
+	createSnapshotAt(t, writer, base, 10)
+	corruptSelectionSnapshot(t, root, 10)
+
+	writeReplaySegment(t, root, 6,
+		replayRecord{txID: 6, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 7, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+		replayRecord{txID: 8, inserts: []types.ProductValue{{types.NewUint64(4), types.NewString("dave")}}},
+		replayRecord{txID: 9, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("erin")}}},
+		replayRecord{txID: 10, inserts: []types.ProductValue{{types.NewUint64(6), types.NewString("frank")}}},
+	)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 10 {
+		t.Fatalf("maxTxID = %d, want 10", maxTxID)
+	}
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 5 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 5)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 10 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 10)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 6, End: 10}) {
+		t.Fatalf("replayed tx range = %+v, want 6..10", report.ReplayedTxRange)
+	}
+	if report.RecoveredTxID != maxTxID {
+		t.Fatalf("recovered txID report = %d, want %d", report.RecoveredTxID, maxTxID)
+	}
+	if report.ResumePlan != plan {
+		t.Fatalf("resume plan report = %+v, want %+v", report.ResumePlan, plan)
+	}
+	if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 6 || report.SegmentCoverage[0].MaxTxID != 10 {
+		t.Fatalf("segment coverage report = %+v, want one 6..10 segment", report.SegmentCoverage)
+	}
+	if len(report.SkippedSnapshots) != 1 {
+		t.Fatalf("skipped snapshots = %+v, want one corrupt fallback", report.SkippedSnapshots)
+	}
+	skipped := report.SkippedSnapshots[0]
+	if skipped.TxID != 10 || skipped.Reason != SnapshotSkipReadFailed || skipped.Detail == "" {
+		t.Fatalf("skipped snapshot report = %+v, want tx 10 read failure with detail", skipped)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol", 4: "dave", 5: "erin", 6: "frank"})
+}
+
 func TestOpenAndRecoverDetailedSnapshotReplayDoesNotRegressSequenceFromExplicitAutoincrementRows(t *testing.T) {
 	root := t.TempDir()
 	reg := buildRecoveryAutoIncrementRegistry(t)
@@ -191,6 +248,64 @@ func TestOpenAndRecoverDetailedReplayExplicitAutoincrementValueRaisesRecoveredSe
 	}
 }
 
+func TestOpenAndRecoverDetailedReplayExplicitSignedAutoincrementValueRaisesRecoveredSequence(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoverySignedAutoIncrementRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+
+	jobs, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("jobs table missing")
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewInt64(1), types.NewString("seed-1")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewInt64(2), types.NewString("seed-2")}); err != nil {
+		t.Fatal(err)
+	}
+	jobs.SetSequenceValue(3)
+	jobs.SetNextID(10)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 2)
+	writeRecoverySegment(t, root, reg, 3,
+		recoveryRecord{txID: 3, inserts: []types.ProductValue{{types.NewInt64(42), types.NewString("explicit-42")}}},
+	)
+
+	recovered, maxTxID, plan, err := OpenAndRecoverDetailed(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID = %d, want 3", maxTxID)
+	}
+	if plan.NextTxID != 4 {
+		t.Fatalf("resume plan next tx = %d, want 4", plan.NextTxID)
+	}
+
+	recoveredJobs, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("recovered jobs table missing")
+	}
+	assertSignedRecoveryRows(t, recoveredJobs, map[int64]string{1: "seed-1", 2: "seed-2", 42: "explicit-42"})
+	if seq, has := recoveredJobs.SequenceValue(); !has || seq != 43 {
+		t.Fatalf("SequenceValue after recovery = (%d, %v), want (43, true)", seq, has)
+	}
+
+	tx := store.NewTransaction(recovered, reg)
+	rowID, err := tx.Insert(0, types.ProductValue{types.NewInt64(0), types.NewString("post-recovery-auto")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := tx.GetRow(0, rowID)
+	if !ok {
+		t.Fatal("post-recovery row missing from transaction view")
+	}
+	if got := row[0].AsInt64(); got != 43 {
+		t.Fatalf("post-recovery autoincrement value = %d, want 43", got)
+	}
+}
+
 func TestOpenAndRecoverFromScratchWithoutSnapshot(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
@@ -288,6 +403,46 @@ func TestOpenAndRecoverSnapshotOnlyReturnsSnapshotState(t *testing.T) {
 		t.Fatalf("maxTxID = %d, want 5", maxTxID)
 	}
 	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice"})
+}
+
+func TestOpenAndRecoverSnapshotRebuildsSecondaryIndexes(t *testing.T) {
+	root := t.TempDir()
+	reg := buildSelectionRegistry(t, selectionRegistryConfig{extraNameIndex: true})
+	committed := buildSelectionCommittedState(t, reg)
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 5)
+
+	recovered, maxTxID, err := OpenAndRecover(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 5 {
+		t.Fatalf("maxTxID = %d, want 5", maxTxID)
+	}
+	players, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	var nameIndexID schema.IndexID
+	found := false
+	ts, _ := reg.Table(0)
+	for _, idx := range ts.Indexes {
+		if idx.Name == "by_name" {
+			nameIndexID = idx.ID
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("by_name index missing from registry")
+	}
+	idx := players.IndexByID(nameIndexID)
+	if idx == nil {
+		t.Fatal("by_name index missing from recovered table")
+	}
+	if got := len(idx.Seek(store.NewIndexKey(types.NewString("alice")))); got != 1 {
+		t.Fatalf("by_name index seek count = %d, want 1", got)
+	}
 }
 
 func TestOpenAndRecoverNoData(t *testing.T) {
@@ -435,6 +590,24 @@ func buildRecoveryAutoIncrementRegistry(t *testing.T) schema.SchemaRegistry {
 	return engine.Registry()
 }
 
+func buildRecoverySignedAutoIncrementRegistry(t *testing.T) schema.SchemaRegistry {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "jobs",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindInt64, PrimaryKey: true, AutoIncrement: true},
+			{Name: "name", Type: schema.KindString},
+		},
+	})
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return engine.Registry()
+}
+
 func buildRecoveryCommittedState(t *testing.T, reg schema.SchemaRegistry) *store.CommittedState {
 	t.Helper()
 	committed := store.NewCommittedState()
@@ -488,6 +661,27 @@ func assertRecoveryRows(t *testing.T, table *store.Table, want map[uint64]string
 		t.Fatalf("row count = %d, want %d (got=%v)", len(got), len(want), got)
 	}
 	ids := make([]uint64, 0, len(want))
+	for id := range want {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		if got[id] != want[id] {
+			t.Fatalf("rows = %v, want %v", got, want)
+		}
+	}
+}
+
+func assertSignedRecoveryRows(t *testing.T, table *store.Table, want map[int64]string) {
+	t.Helper()
+	got := make(map[int64]string, table.RowCount())
+	for _, row := range table.Scan() {
+		got[row[0].AsInt64()] = row[1].AsString()
+	}
+	if len(got) != len(want) {
+		t.Fatalf("row count = %d, want %d (got=%v)", len(got), len(want), got)
+	}
+	ids := make([]int64, 0, len(want))
 	for id := range want {
 		ids = append(ids, id)
 	}

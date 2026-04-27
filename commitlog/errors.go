@@ -214,9 +214,11 @@ func (e *SnapshotHashMismatchError) Is(target error) bool {
 	return target == ErrSnapshot
 }
 
+// SnapshotHorizonMismatchError reports a snapshot write whose requested txID
+// does not match the committed state's recorded horizon.
 type SnapshotHorizonMismatchError struct {
-	SnapshotTxID  types.TxID
-	CommittedTxID types.TxID
+	SnapshotTxID  types.TxID // SnapshotTxID is the txID requested for the snapshot.
+	CommittedTxID types.TxID // CommittedTxID is the horizon recorded on the source state.
 }
 
 func (e *SnapshotHorizonMismatchError) Error() string {
@@ -224,6 +226,29 @@ func (e *SnapshotHorizonMismatchError) Error() string {
 }
 
 func (e *SnapshotHorizonMismatchError) Is(target error) bool {
+	return target == ErrSnapshot
+}
+
+// SnapshotCompletionError reports a filesystem failure while making a snapshot
+// selectable after its body has been written.
+type SnapshotCompletionError struct {
+	Phase string // Phase names the completion step that failed.
+	Path  string // Path names the affected artifact or directory when available.
+	Err   error  // Err is the wrapped underlying filesystem error.
+}
+
+func (e *SnapshotCompletionError) Error() string {
+	if e.Path == "" {
+		return fmt.Sprintf("commitlog: snapshot %s: %v", e.Phase, e.Err)
+	}
+	return fmt.Sprintf("commitlog: snapshot %s %s: %v", e.Phase, e.Path, e.Err)
+}
+
+func (e *SnapshotCompletionError) Unwrap() error {
+	return e.Err
+}
+
+func (e *SnapshotCompletionError) Is(target error) bool {
 	return target == ErrSnapshot
 }
 

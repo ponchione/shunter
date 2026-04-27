@@ -35,17 +35,20 @@ Project framing was clarified on 2026-04-26:
 - OI-001 Shunter-native protocol cleanup is narrowed to conditional follow-ups: strict decoder body consumption is pinned, subscribe/unsubscribe response shaping is consolidated, and only `v1.bsatn.shunter` is accepted.
 - Use reference behavior as evidence for runtime semantics, but prefer Shunter's own simpler contract when compatibility-only details add cost without value.
 
-No fixed implementation slice is queued. Continue OI-002 by a fresh scout unless the user supplies a narrower focus. Remaining likely work is evidence-driven:
+No fixed implementation slice is queued. OI-002 has no current open runtime-model work after the latest evidence-driven scout and fixture dedup pass.
 
-- projection regressions only with a fresh Shunter-visible failing scenario
-- validation ordering only when it changes acceptance, rows, or user-visible errors
-- shared fixture/test deduplication where it reduces duplicated one-off/subscription scenario blocks
+Reopen OI-002 only if a future user or failing test provides a fresh Shunter-visible regression:
+
+- wrong accepted/rejected query
+- wrong one-off rows or subscription rows
+- misleading user-visible validation error
+- one-off/subscription drift on shared syntax or type semantics
 
 Completed OI-002 history belongs in tests and git history, not this handoff. Do not reopen exact identifier lookup, join-WHERE policy, structured-query protocol cleanup, or one-off cross-join explicit mixed projection without a fresh failing example.
 
 ## Confirmed Work Queue
 
-Add failing tests first, then implement. Batch only when the locus overlaps; commit per slice if the working tree is clean enough to do so without sweeping unrelated user changes into the commit. If proof is needed, use `rtk git log`, `rtk git show`, and the relevant tests instead of expanding this handoff with closure archaeology.
+For any future OI-002 regression, add the failing Shunter-visible test first, then implement. Batch only when the locus overlaps; commit per slice if the working tree is clean enough to do so without sweeping unrelated user changes into the commit. If proof is needed, use `rtk git log`, `rtk git show`, and the relevant tests instead of expanding this handoff with closure archaeology.
 
 ## Out Of Scope
 
@@ -65,7 +68,7 @@ rtk go test ./... -count=1
 
 ## Doc Follow-Through
 
-After the implementation is green:
+After any future implementation is green:
 
-- update `TECH-DEBT.md::OI-002` summary only if the closure removes a risk listed there
+- update `TECH-DEBT.md::OI-002` only if new evidence reopens or closes runtime-model work
 - rewrite this handoff to the next live target, keeping startup reading minimal and only future-relevant state

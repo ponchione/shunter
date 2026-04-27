@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
@@ -121,6 +122,75 @@ func TestSelectSnapshotSchemaMismatchColumnType(t *testing.T) {
 	assertSchemaMismatchDetail(t, err, "type")
 }
 
+func TestSelectSnapshotSchemaMismatchTableName(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+	mismatchReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+		players := tables[0]
+		players.Name = "users"
+		tables[0] = players
+	})
+
+	_, err := SelectSnapshot(root, 5, mismatchReg)
+	assertSchemaMismatchDetail(t, err, "name")
+	assertSchemaMismatchDetail(t, err, "players")
+	assertSchemaMismatchDetail(t, err, "users")
+}
+
+func TestSelectSnapshotSchemaMismatchColumnNameAndIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(schema.TableSchema) schema.TableSchema
+		want   string
+	}{
+		{
+			name: "name",
+			mutate: func(players schema.TableSchema) schema.TableSchema {
+				players.Columns[1].Name = "handle"
+				return players
+			},
+			want: "name",
+		},
+		{
+			name: "index",
+			mutate: func(players schema.TableSchema) schema.TableSchema {
+				players.Columns[1].Index = 99
+				return players
+			},
+			want: "index",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			cs, reg := buildSnapshotCommittedState(t)
+			writeSelectionSnapshot(t, root, reg, cs, 5)
+			mismatchReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+				tables[0] = tc.mutate(tables[0])
+			})
+
+			_, err := SelectSnapshot(root, 5, mismatchReg)
+			assertSchemaMismatchDetail(t, err, "column")
+			assertSchemaMismatchDetail(t, err, tc.want)
+		})
+	}
+}
+
+func TestSelectSnapshotSchemaMismatchAutoIncrementFlag(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoveryAutoIncrementRegistry(t)
+	cs := buildRecoveryCommittedState(t, reg)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+	mismatchReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+		jobs := tables[0]
+		jobs.Columns[0].AutoIncrement = false
+		tables[0] = jobs
+	})
+
+	_, err := SelectSnapshot(root, 5, mismatchReg)
+	assertSchemaMismatchDetail(t, err, "auto_increment")
+}
+
 func TestSelectSnapshotSchemaMismatchMissingTable(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
@@ -154,6 +224,74 @@ func TestSelectSnapshotSchemaMismatchExtraIndex(t *testing.T) {
 
 	_, err := SelectSnapshot(root, 5, mismatchReg)
 	assertSchemaMismatchDetail(t, err, "index")
+}
+
+func TestSelectSnapshotSchemaMismatchIndexDetails(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(schema.IndexSchema) schema.IndexSchema
+		want   string
+	}{
+		{
+			name: "columns",
+			mutate: func(idx schema.IndexSchema) schema.IndexSchema {
+				idx.Columns = []int{1}
+				return idx
+			},
+			want: "columns",
+		},
+		{
+			name: "unique",
+			mutate: func(idx schema.IndexSchema) schema.IndexSchema {
+				idx.Unique = false
+				return idx
+			},
+			want: "unique",
+		},
+		{
+			name: "primary",
+			mutate: func(idx schema.IndexSchema) schema.IndexSchema {
+				idx.Primary = false
+				return idx
+			},
+			want: "primary",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			cs, reg := buildSnapshotCommittedState(t)
+			writeSelectionSnapshot(t, root, reg, cs, 5)
+			mismatchReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+				players := tables[0]
+				players.Indexes[0] = tc.mutate(players.Indexes[0])
+				tables[0] = players
+			})
+
+			_, err := SelectSnapshot(root, 5, mismatchReg)
+			assertSchemaMismatchDetail(t, err, "index")
+			assertSchemaMismatchDetail(t, err, tc.want)
+		})
+	}
+}
+
+func TestSelectSnapshotSchemaSnapshotVersionMismatch(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+	path := filepath.Join(root, "snapshots", "5", snapshotFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.LittleEndian.PutUint32(data[SnapshotHeaderSize+4:SnapshotHeaderSize+8], reg.Version()+1)
+	hash := ComputeSnapshotHash(data[SnapshotHeaderSize:])
+	copy(data[20:52], hash[:])
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = SelectSnapshot(root, 5, reg)
+	assertSchemaMismatchDetail(t, err, "schema snapshot version")
 }
 
 type selectionRegistryConfig struct {

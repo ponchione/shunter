@@ -1,8 +1,10 @@
 package commitlog
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -188,6 +190,153 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarOnRetry(t *testing.T) {
 	assertFileExists(t, idx2Path)
 }
 
+func TestRunCompactionSegmentRemovalFailureIncludesPhasePathAndWraps(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	makeScanTestSegment(t, dir, 4, 4, 5)
+	removeErr := errors.New("remove segment failed")
+
+	originalRemoveFile := removeFile
+	removeFile = func(path string) error {
+		if path == seg1 {
+			return removeErr
+		}
+		return originalRemoveFile(path)
+	}
+	defer func() { removeFile = originalRemoveFile }()
+
+	err := RunCompaction(dir, 3)
+	assertCompactionFailureContext(t, err, removeErr, "remove covered segment", seg1)
+	assertFileExists(t, seg1)
+}
+
+func TestRunCompactionSidecarRemovalFailureIncludesPhasePathAndWraps(t *testing.T) {
+	dir := t.TempDir()
+	makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	makeScanTestSegment(t, dir, 4, 4, 5)
+	idxPath := filepath.Join(dir, OffsetIndexFileName(1))
+	idx, err := CreateOffsetIndex(idxPath, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+	removeErr := errors.New("remove sidecar failed")
+
+	originalRemoveFile := removeFile
+	removeFile = func(path string) error {
+		if path == idxPath {
+			return removeErr
+		}
+		return originalRemoveFile(path)
+	}
+	defer func() { removeFile = originalRemoveFile }()
+
+	err = RunCompaction(dir, 3)
+	assertCompactionFailureContext(t, err, removeErr, "remove covered offset index", idxPath)
+	assertFileExists(t, idxPath)
+}
+
+func TestRunCompactionOrphanSidecarRemovalFailureIncludesPhasePathAndWraps(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	makeScanTestSegment(t, dir, 4, 4, 5)
+	idxPath := filepath.Join(dir, OffsetIndexFileName(1))
+	idx, err := CreateOffsetIndex(idxPath, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(seg1); err != nil {
+		t.Fatal(err)
+	}
+	removeErr := errors.New("remove orphan sidecar failed")
+
+	originalRemoveFile := removeFile
+	removeFile = func(path string) error {
+		if path == idxPath {
+			return removeErr
+		}
+		return originalRemoveFile(path)
+	}
+	defer func() { removeFile = originalRemoveFile }()
+
+	err = RunCompaction(dir, 3)
+	assertCompactionFailureContext(t, err, removeErr, "remove orphaned offset index", idxPath)
+	assertFileExists(t, idxPath)
+}
+
+func TestRunCompactionSyncFailureIncludesPhasePathAndWraps(t *testing.T) {
+	dir := t.TempDir()
+	makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	makeScanTestSegment(t, dir, 4, 4, 5)
+	syncErr := errors.New("sync failed")
+
+	originalSyncDir := syncDir
+	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		return syncErr
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	err := RunCompaction(dir, 3)
+	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
+}
+
+func TestRunCompactionRetriesDirectorySyncAfterPriorSyncFailure(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	seg2 := makeScanTestSegment(t, dir, 4, 4, 5)
+	syncErr := errors.New("sync failed")
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		syncCalls++
+		if syncCalls == 1 {
+			return syncErr
+		}
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	err := RunCompaction(dir, 3)
+	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
+	assertFileMissing(t, seg1)
+	assertFileExists(t, seg2)
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	if syncCalls != 2 {
+		t.Fatalf("syncDir calls = %d, want 2", syncCalls)
+	}
+}
+
+func TestRunCompactionRejectsSnapshotBeyondDurableHorizon(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	makeScanTestSegment(t, dir, 4, 4, 5)
+
+	err := RunCompaction(dir, 99)
+	if err == nil {
+		t.Fatal("expected durable horizon rejection")
+	}
+	text := err.Error()
+	if !strings.Contains(text, "beyond durable log horizon") || !strings.Contains(text, "99") || !strings.Contains(text, "5") {
+		t.Fatalf("error %q should include snapshot tx and durable horizon", text)
+	}
+	assertFileExists(t, seg1)
+}
+
 func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	dir := t.TempDir()
 	boundary := makeScanTestSegment(t, dir, 900, contiguousTxs(900, 1100)...)
@@ -196,6 +345,9 @@ func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	originalSyncDir := syncDir
 	syncCalls := 0
 	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
 		syncCalls++
 		return nil
 	}
@@ -204,11 +356,22 @@ func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	if err := RunCompaction(dir, 1000); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
 	}
-	if syncCalls != 0 {
-		t.Fatalf("syncDir calls = %d, want 0", syncCalls)
+	if syncCalls != 1 {
+		t.Fatalf("syncDir calls = %d, want 1 conservative retry sync", syncCalls)
 	}
 	assertFileExists(t, boundary)
 	assertFileExists(t, active)
+}
+
+func assertCompactionFailureContext(t *testing.T, err, cause error, phase, path string) {
+	t.Helper()
+	if !errors.Is(err, cause) {
+		t.Fatalf("error %v should wrap %v", err, cause)
+	}
+	text := err.Error()
+	if !strings.Contains(text, phase) || !strings.Contains(text, path) {
+		t.Fatalf("error %q should include phase %q and path %q", text, phase, path)
+	}
 }
 
 func assertSegmentRangesEqual(t *testing.T, got, want []SegmentRange) {

@@ -663,6 +663,44 @@ func TestPostCommitPropagatesDurabilityReadinessChannel(t *testing.T) {
 	}
 }
 
+func TestPostCommitResponseDoesNotWaitForDurabilityReadiness(t *testing.T) {
+	h := newPipelineHarness(t)
+	waitCh := make(chan types.TxID)
+	h.dur.waitCh = waitCh
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	respCh := make(chan ReducerResponse, 1)
+	if err := h.exec.Submit(CallReducerCmd{
+		Request: ReducerRequest{
+			ReducerName: "InsertPlayer",
+			Source:      CallSourceExternal,
+		},
+		ResponseCh: respCh,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case resp := <-respCh:
+		if resp.Status != StatusCommitted {
+			t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("response waited for durability readiness channel")
+	}
+
+	h.subs.mu.Lock()
+	defer h.subs.mu.Unlock()
+	if len(h.subs.metas) != 1 {
+		t.Fatalf("metas=%d want 1", len(h.subs.metas))
+	}
+	if h.subs.metas[0].TxDurable != waitCh {
+		t.Fatal("TxDurable channel was not propagated while response remained non-durable")
+	}
+}
+
 // Story 5.3 AC: panic in EnqueueCommitted sets fatal and delivers an error
 // response (transaction already committed in memory but pipeline broke).
 func TestPostCommitPanicInDurabilitySetsFatal(t *testing.T) {

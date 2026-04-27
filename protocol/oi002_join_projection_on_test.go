@@ -76,43 +76,15 @@ func TestOI002JoinProjectionOn_SubscribeJoinOnResolutionPrecedesProjectionQualif
 }
 
 func TestOI002JoinProjectionOn_RightColumnListMatchesWildcardOrder(t *testing.T) {
-	b := schema.NewBuilder().SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "Orders",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
-			{Name: "product_id", Type: schema.KindUint32},
-		},
-		Indexes: []schema.IndexDefinition{{Name: "idx_orders_product_id", Columns: []string{"product_id"}}},
-	})
-	b.TableDef(schema.TableDefinition{
-		Name: "Inventory",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
-			{Name: "quantity", Type: schema.KindUint32},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
-	_, ordersReg, ok := eng.Registry().TableByName("Orders")
-	if !ok {
-		t.Fatal("Orders table missing from registry")
-	}
-	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
-	if !ok {
-		t.Fatal("Inventory table missing from registry")
-	}
-	sl := registrySchemaLookup{reg: eng.Registry()}
-	projectedTS := &schema.TableSchema{ID: inventoryReg.ID, Name: "Inventory", Columns: inventoryReg.Columns}
+	fixture := newOI002OrdersInventoryFixture(t, oi002OrdersInventoryOptions{OrdersProductIDIndex: true})
+	projectedTS := &schema.TableSchema{ID: fixture.inventory.ID, Name: "Inventory", Columns: fixture.inventory.Columns}
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
-		ordersReg.ID: {
+		fixture.orders.ID: {
 			{types.NewUint32(1), types.NewUint32(102)},
 			{types.NewUint32(2), types.NewUint32(100)},
 			{types.NewUint32(3), types.NewUint32(100)},
 		},
-		inventoryReg.ID: {
+		fixture.inventory.ID: {
 			{types.NewUint32(100), types.NewUint32(9)},
 			{types.NewUint32(102), types.NewUint32(3)},
 		},
@@ -125,7 +97,7 @@ func TestOI002JoinProjectionOn_RightColumnListMatchesWildcardOrder(t *testing.T)
 		handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
 			MessageID:   []byte{messageID},
 			QueryString: query,
-		}, stateAccess, sl)
+		}, stateAccess, fixture.lookup)
 		result := drainOneOff(t, conn)
 		if result.Error != nil {
 			t.Fatalf("%s error = %q, want nil", query, *result.Error)

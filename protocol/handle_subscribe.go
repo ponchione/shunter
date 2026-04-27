@@ -733,6 +733,9 @@ func joinSQLPredicatesWithAnd(left, right sql.Predicate) sql.Predicate {
 }
 
 func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string]relationSchema, caller *types.Identity, noRowsTable schema.TableID) (subscription.Predicate, error) {
+	if _, err := compileSQLPredicateForRelations(pred, relations, func(string) uint8 { return 0 }, caller); err != nil {
+		return nil, err
+	}
 	normalized := normalizeSQLPredicate(pred)
 	switch p := normalized.(type) {
 	case nil:

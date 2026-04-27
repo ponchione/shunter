@@ -88,7 +88,7 @@ Execution note:
 
 ### OI-002: Query and subscription behavior needs a Shunter-owned correctness pass
 
-Status: open
+Status: closed for current evidence
 Severity: high
 
 Summary:
@@ -99,14 +99,12 @@ Current contract:
 - SpacetimeDB behavior may guide tricky ordering/type decisions, but byte-for-byte parser error parity is not a product goal.
 
 Current open work:
-- Projection on joined rows has historical fragility. Current tests now cover many left/right/mixed/self projection and ordering cases; keep future work evidence-driven and do not reopen this solely from the old broad note without a fresh failing Shunter-visible scenario.
-- Validation ordering still matters where it changes user-visible outcomes. Keep ordering work only when it prevents wrong acceptance, wrong rows, misleading errors, or subscribe/one-off drift; do not chase message text for its own sake.
-- One-off and subscription tests duplicate large scenario blocks. Consolidate shared fixtures where the same syntax/typing contract is being tested.
+- None in the runtime model as of the latest OI-002 scout. Projection, validation-ordering, identifier lookup, join-WHERE policy, structured-query protocol cleanup, and clear duplicated fixture blocks are pinned by focused tests.
+- Future OI-002 work should be opened only from a fresh Shunter-visible failing example: wrong accepted/rejected query, wrong rows, misleading user-visible error, or one-off/subscription drift. Do not reopen parser-message parity or historical projection risk without new evidence.
 
 Execution note:
-- `NEXT_SESSION_HANDOFF.md` owns the immediate OI-002 startup path.
+- `NEXT_SESSION_HANDOFF.md` should not queue more OI-002 runtime-model work unless the next user supplies a fresh failing scenario.
 - Completed OI-002 slices belong in tests and git history, not this open-issues file. Do not reopen them without a fresh Shunter-visible failing example.
-- Choose the next OI-002 batch by a fresh scout organized around the current open-work bullets above.
 
 Why this matters:
 - the system can look architecturally right while still behaving differently under realistic subscription workloads

@@ -10,48 +10,17 @@ import (
 
 func TestOI002JoinProjectionCrossJoinMixedColumnsReturnsBothSides(t *testing.T) {
 	conn := testConnDirect(nil)
-	projectedSchema := &schema.TableSchema{
-		Name: "Inventory",
-		Columns: []schema.ColumnSchema{
-			{Index: 0, Name: "quantity", Type: schema.KindUint32},
-			{Index: 1, Name: "id", Type: schema.KindUint32},
-		},
-	}
-	b := schema.NewBuilder().SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "Orders",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
-			{Name: "product_id", Type: schema.KindUint32},
-		},
-	})
-	b.TableDef(schema.TableDefinition{
-		Name: "Inventory",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: schema.KindUint32, PrimaryKey: true},
-			{Name: "quantity", Type: schema.KindUint32},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
-	_, ordersReg, ok := eng.Registry().TableByName("Orders")
-	if !ok {
-		t.Fatal("Orders table missing from registry")
-	}
-	_, inventoryReg, ok := eng.Registry().TableByName("Inventory")
-	if !ok {
-		t.Fatal("Inventory table missing from registry")
-	}
-	projectedSchema.ID = inventoryReg.ID
-	sl := registrySchemaLookup{reg: eng.Registry()}
+	fixture := newOI002OrdersInventoryFixture(t, oi002OrdersInventoryOptions{})
+	projectedSchema := fixture.inventoryProjectionSchema(
+		schema.ColumnSchema{Index: 0, Name: "quantity", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "id", Type: schema.KindUint32},
+	)
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
-		ordersReg.ID: {
+		fixture.orders.ID: {
 			{types.NewUint32(1), types.NewUint32(100)},
 			{types.NewUint32(2), types.NewUint32(200)},
 		},
-		inventoryReg.ID: {
+		fixture.inventory.ID: {
 			{types.NewUint32(10), types.NewUint32(9)},
 			{types.NewUint32(11), types.NewUint32(3)},
 		},
@@ -62,7 +31,7 @@ func TestOI002JoinProjectionCrossJoinMixedColumnsReturnsBothSides(t *testing.T) 
 		MessageID:   []byte{0x91, 0x02},
 		QueryString: "SELECT product.quantity, o.id FROM Orders o JOIN Inventory product",
 	}
-	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, fixture.lookup)
 
 	result := drainOneOff(t, conn)
 	if result.Error != nil {
