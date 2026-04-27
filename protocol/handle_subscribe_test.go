@@ -452,7 +452,7 @@ func TestHandleSubscribeSingle_QualifiedColumnsSameTable(t *testing.T) {
 	}
 }
 
-func TestHandleSubscribeSingle_MixedCaseTableAndColumns(t *testing.T) {
+func TestHandleSubscribeSingle_MixedCaseTableRejectedByExactSQLPolicy(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
 		Name: "users",
@@ -478,36 +478,17 @@ func TestHandleSubscribeSingle_MixedCaseTableAndColumns(t *testing.T) {
 
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	select {
-	case frame := <-conn.OutboundCh:
-		t.Fatalf("unexpected message on OutboundCh: %x", frame)
-	default:
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
 	}
-
-	req := executor.getRegisterSetReq()
-	if req == nil {
-		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	se := decoded.(SubscriptionError)
+	want := "no such table: `USERS`. If the table exists, it may be marked private., executing: `SELECT * FROM USERS WHERE ID = 1 AND users.DISPLAY_NAME = 'alice'`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}
-	if len(req.Predicates) != 1 {
-		t.Fatalf("len(Predicates) = %d, want 1 query predicate", len(req.Predicates))
-	}
-	andPred, ok := req.Predicates[0].(subscription.And)
-	if !ok {
-		t.Fatalf("Predicates[0] type = %T, want And", req.Predicates[0])
-	}
-	first, ok := andPred.Left.(subscription.ColEq)
-	if !ok {
-		t.Fatalf("Predicates[0].Left type = %T, want ColEq", andPred.Left)
-	}
-	second, ok := andPred.Right.(subscription.ColEq)
-	if !ok {
-		t.Fatalf("Predicates[0].Right type = %T, want ColEq", andPred.Right)
-	}
-	if first.Column != 0 {
-		t.Fatalf("Predicates[0].Left.Column = %d, want 0", first.Column)
-	}
-	if second.Column != 1 {
-		t.Fatalf("Predicates[0].Right.Column = %d, want 1", second.Column)
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Fatal("executor should not receive RegisterSubscriptionSet for case-mismatched table")
 	}
 }
 

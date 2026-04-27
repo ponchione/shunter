@@ -279,6 +279,8 @@ v1 SQL subset supported by `query/sql.Parse`:
 - optional `WHERE` clause combining column-equality, column-range (`<`, `<=`, `>`, `>=`), and `AND` conjunctions
 - the outermost expression may be a single range/equality predicate or an `AND` tree
 
+SQL identifier lookup is byte-exact after quoted-identifier unescaping. Table names, column names, aliases, and qualifiers must match the declared schema or relation alias exactly; quoting preserves the written spelling and does not enable case-folded lookup. Once a relation alias is introduced, the base table name is no longer an in-scope qualifier for SQL WHERE or projection references.
+
 Normalization into the SPEC-004 model:
 - no `WHERE` clause → `AllRows(table_name)`
 - single equality → `ColEq(table_name, column, value)`
@@ -381,7 +383,7 @@ query_string: string    — SQL query per §7.1.1
 
 The executor runs a read-only query against `CommittedState.Snapshot()` directly. This read is not atomic with subscription registration because it does not register subscription state; it only returns a point-in-time result from committed state.
 
-Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset and is tracked under `TECH-DEBT.md::OI-002`. Current query-only widenings include `LIMIT`, column projections, `COUNT(*) [AS] alias`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject cross-join `WHERE` before executor registration.
+Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset. Current query-only widenings include `LIMIT`, column projections, `COUNT(*) [AS] alias`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject cross-join `WHERE` before executor registration. Inner-join `WHERE` field-vs-field comparisons and broader cross-join boolean expressions are rejected at compile time.
 
 ---
 

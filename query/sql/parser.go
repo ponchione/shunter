@@ -17,7 +17,12 @@
 //	qcol   = ident "." ident
 //	op     = "=" | "<" | ">" | "<=" | ">=" | "!=" | "<>"
 //	literal = integer | float | bool | string | hex-bytes
-//	ident   = [A-Za-z_][A-Za-z0-9_]*
+//	ident   = [A-Za-z_][A-Za-z0-9_]* | quoted-ident
+//	quoted-ident = '"' ( '""' | any-char-except-quote )+ '"'
+//
+// SQL identifiers are byte-exact after quoted-identifier unescaping. Quoting
+// preserves the written spelling and does not enable case-folded table,
+// column, alias, or qualifier lookup.
 //
 // Anything outside this grammar (projection other than "*", unsupported JOIN forms,
 // ORDER BY, aggregates other than `COUNT(*) [AS] alias`,
@@ -1415,16 +1420,7 @@ func matchesQualifier(candidate string, qualifiers []string) bool {
 			return true
 		}
 	}
-	matched := false
-	for _, qualifier := range qualifiers {
-		if strings.EqualFold(candidate, qualifier) {
-			if matched {
-				return false
-			}
-			matched = true
-		}
-	}
-	return matched
+	return false
 }
 
 var reservedWords = map[string]struct{}{
@@ -1459,16 +1455,5 @@ func resolveQualifier(qualifier string, lookup map[string]string) (string, bool)
 	if resolved, ok := lookup[qualifier]; ok {
 		return resolved, true
 	}
-	var resolved string
-	matched := false
-	for candidate, tableName := range lookup {
-		if strings.EqualFold(candidate, qualifier) {
-			if matched {
-				return "", false
-			}
-			resolved = tableName
-			matched = true
-		}
-	}
-	return resolved, matched
+	return "", false
 }

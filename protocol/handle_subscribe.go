@@ -45,6 +45,26 @@ type SchemaLookup interface {
 	schema.SchemaLookup
 }
 
+func lookupSQLTableExact(sl SchemaLookup, name string) (schema.TableID, *schema.TableSchema, bool) {
+	id, ts, ok := sl.TableByName(name)
+	if !ok || ts == nil || ts.Name != name {
+		return 0, nil, false
+	}
+	return id, ts, true
+}
+
+func lookupSQLColumnExact(ts *schema.TableSchema, name string) (*schema.ColumnSchema, bool) {
+	if ts == nil {
+		return nil, false
+	}
+	for i := range ts.Columns {
+		if ts.Columns[i].Name == name {
+			return &ts.Columns[i], true
+		}
+	}
+	return nil, false
+}
+
 // joinProjectsRight decides whether the SELECT target names the right side of
 // the join. For distinct-table joins a match against the right table's alias
 // (or its base name when unaliased) is sufficient. For self-joins the table
@@ -243,11 +263,11 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	normalizedPredicate := normalizeSQLPredicate(stmt.Predicate)
 	usesCallerIdentity := sqlPredicateUsesCallerIdentity(normalizedPredicate)
 	if stmt.Join != nil {
-		leftID, leftTS, ok := sl.TableByName(stmt.Join.LeftTable)
+		leftID, leftTS, ok := lookupSQLTableExact(sl, stmt.Join.LeftTable)
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.LeftTable)
 		}
-		rightID, rightTS, ok := sl.TableByName(stmt.Join.RightTable)
+		rightID, rightTS, ok := lookupSQLTableExact(sl, stmt.Join.RightTable)
 		if !ok {
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.RightTable)
 		}
@@ -324,8 +344,8 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			}
 		}
 		relations := map[string]relationSchema{
-			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
-			stmt.Join.RightTable: {id: rightID, ts: rightTS},
+			stmt.Join.LeftAlias:  {id: leftID, ts: leftTS},
+			stmt.Join.RightAlias: {id: rightID, ts: rightTS},
 		}
 		if stmt.Join.HasOn && stmt.Predicate != nil {
 			if _, err := compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTagForJoin(stmt, leftID == rightID), caller); err != nil {
@@ -354,10 +374,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			projectedID = rightID
 		}
 		aliasTag := aliasTagForJoin(stmt, leftID == rightID)
-		projectionColumns, err := compileJoinProjectionColumns(stmt.ProjectionColumns,
-			relationSchema{id: leftID, ts: leftTS}, stmt.Join.LeftTable,
-			relationSchema{id: rightID, ts: rightTS}, stmt.Join.RightTable,
-			aliasTag)
+		projectionColumns, err := compileJoinProjectionColumns(stmt.ProjectionColumns, relations, aliasTag)
 		if err != nil {
 			return compiledSQLQuery{}, err
 		}
@@ -432,7 +449,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			Limit:              limit,
 		}, nil
 	}
-	projectedID, ts, ok := sl.TableByName(stmt.ProjectedTable)
+	projectedID, ts, ok := lookupSQLTableExact(sl, stmt.ProjectedTable)
 	if !ok {
 		return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.ProjectedTable)
 	}
@@ -511,13 +528,13 @@ func resolveProjectedJoinRelation(stmt sql.Statement, leftID, rightID schema.Tab
 func resolveJoinOnColumn(ref sql.ColumnRef, stmt sql.Statement, leftTS, rightTS *schema.TableSchema) (string, *schema.ColumnSchema, error) {
 	switch {
 	case ref.Alias == stmt.Join.LeftAlias:
-		col, ok := leftTS.Column(ref.Column)
+		col, ok := lookupSQLColumnExact(leftTS, ref.Column)
 		if !ok {
 			return "", nil, sql.UnresolvedVarError{Name: ref.Column}
 		}
 		return "left", col, nil
 	case ref.Alias == stmt.Join.RightAlias:
-		col, ok := rightTS.Column(ref.Column)
+		col, ok := lookupSQLColumnExact(rightTS, ref.Column)
 		if !ok {
 			return "", nil, sql.UnresolvedVarError{Name: ref.Column}
 		}
@@ -568,9 +585,6 @@ func compileAggregateProjection(agg *sql.AggregateProjection) (*compiledSQLAggre
 }
 
 func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.TableID, leftTS *schema.TableSchema, rightID schema.TableID, rightTS *schema.TableSchema, caller *types.Identity) (subscription.Join, error) {
-	if leftID == rightID {
-		return subscription.Join{}, fmt.Errorf("self-join cross join WHERE column equality not supported")
-	}
 	cmp, filterPred, err := splitCrossJoinWherePredicate(stmt.Predicate)
 	if err != nil {
 		return subscription.Join{}, err
@@ -579,19 +593,35 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 		return subscription.Join{}, fmt.Errorf("cross join WHERE column comparisons only support '='")
 	}
 	leftRef, rightRef := cmp.Left, cmp.Right
-	if leftRef.Table == stmt.Join.RightTable && rightRef.Table == stmt.Join.LeftTable {
-		leftRef, rightRef = rightRef, leftRef
+	leftSide, leftRel, err := resolveJoinPredicateRelation(leftRef, stmt, relationSchema{id: leftID, ts: leftTS}, relationSchema{id: rightID, ts: rightTS})
+	if err != nil {
+		return subscription.Join{}, err
 	}
-	if leftRef.Table != stmt.Join.LeftTable || rightRef.Table != stmt.Join.RightTable {
+	rightSide, rightRel, err := resolveJoinPredicateRelation(rightRef, stmt, relationSchema{id: leftID, ts: leftTS}, relationSchema{id: rightID, ts: rightTS})
+	if err != nil {
+		return subscription.Join{}, err
+	}
+	if leftSide == rightSide {
 		return subscription.Join{}, fmt.Errorf("cross join WHERE column equality must compare left and right relations")
 	}
-	leftCol, ok := leftTS.Column(leftRef.Column)
+	if leftSide == "right" && rightSide == "left" {
+		leftRef, rightRef = rightRef, leftRef
+		leftRel, rightRel = rightRel, leftRel
+		leftSide, rightSide = rightSide, leftSide
+	}
+	if leftSide != "left" || rightSide != "right" {
+		return subscription.Join{}, fmt.Errorf("cross join WHERE column equality must compare left and right relations")
+	}
+	leftCol, ok := lookupSQLColumnExact(leftRel.ts, leftRef.Column)
 	if !ok {
 		return subscription.Join{}, sql.UnresolvedVarError{Name: leftRef.Column}
 	}
-	rightCol, ok := rightTS.Column(rightRef.Column)
+	rightCol, ok := lookupSQLColumnExact(rightRel.ts, rightRef.Column)
 	if !ok {
 		return subscription.Join{}, sql.UnresolvedVarError{Name: rightRef.Column}
+	}
+	if leftID == rightID {
+		return subscription.Join{}, fmt.Errorf("self-join cross join WHERE column equality not supported")
 	}
 	if leftCol.Type != rightCol.Type {
 		return subscription.Join{}, sql.UnexpectedTypeError{
@@ -608,8 +638,8 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 	var filter subscription.Predicate
 	if filterPred != nil {
 		filter, err = compileCrossJoinWhereLiteralFilter(filterPred, map[string]relationSchema{
-			stmt.Join.LeftTable:  {id: leftID, ts: leftTS},
-			stmt.Join.RightTable: {id: rightID, ts: rightTS},
+			stmt.Join.LeftAlias:  {id: leftID, ts: leftTS},
+			stmt.Join.RightAlias: {id: rightID, ts: rightTS},
 		}, caller)
 		if err != nil {
 			return subscription.Join{}, err
@@ -623,6 +653,21 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 		Filter:       filter,
 		ProjectRight: joinProjectsRight(stmt, false),
 	}, nil
+}
+
+func resolveJoinPredicateRelation(ref sql.ColumnRef, stmt sql.Statement, left relationSchema, right relationSchema) (string, relationSchema, error) {
+	switch ref.Alias {
+	case stmt.Join.LeftAlias:
+		return "left", left, nil
+	case stmt.Join.RightAlias:
+		return "right", right, nil
+	default:
+		name := ref.Alias
+		if name == "" {
+			name = ref.Table
+		}
+		return "", relationSchema{}, sql.UnresolvedVarError{Name: name}
+	}
 }
 
 func splitCrossJoinWherePredicate(pred sql.Predicate) (sql.ColumnComparisonPredicate, sql.Predicate, error) {
@@ -662,7 +707,7 @@ func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema
 	case sql.FalsePredicate:
 		return subscription.NoRows{Table: rel.id}, nil
 	case sql.ComparisonPredicate:
-		if p.Filter.Alias != "" && !strings.EqualFold(p.Filter.Alias, tableAlias) {
+		if p.Filter.Alias != "" && p.Filter.Alias != tableAlias {
 			return nil, sql.UnresolvedVarError{Name: p.Filter.Alias}
 		}
 		f := p.Filter
@@ -703,7 +748,7 @@ func compileProjectionColumns(projectedTable string, tableAlias string, columns 
 		if err := checkDuplicateProjectionName(col, seen); err != nil {
 			return nil, err
 		}
-		if col.SourceQualifier != "" && !strings.EqualFold(col.SourceQualifier, tableAlias) {
+		if col.SourceQualifier != "" && col.SourceQualifier != tableAlias {
 			return nil, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
 		}
 		compiledCol, err := compileProjectionColumn(col, tableID, ts, 0)
@@ -715,7 +760,7 @@ func compileProjectionColumns(projectedTable string, tableAlias string, columns 
 	return resolved, nil
 }
 
-func compileJoinProjectionColumns(columns []sql.ProjectionColumn, left relationSchema, leftTable string, right relationSchema, rightTable string, aliasTag func(string) uint8) ([]compiledSQLProjectionColumn, error) {
+func compileJoinProjectionColumns(columns []sql.ProjectionColumn, relations map[string]relationSchema, aliasTag func(string) uint8) ([]compiledSQLProjectionColumn, error) {
 	if len(columns) == 0 {
 		return nil, nil
 	}
@@ -725,13 +770,12 @@ func compileJoinProjectionColumns(columns []sql.ProjectionColumn, left relationS
 		if err := checkDuplicateProjectionName(col, seen); err != nil {
 			return nil, err
 		}
-		var rel relationSchema
-		switch {
-		case col.Table == leftTable:
-			rel = left
-		case col.Table == rightTable:
-			rel = right
-		default:
+		qualifier := col.SourceQualifier
+		if qualifier == "" {
+			qualifier = col.Table
+		}
+		rel, ok := relations[qualifier]
+		if !ok {
 			return nil, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
 		}
 		compiledCol, err := compileProjectionColumn(col, rel.id, rel.ts, aliasTag(col.SourceQualifier))
@@ -772,7 +816,7 @@ func projectionQualifierName(col sql.ProjectionColumn) string {
 }
 
 func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema, alias uint8) (compiledSQLProjectionColumn, error) {
-	tsCol, ok := ts.Column(col.Column)
+	tsCol, ok := lookupSQLColumnExact(ts, col.Column)
 	if !ok {
 		return compiledSQLProjectionColumn{}, sql.UnresolvedVarError{Name: col.Column}
 	}
@@ -828,6 +872,8 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 		return nil, nil
 	case sql.ComparisonPredicate:
 		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag, caller)
+	case sql.ColumnComparisonPredicate:
+		return nil, fmt.Errorf("join WHERE column comparisons not supported")
 	case sql.AndPredicate:
 		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag, caller)
 		if err != nil {
@@ -854,7 +900,11 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 }
 
 func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity) (subscription.Predicate, error) {
-	rel, ok := relations[f.Table]
+	relationKey := f.Table
+	if f.Alias != "" {
+		relationKey = f.Alias
+	}
+	rel, ok := relations[relationKey]
 	if !ok {
 		name := f.Alias
 		if name == "" {
@@ -862,7 +912,7 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 		}
 		return nil, sql.UnresolvedVarError{Name: name}
 	}
-	col, ok := rel.ts.Column(f.Column)
+	col, ok := lookupSQLColumnExact(rel.ts, f.Column)
 	if !ok {
 		return nil, sql.UnresolvedVarError{Name: f.Column}
 	}

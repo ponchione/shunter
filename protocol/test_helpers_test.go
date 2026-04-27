@@ -65,6 +65,25 @@ func drainServerMsgEventually(t *testing.T, conn *Conn) (uint8, any) {
 	}
 }
 
+func requireSubscriptionError(t *testing.T, conn *Conn, requestID, queryID uint32, want string) SubscriptionError {
+	t.Helper()
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	if se.RequestID == nil || *se.RequestID != requestID {
+		t.Fatalf("RequestID = %v, want %d", se.RequestID, requestID)
+	}
+	if se.QueryID == nil || *se.QueryID != queryID {
+		t.Fatalf("QueryID = %v, want %d", se.QueryID, queryID)
+	}
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	return se
+}
+
 func overlongSQLQuery() string {
 	const maxSQLLength = 50_000
 	const base = "SELECT * FROM users WHERE id = 1"
