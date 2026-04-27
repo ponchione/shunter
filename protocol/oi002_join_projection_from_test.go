@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestOI002JoinProjectionFromScout_RightTableResolutionPrecedesProjectionQualifier(t *testing.T) {
+func TestOI002JoinProjectionFrom_RightTableResolutionPrecedesProjectionQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
@@ -33,7 +33,7 @@ func TestOI002JoinProjectionFromScout_RightTableResolutionPrecedesProjectionQual
 	}
 }
 
-func TestOI002JoinProjectionFromScout_LeftTableResolutionPrecedesProjectionQualifier(t *testing.T) {
+func TestOI002JoinProjectionFrom_LeftTableResolutionPrecedesProjectionQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("s", 2,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
@@ -58,7 +58,7 @@ func TestOI002JoinProjectionFromScout_LeftTableResolutionPrecedesProjectionQuali
 	}
 }
 
-func TestOI002JoinProjectionFromScout_SubscribeRightTableResolutionPrecedesProjectionQualifier(t *testing.T) {
+func TestOI002JoinProjectionFrom_SubscribeRightTableResolutionPrecedesProjectionQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -84,7 +84,7 @@ func TestOI002JoinProjectionFromScout_SubscribeRightTableResolutionPrecedesProje
 	}
 }
 
-func TestOI002JoinProjectionFromScout_SubscribeLeftTableResolutionPrecedesProjectionQualifier(t *testing.T) {
+func TestOI002JoinProjectionFrom_SubscribeLeftTableResolutionPrecedesProjectionQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("s", 2,

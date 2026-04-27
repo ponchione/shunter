@@ -93,7 +93,7 @@ Severity: high
 
 Summary:
 Current contract:
-- Shunter's v1 SQL surface is intentionally narrow: single-table equality/range predicates with `AND`, plus the subset of joins and one-off projections already documented in SPEC-005.
+- Shunter's v1 SQL surface is intentionally narrow: single-table equality/range predicates with `AND` / `OR`, plus the subset of joins and one-off projections already documented in SPEC-005.
 - One-off reads and subscriptions should agree anywhere they share syntax and type semantics.
 - Observable behavior should be stable for Shunter clients: accepted queries should return correct rows, rejected queries should fail before registration/execution, and errors should be diagnosable.
 - SpacetimeDB behavior may guide tricky ordering/type decisions, but byte-for-byte parser error parity is not a product goal.
@@ -101,17 +101,17 @@ Current contract:
 Current open work:
 - Projection on joined rows has historical fragility. Current tests now cover many left/right/mixed/self projection and ordering cases; keep future work evidence-driven and do not reopen this solely from the old broad note without a fresh failing Shunter-visible scenario.
 - Validation ordering still matters where it changes user-visible outcomes. Keep ordering work only when it prevents wrong acceptance, wrong rows, misleading errors, or subscribe/one-off drift; do not chase message text for its own sake.
-- Legacy structured-query remnants remain alongside the SQL path: `Query` / `Predicate` wire types and exported structured-predicate normalization helpers make the live query model harder to reason about. The unused `compileQuery`, `parseQueryString`, and one-off matcher helpers have been removed.
 - One-off and subscription tests duplicate large scenario blocks. Consolidate shared fixtures where the same syntax/typing contract is being tested.
 
 Closed findings (2026-04-27):
 - SQL identifier lookup is now byte-exact for table names, column names, aliases, and qualifiers after quoted-identifier unescaping, including rejecting base-table qualifiers once a relation alias is introduced in join WHERE/projection scopes. The SQL compiler uses exact local table/column lookup helpers while `schema.SchemaRegistry.TableByName` and `TableSchema.Column` keep their non-SQL case-folding behavior. Pinned across OneOff, SubscribeSingle, and SubscribeMulti by `protocol/oi002_identifier_policy_test.go`.
 - Case-distinct projection columns are now routed byte-exactly; `SELECT u32, U32 FROM t` projects distinct physical columns when the schema declares both names. A case-mismatched single declared column rejects as `Unresolved::Var`.
 - Join WHERE policy is explicit: OneOff cross-join WHERE remains query-only for the documented equality and equality-plus-one-literal-filter shapes, SubscribeSingle/Multi reject cross-join WHERE before registration, and inner-join WHERE field-vs-field comparisons reject with `join WHERE column comparisons not supported`. Pinned by `protocol/oi002_join_where_policy_test.go` plus the existing cross-join tests.
+- Legacy structured-query remnants have been removed from the protocol package. `Query` / `Predicate` wire structs and `NormalizePredicates` no longer exist; the only client query wire path is SQL `QueryString` / `QueryStrings`.
 
 Closed context to keep out of startup work:
-- The literal source-text, literal-keyword identifier leak, case-distinct relation-alias routing, ambiguous case-folded table lookup rejection, exact SQL identifier policy, join-WHERE field-vs-field rejection, cross-join WHERE policy pins, dead eval memoization cleanup, dead structured-query helper cleanup, typed error, LIMIT, JOIN ON ordering, boolean-constant masking, join-keyword, unindexed-subscription-join, and missing-field text slices closed on 2026-04-25 / 2026-04-27 and are pinned by tests or compile-time removal. Do not repeat that history here or reopen it without a fresh Shunter-visible regression.
-- The 2026-04-27 scout also found substantial pins around explicit join projection routing and ordering (`TestHandleOneOffQuery_ParityJoinColumnProjection*`, `TestHandleOneOffQuery_ParitySelfJoinColumnProjection*`, and `protocol/oi002_join_projection_*_scout_tmp_test.go`). Do not reopen the old "wrong relation/project twice" concern without a new failing example.
+- The literal source-text, literal-keyword identifier leak, case-distinct relation-alias routing, ambiguous case-folded table lookup rejection, exact SQL identifier policy, join-WHERE field-vs-field rejection, cross-join WHERE policy pins, dead eval memoization cleanup, dead structured-query helper cleanup, dead structured-query wire type cleanup, typed error, LIMIT, JOIN ON ordering, boolean-constant masking, join-keyword, unindexed-subscription-join, and missing-field text slices closed on 2026-04-25 / 2026-04-27 and are pinned by tests or compile-time removal. Do not repeat that history here or reopen it without a fresh Shunter-visible regression.
+- The 2026-04-27 scout also found substantial pins around explicit join projection routing and ordering (`TestHandleOneOffQuery_ParityJoinColumnProjection*`, `TestHandleOneOffQuery_ParitySelfJoinColumnProjection*`, and `protocol/oi002_join_projection_*_test.go`). Do not reopen the old "wrong relation/project twice" concern without a new failing example.
 - Same-connection reused subscription-hash initial-snapshot elision is closed and pinned by `subscription/register_set_test.go::TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate` and `TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot`.
 - `SubscriptionError.table_id` on request-origin error paths now emits `None`; this is pinned by `executor/protocol_inbox_adapter_test.go::TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID`.
 

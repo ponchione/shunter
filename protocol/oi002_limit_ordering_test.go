@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestOI002LimitScout_MissingTablePrecedesInvalidLimitLiteral(t *testing.T) {
+func TestOI002LimitOrdering_MissingTablePrecedesInvalidLimitLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -33,7 +33,7 @@ func TestOI002LimitScout_MissingTablePrecedesInvalidLimitLiteral(t *testing.T) {
 	}
 }
 
-func TestOI002LimitScout_ProjectionErrorPrecedesInvalidLimitLiteral(t *testing.T) {
+func TestOI002LimitOrdering_ProjectionErrorPrecedesInvalidLimitLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -58,7 +58,7 @@ func TestOI002LimitScout_ProjectionErrorPrecedesInvalidLimitLiteral(t *testing.T
 	}
 }
 
-func TestOI002LimitScout_WhereErrorPrecedesInvalidLimitLiteral(t *testing.T) {
+func TestOI002LimitOrdering_WhereErrorPrecedesInvalidLimitLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -83,7 +83,7 @@ func TestOI002LimitScout_WhereErrorPrecedesInvalidLimitLiteral(t *testing.T) {
 	}
 }
 
-func TestOI002LimitScout_JoinOnErrorPrecedesInvalidLimitLiteral(t *testing.T) {
+func TestOI002LimitOrdering_JoinOnErrorPrecedesInvalidLimitLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -116,7 +116,7 @@ func TestOI002LimitScout_JoinOnErrorPrecedesInvalidLimitLiteral(t *testing.T) {
 	}
 }
 
-func TestOI002LimitScout_LeadingPlusLimitRejectedByReferenceParser(t *testing.T) {
+func TestOI002LimitOrdering_LeadingPlusLimitRejectedByReferenceParser(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -143,7 +143,7 @@ func TestOI002LimitScout_LeadingPlusLimitRejectedByReferenceParser(t *testing.T)
 	}
 }
 
-func TestOI002LimitScout_NegativeLimitRejectedByReferenceParser(t *testing.T) {
+func TestOI002LimitOrdering_NegativeLimitRejectedByReferenceParser(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -170,7 +170,7 @@ func TestOI002LimitScout_NegativeLimitRejectedByReferenceParser(t *testing.T) {
 	}
 }
 
-func TestOI002LimitScout_SignedLimitRejectedBeforeMissingTable(t *testing.T) {
+func TestOI002LimitOrdering_SignedLimitRejectedBeforeMissingTable(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -195,7 +195,7 @@ func TestOI002LimitScout_SignedLimitRejectedBeforeMissingTable(t *testing.T) {
 	}
 }
 
-func TestOI002LimitScout_NonNumericLimitRejectedBeforeProjection(t *testing.T) {
+func TestOI002LimitOrdering_NonNumericLimitRejectedBeforeProjection(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},

@@ -9,7 +9,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestOI002Scout_CaseDistinctQuotedAliasesDoNotCollide pins the reference
+// TestOI002CaseAlias_CaseDistinctQuotedAliasesDoNotCollide pins the reference
 // `SqlIdent` byte-equal alias semantics: a join whose two relations are
 // aliased with case-distinct identifiers (`"R"` and `r`) must NOT be
 // rejected as a `DuplicateName` collision. Reference path: `type_from`
@@ -19,12 +19,12 @@ import (
 // collision check exact so case-distinct aliases cannot regress into a
 // `DuplicateName` rejection.
 //
-// Scope: this scout pins ONLY the collision-detection seam. Downstream
+// Scope: this regression pins ONLY the collision-detection seam. Downstream
 // parser/protocol alias routing for the same case-distinct shape is pinned by
 // `TestParseCaseDistinctRelationAliasesResolveIndependently`,
 // `TestHandleOneOffQuery_CaseDistinctRelationAliasesRouteJoinSides`, and
 // `TestHandleSubscribeSingle_CaseDistinctRelationAliasesRouteJoinSides`.
-func TestOI002Scout_CaseDistinctQuotedAliasesDoNotCollide(t *testing.T) {
+func TestOI002CaseAlias_CaseDistinctQuotedAliasesDoNotCollide(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{

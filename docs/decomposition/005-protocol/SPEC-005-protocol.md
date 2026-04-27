@@ -274,10 +274,11 @@ The current v1 wire carries a **SQL query string** rather than the older structu
 query_string : string    — SQL SELECT against exactly one table; single-row result set per match
 ```
 
-v1 SQL subset supported by `query/sql.Parse`:
-- `SELECT <cols> FROM <table>`
-- optional `WHERE` clause combining column-equality, column-range (`<`, `<=`, `>`, `>=`), and `AND` conjunctions
-- the outermost expression may be a single range/equality predicate or an `AND` tree
+v1 SQL subset supported by `query/sql.Parse` for subscriptions:
+- `SELECT * FROM <table>` or `SELECT <qualifier>.* FROM <table> [alias] [JOIN <table> [alias] [ON <qcol> = <qcol>]]`
+- optional single-table `WHERE` clause combining column-equality, column-range (`<`, `<=`, `>`, `>=`), `AND`, and `OR`
+- optional join `WHERE` literal filters for `INNER JOIN ... ON ...`; cross-join `WHERE` is rejected on the subscription path
+- the outermost single-table expression may be a single range/equality predicate, an `AND` tree, or an `OR` tree
 
 SQL identifier lookup is byte-exact after quoted-identifier unescaping. Table names, column names, aliases, and qualifiers must match the declared schema or relation alias exactly; quoting preserves the written spelling and does not enable case-folded lookup. Once a relation alias is introduced, the base table name is no longer an in-scope qualifier for SQL WHERE or projection references.
 
@@ -286,22 +287,24 @@ Normalization into the SPEC-004 model:
 - single equality → `ColEq(table_name, column, value)`
 - single range → `ColLt` / `ColLe` / `ColGt` / `ColGe`
 - `AND` trees are left-associative, mirroring the pre-Slice-1 structured normalization (`[P1 AND P2 AND P3]` → `And{Left: And{Left: P1, Right: P2}, Right: P3}`)
+- `OR` trees lower into SPEC-004 `Or` predicates
+- indexed `INNER JOIN ... ON left.col = right.col` → SPEC-004 `Join`; unindexed subscription joins fail before registration
+- two-relation `JOIN` without `ON` and without `WHERE` → SPEC-004 `CrossJoin`
 
 Still rejected in protocol v1 (each as `SubscriptionError`):
-- `OR` expressions in the top-level subscription predicate (evaluator has no placement tier; Tier-3 fallback is safe but intentionally not exposed via Subscribe)
-- joins / references to more than one table
-- aggregates, projections other than `SELECT *`, ordering, limits
+- cross-join `WHERE`, inner-join `WHERE` field-vs-field comparisons, and joins with more than two relations
+- aggregates, column-list projections, ordering, limits
 
 `SubscribeSingle` validation MUST fail with `SubscriptionError` if:
 - `query_string` fails to parse as SQL
-- `table_name` (after parse) does not exist
-- any referenced column does not exist on that table
+- any referenced table does not exist
+- any referenced column does not exist on its table
 - the same `query_id` is already active **or pending** on the connection
 - the expression shape is not part of the v1 subset
 
 **Design decision — SQL in v1.** The structured-predicate shape was rejected once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and gives Shunter clients one query language across subscribe and one-off reads. The original structured-predicate design is now superseded by the SQL wire surface. See `TECH-DEBT.md::OI-002` and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for current status.
 
-**Design decision — still single-table in v1.** Equality / range predicates on one table remain the common hot-path subscription shape and map cleanly onto SPEC-004's pruning indexes. Range and join subscriptions remain part of the evaluator's internal model, but joins are still not exposed on the public wire protocol in v1.
+**Design decision — bounded joins in v1.** Equality / range predicates on one table remain the common hot-path subscription shape and map cleanly onto SPEC-004's pruning indexes. v1 also exposes the bounded two-relation join subset above because it lowers directly into the existing SPEC-004 `Join` / `CrossJoin` predicate model. Broader relational SQL remains out of scope.
 
 #### 7.1b SubscribeMulti
 
@@ -830,7 +833,7 @@ Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names
 
 ## 15. Open Questions
 
-1. **Query language evolution.** *Closed for v1.* v1 carries SQL query strings on `SubscribeSingle` / `SubscribeMulti` / `OneOffQuery` (§7.1.1). The supported SQL subset is single-table equality/range predicates with `AND`; OR/join/aggregation remain rejected. Further language widening should be driven by Shunter client needs.
+1. **Query language evolution.** *Closed for v1.* v1 carries SQL query strings on `SubscribeSingle` / `SubscribeMulti` / `OneOffQuery` (§7.1.1). The supported subscription SQL subset is single-table equality/range predicates with `AND` / `OR`, plus bounded two-relation joins. Aggregates, column-list subscription projections, ordering, limits, and broader relational SQL remain rejected. Further language widening should be driven by Shunter client needs.
 
 2. **Gap-fill / resume protocol.** v1 has no commit-id wire field on post-commit envelopes and no way to request missed deltas. Clients must re-subscribe and accept a full `SubscribeSingleApplied` / `SubscribeMultiApplied`. Should the server support `resume_from_tx_id` for short disconnections? This requires the server to retain a short delta buffer and expose a commit-id. Deferred to v2.
 

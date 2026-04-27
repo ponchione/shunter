@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestOI002JoinProjectionDuplicateScout_DuplicateAliasPrecedesProjectionQualifier(t *testing.T) {
+func TestOI002JoinProjectionOn_JoinOnResolutionPrecedesProjectionQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -24,15 +24,15 @@ func TestOI002JoinProjectionDuplicateScout_DuplicateAliasPrecedesProjectionQuali
 	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
 	stateAccess := &mockStateAccess{snap: snap}
 
-	const sqlText = "SELECT x.* FROM t AS dup JOIN s AS dup ON dup.id = dup.id"
+	const sqlText = "SELECT x.* FROM t JOIN s ON t.missing = s.id"
 	msg := &OneOffQueryMsg{
-		MessageID:   []byte{0xF2},
+		MessageID:   []byte{0xF3},
 		QueryString: sqlText,
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
 	result := drainOneOff(t, conn)
-	const want = "Duplicate name `dup`"
+	const want = "`missing` is not in scope"
 	if result.Error == nil || *result.Error != want {
 		if result.Error == nil {
 			t.Fatalf("Error = nil, want %q", want)
@@ -41,7 +41,7 @@ func TestOI002JoinProjectionDuplicateScout_DuplicateAliasPrecedesProjectionQuali
 	}
 }
 
-func TestOI002JoinProjectionDuplicateScout_SubscribeDuplicateAliasPrecedesProjectionQualifier(t *testing.T) {
+func TestOI002JoinProjectionOn_SubscribeJoinOnResolutionPrecedesProjectionQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := &mockSchemaLookup{tables: map[string]struct {
@@ -56,10 +56,10 @@ func TestOI002JoinProjectionDuplicateScout_SubscribeDuplicateAliasPrecedesProjec
 		}}},
 	}}
 
-	const sqlText = "SELECT x.* FROM t AS dup JOIN s AS dup ON dup.id = dup.id"
+	const sqlText = "SELECT x.* FROM t JOIN s ON t.missing = s.id"
 	msg := &SubscribeSingleMsg{
-		RequestID:   734,
-		QueryID:     735,
+		RequestID:   736,
+		QueryID:     737,
 		QueryString: sqlText,
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
@@ -69,7 +69,7 @@ func TestOI002JoinProjectionDuplicateScout_SubscribeDuplicateAliasPrecedesProjec
 		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
 	}
 	se := decoded.(SubscriptionError)
-	want := "Duplicate name `dup`, executing: `" + sqlText + "`"
+	want := "`missing` is not in scope, executing: `" + sqlText + "`"
 	if se.Error != want {
 		t.Fatalf("Error = %q, want %q", se.Error, want)
 	}

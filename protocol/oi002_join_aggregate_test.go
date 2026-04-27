@@ -7,7 +7,7 @@ import (
 	"github.com/ponchione/shunter/schema"
 )
 
-func TestOI002JoinAggregateScout_SubscribeJoinAggregateGuardYieldsToWhereResolution(t *testing.T) {
+func TestOI002JoinAggregate_SubscribeJoinAggregateGuardYieldsToWhereResolution(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := &mockSchemaLookup{tables: map[string]struct {

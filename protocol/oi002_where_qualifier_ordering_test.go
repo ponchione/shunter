@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestOI002WhereQualifierFromScout_FromResolutionPrecedesWhereQualifier(t *testing.T) {
+func TestOI002WhereQualifierOrdering_FromResolutionPrecedesWhereQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
@@ -33,7 +33,7 @@ func TestOI002WhereQualifierFromScout_FromResolutionPrecedesWhereQualifier(t *te
 	}
 }
 
-func TestOI002WhereQualifierFromScout_SubscribeFromResolutionPrecedesWhereQualifier(t *testing.T) {
+func TestOI002WhereQualifierOrdering_SubscribeFromResolutionPrecedesWhereQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -59,7 +59,7 @@ func TestOI002WhereQualifierFromScout_SubscribeFromResolutionPrecedesWhereQualif
 	}
 }
 
-func TestOI002WhereQualifierFromScout_JoinRightTableResolutionPrecedesWhereQualifier(t *testing.T) {
+func TestOI002WhereQualifierOrdering_JoinRightTableResolutionPrecedesWhereQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},
@@ -84,7 +84,7 @@ func TestOI002WhereQualifierFromScout_JoinRightTableResolutionPrecedesWhereQuali
 	}
 }
 
-func TestOI002WhereQualifierFromScout_SubscribeJoinRightTableResolutionPrecedesWhereQualifier(t *testing.T) {
+func TestOI002WhereQualifierOrdering_SubscribeJoinRightTableResolutionPrecedesWhereQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -110,7 +110,7 @@ func TestOI002WhereQualifierFromScout_SubscribeJoinRightTableResolutionPrecedesW
 	}
 }
 
-func TestOI002WhereQualifierFromScout_JoinOnResolutionPrecedesWhereQualifier(t *testing.T) {
+func TestOI002WhereQualifierOrdering_JoinOnResolutionPrecedesWhereQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -143,7 +143,7 @@ func TestOI002WhereQualifierFromScout_JoinOnResolutionPrecedesWhereQualifier(t *
 	}
 }
 
-func TestOI002WhereQualifierFromScout_SubscribeJoinOnResolutionPrecedesWhereQualifier(t *testing.T) {
+func TestOI002WhereQualifierOrdering_SubscribeJoinOnResolutionPrecedesWhereQualifier(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := &mockSchemaLookup{tables: map[string]struct {
