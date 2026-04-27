@@ -1417,6 +1417,71 @@ func TestHandleOneOffQuery_CrossJoinWhereColumnEqualityAndLiteralFilterReturnsPr
 	}
 }
 
+func TestHandleOneOffQuery_JoinFilterCrossSideOrDoesNotPassEveryPair(t *testing.T) {
+	conn := testConnDirect(nil)
+	b := schema.NewBuilder().SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "t",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	b.TableDef(schema.TableDefinition{
+		Name: "s",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint32},
+			{Name: "u32", Type: schema.KindUint32},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, tReg, ok := eng.Registry().TableByName("t")
+	if !ok {
+		t.Fatal("t table missing from registry")
+	}
+	_, sReg, ok := eng.Registry().TableByName("s")
+	if !ok {
+		t.Fatal("s table missing from registry")
+	}
+	tTS := &schema.TableSchema{ID: tReg.ID, Name: "t", Columns: tReg.Columns}
+	sl := registrySchemaLookup{reg: eng.Registry()}
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			tReg.ID: {
+				{types.NewUint32(1), types.NewUint32(10)},
+				{types.NewUint32(2), types.NewUint32(10)},
+				{types.NewUint32(3), types.NewUint32(30)},
+			},
+			sReg.ID: {
+				{types.NewUint32(20), types.NewUint32(10)},
+				{types.NewUint32(30), types.NewUint32(30)},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x7e},
+		QueryString: "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = 1 OR s.id = 30",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), tTS)
+	wantRows := []types.ProductValue{
+		{types.NewUint32(1), types.NewUint32(10)},
+		{types.NewUint32(3), types.NewUint32(30)},
+	}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
 func TestHandleOneOffQuery_JoinProjectionOnLeftTable(t *testing.T) {
 	conn := testConnDirect(nil)
 	ordersTS := &schema.TableSchema{

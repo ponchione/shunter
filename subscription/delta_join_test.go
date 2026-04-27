@@ -123,6 +123,40 @@ func TestJoinWithFilterExcludesNonMatching(t *testing.T) {
 	}
 }
 
+func TestJoinWithCrossSideOrFilterEvaluatesAgainstJoinedPair(t *testing.T) {
+	committed := newJoinCommitted()
+	committed.addRow(joinRHS, 10, types.ProductValue{types.NewUint64(100), types.NewUint64(2)})
+	committed.addRow(joinRHS, 11, types.ProductValue{types.NewUint64(200), types.NewUint64(3)})
+	cs := joinChangeset(
+		joinLHS,
+		[]types.ProductValue{
+			{types.NewUint64(2), types.NewString("no-match")},
+			{types.NewUint64(3), types.NewString("rhs-match")},
+		},
+		nil,
+		joinRHS, nil, nil,
+	)
+	dv := NewDeltaView(committed, cs, map[TableID][]ColID{joinLHS: {joinLHSCol}, joinRHS: {joinRHSCol}})
+	join := &Join{
+		Left: joinLHS, Right: joinRHS, LeftCol: joinLHSCol, RightCol: joinRHSCol,
+		Filter: Or{
+			Left:  ColEq{Table: joinLHS, Column: joinLHSCol, Value: types.NewUint64(1)},
+			Right: ColEq{Table: joinRHS, Column: 0, Value: types.NewUint64(200)},
+		},
+	}
+	f := EvalJoinDeltaFragments(dv, join, newJoinResolver())
+	if len(f.Inserts[0]) != 1 {
+		t.Fatalf("I1 len = %d, want 1", len(f.Inserts[0]))
+	}
+	want := types.ProductValue{
+		types.NewUint64(3), types.NewString("rhs-match"),
+		types.NewUint64(200), types.NewUint64(3),
+	}
+	if !f.Inserts[0][0].Equal(want) {
+		t.Fatalf("I1 row = %v, want %v", f.Inserts[0][0], want)
+	}
+}
+
 func TestJoinFragmentEqualsFullReEvaluation(t *testing.T) {
 	// Baseline: reconcile the 4+4 fragments via ReconcileJoinDelta and
 	// compare the resulting inserts/deletes to a full re-evaluation of the

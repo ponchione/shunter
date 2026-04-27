@@ -96,6 +96,76 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 	return false
 }
 
+// MatchJoinPair evaluates a join filter against both relation rows at once.
+// Single-side MatchRowSide intentionally treats leaves from the other table as
+// pass-through so an AND filter can be evaluated side-by-side. That shortcut is
+// not valid for OR: `(left.x = 1 OR right.y = 2)` must be evaluated as a
+// boolean expression over the joined pair, not as two independent row filters.
+func MatchJoinPair(pred Predicate, leftTable TableID, leftAlias uint8, leftRow types.ProductValue, rightTable TableID, rightAlias uint8, rightRow types.ProductValue) bool {
+	if pred == nil {
+		return true
+	}
+	switch p := pred.(type) {
+	case ColEq:
+		row, ok := joinPredicateRow(p.Table, p.Alias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
+		if !ok || int(p.Column) >= len(row) {
+			return false
+		}
+		return row[p.Column].Equal(p.Value)
+	case ColNe:
+		row, ok := joinPredicateRow(p.Table, p.Alias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
+		if !ok || int(p.Column) >= len(row) {
+			return false
+		}
+		return !row[p.Column].Equal(p.Value)
+	case ColRange:
+		row, ok := joinPredicateRow(p.Table, p.Alias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
+		if !ok || int(p.Column) >= len(row) {
+			return false
+		}
+		return matchBounds(row[p.Column], p.Lower, p.Upper)
+	case And:
+		return MatchJoinPair(p.Left, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow) &&
+			MatchJoinPair(p.Right, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
+	case Or:
+		return MatchJoinPair(p.Left, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow) ||
+			MatchJoinPair(p.Right, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
+	case AllRows:
+		return true
+	case NoRows:
+		return false
+	case Join:
+		return true
+	case CrossJoin:
+		return true
+	}
+	return false
+}
+
+func joinPredicateRow(table TableID, alias uint8, leftTable TableID, leftAlias uint8, leftRow types.ProductValue, rightTable TableID, rightAlias uint8, rightRow types.ProductValue) (types.ProductValue, bool) {
+	if leftTable == rightTable {
+		if table != leftTable {
+			return nil, false
+		}
+		switch alias {
+		case leftAlias:
+			return leftRow, true
+		case rightAlias:
+			return rightRow, true
+		default:
+			return nil, false
+		}
+	}
+	switch table {
+	case leftTable:
+		return leftRow, true
+	case rightTable:
+		return rightRow, true
+	default:
+		return nil, false
+	}
+}
+
 // matchBounds reports whether v falls within [lower, upper].
 func matchBounds(v Value, lower, upper Bound) bool {
 	if !lower.Unbounded {

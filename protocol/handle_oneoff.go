@@ -196,8 +196,7 @@ func evaluateOneOffJoin(view store.CommittedReadView, projectedTable schema.Tabl
 				} else {
 					leftRow, rightRow = otherRow, projectedRow
 				}
-				if !subscription.MatchRowSide(join.Filter, join.Left, join.LeftAlias, leftRow) ||
-					!subscription.MatchRowSide(join.Filter, join.Right, join.RightAlias, rightRow) {
+				if !subscription.MatchJoinPair(join.Filter, join.Left, join.LeftAlias, leftRow, join.Right, join.RightAlias, rightRow) {
 					continue
 				}
 			}
@@ -216,11 +215,8 @@ func evaluateOneOffJoinProjection(view store.CommittedReadView, join subscriptio
 		if !leftRow[join.LeftCol].Equal(rightRow[join.RightCol]) {
 			return
 		}
-		if join.Filter != nil {
-			if !subscription.MatchRowSide(join.Filter, join.Left, join.LeftAlias, leftRow) ||
-				!subscription.MatchRowSide(join.Filter, join.Right, join.RightAlias, rightRow) {
-				return
-			}
+		if join.Filter != nil && !subscription.MatchJoinPair(join.Filter, join.Left, join.LeftAlias, leftRow, join.Right, join.RightAlias, rightRow) {
+			return
 		}
 		rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, columns))
 	}
