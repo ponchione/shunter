@@ -646,6 +646,90 @@ func TestEvalJoinSubscriptionPreservesProjectedRightDeltaOrder(t *testing.T) {
 	}
 }
 
+func TestEvalJoinSubscriptionLeftInsertWhenOnlyLeftJoinColumnIndexed(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {
+			{types.NewUint64(10), types.NewUint64(7)},
+			{types.NewUint64(11), types.NewUint64(7)},
+		},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 24, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(1), types.NewUint64(7)}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "lhs",
+			Inserts:   []types.ProductValue{inserted},
+		},
+	}}
+	committed.addRow(1, 1, inserted)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	want := []types.ProductValue{inserted, inserted}
+	assertRowsEqual(t, updates[0].Inserts, want)
+	if len(updates[0].Deletes) != 0 {
+		t.Fatalf("deletes = %v, want none", updates[0].Deletes)
+	}
+}
+
+func TestEvalJoinSubscriptionRightInsertWhenOnlyRightJoinColumnIndexed(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewUint64(7)},
+			{types.NewUint64(2), types.NewUint64(7)},
+		},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1, ProjectRight: true}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 25, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(10), types.NewUint64(7)}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		2: {
+			TableID:   2,
+			TableName: "rhs",
+			Inserts:   []types.ProductValue{inserted},
+		},
+	}}
+	committed.addRow(2, 1, inserted)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	want := []types.ProductValue{inserted, inserted}
+	assertRowsEqual(t, updates[0].Inserts, want)
+	if len(updates[0].Deletes) != 0 {
+		t.Fatalf("deletes = %v, want none", updates[0].Deletes)
+	}
+}
+
 func TestEvalJoinSubscriptionProjectedLeftCancelsJoinedPairChurn(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)

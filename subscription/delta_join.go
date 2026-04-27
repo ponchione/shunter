@@ -72,20 +72,33 @@ func joinDriveCommitted(
 	if len(driving) == 0 || resolver == nil || dv.committed == nil {
 		return nil
 	}
-	rhsIdx, ok := resolver.IndexIDForColumn(rhsTable, rhsCol)
-	if !ok {
-		return nil
+	if rhsIdx, ok := resolver.IndexIDForColumn(rhsTable, rhsCol); ok {
+		var out []types.ProductValue
+		for _, lrow := range driving {
+			if int(lhsCol) >= len(lrow) {
+				continue
+			}
+			key := store.NewIndexKey(lrow[lhsCol])
+			rowIDs := dv.committed.IndexSeek(rhsTable, rhsIdx, key)
+			for _, rid := range rowIDs {
+				rrow, ok := dv.committed.GetRow(rhsTable, rid)
+				if !ok {
+					continue
+				}
+				if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
+					out = append(out, joined)
+				}
+			}
+		}
+		return out
 	}
 	var out []types.ProductValue
 	for _, lrow := range driving {
 		if int(lhsCol) >= len(lrow) {
 			continue
 		}
-		key := store.NewIndexKey(lrow[lhsCol])
-		rowIDs := dv.committed.IndexSeek(rhsTable, rhsIdx, key)
-		for _, rid := range rowIDs {
-			rrow, ok := dv.committed.GetRow(rhsTable, rid)
-			if !ok {
+		for _, rrow := range dv.committed.TableScan(rhsTable) {
+			if int(rhsCol) >= len(rrow) || !lrow[lhsCol].Equal(rrow[rhsCol]) {
 				continue
 			}
 			if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
@@ -109,20 +122,33 @@ func joinDriveCommittedReversed(
 	if len(driving) == 0 || resolver == nil || dv.committed == nil {
 		return nil
 	}
-	lhsIdx, ok := resolver.IndexIDForColumn(lhsTable, lhsCol)
-	if !ok {
-		return nil
+	if lhsIdx, ok := resolver.IndexIDForColumn(lhsTable, lhsCol); ok {
+		var out []types.ProductValue
+		for _, rrow := range driving {
+			if int(rhsCol) >= len(rrow) {
+				continue
+			}
+			key := store.NewIndexKey(rrow[rhsCol])
+			rowIDs := dv.committed.IndexSeek(lhsTable, lhsIdx, key)
+			for _, lid := range rowIDs {
+				lrow, ok := dv.committed.GetRow(lhsTable, lid)
+				if !ok {
+					continue
+				}
+				if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
+					out = append(out, joined)
+				}
+			}
+		}
+		return out
 	}
 	var out []types.ProductValue
 	for _, rrow := range driving {
 		if int(rhsCol) >= len(rrow) {
 			continue
 		}
-		key := store.NewIndexKey(rrow[rhsCol])
-		rowIDs := dv.committed.IndexSeek(lhsTable, lhsIdx, key)
-		for _, lid := range rowIDs {
-			lrow, ok := dv.committed.GetRow(lhsTable, lid)
-			if !ok {
+		for _, lrow := range dv.committed.TableScan(lhsTable) {
+			if int(lhsCol) >= len(lrow) || !lrow[lhsCol].Equal(rrow[rhsCol]) {
 				continue
 			}
 			if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {

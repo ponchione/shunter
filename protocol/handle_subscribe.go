@@ -643,7 +643,7 @@ func compileCrossJoinWhereColumnEquality(stmt sql.Statement, leftID schema.Table
 		filter, err = compileCrossJoinWhereLiteralFilter(filterPred, map[string]relationSchema{
 			stmt.Join.LeftAlias:  {id: leftID, ts: leftTS},
 			stmt.Join.RightAlias: {id: rightID, ts: rightTS},
-		}, caller)
+		}, caller, leftID)
 		if err != nil {
 			return subscription.Join{}, err
 		}
@@ -673,32 +673,77 @@ func resolveJoinPredicateRelation(ref sql.ColumnRef, stmt sql.Statement, left re
 	}
 }
 
+type crossJoinWhereParts struct {
+	cmp    sql.ColumnComparisonPredicate
+	hasCmp bool
+	filter sql.Predicate
+}
+
 func splitCrossJoinWherePredicate(pred sql.Predicate) (sql.ColumnComparisonPredicate, sql.Predicate, error) {
+	parts, err := splitCrossJoinWherePredicateTree(pred)
+	if err != nil {
+		return sql.ColumnComparisonPredicate{}, nil, err
+	}
+	if !parts.hasCmp {
+		return sql.ColumnComparisonPredicate{}, nil, fmt.Errorf("cross join WHERE only supports qualified column equality")
+	}
+	return parts.cmp, parts.filter, nil
+}
+
+func splitCrossJoinWherePredicateTree(pred sql.Predicate) (crossJoinWhereParts, error) {
 	switch p := pred.(type) {
 	case sql.ColumnComparisonPredicate:
-		return p, nil, nil
+		return crossJoinWhereParts{cmp: p, hasCmp: true}, nil
 	case sql.AndPredicate:
-		if cmp, ok := p.Left.(sql.ColumnComparisonPredicate); ok {
-			if _, rightIsColumnComparison := p.Right.(sql.ColumnComparisonPredicate); rightIsColumnComparison {
-				return sql.ColumnComparisonPredicate{}, nil, fmt.Errorf("cross join WHERE supports exactly one qualified column equality")
-			}
-			return cmp, p.Right, nil
+		left, err := splitCrossJoinWherePredicateTree(p.Left)
+		if err != nil {
+			return crossJoinWhereParts{}, err
 		}
-		if cmp, ok := p.Right.(sql.ColumnComparisonPredicate); ok {
-			return cmp, p.Left, nil
+		right, err := splitCrossJoinWherePredicateTree(p.Right)
+		if err != nil {
+			return crossJoinWhereParts{}, err
 		}
-		return sql.ColumnComparisonPredicate{}, nil, fmt.Errorf("cross join WHERE only supports qualified column equality")
+		if left.hasCmp && right.hasCmp {
+			return crossJoinWhereParts{}, fmt.Errorf("cross join WHERE supports exactly one qualified column equality")
+		}
+		parts := crossJoinWhereParts{filter: joinSQLPredicatesWithAnd(left.filter, right.filter)}
+		switch {
+		case left.hasCmp:
+			parts.cmp = left.cmp
+			parts.hasCmp = true
+		case right.hasCmp:
+			parts.cmp = right.cmp
+			parts.hasCmp = true
+		}
+		return parts, nil
 	default:
-		return sql.ColumnComparisonPredicate{}, nil, fmt.Errorf("cross join WHERE only supports qualified column equality")
+		return crossJoinWhereParts{filter: pred}, nil
 	}
 }
 
-func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string]relationSchema, caller *types.Identity) (subscription.Predicate, error) {
-	cmp, ok := pred.(sql.ComparisonPredicate)
-	if !ok {
-		return nil, fmt.Errorf("cross join WHERE filter supports exactly one column-literal predicate")
+func joinSQLPredicatesWithAnd(left, right sql.Predicate) sql.Predicate {
+	switch {
+	case left == nil:
+		return right
+	case right == nil:
+		return left
+	default:
+		return sql.AndPredicate{Left: left, Right: right}
 	}
-	return normalizeSQLFilterForRelations(cmp.Filter, relations, func(string) uint8 { return 0 }, caller)
+}
+
+func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string]relationSchema, caller *types.Identity, noRowsTable schema.TableID) (subscription.Predicate, error) {
+	normalized := normalizeSQLPredicate(pred)
+	switch p := normalized.(type) {
+	case nil:
+		return nil, nil
+	case sql.TruePredicate:
+		return nil, nil
+	case sql.FalsePredicate:
+		return subscription.NoRows{Table: noRowsTable}, nil
+	default:
+		return compileSQLPredicateForRelations(p, relations, func(string) uint8 { return 0 }, caller)
+	}
 }
 
 func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema, tableAlias string, caller *types.Identity) (subscription.Predicate, error) {

@@ -4,14 +4,16 @@ import (
 	"sync"
 
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/types"
 )
 
 // CommittedState holds the committed version of all tables.
 // Protected by RWMutex: writes are serialized by the executor,
 // reads may be concurrent via RLock for snapshots.
 type CommittedState struct {
-	mu     sync.RWMutex
-	tables map[schema.TableID]*Table
+	mu            sync.RWMutex
+	tables        map[schema.TableID]*Table
+	committedTxID types.TxID
 }
 
 // NewCommittedState creates an empty committed state.
@@ -97,6 +99,26 @@ func (cs *CommittedState) tableIDsLocked() []schema.TableID {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// CommittedTxID returns the commit horizon represented by this state.
+func (cs *CommittedState) CommittedTxID() types.TxID {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.committedTxID
+}
+
+// SetCommittedTxID records the commit horizon represented by this state.
+func (cs *CommittedState) SetCommittedTxID(txID types.TxID) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.committedTxID = txID
+}
+
+// CommittedTxIDLocked returns the committed horizon while the caller already
+// holds RLock or Lock.
+func (cs *CommittedState) CommittedTxIDLocked() types.TxID {
+	return cs.committedTxID
 }
 
 // RLock acquires a read lock.

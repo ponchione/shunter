@@ -32,6 +32,14 @@ func buildSnapshotCommittedState(t *testing.T) (*store.CommittedState, schema.Sc
 	return cs, reg
 }
 
+func createSnapshotAt(t testing.TB, writer SnapshotWriter, cs *store.CommittedState, txID types.TxID) {
+	t.Helper()
+	cs.SetCommittedTxID(txID)
+	if err := writer.CreateSnapshot(cs, txID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSnapshotPublicAPIContractCompiles(t *testing.T) {
 	var _ = SnapshotMagic
 	var _ uint8 = SnapshotVersion
@@ -97,9 +105,7 @@ func TestCreateAndReadSnapshotRoundTrip(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
 	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
-	if err := writer.CreateSnapshot(cs, 77); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, cs, 77)
 
 	data, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "77"))
 	if err != nil {
@@ -129,9 +135,7 @@ func TestSnapshotOmitsSequenceEntriesForTablesWithoutAutoincrement(t *testing.T)
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
 	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
-	if err := writer.CreateSnapshot(cs, 78); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, cs, 78)
 
 	data, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "78"))
 	if err != nil {
@@ -179,9 +183,7 @@ func TestReadSnapshotHashMismatch(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
 	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
-	if err := writer.CreateSnapshot(cs, 88); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, cs, 88)
 	path := filepath.Join(baseDir, "snapshots", "88", "snapshot")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -207,6 +209,7 @@ func TestConcurrentSnapshotReturnsInProgress(t *testing.T) {
 	blocking.continueWrite = make(chan struct{})
 
 	errCh := make(chan error, 1)
+	cs.SetCommittedTxID(91)
 	go func() { errCh <- writer.CreateSnapshot(cs, 91) }()
 	<-blocking.beforeWrite
 	if err := writer.CreateSnapshot(cs, 92); !errors.Is(err, ErrSnapshotInProgress) {
@@ -227,6 +230,7 @@ func TestCreateSnapshotUsesTempFileUntilRename(t *testing.T) {
 	blocking.continueWrite = make(chan struct{})
 
 	errCh := make(chan error, 1)
+	cs.SetCommittedTxID(91)
 	go func() { errCh <- writer.CreateSnapshot(cs, 91) }()
 	<-blocking.beforeWrite
 
@@ -265,6 +269,25 @@ func TestCreateSnapshotUsesTempFileUntilRename(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshotRejectsTxIDThatDoesNotMatchCommittedHorizon(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	cs.SetCommittedTxID(2)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+
+	err := writer.CreateSnapshot(cs, 3)
+	var mismatch *SnapshotHorizonMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected SnapshotHorizonMismatchError, got %v", err)
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("expected snapshot category, got %v", err)
+	}
+	if mismatch.SnapshotTxID != 3 || mismatch.CommittedTxID != 2 {
+		t.Fatalf("mismatch = %+v, want SnapshotTxID=3 CommittedTxID=2", mismatch)
+	}
+}
+
 func buildLargeSnapshotCommittedState(t testing.TB, rowCount int) (*store.CommittedState, schema.SchemaRegistry) {
 	t.Helper()
 	_, reg := testSchema()
@@ -293,12 +316,8 @@ func TestSnapshotLargeRoundTripAndDeterministicBytes(t *testing.T) {
 	cs, reg := buildLargeSnapshotCommittedState(t, 2048)
 	baseDir := t.TempDir()
 	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
-	if err := writer.CreateSnapshot(cs, 101); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.CreateSnapshot(cs, 102); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, cs, 101)
+	createSnapshotAt(t, writer, cs, 102)
 
 	data101, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "101"))
 	if err != nil {
@@ -354,9 +373,7 @@ func TestReadSnapshotLargeRoundTrip(t *testing.T) {
 	cs, reg := buildLargeSnapshotCommittedState(t, 4096)
 	baseDir := t.TempDir()
 	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
-	if err := writer.CreateSnapshot(cs, 103); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, cs, 103)
 
 	data, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "103"))
 	if err != nil {
@@ -387,9 +404,7 @@ func BenchmarkCreateSnapshotLarge(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		root := b.TempDir()
 		writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
-		if err := writer.CreateSnapshot(cs, types.TxID(i+1)); err != nil {
-			b.Fatal(err)
-		}
+		createSnapshotAt(b, writer, cs, types.TxID(i+1))
 	}
 }
 

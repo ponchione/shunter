@@ -224,9 +224,7 @@ func buildSelectionCommittedState(t *testing.T, reg schema.SchemaRegistry) *stor
 func writeSelectionSnapshot(t *testing.T, root string, reg schema.SchemaRegistry, cs *store.CommittedState, txID types.TxID) {
 	t.Helper()
 	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
-	if err := writer.CreateSnapshot(cs, txID); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, cs, txID)
 }
 
 func corruptSelectionSnapshot(t *testing.T, root string, txID types.TxID) {

@@ -227,6 +227,10 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 		w.mu.Unlock()
 	}()
 
+	if err := validateSnapshotHorizon(committed, txID); err != nil {
+		return err
+	}
+
 	snapshotDir := filepath.Join(w.baseDir, strconv.FormatUint(uint64(txID), 10))
 	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
 		return err
@@ -286,6 +290,17 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	return nil
 }
 
+func validateSnapshotHorizon(committed *store.CommittedState, txID types.TxID) error {
+	committedTxID := committed.CommittedTxID()
+	if committedTxID != txID {
+		return &SnapshotHorizonMismatchError{
+			SnapshotTxID:  txID,
+			CommittedTxID: committedTxID,
+		}
+	}
+	return nil
+}
+
 func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.CommittedState, txID types.TxID) error {
 	if _, err := f.Write(SnapshotMagic[:]); err != nil {
 		return err
@@ -305,7 +320,7 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.Comm
 
 	hasher := blake3.New(32, nil)
 	bodyWriter := io.MultiWriter(f, hasher)
-	if err := w.writeSnapshotBody(bodyWriter, committed); err != nil {
+	if err := w.writeSnapshotBody(bodyWriter, committed, txID); err != nil {
 		return err
 	}
 	var hash [32]byte
@@ -316,9 +331,16 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.Comm
 	return nil
 }
 
-func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.CommittedState) error {
+func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.CommittedState, txID types.TxID) error {
 	committed.RLock()
 	defer committed.RUnlock()
+
+	if committedTxID := committed.CommittedTxIDLocked(); committedTxID != txID {
+		return &SnapshotHorizonMismatchError{
+			SnapshotTxID:  txID,
+			CommittedTxID: committedTxID,
+		}
+	}
 
 	var schemaBuf bytes.Buffer
 	if err := EncodeSchemaSnapshot(&schemaBuf, w.reg); err != nil {

@@ -31,9 +31,7 @@ func TestOpenAndRecoverSnapshotAndLogRecovery(t *testing.T) {
 	jobs.SetNextID(10)
 
 	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
-	if err := writer.CreateSnapshot(committed, 2); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, committed, 2)
 
 	writeRecoverySegment(t, root, reg, 3,
 		recoveryRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("replayed-3")}}},
@@ -46,6 +44,9 @@ func TestOpenAndRecoverSnapshotAndLogRecovery(t *testing.T) {
 	}
 	if maxTxID != 4 {
 		t.Fatalf("maxTxID = %d, want 4", maxTxID)
+	}
+	if got := recovered.CommittedTxID(); got != maxTxID {
+		t.Fatalf("committed horizon = %d, want recovered max txID %d", got, maxTxID)
 	}
 
 	recoveredJobs, ok := recovered.Table(0)
@@ -87,9 +88,7 @@ func TestOpenAndRecoverDetailedSnapshotReplayDoesNotRegressSequenceFromExplicitA
 	jobs.SetNextID(10)
 
 	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
-	if err := writer.CreateSnapshot(committed, 2); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, committed, 2)
 	writeRecoverySegment(t, root, reg, 3,
 		recoveryRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(42), types.NewString("explicit-42")}}},
 	)
@@ -153,9 +152,7 @@ func TestOpenAndRecoverDetailedReplayExplicitAutoincrementValueRaisesRecoveredSe
 	jobs.SetNextID(10)
 
 	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
-	if err := writer.CreateSnapshot(committed, 2); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, committed, 2)
 	writeRecoverySegment(t, root, reg, 3,
 		recoveryRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(42), types.NewString("explicit-42")}}},
 	)
@@ -243,12 +240,8 @@ func TestOpenAndRecoverCorruptNewestAndLockedSnapshotsFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
-	if err := writer.CreateSnapshot(base, 5); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.CreateSnapshot(base, 6); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, base, 5)
+	createSnapshotAt(t, writer, base, 6)
 	corruptSelectionSnapshot(t, root, 6)
 
 	for _, txID := range []types.TxID{7, 8} {
@@ -285,9 +278,7 @@ func TestOpenAndRecoverSnapshotOnlyReturnsSnapshotState(t *testing.T) {
 		t.Fatal(err)
 	}
 	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
-	if err := writer.CreateSnapshot(committed, 5); err != nil {
-		t.Fatal(err)
-	}
+	createSnapshotAt(t, writer, committed, 5)
 
 	recovered, maxTxID, err := OpenAndRecover(root, reg)
 	if err != nil {

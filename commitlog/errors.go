@@ -3,6 +3,8 @@ package commitlog
 import (
 	"errors"
 	"fmt"
+
+	"github.com/ponchione/shunter/types"
 )
 
 var (
@@ -209,6 +211,19 @@ func (e *SnapshotHashMismatchError) Error() string {
 }
 
 func (e *SnapshotHashMismatchError) Is(target error) bool {
+	return target == ErrSnapshot
+}
+
+type SnapshotHorizonMismatchError struct {
+	SnapshotTxID  types.TxID
+	CommittedTxID types.TxID
+}
+
+func (e *SnapshotHorizonMismatchError) Error() string {
+	return fmt.Sprintf("commitlog: snapshot txID %d does not match committed txID %d", e.SnapshotTxID, e.CommittedTxID)
+}
+
+func (e *SnapshotHorizonMismatchError) Is(target error) bool {
 	return target == ErrSnapshot
 }
 

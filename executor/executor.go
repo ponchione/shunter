@@ -94,6 +94,7 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 	if !reg.IsFrozen() {
 		panic("executor: registry must be frozen before creating executor")
 	}
+	cs.SetCommittedTxID(types.TxID(recoveredTxID))
 	capacity := cfg.InboxCapacity
 	if capacity <= 0 {
 		capacity = 256
@@ -554,6 +555,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	txID := types.TxID(e.nextTxID)
 	e.nextTxID++
 	changeset.TxID = txID
+	e.committed.SetCommittedTxID(txID)
 
 	var opts postCommitOptions
 	opts.source = req.Source

@@ -59,6 +59,7 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) {
 	txID := types.TxID(e.nextTxID)
 	e.nextTxID++
 	changeset.TxID = txID
+	e.committed.SetCommittedTxID(txID)
 
 	e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle})
 }
@@ -109,6 +110,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
 	txID := types.TxID(e.nextTxID)
 	e.nextTxID++
 	changeset.TxID = txID
+	e.committed.SetCommittedTxID(txID)
 
 	// Even when the reducer failed, the cleanup commit still runs the
 	// post-commit pipeline so subscribers see the sys_clients delete.
@@ -172,6 +174,7 @@ func (e *Executor) sweepDanglingClients(ctx context.Context) error {
 		txID := types.TxID(e.nextTxID)
 		e.nextTxID++
 		changeset.TxID = txID
+		e.committed.SetCommittedTxID(txID)
 		e.postCommit(txID, changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})
 		if e.fatal.Load() {
 			return fmt.Errorf("sweep aborted: %w", ErrExecutorFatal)

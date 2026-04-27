@@ -72,6 +72,9 @@ func TestExecutorRunAndSubmit(t *testing.T) {
 		if resp.TxID == 0 {
 			t.Fatal("TxID should be > 0")
 		}
+		if got := exec.committed.CommittedTxID(); got != resp.TxID {
+			t.Fatalf("committed horizon = %d, want response txID %d", got, resp.TxID)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for response")
 	}
