@@ -90,6 +90,9 @@ func TestSchedulerScanEnqueuesDueRow(t *testing.T) {
 		if call.Request.Source != CallSourceScheduled {
 			t.Errorf("Source = %v, want CallSourceScheduled", call.Request.Source)
 		}
+		if call.ResponseCh != nil || call.ProtocolResponseCh != nil {
+			t.Fatal("scheduled call should not own a response channel")
+		}
 		if string(call.Request.Args) != string([]byte{0x01}) {
 			t.Errorf("Args mismatch: %x", call.Request.Args)
 		}
@@ -239,38 +242,6 @@ func TestSchedulerRunCancelsWhileEnqueueBlocked(t *testing.T) {
 	case <-runDone:
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("Run did not return after cancellation while enqueue was blocked")
-	}
-}
-
-func TestSchedulerDrainResponsesKeepsDrainingAfterCancel(t *testing.T) {
-	s := &Scheduler{respCh: make(chan ReducerResponse, 1)}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		s.drainResponses(ctx)
-		close(done)
-	}()
-
-	cancel()
-	time.Sleep(20 * time.Millisecond)
-
-	s.respCh <- ReducerResponse{Status: StatusFailedUser, Error: stubError("first")}
-	sentSecond := make(chan struct{})
-	go func() {
-		s.respCh <- ReducerResponse{Status: StatusFailedInternal, Error: stubError("second")}
-		close(sentSecond)
-	}()
-
-	select {
-	case <-sentSecond:
-	case <-time.After(300 * time.Millisecond):
-		t.Fatal("drainResponses stopped reading too early after ctx cancellation")
-	}
-
-	select {
-	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("drainResponses should exit after draining in-flight responses")
 	}
 }
 

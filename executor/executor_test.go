@@ -80,6 +80,86 @@ func TestExecutorRunAndSubmit(t *testing.T) {
 	}
 }
 
+func TestReducerContextHandlesClosedAfterReducerReturn(t *testing.T) {
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "items",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
+		},
+	})
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := engine.Registry()
+	tableID, _, ok := reg.TableByName("items")
+	if !ok {
+		t.Fatal("items table missing")
+	}
+	cs := store.NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, store.NewTable(ts))
+	}
+
+	var leakedDB types.ReducerDB
+	var leakedScheduler types.ReducerScheduler
+	var leakedTx *store.Transaction
+	rr := NewReducerRegistry()
+	rr.Register(RegisteredReducer{
+		Name: "leak",
+		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, args []byte) ([]byte, error) {
+			leakedDB = ctx.DB
+			leakedScheduler = ctx.Scheduler
+			leakedTx, _ = ctx.DB.Underlying().(*store.Transaction)
+			return nil, nil
+		}),
+	})
+	rr.Freeze()
+
+	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go exec.Run(ctx)
+
+	respCh := make(chan ReducerResponse, 1)
+	if err := exec.Submit(CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "leak", Source: CallSourceExternal},
+		ResponseCh: respCh,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case resp := <-respCh:
+		if resp.Status != StatusCommitted {
+			t.Fatalf("status=%d err=%v, want committed", resp.Status, resp.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for reducer response")
+	}
+
+	if _, err := leakedDB.Insert(uint32(tableID), types.ProductValue{types.NewUint64(1)}); !errors.Is(err, store.ErrTransactionClosed) {
+		t.Fatalf("leaked DB Insert err=%v, want ErrTransactionClosed", err)
+	}
+	if got := leakedDB.Underlying(); got != nil {
+		t.Fatalf("leaked DB Underlying = %T, want nil", got)
+	}
+	if _, err := leakedScheduler.Schedule("leak", nil, time.Now()); !errors.Is(err, store.ErrTransactionClosed) {
+		t.Fatalf("leaked scheduler Schedule err=%v, want ErrTransactionClosed", err)
+	}
+	if leakedTx == nil {
+		t.Fatal("reducer did not expose underlying transaction during call")
+	}
+	if txState := leakedTx.TxState(); txState != nil {
+		t.Fatal("leaked transaction TxState should be nil after reducer return")
+	}
+	if _, err := leakedTx.Insert(tableID, types.ProductValue{types.NewUint64(2)}); !errors.Is(err, store.ErrTransactionClosed) {
+		t.Fatalf("leaked transaction Insert err=%v, want ErrTransactionClosed", err)
+	}
+}
+
 func TestExecutorUnknownReducer(t *testing.T) {
 	exec, _ := setupExecutor()
 	ctx, cancel := context.WithCancel(context.Background())

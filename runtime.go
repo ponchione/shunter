@@ -33,11 +33,14 @@ type Runtime struct {
 	reducers       *executor.ReducerRegistry
 
 	mu              sync.Mutex
+	closeMu         sync.Mutex
 	stateName       RuntimeState
 	ready           atomic.Bool
 	lastErr         error
 	lifecycleCancel context.CancelFunc
-	auxWG           sync.WaitGroup
+	fanOutCancel    context.CancelFunc
+	schedulerWG     sync.WaitGroup
+	fanOutWG        sync.WaitGroup
 	durability      *commitlog.DurabilityWorker
 	subscriptions   *subscription.Manager
 	fanOutInbox     chan subscription.FanOutMessage

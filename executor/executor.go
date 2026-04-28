@@ -351,7 +351,11 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 	if start.IsZero() {
 		start = time.Now()
 	}
-	res, err := e.subs.RegisterSet(cmd.Request, view)
+	req := cmd.Request
+	if req.Context == nil {
+		req.Context = context.Background()
+	}
+	res, err := e.subs.RegisterSet(req, view)
 	durationMicros := uint64(time.Since(start).Microseconds())
 	if durationMicros == 0 {
 		durationMicros = 1
@@ -375,7 +379,20 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 	if start.IsZero() {
 		start = time.Now()
 	}
-	res, err := e.subs.UnregisterSet(cmd.ConnID, cmd.QueryID, view)
+	ctx := cmd.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	type unregisterSetContexter interface {
+		UnregisterSetContext(context.Context, types.ConnectionID, uint32, store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error)
+	}
+	var res subscription.SubscriptionSetUnregisterResult
+	var err error
+	if subs, ok := e.subs.(unregisterSetContexter); ok {
+		res, err = subs.UnregisterSetContext(ctx, cmd.ConnID, cmd.QueryID, view)
+	} else {
+		res, err = e.subs.UnregisterSet(cmd.ConnID, cmd.QueryID, view)
+	}
 	durationMicros := uint64(time.Since(start).Microseconds())
 	if durationMicros == 0 {
 		durationMicros = 1
@@ -394,30 +411,89 @@ func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubsc
 }
 
 type reducerDBAdapter struct {
-	tx *store.Transaction
+	mu     sync.Mutex
+	closed bool
+	tx     *store.Transaction
+}
+
+func (d *reducerDBAdapter) close() {
+	d.mu.Lock()
+	d.closed = true
+	d.mu.Unlock()
+}
+
+func (d *reducerDBAdapter) checkOpenLocked() error {
+	if d.closed || d.tx == nil {
+		return store.ErrTransactionClosed
+	}
+	return nil
 }
 
 func (d *reducerDBAdapter) Insert(tableID uint32, row types.ProductValue) (types.RowID, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.checkOpenLocked(); err != nil {
+		return 0, err
+	}
 	return d.tx.Insert(schema.TableID(tableID), row)
 }
 
 func (d *reducerDBAdapter) Delete(tableID uint32, rowID types.RowID) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.checkOpenLocked(); err != nil {
+		return err
+	}
 	return d.tx.Delete(schema.TableID(tableID), rowID)
 }
 
 func (d *reducerDBAdapter) Update(tableID uint32, rowID types.RowID, newRow types.ProductValue) (types.RowID, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.checkOpenLocked(); err != nil {
+		return 0, err
+	}
 	return d.tx.Update(schema.TableID(tableID), rowID, newRow)
 }
 
 func (d *reducerDBAdapter) GetRow(tableID uint32, rowID types.RowID) (types.ProductValue, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.checkOpenLocked(); err != nil {
+		return nil, false
+	}
 	return d.tx.GetRow(schema.TableID(tableID), rowID)
 }
 
 func (d *reducerDBAdapter) ScanTable(tableID uint32) iter.Seq2[types.RowID, types.ProductValue] {
-	return d.tx.ScanTable(schema.TableID(tableID))
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.checkOpenLocked(); err != nil {
+		return func(func(types.RowID, types.ProductValue) bool) {}
+	}
+	type entry struct {
+		id  types.RowID
+		row types.ProductValue
+	}
+	var rows []entry
+	for id, row := range d.tx.ScanTable(schema.TableID(tableID)) {
+		rows = append(rows, entry{id: id, row: row})
+	}
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for _, row := range rows {
+			if !yield(row.id, row.row) {
+				return
+			}
+		}
+	}
 }
 
 func (d *reducerDBAdapter) Underlying() any {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.checkOpenLocked(); err != nil {
+		return nil
+	}
 	return d.tx
 }
 
@@ -476,11 +552,13 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		Timestamp:    time.Now().UTC(),
 	}
 	tx := store.NewTransaction(e.committed, e.schemaReg)
+	db := &reducerDBAdapter{tx: tx}
+	scheduler := e.newSchedulerHandle(tx)
 	rctx := &types.ReducerContext{
 		ReducerName: req.ReducerName,
 		Caller:      caller,
-		DB:          &reducerDBAdapter{tx: tx},
-		Scheduler:   e.newSchedulerHandle(tx),
+		DB:          db,
+		Scheduler:   scheduler,
 	}
 
 	// Execute with panic recovery.
@@ -495,6 +573,8 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		}()
 		ret, reducerErr = rr.Handler(rctx, req.Args)
 	}()
+	db.close()
+	scheduler.close()
 
 	// Decision routing.
 	if panicked != nil {
@@ -539,6 +619,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	}
 
 	// Commit.
+	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {
 		store.Rollback(tx)

@@ -107,7 +107,7 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 		},
 		ResponseCh: responseCh,
 	}
-	if err := exec.Submit(cmd); err != nil {
+	if err := exec.SubmitWithContext(ctx, cmd); err != nil {
 		return ReducerResult{}, err
 	}
 

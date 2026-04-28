@@ -70,6 +70,30 @@ func (s *countingSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, t
 	return s.mockSnapshot.TableScan(id)
 }
 
+type cancelingSnapshot struct {
+	*mockSnapshot
+	cancel  func()
+	yielded int
+	closed  bool
+}
+
+func (s *cancelingSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	base := s.mockSnapshot.TableScan(id)
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for rid, row := range base {
+			if !yield(rid, row) {
+				return
+			}
+			s.yielded++
+			if s.yielded == 1 && s.cancel != nil {
+				s.cancel()
+			}
+		}
+	}
+}
+
+func (s *cancelingSnapshot) Close() { s.closed = true }
+
 // mockStateAccess implements CommittedStateAccess.
 type mockStateAccess struct {
 	snap store.CommittedReadView
@@ -224,6 +248,34 @@ func TestHandleOneOffQueryLimitZeroDoesNotScan(t *testing.T) {
 	}
 	if snap.tableScans != 0 {
 		t.Fatalf("TableScan calls = %d, want 0", snap.tableScans)
+	}
+}
+
+func TestHandleOneOffQueryCancelsDuringSnapshotScanAndClosesView(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	snap := &cancelingSnapshot{mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1)},
+			{types.NewUint64(2)},
+		},
+	}}, cancel: cancel}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(ctx, conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x11},
+		QueryString: "SELECT * FROM users",
+	}, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil || *result.Error != context.Canceled.Error() {
+		t.Fatalf("Error = %v, want %q", result.Error, context.Canceled.Error())
+	}
+	if !snap.closed {
+		t.Fatal("snapshot should be closed after canceled one-off query")
 	}
 }
 

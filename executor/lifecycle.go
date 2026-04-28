@@ -50,6 +50,7 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) {
 		}
 	}
 
+	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {
 		store.Rollback(tx)
@@ -101,6 +102,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
 		return
 	}
 
+	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {
 		store.Rollback(tx)
@@ -166,6 +168,7 @@ func (e *Executor) sweepDanglingClients(ctx context.Context) error {
 			store.Rollback(tx)
 			return fmt.Errorf("sweep sys_clients delete conn=%x: %w", t.conn[:], err)
 		}
+		tx.Seal()
 		changeset, err := store.Commit(e.committed, tx)
 		if err != nil {
 			store.Rollback(tx)
@@ -197,11 +200,13 @@ func (e *Executor) runLifecycleReducer(
 		ConnectionID: conn,
 		Timestamp:    time.Now().UTC(),
 	}
+	db := &reducerDBAdapter{tx: tx}
+	scheduler := e.newSchedulerHandle(tx)
 	rctx := &types.ReducerContext{
 		ReducerName: rr.Name,
 		Caller:      caller,
-		DB:          &reducerDBAdapter{tx: tx},
-		Scheduler:   e.newSchedulerHandle(tx),
+		DB:          db,
+		Scheduler:   scheduler,
 	}
 
 	var reducerErr error
@@ -215,6 +220,8 @@ func (e *Executor) runLifecycleReducer(
 		}()
 		_, reducerErr = rr.Handler(rctx, nil)
 	}()
+	db.close()
+	scheduler.close()
 
 	switch {
 	case panicked != nil:

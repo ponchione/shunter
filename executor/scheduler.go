@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"sync"
 	"time"
 
 	"github.com/ponchione/shunter/schema"
@@ -86,10 +87,25 @@ func (e *Executor) newSchedulerHandle(tx *store.Transaction) *schedulerHandle {
 // commit that touched sys_scheduled has been observed — Story 6.3
 // wires it to the scheduler worker. nil means "no timer yet."
 type schedulerHandle struct {
+	mu          sync.Mutex
+	closed      bool
 	tx          *store.Transaction
 	tableID     schema.TableID
 	seq         *store.Sequence
 	timerNotify func()
+}
+
+func (h *schedulerHandle) close() {
+	h.mu.Lock()
+	h.closed = true
+	h.mu.Unlock()
+}
+
+func (h *schedulerHandle) checkOpenLocked() error {
+	if h.closed || h.tx == nil {
+		return store.ErrTransactionClosed
+	}
+	return nil
 }
 
 // Schedule inserts a one-shot scheduled-reducer row into sys_scheduled.
@@ -106,6 +122,11 @@ func (h *schedulerHandle) ScheduleRepeat(reducerName string, args []byte, interv
 }
 
 func (h *schedulerHandle) insertSchedule(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.checkOpenLocked(); err != nil {
+		return 0, err
+	}
 	id := ScheduleID(h.seq.Next())
 	row := types.ProductValue{
 		SysScheduledColScheduleID:  types.NewUint64(uint64(id)),
@@ -125,6 +146,11 @@ func (h *schedulerHandle) insertSchedule(reducerName string, args []byte, nextRu
 // non-nil error if the delete failed after a matching row was found.
 // v1 scans the table; sys_scheduled is expected to be small.
 func (h *schedulerHandle) Cancel(id ScheduleID) (bool, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.checkOpenLocked(); err != nil {
+		return false, err
+	}
 	target := uint64(id)
 	for rowID, row := range h.tx.ScanTable(h.tableID) {
 		if row[SysScheduledColScheduleID].AsUint64() != target {

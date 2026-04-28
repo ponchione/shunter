@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -60,6 +61,59 @@ func TestCallReducerWithCanceledContextReturnsContextError(t *testing.T) {
 	_, err := rt.CallReducer(ctx, "send_message", nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("CallReducer canceled context error = %v, want context.Canceled", err)
+	}
+}
+
+func TestCallReducerContextCancelsWhileExecutorInboxFull(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	rt, err := Build(validChatModule().Reducer("slow", func(_ *schema.ReducerContext, _ []byte) ([]byte, error) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		return []byte("ok"), nil
+	}), Config{DataDir: t.TempDir(), ExecutorQueueCapacity: 1})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Close()
+
+	firstResp := make(chan executor.ReducerResponse, 1)
+	if err := rt.executor.Submit(executor.CallReducerCmd{
+		Request:    executor.ReducerRequest{ReducerName: "slow", Source: executor.CallSourceExternal},
+		ResponseCh: firstResp,
+	}); err != nil {
+		t.Fatalf("submit first slow reducer: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow reducer did not start")
+	}
+	if err := rt.executor.Submit(executor.CallReducerCmd{
+		Request: executor.ReducerRequest{ReducerName: "slow", Source: executor.CallSourceExternal},
+	}); err != nil {
+		t.Fatalf("submit queued slow reducer: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, err = rt.CallReducer(ctx, "slow", nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CallReducer with full inbox err=%v, want context deadline exceeded", err)
+	}
+
+	close(release)
+	select {
+	case <-firstResp:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first slow reducer did not finish after release")
 	}
 }
 

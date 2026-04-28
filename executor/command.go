@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"time"
 
 	"github.com/ponchione/shunter/subscription"
@@ -79,6 +80,7 @@ type UnregisterSubscriptionSetCmd struct {
 	ConnID  types.ConnectionID
 	QueryID uint32
 	Reply   func(subscription.SubscriptionSetUnregisterResult, error)
+	Context context.Context
 	// Receipt mirrors RegisterSubscriptionSetCmd.Receipt for the unsubscribe
 	// admission path.
 	Receipt time.Time

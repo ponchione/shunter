@@ -150,6 +150,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	}
 
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	fanOutCtx, fanOutCancel := context.WithCancel(context.Background())
 	fanOutSender := newSwappableFanOutSender(noopFanOutSender{})
 	fanOutWorker := subscription.NewFanOutWorker(fanOutInbox, fanOutSender, subscriptions.DroppedChanSend())
 
@@ -157,10 +158,12 @@ func (r *Runtime) Start(ctx context.Context) error {
 	if r.stateName == RuntimeStateClosed || r.stateName == RuntimeStateClosing {
 		r.mu.Unlock()
 		lifecycleCancel()
+		fanOutCancel()
 		r.recordStartFailure(ErrRuntimeClosed)
 		return ErrRuntimeClosed
 	}
 	r.lifecycleCancel = lifecycleCancel
+	r.fanOutCancel = fanOutCancel
 	r.durability = durability
 	r.subscriptions = subscriptions
 	r.fanOutInbox = fanOutInbox
@@ -170,6 +173,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	r.scheduler = scheduler
 	if err := r.ensureProtocolGraphLocked(); err != nil {
 		r.lifecycleCancel = nil
+		r.fanOutCancel = nil
 		r.durability = nil
 		r.subscriptions = nil
 		r.fanOutInbox = nil
@@ -183,22 +187,24 @@ func (r *Runtime) Start(ctx context.Context) error {
 		r.protocolServer = nil
 		r.mu.Unlock()
 		lifecycleCancel()
+		fanOutCancel()
 		r.recordStartFailure(err)
 		return err
 	}
-	r.auxWG.Add(2)
+	r.schedulerWG.Add(1)
+	r.fanOutWG.Add(1)
 	r.stateName = RuntimeStateReady
 	r.ready.Store(true)
 	r.mu.Unlock()
 
 	go exec.Run(context.Background())
 	go func() {
-		defer r.auxWG.Done()
+		defer r.schedulerWG.Done()
 		scheduler.Run(lifecycleCtx)
 	}()
 	go func() {
-		defer r.auxWG.Done()
-		fanOutWorker.Run(lifecycleCtx)
+		defer r.fanOutWG.Done()
+		fanOutWorker.Run(fanOutCtx)
 	}()
 
 	cleanupDurability = false
@@ -207,6 +213,9 @@ func (r *Runtime) Start(ctx context.Context) error {
 
 // Close idempotently shuts down runtime-owned background workers.
 func (r *Runtime) Close() error {
+	r.closeMu.Lock()
+	defer r.closeMu.Unlock()
+
 	r.mu.Lock()
 	if r.stateName == RuntimeStateClosed {
 		r.mu.Unlock()
@@ -221,6 +230,7 @@ func (r *Runtime) Close() error {
 	r.stateName = RuntimeStateClosing
 	r.ready.Store(false)
 	lifecycleCancel := r.lifecycleCancel
+	fanOutCancel := r.fanOutCancel
 	exec := r.executor
 	durability := r.durability
 	protocolConns := r.protocolConns
@@ -231,10 +241,14 @@ func (r *Runtime) Close() error {
 	if lifecycleCancel != nil {
 		lifecycleCancel()
 	}
-	r.auxWG.Wait()
+	r.schedulerWG.Wait()
 	if exec != nil {
 		exec.Shutdown()
 	}
+	if fanOutCancel != nil {
+		fanOutCancel()
+	}
+	r.fanOutWG.Wait()
 	var closeErr error
 	if durability != nil {
 		_, closeErr = durability.Close()
@@ -242,6 +256,7 @@ func (r *Runtime) Close() error {
 
 	r.mu.Lock()
 	r.lifecycleCancel = nil
+	r.fanOutCancel = nil
 	r.durability = nil
 	r.subscriptions = nil
 	r.fanOutInbox = nil

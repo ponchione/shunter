@@ -74,6 +74,7 @@ func (a *ProtocolInboxAdapter) RegisterSubscriptionSet(ctx context.Context, req 
 	}
 	cmd := RegisterSubscriptionSetCmd{
 		Request: subscription.SubscriptionSetRegisterRequest{
+			Context:                 ctx,
 			ConnID:                  req.ConnID,
 			QueryID:                 req.QueryID,
 			RequestID:               req.RequestID,
@@ -105,6 +106,7 @@ func (a *ProtocolInboxAdapter) UnregisterSubscriptionSet(ctx context.Context, re
 			}
 			req.Reply(a.buildUnregisterResponse(req, result, replyErr))
 		},
+		Context: ctx,
 		Receipt: req.Receipt,
 	}
 	return a.submitter.SubmitWithContext(ctx, cmd)

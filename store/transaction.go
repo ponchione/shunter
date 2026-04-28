@@ -3,9 +3,17 @@ package store
 import (
 	"fmt"
 	"iter"
+	"sync/atomic"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
+)
+
+const (
+	transactionActive uint32 = iota
+	transactionSealed
+	transactionCommitted
+	transactionRolledBack
 )
 
 // Transaction provides read-write access to the store within a reducer.
@@ -13,7 +21,7 @@ type Transaction struct {
 	committed       *CommittedState
 	tx              *TxState
 	registry        schema.SchemaRegistry
-	rolledBack      bool
+	state           atomic.Uint32
 	txUniqueIndexes map[txUniqueRef]map[uint64][]txUniqueEntry
 	txRowIndexes    map[schema.TableID]map[uint64][]txRowEntry
 }
@@ -42,15 +50,39 @@ func NewTransaction(cs *CommittedState, reg schema.SchemaRegistry) *Transaction 
 	}
 }
 
-// TxState returns the underlying transaction state (for commit).
-func (t *Transaction) TxState() *TxState { return t.tx }
+// TxState returns the underlying transaction state while the transaction is
+// still reducer-owned. It returns nil after the executor seals, commits, or
+// rolls back the transaction so transaction-local buffers do not remain a
+// public lifetime escape after reducer return.
+func (t *Transaction) TxState() *TxState {
+	if err := t.checkUsable(); err != nil {
+		return nil
+	}
+	return t.tx
+}
+
+func (t *Transaction) txStateForCommit() *TxState { return t.tx }
+
+// Seal closes reducer-facing access while preserving the transaction buffers
+// for the executor's internal commit path.
+func (t *Transaction) Seal() {
+	t.state.CompareAndSwap(transactionActive, transactionSealed)
+}
+
+func (t *Transaction) finishCommitted() {
+	t.state.Store(transactionCommitted)
+}
 
 // checkUsable returns ErrTransactionRolledBack if the transaction has been rolled back.
 func (t *Transaction) checkUsable() error {
-	if t.rolledBack {
+	switch t.state.Load() {
+	case transactionActive:
+		return nil
+	case transactionRolledBack:
 		return ErrTransactionRolledBack
+	default:
+		return ErrTransactionClosed
 	}
-	return nil
 }
 
 func (t *Transaction) applyAutoIncrement(table *Table, row types.ProductValue) (types.ProductValue, error) {
@@ -425,7 +457,7 @@ func (t *Transaction) Update(tableID schema.TableID, rowID types.RowID, newRow t
 
 // GetRow returns a row visible in this transaction.
 func (t *Transaction) GetRow(tableID schema.TableID, rowID types.RowID) (types.ProductValue, bool) {
-	if t.rolledBack {
+	if err := t.checkUsable(); err != nil {
 		return nil, false
 	}
 	return NewStateView(t.committed, t.tx).GetRow(tableID, rowID)
@@ -433,7 +465,7 @@ func (t *Transaction) GetRow(tableID schema.TableID, rowID types.RowID) (types.P
 
 // ScanTable yields all visible rows (committed minus deletes plus tx inserts).
 func (t *Transaction) ScanTable(tableID schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
-	if t.rolledBack {
+	if err := t.checkUsable(); err != nil {
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
 	return NewStateView(t.committed, t.tx).ScanTable(tableID)

@@ -23,6 +23,7 @@ var (
 	ErrInvalidFloat              = types.ErrInvalidFloat
 	ErrRowShapeMismatch          = errors.New("row shape mismatch")
 	ErrTransactionRolledBack     = errors.New("transaction rolled back")
+	ErrTransactionClosed         = errors.New("transaction closed")
 )
 
 // TypeMismatchError is returned when a column value doesn't match the schema type.

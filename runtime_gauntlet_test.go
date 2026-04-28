@@ -12,11 +12,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/golang-jwt/jwt/v5"
 	shunter "github.com/ponchione/shunter"
+	"github.com/ponchione/shunter/auth"
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
@@ -176,6 +179,231 @@ func TestRuntimeGauntletCloseWaitsForHeldReadBlockedReducer(t *testing.T) {
 	restartedRT := buildGauntletRuntime(t, dataDir)
 	defer restartedRT.Close()
 	assertGauntletReadMatchesModel(t, restartedRT, model, "close op 6 after restart")
+}
+
+func TestRuntimeGauntletConcurrentCloseWithLiveProtocolClient(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntime(t, dataDir)
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	op := insertPlayerOp(&nextID, "concurrent_close_initial")
+	runGauntletTrace(t, rt, &model, []gauntletOp{op}, 0, "concurrent close op 0 initial insert")
+
+	client := dialGauntletProtocol(t, rt)
+	defer client.CloseNow()
+	initialRows := subscribeGauntletProtocolPlayers(t, client, "SELECT * FROM players", 8861, 8862)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("concurrent close op 1 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	const closers = 4
+	start := make(chan struct{})
+	errs := make(chan error, closers)
+	var wg sync.WaitGroup
+	wg.Add(closers)
+	for i := 0; i < closers; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- rt.Close()
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent close op 2 Close returned error: %v", err)
+		}
+	}
+	assertGauntletProtocolClosed(t, client, "concurrent close op 3 client after close")
+	assertGauntletRuntimeClosedLocalSurfaces(t, rt, "concurrent close op 3 after close")
+
+	restartedRT := buildGauntletRuntime(t, dataDir)
+	defer restartedRT.Close()
+	assertGauntletReadMatchesModel(t, restartedRT, model, "concurrent close op 4 after restart")
+}
+
+func TestRuntimeGauntletHTTPHandlerLifecycleGating(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntimeWithConfig(t, shunter.Config{DataDir: dataDir}, false)
+
+	assertGauntletHTTPSubscribeStatus(t, rt, http.StatusServiceUnavailable, "http op 0 before start")
+	if rt.Ready() {
+		t.Fatalf("http op 0 HTTPHandler started runtime lifecycle")
+	}
+
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("http op 1 Start returned error: %v", err)
+	}
+	assertGauntletHTTPSubscribeStatus(t, rt, http.StatusBadRequest, "http op 1 after start non-websocket")
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	client := dialGauntletProtocol(t, rt)
+	defer client.CloseNow()
+	op := insertPlayerOp(&nextID, "http_handler_commit")
+	outcome := callGauntletProtocolReducer(t, client, op, 8851, "http op 2 protocol commit")
+	advanceGauntletModel(t, &model, op, outcome, "http op 2 protocol commit")
+	assertGauntletReadMatchesModel(t, rt, model, "http op 2 protocol commit")
+	assertGauntletProtocolQueriesMatchModel(t, client, model, "http op 2 protocol commit")
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("http op 3 Close returned error: %v", err)
+	}
+	assertGauntletHTTPSubscribeStatus(t, rt, http.StatusServiceUnavailable, "http op 3 after close")
+	assertGauntletRuntimeClosedLocalSurfaces(t, rt, "http op 3 after close")
+
+	restartedRT := buildGauntletRuntime(t, dataDir)
+	defer restartedRT.Close()
+	assertGauntletReadMatchesModel(t, restartedRT, model, "http op 4 after restart")
+}
+
+func TestRuntimeGauntletStrictAuthProtocolWorkload(t *testing.T) {
+	dataDir := t.TempDir()
+	signingKey := []byte("gauntlet-strict-auth-signing-key")
+	cfg := shunter.Config{
+		DataDir:        dataDir,
+		AuthMode:       shunter.AuthModeStrict,
+		AuthSigningKey: signingKey,
+		AuthAudiences:  []string{"gauntlet"},
+	}
+	rt := buildGauntletRuntimeWithConfig(t, cfg, true)
+	defer rt.Close()
+
+	srv := httptest.NewServer(rt.HTTPHandler())
+	defer srv.Close()
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+
+	assertGauntletProtocolDialRejected(t, url, nil, http.StatusUnauthorized, "strict op 0 no token")
+	badAudienceToken := mintGauntletStrictToken(t, signingKey, "gauntlet-issuer", "alice", "other")
+	assertGauntletProtocolDialRejected(t, url, gauntletBearerHeader(badAudienceToken), http.StatusUnauthorized, "strict op 1 wrong audience")
+
+	validToken := mintGauntletStrictToken(t, signingKey, "gauntlet-issuer", "alice", "gauntlet")
+	subscriber, subscriberIdentity := dialGauntletProtocolURLWithHeaders(t, url, gauntletBearerHeader(validToken), "strict op 2 subscriber dial")
+	defer subscriber.CloseNow()
+	caller, callerIdentity := dialGauntletProtocolURLWithHeaders(t, url, gauntletBearerHeader(validToken), "strict op 2 caller dial")
+	defer caller.CloseNow()
+	queryClient, queryIdentity := dialGauntletProtocolURLWithHeaders(t, url, gauntletBearerHeader(validToken), "strict op 2 query dial")
+	defer queryClient.CloseNow()
+
+	wantIdentity := auth.DeriveIdentity("gauntlet-issuer", "alice")
+	for label, got := range map[string]protocol.IdentityToken{
+		"subscriber": subscriberIdentity,
+		"caller":     callerIdentity,
+		"query":      queryIdentity,
+	} {
+		if got.Identity != wantIdentity {
+			t.Fatalf("strict op 2 %s identity = %x, want %x", label, got.Identity, wantIdentity)
+		}
+		if got.Token != "" {
+			t.Fatalf("strict op 2 %s minted token = %q, want empty in strict mode", label, got.Token)
+		}
+	}
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	const subscriberQueryID = uint32(8922)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 8921, subscriberQueryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("strict op 3 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	commitOp := insertPlayerOp(&nextID, "strict_auth_commit")
+	commitDelta := gauntletAllRowsDeltaForOp(t, model, commitOp)
+	commitOutcome := callGauntletProtocolReducer(t, caller, commitOp, 8923, "strict op 4 protocol commit")
+	advanceGauntletModel(t, &model, commitOp, commitOutcome, "strict op 4 protocol commit")
+	gotCommitDelta := readGauntletTransactionUpdateLight(t, subscriber, subscriberQueryID, "strict op 4 protocol commit")
+	assertGauntletDeltaEqual(t, gotCommitDelta, commitDelta, "strict op 4 protocol commit")
+	assertGauntletReadMatchesModel(t, rt, model, "strict op 4 protocol commit")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "strict op 4 protocol commit")
+
+	failedOp := failAfterInsertOp(nextID, "strict_auth_failed")
+	failedOutcome := callGauntletProtocolReducer(t, caller, failedOp, 8924, "strict op 5 failed reducer")
+	advanceGauntletModel(t, &model, failedOp, failedOutcome, "strict op 5 failed reducer")
+	assertGauntletReadMatchesModel(t, rt, model, "strict op 5 failed reducer")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "strict op 5 failed reducer")
+	assertNoGauntletProtocolMessageBeforeClose(t, subscriber, 50*time.Millisecond, "strict op 5 failed reducer")
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("strict op 6 Close returned error: %v", err)
+	}
+	restartedRT := buildGauntletRuntimeWithConfig(t, cfg, true)
+	defer restartedRT.Close()
+	assertGauntletReadMatchesModel(t, restartedRT, model, "strict op 7 after restart")
+}
+
+func TestRuntimeGauntletProtocolConnectionIDReconnectIsolation(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	srv := httptest.NewServer(rt.HTTPHandler())
+	defer srv.Close()
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+	wantConnID := types.ConnectionID{0xCA, 0xFE, 0xBA, 0xBE}
+	reconnectURL := gauntletURLWithConnectionID(url, wantConnID)
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+
+	first, firstIdentity := dialGauntletProtocolURLWithHeaders(t, reconnectURL, nil, "connection op 0 first dial")
+	if firstIdentity.ConnectionID != wantConnID {
+		t.Fatalf("connection op 0 connection ID = %x, want %x", firstIdentity.ConnectionID, wantConnID)
+	}
+	if firstIdentity.Identity == (types.Identity{}) || firstIdentity.Token == "" {
+		t.Fatalf("connection op 0 identity=%x token length=%d, want anonymous identity and minted token", firstIdentity.Identity, len(firstIdentity.Token))
+	}
+	const firstQueryID = uint32(8942)
+	initialRows := subscribeGauntletProtocolPlayers(t, first, "SELECT * FROM players", 8941, firstQueryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("connection op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+	if err := first.Close(websocket.StatusNormalClosure, "connection op 0 complete"); err != nil {
+		t.Fatalf("connection op 0 close first client: %v", err)
+	}
+
+	caller := dialGauntletProtocol(t, rt)
+	defer caller.CloseNow()
+
+	second, secondIdentity := dialGauntletProtocolURLWithHeaders(t, reconnectURL, gauntletBearerHeader(firstIdentity.Token), "connection op 1 reconnect without subscribe")
+	if secondIdentity.ConnectionID != wantConnID {
+		t.Fatalf("connection op 1 connection ID = %x, want %x", secondIdentity.ConnectionID, wantConnID)
+	}
+	if secondIdentity.Identity != firstIdentity.Identity {
+		t.Fatalf("connection op 1 identity = %x, want %x", secondIdentity.Identity, firstIdentity.Identity)
+	}
+	if secondIdentity.Token != "" {
+		t.Fatalf("connection op 1 token = %q, want empty when reconnecting with existing token", secondIdentity.Token)
+	}
+
+	firstCommit := insertPlayerOp(&nextID, "connection_reconnect_isolation")
+	firstOutcome := callGauntletProtocolReducer(t, caller, firstCommit, 8943, "connection op 2 commit after reconnect without subscribe")
+	advanceGauntletModel(t, &model, firstCommit, firstOutcome, "connection op 2 commit after reconnect without subscribe")
+	assertGauntletReadMatchesModel(t, rt, model, "connection op 2 commit after reconnect without subscribe")
+	assertNoGauntletProtocolMessageBeforeClose(t, second, 50*time.Millisecond, "connection op 2 unsubscribed reconnect")
+	if err := second.Close(websocket.StatusNormalClosure, "connection op 2 complete"); err != nil {
+		t.Fatalf("connection op 2 close second client: %v", err)
+	}
+
+	third, thirdIdentity := dialGauntletProtocolURLWithHeaders(t, reconnectURL, gauntletBearerHeader(firstIdentity.Token), "connection op 3 reconnect and subscribe")
+	defer third.CloseNow()
+	if thirdIdentity.ConnectionID != wantConnID || thirdIdentity.Identity != firstIdentity.Identity {
+		t.Fatalf("connection op 3 identity token = {identity=%x conn=%x}, want {identity=%x conn=%x}", thirdIdentity.Identity, thirdIdentity.ConnectionID, firstIdentity.Identity, wantConnID)
+	}
+	const thirdQueryID = uint32(8945)
+	reconnectRows := subscribeGauntletProtocolPlayers(t, third, "SELECT * FROM players", 8944, thirdQueryID)
+	if diff := diffGauntletPlayers(reconnectRows, model.players); diff != "" {
+		t.Fatalf("connection op 3 reconnect subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	secondCommit := insertPlayerOp(&nextID, "connection_reconnect_subscribed")
+	secondDelta := gauntletAllRowsDeltaForOp(t, model, secondCommit)
+	secondOutcome := callGauntletProtocolReducer(t, caller, secondCommit, 8946, "connection op 4 commit after resubscribe")
+	advanceGauntletModel(t, &model, secondCommit, secondOutcome, "connection op 4 commit after resubscribe")
+	gotSecondDelta := readGauntletTransactionUpdateLight(t, third, thirdQueryID, "connection op 4 commit after resubscribe")
+	assertGauntletDeltaEqual(t, gotSecondDelta, secondDelta, "connection op 4 commit after resubscribe")
+	assertGauntletReadMatchesModel(t, rt, model, "connection op 4 commit after resubscribe")
 }
 
 func TestRuntimeGauntletListenAndServeProtocolWorkload(t *testing.T) {
@@ -2868,6 +3096,14 @@ func reserveGauntletListenAddr(t *testing.T) string {
 	return addr
 }
 
+func gauntletURLWithConnectionID(url string, connID types.ConnectionID) string {
+	separator := "?"
+	if strings.Contains(url, "?") {
+		separator = "&"
+	}
+	return url + separator + "connection_id=" + connID.Hex()
+}
+
 func dialGauntletProtocol(t *testing.T, rt *shunter.Runtime) *websocket.Conn {
 	t.Helper()
 	srv := httptest.NewServer(rt.HTTPHandler())
@@ -2879,20 +3115,20 @@ func dialGauntletProtocol(t *testing.T, rt *shunter.Runtime) *websocket.Conn {
 
 func dialGauntletProtocolURL(t *testing.T, url, label string) *websocket.Conn {
 	t.Helper()
+	client, _ := dialGauntletProtocolURLWithHeaders(t, url, nil, label)
+	return client
+}
+
+func dialGauntletProtocolURLWithHeaders(t *testing.T, url string, headers http.Header, label string) (*websocket.Conn, protocol.IdentityToken) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	client, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{
-		Subprotocols: []string{protocol.SubprotocolV1},
-	})
+	client, resp, err := websocket.Dial(ctx, url, gauntletWebSocketDialOptions(headers))
 	if err != nil {
 		t.Fatalf("%s failed: %v (resp=%v)", label, err, resp)
 	}
 
-	_, msg := readGauntletProtocolMessage(t, client, label+" identity token")
-	if _, ok := msg.(protocol.IdentityToken); !ok {
-		t.Fatalf("%s first protocol message = %T, want IdentityToken", label, msg)
-	}
-	return client
+	return client, readGauntletIdentityToken(t, client, label)
 }
 
 func dialGauntletProtocolURLEventually(t *testing.T, url, label string) *websocket.Conn {
@@ -2904,17 +3140,13 @@ func dialGauntletProtocolURLEventually(t *testing.T, url, label string) *websock
 	var lastResp *http.Response
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		client, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{
-			Subprotocols: []string{protocol.SubprotocolV1},
-		})
+		client, resp, err := websocket.Dial(ctx, url, gauntletWebSocketDialOptions(nil))
 		cancel()
 		if err == nil {
-			_, msg := readGauntletProtocolMessage(t, client, label+" identity token")
-			if _, ok := msg.(protocol.IdentityToken); !ok {
-				t.Fatalf("%s first protocol message = %T, want IdentityToken", label, msg)
-			}
+			readGauntletIdentityToken(t, client, label)
 			return client
 		}
+		closeGauntletHTTPResponse(resp)
 		lastErr = err
 		lastResp = resp
 
@@ -2924,6 +3156,75 @@ func dialGauntletProtocolURLEventually(t *testing.T, url, label string) *websock
 			t.Fatalf("%s failed before deadline: %v (resp=%v)", label, lastErr, lastResp)
 		}
 	}
+}
+
+func gauntletWebSocketDialOptions(headers http.Header) *websocket.DialOptions {
+	opts := &websocket.DialOptions{Subprotocols: []string{protocol.SubprotocolV1}}
+	if len(headers) > 0 {
+		opts.HTTPHeader = headers
+	}
+	return opts
+}
+
+func readGauntletIdentityToken(t *testing.T, client *websocket.Conn, label string) protocol.IdentityToken {
+	t.Helper()
+	tag, msg := readGauntletProtocolMessage(t, client, label+" identity token")
+	if tag != protocol.TagIdentityToken {
+		t.Fatalf("%s first protocol tag = %d, want IdentityToken", label, tag)
+	}
+	identityToken, ok := msg.(protocol.IdentityToken)
+	if !ok {
+		t.Fatalf("%s first protocol message = %T, want IdentityToken", label, msg)
+	}
+	return identityToken
+}
+
+func assertGauntletProtocolDialRejected(t *testing.T, url string, headers http.Header, wantStatus int, label string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx, url, gauntletWebSocketDialOptions(headers))
+	if conn != nil {
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}
+	defer closeGauntletHTTPResponse(resp)
+	if err == nil {
+		t.Fatalf("%s dial succeeded, want HTTP %d rejection", label, wantStatus)
+	}
+	if resp == nil {
+		t.Fatalf("%s dial error = %v with nil response, want HTTP %d", label, err, wantStatus)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("%s status = %d, want %d (err=%v)", label, resp.StatusCode, wantStatus, err)
+	}
+}
+
+func closeGauntletHTTPResponse(resp *http.Response) {
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+}
+
+func gauntletBearerHeader(token string) http.Header {
+	return http.Header{"Authorization": []string{"Bearer " + token}}
+}
+
+func mintGauntletStrictToken(t *testing.T, signingKey []byte, issuer, subject, audience string) string {
+	t.Helper()
+	claims := jwt.MapClaims{
+		"iss": issuer,
+		"sub": subject,
+		"iat": time.Now().Unix(),
+	}
+	if audience != "" {
+		claims["aud"] = audience
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(signingKey)
+	if err != nil {
+		t.Fatalf("mint strict token: %v", err)
+	}
+	return signed
 }
 
 func insertPlayerReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
@@ -3964,6 +4265,16 @@ func assertGauntletProtocolClosed(t *testing.T, client *websocket.Conn, label st
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("%s protocol connection did not close before timeout", label)
+	}
+}
+
+func assertGauntletHTTPSubscribeStatus(t *testing.T, rt *shunter.Runtime, want int, label string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/subscribe", nil)
+	rt.HTTPHandler().ServeHTTP(rec, req)
+	if rec.Code != want {
+		t.Fatalf("%s status = %d, want %d", label, rec.Code, want)
 	}
 }
 

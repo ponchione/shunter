@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"iter"
@@ -43,6 +44,27 @@ type streamingJoinView struct {
 	beforeFirstProbe func(scanned int)
 	scannedLeft      int
 	probes           int
+}
+
+type cancelOnTableScanView struct {
+	*mockCommitted
+	cancel  func()
+	yielded int
+}
+
+func (v *cancelOnTableScanView) TableScan(id TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	base := v.mockCommitted.TableScan(id)
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for rid, row := range base {
+			if !yield(rid, row) {
+				return
+			}
+			v.yielded++
+			if v.yielded == 1 && v.cancel != nil {
+				v.cancel()
+			}
+		}
+	}
 }
 
 func (v *streamingJoinView) TableScan(id TableID) iter.Seq2[types.RowID, types.ProductValue] {
@@ -111,6 +133,28 @@ func TestRegisterSetMultiMergesInitialSnapshot(t *testing.T) {
 	}
 	if len(res.Update) == 0 {
 		t.Logf("Update=%+v (may be empty if fixture has no rows)", res.Update)
+	}
+}
+
+func TestRegisterSetInitialQueryStopsOnContextCancel(t *testing.T) {
+	mgr, base := newRegisterSetTestManagerWithRows(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	view := &cancelOnTableScanView{mockCommitted: base, cancel: cancel}
+	req := SubscriptionSetRegisterRequest{
+		Context:    ctx,
+		ConnID:     types.ConnectionID{1},
+		QueryID:    8,
+		Predicates: []Predicate{AllRows{Table: 1}},
+	}
+	_, err := mgr.RegisterSet(req, view)
+	if !errors.Is(err, ErrInitialQuery) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("RegisterSet err = %v, want ErrInitialQuery wrapping context.Canceled", err)
+	}
+	if _, ok := mgr.querySets[req.ConnID]; ok {
+		t.Fatalf("querySets should be empty after canceled initial query, got %+v", mgr.querySets)
+	}
+	if mgr.registry.hasActive() {
+		t.Fatal("registry should be clear after canceled initial query")
 	}
 }
 
@@ -347,6 +391,32 @@ func TestUnregisterSetMultiFinalEvalErrorEmptySQLText(t *testing.T) {
 	}
 	if _, ok := mgr.querySets[connID]; ok {
 		t.Fatalf("querySets not cleared after eval-error unregister: %+v", mgr.querySets)
+	}
+}
+
+func TestUnregisterSetContextStopsFinalQueryOnContextCancelAndDropsSet(t *testing.T) {
+	mgr, base := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	req := SubscriptionSetRegisterRequest{
+		ConnID:     connID,
+		QueryID:    13,
+		Predicates: []Predicate{AllRows{Table: 1}},
+	}
+	if _, err := mgr.RegisterSet(req, base); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	view := &cancelOnTableScanView{mockCommitted: base, cancel: cancel}
+	_, err := mgr.UnregisterSetContext(ctx, connID, req.QueryID, view)
+	if !errors.Is(err, ErrFinalQuery) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("UnregisterSetContext err = %v, want ErrFinalQuery wrapping context.Canceled", err)
+	}
+	if _, ok := mgr.querySets[connID]; ok {
+		t.Fatalf("querySets not cleared after canceled unregister final query: %+v", mgr.querySets)
+	}
+	if mgr.registry.hasActive() {
+		t.Fatal("registry should be clear after canceled unregister final query")
 	}
 }
 

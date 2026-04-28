@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/ponchione/shunter/schema"
@@ -36,11 +35,6 @@ type Scheduler struct {
 	// scan() and consumed by Run() to arm its timer. Zero means "no
 	// future schedules currently known."
 	nextWakeup time.Time
-	// respCh is the dump channel for CallReducerCmd responses that
-	// the scheduler owns (no client is waiting for a scheduled
-	// reducer's reply). Drained by a goroutine started in Run so the
-	// executor never blocks on response delivery.
-	respCh chan ReducerResponse
 }
 
 // NewScheduler constructs a Scheduler that reads sys_scheduled from
@@ -53,16 +47,11 @@ func NewScheduler(inbox chan<- ExecutorCommand, cs *store.CommittedState, tableI
 		tableID: tableID,
 		wakeup:  make(chan struct{}, 1),
 		now:     time.Now,
-		respCh:  make(chan ReducerResponse, 64),
 	}
 }
 
 // Run drives the scheduler loop. Returns when ctx is cancelled.
 func (s *Scheduler) Run(ctx context.Context) {
-	// Drain scheduled-reducer responses in the background so the
-	// executor's post-commit path never blocks on a full respCh.
-	go s.drainResponses(ctx)
-
 	for {
 		if !s.scanWithContext(ctx) {
 			return
@@ -204,48 +193,11 @@ func (s *Scheduler) enqueueWithContext(ctx context.Context, row types.ProductVal
 			Source:      CallSourceScheduled,
 			// Caller left zero — scheduled calls have no connection.
 		},
-		ResponseCh: s.respCh,
 	}
 	select {
 	case s.inbox <- cmd:
 		return true
 	case <-ctx.Done():
 		return false
-	}
-}
-
-// drainResponses consumes scheduled-reducer outcomes so the executor's
-// post-commit write to respCh never blocks. Failures are logged; no
-// caller is listening.
-func (s *Scheduler) drainResponses(ctx context.Context) {
-	logResp := func(resp ReducerResponse) {
-		if resp.Status != StatusCommitted {
-			log.Printf("scheduler: reducer outcome status=%d err=%v", resp.Status, resp.Error)
-		}
-	}
-
-	for {
-		select {
-		case resp := <-s.respCh:
-			logResp(resp)
-		case <-ctx.Done():
-			idle := time.NewTimer(100 * time.Millisecond)
-			defer idle.Stop()
-			for {
-				select {
-				case resp := <-s.respCh:
-					logResp(resp)
-					if !idle.Stop() {
-						select {
-						case <-idle.C:
-						default:
-						}
-					}
-					idle.Reset(100 * time.Millisecond)
-				case <-idle.C:
-					return
-				}
-			}
-		}
 	}
 }

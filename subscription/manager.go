@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"errors"
 
 	"github.com/ponchione/shunter/store"
@@ -16,6 +17,7 @@ var ErrQueryIDAlreadyLive = errors.New("subscription: query id already live on c
 // SubscriptionSetRegisterRequest is the set-based register request.
 // Predicates may have length >= 1; length 1 is the Single path.
 type SubscriptionSetRegisterRequest struct {
+	Context                 context.Context
 	ConnID                  types.ConnectionID
 	QueryID                 uint32
 	Predicates              []Predicate

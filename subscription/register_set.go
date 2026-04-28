@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/ponchione/shunter/store"
@@ -52,12 +53,21 @@ func (m *Manager) removeDroppedSub(connID types.ConnectionID, subID types.Subscr
 // predicate. Single-table predicates use a filtered table scan. Join
 // predicates re-evaluate the full join against committed state and project
 // each joined pair down to the subscription's SELECT side (Join.ProjectRight).
-func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]types.ProductValue, error) {
+func (m *Manager) initialQuery(ctx context.Context, pred Predicate, view store.CommittedReadView) ([]types.ProductValue, error) {
 	if view == nil {
 		return nil, nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var out []types.ProductValue
 	add := func(row types.ProductValue) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if m.InitialRowLimit > 0 && len(out) >= m.InitialRowLimit {
 			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
 		}
@@ -67,13 +77,13 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 
 	switch p := pred.(type) {
 	case Join:
-		joinedRows, err := m.appendProjectedJoinRows(out, view, p)
+		joinedRows, err := m.appendProjectedJoinRows(ctx, out, view, p)
 		if err != nil {
 			return nil, err
 		}
 		out = joinedRows
 	case CrossJoin:
-		crossRows, err := m.appendProjectedCrossJoinRows(out, view, p)
+		crossRows, err := m.appendProjectedCrossJoinRows(ctx, out, view, p)
 		if err != nil {
 			return nil, err
 		}
@@ -94,6 +104,9 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 				lower := store.Bound{Value: r.Lower.Value, Inclusive: r.Lower.Inclusive, Unbounded: r.Lower.Unbounded}
 				upper := store.Bound{Value: r.Upper.Value, Inclusive: r.Upper.Inclusive, Unbounded: r.Upper.Unbounded}
 				for _, row := range view.IndexRange(t, idxID, lower, upper) {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
 					if err := add(row); err != nil {
 						return nil, err
 					}
@@ -102,6 +115,9 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 			}
 		}
 		for _, row := range view.TableScan(t) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if MatchRow(pred, t, row) {
 				if err := add(row); err != nil {
 					return nil, err
@@ -112,9 +128,15 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 	return out, nil
 }
 
-func (m *Manager) appendProjectedCrossJoinRows(out []types.ProductValue, view store.CommittedReadView, p CrossJoin) ([]types.ProductValue, error) {
+func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p CrossJoin) ([]types.ProductValue, error) {
 	if view == nil {
 		return out, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	projectedTable := p.ProjectedTable()
 	otherTable := crossJoinOtherTable(p)
@@ -123,6 +145,9 @@ func (m *Manager) appendProjectedCrossJoinRows(out []types.ProductValue, view st
 		return out, nil
 	}
 	add := func(row types.ProductValue) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if m.InitialRowLimit > 0 && len(out) >= m.InitialRowLimit {
 			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
 		}
@@ -130,6 +155,9 @@ func (m *Manager) appendProjectedCrossJoinRows(out []types.ProductValue, view st
 		return nil
 	}
 	for _, projectedRow := range view.TableScan(projectedTable) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		for i := 0; i < otherCount; i++ {
 			if err := add(projectedRow); err != nil {
 				return nil, err
@@ -139,7 +167,13 @@ func (m *Manager) appendProjectedCrossJoinRows(out []types.ProductValue, view st
 	return out, nil
 }
 
-func (m *Manager) appendProjectedJoinRows(out []types.ProductValue, view store.CommittedReadView, p Join) ([]types.ProductValue, error) {
+func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p Join) ([]types.ProductValue, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if m.resolver == nil {
 		return nil, fmt.Errorf("%w: manager has no IndexResolver (join=%d.%d=%d.%d)", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
 	}
@@ -164,6 +198,9 @@ func (m *Manager) appendProjectedJoinRows(out []types.ProductValue, view store.C
 		}
 	}
 	add := func(row types.ProductValue) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if m.InitialRowLimit > 0 && len(out) >= m.InitialRowLimit {
 			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
 		}
@@ -171,12 +208,18 @@ func (m *Manager) appendProjectedJoinRows(out []types.ProductValue, view store.C
 		return nil
 	}
 	for _, projectedRow := range view.TableScan(projectedTable) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if int(projectedJoinCol) >= len(projectedRow) {
 			continue
 		}
 		if hasOtherIdx {
 			key := store.NewIndexKey(projectedRow[projectedJoinCol])
 			for _, rid := range view.IndexSeek(otherTable, otherIdx, key) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				otherRow, ok := view.GetRow(otherTable, rid)
 				if !ok {
 					continue
@@ -192,6 +235,9 @@ func (m *Manager) appendProjectedJoinRows(out []types.ProductValue, view store.C
 			continue
 		}
 		for _, otherRow := range view.TableScan(otherTable) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if int(otherJoinCol) >= len(otherRow) || !projectedRow[projectedJoinCol].Equal(otherRow[otherJoinCol]) {
 				continue
 			}
@@ -251,9 +297,16 @@ func (m *Manager) RegisterSet(
 	req SubscriptionSetRegisterRequest,
 	view store.CommittedReadView,
 ) (SubscriptionSetRegisterResult, error) {
+	ctx := req.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	canonicalPreds := make([]Predicate, 0, len(req.Predicates))
 	// Pre-validate every predicate before touching registry state.
 	for _, p := range req.Predicates {
+		if err := ctx.Err(); err != nil {
+			return SubscriptionSetRegisterResult{}, err
+		}
 		if err := ValidatePredicate(p, m.schema); err != nil {
 			return SubscriptionSetRegisterResult{}, fmt.Errorf("predicate validation: %w", err)
 		}
@@ -318,7 +371,7 @@ func (m *Manager) RegisterSet(
 		var rows []types.ProductValue
 		if !sameConnReuse {
 			var err error
-			rows, err = m.initialQuery(p, view)
+			rows, err = m.initialQuery(ctx, p, view)
 			if err != nil {
 				// Unwind any partial state. dropSub handles registry maps + PruningIndexes
 				// eviction on last-ref; each allocated sub is dropped independently.
@@ -380,6 +433,20 @@ func (m *Manager) UnregisterSet(
 	queryID uint32,
 	view store.CommittedReadView,
 ) (SubscriptionSetUnregisterResult, error) {
+	return m.UnregisterSetContext(context.Background(), connID, queryID, view)
+}
+
+// UnregisterSetContext is UnregisterSet with cancellation support for the
+// final snapshot evaluation performed on protocol unsubscribe.
+func (m *Manager) UnregisterSetContext(
+	ctx context.Context,
+	connID types.ConnectionID,
+	queryID uint32,
+	view store.CommittedReadView,
+) (SubscriptionSetUnregisterResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	byQ := m.querySets[connID]
 	sids, ok := byQ[queryID]
 	if !ok {
@@ -400,7 +467,7 @@ func (m *Manager) UnregisterSet(
 		if view == nil || evalErr != nil {
 			continue
 		}
-		rows, err := m.initialQuery(qs.predicate, view)
+		rows, err := m.initialQuery(ctx, qs.predicate, view)
 		if err != nil {
 			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
 			evalSQL = qs.sqlText
