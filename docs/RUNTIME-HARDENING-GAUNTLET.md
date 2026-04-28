@@ -59,7 +59,18 @@ Current status:
   started with a missed-timer replay overflow pin proving startup cannot block
   the dangling-client sweep when recovered due timers exceed executor inbox
   capacity, and a duplicate-replay pin proving the first scheduler scan after
-  startup does not enqueue a recovered missed timer a second time.
+  startup does not enqueue a recovered missed timer a second time, plus a
+  failed-replay retry pin proving stale startup duplicate suppression cannot
+  hide a failed recovered firing from the scheduler restart loop, and an
+  overflowed-replay retry pin proving a recovered due schedule that did not
+  fit during startup replay is still picked up and retried after a failed
+  scheduler-run attempt, plus a repeating-replay catch-up pin proving overdue
+  recovered interval schedules advance one intended fixed-rate interval per
+  fire across restart, an overflowed repeating-replay catch-up pin proving the
+  same fixed-rate advancement after startup replay saturation, a panicking
+  recovered one-shot retry pin, and a replay/external-admission ordering pin
+  proving post-startup external reducers do not overtake recovered scheduled
+  firings queued before the gate opens.
 
 ## Goals
 

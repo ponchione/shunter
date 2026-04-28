@@ -10,17 +10,28 @@ Likely files:
 - JSON fixtures under the chosen package testdata directory
 
 Tests to add:
-- diffing previous and current canonical JSON returns deterministic additive,
+- done: diffing previous and current canonical JSON returns deterministic
+  additive,
   breaking, and metadata-only changes
-- policy checks return deterministic warnings and strict-mode failure status
-- TypeScript codegen from JSON writes deterministic output
-- malformed JSON returns a clear error
-- unsupported language returns the existing codegen sentinel
-- missing input paths and unwritable output paths produce clear errors
-- command help documents that module export belongs in app-owned binaries
+- done: policy checks return deterministic warnings and strict-mode failure
+  status
+- done: TypeScript codegen from JSON writes deterministic output
+- done: malformed JSON returns a clear error
+- done: unsupported language returns the existing codegen sentinel
+- done: missing input paths and unwritable output paths produce clear errors
+- done: command help documents that module export belongs in app-owned binaries
 
 Test boundaries:
 - do not start a runtime
 - do not load an arbitrary app module dynamically
 - do not add migration plan semantics; V2-C owns that
 - do not add multi-module aggregate contracts
+
+Added test coverage:
+- `contractworkflow/contractworkflow_test.go`
+- `cmd/shunter/main_test.go`
+
+Initial red proof:
+- `rtk go test ./contractworkflow ./cmd/shunter -count=1` failed with missing
+  `CompareFiles`, `FormatDiff`, `FormatPolicy`, `GenerateFile`,
+  `GenerateFromFile`, format constants, helper functions, and CLI `run`.

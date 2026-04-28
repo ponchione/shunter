@@ -279,7 +279,8 @@ func BenchmarkSchedulerScanEnqueue(b *testing.B) {
 	schedTS, _ := SysScheduledTable(reg)
 
 	// One past-due row. Inbox cap 1 so we can drain + re-fill per op.
-	seedSchedule(b, cs, schedTS.ID, 1, "bench", nil, time.Now().Add(-time.Second).UnixNano(), 0)
+	fireAt := time.Now().Add(-time.Second).UnixNano()
+	seedSchedule(b, cs, schedTS.ID, 1, "bench", nil, fireAt, 0)
 
 	inbox := make(chan ExecutorCommand, 1)
 	s := NewScheduler(inbox, cs, schedTS.ID)
@@ -288,6 +289,7 @@ func BenchmarkSchedulerScanEnqueue(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		s.scan()
 		<-inbox
+		s.completeInFlight(1, fireAt)
 	}
 }
 

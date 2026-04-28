@@ -107,7 +107,7 @@ func (r *Runtime) ExportContract() ModuleContract {
 		Schema:      schemaExport,
 		Queries:     queries,
 		Views:       views,
-		Permissions: buildPermissionContract(r.moduleReducers, queries, views),
+		Permissions: buildPermissionContract(r.module.reducerDeclarations(), queries, views),
 		ReadModel:   buildReadModelContract(queries, views),
 		Migrations:  buildMigrationContract(schemaExport, desc.Module.Migration, desc.Module.TableMigrations, queries, views),
 		Codegen:     defaultCodegenContractMetadata(),

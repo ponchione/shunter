@@ -1,5 +1,7 @@
 # Hosted Runtime V2-A Current Execution Plan
 
+Status: complete as of 2026-04-28.
+
 Goal: make the in-process runtime/module boundary explicit enough for later v2
 work without changing the public app-author API.
 
@@ -30,3 +32,27 @@ Scope boundaries:
 
 Immediate next V2 slice after V2-A: V2-B contract artifact admin and CLI
 workflows.
+
+## Completion Proof
+
+- `Runtime` now groups app-authored module identity, reducer declaration
+  metadata, query/view declarations, migration metadata, and table migrations
+  behind the private `moduleSnapshot`.
+- `Build` creates the module snapshot after validation and before returning the
+  runtime; later mutation of the original `Module` does not affect runtime
+  describe or contract exports.
+- Runtime-owned schema engine, registry, committed state, reducer registry,
+  subscription manager, executor, scheduler, protocol graph, and lifecycle
+  resources remain separate runtime-owned fields.
+- `Runtime.Describe` and `Runtime.ExportContract` use snapshot helpers that
+  return detached copies; `Runtime.ExportSchema` remains a detached schema
+  export from the runtime-owned engine.
+- `runtime_boundary_test.go` pins build-time module snapshot isolation,
+  internal snapshot detachment, and deep `Runtime.Describe` detachment.
+
+Validation passed:
+- `rtk go fmt .`
+- `rtk go test . -run 'Test.*(Boundary|Describe|Export|Contract|Lifecycle|Build)' -count=1`
+- `rtk go test . -count=1`
+- `rtk go vet .`
+- `rtk go test ./... -count=1`

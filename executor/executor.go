@@ -59,10 +59,11 @@ type Executor struct {
 	// transactions. Rollback produces gaps, matching Postgres
 	// sequence semantics. Story 6.5 resets this from the max existing
 	// schedule_id at startup so replayed schedules keep their IDs.
-	schedSeq        *store.Sequence
-	schedulerNotify func()
-	durability      DurabilityHandle
-	subs            SubscriptionManager
+	schedSeq                 *store.Sequence
+	schedulerNotify          func()
+	schedulerAttemptComplete func(ScheduleID, int64) (bool, bool)
+	durability               DurabilityHandle
+	subs                     SubscriptionManager
 	// snapshotFn acquires the committed read view used by post-commit
 	// subscription evaluation. Defaults to e.committed.Snapshot(); tests
 	// override it to inject a tracking wrapper.
@@ -163,6 +164,7 @@ func (e *Executor) Startup(ctx context.Context, scheduler *Scheduler) error {
 	var startupErr error
 	e.startupOnce.Do(func() {
 		if scheduler != nil {
+			e.attachScheduler(scheduler)
 			scheduler.ReplayFromCommitted()
 		}
 		if err := e.sweepDanglingClients(ctx); err != nil {
@@ -309,7 +311,7 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) {
 	log.Printf("executor: panic during dispatch: %v\n%s", r, debug.Stack())
 	// Send error response if possible.
 	if c, ok := cmd.(CallReducerCmd); ok {
-		sendCallReducerResponse(c, ReducerResponse{
+		e.sendCallReducerResponse(c, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  fmt.Errorf("reducer panicked: %v", r),
 		}, nil)
@@ -323,7 +325,7 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 	if e.fatal.Load() {
 		switch c := cmd.(type) {
 		case CallReducerCmd:
-			sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal}, nil)
+			e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal}, nil)
 		}
 		return
 	}
@@ -523,12 +525,28 @@ func sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, committed
 	return responded && protocolResponded
 }
 
+func (e *Executor) sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, committed *CommittedCallerPayload) bool {
+	responded := sendCallReducerResponse(cmd, resp, committed)
+	e.afterCallReducerResponse(cmd.Request, resp)
+	return responded
+}
+
+func (e *Executor) afterCallReducerResponse(req ReducerRequest, resp ReducerResponse) {
+	if req.Source != CallSourceScheduled || e.schedulerAttemptComplete == nil {
+		return
+	}
+	wasInFlight, _ := e.schedulerAttemptComplete(req.ScheduleID, req.IntendedFireAt)
+	if wasInFlight && resp.Status != StatusCommitted && e.schedulerNotify != nil {
+		e.schedulerNotify()
+	}
+}
+
 func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	req := cmd.Request
 	start := time.Now()
 	if req.Source != CallSourceLifecycle {
 		if _, reserved := lifecycleNames[req.ReducerName]; reserved {
-			sendCallReducerResponse(cmd, ReducerResponse{
+			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  ErrLifecycleReducer,
 			}, nil)
@@ -539,7 +557,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	// Lookup reducer.
 	rr, ok := e.registry.Lookup(req.ReducerName)
 	if !ok {
-		sendCallReducerResponse(cmd, ReducerResponse{
+		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  fmt.Errorf("%w: %s", ErrReducerNotFound, req.ReducerName),
 		}, nil)
@@ -586,7 +604,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 			}
 			return fmt.Errorf("%v: %w", r, ErrReducerPanic)
 		}(panicked)
-		sendCallReducerResponse(cmd, ReducerResponse{
+		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  panicErr,
 		}, nil)
@@ -595,7 +613,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 
 	if reducerErr != nil {
 		store.Rollback(tx)
-		sendCallReducerResponse(cmd, ReducerResponse{
+		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedUser,
 			Error:  reducerErr,
 		}, nil)
@@ -611,7 +629,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	if req.Source == CallSourceScheduled {
 		if err := e.advanceOrDeleteSchedule(tx, req.ScheduleID, req.IntendedFireAt); err != nil {
 			store.Rollback(tx)
-			sendCallReducerResponse(cmd, ReducerResponse{
+			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  fmt.Errorf("schedule advance: %w", err),
 			}, nil)
@@ -628,7 +646,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		if isUserCommitError(err) {
 			status = StatusFailedUser
 		}
-		sendCallReducerResponse(cmd, ReducerResponse{
+		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: status,
 			Error:  fmt.Errorf("commit: %w", err),
 		}, nil)
@@ -697,7 +715,7 @@ func (e *Executor) postCommit(
 		if responded {
 			return
 		}
-		sendCallReducerResponse(cmd, ReducerResponse{
+		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  fmt.Errorf("%w: post-commit panic: %v", ErrExecutorFatal, r),
 			TxID:   txID,
@@ -741,7 +759,7 @@ func (e *Executor) postCommit(
 	}
 	e.subs.EvalAndBroadcast(txID, changeset, view, meta)
 
-	responded = sendCallReducerResponse(cmd, ReducerResponse{
+	responded = e.sendCallReducerResponse(cmd, ReducerResponse{
 		Status:      StatusCommitted,
 		ReturnBSATN: ret,
 		TxID:        txID,

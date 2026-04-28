@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/ponchione/shunter/schema"
@@ -35,9 +36,14 @@ type Scheduler struct {
 	// scan() and consumed by Run() to arm its timer. Zero means "no
 	// future schedules currently known."
 	nextWakeup time.Time
-	// replayQueued tracks due schedule firings already queued during
-	// Startup replay so the first Scheduler.Run scan does not enqueue
-	// the same missed timer a second time before the executor drains it.
+	// inFlight tracks due schedule firings already enqueued into the
+	// executor so Scheduler.Run scans do not enqueue the same timer a
+	// second time before the current attempt completes. replayQueued is
+	// the subset enqueued during Startup replay; failed replay attempts
+	// get one wakeup after completion so retry is not hidden by startup
+	// duplicate suppression.
+	inFlightMu   sync.Mutex
+	inFlight     map[scheduledFireKey]struct{}
 	replayQueued map[scheduledFireKey]struct{}
 }
 
@@ -156,7 +162,7 @@ func (s *Scheduler) ReplayFromCommitted() ScheduleID {
 		if nextNs <= nowNs {
 			if !inboxSaturated {
 				if s.tryEnqueue(row) {
-					s.markReplayQueued(row)
+					s.markInFlight(row, true)
 				} else {
 					inboxSaturated = true
 				}
@@ -182,10 +188,14 @@ func (s *Scheduler) scanAndTrackMaxWithContext(ctx context.Context) (ScheduleID,
 	rows := s.snapshotScheduleRows()
 
 	maxID, nextWakeup, ok := s.scanRows(rows, nowNs, func(row types.ProductValue) bool {
-		if s.consumeReplayQueued(row) {
+		if s.isInFlight(row) {
 			return true
 		}
-		return s.enqueueWithContext(ctx, row)
+		if !s.enqueueWithContext(ctx, row) {
+			return false
+		}
+		s.markInFlight(row, false)
+		return true
 	})
 	s.nextWakeup = nextWakeup
 	return maxID, ok
@@ -266,23 +276,42 @@ func scheduledCallReducerCommand(row types.ProductValue) CallReducerCmd {
 	}
 }
 
-func (s *Scheduler) markReplayQueued(row types.ProductValue) {
-	if s.replayQueued == nil {
-		s.replayQueued = make(map[scheduledFireKey]struct{})
+func (s *Scheduler) markInFlight(row types.ProductValue, replay bool) {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	if s.inFlight == nil {
+		s.inFlight = make(map[scheduledFireKey]struct{})
 	}
-	s.replayQueued[scheduledFireKeyForRow(row)] = struct{}{}
+	key := scheduledFireKeyForRow(row)
+	s.inFlight[key] = struct{}{}
+	if replay {
+		if s.replayQueued == nil {
+			s.replayQueued = make(map[scheduledFireKey]struct{})
+		}
+		s.replayQueued[key] = struct{}{}
+	}
 }
 
-func (s *Scheduler) consumeReplayQueued(row types.ProductValue) bool {
-	if len(s.replayQueued) == 0 {
+func (s *Scheduler) isInFlight(row types.ProductValue) bool {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	if len(s.inFlight) == 0 {
 		return false
 	}
 	key := scheduledFireKeyForRow(row)
-	if _, ok := s.replayQueued[key]; !ok {
-		return false
-	}
+	_, ok := s.inFlight[key]
+	return ok
+}
+
+func (s *Scheduler) completeInFlight(id ScheduleID, intendedFireAt int64) (bool, bool) {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	key := scheduledFireKey{id: id, intendedFireAt: intendedFireAt}
+	_, wasInFlight := s.inFlight[key]
+	_, wasReplayQueued := s.replayQueued[key]
+	delete(s.inFlight, key)
 	delete(s.replayQueued, key)
-	return true
+	return wasInFlight, wasReplayQueued
 }
 
 func scheduledFireKeyForRow(row types.ProductValue) scheduledFireKey {

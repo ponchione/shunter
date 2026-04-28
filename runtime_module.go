@@ -1,0 +1,44 @@
+package shunter
+
+type moduleSnapshot struct {
+	name            string
+	version         string
+	metadata        map[string]string
+	reducers        []ReducerDeclaration
+	queries         []QueryDeclaration
+	views           []ViewDeclaration
+	migration       MigrationMetadata
+	tableMigrations map[string]MigrationMetadata
+}
+
+func newModuleSnapshot(mod *Module) moduleSnapshot {
+	if mod == nil {
+		return moduleSnapshot{metadata: map[string]string{}, tableMigrations: map[string]MigrationMetadata{}}
+	}
+	return moduleSnapshot{
+		name:            mod.name,
+		version:         mod.version,
+		metadata:        mod.MetadataMap(),
+		reducers:        copyReducerDeclarations(mod.reducers),
+		queries:         copyQueryDeclarations(mod.queries),
+		views:           copyViewDeclarations(mod.views),
+		migration:       copyMigrationMetadata(mod.migration),
+		tableMigrations: copyMigrationMetadataMap(mod.tableMigrations),
+	}
+}
+
+func (s moduleSnapshot) describe() ModuleDescription {
+	return ModuleDescription{
+		Name:            s.name,
+		Version:         s.version,
+		Metadata:        copyStringMap(s.metadata),
+		Queries:         describeQueryDeclarations(s.queries),
+		Views:           describeViewDeclarations(s.views),
+		Migration:       copyMigrationMetadata(s.migration),
+		TableMigrations: copyMigrationMetadataMap(s.tableMigrations),
+	}
+}
+
+func (s moduleSnapshot) reducerDeclarations() []ReducerDeclaration {
+	return copyReducerDeclarations(s.reducers)
+}

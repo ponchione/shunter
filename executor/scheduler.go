@@ -61,8 +61,13 @@ func (e *Executor) advanceOrDeleteSchedule(tx *store.Transaction, id ScheduleID,
 // closed channel.
 func (e *Executor) SchedulerFor() *Scheduler {
 	scheduler := NewScheduler(e.inbox, e.committed, e.schedTableID)
-	e.schedulerNotify = scheduler.Notify
+	e.attachScheduler(scheduler)
 	return scheduler
+}
+
+func (e *Executor) attachScheduler(scheduler *Scheduler) {
+	e.schedulerNotify = scheduler.Notify
+	e.schedulerAttemptComplete = scheduler.completeInFlight
 }
 
 // newSchedulerHandle builds a fresh SchedulerHandle bound to a reducer's

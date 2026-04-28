@@ -34,6 +34,18 @@ Prerequisite conclusions to record in Task 01:
 - V2-A should harden the boundary before adding multi-module or process
   isolation work
 
+Recorded 2026-04-28 conclusions:
+- All required `rtk go doc` checks resolved for the root `Module`, `Runtime`,
+  `Build`, describe/export methods, and schema/executor/subscription/protocol
+  subsystem owners.
+- `Build` remains the root boundary that validates module identity,
+  declarations, config, schema, durable state bootstrap, and reducer registry
+  construction before returning a runtime.
+- Runtime-owned subsystem handles are private and remain owned by `Start`,
+  `Close`, `HTTPHandler`, `ListenAndServe`, local calls, and read paths.
+- No missing V1/V1.5 hosted-runtime API or ambiguous V1/V1.5 drift blocked
+  V2-A.
+
 Stop if:
 - the root hosted-runtime APIs are missing or failing focused tests
 - ongoing V1/V1.5 changes make boundary behavior ambiguous

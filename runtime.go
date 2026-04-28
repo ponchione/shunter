@@ -19,23 +19,16 @@ import (
 // Runtime owns a built module, its recovered committed state, lifecycle-owned
 // workers, and the protocol serving graph exposed by the hosted runtime.
 type Runtime struct {
-	moduleName            string
-	moduleVersion         string
-	moduleMetadata        map[string]string
-	moduleReducers        []ReducerDeclaration
-	moduleQueries         []QueryDeclaration
-	moduleViews           []ViewDeclaration
-	moduleMigration       MigrationMetadata
-	moduleTableMigrations map[string]MigrationMetadata
-	config                Config
-	buildConfig           Config
-	engine                *schema.Engine
-	registry              schema.SchemaRegistry
-	dataDir               string
-	state                 *store.CommittedState
-	recoveredTxID         types.TxID
-	resumePlan            commitlog.RecoveryResumePlan
-	reducers              *executor.ReducerRegistry
+	module        moduleSnapshot
+	config        Config
+	buildConfig   Config
+	engine        *schema.Engine
+	registry      schema.SchemaRegistry
+	dataDir       string
+	state         *store.CommittedState
+	recoveredTxID types.TxID
+	resumePlan    commitlog.RecoveryResumePlan
+	reducers      *executor.ReducerRegistry
 
 	mu              sync.Mutex
 	closeMu         sync.Mutex
@@ -102,30 +95,23 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		moduleName:            mod.name,
-		moduleVersion:         mod.version,
-		moduleMetadata:        mod.MetadataMap(),
-		moduleReducers:        copyReducerDeclarations(mod.reducers),
-		moduleQueries:         copyQueryDeclarations(mod.queries),
-		moduleViews:           copyViewDeclarations(mod.views),
-		moduleMigration:       copyMigrationMetadata(mod.migration),
-		moduleTableMigrations: copyMigrationMetadataMap(mod.tableMigrations),
-		config:                cfg,
-		buildConfig:           normalized,
-		engine:                engine,
-		registry:              registry,
-		dataDir:               dataDir,
-		state:                 state,
-		recoveredTxID:         recoveredTxID,
-		resumePlan:            resumePlan,
-		reducers:              reducers,
-		stateName:             RuntimeStateBuilt,
+		module:        newModuleSnapshot(mod),
+		config:        cfg,
+		buildConfig:   normalized,
+		engine:        engine,
+		registry:      registry,
+		dataDir:       dataDir,
+		state:         state,
+		recoveredTxID: recoveredTxID,
+		resumePlan:    resumePlan,
+		reducers:      reducers,
+		stateName:     RuntimeStateBuilt,
 	}, nil
 }
 
 // ModuleName returns the name of the module used to build the runtime.
 func (r *Runtime) ModuleName() string {
-	return r.moduleName
+	return r.module.name
 }
 
 // Config returns the runtime configuration by value.

@@ -68,15 +68,7 @@ func (r *Runtime) Describe() RuntimeDescription {
 		return RuntimeDescription{Module: ModuleDescription{Metadata: map[string]string{}}}
 	}
 	return RuntimeDescription{
-		Module: ModuleDescription{
-			Name:            r.moduleName,
-			Version:         r.moduleVersion,
-			Metadata:        copyStringMap(r.moduleMetadata),
-			Queries:         describeQueryDeclarations(r.moduleQueries),
-			Views:           describeViewDeclarations(r.moduleViews),
-			Migration:       copyMigrationMetadata(r.moduleMigration),
-			TableMigrations: copyMigrationMetadataMap(r.moduleTableMigrations),
-		},
+		Module: r.module.describe(),
 		Health: r.Health(),
 	}
 }
