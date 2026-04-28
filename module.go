@@ -11,6 +11,7 @@ type Module struct {
 	version  string
 	metadata map[string]string
 	builder  *schema.Builder
+	reducers []ReducerDeclaration
 	queries  []QueryDeclaration
 	views    []ViewDeclaration
 }
@@ -57,7 +58,17 @@ func (m *Module) TableDef(def schema.TableDefinition, opts ...schema.TableOption
 
 // Reducer registers a named reducer through the underlying schema builder and
 // returns the receiver for fluent module declarations.
-func (m *Module) Reducer(name string, h schema.ReducerHandler) *Module {
+func (m *Module) Reducer(name string, h schema.ReducerHandler, opts ...ReducerOption) *Module {
+	var options reducerOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+	m.reducers = append(m.reducers, ReducerDeclaration{
+		Name:        name,
+		Permissions: copyPermissionMetadata(options.permissions),
+	})
 	m.builder.Reducer(name, h)
 	return m
 }

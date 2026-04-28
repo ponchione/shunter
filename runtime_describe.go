@@ -14,13 +14,17 @@ type ModuleDescription struct {
 
 // QueryDescription is a detached declaration summary for a named read query.
 type QueryDescription struct {
-	Name string
+	Name        string
+	Permissions PermissionMetadata `json:"-"`
+	ReadModel   ReadModelMetadata  `json:"-"`
 }
 
 // ViewDescription is a detached declaration summary for a named live view or
 // subscription.
 type ViewDescription struct {
-	Name string
+	Name        string
+	Permissions PermissionMetadata `json:"-"`
+	ReadModel   ReadModelMetadata  `json:"-"`
 }
 
 // RuntimeDescription is a detached snapshot of V1 runtime diagnostics.

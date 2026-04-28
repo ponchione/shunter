@@ -37,6 +37,16 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export const views = {`)
 	assertContains(t, ts, `liveMessages: "live_messages",`)
 	assertContains(t, ts, `export function subscribeLiveMessages(subscribeView: ViewSubscriber, args?: Uint8Array): Promise<() => void> {`)
+	assertContains(t, ts, `export const permissions = {`)
+	assertContains(t, ts, `reducers: {`)
+	assertContains(t, ts, `sendMessage: { required: ["messages:send"] },`)
+	assertContains(t, ts, `queries: {`)
+	assertContains(t, ts, `recentMessages: { required: ["messages:read"] },`)
+	assertContains(t, ts, `views: {`)
+	assertContains(t, ts, `liveMessages: { required: ["messages:subscribe"] },`)
+	assertContains(t, ts, `export const readModels = {`)
+	assertContains(t, ts, `recentMessages: { tables: ["messages"], tags: ["history"] },`)
+	assertContains(t, ts, `liveMessages: { tables: ["messages"], tags: ["realtime"] },`)
 }
 
 func TestGeneratorAcceptsModuleContractWithoutRuntime(t *testing.T) {
@@ -120,12 +130,31 @@ func contractFixture() shunter.ModuleContract {
 			{Name: "live_messages"},
 		},
 		Permissions: shunter.PermissionContract{
-			Reducers: []shunter.PermissionContractDeclaration{},
-			Queries:  []shunter.PermissionContractDeclaration{},
-			Views:    []shunter.PermissionContractDeclaration{},
+			Reducers: []shunter.PermissionContractDeclaration{
+				{Name: "send_message", Required: []string{"messages:send"}},
+			},
+			Queries: []shunter.PermissionContractDeclaration{
+				{Name: "recent_messages", Required: []string{"messages:read"}},
+			},
+			Views: []shunter.PermissionContractDeclaration{
+				{Name: "live_messages", Required: []string{"messages:subscribe"}},
+			},
 		},
 		ReadModel: shunter.ReadModelContract{
-			Declarations: []shunter.ReadModelContractDeclaration{},
+			Declarations: []shunter.ReadModelContractDeclaration{
+				{
+					Surface: shunter.ReadModelSurfaceQuery,
+					Name:    "recent_messages",
+					Tables:  []string{"messages"},
+					Tags:    []string{"history"},
+				},
+				{
+					Surface: shunter.ReadModelSurfaceView,
+					Name:    "live_messages",
+					Tables:  []string{"messages"},
+					Tags:    []string{"realtime"},
+				},
+			},
 		},
 		Migrations: shunter.MigrationContract{
 			Declarations: []shunter.MigrationContractDeclaration{},

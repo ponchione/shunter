@@ -7,18 +7,22 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-The active hosted-runtime slice is V1.5-D permissions/read-model metadata.
+The active hosted-runtime slice is V1.5-E migration metadata, contract diffs,
+and warning policy checks.
 
-Next agent run: complete V1.5-D end to end, from prerequisites through tests,
-implementation, contract/export metadata, validation, and handoff upkeep.
+Next agent run: complete V1.5-E end to end, from prerequisites through tests,
+implementation, contract-diff tooling, warning policy checks, validation, and
+handoff upkeep.
 
 Start from:
 - `docs/hosted-runtime-planning/V1.5/README.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-D/01-stack-prerequisites.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-D/02-permission-metadata-tests.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-D/03-metadata-implementation.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-D/04-format-and-validate.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-E/01-stack-prerequisites.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-E/02-migration-metadata-tests.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-E/03-metadata-implementation.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-E/04-contract-diff-tooling.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-E/05-warning-policy-checks.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-E/06-format-and-validate.md`
 - `module.go`
 - `module_declarations.go`
 - `runtime_contract.go`
@@ -99,15 +103,48 @@ V1.5-C validation passed:
 - `rtk go test ./... -count=1`
 - `rtk go vet ./codegen`
 
-V1.5-D goal:
-- attach narrow permission/read-model metadata to reducers, queries, and views
-- export metadata in the canonical contract
-- keep metadata passive and inspectable by tooling/codegen
-- avoid adding runtime access-control enforcement or a broad policy language
+V1.5-D is complete. Its live proof is:
+- `PermissionMetadata` and `ReadModelMetadata` exist in the root package.
+- `Module.Reducer(...)` accepts `WithReducerPermissions(...)` without breaking
+  existing two-argument reducer registrations.
+- `QueryDeclaration` and `ViewDeclaration` carry passive `Permissions` and
+  `ReadModel` metadata.
+- `Runtime.ExportContract()` exports permission metadata for reducers,
+  queries, and views plus read-model metadata for queries and views.
+- absent permission/read-model metadata serializes deterministically as empty
+  contract arrays.
+- TypeScript codegen exposes passive `permissions` and `readModels` constants.
+- no runtime access-control enforcement, policy engine, migration metadata, or
+  runtime shape change was added.
+
+V1.5-D validation passed:
+- `rtk go fmt .`
+- `rtk go test . -run 'Test.*Permission|Test.*ReadModel|Test.*Contract' -count=1`
+- `rtk go test . -count=1`
+- `rtk go vet .`
+- `rtk go test ./... -run 'Test.*Codegen|Test.*Generator|Test.*TypeScript' -count=1`
+- `rtk go test ./codegen -count=1`
+- `rtk go vet ./codegen`
+
+Known non-slice validation blocker:
+- `rtk go test ./... -count=1` currently fails in
+  `store.TestRapidStoreCommitMatchesModel`.
+- The same failure reproduces with
+  `rtk go test ./store -run TestRapidStoreCommitMatchesModel -count=1`.
+- V1.5-D did not touch `store/`, and the V1.5-D handoff explicitly avoided
+  rapid/fuzz-style store work.
+
+V1.5-E goal:
+- make schema/module evolution visible and reviewable without executing
+  migrations
+- export descriptive module-level and declaration-level migration metadata
+- add deterministic contract-diff tooling against `shunter.contract.json`
+- add warning/CI-oriented policy checks
+- keep runtime startup non-blocking for missing or risky migration metadata
 
 ## Current Hosted-Runtime State
 
-V1-H, V1.5-A, V1.5-B, and V1.5-C are audited as landed.
+V1-H, V1.5-A, V1.5-B, V1.5-C, and V1.5-D are audited as landed.
 
 Live proof points:
 - root package imports as `github.com/ponchione/shunter`
@@ -127,13 +164,15 @@ Live proof points:
 - `codegen.Generate` and `codegen.GenerateFromJSON` generate deterministic
   TypeScript client bindings from the canonical contract without starting a
   runtime
+- permission/read-model metadata is passive, exported in the canonical
+  contract, and visible to generated TypeScript clients
 - root/runtime package tests are the live proof for hosted-runtime ownership,
   serving, local calls, describe, export, and lifecycle behavior
 - the prior bundled hello-world command was removed because it no longer served
   a maintained product or integration purpose
 
-Do not reopen V1-A through V1-H, V1.5-A, V1.5-B, or V1.5-C unless a new failing
-regression proves drift.
+Do not reopen V1-A through V1-H, V1.5-A, V1.5-B, V1.5-C, or V1.5-D unless a
+new failing regression proves drift.
 
 ## Startup Reading
 
@@ -141,41 +180,43 @@ Required:
 1. `RTK.md`
 2. this file
 3. `docs/hosted-runtime-planning/V1.5/README.md`
-4. `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
-5. `docs/hosted-runtime-planning/V1.5/V1.5-D/01-stack-prerequisites.md`
-6. `docs/hosted-runtime-planning/V1.5/V1.5-D/02-permission-metadata-tests.md`
-7. `docs/hosted-runtime-planning/V1.5/V1.5-D/03-metadata-implementation.md`
-8. `docs/hosted-runtime-planning/V1.5/V1.5-D/04-format-and-validate.md`
-9. `docs/hosted-runtime-planning/V1.5/V1.5-C/00-current-execution-plan.md` only
-   if V1.5-C proof is needed
+4. `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+5. `docs/hosted-runtime-planning/V1.5/V1.5-E/01-stack-prerequisites.md`
+6. `docs/hosted-runtime-planning/V1.5/V1.5-E/02-migration-metadata-tests.md`
+7. `docs/hosted-runtime-planning/V1.5/V1.5-E/03-metadata-implementation.md`
+8. `docs/hosted-runtime-planning/V1.5/V1.5-E/04-contract-diff-tooling.md`
+9. `docs/hosted-runtime-planning/V1.5/V1.5-E/05-warning-policy-checks.md`
+10. `docs/hosted-runtime-planning/V1.5/V1.5-E/06-format-and-validate.md`
+11. `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
+    only if V1.5-D proof is needed
 
-V1.5-D Task 01 should run and record these checks:
-- `rtk go doc . Module`
+V1.5-E Task 01 should run and record these checks:
 - `rtk go doc . Runtime.ExportContract`
-- `rtk go doc ./schema ReducerExport`
+- inspect the V1.5-B contract JSON tests
+- inspect the V1.5-D metadata attachment patterns
 
-Open these only when the active V1.5-D docs or live code leave a contract or
-metadata question unresolved:
+Open these only when the active V1.5-E docs or live code leave a contract,
+metadata, or diff-tooling question unresolved:
 - `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
 
 Do not read broad roadmap, ledger, or decomposition docs by default.
 
-## V1.5-D Scope
+## V1.5-E Scope
 
 In scope:
-- small permission/read-model metadata types
-- reducer metadata declarations
-- query metadata declarations
-- view/subscription metadata declarations
-- canonical contract export of that metadata
-- deterministic absent metadata representation
-- codegen visibility if metadata becomes part of generated output
+- descriptive migration metadata types
+- module-level migration/version compatibility summary
+- declaration-level migration metadata where the V1.5-E task docs require it
+- canonical contract export of migration metadata
+- deterministic contract-diff tooling comparing current exports against a
+  previous `shunter.contract.json`
+- warning/CI policy checks for missing metadata, risky changes, and
+  declared-vs-inferred mismatches
 
 Out of scope:
-- runtime-blocking authorization behavior
-- broad standalone policy/auth framework
-- complex multi-tenant policy language
-- migration metadata, contract diff tooling, or executable migrations
+- executable migration runners
+- runtime-blocking migration metadata enforcement
+- automatic stored-state rewrites, rollback, or deployment orchestration
 - full SQL/view system
 - query engine surface widening
 - runtime shape changes
@@ -185,24 +226,27 @@ Preserve WebSocket-first v1 runtime behavior.
 
 ## Next Slice Notes
 
-Complete V1.5-D in one run. Work through its numbered tasks in order:
-- reconfirm declaration, contract, and codegen surfaces
-- add failing permission/read-model metadata tests
-- implement narrow metadata on reducers, queries, and views
+Complete V1.5-E in one run. Work through its numbered tasks in order:
+- reconfirm contract, metadata, and snapshot surfaces
+- add failing tests for descriptive migration metadata
+- implement module-level and declaration-level migration metadata
+- add deterministic contract-diff tooling
+- add warning/CI-oriented policy checks
 - format, test, vet, and update handoffs
 
-Prerequisite proof should verify V1.5-D annotates existing exported surfaces
-without changing runtime behavior:
-- reducers are already exported through schema/contract metadata
-- queries and views are exported through V1.5-A/V1.5-B metadata
-- metadata should live near the declaration it governs
-- metadata should remain passive and inspectable
-- codegen may expose metadata but must not enforce it
+Prerequisite proof should verify V1.5-E builds on the canonical contract
+without changing runtime startup semantics:
+- canonical contract JSON is the source of truth for diffs
+- `shunter.contract.json` remains the recommended snapshot path
+- migration metadata is descriptive and exported
+- runtime startup must not fail solely because migration metadata is missing or
+  risky
+- tooling/CI may warn or fail based on project policy
 
 ## Coordination Notes
 
 There may be concurrent gauntlet/dependency test work in the same worktree.
-For V1.5-D, avoid touching these unless the user explicitly redirects the work:
+For V1.5-E, avoid touching these unless the user explicitly redirects the work:
 - `docs/RUNTIME-HARDENING-GAUNTLET.md`
 - `go.mod`
 - `go.sum`
@@ -214,15 +258,19 @@ Do not push unless explicitly asked.
 
 ## Validation
 
-Expected V1.5-D validation:
-- `rtk go fmt .`
-- `rtk go test . -run 'Test.*Permission|Test.*ReadModel|Test.*Contract' -count=1`
-- `rtk go test . -count=1`
-- `rtk go vet .`
-
-Expand when codegen output changes:
-- `rtk go test ./... -run 'Test.*Codegen|Test.*Generator|Test.*TypeScript' -count=1`
+Expected V1.5-E validation:
+- `rtk go fmt <touched packages>`
+- `rtk go test ./... -run 'Test.*Migration|Test.*ContractDiff|Test.*Policy' -count=1`
 - `rtk go test ./... -count=1`
+- `rtk go vet <touched packages>`
+
+If V1.5-E creates a command package, include that package explicitly in format
+and vet commands.
+
+Current broad-suite caveat:
+- `rtk go test ./... -count=1` is blocked by
+  `store.TestRapidStoreCommitMatchesModel` until that non-slice rapid test is
+  fixed or quarantined.
 
 Pinned Staticcheck is available as `rtk go tool staticcheck ./...`. Use it for
 static-analysis visibility when relevant, but do not treat a broad green run as
@@ -234,9 +282,8 @@ commands pass.
 
 ## Handoff Upkeep
 
-When V1.5-D completes:
-- update task progress in `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
-- update this file to make V1.5-E migration metadata / contract diffs the
-  current target
+When V1.5-E completes:
+- update task progress in `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+- update this file to make the next hosted-runtime target explicit
 - keep startup reading minimal
 - record only future-relevant state, not closure archaeology

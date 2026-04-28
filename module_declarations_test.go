@@ -25,6 +25,50 @@ func TestModuleViewDeclarationMetadataIsDescribed(t *testing.T) {
 	}
 }
 
+func TestModuleQueryPermissionAndReadModelMetadataIsDescribed(t *testing.T) {
+	mod := NewModule("chat").Query(QueryDeclaration{
+		Name:        "recent_messages",
+		Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"history"}},
+	})
+
+	desc := mod.Describe()
+	if len(desc.Queries) != 1 {
+		t.Fatalf("queries = %#v, want one query", desc.Queries)
+	}
+	if got := desc.Queries[0].Permissions.Required; len(got) != 1 || got[0] != "messages:read" {
+		t.Fatalf("query permissions = %#v, want messages:read", desc.Queries[0].Permissions)
+	}
+	if got := desc.Queries[0].ReadModel.Tables; len(got) != 1 || got[0] != "messages" {
+		t.Fatalf("query read model tables = %#v, want messages", desc.Queries[0].ReadModel.Tables)
+	}
+	if got := desc.Queries[0].ReadModel.Tags; len(got) != 1 || got[0] != "history" {
+		t.Fatalf("query read model tags = %#v, want history", desc.Queries[0].ReadModel.Tags)
+	}
+}
+
+func TestModuleViewPermissionAndReadModelMetadataIsDescribed(t *testing.T) {
+	mod := NewModule("chat").View(ViewDeclaration{
+		Name:        "live_messages",
+		Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"realtime"}},
+	})
+
+	desc := mod.Describe()
+	if len(desc.Views) != 1 {
+		t.Fatalf("views = %#v, want one view", desc.Views)
+	}
+	if got := desc.Views[0].Permissions.Required; len(got) != 1 || got[0] != "messages:subscribe" {
+		t.Fatalf("view permissions = %#v, want messages:subscribe", desc.Views[0].Permissions)
+	}
+	if got := desc.Views[0].ReadModel.Tables; len(got) != 1 || got[0] != "messages" {
+		t.Fatalf("view read model tables = %#v, want messages", desc.Views[0].ReadModel.Tables)
+	}
+	if got := desc.Views[0].ReadModel.Tags; len(got) != 1 || got[0] != "realtime" {
+		t.Fatalf("view read model tags = %#v, want realtime", desc.Views[0].ReadModel.Tags)
+	}
+}
+
 func TestModuleDeclarationNamesMustBeNonEmpty(t *testing.T) {
 	tests := []struct {
 		name string
@@ -97,6 +141,8 @@ func TestModuleDeclarationDescriptionsAreDetached(t *testing.T) {
 	}
 	desc.Queries[0].Name = "mutated_query"
 	desc.Views[0].Name = "mutated_view"
+	desc.Queries[0].Permissions.Required = append(desc.Queries[0].Permissions.Required, "mutated_permission")
+	desc.Views[0].ReadModel.Tables = append(desc.Views[0].ReadModel.Tables, "mutated_table")
 
 	second := mod.Describe()
 	assertQueryDescription(t, second.Queries, "recent_messages")
@@ -106,6 +152,12 @@ func TestModuleDeclarationDescriptionsAreDetached(t *testing.T) {
 	}
 	if hasViewDescription(second.Views, "mutated_view") {
 		t.Fatalf("views = %#v, want detached view descriptions", second.Views)
+	}
+	if len(second.Queries[0].Permissions.Required) != 0 {
+		t.Fatalf("queries = %#v, want detached permission metadata", second.Queries)
+	}
+	if len(second.Views[0].ReadModel.Tables) != 0 {
+		t.Fatalf("views = %#v, want detached read model metadata", second.Views)
 	}
 }
 

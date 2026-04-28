@@ -62,6 +62,33 @@ func TestRuntimeExportContractIncludesModuleSchemaDeclarationsAndReservedSection
 	}
 }
 
+func TestRuntimeExportContractIncludesPermissionAndReadModelMetadata(t *testing.T) {
+	mod := validChatModule().
+		Reducer("send_message", noopReducer, WithReducerPermissions(PermissionMetadata{Required: []string{"messages:send"}})).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"history"}},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"realtime"}},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	assertPermissionContractDeclaration(t, contract.Permissions.Reducers, "send_message", "messages:send")
+	assertPermissionContractDeclaration(t, contract.Permissions.Queries, "recent_messages", "messages:read")
+	assertPermissionContractDeclaration(t, contract.Permissions.Views, "live_messages", "messages:subscribe")
+	assertReadModelContractDeclaration(t, contract.ReadModel.Declarations, ReadModelSurfaceQuery, "recent_messages", "messages", "history")
+	assertReadModelContractDeclaration(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_messages", "messages", "realtime")
+}
+
 func TestRuntimeExportContractReturnsDetachedSnapshot(t *testing.T) {
 	rt := buildContractRuntime(t)
 
@@ -98,6 +125,32 @@ func TestRuntimeExportContractReturnsDetachedSnapshot(t *testing.T) {
 	if len(again.Migrations.Declarations) != 0 {
 		t.Fatalf("second contract migration declarations = %#v, want empty", again.Migrations.Declarations)
 	}
+}
+
+func TestRuntimeExportContractMetadataReturnsDetachedSnapshot(t *testing.T) {
+	mod := validChatModule().
+		Reducer("send_message", noopReducer, WithReducerPermissions(PermissionMetadata{Required: []string{"messages:send"}})).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"history"}},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	contract.Permissions.Reducers[0].Required[0] = "mutated"
+	contract.Permissions.Queries[0].Required = append(contract.Permissions.Queries[0].Required, "mutated")
+	contract.ReadModel.Declarations[0].Tables[0] = "mutated"
+	contract.ReadModel.Declarations[0].Tags = append(contract.ReadModel.Declarations[0].Tags, "mutated")
+
+	again := rt.ExportContract()
+	assertPermissionContractDeclaration(t, again.Permissions.Reducers, "send_message", "messages:send")
+	assertPermissionContractDeclaration(t, again.Permissions.Queries, "recent_messages", "messages:read")
+	assertReadModelContractDeclaration(t, again.ReadModel.Declarations, ReadModelSurfaceQuery, "recent_messages", "messages", "history")
 }
 
 func TestRuntimeExportContractWorksAcrossLifecycle(t *testing.T) {
@@ -178,4 +231,35 @@ func buildContractRuntime(t *testing.T) *Runtime {
 		t.Fatalf("Build returned error: %v", err)
 	}
 	return rt
+}
+
+func assertPermissionContractDeclaration(t *testing.T, declarations []PermissionContractDeclaration, name, required string) {
+	t.Helper()
+	for _, declaration := range declarations {
+		if declaration.Name != name {
+			continue
+		}
+		if len(declaration.Required) != 1 || declaration.Required[0] != required {
+			t.Fatalf("permission declaration %q = %#v, want required %q", name, declaration, required)
+		}
+		return
+	}
+	t.Fatalf("permission declarations = %#v, want %q", declarations, name)
+}
+
+func assertReadModelContractDeclaration(t *testing.T, declarations []ReadModelContractDeclaration, surface, name, table, tag string) {
+	t.Helper()
+	for _, declaration := range declarations {
+		if declaration.Surface != surface || declaration.Name != name {
+			continue
+		}
+		if len(declaration.Tables) != 1 || declaration.Tables[0] != table {
+			t.Fatalf("read model declaration %q/%q tables = %#v, want %q", surface, name, declaration.Tables, table)
+		}
+		if len(declaration.Tags) != 1 || declaration.Tags[0] != tag {
+			t.Fatalf("read model declaration %q/%q tags = %#v, want %q", surface, name, declaration.Tags, tag)
+		}
+		return
+	}
+	t.Fatalf("read model declarations = %#v, want %s %q", declarations, surface, name)
 }

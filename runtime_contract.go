@@ -37,26 +37,32 @@ type ModuleContractIdentity struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-// PermissionContract reserves permission declarations for later V1.5 slices.
+// PermissionContract records passive permission metadata for exported surfaces.
 type PermissionContract struct {
 	Reducers []PermissionContractDeclaration `json:"reducers"`
 	Queries  []PermissionContractDeclaration `json:"queries"`
 	Views    []PermissionContractDeclaration `json:"views"`
 }
 
-// PermissionContractDeclaration is a reserved permission declaration slot.
+// PermissionContractDeclaration describes required permission tags for one
+// exported surface.
 type PermissionContractDeclaration struct {
-	Name string `json:"name"`
+	Name     string   `json:"name"`
+	Required []string `json:"required"`
 }
 
-// ReadModelContract reserves read-model declarations for later V1.5 slices.
+// ReadModelContract records passive read-model metadata for exported read
+// surfaces.
 type ReadModelContract struct {
 	Declarations []ReadModelContractDeclaration `json:"declarations"`
 }
 
-// ReadModelContractDeclaration is a reserved read-model declaration slot.
+// ReadModelContractDeclaration describes read-model tags for one query or view.
 type ReadModelContractDeclaration struct {
-	Name string `json:"name"`
+	Surface string   `json:"surface"`
+	Name    string   `json:"name"`
+	Tables  []string `json:"tables"`
+	Tags    []string `json:"tags"`
 }
 
 // MigrationContract reserves migration declarations for later V1.5 slices.
@@ -83,6 +89,8 @@ func (r *Runtime) ExportContract() ModuleContract {
 	}
 
 	desc := r.Describe()
+	queries := copyQueryDescriptions(desc.Module.Queries)
+	views := copyViewDescriptions(desc.Module.Views)
 	return ModuleContract{
 		ContractVersion: ModuleContractVersion,
 		Module: ModuleContractIdentity{
@@ -91,10 +99,10 @@ func (r *Runtime) ExportContract() ModuleContract {
 			Metadata: copyStringMap(desc.Module.Metadata),
 		},
 		Schema:      copySchemaExport(r.ExportSchema()),
-		Queries:     copyQueryDescriptions(desc.Module.Queries),
-		Views:       copyViewDescriptions(desc.Module.Views),
-		Permissions: emptyPermissionContract(),
-		ReadModel:   emptyReadModelContract(),
+		Queries:     queries,
+		Views:       views,
+		Permissions: buildPermissionContract(r.moduleReducers, queries, views),
+		ReadModel:   buildReadModelContract(queries, views),
 		Migrations:  emptyMigrationContract(),
 		Codegen:     defaultCodegenContractMetadata(),
 	}
@@ -130,14 +138,27 @@ func normalizeModuleContract(c ModuleContract) ModuleContract {
 	if c.Permissions.Reducers == nil {
 		c.Permissions.Reducers = []PermissionContractDeclaration{}
 	}
+	for i := range c.Permissions.Reducers {
+		c.Permissions.Reducers[i].Required = normalizeStringSlice(c.Permissions.Reducers[i].Required)
+	}
 	if c.Permissions.Queries == nil {
 		c.Permissions.Queries = []PermissionContractDeclaration{}
+	}
+	for i := range c.Permissions.Queries {
+		c.Permissions.Queries[i].Required = normalizeStringSlice(c.Permissions.Queries[i].Required)
 	}
 	if c.Permissions.Views == nil {
 		c.Permissions.Views = []PermissionContractDeclaration{}
 	}
+	for i := range c.Permissions.Views {
+		c.Permissions.Views[i].Required = normalizeStringSlice(c.Permissions.Views[i].Required)
+	}
 	if c.ReadModel.Declarations == nil {
 		c.ReadModel.Declarations = []ReadModelContractDeclaration{}
+	}
+	for i := range c.ReadModel.Declarations {
+		c.ReadModel.Declarations[i].Tables = normalizeStringSlice(c.ReadModel.Declarations[i].Tables)
+		c.ReadModel.Declarations[i].Tags = normalizeStringSlice(c.ReadModel.Declarations[i].Tags)
 	}
 	if c.Migrations.Declarations == nil {
 		c.Migrations.Declarations = []MigrationContractDeclaration{}
@@ -176,6 +197,65 @@ func emptyReadModelContract() ReadModelContract {
 	return ReadModelContract{
 		Declarations: []ReadModelContractDeclaration{},
 	}
+}
+
+func buildPermissionContract(reducers []ReducerDeclaration, queries []QueryDescription, views []ViewDescription) PermissionContract {
+	out := emptyPermissionContract()
+	for _, reducer := range reducers {
+		if !hasPermissionMetadata(reducer.Permissions) {
+			continue
+		}
+		out.Reducers = append(out.Reducers, PermissionContractDeclaration{
+			Name:     reducer.Name,
+			Required: normalizeStringSlice(reducer.Permissions.Required),
+		})
+	}
+	for _, query := range queries {
+		if !hasPermissionMetadata(query.Permissions) {
+			continue
+		}
+		out.Queries = append(out.Queries, PermissionContractDeclaration{
+			Name:     query.Name,
+			Required: normalizeStringSlice(query.Permissions.Required),
+		})
+	}
+	for _, view := range views {
+		if !hasPermissionMetadata(view.Permissions) {
+			continue
+		}
+		out.Views = append(out.Views, PermissionContractDeclaration{
+			Name:     view.Name,
+			Required: normalizeStringSlice(view.Permissions.Required),
+		})
+	}
+	return out
+}
+
+func buildReadModelContract(queries []QueryDescription, views []ViewDescription) ReadModelContract {
+	out := emptyReadModelContract()
+	for _, query := range queries {
+		if !hasReadModelMetadata(query.ReadModel) {
+			continue
+		}
+		out.Declarations = append(out.Declarations, ReadModelContractDeclaration{
+			Surface: ReadModelSurfaceQuery,
+			Name:    query.Name,
+			Tables:  normalizeStringSlice(query.ReadModel.Tables),
+			Tags:    normalizeStringSlice(query.ReadModel.Tags),
+		})
+	}
+	for _, view := range views {
+		if !hasReadModelMetadata(view.ReadModel) {
+			continue
+		}
+		out.Declarations = append(out.Declarations, ReadModelContractDeclaration{
+			Surface: ReadModelSurfaceView,
+			Name:    view.Name,
+			Tables:  normalizeStringSlice(view.ReadModel.Tables),
+			Tags:    normalizeStringSlice(view.ReadModel.Tags),
+		})
+	}
+	return out
 }
 
 func emptyMigrationContract() MigrationContract {
@@ -261,7 +341,13 @@ func copyQueryDescriptions(in []QueryDescription) []QueryDescription {
 		return []QueryDescription{}
 	}
 	out := make([]QueryDescription, len(in))
-	copy(out, in)
+	for i, query := range in {
+		out[i] = QueryDescription{
+			Name:        query.Name,
+			Permissions: copyPermissionMetadata(query.Permissions),
+			ReadModel:   copyReadModelMetadata(query.ReadModel),
+		}
+	}
 	return out
 }
 
@@ -270,6 +356,12 @@ func copyViewDescriptions(in []ViewDescription) []ViewDescription {
 		return []ViewDescription{}
 	}
 	out := make([]ViewDescription, len(in))
-	copy(out, in)
+	for i, view := range in {
+		out[i] = ViewDescription{
+			Name:        view.Name,
+			Permissions: copyPermissionMetadata(view.Permissions),
+			ReadModel:   copyReadModelMetadata(view.ReadModel),
+		}
+	}
 	return out
 }

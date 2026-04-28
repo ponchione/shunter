@@ -114,6 +114,9 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 		b.WriteString("}\n\n")
 	}
 
+	writeTypeScriptPermissions(&b, contract.Permissions)
+	writeTypeScriptReadModels(&b, contract.ReadModel.Declarations)
+
 	return b.Bytes(), nil
 }
 
@@ -123,6 +126,80 @@ func writeTypeScriptConstMap(b *bytes.Buffer, name string, identifiers []namedTy
 		fmt.Fprintf(b, "  %s: %s,\n", identifier.identifier, strconv.Quote(identifier.name))
 	}
 	b.WriteString("} as const;\n\n")
+}
+
+func writeTypeScriptPermissions(b *bytes.Buffer, permissions shunter.PermissionContract) {
+	b.WriteString("export const permissions = {\n")
+	writeTypeScriptPermissionCategory(b, "reducers", permissions.Reducers)
+	writeTypeScriptPermissionCategory(b, "queries", permissions.Queries)
+	writeTypeScriptPermissionCategory(b, "views", permissions.Views)
+	b.WriteString("} as const;\n\n")
+}
+
+func writeTypeScriptPermissionCategory(b *bytes.Buffer, category string, declarations []shunter.PermissionContractDeclaration) {
+	fmt.Fprintf(b, "  %s: {\n", category)
+	identifiers := permissionTypeScriptIdentifiers(declarations)
+	for i, identifier := range identifiers {
+		fmt.Fprintf(b, "    %s: { required: %s },\n", identifier.identifier, typeScriptStringArray(declarations[i].Required))
+	}
+	b.WriteString("  },\n")
+}
+
+func permissionTypeScriptIdentifiers(declarations []shunter.PermissionContractDeclaration) []namedTypeScriptIdentifier {
+	names := make([]string, len(declarations))
+	for i, declaration := range declarations {
+		names[i] = declaration.Name
+	}
+	return uniqueTypeScriptIdentifiers(names, typeScriptCamelIdentifier)
+}
+
+func writeTypeScriptReadModels(b *bytes.Buffer, declarations []shunter.ReadModelContractDeclaration) {
+	b.WriteString("export const readModels = {\n")
+	writeTypeScriptReadModelCategory(b, "queries", declarations, shunter.ReadModelSurfaceQuery)
+	writeTypeScriptReadModelCategory(b, "views", declarations, shunter.ReadModelSurfaceView)
+	b.WriteString("} as const;\n\n")
+}
+
+func writeTypeScriptReadModelCategory(b *bytes.Buffer, category string, declarations []shunter.ReadModelContractDeclaration, surface string) {
+	filtered := make([]shunter.ReadModelContractDeclaration, 0, len(declarations))
+	for _, declaration := range declarations {
+		if declaration.Surface == surface {
+			filtered = append(filtered, declaration)
+		}
+	}
+
+	fmt.Fprintf(b, "  %s: {\n", category)
+	identifiers := readModelTypeScriptIdentifiers(filtered)
+	for i, identifier := range identifiers {
+		declaration := filtered[i]
+		fmt.Fprintf(
+			b,
+			"    %s: { tables: %s, tags: %s },\n",
+			identifier.identifier,
+			typeScriptStringArray(declaration.Tables),
+			typeScriptStringArray(declaration.Tags),
+		)
+	}
+	b.WriteString("  },\n")
+}
+
+func readModelTypeScriptIdentifiers(declarations []shunter.ReadModelContractDeclaration) []namedTypeScriptIdentifier {
+	names := make([]string, len(declarations))
+	for i, declaration := range declarations {
+		names[i] = declaration.Name
+	}
+	return uniqueTypeScriptIdentifiers(names, typeScriptCamelIdentifier)
+}
+
+func typeScriptStringArray(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, len(values))
+	for i, value := range values {
+		quoted[i] = strconv.Quote(value)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
 func typeScriptColumnType(kind string) (string, error) {

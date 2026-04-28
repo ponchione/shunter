@@ -93,5 +93,46 @@ func validateContract(contract shunter.ModuleContract) error {
 			return fmt.Errorf("%w: view name must not be empty", ErrInvalidContract)
 		}
 	}
+	if err := validatePermissionDeclarations("reducer", contract.Permissions.Reducers); err != nil {
+		return err
+	}
+	if err := validatePermissionDeclarations("query", contract.Permissions.Queries); err != nil {
+		return err
+	}
+	if err := validatePermissionDeclarations("view", contract.Permissions.Views); err != nil {
+		return err
+	}
+	for _, declaration := range contract.ReadModel.Declarations {
+		if declaration.Surface != shunter.ReadModelSurfaceQuery && declaration.Surface != shunter.ReadModelSurfaceView {
+			return fmt.Errorf("%w: read model surface %q is invalid", ErrInvalidContract, declaration.Surface)
+		}
+		if strings.TrimSpace(declaration.Name) == "" {
+			return fmt.Errorf("%w: read model %s name must not be empty", ErrInvalidContract, declaration.Surface)
+		}
+		for _, table := range declaration.Tables {
+			if strings.TrimSpace(table) == "" {
+				return fmt.Errorf("%w: read model %s %q table must not be empty", ErrInvalidContract, declaration.Surface, declaration.Name)
+			}
+		}
+		for _, tag := range declaration.Tags {
+			if strings.TrimSpace(tag) == "" {
+				return fmt.Errorf("%w: read model %s %q tag must not be empty", ErrInvalidContract, declaration.Surface, declaration.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func validatePermissionDeclarations(surface string, declarations []shunter.PermissionContractDeclaration) error {
+	for _, declaration := range declarations {
+		if strings.TrimSpace(declaration.Name) == "" {
+			return fmt.Errorf("%w: permission %s name must not be empty", ErrInvalidContract, surface)
+		}
+		for _, required := range declaration.Required {
+			if strings.TrimSpace(required) == "" {
+				return fmt.Errorf("%w: permission %s %q requirement must not be empty", ErrInvalidContract, surface, declaration.Name)
+			}
+		}
+	}
 	return nil
 }

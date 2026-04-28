@@ -22,6 +22,7 @@ type Runtime struct {
 	moduleName     string
 	moduleVersion  string
 	moduleMetadata map[string]string
+	moduleReducers []ReducerDeclaration
 	moduleQueries  []QueryDeclaration
 	moduleViews    []ViewDeclaration
 	config         Config
@@ -102,6 +103,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		moduleName:     mod.name,
 		moduleVersion:  mod.version,
 		moduleMetadata: mod.MetadataMap(),
+		moduleReducers: copyReducerDeclarations(mod.reducers),
 		moduleQueries:  copyQueryDeclarations(mod.queries),
 		moduleViews:    copyViewDeclarations(mod.views),
 		config:         cfg,
