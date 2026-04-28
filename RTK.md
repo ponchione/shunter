@@ -14,6 +14,7 @@ Prefer RTK-native subcommands when available instead of wrapping the underlying 
 - File reading/search: `rtk read`, `rtk grep`
 - Git/GitHub: `rtk git`, `rtk gh`
 - Tests/builds/checks: `rtk test`, `rtk go`, `rtk cargo`, `rtk pytest`, `rtk vitest`, `rtk tsc`, `rtk lint`, `rtk next`
+- Pinned Go static analysis: `rtk go tool staticcheck ./...`
 - Logs/errors/diffs/summaries: `rtk log`, `rtk err`, `rtk diff`, `rtk summary`
 
 Examples:
@@ -27,6 +28,7 @@ rtk npm run build
 rtk pytest -q
 rtk go build
 rtk go test
+rtk go tool staticcheck ./...
 ```
 
 ## Verification

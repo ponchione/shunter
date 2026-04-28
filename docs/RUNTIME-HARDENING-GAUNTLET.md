@@ -33,7 +33,9 @@ Current status:
   cycles, rejected subscribe multi atomicity, panic rollback, unknown reducer
   admission failures, reserved lifecycle reducer rejection, one-shot scheduled
   reducer firing through the hosted runtime, cancel-before-fire, and clean
-  restart firing for pre-close scheduled reducers.
+  restart firing for pre-close scheduled reducers, plus fixed-seed
+  scheduled fire/cancel workloads and scheduled reducer failure rollback with
+  no fanout, and repeating scheduled reducer fire/cancel behavior.
 
 ## Goals
 
@@ -93,6 +95,11 @@ The model should be intentionally boring:
 
 Avoid sharing Shunter internals with the model. The point is to compare two
 independent implementations of the same public contract.
+
+The root runtime test package uses `go.uber.org/goleak` through package-level
+`TestMain`; gauntlet tests run under that check. Future gauntlet slices should
+prefer explicit runtime/client cleanup and avoid per-test `goleak.VerifyNone`
+or broad ignore rules unless a dependency has a documented benign goroutine.
 
 ## Workload Operations
 
@@ -209,6 +216,9 @@ panic/fatal error.
 Before calling a major build ready, run:
 
 - `rtk go test ./... -count=1`
+- pinned static analysis with `rtk go tool staticcheck ./...`; until OI-008
+  cleanup clears known findings, record failures instead of treating it as a
+  required green release-candidate gate
 - targeted package tests with `-race` for runtime, executor, protocol,
   subscription, store, and commitlog
 - fuzz corpus replay

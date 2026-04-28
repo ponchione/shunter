@@ -239,7 +239,13 @@ Summary:
 - several async tests rely on fixed `time.Sleep` windows, especially in fanout-worker coverage; these should move to condition/event based waits before the suite grows more parallel or slower
 - duplicated protocol scenario tests should be collapsed where they are testing shared behavior rather than genuinely different one-off vs subscription contracts
 - historical hosted-runtime planning files still contain superseded sequencing notes, such as older V1-G plans describing V1-H as the immediate next slice; prune or archive these when hosted-runtime planning resumes
-- dead-code tooling is not part of the local validation path yet; `rtk staticcheck ./...` was unavailable during the sweep, and `go vet` does not catch several of these cleanup issues
+- Staticcheck is now pinned as a Go tool dependency at
+  `honnef.co/go/tools/cmd/staticcheck v0.7.0` and is available through
+  `rtk go tool staticcheck ./...`. It is not yet a green required check: a
+  dependency-only run on 2026-04-28 reported existing cleanup findings across
+  unused symbols, error-string style, a simplifiable boolean, and one
+  identical-expression test comparison. Those findings were intentionally
+  recorded, not fixed, in the Staticcheck dependency slice.
 
 Why this matters:
 - stale labels make failure output point maintainers toward closed or nonexistent work

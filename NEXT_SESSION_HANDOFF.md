@@ -66,6 +66,10 @@ rtk go vet <touched packages>
 rtk go test ./... -count=1
 ```
 
+Pinned Staticcheck is available as `rtk go tool staticcheck ./...`. Use it for
+static-analysis visibility, but do not treat a broad green run as required
+until OI-008 cleanup clears the known findings and any dirty compile blockers.
+
 ## Doc Follow-Through
 
 After any future implementation is green:

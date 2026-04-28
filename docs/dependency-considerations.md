@@ -2,9 +2,10 @@
 
 Last reviewed: 2026-04-28
 
-This note captures dependency suggestions and explicit rejections from the
-dependency scan of the current Shunter codebase. It is not an implementation
-plan and does not add anything to `go.mod` by itself.
+This note captures adopted dependencies, dependency suggestions, and explicit
+rejections from the dependency scan of the current Shunter codebase. Candidate
+sections are not an implementation plan and do not add anything to `go.mod` by
+themselves.
 
 Current repo context:
 
@@ -12,6 +13,8 @@ Current repo context:
 - Direct runtime dependencies are currently limited to `github.com/coder/websocket`,
   `github.com/golang-jwt/jwt/v5`, and `lukechampine.com/blake3`.
 - Direct test dependencies now include `go.uber.org/goleak v1.3.0`.
+- Pinned Go tool dependencies now include
+  `honnef.co/go/tools/cmd/staticcheck v0.7.0`.
 - `github.com/coder/websocket` is replaced with the local Shunter fork
   `github.com/ponchione/websocket v1.8.14-shunter.1`.
 - The broad suite passed after adopting `goleak` with:
@@ -45,6 +48,27 @@ Notes:
   goroutines, with a short comment.
 
 Docs: https://pkg.go.dev/go.uber.org/goleak
+
+## Adopted Tool Dependencies
+
+### `honnef.co/go/tools/cmd/staticcheck`
+
+Pinned as a Go tool dependency at `v0.7.0`.
+
+Run it with:
+
+```bash
+rtk go tool staticcheck ./...
+```
+
+Notes:
+
+- The tool is pinned in `go.mod`; no `tools.go` file is needed with this Go
+  toolchain.
+- Use it for cleanup/static-analysis visibility.
+- Until OI-008 cleanup is complete, broad runs may fail on known findings or
+  compile blockers. Record those failures instead of fixing them in unrelated
+  slices.
 
 ## Strong Candidates
 
@@ -86,21 +110,6 @@ Best first packages:
 - `query/sql`
 
 Docs: https://pkg.go.dev/pgregory.net/rapid
-
-### `honnef.co/go/tools/cmd/staticcheck`
-
-Pin as a tool, not as a runtime library.
-
-Why it fits:
-
-- `TECH-DEBT.md` already calls out dead-code and test-label cleanup that `go vet`
-  does not cover well.
-- The repo has enough concurrency, tests, and stale-audit cleanup that an
-  analysis pass would likely find useful maintenance issues.
-- Prefer pinning a released tool version instead of relying on an ambient
-  developer install.
-
-Docs: https://pkg.go.dev/honnef.co/go/tools
 
 ### `golang.org/x/sync/errgroup`
 

@@ -39,6 +39,10 @@ Commands run:
 - `rtk go test ./... -count=1`
 - `rtk go build ./...`
 
+Pinned Staticcheck is available as `rtk go tool staticcheck ./...`. Use it for
+static-analysis visibility, but do not treat a broad green run as required
+until OI-008 cleanup clears the known findings and any dirty compile blockers.
+
 Before taking further hosted-runtime implementation work, rerun the focused tests for the surfaces you touch.
 
 ## Next hosted-runtime direction

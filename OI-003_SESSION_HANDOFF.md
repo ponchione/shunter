@@ -102,4 +102,8 @@ rtk go vet ./store ./commitlog ./types ./bsatn ./executor
 rtk go test ./... -count=1
 ```
 
+Pinned Staticcheck is available as `rtk go tool staticcheck ./...`. Use it for
+static-analysis visibility, but do not treat a broad green run as required
+until OI-008 cleanup clears the known findings and any dirty compile blockers.
+
 Run `rtk go fmt` on touched Go packages before finishing.

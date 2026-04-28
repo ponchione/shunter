@@ -50,6 +50,9 @@ Do not read broad roadmap, ledger, or full decomposition specs by default. Open 
   - run targeted tests for touched packages first
   - expand to broader test runs only when needed
   - run `rtk go vet` for touched packages when behavior, exported APIs, or interfaces changed
+  - run pinned Staticcheck with `rtk go tool staticcheck ./...` when static
+    analysis is relevant; until OI-008 cleanup makes it green, it may be
+    report-only rather than a required passing check
   - run `rtk go fmt` on touched files/packages before finishing
 - Do not claim a Go change is complete until the relevant Go commands pass.
 
@@ -64,6 +67,7 @@ Do not read broad roadmap, ledger, or full decomposition specs by default. Open 
 Examples:
 - `rtk git status`
 - `rtk go test ./...`
+- `rtk go tool staticcheck ./...`
 - `rtk grep "pattern" docs`
 
 ## If docs disagree

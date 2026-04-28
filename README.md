@@ -191,6 +191,16 @@ To run the broad test suite:
 rtk go test ./...
 ```
 
+Pinned static analysis is available through:
+
+```bash
+rtk go tool staticcheck ./...
+```
+
+Treat Staticcheck as cleanup/static-analysis signal until the known OI-008
+findings are cleared; do not count it as a green broad-verification result
+unless the command actually passes.
+
 ## Clean-room note
 
 Shunter is intended to be a clean-room implementation inspired by public documentation and independent analysis of SpacetimeDB's architecture. The goal is architectural learning and independent implementation, not source reuse.
