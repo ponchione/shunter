@@ -161,6 +161,60 @@ func TestSchedulerReplaySuppressesDuplicateFirstPostReplayScan(t *testing.T) {
 	}
 }
 
+func TestSchedulerReplayOverflowLeavesSkippedDueRowsRetryable(t *testing.T) {
+	_, cs, tid, _ := schedulerWorkerFixture(t)
+	inbox := make(chan ExecutorCommand, 1)
+	s := NewScheduler(inbox, cs, tid)
+	s.now = func() time.Time { return time.Unix(100, 0) }
+	seedSchedule(t, cs, tid, 8, "first-due", nil, time.Unix(50, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 9, "skipped-due", nil, time.Unix(60, 0).UnixNano(), 0)
+
+	s.ReplayFromCommitted()
+	var replayedID ScheduleID
+	select {
+	case cmd := <-inbox:
+		replayedID = cmd.(CallReducerCmd).Request.ScheduleID
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("replay should enqueue one due schedule before inbox saturation")
+	}
+
+	s.scan()
+	select {
+	case cmd := <-inbox:
+		scannedID := cmd.(CallReducerCmd).Request.ScheduleID
+		if scannedID == replayedID {
+			t.Fatalf("scan duplicated replayed schedule %d instead of picking skipped due row", scannedID)
+		}
+		if replayedID+scannedID != 17 {
+			t.Fatalf("replay+scan schedule IDs = %d and %d, want 8 and 9 in either order", replayedID, scannedID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("scan did not pick up due schedule skipped by saturated replay")
+	}
+}
+
+func TestSchedulerReplayOverflowStillArmsEarliestFutureWakeup(t *testing.T) {
+	_, cs, tid, _ := schedulerWorkerFixture(t)
+	inbox := make(chan ExecutorCommand, 1)
+	s := NewScheduler(inbox, cs, tid)
+	s.now = func() time.Time { return time.Unix(100, 0) }
+	seedSchedule(t, cs, tid, 10, "due-a", nil, time.Unix(50, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 11, "due-b", nil, time.Unix(60, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 12, "future-late", nil, time.Unix(900, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 13, "future-early", nil, time.Unix(400, 0).UnixNano(), 0)
+
+	s.ReplayFromCommitted()
+
+	if s.nextWakeup != time.Unix(400, 0) {
+		t.Fatalf("nextWakeup after saturated replay = %v, want %v", s.nextWakeup, time.Unix(400, 0))
+	}
+	select {
+	case <-inbox:
+	default:
+		t.Fatal("replay should have enqueued one due row before saturation")
+	}
+}
+
 // TestParityP0Sched001ReplayPreservesScanOrderWithoutSorting pins the
 // intentional divergence from reference scheduler.rs:118-130 that the
 // scheduler does not sort past-due rows by next_run_at_ns during replay;

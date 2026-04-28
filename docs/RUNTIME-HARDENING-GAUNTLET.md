@@ -77,7 +77,10 @@ Current status:
   successful retry. Scheduler clock injection is now pinned across future
   wakeups, notify-driven rescans, and replayed future wakeups so recovered
   schedules cannot fire early just because their recovered due time predates
-  the host wall clock.
+  the host wall clock. Additional replay-saturation pins prove skipped due
+  rows remain retryable, the earliest future wakeup survives a saturated replay
+  pass, and recovered repeating schedules that advance into the future after
+  either replay or overflow wait for the scheduler clock before firing again.
 
 ## Goals
 

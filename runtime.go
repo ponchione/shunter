@@ -83,6 +83,9 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		return nil, fmt.Errorf("build hosted runtime schema: %w", err)
 	}
 	registry := engine.Registry()
+	if err := validateModuleDeclarationSQL(mod, registry); err != nil {
+		return nil, err
+	}
 
 	state, recoveredTxID, resumePlan, err := openOrBootstrapState(dataDir, registry)
 	if err != nil {

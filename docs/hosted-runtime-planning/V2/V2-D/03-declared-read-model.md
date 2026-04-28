@@ -5,6 +5,8 @@ Parent plan: `docs/hosted-runtime-planning/V2/V2-D/00-current-execution-plan.md`
 Objective: implement the smallest coherent relationship between declarations
 and executable reads.
 
+Status: complete.
+
 Acceptable implementation directions:
 - declarations remain metadata-only, and generated clients clearly use raw SQL
   helpers for execution
@@ -24,3 +26,11 @@ Do not implement:
   selected model explicitly needs them
 - policy enforcement; V2-E owns that
 - aggregate multi-module read routing; V2-F owns that
+
+Implemented model:
+- declarations remain named metadata surfaces unless they include SQL metadata.
+- `QueryDeclaration.SQL` is validated with one-off SQL rules.
+- `ViewDeclaration.SQL` is validated with subscription SQL rules.
+- raw SQL protocol reads remain the external execution path.
+- generated clients call SQL strings for executable declarations and leave
+  metadata-only declarations as constants.

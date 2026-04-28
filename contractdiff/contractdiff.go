@@ -184,32 +184,51 @@ func compareReducers(out *Report, oldReducers, currentReducers []schema.ReducerE
 }
 
 func compareNamedQueries(out *Report, surface Surface, oldQueries, currentQueries []shunter.QueryDescription) {
-	oldNames := querySet(oldQueries)
-	currentNames := querySet(currentQueries)
-	for name := range currentNames {
-		if _, ok := oldNames[name]; !ok {
+	oldByName := queryMap(oldQueries)
+	currentByName := queryMap(currentQueries)
+	for name, current := range currentByName {
+		old, ok := oldByName[name]
+		if !ok {
 			out.add(ChangeKindAdditive, surface, name, "query added")
+			continue
 		}
+		compareNamedReadSQL(out, ChangeKindAdditive, ChangeKindBreaking, surface, name, "query", old.SQL, current.SQL)
 	}
-	for name := range oldNames {
-		if _, ok := currentNames[name]; !ok {
+	for name := range oldByName {
+		if _, ok := currentByName[name]; !ok {
 			out.add(ChangeKindBreaking, surface, name, "query removed")
 		}
 	}
 }
 
 func compareNamedViews(out *Report, oldViews, currentViews []shunter.ViewDescription) {
-	oldNames := viewSet(oldViews)
-	currentNames := viewSet(currentViews)
-	for name := range currentNames {
-		if _, ok := oldNames[name]; !ok {
+	oldByName := viewMap(oldViews)
+	currentByName := viewMap(currentViews)
+	for name, current := range currentByName {
+		old, ok := oldByName[name]
+		if !ok {
 			out.add(ChangeKindAdditive, SurfaceView, name, "view added")
+			continue
 		}
+		compareNamedReadSQL(out, ChangeKindAdditive, ChangeKindBreaking, SurfaceView, name, "view", old.SQL, current.SQL)
 	}
-	for name := range oldNames {
-		if _, ok := currentNames[name]; !ok {
+	for name := range oldByName {
+		if _, ok := currentByName[name]; !ok {
 			out.add(ChangeKindBreaking, SurfaceView, name, "view removed")
 		}
+	}
+}
+
+func compareNamedReadSQL(out *Report, addedKind, changedKind ChangeKind, surface Surface, name, label, oldSQL, currentSQL string) {
+	oldHasSQL := strings.TrimSpace(oldSQL) != ""
+	currentHasSQL := strings.TrimSpace(currentSQL) != ""
+	switch {
+	case !oldHasSQL && currentHasSQL:
+		out.add(addedKind, surface, name, label+" SQL added")
+	case oldHasSQL && !currentHasSQL:
+		out.add(changedKind, surface, name, label+" SQL removed")
+	case oldHasSQL && currentHasSQL && oldSQL != currentSQL:
+		out.add(changedKind, surface, name, label+" SQL changed")
 	}
 }
 
@@ -337,18 +356,18 @@ func indexMap(indexes []schema.IndexExport) map[string]schema.IndexExport {
 	return out
 }
 
-func querySet(queries []shunter.QueryDescription) map[string]struct{} {
-	out := make(map[string]struct{}, len(queries))
+func queryMap(queries []shunter.QueryDescription) map[string]shunter.QueryDescription {
+	out := make(map[string]shunter.QueryDescription, len(queries))
 	for _, query := range queries {
-		out[query.Name] = struct{}{}
+		out[query.Name] = query
 	}
 	return out
 }
 
-func viewSet(views []shunter.ViewDescription) map[string]struct{} {
-	out := make(map[string]struct{}, len(views))
+func viewMap(views []shunter.ViewDescription) map[string]shunter.ViewDescription {
+	out := make(map[string]shunter.ViewDescription, len(views))
 	for _, view := range views {
-		out[view.Name] = struct{}{}
+		out[view.Name] = view
 	}
 	return out
 }

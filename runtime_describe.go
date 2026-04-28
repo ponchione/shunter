@@ -17,6 +17,7 @@ type ModuleDescription struct {
 // QueryDescription is a detached declaration summary for a named read query.
 type QueryDescription struct {
 	Name        string
+	SQL         string             `json:"SQL,omitempty"`
 	Permissions PermissionMetadata `json:"-"`
 	ReadModel   ReadModelMetadata  `json:"-"`
 	Migration   MigrationMetadata  `json:"-"`
@@ -26,6 +27,7 @@ type QueryDescription struct {
 // subscription.
 type ViewDescription struct {
 	Name        string
+	SQL         string             `json:"SQL,omitempty"`
 	Permissions PermissionMetadata `json:"-"`
 	ReadModel   ReadModelMetadata  `json:"-"`
 	Migration   MigrationMetadata  `json:"-"`

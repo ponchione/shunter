@@ -13,6 +13,7 @@ import (
 type namedTypeScriptIdentifier struct {
 	name       string
 	identifier string
+	sql        string
 }
 
 func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
@@ -25,8 +26,8 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	}
 	b.WriteString("\n")
 	b.WriteString("export type ReducerCaller = (name: string, args: Uint8Array) => Promise<Uint8Array>;\n")
-	b.WriteString("export type QueryRunner = (name: string, args?: Uint8Array) => Promise<Uint8Array>;\n")
-	b.WriteString("export type ViewSubscriber = (name: string, args?: Uint8Array) => Promise<() => void>;\n")
+	b.WriteString("export type QueryRunner = (sql: string) => Promise<Uint8Array>;\n")
+	b.WriteString("export type ViewSubscriber = (sql: string) => Promise<() => void>;\n")
 	b.WriteString("export type TableSubscriber<Row> = (table: string, onRows?: (rows: Row[]) => void) => Promise<() => void>;\n")
 	b.WriteString("\n")
 
@@ -94,10 +95,13 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	queryIdentifiers := uniqueTypeScriptIdentifiers(queryNames, typeScriptCamelIdentifier)
 	writeTypeScriptConstMap(&b, "queries", queryIdentifiers)
 	b.WriteString("export type QueryName = (typeof queries)[keyof typeof queries];\n\n")
-	for _, query := range queryIdentifiers {
+	executableQueries := executableQueryIdentifiers(contract.Queries, queryIdentifiers)
+	writeTypeScriptSQLConstMap(&b, "querySQL", executableQueries)
+	b.WriteString("export type ExecutableQueryName = keyof typeof querySQL;\n\n")
+	for _, query := range executableQueries {
 		functionName := "query" + upperFirst(query.identifier)
-		fmt.Fprintf(&b, "export function %s(runQuery: QueryRunner, args?: Uint8Array): Promise<Uint8Array> {\n", functionName)
-		fmt.Fprintf(&b, "  return runQuery(%s, args);\n", strconv.Quote(query.name))
+		fmt.Fprintf(&b, "export function %s(runQuery: QueryRunner): Promise<Uint8Array> {\n", functionName)
+		fmt.Fprintf(&b, "  return runQuery(%s);\n", strconv.Quote(query.sql))
 		b.WriteString("}\n\n")
 	}
 
@@ -108,10 +112,13 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	viewIdentifiers := uniqueTypeScriptIdentifiers(viewNames, typeScriptCamelIdentifier)
 	writeTypeScriptConstMap(&b, "views", viewIdentifiers)
 	b.WriteString("export type ViewName = (typeof views)[keyof typeof views];\n\n")
-	for _, view := range viewIdentifiers {
+	executableViews := executableViewIdentifiers(contract.Views, viewIdentifiers)
+	writeTypeScriptSQLConstMap(&b, "viewSQL", executableViews)
+	b.WriteString("export type ExecutableViewName = keyof typeof viewSQL;\n\n")
+	for _, view := range executableViews {
 		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), subscribeFunctionNames)
-		fmt.Fprintf(&b, "export function %s(subscribeView: ViewSubscriber, args?: Uint8Array): Promise<() => void> {\n", functionName)
-		fmt.Fprintf(&b, "  return subscribeView(%s, args);\n", strconv.Quote(view.name))
+		fmt.Fprintf(&b, "export function %s(subscribeView: ViewSubscriber): Promise<() => void> {\n", functionName)
+		fmt.Fprintf(&b, "  return subscribeView(%s);\n", strconv.Quote(view.sql))
 		b.WriteString("}\n\n")
 	}
 
@@ -127,6 +134,40 @@ func writeTypeScriptConstMap(b *bytes.Buffer, name string, identifiers []namedTy
 		fmt.Fprintf(b, "  %s: %s,\n", identifier.identifier, strconv.Quote(identifier.name))
 	}
 	b.WriteString("} as const;\n\n")
+}
+
+func writeTypeScriptSQLConstMap(b *bytes.Buffer, name string, identifiers []namedTypeScriptIdentifier) {
+	fmt.Fprintf(b, "export const %s = {\n", name)
+	for _, identifier := range identifiers {
+		fmt.Fprintf(b, "  %s: %s,\n", identifier.identifier, strconv.Quote(identifier.sql))
+	}
+	b.WriteString("} as const;\n\n")
+}
+
+func executableQueryIdentifiers(queries []shunter.QueryDescription, identifiers []namedTypeScriptIdentifier) []namedTypeScriptIdentifier {
+	out := make([]namedTypeScriptIdentifier, 0, len(queries))
+	for i, query := range queries {
+		if strings.TrimSpace(query.SQL) == "" {
+			continue
+		}
+		identifier := identifiers[i]
+		identifier.sql = query.SQL
+		out = append(out, identifier)
+	}
+	return out
+}
+
+func executableViewIdentifiers(views []shunter.ViewDescription, identifiers []namedTypeScriptIdentifier) []namedTypeScriptIdentifier {
+	out := make([]namedTypeScriptIdentifier, 0, len(views))
+	for i, view := range views {
+		if strings.TrimSpace(view.SQL) == "" {
+			continue
+		}
+		identifier := identifiers[i]
+		identifier.sql = view.SQL
+		out = append(out, identifier)
+	}
+	return out
 }
 
 func writeTypeScriptPermissions(b *bytes.Buffer, permissions shunter.PermissionContract) {

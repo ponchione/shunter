@@ -3,6 +3,8 @@
 Goal: reconcile v1.5 named query/view declarations with the live protocol SQL
 read path before either surface grows larger.
 
+Status: complete.
+
 V2-D target:
 - define how declared queries/views relate to executable protocol reads
 - preserve existing OneOffQuery and Subscribe SQL behavior
@@ -27,5 +29,30 @@ Scope boundaries:
   client expectations, protocol compatibility.
 - Out of scope: broad SQL expansion, cross-language query runtime, policy
   enforcement, multi-module routing, process isolation.
+
+Completed live proof:
+- `QueryDeclaration.SQL` and `ViewDeclaration.SQL` define optional executable
+  SQL targets for named read declarations.
+- metadata-only declarations remain supported, but generated TypeScript clients
+  no longer emit executable helpers unless SQL metadata is present.
+- `Build` validates SQL-backed queries and views against the same protocol SQL
+  compiler used by `OneOffQuery` and subscription admission.
+- query SQL allows one-off query grammar, including projection and `LIMIT`;
+  view SQL uses subscription grammar and rejects projection/`LIMIT`.
+- `Runtime.ExportContract` and canonical JSON include declaration SQL metadata
+  when present.
+- `contractdiff.Compare` reports declaration SQL additions as additive and
+  removals/changes as breaking.
+- raw SQL protocol one-off and subscription behavior remains unchanged.
+- no broad SQL grammar expansion, policy enforcement, multi-module routing, or
+  process isolation was added.
+
+Validation passed:
+- `rtk go fmt . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
+- `rtk go test . -run 'Test.*(Declaration|Contract|Read|Query|View)' -count=1`
+- `rtk go test ./protocol ./query/sql ./subscription -count=1`
+- `rtk go test ./codegen ./contractdiff -count=1`
+- `rtk go vet . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
+- `rtk go test ./... -count=1`
 
 Immediate next V2 slice after V2-D: V2-E policy/auth enforcement foundation.

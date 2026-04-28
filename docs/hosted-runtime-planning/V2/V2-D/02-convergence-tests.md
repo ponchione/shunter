@@ -4,6 +4,8 @@ Parent plan: `docs/hosted-runtime-planning/V2/V2-D/00-current-execution-plan.md`
 
 Objective: make the declaration-vs-SQL decision testable.
 
+Status: complete.
+
 Likely files:
 - `module_declarations_test.go`
 - `runtime_contract_test.go`
@@ -26,3 +28,13 @@ Test boundaries:
 - do not require a full SQL/view system
 - do not change auth/policy behavior
 - do not add multi-module namespacing
+
+Implemented tests:
+- declaration descriptions and contracts include SQL metadata when present.
+- invalid SQL-backed query/view declarations fail `Build` with
+  `ErrInvalidDeclarationSQL`.
+- subscription-only view SQL rejects projection and `LIMIT`.
+- TypeScript codegen emits executable helpers only for declarations with SQL
+  metadata.
+- contractdiff reports declaration SQL additions/removals/changes.
+- protocol SQL tests remained green with named declarations in the root package.

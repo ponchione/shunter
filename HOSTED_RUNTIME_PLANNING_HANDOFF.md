@@ -7,9 +7,10 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-The active hosted-runtime implementation target is `V2-D`: declared read and
-SQL protocol convergence.
+The active hosted-runtime implementation target is `V2-E`: policy/auth
+enforcement foundation.
 
+V2-D declared read and SQL protocol convergence is complete.
 V2-C migration planning and validation is complete.
 V2-B contract artifact admin and CLI workflows are complete.
 V2-A runtime/module boundary hardening is complete.
@@ -21,7 +22,7 @@ V2 planning is now decomposed under `docs/hosted-runtime-planning/V2/`,
 starting from the code-grounded source direction in
 `docs/decomposition/hosted-runtime-v2-directions.md`.
 
-Next hosted-runtime work should start from `V2-D` unless a newer explicit user
+Next hosted-runtime work should start from `V2-E` unless a newer explicit user
 target supersedes this handoff. Do not reopen V1-H or V1.5-A through V1.5-E
 unless a new failing regression proves drift.
 
@@ -119,6 +120,32 @@ V2-C validation passed:
 - `rtk go test ./contractdiff ./contractworkflow ./cmd/shunter -count=1`
 - `rtk go test ./... -run 'Test.*(Migration|ContractDiff|Policy|Plan)' -count=1`
 - `rtk go vet ./contractdiff ./contractworkflow ./cmd/shunter`
+
+V2-D is complete. Its live proof is:
+- `QueryDeclaration.SQL` and `ViewDeclaration.SQL` define optional executable
+  SQL targets for named read declarations.
+- metadata-only declarations remain supported, while generated TypeScript
+  clients emit executable helpers only when SQL metadata exists.
+- `Build` validates SQL-backed declarations against the protocol SQL compiler;
+  query SQL uses one-off rules and view SQL uses subscription rules.
+- `Runtime.ExportContract` and canonical contract JSON carry declaration SQL
+  metadata when present.
+- `codegen.Generate` emits `querySQL` and `viewSQL` maps and SQL-backed helper
+  functions instead of calling a nonexistent named-query protocol feature.
+- `contractdiff.Compare` reports declaration SQL additions as additive and
+  declaration SQL removals/changes as breaking.
+- raw SQL `OneOffQuery`, `SubscribeSingle`, and `SubscribeMulti` behavior is
+  preserved.
+- no broad SQL expansion, policy enforcement, multi-module routing, process
+  isolation, or alternate read evaluator was added.
+
+V2-D validation passed:
+- `rtk go fmt . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
+- `rtk go test . -run 'Test.*(Declaration|Contract|Read|Query|View)' -count=1`
+- `rtk go test ./protocol ./query/sql ./subscription -count=1`
+- `rtk go test ./codegen ./contractdiff -count=1`
+- `rtk go vet . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
+- `rtk go test ./... -count=1`
 
 The completed V1.5 proof below is historical context and should not be treated
 as an active target.
@@ -235,7 +262,7 @@ Former non-slice validation blocker resolved:
 
 ## Current Hosted-Runtime State
 
-V1-H, V1.5-A through V1.5-E, V2-A, V2-B, and V2-C are audited as landed.
+V1-H, V1.5-A through V1.5-E, and V2-A through V2-D are audited as landed.
 
 Live proof points:
 - root package imports as `github.com/ponchione/shunter`
@@ -266,6 +293,9 @@ Live proof points:
   `contract codegen`
 - V2-C added deterministic migration planning through `contractdiff.Plan`,
   `contractworkflow.PlanFiles`, and `cmd/shunter contract plan`
+- V2-D added optional SQL-backed query/view declarations validated through the
+  protocol SQL compiler, exported through contracts, reflected in codegen, and
+  visible to contractdiff
 - generic contract workflows operate only on existing canonical JSON files;
   app-owned export remains based on `Runtime.ExportContractJSON`
 - root/runtime package tests are the live proof for hosted-runtime ownership,
@@ -284,13 +314,13 @@ Required:
 3. `docs/hosted-runtime-planning/V2/README.md`
 4. the active V2 slice execution plan and task docs
 
-For the current V2-D target, start from:
-- `docs/hosted-runtime-planning/V2/V2-D/00-current-execution-plan.md`
-- `docs/hosted-runtime-planning/V2/V2-D/01-stack-prerequisites.md`
-- `docs/hosted-runtime-planning/V2/V2-D/02-convergence-tests.md`
-- `docs/hosted-runtime-planning/V2/V2-D/03-declared-read-model.md`
-- `docs/hosted-runtime-planning/V2/V2-D/04-contract-and-codegen-updates.md`
-- `docs/hosted-runtime-planning/V2/V2-D/05-format-and-validate.md`
+For the current V2-E target, start from:
+- `docs/hosted-runtime-planning/V2/V2-E/00-current-execution-plan.md`
+- `docs/hosted-runtime-planning/V2/V2-E/01-stack-prerequisites.md`
+- `docs/hosted-runtime-planning/V2/V2-E/02-permission-enforcement-tests.md`
+- `docs/hosted-runtime-planning/V2/V2-E/03-claims-and-reducer-enforcement.md`
+- `docs/hosted-runtime-planning/V2/V2-E/04-read-permission-extension.md`
+- `docs/hosted-runtime-planning/V2/V2-E/05-format-and-validate.md`
 
 For V1.5-E audit only, start from:
 - `docs/hosted-runtime-planning/V1.5/README.md`
@@ -331,12 +361,13 @@ Preserve WebSocket-first v1 runtime behavior.
 ## V2 Planning State
 
 Current active V2 slice:
-- `V2-D`: declared read and SQL protocol convergence
+- `V2-E`: policy/auth enforcement foundation
 
 Completed V2 slices:
 - `V2-A`: runtime/module boundary hardening
 - `V2-B`: contract artifact admin and CLI workflows
 - `V2-C`: migration planning and validation
+- `V2-D`: declared read and SQL protocol convergence
 
 V2 planning slices are:
 1. `V2-A`: runtime/module boundary hardening
@@ -353,17 +384,17 @@ If V2 implementation starts, begin with:
 - that slice's `01-stack-prerequisites.md`
 - live code/package docs named by the slice
 
-Do not start V2-E or later until V2-D is complete or explicitly deferred with
+Do not start V2-F or later until V2-E is complete or explicitly deferred with
 the reason recorded here.
 
 ## Next Slice Notes
 
 No next V1.5 slice is queued. The active hosted-runtime implementation slice is
-V2-D.
+V2-E.
 
-After V2-D completes, update this handoff to:
-- mark V2-D complete with live proof and validation commands
-- set `V2-E` as the active target
+After V2-E completes, update this handoff to:
+- mark V2-E complete with live proof and validation commands
+- set `V2-F` as the active target
 - preserve the rule that each handoff completes one full lettered slice,
   including tests and validations
 
@@ -405,6 +436,14 @@ Completed V2-C validation:
 - `rtk go test ./contractdiff ./contractworkflow ./cmd/shunter -count=1`
 - `rtk go test ./... -run 'Test.*(Migration|ContractDiff|Policy|Plan)' -count=1`
 - `rtk go vet ./contractdiff ./contractworkflow ./cmd/shunter`
+
+Completed V2-D validation:
+- `rtk go fmt . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
+- `rtk go test . -run 'Test.*(Declaration|Contract|Read|Query|View)' -count=1`
+- `rtk go test ./protocol ./query/sql ./subscription -count=1`
+- `rtk go test ./codegen ./contractdiff -count=1`
+- `rtk go vet . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
+- `rtk go test ./... -count=1`
 
 Completed V1.5-E validation:
 - `rtk go fmt <touched packages>`

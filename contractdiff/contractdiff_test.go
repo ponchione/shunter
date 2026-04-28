@@ -93,7 +93,10 @@ func TestContractDiffDetectsDeclaredReadSQLChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceQuery, "history")
 	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceView, "live")
 
-	old = current
+	old = contractFixture()
+	old.Queries[0].SQL = "SELECT * FROM messages"
+	old.Views[0].SQL = "SELECT * FROM messages"
+	current = contractFixture()
 	current.Queries[0].SQL = "SELECT id FROM messages"
 	current.Views[0].SQL = ""
 

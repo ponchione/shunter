@@ -409,6 +409,7 @@ func copyQueryDescriptions(in []QueryDescription) []QueryDescription {
 	for i, query := range in {
 		out[i] = QueryDescription{
 			Name:        query.Name,
+			SQL:         query.SQL,
 			Permissions: copyPermissionMetadata(query.Permissions),
 			ReadModel:   copyReadModelMetadata(query.ReadModel),
 			Migration:   copyMigrationMetadata(query.Migration),
@@ -425,6 +426,7 @@ func copyViewDescriptions(in []ViewDescription) []ViewDescription {
 	for i, view := range in {
 		out[i] = ViewDescription{
 			Name:        view.Name,
+			SQL:         view.SQL,
 			Permissions: copyPermissionMetadata(view.Permissions),
 			ReadModel:   copyReadModelMetadata(view.ReadModel),
 			Migration:   copyMigrationMetadata(view.Migration),

@@ -1200,6 +1200,174 @@ func TestStartup_OverflowedRepeatingRecoveredScheduleCatchupStaysFixedRate(t *te
 	}
 }
 
+func TestStartup_ReplayedRepeatingScheduleFutureAdvanceWaitsForSchedulerClock(t *testing.T) {
+	runRepeatingFutureAdvanceWaitsForSchedulerClock(t, false)
+}
+
+func TestStartup_OverflowedRepeatingScheduleFutureAdvanceWaitsForSchedulerClock(t *testing.T) {
+	runRepeatingFutureAdvanceWaitsForSchedulerClock(t, true)
+}
+
+func TestStartup_ReplayedRepeatingFutureAdvanceCanBeCancelledBeforeDue(t *testing.T) {
+	firstAt := time.Unix(50, 0).UnixNano()
+	repeatNs := int64(450 * time.Second)
+	secondAt := firstAt + repeatNs
+
+	observedNextRuns := make(chan int64, 1)
+	var attempts atomic.Int32
+	var nowNs atomic.Int64
+	var schedTable schema.TableID
+
+	seed := startupSeed{
+		inboxCapacity: 1,
+		schedules: []sysScheduledSeed{
+			{id: 100, reducerName: "repeat-cancel-before-due", nextRunAtNs: firstAt, repeatNs: repeatNs},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: "repeat-cancel-before-due",
+				Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+					attempts.Add(1)
+					observedNextRuns <- scheduledNextRunFromReducer(ctx, schedTable, 100)
+					return nil, nil
+				}),
+			},
+			{
+				Name: "cancel-advanced-repeat",
+				Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+					deleted, err := ctx.Scheduler.Cancel(100)
+					if err != nil {
+						return nil, err
+					}
+					if !deleted {
+						return nil, errFireFailed
+					}
+					return nil, nil
+				}),
+			},
+		},
+	}
+	h := newStartupHarness(t, seed)
+	schedTable = h.schedTable
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+
+	gotFirst := readScheduledAttemptNextRun(t, observedNextRuns, "first replayed repeating cancelable attempt")
+	if gotFirst != firstAt {
+		t.Fatalf("first replayed repeating cancelable attempt saw next_run_at_ns=%d, want %d", gotFirst, firstAt)
+	}
+	waitExecutorBarrier(t, h.exec, "after first replayed repeating cancelable attempt")
+
+	rows := h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("cancelable repeating schedule rows=%d, want 1", len(rows))
+	}
+	if got := rows[0][SysScheduledColNextRunAtNs].AsInt64(); got != secondAt {
+		t.Fatalf("advanced cancelable repeating next_run_at_ns=%d, want %d", got, secondAt)
+	}
+
+	startHarnessScheduler(t, h)
+	cancelResp := make(chan ReducerResponse, 1)
+	if err := h.exec.SubmitWithContext(execCtx, CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "cancel-advanced-repeat", Source: CallSourceExternal},
+		ResponseCh: cancelResp,
+	}); err != nil {
+		t.Fatalf("SubmitWithContext cancel advanced repeat: %v", err)
+	}
+	expectCommittedResponse(t, cancelResp, "cancel advanced repeat")
+	waitExecutorBarrier(t, h.exec, "after cancelling advanced repeat")
+	if rows := h.sysScheduledRows(); len(rows) != 0 {
+		t.Fatalf("cancelled advanced repeating schedule rows=%d, want 0", len(rows))
+	}
+
+	nowNs.Store(time.Unix(600, 0).UnixNano())
+	h.scheduler.Notify()
+	assertNoReceive(t, observedNextRuns, 50*time.Millisecond, "cancelled recovered repeating schedule")
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("cancelled recovered repeating attempts=%d, want 1", got)
+	}
+}
+
+func TestStartup_RecoveredFutureWakeupRearmsForEarlierPostStartupSchedule(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 2)
+	lateAt := time.Unix(900, 0).UnixNano()
+	earlierAt := time.Unix(300, 0)
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 120, reducerName: "recovered-late", nextRunAtNs: lateAt},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: "recovered-late",
+				Handler: types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) {
+					fired <- "recovered-late"
+					return nil, nil
+				}),
+			},
+			{
+				Name: "schedule-earlier",
+				Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+					_, err := ctx.Scheduler.Schedule("earlier-after-startup", nil, earlierAt)
+					return nil, err
+				}),
+			},
+			{
+				Name: "earlier-after-startup",
+				Handler: types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) {
+					fired <- "earlier-after-startup"
+					return nil, nil
+				}),
+			},
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	scheduleResp := make(chan ReducerResponse, 1)
+	if err := h.exec.SubmitWithContext(execCtx, CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "schedule-earlier", Source: CallSourceExternal},
+		ResponseCh: scheduleResp,
+	}); err != nil {
+		t.Fatalf("SubmitWithContext schedule earlier: %v", err)
+	}
+	expectCommittedResponse(t, scheduleResp, "schedule earlier")
+	assertNoReceive(t, fired, 50*time.Millisecond, "post-startup earlier schedule before injected clock advanced")
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, fired, "earlier post-startup schedule")
+	if got != "earlier-after-startup" {
+		t.Fatalf("first fired reducer after rearm = %q, want earlier-after-startup", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after earlier post-startup schedule")
+	assertNoReceive(t, fired, 50*time.Millisecond, "recovered later schedule before its due time")
+
+	rows := h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("remaining recovered future schedules=%d, want 1", len(rows))
+	}
+	if got := rows[0][SysScheduledColScheduleID].AsUint64(); got != 120 {
+		t.Fatalf("remaining schedule_id=%d, want recovered late schedule 120", got)
+	}
+	if got := rows[0][SysScheduledColNextRunAtNs].AsInt64(); got != lateAt {
+		t.Fatalf("remaining recovered late next_run_at_ns=%d, want %d", got, lateAt)
+	}
+}
+
 // Pin 12: Startup(ctx, nil) is the test-path shorthand — the scheduler
 // replay step is skipped entirely (no inbox enqueue, no scan). Used by
 // harnesses that do not need sys_scheduled replay.
@@ -1346,6 +1514,22 @@ func readReducerOrder(t *testing.T, ch <-chan string, label string) string {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatalf("timeout waiting for %s", label)
 		return ""
+	}
+}
+
+func waitExecutorBarrier(t *testing.T, exec *Executor, label string) {
+	t.Helper()
+	barrier := make(chan ReducerResponse, 1)
+	if err := exec.Submit(CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "not-registered"},
+		ResponseCh: barrier,
+	}); err != nil {
+		t.Fatalf("Submit barrier for %s: %v", label, err)
+	}
+	select {
+	case <-barrier:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("executor barrier timed out for %s", label)
 	}
 }
 

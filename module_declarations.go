@@ -4,11 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/ponchione/shunter/protocol"
 )
 
 var (
 	ErrEmptyDeclarationName     = errors.New("declaration name must not be empty")
 	ErrDuplicateDeclarationName = errors.New("duplicate declaration name")
+
+	// ErrInvalidDeclarationSQL reports SQL metadata that cannot be compiled
+	// against the built module schema.
+	ErrInvalidDeclarationSQL = errors.New("invalid declaration SQL")
 )
 
 const (
@@ -94,7 +100,10 @@ func WithReducerPermissions(metadata PermissionMetadata) ReducerOption {
 // QueryDeclaration declares a named request/response-style read surface owned
 // by a module.
 type QueryDeclaration struct {
-	Name        string
+	Name string
+	// SQL optionally binds the declaration to an executable OneOffQuery SQL
+	// string. Empty SQL leaves the declaration metadata-only.
+	SQL         string
 	Permissions PermissionMetadata
 	ReadModel   ReadModelMetadata
 	Migration   MigrationMetadata
@@ -103,7 +112,10 @@ type QueryDeclaration struct {
 // ViewDeclaration declares a named live view/subscription surface owned by a
 // module.
 type ViewDeclaration struct {
-	Name        string
+	Name string
+	// SQL optionally binds the declaration to an executable subscription SQL
+	// string. Empty SQL leaves the declaration metadata-only.
+	SQL         string
 	Permissions PermissionMetadata
 	ReadModel   ReadModelMetadata
 	Migration   MigrationMetadata
@@ -150,9 +162,38 @@ func validateModuleDeclarations(m *Module) error {
 	return nil
 }
 
+func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
+	for _, query := range m.queries {
+		if strings.TrimSpace(query.SQL) == "" {
+			continue
+		}
+		err := protocol.ValidateSQLQueryString(query.SQL, sl, protocol.SQLQueryValidationOptions{
+			AllowLimit:      true,
+			AllowProjection: true,
+		})
+		if err != nil {
+			return fmt.Errorf("%w: query %q: %v", ErrInvalidDeclarationSQL, query.Name, err)
+		}
+	}
+	for _, view := range m.views {
+		if strings.TrimSpace(view.SQL) == "" {
+			continue
+		}
+		err := protocol.ValidateSQLQueryString(view.SQL, sl, protocol.SQLQueryValidationOptions{
+			AllowLimit:      false,
+			AllowProjection: false,
+		})
+		if err != nil {
+			return fmt.Errorf("%w: view %q: %v", ErrInvalidDeclarationSQL, view.Name, err)
+		}
+	}
+	return nil
+}
+
 func copyQueryDeclaration(query QueryDeclaration) QueryDeclaration {
 	return QueryDeclaration{
 		Name:        query.Name,
+		SQL:         query.SQL,
 		Permissions: copyPermissionMetadata(query.Permissions),
 		ReadModel:   copyReadModelMetadata(query.ReadModel),
 		Migration:   copyMigrationMetadata(query.Migration),
@@ -162,6 +203,7 @@ func copyQueryDeclaration(query QueryDeclaration) QueryDeclaration {
 func copyViewDeclaration(view ViewDeclaration) ViewDeclaration {
 	return ViewDeclaration{
 		Name:        view.Name,
+		SQL:         view.SQL,
 		Permissions: copyPermissionMetadata(view.Permissions),
 		ReadModel:   copyReadModelMetadata(view.ReadModel),
 		Migration:   copyMigrationMetadata(view.Migration),
@@ -198,6 +240,7 @@ func describeQueryDeclarations(in []QueryDeclaration) []QueryDescription {
 	for i, query := range in {
 		out[i] = QueryDescription{
 			Name:        query.Name,
+			SQL:         query.SQL,
 			Permissions: copyPermissionMetadata(query.Permissions),
 			ReadModel:   copyReadModelMetadata(query.ReadModel),
 			Migration:   copyMigrationMetadata(query.Migration),
@@ -214,6 +257,7 @@ func describeViewDeclarations(in []ViewDeclaration) []ViewDescription {
 	for i, view := range in {
 		out[i] = ViewDescription{
 			Name:        view.Name,
+			SQL:         view.SQL,
 			Permissions: copyPermissionMetadata(view.Permissions),
 			ReadModel:   copyReadModelMetadata(view.ReadModel),
 			Migration:   copyMigrationMetadata(view.Migration),
