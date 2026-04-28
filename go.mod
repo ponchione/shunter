@@ -8,6 +8,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	go.uber.org/goleak v1.3.0
 	lukechampine.com/blake3 v1.4.1
+	pgregory.net/rapid v1.2.0
 )
 
 require (

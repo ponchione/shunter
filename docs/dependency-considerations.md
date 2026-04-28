@@ -12,8 +12,8 @@ Current repo context:
 - Shunter is intentionally dependency-light today.
 - Direct runtime dependencies are currently limited to `github.com/coder/websocket`,
   `github.com/golang-jwt/jwt/v5`, and `lukechampine.com/blake3`.
-- Direct test dependencies now include `github.com/google/go-cmp v0.6.0`
-  and `go.uber.org/goleak v1.3.0`.
+- Direct test dependencies now include `github.com/google/go-cmp v0.6.0`,
+  `go.uber.org/goleak v1.3.0`, and `pgregory.net/rapid v1.2.0`.
 - Pinned Go tool dependencies now include
   `honnef.co/go/tools/cmd/staticcheck v0.7.0`.
 - `github.com/coder/websocket` is replaced with the local Shunter fork
@@ -67,6 +67,27 @@ Notes:
 
 Docs: https://pkg.go.dev/github.com/google/go-cmp/cmp
 
+### `pgregory.net/rapid`
+
+Added as a direct test dependency for shrinkable property and state-model
+coverage over Shunter-owned invariants.
+
+Enabled in:
+
+- `bsatn`
+- `query/sql`
+- `store`
+- `commitlog`
+
+Notes:
+
+- Keep Rapid imports in `_test.go` files only.
+- Prefer package-local generators while the generated data is package-specific.
+- Keep default check counts in normal test runs; use higher counts only for
+  manual stress runs.
+
+Docs: https://pkg.go.dev/pgregory.net/rapid
+
 ## Adopted Tool Dependencies
 
 ### `honnef.co/go/tools/cmd/staticcheck`
@@ -91,29 +112,6 @@ Notes:
 ## Strong Candidates
 
 These are the highest-value additions to consider first.
-
-### `pgregory.net/rapid`
-
-Use as a property-based and state-machine testing dependency.
-
-Why it fits:
-
-- Shunter has several custom invariant-heavy surfaces:
-  - `bsatn` encode/decode round trips
-  - `store` transaction/index behavior
-  - `commitlog` replay/recovery invariants
-  - `query/sql` parser and coercion edge cases
-- Rapid supports shrinking, complex generated data, and state-machine tests.
-- It has no non-stdlib dependencies of its own.
-
-Best first packages:
-
-- `bsatn`
-- `store`
-- `commitlog`
-- `query/sql`
-
-Docs: https://pkg.go.dev/pgregory.net/rapid
 
 ### `golang.org/x/sync/errgroup`
 

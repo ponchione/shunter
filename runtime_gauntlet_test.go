@@ -623,6 +623,371 @@ func TestRuntimeGauntletScheduledOneShotFiresAfterCleanRestart(t *testing.T) {
 	assertGauntletReadMatchesModel(t, restartedRT, model, "scheduled restart op 4 second restart")
 }
 
+func TestRuntimeGauntletScheduledImmediateAndPastDueOneShots(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntime(t, dataDir)
+
+	model := gauntletModel{players: map[uint64]string{}}
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const queryID = uint32(8976)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 8975, queryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("scheduled immediate/past op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	runGauntletScheduledInsertWithSubscriber(t, rt, subscriber, queryID, &model, 20, "scheduled_immediate", 0, "scheduled immediate/past op 1 immediate")
+	scheduleGauntletPastDueInsertNext(t, rt, 21, "scheduled_past_due", 200*time.Millisecond, "scheduled immediate/past op 2 schedule past due")
+	assertGauntletScheduledInsertFired(t, subscriber, queryID, &model, 21, "scheduled_past_due", "scheduled immediate/past op 3 past due fire")
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled immediate/past op 3 after fires")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled immediate/past op 3 after fires")
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("scheduled immediate/past op 4 Close returned error: %v", err)
+	}
+	restartedRT := buildGauntletRuntime(t, dataDir)
+	defer restartedRT.Close()
+	time.Sleep(100 * time.Millisecond)
+	assertGauntletReadMatchesModel(t, restartedRT, model, "scheduled immediate/past op 5 after restart")
+	restartedClient := dialGauntletProtocol(t, restartedRT)
+	defer restartedClient.CloseNow()
+	assertGauntletProtocolQueriesMatchModel(t, restartedClient, model, "scheduled immediate/past op 5 after restart")
+}
+
+func TestRuntimeGauntletScheduledDueTimePreemptsScheduleOrder(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const queryID = uint32(8978)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 8977, queryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("scheduled due-time order op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	scheduleGauntletInsertNext(t, rt, 80, "scheduled_late_first", 250*time.Millisecond, "scheduled due-time order op 1 schedule late")
+	scheduleGauntletInsertNext(t, rt, 81, "scheduled_early_second", 40*time.Millisecond, "scheduled due-time order op 2 schedule early")
+
+	assertGauntletScheduledInsertFired(t, subscriber, queryID, &model, 81, "scheduled_early_second", "scheduled due-time order op 3 early fire")
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled due-time order op 3 after early fire")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled due-time order op 3 after early fire")
+
+	assertGauntletScheduledInsertFired(t, subscriber, queryID, &model, 80, "scheduled_late_first", "scheduled due-time order op 4 late fire")
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled due-time order op 4 after late fire")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled due-time order op 4 after late fire")
+}
+
+func TestRuntimeGauntletScheduledPredicateSubscriptionDeltas(t *testing.T) {
+	const (
+		allRequestID    = uint32(8984)
+		allQueryID      = uint32(8985)
+		targetRequestID = uint32(8986)
+		targetQueryID   = uint32(8987)
+		targetName      = "scheduled_target"
+	)
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	client := dialGauntletProtocol(t, rt)
+	defer client.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	allInitial := subscribeGauntletProtocolPlayers(t, client, "SELECT * FROM players", allRequestID, allQueryID)
+	if diff := diffGauntletPlayers(allInitial, model.players); diff != "" {
+		t.Fatalf("scheduled predicate op 0 all initial snapshot mismatch:\n%s", diff)
+	}
+	targetInitial := subscribeGauntletProtocolPlayers(t, client, "SELECT * FROM players WHERE name = 'scheduled_target'", targetRequestID, targetQueryID)
+	if diff := diffGauntletPlayers(targetInitial, model.players); diff != "" {
+		t.Fatalf("scheduled predicate op 0 target initial snapshot mismatch:\n%s", diff)
+	}
+
+	scheduleGauntletInsertNext(t, rt, 90, "scheduled_other", 30*time.Millisecond, "scheduled predicate op 1 schedule nonmatch")
+	gotNonMatch := readGauntletTransactionUpdateLightByQuery(t, client, "scheduled predicate op 2 nonmatch fire")
+	assertGauntletDeltasByQueryEqual(t, gotNonMatch, map[uint32]gauntletDelta{
+		allQueryID: {
+			inserts: map[uint64]string{90: "scheduled_other"},
+			deletes: map[uint64]string{},
+		},
+	}, "scheduled predicate op 2 nonmatch fire")
+	model.players[90] = "scheduled_other"
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled predicate op 2 after nonmatch fire")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled predicate op 2 after nonmatch fire")
+
+	scheduleGauntletInsertNext(t, rt, 91, targetName, 30*time.Millisecond, "scheduled predicate op 3 schedule target")
+	wantTargetDelta := gauntletDelta{
+		inserts: map[uint64]string{91: targetName},
+		deletes: map[uint64]string{},
+	}
+	gotTarget := readGauntletTransactionUpdateLightByQuery(t, client, "scheduled predicate op 4 target fire")
+	assertGauntletDeltasByQueryEqual(t, gotTarget, map[uint32]gauntletDelta{
+		allQueryID:    wantTargetDelta,
+		targetQueryID: wantTargetDelta,
+	}, "scheduled predicate op 4 target fire")
+	model.players[91] = targetName
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled predicate op 4 after target fire")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled predicate op 4 after target fire")
+}
+
+func TestRuntimeGauntletScheduledMultiSubscriberFanoutParity(t *testing.T) {
+	const (
+		primaryRequestID = uint32(8988)
+		primaryQueryID   = uint32(8989)
+		mirrorRequestID  = uint32(8990)
+		mirrorQueryID    = uint32(8991)
+		controlRequestID = uint32(8992)
+		controlQueryID   = uint32(8993)
+	)
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	primary := dialGauntletProtocol(t, rt)
+	defer primary.CloseNow()
+	mirror := dialGauntletProtocol(t, rt)
+	defer mirror.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	primaryInitial := subscribeGauntletProtocolPlayers(t, primary, "SELECT * FROM players", primaryRequestID, primaryQueryID)
+	if diff := diffGauntletPlayers(primaryInitial, model.players); diff != "" {
+		t.Fatalf("scheduled multi-subscriber op 0 primary initial snapshot mismatch:\n%s", diff)
+	}
+	mirrorInitial := subscribeGauntletProtocolPlayers(t, mirror, "SELECT * FROM players", mirrorRequestID, mirrorQueryID)
+	if diff := diffGauntletPlayers(mirrorInitial, primaryInitial); diff != "" {
+		t.Fatalf("scheduled multi-subscriber op 0 mirror/primary initial snapshot mismatch:\n%s", diff)
+	}
+
+	control := subscribeGauntletNoEffectObserver(t, rt, model, controlRequestID, controlQueryID, "scheduled multi-subscriber op 1 cancel observer")
+	cancelledID := scheduleGauntletInsertNext(t, rt, 95, "scheduled_cancelled_fanout", 120*time.Millisecond, "scheduled multi-subscriber op 2 schedule cancelled")
+	cancelGauntletSchedule(t, rt, cancelledID, "scheduled multi-subscriber op 3 cancel")
+	assertGauntletScheduledNoEffect(t, rt, control, queryClient, model, 180*time.Millisecond, "scheduled multi-subscriber op 4 cancelled schedule")
+
+	scheduleGauntletInsertNext(t, rt, 96, "scheduled_fanout", 20*time.Millisecond, "scheduled multi-subscriber op 5 schedule fanout")
+	assertGauntletScheduledInsertFired(t, primary, primaryQueryID, &model, 96, "scheduled_fanout", "scheduled multi-subscriber op 6 primary fire")
+	assertGauntletScheduledInsertFired(t, mirror, mirrorQueryID, &model, 96, "scheduled_fanout", "scheduled multi-subscriber op 6 mirror fire")
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled multi-subscriber op 6 after fanout")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled multi-subscriber op 6 after fanout")
+}
+
+func TestRuntimeGauntletScheduledCancelIsIdempotentNoEffect(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const queryID = uint32(8995)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 8994, queryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("scheduled cancel idempotence op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	cancelObserver := subscribeGauntletNoEffectObserver(t, rt, model, 8996, 8997, "scheduled cancel idempotence op 1 observer")
+	scheduleID := scheduleGauntletInsertNext(t, rt, 97, "scheduled_cancel_idempotent", 120*time.Millisecond, "scheduled cancel idempotence op 2 schedule")
+	cancelGauntletSchedule(t, rt, scheduleID, "scheduled cancel idempotence op 3 first cancel")
+	failGauntletCancelSchedule(t, rt, scheduleID, "scheduled cancel idempotence op 4 repeated cancel")
+	failGauntletCancelSchedule(t, rt, types.ScheduleID(999999), "scheduled cancel idempotence op 5 unknown cancel")
+	assertGauntletScheduledNoEffect(t, rt, cancelObserver, queryClient, model, 180*time.Millisecond, "scheduled cancel idempotence op 6 cancelled schedule")
+
+	runGauntletScheduledInsertWithSubscriber(t, rt, subscriber, queryID, &model, 98, "scheduled_after_cancel_idempotence", 20*time.Millisecond, "scheduled cancel idempotence op 7 success")
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled cancel idempotence op 7 after success")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled cancel idempotence op 7 after success")
+}
+
+func TestRuntimeGauntletProtocolScheduledOneShotFires(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	caller := dialGauntletProtocol(t, rt)
+	defer caller.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const queryID = uint32(9001)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9000, queryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("protocol scheduled one-shot op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	protocolScheduleGauntletInsertNext(t, caller, 35, "protocol_scheduled", 20*time.Millisecond, 9002, "protocol scheduled one-shot op 1 schedule")
+	assertGauntletScheduledInsertFired(t, subscriber, queryID, &model, 35, "protocol_scheduled", "protocol scheduled one-shot op 2 fire")
+	assertGauntletReadMatchesModel(t, rt, model, "protocol scheduled one-shot op 2 after fire")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "protocol scheduled one-shot op 2 after fire")
+}
+
+func TestRuntimeGauntletProtocolScheduledOneShotFiresAfterCleanRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntime(t, dataDir)
+
+	caller := dialGauntletProtocol(t, rt)
+	protocolScheduleGauntletInsertNext(t, caller, 39, "protocol_scheduled_after_restart", 500*time.Millisecond, 9015, "protocol scheduled restart op 0 schedule")
+	if err := caller.Close(websocket.StatusNormalClosure, "protocol scheduled restart prefix complete"); err != nil {
+		t.Fatalf("protocol scheduled restart op 1 close caller: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("protocol scheduled restart op 1 Close before fire returned error: %v", err)
+	}
+
+	rt = buildGauntletRuntime(t, dataDir)
+	defer rt.Close()
+	model := gauntletModel{players: map[uint64]string{}}
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const queryID = uint32(9017)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9016, queryID)
+	firedRows := map[uint64]string{39: "protocol_scheduled_after_restart"}
+	if diff := diffGauntletPlayers(initialRows, model.players); diff == "" {
+		wantDelta := gauntletDelta{
+			inserts: copyGauntletPlayers(firedRows),
+			deletes: map[uint64]string{},
+		}
+		gotDelta := readGauntletTransactionUpdateLight(t, subscriber, queryID, "protocol scheduled restart op 2 fire after restart")
+		assertGauntletDeltaEqual(t, gotDelta, wantDelta, "protocol scheduled restart op 2 fire after restart")
+	} else if firedDiff := diffGauntletPlayers(initialRows, firedRows); firedDiff != "" {
+		t.Fatalf("protocol scheduled restart op 2 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+	model.players[39] = "protocol_scheduled_after_restart"
+	assertGauntletReadMatchesModel(t, rt, model, "protocol scheduled restart op 2 after fire")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "protocol scheduled restart op 2 after fire")
+}
+
+func TestRuntimeGauntletProtocolScheduledCancelSuppressesFire(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	caller := dialGauntletProtocol(t, rt)
+	defer caller.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const queryID = uint32(9004)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9003, queryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("protocol scheduled cancel op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	cancelObserver := subscribeGauntletNoEffectObserver(t, rt, model, 9005, 9006, "protocol scheduled cancel op 1 observer")
+	scheduleID := scheduleGauntletInsertNext(t, rt, 36, "protocol_cancelled", 120*time.Millisecond, "protocol scheduled cancel op 2 schedule")
+	protocolCancelGauntletSchedule(t, caller, scheduleID, 9007, "protocol scheduled cancel op 3 cancel")
+	assertGauntletScheduledNoEffect(t, rt, cancelObserver, queryClient, model, 180*time.Millisecond, "protocol scheduled cancel op 4 cancelled schedule")
+
+	runGauntletScheduledInsertWithSubscriber(t, rt, subscriber, queryID, &model, 37, "scheduled_after_protocol_cancel", 20*time.Millisecond, "protocol scheduled cancel op 5 success")
+	assertGauntletReadMatchesModel(t, rt, model, "protocol scheduled cancel op 5 after success")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "protocol scheduled cancel op 5 after success")
+}
+
+func TestRuntimeGauntletProtocolScheduleCreationRollbackDoesNotFire(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	caller := dialGauntletProtocol(t, rt)
+	defer caller.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	rollbackObserver := subscribeGauntletNoEffectObserver(t, rt, model, 9018, 9019, "protocol schedule rollback op 0 observer")
+	protocolFailGauntletScheduleInsertNext(t, caller, 40, "protocol_scheduled_rolled_back", 30*time.Millisecond, 9020, "protocol schedule rollback op 1 failed scheduler reducer")
+	assertGauntletScheduledNoEffect(t, rt, rollbackObserver, queryClient, model, 180*time.Millisecond, "protocol schedule rollback op 2 rolled-back schedule")
+
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	const queryID = uint32(9022)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9021, queryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("protocol schedule rollback op 3 success subscriber snapshot mismatch:\n%s", diff)
+	}
+	runGauntletScheduledInsertWithSubscriber(t, rt, subscriber, queryID, &model, 41, "scheduled_after_protocol_rollback", 20*time.Millisecond, "protocol schedule rollback op 4 success")
+	assertGauntletReadMatchesModel(t, rt, model, "protocol schedule rollback op 4 after success")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "protocol schedule rollback op 4 after success")
+}
+
+func TestRuntimeGauntletProtocolUnknownCancelDoesNotMutateOrFanout(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	caller := dialGauntletProtocol(t, rt)
+	defer caller.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const queryID = uint32(9024)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9023, queryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("protocol unknown cancel op 0 subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	unknownObserver := subscribeGauntletNoEffectObserver(t, rt, model, 9025, 9026, "protocol unknown cancel op 1 observer")
+	protocolFailGauntletCancelSchedule(t, caller, types.ScheduleID(999998), 9027, "protocol unknown cancel op 2 unknown cancel")
+	assertGauntletScheduledNoEffect(t, rt, unknownObserver, queryClient, model, 80*time.Millisecond, "protocol unknown cancel op 3 no effect")
+
+	runGauntletScheduledInsertWithSubscriber(t, rt, subscriber, queryID, &model, 42, "scheduled_after_protocol_unknown_cancel", 20*time.Millisecond, "protocol unknown cancel op 4 success")
+	assertGauntletReadMatchesModel(t, rt, model, "protocol unknown cancel op 4 after success")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "protocol unknown cancel op 4 after success")
+}
+
+func TestRuntimeGauntletScheduledFireSkipsUnsubscribedClient(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	primary := dialGauntletProtocol(t, rt)
+	defer primary.CloseNow()
+	mirror := dialGauntletProtocol(t, rt)
+	defer mirror.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const (
+		primaryQueryID = uint32(9010)
+		mirrorQueryID  = uint32(9012)
+	)
+	primaryInitial := subscribeGauntletProtocolPlayers(t, primary, "SELECT * FROM players", 9009, primaryQueryID)
+	if diff := diffGauntletPlayers(primaryInitial, model.players); diff != "" {
+		t.Fatalf("scheduled unsubscribe op 0 primary initial snapshot mismatch:\n%s", diff)
+	}
+	mirrorInitial := subscribeGauntletProtocolPlayers(t, mirror, "SELECT * FROM players", 9011, mirrorQueryID)
+	if diff := diffGauntletPlayers(mirrorInitial, primaryInitial); diff != "" {
+		t.Fatalf("scheduled unsubscribe op 0 mirror/primary initial snapshot mismatch:\n%s", diff)
+	}
+
+	scheduleGauntletInsertNext(t, rt, 38, "scheduled_after_unsubscribe", 120*time.Millisecond, "scheduled unsubscribe op 1 schedule")
+	mirrorFinalRows := unsubscribeGauntletProtocolPlayersWithLabel(t, mirror, 9013, mirrorQueryID, "scheduled unsubscribe op 2 mirror unsubscribe")
+	if diff := diffGauntletPlayers(mirrorFinalRows, model.players); diff != "" {
+		t.Fatalf("scheduled unsubscribe op 2 mirror final rows mismatch:\n%s", diff)
+	}
+
+	assertGauntletScheduledInsertFired(t, primary, primaryQueryID, &model, 38, "scheduled_after_unsubscribe", "scheduled unsubscribe op 3 primary fire")
+	assertNoGauntletProtocolMessageBeforeClose(t, mirror, 50*time.Millisecond, "scheduled unsubscribe op 3 mirror after unsubscribe")
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled unsubscribe op 3 after fire")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled unsubscribe op 3 after fire")
+}
+
 func TestRuntimeGauntletSeededScheduledWorkload(t *testing.T) {
 	const steps = 8
 
@@ -3411,6 +3776,11 @@ func scheduleGauntletInsertNext(t *testing.T, rt *shunter.Runtime, baseID uint64
 	return scheduleGauntletViaReducer(t, rt, "schedule_insert_next_player", baseID, name, delay, label)
 }
 
+func scheduleGauntletPastDueInsertNext(t *testing.T, rt *shunter.Runtime, baseID uint64, name string, delay time.Duration, label string) types.ScheduleID {
+	t.Helper()
+	return scheduleGauntletViaReducer(t, rt, "schedule_past_due_insert_next_player", baseID, name, delay, label)
+}
+
 func scheduleGauntletFailAfterInsert(t *testing.T, rt *shunter.Runtime, baseID uint64, name string, delay time.Duration, label string) types.ScheduleID {
 	t.Helper()
 	return scheduleGauntletViaReducer(t, rt, "schedule_fail_after_insert", baseID, name, delay, label)
@@ -3466,12 +3836,48 @@ func scheduleGauntletViaReducer(t *testing.T, rt *shunter.Runtime, reducer strin
 func runGauntletScheduledInsertWithSubscriber(t *testing.T, rt *shunter.Runtime, subscriber *websocket.Conn, queryID uint32, model *gauntletModel, id uint64, name string, delay time.Duration, label string) {
 	t.Helper()
 	scheduleGauntletInsertNext(t, rt, id, name, delay, label+" schedule")
+	assertGauntletScheduledInsertFired(t, subscriber, queryID, model, id, name, label+" fire")
+}
+
+func protocolScheduleGauntletInsertNext(t *testing.T, client *websocket.Conn, baseID uint64, name string, delay time.Duration, requestID uint32, label string) {
+	t.Helper()
+	op := gauntletOp{
+		kind:       "protocol_schedule_insert_next_player",
+		reducer:    "schedule_insert_next_player",
+		args:       fmt.Sprintf("%d:%s:%d", baseID, name, delay.Nanoseconds()),
+		wantStatus: shunter.StatusCommitted,
+	}
+	outcome := callGauntletProtocolReducer(t, client, op, requestID, label)
+	if outcome.status != shunter.StatusCommitted {
+		t.Fatalf("%s status = %v, want %v; reducer err = %s", label, outcome.status, shunter.StatusCommitted, outcome.err)
+	}
+}
+
+func protocolFailGauntletScheduleInsertNext(t *testing.T, client *websocket.Conn, baseID uint64, name string, delay time.Duration, requestID uint32, label string) {
+	t.Helper()
+	op := gauntletOp{
+		kind:       "protocol_schedule_insert_next_player_then_fail",
+		reducer:    "schedule_insert_next_player_then_fail",
+		args:       fmt.Sprintf("%d:%s:%d", baseID, name, delay.Nanoseconds()),
+		wantStatus: shunter.StatusFailedUser,
+	}
+	outcome := callGauntletProtocolReducer(t, client, op, requestID, label)
+	if outcome.status != shunter.StatusFailedUser {
+		t.Fatalf("%s status = %v, want %v; reducer err = %s", label, outcome.status, shunter.StatusFailedUser, outcome.err)
+	}
+	if outcome.err == "" {
+		t.Fatalf("%s error = empty, want reducer failure detail", label)
+	}
+}
+
+func assertGauntletScheduledInsertFired(t *testing.T, subscriber *websocket.Conn, queryID uint32, model *gauntletModel, id uint64, name string, label string) {
+	t.Helper()
 	wantDelta := gauntletDelta{
 		inserts: map[uint64]string{id: name},
 		deletes: map[uint64]string{},
 	}
-	gotDelta := readGauntletTransactionUpdateLight(t, subscriber, queryID, label+" fire")
-	assertGauntletDeltaEqual(t, gotDelta, wantDelta, label+" fire")
+	gotDelta := readGauntletTransactionUpdateLight(t, subscriber, queryID, label)
+	assertGauntletDeltaEqual(t, gotDelta, wantDelta, label)
 	model.players[id] = name
 }
 
@@ -3505,6 +3911,52 @@ func cancelGauntletSchedule(t *testing.T, rt *shunter.Runtime, id types.Schedule
 	outcome := gauntletReducerOutcomeFromResult(res)
 	if outcome.status != shunter.StatusCommitted {
 		t.Fatalf("%s status = %v, want %v; reducer err = %s", label, outcome.status, shunter.StatusCommitted, outcome.err)
+	}
+}
+
+func failGauntletCancelSchedule(t *testing.T, rt *shunter.Runtime, id types.ScheduleID, label string) {
+	t.Helper()
+	res, err := rt.CallReducer(context.Background(), "cancel_schedule", []byte(strconv.FormatUint(uint64(id), 10)))
+	if err != nil {
+		t.Fatalf("%s admission error: %v", label, err)
+	}
+	outcome := gauntletReducerOutcomeFromResult(res)
+	if outcome.status != shunter.StatusFailedUser {
+		t.Fatalf("%s status = %v, want %v; reducer err = %s", label, outcome.status, shunter.StatusFailedUser, outcome.err)
+	}
+	if outcome.err == "" {
+		t.Fatalf("%s error = empty, want reducer failure detail", label)
+	}
+}
+
+func protocolCancelGauntletSchedule(t *testing.T, client *websocket.Conn, id types.ScheduleID, requestID uint32, label string) {
+	t.Helper()
+	op := gauntletOp{
+		kind:       "protocol_cancel_schedule",
+		reducer:    "cancel_schedule",
+		args:       strconv.FormatUint(uint64(id), 10),
+		wantStatus: shunter.StatusCommitted,
+	}
+	outcome := callGauntletProtocolReducer(t, client, op, requestID, label)
+	if outcome.status != shunter.StatusCommitted {
+		t.Fatalf("%s status = %v, want %v; reducer err = %s", label, outcome.status, shunter.StatusCommitted, outcome.err)
+	}
+}
+
+func protocolFailGauntletCancelSchedule(t *testing.T, client *websocket.Conn, id types.ScheduleID, requestID uint32, label string) {
+	t.Helper()
+	op := gauntletOp{
+		kind:       "protocol_cancel_schedule",
+		reducer:    "cancel_schedule",
+		args:       strconv.FormatUint(uint64(id), 10),
+		wantStatus: shunter.StatusFailedUser,
+	}
+	outcome := callGauntletProtocolReducer(t, client, op, requestID, label)
+	if outcome.status != shunter.StatusFailedUser {
+		t.Fatalf("%s status = %v, want %v; reducer err = %s", label, outcome.status, shunter.StatusFailedUser, outcome.err)
+	}
+	if outcome.err == "" {
+		t.Fatalf("%s error = empty, want reducer failure detail", label)
 	}
 }
 
@@ -3686,6 +4138,7 @@ func buildGauntletRuntimeWithConfig(t *testing.T, cfg shunter.Config, start bool
 		Reducer("rename_player", renamePlayerReducer).
 		Reducer("delete_player", deletePlayerReducer).
 		Reducer("schedule_insert_next_player", scheduleInsertNextPlayerReducer).
+		Reducer("schedule_past_due_insert_next_player", schedulePastDueInsertNextPlayerReducer).
 		Reducer("schedule_insert_next_player_then_fail", scheduleInsertNextPlayerThenFailReducer).
 		Reducer("schedule_fail_after_insert", scheduleFailAfterInsertReducer).
 		Reducer("schedule_panic_after_insert", schedulePanicAfterInsertReducer).
@@ -3876,6 +4329,18 @@ func insertNextPlayerReducer(ctx *schema.ReducerContext, args []byte) ([]byte, e
 
 func scheduleInsertNextPlayerReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
 	return scheduleGauntletOneShotReducer(ctx, args, "insert_next_player")
+}
+
+func schedulePastDueInsertNextPlayerReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
+	scheduleArgs, delay, err := parseGauntletScheduleTargetArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	scheduleID, err := ctx.Scheduler.Schedule("insert_next_player", scheduleArgs, time.Now().Add(-delay))
+	if err != nil {
+		return nil, err
+	}
+	return []byte(strconv.FormatUint(uint64(scheduleID), 10)), nil
 }
 
 func scheduleInsertNextPlayerThenFailReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {

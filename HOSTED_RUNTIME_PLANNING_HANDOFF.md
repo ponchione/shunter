@@ -47,7 +47,10 @@ Before taking further hosted-runtime implementation work, rerun the focused test
 
 ## Next hosted-runtime direction
 
-If continuing hosted-runtime work, do planning first for V1.5-A query/view declarations.
+If continuing hosted-runtime work, start from the V1.5-A query/view declaration
+plan.
+The implementation-planning decomposition now lives under
+`docs/hosted-runtime-planning/V1.5/`.
 
 The next plan should stay narrow:
 - decide the smallest declared read surface that attaches to `shunter.Module`

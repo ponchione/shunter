@@ -1,6 +1,6 @@
 # Hosted runtime implementation roadmap
 
-Status: v1 hosted-runtime proof landed; ready for V1.5 planning if hosted-runtime work continues
+Status: v1 hosted-runtime proof landed; V1.5 planning decomposed into implementation slices
 Scope: implementation-facing roadmap for turning the hosted-runtime architecture docs into ordered epics. This is not a detailed first-patch implementation plan.
 
 This roadmap follows:
@@ -432,7 +432,10 @@ Landed proof points:
 - root/runtime tests now carry the maintained hosted-runtime proof
 - the prior bundled demo command was removed because it was throwaway code, not a durable product surface
 
-If hosted-runtime work continues, the next marker is planning V1.5-A query/view declarations. Do not start v1.5 implementation until the plan is grounded against the live v1 API and keeps codegen/contract/migration work out of the first query/view slice.
+If hosted-runtime work continues, the next marker is V1.5-A query/view
+declarations using `docs/hosted-runtime-planning/V1.5/V1.5-A/`. Do not start
+later v1.5 slices until V1.5-A is grounded against the live v1 API and keeps
+codegen/contract/migration work out of the first query/view slice.
 
 ---
 
@@ -442,6 +445,6 @@ The architecture docs are now clear enough to stop asking broad design questions
 
 The hosted-runtime implementation path is now:
 - keep the v1 top-level runtime proof green
-- if continuing hosted-runtime usability work, plan V1.5-A query/view declarations next
+- if continuing hosted-runtime usability work, start with the V1.5-A query/view declaration plan
 - only after query/view declarations exist, continue toward canonical export, codegen, permissions metadata, and migration metadata
 - leave v2 structural ambitions parked until real hosted apps create pressure

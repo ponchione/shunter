@@ -1,6 +1,6 @@
 # Hosted runtime version phases
 
-Status: v1 initial implementation landed; v1.5 planning is next if hosted-runtime work continues
+Status: v1 initial implementation landed; v1.5 slice planning is decomposed
 Scope: version-phase plan for hosted-runtime work. This is not an implementation plan and should not be used as permission to write code directly.
 
 This document sits between the architecture contracts and detailed implementation plans:
@@ -507,14 +507,16 @@ V2 planning posture:
 
 ---
 
-## Next planning step
+## Next implementation step
 
-The next hosted-runtime planning artifact should be for V1.5-A query/view declarations, not more V1 bootstrap work.
+The next hosted-runtime implementation step should start from
+`docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`, not
+more V1 bootstrap work.
 
-That plan must decide:
+Before implementation, reconfirm:
 - the smallest declared read surface that attaches to `shunter.Module`
 - how query/view declarations are described/exported without implementing the full canonical contract yet
 - which tests prove declarations are module-owned while keeping codegen, permissions metadata, and migration metadata out of the first V1.5 slice
 - how the new declarations coexist with the existing WebSocket-first v1 runtime surface
 
-Do not start V1.5 implementation until that bounded plan exists.
+Do not start later V1.5 slices until V1.5-A lands and its validation gates pass.

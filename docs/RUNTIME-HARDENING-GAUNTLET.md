@@ -38,8 +38,13 @@ Current status:
   no fanout, scheduled reducer panic rollback with no fanout, repeating
   scheduled reducer fire/cancel behavior, repeating schedule resume after clean
   restart, cancelled schedule persistence across clean restart, and
-  transactional rollback of schedule creation, plus fixed-seed
-  runtime/scheduler interleaving workloads.
+  transactional rollback of schedule creation, immediate and past-due scheduled
+  one-shot firing, scheduled due-time ordering, scheduled predicate
+  subscription deltas, scheduled multi-subscriber fanout parity, cancel
+  idempotence and unknown-cancel no-effect controls, protocol `CallReducer`
+  schedule/cancel coverage including clean restart, protocol rollback of
+  schedule creation, scheduled fire isolation for unsubscribed clients, and
+  fixed-seed runtime/scheduler interleaving workloads.
 
 ## Goals
 
