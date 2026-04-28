@@ -77,7 +77,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 			timer *time.Timer
 		)
 		if !s.nextWakeup.IsZero() {
-			d := time.Until(s.nextWakeup)
+			d := s.nextWakeup.Sub(s.now())
 			if d < 0 {
 				d = 0
 			}

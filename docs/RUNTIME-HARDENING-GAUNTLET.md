@@ -74,7 +74,10 @@ Current status:
   in-flight attempt tracking is established before an executor can complete a
   due command, and recovered repeating schedules that fail or panic retry the
   same intended fire time before advancing by one fixed-rate interval on the
-  successful retry.
+  successful retry. Scheduler clock injection is now pinned across future
+  wakeups, notify-driven rescans, and replayed future wakeups so recovered
+  schedules cannot fire early just because their recovered due time predates
+  the host wall clock.
 
 ## Goals
 

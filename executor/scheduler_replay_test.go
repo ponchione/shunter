@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,6 +65,64 @@ func TestSchedulerReplayArmsTimerForFuture(t *testing.T) {
 
 	if s.nextWakeup != time.Unix(900, 0) {
 		t.Errorf("nextWakeup = %v, want %v", s.nextWakeup, time.Unix(900, 0))
+	}
+}
+
+func TestSchedulerReplayFutureWakeupWaitsForInjectedClockAfterRestart(t *testing.T) {
+	s, cs, tid, inbox := schedulerWorkerFixture(t)
+	var nowNs atomic.Int64
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	s.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	fireAt := time.Unix(500, 0).UnixNano()
+	seedSchedule(t, cs, tid, 2, "recovered-future", nil, fireAt, 0)
+
+	s.ReplayFromCommitted()
+	if s.nextWakeup != time.Unix(500, 0) {
+		t.Fatalf("nextWakeup = %v, want %v", s.nextWakeup, time.Unix(500, 0))
+	}
+	select {
+	case cmd := <-inbox:
+		t.Fatalf("future replay should not enqueue before injected scheduler clock reaches wakeup: %+v", cmd)
+	default:
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(runDone)
+	}()
+
+	select {
+	case cmd := <-inbox:
+		t.Fatalf("future recovered schedule enqueued before injected scheduler clock reached wakeup: %+v", cmd)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	nowNs.Store(time.Unix(600, 0).UnixNano())
+	s.Notify()
+	select {
+	case cmd := <-inbox:
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("enqueued cmd type=%T, want CallReducerCmd", cmd)
+		}
+		if call.Request.ScheduleID != 2 {
+			t.Fatalf("ScheduleID = %d, want 2", call.Request.ScheduleID)
+		}
+		if call.Request.IntendedFireAt != fireAt {
+			t.Fatalf("IntendedFireAt = %d, want %d", call.Request.IntendedFireAt, fireAt)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("future recovered schedule was not enqueued after injected scheduler clock advanced")
+	}
+
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not return after cancellation")
 	}
 }
 

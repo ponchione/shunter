@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -256,6 +257,86 @@ func TestSchedulerNotifyTriggersRescan(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Notify should have triggered rescan within 500ms")
+	}
+}
+
+func TestSchedulerRunUsesInjectedClockForFutureWakeup(t *testing.T) {
+	_, cs, tid, _ := schedulerWorkerFixture(t)
+	inbox := make(chan ExecutorCommand, 1)
+	s := NewScheduler(inbox, cs, tid)
+	seedSchedule(t, cs, tid, 33, "future", nil, time.Unix(500, 0).UnixNano(), 0)
+
+	var nowCalls atomic.Int32
+	s.now = func() time.Time {
+		if nowCalls.Add(1) <= 2 {
+			return time.Unix(100, 0)
+		}
+		return time.Unix(600, 0)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(runDone)
+	}()
+
+	select {
+	case cmd := <-inbox:
+		t.Fatalf("future schedule enqueued before injected scheduler clock reached wakeup: %+v", cmd)
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
+func TestSchedulerNotifyRespectsInjectedClockForFutureWakeup(t *testing.T) {
+	s, cs, tid, inbox := schedulerWorkerFixture(t)
+	var nowNs atomic.Int64
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	s.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	seedSchedule(t, cs, tid, 34, "future-notify", nil, time.Unix(500, 0).UnixNano(), 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(runDone)
+	}()
+
+	s.Notify()
+	select {
+	case cmd := <-inbox:
+		t.Fatalf("future schedule enqueued by notify before injected scheduler clock reached wakeup: %+v", cmd)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	nowNs.Store(time.Unix(600, 0).UnixNano())
+	s.Notify()
+	select {
+	case cmd := <-inbox:
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("enqueued cmd type=%T, want CallReducerCmd", cmd)
+		}
+		if call.Request.ScheduleID != 34 {
+			t.Fatalf("ScheduleID = %d, want 34", call.Request.ScheduleID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("due future schedule was not enqueued after injected scheduler clock advanced")
+	}
+
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not return after cancellation")
 	}
 }
 

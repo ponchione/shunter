@@ -28,6 +28,7 @@ func TestModuleViewDeclarationMetadataIsDescribed(t *testing.T) {
 func TestModuleQueryPermissionAndReadModelMetadataIsDescribed(t *testing.T) {
 	mod := NewModule("chat").Query(QueryDeclaration{
 		Name:        "recent_messages",
+		SQL:         "SELECT * FROM messages",
 		Permissions: PermissionMetadata{Required: []string{"messages:read"}},
 		ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"history"}},
 	})
@@ -45,11 +46,15 @@ func TestModuleQueryPermissionAndReadModelMetadataIsDescribed(t *testing.T) {
 	if got := desc.Queries[0].ReadModel.Tags; len(got) != 1 || got[0] != "history" {
 		t.Fatalf("query read model tags = %#v, want history", desc.Queries[0].ReadModel.Tags)
 	}
+	if got := desc.Queries[0].SQL; got != "SELECT * FROM messages" {
+		t.Fatalf("query SQL = %q, want declaration SQL", got)
+	}
 }
 
 func TestModuleViewPermissionAndReadModelMetadataIsDescribed(t *testing.T) {
 	mod := NewModule("chat").View(ViewDeclaration{
 		Name:        "live_messages",
+		SQL:         "SELECT * FROM messages",
 		Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
 		ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"realtime"}},
 	})
@@ -67,6 +72,9 @@ func TestModuleViewPermissionAndReadModelMetadataIsDescribed(t *testing.T) {
 	if got := desc.Views[0].ReadModel.Tags; len(got) != 1 || got[0] != "realtime" {
 		t.Fatalf("view read model tags = %#v, want realtime", desc.Views[0].ReadModel.Tags)
 	}
+	if got := desc.Views[0].SQL; got != "SELECT * FROM messages" {
+		t.Fatalf("view SQL = %q, want declaration SQL", got)
+	}
 }
 
 func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
@@ -82,6 +90,7 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 	mod := NewModule("chat").
 		Query(QueryDeclaration{
 			Name:        "recent_messages",
+			SQL:         "SELECT * FROM messages",
 			Permissions: PermissionMetadata{Required: queryPermissions},
 			ReadModel:   ReadModelMetadata{Tables: queryTables, Tags: queryTags},
 			Migration: MigrationMetadata{
@@ -90,6 +99,7 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 		}).
 		View(ViewDeclaration{
 			Name:        "live_messages",
+			SQL:         "SELECT * FROM messages",
 			Permissions: PermissionMetadata{Required: viewPermissions},
 			ReadModel:   ReadModelMetadata{Tables: viewTables, Tags: viewTags},
 			Migration: MigrationMetadata{
@@ -119,6 +129,9 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 	if got := desc.Queries[0].Migration.Classifications; len(got) != 1 || got[0] != MigrationClassificationAdditive {
 		t.Fatalf("query migration classifications = %#v, want registration-time copy", got)
 	}
+	if got := desc.Queries[0].SQL; got != "SELECT * FROM messages" {
+		t.Fatalf("query SQL = %q, want registration-time copy", got)
+	}
 	if got := desc.Views[0].Permissions.Required; len(got) != 1 || got[0] != "messages:subscribe" {
 		t.Fatalf("view permissions = %#v, want registration-time copy", got)
 	}
@@ -130,6 +143,63 @@ func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
 	}
 	if got := desc.Views[0].Migration.Classifications; len(got) != 1 || got[0] != MigrationClassificationManualReviewNeeded {
 		t.Fatalf("view migration classifications = %#v, want registration-time copy", got)
+	}
+	if got := desc.Views[0].SQL; got != "SELECT * FROM messages" {
+		t.Fatalf("view SQL = %q, want registration-time copy", got)
+	}
+}
+
+func TestBuildValidatesDeclaredReadSQLAgainstSchema(t *testing.T) {
+	tests := []struct {
+		name string
+		mod  *Module
+	}{
+		{
+			name: "query missing table",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "recent_messages",
+				SQL:  "SELECT * FROM missing",
+			}),
+		},
+		{
+			name: "view projection unsupported by subscription SQL",
+			mod: validChatModule().View(ViewDeclaration{
+				Name: "live_messages",
+				SQL:  "SELECT id FROM messages",
+			}),
+		},
+		{
+			name: "view limit unsupported by subscription SQL",
+			mod: validChatModule().View(ViewDeclaration{
+				Name: "live_messages",
+				SQL:  "SELECT * FROM messages LIMIT 1",
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(tt.mod, Config{DataDir: t.TempDir()})
+			if err == nil || !errors.Is(err, ErrInvalidDeclarationSQL) {
+				t.Fatalf("expected ErrInvalidDeclarationSQL, got %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildAcceptsValidDeclaredReadSQL(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "recent_messages",
+			SQL:  "SELECT id FROM messages WHERE body = 'hello' LIMIT 1",
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT * FROM messages WHERE body = 'hello'",
+		})
+
+	if _, err := Build(mod, Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build returned error: %v", err)
 	}
 }
 
@@ -205,6 +275,8 @@ func TestModuleDeclarationDescriptionsAreDetached(t *testing.T) {
 	}
 	desc.Queries[0].Name = "mutated_query"
 	desc.Views[0].Name = "mutated_view"
+	desc.Queries[0].SQL = "SELECT * FROM mutated_query"
+	desc.Views[0].SQL = "SELECT * FROM mutated_view"
 	desc.Queries[0].Permissions.Required = append(desc.Queries[0].Permissions.Required, "mutated_permission")
 	desc.Views[0].ReadModel.Tables = append(desc.Views[0].ReadModel.Tables, "mutated_table")
 
@@ -222,6 +294,9 @@ func TestModuleDeclarationDescriptionsAreDetached(t *testing.T) {
 	}
 	if len(second.Views[0].ReadModel.Tables) != 0 {
 		t.Fatalf("views = %#v, want detached read model metadata", second.Views)
+	}
+	if second.Queries[0].SQL != "" || second.Views[0].SQL != "" {
+		t.Fatalf("declarations = %#v/%#v, want detached SQL metadata", second.Queries, second.Views)
 	}
 }
 

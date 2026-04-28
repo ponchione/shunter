@@ -31,6 +31,13 @@ type compiledSQLAggregate struct {
 	ResultColumn schema.ColumnSchema
 }
 
+// SQLQueryValidationOptions controls how ValidateSQLQueryString applies the
+// protocol SQL compiler to authored declaration metadata.
+type SQLQueryValidationOptions struct {
+	AllowLimit      bool
+	AllowProjection bool
+}
+
 type relationSchema struct {
 	id schema.TableID
 	ts *schema.TableSchema
@@ -192,6 +199,17 @@ func wrapSubscribeCompileErrorSQL(err error, sqlText string) string {
 		return fmt.Sprintf("%s, executing: `%s`", unsupSelectErr.SubscribeError(), sqlText)
 	}
 	return fmt.Sprintf("%s, executing: `%s`", err.Error(), sqlText)
+}
+
+// ValidateSQLQueryString validates a SQL read string against the same compiler
+// used by OneOffQuery and Subscribe protocol admission.
+func ValidateSQLQueryString(qs string, sl SchemaLookup, opts SQLQueryValidationOptions) error {
+	if sl == nil {
+		return fmt.Errorf("schema lookup must not be nil")
+	}
+	var caller types.Identity
+	_, err := compileSQLQueryString(qs, sl, &caller, opts.AllowLimit, opts.AllowProjection)
+	return err
 }
 
 func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool) (compiledSQLQuery, error) {

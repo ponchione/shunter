@@ -33,10 +33,16 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `OnConnect: "OnConnect",`)
 	assertContains(t, ts, `export const queries = {`)
 	assertContains(t, ts, `recentMessages: "recent_messages",`)
-	assertContains(t, ts, `export function queryRecentMessages(runQuery: QueryRunner, args?: Uint8Array): Promise<Uint8Array> {`)
+	assertContains(t, ts, `export const querySQL = {`)
+	assertContains(t, ts, `recentMessages: "SELECT * FROM messages",`)
+	assertContains(t, ts, `export function queryRecentMessages(runQuery: QueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runQuery("SELECT * FROM messages");`)
 	assertContains(t, ts, `export const views = {`)
 	assertContains(t, ts, `liveMessages: "live_messages",`)
-	assertContains(t, ts, `export function subscribeLiveMessages(subscribeView: ViewSubscriber, args?: Uint8Array): Promise<() => void> {`)
+	assertContains(t, ts, `export const viewSQL = {`)
+	assertContains(t, ts, `liveMessages: "SELECT * FROM messages",`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeView: ViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeView("SELECT * FROM messages");`)
 	assertContains(t, ts, `export const permissions = {`)
 	assertContains(t, ts, `reducers: {`)
 	assertContains(t, ts, `sendMessage: { required: ["messages:send"] },`)
@@ -110,7 +116,28 @@ func TestTypeScriptGeneratorAvoidsTableViewSubscribeHelperNameCollisions(t *test
 	ts := string(out)
 
 	assertContains(t, ts, `export function subscribeLiveMessages(subscribeTable: TableSubscriber<LiveMessagesRow>): Promise<() => void> {`)
-	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeView: ViewSubscriber, args?: Uint8Array): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeView: ViewSubscriber): Promise<() => void> {`)
+}
+
+func TestTypeScriptGeneratorDoesNotEmitExecutableHelpersForMetadataOnlyDeclarations(t *testing.T) {
+	contract := contractFixture()
+	contract.Queries[0].SQL = ""
+	contract.Views[0].SQL = ""
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export const queries = {`)
+	assertContains(t, ts, `recentMessages: "recent_messages",`)
+	assertContains(t, ts, `export const querySQL = {`)
+	assertNotContains(t, ts, `export function queryRecentMessages(`)
+	assertContains(t, ts, `export const views = {`)
+	assertContains(t, ts, `liveMessages: "live_messages",`)
+	assertContains(t, ts, `export const viewSQL = {`)
+	assertNotContains(t, ts, `export function subscribeLiveMessages(`)
 }
 
 func contractFixture() shunter.ModuleContract {
@@ -144,10 +171,10 @@ func contractFixture() shunter.ModuleContract {
 			},
 		},
 		Queries: []shunter.QueryDescription{
-			{Name: "recent_messages"},
+			{Name: "recent_messages", SQL: "SELECT * FROM messages"},
 		},
 		Views: []shunter.ViewDescription{
-			{Name: "live_messages"},
+			{Name: "live_messages", SQL: "SELECT * FROM messages"},
 		},
 		Permissions: shunter.PermissionContract{
 			Reducers: []shunter.PermissionContractDeclaration{
@@ -191,5 +218,12 @@ func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
 		t.Fatalf("generated TypeScript missing %q:\n%s", needle, haystack)
+	}
+}
+
+func assertNotContains(t *testing.T, haystack, needle string) {
+	t.Helper()
+	if strings.Contains(haystack, needle) {
+		t.Fatalf("generated TypeScript unexpectedly contains %q:\n%s", needle, haystack)
 	}
 }

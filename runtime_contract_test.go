@@ -89,6 +89,38 @@ func TestRuntimeExportContractIncludesPermissionAndReadModelMetadata(t *testing.
 	assertReadModelContractDeclaration(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_messages", "messages", "realtime")
 }
 
+func TestRuntimeExportContractIncludesDeclarationSQLMetadata(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "recent_messages",
+			SQL:  "SELECT id FROM messages WHERE body = 'hello' LIMIT 1",
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT * FROM messages WHERE body = 'hello'",
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	assertQuerySQL(t, contract.Queries, "recent_messages", "SELECT id FROM messages WHERE body = 'hello' LIMIT 1")
+	assertViewSQL(t, contract.Views, "live_messages", "SELECT * FROM messages WHERE body = 'hello'")
+
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	var decoded ModuleContract
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal contract JSON: %v", err)
+	}
+	assertQuerySQL(t, decoded.Queries, "recent_messages", "SELECT id FROM messages WHERE body = 'hello' LIMIT 1")
+	assertViewSQL(t, decoded.Views, "live_messages", "SELECT * FROM messages WHERE body = 'hello'")
+}
+
 func TestRuntimeExportContractReturnsDetachedSnapshot(t *testing.T) {
 	rt := buildContractRuntime(t)
 
@@ -262,4 +294,32 @@ func assertReadModelContractDeclaration(t *testing.T, declarations []ReadModelCo
 		return
 	}
 	t.Fatalf("read model declarations = %#v, want %s %q", declarations, surface, name)
+}
+
+func assertQuerySQL(t *testing.T, queries []QueryDescription, name, sql string) {
+	t.Helper()
+	for _, query := range queries {
+		if query.Name != name {
+			continue
+		}
+		if query.SQL != sql {
+			t.Fatalf("query %q SQL = %q, want %q", name, query.SQL, sql)
+		}
+		return
+	}
+	t.Fatalf("queries = %#v, want %q", queries, name)
+}
+
+func assertViewSQL(t *testing.T, views []ViewDescription, name, sql string) {
+	t.Helper()
+	for _, view := range views {
+		if view.Name != name {
+			continue
+		}
+		if view.SQL != sql {
+			t.Fatalf("view %q SQL = %q, want %q", name, view.SQL, sql)
+		}
+		return
+	}
+	t.Fatalf("views = %#v, want %q", views, name)
 }

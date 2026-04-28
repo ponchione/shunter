@@ -83,6 +83,25 @@ func TestContractDiffReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceReadModel, "query.history")
 }
 
+func TestContractDiffDetectsDeclaredReadSQLChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Queries[0].SQL = "SELECT * FROM messages"
+	current.Views[0].SQL = "SELECT * FROM messages"
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceQuery, "history")
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceView, "live")
+
+	old = current
+	current.Queries[0].SQL = "SELECT id FROM messages"
+	current.Views[0].SQL = ""
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceQuery, "history")
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceView, "live")
+}
+
 func TestContractDiffJSONFailsClearlyForMalformedInput(t *testing.T) {
 	_, err := CompareJSON([]byte(`{`), mustContractJSON(t, contractFixture()))
 	if err == nil {
