@@ -93,7 +93,9 @@ Current status:
   earlier schedule creation cannot replace the recovered future wakeup. Success
   path rearm pins prove a completed early recovered one-shot re-arms a later
   recovered row, and a recovered repeating row advanced into the future does
-  not overtake an earlier recovered one-shot.
+  not overtake an earlier recovered one-shot. Future-armed failure pins prove
+  recovered one-shots that fail or panic at their due time retry before later
+  recovered wakeups are allowed to fire.
 
 ## Goals
 

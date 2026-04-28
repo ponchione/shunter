@@ -1644,6 +1644,14 @@ func TestStartup_RecoveredRepeatingFutureRearmsEarlierOneShotAfterAdvance(t *tes
 	assertScheduleRowNextRun(t, h, 137, thirdRepeatAt)
 }
 
+func TestStartup_FailedRecoveredFutureRetriesBeforeLaterWakeup(t *testing.T) {
+	runRecoveredFutureRetryBeforeLaterWakeup(t, false)
+}
+
+func TestStartup_PanickingRecoveredFutureRetriesBeforeLaterWakeup(t *testing.T) {
+	runRecoveredFutureRetryBeforeLaterWakeup(t, true)
+}
+
 // Pin 12: Startup(ctx, nil) is the test-path shorthand — the scheduler
 // replay step is skipped entirely (no inbox enqueue, no scan). Used by
 // harnesses that do not need sys_scheduled replay.
@@ -1866,6 +1874,94 @@ func runRepeatingFutureAdvanceWaitsForSchedulerClock(t *testing.T, overflow bool
 	}
 	if got := attempts.Load(); got != 2 {
 		t.Fatalf("repeating future scheduled reducer attempts=%d, want 2", got)
+	}
+}
+
+func runRecoveredFutureRetryBeforeLaterWakeup(t *testing.T, panicFirst bool) {
+	t.Helper()
+	var nowNs atomic.Int64
+	events := make(chan string, 3)
+	earlyAt := time.Unix(300, 0).UnixNano()
+	lateAt := time.Unix(900, 0).UnixNano()
+	earlyReducer := "failed-recovered-future"
+	firstEvent := "failed-first"
+	secondEvent := "failed-retry"
+	if panicFirst {
+		earlyReducer = "panicking-recovered-future"
+		firstEvent = "panic-first"
+		secondEvent = "panic-retry"
+	}
+
+	var attempts atomic.Int32
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 139, reducerName: earlyReducer, nextRunAtNs: earlyAt},
+			{id: 140, reducerName: "later-after-future-retry", nextRunAtNs: lateAt},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: earlyReducer,
+				Handler: types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) {
+					switch attempts.Add(1) {
+					case 1:
+						events <- firstEvent
+						if panicFirst {
+							panic("recovered future panic")
+						}
+						return nil, errFireFailed
+					case 2:
+						events <- secondEvent
+						return nil, nil
+					default:
+						return nil, nil
+					}
+				}),
+			},
+			recordStringReducer("later-after-future-retry", events),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, events, "first recovered future attempt")
+	if got != firstEvent {
+		t.Fatalf("first recovered future event=%q, want %q", got, firstEvent)
+	}
+	got = readReducerOrder(t, events, "retry recovered future attempt")
+	if got != secondEvent {
+		t.Fatalf("retry recovered future event=%q, want %q", got, secondEvent)
+	}
+	waitExecutorBarrier(t, h.exec, "after recovered future retry")
+	rows := h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("remaining rows after recovered future retry=%d, want later row", len(rows))
+	}
+	if got := rows[0][SysScheduledColScheduleID].AsUint64(); got != 140 {
+		t.Fatalf("remaining schedule_id=%d, want later schedule 140", got)
+	}
+	assertNoReceive(t, events, 50*time.Millisecond, "later recovered future before its due time")
+
+	nowNs.Store(time.Unix(950, 0).UnixNano())
+	h.scheduler.Notify()
+	got = readReducerOrder(t, events, "later recovered future after retry")
+	if got != "later-after-future-retry" {
+		t.Fatalf("later recovered future event=%q, want later-after-future-retry", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after later recovered future")
+	if rows := h.sysScheduledRows(); len(rows) != 0 {
+		t.Fatalf("remaining rows after later recovered future=%d, want 0", len(rows))
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("recovered future attempts=%d, want 2", got)
 	}
 }
 

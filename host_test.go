@@ -42,6 +42,45 @@ func TestHostRejectsDuplicateModuleNames(t *testing.T) {
 	assertErrorMentions(t, err, "chat")
 }
 
+func TestHostRejectsNilRuntime(t *testing.T) {
+	_, err := NewHost(HostRuntime{Name: "chat", RoutePrefix: "/chat"})
+	if err == nil {
+		t.Fatal("NewHost succeeded with nil runtime")
+	}
+	assertErrorMentions(t, err, "runtime")
+	assertErrorMentions(t, err, "nil")
+}
+
+func TestHostRejectsBlankModuleName(t *testing.T) {
+	_, err := NewHost(HostRuntime{Name: "   ", RoutePrefix: "/chat", Runtime: buildHostTestRuntime(t, "chat", t.TempDir())})
+	if err == nil {
+		t.Fatal("NewHost succeeded with blank module name")
+	}
+	assertErrorMentions(t, err, "name")
+	assertErrorMentions(t, err, "empty")
+}
+
+func TestHostRejectsModuleRuntimeIdentityMismatch(t *testing.T) {
+	_, err := NewHost(HostRuntime{Name: "ops", RoutePrefix: "/ops", Runtime: buildHostTestRuntime(t, "chat", t.TempDir())})
+	if err == nil {
+		t.Fatal("NewHost succeeded with mismatched module and runtime names")
+	}
+	assertErrorMentions(t, err, "ops")
+	assertErrorMentions(t, err, "chat")
+}
+
+func TestHostRejectsOverlappingRoutePrefixes(t *testing.T) {
+	_, err := NewHost(
+		HostRuntime{Name: "chat", RoutePrefix: "/chat", Runtime: buildHostTestRuntime(t, "chat", t.TempDir())},
+		HostRuntime{Name: "ops", RoutePrefix: "/chat/admin", Runtime: buildHostTestRuntime(t, "ops", t.TempDir())},
+	)
+	if err == nil {
+		t.Fatal("NewHost succeeded with overlapping route prefixes")
+	}
+	assertErrorMentions(t, err, "prefix")
+	assertErrorMentions(t, err, "conflicts")
+}
+
 func TestHostRejectsSharedRuntimeDataDir(t *testing.T) {
 	dir := t.TempDir()
 	chat := buildHostTestRuntime(t, "chat", dir)
