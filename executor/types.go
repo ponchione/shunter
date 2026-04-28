@@ -25,10 +25,11 @@ const (
 type ReducerStatus int
 
 const (
-	StatusCommitted      ReducerStatus = iota // committed successfully
-	StatusFailedUser                          // reducer returned an error
-	StatusFailedPanic                         // reducer panicked
-	StatusFailedInternal                      // executor-level failure
+	StatusCommitted        ReducerStatus = iota // committed successfully
+	StatusFailedUser                            // reducer returned an error
+	StatusFailedPanic                           // reducer panicked
+	StatusFailedInternal                        // executor-level failure
+	StatusFailedPermission                      // caller lacks a reducer-required permission
 )
 
 // LifecycleKind identifies the lifecycle hook type for a reducer.

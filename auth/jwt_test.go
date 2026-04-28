@@ -192,6 +192,35 @@ func TestValidateJWTAudienceDisabledAcceptsAny(t *testing.T) {
 	}
 }
 
+func TestValidateJWTPermissionClaims(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":         "alice",
+		"iss":         "issuer",
+		"permissions": []string{"messages:send", "messages:read"},
+	})
+	claims, err := ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := claims.Permissions; len(got) != 2 || got[0] != "messages:send" || got[1] != "messages:read" {
+		t.Fatalf("Permissions = %#v, want send/read tags", got)
+	}
+
+	s = mintHS256(t, jwt.MapClaims{
+		"sub":         "alice",
+		"iss":         "issuer",
+		"permissions": "messages:admin",
+	})
+	claims, err = ValidateJWT(s, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := claims.Permissions; len(got) != 1 || got[0] != "messages:admin" {
+		t.Fatalf("single-string Permissions = %#v, want admin tag", got)
+	}
+}
+
 func TestClaimsDeriveIdentity(t *testing.T) {
 	c := &Claims{Issuer: "issuer", Subject: "alice"}
 	got := c.DeriveIdentity()

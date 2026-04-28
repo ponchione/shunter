@@ -182,6 +182,69 @@ func TestExecutorUnknownReducer(t *testing.T) {
 	}
 }
 
+func TestExecutorPermissionDeniedBeforeReducerExecution(t *testing.T) {
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "messages",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
+		},
+	})
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := engine.Registry()
+	cs := store.NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, store.NewTable(ts))
+	}
+
+	called := false
+	rr := NewReducerRegistry()
+	if err := rr.Register(RegisteredReducer{
+		Name: "InsertMessage",
+		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+			called = true
+			_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(1)})
+			return nil, err
+		}),
+		RequiredPermissions: []string{"messages:send"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rr.Freeze()
+
+	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go exec.Run(ctx)
+
+	respCh := make(chan ReducerResponse, 1)
+	if err := exec.Submit(CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "InsertMessage", Source: CallSourceExternal},
+		ResponseCh: respCh,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case resp := <-respCh:
+		if resp.Status != StatusFailedPermission {
+			t.Fatalf("status = %d, want StatusFailedPermission; err=%v", resp.Status, resp.Error)
+		}
+		if !errors.Is(resp.Error, ErrPermissionDenied) {
+			t.Fatalf("err = %v, want ErrPermissionDenied", resp.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+	if called {
+		t.Fatal("reducer handler ran despite missing permission")
+	}
+}
+
 func TestExecutorShutdown(t *testing.T) {
 	exec, _ := setupExecutor()
 	ctx, cancel := context.WithCancel(context.Background())

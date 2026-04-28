@@ -26,3 +26,16 @@ Test boundaries:
 - do not add tenant scoping
 - do not require external IdP integration
 - do not make dev/local tests require production auth setup
+
+## Completion Notes
+
+Added tests covering:
+- JWT permission claim extraction
+- permission context propagation through protocol upgrade, call-reducer
+  dispatch, and the executor inbox adapter
+- dev local default access to protected reducers
+- strict local denial without explicit permissions and success with
+  `WithPermissions(...)`
+- executor permission denial before reducer handler execution
+- stable `ErrPermissionDenied` / `StatusFailedPermission` distinction from
+  user reducer failures and internal executor failures

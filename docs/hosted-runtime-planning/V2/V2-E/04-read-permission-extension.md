@@ -23,3 +23,20 @@ Decision constraints:
 If read semantics remain metadata-only:
 - record that read permission enforcement is deferred
 - keep reducer enforcement complete and tested
+
+## Completion Decision
+
+Read permission enforcement is deferred.
+
+Reason:
+- V2-D made `QueryDeclaration.SQL` and `ViewDeclaration.SQL` executable through
+  generated helpers, but those helpers still call raw SQL one-off/subscription
+  protocol paths.
+- The runtime does not receive a named query/view declaration when a raw SQL
+  read arrives, so declaration-only permission checks would be incomplete and
+  bypassable.
+- Correct raw SQL read enforcement needs a table/read-model policy layer that
+  can evaluate the compiled SQL surface. That is outside V2-E's narrow reducer
+  enforcement foundation.
+
+Reducer enforcement is complete and tested.

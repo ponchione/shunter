@@ -40,3 +40,16 @@ Stop if:
 - current auth or reducer call tests are failing
 - V2-D left read execution semantics unresolved and the slice attempts read
   enforcement anyway
+
+## Completion Notes
+
+- `auth.Claims` previously carried identity-oriented JWT fields only; V2-E
+  added permission tags from a narrow `permissions` claim.
+- Local calls previously supplied identity/connection context only; V2-E added
+  explicit local permission options plus a dev default.
+- Reducer/query/view permission metadata was passive and remains exported in
+  contracts/codegen.
+- Strict auth already required signing material; V2-E keeps strict protocol
+  permission data tied to validated claims.
+- Current read execution uses raw SQL protocol paths for generated helpers, so
+  declaration-level read enforcement is deferred rather than guessed.

@@ -159,6 +159,96 @@ func TestCallReducerUserErrorIsResultNotAdmissionError(t *testing.T) {
 	}
 }
 
+func TestCallReducerDevLocalDefaultSatisfiesReducerPermissions(t *testing.T) {
+	rt, err := Build(validChatModule().Reducer("send_message", noopReducer, WithReducerPermissions(PermissionMetadata{Required: []string{"messages:send"}})), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "send_message", nil)
+	if err != nil {
+		t.Fatalf("CallReducer admission error = %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("status = %v, want committed; err = %v", res.Status, res.Error)
+	}
+}
+
+func TestCallReducerPermissionDeniedBeforeReducerExecution(t *testing.T) {
+	called := false
+	rt, err := Build(validChatModule().Reducer("send_message", func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+		called = true
+		_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(1), types.NewString("blocked")})
+		return nil, err
+	}, WithReducerPermissions(PermissionMetadata{Required: []string{"messages:send"}})), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "send_message", nil, WithPermissions("messages:read"))
+	if err != nil {
+		t.Fatalf("CallReducer admission error = %v", err)
+	}
+	if res.Status != StatusFailedPermission {
+		t.Fatalf("status = %v, want permission failure; err = %v", res.Status, res.Error)
+	}
+	if !errors.Is(res.Error, ErrPermissionDenied) {
+		t.Fatalf("error = %v, want ErrPermissionDenied", res.Error)
+	}
+	if called {
+		t.Fatal("reducer handler ran despite missing permission")
+	}
+
+	err = rt.Read(context.Background(), func(view LocalReadView) error {
+		if got := view.RowCount(0); got != 0 {
+			return fmt.Errorf("row count = %d, want 0", got)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+}
+
+func TestCallReducerStrictLocalRequiresExplicitPermissions(t *testing.T) {
+	rt, err := Build(validChatModule().Reducer("send_message", noopReducer, WithReducerPermissions(PermissionMetadata{Required: []string{"messages:send"}})), Config{
+		DataDir:        t.TempDir(),
+		AuthMode:       AuthModeStrict,
+		AuthSigningKey: []byte("strict-local-secret"),
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "send_message", nil)
+	if err != nil {
+		t.Fatalf("CallReducer admission error = %v", err)
+	}
+	if res.Status != StatusFailedPermission || !errors.Is(res.Error, ErrPermissionDenied) {
+		t.Fatalf("strict default result = (%v, %v), want permission denied", res.Status, res.Error)
+	}
+
+	res, err = rt.CallReducer(context.Background(), "send_message", nil, WithPermissions("messages:send"))
+	if err != nil {
+		t.Fatalf("CallReducer with permissions admission error = %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("status with permissions = %v, want committed; err = %v", res.Status, res.Error)
+	}
+}
+
 func TestReadRejectsNilCallbackBeforeReadinessCheck(t *testing.T) {
 	rt := buildValidTestRuntime(t)
 

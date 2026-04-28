@@ -24,13 +24,19 @@ const (
 	StatusFailedPanic = executor.StatusFailedPanic
 	// StatusFailedInternal means the executor failed the call before user commit semantics completed.
 	StatusFailedInternal = executor.StatusFailedInternal
+	// StatusFailedPermission means the caller lacked required reducer permissions.
+	StatusFailedPermission = executor.StatusFailedPermission
 )
 
 // ReducerResult is the result of a local reducer execution.
 type ReducerResult = executor.ReducerResponse
 
-// ErrLocalReadNilCallback reports that Runtime.Read was called without a read callback.
-var ErrLocalReadNilCallback = errors.New("shunter: local read callback must not be nil")
+var (
+	// ErrLocalReadNilCallback reports that Runtime.Read was called without a read callback.
+	ErrLocalReadNilCallback = errors.New("shunter: local read callback must not be nil")
+	// ErrPermissionDenied reports that a caller lacks required reducer permissions.
+	ErrPermissionDenied = executor.ErrPermissionDenied
+)
 
 // LocalReadView is the callback-scoped read-only view exposed by Runtime.Read.
 type LocalReadView interface {
@@ -43,8 +49,9 @@ type LocalReadView interface {
 type ReducerCallOption func(*reducerCallOptions)
 
 type reducerCallOptions struct {
-	caller    types.CallerContext
-	requestID uint32
+	caller         types.CallerContext
+	requestID      uint32
+	permissionsSet bool
 }
 
 var defaultLocalIdentity = types.Identity(sha256.Sum256([]byte("shunter local runtime caller")))
@@ -67,6 +74,15 @@ func WithIdentity(identity types.Identity) ReducerCallOption {
 func WithConnectionID(connID types.ConnectionID) ReducerCallOption {
 	return func(opts *reducerCallOptions) {
 		opts.caller.ConnectionID = connID
+	}
+}
+
+// WithPermissions sets the local caller permission tags for the reducer call.
+func WithPermissions(permissions ...string) ReducerCallOption {
+	return func(opts *reducerCallOptions) {
+		opts.caller.Permissions = append([]string(nil), permissions...)
+		opts.caller.AllowAllPermissions = false
+		opts.permissionsSet = true
 	}
 }
 
@@ -94,6 +110,9 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 	}
 	if callOpts.caller.Identity.IsZero() {
 		callOpts.caller.Identity = defaultLocalIdentity
+	}
+	if !callOpts.permissionsSet && r.buildConfig.AuthMode == AuthModeDev {
+		callOpts.caller.AllowAllPermissions = true
 	}
 
 	responseCh := make(chan executor.ReducerResponse, 1)

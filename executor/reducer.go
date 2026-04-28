@@ -7,10 +7,11 @@ import "github.com/ponchione/shunter/types"
 // Phase 1.5 heavy TransactionUpdate envelope can carry the reference
 // ReducerCallInfo.ReducerId field (u32).
 type RegisteredReducer struct {
-	Name      string
-	Handler   types.ReducerHandler
-	Lifecycle LifecycleKind
-	ID        uint32
+	Name                string
+	Handler             types.ReducerHandler
+	Lifecycle           LifecycleKind
+	RequiredPermissions []string
+	ID                  uint32
 }
 
 // ReducerRequest is the input to a reducer call.

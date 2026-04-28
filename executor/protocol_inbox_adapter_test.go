@@ -970,6 +970,37 @@ func TestProtocolInboxAdapter_CallReducer_TranslatesFailedReducerResponse(t *tes
 	}
 }
 
+func TestProtocolInboxAdapter_CallReducer_ForwardsPermissionContext(t *testing.T) {
+	adapter := newProtocolInboxAdapter(
+		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+			call, ok := cmd.(CallReducerCmd)
+			if !ok {
+				t.Fatalf("command type = %T, want CallReducerCmd", cmd)
+			}
+			if got := call.Request.Caller.Permissions; len(got) != 1 || got[0] != "messages:send" {
+				t.Fatalf("caller permissions = %#v, want messages:send", got)
+			}
+			if !call.Request.Caller.AllowAllPermissions {
+				t.Fatal("AllowAllPermissions = false, want true")
+			}
+			return nil
+		}},
+		stubProtocolSchemaRegistry{},
+	)
+
+	err := adapter.CallReducer(context.Background(), protocol.CallReducerRequest{
+		ConnID:              types.ConnectionID{3},
+		Identity:            types.Identity{4},
+		RequestID:           55,
+		ReducerName:         "DoThing",
+		Permissions:         []string{"messages:send"},
+		AllowAllPermissions: true,
+	})
+	if err != nil {
+		t.Fatalf("CallReducer: %v", err)
+	}
+}
+
 func TestProtocolInboxAdapter_CallReducer_UsesBufferedProtocolResponseChannel(t *testing.T) {
 	adapter := newProtocolInboxAdapter(
 		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {

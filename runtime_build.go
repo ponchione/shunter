@@ -71,14 +71,22 @@ func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.Com
 	return commitlog.OpenAndRecoverDetailed(dataDir, reg)
 }
 
-func buildExecutorReducerRegistry(reg schema.SchemaRegistry) (*executor.ReducerRegistry, error) {
+func buildExecutorReducerRegistry(reg schema.SchemaRegistry, declarations []ReducerDeclaration) (*executor.ReducerRegistry, error) {
 	reducers := executor.NewReducerRegistry()
+	permissionsByName := make(map[string]PermissionMetadata, len(declarations))
+	for _, decl := range declarations {
+		permissionsByName[decl.Name] = copyPermissionMetadata(decl.Permissions)
+	}
 	for _, name := range reg.Reducers() {
 		handler, ok := reg.Reducer(name)
 		if !ok {
 			return nil, fmt.Errorf("schema registry missing reducer %q", name)
 		}
-		if err := reducers.Register(executor.RegisteredReducer{Name: name, Handler: handler}); err != nil {
+		if err := reducers.Register(executor.RegisteredReducer{
+			Name:                name,
+			Handler:             handler,
+			RequiredPermissions: copyStringSlice(permissionsByName[name].Required),
+		}); err != nil {
 			return nil, err
 		}
 	}

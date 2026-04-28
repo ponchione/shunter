@@ -7,9 +7,10 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-The active hosted-runtime implementation target is `V2-E`: policy/auth
-enforcement foundation.
+The active hosted-runtime implementation target is `V2-F`: multi-module
+hosting exploration.
 
+V2-E policy/auth enforcement foundation is complete.
 V2-D declared read and SQL protocol convergence is complete.
 V2-C migration planning and validation is complete.
 V2-B contract artifact admin and CLI workflows are complete.
@@ -22,7 +23,7 @@ V2 planning is now decomposed under `docs/hosted-runtime-planning/V2/`,
 starting from the code-grounded source direction in
 `docs/decomposition/hosted-runtime-v2-directions.md`.
 
-Next hosted-runtime work should start from `V2-E` unless a newer explicit user
+Next hosted-runtime work should start from `V2-F` unless a newer explicit user
 target supersedes this handoff. Do not reopen V1-H or V1.5-A through V1.5-E
 unless a new failing regression proves drift.
 
@@ -147,6 +148,41 @@ V2-D validation passed:
 - `rtk go vet . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
 - `rtk go test ./... -count=1`
 
+V2-E is complete. Its live proof is:
+- `auth.Claims` now carries optional permission tags parsed from a narrow
+  `permissions` JWT claim while preserving existing identity, issuer,
+  audience, expiry, and hex-identity validation.
+- `types.CallerContext` carries permission tags plus an explicit
+  all-permissions flag used for trusted dev/anonymous paths.
+- `Runtime.CallReducer` exposes `WithPermissions(...)`; `AuthModeDev` local
+  calls retain a dev-friendly all-permissions default unless permissions are
+  explicitly supplied, while strict local calls require explicit permission
+  tags for protected reducers.
+- Protocol upgrades copy validated claim permission tags into
+  `UpgradeContext` and `Conn`; anonymous/dev protocol connections get the
+  explicit all-permissions flag.
+- `protocol.CallReducerRequest` and `executor.ProtocolInboxAdapter` forward
+  permission context into executor reducer requests.
+- `Build` copies reducer permission metadata into the runtime-owned executor
+  reducer registry.
+- The executor rejects external reducer calls missing required tags with
+  `ErrPermissionDenied` and `StatusFailedPermission` before reducer user code
+  or transaction creation.
+- Permission metadata remains exported in canonical contracts and generated
+  TypeScript clients.
+- Read permission enforcement is deferred because SQL-backed generated helpers
+  still execute through raw SQL protocol paths; correct raw SQL enforcement
+  needs table/read-model policy rather than declaration-name checks alone.
+- no tenant framework, role database, external IdP integration, broad policy
+  language, multi-module scoping, or read policy engine was added.
+
+V2-E validation passed:
+- `rtk go fmt . ./auth ./protocol ./executor ./codegen ./types`
+- `rtk go test . -run 'Test.*(Permission|Auth|Reducer|Local|Network)' -count=1`
+- `rtk go test ./auth ./protocol ./executor ./codegen ./types -count=1`
+- `rtk go vet . ./auth ./protocol ./executor ./codegen ./types`
+- `rtk go test ./... -count=1`
+
 The completed V1.5 proof below is historical context and should not be treated
 as an active target.
 
@@ -262,7 +298,7 @@ Former non-slice validation blocker resolved:
 
 ## Current Hosted-Runtime State
 
-V1-H, V1.5-A through V1.5-E, and V2-A through V2-D are audited as landed.
+V1-H, V1.5-A through V1.5-E, and V2-A through V2-E are audited as landed.
 
 Live proof points:
 - root package imports as `github.com/ponchione/shunter`
@@ -296,6 +332,10 @@ Live proof points:
 - V2-D added optional SQL-backed query/view declarations validated through the
   protocol SQL compiler, exported through contracts, reflected in codegen, and
   visible to contractdiff
+- V2-E added narrow permission claim extraction, caller permission context,
+  reducer permission enforcement for local/protocol external calls, and stable
+  permission-denied results; read permission enforcement remains deferred to a
+  future table/read-model policy surface
 - generic contract workflows operate only on existing canonical JSON files;
   app-owned export remains based on `Runtime.ExportContractJSON`
 - root/runtime package tests are the live proof for hosted-runtime ownership,
@@ -314,13 +354,13 @@ Required:
 3. `docs/hosted-runtime-planning/V2/README.md`
 4. the active V2 slice execution plan and task docs
 
-For the current V2-E target, start from:
-- `docs/hosted-runtime-planning/V2/V2-E/00-current-execution-plan.md`
-- `docs/hosted-runtime-planning/V2/V2-E/01-stack-prerequisites.md`
-- `docs/hosted-runtime-planning/V2/V2-E/02-permission-enforcement-tests.md`
-- `docs/hosted-runtime-planning/V2/V2-E/03-claims-and-reducer-enforcement.md`
-- `docs/hosted-runtime-planning/V2/V2-E/04-read-permission-extension.md`
-- `docs/hosted-runtime-planning/V2/V2-E/05-format-and-validate.md`
+For the current V2-F target, start from:
+- `docs/hosted-runtime-planning/V2/V2-F/00-current-execution-plan.md`
+- `docs/hosted-runtime-planning/V2/V2-F/01-stack-prerequisites.md`
+- `docs/hosted-runtime-planning/V2/V2-F/02-hosting-tests.md`
+- `docs/hosted-runtime-planning/V2/V2-F/03-host-abstraction.md`
+- `docs/hosted-runtime-planning/V2/V2-F/04-aggregate-introspection.md`
+- `docs/hosted-runtime-planning/V2/V2-F/05-format-and-validate.md`
 
 For V1.5-E audit only, start from:
 - `docs/hosted-runtime-planning/V1.5/README.md`
@@ -361,13 +401,14 @@ Preserve WebSocket-first v1 runtime behavior.
 ## V2 Planning State
 
 Current active V2 slice:
-- `V2-E`: policy/auth enforcement foundation
+- `V2-F`: multi-module hosting exploration
 
 Completed V2 slices:
 - `V2-A`: runtime/module boundary hardening
 - `V2-B`: contract artifact admin and CLI workflows
 - `V2-C`: migration planning and validation
 - `V2-D`: declared read and SQL protocol convergence
+- `V2-E`: policy/auth enforcement foundation
 
 V2 planning slices are:
 1. `V2-A`: runtime/module boundary hardening
@@ -384,17 +425,17 @@ If V2 implementation starts, begin with:
 - that slice's `01-stack-prerequisites.md`
 - live code/package docs named by the slice
 
-Do not start V2-F or later until V2-E is complete or explicitly deferred with
+Do not start V2-G or later until V2-F is complete or explicitly deferred with
 the reason recorded here.
 
 ## Next Slice Notes
 
 No next V1.5 slice is queued. The active hosted-runtime implementation slice is
-V2-E.
+V2-F.
 
-After V2-E completes, update this handoff to:
-- mark V2-E complete with live proof and validation commands
-- set `V2-F` as the active target
+After V2-F completes, update this handoff to:
+- mark V2-F complete with live proof and validation commands
+- set `V2-G` as the active target
 - preserve the rule that each handoff completes one full lettered slice,
   including tests and validations
 
@@ -443,6 +484,13 @@ Completed V2-D validation:
 - `rtk go test ./protocol ./query/sql ./subscription -count=1`
 - `rtk go test ./codegen ./contractdiff -count=1`
 - `rtk go vet . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
+- `rtk go test ./... -count=1`
+
+Completed V2-E validation:
+- `rtk go fmt . ./auth ./protocol ./executor ./codegen ./types`
+- `rtk go test . -run 'Test.*(Permission|Auth|Reducer|Local|Network)' -count=1`
+- `rtk go test ./auth ./protocol ./executor ./codegen ./types -count=1`
+- `rtk go vet . ./auth ./protocol ./executor ./codegen ./types`
 - `rtk go test ./... -count=1`
 
 Completed V1.5-E validation:

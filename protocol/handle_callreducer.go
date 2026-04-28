@@ -29,14 +29,16 @@ func handleCallReducer(
 
 	respCh := make(chan TransactionUpdate, 1)
 	if err := executor.CallReducer(ctx, CallReducerRequest{
-		ConnID:      conn.ID,
-		Identity:    conn.Identity,
-		RequestID:   msg.RequestID,
-		ReducerName: msg.ReducerName,
-		Args:        msg.Args,
-		Flags:       msg.Flags,
-		ResponseCh:  respCh,
-		Done:        conn.closed,
+		ConnID:              conn.ID,
+		Identity:            conn.Identity,
+		RequestID:           msg.RequestID,
+		ReducerName:         msg.ReducerName,
+		Args:                msg.Args,
+		Permissions:         append([]string(nil), conn.Permissions...),
+		AllowAllPermissions: conn.AllowAllPermissions,
+		Flags:               msg.Flags,
+		ResponseCh:          respCh,
+		Done:                conn.closed,
 	}); err != nil {
 		sendSyntheticFailure(conn, msg, "executor unavailable: "+err.Error())
 		return

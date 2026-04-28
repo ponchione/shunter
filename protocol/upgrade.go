@@ -61,9 +61,11 @@ type Server struct {
 // handler hands to the lifecycle layer. Stories 3.3/3.4 consume
 // the Identity + ConnectionID + Token + Compression mode.
 type UpgradeContext struct {
-	Conn         *websocket.Conn
-	Identity     types.Identity
-	ConnectionID types.ConnectionID
+	Conn                *websocket.Conn
+	Identity            types.Identity
+	ConnectionID        types.ConnectionID
+	Permissions         []string
+	AllowAllPermissions bool
 	// Token is the minted anonymous JWT when the server minted one
 	// during upgrade. Empty for strict-mode connections that
 	// presented a token.
@@ -83,6 +85,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	var claims *auth.Claims
 	var mintedToken string
 	var identity types.Identity
+	var permissions []string
 	if hasToken {
 		c, err := auth.ValidateJWT(token, s.JWT)
 		if err != nil {
@@ -91,6 +94,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		}
 		claims = c
 		identity = c.DeriveIdentity()
+		permissions = append([]string(nil), c.Permissions...)
 	} else {
 		if s.JWT.AuthMode != auth.AuthModeAnonymous {
 			http.Error(w, "no token and strict auth enabled", http.StatusUnauthorized)
@@ -108,6 +112,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		mintedToken = mt
 		identity = id
 	}
+	allowAllPermissions := s.JWT.AuthMode == auth.AuthModeAnonymous
 
 	// 2. connection_id: parse / generate / reject zero.
 	connID, err := resolveConnectionID(r.URL.Query().Get("connection_id"))
@@ -151,12 +156,14 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 
 	// 6. Hand off.
 	uc := &UpgradeContext{
-		Conn:         conn,
-		Identity:     identity,
-		ConnectionID: connID,
-		Token:        mintedToken,
-		Compression:  compression,
-		Claims:       claims,
+		Conn:                conn,
+		Identity:            identity,
+		ConnectionID:        connID,
+		Permissions:         append([]string(nil), permissions...),
+		AllowAllPermissions: allowAllPermissions,
+		Token:               mintedToken,
+		Compression:         compression,
+		Claims:              claims,
 	}
 	if s.Upgraded != nil {
 		s.Upgraded(r.Context(), uc)
@@ -171,6 +178,8 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 			uc.Conn,
 			&s.Options,
 		)
+		c.Permissions = append([]string(nil), uc.Permissions...)
+		c.AllowAllPermissions = uc.AllowAllPermissions
 		// RunLifecycle closes the socket on its own failure paths; on
 		// success it leaves the socket open for the background
 		// goroutines below. Story 3.6 (Disconnect) closes c.closed,

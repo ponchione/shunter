@@ -41,6 +41,9 @@ type Claims struct {
 	ExpiresAt   *time.Time // nil when the token omits `exp`
 	IssuedAt    time.Time
 	HexIdentity string
+	// Permissions carries optional caller permission tags from the
+	// `permissions` JWT claim.
+	Permissions []string
 }
 
 // DeriveIdentity is a convenience wrapper: identity derivation uses
@@ -113,6 +116,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 		}
 		c.HexIdentity = hex
 	}
+	c.Permissions = extractStringClaim(mc["permissions"])
 
 	// Audience: normalize to []string and optionally enforce policy.
 	c.Audience = extractAudience(mc["aud"])
@@ -137,6 +141,36 @@ func extractAudience(raw any) []string {
 		out := make([]string, 0, len(v))
 		for _, item := range v {
 			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func extractStringClaim(raw any) []string {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case string:
+		if v == "" {
+			return nil
+		}
+		return []string{v}
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
 				out = append(out, s)
 			}
 		}

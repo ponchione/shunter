@@ -20,3 +20,12 @@ Validation checklist:
 - dev/local behavior is explicit
 - strict auth behavior stays testable
 - no broad policy framework or tenant model leaked into V2-E
+
+## Completion Notes
+
+Validation passed:
+- `rtk go fmt . ./auth ./protocol ./executor ./codegen ./types`
+- `rtk go test . -run 'Test.*(Permission|Auth|Reducer|Local|Network)' -count=1`
+- `rtk go test ./auth ./protocol ./executor ./codegen ./types -count=1`
+- `rtk go vet . ./auth ./protocol ./executor ./codegen ./types`
+- `rtk go test ./... -count=1`

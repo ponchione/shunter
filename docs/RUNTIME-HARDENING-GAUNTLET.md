@@ -81,6 +81,14 @@ Current status:
   rows remain retryable, the earliest future wakeup survives a saturated replay
   pass, and recovered repeating schedules that advance into the future after
   either replay or overflow wait for the scheduler clock before firing again.
+  Follow-on restart/notify pins prove such advanced repeating rows can be
+  cancelled before the next due time without a stale firing, and that a
+  post-startup schedule earlier than a recovered future wakeup re-arms the
+  scheduler without firing the later recovered row early. Additional recovered
+  future cancellation pins prove one-shot rows can be cancelled while the
+  scheduler is armed, and cancelling the earliest recovered future wakeup
+  re-arms the scheduler to a later recovered row instead of retaining a stale
+  early wakeup.
 
 ## Goals
 

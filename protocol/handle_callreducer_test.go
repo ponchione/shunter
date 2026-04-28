@@ -240,6 +240,34 @@ func TestHandleCallReducer_ForwardsFlags_NoSuccessNotify(t *testing.T) {
 	}
 }
 
+func TestHandleCallReducer_ForwardsPermissionContext(t *testing.T) {
+	conn := testConnDirect(nil)
+	conn.Permissions = []string{"messages:send"}
+	conn.AllowAllPermissions = true
+	exec := &mockDispatchExecutor{}
+
+	msg := &CallReducerMsg{
+		RequestID:   51,
+		ReducerName: "DoThing",
+	}
+	handleCallReducer(context.Background(), conn, msg, exec)
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if exec.callReducerReq == nil {
+		t.Fatal("executor.CallReducer was not called")
+	}
+	if got := exec.callReducerReq.Permissions; len(got) != 1 || got[0] != "messages:send" {
+		t.Fatalf("Permissions = %#v, want messages:send", got)
+	}
+	if !exec.callReducerReq.AllowAllPermissions {
+		t.Fatal("AllowAllPermissions = false, want true")
+	}
+	if exec.callReducerReq.ResponseCh != nil {
+		close(exec.callReducerReq.ResponseCh)
+	}
+}
+
 func TestHandleCallReducer_ExecutorReject(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{callReducerErr: errors.New("reducer crashed")}

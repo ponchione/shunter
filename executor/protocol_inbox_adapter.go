@@ -119,8 +119,10 @@ func (a *ProtocolInboxAdapter) CallReducer(ctx context.Context, req protocol.Cal
 			ReducerName: req.ReducerName,
 			Args:        req.Args,
 			Caller: types.CallerContext{
-				Identity:     req.Identity,
-				ConnectionID: req.ConnID,
+				Identity:            req.Identity,
+				ConnectionID:        req.ConnID,
+				Permissions:         append([]string(nil), req.Permissions...),
+				AllowAllPermissions: req.AllowAllPermissions,
 			},
 			RequestID: req.RequestID,
 			Source:    CallSourceExternal,

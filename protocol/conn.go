@@ -28,6 +28,10 @@ type Conn struct {
 	Identity    types.Identity
 	Token       string // validated or minted JWT for this connection
 	Compression bool   // true when gzip was negotiated at upgrade
+	// Permissions are copied from authenticated upgrade claims and forwarded
+	// to the executor on external reducer calls.
+	Permissions         []string
+	AllowAllPermissions bool
 
 	// OutboundCh is the bounded per-connection outbound queue. The
 	// backpressure design (SPEC-005 §10.1, Epic 6) uses the

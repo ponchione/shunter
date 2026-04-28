@@ -44,7 +44,9 @@ type ReducerContext struct {
 
 // CallerContext captures the identity and timing of a reducer invocation.
 type CallerContext struct {
-	Identity     Identity
-	ConnectionID ConnectionID
-	Timestamp    time.Time
+	Identity            Identity
+	ConnectionID        ConnectionID
+	Timestamp           time.Time
+	Permissions         []string
+	AllowAllPermissions bool
 }

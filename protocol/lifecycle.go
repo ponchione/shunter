@@ -155,11 +155,13 @@ type UnsubscribeSetCommandResponse struct {
 // `ExecutorInbox.CallReducer` — the protocol layer synthesizes a heavy
 // envelope with `StatusFailed` in that case.
 type CallReducerRequest struct {
-	ConnID      types.ConnectionID
-	Identity    types.Identity
-	RequestID   uint32
-	ReducerName string
-	Args        []byte
+	ConnID              types.ConnectionID
+	Identity            types.Identity
+	RequestID           uint32
+	ReducerName         string
+	Args                []byte
+	Permissions         []string
+	AllowAllPermissions bool
 	// Flags mirrors the wire `CallReducerFlags` byte. The executor / fan-out
 	// seam reads this to decide whether to suppress the caller's
 	// successful-commit heavy echo (`CallReducerFlagsNoSuccessNotify`).

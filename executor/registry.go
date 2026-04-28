@@ -54,6 +54,7 @@ func (rr *ReducerRegistry) Register(r RegisteredReducer) error {
 		return fmt.Errorf("executor: duplicate reducer %q", r.Name)
 	}
 
+	r.RequiredPermissions = append([]string(nil), r.RequiredPermissions...)
 	r.ID = rr.nextID
 	rr.nextID++
 	rr.reducers[r.Name] = &r
@@ -68,6 +69,7 @@ func cloneRegisteredReducer(r *RegisteredReducer) *RegisteredReducer {
 		return nil
 	}
 	clone := *r
+	clone.RequiredPermissions = append([]string(nil), r.RequiredPermissions...)
 	return &clone
 }
 

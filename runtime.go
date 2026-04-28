@@ -92,7 +92,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		return nil, fmt.Errorf("build hosted runtime state: %w", err)
 	}
 
-	reducers, err := buildExecutorReducerRegistry(registry)
+	reducers, err := buildExecutorReducerRegistry(registry, mod.reducers)
 	if err != nil {
 		return nil, fmt.Errorf("build hosted runtime reducers: %w", err)
 	}

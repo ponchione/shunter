@@ -1,5 +1,7 @@
 # Hosted Runtime V2-E Current Execution Plan
 
+Status: complete
+
 Goal: turn passive v1.5 permission metadata into a narrow, testable
 policy/auth enforcement foundation where real identity data supports it.
 
@@ -27,3 +29,38 @@ Scope boundaries:
   beyond current JWT validation, broad policy language, multi-module scoping.
 
 Immediate next V2 slice after V2-E: V2-F multi-module hosting exploration.
+
+## Completion Proof
+
+- `auth.Claims` now carries optional `permissions` JWT claim tags while
+  preserving existing identity, issuer, audience, expiry, and hex-identity
+  validation.
+- `types.CallerContext` carries permission tags and an explicit dev/anonymous
+  all-permissions flag.
+- Local calls in `AuthModeDev` keep a dev-friendly default by allowing all
+  permissions unless the caller explicitly supplies tags with
+  `WithPermissions(...)`.
+- Local calls in `AuthModeStrict` require explicit supplied permission tags for
+  protected reducers.
+- Protocol upgrades copy validated claim permission tags; anonymous/dev
+  protocol connections get the explicit all-permissions flag.
+- `protocol.CallReducerRequest` and `executor.ProtocolInboxAdapter` forward
+  permission context into reducer execution.
+- `Build` copies reducer permission metadata into the runtime-owned executor
+  reducer registry.
+- The executor rejects external reducer calls missing required tags with
+  `ErrPermissionDenied` and `StatusFailedPermission` before reducer user code
+  or transaction creation.
+- Permission metadata remains exported through canonical contracts and
+  generated clients as before.
+- Read permission enforcement is deferred: V2-D SQL-backed generated helpers
+  still execute through raw SQL protocol routes, so correct read enforcement
+  needs table/read-model policy rather than declaration-name checks alone.
+
+## Validation
+
+- `rtk go fmt . ./auth ./protocol ./executor ./codegen ./types`
+- `rtk go test . -run 'Test.*(Permission|Auth|Reducer|Local|Network)' -count=1`
+- `rtk go test ./auth ./protocol ./executor ./codegen ./types -count=1`
+- `rtk go vet . ./auth ./protocol ./executor ./codegen ./types`
+- `rtk go test ./... -count=1`
