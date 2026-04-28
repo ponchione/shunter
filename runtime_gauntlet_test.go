@@ -716,6 +716,56 @@ func TestRuntimeGauntletScheduledRepeatFiresAndCancels(t *testing.T) {
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled repeat op 6 after cancel")
 }
 
+func TestRuntimeGauntletScheduledRepeatResumesAfterCleanRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntime(t, dataDir)
+
+	repeatID := scheduleGauntletRepeatInsertNext(t, rt, 80, "scheduled_repeat_restart", 300*time.Millisecond, "scheduled repeat restart op 0 schedule")
+	if err := rt.Close(); err != nil {
+		t.Fatalf("scheduled repeat restart op 1 Close before repeat fire returned error: %v", err)
+	}
+
+	rt = buildGauntletRuntime(t, dataDir)
+	defer rt.Close()
+	model := gauntletModel{players: map[uint64]string{}}
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.CloseNow()
+
+	const queryID = uint32(89997)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 89996, queryID)
+	if len(initialRows) > 2 {
+		t.Fatalf("scheduled repeat restart op 2 initial rows = %d, want at most 2", len(initialRows))
+	}
+	for i := 0; i < len(initialRows); i++ {
+		id := uint64(80 + i)
+		if got, ok := initialRows[id]; !ok || got != "scheduled_repeat_restart" {
+			t.Fatalf("scheduled repeat restart op 2 initial rows = %v, want contiguous repeated rows starting at id 80", initialRows)
+		}
+		model.players[id] = "scheduled_repeat_restart"
+	}
+
+	for len(model.players) < 2 {
+		id := uint64(80 + len(model.players))
+		wantDelta := gauntletDelta{
+			inserts: map[uint64]string{id: "scheduled_repeat_restart"},
+			deletes: map[uint64]string{},
+		}
+		label := fmt.Sprintf("scheduled repeat restart op 3 fire id %d", id)
+		gotDelta := readGauntletTransactionUpdateLight(t, subscriber, queryID, label)
+		assertGauntletDeltaEqual(t, gotDelta, wantDelta, label)
+		model.players[id] = "scheduled_repeat_restart"
+	}
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled repeat restart op 4 resumed fires")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled repeat restart op 4 resumed fires")
+
+	cancelGauntletSchedule(t, rt, repeatID, "scheduled repeat restart op 5 cancel")
+	assertNoGauntletProtocolMessageBeforeClose(t, subscriber, 350*time.Millisecond, "scheduled repeat restart op 6 after cancel")
+	assertGauntletReadMatchesModel(t, rt, model, "scheduled repeat restart op 6 after cancel")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled repeat restart op 6 after cancel")
+}
+
 func TestRuntimeGauntletProtocolCallReducerRestartEquivalence(t *testing.T) {
 	for _, seed := range []int64{1, 17, 20260427} {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
