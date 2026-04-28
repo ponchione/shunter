@@ -9,13 +9,13 @@ import (
 	"github.com/ponchione/shunter/schema"
 )
 
-// TestParitySubscribeSingleDurationNonZeroOnCompileFail pins that the
+// TestShunterSubscribeSingleDurationNonZeroOnCompileFail pins that the
 // receipt-timestamp seam populates `TotalHostExecutionDurationMicros`
 // with a measured value on the handler-short-circuit path
 // (compile-error before dispatch). Reference field semantics: duration
 // reflects the full admission time; a deferred-measurement 0 is no
 // longer legal on any admission-origin emit site. Pin: non-zero.
-func TestParitySubscribeSingleDurationNonZeroOnCompileFail(t *testing.T) {
+func TestShunterSubscribeSingleDurationNonZeroOnCompileFail(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("users", 1) // only "users" exists
@@ -37,9 +37,9 @@ func TestParitySubscribeSingleDurationNonZeroOnCompileFail(t *testing.T) {
 	}
 }
 
-// TestParitySubscribeSingleDurationNonZeroOnSubmitFail pins the same
+// TestShunterSubscribeSingleDurationNonZeroOnSubmitFail pins the same
 // contract on the executor-unavailable short-circuit path.
-func TestParitySubscribeSingleDurationNonZeroOnSubmitFail(t *testing.T) {
+func TestShunterSubscribeSingleDurationNonZeroOnSubmitFail(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{registerSetErr: errors.New("queue full")}
 	sl := newMockSchema("users", 1,
@@ -58,9 +58,9 @@ func TestParitySubscribeSingleDurationNonZeroOnSubmitFail(t *testing.T) {
 	}
 }
 
-// TestParitySubscribeMultiDurationNonZeroOnCompileFail pins the
+// TestShunterSubscribeMultiDurationNonZeroOnCompileFail pins the
 // receipt-timestamp seam on handleSubscribeMulti's compile-short-circuit.
-func TestParitySubscribeMultiDurationNonZeroOnCompileFail(t *testing.T) {
+func TestShunterSubscribeMultiDurationNonZeroOnCompileFail(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("users", 1)
@@ -81,9 +81,9 @@ func TestParitySubscribeMultiDurationNonZeroOnCompileFail(t *testing.T) {
 	}
 }
 
-// TestParitySubscribeMultiDurationNonZeroOnSubmitFail pins the same
+// TestShunterSubscribeMultiDurationNonZeroOnSubmitFail pins the same
 // contract on the multi executor-unavailable short-circuit path.
-func TestParitySubscribeMultiDurationNonZeroOnSubmitFail(t *testing.T) {
+func TestShunterSubscribeMultiDurationNonZeroOnSubmitFail(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{registerSetErr: errors.New("queue full")}
 	sl := newMockSchema("users", 1,
@@ -154,9 +154,9 @@ func TestHandleSubscribeMulti_SQLTooLongRejectedBeforeExecutor(t *testing.T) {
 	}
 }
 
-// TestParityUnsubscribeSingleDurationNonZeroOnSubmitFail pins the seam
+// TestShunterUnsubscribeSingleDurationNonZeroOnSubmitFail pins the seam
 // on handleUnsubscribeSingle's executor-unavailable short-circuit.
-func TestParityUnsubscribeSingleDurationNonZeroOnSubmitFail(t *testing.T) {
+func TestShunterUnsubscribeSingleDurationNonZeroOnSubmitFail(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{unregisterSetErr: errors.New("db down")}
 	msg := &UnsubscribeSingleMsg{RequestID: 4, QueryID: 7}
@@ -172,9 +172,9 @@ func TestParityUnsubscribeSingleDurationNonZeroOnSubmitFail(t *testing.T) {
 	}
 }
 
-// TestParityUnsubscribeMultiDurationNonZeroOnSubmitFail pins the same
+// TestShunterUnsubscribeMultiDurationNonZeroOnSubmitFail pins the same
 // contract on handleUnsubscribeMulti.
-func TestParityUnsubscribeMultiDurationNonZeroOnSubmitFail(t *testing.T) {
+func TestShunterUnsubscribeMultiDurationNonZeroOnSubmitFail(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{unregisterSetErr: errors.New("db down")}
 	msg := &UnsubscribeMultiMsg{RequestID: 24, QueryID: 99}

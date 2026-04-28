@@ -27,7 +27,7 @@ func (s assertingSender) SendTransactionUpdateLight(_ types.ConnectionID, _ *Tra
 	return nil
 }
 
-// Phase 2 Slice 2 admission-model slice (TD-140): the SendSubscribe /
+// single/multi variant admission-model slice (TD-140): the SendSubscribe /
 // SendUnsubscribe / SendSubscriptionError helpers are straight transport
 // pushes now. The tests below verify the transport-level surface
 // (frame enqueue + error propagation). Semantic tests that used to

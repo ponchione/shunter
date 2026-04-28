@@ -8,7 +8,7 @@ This document is a companion to `BRAIN-EXTENSIONS-LLM-HARNESS.md`.
 Owner-operator framing:
 - These notes should be read through the lens of a private, owner-operated platform for the repo owner’s own projects/businesses.
 - “General-purpose” here means reusable across the owner's own app ideas, not “public competitor to SpacetimeDB” or “broad-market database product.”
-- That makes selective parity, opinionated defaults, and workload-specific narrowing acceptable as long as the kernel/layering stays clean.
+- That makes selective reference matching, opinionated defaults, and workload-specific narrowing acceptable as long as the kernel/layering stays clean.
 
 ---
 
@@ -99,7 +99,7 @@ The current schema/type model is intentionally narrow. That is good for v1 kerne
 - collections/arrays in some controlled form
 - blobs/attachments or references to them
 
-General-purpose use does not necessarily require full SpacetimeDB type parity immediately, but it usually needs more than a flat scalar-only model.
+General-purpose use does not necessarily require full SpacetimeDB type compatibility immediately, but it usually needs more than a flat scalar-only model.
 
 ### 3.3 Better developer-facing application API
 

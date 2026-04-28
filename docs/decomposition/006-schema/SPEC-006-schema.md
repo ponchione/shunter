@@ -587,7 +587,7 @@ type sysScheduled struct {
 
 Managed by the scheduler. Entries are inserted when `SchedulerHandle.Schedule()` is called from reducer code. One-shot entries are deleted only when the scheduled reducer transaction commits successfully. Repeating entries stay in place and update `next_run_at_ns` on successful commit. On scheduled reducer failure or crash-before-commit, the row remains as the durable source of truth.
 
-`schedule_id` intentionally uses `uint64` / `ScheduleID` in Shunter v1 for extra headroom. SpacetimeDB uses a 32-bit schedule identifier; this spec does not attempt parity there.
+`schedule_id` intentionally uses `uint64` / `ScheduleID` in Shunter v1 for extra headroom. SpacetimeDB uses a 32-bit schedule identifier; this spec does not attempt compatibility there.
 
 ---
 

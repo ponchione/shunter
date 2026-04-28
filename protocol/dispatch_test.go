@@ -296,8 +296,7 @@ func TestDispatchLoop_MarksActivity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Let the initial MarkActivity from NewConn settle, then sample.
-	time.Sleep(10 * time.Millisecond)
+	conn.lastActivity.Store(1)
 	before := conn.lastActivity.Load()
 
 	done := runDispatchAsync(conn, ctx, handlers)

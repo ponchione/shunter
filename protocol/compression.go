@@ -17,7 +17,7 @@ var gzipWriterPool = sync.Pool{
 
 var gzipReaderPool sync.Pool
 
-// Compression byte values (SPEC-005 §3.3, parity-aligned with
+// Compression byte values (SPEC-005 §3.3, aligned with
 // reference/SpacetimeDB
 // crates/client-api-messages/src/websocket/common.rs
 // SERVER_MSG_COMPRESSION_TAG_*).
@@ -32,7 +32,7 @@ const (
 var ErrUnknownCompressionTag = errors.New("protocol: unknown compression tag")
 
 // ErrBrotliUnsupported is returned when a peer requests brotli
-// compression. The tag is recognized (Phase 1 parity) but Shunter does
+// compression. The tag is recognized, but Shunter does
 // not implement brotli; callers should treat it as a distinct protocol
 // deferral rather than an unknown tag.
 var ErrBrotliUnsupported = errors.New("protocol: brotli compression unsupported")

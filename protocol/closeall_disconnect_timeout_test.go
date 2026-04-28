@@ -7,7 +7,7 @@ import (
 )
 
 // TestCloseAllBoundsDisconnectOnInboxHang is the primary pin for the
-// OI-004 CloseAll disconnect-context sub-hazard. CloseAll
+// CloseAll disconnect-context. CloseAll
 // forwards the caller's ctx into each per-conn Conn.Disconnect, which
 // threads it into inbox.DisconnectClientSubscriptions and
 // inbox.OnDisconnect. Without a per-conn bounded ctx, a

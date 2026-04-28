@@ -84,13 +84,14 @@ func TestOutgoingBackpressure_FurtherSendsAfterDisconnect(t *testing.T) {
 	_ = s.Send(conn.ID, msg)
 
 	// Wait for disconnect to complete (conn removed from manager).
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
 	deadline := time.After(2 * time.Second)
 	for mgr.Get(conn.ID) != nil {
 		select {
+		case <-tick.C:
 		case <-deadline:
 			t.Fatal("conn not removed from manager after overflow disconnect")
-		default:
-			time.Sleep(5 * time.Millisecond)
 		}
 	}
 
@@ -124,10 +125,12 @@ func TestOutgoingBackpressure_SendConcurrentWithDisconnectDoesNotPanic(t *testin
 	defer cancel()
 
 	var wg sync.WaitGroup
+	started := make(chan struct{}, 8)
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			started <- struct{}{}
 			for {
 				select {
 				case <-ctx.Done():
@@ -139,7 +142,7 @@ func TestOutgoingBackpressure_SendConcurrentWithDisconnectDoesNotPanic(t *testin
 		}()
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSignals(t, started, 8, "concurrent senders started")
 	conn.Disconnect(context.Background(), websocket.StatusNormalClosure, "", inbox, mgr)
 	wg.Wait()
 

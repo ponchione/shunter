@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestParityTransactionUpdateWireShape pins the byte-level Shunter-native
+// TestShunterTransactionUpdateWireShape pins the byte-level Shunter-native
 // wire shape of TransactionUpdate:
 //
 //	status:                     UpdateStatus     (tagged union)
@@ -19,7 +19,7 @@ import (
 // The test constructs the expected byte shape by hand and compares
 // against EncodeServerMessage, then round-trips through
 // DecodeServerMessage to prove the field-order change is symmetric.
-func TestParityTransactionUpdateWireShape(t *testing.T) {
+func TestShunterTransactionUpdateWireShape(t *testing.T) {
 	var identity [32]byte
 	for i := range identity {
 		identity[i] = byte(0x10 + i)
@@ -149,11 +149,11 @@ func TestParityTransactionUpdateWireShape(t *testing.T) {
 	}
 }
 
-// TestParityTransactionUpdateWireShapeFailed pins the byte shape when
+// TestShunterTransactionUpdateWireShapeFailed pins the byte shape when
 // Status is the Failed arm — UpdateStatus tag byte is 1 followed by a
 // Box<str> error message, and the rest of the envelope follows the
 // reference field order.
-func TestParityTransactionUpdateWireShapeFailed(t *testing.T) {
+func TestShunterTransactionUpdateWireShapeFailed(t *testing.T) {
 	const errMsg = "reducer panicked"
 	const timestamp int64 = 42
 

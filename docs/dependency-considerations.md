@@ -146,9 +146,8 @@ cost.
 
 Why it might fit:
 
-- There are many tests using fixed `time.Sleep` / `time.After` windows,
-  especially around scheduler, keepalive, fanout worker, protocol backpressure,
-  and runtime gauntlet behavior.
+- Several tests still exercise timer-driven scheduler, keepalive, protocol, and
+  runtime gauntlet behavior where a fake clock could reduce wall-clock time.
 - A fake clock could make these tests faster and less flaky.
 
 Why to wait:

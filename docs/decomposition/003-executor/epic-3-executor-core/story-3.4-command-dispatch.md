@@ -13,7 +13,7 @@ The `dispatch()` type switch routing commands to handlers. Includes subscription
 
 ## Deliverables
 
-> **Updated 2026-04-19 (Phase 2 Slice 2).** Dispatch routes the set-based
+> **Updated 2026-04-19.** Dispatch routes the set-based
 > subscription commands instead of the former single-subscription
 > commands.
 

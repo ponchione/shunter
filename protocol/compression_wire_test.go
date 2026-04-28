@@ -12,12 +12,12 @@ import (
 	"github.com/coder/websocket"
 )
 
-// TestPhase1ParityCompressionTagByteValues pins the reference byte
+// TestShunterCompressionTagByteValues pins the reference byte
 // numbering: 0x00 none, 0x01 brotli (reserved, unsupported), 0x02
 // gzip. Reference outcome matched:
 // crates/client-api-messages/src/websocket/common.rs
 // SERVER_MSG_COMPRESSION_TAG_{NONE,BROTLI,GZIP}.
-func TestPhase1ParityCompressionTagByteValues(t *testing.T) {
+func TestShunterCompressionTagByteValues(t *testing.T) {
 	if CompressionNone != 0x00 {
 		t.Errorf("CompressionNone = 0x%02x, want 0x00", CompressionNone)
 	}
@@ -30,10 +30,10 @@ func TestPhase1ParityCompressionTagByteValues(t *testing.T) {
 	}
 }
 
-// TestPhase1ParityCompressionGzipEnvelopeByte pins the over-the-wire
+// TestShunterCompressionGzipEnvelopeByte pins the over-the-wire
 // byte sequence so a reference-compatible client sees gzip signaled as
 // 0x02.
-func TestPhase1ParityCompressionGzipEnvelopeByte(t *testing.T) {
+func TestShunterCompressionGzipEnvelopeByte(t *testing.T) {
 	frame, err := WrapCompressed(TagTransactionUpdate, []byte("body"),
 		CompressionGzip)
 	if err != nil {
@@ -56,13 +56,13 @@ func TestPhase1ParityCompressionGzipEnvelopeByte(t *testing.T) {
 	defer gr.Close()
 }
 
-// TestPhase1ParityCompressionBrotliReservedRejected pins the deferral:
+// TestShunterCompressionBrotliReservedRejected pins the deferral:
 // brotli is recognized as a known tag but Shunter does not implement
 // it. Server-side emit must reject it; decode must return a dedicated
 // ErrBrotliUnsupported (distinct from ErrUnknownCompressionTag) so
 // callers can distinguish "reserved-but-unimplemented" from "bogus
 // byte".
-func TestPhase1ParityCompressionBrotliReservedRejected(t *testing.T) {
+func TestShunterCompressionBrotliReservedRejected(t *testing.T) {
 	_, err := WrapCompressed(TagTransactionUpdate, []byte("body"),
 		CompressionBrotli)
 	if err == nil {
@@ -83,11 +83,11 @@ func TestPhase1ParityCompressionBrotliReservedRejected(t *testing.T) {
 	}
 }
 
-// TestPhase1ParityBrotliFrameClosesWithReason drives a brotli-tagged
+// TestShunterBrotliFrameClosesWithReason drives a brotli-tagged
 // frame into the dispatch loop and asserts the connection is closed
 // with code 1002 and a reason string containing "brotli". Mirrors the
 // pattern of TestUnknownCompressionTag_Closes1002 in close_test.go.
-func TestPhase1ParityBrotliFrameClosesWithReason(t *testing.T) {
+func TestShunterBrotliFrameClosesWithReason(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	conn, clientWS := testConnPair(t, &opts)
 	conn.Compression = true // enable compression path

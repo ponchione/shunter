@@ -4,8 +4,8 @@
 - Tech-debt linkage: TD-140 (decision), TD-136 + TD-137 (fixes unblocked by
   this decision), TD-138 + TD-139 (parallel cleanup, Group C, not
   addressed here)
-- Context origin: Phase 2 Slice 2 `SubscribeMulti` / `SubscribeSingle`
-  variant split post-merge audit. See
+- Context origin: the `SubscribeMulti` / `SubscribeSingle` set-based variant
+  split post-merge audit. See
   `docs/superpowers/specs/2026-04-18-subscribe-multi-single-split-design.md`.
 - Clean-room note: reference design patterns cited from
   `reference/SpacetimeDB/` inform decisions here; no Rust code is ported
@@ -13,8 +13,8 @@
 
 ## Context
 
-The Phase 2 Slice 2 variant split introduced a set-based subscription
-manager API (`RegisterSet` / `UnregisterSet`) keyed by
+The set-based variant split introduced a subscription manager API
+(`RegisterSet` / `UnregisterSet`) keyed by
 `(ConnID, QueryID)` and an internal `SubscriptionID` allocation used by
 fan-out. The split left two admission-bookkeeping systems coexisting:
 
@@ -58,7 +58,7 @@ and how the other becomes derived state (or is removed).
   discards the registration result.
 - **SPEC-005 §9.1 rule 1:** a second `Subscribe` with the same id while
   pending or active MUST fail with `SubscriptionError`.
-- **Reference parity is the target:**
+- **Reference-informed ordering is the target:**
   `ModuleSubscriptionManager::add_subscription_multi` at
   `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1023-1101`
   preserves §9.4-equivalent ordering via a per-client
@@ -143,7 +143,7 @@ Concretely:
   `Reply` closure signature replaces `ResponseCh` (~50 LOC net
   change across protocol + executor).
 - **Consistent with Single-collapses-into-Set semantics.** §4.5 of the
-  Phase 2 Slice 2 design spec observes that reference implements
+  set-based subscription design spec observes that reference implements
   `add_subscription` as a one-line wrapper around
   `add_subscription_multi`. The admission model should be consistent
   on the delivery path too: Single and Multi applied frames already
@@ -287,8 +287,8 @@ are removed. New regression pins:
 - TD-139: `Predicates []any` compile-time safety. Unaffected by this
   ADR; retained as-is. Group C remains the place where TD-139's code
   change lands.
-- Task 10 host-adapter slice (Phase 2 Slice 2 plan): unblocked by
-  this ADR but not executed here. The adapter will supply the
+- Host-adapter follow-up: unblocked by this ADR but not executed here.
+  The adapter will supply the
   concrete `ExecutorInbox` implementation whose `Reply` closures use
   the real `connOnlySender`; the in-tree test fakes already satisfy
   the new interface shape.
@@ -341,6 +341,6 @@ bridge state exists where both systems coexist mid-slice.
 
 - TECH-DEBT entries TD-136, TD-137, TD-138, TD-139, TD-140.
 - SPEC-005 §9.1 and §9.4 (`docs/decomposition/005-protocol/SPEC-005-protocol.md:480-529`).
-- Phase 2 Slice 2 design spec (`docs/superpowers/specs/2026-04-18-subscribe-multi-single-split-design.md`).
+- Set-based subscription design spec (`docs/superpowers/specs/2026-04-18-subscribe-multi-single-split-design.md`).
 - Reference admission:
   `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:841-1101`.

@@ -9,6 +9,17 @@ import (
 	"github.com/coder/websocket"
 )
 
+func waitForSignals(t *testing.T, ch <-chan struct{}, want int, label string) {
+	t.Helper()
+	for i := 0; i < want; i++ {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s: observed %d/%d signals", label, i, want)
+		}
+	}
+}
+
 func TestIncomingBackpressure_WithinLimitAllProcessed(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.IncomingQueueMessages = 4
@@ -16,11 +27,13 @@ func TestIncomingBackpressure_WithinLimitAllProcessed(t *testing.T) {
 
 	var mu sync.Mutex
 	var count int
+	processed := make(chan struct{}, 4)
 	handlers := &MessageHandlers{
 		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			count++
 			mu.Unlock()
+			processed <- struct{}{}
 		},
 	}
 
@@ -41,7 +54,7 @@ func TestIncomingBackpressure_WithinLimitAllProcessed(t *testing.T) {
 		wCancel()
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	waitForSignals(t, processed, 4, "processed within limit")
 
 	mu.Lock()
 	got := count
@@ -104,11 +117,13 @@ func TestIncomingBackpressure_RapidBurstWithinLimit(t *testing.T) {
 
 	var mu sync.Mutex
 	var count int
+	processed := make(chan struct{}, 8)
 	handlers := &MessageHandlers{
 		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			count++
 			mu.Unlock()
+			processed <- struct{}{}
 		},
 	}
 
@@ -126,7 +141,7 @@ func TestIncomingBackpressure_RapidBurstWithinLimit(t *testing.T) {
 		wCancel()
 	}
 
-	time.Sleep(300 * time.Millisecond)
+	waitForSignals(t, processed, 8, "processed rapid burst")
 
 	mu.Lock()
 	got := count
@@ -147,11 +162,13 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	var mu sync.Mutex
 	var ids []uint32
 	block := make(chan struct{})
+	started := make(chan struct{}, 1)
 	handlers := &MessageHandlers{
 		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
 			mu.Lock()
 			ids = append(ids, msg.QueryID)
 			mu.Unlock()
+			started <- struct{}{}
 			<-block
 		},
 	}
@@ -159,7 +176,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_ = runDispatchAsync(conn, ctx, handlers)
+	done := runDispatchAsync(conn, ctx, handlers)
 
 	frame1, _ := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 1, QueryID: 100,
@@ -169,7 +186,7 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	_ = clientWS.Write(wCtx, websocket.MessageBinary, frame1)
 	wCancel()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSignals(t, started, 1, "first handler start")
 
 	frame2, _ := EncodeClientMessage(SubscribeSingleMsg{
 		RequestID: 2, QueryID: 200,
@@ -179,7 +196,11 @@ func TestIncomingBackpressure_OverflowMessageNotProcessed(t *testing.T) {
 	_ = clientWS.Write(wCtx2, websocket.MessageBinary, frame2)
 	wCancel2()
 
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch loop did not exit on incoming overflow")
+	}
 
 	mu.Lock()
 	got := ids

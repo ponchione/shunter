@@ -173,7 +173,7 @@ It does **not** mean:
 - hosted cloud service by default
 - multi-tenant control plane
 - mandatory WASM or multi-language runtime
-- immediate full SpacetimeDB product parity
+- immediate full SpacetimeDB product compatibility
 
 ### 4.2 Why this matters
 

@@ -15,7 +15,7 @@ import (
 //
 // Called synchronously on the executor goroutine; changeset is read-only.
 //
-// View lifetime (OI-005 subscription-seam sub-hazard): `view` is borrowed
+// View lifetime (OI-005 subscription-seam): `view` is borrowed
 // for the duration of this call only. The executor calls `view.Close()`
 // immediately after this function returns (`executor/executor.go:540-541`),
 // so no reference to `view` may escape past return — not via the
@@ -25,7 +25,7 @@ import (
 // Pinned by
 // `eval_view_lifetime_test.go::TestEvalAndBroadcastDoesNotUseViewAfterReturn_{Join,SingleTable}`.
 //
-// Phase 1.5 outcome-model decision (`docs/parity-decisions.md#outcome-model`):
+// Outcome-model decision (`docs/shunter-design-decisions.md#outcome-model`):
 // a caller-addressable commit MUST NOT short-circuit on "no active
 // subscriptions" or "empty changeset" — the caller still needs its
 // heavy `TransactionUpdate` envelope to observe the reducer outcome.
@@ -118,7 +118,7 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 					cloned := u
 					cloned.SubscriptionID = subID
 					cloned.QueryID = delivery.QueryID
-					// OI-006 fanout aliasing: give each subscriber an
+					// fanout aliasing: give each subscriber an
 					// independent outer slice header for Inserts/Deletes
 					// so downstream replace/append on one subscriber's
 					// updates cannot leak into another's view.

@@ -18,8 +18,7 @@ Task sequence:
    surfaces.
 2. Add failing tests for reducer permission enforcement and dev/strict behavior.
 3. Implement the smallest permission claim extraction and enforcement path.
-4. Extend enforcement to declared reads/raw SQL only after V2-D clarifies read
-   semantics.
+4. Extend enforcement to declared reads/raw SQL using the declared-read model.
 5. Format and validate V2-E gates.
 
 Scope boundaries:
@@ -28,7 +27,9 @@ Scope boundaries:
 - Out of scope: tenant framework, role database, external IdP integration
   beyond current JWT validation, broad policy language, multi-module scoping.
 
-Immediate next V2 slice after V2-E: V2-F multi-module hosting exploration.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V2-E plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
 
 ## Completion Proof
 

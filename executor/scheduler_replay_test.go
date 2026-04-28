@@ -161,6 +161,32 @@ func TestSchedulerReplaySuppressesDuplicateFirstPostReplayScan(t *testing.T) {
 	}
 }
 
+func TestSchedulerReplayRepeatedCallDoesNotDuplicateInFlightDueRow(t *testing.T) {
+	s, cs, tid, inbox := schedulerWorkerFixture(t)
+	fireAt := time.Unix(50, 0).UnixNano()
+	seedSchedule(t, cs, tid, 23, "past", nil, fireAt, 0)
+
+	s.ReplayFromCommitted()
+	s.ReplayFromCommitted()
+
+	var got []ScheduleID
+	for {
+		select {
+		case cmd := <-inbox:
+			got = append(got, cmd.(CallReducerCmd).Request.ScheduleID)
+		default:
+			if len(got) != 1 || got[0] != 23 {
+				t.Fatalf("queued schedule IDs after repeated replay = %v, want [23]", got)
+			}
+			wasInFlight, wasReplayQueued := s.completeInFlight(23, fireAt)
+			if !wasInFlight || !wasReplayQueued {
+				t.Fatalf("completeInFlight = (%v, %v), want replay-queued in-flight row", wasInFlight, wasReplayQueued)
+			}
+			return
+		}
+	}
+}
+
 func TestSchedulerReplayOverflowLeavesSkippedDueRowsRetryable(t *testing.T) {
 	_, cs, tid, _ := schedulerWorkerFixture(t)
 	inbox := make(chan ExecutorCommand, 1)
@@ -238,6 +264,54 @@ func TestSchedulerRunPicksUpDueRowsSkippedBySaturatedReplay(t *testing.T) {
 	}
 }
 
+func TestSchedulerRunDrainsMultipleRowsSkippedBySaturatedReplayWithoutDuplicates(t *testing.T) {
+	_, cs, tid, _ := schedulerWorkerFixture(t)
+	inbox := make(chan ExecutorCommand, 1)
+	s := NewScheduler(inbox, cs, tid)
+	s.now = func() time.Time { return time.Unix(100, 0) }
+	seedSchedule(t, cs, tid, 20, "replayed-or-overflowed-a", nil, time.Unix(50, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 21, "replayed-or-overflowed-b", nil, time.Unix(60, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 22, "replayed-or-overflowed-c", nil, time.Unix(70, 0).UnixNano(), 0)
+
+	s.ReplayFromCommitted()
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(runDone)
+	}()
+
+	got := map[ScheduleID]int{}
+	for len(got) < 3 {
+		select {
+		case cmd := <-inbox:
+			call, ok := cmd.(CallReducerCmd)
+			if !ok {
+				t.Fatalf("enqueued cmd type=%T, want CallReducerCmd", cmd)
+			}
+			got[call.Request.ScheduleID]++
+			if got[call.Request.ScheduleID] > 1 {
+				t.Fatalf("schedule %d was enqueued more than once; got=%v", call.Request.ScheduleID, got)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("Scheduler.Run did not drain all replay-overflowed due rows; got=%v", got)
+		}
+	}
+	if got[20] != 1 || got[21] != 1 || got[22] != 1 {
+		t.Fatalf("queued schedule IDs = %v, want exactly one enqueue for 20, 21, and 22", got)
+	}
+
+	s.Notify()
+	assertNoReceive(t, inbox, 50*time.Millisecond, "duplicate replay-overflowed schedule after rescan")
+
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
 func TestSchedulerReplayOverflowStillArmsEarliestFutureWakeup(t *testing.T) {
 	_, cs, tid, _ := schedulerWorkerFixture(t)
 	inbox := make(chan ExecutorCommand, 1)
@@ -260,14 +334,14 @@ func TestSchedulerReplayOverflowStillArmsEarliestFutureWakeup(t *testing.T) {
 	}
 }
 
-// TestParityP0Sched001ReplayPreservesScanOrderWithoutSorting pins the
+// TestSchedulerReplayPreservesScanOrderWithoutSorting pins the
 // intentional divergence from reference scheduler.rs:118-130 that the
 // scheduler does not sort past-due rows by next_run_at_ns during replay;
 // it preserves the committed-scan order it is given. The committed-state
-// TableScan surface is explicitly unordered, so this parity pin targets the
+// TableScan surface is explicitly unordered, so this Shunter pin targets the
 // order-preservation seam directly rather than assuming a specific map
 // iteration order in the fixture.
-func TestParityP0Sched001ReplayPreservesScanOrderWithoutSorting(t *testing.T) {
+func TestSchedulerReplayPreservesScanOrderWithoutSorting(t *testing.T) {
 	s := &Scheduler{}
 	rows := []types.ProductValue{
 		{

@@ -66,6 +66,24 @@ func runKeepaliveAsync(c *Conn, ctx context.Context) chan struct{} {
 	return done
 }
 
+func waitForActivityAfter(t *testing.T, c *Conn, after int64, label string) int64 {
+	t.Helper()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	deadline := time.After(2 * time.Second)
+	for {
+		got := c.lastActivity.Load()
+		if got > after {
+			return got
+		}
+		select {
+		case <-tick.C:
+		case <-deadline:
+			t.Fatalf("%s: lastActivity = %d, want > %d", label, got, after)
+		}
+	}
+}
+
 func TestKeepaliveReturnsOnCtxCancel(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.PingInterval = 2 * time.Second // so no tick fires during the test
@@ -132,12 +150,7 @@ func TestKeepaliveMarksActivityOnPongFromResponsiveClient(t *testing.T) {
 	pumpDone := runDispatchAsync(c, ctx, handlers)
 	kaDone := runKeepaliveAsync(c, ctx)
 
-	time.Sleep(250 * time.Millisecond) // ~4 PingInterval cycles
-
-	last := c.lastActivity.Load()
-	if last <= start {
-		t.Errorf("lastActivity = %d, want > %d (expected Pong-driven activity)", last, start)
-	}
+	waitForActivityAfter(t, c, start, "Pong-driven activity")
 
 	cancel()
 	clientReadCancel()
@@ -195,9 +208,7 @@ func TestDispatchLoopMarksActivityOnInboundFrame(t *testing.T) {
 	}
 	pumpDone := runDispatchAsync(c, ctx, handlers)
 
-	// Give the dispatch loop a moment to start and sample a baseline
-	// AFTER NewConn's construction MarkActivity so we can detect movement.
-	time.Sleep(10 * time.Millisecond)
+	c.lastActivity.Store(1)
 	before := c.lastActivity.Load()
 
 	// Client sends a valid Subscribe frame. The dispatch loop routes it

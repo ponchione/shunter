@@ -10,9 +10,9 @@ import (
 
 // The pins in this file are the rolled-up canonical-contract layer for
 // the rows-shape cluster decided in
-// `docs/parity-decisions.md#protocol-rows-shape`. Individual byte-shape
-// pins continue to live in `parity_applied_envelopes_test.go` and
-// `parity_transaction_update_test.go`; this file adds:
+// `docs/shunter-design-decisions.md#protocol-rows-shape`. Individual byte-shape
+// pins continue to live in `subscription_response_wire_test.go` and
+// `transaction_update_wire_test.go`; this file adds:
 //
 //   - a cross-envelope field-order table with the decision-doc
 //     rationale inlined,
@@ -20,16 +20,16 @@ import (
 //   - an explicit `writeSubscriptionUpdates` inner-layout pin, and
 //   - a rowlist-format pin referencing SPEC-005 §3.4.
 //
-// If a future slice closes the wrapper-chain parity (SubscribeRows /
+// If a future slice closes the reference wrapper chain (SubscribeRows /
 // DatabaseUpdate / TableUpdate / CompressableQueryUpdate / BsatnRowList
 // together), every pin in this file will need to flip together, by
 // design.
 
-// TestParityRowsShapeEnvelopesFlatShape pins the current Shunter flat-
+// TestShunterRowsShapeEnvelopesFlatShape pins the current Shunter flat-
 // rows shape across every envelope that carries subscription row data.
 // See delta audit rows #1-#6 in
-// `docs/parity-decisions.md#protocol-rows-shape`.
-func TestParityRowsShapeEnvelopesFlatShape(t *testing.T) {
+// `docs/shunter-design-decisions.md#protocol-rows-shape`.
+func TestShunterRowsShapeEnvelopesFlatShape(t *testing.T) {
 	cases := []struct {
 		name     string
 		envelope any
@@ -75,7 +75,7 @@ func TestParityRowsShapeEnvelopesFlatShape(t *testing.T) {
 	}
 }
 
-// TestParityTransactionUpdateLightWireShape pins the byte-level wire
+// TestShunterTransactionUpdateLightWireShape pins the byte-level wire
 // shape of TransactionUpdateLight. Reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:493`:
 //
@@ -84,10 +84,10 @@ func TestParityRowsShapeEnvelopesFlatShape(t *testing.T) {
 //
 // Shunter flattens `DatabaseUpdate { tables: Vec<TableUpdate> }` to
 // `[]SubscriptionUpdate`. That inner divergence is delta #5 / #10 in
-// `docs/parity-decisions.md#protocol-rows-shape` and is accepted as a
+// `docs/shunter-design-decisions.md#protocol-rows-shape` and is accepted as a
 // documented divergence. This pin locks the current flat shape so
 // accidental wire drift is loudly visible.
-func TestParityTransactionUpdateLightWireShape(t *testing.T) {
+func TestShunterTransactionUpdateLightWireShape(t *testing.T) {
 	const requestID uint32 = 0x01020304
 	rl := EncodeRowList([][]byte{{0xAA, 0xBB}})
 	update := []SubscriptionUpdate{
@@ -147,17 +147,17 @@ func TestParityTransactionUpdateLightWireShape(t *testing.T) {
 	}
 }
 
-// TestParitySubscriptionUpdateInnerLayout pins the SubscriptionUpdate
+// TestShunterSubscriptionUpdateInnerLayout pins the SubscriptionUpdate
 // inner wire layout as a canonical contract. Locks:
 //   - the flattened per-entry `QueryID` field (delta #3 in
-//     `docs/parity-decisions.md#protocol-rows-shape`; reference carries query
+//     `docs/shunter-design-decisions.md#protocol-rows-shape`; reference carries query
 //     correlation through the fuller wrapper chain rather than this flat slot), and
 //   - the inserts-before-deletes field order (delta #7; reference
 //     QueryUpdate is deletes-first).
 //
 // Both are intentional Shunter divergences carried forward by the
 // decision doc until the wrapper-chain close lands as its own slice.
-func TestParitySubscriptionUpdateInnerLayout(t *testing.T) {
+func TestShunterSubscriptionUpdateInnerLayout(t *testing.T) {
 	fields := msgFieldNames(SubscriptionUpdate{})
 	want := []string{"QueryID", "TableName", "Inserts", "Deletes"}
 	if diff := cmp.Diff(want, fields); diff != "" {
@@ -195,14 +195,14 @@ func TestParitySubscriptionUpdateInnerLayout(t *testing.T) {
 	}
 }
 
-// TestParityRowsShapeRowListFormatReference pins the per-row-length-
+// TestShunterRowsShapeRowListFormatReference pins the per-row-length-
 // prefix EncodeRowList layout as the canonical Shunter rows-data
 // format. See SPEC-005 §3.4
 // (`docs/decomposition/005-protocol/SPEC-005-protocol.md:132-143`) and
-// delta #10 in `docs/parity-decisions.md#protocol-rows-shape`. The reference
+// delta #10 in `docs/shunter-design-decisions.md#protocol-rows-shape`. The reference
 // `BsatnRowList { size_hint: RowSizeHint, rows_data: Bytes }` layout
 // is deliberately deferred to v2.
-func TestParityRowsShapeRowListFormatReference(t *testing.T) {
+func TestShunterRowsShapeRowListFormatReference(t *testing.T) {
 	rows := [][]byte{{0x01, 0x02}, {0x03}}
 
 	got := EncodeRowList(rows)

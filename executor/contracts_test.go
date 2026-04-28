@@ -12,7 +12,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestFoundationTypesMatchPhase1dContracts(t *testing.T) {
+func TestFoundationTypesMatchContracts(t *testing.T) {
 	var zero types.TxID
 	if zero != types.TxID(0) {
 		t.Fatalf("TxID zero value = %d, want 0", zero)
@@ -51,7 +51,7 @@ func TestFoundationTypesMatchPhase1dContracts(t *testing.T) {
 	}
 }
 
-func TestReducerContractsMatchPhase1dSpec(t *testing.T) {
+func TestReducerContractsMatchSpec(t *testing.T) {
 	h := types.ReducerHandler(func(ctx *types.ReducerContext, argBSATN []byte) ([]byte, error) {
 		if ctx == nil {
 			t.Fatal("ReducerHandler should receive ReducerContext")
@@ -207,6 +207,7 @@ func TestEpic1InterfacesAndErrorsExist(t *testing.T) {
 		ErrCommitFailed,
 		ErrExecutorFatal,
 		ErrExecutorUnbufferedResponseChannel,
+		ErrInvalidScheduleInterval,
 	}
 	for _, err := range base {
 		if !errors.Is(err, err) {

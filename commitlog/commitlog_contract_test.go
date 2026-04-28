@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func phase4TestSchema(t *testing.T) schema.SchemaRegistry {
+func contractTestSchema(t *testing.T) schema.SchemaRegistry {
 	t.Helper()
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)
@@ -260,7 +259,7 @@ func TestSegmentWriterEnforcesStartTxAlignment(t *testing.T) {
 }
 
 func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
-	reg := phase4TestSchema(t)
+	reg := contractTestSchema(t)
 	cs := sampleChangeset()
 	data, err := EncodeChangeset(cs)
 	if err != nil {
@@ -317,17 +316,7 @@ func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 	}
 }
 
-type countingSegmentWriter struct {
-	*SegmentWriter
-	syncs *atomic.Int32
-}
-
-func (w *countingSegmentWriter) Sync() error {
-	w.syncs.Add(1)
-	return w.SegmentWriter.Sync()
-}
-
-func TestDurabilityWorkerBatchesAndFsyncs(t *testing.T) {
+func TestDurabilityWorkerBatchesAndTracksDurableTx(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultCommitLogOptions()
 	opts.ChannelCapacity = 8
@@ -336,10 +325,6 @@ func TestDurabilityWorkerBatchesAndFsyncs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var syncCount atomic.Int32
-	dw.seg = &SegmentWriter{file: dw.seg.file, bw: dw.seg.bw, size: dw.seg.size, startTx: dw.seg.startTx, lastTx: dw.seg.lastTx}
-	counting := &countingSegmentWriter{SegmentWriter: dw.seg, syncs: &syncCount}
-	_ = counting
 	for i := 1; i <= 6; i++ {
 		dw.EnqueueCommitted(uint64(i), &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
 	}
@@ -389,6 +374,26 @@ func TestDurabilityWorkerCloseThenEnqueuePanics(t *testing.T) {
 	dw.EnqueueCommitted(1, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
 }
 
+func waitForLastEnqueued(t *testing.T, dw *DurabilityWorker, want uint64) {
+	t.Helper()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	timeout := time.After(time.Second)
+	for {
+		dw.stateMu.Lock()
+		got := dw.lastEnq
+		dw.stateMu.Unlock()
+		if got == want {
+			return
+		}
+		select {
+		case <-tick.C:
+		case <-timeout:
+			t.Fatalf("lastEnq = %d, want %d", got, want)
+		}
+	}
+}
+
 func TestDurabilityWorkerCloseWhileEnqueueBlockedReturnsControlledClosePanic(t *testing.T) {
 	dw := &DurabilityWorker{
 		ch:      make(chan durabilityItem, 1),
@@ -411,7 +416,7 @@ func TestDurabilityWorkerCloseWhileEnqueueBlockedReturnsControlledClosePanic(t *
 		dw.EnqueueCommitted(2, &store.Changeset{Tables: map[schema.TableID]*store.TableChangeset{}})
 	}()
 
-	time.Sleep(20 * time.Millisecond)
+	waitForLastEnqueued(t, dw, 2)
 	if _, err := dw.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -517,7 +522,7 @@ func TestDurabilityWorkerReopensExistingSegment(t *testing.T) {
 	opts := DefaultCommitLogOptions()
 	opts.ChannelCapacity = 16
 
-	// Phase 1: create worker, write two records, close.
+	// First open: create worker, write two records, close.
 	dw1, err := NewDurabilityWorker(dir, 1, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -542,9 +547,9 @@ func TestDurabilityWorkerReopensExistingSegment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat segment: %v", err)
 	}
-	sizeAfterPhase1 := info1.Size()
+	sizeAfterFirstOpen := info1.Size()
 
-	// Phase 2: reopen same dir+startTxID, write one more record.
+	// Second open: reopen same dir+startTxID, write one more record.
 	dw2, err := NewDurabilityWorker(dir, 1, opts)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
@@ -568,8 +573,8 @@ func TestDurabilityWorkerReopensExistingSegment(t *testing.T) {
 
 	// Verify segment grew (not truncated).
 	info2, _ := os.Stat(segPath)
-	if info2.Size() <= sizeAfterPhase1 {
-		t.Fatalf("segment truncated: size before=%d, after=%d", sizeAfterPhase1, info2.Size())
+	if info2.Size() <= sizeAfterFirstOpen {
+		t.Fatalf("segment truncated: size before=%d, after=%d", sizeAfterFirstOpen, info2.Size())
 	}
 
 	// Verify all 3 records readable.

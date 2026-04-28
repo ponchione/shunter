@@ -995,7 +995,7 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 	}
 	v, err := coerceLiteral(f.Literal, col.Type, caller)
 	if err != nil {
-		// Parity error types carry the reference literal verbatim; do
+		// Reference-informed error types carry the source literal verbatim; do
 		// not prefix with "coerce column" so the text matches
 		// reference expr/src/errors.rs (UnexpectedType:100,
 		// InvalidLiteral:84).

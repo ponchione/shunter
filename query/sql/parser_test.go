@@ -998,7 +998,7 @@ func TestParseCaseDistinctRelationAliasesResolveIndependently(t *testing.T) {
 	}
 }
 
-// TD-142 Slice 14: RHS-side self-join projection must carry the b-alias so
+// self-join projection contract: RHS-side self-join projection must carry the b-alias so
 // the compile path can thread ProjectRight=true.
 func TestParseAliasedSelfEquiJoinProjectsRight(t *testing.T) {
 	stmt, err := Parse("SELECT b.* FROM t AS a JOIN t AS b ON a.u32 = b.u32")
@@ -1726,8 +1726,8 @@ func TestParseJoinCountStarBareAliasProjectionWithWhere(t *testing.T) {
 
 // TestParseJoinCountStarAliasProjectionOnCrossJoinWhereEquality pins that the
 // parser admits COUNT(*) aggregate projection on the already-accepted
-// cross-join WHERE column-equality shape (P0-SUBSCRIPTION-024). The
-// statement carries the aggregate metadata plus a cross-join (HasOn=false)
+// cross-join WHERE column-equality shape. The statement carries the aggregate
+// metadata plus a cross-join (HasOn=false)
 // and a ColumnComparisonPredicate that equates the two relations' columns.
 func TestParseJoinCountStarAliasProjectionOnCrossJoinWhereEquality(t *testing.T) {
 	stmt, err := Parse("SELECT COUNT(*) AS n FROM t JOIN s WHERE t.u32 = s.u32")
@@ -1764,9 +1764,9 @@ func TestParseJoinCountStarAliasProjectionOnCrossJoinWhereEquality(t *testing.T)
 // TestParseJoinCountStarBareAliasProjectionOnCrossJoinWhereEqualityAndFilter
 // pins that the parser admits COUNT(*) aggregate projection with bare alias
 // on the already-accepted cross-join WHERE equality-plus-single-literal-filter
-// shape (P0-SUBSCRIPTION-031). The statement carries the aggregate metadata
-// plus the AndPredicate{ColumnComparisonPredicate, ComparisonPredicate}
-// shape without flattening.
+// shape. The statement carries the aggregate metadata plus the
+// AndPredicate{ColumnComparisonPredicate, ComparisonPredicate} shape without
+// flattening.
 func TestParseJoinCountStarBareAliasProjectionOnCrossJoinWhereEqualityAndFilter(t *testing.T) {
 	stmt, err := Parse("SELECT COUNT(*) n FROM t JOIN s WHERE t.u32 = s.u32 AND s.enabled = TRUE")
 	if err != nil {

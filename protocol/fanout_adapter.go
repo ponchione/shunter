@@ -199,7 +199,7 @@ func encodeSubscriptionUpdate(su subscription.SubscriptionUpdate) (SubscriptionU
 }
 
 // encodeRows encodes each row to BSATN bytes. Row payloads are
-// treated as READ-ONLY: OI-006 row-payload sharing contract governs
+// treated as READ-ONLY: row-payload sharing contract governs
 // `types.ProductValue` backing-array sharing across subscribers of
 // the same query (pinned by subscription fanout row-payload sharing
 // regression tests and `subscription/eval.go::evaluate`). `bsatn.EncodeProductValue`

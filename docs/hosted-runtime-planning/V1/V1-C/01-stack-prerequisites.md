@@ -17,4 +17,4 @@ Checks:
 
 Stop if:
 - the root package is still absent
-- V1-B success-path tests are not yet passing
+- V1-B success-path tests fail

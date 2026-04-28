@@ -11,7 +11,7 @@ import (
 // mockCommitted is a minimal in-memory CommittedReadView for tests. It does
 // not enforce schema; tests declare the rows and the (table, indexID) →
 // column mapping they care about. Iteration is stabilized by RowID so
-// order-sensitive bootstrap/one-off parity tests can assert row sequence
+// order-sensitive bootstrap/one-off contract tests can assert row sequence
 // deterministically even though the production store scan is currently
 // unordered.
 type mockCommitted struct {

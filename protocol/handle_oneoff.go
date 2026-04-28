@@ -23,7 +23,7 @@ type CommittedStateAccess interface {
 // comparison predicates against committed state and sends the result
 // back to the client (SPEC-005 §7.4).
 //
-// The wire carries a SQL string (Phase 2 Slice 1) which is parsed and
+// The wire carries a SQL string (SQL-string) which is parsed and
 // coerced against the schema before the existing snapshot-scan path
 // runs.
 func handleOneOffQuery(

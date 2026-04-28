@@ -19,7 +19,7 @@ Current status:
   `CallReducer` restart equivalence, one-off reads and isolated one-off errors,
   same-connection one-off/subscription interleaving, subscription initial rows,
   subscribe-initial/one-off equivalence, live subscription deltas,
-  multi-subscriber fanout parity, same-connection subscription multiplexing,
+  multi-subscriber fanout contract, same-connection subscription multiplexing,
   same-connection `SubscribeMulti`/`SubscribeSingle` coexistence, predicate
   subscription deltas, rejected subscribe cleanup and same-connection recovery,
   rejected subscribe-multi cleanup and same-connection recovery,
@@ -40,7 +40,7 @@ Current status:
   restart, cancelled schedule persistence across clean restart, and
   transactional rollback of schedule creation, immediate and past-due scheduled
   one-shot firing, scheduled due-time ordering, scheduled predicate
-  subscription deltas, scheduled multi-subscriber fanout parity, cancel
+  subscription deltas, scheduled multi-subscriber fanout contract, cancel
   idempotence and unknown-cancel no-effect controls, protocol `CallReducer`
   schedule/cancel coverage including clean restart, protocol rollback of
   schedule creation, scheduled fire isolation for unsubscribed clients, and
@@ -108,7 +108,28 @@ Current status:
   one-shot is created after startup at that same timestamp. Equal-time
   retry pins prove a failing or panicking recovered row retries without
   duplicating its same-timestamp recovered sibling, including repeating rows
-  that must advance fixed-rate after the successful retry.
+  that must advance fixed-rate after the successful retry. Final replay-overflow
+  pins prove multiple overflowed due rows drain exactly once, stale snapshot
+  rows already in flight cannot be re-enqueued after a fast executor commit,
+  the recovered future wakeup survives after the overflow clears, same-time
+  replay-queued failure retries do not duplicate a committed sibling, and
+  cancelling an advanced recovered repeating row sharing a future wakeup leaves
+  the one-shot wakeup armed. A final rearm pin proves a successful recovered
+  repeating fire notifies the scheduler after advancing `next_run_at_ns`, so the
+  next wakeup is armed without relying on an external Notify. Final
+  cancel-before-retry pins prove a failed or panicking recovered due row can be
+  cancelled before scheduler retry and cannot be resurrected by stale retry
+  notification state. A deeper final audit also closed scheduler contract gaps:
+  `ScheduleRepeat` now rejects non-positive intervals before mutating
+  `sys_scheduled` or consuming a schedule ID, and failed or panicking
+  rolled-back cancellations of recovered future rows keep those rows armed and
+  able to fire. One more deep pass pinned direct replay idempotence for
+  already in-flight due rows and fixed Startup idempotence so a failed first
+  startup call returns the original error on later no-op calls instead of
+  falsely reporting success while external admission remains closed. The
+  deterministic root runtime and scheduler restart slices are saturated for the
+  current surface; remaining gauntlet work should move to broader
+  crash/fault/fuzz/metamorphic/race/soak coverage unless a new invariant appears.
 
 ## Goals
 
@@ -289,9 +310,8 @@ panic/fatal error.
 Before calling a major build ready, run:
 
 - `rtk go test ./... -count=1`
-- pinned static analysis with `rtk go tool staticcheck ./...`; until OI-008
-  cleanup clears known findings, record failures instead of treating it as a
-  required green release-candidate gate
+- pinned static analysis with `rtk go tool staticcheck ./...`; after OI-008
+  cleanup, this is a required green release-candidate gate
 - targeted package tests with `-race` for runtime, executor, protocol,
   subscription, store, and commitlog
 - fuzz corpus replay

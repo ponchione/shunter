@@ -424,6 +424,7 @@ func TestStartup_SweepDoesNotInvokeOnDisconnectReducer(t *testing.T) {
 // command may interleave ahead of the sweep."
 func TestStartup_ExternalRejectedWhileSweepInProgress(t *testing.T) {
 	block := make(chan struct{})
+	enteredEval := make(chan struct{})
 	var sawReady atomic.Bool
 	var gateRejectsObserved atomic.Int32
 
@@ -431,6 +432,7 @@ func TestStartup_ExternalRejectedWhileSweepInProgress(t *testing.T) {
 		clients: []sysClientsSeed{{conn: types.ConnectionID{1}}},
 	})
 	h.subs.onEval = func(store.CommittedReadView) {
+		close(enteredEval)
 		// Inside the sweep's post-commit pipeline the gate must still
 		// be closed; concurrent external admission must be rejected.
 		if h.exec.externalReady.Load() {
@@ -449,8 +451,11 @@ func TestStartup_ExternalRejectedWhileSweepInProgress(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- h.exec.Startup(context.Background(), nil) }()
 
-	// Let Startup get into postCommit.
-	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-enteredEval:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Startup did not reach postCommit eval")
+	}
 	if sawReady.Load() {
 		t.Error("externalReady flipped true while sweep was still running")
 	}
@@ -1027,6 +1032,14 @@ func TestStartup_PanickingRepeatingReplayedScheduleRetryAdvancesFromSameIntended
 	}
 }
 
+func TestStartup_FailedRecoveredDueScheduleCanBeCancelledBeforeRetry(t *testing.T) {
+	runRecoveredDueScheduleCanBeCancelledBeforeRetry(t, false)
+}
+
+func TestStartup_PanickingRecoveredDueScheduleCanBeCancelledBeforeRetry(t *testing.T) {
+	runRecoveredDueScheduleCanBeCancelledBeforeRetry(t, true)
+}
+
 func TestStartup_RepeatingRecoveredScheduleCatchupStaysFixedRate(t *testing.T) {
 	firstAt := time.Unix(95, 0).UnixNano()
 	repeatNs := int64(3 * time.Second)
@@ -1286,6 +1299,86 @@ func TestStartup_ReplayedRepeatingFutureAdvanceCanBeCancelledBeforeDue(t *testin
 	}
 }
 
+func TestStartup_InvalidScheduleRepeatIntervalFailsWithoutScheduleRow(t *testing.T) {
+	seed := startupSeed{
+		reducers: []RegisteredReducer{
+			{
+				Name: "invalid-repeat",
+				Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+					_, err := ctx.Scheduler.ScheduleRepeat("never", nil, 0)
+					return nil, err
+				}),
+			},
+		},
+	}
+	h := newStartupHarness(t, seed)
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	respCh := make(chan ReducerResponse, 1)
+	if err := h.exec.SubmitWithContext(execCtx, CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "invalid-repeat", Source: CallSourceExternal},
+		ResponseCh: respCh,
+	}); err != nil {
+		t.Fatalf("SubmitWithContext invalid repeat: %v", err)
+	}
+	resp := expectAnyResponse(t, respCh, "invalid repeat")
+	expectResponseStatus(t, resp, "invalid repeat", StatusFailedUser)
+	if !errors.Is(resp.Error, ErrInvalidScheduleInterval) {
+		t.Fatalf("invalid repeat error=%v, want %v", resp.Error, ErrInvalidScheduleInterval)
+	}
+	assertScheduleIDs(t, h)
+}
+
+func TestStartup_RepeatingSuccessUpdateNotifiesSchedulerForNextWakeup(t *testing.T) {
+	firstAt := time.Unix(50, 0).UnixNano()
+	repeatNs := int64(450 * time.Second)
+	secondAt := firstAt + repeatNs
+	fired := make(chan struct{}, 1)
+
+	seed := startupSeed{
+		inboxCapacity: 1,
+		schedules: []sysScheduledSeed{
+			{id: 158, reducerName: "repeat-update-notify", nextRunAtNs: firstAt, repeatNs: repeatNs},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: "repeat-update-notify",
+				Handler: types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) {
+					fired <- struct{}{}
+					return nil, nil
+				}),
+			},
+		},
+	}
+	h := newStartupHarness(t, seed)
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	startHarnessExecutor(t, h)
+	select {
+	case <-fired:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("replayed repeating schedule did not fire")
+	}
+	waitExecutorBarrier(t, h.exec, "after replayed repeating schedule update")
+	assertScheduleRowNextRun(t, h, 158, secondAt)
+
+	select {
+	case <-h.scheduler.wakeup:
+	default:
+		t.Fatal("repeating schedule advancement did not notify scheduler to rearm next wakeup")
+	}
+
+	h.scheduler.scan()
+	if h.scheduler.nextWakeup != time.Unix(0, secondAt) {
+		t.Fatalf("nextWakeup after repeating update rescan = %v, want %v", h.scheduler.nextWakeup, time.Unix(0, secondAt))
+	}
+}
+
 func TestStartup_RecoveredFutureWakeupRearmsForEarlierPostStartupSchedule(t *testing.T) {
 	var nowNs atomic.Int64
 	fired := make(chan string, 2)
@@ -1532,6 +1625,73 @@ func TestStartup_RolledBackEarlierScheduleDoesNotReplaceRecoveredFutureWakeup(t 
 	}
 }
 
+func TestStartup_RolledBackRecoveredCancelKeepsScheduleArmed(t *testing.T) {
+	runRolledBackRecoveredCancelKeepsScheduleArmed(t, false)
+}
+
+func TestStartup_PanickingRecoveredCancelKeepsScheduleArmed(t *testing.T) {
+	runRolledBackRecoveredCancelKeepsScheduleArmed(t, true)
+}
+
+func runRolledBackRecoveredCancelKeepsScheduleArmed(t *testing.T, panicAfterCancel bool) {
+	t.Helper()
+	var nowNs atomic.Int64
+	fired := make(chan string, 1)
+	fireAt := time.Unix(500, 0).UnixNano()
+	cancelReducer := "cancel-recovered-then-fail"
+	wantStatus := StatusFailedUser
+	if panicAfterCancel {
+		cancelReducer = "cancel-recovered-then-panic"
+		wantStatus = StatusFailedPanic
+	}
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 161, reducerName: "recovered-after-rolled-back-cancel", nextRunAtNs: fireAt},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("recovered-after-rolled-back-cancel", fired),
+			{
+				Name: cancelReducer,
+				Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+					deleted, err := ctx.Scheduler.Cancel(161)
+					if err != nil {
+						return nil, err
+					}
+					if !deleted {
+						return nil, errFireFailed
+					}
+					if panicAfterCancel {
+						panic("recovered cancel panic")
+					}
+					return nil, errFireFailed
+				}),
+			},
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	submitWithContextAndExpectStatus(t, execCtx, h.exec, cancelReducer, "rolled-back recovered cancel", wantStatus)
+	waitExecutorBarrier(t, h.exec, "after rolled-back recovered cancel")
+	assertScheduleRowNextRun(t, h, 161, fireAt)
+
+	startHarnessScheduler(t, h)
+	nowNs.Store(time.Unix(600, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, fired, "recovered schedule after rolled-back cancel")
+	if got != "recovered-after-rolled-back-cancel" {
+		t.Fatalf("fired reducer after rolled-back cancel=%q, want recovered-after-rolled-back-cancel", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after recovered schedule post rolled-back cancel")
+	assertScheduleIDs(t, h)
+}
+
 func TestStartup_RecoveredFutureSuccessRearmsLaterWakeup(t *testing.T) {
 	var nowNs atomic.Int64
 	fired := make(chan string, 2)
@@ -1756,6 +1916,173 @@ func TestStartup_PanickingSameTimeRepeatingRecoveredFutureRetriesWithoutDuplicat
 	runSameTimeRecoveredFutureRetryWithoutDuplicatingSibling(t, true, int64(700*time.Second))
 }
 
+func TestStartup_MultipleOverflowedDueRowsFireBeforeRecoveredFutureWakeup(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 4)
+	futureAt := time.Unix(500, 0)
+
+	seed := startupSeed{
+		inboxCapacity: 1,
+		schedules: []sysScheduledSeed{
+			{id: 150, reducerName: "overflowed-due-a", nextRunAtNs: time.Unix(50, 0).UnixNano()},
+			{id: 151, reducerName: "overflowed-due-b", nextRunAtNs: time.Unix(60, 0).UnixNano()},
+			{id: 152, reducerName: "overflowed-due-c", nextRunAtNs: time.Unix(70, 0).UnixNano()},
+			{id: 153, reducerName: "recovered-future-after-overflow", nextRunAtNs: futureAt.UnixNano()},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("overflowed-due-a", fired),
+			recordStringReducer("overflowed-due-b", fired),
+			recordStringReducer("overflowed-due-c", fired),
+			recordStringReducer("recovered-future-after-overflow", fired),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	startHarnessExecutor(t, h)
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	schedulerDone := make(chan struct{})
+	go func() {
+		h.scheduler.Run(schedulerCtx)
+		close(schedulerDone)
+	}()
+
+	assertReducerEvents(t, fired, []string{"overflowed-due-a", "overflowed-due-b", "overflowed-due-c"}, "recovered replay-overflowed due rows")
+	waitExecutorBarrier(t, h.exec, "after recovered replay-overflowed due rows")
+
+	schedulerCancel()
+	select {
+	case <-schedulerDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("scheduler did not stop after replay-overflowed due rows drained")
+	}
+	if h.scheduler.nextWakeup != futureAt {
+		t.Fatalf("nextWakeup after replay-overflowed due rows = %v, want %v", h.scheduler.nextWakeup, futureAt)
+	}
+	assertScheduleIDs(t, h, 153)
+	assertNoReceive(t, fired, 50*time.Millisecond, "recovered future before replay-overflow backlog cleared")
+
+	nowNs.Store(time.Unix(600, 0).UnixNano())
+	startHarnessScheduler(t, h)
+	h.scheduler.Notify()
+	got := readReducerOrder(t, fired, "recovered future after replay-overflow backlog")
+	if got != "recovered-future-after-overflow" {
+		t.Fatalf("future reducer after replay-overflow backlog=%q, want recovered-future-after-overflow", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after recovered future following replay-overflow backlog")
+	assertScheduleIDs(t, h)
+}
+
+func TestStartup_FailedSameTimeReplayQueuedScheduleRetriesAfterSiblingCommits(t *testing.T) {
+	events := make(chan string, 4)
+	var attempts atomic.Int32
+	fireAt := time.Unix(50, 0).UnixNano()
+
+	seed := startupSeed{
+		inboxCapacity: 2,
+		schedules: []sysScheduledSeed{
+			{id: 154, reducerName: "same-time-replay-flaky", nextRunAtNs: fireAt},
+			{id: 155, reducerName: "same-time-replay-sibling", nextRunAtNs: fireAt},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: "same-time-replay-flaky",
+				Handler: types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) {
+					switch attempts.Add(1) {
+					case 1:
+						events <- "same-time-replay-flaky-first"
+						return nil, errFireFailed
+					case 2:
+						events <- "same-time-replay-flaky-retry"
+						return nil, nil
+					default:
+						events <- "same-time-replay-flaky-extra"
+						return nil, nil
+					}
+				}),
+			},
+			recordStringReducer("same-time-replay-sibling", events),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	assertReducerEvents(t, events, []string{"same-time-replay-flaky-first", "same-time-replay-sibling"}, "same-time replay queued first attempts")
+	got := readReducerOrder(t, events, "same-time replay queued retry")
+	if got != "same-time-replay-flaky-retry" {
+		t.Fatalf("same-time replay queued retry event=%q, want same-time-replay-flaky-retry", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after same-time replay queued retry")
+	assertScheduleIDs(t, h)
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("same-time replay queued flaky attempts=%d, want 2", got)
+	}
+	assertNoReceive(t, events, 50*time.Millisecond, "duplicate same-time replay queued sibling or retry")
+}
+
+func TestStartup_CancelAdvancedRepeatingSharedWakeupLeavesOneShotArmed(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 3)
+	repeatID := ScheduleID(156)
+	firstAt := time.Unix(300, 0).UnixNano()
+	repeatNs := int64(700 * time.Second)
+	sharedNextAt := firstAt + repeatNs
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: uint64(repeatID), reducerName: "shared-wakeup-repeat", nextRunAtNs: firstAt, repeatNs: repeatNs},
+			{id: 157, reducerName: "shared-wakeup-one-shot", nextRunAtNs: sharedNextAt},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("shared-wakeup-repeat", fired),
+			recordStringReducer("shared-wakeup-one-shot", fired),
+			cancelScheduleReducer("cancel-shared-wakeup-repeat", repeatID),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, fired, "first shared-wakeup repeating fire")
+	if got != "shared-wakeup-repeat" {
+		t.Fatalf("first shared-wakeup fire=%q, want shared-wakeup-repeat", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after first shared-wakeup repeating fire")
+	assertScheduleRowNextRun(t, h, repeatID, sharedNextAt)
+	assertScheduleRowNextRun(t, h, 157, sharedNextAt)
+
+	submitWithContextAndExpectCommitted(t, execCtx, h.exec, "cancel-shared-wakeup-repeat", "cancel advanced shared-wakeup repeat")
+	waitExecutorBarrier(t, h.exec, "after cancelling advanced shared-wakeup repeat")
+	assertScheduleIDs(t, h, 157)
+
+	nowNs.Store(time.Unix(1100, 0).UnixNano())
+	h.scheduler.Notify()
+	got = readReducerOrder(t, fired, "shared-wakeup one-shot after cancelling repeat")
+	if got != "shared-wakeup-one-shot" {
+		t.Fatalf("shared-wakeup fire after cancelling repeat=%q, want shared-wakeup-one-shot", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after shared-wakeup one-shot")
+	assertScheduleIDs(t, h)
+	assertNoReceive(t, fired, 50*time.Millisecond, "cancelled advanced shared-wakeup repeat duplicate")
+}
+
 // Pin 12: Startup(ctx, nil) is the test-path shorthand — the scheduler
 // replay step is skipped entirely (no inbox enqueue, no scan). Used by
 // harnesses that do not need sys_scheduled replay.
@@ -1876,6 +2203,47 @@ func TestStartup_CtxCancelMidSweepLeavesGateClosed(t *testing.T) {
 	}
 	if h.exec.externalReady.Load() {
 		t.Fatal("externalReady must stay false when Startup fails")
+	}
+}
+
+func TestStartup_FailedFirstCallReturnsSameErrorOnLaterCalls(t *testing.T) {
+	seed := startupSeed{
+		clients: []sysClientsSeed{
+			{conn: types.ConnectionID{1}},
+			{conn: types.ConnectionID{2}},
+		},
+	}
+	h := newStartupHarness(t, seed)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	first := true
+	h.subs.onEval = func(store.CommittedReadView) {
+		if first {
+			first = false
+			cancel()
+		}
+	}
+
+	err := h.exec.Startup(ctx, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("first Startup after cancel = %v, want context.Canceled", err)
+	}
+	if h.exec.externalReady.Load() {
+		t.Fatal("externalReady must stay false when first Startup fails")
+	}
+	if rows := h.sysClientsRows(); len(rows) != 1 {
+		t.Fatalf("remaining sys_clients rows after failed first Startup = %d, want 1", len(rows))
+	}
+
+	err = h.exec.Startup(context.Background(), nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("second Startup after failed first call = %v, want original context.Canceled", err)
+	}
+	if h.exec.externalReady.Load() {
+		t.Fatal("externalReady must stay false after no-op second Startup")
+	}
+	if rows := h.sysClientsRows(); len(rows) != 1 {
+		t.Fatalf("remaining sys_clients rows after second Startup = %d, want 1", len(rows))
 	}
 }
 
@@ -2250,6 +2618,62 @@ func runSameTimeRepeatingAndOneShotFireOnce(t *testing.T, postStartupOneShot boo
 	assertScheduleRowNextRun(t, h, repeatID, secondRepeatAt)
 }
 
+func runRecoveredDueScheduleCanBeCancelledBeforeRetry(t *testing.T, panicFirst bool) {
+	t.Helper()
+	events := make(chan string, 2)
+	reducerName := "failed-due-cancel-before-retry"
+	firstEvent := "failed-due-first"
+	if panicFirst {
+		reducerName = "panicking-due-cancel-before-retry"
+		firstEvent = "panicking-due-first"
+	}
+
+	var attempts atomic.Int32
+	seed := startupSeed{
+		inboxCapacity: 1,
+		schedules: []sysScheduledSeed{
+			{id: 159, reducerName: reducerName, nextRunAtNs: time.Unix(50, 0).UnixNano()},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: reducerName,
+				Handler: types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) {
+					attempts.Add(1)
+					events <- firstEvent
+					if panicFirst {
+						panic("recovered due schedule panic before cancel")
+					}
+					return nil, errFireFailed
+				}),
+			},
+			cancelScheduleReducer("cancel-failed-due-before-retry", 159),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	got := readReducerOrder(t, events, "first recovered due failure before cancel")
+	if got != firstEvent {
+		t.Fatalf("first recovered due failure event=%q, want %q", got, firstEvent)
+	}
+	waitExecutorBarrier(t, h.exec, "after first recovered due failure before cancel")
+	assertScheduleIDs(t, h, 159)
+
+	submitWithContextAndExpectCommitted(t, execCtx, h.exec, "cancel-failed-due-before-retry", "cancel failed recovered due before retry")
+	waitExecutorBarrier(t, h.exec, "after cancelling failed recovered due before retry")
+	assertScheduleIDs(t, h)
+
+	startHarnessScheduler(t, h)
+	h.scheduler.Notify()
+	assertNoReceive(t, events, 50*time.Millisecond, "cancelled failed recovered due retry")
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("failed recovered due attempts after cancellation=%d, want 1", got)
+	}
+}
+
 func recordStringReducer(name string, ch chan<- string) RegisteredReducer {
 	return RegisteredReducer{
 		Name: name,
@@ -2357,12 +2781,6 @@ func expectAnyResponse(t *testing.T, ch <-chan ReducerResponse, label string) Re
 	}
 }
 
-func expectCommittedResponse(t *testing.T, ch <-chan ReducerResponse, label string) {
-	t.Helper()
-	resp := expectAnyResponse(t, ch, label)
-	expectResponseStatus(t, resp, label, StatusCommitted)
-}
-
 func submitWithContextAndExpectCommitted(t *testing.T, ctx context.Context, exec *Executor, reducerName, label string) {
 	t.Helper()
 	submitWithContextAndExpectStatus(t, ctx, exec, reducerName, label, StatusCommitted)
@@ -2408,6 +2826,23 @@ func assertScheduleRowNextRun(t *testing.T, h *startupHarness, scheduleID Schedu
 		}
 	}
 	t.Fatalf("schedule %d missing from sys_scheduled", scheduleID)
+}
+
+func assertScheduleIDs(t *testing.T, h *startupHarness, want ...ScheduleID) {
+	t.Helper()
+	rows := h.sysScheduledRows()
+	got := make(map[ScheduleID]int, len(rows))
+	for _, row := range rows {
+		got[ScheduleID(row[SysScheduledColScheduleID].AsUint64())]++
+	}
+	if len(got) != len(want) {
+		t.Fatalf("sys_scheduled IDs=%v, want %v", got, want)
+	}
+	for _, id := range want {
+		if got[id] != 1 {
+			t.Fatalf("sys_scheduled IDs=%v, want %v", got, want)
+		}
+	}
 }
 
 func waitExecutorBarrier(t *testing.T, exec *Executor, label string) {

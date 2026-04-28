@@ -2,8 +2,8 @@
 
 Parent plan: `docs/hosted-runtime-planning/V2/V2-E/00-current-execution-plan.md`
 
-Objective: apply permission enforcement to reads only after V2-D resolves the
-declared-read/raw-SQL relationship.
+Objective: apply permission enforcement to reads using the declared-read/raw-SQL
+relationship.
 
 Possible enforcement points:
 - named query declarations

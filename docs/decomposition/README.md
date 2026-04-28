@@ -11,7 +11,7 @@ They are intended to cover the comparable engine kernel:
 - subscription evaluation and fan-out
 - client protocol / websocket delivery
 
-They do **not** attempt full SpacetimeDB product parity.
+They do **not** attempt full SpacetimeDB product compatibility.
 
 Out of scope for this decomposition unless a spec says otherwise:
 

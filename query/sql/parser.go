@@ -67,7 +67,7 @@ const (
 	LitSender
 	// LitBigInt carries an arbitrary-precision integer literal — the branch
 	// used when a numeric literal parses as integer-valued (via big.Rat) but
-	// does not fit int64. Reference parity target is `u256 = 1e40` at
+	// does not fit int64. Reference target is `u256 = 1e40` at
 	// reference/SpacetimeDB/crates/expr/src/check.rs:330-332, where the
 	// reference BigDecimal path treats `1e40` as the exact integer 10^40.
 	LitBigInt
@@ -665,7 +665,7 @@ func (p *parser) parseStatement() (Statement, error) {
 			}
 			stmt.ProjectedAlias = projectionQualifier
 		}
-		// Parity rejection: reference subscription runtime at
+		// Reference-informed rejection: subscription runtime at
 		// reference/SpacetimeDB/crates/subscription/src/lib.rs:251 bails with
 		// "Invalid number of tables in subscription: {N}" for N >= 3. Shunter
 		// rejects the chain shape at the parser boundary so the rejection is

@@ -23,7 +23,7 @@ var ErrConnNotFound = errors.New("protocol: connection not found")
 // messages to connected clients (SPEC-005 §13). The fan-out worker
 // (SPEC-004 E6) and executor response paths call these methods.
 //
-// Phase 1.5 outcome-model split (`docs/parity-decisions.md#outcome-model`):
+// Outcome-model split (`docs/shunter-design-decisions.md#outcome-model`):
 // callers receive the heavy `TransactionUpdate` via SendTransactionUpdate;
 // non-caller subscribers receive `TransactionUpdateLight` via
 // SendTransactionUpdateLight. The removed `SendReducerResult` is
@@ -103,7 +103,7 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 	case conn.OutboundCh <- wrapped:
 		return nil
 	default:
-		// OI-004 sub-hazard pin: the overflow-driven teardown used to spawn
+		// contract: the overflow-driven teardown used to spawn
 		// `go conn.Disconnect(context.Background(), ...)`. With a
 		// Background ctx the detached goroutine was unbounded if
 		// inbox.DisconnectClientSubscriptions or inbox.OnDisconnect

@@ -582,10 +582,9 @@ Completed V1.5-E validation:
 - `rtk go test ./... -count=1`
 - `rtk go vet <touched packages>`
 
-Pinned Staticcheck is available as `rtk go tool staticcheck ./...`. Use it for
-static-analysis visibility when relevant, but do not treat a broad green run as
-required until OI-008 cleanup clears known findings and any dirty compile
-blockers.
+Pinned Staticcheck is available as `rtk go tool staticcheck ./...` and is
+expected to be green after OI-008 cleanup. Treat failures as real cleanup
+findings unless a task explicitly narrows verification.
 
 Do not claim a Go implementation slice is complete until the relevant Go
 commands pass.

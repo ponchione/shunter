@@ -70,9 +70,9 @@ In scope:
 
 Out of scope:
 
-- local reducer/query public APIs; V1-F owns those
-- export/introspection; V1-G owns that
-- hello-world/example replacement; V1-H owns that
+- local reducer/query public APIs
+- export/introspection
+- hello-world/example replacement
 - REST-first API
 - MCP-first API
 - broad admin/control-plane surface
@@ -132,7 +132,7 @@ Out of scope:
 5. V1-E should replace V1-D no-op fan-out safely.
    - Preferred design: V1-D should instantiate the fan-out worker with a private swappable sender wrapper, initially pointing to a no-op sender.
    - V1-E sets that wrapper's target to `protocol.NewFanOutSenderAdapter(protocol.NewClientSender(conns, inbox))` before the runtime admits WebSocket traffic.
-   - If implementation has not yet landed V1-D, adjust V1-D implementation to use the swappable wrapper from the start rather than starting the worker with a permanently fixed no-op sender.
+   - When this plan was active, a concurrent V1-D implementation would have needed the swappable wrapper from the start rather than starting the worker with a permanently fixed no-op sender.
    - Do not export the swappable sender or make it a public option.
 
 6. Auth mapping stays narrow but real.
@@ -760,7 +760,7 @@ rtk go test ./... -count=1
 
 Expected:
 - root and touched-package gates pass
-- broad tests pass, or unrelated dirty-state failures are reported without fixing unrelated parity/audit code inside V1-E
+- broad tests pass, or unrelated dirty-state failures are reported without fixing unrelated correctness/audit code inside V1-E
 
 ---
 
@@ -805,13 +805,8 @@ V1-E is complete when all of the following are true:
 7. Scope creep into local APIs is tempting once protocol reducer calls work.
    - Guardrail: V1-E remains network-only. V1-F owns local reducer/query calls.
 
-## Immediate next slice after V1-E
+## Historical sequencing note
 
-V1-F local runtime calls:
-
-- expose local reducer invocation as a legitimate secondary API for tests/tools/admin flows
-- expose minimal local read/query helpers
-- define local identity/caller behavior
-- align local call behavior with external protocol semantics where practical
-
-V1-F should not replace WebSocket as the primary external client model.
+The later hosted-runtime slices have since landed. Do not treat this completed
+V1-E plan as a live handoff; use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+current hosted-runtime status.

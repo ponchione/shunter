@@ -40,6 +40,7 @@ type fakeDurability struct {
 	txIDs    []types.TxID
 	payloads []*store.Changeset
 	block    chan struct{}     // if set, EnqueueCommitted waits on it
+	entered  chan struct{}     // optional test signal before blocking
 	waitCh   <-chan types.TxID // optional readiness channel returned by WaitUntilDurable
 	panicOn  bool              // panic when EnqueueCommitted is called
 	mu       sync.Mutex
@@ -47,6 +48,10 @@ type fakeDurability struct {
 
 func (f *fakeDurability) EnqueueCommitted(txID types.TxID, cs *store.Changeset) {
 	if f.block != nil {
+		if f.entered != nil {
+			close(f.entered)
+			f.entered = nil
+		}
 		<-f.block
 	}
 	if f.panicOn {
@@ -326,6 +331,8 @@ func TestPostCommitDurabilityBackpressureStalls(t *testing.T) {
 	h := newPipelineHarness(t)
 	release := make(chan struct{})
 	h.dur.block = release
+	enteredDurability := make(chan struct{})
+	h.dur.entered = enteredDurability
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go h.exec.Run(ctx)
@@ -343,8 +350,11 @@ func TestPostCommitDurabilityBackpressureStalls(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Give the executor plenty of time to reach durability.
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-enteredDurability:
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not reach durability")
+	}
 	select {
 	case r := <-ch:
 		t.Fatalf("response arrived before durability unblocked: %+v", r)
@@ -548,7 +558,7 @@ func TestPostCommitExternalReducerPropagatesCallerMetadata(t *testing.T) {
 	_ = resp
 }
 
-// TestPostCommitPropagatesCallerFlags pins the Phase 1.5 sub-slice:
+// TestPostCommitPropagatesCallerFlags pins the outcome-model contract:
 // an external reducer call carrying CallReducerFlags::NoSuccessNotify
 // (byte = 1) must surface that flag on CallerOutcome.Flags so the
 // fan-out worker can skip the caller's heavy echo on successful commits.
@@ -806,6 +816,8 @@ func TestPostCommitInFlightCommandGetsFatalResponse(t *testing.T) {
 	// second command reaches the inbox before fatal triggers.
 	release := make(chan struct{})
 	h.dur.block = release
+	enteredDurability := make(chan struct{})
+	h.dur.entered = enteredDurability
 	h.dur.panicOn = true
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -827,8 +839,11 @@ func TestPostCommitInFlightCommandGetsFatalResponse(t *testing.T) {
 	}
 
 	go h.exec.Run(ctx)
-	// Let the first command enter postCommit, then trigger the panic.
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-enteredDurability:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first command did not reach postCommit durability")
+	}
 	close(release)
 
 	select {

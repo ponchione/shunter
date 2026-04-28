@@ -24,8 +24,8 @@ Decision constraints:
 Do not implement:
 - ORDER BY, subqueries, arbitrary aggregates, or broad SQL expansion unless the
   selected model explicitly needs them
-- policy enforcement; V2-E owns that
-- aggregate multi-module read routing; V2-F owns that
+- policy enforcement
+- aggregate multi-module read routing
 
 Implemented model:
 - declarations remain named metadata surfaces unless they include SQL metadata.

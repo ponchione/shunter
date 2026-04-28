@@ -1,11 +1,11 @@
 package commitlog
 
-// Phase 4 Slice 2γ — wire-shape canonical-contract pin suite.
+// wire-shape — wire-shape canonical-contract pin suite.
 //
 // These 33 pins latch the current Shunter on-disk wire format as a
 // canonical contract. Any accidental drift in byte layout, constant
 // value, CRC algorithm, or framing invariant is intended to fail one
-// of these pins loudly. See docs/parity-decisions.md#commitlog-record-shape
+// of these pins loudly. See docs/shunter-design-decisions.md#commitlog-record-shape
 // for the divergence audit against reference SpacetimeDB.
 
 import (
@@ -100,7 +100,7 @@ func TestWireShapeSegmentHeaderRejectsVersionMismatch(t *testing.T) {
 
 // Pin 7.
 //
-// Note: the realized Slice 2β error taxonomy carries `ErrBadFlags` as
+// Note: the realized record-shape error taxonomy carries `ErrBadFlags` as
 // a single-category leaf mapped to `ErrTraversal`, rather than the
 // call-site split originally proposed in the 2β decision doc. Pin 7
 // reflects the realized shape; a future slice could reintroduce the

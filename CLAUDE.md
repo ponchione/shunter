@@ -26,7 +26,6 @@ Read `RTK.md` first for command rules.
   - targeted `rtk go test` for touched packages
   - `rtk go vet` when interfaces or behavior changed
   - pinned Staticcheck with `rtk go tool staticcheck ./...` when static
-    analysis is relevant; until OI-008 cleanup makes it green, treat failures
-    as report-only unless the slice explicitly fixes them
+    analysis is relevant; after OI-008 cleanup it is expected to pass
   - `rtk go fmt` on touched code
 - Do not report a Go change as finished until those checks pass.

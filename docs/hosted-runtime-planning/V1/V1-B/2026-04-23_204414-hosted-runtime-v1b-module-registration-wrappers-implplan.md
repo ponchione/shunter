@@ -310,7 +310,7 @@ rtk go test . -run 'TestBuildExplicitVersionedModuleSucceeds|TestBuildSchemaVers
 ```
 Expected:
 - pass if V1-A `Build` is already in place and uses `m.builder.Build(...)`
-- otherwise fail only on remaining unimplemented wrapper tests
+- otherwise fail only on wrapper tests scheduled later in this plan
 
 ---
 
@@ -576,7 +576,7 @@ Expected:
 
 ## Task 10: Run focused validation, then broader validation if the tree allows
 
-Objective: verify the root package slice is complete without drifting into unrelated parity cleanup.
+Objective: verify the root package slice is complete without drifting into unrelated correctness cleanup.
 
 Files:
 - Modify only files from prior tasks
@@ -645,9 +645,8 @@ V1-B is complete when all of the following are true:
 4. Scope creep into reflection helpers or runtime lifecycle.
    - Guardrail: V1-B stops at explicit registration wrappers and build success through existing `Build`.
 
-## Immediate next slice after V1-B
+## Historical sequencing note
 
-If V1-B lands cleanly, the next planning/implementation slice should be V1-C runtime build pipeline:
-- make `Build(module, config)` own subsystem assembly instead of only returning a schema-engine-backed shell
-- derive the runtime build path from kernel package contracts and tests, not from example code
-- still keep lifecycle/network start behavior for the later V1-D/V1-E slices
+The later hosted-runtime slices have since landed. Do not treat this completed
+V1-B plan as a live handoff; use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+current hosted-runtime status.

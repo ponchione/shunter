@@ -538,7 +538,7 @@ func TestCoerceStringLiteralToTimestamp(t *testing.T) {
 	}
 }
 
-// TestCoerceMalformedTimestampRejected pins reference `InvalidLiteral` parity
+// TestCoerceMalformedTimestampRejected pins the reference `InvalidLiteral` shape
 // for non-RFC3339 strings against a `KindTimestamp` column. Reference path:
 // `parse(value, Timestamp)` at expr/src/lib.rs:359 hits the catch-all
 // `bail!("Literal values for type {} are not supported")`, folded by
@@ -628,7 +628,7 @@ func TestCoerceSenderRejectsTimestampColumn(t *testing.T) {
 	}
 }
 
-// TestCoerceSenderRejectsArrayStringColumn pins the reference parity shape
+// TestCoerceSenderRejectsArrayStringColumn pins the reference-informed shape
 // `SELECT * FROM t WHERE arr = :sender` at check.rs:487-489. The :sender
 // parameter materializes as a 32-byte identity; an array-of-string column
 // cannot accept it, and coerce rejects with ErrUnsupportedSQL.
@@ -1075,7 +1075,7 @@ func TestCoerceLitStringFailingNumericEmitsInvalidLiteral(t *testing.T) {
 }
 
 // TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral pins the previously
-// missing parity on direct LitBigInt input against 32/64-bit integer
+// missing reference-informed behavior on direct LitBigInt input against 32/64-bit integer
 // kinds. The parser only produces LitBigInt when a numeric token
 // overflows int64 (e.g. `1e40` → LitBigInt(10^40)), so the value always
 // overflows U32/I32/U64/I64. Reference parse_int → BigDecimal::to_uN/iN
@@ -1118,7 +1118,7 @@ func TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral(t *testing.T) {
 }
 
 // parseFilterLiteral drives Parse() on a one-filter SELECT and returns the
-// parsed Literal. Used by the parity-pins below to exercise the full source-
+// parsed Literal. Used by the contract pins below to exercise the full source-
 // text-preservation seam (parser → Literal.Text → coerce) rather than
 // constructing a Literal directly.
 func parseFilterLiteral(t *testing.T, sql string) Literal {

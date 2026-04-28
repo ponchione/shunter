@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestParityIdentityTokenWireShape pins the byte-level wire shape of
+// TestShunterIdentityTokenWireShape pins the byte-level wire shape of
 // IdentityToken against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:445`
 // (`pub struct IdentityToken`). Reference field order:
@@ -20,7 +20,7 @@ import (
 // the decoder to prove the rename + field-order change is symmetric.
 // Prior Shunter wire (pre-rename) used `identity, connection_id, token`
 // under the type name `InitialConnection`.
-func TestParityIdentityTokenWireShape(t *testing.T) {
+func TestShunterIdentityTokenWireShape(t *testing.T) {
 	var identity [32]byte
 	for i := range identity {
 		identity[i] = byte(i + 1)
@@ -76,12 +76,12 @@ func TestParityIdentityTokenWireShape(t *testing.T) {
 	}
 }
 
-// TestParityIdentityTokenWireShapeEmptyToken pins the byte shape when
+// TestShunterIdentityTokenWireShapeEmptyToken pins the byte shape when
 // the token string is empty (the anonymous-connection case where the
 // server has already handed the client its credentials out of band).
 // Reference encoding of `Box<str>` with zero length is a LE u32 zero
 // followed by no payload, so connection_id immediately follows.
-func TestParityIdentityTokenWireShapeEmptyToken(t *testing.T) {
+func TestShunterIdentityTokenWireShapeEmptyToken(t *testing.T) {
 	var identity [32]byte
 	for i := range identity {
 		identity[i] = byte(0x10 + i)

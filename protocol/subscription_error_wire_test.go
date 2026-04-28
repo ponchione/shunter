@@ -10,7 +10,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestParitySubscriptionErrorWireShape pins the byte-level wire shape
+// TestShunterSubscriptionErrorWireShape pins the byte-level wire shape
 // of SubscriptionError against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`
 // (`pub struct SubscriptionError`). Reference field order:
@@ -28,7 +28,7 @@ import (
 // compares against the protocol encoder output; it also round-trips
 // the frame through the decoder to prove the field-order change is
 // symmetric.
-func TestParitySubscriptionErrorWireShape(t *testing.T) {
+func TestShunterSubscriptionErrorWireShape(t *testing.T) {
 	requestID := uint32(0x11223344)
 	queryID := uint32(0x55667788)
 	tableID := schema.TableID(0x99AABBCC)
@@ -111,11 +111,11 @@ func TestParitySubscriptionErrorWireShape(t *testing.T) {
 	}
 }
 
-// TestParitySubscriptionErrorWireShapeAllNoneOptions pins the byte shape
+// TestShunterSubscriptionErrorWireShapeAllNoneOptions pins the byte shape
 // when every optional field is absent. The reference encoding of
 // Option<T>::None is a single 0 tag byte. Duration remains present as
 // u64 (non-optional per reference).
-func TestParitySubscriptionErrorWireShapeAllNoneOptions(t *testing.T) {
+func TestShunterSubscriptionErrorWireShapeAllNoneOptions(t *testing.T) {
 	errMsg := "generic failure"
 	in := SubscriptionError{
 		TotalHostExecutionDurationMicros: 0,
@@ -149,7 +149,7 @@ func TestParitySubscriptionErrorWireShapeAllNoneOptions(t *testing.T) {
 	}
 }
 
-// TestParitySubscriptionErrorTransactionOriginWire pins the wire shape
+// TestShunterSubscriptionErrorTransactionOriginWire pins the wire shape
 // produced by the fan-out adapter for a post-commit evaluation error.
 // Reference emit path at
 // `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1998-2010`
@@ -169,7 +169,7 @@ func TestParitySubscriptionErrorWireShapeAllNoneOptions(t *testing.T) {
 // the wire. A zero-duration adapter call would still encode cleanly (0
 // is a legal reference-side value), but the evaluator no longer hands
 // zero to the adapter for a live eval-origin error.
-func TestParitySubscriptionErrorTransactionOriginWire(t *testing.T) {
+func TestShunterSubscriptionErrorTransactionOriginWire(t *testing.T) {
 	capture := &captureSender{}
 	adapter := NewFanOutSenderAdapter(capture)
 

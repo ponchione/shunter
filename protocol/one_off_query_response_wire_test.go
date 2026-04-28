@@ -12,7 +12,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestParityOneOffQueryResponseWireShapeSuccess pins the byte-level wire
+// TestShunterOneOffQueryResponseWireShapeSuccess pins the byte-level wire
 // shape of OneOffQueryResponse against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:654`
 // (`pub struct OneOffQueryResponse<F>`). Reference field order:
@@ -29,7 +29,7 @@ import (
 //
 // Success emission matches module_host.rs:2290 (`error: None, results:
 // vec![OneOffTable { table_name, rows }]`).
-func TestParityOneOffQueryResponseWireShapeSuccess(t *testing.T) {
+func TestShunterOneOffQueryResponseWireShapeSuccess(t *testing.T) {
 	messageID := []byte{0xAA, 0xBB, 0xCC}
 	tableName := "users"
 	rows := EncodeRowList([][]byte{{0x01, 0x02}, {0x03}})
@@ -111,9 +111,9 @@ func TestParityOneOffQueryResponseWireShapeSuccess(t *testing.T) {
 	}
 }
 
-// TestParityOneOffQueryResponseWireShapeError pins the failure emission
+// TestShunterOneOffQueryResponseWireShapeError pins the failure emission
 // shape: `error: Some(msg), tables: []` — matching module_host.rs:2300.
-func TestParityOneOffQueryResponseWireShapeError(t *testing.T) {
+func TestShunterOneOffQueryResponseWireShapeError(t *testing.T) {
 	messageID := []byte{0x01, 0x02}
 	errMsg := "bad query"
 	const duration int64 = 0
@@ -170,12 +170,12 @@ func TestParityOneOffQueryResponseWireShapeError(t *testing.T) {
 	}
 }
 
-// TestParityOneOffQueryResponseDurationNonZeroOnSuccess pins the
+// TestShunterOneOffQueryResponseDurationNonZeroOnSuccess pins the
 // receipt-timestamp seam at handleOneOffQuery entry: success emissions
 // now carry a measured `TotalHostExecutionDuration` in microseconds.
 // Before the seam the field always emitted 0 regardless of how long the
 // scan took.
-func TestParityOneOffQueryResponseDurationNonZeroOnSuccess(t *testing.T) {
+func TestShunterOneOffQueryResponseDurationNonZeroOnSuccess(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("users", 1, schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32})
 	snap := &mockSnapshot{
@@ -200,9 +200,9 @@ func TestParityOneOffQueryResponseDurationNonZeroOnSuccess(t *testing.T) {
 	}
 }
 
-// TestParityOneOffQueryResponseDurationNonZeroOnCompileFail pins the
+// TestShunterOneOffQueryResponseDurationNonZeroOnCompileFail pins the
 // seam on the compile-short-circuit error path.
-func TestParityOneOffQueryResponseDurationNonZeroOnCompileFail(t *testing.T) {
+func TestShunterOneOffQueryResponseDurationNonZeroOnCompileFail(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("users", 1) // schema has no match for garbage query
 	snap := &mockSnapshot{}

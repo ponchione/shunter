@@ -14,7 +14,7 @@ var lifecycleReducerNames = map[string]bool{
 // heavy `TransactionUpdate` before returning it to the caller's
 // outbound channel. Pre-acceptance rejections (lifecycle-reducer-name
 // collision, executor-unavailable) are synthesized as heavy
-// `TransactionUpdate` envelopes with `StatusFailed` — see the Phase 1.5
+// `TransactionUpdate` envelopes with `StatusFailed` — see the outcome-model
 // outcome-model decision doc.
 func handleCallReducer(
 	ctx context.Context,
@@ -49,7 +49,7 @@ func handleCallReducer(
 // sendSyntheticFailure delivers a heavy `TransactionUpdate` with
 // `StatusFailed` for pre-acceptance rejections that never reach the
 // executor commit seam. TxID equivalent metadata is zero — no
-// transaction was opened — and numeric fields follow the Phase 1.5 stub
+// transaction was opened — and numeric fields follow the outcome-model stub
 // policy.
 func sendSyntheticFailure(conn *Conn, msg *CallReducerMsg, errText string) {
 	tu := TransactionUpdate{

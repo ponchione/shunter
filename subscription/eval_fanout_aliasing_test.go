@@ -6,7 +6,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the OI-006 fanout-aliasing sub-hazard: the
+// Tests in this file pin the fanout-aliasing: the
 // per-query update slices produced by evaluate() are distributed to N
 // subscribers in subscription/eval.go::evaluate. Before this slice each
 // subscriber's SubscriptionUpdate carried the SAME backing slice for

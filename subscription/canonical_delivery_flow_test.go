@@ -3,37 +3,14 @@ package subscription
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/ponchione/shunter/types"
 )
 
-func waitForPhase0Delivery(t *testing.T, mock *mockFanOutSender, wantHeavy, wantLight int) {
-	t.Helper()
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		mock.mu.Lock()
-		gotH := len(mock.heavyCalls)
-		gotL := len(mock.lightCalls)
-		mock.mu.Unlock()
-		if gotH == wantHeavy && gotL == wantLight {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	mock.mu.Lock()
-	defer mock.mu.Unlock()
-	t.Fatalf("timed out waiting for delivery counts: got heavy=%d light=%d, want heavy=%d light=%d",
-		len(mock.heavyCalls), len(mock.lightCalls), wantHeavy, wantLight)
-}
-
-// TestPhase0ParityCanonicalReducerDeliveryFlow is the `P0-DELIVERY-001`
-// scenario lock — connect → subscribe → reducer → caller heavy →
-// non-caller light, with confirmed-read gating on TxDurable. Phase 1.5
-// flipped the caller-side envelope from `ReducerCallResult` to the
-// reference heavy `TransactionUpdate` (see
-// `docs/parity-decisions.md#outcome-model`).
-func TestPhase0ParityCanonicalReducerDeliveryFlow(t *testing.T) {
+// TestCanonicalReducerDeliveryFlow pins the canonical reducer-delivery flow:
+// connect, subscribe, commit a reducer transaction, deliver the caller's heavy
+// outcome, and deliver non-caller light updates after confirmed-read durability.
+func TestCanonicalReducerDeliveryFlow(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
@@ -59,17 +36,10 @@ func TestPhase0ParityCanonicalReducerDeliveryFlow(t *testing.T) {
 		CallerOutcome: committedOutcome(77),
 	}
 
-	time.Sleep(30 * time.Millisecond)
-	mock.mu.Lock()
-	if len(mock.heavyCalls) != 0 || len(mock.lightCalls) != 0 {
-		mock.mu.Unlock()
-		t.Fatalf("delivery should wait for confirmed-read durability; got heavy=%d light=%d before durable",
-			len(mock.heavyCalls), len(mock.lightCalls))
-	}
-	mock.mu.Unlock()
+	assertMockCounts(t, mock, "before confirmed-read durability", 0, 0, 0)
 
 	durableCh <- types.TxID(44)
-	waitForPhase0Delivery(t, mock, 1, 1)
+	waitForMockCounts(t, mock, "confirmed-read durability", 1, 1, 0)
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()

@@ -1,8 +1,8 @@
 # Next Session Handoff
 
-Use this file to start the next Shunter correctness / TECH-DEBT agent with no prior chat context.
-
-Hosted-runtime planning uses `HOSTED_RUNTIME_PLANNING_HANDOFF.md` instead.
+Use this file to start the next Shunter correctness / TECH-DEBT agent with no
+prior chat context. Hosted-runtime planning uses
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` instead.
 
 ## Startup
 
@@ -10,69 +10,63 @@ Required reading before editing:
 
 1. `RTK.md`
 2. This file
+3. `TECH-DEBT.md` only for the active issue section you are taking
+4. `docs/RUNTIME-HARDENING-GAUNTLET.md` only when running the runtime hardening
+   campaign
 
-Then inspect live code with Go tools:
+Then inspect live code with Go tools for the package you will touch:
 
 ```bash
-rtk go list -json ./query/sql ./protocol ./schema ./subscription
-rtk go doc ./query/sql
-rtk go doc ./query/sql.Statement
-rtk go doc ./schema.TableSchema.Column
-rtk go doc ./schema.SchemaLookup
+rtk go list -json <pkg>
+rtk go doc <pkg>
+rtk go doc <pkg>.<Symbol>
 ```
 
-Open `TECH-DEBT.md` only if you need the broader backlog. Open `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md` or `docs/decomposition/005-protocol/SPEC-005-protocol.md` only for a specific contract question.
-
-Use `rtk` for every shell command, including git. Do not push unless explicitly asked.
+Use `rtk` for every shell command, including git. Do not push unless explicitly
+asked.
 
 ## Current Objective
 
-Project framing was clarified on 2026-04-26:
+OI-008 cleanup is closed. Staticcheck is now expected to be green:
 
-- SpacetimeDB is an architectural reference, not a wire/client/business compatibility target.
-- Shunter is for self-hosted / personally operated apps with Shunter-owned Go APIs and clients.
-- Energy accounting is not a Shunter product goal; the protocol no longer carries energy fields or an `OutOfEnergy` outcome arm.
-- OI-001 Shunter-native protocol cleanup is narrowed to conditional follow-ups: strict decoder body consumption is pinned, subscribe/unsubscribe response shaping is consolidated, and only `v1.bsatn.shunter` is accepted.
-- Use reference behavior as evidence for runtime semantics, but prefer Shunter's own simpler contract when compatibility-only details add cost without value.
+```bash
+rtk go tool staticcheck ./...
+```
 
-No fixed implementation slice is queued. OI-002 has no current open runtime-model work after the latest evidence-driven scout and fixture dedup pass.
+No fixed implementation slice is queued. The best next live TECH-DEBT target is
+OI-007 replay-edge and scheduler restart behavior, unless the user explicitly
+chooses a different open issue or asks for the runtime hardening gauntlet.
 
-Reopen OI-002 only if a future user or failing test provides a fresh Shunter-visible regression:
+For OI-007, start from the issue section in `TECH-DEBT.md`, then inspect only
+the relevant restart/replay code and tests:
 
-- wrong accepted/rejected query
-- wrong one-off rows or subscription rows
-- misleading user-visible validation error
-- one-off/subscription drift on shared syntax or type semantics
+- `commitlog/replay.go`
+- `commitlog/recovery.go`
+- `commitlog/replay_test.go`
+- `commitlog/recovery_test.go`
+- scheduler replay/firing tests under `executor/`
 
-Completed OI-002 history belongs in tests and git history, not this handoff. Do not reopen exact identifier lookup, join-WHERE policy, structured-query protocol cleanup, or one-off cross-join explicit mixed projection without a fresh failing example.
+## Guardrails
 
-## Confirmed Work Queue
-
-For any future OI-002 regression, add the failing Shunter-visible test first, then implement. Batch only when the locus overlaps; commit per slice if the working tree is clean enough to do so without sweeping unrelated user changes into the commit. If proof is needed, use `rtk git log`, `rtk git show`, and the relevant tests instead of expanding this handoff with closure archaeology.
-
-## Out Of Scope
-
-- SQL surface widening beyond what the parser already admits
-- Fanout/QueryID correlation redesign
-- Reopening closed parity rows without fresh failing evidence
-- Non-OI-002 tech-debt
+- Do not reopen OI-002 or OI-003 without a fresh Shunter-visible failing
+  example.
+- OI-001 remaining work is conditional protocol follow-up only; do not widen it
+  without a concrete client/runtime need.
+- OI-005 is a lower-level raw read-view/snapshot lifetime discipline marker, not
+  a hosted-runtime blocker.
+- Keep SpacetimeDB reference usage scoped to design evidence. Shunter owns the
+  final Go API, protocol, and runtime behavior.
 
 ## Validation
 
+Use targeted tests first, then broaden when the touched surface warrants it:
+
 ```bash
-rtk go test <touched packages> -count=1 -v
 rtk go fmt <touched packages>
+rtk go test <touched packages> -count=1
 rtk go vet <touched packages>
 rtk go test ./... -count=1
+rtk go tool staticcheck ./...
 ```
 
-Pinned Staticcheck is available as `rtk go tool staticcheck ./...`. Use it for
-static-analysis visibility, but do not treat a broad green run as required
-until OI-008 cleanup clears the known findings and any dirty compile blockers.
-
-## Doc Follow-Through
-
-After any future implementation is green:
-
-- update `TECH-DEBT.md::OI-002` only if new evidence reopens or closes runtime-model work
-- rewrite this handoff to the next live target, keeping startup reading minimal and only future-relevant state
+Pinned Staticcheck is no longer report-only after OI-008.

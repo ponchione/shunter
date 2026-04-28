@@ -39,4 +39,6 @@ V1.5-A must stay narrow:
   contract JSON
 - do not widen the SQL/query engine as part of this slice
 
-Immediate next V1.5 slice after V1.5-A: V1.5-B canonical contract export.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V1.5-A plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

@@ -7,7 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment pins
+// TestReplaySkipsExhaustedSegmentsWithoutOpeningThem pins
 // Shunter's intentional divergence from reference replay-horizon skip
 // granularity.
 //
@@ -24,9 +24,9 @@ import (
 // contribute above the horizon. Same externally visible outcome; the
 // mechanism difference is pinned here as intentional.
 //
-// This test is the direct parity anchor for the segment-level
+// This test is the direct Shunter contract anchor for the segment-level
 // short-circuit divergence.
-func TestParityP0Recovery001SegmentSkipDoesNotOpenExhaustedSegment(t *testing.T) {
+func TestReplaySkipsExhaustedSegmentsWithoutOpeningThem(t *testing.T) {
 	root := t.TempDir()
 	committed, reg := buildReplayCommittedState(t)
 

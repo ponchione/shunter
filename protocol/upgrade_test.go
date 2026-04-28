@@ -75,26 +75,46 @@ func anonymousServer(t *testing.T) (*Server, *upgradeRecorder) {
 }
 
 type upgradeRecorder struct {
-	mu   sync.Mutex
-	seen []UpgradeContext
+	mu      sync.Mutex
+	changed chan struct{}
+	seen    []UpgradeContext
 }
 
 func (r *upgradeRecorder) record(ctx context.Context, uc *UpgradeContext) {
 	r.mu.Lock()
 	r.seen = append(r.seen, *uc)
+	if r.changed != nil {
+		close(r.changed)
+		r.changed = make(chan struct{})
+	}
 	r.mu.Unlock()
 	// Tests don't exercise the upgraded-conn read/write path here —
 	// close cleanly to let the server-side goroutine exit.
 	_ = uc.Conn.Close(websocket.StatusNormalClosure, "")
 }
 
-func (r *upgradeRecorder) last() (UpgradeContext, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.seen) == 0 {
-		return UpgradeContext{}, false
+func (r *upgradeRecorder) waitLast(t *testing.T) UpgradeContext {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		r.mu.Lock()
+		if len(r.seen) != 0 {
+			uc := r.seen[len(r.seen)-1]
+			r.mu.Unlock()
+			return uc
+		}
+		if r.changed == nil {
+			r.changed = make(chan struct{})
+		}
+		ch := r.changed
+		r.mu.Unlock()
+
+		select {
+		case <-ch:
+		case <-deadline:
+			t.Fatal("Upgraded callback not invoked")
+		}
 	}
-	return r.seen[len(r.seen)-1], true
 }
 
 // dialWS opens a ws:// upgrade against httptestServer's /subscribe
@@ -146,12 +166,7 @@ func TestUpgradeValidTokenHeaderSucceeds(t *testing.T) {
 		t.Errorf("Sec-WebSocket-Protocol echoed = %q, want v1.bsatn.shunter", got)
 	}
 
-	// Give the server handler time to invoke Upgraded and close.
-	time.Sleep(50 * time.Millisecond)
-	uc, ok := rec.last()
-	if !ok {
-		t.Fatal("Upgraded callback not invoked")
-	}
+	uc := rec.waitLast(t)
 	if uc.Identity != auth.DeriveIdentity("test-issuer", "alice") {
 		t.Errorf("Identity mismatch: got %x", uc.Identity)
 	}
@@ -180,11 +195,7 @@ func TestUpgradeValidTokenCarriesPermissions(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	time.Sleep(50 * time.Millisecond)
-	uc, ok := rec.last()
-	if !ok {
-		t.Fatal("Upgraded callback not invoked")
-	}
+	uc := rec.waitLast(t)
 	if uc.Claims == nil {
 		t.Fatal("Claims = nil, want validated claims")
 	}
@@ -262,11 +273,7 @@ func TestUpgradeAnonymousNoTokenMints(t *testing.T) {
 		t.Errorf("status = %d, want 101", resp.StatusCode)
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	uc, ok := rec.last()
-	if !ok {
-		t.Fatal("Upgraded callback not invoked for anonymous mint")
-	}
+	uc := rec.waitLast(t)
 	if uc.Token == "" {
 		t.Error("anonymous upgrade should produce a minted token in UpgradeContext.Token")
 	}
@@ -308,11 +315,7 @@ func TestUpgradeGeneratesConnectionIDWhenAbsent(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	time.Sleep(50 * time.Millisecond)
-	uc, ok := rec.last()
-	if !ok {
-		t.Fatal("no upgrade record")
-	}
+	uc := rec.waitLast(t)
 	if uc.ConnectionID.IsZero() {
 		t.Error("server should have generated a non-zero connection_id")
 	}
@@ -333,11 +336,7 @@ func TestUpgradeClientSuppliedConnectionIDUsed(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	time.Sleep(50 * time.Millisecond)
-	uc, ok := rec.last()
-	if !ok {
-		t.Fatal("no upgrade record")
-	}
+	uc := rec.waitLast(t)
 	if uc.ConnectionID.Hex() != clientID {
 		t.Errorf("ConnectionID.Hex = %q, want %q", uc.ConnectionID.Hex(), clientID)
 	}
@@ -373,8 +372,7 @@ func TestUpgradeCompressionGzip(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	time.Sleep(50 * time.Millisecond)
-	uc, _ := rec.last()
+	uc := rec.waitLast(t)
 	if uc.Compression != CompressionGzip {
 		t.Errorf("Compression = %d, want CompressionGzip", uc.Compression)
 	}
@@ -394,8 +392,7 @@ func TestUpgradeCompressionNone(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	time.Sleep(50 * time.Millisecond)
-	uc, _ := rec.last()
+	uc := rec.waitLast(t)
 	if uc.Compression != CompressionNone {
 		t.Errorf("Compression = %d, want CompressionNone", uc.Compression)
 	}

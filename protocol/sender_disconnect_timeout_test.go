@@ -62,7 +62,7 @@ func (b *blockingInbox) CallReducer(context.Context, CallReducerRequest) error {
 }
 
 // TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang is the primary
-// OI-004 sender-disconnect-context pin. Fails if
+// sender-disconnect-context pin. Fails if
 // connManagerSender.enqueueOnConn reverts to spawning Disconnect with
 // a Background context (or any ctx that never cancels under
 // DisconnectTimeout), which would leak the detached goroutine for the

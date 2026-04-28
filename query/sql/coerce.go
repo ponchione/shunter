@@ -208,7 +208,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		// LitBool routes through `mismatch` → `UnexpectedTypeError` matching
 		// the lib.rs:94 Bool arm. The Shunter parser still drives the happy
 		// path (RFC3339-shaped LitString → Timestamp micros); only the reject
-		// branch is parity-routed.
+		// branch is reference-informed.
 		if lit.Kind == LitString {
 			if micros, ok := parseTimestampLiteral(lit.Str); ok {
 				return types.NewTimestamp(micros), nil
@@ -268,7 +268,7 @@ func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64
 }
 
 func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64) types.Value) (types.Value, error) {
-	// LitBigInt overflow on 32/64-bit unsigned columns: same parity shape
+	// LitBigInt overflow on 32/64-bit unsigned columns: same reference-informed shape
 	// as `coerceSigned`. Negative LitBigInt also overflows the unsigned
 	// range; the same emit shape covers both reject directions. Source-text
 	// seam preserved through `renderLiteralSourceText` so collapsed forms
@@ -334,7 +334,7 @@ func mismatch(lit Literal, kind types.ValueKind) error {
 	// expr/src/lib.rs:94 for `(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty))`).
 	// Other mismatch categories keep the current coerce-level text; their
 	// reference counterparts (`InvalidLiteral` for Str/Hex) are
-	// separate parity slices.
+	// separate contract slices.
 	if lit.Kind == LitBool && kind != types.KindBool {
 		return UnexpectedTypeError{Expected: "Bool", Inferred: algebraicName(kind)}
 	}
@@ -464,8 +464,8 @@ func (e UnexpectedTypeError) Unwrap() error { return ErrUnsupportedSQL }
 // classify by sentinel still match. `Literal` carries the reconstructed
 // decimal text of the integer value; scientific-notation literals collapse
 // to LitInt at the Shunter parser and so render via `strconv.FormatInt`
-// rather than the original source token — parity for that surface requires
-// preserving the source text on Literal and is out of scope here.
+// rather than the original source token. Surfaces that need exact source text
+// preserve it on Literal before calling the coerce boundary.
 type InvalidLiteralError struct {
 	Literal string
 	Type    string
@@ -863,7 +863,7 @@ func coerceBigIntToInt256(lit Literal, kind types.ValueKind) (types.Value, error
 }
 
 // coerceBigIntToUint256 binds a big.Int literal to a 256-bit unsigned column.
-// Rejects negative values and values >= 2^256. The reference parity target
+// Rejects negative values and values >= 2^256. The reference-informed target
 // `u256 = 1e40` (check.rs:330-332) goes through this path — 10^40 fits
 // comfortably in u256 (max ~1.16e77).
 func coerceBigIntToUint256(lit Literal, kind types.ValueKind) (types.Value, error) {

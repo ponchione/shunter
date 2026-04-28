@@ -149,6 +149,9 @@ func TestReducerContextHandlesClosedAfterReducerReturn(t *testing.T) {
 	if _, err := leakedScheduler.Schedule("leak", nil, time.Now()); !errors.Is(err, store.ErrTransactionClosed) {
 		t.Fatalf("leaked scheduler Schedule err=%v, want ErrTransactionClosed", err)
 	}
+	if _, err := leakedScheduler.ScheduleRepeat("leak", nil, 0); !errors.Is(err, store.ErrTransactionClosed) {
+		t.Fatalf("leaked scheduler ScheduleRepeat err=%v, want ErrTransactionClosed", err)
+	}
 	if leakedTx == nil {
 		t.Fatal("reducer did not expose underlying transaction during call")
 	}
@@ -258,6 +261,17 @@ func TestExecutorShutdown(t *testing.T) {
 	}
 }
 
+func waitForExecutorSignals(t *testing.T, ch <-chan struct{}, want int, label string) {
+	t.Helper()
+	for i := 0; i < want; i++ {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s: observed %d/%d signals", label, i, want)
+		}
+	}
+}
+
 func TestExecutorShutdownConcurrentSubmittersDoNotPanic(t *testing.T) {
 	exec, _ := setupExecutor()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -266,11 +280,13 @@ func TestExecutorShutdownConcurrentSubmittersDoNotPanic(t *testing.T) {
 
 	panicCh := make(chan any, 1)
 	stop := make(chan struct{})
+	started := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			signaled := false
 			defer func() {
 				if r := recover(); r != nil {
 					select {
@@ -284,6 +300,10 @@ func TestExecutorShutdownConcurrentSubmittersDoNotPanic(t *testing.T) {
 				case <-stop:
 					return
 				default:
+				}
+				if !signaled {
+					started <- struct{}{}
+					signaled = true
 				}
 				respCh := make(chan ReducerResponse, 1)
 				err := exec.Submit(CallReducerCmd{
@@ -304,7 +324,7 @@ func TestExecutorShutdownConcurrentSubmittersDoNotPanic(t *testing.T) {
 		}()
 	}
 
-	time.Sleep(20 * time.Millisecond)
+	waitForExecutorSignals(t, started, 8, "submitters started")
 	shutdownDone := make(chan struct{})
 	go func() {
 		exec.Shutdown()
@@ -578,11 +598,13 @@ func TestReducerRegistryConcurrentRegisterLookupAndFreeze(t *testing.T) {
 
 	start := make(chan struct{})
 	var wg sync.WaitGroup
+	ready := make(chan struct{}, 4)
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			<-start
+			ready <- struct{}{}
 			name := fmt.Sprintf("r%d", id)
 			for j := 0; j < 200; j++ {
 				_ = rr.Register(RegisteredReducer{Name: name, Handler: h})
@@ -595,7 +617,7 @@ func TestReducerRegistryConcurrentRegisterLookupAndFreeze(t *testing.T) {
 	}
 
 	close(start)
-	time.Sleep(10 * time.Millisecond)
+	waitForExecutorSignals(t, ready, 4, "registry workers ready")
 	rr.Freeze()
 	wg.Wait()
 

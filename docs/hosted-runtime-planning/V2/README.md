@@ -81,6 +81,5 @@ Each implementation slice should:
 - expand to `rtk go test ./... -count=1` when root/runtime behavior or shared
   contracts change
 
-Pinned Staticcheck remains report-oriented until the repo-wide cleanup makes it
-green:
+Pinned Staticcheck is expected to be green after OI-008 cleanup:
 - `rtk go tool staticcheck ./...`

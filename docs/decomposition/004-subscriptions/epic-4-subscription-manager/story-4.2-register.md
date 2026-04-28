@@ -11,7 +11,7 @@
 
 Full registration flow from validated predicate to initial rows returned. Runs inside executor command — no gap between initial query and delta activation.
 
-> **Updated 2026-04-19 (Phase 2 Slice 2).** The entry point is
+> **Updated 2026-04-19.** The entry point is
 > `RegisterSet(req SubscriptionSetRegisterRequest, view) (SubscriptionSetRegisterResult, error)`.
 > One `QueryID` names a set with `Predicates []Predicate` (length 1 =
 > Single path). The steps below are executed for each predicate in

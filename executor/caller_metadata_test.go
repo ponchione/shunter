@@ -9,11 +9,11 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Phase 1.5 caller-metadata wiring sub-slice
+// caller-metadata wiring sub-slice
 // (TECH-DEBT.md reducer-outcome follow-ups). Pins that
 // an external CallReducer populates the caller-bound metadata on
 // subscription.CallerOutcome so the heavy TransactionUpdate envelope
-// carries real values instead of the Phase 1.5 zero stubs. Reference
+// carries real values instead of the earlier zero stubs. Reference
 // fields being matched:
 //
 //	TransactionUpdate.CallerIdentity            (Identity)

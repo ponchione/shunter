@@ -180,7 +180,7 @@ func optionalUint32(v uint32) *uint32 {
 // Subscribe / unsubscribe request-origin SubscriptionError always emits
 // table_id: None to match reference v1 (module_subscription_actor.rs
 // :625, :731, :805, :1308; module_subscription_manager.rs:2014). The
-// field is retained in SubscriptionError for wire-shape parity and to
+// field is retained in SubscriptionError for wire-shape stability and to
 // allow a future opt-in drop-scope hint, but narrowing the drop scope
 // from the request's referenced tables is a Shunter-only behavior that
 // never matched reference semantics.
@@ -382,7 +382,7 @@ func encodeProductRows(rows []types.ProductValue) ([]byte, error) {
 // ProtocolCallReducerResponse onto the caller's protocol.TransactionUpdate
 // channel.
 //
-// OI-004 sub-hazard pin: the select additionally watches req.Done so the
+// contract: the select additionally watches req.Done so the
 // goroutine exits promptly when the owning connection tears down. Without
 // this arm, a ctx rooted at context.Background() (the production path from
 // protocol/upgrade.go:201 through runDispatchLoop) combined with an executor

@@ -25,7 +25,9 @@ Initial language guidance:
 - TypeScript is the existing documented first target for schema codegen
 - do not add every language target in V1.5-C
 
-Immediate next V1.5 slice after V1.5-C: V1.5-D permissions/read-model metadata.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V1.5-C plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
 
 Completion notes:
 - `codegen.Generate` accepts detached `ModuleContract` values.

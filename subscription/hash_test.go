@@ -290,7 +290,7 @@ func TestQueryHashJoinFilterDiffers(t *testing.T) {
 	}
 }
 
-// TD-142 Slice 14: ProjectRight is part of the canonical identity because
+// self-join projection contract: ProjectRight is part of the canonical identity because
 // `SELECT lhs.*` and `SELECT rhs.*` produce rows of different shape and are
 // distinct queries. Same Join sides must hash differently for the two
 // projections so the registry does not collapse them.

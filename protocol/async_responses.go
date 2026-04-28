@@ -57,10 +57,10 @@ func (s connOnlySender) SendTransactionUpdateLight(connID types.ConnectionID, up
 
 // watchReducerResponse listens for the executor's heavy
 // `TransactionUpdate` envelope and delivers it on the caller's outbound
-// channel. Phase 1.5: the envelope is already fully populated by the
+// channel. outcome-model: the envelope is already fully populated by the
 // executor / fan-out seam; this watcher only owns transport delivery.
 //
-// OI-004 hardening (2026-04-20): the watcher goroutine is tied to the
+// hardening (2026-04-20): the watcher goroutine is tied to the
 // owning `Conn`'s lifecycle. Previously the body blocked unconditionally
 // on `<-respCh`; if the executor accepted the CallReducer but never sent
 // on (or closed) respCh — e.g. executor crash mid-commit, hung reducer

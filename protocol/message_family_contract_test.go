@@ -8,16 +8,16 @@ import (
 	"github.com/ponchione/shunter/schema"
 )
 
-// These tests are *pins*, not parity implementations. Each pins the
+// These tests are *pins*, not compatibility implementations. Each pins the
 // current message-family shape so the divergence is either explicit or
-// closed. The Phase 1.5 outcome-model decision flipped the
+// closed. The Outcome-model decision flipped the
 // TransactionUpdate / ReducerCallResult pins to assert the new heavy /
-// light / `UpdateStatus` shape; see `docs/parity-decisions.md#outcome-model`.
+// light / `UpdateStatus` shape; see `docs/shunter-design-decisions.md#outcome-model`.
 
-// TestPhase15TransactionUpdateHeavyShape pins the Shunter-native heavy
+// TestShunterTransactionUpdateHeavyShape pins the Shunter-native heavy
 // `TransactionUpdate` envelope. The wire byte shape is pinned separately in
-// parity_transaction_update_test.go.
-func TestPhase15TransactionUpdateHeavyShape(t *testing.T) {
+// transaction_update_wire_test.go.
+func TestShunterTransactionUpdateHeavyShape(t *testing.T) {
 	fields := msgFieldNames(TransactionUpdate{})
 	want := []string{
 		"Status",
@@ -32,20 +32,9 @@ func TestPhase15TransactionUpdateHeavyShape(t *testing.T) {
 	}
 }
 
-// TestPhase15TransactionUpdateLightShape pins the Phase 1.5 adoption
-// of the reference delta-only envelope. Reference:
-// `pub struct TransactionUpdateLight<F: WebsocketFormat>`.
-func TestPhase15TransactionUpdateLightShape(t *testing.T) {
-	fields := msgFieldNames(TransactionUpdateLight{})
-	want := []string{"RequestID", "Update"}
-	if diff := cmp.Diff(want, fields); diff != "" {
-		t.Errorf("TransactionUpdateLight fields mismatch (-want +got):\n%s", diff)
-	}
-}
-
-// TestPhase15ReducerCallInfoShape pins the embedded metadata carried by
+// TestShunterReducerCallInfoShape pins the embedded metadata carried by
 // heavy `TransactionUpdate`. Reference: `pub struct ReducerCallInfo<F>`.
-func TestPhase15ReducerCallInfoShape(t *testing.T) {
+func TestShunterReducerCallInfoShape(t *testing.T) {
 	fields := msgFieldNames(ReducerCallInfo{})
 	want := []string{"ReducerName", "ReducerID", "Args", "RequestID"}
 	if diff := cmp.Diff(want, fields); diff != "" {
@@ -53,9 +42,9 @@ func TestPhase15ReducerCallInfoShape(t *testing.T) {
 	}
 }
 
-// TestPhase15UpdateStatusVariants pins the two-arm Shunter-native
+// TestShunterUpdateStatusVariants pins the two-arm Shunter-native
 // `UpdateStatus` tagged union.
-func TestPhase15UpdateStatusVariants(t *testing.T) {
+func TestShunterUpdateStatusVariants(t *testing.T) {
 	var _ UpdateStatus = StatusCommitted{}
 	var _ UpdateStatus = StatusFailed{}
 
@@ -67,11 +56,11 @@ func TestPhase15UpdateStatusVariants(t *testing.T) {
 	}
 }
 
-// TestPhase15TagReducerCallResultReserved pins that
+// TestShunterTagReducerCallResultReserved pins that
 // `TagReducerCallResult` is reserved — no encoder emits it and the
 // decoder rejects it. The tag byte is not reused so a future
 // reintroduction cannot silently collide.
-func TestPhase15TagReducerCallResultReserved(t *testing.T) {
+func TestShunterTagReducerCallResultReserved(t *testing.T) {
 	if TagReducerCallResult == 0 {
 		t.Fatal("TagReducerCallResult should remain defined as a reserved value, not zero")
 	}
@@ -81,12 +70,12 @@ func TestPhase15TagReducerCallResultReserved(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeSingleShape pins the Phase 2 Slice 1 SQL-string
+// TestShunterSubscribeSingleShape pins the SQL-string SQL-string
 // shape. Reference: SubscribeSingle { query: Box<str>, request_id,
 // query_id } at reference/SpacetimeDB/crates/client-api-messages/src/
 // websocket/v1.rs:189. The structured `Query` form was flipped to a
-// `QueryString` in Phase 2 Slice 1.
-func TestPhase2SubscribeSingleShape(t *testing.T) {
+// `QueryString` in SQL-string.
+func TestShunterSubscribeSingleShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeSingleMsg{})
 	want := []string{"RequestID", "QueryID", "QueryString"}
 	if diff := cmp.Diff(want, fields); diff != "" {
@@ -94,14 +83,14 @@ func TestPhase2SubscribeSingleShape(t *testing.T) {
 	}
 }
 
-// TestPhase2UnsubscribeSingleShape pins the reference field order.
+// TestShunterUnsubscribeSingleShape pins the reference field order.
 // Reference: Unsubscribe at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218
 // (`{ request_id: u32, query_id: QueryId }`). Byte shape is pinned in
-// parity_unsubscribe_test.go. The prior extra `SendDropped` byte — a
+// unsubscribe_wire_test.go. The prior extra `SendDropped` byte — a
 // Shunter-local smuggle of the v2 `UnsubscribeFlags::SendDroppedRows`
 // concept — has been removed to match reference v1.
-func TestPhase2UnsubscribeSingleShape(t *testing.T) {
+func TestShunterUnsubscribeSingleShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeSingleMsg{})
 	want := []string{"RequestID", "QueryID"}
 	if diff := cmp.Diff(want, fields); diff != "" {
@@ -109,45 +98,12 @@ func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeSingleAppliedShape pins the reference field order.
-// Reference: SubscribeApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317
-// (`request_id, total_host_execution_duration_micros, query_id, rows`).
-// Duration sits at position 2. Byte shape is pinned in
-// parity_applied_envelopes_test.go. The flattened TableName + Rows
-// shape is a documented divergence per
-// `docs/parity-decisions.md#protocol-rows-shape` — the reference wraps
-// them in `SubscribeRows`.
-func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
-	fields := msgFieldNames(SubscribeSingleApplied{})
-	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "TableName", "Rows"}
-	if diff := cmp.Diff(want, fields); diff != "" {
-		t.Fatalf("SubscribeSingleApplied fields mismatch (-want +got):\n%s", diff)
-	}
-}
-
-// TestPhase2UnsubscribeSingleAppliedShape pins the reference field order.
-// Reference: UnsubscribeApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331
-// (`request_id, total_host_execution_duration_micros, query_id, rows`).
-// Duration sits at position 2. Byte shape is pinned in
-// parity_applied_envelopes_test.go. HasRows + Rows diverges from
-// the reference required `SubscribeRows` wrapper — documented per
-// `docs/parity-decisions.md#protocol-rows-shape`.
-func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
-	fields := msgFieldNames(UnsubscribeSingleApplied{})
-	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "HasRows", "Rows"}
-	if diff := cmp.Diff(want, fields); diff != "" {
-		t.Fatalf("UnsubscribeSingleApplied fields mismatch (-want +got):\n%s", diff)
-	}
-}
-
-// TestPhase15CallReducerFlagsField pins the reference `CallReducer<Args>`
+// TestShunterCallReducerFlagsField pins the reference `CallReducer<Args>`
 // field order from
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:110
 // (`reducer, args, request_id, flags`). The wire byte shape is pinned
-// separately in parity_call_reducer_test.go.
-func TestPhase15CallReducerFlagsField(t *testing.T) {
+// separately in call_reducer_wire_test.go.
+func TestShunterCallReducerFlagsField(t *testing.T) {
 	fields := msgFieldNames(CallReducerMsg{})
 	want := []string{"ReducerName", "Args", "RequestID", "Flags"}
 	if diff := cmp.Diff(want, fields); diff != "" {
@@ -155,13 +111,13 @@ func TestPhase15CallReducerFlagsField(t *testing.T) {
 	}
 }
 
-// TestPhase2Slice1COneOffQueryMessageIDBytes pins the Phase 2 Slice 1c
-// wire-shape parity flip: reference OneOffQuery carries
+// TestShunterOneOffQueryMessageIDBytes pins the one-off message-id
+// wire-shape contract change: reference OneOffQuery carries
 // `message_id: Box<[u8]>, query_string: Box<str>` and the paired result
 // envelope correlates with the same opaque bytes. Shunter must therefore
 // expose `MessageID []byte` on both request and response envelopes rather
 // than a numeric RequestID.
-func TestPhase2Slice1COneOffQueryMessageIDBytes(t *testing.T) {
+func TestShunterOneOffQueryMessageIDBytes(t *testing.T) {
 	msgFields := msgFieldNames(OneOffQueryMsg{})
 	wantMsgFields := []string{"MessageID", "QueryString"}
 	if diff := cmp.Diff(wantMsgFields, msgFields); diff != "" {
@@ -189,12 +145,12 @@ func TestPhase2Slice1COneOffQueryMessageIDBytes(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeMultiShape pins the Phase 2 Slice 1 SQL-string
+// TestShunterSubscribeMultiShape pins the SQL-string SQL-string
 // list. Reference: SubscribeMulti { query_strings: Box<[Box<str>]>,
 // request_id, query_id } at reference/SpacetimeDB/crates/
 // client-api-messages/src/websocket/v1.rs:203. The structured Queries
-// list was flipped to QueryStrings in Phase 2 Slice 1.
-func TestPhase2SubscribeMultiShape(t *testing.T) {
+// list was flipped to QueryStrings in SQL-string.
+func TestShunterSubscribeMultiShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeMultiMsg{})
 	want := []string{"RequestID", "QueryID", "QueryStrings"}
 	if diff := cmp.Diff(want, fields); diff != "" {
@@ -202,10 +158,10 @@ func TestPhase2SubscribeMultiShape(t *testing.T) {
 	}
 }
 
-// TestPhase2UnsubscribeMultiShape pins the new Phase 2 Slice 2 envelope.
+// TestShunterUnsubscribeMultiShape pins the new single/multi variant envelope.
 // Reference: UnsubscribeMulti { request_id, query_id } at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:229.
-func TestPhase2UnsubscribeMultiShape(t *testing.T) {
+func TestShunterUnsubscribeMultiShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeMultiMsg{})
 	want := []string{"RequestID", "QueryID"}
 	if diff := cmp.Diff(want, fields); diff != "" {
@@ -213,41 +169,9 @@ func TestPhase2UnsubscribeMultiShape(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscribeMultiAppliedShape pins the reference field order.
-// Reference: SubscribeMultiApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380
-// (`request_id, total_host_execution_duration_micros, query_id, update`).
-// Duration sits at position 2. Byte shape is pinned in
-// parity_applied_envelopes_test.go. Update flattens the reference
-// `DatabaseUpdate` wrapper — documented per
-// `docs/parity-decisions.md#protocol-rows-shape`.
-func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
-	fields := msgFieldNames(SubscribeMultiApplied{})
-	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}
-	if diff := cmp.Diff(want, fields); diff != "" {
-		t.Fatalf("SubscribeMultiApplied fields mismatch (-want +got):\n%s", diff)
-	}
-}
-
-// TestPhase2UnsubscribeMultiAppliedShape pins the reference field order.
-// Reference: UnsubscribeMultiApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394
-// (`request_id, total_host_execution_duration_micros, query_id, update`).
-// Duration sits at position 2. Byte shape is pinned in
-// parity_applied_envelopes_test.go. Update flattens the reference
-// `DatabaseUpdate` wrapper — documented per
-// `docs/parity-decisions.md#protocol-rows-shape`.
-func TestPhase2UnsubscribeMultiAppliedShape(t *testing.T) {
-	fields := msgFieldNames(UnsubscribeMultiApplied{})
-	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}
-	if diff := cmp.Diff(want, fields); diff != "" {
-		t.Fatalf("UnsubscribeMultiApplied fields mismatch (-want +got):\n%s", diff)
-	}
-}
-
-// TestPhase2SubscribeAppliedCarriesHostExecutionDuration pins the
+// TestShunterSubscribeAppliedCarriesHostExecutionDuration pins the
 // reference-style host execution duration on all four applied envelopes.
-func TestPhase2SubscribeAppliedCarriesHostExecutionDuration(t *testing.T) {
+func TestShunterSubscribeAppliedCarriesHostExecutionDuration(t *testing.T) {
 	for _, v := range []any{
 		SubscribeSingleApplied{},
 		SubscribeMultiApplied{},
@@ -267,14 +191,14 @@ func TestPhase2SubscribeAppliedCarriesHostExecutionDuration(t *testing.T) {
 	}
 }
 
-// TestPhase2SubscriptionErrorOptionalShape pins the narrowed
+// TestShunterSubscriptionErrorOptionalShape pins the narrowed
 // SubscriptionError follow-through: request_id / query_id are now
 // explicit optionals and table_id is present on the Go envelope.
 // `TotalHostExecutionDurationMicros` is the reference-position first
 // field (v1.rs:350); live emit sites now populate a measured non-zero
 // microsecond duration via the receipt-timestamp seam. See
-// `parity_subscription_error_test.go` for the byte-shape pin.
-func TestPhase2SubscriptionErrorOptionalShape(t *testing.T) {
+// `subscription_error_wire_test.go` for the byte-shape pin.
+func TestShunterSubscriptionErrorOptionalShape(t *testing.T) {
 	fields := msgFieldNames(SubscriptionError{})
 	want := []string{"TotalHostExecutionDurationMicros", "RequestID", "QueryID", "TableID", "Error"}
 	if diff := cmp.Diff(want, fields); diff != "" {
@@ -305,10 +229,10 @@ func TestPhase2SubscriptionErrorOptionalShape(t *testing.T) {
 	}
 }
 
-// TestPhase2Slice1SubscribeMultiQueryStringsList pins the positive
-// shape after Phase 2 Slice 1: `query_strings: Box<[Box<str>]>` on the
+// TestShunterSlice1SubscribeMultiQueryStringsList pins the positive
+// shape after SQL-string: `query_strings: Box<[Box<str>]>` on the
 // reference (v1.rs:205) maps to a Go `[]string` carrying SQL strings.
-func TestPhase2Slice1SubscribeMultiQueryStringsList(t *testing.T) {
+func TestShunterSlice1SubscribeMultiQueryStringsList(t *testing.T) {
 	m := SubscribeMultiMsg{}
 	qf, ok := reflect.TypeOf(m).FieldByName("QueryStrings")
 	if !ok {
@@ -320,10 +244,10 @@ func TestPhase2Slice1SubscribeMultiQueryStringsList(t *testing.T) {
 	}
 }
 
-// TestPhase2TagByteStability pins the Phase 2 Slice 2 tag layout.
+// TestShunterTagByteStability pins the single/multi variant tag layout.
 // Older bytes (1-8) stay fixed; 9/10 are the new multi-applied tags.
 // 5/6 are the new multi request tags.
-func TestPhase2TagByteStability(t *testing.T) {
+func TestShunterTagByteStability(t *testing.T) {
 	cases := []struct {
 		name string
 		got  uint8

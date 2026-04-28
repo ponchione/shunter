@@ -7,7 +7,7 @@ import (
 )
 
 // SendSubscribeSingleApplied delivers a SubscribeSingleApplied message.
-// Phase 2 Slice 2 admission-model slice (TD-140): wire-id admission
+// single/multi variant admission-model slice (TD-140): wire-id admission
 // bookkeeping is no longer maintained on the protocol connection —
 // subscription.Manager.querySets is the single source of truth, and
 // §9.4 ordering is preserved by the synchronous Reply closure invoked
@@ -18,7 +18,7 @@ func SendSubscribeSingleApplied(sender ClientSender, conn *Conn, msg *SubscribeS
 }
 
 // SendUnsubscribeSingleApplied delivers an UnsubscribeSingleApplied
-// message. Phase 2 Slice 2 (TD-140): per-connection admission
+// message. single/multi variant (TD-140): per-connection admission
 // bookkeeping is gone — subscription.Manager owns the authoritative
 // set of live query IDs, so this is a straight transport push.
 func SendUnsubscribeSingleApplied(sender ClientSender, conn *Conn, msg *UnsubscribeSingleApplied) error {
@@ -26,7 +26,7 @@ func SendUnsubscribeSingleApplied(sender ClientSender, conn *Conn, msg *Unsubscr
 }
 
 // SendSubscribeMultiApplied delivers a SubscribeMultiApplied message.
-// Phase 2 Slice 2 admission-model slice (TD-140): connection-level
+// single/multi variant admission-model slice (TD-140): connection-level
 // subscription tracking is gone on both Single and Multi paths —
 // subscription.Manager owns admission, set-level teardown bookkeeping
 // lives in the executor. This helper is a straight transport push.
@@ -40,7 +40,7 @@ func SendUnsubscribeMultiApplied(sender ClientSender, conn *Conn, msg *Unsubscri
 	return sender.Send(conn.ID, *msg)
 }
 
-// SendSubscriptionError delivers a SubscriptionError. Phase 2 Slice 2
+// SendSubscriptionError delivers a SubscriptionError. single/multi variant
 // (TD-140): per-connection admission bookkeeping is gone —
 // subscription.Manager owns the authoritative set of live query IDs,
 // and a failed Register never admits the id, so there is nothing to

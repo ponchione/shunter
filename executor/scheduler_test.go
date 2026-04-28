@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -110,6 +111,31 @@ func TestSchedulerHandleScheduleRepeatSetsRepeatNs(t *testing.T) {
 	}
 	if got := found[SysScheduledColNextRunAtNs].AsInt64(); got <= time.Now().Add(-1*time.Second).UnixNano() {
 		t.Errorf("next_run_at_ns should be near now, got %d", got)
+	}
+}
+
+func TestSchedulerHandleScheduleRepeatRejectsNonPositiveInterval(t *testing.T) {
+	tx, h, _ := setupScheduler(t)
+
+	for _, interval := range []time.Duration{0, -time.Nanosecond} {
+		id, err := h.ScheduleRepeat("tick", nil, interval)
+		if !errors.Is(err, ErrInvalidScheduleInterval) {
+			t.Fatalf("ScheduleRepeat(%s) error = %v, want %v", interval, err, ErrInvalidScheduleInterval)
+		}
+		if id != 0 {
+			t.Fatalf("ScheduleRepeat(%s) id = %d, want 0", interval, id)
+		}
+	}
+	if got := len(tx.TxState().Inserts(h.tableID)); got != 0 {
+		t.Fatalf("invalid ScheduleRepeat inserted %d rows, want 0", got)
+	}
+
+	id, err := h.ScheduleRepeat("tick", nil, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 1 {
+		t.Fatalf("first valid ScheduleRepeat id after invalid attempts = %d, want 1", id)
 	}
 }
 

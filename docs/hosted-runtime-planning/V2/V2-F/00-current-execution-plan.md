@@ -29,7 +29,9 @@ Scope boundaries:
   management, cross-module transactions, shared-table semantics, automatic
   contract merging.
 
-Immediate next V2 slice after V2-F: V2-G out-of-process module execution gate.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V2-F plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
 
 ## Completion Proof
 

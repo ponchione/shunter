@@ -5,7 +5,7 @@ This document is the working implementation plan for the current decomposition d
 Scope boundary:
 - The decomposition docs model the Shunter core engine/runtime that is comparable to the SpacetimeDB engine kernel.
 - They do not attempt to specify the full SpacetimeDB product surface such as hosted/cloud control-plane behavior, standalone host/database routing, or multi-language module-runtime hosting.
-- Do not silently expand a decomposition story into parity work that is outside this narrowed engine scope.
+- Do not silently expand a decomposition story into compatibility work that is outside this narrowed engine scope.
 
 The spec headers are not the only source of dependency cycles. There are three real implementation-level tangles that matter here:
 

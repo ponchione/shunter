@@ -68,6 +68,6 @@ wraps it with `CloseHandshakeTimeout`. Transport death is guaranteed within
 
 The historical fork spec previously linked from this story was a root-level
 planning artifact and has been retired. The authoritative contract for this
-story is now the live implementation in `protocol/close.go` plus the parity
+story is now the live implementation in `protocol/close.go` plus the contract
 and close-behavior tests under `protocol/close_test.go` and
-`protocol/parity_close_codes_test.go`.
+`protocol/close_codes_contract_test.go`.

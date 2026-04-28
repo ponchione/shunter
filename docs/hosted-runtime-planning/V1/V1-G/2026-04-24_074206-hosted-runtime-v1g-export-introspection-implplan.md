@@ -41,7 +41,7 @@ Files likely to change:
 - Create `runtime_describe.go`.
 - Create `runtime_describe_test.go`.
 - Modify `runtime.go` to preserve module version and metadata on built runtimes.
-- Possibly update V1-G current execution plan doc as tasks complete.
+- Update the execution-plan status only if it prevents stale handoff guidance.
 
 Validation commands:
 - `rtk go test . -run 'Test(ModuleDescribe|RuntimeExportSchema|RuntimeDescribe)' -count=1`
@@ -52,4 +52,6 @@ Validation commands:
 - `rtk go doc . Runtime.ExportSchema`
 - `rtk go doc . Runtime.Describe`
 
-Immediate next slice after V1-G: V1-H hello-world replacement and V1 proof, after V1-G introspection is available.
+Historical sequencing note: later hosted-runtime slices have landed. Do not use
+this completed V1-G implementation plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

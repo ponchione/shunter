@@ -6,7 +6,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the OI-006 row-payload sharing contract:
+// Tests in this file pin the row-payload sharing contract:
 // `types.ProductValue` (itself `[]Value`) backing arrays are shared
 // across subscribers of the same query for both
 // `SubscriptionUpdate.Inserts` and `.Deletes`. Sharing is
@@ -15,7 +15,7 @@ import (
 // width × row count × subscriber count for no client-visible benefit
 // under the contract.
 //
-// The OI-006 slice-header sub-hazard (closed 2026-04-20 in
+// The slice-header (closed 2026-04-20 in
 // `eval_fanout_aliasing_test.go`) asserts the outer `[]ProductValue`
 // is independent per subscriber so replace/append on one
 // subscriber's outer slice does not leak. These tests assert the
@@ -61,7 +61,7 @@ func TestEvalFanoutRowPayloadsSharedAcrossSubscribersForInserts(t *testing.T) {
 	}
 
 	// Pin 1: row payload Value backing arrays are shared across
-	// subscribers. The OI-006 slice-header fix gives each subscriber
+	// subscribers. The slice-header fix gives each subscriber
 	// an independent outer `[]types.ProductValue`, but the inner
 	// `ProductValue` slice headers point at the same `[]Value`
 	// backing array. A future change that deep-copied row payloads

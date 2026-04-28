@@ -29,12 +29,12 @@ Project direction (2026-04-26):
 - SpacetimeDB client wire compatibility is not a product goal
 - SpacetimeDB-style energy accounting is not a product goal; Shunter has no billing/metering/quota economy, and energy-shaped protocol fields should be removed rather than kept as inert compatibility baggage
 - use reference behavior as evidence for runtime semantics, but prefer a simpler Shunter contract when compatibility-only details add cost without value
-- SQL/query work is useful when it makes Shunter clients more correct, predictable, and expressive; it should not continue as open-ended reference-message or parser-error parity chasing
+- SQL/query work is useful when it makes Shunter clients more correct, predictable, and expressive; it should not continue as open-ended reference-message or parser-error compatibility chasing
 
 Closed reference-comparison baselines are not startup context and should not be reopened without fresh failing Shunter regression evidence:
 - protocol subprotocol/compression/lifecycle/message-family baselines
 - canonical reducer delivery and empty-fanout caller outcomes
-- subscription rows through `P0-SUBSCRIPTION-033`
+- subscription row-shape and delivery baselines
 - same-connection reused subscription-hash initial-snapshot elision
 - scheduler startup/firing narrow slice
 - recovery replay horizon and snapshot/replay invariant slices
@@ -42,11 +42,11 @@ Closed reference-comparison baselines are not startup context and should not be 
 
 Active audit note (2026-04-26):
 - hosted-runtime V1 is landed and verified; `docs/hosted-runtime-planning/V1/` is no longer the active implementation campaign
-- OI-004 and OI-006 were removed after the post-V1 audit found no concrete remaining open lifecycle or fanout-aliasing defect on the hosted-runtime path
+- the former lifecycle/fanout-aliasing audit placeholders were removed after the post-V1 audit found no concrete remaining open defect on the hosted-runtime path
 - OI-002 is closed for current evidence and should reopen only from a fresh Shunter-visible failing example
 - OI-003 is complete; `OI-003.md` remains the audit/progress authority for the closed recovery/store semantics campaign
 - OI-005 remains open but narrowed to lower-level raw read-view/snapshot lifetime discipline as an accepted expert-API risk
-- the next broad confidence campaign is `docs/RUNTIME-HARDENING-GAUNTLET.md`, not another known-issue parity pass
+- the next broad confidence campaign is `docs/RUNTIME-HARDENING-GAUNTLET.md`, not another known-issue comparison pass
 - do not close behavior items solely because they are reachable through the hosted-runtime API; close or narrow them only when the underlying Shunter correctness gap is pinned by live tests
 
 ## Issue index
@@ -64,8 +64,8 @@ Summary:
 - several message-family and envelope details are intentionally Shunter-specific
 - client/server protocol message decoders reject trailing bytes after a valid body; this is pinned across current v1 message families
 - subscribe/unsubscribe response and executor-unavailable error shaping are shared across Single/Multi paths; keep future lifecycle/parser cleanup behavior-preserving
-- reducer failure-arm collapse remains an explicit outcome-model follow-up only if Shunter clients need more machine-readable failure classes; see `docs/parity-decisions.md#outcome-model`
-- Shunter's flat rows/update shape is the current native protocol contract — see `docs/parity-decisions.md#protocol-rows-shape`. Do not rewrite it solely to match SpacetimeDB's wrapper chain (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `BsatnRowList`).
+- reducer failure-arm collapse remains an explicit outcome-model follow-up only if Shunter clients need more machine-readable failure classes; see `docs/shunter-design-decisions.md#outcome-model`
+- Shunter's flat rows/update shape is the current native protocol contract — see `docs/shunter-design-decisions.md#protocol-rows-shape`. Do not rewrite it solely to match SpacetimeDB's wrapper chain (`SubscribeRows` / `DatabaseUpdate` / `TableUpdate` / `CompressableQueryUpdate` / `BsatnRowList`).
 - energy accounting is explicitly out of scope for Shunter's product model. The energy-shaped protocol surface has been removed: no `TransactionUpdate.EnergyQuantaUsed`, no `StatusOutOfEnergy`, no `CallerOutcomeOutOfEnergy`, and no subscription/fanout energy fields. Do not replace this with a quota/metering abstraction unless a future Shunter-local product need appears.
 
 Why this matters:
@@ -84,8 +84,8 @@ Primary code surfaces:
 - `protocol/fanout_adapter.go`
 
 Source docs:
-- `docs/parity-decisions.md#outcome-model`
-- `docs/parity-decisions.md#protocol-rows-shape`
+- `docs/shunter-design-decisions.md#outcome-model`
+- `docs/shunter-design-decisions.md#protocol-rows-shape`
 
 Execution note:
 - The Shunter-native subprotocol, energy-removal, decoder body-consumption, and subscribe/unsubscribe response-helper cleanup slices are closed and pinned. Remaining OI-001 work is conditional: implement brotli only if clients need it, and redesign failure arms only if clients need a more machine-readable outcome contract.
@@ -100,11 +100,11 @@ Current contract:
 - Shunter's v1 SQL surface is intentionally narrow: single-table equality/range predicates with `AND` / `OR`, plus the subset of joins and one-off projections already documented in SPEC-005.
 - One-off reads and subscriptions should agree anywhere they share syntax and type semantics.
 - Observable behavior should be stable for Shunter clients: accepted queries should return correct rows, rejected queries should fail before registration/execution, and errors should be diagnosable.
-- SpacetimeDB behavior may guide tricky ordering/type decisions, but byte-for-byte parser error parity is not a product goal.
+- SpacetimeDB behavior may guide tricky ordering/type decisions, but byte-for-byte parser error matching is not a product goal.
 
 Current open work:
 - None in the runtime model as of the latest OI-002 scout. Projection, validation-ordering, identifier lookup, join-WHERE policy, structured-query protocol cleanup, and clear duplicated fixture blocks are pinned by focused tests.
-- Future OI-002 work should be opened only from a fresh Shunter-visible failing example: wrong accepted/rejected query, wrong rows, misleading user-visible error, or one-off/subscription drift. Do not reopen parser-message parity or historical projection risk without new evidence.
+- Future OI-002 work should be opened only from a fresh Shunter-visible failing example: wrong accepted/rejected query, wrong rows, misleading user-visible error, or one-off/subscription drift. Do not reopen parser-message matching or historical projection risk without new evidence.
 
 Execution note:
 - `NEXT_SESSION_HANDOFF.md` should not queue more OI-002 runtime-model work unless the next user supplies a fresh failing scenario.
@@ -212,7 +212,7 @@ Summary:
   - clearer corruption/fork detection where it helps a single-node operator distinguish "recoverable tail" from "unsafe history"
   - writer-side preallocation/fallocate support only if it materially improves Shunter durability or startup behavior
   - scheduler replay/firing pins for restart, missed timers, and dangling-client lifecycle interactions
-- byte-compatible record headers, epoch APIs, multi-transaction commit grouping, V0/V1 reference versioning, records-buffer format parity, and `Append<T>` payload-return APIs are not tracked debt unless a Shunter operational requirement appears
+- byte-compatible record headers, epoch APIs, multi-transaction commit grouping, V0/V1 reference versioning, records-buffer format compatibility, and `Append<T>` payload-return APIs are not tracked debt unless a Shunter operational requirement appears
 
 Why this matters:
 - these gaps mainly show up under restart, crash, and replay conditions
@@ -226,26 +226,19 @@ Primary code surfaces:
 
 ### OI-008: Cleanup-only test and label debt obscures the live behavior
 
-Status: open
+Status: closed — cleanup completed and verified on 2026-04-28
 Severity: medium
 
 Summary:
-- stale test names and labels still point at retired docs or closed audit slices, including `OI-004`, `OI-006`, `TD-057`, `P0-DELIVERY-*`, `parity`, and phase-style acceptance labels
-- `docs/parity-decisions.md` has a historical filename and several "accepted deferral" sections. Rename/reframe it as Shunter design decisions once code/tests no longer cite the old path, or keep a short redirect doc if a rename would create churn.
-- `AGENTS.md`, `docs/README.md`, `HOSTED_RUNTIME_PLANNING_HANDOFF.md`, and `NEXT_SESSION_HANDOFF.md` still describe TECH-DEBT work as "parity" work in places. Update those labels to "correctness / TECH-DEBT" and keep SpacetimeDB reference language scoped to design evidence.
-- protocol and subscription tests still use `parity_*` filenames and `Test*Parity*` names for many Shunter-owned contract pins. Rename opportunistically when touching those packages; do not do a repository-wide churn-only rename unless the tree is otherwise quiet.
-- comments in `protocol/`, `subscription/`, `query/sql/`, `executor/`, and `commitlog/` still cite reference paths or parity history. Keep citations that explain why a Shunter decision was made, but rewrite comments that imply ongoing SpacetimeDB interop or byte-for-byte compatibility goals.
-- `commitlog/phase4_acceptance_test.go::TestDurabilityWorkerBatchesAndFsyncs` has dead fsync-count instrumentation (`countingSegmentWriter`, `syncCount`, and `_ = counting`) that no longer validates the behavior its name implies
-- several async tests rely on fixed `time.Sleep` windows, especially in fanout-worker coverage; these should move to condition/event based waits before the suite grows more parallel or slower
-- duplicated protocol scenario tests should be collapsed where they are testing shared behavior rather than genuinely different one-off vs subscription contracts
-- historical hosted-runtime planning files still contain superseded sequencing notes, such as older V1-G plans describing V1-H as the immediate next slice; prune or archive these when hosted-runtime planning resumes
-- Staticcheck is now pinned as a Go tool dependency at
-  `honnef.co/go/tools/cmd/staticcheck v0.7.0` and is available through
-  `rtk go tool staticcheck ./...`. It is not yet a green required check: a
-  dependency-only run on 2026-04-28 reported existing cleanup findings across
-  unused symbols, error-string style, a simplifiable boolean, and one
-  identical-expression test comparison. Those findings were intentionally
-  recorded, not fixed, in the Staticcheck dependency slice.
+- legacy compatibility, audit-slice, delivery-slice, and phase-slice names were removed from test filenames, test identifiers, comments, and active docs where they obscured Shunter-owned behavior
+- `docs/shunter-design-decisions.md` is now the implementation-facing decision document; `docs/parity-decisions.md` remains only as a short redirect for old links
+- protocol and subscription contract pins now use behavior-oriented filenames and `TestShunter*` / descriptive names
+- comments in `protocol/`, `subscription/`, `query/sql/`, `executor/`, and `commitlog/` now frame SpacetimeDB references as design evidence, not ongoing interop or byte-for-byte goals
+- dead durability-worker fsync-count instrumentation was removed and the test now asserts the durable transaction behavior it actually covers
+- fixed sleep windows in async/fanout-worker and runtime polling coverage were replaced with condition/event waits or stability assertions
+- duplicated protocol message-family field-order checks were collapsed where rows-shape coverage already owns the same contract
+- stale hosted-runtime planning next-slice notes now point readers to `HOSTED_RUNTIME_PLANNING_HANDOFF.md` instead of presenting completed work as live sequencing
+- pinned Staticcheck is now green through `rtk go tool staticcheck ./...`
 
 Why this matters:
 - stale labels make failure output point maintainers toward closed or nonexistent work
@@ -253,9 +246,11 @@ Why this matters:
 - dead instrumentation gives a false sense that low-level durability behavior is being asserted
 
 Primary code surfaces:
-- `commitlog/phase4_acceptance_test.go`
+- `commitlog/commitlog_contract_test.go`
+- `docs/shunter-design-decisions.md`
 - `docs/parity-decisions.md`
 - `AGENTS.md`
+- `CLAUDE.md`
 - `docs/README.md`
 - `NEXT_SESSION_HANDOFF.md`
 - `HOSTED_RUNTIME_PLANNING_HANDOFF.md`

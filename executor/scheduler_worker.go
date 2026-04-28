@@ -36,7 +36,7 @@ type Scheduler struct {
 	// scan() and consumed by Run() to arm its timer. Zero means "no
 	// future schedules currently known."
 	nextWakeup time.Time
-	// inFlight tracks due schedule firings already enqueued into the
+	// inFlight tracks due schedule firings admitted for enqueue into the
 	// executor so Scheduler.Run scans do not enqueue the same timer a
 	// second time before the current attempt completes. replayQueued is
 	// the subset enqueued during Startup replay; failed replay attempts
@@ -45,6 +45,9 @@ type Scheduler struct {
 	inFlightMu   sync.Mutex
 	inFlight     map[scheduledFireKey]struct{}
 	replayQueued map[scheduledFireKey]struct{}
+	// enqueueAttempted is a test hook used to observe a blocking enqueue
+	// attempt without sleeping. Production schedulers leave it nil.
+	enqueueAttempted func()
 }
 
 type scheduledFireKey struct {
@@ -161,9 +164,7 @@ func (s *Scheduler) ReplayFromCommitted() ScheduleID {
 		nextNs := row[SysScheduledColNextRunAtNs].AsInt64()
 		if nextNs <= nowNs {
 			if !inboxSaturated {
-				if s.tryEnqueue(row) {
-					s.markInFlight(row, true)
-				} else {
+				if !s.tryEnqueueInFlight(row, true) {
 					inboxSaturated = true
 				}
 			}
@@ -180,17 +181,18 @@ func (s *Scheduler) ReplayFromCommitted() ScheduleID {
 
 func (s *Scheduler) scanAndTrackMaxWithContext(ctx context.Context) (ScheduleID, bool) {
 	nowNs := s.now().UnixNano()
+	initialInFlight := s.inFlightSnapshot()
 	rows := s.snapshotScheduleRows()
 
 	maxID, nextWakeup, ok := s.scanRows(rows, nowNs, func(row types.ProductValue) bool {
-		if s.isInFlight(row) {
+		key := scheduledFireKeyForRow(row)
+		if _, ok := initialInFlight[key]; ok {
 			return true
 		}
-		if !s.enqueueWithContext(ctx, row) {
-			return false
+		if s.isInFlightKey(key) {
+			return true
 		}
-		s.markInFlight(row, false)
-		return true
+		return s.enqueueInFlightWithContext(ctx, row, false)
 	})
 	s.nextWakeup = nextWakeup
 	return maxID, ok
@@ -241,14 +243,39 @@ func (s *Scheduler) tryEnqueue(row types.ProductValue) bool {
 	}
 }
 
+func (s *Scheduler) tryEnqueueInFlight(row types.ProductValue, replay bool) bool {
+	if !s.markInFlight(row, replay) {
+		return true
+	}
+	if s.tryEnqueue(row) {
+		return true
+	}
+	s.unmarkInFlight(row)
+	return false
+}
+
 func (s *Scheduler) enqueueWithContext(ctx context.Context, row types.ProductValue) bool {
 	cmd := scheduledCallReducerCommand(row)
+	if s.enqueueAttempted != nil {
+		s.enqueueAttempted()
+	}
 	select {
 	case s.inbox <- cmd:
 		return true
 	case <-ctx.Done():
 		return false
 	}
+}
+
+func (s *Scheduler) enqueueInFlightWithContext(ctx context.Context, row types.ProductValue, replay bool) bool {
+	if !s.markInFlight(row, replay) {
+		return true
+	}
+	if s.enqueueWithContext(ctx, row) {
+		return true
+	}
+	s.unmarkInFlight(row)
+	return false
 }
 
 func scheduledCallReducerCommand(row types.ProductValue) CallReducerCmd {
@@ -264,13 +291,16 @@ func scheduledCallReducerCommand(row types.ProductValue) CallReducerCmd {
 	}
 }
 
-func (s *Scheduler) markInFlight(row types.ProductValue, replay bool) {
+func (s *Scheduler) markInFlight(row types.ProductValue, replay bool) bool {
 	s.inFlightMu.Lock()
 	defer s.inFlightMu.Unlock()
 	if s.inFlight == nil {
 		s.inFlight = make(map[scheduledFireKey]struct{})
 	}
 	key := scheduledFireKeyForRow(row)
+	if _, exists := s.inFlight[key]; exists {
+		return false
+	}
 	s.inFlight[key] = struct{}{}
 	if replay {
 		if s.replayQueued == nil {
@@ -278,15 +308,40 @@ func (s *Scheduler) markInFlight(row types.ProductValue, replay bool) {
 		}
 		s.replayQueued[key] = struct{}{}
 	}
+	return true
+}
+
+func (s *Scheduler) unmarkInFlight(row types.ProductValue) {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	key := scheduledFireKeyForRow(row)
+	delete(s.inFlight, key)
+	delete(s.replayQueued, key)
+}
+
+func (s *Scheduler) inFlightSnapshot() map[scheduledFireKey]struct{} {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	if len(s.inFlight) == 0 {
+		return nil
+	}
+	out := make(map[scheduledFireKey]struct{}, len(s.inFlight))
+	for key := range s.inFlight {
+		out[key] = struct{}{}
+	}
+	return out
 }
 
 func (s *Scheduler) isInFlight(row types.ProductValue) bool {
+	return s.isInFlightKey(scheduledFireKeyForRow(row))
+}
+
+func (s *Scheduler) isInFlightKey(key scheduledFireKey) bool {
 	s.inFlightMu.Lock()
 	defer s.inFlightMu.Unlock()
 	if len(s.inFlight) == 0 {
 		return false
 	}
-	key := scheduledFireKeyForRow(row)
 	_, ok := s.inFlight[key]
 	return ok
 }

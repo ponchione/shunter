@@ -575,13 +575,8 @@ V1-C is complete when all of the following are true:
 5. Same module cannot be built twice after schema builder success.
    - Guardrail: recovery/reopen tests must use a fresh equivalent module, preserving V1-B `schema.ErrAlreadyBuilt` behavior.
 
-## Immediate next slice after V1-C
+## Historical sequencing note
 
-V1-D runtime lifecycle ownership:
-
-- introduce `Runtime.Start(ctx)` and `Runtime.Close()`
-- create and close `commitlog.DurabilityWorker`
-- construct/start executor, scheduler, subscription fan-out worker, and shutdown ordering
-- pin idempotency, cancellation, partial-start cleanup, and fatal-state observability
-
-V1-D should be the first slice that starts long-lived runtime goroutines.
+The later hosted-runtime slices have since landed. Do not treat this completed
+V1-C plan as a live handoff; use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+current hosted-runtime status.

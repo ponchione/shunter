@@ -13,4 +13,5 @@ var (
 	ErrReducerPanic                      = errors.New("executor: reducer panic")
 	ErrPermissionDenied                  = errors.New("executor: permission denied")
 	ErrCommitFailed                      = errors.New("executor: commit failed")
+	ErrInvalidScheduleInterval           = errors.New("executor: schedule repeat interval must be positive")
 )

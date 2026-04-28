@@ -10,7 +10,7 @@ import (
 )
 
 // Tests in this file pin the OI-005 subscription-seam read-view lifetime
-// sub-hazard: EvalAndBroadcast receives a borrowed store.CommittedReadView
+//: EvalAndBroadcast receives a borrowed store.CommittedReadView
 // and MUST NOT let any reference to that view escape past its synchronous
 // return. The executor (executor/executor.go:540-541) calls Close on the
 // view immediately after EvalAndBroadcast returns, so any post-return use

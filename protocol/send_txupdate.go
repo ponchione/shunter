@@ -13,12 +13,12 @@ type DeliveryError struct {
 }
 
 // DeliverTransactionUpdateLight sends a non-caller TransactionUpdateLight
-// to every connection in fanout (Phase 1.5). Connections not found in
+// to every connection in fanout (outcome-model). Connections not found in
 // the ConnManager are skipped (disconnected since evaluation). Empty
 // update slices are skipped. Buffer-full errors are collected so the
 // caller can trigger disconnects.
 //
-// Phase 2 Slice 2 admission-model slice (TD-140): the former per-update
+// single/multi variant admission-model slice (TD-140): the former per-update
 // active-subscription gate is gone — admission is owned by
 // subscription.Manager.querySets, and fan-out enumerates only live
 // client QueryIDs. Transport-level guards in connOnlySender.Send

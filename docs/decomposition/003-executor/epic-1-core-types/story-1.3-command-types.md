@@ -27,7 +27,7 @@ The `ExecutorCommand` interface and all concrete command types that flow through
   func (CallReducerCmd) isExecutorCommand() {}
   ```
 
-> **Updated 2026-04-19 (Phase 2 Slice 2).** The single-subscription
+> **Updated 2026-04-19.** The single-subscription
 > commands `RegisterSubscriptionCmd` / `UnregisterSubscriptionCmd`
 > were replaced by the set-based commands below. One `QueryID`
 > identifies a subscription set (`Predicates` length >= 1; length 1

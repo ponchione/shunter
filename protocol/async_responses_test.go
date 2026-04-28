@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// TestWatchReducerResponseExitsOnConnClose pins the OI-004 Tier-B
+// TestWatchReducerResponseExitsOnConnClose pins the Tier-B
 // hardening fix for the `watchReducerResponse` goroutine leak.
 //
 // Sharp edge: before 2026-04-20, the watcher goroutine blocked

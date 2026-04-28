@@ -138,7 +138,7 @@ For human orientation instead of another audit spiral, read in this order:
 1. `README.md` — this file
 2. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
 3. `TECH-DEBT.md` — live debt and Shunter correctness priority framing
-4. `docs/parity-decisions.md` — historical name; current Shunter design decisions informed by SpacetimeDB
+4. `docs/shunter-design-decisions.md` — Shunter design decisions informed by SpacetimeDB
 
 Then inspect the main implementation packages:
 - `schema/`
@@ -197,9 +197,8 @@ Pinned static analysis is available through:
 rtk go tool staticcheck ./...
 ```
 
-Treat Staticcheck as cleanup/static-analysis signal until the known OI-008
-findings are cleared; do not count it as a green broad-verification result
-unless the command actually passes.
+Staticcheck is expected to pass after OI-008 cleanup; treat failures as real
+cleanup findings unless a task explicitly narrows verification.
 
 ## Clean-room note
 

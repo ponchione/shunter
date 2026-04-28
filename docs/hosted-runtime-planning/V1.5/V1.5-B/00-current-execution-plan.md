@@ -44,4 +44,6 @@ V1.5-B target artifact:
 Default repo snapshot name:
 - `shunter.contract.json`
 
-Immediate next V1.5 slice after V1.5-B: V1.5-C client bindings and codegen.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V1.5-B plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

@@ -51,8 +51,7 @@ Do not read broad roadmap, ledger, or full decomposition specs by default. Open 
   - expand to broader test runs only when needed
   - run `rtk go vet` for touched packages when behavior, exported APIs, or interfaces changed
   - run pinned Staticcheck with `rtk go tool staticcheck ./...` when static
-    analysis is relevant; until OI-008 cleanup makes it green, it may be
-    report-only rather than a required passing check
+    analysis is relevant; after OI-008 cleanup it is expected to pass
   - run `rtk go fmt` on touched files/packages before finishing
 - Do not claim a Go change is complete until the relevant Go commands pass.
 

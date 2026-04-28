@@ -7,13 +7,13 @@ import (
 	"github.com/coder/websocket"
 )
 
-// TestPhase1ParityCloseCodeConstants pins the four close codes used by
+// TestShunterCloseCodeConstants pins the four close codes used by
 // the server. Reference: RFC 6455 §7.4.1 + reference/SpacetimeDB
 // standard usage.
 //
 // TestCloseConstants in close_test.go already asserts the same values;
-// this test is the parity-named pin for the close-code contract.
-func TestPhase1ParityCloseCodeConstants(t *testing.T) {
+// this test is the contract pin for the close-code contract.
+func TestShunterCloseCodeConstants(t *testing.T) {
 	if CloseNormal != websocket.StatusNormalClosure {
 		t.Errorf("CloseNormal = %d, want %d (1000 Normal Closure)", CloseNormal, websocket.StatusNormalClosure)
 	}
@@ -28,12 +28,12 @@ func TestPhase1ParityCloseCodeConstants(t *testing.T) {
 	}
 }
 
-// TestPhase1ParityHandshakeRejectionStatuses pins the HTTP status codes
+// TestShunterHandshakeRejectionStatuses pins the HTTP status codes
 // the server returns before the WebSocket upgrade for each rejection
 // class. These sub-tests exercise the upgrade.go guard sequence in order
 // (auth → connection_id → compression → subprotocol). Each uses the
 // same httptest.Server + dialWS harness that upgrade_test.go uses.
-func TestPhase1ParityHandshakeRejectionStatuses(t *testing.T) {
+func TestShunterHandshakeRejectionStatuses(t *testing.T) {
 	// Each case describes the rejection class being pinned. Cases that
 	// test auth are set up without a valid token; cases that test
 	// post-auth guards (connection_id, compression, subprotocol) carry a

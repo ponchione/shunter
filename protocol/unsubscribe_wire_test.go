@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestParityUnsubscribeSingleWireShape pins the byte-level wire shape
+// TestShunterUnsubscribeSingleWireShape pins the byte-level wire shape
 // of UnsubscribeSingleMsg against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218`
 // (`pub struct Unsubscribe { request_id: u32, query_id: QueryId }`).
@@ -21,7 +21,7 @@ import (
 // via `UnsubscribeFlags::SendDroppedRows`. This test pins the v1 match
 // by constructing the reference byte shape by hand and round-tripping
 // through the encoder/decoder.
-func TestParityUnsubscribeSingleWireShape(t *testing.T) {
+func TestShunterUnsubscribeSingleWireShape(t *testing.T) {
 	in := UnsubscribeSingleMsg{RequestID: 0x11223344, QueryID: 0xAABBCCDD}
 
 	frame, err := EncodeClientMessage(in)
@@ -66,7 +66,7 @@ func TestParityUnsubscribeSingleWireShape(t *testing.T) {
 	}
 }
 
-// TestParityUnsubscribeSingleRejectsTrailingByte pins that the decoder
+// TestShunterUnsubscribeSingleRejectsTrailingByte pins that the decoder
 // no longer accepts a trailing send_dropped byte: a 10-byte body (old
 // Shunter v1 shape) must not produce a valid UnsubscribeSingleMsg.
 // The decoder reads request_id + query_id and ignores nothing — the
@@ -74,7 +74,7 @@ func TestParityUnsubscribeSingleWireShape(t *testing.T) {
 // as a malformed-message error or a silent pass; the critical guarantee
 // is that encoding is strictly 9 bytes (above). This test locks that
 // encoding does not emit the trailing byte.
-func TestParityUnsubscribeSingleEncodeNoTrailingByte(t *testing.T) {
+func TestShunterUnsubscribeSingleEncodeNoTrailingByte(t *testing.T) {
 	in := UnsubscribeSingleMsg{RequestID: 1, QueryID: 2}
 	frame, err := EncodeClientMessage(in)
 	if err != nil {
@@ -85,9 +85,9 @@ func TestParityUnsubscribeSingleEncodeNoTrailingByte(t *testing.T) {
 	}
 }
 
-// TestParityUnsubscribeSingleDecodeTruncated pins that truncated frames
+// TestShunterUnsubscribeSingleDecodeTruncated pins that truncated frames
 // (missing query_id) surface as ErrMalformedMessage.
-func TestParityUnsubscribeSingleDecodeTruncated(t *testing.T) {
+func TestShunterUnsubscribeSingleDecodeTruncated(t *testing.T) {
 	// Tag + only request_id (4 bytes), missing query_id.
 	frame := []byte{TagUnsubscribeSingle, 0x01, 0x00, 0x00, 0x00}
 	_, _, err := DecodeClientMessage(frame)

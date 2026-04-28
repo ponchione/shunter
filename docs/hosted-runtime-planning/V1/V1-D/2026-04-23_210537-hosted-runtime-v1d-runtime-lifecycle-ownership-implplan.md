@@ -804,14 +804,8 @@ V1-D is complete when all of the following are true:
 6. Scope creep into network serving is tempting once lifecycle exists.
    - Guardrail: V1-D stops at lifecycle ownership. V1-E owns `ListenAndServe`, `HTTPHandler`, protocol server construction, and auth/listen mapping.
 
-## Immediate next slice after V1-D
+## Historical sequencing note
 
-V1-E runtime network surface:
-
-- expose the WebSocket-first runtime through a clean default serving path and composable handler access
-- add `ListenAndServe(...)` or equivalent
-- add `HTTPHandler()`
-- replace the V1-D no-op fan-out sender with protocol-backed delivery
-- map top-level auth/listen config into protocol/server options
-
-V1-E should be the first slice that opens network listeners or exposes HTTP/WebSocket handler composition through the top-level runtime API.
+The later hosted-runtime slices have since landed. Do not treat this completed
+V1-D plan as a live handoff; use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+current hosted-runtime status.

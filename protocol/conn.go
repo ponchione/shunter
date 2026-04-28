@@ -16,7 +16,7 @@ import (
 // transport references all live here; the read loop, write loop, and
 // keep-alive goroutine share ownership.
 //
-// Phase 2 Slice 2 admission-model slice (TD-140): per-connection
+// single/multi variant admission-model slice (TD-140): per-connection
 // subscription-id admission bookkeeping has been retired. The
 // subscription.Manager's querySets map is the single source of truth
 // for active query IDs, and SPEC-005 §9.4 in-flight ordering is
@@ -101,7 +101,7 @@ func (c *Conn) MarkActivity() {
 
 // ConnManager tracks all currently active connections by
 // ConnectionID. Used by cross-connection operations such as the
-// subscription fan-out delivery worker (Phase 8).
+// subscription fan-out delivery worker (fan-out integration).
 type ConnManager struct {
 	mu    sync.RWMutex
 	conns map[types.ConnectionID]*Conn
@@ -139,7 +139,7 @@ func (m *ConnManager) Get(id types.ConnectionID) *Conn {
 // (SPEC-005 §11.1, close code 1000). Connections are closed
 // concurrently with a bounded wait for all teardowns to complete.
 //
-// OI-004 sub-hazard pin: the caller-supplied ctx is forwarded into each Conn.Disconnect, which threads it
+// contract: the caller-supplied ctx is forwarded into each Conn.Disconnect, which threads it
 // into inbox.DisconnectClientSubscriptions and inbox.OnDisconnect (steps
 // 1-2 of the SPEC-005 §5.3 teardown). Every caller-supplied ctx is
 // additionally wrapped per-conn by context.WithTimeout(ctx,

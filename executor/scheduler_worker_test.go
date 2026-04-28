@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -242,9 +243,6 @@ func TestSchedulerNotifyTriggersRescan(t *testing.T) {
 		close(runDone)
 	}()
 
-	// Let the worker park on its initial (empty) wait.
-	time.Sleep(10 * time.Millisecond)
-
 	// Seed a due row, then notify.
 	seedSchedule(t, cs, tid, 1, "tick", nil, time.Unix(50, 0).UnixNano(), 0)
 	s.Notify()
@@ -363,6 +361,11 @@ func TestSchedulerRunCancelsWhileEnqueueBlocked(t *testing.T) {
 	inbox := make(chan ExecutorCommand)
 	s := NewScheduler(inbox, cs, schedTS.ID)
 	s.now = func() time.Time { return time.Unix(100, 0) }
+	enqueueAttempted := make(chan struct{})
+	var enqueueOnce sync.Once
+	s.enqueueAttempted = func() {
+		enqueueOnce.Do(func() { close(enqueueAttempted) })
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	runDone := make(chan struct{})
@@ -371,12 +374,24 @@ func TestSchedulerRunCancelsWhileEnqueueBlocked(t *testing.T) {
 		close(runDone)
 	}()
 
-	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-enqueueAttempted:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("scheduler did not attempt enqueue")
+	}
 	cancel()
 	select {
 	case <-runDone:
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("Run did not return after cancellation while enqueue was blocked")
+	}
+
+	rows := s.snapshotScheduleRows()
+	if len(rows) != 1 {
+		t.Fatalf("schedule rows after cancelled blocked enqueue=%d, want 1", len(rows))
+	}
+	if s.isInFlight(rows[0]) {
+		t.Fatal("cancelled blocked enqueue left a stale in-flight marker")
 	}
 }
 

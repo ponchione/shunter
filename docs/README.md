@@ -26,8 +26,8 @@ Do not read broad roadmap, ledger, or full decomposition specs by default.
   while that implementation track is active.
 - `docs/RUNTIME-HARDENING-GAUNTLET.md` — post-tech-debt test campaign for
   model-based, fault-injected, fuzzed, and soak-tested runtime confidence.
-- `docs/parity-decisions.md` — consolidated current parity decisions that code
-  and tests still cite.
+- `docs/shunter-design-decisions.md` — consolidated current Shunter design
+  decisions that code and tests still cite.
 - `TECH-DEBT.md` — open issue list and follow-up ownership.
 
 ## Baseline Specs

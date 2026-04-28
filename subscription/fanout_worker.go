@@ -14,17 +14,17 @@ import (
 // protocol-backed adapter wired at server startup (SPEC-004 §8 /
 // Story 6.1).
 //
-// Phase 1.5 outcome-model split (`docs/parity-decisions.md#outcome-model`):
+// Outcome-model split (`docs/shunter-design-decisions.md#outcome-model`):
 //   - `SendTransactionUpdateHeavy` delivers the caller-bound envelope
 //     with caller metadata and, for `CallerOutcomeCommitted`, the
 //     caller's visible row delta.
 //   - `SendTransactionUpdateLight` delivers the delta-only envelope to
 //     non-callers whose rows were touched.
 //
-// OI-006 row-payload sharing contract: `callerUpdates` (heavy) and
+// row-payload sharing contract: `callerUpdates` (heavy) and
 // `updates` (light) are READ-ONLY. Each SubscriptionUpdate's
 // `Inserts` / `Deletes` slice is independent per subscriber
-// (OI-006 slice-header sub-hazard closed 2026-04-20), but the
+// (slice-header closed 2026-04-20), but the
 // contained `types.ProductValue` row payloads share `[]Value`
 // backing arrays across subscribers under the post-commit
 // row-immutability contract. Implementations must only read row

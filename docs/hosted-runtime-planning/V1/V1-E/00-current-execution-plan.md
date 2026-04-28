@@ -46,4 +46,5 @@ Validation commands:
 - `rtk go vet . ./protocol ./auth ./executor ./subscription`
 - `rtk go test ./... -count=1`
 
-Immediate next slice after completion: V1-F local runtime calls.
+Historical sequencing note: the later hosted-runtime slices have since landed.
+Use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

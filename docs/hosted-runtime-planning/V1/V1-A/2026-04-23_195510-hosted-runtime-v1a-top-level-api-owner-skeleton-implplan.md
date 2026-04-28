@@ -232,7 +232,7 @@ rtk go test ./... -count=1
 rtk go vet . ./schema
 ```
 
-If broad tests fail because of unrelated dirty OI-002/query/protocol state, report the exact unrelated failures and preserve the narrower passing root/schema gates. Do not fix unrelated parity code inside V1-A.
+If broad tests fail because of unrelated correctness/query/protocol state, report the exact unrelated failures and preserve the narrower passing root/schema gates. Do not fix unrelated correctness code inside V1-A.
 
 ## Files not to touch
 
@@ -245,14 +245,15 @@ Do not edit these for V1-A unless a compile error proves a direct need:
 - `query/sql/*`
 - v1.5/v2 docs
 
-## Docs/handoff follow-through after implementation
+## Historical follow-through note
 
-After V1-A implementation lands, update only:
+When this plan was active, implementation follow-through was limited to:
 
 - `NEXT_SESSION_HANDOFF.md`
   - mark V1-A implemented or report blocker
-  - point the next slice at V1-B module registration wrappers
-- `TECH-DEBT.md` / hosted-runtime roadmap only if they still describe V1-A as not planned or not started
+  - record any follow-up status without treating this completed plan as the
+    live handoff
+- `TECH-DEBT.md` / hosted-runtime roadmap only if they carried stale V1-A status
 
 Do not churn v1.5/v2 docs during the implementation patch.
 
@@ -269,14 +270,8 @@ V1-A is complete when:
 - no runtime services, goroutines, sockets, lifecycle methods, local calls, registration wrappers, codegen, permissions, or migration metadata have been introduced
 - targeted RTK gates pass, with any unrelated dirty-state broad failures explicitly isolated
 
-## Immediate next slice after V1-A
+## Historical sequencing note
 
-V1-B module registration wrappers:
-
-- `Module.SchemaVersion(...)`
-- `Module.TableDef(...)`
-- `Module.Reducer(...)`
-- `Module.OnConnect(...)`
-- `Module.OnDisconnect(...)`
-
-V1-B should be the first slice where a non-empty, explicitly versioned module can build successfully through the top-level API.
+The later hosted-runtime slices have since landed. Do not treat this completed
+V1-A plan as a live handoff; use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+current hosted-runtime status.

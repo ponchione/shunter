@@ -24,7 +24,7 @@ Tests to add:
 Test boundaries:
 - do not start a runtime
 - do not load an arbitrary app module dynamically
-- do not add migration plan semantics; V2-C owns that
+- do not add migration plan semantics
 - do not add multi-module aggregate contracts
 
 Added test coverage:

@@ -30,8 +30,9 @@ Scope boundaries:
   loading, control-plane APIs, migration execution, policy enforcement, query
   language expansion.
 
-Immediate next V2 slice after V2-A: V2-B contract artifact admin and CLI
-workflows.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V2-A plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
 
 ## Completion Proof
 

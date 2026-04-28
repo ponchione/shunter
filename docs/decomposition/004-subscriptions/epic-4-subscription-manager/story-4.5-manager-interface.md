@@ -13,7 +13,7 @@ Public type/interface contract consumed by the executor (SPEC-003). Error types 
 
 ## Deliverables
 
-> **Superseded wording — updated 2026-04-19 (Phase 2 Slice 2).** The former
+> **Superseded wording — updated 2026-04-19.** The former
 > single-subscription `Register` / `Unregister` methods and their
 > `SubscriptionRegisterRequest` / `SubscriptionRegisterResult` types were
 > removed. The current manager contract is set-based

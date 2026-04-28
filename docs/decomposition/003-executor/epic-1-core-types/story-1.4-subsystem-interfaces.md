@@ -28,7 +28,7 @@ Interfaces the executor consumes from other subsystems: durability, subscription
   - Implemented by SPEC-002
 
 - ```go
-  // Updated 2026-04-19 (Phase 2 Slice 2): set-based registration replaces
+  // Updated 2026-04-19: set-based registration replaces
   // the former single-subscription Register / Unregister entry points.
   type SubscriptionManager interface {
       RegisterSet(req SubscriptionSetRegisterRequest, view CommittedReadView) (SubscriptionSetRegisterResult, error)

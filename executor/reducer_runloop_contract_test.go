@@ -16,7 +16,7 @@ import (
 
 var errReducerBoom = errors.New("reducer boom")
 
-func TestPhase4ReducerRegistryRules(t *testing.T) {
+func TestReducerRegistryRules(t *testing.T) {
 	h := types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) { return nil, nil })
 	rr := NewReducerRegistry()
 	if _, ok := rr.Lookup("missing"); ok {
@@ -53,7 +53,7 @@ func TestPhase4ReducerRegistryRules(t *testing.T) {
 	}
 }
 
-func TestPhase4RunLoopSequentialAndCancels(t *testing.T) {
+func TestRunLoopSequentialAndCancels(t *testing.T) {
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{Name: "players", Columns: []schema.ColumnDefinition{{Name: "id", Type: types.KindUint64, PrimaryKey: true}, {Name: "name", Type: types.KindString}}})
@@ -72,6 +72,8 @@ func TestPhase4RunLoopSequentialAndCancels(t *testing.T) {
 	var peak atomic.Int32
 	var mu sync.Mutex
 	order := []string{}
+	started := make(chan struct{}, 2)
+	release := make(chan struct{}, 2)
 	if err := rr.Register(RegisteredReducer{Name: "slow", Handler: func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
 		if got := active.Add(1); got > peak.Load() {
 			peak.Store(got)
@@ -79,7 +81,8 @@ func TestPhase4RunLoopSequentialAndCancels(t *testing.T) {
 		mu.Lock()
 		order = append(order, "start")
 		mu.Unlock()
-		time.Sleep(20 * time.Millisecond)
+		started <- struct{}{}
+		<-release
 		mu.Lock()
 		order = append(order, "end")
 		mu.Unlock()
@@ -97,10 +100,14 @@ func TestPhase4RunLoopSequentialAndCancels(t *testing.T) {
 	if err := exec.Submit(CallReducerCmd{Request: ReducerRequest{ReducerName: "slow"}, ResponseCh: resp1}); err != nil {
 		t.Fatal(err)
 	}
+	<-started
 	if err := exec.Submit(CallReducerCmd{Request: ReducerRequest{ReducerName: "slow"}, ResponseCh: resp2}); err != nil {
 		t.Fatal(err)
 	}
+	release <- struct{}{}
 	<-resp1
+	<-started
+	release <- struct{}{}
 	<-resp2
 	cancel()
 	<-exec.done
@@ -114,7 +121,7 @@ func TestPhase4RunLoopSequentialAndCancels(t *testing.T) {
 	}
 }
 
-func TestPhase4DispatchPanicRecoverySurvivesNextCommand(t *testing.T) {
+func TestDispatchPanicRecoverySurvivesNextCommand(t *testing.T) {
 	exec := &Executor{inbox: make(chan ExecutorCommand, 2), done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -149,7 +156,7 @@ func TestPhase4DispatchPanicRecoverySurvivesNextCommand(t *testing.T) {
 	}
 }
 
-func TestPhase4HandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
+func TestHandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{Name: "players", Columns: []schema.ColumnDefinition{{Name: "id", Type: types.KindUint64, PrimaryKey: true}, {Name: "name", Type: types.KindString}}})
@@ -253,7 +260,7 @@ func TestPhase4HandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 	}
 }
 
-func TestPhase4HandleCallReducerNilResponseChannelDoesNotPanic(t *testing.T) {
+func TestHandleCallReducerNilResponseChannelDoesNotPanic(t *testing.T) {
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{Name: "players", Columns: []schema.ColumnDefinition{{Name: "id", Type: types.KindUint64, PrimaryKey: true}, {Name: "name", Type: types.KindString}}})

@@ -495,7 +495,7 @@ func TestEvalJoinSubscription(t *testing.T) {
 	if len(updates[0].Inserts) != 1 {
 		t.Fatalf("expected 1 joined insert row, got %d", len(updates[0].Inserts))
 	}
-	// TD-142 Slice 14: row is projected onto LHS (default ProjectRight=false).
+	// self-join projection contract: row is projected onto LHS (default ProjectRight=false).
 	// T1 has 2 columns, so the emitted row must be 2-wide, not the 4-wide
 	// LHS++RHS concat the IVM fragments carry internally.
 	if updates[0].TableID != joinLHS {
@@ -510,7 +510,7 @@ func TestEvalJoinSubscription(t *testing.T) {
 	}
 }
 
-// TD-142 Slice 14: delta eval with ProjectRight=true returns RHS-shape rows.
+// self-join projection contract: delta eval with ProjectRight=true returns RHS-shape rows.
 func TestEvalJoinSubscriptionProjectsRight(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(joinLHS, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)

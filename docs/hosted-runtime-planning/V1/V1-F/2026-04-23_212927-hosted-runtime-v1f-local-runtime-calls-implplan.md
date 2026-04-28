@@ -79,8 +79,8 @@ Out of scope:
 - replacing WebSocket as the external client model
 - broad SQL/view system
 - v1.5 query/view declarations
-- export/introspection; V1-G owns that
-- hello-world replacement; V1-H owns that
+- export/introspection
+- hello-world replacement
 - REST/MCP-first surfaces
 - broad admin/control-plane APIs
 - contract snapshots/codegen
@@ -195,7 +195,7 @@ Avoid editing unless implementation proves a direct need:
 
 Permitted tiny lower-level seam if SQL convenience is included:
 
-- Extract a shared, non-network one-off query evaluator from `protocol/handle_oneoff.go` into a package that both protocol and root runtime can use. This should be a small refactor with parity tests preserved, not a behavior rewrite.
+- Extract a shared, non-network one-off query evaluator from `protocol/handle_oneoff.go` into a package that both protocol and root runtime can use. This should be a small refactor with behavior tests preserved, not a behavior rewrite.
 
 ## Public API target for V1-F
 
@@ -758,12 +758,8 @@ Expected:
 - Do not use the former bundled demo command as an implementation source of truth.
 - Keep unknown table/reducer behavior clear and testable; preserve executor/schema sentinel errors where existing contracts already provide them.
 
-## Immediate next slice
+## Historical sequencing note
 
-After V1-F lands, the next planning/implementation slice is V1-G export and introspection foundation:
-
-- module identity/version/metadata export
-- schema information export
-- reducer metadata export
-- narrow runtime/module description for diagnostics
-- no full v1.5 canonical contract, codegen, permissions, or migration metadata yet
+The later hosted-runtime slices have since landed. Do not treat this completed
+V1-F plan as a live handoff; use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+current hosted-runtime status.

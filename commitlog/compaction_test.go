@@ -190,7 +190,7 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarOnRetry(t *testing.T) {
 	assertFileExists(t, idx2Path)
 }
 
-func TestRunCompactionSegmentRemovalFailureIncludesPhasePathAndWraps(t *testing.T) {
+func TestRunCompactionSegmentRemovalFailureIncludesOperationPathAndWraps(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
 	makeScanTestSegment(t, dir, 4, 4, 5)
@@ -210,7 +210,7 @@ func TestRunCompactionSegmentRemovalFailureIncludesPhasePathAndWraps(t *testing.
 	assertFileExists(t, seg1)
 }
 
-func TestRunCompactionSidecarRemovalFailureIncludesPhasePathAndWraps(t *testing.T) {
+func TestRunCompactionSidecarRemovalFailureIncludesOperationPathAndWraps(t *testing.T) {
 	dir := t.TempDir()
 	makeScanTestSegment(t, dir, 1, 1, 2, 3)
 	makeScanTestSegment(t, dir, 4, 4, 5)
@@ -238,7 +238,7 @@ func TestRunCompactionSidecarRemovalFailureIncludesPhasePathAndWraps(t *testing.
 	assertFileExists(t, idxPath)
 }
 
-func TestRunCompactionOrphanSidecarRemovalFailureIncludesPhasePathAndWraps(t *testing.T) {
+func TestRunCompactionOrphanSidecarRemovalFailureIncludesOperationPathAndWraps(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
 	makeScanTestSegment(t, dir, 4, 4, 5)
@@ -269,7 +269,7 @@ func TestRunCompactionOrphanSidecarRemovalFailureIncludesPhasePathAndWraps(t *te
 	assertFileExists(t, idxPath)
 }
 
-func TestRunCompactionSyncFailureIncludesPhasePathAndWraps(t *testing.T) {
+func TestRunCompactionSyncFailureIncludesOperationPathAndWraps(t *testing.T) {
 	dir := t.TempDir()
 	makeScanTestSegment(t, dir, 1, 1, 2, 3)
 	makeScanTestSegment(t, dir, 4, 4, 5)
@@ -363,14 +363,14 @@ func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	assertFileExists(t, active)
 }
 
-func assertCompactionFailureContext(t *testing.T, err, cause error, phase, path string) {
+func assertCompactionFailureContext(t *testing.T, err, cause error, operation, path string) {
 	t.Helper()
 	if !errors.Is(err, cause) {
 		t.Fatalf("error %v should wrap %v", err, cause)
 	}
 	text := err.Error()
-	if !strings.Contains(text, phase) || !strings.Contains(text, path) {
-		t.Fatalf("error %q should include phase %q and path %q", text, phase, path)
+	if !strings.Contains(text, operation) || !strings.Contains(text, path) {
+		t.Fatalf("error %q should include operation %q and path %q", text, operation, path)
 	}
 }
 

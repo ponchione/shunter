@@ -38,7 +38,7 @@ type ExecutorInbox interface {
 	OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
 	DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
-	// Set-based seam (Phase 2 Slice 2 variant split). Single and Multi
+	// Set-based seam (single/multi variant variant split). Single and Multi
 	// subscribe/unsubscribe paths both route through these — Single
 	// forwards a one-entry Predicates slice, Multi forwards N.
 	RegisterSubscriptionSet(ctx context.Context, req RegisterSubscriptionSetRequest) error
@@ -140,7 +140,7 @@ type UnsubscribeSetCommandResponse struct {
 // CallReducerRequest carries the fields for a reducer invocation
 // (SPEC-003 §10.3).
 //
-// Phase 1.5 outcome-model decision (`docs/parity-decisions.md#outcome-model`):
+// Outcome-model decision (`docs/shunter-design-decisions.md#outcome-model`):
 // the caller-visible reducer outcome is delivered as a heavy
 // `TransactionUpdate` envelope through the subscription fan-out seam.
 // ResponseCh carries that final heavy envelope back to the protocol
@@ -206,7 +206,7 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 		return fmt.Errorf("onconnect rejected: %w", err)
 	}
 
-	// Register before first send: the fan-out worker (Phase 8) resolves
+	// Register before first send: the fan-out worker (fan-out integration) resolves
 	// ConnectionID → Conn via this manager, and admitting a connection
 	// that is not yet visible would drop its first delta. Order is
 	// safe because RunLifecycle is synchronous and IdentityToken is

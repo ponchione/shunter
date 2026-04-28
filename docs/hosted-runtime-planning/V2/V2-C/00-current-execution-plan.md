@@ -49,5 +49,6 @@ Scope boundaries:
   startup-blocking migration enforcement, rollback orchestration,
   backup/restore implementation.
 
-Immediate next V2 slice after V2-C: V2-D declared read and SQL protocol
-convergence.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V2-C plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

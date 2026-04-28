@@ -6,9 +6,9 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestCallerOutcomeShape pins the Phase 1.5 forward-declared shape that
+// TestCallerOutcomeShape pins the outcome-model forward-declared shape that
 // the protocol-side adapter consumes when assembling the heavy
-// `TransactionUpdate` envelope. See `docs/parity-decisions.md#outcome-model`.
+// `TransactionUpdate` envelope. See `docs/shunter-design-decisions.md#outcome-model`.
 func TestCallerOutcomeShape(t *testing.T) {
 	outcome := CallerOutcome{
 		Kind:      CallerOutcomeFailed,
@@ -22,7 +22,7 @@ func TestCallerOutcomeShape(t *testing.T) {
 
 // TestPostCommitMetaCarriesCallerOutcome pins that the executor's
 // post-commit handoff struct still carries `CallerOutcome` after the
-// Phase 1.5 rename from `CallerResult`.
+// outcome-model rename from `CallerResult`.
 func TestPostCommitMetaCarriesCallerOutcome(t *testing.T) {
 	caller := types.ConnectionID{1}
 	meta := PostCommitMeta{

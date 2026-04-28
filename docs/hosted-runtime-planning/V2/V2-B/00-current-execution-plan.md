@@ -27,7 +27,9 @@ Scope boundaries:
   local reducer/query admin commands, cloud control plane, multi-module host
   commands.
 
-Immediate next V2 slice after V2-B: V2-C migration planning and validation.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V2-B plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
 
 Live proof:
 - `contractworkflow.CompareFiles` diffs previous/current canonical contract

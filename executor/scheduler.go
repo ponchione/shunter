@@ -116,7 +116,7 @@ func (h *schedulerHandle) Schedule(reducerName string, args []byte, at time.Time
 // interval.Nanoseconds() using fixed-rate semantics (Story 6.4, §9.5).
 func (h *schedulerHandle) ScheduleRepeat(reducerName string, args []byte, interval time.Duration) (ScheduleID, error) {
 	first := time.Now().Add(interval).UnixNano()
-	return h.insertSchedule(reducerName, args, first, interval.Nanoseconds())
+	return h.insertRepeatSchedule(reducerName, args, first, interval.Nanoseconds())
 }
 
 func (h *schedulerHandle) insertSchedule(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
@@ -125,6 +125,22 @@ func (h *schedulerHandle) insertSchedule(reducerName string, args []byte, nextRu
 	if err := h.checkOpenLocked(); err != nil {
 		return 0, err
 	}
+	return h.insertScheduleLocked(reducerName, args, nextRunAtNs, repeatNs)
+}
+
+func (h *schedulerHandle) insertRepeatSchedule(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.checkOpenLocked(); err != nil {
+		return 0, err
+	}
+	if repeatNs <= 0 {
+		return 0, ErrInvalidScheduleInterval
+	}
+	return h.insertScheduleLocked(reducerName, args, nextRunAtNs, repeatNs)
+}
+
+func (h *schedulerHandle) insertScheduleLocked(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
 	id := ScheduleID(h.seq.Next())
 	row := types.ProductValue{
 		SysScheduledColScheduleID:  types.NewUint64(uint64(id)),

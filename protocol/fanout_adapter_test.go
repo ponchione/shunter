@@ -109,7 +109,7 @@ func TestEncodeSubscriptionUpdate_MultiRow(t *testing.T) {
 	}
 }
 
-// --- Adapter integration tests (Phase 1.5 envelope split) ---
+// --- Adapter integration tests (outcome-model envelope split) ---
 
 type mockClientSender struct {
 	mu          sync.Mutex
@@ -310,7 +310,7 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 }
 
 // TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs
-// pins the reference-parity behavior for post-commit evaluation errors.
+// pins the reference-informed behavior for post-commit evaluation errors.
 // The fan-out adapter is only invoked for errors routed through
 // FanOutMessage.Errors, which originate from
 // `subscription/eval.go::handleEvalError` during a TransactionUpdate

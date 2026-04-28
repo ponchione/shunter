@@ -359,7 +359,7 @@ args:          bytes            — BSATN-encoded ProductValue of reducer argume
 flags:         uint8            — CallReducerFlags byte (see below)
 ```
 
-**Response:** the caller receives the heavy `TransactionUpdate` (§8.5) carrying the reducer's `UpdateStatus`. No separate `ReducerCallResult` envelope exists on the wire — tag 7 is reserved (see §6, §8.7, and `docs/parity-decisions.md#outcome-model`).
+**Response:** the caller receives the heavy `TransactionUpdate` (§8.5) carrying the reducer's `UpdateStatus`. No separate `ReducerCallResult` envelope exists on the wire — tag 7 is reserved (see §6, §8.7, and `docs/shunter-design-decisions.md#outcome-model`).
 
 The client is responsible for encoding `args` as a `ProductValue` matching the reducer's declared parameter types. Type mismatch is detected by the executor and returned as a heavy `TransactionUpdate` with `Status = StatusFailed{Error}`.
 
@@ -521,7 +521,7 @@ A single `Committed.update` (or `TransactionUpdateLight.update`) may contain ent
 
 **Important:** If the same row matches multiple subscriptions, it appears in the update for each matching subscription independently. There is no deduplication across subscriptions.
 
-**`tx_id` exposure.** The caller's commit TxID is **not** a standalone wire field on `TransactionUpdate` in v1. Clients recover commit identity through their `SubscribeSingleApplied` / `SubscribeMultiApplied` seeding and successive deltas; v1 provides no `resume_from_tx_id` mechanism. A client that disconnects must re-subscribe and rebuild state from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`. (For rejection paths where no transaction was ever opened, the executor emits a synthetic heavy `TransactionUpdate` with `Status = Failed{Error}` and `ReducerCallInfo` populated from the request; the "no committed transaction" signal is implicit in the `Failed` arm. See `docs/parity-decisions.md#outcome-model`.)
+**`tx_id` exposure.** The caller's commit TxID is **not** a standalone wire field on `TransactionUpdate` in v1. Clients recover commit identity through their `SubscribeSingleApplied` / `SubscribeMultiApplied` seeding and successive deltas; v1 provides no `resume_from_tx_id` mechanism. A client that disconnects must re-subscribe and rebuild state from a fresh `SubscribeSingleApplied` / `SubscribeMultiApplied`. (For rejection paths where no transaction was ever opened, the executor emits a synthetic heavy `TransactionUpdate` with `Status = Failed{Error}` and `ReducerCallInfo` populated from the request; the "no committed transaction" signal is implicit in the `Failed` arm. See `docs/shunter-design-decisions.md#outcome-model`.)
 
 **Dispatch rule:**
 - Caller always receives this heavy `TransactionUpdate` on `Committed` / `Failed`, subject to the `CallReducerFlags::NoSuccessNotify` opt-out on `Committed` (§7.3).
@@ -554,7 +554,7 @@ rows:       RowList
 **Tag 7 is reserved.** The former `ReducerCallResult` envelope was removed from the wire surface. The caller outcome is now carried by the heavy `TransactionUpdate` (§8.5); non-callers receive `TransactionUpdateLight` (§8.8). The tag byte is held reserved so it cannot be silently re-allocated if a future contributor reintroduces a separate caller envelope. A server decoder MUST reject tag 7 with `ErrUnknownMessageTag`; a client decoder MUST treat tag 7 as a fatal protocol error (§3.2).
 
 Authoritative pins:
-- `protocol/parity_message_family_test.go::TestPhase15TagReducerCallResultReserved`
+- `protocol/message_family_contract_test.go::TestShunterTagReducerCallResultReserved`
 - `protocol/server_messages_test.go::TestTagReducerCallResultIsReserved`
 
 ### 8.8 TransactionUpdateLight

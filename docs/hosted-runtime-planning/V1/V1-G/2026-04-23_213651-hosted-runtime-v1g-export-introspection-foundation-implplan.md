@@ -17,7 +17,7 @@ Tech stack: Go, root package `github.com/ponchione/shunter`, existing `schema` p
 
 Read and verified while writing this plan:
 
-- `docs/decomposition/hosted-runtime-version-phases.md` defines V1-G as export and introspection foundation after V1-F local runtime calls and before V1-H hello-world replacement.
+- `docs/decomposition/hosted-runtime-version-phases.md` defines V1-G as the export and introspection foundation in the hosted-runtime sequence.
 - `docs/decomposition/hosted-runtime-v1-contract.md` says `Runtime` should expose schema/module export and introspection as part of the minimum hosted runtime owner surface.
 - `docs/hosted-runtime-implementation-roadmap.md` V1-6 says the export/introspection hook should reuse existing schema export work, define a small module description structure, and avoid the full v1.5 canonical contract.
 - V1-A through V1-F plans under `docs/hosted-runtime-planning/` define the root `Module`, `Config`, `Runtime`, `Build`, module registration wrappers, private runtime build/lifecycle/network/local-call state, and explicitly defer export/introspection to V1-G.
@@ -81,7 +81,7 @@ Out of scope:
 - multi-module hosting
 - new network serving APIs; V1-E owns network surface
 - local reducer/query calls; V1-F owns local calls
-- hello-world replacement; V1-H owns examples
+- hello-world replacement
 - broad SQL/view system
 - lower-level schema redesign solely to make export richer
 
@@ -247,8 +247,8 @@ Do not add in V1-G:
 // func (m *Module) View(...)
 // type Contract struct { ... permissions/migrations/codegen ... }
 
-// V1-H:
-// example rewrite or hello-world changes
+// Examples:
+// rewrite or hello-world changes
 
 // Later adapters/control plane:
 // CLI/admin/REST/MCP description endpoints
@@ -788,13 +788,8 @@ Expected:
 - Do not use the former bundled demo command as an implementation source of truth.
 - If `schema.Engine.ExportSchema()` lacks a V1-G-needed schema detail, prefer documenting the limitation over widening lower-level schema export into v1.5 territory.
 
-## Immediate next slice
+## Historical Sequencing Note
 
-After V1-G lands, the next planning/implementation slice is V1-H hello-world replacement and V1 proof:
-
-- replace manual subsystem bootstrap with a hosted-runtime example
-- define a table and reducer through the top-level module API
-- build/start runtime through the root owner API
-- connect a client through the V1-E network surface
-- use reducer/local/read behavior where appropriate to prove the path
-- keep full tutorial sites, generated frontend apps, and v1.5 codegen/contract workflow deferred
+Later hosted-runtime slices have landed. Do not use this completed V1-G
+implementation plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

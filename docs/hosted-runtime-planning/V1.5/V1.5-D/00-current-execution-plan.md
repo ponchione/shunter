@@ -20,9 +20,8 @@ Task progress:
 - Task 03 complete. `PermissionMetadata`, `ReadModelMetadata`, reducer
   options, query/view metadata fields, contract declarations, and generated
   TypeScript metadata constants are implemented.
-- Task 04 complete. Root/package validation passed; the broad `./...` run is
-  blocked by the existing `store` rapid test failure noted in the hosted
-  runtime handoff.
+- Task 04 complete. Root/package validation passed. At the time, the broad
+  `./...` run was tracked separately in the hosted-runtime handoff.
 
 V1.5-D landed proof:
 - reducers can be annotated with `WithReducerPermissions(...)`
@@ -64,5 +63,6 @@ V1.5-D must not become:
 - runtime-blocking access-control enforcement unless a later contract explicitly
   designs that behavior
 
-Immediate next V1.5 slice after V1.5-D: V1.5-E migration metadata and contract
-diff tooling.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V1.5-D plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

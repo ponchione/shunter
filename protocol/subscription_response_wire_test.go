@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestParitySubscribeSingleAppliedWireShape pins the byte-level wire
+// TestShunterSubscribeSingleAppliedWireShape pins the byte-level wire
 // shape of SubscribeSingleApplied against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317`
 // (`pub struct SubscribeApplied<F>`). Reference field order:
@@ -18,9 +18,9 @@ import (
 //
 // Shunter flattens `SubscribeRows { table_id, table_name, table_rows }`
 // to `TableName (Box<str>) + Rows (Bytes)`. That rows-shape divergence is
-// accepted as documented per `docs/parity-decisions.md#protocol-rows-shape`
-// (Phase 2 Slice 4). This test pins the field order.
-func TestParitySubscribeSingleAppliedWireShape(t *testing.T) {
+// accepted as documented per `docs/shunter-design-decisions.md#protocol-rows-shape`
+// (row-shape). This test pins the field order.
+func TestShunterSubscribeSingleAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x11223344
 	const queryID uint32 = 0xAABBCCDD
 	const duration uint64 = 0x0102030405060708
@@ -80,7 +80,7 @@ func TestParitySubscribeSingleAppliedWireShape(t *testing.T) {
 	}
 }
 
-// TestParityUnsubscribeSingleAppliedWireShape pins the byte-level wire
+// TestShunterUnsubscribeSingleAppliedWireShape pins the byte-level wire
 // shape of UnsubscribeSingleApplied against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331`
 // (`pub struct UnsubscribeApplied<F>`). Reference field order:
@@ -92,8 +92,8 @@ func TestParitySubscribeSingleAppliedWireShape(t *testing.T) {
 //
 // Shunter models `rows` as `HasRows (u8) + optional Rows (Bytes)`; the
 // reference required-rows shape is accepted as documented per
-// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
-func TestParityUnsubscribeSingleAppliedWireShape(t *testing.T) {
+// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
+func TestShunterUnsubscribeSingleAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x44332211
 	const queryID uint32 = 0xDDCCBBAA
 	const duration uint64 = 0x1020304050607080
@@ -150,10 +150,10 @@ func TestParityUnsubscribeSingleAppliedWireShape(t *testing.T) {
 	}
 }
 
-// TestParityUnsubscribeSingleAppliedWireShapeNoRows pins the HasRows=false
+// TestShunterUnsubscribeSingleAppliedWireShapeNoRows pins the HasRows=false
 // byte shape: duration still sits at position 2; the rows Bytes length
 // is absent because HasRows=0.
-func TestParityUnsubscribeSingleAppliedWireShapeNoRows(t *testing.T) {
+func TestShunterUnsubscribeSingleAppliedWireShapeNoRows(t *testing.T) {
 	const requestID uint32 = 7
 	const queryID uint32 = 42
 	const duration uint64 = 0xCAFEBABEDEADBEEF
@@ -188,7 +188,7 @@ func TestParityUnsubscribeSingleAppliedWireShapeNoRows(t *testing.T) {
 	}
 }
 
-// TestParitySubscribeMultiAppliedWireShape pins the byte-level wire
+// TestShunterSubscribeMultiAppliedWireShape pins the byte-level wire
 // shape of SubscribeMultiApplied against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380`
 // (`pub struct SubscribeMultiApplied<F>`). Reference field order:
@@ -200,9 +200,8 @@ func TestParityUnsubscribeSingleAppliedWireShapeNoRows(t *testing.T) {
 //
 // Shunter flattens `DatabaseUpdate { tables: Vec<TableUpdate> }` to
 // `[]SubscriptionUpdate`; that rows-shape divergence is accepted as
-// documented per `docs/parity-decisions.md#protocol-rows-shape` (Phase 2
-// Slice 4).
-func TestParitySubscribeMultiAppliedWireShape(t *testing.T) {
+// documented per `docs/shunter-design-decisions.md#protocol-rows-shape`.
+func TestShunterSubscribeMultiAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x01020304
 	const queryID uint32 = 0x05060708
 	const duration uint64 = 0x1112131415161718
@@ -270,12 +269,12 @@ func TestParitySubscribeMultiAppliedWireShape(t *testing.T) {
 	}
 }
 
-// TestParityUnsubscribeMultiAppliedWireShape pins the byte-level wire
+// TestShunterUnsubscribeMultiAppliedWireShape pins the byte-level wire
 // shape of UnsubscribeMultiApplied against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394`
 // (`pub struct UnsubscribeMultiApplied<F>`). Same field order as
 // SubscribeMultiApplied — duration at position 2.
-func TestParityUnsubscribeMultiAppliedWireShape(t *testing.T) {
+func TestShunterUnsubscribeMultiAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0xAAAA5555
 	const queryID uint32 = 0x5555AAAA
 	const duration uint64 = 0xF0E0D0C0B0A09080

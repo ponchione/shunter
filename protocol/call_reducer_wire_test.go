@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestParityCallReducerWireShape pins the byte-level wire shape of
+// TestShunterCallReducerWireShape pins the byte-level wire shape of
 // CallReducer against the reference envelope at
 // `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:110`
 // (`pub struct CallReducer<Args>`). Reference field order:
@@ -20,7 +20,7 @@ import (
 // The test constructs the reference byte shape by hand and compares
 // against the protocol encoder output; it also round-trips the frame
 // through the decoder to prove the field-order change is symmetric.
-func TestParityCallReducerWireShape(t *testing.T) {
+func TestShunterCallReducerWireShape(t *testing.T) {
 	const reducerName = "transfer"
 	args := []byte{0xde, 0xad, 0xbe, 0xef}
 	const requestID uint32 = 0x11223344
@@ -89,10 +89,10 @@ func TestParityCallReducerWireShape(t *testing.T) {
 	}
 }
 
-// TestParityCallReducerWireShapeEmptyArgs pins the byte shape when args
+// TestShunterCallReducerWireShapeEmptyArgs pins the byte shape when args
 // is empty. Reference encoding of `Bytes` with zero length is a LE u32
 // zero followed by no payload.
-func TestParityCallReducerWireShapeEmptyArgs(t *testing.T) {
+func TestShunterCallReducerWireShapeEmptyArgs(t *testing.T) {
 	const reducerName = "ping"
 	const requestID uint32 = 1
 

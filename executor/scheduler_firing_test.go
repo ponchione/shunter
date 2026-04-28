@@ -157,12 +157,6 @@ func TestFiringFixedRateUsesIntendedFireTime(t *testing.T) {
 	repeatNs := int64(10 * time.Second)
 	seedSchedule(t, ff.cs, ff.schedTable, 42, "fire", nil, intendedNs, repeatNs)
 
-	// Delay so wall-clock now is meaningfully after intendedNs. If the
-	// implementation ever regressed to now+repeat instead of
-	// intended+repeat, this test would catch it because real "now" is
-	// decades after time.Unix(100,0).
-	time.Sleep(5 * time.Millisecond)
-
 	resp := fireCallCmd(ff, 42, intendedNs)
 	if resp.Status != StatusCommitted {
 		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
@@ -196,13 +190,13 @@ func TestFiringMissingRowSucceeds(t *testing.T) {
 
 var errFireFailed = stubError("scheduled reducer failed on purpose")
 
-// TestParityP0Sched001PanicRetainsScheduledRow pins the intentional
-// divergence from reference scheduler.rs:445-455 that Shunter
+// TestSchedulerPanicRetainsScheduledRow pins the intentional divergence from
+// reference scheduler.rs:445-455 that Shunter
 // preserves sys_scheduled rows on reducer panic (consistent with
 // reducer-error), while the reference deletes one-shot rows in a
 // fresh tx regardless of panic outcome. See
-// docs/parity-decisions.md#scheduler-startup-and-firing.
-func TestParityP0Sched001PanicRetainsScheduledRow(t *testing.T) {
+// docs/shunter-design-decisions.md#scheduler-startup-and-firing.
+func TestSchedulerPanicRetainsScheduledRow(t *testing.T) {
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{

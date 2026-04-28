@@ -22,7 +22,7 @@ import (
 // Field order matches reference `IdentityToken` at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:445
 // (`identity, token, connection_id`) — pinned by
-// parity_identity_token_test.go against the reference byte shape.
+// identity_token_wire_test.go against the reference byte shape.
 // Renamed from `InitialConnection`; the prior type name and field
 // order (`identity, connection_id, token`) were Shunter-local.
 type IdentityToken struct {
@@ -32,16 +32,16 @@ type IdentityToken struct {
 }
 
 // SubscribeSingleApplied is the server response to a SubscribeSingle.
-// Part of the Phase 2 Slice 2 variant split — SubscribeMultiApplied
+// Part of the single/multi variant variant split — SubscribeMultiApplied
 // carries the merged delta for a multi-query set. Reference:
 // SubscribeApplied at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317
 // (`request_id, total_host_execution_duration_micros, query_id, rows`).
 // Duration sits at position 2 to match the reference byte shape — pinned
-// by parity_applied_envelopes_test.go. TableName + Rows flatten the
+// by subscription_response_wire_test.go. TableName + Rows flatten the
 // reference `SubscribeRows` wrapper; that rows-shape divergence is
 // accepted as documented per
-// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
+// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
 type SubscribeSingleApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -51,17 +51,17 @@ type SubscribeSingleApplied struct {
 }
 
 // UnsubscribeSingleApplied is the server response to an UnsubscribeSingle.
-// Part of the Phase 2 Slice 2 variant split — UnsubscribeMultiApplied
+// Part of the single/multi variant variant split — UnsubscribeMultiApplied
 // carries the merged delta for a multi-query set. Reference:
 // UnsubscribeApplied at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331
 // (`request_id, total_host_execution_duration_micros, query_id, rows`).
 // Duration sits at position 2 to match the reference byte shape — pinned
-// by parity_applied_envelopes_test.go. HasRows + Rows diverges from the
+// by subscription_response_wire_test.go. HasRows + Rows diverges from the
 // reference required `SubscribeRows` wrapper; that rows-shape
 // divergence (including the Shunter-local `HasRows` optionality) is
 // accepted as documented per
-// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
+// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
 type UnsubscribeSingleApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -80,7 +80,7 @@ type UnsubscribeSingleApplied struct {
 //
 // TotalHostExecutionDurationMicros mirrors the reference field of the
 // same name (v1.rs:350) and is the first wire field for byte-shape
-// parity. Live emit sites now populate a measured non-zero microsecond
+// Shunter contract. Live emit sites now populate a measured non-zero microsecond
 // duration from the admission / evaluation receipt seam; the wire shape
 // and the value semantics are both closed.
 type SubscriptionError struct {
@@ -98,10 +98,10 @@ type SubscriptionError struct {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380
 // (`request_id, total_host_execution_duration_micros, query_id, update`).
 // Duration sits at position 2 to match the reference byte shape — pinned
-// by parity_applied_envelopes_test.go. Update flattens the reference
+// by subscription_response_wire_test.go. Update flattens the reference
 // `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
 // divergence is accepted as documented per
-// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
+// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
 type SubscribeMultiApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -115,10 +115,10 @@ type SubscribeMultiApplied struct {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394
 // (`request_id, total_host_execution_duration_micros, query_id, update`).
 // Duration sits at position 2 to match the reference byte shape — pinned
-// by parity_applied_envelopes_test.go. Update flattens the reference
+// by subscription_response_wire_test.go. Update flattens the reference
 // `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
 // divergence is accepted as documented per
-// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
+// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
 type UnsubscribeMultiApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -142,14 +142,14 @@ type TransactionUpdate struct {
 }
 
 // TransactionUpdateLight is the delta-only envelope delivered to
-// non-caller subscribers whose rows were touched (Phase 1.5). Reference:
+// non-caller subscribers whose rows were touched (outcome-model). Reference:
 // `pub struct TransactionUpdateLight<F>` at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:493
 // (`request_id: u32, update: DatabaseUpdate<F>`). Byte-shape pin in
-// parity_rows_shape_test.go. Update flattens the reference
+// rows_shape_contract_test.go. Update flattens the reference
 // `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
 // divergence is accepted as documented per
-// `docs/parity-decisions.md#protocol-rows-shape` (Phase 2 Slice 4).
+// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
 type TransactionUpdateLight struct {
 	RequestID uint32
 	Update    []SubscriptionUpdate
@@ -168,14 +168,14 @@ type UpdateStatus interface {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:526.
 // Update flattens the reference `DatabaseUpdate` wrapper to
 // `[]SubscriptionUpdate`; that rows-shape divergence is accepted as
-// documented per `docs/parity-decisions.md#protocol-rows-shape` (Phase 2
-// Slice 4). Byte-shape pin lives in parity_transaction_update_test.go.
+// documented per `docs/shunter-design-decisions.md#protocol-rows-shape`.
+// Byte-shape pin lives in transaction_update_wire_test.go.
 type StatusCommitted struct {
 	Update []SubscriptionUpdate
 }
 
 // StatusFailed signals reducer-side failure or pre-commit rejection.
-// Error is a human-readable message; Phase 1.5 collapses user-error,
+// Error is a human-readable message; outcome-model collapses user-error,
 // panic, and not-found into this single arm — see the decision doc.
 type StatusFailed struct {
 	Error string
@@ -198,7 +198,7 @@ type ReducerCallInfo struct {
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:654
 // (`message_id, error: Option<Box<str>>, tables: Box<[OneOffTable]>,
 // total_host_execution_duration: TimeDuration`) — pinned by
-// parity_one_off_query_response_test.go against the reference byte shape.
+// one_off_query_response_wire_test.go against the reference byte shape.
 // Renamed from `OneOffQueryResult`; the prior Status-byte + single-Rows
 // + Error layout was Shunter-local. `nil Error` signals success and
 // `Tables` carries the matched rows; on failure `Error` is non-nil and
@@ -300,7 +300,7 @@ func EncodeServerMessage(m any) ([]byte, error) {
 // OneOffQueryResponse, TransactionUpdateLight, SubscribeMultiApplied,
 // UnsubscribeMultiApplied — matching the tag byte.
 // TagReducerCallResult is reserved and rejected here — see
-// `docs/parity-decisions.md#outcome-model`.
+// `docs/shunter-design-decisions.md#outcome-model`.
 func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	if len(frame) < 1 {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)

@@ -48,8 +48,9 @@ type Executor struct {
 	// deliberately ungated — embedder-direct callers own their ordering.
 	externalReady atomic.Bool
 	// startupOnce ensures Startup runs its replay + sweep sequence once.
-	// Subsequent calls return nil without re-entering the sweep.
+	// Subsequent calls return the first result without re-entering the sweep.
 	startupOnce sync.Once
+	startupErr  error
 	submitMu    sync.RWMutex
 	// schedTableID is the cached schema.TableID for sys_scheduled,
 	// resolved once at NewExecutor so per-reducer handle construction
@@ -157,23 +158,22 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 // boot ordering is: recovery → NewExecutor → Startup → go Scheduler.Run →
 // go Executor.Run → first protocol accept.
 //
-// Startup is idempotent: later calls are no-ops (first-call wins via
-// sync.Once). If the sweep's post-commit pipeline latches executor-fatal
+// Startup is idempotent: later calls are no-ops that return the first
+// call's result. If the sweep's post-commit pipeline latches executor-fatal
 // mid-sequence, Startup returns the error and leaves externalReady false.
 func (e *Executor) Startup(ctx context.Context, scheduler *Scheduler) error {
-	var startupErr error
 	e.startupOnce.Do(func() {
 		if scheduler != nil {
 			e.attachScheduler(scheduler)
 			scheduler.ReplayFromCommitted()
 		}
 		if err := e.sweepDanglingClients(ctx); err != nil {
-			startupErr = err
+			e.startupErr = err
 			return
 		}
 		e.externalReady.Store(true)
 	})
-	return startupErr
+	return e.startupErr
 }
 
 // Run processes commands until context is cancelled or inbox is closed.

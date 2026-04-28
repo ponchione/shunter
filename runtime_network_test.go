@@ -263,12 +263,18 @@ func TestRuntimeCloseClearsProtocolGraphBeforeExecutorResources(t *testing.T) {
 
 func eventually(t *testing.T, fn func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
 		if fn() {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-timeout.C:
+			t.Fatal("condition was not met before deadline")
+		case <-ticker.C:
+		}
 	}
-	t.Fatal("condition was not met before deadline")
 }

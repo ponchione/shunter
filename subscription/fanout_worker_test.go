@@ -12,6 +12,7 @@ import (
 // mockFanOutSender records delivery calls for test assertions.
 type mockFanOutSender struct {
 	mu         sync.Mutex
+	changed    chan struct{}
 	lightCalls []lightCall
 	heavyCalls []heavyCall
 	errCalls   []errCall
@@ -37,19 +38,79 @@ func (m *mockFanOutSender) SendTransactionUpdateHeavy(connID types.ConnectionID,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.heavyCalls = append(m.heavyCalls, heavyCall{ConnID: connID, Outcome: outcome, CallerUpdates: callerUpdates})
+	m.signalLocked()
 	return m.sendErr
 }
 func (m *mockFanOutSender) SendTransactionUpdateLight(connID types.ConnectionID, requestID uint32, updates []SubscriptionUpdate, memo *EncodingMemo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lightCalls = append(m.lightCalls, lightCall{ConnID: connID, RequestID: requestID, Updates: updates})
+	m.signalLocked()
 	return m.sendErr
 }
 func (m *mockFanOutSender) SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.errCalls = append(m.errCalls, errCall{ConnID: connID, Err: subErr})
+	m.signalLocked()
 	return m.sendErr
+}
+
+func (m *mockFanOutSender) signalLocked() {
+	if m.changed != nil {
+		close(m.changed)
+		m.changed = make(chan struct{})
+	}
+}
+
+func (m *mockFanOutSender) waitChLocked() <-chan struct{} {
+	if m.changed == nil {
+		m.changed = make(chan struct{})
+	}
+	return m.changed
+}
+
+func waitForMockCounts(t *testing.T, mock *mockFanOutSender, label string, wantLight, wantHeavy, wantErr int) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		mock.mu.Lock()
+		gotLight := len(mock.lightCalls)
+		gotHeavy := len(mock.heavyCalls)
+		gotErr := len(mock.errCalls)
+		if gotLight == wantLight && gotHeavy == wantHeavy && gotErr == wantErr {
+			mock.mu.Unlock()
+			return
+		}
+		ch := mock.waitChLocked()
+		mock.mu.Unlock()
+
+		select {
+		case <-ch:
+		case <-deadline:
+			t.Fatalf("%s delivery counts: light=%d heavy=%d err=%d, want light=%d heavy=%d err=%d",
+				label, gotLight, gotHeavy, gotErr, wantLight, wantHeavy, wantErr)
+		}
+	}
+}
+
+func assertMockCounts(t *testing.T, mock *mockFanOutSender, label string, wantLight, wantHeavy, wantErr int) {
+	t.Helper()
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.lightCalls) != wantLight || len(mock.heavyCalls) != wantHeavy || len(mock.errCalls) != wantErr {
+		t.Fatalf("%s delivery counts: light=%d heavy=%d err=%d, want light=%d heavy=%d err=%d",
+			label, len(mock.lightCalls), len(mock.heavyCalls), len(mock.errCalls), wantLight, wantHeavy, wantErr)
+	}
+}
+
+func waitForFanOutWorkerExit(t *testing.T, done <-chan struct{}, label string) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("%s: worker did not exit", label)
+	}
 }
 
 func cid(b byte) types.ConnectionID {
@@ -81,7 +142,7 @@ func TestFanOutWorker_NonCallerDelivery(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "non-caller delivery", 2, 0, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -117,7 +178,7 @@ func TestFanOutWorker_ContextCancel(t *testing.T) {
 
 func TestFanOutWorker_ContextCancelWhileWaitingOnTxDurable(t *testing.T) {
 	mock := &mockFanOutSender{}
-	inbox := make(chan FanOutMessage, 1)
+	inbox := make(chan FanOutMessage)
 	dropped := make(chan types.ConnectionID, 64)
 	w := NewFanOutWorker(inbox, mock, dropped)
 	conn1 := cid(1)
@@ -130,15 +191,22 @@ func TestFanOutWorker_ContextCancelWhileWaitingOnTxDurable(t *testing.T) {
 		close(done)
 	}()
 
-	inbox <- FanOutMessage{
-		TxID:      types.TxID(1),
-		TxDurable: make(chan types.TxID),
-		Fanout: CommitFanout{
-			conn1: {{SubscriptionID: 1, TableName: "t1"}},
-		},
+	sent := make(chan struct{})
+	go func() {
+		inbox <- FanOutMessage{
+			TxID:      types.TxID(1),
+			TxDurable: make(chan types.TxID),
+			Fanout: CommitFanout{
+				conn1: {{SubscriptionID: 1, TableName: "t1"}},
+			},
+		}
+		close(sent)
+	}()
+	select {
+	case <-sent:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not receive TxDurable-gated message")
 	}
-
-	time.Sleep(25 * time.Millisecond)
 	cancel()
 	select {
 	case <-done:
@@ -167,7 +235,7 @@ func TestFanOutWorker_ClosedInbox(t *testing.T) {
 	}
 }
 
-// TestFanOutWorker_CallerDiversion verifies the Phase 1.5 split: caller
+// TestFanOutWorker_CallerDiversion verifies the outcome-model split: caller
 // receives the heavy envelope with the caller's row delta embedded in
 // CallerUpdates; non-callers receive the light envelope.
 func TestFanOutWorker_CallerDiversion(t *testing.T) {
@@ -191,7 +259,7 @@ func TestFanOutWorker_CallerDiversion(t *testing.T) {
 		CallerOutcome: committedOutcome(7),
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "caller diversion", 1, 1, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -224,7 +292,7 @@ func TestFanOutWorker_CallerDiversion(t *testing.T) {
 // TestFanOutWorker_CallerDiversion_FailedStatus verifies that a failed
 // reducer still delivers the heavy envelope to the caller; non-caller
 // fanout is still delivered because the row-touches may have been
-// preserved for other reducers. Phase 1.5 collapses all failure modes
+// preserved for other reducers. outcome-model collapses all failure modes
 // (user, panic, not_found) onto `CallerOutcomeFailed`.
 func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
 	mock := &mockFanOutSender{}
@@ -250,7 +318,7 @@ func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "failed caller diversion", 0, 1, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -267,10 +335,10 @@ func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
 	}
 }
 
-// TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout is the
-// Phase 1.5 `P0-DELIVERY-002` pin: even when no subscriptions are active
-// and the fanout is empty, a reducer-originated commit must still
-// deliver the caller's heavy envelope so the caller observes its outcome.
+// TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout pins that even when
+// no subscriptions are active and the fanout is empty, a reducer-originated
+// commit must still deliver the caller's heavy envelope so the caller observes
+// its outcome.
 func TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
@@ -289,7 +357,7 @@ func TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout(t *testing.T) {
 		CallerOutcome: committedOutcome(99),
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "empty fanout caller heavy", 0, 1, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -309,7 +377,7 @@ func TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout(t *testing.T) {
 }
 
 // TestFanOutWorker_NoSuccessNotify_SuppressesCallerHeavy_OnCommitted
-// pins the Phase 1.5 sub-slice: when the caller set
+// pins the outcome-model contract: when the caller set
 // CallReducerFlags::NoSuccessNotify and the outcome is committed, the
 // caller's heavy envelope is skipped entirely. Caller observes nothing;
 // non-caller recipients still receive their light envelopes.
@@ -338,7 +406,7 @@ func TestFanOutWorker_NoSuccessNotify_SuppressesCallerHeavy_OnCommitted(t *testi
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "NoSuccessNotify non-caller delivery", 1, 0, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -365,7 +433,11 @@ func TestFanOutWorker_NoSuccessNotify_EmptyFanout_NoDelivery(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
 
 	caller := cid(1)
 	inbox <- FanOutMessage{
@@ -379,8 +451,8 @@ func TestFanOutWorker_NoSuccessNotify_EmptyFanout_NoDelivery(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	cancel()
+	close(inbox)
+	waitForFanOutWorkerExit(t, done, "NoSuccessNotify empty fanout")
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
@@ -418,7 +490,7 @@ func TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnFailed(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "NoSuccessNotify failure delivery", 0, 1, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -467,7 +539,11 @@ func TestFanOutWorker_ConnGone_Silent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
 
 	inbox <- FanOutMessage{
 		TxID: types.TxID(1),
@@ -476,8 +552,8 @@ func TestFanOutWorker_ConnGone_Silent(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	cancel()
+	close(inbox)
+	waitForFanOutWorkerExit(t, done, "conn-gone delivery")
 
 	select {
 	case id := <-dropped:
@@ -515,17 +591,13 @@ func TestFanOutWorker_MultipleSlowClients(t *testing.T) {
 		t.Fatal("no dropped client signal")
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	sender.mu.Lock()
-	defer sender.mu.Unlock()
-	if sender.okCount < 2 {
-		t.Fatalf("okCount = %d, want >= 2", sender.okCount)
-	}
+	waitForSelectiveOK(t, sender, 2)
 }
 
 // selectiveFailSender fails with ErrSendBufferFull for a specific connID.
 type selectiveFailSender struct {
 	mu      sync.Mutex
+	changed chan struct{}
 	fail    types.ConnectionID
 	okCount int
 }
@@ -540,10 +612,46 @@ func (s *selectiveFailSender) SendTransactionUpdateLight(connID types.Connection
 		return ErrSendBufferFull
 	}
 	s.okCount++
+	s.signalLocked()
 	return nil
 }
 func (s *selectiveFailSender) SendSubscriptionError(connID types.ConnectionID, subErr SubscriptionError) error {
 	return nil
+}
+
+func (s *selectiveFailSender) signalLocked() {
+	if s.changed != nil {
+		close(s.changed)
+		s.changed = make(chan struct{})
+	}
+}
+
+func (s *selectiveFailSender) waitChLocked() <-chan struct{} {
+	if s.changed == nil {
+		s.changed = make(chan struct{})
+	}
+	return s.changed
+}
+
+func waitForSelectiveOK(t *testing.T, sender *selectiveFailSender, want int) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		sender.mu.Lock()
+		got := sender.okCount
+		if got >= want {
+			sender.mu.Unlock()
+			return
+		}
+		ch := sender.waitChLocked()
+		sender.mu.Unlock()
+
+		select {
+		case <-ch:
+		case <-deadline:
+			t.Fatalf("okCount = %d, want >= %d", got, want)
+		}
+	}
 }
 
 func TestFanOutWorker_PublicProtocolDefault_WaitsForDurability(t *testing.T) {
@@ -565,17 +673,11 @@ func TestFanOutWorker_PublicProtocolDefault_WaitsForDurability(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	mock.mu.Lock()
-	preCount := len(mock.lightCalls)
-	mock.mu.Unlock()
-	if preCount != 0 {
-		t.Fatalf("lightCalls = %d before TxDurable, want 0", preCount)
-	}
+	assertMockCounts(t, mock, "before TxDurable", 0, 0, 0)
 
 	durableCh <- types.TxID(1)
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "after TxDurable", 1, 0, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -606,17 +708,11 @@ func TestFanOutWorker_ConfirmedRead_Waits(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	mock.mu.Lock()
-	preCount := len(mock.lightCalls)
-	mock.mu.Unlock()
-	if preCount != 0 {
-		t.Fatalf("lightCalls = %d before TxDurable, want 0", preCount)
-	}
+	assertMockCounts(t, mock, "before TxDurable", 0, 0, 0)
 
 	durableCh <- types.TxID(1)
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "after TxDurable", 1, 0, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -646,17 +742,11 @@ func TestFanOutWorker_SubscriptionError_PublicProtocolDefault_WaitsForDurability
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	mock.mu.Lock()
-	preCount := len(mock.errCalls)
-	mock.mu.Unlock()
-	if preCount != 0 {
-		t.Fatalf("errCalls = %d before TxDurable, want 0", preCount)
-	}
+	assertMockCounts(t, mock, "before TxDurable", 0, 0, 0)
 
 	durableCh <- types.TxID(1)
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "after TxDurable", 0, 0, 1)
 	cancel()
 
 	mock.mu.Lock()
@@ -666,7 +756,7 @@ func TestFanOutWorker_SubscriptionError_PublicProtocolDefault_WaitsForDurability
 	}
 }
 
-// TestFanOutWorker_ConfirmedReadCallerOnly_Waits verifies Phase 1.5
+// TestFanOutWorker_ConfirmedReadCallerOnly_Waits verifies outcome-model
 // confirmed-read gating for caller-only batches: a heavy delivery with
 // no non-caller fanout still waits for TxDurable before delivery.
 func TestFanOutWorker_ConfirmedReadCallerOnly_Waits(t *testing.T) {
@@ -690,17 +780,11 @@ func TestFanOutWorker_ConfirmedReadCallerOnly_Waits(t *testing.T) {
 		CallerOutcome: committedOutcome(9),
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	mock.mu.Lock()
-	preCount := len(mock.heavyCalls)
-	mock.mu.Unlock()
-	if preCount != 0 {
-		t.Fatalf("heavyCalls = %d before TxDurable, want 0", preCount)
-	}
+	assertMockCounts(t, mock, "before TxDurable", 0, 0, 0)
 
 	durableCh <- types.TxID(1)
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "after TxDurable", 0, 1, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -735,21 +819,11 @@ func TestFanOutWorker_FastRecipientDoesNotWaitForConfirmedCaller(t *testing.T) {
 		CallerOutcome: committedOutcome(11),
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	mock.mu.Lock()
-	preLight := len(mock.lightCalls)
-	preHeavy := len(mock.heavyCalls)
-	mock.mu.Unlock()
-	if preLight != 1 {
-		t.Fatalf("lightCalls = %d before TxDurable, want 1 for fast recipient", preLight)
-	}
-	if preHeavy != 0 {
-		t.Fatalf("heavyCalls = %d before TxDurable, want 0 for confirmed-read caller", preHeavy)
-	}
+	waitForMockCounts(t, mock, "fast recipient before TxDurable", 1, 0, 0)
 
 	durableCh <- types.TxID(1)
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "confirmed caller after TxDurable", 1, 1, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -782,7 +856,7 @@ func TestFanOutWorker_FastCallerOnly_DoesNotWaitForTxDurable(t *testing.T) {
 		CallerOutcome: committedOutcome(12),
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "fast caller-only delivery", 0, 1, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -814,7 +888,7 @@ func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "nil TxDurable delivery", 1, 0, 0)
 	cancel()
 
 	mock.mu.Lock()
@@ -936,7 +1010,7 @@ func TestFanOutWorker_SubscriptionErrorDelivery(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	waitForMockCounts(t, mock, "subscription error delivery", 1, 0, 2)
 	cancel()
 
 	mock.mu.Lock()
@@ -960,16 +1034,23 @@ func TestFanOutWorker_ErrorsDeliveredBeforeUpdates(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var order []call
+	changed := make(chan struct{})
+	signal := func() {
+		close(changed)
+		changed = make(chan struct{})
+	}
 
 	sender := &orderTrackingSender{
 		onLight: func(connID types.ConnectionID) {
 			mu.Lock()
 			order = append(order, call{kind: "tx", conn: connID})
+			signal()
 			mu.Unlock()
 		},
 		onErr: func(connID types.ConnectionID) {
 			mu.Lock()
 			order = append(order, call{kind: "err", conn: connID})
+			signal()
 			mu.Unlock()
 		},
 	}
@@ -992,14 +1073,29 @@ func TestFanOutWorker_ErrorsDeliveredBeforeUpdates(t *testing.T) {
 		},
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	deadline := time.After(time.Second)
+	for {
+		mu.Lock()
+		if len(order) >= 2 {
+			mu.Unlock()
+			break
+		}
+		ch := changed
+		mu.Unlock()
+
+		select {
+		case <-ch:
+		case <-deadline:
+			mu.Lock()
+			got := len(order)
+			mu.Unlock()
+			t.Fatalf("order len = %d, want >= 2", got)
+		}
+	}
 	cancel()
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(order) < 2 {
-		t.Fatalf("order len = %d, want >= 2", len(order))
-	}
 	if order[0].kind != "err" {
 		t.Fatalf("first call = %q, want 'err' (errors before updates)", order[0].kind)
 	}
@@ -1029,7 +1125,7 @@ func (s *orderTrackingSender) SendSubscriptionError(connID types.ConnectionID, s
 	return nil
 }
 
-func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
+func TestFanOutWorker_FullFlow(t *testing.T) {
 	// Full pipeline: Manager.EvalAndBroadcast → inbox → FanOutWorker → mock sender.
 	mock := &mockFanOutSender{}
 	fanoutCh := make(chan FanOutMessage, 64)
@@ -1059,7 +1155,7 @@ func TestFanOutWorker_Acceptance_FullFlow(t *testing.T) {
 	)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 
-	time.Sleep(100 * time.Millisecond)
+	waitForMockCounts(t, mock, "manager fanout delivery", 1, 0, 0)
 	cancel()
 
 	mock.mu.Lock()

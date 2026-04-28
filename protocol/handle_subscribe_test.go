@@ -1621,7 +1621,7 @@ func TestHandleSubscribeSingle_JoinProjectionOnRightTable(t *testing.T) {
 	if joinPred.Filter != nil {
 		t.Fatalf("Join.Filter = %T, want nil", joinPred.Filter)
 	}
-	// TD-142 Slice 14: SELECT on the RHS alias must thread ProjectRight=true
+	// self-join projection contract: SELECT on the RHS alias must thread ProjectRight=true
 	// so the runtime emits RHS-shape rows.
 	if !joinPred.ProjectRight {
 		t.Fatal("Join.ProjectRight = false, want true for SELECT product.*")
@@ -1982,7 +1982,7 @@ func TestHandleSubscribeSingle_CaseDistinctRelationAliasesRouteJoinSides(t *test
 	}
 }
 
-// TD-142 Slice 14: self-join `SELECT b.*` threads ProjectRight=true so the
+// self-join projection contract: self-join `SELECT b.*` threads ProjectRight=true so the
 // runtime emits rows shaped like the b-side instance. The parser-side
 // ProjectedAlias="b" drives this decision; the physical table is the same on
 // both sides so the alias is the only signal.
@@ -2566,14 +2566,14 @@ func TestHandleSubscribeMulti_MixedLiteralAndSenderParameterCarriesPerPredicateH
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySenderResolvesToHexOnStringColumn pins
+// TestHandleSubscribeSingle_ShunterSenderResolvesToHexOnStringColumn pins
 // reference resolve_sender → lib.rs:353 onto the SubscribeSingle admission
 // surface. The compiled predicate must carry the caller hex string as the
 // equality target on a `KindString` column so the executor receives a
 // well-formed ColEq predicate (no protocol-level rejection). The earlier
 // rejection assertion was based on a misread of check.rs:487-488; that
 // reject case is `arr = :sender` (Array<String>), not String.
-func TestHandleSubscribeSingle_ParitySenderResolvesToHexOnStringColumn(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSenderResolvesToHexOnStringColumn(t *testing.T) {
 	conn := testConnDirect(nil)
 	conn.Identity = types.Identity{0xab, 0xcd}
 	executor := &mockSubExecutor{}
@@ -2735,7 +2735,7 @@ func TestHandleSubscribeSingle_SenderParameterInJoinFilter(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySenderInJoinFilterResolvesOnStringColumn
+// TestHandleSubscribeSingle_ShunterSenderInJoinFilterResolvesOnStringColumn
 // pins resolve_sender → lib.rs:353 on the join-WHERE surface. With
 // `WHERE s.label = :sender` against a `KindString` column on the joined
 // relation, the compiled join predicate must carry a String(caller hex)
@@ -2743,7 +2743,7 @@ func TestHandleSubscribeSingle_SenderParameterInJoinFilter(t *testing.T) {
 // rejection on the assumption that `:sender` was bytes-only on join sides;
 // reference admits the same widening on join WHERE leaves as on standalone
 // single-table predicates.
-func TestHandleSubscribeSingle_ParitySenderInJoinFilterResolvesOnStringColumn(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSenderInJoinFilterResolvesOnStringColumn(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
 		Name: "t",
@@ -2876,12 +2876,12 @@ func TestHandleSubscribeSingle_FloatLiteralOnIntegerColumnRejected(t *testing.T)
 	}
 }
 
-// TestHandleSubscribeSingle_ParityStringDigitsOnIntegerColumnWidens pins
+// TestHandleSubscribeSingle_ShunterStringDigitsOnIntegerColumnWidens pins
 // the reference widening at expr/src/lib.rs:255-352 onto the
 // SubscribeSingle admission surface. `WHERE u32 = '42'` must compile
 // (no SubscriptionError) and bind `u32` against `types.NewUint32(42)`
 // via the new LitString-on-numeric routing through `parseNumericLiteral`.
-func TestHandleSubscribeSingle_ParityStringDigitsOnIntegerColumnWidens(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterStringDigitsOnIntegerColumnWidens(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -2915,13 +2915,13 @@ func TestHandleSubscribeSingle_ParityStringDigitsOnIntegerColumnWidens(t *testin
 	}
 }
 
-// TestHandleSubscribeSingle_ParityNonNumericStringOnIntegerEmitsInvalidLiteral
+// TestHandleSubscribeSingle_ShunterNonNumericStringOnIntegerEmitsInvalidLiteral
 // pins the reference reject text on the SubscribeSingle admission
 // surface. `WHERE u32 = 'foo'` rejects with “ The literal expression
 // `foo` cannot be parsed as type `U32` “, WithSql-wrapped via the
 // existing `wrapSubscribeCompileErrorSQL` seam (the suffix added per
 // `error.rs:140` `DBError::WithSql`).
-func TestHandleSubscribeSingle_ParityNonNumericStringOnIntegerEmitsInvalidLiteral(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterNonNumericStringOnIntegerEmitsInvalidLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -2948,7 +2948,7 @@ func TestHandleSubscribeSingle_ParityNonNumericStringOnIntegerEmitsInvalidLitera
 	}
 }
 
-// TestHandleSubscribeSingle_ParityNumericLiteralOnStringColumnWidens pins the
+// TestHandleSubscribeSingle_ShunterNumericLiteralOnStringColumnWidens pins the
 // reference widening at expr/src/lib.rs:353 (`AlgebraicType::String =>
 // Ok(AlgebraicValue::String(value.into()))`) onto the SubscribeSingle
 // admission surface. `WHERE name = 42` and `WHERE name = 1.3` must compile
@@ -2957,7 +2957,7 @@ func TestHandleSubscribeSingle_ParityNonNumericStringOnIntegerEmitsInvalidLitera
 // `strconv.FormatInt` and LitFloat via `strconv.FormatFloat('g', -1, 64)`
 // at the coerce boundary, so the executor sees a `ColEq` carrying
 // `types.NewString("42")` / `types.NewString("1.3")` respectively.
-func TestHandleSubscribeSingle_ParityNumericLiteralOnStringColumnWidens(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterNumericLiteralOnStringColumnWidens(t *testing.T) {
 	cases := []struct {
 		name      string
 		sql       string
@@ -3008,14 +3008,14 @@ func TestHandleSubscribeSingle_ParityNumericLiteralOnStringColumnWidens(t *testi
 	}
 }
 
-// TestHandleSubscribeSingle_ParityScientificLiteralOverflowPreservesSourceText
+// TestHandleSubscribeSingle_ShunterScientificLiteralOverflowPreservesSourceText
 // pins the source-text seam through the SubscribeSingle (WithSql wrapper)
 // admission surface. `WHERE u8 = 1e3` collapses at the parser to LitInt(1000)
 // but keeps `Literal.Text = "1e3"`. Reference parse_int folds to_u8 None
 // into `InvalidLiteral::new("1e3", U8)`; Shunter renders the same text
 // via `renderLiteralSourceText`, then `wrapSubscribeCompileErrorSQL`
 // suffixes the SQL per `error.rs:140` `DBError::WithSql`.
-func TestHandleSubscribeSingle_ParityScientificLiteralOverflowPreservesSourceText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterScientificLiteralOverflowPreservesSourceText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3042,14 +3042,14 @@ func TestHandleSubscribeSingle_ParityScientificLiteralOverflowPreservesSourceTex
 	}
 }
 
-// TestHandleSubscribeSingle_ParityHexLiteralWidensOntoStringColumn pins the
+// TestHandleSubscribeSingle_ShunterHexLiteralWidensOntoStringColumn pins the
 // reference `parse(value, String)` arm at lib.rs:353 onto the SubscribeSingle
 // admission surface for a Hex source-text literal. `WHERE name =
 // 0xDEADBEEF` keeps the original token through `Literal.Text` (parser sets
 // it on tokHex), so the compiled predicate carries `String("0xDEADBEEF")`
 // as the equality target — no SubscriptionError, executor receives a
 // well-formed ColEq.
-func TestHandleSubscribeSingle_ParityHexLiteralWidensOntoStringColumn(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterHexLiteralWidensOntoStringColumn(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3084,14 +3084,14 @@ func TestHandleSubscribeSingle_ParityHexLiteralWidensOntoStringColumn(t *testing
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnknownTableRejected pins the reference
+// TestHandleSubscribeSingle_ShunterUnknownTableRejected pins the reference
 // type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs
 // lines 483-485 (`select * from r` / "Table r does not exist") onto the
 // SubscribeSingle admission surface. Shunter enforces this incidentally via
 // SchemaLookup.TableByName returning !ok inside compileSQLQueryString
 // (protocol/handle_subscribe.go:152-154); this pin promotes the rejection
-// from incidental to named parity contract.
-func TestHandleSubscribeSingle_ParityUnknownTableRejected(t *testing.T) {
+// from incidental to named Shunter contract.
+func TestHandleSubscribeSingle_ShunterUnknownTableRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3116,14 +3116,14 @@ func TestHandleSubscribeSingle_ParityUnknownTableRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnknownColumnRejected pins the reference
+// TestHandleSubscribeSingle_ShunterUnknownColumnRejected pins the reference
 // type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs
 // lines 491-493 (`select * from t where t.a = 1` / "Field a does not exist
 // on table t") onto the SubscribeSingle admission surface. Shunter enforces
 // this incidentally via rel.ts.Column returning !ok inside
 // normalizeSQLFilterForRelations (protocol/handle_subscribe.go:250-253); the
-// pin promotes the rejection from incidental to named parity contract.
-func TestHandleSubscribeSingle_ParityUnknownColumnRejected(t *testing.T) {
+// pin promotes the rejection from incidental to named Shunter contract.
+func TestHandleSubscribeSingle_ShunterUnknownColumnRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3148,7 +3148,7 @@ func TestHandleSubscribeSingle_ParityUnknownColumnRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected pins the
+// TestHandleSubscribeSingle_ShunterAliasedUnknownColumnRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 495-497 (`select * from t as r where r.a = 1` / "Field a
 // does not exist on table t") onto the SubscribeSingle admission surface.
@@ -3157,7 +3157,7 @@ func TestHandleSubscribeSingle_ParityUnknownColumnRejected(t *testing.T) {
 // rel.ts.Column lookup. The pin keeps the rejection named on the alias-
 // qualified surface rather than leaving it collapsed under the unaliased
 // case.
-func TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterAliasedUnknownColumnRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3182,7 +3182,7 @@ func TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected(t *testing.T) 
 	}
 }
 
-// TestHandleSubscribeSingle_ParityBaseTableQualifierAfterAliasRejected pins the
+// TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 506-509 (`select * from t as r where t.u32 = 5` / "t is not
 // in scope after alias") onto the SubscribeSingle admission surface. Once an
@@ -3190,8 +3190,8 @@ func TestHandleSubscribeSingle_ParityAliasedUnknownColumnRejected(t *testing.T) 
 // Shunter's parser enforces this incidentally at parseComparison via
 // resolveQualifier returning !ok against relationBindings.byQualifier
 // (query/sql/parser.go:750-753). The pin promotes the rejection from
-// incidental to named parity contract.
-func TestHandleSubscribeSingle_ParityBaseTableQualifierAfterAliasRejected(t *testing.T) {
+// incidental to named Shunter contract.
+func TestHandleSubscribeSingle_ShunterBaseTableQualifierAfterAliasRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3216,14 +3216,14 @@ func TestHandleSubscribeSingle_ParityBaseTableQualifierAfterAliasRejected(t *tes
 	}
 }
 
-// TestHandleSubscribeSingle_ParityBareColumnProjectionRejected pins the
+// TestHandleSubscribeSingle_ShunterBareColumnProjectionRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 510-513 (`select u32 from t` / "Subscriptions must be typed
 // to a single table") onto the SubscribeSingle admission surface. Shunter's
 // parser rejects any projection other than `*` or `table.*` at parseProjection
 // (query/sql/parser.go:517-528). The pin promotes the rejection from
-// incidental to named parity contract on the protocol boundary.
-func TestHandleSubscribeSingle_ParityBareColumnProjectionRejected(t *testing.T) {
+// incidental to named Shunter contract on the protocol boundary.
+func TestHandleSubscribeSingle_ShunterBareColumnProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3273,14 +3273,14 @@ func TestHandleSubscribeSingle_UnquotedNullWhereRejectedBeforeRegistration(t *te
 	}
 }
 
-// TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected pins
+// TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected pins
 // the reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 515-517 (`select * from t join s` / "Subscriptions must be
 // typed to a single table") onto the SubscribeSingle admission surface.
 // Shunter's parser requires joined queries to name the projected side via a
 // qualified projection at parseStatement (query/sql/parser.go:468-469). The
-// pin promotes the rejection from incidental to named parity contract.
-func TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected(t *testing.T) {
+// pin promotes the rejection from incidental to named Shunter contract.
+func TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3305,7 +3305,7 @@ func TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected(t *t
 	}
 }
 
-// TestHandleSubscribeSingle_ParityJoinStarProjectionRejectText pins the
+// TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText pins the
 // reference type-check rejection text at
 // reference/SpacetimeDB/crates/expr/src/errors.rs:41 (`InvalidWildcard::Join`
 // = "SELECT * is not supported for joins"), emitted at
@@ -3314,8 +3314,8 @@ func TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected(t *t
 // SubscribeSingle compile-origin error path wraps the inner text with
 // `DBError::WithSql` (reference error.rs:140) → `"{error}, executing:
 // `{sql}`"`. This pin is the exact-text companion to the shape-only
-// rejection pin at TestHandleSubscribeSingle_ParityJoinWithoutQualifiedProjectionRejected.
-func TestHandleSubscribeSingle_ParityJoinStarProjectionRejectText(t *testing.T) {
+// rejection pin at TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected.
+func TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -3354,14 +3354,14 @@ func TestHandleSubscribeSingle_ParityJoinStarProjectionRejectText(t *testing.T) 
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected pins the
+// TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
 // aliases") onto the SubscribeSingle admission surface. Shunter's parser
 // rejects the same-alias self-join shape in parseJoinClause
 // (query/sql/parser.go:577-579). The pin promotes the rejection from
-// incidental to named parity contract.
-func TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected(t *testing.T) {
+// incidental to named Shunter contract.
+func TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3386,7 +3386,7 @@ func TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected(t *testing.T
 	}
 }
 
-// TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected pins the
+// TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 526-528 (`select t.* from t join s on t.u32 = r.u32 join s
 // as r` / "Alias r is not in scope when it is referenced") onto the
@@ -3395,8 +3395,8 @@ func TestHandleSubscribeSingle_ParitySelfJoinWithoutAliasesRejected(t *testing.T
 // returning !ok against the first join's lookup table (query/sql/parser.go:629
 // -631); the multi-way-join rejection at parseStatement (query/sql/parser.go:
 // 482-489) would otherwise also fire, but the forward reference fails first.
-// The pin names the shape as a parity rejection contract.
-func TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected(t *testing.T) {
+// The pin names the shape as a Shunter rejection contract.
+func TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3421,15 +3421,15 @@ func TestHandleSubscribeSingle_ParityForwardAliasReferenceRejected(t *testing.T)
 	}
 }
 
-// TestHandleSubscribeSingle_ParityLimitClauseRejected pins the reference type-
+// TestHandleSubscribeSingle_ShunterLimitClauseRejected pins the reference type-
 // check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
-// TestHandleSubscribeSingle_ParityLimitClauseRejected pins reference
+// TestHandleSubscribeSingle_ShunterLimitClauseRejected pins reference
 // `SubParser::parse_query` (sql-parser/src/parser/sub.rs:94-107)
 // rejection of subscription queries carrying `limit: Some(...)` through
 // `SubscriptionUnsupported::feature(query)`, rendered as
 // `Unsupported: {query}` (parser/errors.rs:18-19) and wrapped with
 // `DBError::WithSql` for SubscribeSingle.
-func TestHandleSubscribeSingle_ParityLimitClauseRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterLimitClauseRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3459,11 +3459,11 @@ func TestHandleSubscribeSingle_ParityLimitClauseRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityLimitPrecedesSetQuantifierRejectText pins
+// TestHandleSubscribeSingle_ShunterLimitPrecedesSetQuantifierRejectText pins
 // reference `SubParser::parse_query` ordering: subscription LIMIT rejection
 // fires before `parse_select` can route SELECT ALL / DISTINCT to the
 // `Unsupported SELECT:` arm.
-func TestHandleSubscribeSingle_ParityLimitPrecedesSetQuantifierRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterLimitPrecedesSetQuantifierRejectText(t *testing.T) {
 	cases := []struct {
 		name    string
 		sqlText string
@@ -3505,13 +3505,13 @@ func TestHandleSubscribeSingle_ParityLimitPrecedesSetQuantifierRejectText(t *tes
 	}
 }
 
-// TestHandleSubscribeSingle_ParityLeadingPlusIntLiteral pins the reference
+// TestHandleSubscribeSingle_ShunterLeadingPlusIntLiteral pins the reference
 // valid-literal shape at reference/SpacetimeDB/crates/expr/src/check.rs:297-
 // 300 (`select * from t where u32 = +1` / "Leading `+`"): a leading `+` on
 // an integer literal is admitted end-to-end (parser accepts, coerce produces
 // the unsigned value, subscribe admission registers the set). Mirrors the
 // already-landed leading `-` support (`TestParseWhereNegativeInt`).
-func TestHandleSubscribeSingle_ParityLeadingPlusIntLiteral(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterLeadingPlusIntLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3548,15 +3548,15 @@ func TestHandleSubscribeSingle_ParityLeadingPlusIntLiteral(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnqualifiedWhereInJoinRejected pins the
+// TestHandleSubscribeSingle_ShunterUnqualifiedWhereInJoinRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 534-537 (`select t.* from t join s on t.u32 = s.u32 where
 // bytes = 0xABCD` / "Columns must be qualified in join expressions") onto the
 // SubscribeSingle admission surface. Shunter's parser enforces the qualify
 // requirement under a join binding at parseComparison
 // (query/sql/parser.go:761-763). The pin promotes the rejection from
-// incidental to named parity contract.
-func TestHandleSubscribeSingle_ParityUnqualifiedWhereInJoinRejected(t *testing.T) {
+// incidental to named Shunter contract.
+func TestHandleSubscribeSingle_ShunterUnqualifiedWhereInJoinRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3582,12 +3582,12 @@ func TestHandleSubscribeSingle_ParityUnqualifiedWhereInJoinRejected(t *testing.T
 	}
 }
 
-// TestHandleSubscribeSingle_ParityScientificNotationUnsignedInteger pins the
+// TestHandleSubscribeSingle_ShunterScientificNotationUnsignedInteger pins the
 // reference valid-literal shape at reference/SpacetimeDB/crates/expr/src/
 // check.rs:302-304 (`select * from t where u32 = 1e3` / "Scientific
 // notation"): an integer-valued exponent-form numeric binds to an unsigned
 // integer column end-to-end.
-func TestHandleSubscribeSingle_ParityScientificNotationUnsignedInteger(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterScientificNotationUnsignedInteger(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3624,11 +3624,11 @@ func TestHandleSubscribeSingle_ParityScientificNotationUnsignedInteger(t *testin
 	}
 }
 
-// TestHandleSubscribeSingle_ParityScientificNotationFloatNegativeExponent
+// TestHandleSubscribeSingle_ShunterScientificNotationFloatNegativeExponent
 // pins reference/SpacetimeDB/crates/expr/src/check.rs:314-316 (`select * from
 // t where f32 = 1e-3` / "Negative exponent"): a non-integral exponent-form
 // numeric binds to a float column end-to-end.
-func TestHandleSubscribeSingle_ParityScientificNotationFloatNegativeExponent(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterScientificNotationFloatNegativeExponent(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3665,11 +3665,11 @@ func TestHandleSubscribeSingle_ParityScientificNotationFloatNegativeExponent(t *
 	}
 }
 
-// TestHandleSubscribeSingle_ParityLeadingDotFloatLiteral pins reference/
+// TestHandleSubscribeSingle_ShunterLeadingDotFloatLiteral pins reference/
 // SpacetimeDB/crates/expr/src/check.rs:322-324 (`select * from t where
 // f32 = .1` / "Leading `.`"): a leading-dot numeric with no integer part
 // binds to a float column end-to-end.
-func TestHandleSubscribeSingle_ParityLeadingDotFloatLiteral(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterLeadingDotFloatLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3706,11 +3706,11 @@ func TestHandleSubscribeSingle_ParityLeadingDotFloatLiteral(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityScientificNotationOverflowInfinity pins
+// TestHandleSubscribeSingle_ShunterScientificNotationOverflowInfinity pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:326-328 (`select * from t
 // where f32 = 1e40` / "Infinity"): a magnitude beyond float32 range binds to
 // the f32 column as +Inf rather than being rejected.
-func TestHandleSubscribeSingle_ParityScientificNotationOverflowInfinity(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterScientificNotationOverflowInfinity(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3746,13 +3746,13 @@ func TestHandleSubscribeSingle_ParityScientificNotationOverflowInfinity(t *testi
 	}
 }
 
-// TestHandleSubscribeSingle_ParityInvalidLiteralNegativeIntOnUnsignedRejected
+// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejected
 // pins reference/SpacetimeDB/crates/expr/src/check.rs:382-385 (`select * from
 // t where u8 = -1` / "Negative integer for unsigned column") onto the
 // SubscribeSingle admission surface. `-1` parses to LitInt(-1) and
 // coerceUnsigned (query/sql/coerce.go:119) rejects negative ints before they
-// reach an unsigned column; the pin names the rejection as a parity contract.
-func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
+// reach an unsigned column; the pin names the rejection as a Shunter contract.
+func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3777,13 +3777,13 @@ func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeIntOnUnsignedRejected
 	}
 }
 
-// TestHandleSubscribeSingle_ParityInvalidLiteralScientificOverflowRejected
+// TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected
 // pins reference/SpacetimeDB/crates/expr/src/check.rs:386-389 (`select * from
 // t where u8 = 1e3` / "Out of bounds") onto the SubscribeSingle admission
 // surface. `1e3` parses via parseNumericLiteral as an integer-valued literal
 // that collapses to LitInt(1000); coerceUnsigned (query/sql/coerce.go:123)
 // rejects it as out of range for u8 (max 255).
-func TestHandleSubscribeSingle_ParityInvalidLiteralScientificOverflowRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterInvalidLiteralScientificOverflowRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3808,13 +3808,13 @@ func TestHandleSubscribeSingle_ParityInvalidLiteralScientificOverflowRejected(t 
 	}
 }
 
-// TestHandleSubscribeSingle_ParityInvalidLiteralFloatOnUnsignedRejected pins
+// TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:390-393 (`select * from t
 // where u8 = 0.1` / "Float as integer") onto the SubscribeSingle admission
 // surface. A non-integral decimal stays LitFloat and coerceUnsigned
 // (query/sql/coerce.go:116) rejects non-LitInt against an integer column.
 // Complements the existing u32 = 1.3 pin by naming the u8 column variant.
-func TestHandleSubscribeSingle_ParityInvalidLiteralFloatOnUnsignedRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterInvalidLiteralFloatOnUnsignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3839,13 +3839,13 @@ func TestHandleSubscribeSingle_ParityInvalidLiteralFloatOnUnsignedRejected(t *te
 	}
 }
 
-// TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnUnsignedRejected
+// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
 // pins reference/SpacetimeDB/crates/expr/src/check.rs:394-397 (`select * from
 // t where u32 = 1e-3` / "Float as integer") onto the SubscribeSingle
 // admission surface. `1e-3` parses to 0.001, fails the integer-valued collapse
 // in parseNumericLiteral (non-integral), stays LitFloat, and coerceUnsigned
 // rejects LitFloat against a KindUint32 column.
-func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnUnsignedRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3870,13 +3870,13 @@ func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnUnsignedRej
 	}
 }
 
-// TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnSignedRejected
+// TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected
 // pins reference/SpacetimeDB/crates/expr/src/check.rs:398-401 (`select * from
 // t where i32 = 1e-3` / "Float as integer") onto the SubscribeSingle
 // admission surface. Mirrors the unsigned case on a signed column:
 // parseNumericLiteral leaves 0.001 as LitFloat, and coerceSigned
 // (query/sql/coerce.go:106) rejects non-LitInt against a KindInt32 column.
-func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnSignedRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -3901,7 +3901,7 @@ func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnSignedRejec
 	}
 }
 
-// TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth pins
+// TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:360-370
 // (`valid_literals_for_type`) at the SubscribeSingle admission surface.
 // The reference test iterates every numeric column kind and asserts that
@@ -3912,7 +3912,7 @@ func TestHandleSubscribeSingle_ParityInvalidLiteralNegativeExponentOnSignedRejec
 // `SELECT * FROM t WHERE {colname} = 127`, and asserts the executor
 // receives a ColEq predicate with the width-native value. The reference
 // `u256 = 1e40` row stays deferred until BigDecimal literal widening.
-func TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth(t *testing.T) {
 	f32Want, err := types.NewFloat32(127)
 	if err != nil {
 		t.Fatalf("NewFloat32(127): %v", err)
@@ -3984,7 +3984,7 @@ func TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth(t *testing.T
 	}
 }
 
-// TestHandleSubscribeSingle_ParityValidLiteralU256Scientific pins the
+// TestHandleSubscribeSingle_ShunterValidLiteralU256Scientific pins the
 // remaining reference `valid_literals` row at
 // reference/SpacetimeDB/crates/expr/src/check.rs:330-332
 // (`select * from t where u256 = 1e40` / "u256"). The reference BigDecimal
@@ -3993,7 +3993,7 @@ func TestHandleSubscribeSingle_ParityValidLiteralOnEachIntegerWidth(t *testing.T
 // coerce decomposes it into four uint64 words matching the 256-bit layout.
 // Admission must succeed and the executor must receive a ColEq predicate
 // carrying the 10^40 Uint256 value.
-func TestHandleSubscribeSingle_ParityValidLiteralU256Scientific(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterValidLiteralU256Scientific(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4034,11 +4034,11 @@ func TestHandleSubscribeSingle_ParityValidLiteralU256Scientific(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUint256NegativeRejected extends the
+// TestHandleSubscribeSingle_ShunterUint256NegativeRejected extends the
 // reference invalid_literals bundle at check.rs:382-385 to the Uint256
 // column kind. `-1` parses to LitInt(-1) and coerce's KindUint256 branch
 // rejects negative ints just like the u8 / u128 rows do.
-func TestHandleSubscribeSingle_ParityUint256NegativeRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUint256NegativeRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4063,7 +4063,7 @@ func TestHandleSubscribeSingle_ParityUint256NegativeRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityTimestampLiteralAccepted pins the reference
+// TestHandleSubscribeSingle_ShunterTimestampLiteralAccepted pins the reference
 // valid_literals rows at check.rs:334-352 onto the SubscribeSingle admission
 // surface: RFC3339-shaped string literals bind to a KindTimestamp column. The
 // coerce path (query/sql/coerce.go) parses `T`/space separator, optional
@@ -4071,7 +4071,7 @@ func TestHandleSubscribeSingle_ParityUint256NegativeRejected(t *testing.T) {
 // and numeric offset forms. Each subtest runs
 // `SELECT * FROM t WHERE ts = '<shape>'` and confirms the executor receives a
 // ColEq predicate carrying a Timestamp value with the expected micros.
-func TestHandleSubscribeSingle_ParityTimestampLiteralAccepted(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterTimestampLiteralAccepted(t *testing.T) {
 	cases := []struct {
 		name  string
 		lit   string
@@ -4127,7 +4127,7 @@ func TestHandleSubscribeSingle_ParityTimestampLiteralAccepted(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityTimestampMalformedRejected pins reference
+// TestHandleSubscribeSingle_ShunterTimestampMalformedRejected pins reference
 // `InvalidLiteral` text for a non-RFC3339 string on a Timestamp column on
 // the SubscribeSingle admission surface. Reference path: `parse(value,
 // Timestamp)` (expr/src/lib.rs:359) falls through the catch-all `bail!`,
@@ -4135,7 +4135,7 @@ func TestHandleSubscribeSingle_ParityTimestampLiteralAccepted(t *testing.T) {
 // SubscribeSingle wraps compile errors with `DBError::WithSql`
 // (module_subscription_actor.rs:643), so the pin carries the
 // `, executing: ` suffix.
-func TestHandleSubscribeSingle_ParityTimestampMalformedRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterTimestampMalformedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4165,13 +4165,13 @@ func TestHandleSubscribeSingle_ParityTimestampMalformedRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityBoolLiteralOnTimestampRejectText pins
+// TestHandleSubscribeSingle_ShunterBoolLiteralOnTimestampRejectText pins
 // reference `UnexpectedType` text for a bool literal on a Timestamp column.
 // Reference lib.rs:94 routes the bool arm directly to UnexpectedType
 // (errors.rs:100) ahead of the lib.rs:99 InvalidLiteral fallback. Timestamp
 // inferred name is the SATS Product fmt. SubscribeSingle wraps with
 // DBError::WithSql.
-func TestHandleSubscribeSingle_ParityBoolLiteralOnTimestampRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterBoolLiteralOnTimestampRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4200,14 +4200,14 @@ func TestHandleSubscribeSingle_ParityBoolLiteralOnTimestampRejectText(t *testing
 	}
 }
 
-// TestHandleSubscribeSingle_ParityStringLiteralOnArrayStringRejectText pins
+// TestHandleSubscribeSingle_ShunterStringLiteralOnArrayStringRejectText pins
 // reference `InvalidLiteral` text for a scalar string literal targeting an
 // Array<String> column. Reference `parse(value, Array<String>)` at
 // lib.rs:359 hits the array-kind catch-all `bail!`, folded by lib.rs:99
 // into `InvalidLiteral::new(v.into_string(), ty)`. Array<String> renders
 // through the parameterized array fmt. SubscribeSingle wraps with
 // DBError::WithSql.
-func TestHandleSubscribeSingle_ParityStringLiteralOnArrayStringRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterStringLiteralOnArrayStringRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4236,12 +4236,12 @@ func TestHandleSubscribeSingle_ParityStringLiteralOnArrayStringRejectText(t *tes
 	}
 }
 
-// TestHandleSubscribeSingle_ParityBoolLiteralOnArrayStringRejectText pins
+// TestHandleSubscribeSingle_ShunterBoolLiteralOnArrayStringRejectText pins
 // reference `UnexpectedType` text for a bool literal on an Array<String>
 // column. Reference lib.rs:94 routes the bool arm to UnexpectedType ahead
 // of the lib.rs:99 InvalidLiteral fallback. SubscribeSingle wraps with
 // DBError::WithSql.
-func TestHandleSubscribeSingle_ParityBoolLiteralOnArrayStringRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterBoolLiteralOnArrayStringRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4270,12 +4270,12 @@ func TestHandleSubscribeSingle_ParityBoolLiteralOnArrayStringRejectText(t *testi
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUint128NegativeRejected extends the
+// TestHandleSubscribeSingle_ShunterUint128NegativeRejected extends the
 // reference invalid_literals bundle at check.rs:382-385 to the Uint128
 // column kind (landed 2026-04-21 alongside the 128-bit column-kind
 // widening). `-1` parses to LitInt(-1) and coerce's KindUint128 branch
 // rejects negative ints just like the u8 row does.
-func TestHandleSubscribeSingle_ParityUint128NegativeRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUint128NegativeRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4300,15 +4300,15 @@ func TestHandleSubscribeSingle_ParityUint128NegativeRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityDMLStatementRejected pins the reference
+// TestHandleSubscribeSingle_ShunterDMLStatementRejected pins the reference
 // subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`delete from t` / "DML not allowed in subscriptions") onto the
 // SubscribeSingle admission surface. Shunter's SELECT-only parser rejects any
 // leading token other than SELECT at parseStatement's expectKeyword("SELECT")
 // call (query/sql/parser.go:475-477). The pin promotes the rejection from
-// incidental to named parity contract.
-func TestHandleSubscribeSingle_ParityDMLStatementRejected(t *testing.T) {
+// incidental to named Shunter contract.
+func TestHandleSubscribeSingle_ShunterDMLStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4333,13 +4333,13 @@ func TestHandleSubscribeSingle_ParityDMLStatementRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityEmptyStatementRejected pins the reference
+// TestHandleSubscribeSingle_ShunterEmptyStatementRejected pins the reference
 // subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (empty string / "Empty") onto the SubscribeSingle admission surface.
 // Shunter's parser rejects via expectKeyword("SELECT") returning "expected
 // SELECT, got end of input" on a token stream that tokenizes to only EOF.
-func TestHandleSubscribeSingle_ParityEmptyStatementRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterEmptyStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4364,13 +4364,13 @@ func TestHandleSubscribeSingle_ParityEmptyStatementRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected pins the
+// TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected pins the
 // reference subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (single space / "Empty after whitespace skip") onto the SubscribeSingle
 // admission surface. Shunter's tokenizer drops whitespace so the parser sees
 // only EOF and fails at expectKeyword("SELECT").
-func TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterWhitespaceOnlyStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4395,7 +4395,7 @@ func TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected(t *testing.
 	}
 }
 
-// TestHandleSubscribeSingle_ParityDistinctProjectionRejected pins the reference
+// TestHandleSubscribeSingle_ShunterDistinctProjectionRejected pins the reference
 // subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`select distinct a from t` / "DISTINCT not supported") onto the
@@ -4403,7 +4403,7 @@ func TestHandleSubscribeSingle_ParityWhitespaceOnlyStatementRejected(t *testing.
 // or `table.*` (query/sql/parser.go:553-572); the DISTINCT identifier is
 // consumed as a qualifier candidate, the next token is `a` not `.`, and the
 // parser rejects with "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ParityDistinctProjectionRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterDistinctProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4433,7 +4433,7 @@ func TestHandleSubscribeSingle_ParityDistinctProjectionRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityAllModifierRejected pins the reference
+// TestHandleSubscribeSingle_ShunterAllModifierRejected pins the reference
 // subscription-parser rejection at sub.rs:120-149 (and the inner SQL
 // parser at sql.rs:362-394). The set quantifier `ALL` produces a non-None
 // `distinct` field which the subscribe `parse_select` arm rejects through
@@ -4442,7 +4442,7 @@ func TestHandleSubscribeSingle_ParityDistinctProjectionRejected(t *testing.T) {
 // The test schema deliberately includes a column named `ALL` to confirm
 // the parser detects the modifier rather than reinterpreting the keyword
 // as a column reference with output alias `u32`.
-func TestHandleSubscribeSingle_ParityAllModifierRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterAllModifierRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4471,7 +4471,7 @@ func TestHandleSubscribeSingle_ParityAllModifierRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySubqueryInFromRejected pins the reference
+// TestHandleSubscribeSingle_ShunterSubqueryInFromRejected pins the reference
 // subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`select * from (select * from t) join (select * from s) on a = b` /
@@ -4479,7 +4479,7 @@ func TestHandleSubscribeSingle_ParityAllModifierRejected(t *testing.T) {
 // surface. Shunter's parseStatement requires an identifier token after FROM
 // (query/sql/parser.go:485-488); the `(` token is tokLParen, not an identifier,
 // so the parser rejects with "expected table name".
-func TestHandleSubscribeSingle_ParitySubqueryInFromRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSubqueryInFromRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4504,14 +4504,14 @@ func TestHandleSubscribeSingle_ParitySubqueryInFromRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlUnsupportedSelectLiteralWithoutFromRejected
+// TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select 1` / "FROM is required") onto the SubscribeSingle admission surface.
 // Shunter's parseProjection only accepts `*` or `table.*`
 // (query/sql/parser.go:553-572); the integer literal `1` matches neither and
 // the parser rejects with "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ParitySqlUnsupportedSelectLiteralWithoutFromRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4536,14 +4536,14 @@ func TestHandleSubscribeSingle_ParitySqlUnsupportedSelectLiteralWithoutFromRejec
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlUnsupportedMultiPartTableNameRejected pins
+// TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected pins
 // the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a from s.t` / "Multi-part table names") onto the SubscribeSingle
 // admission surface. Shunter's parseProjection rejects the bare identifier `a`
 // (non-`*` / non-`table.*`) before FROM parsing begins, so the rejection fires
 // at the projection surface with "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ParitySqlUnsupportedMultiPartTableNameRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlUnsupportedMultiPartTableNameRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4568,14 +4568,14 @@ func TestHandleSubscribeSingle_ParitySqlUnsupportedMultiPartTableNameRejected(t 
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlUnsupportedBitStringLiteralRejected pins
+// TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected pins
 // the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t where a = B'1010'` / "Bit-string literals") onto the
 // SubscribeSingle admission surface. Shunter's lexer tokenizes `B` as an
 // identifier and `'1010'` as a separate string literal; parseLiteral then
 // rejects the identifier RHS with "expected literal, got identifier "B"".
-func TestHandleSubscribeSingle_ParitySqlUnsupportedBitStringLiteralRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlUnsupportedBitStringLiteralRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4600,14 +4600,14 @@ func TestHandleSubscribeSingle_ParitySqlUnsupportedBitStringLiteralRejected(t *t
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlUnsupportedWildcardWithBareColumnsRejected
+// TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
 // the SubscribeSingle admission surface. Shunter's parseProjection accepts one
 // projection item; after consuming `a.*` the parser expects FROM but finds `,`
 // and rejects with "expected FROM, got \",\"".
-func TestHandleSubscribeSingle_ParitySqlUnsupportedWildcardWithBareColumnsRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4632,14 +4632,14 @@ func TestHandleSubscribeSingle_ParitySqlUnsupportedWildcardWithBareColumnsReject
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlUnsupportedOrderByWithLimitExpressionRejected
+// TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t order by a limit b` / "Limit expression") onto the
 // SubscribeSingle admission surface. The standalone ORDER BY clause already
 // trips Shunter's EOF guard at parseStatement (query/sql/parser.go:547-549)
 // with "unexpected token \"ORDER\"" before reaching the LIMIT identifier.
-func TestHandleSubscribeSingle_ParitySqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4664,14 +4664,14 @@ func TestHandleSubscribeSingle_ParitySqlUnsupportedOrderByWithLimitExpressionRej
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlUnsupportedAggregateWithGroupByRejected
+// TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a, count(*) from t group by a` / "GROUP BY") onto the SubscribeSingle
 // admission surface. parseProjection rejects the leading bare column `a` with
 // "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
 // keyword is ever seen.
-func TestHandleSubscribeSingle_ParitySqlUnsupportedAggregateWithGroupByRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlUnsupportedAggregateWithGroupByRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4696,14 +4696,14 @@ func TestHandleSubscribeSingle_ParitySqlUnsupportedAggregateWithGroupByRejected(
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlUnsupportedImplicitCommaJoinRejected pins
+// TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected pins
 // the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
 // "Implicit joins") onto the SubscribeSingle admission surface. After
 // consuming `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects
 // with "unexpected token \",\"".
-func TestHandleSubscribeSingle_ParitySqlUnsupportedImplicitCommaJoinRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlUnsupportedImplicitCommaJoinRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4728,14 +4728,14 @@ func TestHandleSubscribeSingle_ParitySqlUnsupportedImplicitCommaJoinRejected(t *
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected
+// TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select t.* from t join s on int = u32` / "Joins require qualified vars")
 // onto the SubscribeSingle admission surface. parseJoinClause calls
 // parseQualifiedColumnRef for the left side of ON (query/sql/parser.go:629),
 // which requires `ident.ident`; the bare identifier `int` fails there.
-func TestHandleSubscribeSingle_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4760,14 +4760,14 @@ func TestHandleSubscribeSingle_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlInvalidEmptySelectRejected pins the
+// TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected pins the
 // reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select from t` / "Empty SELECT") onto the SubscribeSingle admission
 // surface. parseProjection rejects because the next token after SELECT is the
 // identifier `from`, which is then followed by `t` (not a dot), so the
 // projection fails with "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ParitySqlInvalidEmptySelectRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlInvalidEmptySelectRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4792,13 +4792,13 @@ func TestHandleSubscribeSingle_ParitySqlInvalidEmptySelectRejected(t *testing.T)
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlInvalidEmptyFromRejected pins the
+// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected pins the
 // reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a from where b = 1` / "Empty FROM") onto the SubscribeSingle
 // admission surface. parseProjection rejects the bare column `a` with
 // "projection must be '*' or 'table.*'" before the empty FROM is examined.
-func TestHandleSubscribeSingle_ParitySqlInvalidEmptyFromRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyFromRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4823,13 +4823,13 @@ func TestHandleSubscribeSingle_ParitySqlInvalidEmptyFromRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlInvalidEmptyWhereRejected pins the
+// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected pins the
 // reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a from t where` / "Empty WHERE") onto the SubscribeSingle admission
 // surface. parseProjection rejects the bare column `a` with "projection must
 // be '*' or 'table.*'" before the empty WHERE is examined.
-func TestHandleSubscribeSingle_ParitySqlInvalidEmptyWhereRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyWhereRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4854,14 +4854,14 @@ func TestHandleSubscribeSingle_ParitySqlInvalidEmptyWhereRejected(t *testing.T) 
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlInvalidEmptyGroupByRejected pins the
+// TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected pins the
 // reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a, count(*) from t group by` / "Empty GROUP BY") onto the
 // SubscribeSingle admission surface. parseProjection rejects the leading bare
 // column `a` with "projection must be '*' or 'table.*'" before the aggregate
 // or empty GROUP BY is examined.
-func TestHandleSubscribeSingle_ParitySqlInvalidEmptyGroupByRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlInvalidEmptyGroupByRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4886,11 +4886,11 @@ func TestHandleSubscribeSingle_ParitySqlInvalidEmptyGroupByRejected(t *testing.T
 	}
 }
 
-// TestHandleSubscribeSingle_ParityCountAliasRejected pins the deliberate
+// TestHandleSubscribeSingle_ShunterCountAliasRejected pins the deliberate
 // subscribe-side policy rejection for parsed aggregate projections. Query SQL
 // may widen to accept `COUNT(*) [AS] alias`, but subscriptions must still return
 // SubscriptionError and skip executor registration.
-func TestHandleSubscribeSingle_ParityCountAliasRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterCountAliasRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4915,7 +4915,7 @@ func TestHandleSubscribeSingle_ParityCountAliasRejected(t *testing.T) {
 	}
 }
 
-func TestHandleSubscribeSingle_ParityCountBareAliasRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterCountBareAliasRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -4940,7 +4940,7 @@ func TestHandleSubscribeSingle_ParityCountBareAliasRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityCountAliasWithLimitRejected pins the
+// TestHandleSubscribeSingle_ShunterCountAliasWithLimitRejected pins the
 // deliberate subscribe-side rejection for aggregate projections composed
 // with LIMIT. One-off/ad hoc SQL accepts the combination, but
 // subscriptions must still return SubscriptionError and skip executor
@@ -4948,7 +4948,7 @@ func TestHandleSubscribeSingle_ParityCountBareAliasRejected(t *testing.T) {
 // allowLimit=false catches LIMIT before the aggregate guard fires, so
 // the visible error is the reference `SubscriptionUnsupported::Feature`
 // shape `Unsupported: {sql}` wrapped with `DBError::WithSql`.
-func TestHandleSubscribeSingle_ParityCountAliasWithLimitRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterCountAliasWithLimitRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5015,7 +5015,7 @@ func TestHandleSubscribeSingle_JoinCountAggregateStillRejected(t *testing.T) {
 	}
 }
 
-func TestHandleSubscribeSingle_ParityAliasedBareColumnProjectionRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterAliasedBareColumnProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5040,7 +5040,7 @@ func TestHandleSubscribeSingle_ParityAliasedBareColumnProjectionRejected(t *test
 	}
 }
 
-func TestHandleSubscribeSingle_ParityJoinColumnProjectionRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterJoinColumnProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -5086,14 +5086,14 @@ func TestHandleSubscribeSingle_ParityJoinColumnProjectionRejected(t *testing.T) 
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySqlInvalidAggregateWithoutAliasRejected pins
+// TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected pins
 // the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select count(*) from t` / "Aggregate without alias") onto the
 // SubscribeSingle admission surface. parseProjection reads `count` as an
 // identifier qualifier, then finds `(` where it expects a dot, rejecting with
 // "projection must be '*' or 'table.*'".
-func TestHandleSubscribeSingle_ParitySqlInvalidAggregateWithoutAliasRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSqlInvalidAggregateWithoutAliasRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5118,14 +5118,14 @@ func TestHandleSubscribeSingle_ParitySqlInvalidAggregateWithoutAliasRejected(t *
 	}
 }
 
-// TestHandleSubscribeSingle_ParityArraySenderRejected pins reference
+// TestHandleSubscribeSingle_ShunterArraySenderRejected pins reference
 // check.rs:487-489 (`select * from t where arr = :sender` / "The :sender
 // param is an identity"). With KindArrayString realized, the coerce layer
 // rejects :sender against the array column because :sender only resolves
 // to the 32-byte identity (KindBytes) representation. The rejection is
-// now a positive parity contract instead of falling through the default
+// now a positive Shunter contract instead of falling through the default
 // "column kind not supported" branch.
-func TestHandleSubscribeSingle_ParityArraySenderRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterArraySenderRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5150,12 +5150,12 @@ func TestHandleSubscribeSingle_ParityArraySenderRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityArrayJoinOnRejected pins reference
+// TestHandleSubscribeSingle_ShunterArrayJoinOnRejected pins reference
 // check.rs:523-525 (`select t.* from t join s on t.arr = s.arr` / "Product
 // values are not comparable"). The join compile path refuses to build a
 // subscription.Join when either side of the ON clause names an array
 // column.
-func TestHandleSubscribeSingle_ParityArrayJoinOnRejected(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterArrayJoinOnRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := &mockSchemaLookup{
@@ -5190,11 +5190,11 @@ func TestHandleSubscribeSingle_ParityArrayJoinOnRejected(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityJoinOnStrictEqualityRejectText pins the
+// TestHandleSubscribeSingle_ShunterJoinOnStrictEqualityRejectText pins the
 // reference subscription parser's `JoinType` rejection for any JOIN ON shape
 // other than a pure qualified-column equality. SubscribeSingle wraps the raw
 // parser text with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityJoinOnStrictEqualityRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterJoinOnStrictEqualityRejectText(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
 		Name: "Orders",
@@ -5242,7 +5242,7 @@ func TestHandleSubscribeSingle_ParityJoinOnStrictEqualityRejectText(t *testing.T
 	}
 }
 
-// TestHandleSubscribeSingle_ParityCompileErrorIncludesExecutingSqlSuffix pins
+// TestHandleSubscribeSingle_ShunterCompileErrorIncludesExecutingSqlSuffix pins
 // the reference `DBError::WithSql` shape at
 // reference/SpacetimeDB/crates/core/src/error.rs:140
 // (`"{error}, executing: `{sql}`"`): subscribe-admission compile failures
@@ -5251,7 +5251,7 @@ func TestHandleSubscribeSingle_ParityJoinOnStrictEqualityRejectText(t *testing.T
 // emit site: module_subscription_actor.rs:643 (SubscribeSingle
 // `compile_query_with_hashes`) via the `return_on_err_with_sql_bool!`
 // macro.
-func TestHandleSubscribeSingle_ParityCompileErrorIncludesExecutingSqlSuffix(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterCompileErrorIncludesExecutingSqlSuffix(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("users", 1)
@@ -5278,7 +5278,7 @@ func TestHandleSubscribeSingle_ParityCompileErrorIncludesExecutingSqlSuffix(t *t
 	}
 }
 
-// TestHandleSubscribeMulti_ParityCompileErrorIncludesExecutingSqlSuffix pins
+// TestHandleSubscribeMulti_ShunterCompileErrorIncludesExecutingSqlSuffix pins
 // the reference `DBError::WithSql` shape at
 // reference/SpacetimeDB/crates/core/src/error.rs:140
 // (`"{error}, executing: `{sql}`"`) on the SubscribeMulti admission
@@ -5286,7 +5286,7 @@ func TestHandleSubscribeSingle_ParityCompileErrorIncludesExecutingSqlSuffix(t *t
 // (SubscribeMulti `compile_query_with_hashes`), where each SQL string is
 // wrapped per-item; the first failing SQL's text is what appears in the
 // SubscriptionError message.
-func TestHandleSubscribeMulti_ParityCompileErrorIncludesExecutingSqlSuffix(t *testing.T) {
+func TestHandleSubscribeMulti_ShunterCompileErrorIncludesExecutingSqlSuffix(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}
 	sl := newMockSchema("users", 1)
@@ -5316,7 +5316,7 @@ func TestHandleSubscribeMulti_ParityCompileErrorIncludesExecutingSqlSuffix(t *te
 	}
 }
 
-// TestHandleSubscribeMulti_ParityJoinStarProjectionRejectText pins
+// TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText pins
 // reference/SpacetimeDB/crates/expr/src/errors.rs:41
 // (`InvalidWildcard::Join` = "SELECT * is not supported for joins",
 // emit reference/SpacetimeDB/crates/expr/src/lib.rs:56) on the
@@ -5325,7 +5325,7 @@ func TestHandleSubscribeMulti_ParityCompileErrorIncludesExecutingSqlSuffix(t *te
 // module_subscription_actor.rs:1068 via `return_on_err_with_sql_bool!`,
 // so the per-item compile failure wraps the inner text with the
 // `DBError::WithSql` suffix (error.rs:140).
-func TestHandleSubscribeMulti_ParityJoinStarProjectionRejectText(t *testing.T) {
+func TestHandleSubscribeMulti_ShunterJoinStarProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -5364,14 +5364,14 @@ func TestHandleSubscribeMulti_ParityJoinStarProjectionRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnknownTableRejectText pins the reference
+// TestHandleSubscribeSingle_ShunterUnknownTableRejectText pins the reference
 // type-check rejection literal at
 // reference/SpacetimeDB/crates/expr/src/errors.rs:14
 // (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
 // be marked private."). SubscribeSingle compile-origin wraps the inner text
 // with `DBError::WithSql` (reference error.rs:140) → `"{error}, executing:
-// `{sql}`"`. Exact-text companion to TestHandleSubscribeSingle_ParityUnknownTableRejected.
-func TestHandleSubscribeSingle_ParityUnknownTableRejectText(t *testing.T) {
+// `{sql}`"`. Exact-text companion to TestHandleSubscribeSingle_ShunterUnknownTableRejected.
+func TestHandleSubscribeSingle_ShunterUnknownTableRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5400,12 +5400,12 @@ func TestHandleSubscribeSingle_ParityUnknownTableRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeMulti_ParityUnknownTableRejectText pins the same
+// TestHandleSubscribeMulti_ShunterUnknownTableRejectText pins the same
 // `Unresolved::Table` literal on the SubscribeMulti admission surface.
 // Reference SubscribeMulti wraps each per-item compile error with
 // `DBError::WithSql` (module_subscription_actor.rs:1068 via
 // `return_on_err_with_sql_bool!`).
-func TestHandleSubscribeMulti_ParityUnknownTableRejectText(t *testing.T) {
+func TestHandleSubscribeMulti_ShunterUnknownTableRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5434,14 +5434,14 @@ func TestHandleSubscribeMulti_ParityUnknownTableRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnknownFieldRejectText pins the reference
+// TestHandleSubscribeSingle_ShunterUnknownFieldRejectText pins the reference
 // type-check rejection literal at
 // reference/SpacetimeDB/crates/expr/src/errors.rs:11-13
 // (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
 // `_type_expr` lib.rs:107: a missing column inside an existing relvar
 // surfaces as `Unresolved::var(&field)`. SubscribeSingle compile-origin
 // wraps with `DBError::WithSql` (error.rs:140).
-func TestHandleSubscribeSingle_ParityUnknownFieldRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnknownFieldRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5470,9 +5470,9 @@ func TestHandleSubscribeSingle_ParityUnknownFieldRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeMulti_ParityUnknownFieldRejectText pins the same
+// TestHandleSubscribeMulti_ShunterUnknownFieldRejectText pins the same
 // `Unresolved::Var` literal on the SubscribeMulti admission surface.
-func TestHandleSubscribeMulti_ParityUnknownFieldRejectText(t *testing.T) {
+func TestHandleSubscribeMulti_ShunterUnknownFieldRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5501,7 +5501,7 @@ func TestHandleSubscribeMulti_ParityUnknownFieldRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityAggregateReturnTypeRejectText pins the
+// TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText pins the
 // reference `Unsupported::ReturnType` literal at
 // reference/SpacetimeDB/crates/expr/src/errors.rs:47 ("Column projections
 // are not supported in subscriptions; Subscriptions must return a table
@@ -5510,7 +5510,7 @@ func TestHandleSubscribeMulti_ParityUnknownFieldRejectText(t *testing.T) {
 // (ProjectList::Agg) and column-list (ProjectList::List) projections both
 // fall through to the unified literal on the v1 subscribe surface.
 // SubscribeSingle wraps the inner text with `DBError::WithSql`.
-func TestHandleSubscribeSingle_ParityAggregateReturnTypeRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterAggregateReturnTypeRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5539,12 +5539,12 @@ func TestHandleSubscribeSingle_ParityAggregateReturnTypeRejectText(t *testing.T)
 	}
 }
 
-// TestHandleSubscribeSingle_ParityColumnListReturnTypeRejectText pins the
+// TestHandleSubscribeSingle_ShunterColumnListReturnTypeRejectText pins the
 // same reference `Unsupported::ReturnType` literal onto the column-list
 // projection path: `ProjectList::List` in reference expr/src/check.rs:174
 // likewise fails `expect_table_type` and emits the unified subscription
 // literal.
-func TestHandleSubscribeSingle_ParityColumnListReturnTypeRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterColumnListReturnTypeRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5573,7 +5573,7 @@ func TestHandleSubscribeSingle_ParityColumnListReturnTypeRejectText(t *testing.T
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarProjectionColumnRejectText pins
+// TestHandleSubscribeSingle_ShunterUnresolvedVarProjectionColumnRejectText pins
 // reference `Unresolved::Var` (errors.rs:11-13, "`{name}` is not in scope")
 // for a SubscribeSingle column-list projection where the named column does
 // not exist on the FROM-clause table. Reference path: `type_proj::Exprs`
@@ -5582,7 +5582,7 @@ func TestHandleSubscribeSingle_ParityColumnListReturnTypeRejectText(t *testing.T
 // check.rs:174 — so a missing-column projection emits `Unresolved::Var`,
 // not the column-projection-not-supported literal. SubscribeSingle wraps
 // compile errors with `DBError::WithSql`.
-func TestHandleSubscribeSingle_ParityUnresolvedVarProjectionColumnRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarProjectionColumnRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5611,10 +5611,10 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarProjectionColumnRejectText(t *
 	}
 }
 
-// TestHandleSubscribeMulti_ParityUnresolvedVarProjectionColumnRejectText
+// TestHandleSubscribeMulti_ShunterUnresolvedVarProjectionColumnRejectText
 // pins the same `Unresolved::Var` literal on the SubscribeMulti admission
 // surface for a column-list projection naming a missing column.
-func TestHandleSubscribeMulti_ParityUnresolvedVarProjectionColumnRejectText(t *testing.T) {
+func TestHandleSubscribeMulti_ShunterUnresolvedVarProjectionColumnRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5643,7 +5643,7 @@ func TestHandleSubscribeMulti_ParityUnresolvedVarProjectionColumnRejectText(t *t
 	}
 }
 
-// TestHandleSubscribeSingle_ParityBoolLiteralOnIntegerColumnRejectText pins
+// TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText pins
 // the reference `UnexpectedType` literal from
 // reference/SpacetimeDB/crates/expr/src/errors.rs:100 (via the emit site at
 // lib.rs:94 for a bool literal in a non-bool column) onto the
@@ -5651,7 +5651,7 @@ func TestHandleSubscribeMulti_ParityUnresolvedVarProjectionColumnRejectText(t *t
 // with `DBError::WithSql` (module_subscription_actor.rs:643 via
 // `return_on_err_with_sql_bool!`), so the client sees the
 // `, executing: `{sql}“ suffix.
-func TestHandleSubscribeSingle_ParityBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5680,14 +5680,15 @@ func TestHandleSubscribeSingle_ParityBoolLiteralOnIntegerColumnRejectText(t *tes
 	}
 }
 
-// TestHandleSubscribeSingle_ParityIntOverflowOnUint8RejectText pins the
+// TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText pins the
 // reference `InvalidLiteral` literal from
 // reference/SpacetimeDB/crates/expr/src/errors.rs:108 (emitted at lib.rs:99
 // when `parse(v, ty)` fails) onto the SubscribeSingle admission surface.
 // SubscribeSingle wraps compile errors with `DBError::WithSql`
 // (module_subscription_actor.rs:643 via `return_on_err_with_sql_bool!`).
-// Scope: plain integer literal — scientific-notation parity is deferred.
-func TestHandleSubscribeSingle_ParityIntOverflowOnUint8RejectText(t *testing.T) {
+// Scope: plain integer literal; scientific-notation source-text preservation is
+// covered separately.
+func TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5716,7 +5717,7 @@ func TestHandleSubscribeSingle_ParityIntOverflowOnUint8RejectText(t *testing.T) 
 	}
 }
 
-// TestHandleSubscribeSingle_ParityFloatLiteralOnUint32RejectText pins the
+// TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText pins the
 // reference `InvalidLiteral` literal for a fractional LitFloat against an
 // integer column on the SubscribeSingle admission surface. SubscribeSingle
 // wraps compile errors with `DBError::WithSql`
@@ -5726,7 +5727,7 @@ func TestHandleSubscribeSingle_ParityIntOverflowOnUint8RejectText(t *testing.T) 
 // from errors.rs:84 / lib.rs:99. Scope mirrors the OneOff pin: plain `1.3`
 // whose canonical FormatFloat rendering matches the original token — source-
 // text preservation for round-trip-lossy forms is a separate slice.
-func TestHandleSubscribeSingle_ParityFloatLiteralOnUint32RejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -5755,7 +5756,7 @@ func TestHandleSubscribeSingle_ParityFloatLiteralOnUint32RejectText(t *testing.T
 	}
 }
 
-// TestHandleSubscribeSingle_ParityNonBoolLiteralOnBoolRejectText pins the
+// TestHandleSubscribeSingle_ShunterNonBoolLiteralOnBoolRejectText pins the
 // reference `InvalidLiteral` literal for non-Bool primitive literals
 // targeted at a Bool column on the SubscribeSingle admission surface.
 // Reference catch-all `bail!` on parse(v, Bool) folds into
@@ -5763,7 +5764,7 @@ func TestHandleSubscribeSingle_ParityFloatLiteralOnUint32RejectText(t *testing.T
 // SubscribeSingle wraps compile errors with `DBError::WithSql` so the pin
 // carries the `, executing: ` suffix. LitBytes deferred (no preserved
 // source text).
-func TestHandleSubscribeSingle_ParityNonBoolLiteralOnBoolRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterNonBoolLiteralOnBoolRejectText(t *testing.T) {
 	cases := []struct {
 		name        string
 		queryString string
@@ -5804,12 +5805,12 @@ func TestHandleSubscribeSingle_ParityNonBoolLiteralOnBoolRejectText(t *testing.T
 	}
 }
 
-// TestHandleSubscribeSingle_ParityDuplicateJoinAliasRejectText pins the
+// TestHandleSubscribeSingle_ShunterDuplicateJoinAliasRejectText pins the
 // reference `DuplicateName` literal for an explicitly-aliased join where
 // both sides share the same alias. Reference path: `type_from`
 // (lib.rs:88-89) emits `DuplicateName(alias)` after seeing the alias
 // inserted twice into `Relvars`. SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityDuplicateJoinAliasRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterDuplicateJoinAliasRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -5849,10 +5850,10 @@ func TestHandleSubscribeSingle_ParityDuplicateJoinAliasRejectText(t *testing.T) 
 	}
 }
 
-// TestHandleSubscribeSingle_ParityDuplicateSelfJoinRejectText pins the
+// TestHandleSubscribeSingle_ShunterDuplicateSelfJoinRejectText pins the
 // `DuplicateName` literal for an unaliased self-join — the right side's
 // derived alias collides with the left side's base table name `t`.
-func TestHandleSubscribeSingle_ParityDuplicateSelfJoinRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterDuplicateSelfJoinRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -5888,11 +5889,11 @@ func TestHandleSubscribeSingle_ParityDuplicateSelfJoinRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleSubscribeSingle_ParityJoinColumnKindMismatchRejectText pins
+// TestHandleSubscribeSingle_ShunterJoinColumnKindMismatchRejectText pins
 // the reference `UnexpectedType` literal for an ON binop whose two field
 // references resolve to different algebraic kinds. SubscribeSingle wraps
 // with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityJoinColumnKindMismatchRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterJoinColumnKindMismatchRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -5932,12 +5933,12 @@ func TestHandleSubscribeSingle_ParityJoinColumnKindMismatchRejectText(t *testing
 	}
 }
 
-// TestHandleSubscribeSingle_ParityJoinArrayColumnInvalidOpRejectText pins
+// TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText pins
 // the reference `InvalidOp` literal for an ON binop comparing two
 // Array<…> columns. SubscribeSingle wraps with DBError::WithSql. Schema
 // uses a hand-built `mockSchemaLookup` because `schema.NewBuilder`
 // rejects `KindArrayString` as a column-storage kind.
-func TestHandleSubscribeSingle_ParityJoinArrayColumnInvalidOpRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}
@@ -5972,11 +5973,11 @@ func TestHandleSubscribeSingle_ParityJoinArrayColumnInvalidOpRejectText(t *testi
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarUnqualifiedWhereRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarUnqualifiedWhereRejectText
 // pins the reference `Unresolved::Var` literal for an unqualified
 // single-table WHERE column whose name does not exist on the relvar.
 // SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnresolvedVarUnqualifiedWhereRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarUnqualifiedWhereRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -6005,10 +6006,10 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarUnqualifiedWhereRejectText(t *
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingRejectText
 // pins the reference `Unresolved::Var` literal for an unknown JOIN ON
 // equality operand. SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6048,11 +6049,11 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingRejectText(t *tes
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarJoinWhereQualifiedMissingRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectText
 // pins the reference `Unresolved::Var` literal for a qualified WHERE
 // column on the right side of a join whose field does not exist.
 // SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnresolvedVarJoinWhereQualifiedMissingRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6096,13 +6097,13 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarJoinWhereQualifiedMissingRejec
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarBaseTableAfterAliasRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarBaseTableAfterAliasRejectText
 // pins the reference `Unresolved::Var` literal for a WHERE column
 // qualified by the base table name AFTER an `AS` alias has been declared
 // on the FROM relvar. Reference `_type_expr` (lib.rs:103) emits
 // `Unresolved::var(&table)` when the qualifier name is absent from
 // `Relvars`. SubscribeSingle wraps compile errors with `DBError::WithSql`.
-func TestHandleSubscribeSingle_ParityUnresolvedVarBaseTableAfterAliasRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarBaseTableAfterAliasRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -6131,11 +6132,11 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarBaseTableAfterAliasRejectText(
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectText
 // pins reference `type_from` ordering: the JOIN ON expression types
 // before `type_proj` runs the bare-wildcard rejection. SubscribeSingle
 // wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6175,11 +6176,11 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarBareJoinWildcardOnMissingRejec
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
 // pins the reference order in which `type_from` types the ON expression
 // before the WHERE predicate is folded. SubscribeSingle wraps with
 // DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6219,13 +6220,13 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereF
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarWherePrecedesProjectionRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarWherePrecedesProjectionRejectText
 // pins the reference type-checker order: `type_select` (WHERE) runs
 // before `type_proj` (projection columns). Reference path:
 // `SubChecker::type_set` (check.rs:139-146) computes
 // `type_proj(type_select(input, expr, vars)?, project, vars)`.
 // SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnresolvedVarWherePrecedesProjectionRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarWherePrecedesProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -6254,11 +6255,11 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarWherePrecedesProjectionRejectT
 	}
 }
 
-// TestHandleSubscribeSingle_ParityBooleanConstantWhereDoesNotMaskBranchErrors
+// TestHandleSubscribeSingle_ShunterBooleanConstantWhereDoesNotMaskBranchErrors
 // pins reference `_type_expr` order for logical WHERE expressions on the
 // SubscribeSingle WithSql-wrapped surface: both operands are typed before
 // Bool operators are lowered.
-func TestHandleSubscribeSingle_ParityBooleanConstantWhereDoesNotMaskBranchErrors(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterBooleanConstantWhereDoesNotMaskBranchErrors(t *testing.T) {
 	cases := []struct {
 		name string
 		sql  string
@@ -6299,10 +6300,10 @@ func TestHandleSubscribeSingle_ParityBooleanConstantWhereDoesNotMaskBranchErrors
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedProjectionQualifierRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText
 // pins reference `type_proj::Exprs` `Unresolved::var(&table)` emit on
 // the SubscribeSingle WithSql-wrapped surface.
-func TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedProjectionQualifierRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -6331,11 +6332,11 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedProjectionQualifierRe
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedWildcardQualifierRejectText
+// TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText
 // pins reference `type_proj` `Project::Star(Some(var))`
 // `Unresolved::var(&var)` emit on the SubscribeSingle WithSql-wrapped
 // surface.
-func TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedWildcardQualifierRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -6364,10 +6365,10 @@ func TestHandleSubscribeSingle_ParityUnresolvedVarQualifiedWildcardQualifierReje
 	}
 }
 
-// TestHandleSubscribeSingle_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejectText
+// TestHandleSubscribeSingle_ShunterMissingLeftTablePrecedesDuplicateJoinAliasRejectText
 // pins reference `type_from` ordering: left-relvar resolution precedes
 // duplicate-alias detection. SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterMissingLeftTablePrecedesDuplicateJoinAliasRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6403,11 +6404,11 @@ func TestHandleSubscribeSingle_ParityMissingLeftTablePrecedesDuplicateJoinAliasR
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnqualifiedNamesProjectionRejectText
+// TestHandleSubscribeSingle_ShunterUnqualifiedNamesProjectionRejectText
 // pins the reference `SqlUnsupported::UnqualifiedNames` literal for an
 // unqualified projection column inside a JOIN scope. SubscribeSingle
 // wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnqualifiedNamesProjectionRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnqualifiedNamesProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6447,11 +6448,11 @@ func TestHandleSubscribeSingle_ParityUnqualifiedNamesProjectionRejectText(t *tes
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnqualifiedNamesWhereRejectText pins
+// TestHandleSubscribeSingle_ShunterUnqualifiedNamesWhereRejectText pins
 // the reference `SqlUnsupported::UnqualifiedNames` literal for an
 // unqualified WHERE column inside a JOIN scope. SubscribeSingle wraps
 // with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnqualifiedNamesWhereRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnqualifiedNamesWhereRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6491,10 +6492,10 @@ func TestHandleSubscribeSingle_ParityUnqualifiedNamesWhereRejectText(t *testing.
 	}
 }
 
-// TestHandleSubscribeSingle_ParityUnqualifiedNamesJoinOnRejectText pins
+// TestHandleSubscribeSingle_ShunterUnqualifiedNamesJoinOnRejectText pins
 // the reference `SqlUnsupported::UnqualifiedNames` literal for an
 // unqualified JOIN ON operand. SubscribeSingle wraps with DBError::WithSql.
-func TestHandleSubscribeSingle_ParityUnqualifiedNamesJoinOnRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterUnqualifiedNamesJoinOnRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6534,13 +6535,13 @@ func TestHandleSubscribeSingle_ParityUnqualifiedNamesJoinOnRejectText(t *testing
 	}
 }
 
-// TestHandleSubscribeSingle_ParitySenderParameterCaseSensitiveRejectText
+// TestHandleSubscribeSingle_ShunterSenderParameterCaseSensitiveRejectText
 // pins reference `parse_expr` (sql-parser/src/parser/mod.rs:223)
 // byte-equal `":sender"` admission. Any other casing (e.g. `:SENDER`)
 // falls through to `SqlUnsupported::Expr` rendered as
 // `Unsupported expression: {expr}`. SubscribeSingle wraps with
 // DBError::WithSql.
-func TestHandleSubscribeSingle_ParitySenderParameterCaseSensitiveRejectText(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterSenderParameterCaseSensitiveRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("s", 1,
@@ -6569,12 +6570,12 @@ func TestHandleSubscribeSingle_ParitySenderParameterCaseSensitiveRejectText(t *t
 	}
 }
 
-// TestHandleSubscribeSingle_ParityProjectionGuardYieldsToTableNotFound pins
+// TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToTableNotFound pins
 // reference `SubChecker::type_set` (check.rs:137-156) ordering: `type_from`
 // runs BEFORE `expect_table_type` (check.rs:168-176), so a missing FROM
 // table emits the no-such-table text instead of the
 // `Unsupported::ReturnType` projection-return guard.
-func TestHandleSubscribeSingle_ParityProjectionGuardYieldsToTableNotFound(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToTableNotFound(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -6603,12 +6604,12 @@ func TestHandleSubscribeSingle_ParityProjectionGuardYieldsToTableNotFound(t *tes
 	}
 }
 
-// TestHandleSubscribeSingle_ParityProjectionGuardYieldsToWhereResolution
+// TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToWhereResolution
 // pins reference `SubChecker::type_set` (check.rs:137-156) ordering:
 // `type_select` runs BEFORE `expect_table_type` (check.rs:168-176), so a
 // missing WHERE column emits `Unresolved::Var` instead of the
 // `Unsupported::ReturnType` projection-return guard.
-func TestHandleSubscribeSingle_ParityProjectionGuardYieldsToWhereResolution(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterProjectionGuardYieldsToWhereResolution(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -6637,12 +6638,12 @@ func TestHandleSubscribeSingle_ParityProjectionGuardYieldsToWhereResolution(t *t
 	}
 }
 
-// TestHandleSubscribeSingle_ParityAggregateGuardYieldsToTableNotFound pins
+// TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToTableNotFound pins
 // the same `SubChecker::type_set` ordering on the aggregate path:
 // `type_from` precedes the `Unsupported::ReturnType` guard for
 // `ProjectList::Agg`. Locks the prior early-aggregate guard reorder so
 // `SELECT COUNT(*) FROM missing_table` emits the no-such-table text.
-func TestHandleSubscribeSingle_ParityAggregateGuardYieldsToTableNotFound(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToTableNotFound(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,
@@ -6671,9 +6672,9 @@ func TestHandleSubscribeSingle_ParityAggregateGuardYieldsToTableNotFound(t *test
 	}
 }
 
-// TestHandleSubscribeSingle_ParityAggregateGuardYieldsToWhereResolution
+// TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToWhereResolution
 // pins the aggregate-path WHERE-precedes-return-guard ordering.
-func TestHandleSubscribeSingle_ParityAggregateGuardYieldsToWhereResolution(t *testing.T) {
+func TestHandleSubscribeSingle_ShunterAggregateGuardYieldsToWhereResolution(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
 	sl := newMockSchema("t", 1,

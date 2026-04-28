@@ -9,7 +9,7 @@ import (
 )
 
 // TestSuperviseLifecycleBoundsDisconnectOnInboxHang is the primary pin
-// for the OI-004 supervise-lifecycle disconnect-context sub-hazard. The
+// for the supervise-lifecycle disconnect-context. The
 // supervisor is the only Conn.Disconnect call site that gets
 // context.Background() hardcoded by its caller (upgrade.go
 // HandleSubscribe). Fails if superviseLifecycle reverts to forwarding

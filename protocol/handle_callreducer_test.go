@@ -213,7 +213,7 @@ func TestHandleCallReducer_OnDisconnect(t *testing.T) {
 // TestHandleCallReducer_ForwardsFlags_NoSuccessNotify pins that the
 // NoSuccessNotify wire flag is forwarded onto CallReducerRequest.Flags
 // so downstream seams (executor, fanout worker) can honor the caller's
-// opt-out. Phase 1.5 sub-slice.
+// opt-out. outcome-model contract.
 func TestHandleCallReducer_ForwardsFlags_NoSuccessNotify(t *testing.T) {
 	conn := testConnDirect(nil)
 	exec := &mockDispatchExecutor{}

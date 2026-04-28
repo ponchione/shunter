@@ -25,8 +25,8 @@ Scope for V1-F:
 Non-goals:
 - No new network serving APIs.
 - No REST/MCP/admin/control-plane surface.
-- No export/introspection work; V1-G owns that.
-- No hello-world/example replacement; V1-H owns that.
+- No export/introspection work.
+- No hello-world/example replacement.
 - No v1.5 query/view declarations, contract export, codegen, permissions, or migration metadata.
 - No broad SQL helper unless it can reuse a small shared one-off evaluator without protocol duplication; default plan is to defer SQL and ship the read callback surface.
 
@@ -50,4 +50,6 @@ Latest Task 05 validation:
 - `rtk go test ./executor ./store ./query/sql -count=1` -> passed, 420 tests across 3 packages.
 - `rtk go vet . ./executor ./store ./query/sql` -> passed.
 
-Immediate next V1 slice after V1-F: `docs/hosted-runtime-planning/V1-G/` export/introspection foundation.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V1-F plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

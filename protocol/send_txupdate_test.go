@@ -7,7 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Phase 1.5 outcome-model split: this file exercises the
+// Outcome-model split: this file exercises the
 // `DeliverTransactionUpdateLight` helper used for non-caller
 // subscribers. Caller-heavy delivery is exercised through the fanout
 // adapter tests in `fanout_adapter_test.go` and the fanout worker tests

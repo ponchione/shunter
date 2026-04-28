@@ -55,4 +55,6 @@ Validation passed:
 - `rtk go vet . ./protocol ./query/sql ./subscription ./codegen ./contractdiff`
 - `rtk go test ./... -count=1`
 
-Immediate next V2 slice after V2-D: V2-E policy/auth enforcement foundation.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V2-D plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

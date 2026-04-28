@@ -8,8 +8,8 @@ import (
 	"github.com/coder/websocket"
 )
 
-// TestDispatchLoop_HandlerCtxCancelsOnConnClose pins the OI-004 dispatch-
-// handler ctx sub-hazard fix. Before the fix, handler closures captured
+// TestDispatchLoop_HandlerCtxCancelsOnConnClose pins the dispatch-
+// handler ctx fix. Before the fix, handler closures captured
 // the outer ctx from runDispatchLoop, which production threading roots at
 // context.Background() (protocol/upgrade.go:201). A wedged executor
 // (inbox full on a hung reducer) would leave the handler goroutine

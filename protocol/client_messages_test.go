@@ -137,7 +137,7 @@ func TestCallReducerEmptyArgs(t *testing.T) {
 	}
 }
 
-// TestOneOffQueryRoundTripSQL pins the Phase 2 Slice 1 + 1c wire shape:
+// TestOneOffQueryRoundTripSQL pins the SQL-string + 1c wire shape:
 // SQL string query plus opaque `message_id` bytes.
 func TestOneOffQueryRoundTripSQL(t *testing.T) {
 	in := OneOffQueryMsg{

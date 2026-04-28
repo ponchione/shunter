@@ -11,11 +11,11 @@ import (
 // `SubscribeSingle.query_id: QueryId` — a client-allocated identifier
 // used to correlate the subscribe with its later Unsubscribe.
 //
-// Part of the Phase 2 Slice 2 variant split. SubscribeMultiMsg
+// Part of the single/multi variant variant split. SubscribeMultiMsg
 // carries a list of queries under one QueryID; this type carries
 // exactly one. Reference: SubscribeSingle at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:189
-// (`query: Box<str>`). Phase 2 Slice 1 flipped the wire from a
+// (`query: Box<str>`). SQL-string flipped the wire from a
 // structured Query to a SQL string; the handler parses with
 // query/sql.Parse.
 type SubscribeSingleMsg struct {
@@ -28,16 +28,16 @@ type SubscribeSingleMsg struct {
 // message (SPEC-005 §7.2). QueryID mirrors reference
 // `Unsubscribe.query_id: QueryId`.
 //
-// Part of the Phase 2 Slice 2 variant split. UnsubscribeMultiMsg
+// Part of the single/multi variant variant split. UnsubscribeMultiMsg
 // drops every query under a given QueryID; this type drops exactly
 // one. Field order and wire shape match reference `Unsubscribe`
 // at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218
 // (`{ request_id: u32, query_id: QueryId }`) — pinned by
-// parity_unsubscribe_test.go against the reference byte shape. Prior
+// unsubscribe_wire_test.go against the reference byte shape. Prior
 // Shunter wire carried an extra `send_dropped: u8` byte smuggled onto
 // v1; that concept lives on v2 `UnsubscribeFlags::SendDroppedRows`
-// and is out of scope for v1 parity.
+// and is out of scope for Shunter v1.
 type UnsubscribeSingleMsg struct {
 	RequestID uint32
 	QueryID   uint32
@@ -54,7 +54,7 @@ type UnsubscribeSingleMsg struct {
 // Field order matches reference `CallReducer<Args>` at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:110
 // (`reducer, args, request_id, flags`) — pinned by
-// parity_call_reducer_test.go against the reference byte shape.
+// call_reducer_wire_test.go against the reference byte shape.
 type CallReducerMsg struct {
 	ReducerName string
 	Args        []byte
@@ -84,8 +84,8 @@ const (
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:247
 // (`{ message_id: Box<[u8]>, query_string: Box<str> }`).
 //
-// Phase 2 Slice 1 flipped `TableName + Predicates` → `QueryString`.
-// Phase 2 Slice 1c closes the remaining wire-shape divergence by using
+// SQL-string flipped `TableName + Predicates` → `QueryString`.
+// one-off message-id closes the remaining wire-shape divergence by using
 // the reference-style opaque `message_id: Box<[u8]>` rather than a
 // numeric request id.
 type OneOffQueryMsg struct {
@@ -96,7 +96,7 @@ type OneOffQueryMsg struct {
 // SubscribeMultiMsg is the client-side SubscribeMulti message
 // (SPEC-005 §7.1b). Reference: SubscribeMulti at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:203
-// (`query_strings: Box<[Box<str>]>`). Phase 2 Slice 1 flipped the
+// (`query_strings: Box<[Box<str>]>`). SQL-string flipped the
 // structured predicate list to a SQL string list on the wire; handlers
 // parse each string with query/sql.Parse.
 type SubscribeMultiMsg struct {

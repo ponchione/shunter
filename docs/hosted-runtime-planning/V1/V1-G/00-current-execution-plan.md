@@ -24,4 +24,6 @@ Latest Task 04 validation:
 - `rtk go doc . Runtime.ExportSchema` -> passed.
 - `rtk go doc . Runtime.Describe` -> passed.
 
-Immediate next V1 slice after V1-G: V1-H hello-world replacement and V1 proof.
+Historical sequencing note: later hosted-runtime slices have since landed. Do
+not treat this completed V1-G plan as a live handoff; use
+`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

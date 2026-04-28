@@ -6,8 +6,8 @@ package protocol
 
 // Client→server message tags (SPEC-005 §6).
 const (
-	TagSubscribeSingle   uint8 = 1 // renamed from TagSubscribe (Phase 2 Slice 2 variant split)
-	TagUnsubscribeSingle uint8 = 2 // renamed from TagUnsubscribe (Phase 2 Slice 2 variant split)
+	TagSubscribeSingle   uint8 = 1 // renamed from TagSubscribe (single/multi variant variant split)
+	TagUnsubscribeSingle uint8 = 2 // renamed from TagUnsubscribe (single/multi variant variant split)
 	TagCallReducer       uint8 = 3
 	TagOneOffQuery       uint8 = 4
 	TagSubscribeMulti    uint8 = 5
@@ -16,7 +16,7 @@ const (
 
 // Server→client message tags (SPEC-005 §6).
 //
-// Phase 1.5 outcome-model decision (`docs/parity-decisions.md#outcome-model`):
+// Outcome-model decision (`docs/shunter-design-decisions.md#outcome-model`):
 //   - `TagTransactionUpdate` carries the heavy caller-bound envelope.
 //   - `TagTransactionUpdateLight` carries the non-caller delta-only envelope.
 //   - `TagReducerCallResult` is reserved. The former `ReducerCallResult` wire
@@ -25,13 +25,13 @@ const (
 //     cannot silently collide with the removed shape.
 const (
 	TagIdentityToken            uint8 = 1 // matches reference `IdentityToken` (v1.rs:445); renamed from TagInitialConnection
-	TagSubscribeSingleApplied   uint8 = 2 // renamed from TagSubscribeApplied (Phase 2 Slice 2 variant split)
-	TagUnsubscribeSingleApplied uint8 = 3 // renamed from TagUnsubscribeApplied (Phase 2 Slice 2 variant split)
+	TagSubscribeSingleApplied   uint8 = 2 // renamed from TagSubscribeApplied (single/multi variant variant split)
+	TagUnsubscribeSingleApplied uint8 = 3 // renamed from TagUnsubscribeApplied (single/multi variant variant split)
 	TagSubscriptionError        uint8 = 4
 	TagTransactionUpdate        uint8 = 5
 	TagOneOffQueryResponse      uint8 = 6 // matches reference `OneOffQueryResponse` (v1.rs:287/654); renamed from TagOneOffQueryResult
-	TagReducerCallResult        uint8 = 7 // RESERVED — formerly ReducerCallResult, removed Phase 1.5
+	TagReducerCallResult        uint8 = 7 // RESERVED — formerly ReducerCallResult, removed outcome-model
 	TagTransactionUpdateLight   uint8 = 8
-	TagSubscribeMultiApplied    uint8 = 9  // Phase 2 Slice 2 variant split
-	TagUnsubscribeMultiApplied  uint8 = 10 // Phase 2 Slice 2 variant split
+	TagSubscribeMultiApplied    uint8 = 9  // single/multi variant variant split
+	TagUnsubscribeMultiApplied  uint8 = 10 // single/multi variant variant split
 )

@@ -125,7 +125,7 @@ func drainOneOff(t *testing.T, conn *Conn) OneOffQueryResponse {
 }
 
 // firstTableRows returns the Rows payload of the first OneOffTable, or
-// nil if Tables is empty. Most Phase 2 Slice 1c handler tests populate
+// nil if Tables is empty. Most one-off message-id handler tests populate
 // exactly one table matching `compiled.TableName`.
 func firstTableRows(r OneOffQueryResponse) []byte {
 	if len(r.Tables) == 0 {
@@ -2506,7 +2506,7 @@ func TestHandleOneOffQuery_AliasedSelfJoinFilterAssociativeGroupingVisibleRowsMa
 	}
 }
 
-// TD-142 Slice 14: one-off self-join RHS projection (`SELECT b.*`) must
+// self-join projection contract: one-off self-join RHS projection (`SELECT b.*`) must
 // return only b-side rows. For a self-join both sides share the same
 // physical table, so Join.ProjectRight is the only signal distinguishing
 // b.* from a.* inside the one-off evaluator.
@@ -2976,7 +2976,7 @@ func TestHandleOneOffQuery_SenderParameterOnIdentityColumn(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParitySenderResolvesToHexOnStringColumn pins the
+// TestHandleOneOffQuery_ShunterSenderResolvesToHexOnStringColumn pins the
 // reference behavior at sql-parser/src/ast/mod.rs:159 (resolve_sender) →
 // expr/src/lib.rs:353: `:sender` on a String column substitutes the caller
 // identity hex literal and the String arm wraps it as
@@ -2986,7 +2986,7 @@ func TestHandleOneOffQuery_SenderParameterOnIdentityColumn(t *testing.T) {
 // versions of this test asserted a rejection on the assumption that
 // `:sender` was bytes-only; the rejection at check.rs:487-488 is for
 // `Array<String>` (the array-kind catch-all in `parse`), not String.
-func TestHandleOneOffQuery_ParitySenderResolvesToHexOnStringColumn(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSenderResolvesToHexOnStringColumn(t *testing.T) {
 	conn := testConnDirect(nil)
 	conn.Identity = types.Identity{1, 2, 3}
 	ts := &schema.TableSchema{
@@ -3209,13 +3209,13 @@ func TestHandleOneOffQuery_FloatLiteralOnIntegerColumnRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityStringDigitsOnIntegerColumnWidens pins the
+// TestHandleOneOffQuery_ShunterStringDigitsOnIntegerColumnWidens pins the
 // reference widening at expr/src/lib.rs:255-352. `WHERE u32 = '42'` must
 // now succeed: parse_int → BigDecimal::from_str("42") → BigDecimal::to_u32
 // → Uint32(42). Shunter routes the LitString through `parseNumericLiteral`
 // at the coerce boundary and recurses with the resulting LitInt, so the
 // admission accepts and the executor scans for u32 == 42.
-func TestHandleOneOffQuery_ParityStringDigitsOnIntegerColumnWidens(t *testing.T) {
+func TestHandleOneOffQuery_ShunterStringDigitsOnIntegerColumnWidens(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{
 		ID:   1,
@@ -3254,7 +3254,7 @@ func TestHandleOneOffQuery_ParityStringDigitsOnIntegerColumnWidens(t *testing.T)
 	}
 }
 
-// TestHandleOneOffQuery_ParityNonNumericStringOnIntegerEmitsInvalidLiteral
+// TestHandleOneOffQuery_ShunterNonNumericStringOnIntegerEmitsInvalidLiteral
 // pins the reference reject text at expr/src/errors.rs:84 flowing through
 // the new LitString-on-numeric path. `WHERE u32 = 'foo'` must emit “ The
 // literal expression `foo` cannot be parsed as type `U32` “ rather than
@@ -3263,7 +3263,7 @@ func TestHandleOneOffQuery_ParityStringDigitsOnIntegerColumnWidens(t *testing.T)
 // InvalidLiteral via the lib.rs:99 .map_err. The wrapper-bypass in
 // `normalizeSQLFilterForRelations` already passes InvalidLiteralError
 // through unwrapped.
-func TestHandleOneOffQuery_ParityNonNumericStringOnIntegerEmitsInvalidLiteral(t *testing.T) {
+func TestHandleOneOffQuery_ShunterNonNumericStringOnIntegerEmitsInvalidLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3287,7 +3287,7 @@ func TestHandleOneOffQuery_ParityNonNumericStringOnIntegerEmitsInvalidLiteral(t 
 	}
 }
 
-// TestHandleOneOffQuery_ParityNumericLiteralOnStringColumnWidens pins the
+// TestHandleOneOffQuery_ShunterNumericLiteralOnStringColumnWidens pins the
 // reference widening at expr/src/lib.rs:353 onto the OneOffQuery admission
 // surface. `WHERE name = 42` must succeed and return the row whose `name`
 // column equals the string `"42"`; `WHERE name = 1.3` must succeed and
@@ -3296,7 +3296,7 @@ func TestHandleOneOffQuery_ParityNonNumericStringOnIntegerEmitsInvalidLiteral(t 
 // `AlgebraicValue::String(value.into())`; Shunter renders LitInt via
 // `strconv.FormatInt` and LitFloat via `strconv.FormatFloat('g', -1, 64)`
 // at the coerce boundary so the bound predicate is `name = "<literal>"`.
-func TestHandleOneOffQuery_ParityNumericLiteralOnStringColumnWidens(t *testing.T) {
+func TestHandleOneOffQuery_ShunterNumericLiteralOnStringColumnWidens(t *testing.T) {
 	cases := []struct {
 		name        string
 		sql         string
@@ -3349,7 +3349,7 @@ func TestHandleOneOffQuery_ParityNumericLiteralOnStringColumnWidens(t *testing.T
 	}
 }
 
-// TestHandleOneOffQuery_ParityScientificLiteralOverflowPreservesSourceText
+// TestHandleOneOffQuery_ShunterScientificLiteralOverflowPreservesSourceText
 // pins the source-text seam through the OneOff (raw) admission surface:
 // `WHERE u8 = 1e3` collapses at the parser to LitInt(1000) but keeps the
 // `1e3` source token in `Literal.Text`. Reference parse_int folds the
@@ -3358,7 +3358,7 @@ func TestHandleOneOffQuery_ParityNumericLiteralOnStringColumnWidens(t *testing.T
 // in `normalizeSQLFilterForRelations` already passes InvalidLiteralError
 // through unwrapped, so the OneOff error reply carries the verbatim
 // reference literal.
-func TestHandleOneOffQuery_ParityScientificLiteralOverflowPreservesSourceText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterScientificLiteralOverflowPreservesSourceText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
@@ -3382,13 +3382,13 @@ func TestHandleOneOffQuery_ParityScientificLiteralOverflowPreservesSourceText(t 
 	}
 }
 
-// TestHandleOneOffQuery_ParityHexLiteralWidensOntoStringColumn pins the
+// TestHandleOneOffQuery_ShunterHexLiteralWidensOntoStringColumn pins the
 // reference `parse(value, String)` widening at lib.rs:353 onto the OneOff
 // admission surface for a Hex source-text literal. `WHERE name =
 // 0xDEADBEEF` keeps the original token through `Literal.Text` (parser sets
 // it on tokHex), so the widened String value is the original token
 // `"0xDEADBEEF"` and the snapshot row matches.
-func TestHandleOneOffQuery_ParityHexLiteralWidensOntoStringColumn(t *testing.T) {
+func TestHandleOneOffQuery_ShunterHexLiteralWidensOntoStringColumn(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{
 		ID:   1,
@@ -3463,12 +3463,12 @@ func TestHandleOneOffQuery_UnknownColumn(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnknownTableRejected pins the reference type-
+// TestHandleOneOffQuery_ShunterUnknownTableRejected pins the reference type-
 // check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
 // 483-485 (`select * from r` / "Table r does not exist") onto the OneOff
 // admission surface. Enforced incidentally via SchemaLookup.TableByName
 // returning !ok inside compileSQLQueryString; the pin names the contract.
-func TestHandleOneOffQuery_ParityUnknownTableRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnknownTableRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3491,12 +3491,12 @@ func TestHandleOneOffQuery_ParityUnknownTableRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnknownColumnRejected pins the reference type-
+// TestHandleOneOffQuery_ShunterUnknownColumnRejected pins the reference type-
 // check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
 // 491-493 (`select * from t where t.a = 1` / "Field a does not exist on
 // table t") onto the OneOff admission surface. Enforced incidentally via
 // rel.ts.Column returning !ok inside normalizeSQLFilterForRelations.
-func TestHandleOneOffQuery_ParityUnknownColumnRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnknownColumnRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3519,7 +3519,7 @@ func TestHandleOneOffQuery_ParityUnknownColumnRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected pins the
+// TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 495-497 (`select * from t as r where r.a = 1` / "Field a
 // does not exist on table t") onto the OneOff admission surface. The
@@ -3527,7 +3527,7 @@ func TestHandleOneOffQuery_ParityUnknownColumnRejected(t *testing.T) {
 // relationBindings; normalizeSQLFilterForRelations then fails the
 // rel.ts.Column lookup. Keeps the rejection named on the alias-qualified
 // surface.
-func TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterAliasedUnknownColumnRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3550,12 +3550,12 @@ func TestHandleOneOffQuery_ParityAliasedUnknownColumnRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected pins the
+// TestHandleOneOffQuery_ShunterBaseTableQualifierAfterAliasRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 506-509 (`select * from t as r where t.u32 = 5` / "t is not
 // in scope after alias") onto the OneOff admission surface. Enforced
 // incidentally at parser level via resolveQualifier in parseComparison.
-func TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterBaseTableQualifierAfterAliasRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3578,12 +3578,12 @@ func TestHandleOneOffQuery_ParityBaseTableQualifierAfterAliasRejected(t *testing
 	}
 }
 
-// TestHandleOneOffQuery_ParityBareColumnProjectionReturnsProjectedRows pins the
+// TestHandleOneOffQuery_ShunterBareColumnProjectionReturnsProjectedRows pins the
 // query-only single-table column-projection slice on the OneOff path: the
 // parser/compile seam may now accept `SELECT u32 FROM t`, and one-off must
 // return only the selected column values while keeping the outer table envelope
 // unchanged.
-func TestHandleOneOffQuery_ParityBareColumnProjectionReturnsProjectedRows(t *testing.T) {
+func TestHandleOneOffQuery_ShunterBareColumnProjectionReturnsProjectedRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3674,7 +3674,7 @@ func TestHandleOneOffQuery_UnquotedNullWhereRejectedBeforeColumnLookup(t *testin
 	}
 }
 
-func TestHandleOneOffQuery_ParityMultiColumnProjectionReturnsProjectedRows(t *testing.T) {
+func TestHandleOneOffQuery_ShunterMultiColumnProjectionReturnsProjectedRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3711,7 +3711,7 @@ func TestHandleOneOffQuery_ParityMultiColumnProjectionReturnsProjectedRows(t *te
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityAliasedBareColumnProjectionReturnsProjectedRows(t *testing.T) {
+func TestHandleOneOffQuery_ShunterAliasedBareColumnProjectionReturnsProjectedRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3746,7 +3746,7 @@ func TestHandleOneOffQuery_ParityAliasedBareColumnProjectionReturnsProjectedRows
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityAliasedBareColumnProjectionWithWhereReturnsProjectedRows(t *testing.T) {
+func TestHandleOneOffQuery_ShunterAliasedBareColumnProjectionWithWhereReturnsProjectedRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3779,7 +3779,7 @@ func TestHandleOneOffQuery_ParityAliasedBareColumnProjectionWithWhereReturnsProj
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityAliasedMultiColumnProjectionReturnsProjectedRows(t *testing.T) {
+func TestHandleOneOffQuery_ShunterAliasedMultiColumnProjectionReturnsProjectedRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -3819,7 +3819,7 @@ func TestHandleOneOffQuery_ParityAliasedMultiColumnProjectionReturnsProjectedRow
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityJoinColumnProjectionReturnsProjectedRows(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinColumnProjectionReturnsProjectedRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	projectedTS := &schema.TableSchema{
 		ID:   1,
@@ -3896,7 +3896,7 @@ func TestHandleOneOffQuery_ParityJoinColumnProjectionReturnsProjectedRows(t *tes
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityJoinColumnProjectionProjectsRight(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinColumnProjectionProjectsRight(t *testing.T) {
 	conn := testConnDirect(nil)
 	projectedTS := &schema.TableSchema{
 		ID:   2,
@@ -3973,7 +3973,7 @@ func TestHandleOneOffQuery_ParityJoinColumnProjectionProjectsRight(t *testing.T)
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityJoinColumnProjectionAllowsMixedRelations(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinColumnProjectionAllowsMixedRelations(t *testing.T) {
 	conn := testConnDirect(nil)
 	projectedSchema := &schema.TableSchema{
 		ID:   1,
@@ -4049,7 +4049,7 @@ func TestHandleOneOffQuery_ParityJoinColumnProjectionAllowsMixedRelations(t *tes
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParitySelfJoinColumnProjectionProjectsLeft(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSelfJoinColumnProjectionProjectsLeft(t *testing.T) {
 	conn := testConnDirect(nil)
 	projectedTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -4085,7 +4085,7 @@ func TestHandleOneOffQuery_ParitySelfJoinColumnProjectionProjectsLeft(t *testing
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParitySelfJoinColumnProjectionProjectsRight(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSelfJoinColumnProjectionProjectsRight(t *testing.T) {
 	conn := testConnDirect(nil)
 	projectedTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -4121,12 +4121,12 @@ func TestHandleOneOffQuery_ParitySelfJoinColumnProjectionProjectsRight(t *testin
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-// TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected pins the
+// TestHandleOneOffQuery_ShunterJoinWithoutQualifiedProjectionRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 515-517 (`select * from t join s` / "Subscriptions must be
 // typed to a single table") onto the OneOff admission surface. Enforced
 // incidentally at parseStatement requiring a qualified projection for joins.
-func TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinWithoutQualifiedProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4149,7 +4149,7 @@ func TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected(t *testi
 	}
 }
 
-// TestHandleOneOffQuery_ParityJoinStarProjectionRejectText pins the
+// TestHandleOneOffQuery_ShunterJoinStarProjectionRejectText pins the
 // reference type-check rejection text at
 // reference/SpacetimeDB/crates/expr/src/errors.rs:41
 // (`InvalidWildcard::Join` = "SELECT * is not supported for joins"),
@@ -4158,7 +4158,7 @@ func TestHandleOneOffQuery_ParityJoinWithoutQualifiedProjectionRejected(t *testi
 // `nfields() > 1`. The OneOff admission surface (module_host.rs:2252
 // `compile_subscription`, :2316 `format!("{err}")`) emits the raw error
 // text with no `DBError::WithSql` wrap, unlike the subscribe paths.
-func TestHandleOneOffQuery_ParityJoinStarProjectionRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinStarProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -4192,12 +4192,12 @@ func TestHandleOneOffQuery_ParityJoinStarProjectionRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected pins the
+// TestHandleOneOffQuery_ShunterSelfJoinWithoutAliasesRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 519-521 (`select t.* from t join t` / "Self join requires
 // aliases") onto the OneOff admission surface. Enforced incidentally at
 // parseJoinClause when both sides share the same table and alias.
-func TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSelfJoinWithoutAliasesRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4220,13 +4220,13 @@ func TestHandleOneOffQuery_ParitySelfJoinWithoutAliasesRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityForwardAliasReferenceRejected pins the reference
+// TestHandleOneOffQuery_ShunterForwardAliasReferenceRejected pins the reference
 // type-check rejection at reference/SpacetimeDB/crates/expr/src/check.rs lines
 // 526-528 (`select t.* from t join s on t.u32 = r.u32 join s as r` / "Alias
 // r is not in scope when it is referenced") onto the OneOff admission surface.
 // Enforced incidentally in parseQualifiedColumnRef when the forward alias
 // reference fails resolveQualifier against the first join's lookup.
-func TestHandleOneOffQuery_ParityForwardAliasReferenceRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterForwardAliasReferenceRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4249,12 +4249,12 @@ func TestHandleOneOffQuery_ParityForwardAliasReferenceRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityLimitClauseAppliesToVisibleRows pins the
+// TestHandleOneOffQuery_ShunterLimitClauseAppliesToVisibleRows pins the
 // query-only LIMIT slice from the reference SQL grammar onto Shunter's one-off
 // handler: after the existing row-shaped evaluation path produces matches, the
 // handler caps the visible result rows without changing the scan order contract
 // beyond this deterministic mock harness.
-func TestHandleOneOffQuery_ParityLimitClauseAppliesToVisibleRows(t *testing.T) {
+func TestHandleOneOffQuery_ShunterLimitClauseAppliesToVisibleRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4289,7 +4289,7 @@ func TestHandleOneOffQuery_ParityLimitClauseAppliesToVisibleRows(t *testing.T) {
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityScientificLimitLiteralApplies(t *testing.T) {
+func TestHandleOneOffQuery_ShunterScientificLimitLiteralApplies(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4320,7 +4320,7 @@ func TestHandleOneOffQuery_ParityScientificLimitLiteralApplies(t *testing.T) {
 	}
 }
 
-func TestHandleOneOffQuery_ParityFractionalLimitLiteralRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterFractionalLimitLiteralRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4346,11 +4346,11 @@ func TestHandleOneOffQuery_ParityFractionalLimitLiteralRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityLeadingPlusIntLiteral pins the reference
+// TestHandleOneOffQuery_ShunterLeadingPlusIntLiteral pins the reference
 // valid-literal shape at reference/SpacetimeDB/crates/expr/src/check.rs:297-
 // 300 (`select * from t where u32 = +1` / "Leading `+`"): a leading `+` on
 // an integer literal is admitted end-to-end through the OneOff path.
-func TestHandleOneOffQuery_ParityLeadingPlusIntLiteral(t *testing.T) {
+func TestHandleOneOffQuery_ShunterLeadingPlusIntLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4370,13 +4370,13 @@ func TestHandleOneOffQuery_ParityLeadingPlusIntLiteral(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected pins the
+// TestHandleOneOffQuery_ShunterUnqualifiedWhereInJoinRejected pins the
 // reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
 // check.rs lines 534-537 (`select t.* from t join s on t.u32 = s.u32 where
 // bytes = 0xABCD` / "Columns must be qualified in join expressions") onto the
 // OneOff admission surface. Enforced incidentally at parseComparison when the
 // relation binding has requireQualify set by the join.
-func TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnqualifiedWhereInJoinRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4400,11 +4400,11 @@ func TestHandleOneOffQuery_ParityUnqualifiedWhereInJoinRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityScientificNotationUnsignedInteger pins the
+// TestHandleOneOffQuery_ShunterScientificNotationUnsignedInteger pins the
 // reference valid-literal shape at reference/SpacetimeDB/crates/expr/src/
 // check.rs:302-304 (`select * from t where u32 = 1e3` / "Scientific
 // notation") on the OneOff admission path.
-func TestHandleOneOffQuery_ParityScientificNotationUnsignedInteger(t *testing.T) {
+func TestHandleOneOffQuery_ShunterScientificNotationUnsignedInteger(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4424,10 +4424,10 @@ func TestHandleOneOffQuery_ParityScientificNotationUnsignedInteger(t *testing.T)
 	}
 }
 
-// TestHandleOneOffQuery_ParityScientificNotationFloatNegativeExponent pins
+// TestHandleOneOffQuery_ShunterScientificNotationFloatNegativeExponent pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:314-316 (`select * from t
 // where f32 = 1e-3` / "Negative exponent") on the OneOff admission path.
-func TestHandleOneOffQuery_ParityScientificNotationFloatNegativeExponent(t *testing.T) {
+func TestHandleOneOffQuery_ShunterScientificNotationFloatNegativeExponent(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
@@ -4451,10 +4451,10 @@ func TestHandleOneOffQuery_ParityScientificNotationFloatNegativeExponent(t *test
 	}
 }
 
-// TestHandleOneOffQuery_ParityLeadingDotFloatLiteral pins reference/
+// TestHandleOneOffQuery_ShunterLeadingDotFloatLiteral pins reference/
 // SpacetimeDB/crates/expr/src/check.rs:322-324 (`select * from t where
 // f32 = .1` / "Leading `.`") on the OneOff admission path.
-func TestHandleOneOffQuery_ParityLeadingDotFloatLiteral(t *testing.T) {
+func TestHandleOneOffQuery_ShunterLeadingDotFloatLiteral(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
@@ -4478,12 +4478,12 @@ func TestHandleOneOffQuery_ParityLeadingDotFloatLiteral(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityScientificNotationOverflowInfinity pins
+// TestHandleOneOffQuery_ShunterScientificNotationOverflowInfinity pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:326-328 (`select * from t
 // where f32 = 1e40` / "Infinity") on the OneOff admission path. The stored
 // row is +Inf on the f32 column; the query literal `1e40` must coerce to
 // the same +Inf value and match.
-func TestHandleOneOffQuery_ParityScientificNotationOverflowInfinity(t *testing.T) {
+func TestHandleOneOffQuery_ShunterScientificNotationOverflowInfinity(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
@@ -4507,14 +4507,14 @@ func TestHandleOneOffQuery_ParityScientificNotationOverflowInfinity(t *testing.T
 	}
 }
 
-// TestHandleOneOffQuery_ParityInvalidLiteralNegativeIntOnUnsignedRejected pins
+// TestHandleOneOffQuery_ShunterInvalidLiteralNegativeIntOnUnsignedRejected pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:382-385 (`select * from t
 // where u8 = -1` / "Negative integer for unsigned column") onto the
 // OneOffQuery admission surface. `-1` is LitInt(-1); coerceUnsigned
 // (query/sql/coerce.go:119) rejects negative literals against unsigned
 // columns during SQL predicate compilation, producing Status=1 with a
 // non-empty Error message.
-func TestHandleOneOffQuery_ParityInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeIntOnUnsignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
@@ -4537,12 +4537,12 @@ func TestHandleOneOffQuery_ParityInvalidLiteralNegativeIntOnUnsignedRejected(t *
 	}
 }
 
-// TestHandleOneOffQuery_ParityInvalidLiteralScientificOverflowRejected pins
+// TestHandleOneOffQuery_ShunterInvalidLiteralScientificOverflowRejected pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:386-389 (`select * from t
 // where u8 = 1e3` / "Out of bounds") onto the OneOffQuery admission surface.
 // `1e3` collapses to LitInt(1000) via parseNumericLiteral; coerceUnsigned
 // (query/sql/coerce.go:123) rejects the value as out of range for u8.
-func TestHandleOneOffQuery_ParityInvalidLiteralScientificOverflowRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterInvalidLiteralScientificOverflowRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
@@ -4565,12 +4565,12 @@ func TestHandleOneOffQuery_ParityInvalidLiteralScientificOverflowRejected(t *tes
 	}
 }
 
-// TestHandleOneOffQuery_ParityInvalidLiteralFloatOnUnsignedRejected pins
+// TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:390-393 (`select * from t
 // where u8 = 0.1` / "Float as integer") onto the OneOffQuery admission
 // surface. Complements the existing u32 = 1.3 pin by naming the u8 column
 // variant; coerceUnsigned rejects LitFloat against an integer column.
-func TestHandleOneOffQuery_ParityInvalidLiteralFloatOnUnsignedRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterInvalidLiteralFloatOnUnsignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
@@ -4593,12 +4593,12 @@ func TestHandleOneOffQuery_ParityInvalidLiteralFloatOnUnsignedRejected(t *testin
 	}
 }
 
-// TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnUnsignedRejected
+// TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected
 // pins reference/SpacetimeDB/crates/expr/src/check.rs:394-397 (`select * from
 // t where u32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
 // surface. `1e-3` stays LitFloat (non-integral) and coerceUnsigned rejects
 // it against an unsigned column.
-func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnUnsignedRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnUnsignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4621,12 +4621,12 @@ func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnUnsignedRejecte
 	}
 }
 
-// TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected
+// TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnSignedRejected
 // pins reference/SpacetimeDB/crates/expr/src/check.rs:398-401 (`select * from
 // t where i32 = 1e-3` / "Float as integer") onto the OneOffQuery admission
 // surface. Mirrors the unsigned case on a signed column: coerceSigned rejects
 // the LitFloat against KindInt32.
-func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterInvalidLiteralNegativeExponentOnSignedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "i32", Type: schema.KindInt32},
@@ -4649,7 +4649,7 @@ func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected(
 	}
 }
 
-// TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth pins
+// TestHandleOneOffQuery_ShunterValidLiteralOnEachIntegerWidth pins
 // reference/SpacetimeDB/crates/expr/src/check.rs:360-370
 // (`valid_literals_for_type`) at the OneOffQuery admission surface. Each
 // subtest builds a single-column table, stores a matching row, and
@@ -4658,7 +4658,7 @@ func TestHandleOneOffQuery_ParityInvalidLiteralNegativeExponentOnSignedRejected(
 // (i8/u8/i16/u16/i32/u32/i64/u64/f32/f64 plus i128/u128 added 2026-04-21
 // slice 1 and i256/u256 added 2026-04-21 slice 2). The reference
 // `u256 = 1e40` row stays deferred until BigDecimal literal widening.
-func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
+func TestHandleOneOffQuery_ShunterValidLiteralOnEachIntegerWidth(t *testing.T) {
 	f32Row, err := types.NewFloat32(127)
 	if err != nil {
 		t.Fatalf("NewFloat32(127): %v", err)
@@ -4712,7 +4712,7 @@ func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityValidLiteralU256Scientific pins the remaining
+// TestHandleOneOffQuery_ShunterValidLiteralU256Scientific pins the remaining
 // reference `valid_literals` row at
 // reference/SpacetimeDB/crates/expr/src/check.rs:330-332
 // (`select * from t where u256 = 1e40` / "u256") at the OneOffQuery
@@ -4720,7 +4720,7 @@ func TestHandleOneOffQuery_ParityValidLiteralOnEachIntegerWidth(t *testing.T) {
 // coerce decomposes 10^40 into four uint64 words for the 256-bit Uint256
 // layout. The snapshot holds one matching row so the query should return
 // Status == 0.
-func TestHandleOneOffQuery_ParityValidLiteralU256Scientific(t *testing.T) {
+func TestHandleOneOffQuery_ShunterValidLiteralU256Scientific(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
@@ -4746,10 +4746,10 @@ func TestHandleOneOffQuery_ParityValidLiteralU256Scientific(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityUint256NegativeRejected extends the
+// TestHandleOneOffQuery_ShunterUint256NegativeRejected extends the
 // reference invalid_literals bundle at check.rs:382-385 to the Uint256
 // column kind. Mirrors the subscribe-side pin.
-func TestHandleOneOffQuery_ParityUint256NegativeRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUint256NegativeRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
@@ -4772,12 +4772,12 @@ func TestHandleOneOffQuery_ParityUint256NegativeRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityTimestampLiteralAccepted pins the reference
+// TestHandleOneOffQuery_ShunterTimestampLiteralAccepted pins the reference
 // valid_literals rows at check.rs:334-352 onto the OneOff admission surface.
 // Each subtest builds a Timestamp-column table, stores a matching row, and
 // confirms `SELECT * FROM t WHERE ts = '<shape>'` accepts end-to-end across
 // all five reference RFC3339 shapes.
-func TestHandleOneOffQuery_ParityTimestampLiteralAccepted(t *testing.T) {
+func TestHandleOneOffQuery_ShunterTimestampLiteralAccepted(t *testing.T) {
 	cases := []struct {
 		name  string
 		lit   string
@@ -4812,14 +4812,14 @@ func TestHandleOneOffQuery_ParityTimestampLiteralAccepted(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityTimestampMalformedRejected pins reference
+// TestHandleOneOffQuery_ShunterTimestampMalformedRejected pins reference
 // `InvalidLiteral` text for a non-RFC3339 string on a Timestamp column.
 // Reference path: `parse(value, Timestamp)` (expr/src/lib.rs:359) hits the
 // catch-all `bail!`, folded by lib.rs:99 `.map_err` into
 // `InvalidLiteral::new(v.into_string(), ty)`. Timestamp renders as the
 // Product `(__timestamp_micros_since_unix_epoch__: I64)`. OneOff admission
 // has no DBError::WithSql wrap.
-func TestHandleOneOffQuery_ParityTimestampMalformedRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterTimestampMalformedRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
@@ -4843,13 +4843,13 @@ func TestHandleOneOffQuery_ParityTimestampMalformedRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityBoolLiteralOnTimestampRejectText pins the
+// TestHandleOneOffQuery_ShunterBoolLiteralOnTimestampRejectText pins the
 // reference `UnexpectedType` literal for a bool literal targeting a
 // Timestamp column. Reference path: lib.rs:94 routes
 // `(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty))` directly to
 // `UnexpectedType` (errors.rs:100). Timestamp inferred name comes from the
 // SATS Product fmt.
-func TestHandleOneOffQuery_ParityBoolLiteralOnTimestampRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterBoolLiteralOnTimestampRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "ts", Type: schema.KindTimestamp},
@@ -4873,13 +4873,13 @@ func TestHandleOneOffQuery_ParityBoolLiteralOnTimestampRejectText(t *testing.T) 
 	}
 }
 
-// TestHandleOneOffQuery_ParityStringLiteralOnArrayStringRejectText pins
+// TestHandleOneOffQuery_ShunterStringLiteralOnArrayStringRejectText pins
 // reference `InvalidLiteral` text for a scalar literal on a KindArrayString
 // column. Reference `parse(value, Array<String>)` at lib.rs:359 falls
 // through the array-kind catch-all, folded by lib.rs:99 into
 // `InvalidLiteral::new(v.into_string(), ty)`. Array<String> renders through
 // the parameterized array form.
-func TestHandleOneOffQuery_ParityStringLiteralOnArrayStringRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterStringLiteralOnArrayStringRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
@@ -4903,11 +4903,11 @@ func TestHandleOneOffQuery_ParityStringLiteralOnArrayStringRejectText(t *testing
 	}
 }
 
-// TestHandleOneOffQuery_ParityBoolLiteralOnArrayStringRejectText pins the
+// TestHandleOneOffQuery_ShunterBoolLiteralOnArrayStringRejectText pins the
 // reference `UnexpectedType` literal for a bool literal targeting an
 // Array<String> column. Reference lib.rs:94 routes the bool arm to
 // `UnexpectedType` ahead of the lib.rs:99 InvalidLiteral fallback.
-func TestHandleOneOffQuery_ParityBoolLiteralOnArrayStringRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterBoolLiteralOnArrayStringRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
@@ -4931,10 +4931,10 @@ func TestHandleOneOffQuery_ParityBoolLiteralOnArrayStringRejectText(t *testing.T
 	}
 }
 
-// TestHandleOneOffQuery_ParityUint128NegativeRejected extends the
+// TestHandleOneOffQuery_ShunterUint128NegativeRejected extends the
 // reference invalid_literals bundle at check.rs:382-385 to the Uint128
 // column kind. Mirrors the subscribe-side pin.
-func TestHandleOneOffQuery_ParityUint128NegativeRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUint128NegativeRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
@@ -4957,7 +4957,7 @@ func TestHandleOneOffQuery_ParityUint128NegativeRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityDMLStatementRejected pins the reference
+// TestHandleOneOffQuery_ShunterDMLStatementRejected pins the reference
 // subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`delete from t` / "DML not allowed in subscriptions") onto the OneOff
@@ -4967,7 +4967,7 @@ func TestHandleOneOffQuery_ParityUint128NegativeRejected(t *testing.T) {
 // One-off shares the subscription-shape admission path in Shunter; the
 // intentional divergence from reference's wider parse_and_type_sql path is
 // recorded in TECH-DEBT.md.
-func TestHandleOneOffQuery_ParityDMLStatementRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterDMLStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -4990,12 +4990,12 @@ func TestHandleOneOffQuery_ParityDMLStatementRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityEmptyStatementRejected pins the reference
+// TestHandleOneOffQuery_ShunterEmptyStatementRejected pins the reference
 // subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (empty string / "Empty") onto the OneOff admission surface. Enforced
 // incidentally at expectKeyword("SELECT") on an EOF-only token stream.
-func TestHandleOneOffQuery_ParityEmptyStatementRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterEmptyStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5018,12 +5018,12 @@ func TestHandleOneOffQuery_ParityEmptyStatementRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected pins the
+// TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected pins the
 // reference subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (single space / "Empty after whitespace skip") onto the OneOff admission
 // surface. Enforced incidentally once the tokenizer drops whitespace.
-func TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterWhitespaceOnlyStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5046,13 +5046,13 @@ func TestHandleOneOffQuery_ParityWhitespaceOnlyStatementRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityDistinctProjectionRejected pins the reference
+// TestHandleOneOffQuery_ShunterDistinctProjectionRejected pins the reference
 // SQL parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs:362-394 — the
 // `parse_select` arm requires `distinct: None`; any non-None set quantifier
 // falls into `_ => SqlUnsupported::feature(select)`, which the OneOff
 // surface renders as `Unsupported: {select}`.
-func TestHandleOneOffQuery_ParityDistinctProjectionRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterDistinctProjectionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5077,14 +5077,14 @@ func TestHandleOneOffQuery_ParityDistinctProjectionRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityAllModifierRejected pins the reference SQL
+// TestHandleOneOffQuery_ShunterAllModifierRejected pins the reference SQL
 // parser rejection at sql.rs:362-394 for `SELECT ALL ...`. The set
 // quantifier `ALL` produces a non-None `distinct` field which the
 // `parse_select` arm rejects through `SqlUnsupported::feature(select)`.
 // The test schema deliberately includes a column named `ALL` to confirm
 // the parser detects the modifier rather than reinterpreting the keyword
 // as a column reference with output alias `u32`.
-func TestHandleOneOffQuery_ParityAllModifierRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterAllModifierRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "ALL", Type: schema.KindUint32},
@@ -5109,14 +5109,14 @@ func TestHandleOneOffQuery_ParityAllModifierRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParitySubqueryInFromRejected pins the reference
+// TestHandleOneOffQuery_ShunterSubqueryInFromRejected pins the reference
 // subscription-parser rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
 // (`select * from (select * from t) join (select * from s) on a = b` /
 // "Subqueries in FROM not supported") onto the OneOff admission surface.
 // Enforced incidentally at parseStatement which requires an identifier token
 // after FROM.
-func TestHandleOneOffQuery_ParitySubqueryInFromRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSubqueryInFromRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5139,13 +5139,13 @@ func TestHandleOneOffQuery_ParitySubqueryInFromRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlUnsupportedSelectLiteralWithoutFromRejected
+// TestHandleOneOffQuery_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select 1` / "FROM is required") onto the OneOff admission surface.
 // parseProjection rejects the integer literal `1` with "projection must be
 // '*' or 'table.*'".
-func TestHandleOneOffQuery_ParitySqlUnsupportedSelectLiteralWithoutFromRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlUnsupportedSelectLiteralWithoutFromRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5168,13 +5168,13 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedSelectLiteralWithoutFromRejected(
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlUnsupportedMultiPartTableNameRejected pins
+// TestHandleOneOffQuery_ShunterSqlUnsupportedMultiPartTableNameRejected pins
 // the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a from s.t` / "Multi-part table names") onto the OneOff admission
 // surface. parseProjection rejects the bare identifier `a` before FROM is
 // parsed, so rejection fires with "projection must be '*' or 'table.*'".
-func TestHandleOneOffQuery_ParitySqlUnsupportedMultiPartTableNameRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlUnsupportedMultiPartTableNameRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5197,14 +5197,14 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedMultiPartTableNameRejected(t *tes
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlUnsupportedBitStringLiteralRejected pins
+// TestHandleOneOffQuery_ShunterSqlUnsupportedBitStringLiteralRejected pins
 // the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t where a = B'1010'` / "Bit-string literals") onto the
 // OneOff admission surface. The lexer tokenizes `B` as an identifier and
 // `'1010'` as a separate string literal; parseLiteral rejects the identifier
 // RHS of `=` with "expected literal, got identifier \"B\"".
-func TestHandleOneOffQuery_ParitySqlUnsupportedBitStringLiteralRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlUnsupportedBitStringLiteralRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5227,14 +5227,14 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedBitStringLiteralRejected(t *testi
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlUnsupportedWildcardWithBareColumnsRejected
+// TestHandleOneOffQuery_ShunterSqlUnsupportedWildcardWithBareColumnsRejected
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a.*, b, c from t` / "Wildcard with non-wildcard projections") onto
 // the OneOff admission surface. After parseProjection consumes `t.*`,
 // parseStatement expects FROM but finds `,` and rejects with
 // "expected FROM, got \",\"".
-func TestHandleOneOffQuery_ParitySqlUnsupportedWildcardWithBareColumnsRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlUnsupportedWildcardWithBareColumnsRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5257,14 +5257,14 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedWildcardWithBareColumnsRejected(t
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlUnsupportedOrderByWithLimitExpressionRejected
+// TestHandleOneOffQuery_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t order by a limit b` / "Limit expression") onto the OneOff
 // admission surface. ORDER BY trips parseStatement's EOF guard
 // (query/sql/parser.go:547-549) with "unexpected token \"ORDER\"" before the
 // LIMIT identifier is examined.
-func TestHandleOneOffQuery_ParitySqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5287,14 +5287,14 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedOrderByWithLimitExpressionRejecte
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlUnsupportedAggregateWithGroupByRejected pins
+// TestHandleOneOffQuery_ShunterSqlUnsupportedAggregateWithGroupByRejected pins
 // the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a, count(*) from t group by a` / "GROUP BY") onto the OneOff
 // admission surface. parseProjection rejects the leading bare column with
 // "projection must be '*' or 'table.*'" before the aggregate or GROUP BY
 // keyword is ever seen.
-func TestHandleOneOffQuery_ParitySqlUnsupportedAggregateWithGroupByRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlUnsupportedAggregateWithGroupByRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5317,14 +5317,14 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedAggregateWithGroupByRejected(t *t
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlUnsupportedImplicitCommaJoinRejected pins the
+// TestHandleOneOffQuery_ShunterSqlUnsupportedImplicitCommaJoinRejected pins the
 // reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select a.* from t as a, s as b where a.id = b.id and b.c = 1` /
 // "Implicit joins") onto the OneOff admission surface. After consuming
 // `t AS a`, parseStatement's EOF/keyword guard hits `,` and rejects with
 // "unexpected token \",\"".
-func TestHandleOneOffQuery_ParitySqlUnsupportedImplicitCommaJoinRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlUnsupportedImplicitCommaJoinRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5347,7 +5347,7 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedImplicitCommaJoinRejected(t *test
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected pins
+// TestHandleOneOffQuery_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected pins
 // the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select t.* from t join s on int = u32` / "Joins require qualified vars")
@@ -5355,7 +5355,7 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedImplicitCommaJoinRejected(t *test
 // parseQualifiedColumnRef for the left side of ON
 // (query/sql/parser.go:629); the bare identifier `int` fails there with
 // "expected qualified column reference".
-func TestHandleOneOffQuery_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlUnsupportedUnqualifiedJoinOnVarsRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5378,14 +5378,14 @@ func TestHandleOneOffQuery_ParitySqlUnsupportedUnqualifiedJoinOnVarsRejected(t *
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlInvalidEmptySelectRejected pins the
+// TestHandleOneOffQuery_ShunterSqlInvalidEmptySelectRejected pins the
 // reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select from t` / "Empty SELECT") onto the OneOff admission surface.
 // parseProjection rejects because the next token after SELECT is the
 // identifier `from`, which is then followed by `t` (not a dot), so the
 // projection fails with "projection must be '*' or 'table.*'".
-func TestHandleOneOffQuery_ParitySqlInvalidEmptySelectRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlInvalidEmptySelectRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5408,13 +5408,13 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptySelectRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlInvalidEmptyFromRejected pins the reference
+// TestHandleOneOffQuery_ShunterSqlInvalidEmptyFromRejected pins the reference
 // parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a from where b = 1` / "Empty FROM") onto the OneOff admission
 // surface. parseProjection rejects the bare column `a` with "projection must
 // be '*' or 'table.*'" before the empty FROM is examined.
-func TestHandleOneOffQuery_ParitySqlInvalidEmptyFromRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlInvalidEmptyFromRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5437,13 +5437,13 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptyFromRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlInvalidEmptyWhereRejected pins the reference
+// TestHandleOneOffQuery_ShunterSqlInvalidEmptyWhereRejected pins the reference
 // parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a from t where` / "Empty WHERE") onto the OneOff admission
 // surface. parseProjection rejects the bare column `a` with "projection must
 // be '*' or 'table.*'" before the empty WHERE is examined.
-func TestHandleOneOffQuery_ParitySqlInvalidEmptyWhereRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlInvalidEmptyWhereRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5466,14 +5466,14 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptyWhereRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParitySqlInvalidEmptyGroupByRejected pins the
+// TestHandleOneOffQuery_ShunterSqlInvalidEmptyGroupByRejected pins the
 // reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select a, count(*) from t group by` / "Empty GROUP BY") onto the OneOff
 // admission surface. parseProjection rejects the leading bare column `a` with
 // "projection must be '*' or 'table.*'" before the aggregate or empty GROUP
 // BY is examined.
-func TestHandleOneOffQuery_ParitySqlInvalidEmptyGroupByRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlInvalidEmptyGroupByRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5496,7 +5496,7 @@ func TestHandleOneOffQuery_ParitySqlInvalidEmptyGroupByRejected(t *testing.T) {
 	}
 }
 
-func TestHandleOneOffQuery_ParityCountAliasReturnsSingleAggregateRow(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCountAliasReturnsSingleAggregateRow(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5529,7 +5529,7 @@ func TestHandleOneOffQuery_ParityCountAliasReturnsSingleAggregateRow(t *testing.
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityCountBareAliasReturnsSingleAggregateRow(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCountBareAliasReturnsSingleAggregateRow(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5562,7 +5562,7 @@ func TestHandleOneOffQuery_ParityCountBareAliasReturnsSingleAggregateRow(t *test
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityCountAliasWithWhereReturnsSingleAggregateRow(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCountAliasWithWhereReturnsSingleAggregateRow(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5595,7 +5595,7 @@ func TestHandleOneOffQuery_ParityCountAliasWithWhereReturnsSingleAggregateRow(t 
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityCountAliasZeroRowsReturnsSingleZeroRow(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCountAliasZeroRowsReturnsSingleZeroRow(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5627,7 +5627,7 @@ func TestHandleOneOffQuery_ParityCountAliasZeroRowsReturnsSingleZeroRow(t *testi
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityJoinCountAliasReturnsSingleAggregateRow(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinCountAliasReturnsSingleAggregateRow(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -5673,7 +5673,7 @@ func TestHandleOneOffQuery_ParityJoinCountAliasReturnsSingleAggregateRow(t *test
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-func TestHandleOneOffQuery_ParityJoinCountBareAliasWithWhereReturnsSingleAggregateRow(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinCountBareAliasWithWhereReturnsSingleAggregateRow(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -5716,13 +5716,13 @@ func TestHandleOneOffQuery_ParityJoinCountBareAliasWithWhereReturnsSingleAggrega
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-// TestHandleOneOffQuery_ParityJoinCountAliasOnCrossJoinWhereEqualityReturnsAggregate
+// TestHandleOneOffQuery_ShunterJoinCountAliasOnCrossJoinWhereEqualityReturnsAggregate
 // pins that one-off/ad hoc SQL counts matched rows for the already-accepted
-// cross-join WHERE column-equality shape (P0-SUBSCRIPTION-024) with the
-// already-accepted join-backed COUNT(*) AS alias aggregate (P0-SUBSCRIPTION-025).
+// cross-join WHERE column-equality shape with the already-accepted join-backed
+// COUNT(*) AS alias aggregate.
 // The bounded combination yields one uint64 aggregate row equal to the number
 // of matched join pairs, with multiplicity preserved on duplicates.
-func TestHandleOneOffQuery_ParityJoinCountAliasOnCrossJoinWhereEqualityReturnsAggregate(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinCountAliasOnCrossJoinWhereEqualityReturnsAggregate(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -5768,13 +5768,13 @@ func TestHandleOneOffQuery_ParityJoinCountAliasOnCrossJoinWhereEqualityReturnsAg
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-// TestHandleOneOffQuery_ParityJoinCountBareAliasOnCrossJoinWhereEqualityAndFilterReturnsAggregate
+// TestHandleOneOffQuery_ShunterJoinCountBareAliasOnCrossJoinWhereEqualityAndFilterReturnsAggregate
 // pins the bounded combination of the cross-join WHERE equality-plus-single-
-// literal-filter shape (P0-SUBSCRIPTION-031) with the join-backed COUNT(*)
-// alias aggregate (P0-SUBSCRIPTION-025). Only matched-and-filtered join pairs
-// are counted, the bare alias form is accepted, and the result is a single
+// literal-filter shape with the join-backed COUNT(*) alias aggregate. Only
+// matched-and-filtered join pairs are counted, the bare alias form is accepted,
+// and the result is a single
 // uint64 row under the requested alias.
-func TestHandleOneOffQuery_ParityJoinCountBareAliasOnCrossJoinWhereEqualityAndFilterReturnsAggregate(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinCountBareAliasOnCrossJoinWhereEqualityAndFilterReturnsAggregate(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -5817,12 +5817,12 @@ func TestHandleOneOffQuery_ParityJoinCountBareAliasOnCrossJoinWhereEqualityAndFi
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-// TestHandleOneOffQuery_ParityCountAliasWithLimitOneReturnsFullAggregate pins
+// TestHandleOneOffQuery_ShunterCountAliasWithLimitOneReturnsFullAggregate pins
 // that one-off/ad hoc SQL counts the full matched input before applying LIMIT
 // to the one-row aggregate output. A naive implementation that limited
 // matchedRows before aggregate shaping would count uint64(1); the correct
 // behavior is uint64(2), the full matched-input count.
-func TestHandleOneOffQuery_ParityCountAliasWithLimitOneReturnsFullAggregate(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCountAliasWithLimitOneReturnsFullAggregate(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5855,11 +5855,11 @@ func TestHandleOneOffQuery_ParityCountAliasWithLimitOneReturnsFullAggregate(t *t
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-// TestHandleOneOffQuery_ParityCountAliasWithLimitZeroReturnsNoRows pins that
+// TestHandleOneOffQuery_ShunterCountAliasWithLimitZeroReturnsNoRows pins that
 // LIMIT 0 drops the one-row aggregate output entirely (reference
 // ProjectList::Limit on top of ProjectList::Agg(Count)), rather than emitting
 // one row containing zero.
-func TestHandleOneOffQuery_ParityCountAliasWithLimitZeroReturnsNoRows(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCountAliasWithLimitZeroReturnsNoRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -5893,13 +5893,13 @@ func TestHandleOneOffQuery_ParityCountAliasWithLimitZeroReturnsNoRows(t *testing
 	}
 }
 
-// TestHandleOneOffQuery_ParityJoinCountWithLimitReturnsFullAggregate replaces
+// TestHandleOneOffQuery_ShunterJoinCountWithLimitReturnsFullAggregate replaces
 // the prior aggregate+LIMIT rejection pin. It proves that join multiplicity is
 // counted across the full matched input before LIMIT is applied to the one-row
 // aggregate output. A naive implementation that limited matchedRows first would
 // report uint64(1); the correct behavior is uint64(2), the full matched-pair
 // count.
-func TestHandleOneOffQuery_ParityJoinCountWithLimitReturnsFullAggregate(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinCountWithLimitReturnsFullAggregate(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -5945,12 +5945,12 @@ func TestHandleOneOffQuery_ParityJoinCountWithLimitReturnsFullAggregate(t *testi
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-// TestHandleOneOffQuery_ParityCrossJoinWhereCountWithLimitReturnsFullAggregate
+// TestHandleOneOffQuery_ShunterCrossJoinWhereCountWithLimitReturnsFullAggregate
 // extends the LIMIT-on-aggregate composition onto the cross-join WHERE
 // equality-plus-literal-filter surface already accepted by one-off. Join
 // multiplicity and filtering happen first; LIMIT 1 applies only to the one-row
 // aggregate output.
-func TestHandleOneOffQuery_ParityCrossJoinWhereCountWithLimitReturnsFullAggregate(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCrossJoinWhereCountWithLimitReturnsFullAggregate(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{tables: map[string]struct {
 		id     schema.TableID
@@ -5993,14 +5993,14 @@ func TestHandleOneOffQuery_ParityCrossJoinWhereCountWithLimitReturnsFullAggregat
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
-// TestHandleOneOffQuery_ParitySqlInvalidAggregateWithoutAliasRejected pins the
+// TestHandleOneOffQuery_ShunterSqlInvalidAggregateWithoutAliasRejected pins the
 // reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 457-476
 // (`select count(*) from t` / "Aggregate without alias") onto the OneOff
 // admission surface. parseProjection reads `count` as an identifier
 // qualifier, then finds `(` where it expects a dot, rejecting with
 // "projection must be '*' or 'table.*'".
-func TestHandleOneOffQuery_ParitySqlInvalidAggregateWithoutAliasRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSqlInvalidAggregateWithoutAliasRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6023,13 +6023,13 @@ func TestHandleOneOffQuery_ParitySqlInvalidAggregateWithoutAliasRejected(t *test
 	}
 }
 
-// TestHandleOneOffQuery_ParityArraySenderRejected pins reference
+// TestHandleOneOffQuery_ShunterArraySenderRejected pins reference
 // check.rs:487-489 (`select * from t where arr = :sender` / "The :sender
 // param is an identity") onto the OneOffQuery admission surface. With
 // KindArrayString realized, the coerce layer rejects :sender against the
 // array column instead of hitting the default "column kind not supported"
-// branch — the rejection is a positive parity contract.
-func TestHandleOneOffQuery_ParityArraySenderRejected(t *testing.T) {
+// branch — the rejection is a positive Shunter contract.
+func TestHandleOneOffQuery_ShunterArraySenderRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "arr", Type: schema.KindArrayString},
@@ -6052,11 +6052,11 @@ func TestHandleOneOffQuery_ParityArraySenderRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityArrayJoinOnRejected pins reference
+// TestHandleOneOffQuery_ShunterArrayJoinOnRejected pins reference
 // check.rs:523-525 (`select t.* from t join s on t.arr = s.arr` / "Product
 // values are not comparable") onto the OneOffQuery admission surface. The
 // join compile path rejects when either ON side names an array column.
-func TestHandleOneOffQuery_ParityArrayJoinOnRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterArrayJoinOnRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{
 		tables: map[string]struct {
@@ -6089,7 +6089,7 @@ func TestHandleOneOffQuery_ParityArrayJoinOnRejected(t *testing.T) {
 	}
 }
 
-func TestHandleOneOffQuery_ParityJoinOnStrictEqualityRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinOnStrictEqualityRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -6130,7 +6130,7 @@ func TestHandleOneOffQuery_ParityJoinOnStrictEqualityRejectText(t *testing.T) {
 	}
 }
 
-func TestHandleOneOffQuery_ParityCrossJoinKeywordNotAlias(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCrossJoinKeywordNotAlias(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{
 		tables: map[string]struct {
@@ -6164,7 +6164,7 @@ func TestHandleOneOffQuery_ParityCrossJoinKeywordNotAlias(t *testing.T) {
 	}
 }
 
-func TestHandleOneOffQuery_ParityLeftJoinKeywordRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterLeftJoinKeywordRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := &mockSchemaLookup{
 		tables: map[string]struct {
@@ -6198,14 +6198,14 @@ func TestHandleOneOffQuery_ParityLeftJoinKeywordRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnknownTableRejectText pins the reference
+// TestHandleOneOffQuery_ShunterUnknownTableRejectText pins the reference
 // type-check rejection literal at
 // reference/SpacetimeDB/crates/expr/src/errors.rs:14
 // (`Unresolved::Table` = "no such table: `{0}`. If the table exists, it may
 // be marked private."). The OneOff admission surface
 // (module_host.rs:2252 `compile_subscription`, :2316 `format!("{err}")`)
 // emits the raw error text with no `DBError::WithSql` wrap.
-func TestHandleOneOffQuery_ParityUnknownTableRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnknownTableRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6264,14 +6264,14 @@ func TestHandleOneOffQuery_AmbiguousCaseFoldedTableNameRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnknownFieldRejectText pins the reference
+// TestHandleOneOffQuery_ShunterUnknownFieldRejectText pins the reference
 // type-check rejection literal at
 // reference/SpacetimeDB/crates/expr/src/errors.rs:11-13
 // (`Unresolved::Var` = "`{0}` is not in scope"). Reference emit site
 // `_type_expr` lib.rs:107: a missing column inside an existing relvar
 // surfaces as `Unresolved::var(&field)`. OneOff admission emits the raw
 // error text with no `DBError::WithSql` wrap.
-func TestHandleOneOffQuery_ParityUnknownFieldRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnknownFieldRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6295,7 +6295,7 @@ func TestHandleOneOffQuery_ParityUnknownFieldRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityBoolLiteralOnIntegerColumnRejectText pins the
+// TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText pins the
 // reference type-check rejection literal at
 // reference/SpacetimeDB/crates/expr/src/errors.rs:100
 // (`UnexpectedType` = "Unexpected type: (expected) {expected} != {inferred}
@@ -6305,7 +6305,7 @@ func TestHandleOneOffQuery_ParityUnknownFieldRejectText(t *testing.T) {
 // Err(UnexpectedType::new(&AlgebraicType::Bool, ty).into())`) — a bool
 // literal in a non-bool column. OneOff admission emits the raw error text
 // with no `DBError::WithSql` wrap.
-func TestHandleOneOffQuery_ParityBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6329,20 +6329,20 @@ func TestHandleOneOffQuery_ParityBoolLiteralOnIntegerColumnRejectText(t *testing
 	}
 }
 
-// TestHandleOneOffQuery_ParityIntOverflowOnUint8RejectText pins the reference
+// TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText pins the reference
 // `InvalidLiteral` literal from
 // reference/SpacetimeDB/crates/expr/src/errors.rs:108
 // ("The literal expression `{literal}` cannot be parsed as type `{ty}`"),
 // emitted at lib.rs:99 when `parse(v, ty)` fails. On U8, the reference path
 // `parse_int` → `BigDecimal::to_u8` returns None for values > 255 and the
 // outer `.map_err(|_| InvalidLiteral::new(...))` folds the anyhow overflow
-// into the parity literal. OneOff admission emits the raw text with no
+// into the reference literal. OneOff admission emits the raw text with no
 // `DBError::WithSql` wrap. Scope: plain integer literal (`1000`) whose
 // reconstructed decimal text matches the original SQL token. Scientific
 // notation (`1e3`) collapses to LitInt(1000) at the Shunter parser, which
-// loses the original token; the parity slice for that shape requires
+// loses the original token; the contract slice for that shape requires
 // preserving the source text on Literal and is deferred.
-func TestHandleOneOffQuery_ParityIntOverflowOnUint8RejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
@@ -6366,14 +6366,14 @@ func TestHandleOneOffQuery_ParityIntOverflowOnUint8RejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityNegativeIntOnUint8RejectText pins the same
+// TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText pins the same
 // reference `InvalidLiteral` literal for the negative-on-unsigned case.
 // Reference `parse_int` calls `BigDecimal::to_u8` which returns None for
 // negative inputs; the outer anyhow error is folded into InvalidLiteral by
 // the `.map_err` at lib.rs:99. Shunter emits via the negative branch of
 // `coerceUnsigned` rather than a dedicated typecheck pass; the text must
 // still match the reference literal.
-func TestHandleOneOffQuery_ParityNegativeIntOnUint8RejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterNegativeIntOnUint8RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u8", Type: schema.KindUint8},
@@ -6397,13 +6397,13 @@ func TestHandleOneOffQuery_ParityNegativeIntOnUint8RejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityIntOverflowOnInt8RejectText pins the signed
+// TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText pins the signed
 // variant of the same reference `InvalidLiteral` literal. Reference
 // `parse_int` → `BigDecimal::to_i8` returns None for 200 (>127); the outer
 // anyhow error is folded into InvalidLiteral by `.map_err` at lib.rs:99.
 // Shunter emits via the range-check branch of `coerceSigned`; the text
 // must match reference.
-func TestHandleOneOffQuery_ParityIntOverflowOnInt8RejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterIntOverflowOnInt8RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "i8", Type: schema.KindInt8},
@@ -6427,14 +6427,14 @@ func TestHandleOneOffQuery_ParityIntOverflowOnInt8RejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityNegativeIntOnUint128RejectText pins the
+// TestHandleOneOffQuery_ShunterNegativeIntOnUint128RejectText pins the
 // reference `InvalidLiteral` literal for the LitInt-negative branch against
 // a 128-bit unsigned column (coerce.go:133 in the Uint128 case arm). The
 // reference path `parse_int` + `BigDecimal::to_u128` returns None for
 // negative inputs; the outer `.map_err` folds the anyhow into
 // InvalidLiteral. Scope: LitInt branch — the LitBigInt branch is covered
 // by the BigInt cases below.
-func TestHandleOneOffQuery_ParityNegativeIntOnUint128RejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterNegativeIntOnUint128RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
@@ -6458,12 +6458,12 @@ func TestHandleOneOffQuery_ParityNegativeIntOnUint128RejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityBigIntOverflowOnUint128RejectText pins the
+// TestHandleOneOffQuery_ShunterBigIntOverflowOnUint128RejectText pins the
 // reference `InvalidLiteral` literal for the LitBigInt branch against a
 // 128-bit unsigned column (coerceBigIntToUint128 in coerce.go). Input
 // `2^128` exceeds U128's max and `BigDecimal::to_u128` returns None in
 // the reference `parse_int` path.
-func TestHandleOneOffQuery_ParityBigIntOverflowOnUint128RejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterBigIntOverflowOnUint128RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u128", Type: schema.KindUint128},
@@ -6489,11 +6489,11 @@ func TestHandleOneOffQuery_ParityBigIntOverflowOnUint128RejectText(t *testing.T)
 	}
 }
 
-// TestHandleOneOffQuery_ParityBigIntOverflowOnInt128RejectText pins the
+// TestHandleOneOffQuery_ShunterBigIntOverflowOnInt128RejectText pins the
 // reference `InvalidLiteral` literal for the signed variant.
 // `2^127` overflows I128::MAX (2^127 - 1) and reference
 // `BigDecimal::to_i128` returns None.
-func TestHandleOneOffQuery_ParityBigIntOverflowOnInt128RejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterBigIntOverflowOnInt128RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "i128", Type: schema.KindInt128},
@@ -6519,10 +6519,10 @@ func TestHandleOneOffQuery_ParityBigIntOverflowOnInt128RejectText(t *testing.T) 
 	}
 }
 
-// TestHandleOneOffQuery_ParityNegativeIntOnUint256RejectText pins the
+// TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText pins the
 // reference `InvalidLiteral` literal for the LitInt-negative branch
 // against a 256-bit unsigned column (coerce.go:154 in the Uint256 arm).
-func TestHandleOneOffQuery_ParityNegativeIntOnUint256RejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u256", Type: schema.KindUint256},
@@ -6546,7 +6546,7 @@ func TestHandleOneOffQuery_ParityNegativeIntOnUint256RejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityFloatLiteralOnUint32RejectText pins the
+// TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText pins the
 // reference `InvalidLiteral` literal for a fractional LitFloat targeted at
 // an integer column. Reference path: `parse_int(BigDecimal, U32)` where
 // `BigDecimal::to_u32` returns None for 1.3 and the outer `.map_err` at
@@ -6558,7 +6558,7 @@ func TestHandleOneOffQuery_ParityNegativeIntOnUint256RejectText(t *testing.T) {
 // Source-text preservation for formats that round-trip differently (e.g.
 // `1.10` → "1.1") is a separate slice — this pin uses `1.3` whose canonical
 // text matches the original token.
-func TestHandleOneOffQuery_ParityFloatLiteralOnUint32RejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6582,7 +6582,7 @@ func TestHandleOneOffQuery_ParityFloatLiteralOnUint32RejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityNonBoolLiteralOnBoolRejectText pins the
+// TestHandleOneOffQuery_ShunterNonBoolLiteralOnBoolRejectText pins the
 // reference `InvalidLiteral` literal for non-Bool primitive literals
 // targeted at a Bool column. Reference path: `parse(value, Bool)` at
 // lib.rs:99 has no Bool arm in its type-match and falls to the catch-all
@@ -6592,7 +6592,7 @@ func TestHandleOneOffQuery_ParityFloatLiteralOnUint32RejectText(t *testing.T) {
 // Covers LitInt, LitFloat, LitString in one table; LitBigInt is exercised
 // by the coerce-layer unit test and LitBytes is deferred pending a
 // canonical-hex / Text-field decision on `sql.Literal`.
-func TestHandleOneOffQuery_ParityNonBoolLiteralOnBoolRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterNonBoolLiteralOnBoolRejectText(t *testing.T) {
 	cases := []struct {
 		name        string
 		queryString string
@@ -6629,7 +6629,7 @@ func TestHandleOneOffQuery_ParityNonBoolLiteralOnBoolRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityDuplicateProjectionAliasRejectText pins the
+// TestHandleOneOffQuery_ShunterDuplicateProjectionAliasRejectText pins the
 // reference `DuplicateName` literal (errors.rs:120) for a SELECT list whose
 // explicit `AS` aliases collide. Reference path: `type_proj::Exprs`
 // (check.rs:67-72) tracks each element's alias in a HashSet and emits
@@ -6637,7 +6637,7 @@ func TestHandleOneOffQuery_ParityNonBoolLiteralOnBoolRejectText(t *testing.T) {
 // surface that reaches this branch — SubscribeSingle rejects the
 // column-list projection earlier with `Unsupported::ReturnType` at
 // `compileSQLQueryString`'s `allowProjection=false` guard.
-func TestHandleOneOffQuery_ParityDuplicateProjectionAliasRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterDuplicateProjectionAliasRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6662,13 +6662,13 @@ func TestHandleOneOffQuery_ParityDuplicateProjectionAliasRejectText(t *testing.T
 	}
 }
 
-// TestHandleOneOffQuery_ParityDuplicateImplicitProjectionRejectText pins
+// TestHandleOneOffQuery_ShunterDuplicateImplicitProjectionRejectText pins
 // the same `DuplicateName` literal for a SELECT list with no explicit
 // aliases — the effective output name falls back to the column name, so
 // `SELECT u32, u32 FROM t` collides on `u32`. Reference reads each
 // element's effective name from `ProjectElem(_, SqlIdent(alias))` where
 // `alias` is the column name when no `AS` was written.
-func TestHandleOneOffQuery_ParityDuplicateImplicitProjectionRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterDuplicateImplicitProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6692,14 +6692,14 @@ func TestHandleOneOffQuery_ParityDuplicateImplicitProjectionRejectText(t *testin
 	}
 }
 
-// TestHandleOneOffQuery_ParityDuplicateJoinAliasRejectText pins the
+// TestHandleOneOffQuery_ShunterDuplicateJoinAliasRejectText pins the
 // reference `DuplicateName` literal for a join whose right-side alias
 // collides with the left side. Reference path: `type_from`
 // (lib.rs:88-89) inserts each alias into a HashSet keyed by `Relvars`
 // and emits `DuplicateName(alias.clone())` on collision. Shunter routes
 // the same shape through the parser so OneOff (raw) and SubscribeSingle
 // (WithSql-wrapped) both carry the reference text.
-func TestHandleOneOffQuery_ParityDuplicateJoinAliasRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterDuplicateJoinAliasRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -6734,13 +6734,13 @@ func TestHandleOneOffQuery_ParityDuplicateJoinAliasRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityDuplicateSelfJoinRejectText pins the same
+// TestHandleOneOffQuery_ShunterDuplicateSelfJoinRejectText pins the same
 // `DuplicateName` literal for an unaliased self-join — `FROM t JOIN t`
 // derives both sides' alias from the base table name, so the collision
 // surfaces on `t`. Reference treats the unaliased and explicitly-aliased
 // shapes identically because `parse_relvar` synthesizes the alias from the
 // base table when no `AS` is written.
-func TestHandleOneOffQuery_ParityDuplicateSelfJoinRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterDuplicateSelfJoinRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -6771,7 +6771,7 @@ func TestHandleOneOffQuery_ParityDuplicateSelfJoinRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityJoinColumnKindMismatchRejectText pins the
+// TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText pins the
 // reference `UnexpectedType` literal for an ON binop whose two field
 // references resolve to different algebraic kinds. Reference path:
 // `type_expr` (lib.rs:134-140) types the LEFT side with no expectation
@@ -6781,7 +6781,7 @@ func TestHandleOneOffQuery_ParityDuplicateSelfJoinRejectText(t *testing.T) {
 // carry the reference text instead of the late `subscription:
 // invalid predicate: join column kinds differ` from
 // `subscription/validate.go::validateJoin`.
-func TestHandleOneOffQuery_ParityJoinColumnKindMismatchRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -6816,7 +6816,7 @@ func TestHandleOneOffQuery_ParityJoinColumnKindMismatchRejectText(t *testing.T) 
 	}
 }
 
-// TestHandleOneOffQuery_ParityJoinArrayColumnInvalidOpRejectText pins the
+// TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText pins the
 // reference `InvalidOp` literal for an ON binop comparing two Array<…>
 // columns. Reference path: `type_expr` (lib.rs:138) routes equality
 // against a non-primitive type through `op_supports_type` (lib.rs:155),
@@ -6829,7 +6829,7 @@ func TestHandleOneOffQuery_ParityJoinColumnKindMismatchRejectText(t *testing.T) 
 // (see `schema/validate_structure.go::isValidValueKind`). The mock
 // schema lookup goes only as deep as the protocol-layer compile checks
 // reach.
-func TestHandleOneOffQuery_ParityJoinArrayColumnInvalidOpRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}
 	sTS := &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}
@@ -6859,13 +6859,13 @@ func TestHandleOneOffQuery_ParityJoinArrayColumnInvalidOpRejectText(t *testing.T
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarUnqualifiedWhereRejectText pins
+// TestHandleOneOffQuery_ShunterUnresolvedVarUnqualifiedWhereRejectText pins
 // the reference `Unresolved::Var` literal (errors.rs:11-13) for an
 // unqualified single-table WHERE column that does not exist on the
 // resolved relvar. Reference path: `_type_expr` (lib.rs:107) maps the
 // missing-field branch through `Unresolved::var(&field)`. The text
 // carries only the field name — the table name does not appear.
-func TestHandleOneOffQuery_ParityUnresolvedVarUnqualifiedWhereRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarUnqualifiedWhereRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6889,13 +6889,13 @@ func TestHandleOneOffQuery_ParityUnresolvedVarUnqualifiedWhereRejectText(t *test
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarProjectionColumnRejectText pins
+// TestHandleOneOffQuery_ShunterUnresolvedVarProjectionColumnRejectText pins
 // the reference `Unresolved::Var` literal for an unknown projection
 // column. Reference path: `type_proj::Exprs` (check.rs:74) routes each
 // projection element through `type_expr`, whose missing-field branch at
 // lib.rs:107 emits `Unresolved::var(&field)`. OneOff-only: SubscribeSingle
 // rejects column-list projections earlier with `Unsupported::ReturnType`.
-func TestHandleOneOffQuery_ParityUnresolvedVarProjectionColumnRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarProjectionColumnRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6919,13 +6919,13 @@ func TestHandleOneOffQuery_ParityUnresolvedVarProjectionColumnRejectText(t *test
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingRejectText pins
+// TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingRejectText pins
 // the reference `Unresolved::Var` literal for an unknown JOIN ON
 // equality operand. Reference `type_from` types the ON binop through
 // `type_expr` (lib.rs:101-102), whose field-lookup branch at lib.rs:107
 // emits `Unresolved::var(&field)` when the qualified column does not
 // exist on its declared relvar.
-func TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -6960,13 +6960,13 @@ func TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingRejectText(t *testing
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarJoinWhereQualifiedMissingRejectText
+// TestHandleOneOffQuery_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectText
 // pins the reference `Unresolved::Var` literal for a qualified WHERE
 // column on the right side of a join whose field does not exist.
 // Reference `type_select` routes the WHERE expression through Bool
 // `type_expr`, whose field-lookup branch at lib.rs:107 emits
 // `Unresolved::var(&field)`.
-func TestHandleOneOffQuery_ParityUnresolvedVarJoinWhereQualifiedMissingRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarJoinWhereQualifiedMissingRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -7005,7 +7005,7 @@ func TestHandleOneOffQuery_ParityUnresolvedVarJoinWhereQualifiedMissingRejectTex
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarBaseTableAfterAliasRejectText pins
+// TestHandleOneOffQuery_ShunterUnresolvedVarBaseTableAfterAliasRejectText pins
 // the reference `Unresolved::Var` literal for a WHERE column qualified
 // by the base table name AFTER an `AS` alias has been declared on the
 // FROM relvar. Reference `_type_expr` (lib.rs:103) emits
@@ -7013,7 +7013,7 @@ func TestHandleOneOffQuery_ParityUnresolvedVarJoinWhereQualifiedMissingRejectTex
 // None — the base name `t` is no longer in scope once `AS r` rebinds
 // the relvar to `r`. The text carries the qualifier name (the table /
 // alias identifier), not the column.
-func TestHandleOneOffQuery_ParityUnresolvedVarBaseTableAfterAliasRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarBaseTableAfterAliasRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -7037,14 +7037,14 @@ func TestHandleOneOffQuery_ParityUnresolvedVarBaseTableAfterAliasRejectText(t *t
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText
+// TestHandleOneOffQuery_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectText
 // pins reference `type_from` ordering: the JOIN ON expression types
 // before `type_proj` runs the bare-wildcard rejection. Reference path:
 // `SubChecker::type_from` (check.rs:99-104) types the ON binop through
 // `type_expr` (lib.rs:101-102) before the join `RelExpr` is handed to
 // `type_proj`. So `SELECT * FROM t JOIN s ON t.missing = s.id` emits
 // `Unresolved::Var{missing}` before the `InvalidWildcard::Join` text.
-func TestHandleOneOffQuery_ParityUnresolvedVarBareJoinWildcardOnMissingRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarBareJoinWildcardOnMissingRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -7079,14 +7079,14 @@ func TestHandleOneOffQuery_ParityUnresolvedVarBareJoinWildcardOnMissingRejectTex
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
+// TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText
 // pins the reference order in which `type_from` types the ON expression
 // before the WHERE predicate is folded. Even when WHERE is `FALSE`,
 // reference still types ON first (check.rs:99-104). Shunter's
 // FalsePredicate short-circuit must therefore fire AFTER ON-column
 // resolution, so a missing ON column raises `Unresolved::Var` before
 // the WHERE-FALSE→NoRows rewrite.
-func TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarJoinOnMissingNotHiddenByWhereFalseRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -7121,14 +7121,14 @@ func TestHandleOneOffQuery_ParityUnresolvedVarJoinOnMissingNotHiddenByWhereFalse
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarWherePrecedesProjectionRejectText
+// TestHandleOneOffQuery_ShunterUnresolvedVarWherePrecedesProjectionRejectText
 // pins the reference type-checker order: `type_select` (WHERE) runs
 // before `type_proj` (projection columns). Reference path:
 // `SubChecker::type_set` (check.rs:139-146) computes
 // `type_proj(type_select(input, expr, vars)?, project, vars)`, so the
 // WHERE expression types first and a missing WHERE column raises
 // `Unresolved::Var` before the projection list is walked.
-func TestHandleOneOffQuery_ParityUnresolvedVarWherePrecedesProjectionRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarWherePrecedesProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -7152,12 +7152,12 @@ func TestHandleOneOffQuery_ParityUnresolvedVarWherePrecedesProjectionRejectText(
 	}
 }
 
-// TestHandleOneOffQuery_ParityBooleanConstantWhereDoesNotMaskBranchErrors
+// TestHandleOneOffQuery_ShunterBooleanConstantWhereDoesNotMaskBranchErrors
 // pins reference `_type_expr` order for logical WHERE expressions:
 // both operands are typed before Bool operators are lowered. Constant
 // folding must therefore not hide an unresolved field or invalid literal
 // in the other branch.
-func TestHandleOneOffQuery_ParityBooleanConstantWhereDoesNotMaskBranchErrors(t *testing.T) {
+func TestHandleOneOffQuery_ShunterBooleanConstantWhereDoesNotMaskBranchErrors(t *testing.T) {
 	cases := []struct {
 		name string
 		sql  string
@@ -7193,7 +7193,7 @@ func TestHandleOneOffQuery_ParityBooleanConstantWhereDoesNotMaskBranchErrors(t *
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarQualifiedProjectionQualifierRejectText
+// TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText
 // pins reference `type_proj::Exprs` (`expr/src/lib.rs:65-78`): a
 // qualified column whose qualifier is not a declared relvar routes
 // through `type_expr` and emits `Unresolved::var(&table)`
@@ -7201,7 +7201,7 @@ func TestHandleOneOffQuery_ParityBooleanConstantWhereDoesNotMaskBranchErrors(t *
 // projection-qualifier resolution with `parse: unsupported SQL:
 // projection qualifier "x" does not match relation`; reroute now emits
 // the reference `Unresolved::Var` text.
-func TestHandleOneOffQuery_ParityUnresolvedVarQualifiedProjectionQualifierRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedProjectionQualifierRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -7225,13 +7225,13 @@ func TestHandleOneOffQuery_ParityUnresolvedVarQualifiedProjectionQualifierReject
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnresolvedVarQualifiedWildcardQualifierRejectText
+// TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText
 // pins reference `type_proj` for `Project::Star(Some(var))`:
 // `input.has_field(&var)` miss emits `Unresolved::var(&var)`. Shunter's
 // parser previously rejected with `parse: unsupported SQL: projection
 // qualifier "x" does not match table "t"`; reroute now emits the
 // reference `Unresolved::Var` text.
-func TestHandleOneOffQuery_ParityUnresolvedVarQualifiedWildcardQualifierRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnresolvedVarQualifiedWildcardQualifierRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -7255,13 +7255,13 @@ func TestHandleOneOffQuery_ParityUnresolvedVarQualifiedWildcardQualifierRejectTe
 	}
 }
 
-// TestHandleOneOffQuery_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejectText
+// TestHandleOneOffQuery_ShunterMissingLeftTablePrecedesDuplicateJoinAliasRejectText
 // pins reference `type_from` (`expr/src/check.rs:79-89`) ordering: the
 // left relvar is resolved via `type_relvar` BEFORE the join loop's
 // duplicate-alias HashSet check fires. So
 // `SELECT dup.* FROM missing AS dup JOIN s AS dup ON dup.id = dup.id`
 // emits the missing-table text for the left side, not `Duplicate name`.
-func TestHandleOneOffQuery_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterMissingLeftTablePrecedesDuplicateJoinAliasRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -7292,14 +7292,14 @@ func TestHandleOneOffQuery_ParityMissingLeftTablePrecedesDuplicateJoinAliasRejec
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnqualifiedNamesProjectionRejectText pins
+// TestHandleOneOffQuery_ShunterUnqualifiedNamesProjectionRejectText pins
 // the reference `SqlUnsupported::UnqualifiedNames` literal
 // (`Names must be qualified when using joins`) for an unqualified
 // projection column inside a JOIN scope. Reference
 // `SqlSelect::find_unqualified_vars` (sql-parser/src/ast/sql.rs:84-95)
 // flags `Project::has_unqualified_vars()` and routes through
 // `parser/errors.rs:78-79`.
-func TestHandleOneOffQuery_ParityUnqualifiedNamesProjectionRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnqualifiedNamesProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -7334,13 +7334,13 @@ func TestHandleOneOffQuery_ParityUnqualifiedNamesProjectionRejectText(t *testing
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnqualifiedNamesWhereRejectText pins the
+// TestHandleOneOffQuery_ShunterUnqualifiedNamesWhereRejectText pins the
 // reference `SqlUnsupported::UnqualifiedNames` literal for an
 // unqualified WHERE column inside a JOIN scope. Reference
 // `SqlSelect::find_unqualified_vars` flags
 // `expr.has_unqualified_vars()` (`SqlExpr::Var(_)` case in
 // `ast/mod.rs:140-145`).
-func TestHandleOneOffQuery_ParityUnqualifiedNamesWhereRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnqualifiedNamesWhereRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -7375,14 +7375,14 @@ func TestHandleOneOffQuery_ParityUnqualifiedNamesWhereRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ParityUnqualifiedNamesJoinOnRejectText pins the
+// TestHandleOneOffQuery_ShunterUnqualifiedNamesJoinOnRejectText pins the
 // reference `SqlUnsupported::UnqualifiedNames` literal for an
 // unqualified JOIN ON operand. Reference `parse_join`
 // (sql-parser/src/parser/mod.rs:50-77) accepts
 // `Identifier = CompoundIdentifier` at parse time, then
 // `find_unqualified_vars` flags the bare `Identifier` and routes
 // through `UnqualifiedNames`.
-func TestHandleOneOffQuery_ParityUnqualifiedNamesJoinOnRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterUnqualifiedNamesJoinOnRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -7417,12 +7417,12 @@ func TestHandleOneOffQuery_ParityUnqualifiedNamesJoinOnRejectText(t *testing.T) 
 	}
 }
 
-// TestHandleOneOffQuery_ParitySenderParameterCaseSensitiveRejectText pins
+// TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText pins
 // reference `parse_expr` (sql-parser/src/parser/mod.rs:223) byte-equal
 // `":sender"` admission. Any other casing (e.g. `:SENDER`) falls through
 // to `_ => SqlUnsupported::Expr(expr)` (line 270), rendered as
 // `Unsupported expression: {expr}` (parser/errors.rs:38-39).
-func TestHandleOneOffQuery_ParitySenderParameterCaseSensitiveRejectText(t *testing.T) {
+func TestHandleOneOffQuery_ShunterSenderParameterCaseSensitiveRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("s", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint32},

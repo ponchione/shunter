@@ -47,7 +47,7 @@ type ProtocolCallReducerResponse struct {
 }
 
 // RegisterSubscriptionSetCmd requests atomic set-scoped subscription
-// registration. Part of the Phase 2 Slice 2 variant split.
+// registration. Part of the single/multi variant variant split.
 //
 // Reply is invoked synchronously on the executor goroutine (before the
 // dispatch loop pulls the next command) with the register outcome. Err
@@ -70,7 +70,7 @@ func (RegisterSubscriptionSetCmd) isExecutorCommand() {}
 
 // UnregisterSubscriptionSetCmd removes every subscription registered
 // under one (ConnID, QueryID) key.
-// Part of the Phase 2 Slice 2 variant split.
+// Part of the single/multi variant variant split.
 //
 // Reply is invoked synchronously on the executor goroutine with the
 // unregister outcome. Err is non-nil on failure; on success Result

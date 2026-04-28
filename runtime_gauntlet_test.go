@@ -502,8 +502,7 @@ func TestRuntimeGauntletScheduledOneShotFiresThroughHostedRuntime(t *testing.T) 
 	}
 	restartedRT := buildGauntletRuntime(t, dataDir)
 	defer restartedRT.Close()
-	time.Sleep(150 * time.Millisecond)
-	assertGauntletReadMatchesModel(t, restartedRT, model, "scheduled one-shot op 4 after restart")
+	assertGauntletReadRemainsModel(t, restartedRT, model, 150*time.Millisecond, "scheduled one-shot op 4 after restart")
 	restartedClient := dialGauntletProtocol(t, restartedRT)
 	defer restartedClient.Close(websocket.StatusNormalClosure, "")
 	assertGauntletProtocolQueriesMatchModel(t, restartedClient, model, "scheduled one-shot op 4 after restart")
@@ -542,7 +541,7 @@ func TestRuntimeGauntletScheduledCancelPersistsAfterCleanRestart(t *testing.T) {
 		t.Fatalf("scheduled cancel restart op 2 Close returned error: %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
+	waitGauntletDuration(t, 300*time.Millisecond, "scheduled cancel restart op 2 wait past cancelled fire")
 	rt = buildGauntletRuntime(t, dataDir)
 	defer rt.Close()
 
@@ -619,8 +618,7 @@ func TestRuntimeGauntletScheduledOneShotFiresAfterCleanRestart(t *testing.T) {
 	}
 	restartedRT := buildGauntletRuntime(t, dataDir)
 	defer restartedRT.Close()
-	time.Sleep(150 * time.Millisecond)
-	assertGauntletReadMatchesModel(t, restartedRT, model, "scheduled restart op 4 second restart")
+	assertGauntletReadRemainsModel(t, restartedRT, model, 150*time.Millisecond, "scheduled restart op 4 second restart")
 }
 
 func TestRuntimeGauntletScheduledImmediateAndPastDueOneShots(t *testing.T) {
@@ -650,8 +648,7 @@ func TestRuntimeGauntletScheduledImmediateAndPastDueOneShots(t *testing.T) {
 	}
 	restartedRT := buildGauntletRuntime(t, dataDir)
 	defer restartedRT.Close()
-	time.Sleep(100 * time.Millisecond)
-	assertGauntletReadMatchesModel(t, restartedRT, model, "scheduled immediate/past op 5 after restart")
+	assertGauntletReadRemainsModel(t, restartedRT, model, 100*time.Millisecond, "scheduled immediate/past op 5 after restart")
 	restartedClient := dialGauntletProtocol(t, restartedRT)
 	defer restartedClient.CloseNow()
 	assertGauntletProtocolQueriesMatchModel(t, restartedClient, model, "scheduled immediate/past op 5 after restart")
@@ -738,7 +735,7 @@ func TestRuntimeGauntletScheduledPredicateSubscriptionDeltas(t *testing.T) {
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "scheduled predicate op 4 after target fire")
 }
 
-func TestRuntimeGauntletScheduledMultiSubscriberFanoutParity(t *testing.T) {
+func TestRuntimeGauntletScheduledMultiSubscriberFanoutContract(t *testing.T) {
 	const (
 		primaryRequestID = uint32(8988)
 		primaryQueryID   = uint32(8989)
@@ -2032,7 +2029,7 @@ func TestRuntimeGauntletProtocolSubscribeAllRowsDeltas(t *testing.T) {
 	}
 }
 
-func TestRuntimeGauntletProtocolMultiSubscriberFanoutParity(t *testing.T) {
+func TestRuntimeGauntletProtocolMultiSubscriberFanoutContract(t *testing.T) {
 	for _, seed := range []int64{1, 17, 20260427} {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			const (
@@ -5459,6 +5456,33 @@ func assertGauntletReadMatchesModel(t *testing.T, rt *shunter.Runtime, model gau
 	got := readGauntletPlayers(t, rt, label)
 	if diff := diffGauntletPlayers(got, model.players); diff != "" {
 		t.Fatalf("%s: runtime/model mismatch:\n%s", label, diff)
+	}
+}
+
+func assertGauntletReadRemainsModel(t *testing.T, rt *shunter.Runtime, model gauntletModel, d time.Duration, label string) {
+	t.Helper()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		assertGauntletReadMatchesModel(t, rt, model, label)
+		select {
+		case <-timer.C:
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitGauntletDuration(t *testing.T, d time.Duration, label string) {
+	t.Helper()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-time.After(d + 2*time.Second):
+		t.Fatalf("%s did not complete within timeout", label)
 	}
 }
 
