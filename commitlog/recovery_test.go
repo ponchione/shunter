@@ -566,6 +566,64 @@ func TestOpenAndRecoverDetailedDamagedTailReturnsFreshNextSegmentPlan(t *testing
 	}
 }
 
+func TestOpenAndRecoverDetailedSecondRestartKeepsDamagedTailSegmentRecoverable(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	damagedPath := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("partial-carol")}}},
+	)
+	truncateScanTestFileToOffset(t, damagedPath, int64(scanTestRecordPayloadOffset(t, damagedPath, 2, 10)))
+
+	firstRecovered, firstMaxTxID, firstPlan, err := OpenAndRecoverDetailed(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstMaxTxID != 2 {
+		t.Fatalf("first recovery maxTxID = %d, want 2", firstMaxTxID)
+	}
+	assertReplayPlayerRows(t, firstRecovered, map[uint64]string{1: "alice", 2: "bob"})
+	if firstPlan.AppendMode != AppendByFreshNextSegment || firstPlan.SegmentStartTx != 3 || firstPlan.NextTxID != 3 {
+		t.Fatalf("first recovery plan = %+v, want fresh segment at tx 3", firstPlan)
+	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(root, firstPlan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(3, &store.Changeset{
+		TxID: 3,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts:   []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}},
+			},
+		},
+	})
+	if finalTxID, err := dw.Close(); err != nil {
+		t.Fatal(err)
+	} else if finalTxID != 3 {
+		t.Fatalf("durability final txID = %d, want 3", finalTxID)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("second recovery maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 3 || plan.NextTxID != 4 {
+		t.Fatalf("second recovery plan = %+v, want append-in-place on fresh tx 3 segment", plan)
+	}
+	if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].Path != damagedPath {
+		t.Fatalf("damaged tail report = %+v, want only %s", report.DamagedTailSegments, damagedPath)
+	}
+}
+
 type recoveryRecord struct {
 	txID    uint64
 	inserts []types.ProductValue

@@ -18,8 +18,9 @@ type AppendMode uint8
 const (
 	// AppendInPlace means the active segment ended cleanly and can be reopened.
 	AppendInPlace AppendMode = iota
-	// AppendByFreshNextSegment means the active segment has a valid prefix but a
-	// truncated or corrupt tail; future writes must continue in a new segment.
+	// AppendByFreshNextSegment means the segment has a valid prefix but a
+	// truncated or corrupt tail; future writes must continue in a fresh segment
+	// after that valid prefix.
 	AppendByFreshNextSegment
 	// AppendForbidden means this segment must not be appended to.
 	AppendForbidden
@@ -184,8 +185,8 @@ func isDamagedTailError(err error) bool {
 	return errors.As(err, &checksumErr)
 }
 
-func canTreatAsDamagedTail(err error, isLast bool, recordCount int) bool {
-	return isLast && recordCount > 0 && isDamagedTailError(err)
+func canTreatAsDamagedTail(err error, recordCount int) bool {
+	return recordCount > 0 && isDamagedTailError(err)
 }
 
 func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
@@ -213,7 +214,7 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			if canTreatAsDamagedTail(err, isLast, recordCount) {
+			if canTreatAsDamagedTail(err, recordCount) {
 				info.AppendMode = AppendByFreshNextSegment
 				break
 			}

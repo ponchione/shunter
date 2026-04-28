@@ -50,7 +50,10 @@ Current status:
   workloads. The short deterministic root runtime gauntlet is saturated for the
   current public hosted-runtime, protocol, and scheduler surfaces; remaining
   campaign work moves to crash/recovery, fault injection, fuzzing/corpus,
-  metamorphic expansion, race/soak, and release-candidate runs.
+  metamorphic expansion, race/soak, and release-candidate runs. The
+  crash/recovery campaign has started with a deterministic restart pin proving a
+  damaged tail segment remains recoverable after recovery resumes into a fresh
+  successor segment and the process restarts again.
 
 ## Goals
 
