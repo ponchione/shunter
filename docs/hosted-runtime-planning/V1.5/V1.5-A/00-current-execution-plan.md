@@ -12,7 +12,8 @@ Task sequence:
 5. Format and validate V1.5-A gates.
 
 Task progress:
-- Task 01 pending.
+- Task 01 complete: live root package, describe, and schema export
+  prerequisites reconfirmed.
 - Task 02 pending.
 - Task 03 pending.
 - Task 04 pending.
@@ -28,4 +29,3 @@ V1.5-A must stay narrow:
 - do not widen the SQL/query engine as part of this slice
 
 Immediate next V1.5 slice after V1.5-A: V1.5-B canonical contract export.
-

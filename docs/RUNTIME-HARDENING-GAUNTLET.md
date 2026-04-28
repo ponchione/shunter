@@ -44,7 +44,13 @@ Current status:
   idempotence and unknown-cancel no-effect controls, protocol `CallReducer`
   schedule/cancel coverage including clean restart, protocol rollback of
   schedule creation, scheduled fire isolation for unsubscribed clients, and
-  fixed-seed runtime/scheduler interleaving workloads.
+  scheduled `SubscribeMulti` deltas with unsubscribe controls,
+  `NoSuccessNotify` protocol scheduling that still fires, protocol-created
+  repeating schedule firing, and fixed-seed runtime/scheduler interleaving
+  workloads. The short deterministic root runtime gauntlet is saturated for the
+  current public hosted-runtime, protocol, and scheduler surfaces; remaining
+  campaign work moves to crash/recovery, fault injection, fuzzing/corpus,
+  metamorphic expansion, race/soak, and release-candidate runs.
 
 ## Goals
 
