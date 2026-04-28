@@ -25,3 +25,25 @@ Test boundaries:
   prototype
 - do not add cross-language support
 - do not replace in-process reducer execution
+
+## Added Tests
+
+Added `internal/processboundary/contract_test.go`:
+- `TestInvocationRequestAndResponseRepresentReducerCall` verifies reducer
+  invocation request/response JSON can carry caller identity, connection ID,
+  permission tags, args, status, output, and explicit transaction semantics.
+- `TestInvocationFailuresDistinguishUserAndBoundaryFailures` verifies user
+  reducer failures and boundary/transport failures have separate status and
+  failure classes.
+- `TestValidateInvocationResponseRequiresExplicitTransactionSemantics` verifies
+  every response must either declare transaction semantics or explicitly mark
+  them unsupported.
+- `TestDefaultContractDeclaresLifecycleAndSubscriptionSemantics` verifies
+  OnConnect and OnDisconnect ordering/failure behavior and requires
+  committed-state-driven subscription updates.
+- `TestValidateContractRejectsProcessDrivenSubscriptionUpdates` rejects any
+  contract that lets process messages broadcast subscription updates.
+
+Added `TestRuntimeExportContractOmitsProcessBoundaryMetadata` in
+`runtime_contract_test.go` to prove V2-G process-boundary metadata does not
+change canonical module contract JSON.

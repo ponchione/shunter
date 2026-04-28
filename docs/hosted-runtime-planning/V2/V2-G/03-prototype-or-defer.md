@@ -21,3 +21,27 @@ If prototyping:
 - keep it behind an internal or experimental package boundary
 - do not expose it as the default runtime path
 - document unsupported behaviors explicitly
+
+## Decision
+
+Deferred production out-of-process module execution.
+
+Implemented only an internal boundary-contract prototype in
+`internal/processboundary`. It is not a runner and is not wired into
+`Runtime`, `Executor`, `Host`, or `protocol.Server`.
+
+Reasons:
+- reducer mutation still depends on direct `store.Transaction` access from a
+  synchronous in-process `types.ReducerContext`.
+- rollback and commit are host-local Go object semantics, not a serializable
+  process protocol.
+- subscriptions are evaluated from committed changesets and committed read
+  views after host commit, so process messages must not become an alternate
+  broadcast source.
+- lifecycle ordering can be described, but preserving OnConnect rollback and
+  OnDisconnect cleanup behavior across a process boundary would require a
+  larger transaction design.
+
+Supported path retained:
+- statically linked in-process modules remain the normal v2 app-authoring and
+  runtime execution model.

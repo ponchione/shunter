@@ -22,3 +22,19 @@ Validation checklist:
 - no production process runner was implied by an experimental prototype
 - decision record is complete
 - future work is explicitly kept, deferred, or rejected
+
+## Completed Validation
+
+Passed:
+- `rtk go fmt . ./executor ./store ./subscription ./protocol ./internal/processboundary`
+- `rtk go test ./executor ./store ./subscription ./protocol ./internal/processboundary -count=1`
+- `rtk go test . -run 'Test.*(Runtime|Lifecycle|Local|Contract)' -count=1`
+- `rtk go vet . ./executor ./store ./subscription ./protocol ./internal/processboundary`
+
+Checklist result:
+- in-process module execution remains the supported runtime path.
+- boundary failures and user reducer failures have separate status/failure
+  classes.
+- only an internal contract prototype was added; no production process runner
+  or child-process supervisor was implied.
+- process isolation is deferred with future work recorded in Task 04.

@@ -7,9 +7,12 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-The active hosted-runtime implementation target is `V2-G`: out-of-process
-module execution gate.
+Hosted-runtime V2 is complete through `V2-G`.
 
+No `V2-H` target is queued. Future hosted-runtime work should start only from a
+new explicit user target or a failing regression that proves drift.
+
+V2-G out-of-process module execution gate is complete.
 V2-F multi-module hosting exploration is complete.
 V2-E policy/auth enforcement foundation is complete.
 V2-D declared read and SQL protocol convergence is complete.
@@ -24,9 +27,8 @@ V2 planning is now decomposed under `docs/hosted-runtime-planning/V2/`,
 starting from the code-grounded source direction in
 `docs/decomposition/hosted-runtime-v2-directions.md`.
 
-Next hosted-runtime work should start from `V2-G` unless a newer explicit user
-target supersedes this handoff. Do not reopen V1-H or V1.5-A through V1.5-E
-unless a new failing regression proves drift.
+Do not reopen V1-H, V1.5-A through V1.5-E, or V2-A through V2-G unless a new
+failing regression proves drift.
 
 ## Execution Granularity
 
@@ -212,6 +214,34 @@ V2-F validation passed:
 - `rtk go test ./protocol ./subscription ./executor -count=1`
 - `rtk go test ./... -count=1`
 
+V2-G is complete. Its live proof is:
+- `internal/processboundary` records an internal, experimental invocation
+  contract for reducer/lifecycle requests, caller identity, args, statuses,
+  output bytes, user errors, boundary failures, lifecycle ordering,
+  transaction policy, and subscription-update ownership.
+- `InvocationResponse` validation requires explicit transaction semantics and
+  rejects commit/rollback decisions when the boundary declares transaction
+  mutation unsupported.
+- `DefaultContract` defers out-of-process execution because
+  `store.Transaction` commit/rollback semantics are host-local Go object
+  semantics and subscriptions are evaluated from committed host state.
+- lifecycle metadata captures current OnConnect insertion, reducer invocation,
+  and rollback/commit behavior plus OnDisconnect invoke/cleanup/commit-cleanup
+  behavior.
+- subscription updates remain committed-state driven; process messages are not
+  allowed to broadcast updates.
+- canonical `ModuleContract` JSON remains unchanged and does not contain
+  process-boundary metadata.
+- no production process runner, child-process supervisor, dynamic module
+  loading, cross-language SDK, executor routing change, or replacement of
+  in-process module execution was added.
+
+V2-G validation passed:
+- `rtk go fmt . ./executor ./store ./subscription ./protocol ./internal/processboundary`
+- `rtk go test ./executor ./store ./subscription ./protocol ./internal/processboundary -count=1`
+- `rtk go test . -run 'Test.*(Runtime|Lifecycle|Local|Contract)' -count=1`
+- `rtk go vet . ./executor ./store ./subscription ./protocol ./internal/processboundary`
+
 The completed V1.5 proof below is historical context and should not be treated
 as an active target.
 
@@ -327,7 +357,7 @@ Former non-slice validation blocker resolved:
 
 ## Current Hosted-Runtime State
 
-V1-H, V1.5-A through V1.5-E, and V2-A through V2-E are audited as landed.
+V1-H, V1.5-A through V1.5-E, and V2-A through V2-G are audited as landed.
 
 Live proof points:
 - root package imports as `github.com/ponchione/shunter`
@@ -369,6 +399,9 @@ Live proof points:
   explicit module names, route prefixes, data-dir collision checks,
   deterministic lifecycle cleanup, prefixed HTTP routing, and detached
   per-module health/description diagnostics
+- V2-G added an internal `processboundary` contract gate and deferred
+  production out-of-process execution until transaction mutation and
+  subscription semantics have a dedicated design
 - generic contract workflows operate only on existing canonical JSON files;
   app-owned export remains based on `Runtime.ExportContractJSON`
 - root/runtime package tests are the live proof for hosted-runtime ownership,
@@ -384,10 +417,12 @@ regression proves drift.
 Required:
 1. `RTK.md`
 2. this file
-3. `docs/hosted-runtime-planning/V2/README.md`
-4. the active V2 slice execution plan and task docs
+3. any explicitly assigned hosted-runtime slice or regression documents
 
-For the current V2-G target, start from:
+No V2-H target is queued.
+
+For V2-G audit only, start from:
+- `docs/hosted-runtime-planning/V2/README.md`
 - `docs/hosted-runtime-planning/V2/V2-G/00-current-execution-plan.md`
 - `docs/hosted-runtime-planning/V2/V2-G/01-stack-prerequisites.md`
 - `docs/hosted-runtime-planning/V2/V2-G/02-boundary-contract-tests.md`
@@ -434,7 +469,7 @@ Preserve WebSocket-first v1 runtime behavior.
 ## V2 Planning State
 
 Current active V2 slice:
-- `V2-G`: out-of-process module execution gate
+- none; `V2-G` is complete and no `V2-H` target is queued
 
 Completed V2 slices:
 - `V2-A`: runtime/module boundary hardening
@@ -443,6 +478,7 @@ Completed V2 slices:
 - `V2-D`: declared read and SQL protocol convergence
 - `V2-E`: policy/auth enforcement foundation
 - `V2-F`: multi-module hosting exploration
+- `V2-G`: out-of-process module execution gate
 
 V2 planning slices are:
 1. `V2-A`: runtime/module boundary hardening
@@ -453,25 +489,24 @@ V2 planning slices are:
 6. `V2-F`: multi-module hosting exploration
 7. `V2-G`: out-of-process module execution gate
 
-If V2 implementation starts, begin with:
+If new V2 implementation starts from an explicit user target, begin with:
 - `docs/hosted-runtime-planning/V2/README.md`
 - the selected slice `00-current-execution-plan.md`
 - that slice's `01-stack-prerequisites.md`
 - live code/package docs named by the slice
 
-Do not start slices later than V2-G until V2-G is complete or explicitly
-deferred with the reason recorded here.
+Do not invent slices later than V2-G without an explicit new target.
 
 ## Next Slice Notes
 
-No next V1.5 slice is queued. The active hosted-runtime implementation slice is
-V2-G.
+No next V1.5 or V2 slice is queued. V2-G completed as a defer decision for
+production out-of-process execution because preserving transaction mutation,
+lifecycle cleanup, durability, and subscription ordering needs a dedicated
+design before a runner is justified.
 
-After V2-G completes, update this handoff to:
-- mark V2-G complete with live proof and validation commands
-- record the next hosted-runtime target or the reason no V2-H target is queued
-- preserve the rule that each handoff completes one full lettered slice,
-  including tests and validations
+Future hosted-runtime work should either be a new explicit target or a
+regression fix. Preserve the rule that each handoff completes one full lettered
+slice, including tests and validations.
 
 ## Coordination Notes
 
@@ -534,6 +569,12 @@ Completed V2-F validation:
 - `rtk go vet .`
 - `rtk go test ./protocol ./subscription ./executor -count=1`
 - `rtk go test ./... -count=1`
+
+Completed V2-G validation:
+- `rtk go fmt . ./executor ./store ./subscription ./protocol ./internal/processboundary`
+- `rtk go test ./executor ./store ./subscription ./protocol ./internal/processboundary -count=1`
+- `rtk go test . -run 'Test.*(Runtime|Lifecycle|Local|Contract)' -count=1`
+- `rtk go vet . ./executor ./store ./subscription ./protocol ./internal/processboundary`
 
 Completed V1.5-E validation:
 - `rtk go fmt <touched packages>`

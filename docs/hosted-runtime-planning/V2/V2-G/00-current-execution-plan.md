@@ -1,5 +1,7 @@
 # Hosted Runtime V2-G Current Execution Plan
 
+Status: complete
+
 Goal: decide whether out-of-process module execution is justified, then gate
 any prototype behind the runtime/module boundary proven by earlier V2 slices.
 
@@ -28,3 +30,25 @@ Scope boundaries:
   modules.
 
 V2-G is a gate. It may legitimately end with "defer out-of-process execution."
+
+## Result
+
+V2-G ended with out-of-process execution deferred for now.
+
+Live proof:
+- `internal/processboundary` records an internal, experimental invocation
+  contract for reducer/lifecycle calls, failure classification, lifecycle
+  ordering, transaction policy, and subscription-update ownership.
+- `InvocationRequest` and `InvocationResponse` can represent caller identity,
+  reducer/lifecycle name, args, status, output, user errors, boundary failures,
+  and explicit transaction semantics.
+- `DefaultContract` and `ValidateContract` declare process-boundary
+  transactions unsupported because `store.Transaction` commit/rollback
+  semantics are host-local Go object semantics.
+- subscription updates remain committed-state driven; process messages are not
+  allowed to broadcast updates.
+- canonical `ModuleContract` JSON remains unchanged and does not include
+  process-boundary metadata.
+
+No production process runner, child-process supervisor, dynamic module loading,
+cross-language SDK, or replacement of in-process module execution was added.

@@ -248,6 +248,29 @@ func TestRuntimeExportContractJSONDocumentsDefaultSnapshotFilename(t *testing.T)
 	}
 }
 
+func TestRuntimeExportContractOmitsProcessBoundaryMetadata(t *testing.T) {
+	rt := buildContractRuntime(t)
+
+	data, err := rt.ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON returned error: %v", err)
+	}
+	var topLevel map[string]json.RawMessage
+	if err := json.Unmarshal(data, &topLevel); err != nil {
+		t.Fatalf("Unmarshal contract JSON: %v", err)
+	}
+	for _, key := range []string{
+		"process_boundary",
+		"processBoundary",
+		"invocation_protocol",
+		"out_of_process",
+	} {
+		if _, ok := topLevel[key]; ok {
+			t.Fatalf("contract JSON unexpectedly included %q: %s", key, data)
+		}
+	}
+}
+
 func buildContractRuntime(t *testing.T) *Runtime {
 	t.Helper()
 	mod := validChatModule().

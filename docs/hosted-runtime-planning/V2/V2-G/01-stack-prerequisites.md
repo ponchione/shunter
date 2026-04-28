@@ -35,3 +35,33 @@ Stop if:
 - V2-A boundary cleanup and V2-F host decisions are incomplete
 - process isolation would require replacing core transaction semantics without a
   dedicated design
+
+## Recorded Conclusions
+
+Prerequisite inspection completed against:
+- `rtk go doc . Module`
+- `rtk go doc . Runtime`
+- `rtk go doc ./executor Executor`
+- `rtk go doc ./executor ReducerRegistry`
+- `rtk go doc ./types ReducerContext`
+- `rtk go doc ./store Transaction`
+- `rtk go doc ./store CommittedState`
+- `rtk go doc ./subscription Manager`
+- `rtk go doc ./protocol Server`
+- `rtk go doc . ModuleContract`
+
+Conclusions:
+- reducer invocation still runs in-process on the executor goroutine with a
+  direct `types.ReducerContext`.
+- `store.Transaction` commit and rollback semantics are local Go object
+  semantics owned by the host executor and committed state.
+- subscription evaluation is driven by committed changesets plus a committed
+  read view after host commit.
+- protocol admission remains runtime-owned through `protocol.Server` and the
+  executor inbox adapter.
+- canonical `ModuleContract` export describes module schema, reducer/read
+  declarations, permissions, read-model metadata, migrations, and codegen
+  metadata; it does not describe a process invocation protocol.
+
+These seams justify deferring a production process runner until transaction
+mutation and subscription semantics have a dedicated design.
