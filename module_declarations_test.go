@@ -69,6 +69,70 @@ func TestModuleViewPermissionAndReadModelMetadataIsDescribed(t *testing.T) {
 	}
 }
 
+func TestModuleQueryAndViewDeclarationsAreCopiedAtRegistration(t *testing.T) {
+	queryPermissions := []string{"messages:read"}
+	queryTables := []string{"messages"}
+	queryTags := []string{"history"}
+	queryClassifications := []MigrationClassification{MigrationClassificationAdditive}
+	viewPermissions := []string{"messages:subscribe"}
+	viewTables := []string{"messages"}
+	viewTags := []string{"realtime"}
+	viewClassifications := []MigrationClassification{MigrationClassificationManualReviewNeeded}
+
+	mod := NewModule("chat").
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			Permissions: PermissionMetadata{Required: queryPermissions},
+			ReadModel:   ReadModelMetadata{Tables: queryTables, Tags: queryTags},
+			Migration: MigrationMetadata{
+				Classifications: queryClassifications,
+			},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_messages",
+			Permissions: PermissionMetadata{Required: viewPermissions},
+			ReadModel:   ReadModelMetadata{Tables: viewTables, Tags: viewTags},
+			Migration: MigrationMetadata{
+				Classifications: viewClassifications,
+			},
+		})
+
+	queryPermissions[0] = "mutated"
+	queryTables[0] = "mutated"
+	queryTags[0] = "mutated"
+	queryClassifications[0] = MigrationClassificationDeprecated
+	viewPermissions[0] = "mutated"
+	viewTables[0] = "mutated"
+	viewTags[0] = "mutated"
+	viewClassifications[0] = MigrationClassificationDeprecated
+
+	desc := mod.Describe()
+	if got := desc.Queries[0].Permissions.Required; len(got) != 1 || got[0] != "messages:read" {
+		t.Fatalf("query permissions = %#v, want registration-time copy", got)
+	}
+	if got := desc.Queries[0].ReadModel.Tables; len(got) != 1 || got[0] != "messages" {
+		t.Fatalf("query tables = %#v, want registration-time copy", got)
+	}
+	if got := desc.Queries[0].ReadModel.Tags; len(got) != 1 || got[0] != "history" {
+		t.Fatalf("query tags = %#v, want registration-time copy", got)
+	}
+	if got := desc.Queries[0].Migration.Classifications; len(got) != 1 || got[0] != MigrationClassificationAdditive {
+		t.Fatalf("query migration classifications = %#v, want registration-time copy", got)
+	}
+	if got := desc.Views[0].Permissions.Required; len(got) != 1 || got[0] != "messages:subscribe" {
+		t.Fatalf("view permissions = %#v, want registration-time copy", got)
+	}
+	if got := desc.Views[0].ReadModel.Tables; len(got) != 1 || got[0] != "messages" {
+		t.Fatalf("view tables = %#v, want registration-time copy", got)
+	}
+	if got := desc.Views[0].ReadModel.Tags; len(got) != 1 || got[0] != "realtime" {
+		t.Fatalf("view tags = %#v, want registration-time copy", got)
+	}
+	if got := desc.Views[0].Migration.Classifications; len(got) != 1 || got[0] != MigrationClassificationManualReviewNeeded {
+		t.Fatalf("view migration classifications = %#v, want registration-time copy", got)
+	}
+}
+
 func TestModuleDeclarationNamesMustBeNonEmpty(t *testing.T) {
 	tests := []struct {
 		name string

@@ -56,9 +56,10 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 
 	writeTypeScriptConstMap(&b, "tables", tableConstants)
 	b.WriteString("export type TableName = (typeof tables)[keyof typeof tables];\n\n")
+	subscribeFunctionNames := make(map[string]int, len(contract.Schema.Tables)+len(contract.Views))
 	for i, table := range contract.Schema.Tables {
 		rowType := tableTypes[i].identifier + "Row"
-		functionName := "subscribe" + tableTypes[i].identifier
+		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, subscribeFunctionNames)
 		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>): Promise<() => void> {\n", functionName, rowType)
 		fmt.Fprintf(&b, "  return subscribeTable(%s);\n", strconv.Quote(table.Name))
 		b.WriteString("}\n\n")
@@ -108,7 +109,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptConstMap(&b, "views", viewIdentifiers)
 	b.WriteString("export type ViewName = (typeof views)[keyof typeof views];\n\n")
 	for _, view := range viewIdentifiers {
-		functionName := "subscribe" + upperFirst(view.identifier)
+		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), subscribeFunctionNames)
 		fmt.Fprintf(&b, "export function %s(subscribeView: ViewSubscriber, args?: Uint8Array): Promise<() => void> {\n", functionName)
 		fmt.Fprintf(&b, "  return subscribeView(%s, args);\n", strconv.Quote(view.name))
 		b.WriteString("}\n\n")
@@ -229,20 +230,25 @@ func uniqueTypeScriptIdentifiers(names []string, style func(string) string) []na
 		if base == "" {
 			base = "_"
 		}
-		identifier := base
-		if count := seen[identifier]; count > 0 {
-			for suffix := count + 1; ; suffix++ {
-				candidate := fmt.Sprintf("%s%d", base, suffix)
-				if seen[candidate] == 0 {
-					identifier = candidate
-					break
-				}
-			}
-		}
-		seen[identifier]++
+		identifier := uniqueTypeScriptIdentifier(base, seen)
 		out[i] = namedTypeScriptIdentifier{name: name, identifier: identifier}
 	}
 	return out
+}
+
+func uniqueTypeScriptIdentifier(base string, seen map[string]int) string {
+	identifier := base
+	if count := seen[identifier]; count > 0 {
+		for suffix := count + 1; ; suffix++ {
+			candidate := fmt.Sprintf("%s%d", base, suffix)
+			if seen[candidate] == 0 {
+				identifier = candidate
+				break
+			}
+		}
+	}
+	seen[identifier]++
+	return identifier
 }
 
 func typeScriptCamelIdentifier(name string) string {

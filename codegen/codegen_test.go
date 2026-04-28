@@ -93,6 +93,26 @@ func TestTypeScriptGeneratorIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestTypeScriptGeneratorAvoidsTableViewSubscribeHelperNameCollisions(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables, schema.TableExport{
+		Name: "live_messages",
+		Columns: []schema.ColumnExport{
+			{Name: "id", Type: "uint64"},
+		},
+		Indexes: []schema.IndexExport{},
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeTable: TableSubscriber<LiveMessagesRow>): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeView: ViewSubscriber, args?: Uint8Array): Promise<() => void> {`)
+}
+
 func contractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,

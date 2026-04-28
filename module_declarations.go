@@ -112,14 +112,14 @@ type ViewDeclaration struct {
 // Query registers a named read query declaration and returns the receiver for
 // fluent module declarations.
 func (m *Module) Query(decl QueryDeclaration) *Module {
-	m.queries = append(m.queries, decl)
+	m.queries = append(m.queries, copyQueryDeclaration(decl))
 	return m
 }
 
 // View registers a named live view/subscription declaration and returns the
 // receiver for fluent module declarations.
 func (m *Module) View(decl ViewDeclaration) *Module {
-	m.views = append(m.views, decl)
+	m.views = append(m.views, copyViewDeclaration(decl))
 	return m
 }
 
@@ -150,18 +150,31 @@ func validateModuleDeclarations(m *Module) error {
 	return nil
 }
 
+func copyQueryDeclaration(query QueryDeclaration) QueryDeclaration {
+	return QueryDeclaration{
+		Name:        query.Name,
+		Permissions: copyPermissionMetadata(query.Permissions),
+		ReadModel:   copyReadModelMetadata(query.ReadModel),
+		Migration:   copyMigrationMetadata(query.Migration),
+	}
+}
+
+func copyViewDeclaration(view ViewDeclaration) ViewDeclaration {
+	return ViewDeclaration{
+		Name:        view.Name,
+		Permissions: copyPermissionMetadata(view.Permissions),
+		ReadModel:   copyReadModelMetadata(view.ReadModel),
+		Migration:   copyMigrationMetadata(view.Migration),
+	}
+}
+
 func copyQueryDeclarations(in []QueryDeclaration) []QueryDeclaration {
 	if len(in) == 0 {
 		return nil
 	}
 	out := make([]QueryDeclaration, len(in))
 	for i, query := range in {
-		out[i] = QueryDeclaration{
-			Name:        query.Name,
-			Permissions: copyPermissionMetadata(query.Permissions),
-			ReadModel:   copyReadModelMetadata(query.ReadModel),
-			Migration:   copyMigrationMetadata(query.Migration),
-		}
+		out[i] = copyQueryDeclaration(query)
 	}
 	return out
 }
@@ -172,12 +185,7 @@ func copyViewDeclarations(in []ViewDeclaration) []ViewDeclaration {
 	}
 	out := make([]ViewDeclaration, len(in))
 	for i, view := range in {
-		out[i] = ViewDeclaration{
-			Name:        view.Name,
-			Permissions: copyPermissionMetadata(view.Permissions),
-			ReadModel:   copyReadModelMetadata(view.ReadModel),
-			Migration:   copyMigrationMetadata(view.Migration),
-		}
+		out[i] = copyViewDeclaration(view)
 	}
 	return out
 }

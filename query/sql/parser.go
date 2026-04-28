@@ -752,7 +752,7 @@ func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjec
 	// happens to share the keyword's name). On the subscribe surface,
 	// query-level LIMIT rejection precedes parse_select's set-quantifier
 	// rejection, so preserve that ordering when both clauses are present.
-	if !t.quoted && t.kind == tokIdent && (strings.EqualFold(t.text, "ALL") || strings.EqualFold(t.text, "DISTINCT")) {
+	if !t.quoted && t.kind == tokIdent && p.peekNext().kind != tokDot && (strings.EqualFold(t.text, "ALL") || strings.EqualFold(t.text, "DISTINCT")) {
 		return "", nil, nil, UnsupportedSelectError{SQL: p.sql, HasLimit: p.hasLimitClauseAhead()}
 	}
 	if t.kind == tokStar {

@@ -38,6 +38,24 @@ func TestParseSelectQualifiedStarWithAlias(t *testing.T) {
 	}
 }
 
+func TestParseSelectQualifiedStarWithSetQuantifierSpelledTable(t *testing.T) {
+	stmt, err := Parse("SELECT All.* FROM All")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Table != "All" || stmt.ProjectedTable != "All" || stmt.ProjectedAlias != "All" {
+		t.Fatalf("statement = %+v, want table/projected table/projected alias All", stmt)
+	}
+}
+
+func TestParseSelectAllSetQuantifierStillRejected(t *testing.T) {
+	_, err := Parse("SELECT ALL * FROM users")
+	var unsupported UnsupportedSelectError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("expected UnsupportedSelectError, got %T (%v)", err, err)
+	}
+}
+
 func TestParseSelectQualifiedStarWithAsAliasAndQualifiedWhereColumns(t *testing.T) {
 	stmt, err := Parse("SELECT item.* FROM Inventory AS item WHERE item.id = 7 AND item.active = TRUE")
 	if err != nil {

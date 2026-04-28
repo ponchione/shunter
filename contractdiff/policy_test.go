@@ -67,6 +67,28 @@ func TestPolicyWarnsWhenAdditiveChangeDeclaredBreaking(t *testing.T) {
 	assertWarning(t, result.Warnings, WarningBreakingDeclaredForAdditiveChange, SurfaceColumn, "messages.sent_at")
 }
 
+func TestPolicyAllowsModuleMigrationMetadataForRemovedReadSurfaces(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Queries = nil
+	current.Views = nil
+	current.Migrations.Module = shunter.MigrationMetadata{
+		Compatibility: shunter.MigrationCompatibilityBreaking,
+		Notes:         "remove legacy read surfaces",
+	}
+
+	result := CheckPolicy(Compare(old, current), current, PolicyOptions{Strict: true})
+	if hasWarning(result.Warnings, WarningMissingMigrationMetadata, SurfaceQuery, "history") {
+		t.Fatalf("query removal should be covered by module migration metadata: %#v", result.Warnings)
+	}
+	if hasWarning(result.Warnings, WarningMissingMigrationMetadata, SurfaceView, "live") {
+		t.Fatalf("view removal should be covered by module migration metadata: %#v", result.Warnings)
+	}
+	if result.Failed {
+		t.Fatalf("strict policy failed despite module migration metadata: %#v", result.Warnings)
+	}
+}
+
 func TestPolicyCanRequirePreviousVersionReference(t *testing.T) {
 	current := contractFixture()
 
@@ -82,4 +104,13 @@ func assertWarning(t *testing.T, warnings []PolicyWarning, code WarningCode, sur
 		}
 	}
 	t.Fatalf("warnings = %#v, want %s %s %s", warnings, code, surface, name)
+}
+
+func hasWarning(warnings []PolicyWarning, code WarningCode, surface Surface, name string) bool {
+	for _, warning := range warnings {
+		if warning.Code == code && warning.Surface == surface && warning.Name == name {
+			return true
+		}
+	}
+	return false
 }

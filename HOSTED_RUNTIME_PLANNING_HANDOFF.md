@@ -11,6 +11,11 @@ There is no active hosted-runtime implementation slice pending. V1.5-E
 migration metadata, contract diffs, and warning policy checks are complete,
 which completes the initial V1.5 hosted-runtime follow-on plan.
 
+V2 planning is now decomposed under `docs/hosted-runtime-planning/V2/`,
+starting from the code-grounded source direction in
+`docs/decomposition/hosted-runtime-v2-directions.md`. No V2 implementation
+slice is active until a future user request explicitly selects one.
+
 Next hosted-runtime work should start from a new explicit user target or a new
 planning handoff. Do not reopen V1-H or V1.5-A through V1.5-E unless a new
 failing regression proves drift.
@@ -217,6 +222,25 @@ Out of scope:
 - multi-module hosting, out-of-process module execution, or control-plane work
 
 Preserve WebSocket-first v1 runtime behavior.
+
+## V2 Planning State
+
+V2 planning slices are:
+1. `V2-A`: runtime/module boundary hardening
+2. `V2-B`: contract artifact admin and CLI workflows
+3. `V2-C`: migration planning and validation
+4. `V2-D`: declared read and SQL protocol convergence
+5. `V2-E`: policy/auth enforcement foundation
+6. `V2-F`: multi-module hosting exploration
+7. `V2-G`: out-of-process module execution gate
+
+If V2 implementation starts, begin with:
+- `docs/hosted-runtime-planning/V2/README.md`
+- the selected slice `00-current-execution-plan.md`
+- that slice's `01-stack-prerequisites.md`
+- live code/package docs named by the slice
+
+Do not start V2-B or later until V2-A is complete or explicitly deferred.
 
 ## Next Slice Notes
 
