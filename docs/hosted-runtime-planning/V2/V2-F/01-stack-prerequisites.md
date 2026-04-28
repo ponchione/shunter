@@ -30,6 +30,20 @@ Prerequisite conclusions to record in Task 01:
 - per-module contracts already have module identity
 - aggregate contracts do not exist
 
+Recorded conclusions:
+- `Runtime` remains a single-module owner with a private module snapshot,
+  runtime-scoped config, lifecycle resources, protocol graph, and state.
+- `Config.DataDir` normalizes to a runtime-owned data directory during `Build`;
+  host-level multi-module sharing therefore needs explicit collision checks
+  rather than a shared storage namespace.
+- `Runtime.HTTPHandler` still mounts protocol traffic at `/subscribe` for one
+  runtime. V2-F host routing mounts that existing handler below explicit
+  per-module prefixes instead of changing the runtime handler contract.
+- `Runtime.ExportContract` already includes canonical module identity, so V2-F
+  keeps contracts per module.
+- No aggregate contract existed before V2-F, and none was added because host
+  health/description diagnostics were sufficient.
+
 Stop if:
 - one-module lifecycle or serving tests are failing
 - V2-A did not land a clear enough boundary to build on

@@ -7,9 +7,10 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-The active hosted-runtime implementation target is `V2-F`: multi-module
-hosting exploration.
+The active hosted-runtime implementation target is `V2-G`: out-of-process
+module execution gate.
 
+V2-F multi-module hosting exploration is complete.
 V2-E policy/auth enforcement foundation is complete.
 V2-D declared read and SQL protocol convergence is complete.
 V2-C migration planning and validation is complete.
@@ -23,7 +24,7 @@ V2 planning is now decomposed under `docs/hosted-runtime-planning/V2/`,
 starting from the code-grounded source direction in
 `docs/decomposition/hosted-runtime-v2-directions.md`.
 
-Next hosted-runtime work should start from `V2-F` unless a newer explicit user
+Next hosted-runtime work should start from `V2-G` unless a newer explicit user
 target supersedes this handoff. Do not reopen V1-H or V1.5-A through V1.5-E
 unless a new failing regression proves drift.
 
@@ -183,6 +184,34 @@ V2-E validation passed:
 - `rtk go vet . ./auth ./protocol ./executor ./codegen ./types`
 - `rtk go test ./... -count=1`
 
+V2-F is complete. Its live proof is:
+- `HostRuntime` and `NewHost(...)` bind already-built single-module runtimes to
+  explicit module names and route prefixes without changing `Runtime`,
+  `Build`, or one-module app authoring.
+- host construction rejects nil runtimes, blank names, module-name/runtime
+  identity mismatches, duplicate module names, overlapping route prefixes, and
+  shared runtime data directories.
+- `Host.Start` starts runtimes in registration order and closes already-started
+  runtimes in reverse order if a later runtime fails to start.
+- `Host.Close` closes every hosted runtime in reverse registration order.
+- `Host.HTTPHandler` mounts each runtime's existing `/subscribe` protocol
+  handler below the module's explicit route prefix.
+- `Host.Health` and `Host.Describe` expose detached per-module diagnostics with
+  module name, route prefix, data directory, and runtime health/description.
+- per-module `Runtime.ExportContract` remains unchanged and canonical; no
+  aggregate contract artifact or contract merge was added.
+- no process isolation, dynamic module loading, cross-module transactions,
+  shared-table semantics, global schema registry, or shared reducer/subscription
+  manager was added.
+
+V2-F validation passed:
+- `rtk go fmt .`
+- `rtk go test . -run 'Test.*(Host|MultiModule|Runtime|Network|Contract)' -count=1`
+- `rtk go test . -count=1`
+- `rtk go vet .`
+- `rtk go test ./protocol ./subscription ./executor -count=1`
+- `rtk go test ./... -count=1`
+
 The completed V1.5 proof below is historical context and should not be treated
 as an active target.
 
@@ -336,6 +365,10 @@ Live proof points:
   reducer permission enforcement for local/protocol external calls, and stable
   permission-denied results; read permission enforcement remains deferred to a
   future table/read-model policy surface
+- V2-F added a root-package `Host` owner for already-built runtimes with
+  explicit module names, route prefixes, data-dir collision checks,
+  deterministic lifecycle cleanup, prefixed HTTP routing, and detached
+  per-module health/description diagnostics
 - generic contract workflows operate only on existing canonical JSON files;
   app-owned export remains based on `Runtime.ExportContractJSON`
 - root/runtime package tests are the live proof for hosted-runtime ownership,
@@ -354,13 +387,13 @@ Required:
 3. `docs/hosted-runtime-planning/V2/README.md`
 4. the active V2 slice execution plan and task docs
 
-For the current V2-F target, start from:
-- `docs/hosted-runtime-planning/V2/V2-F/00-current-execution-plan.md`
-- `docs/hosted-runtime-planning/V2/V2-F/01-stack-prerequisites.md`
-- `docs/hosted-runtime-planning/V2/V2-F/02-hosting-tests.md`
-- `docs/hosted-runtime-planning/V2/V2-F/03-host-abstraction.md`
-- `docs/hosted-runtime-planning/V2/V2-F/04-aggregate-introspection.md`
-- `docs/hosted-runtime-planning/V2/V2-F/05-format-and-validate.md`
+For the current V2-G target, start from:
+- `docs/hosted-runtime-planning/V2/V2-G/00-current-execution-plan.md`
+- `docs/hosted-runtime-planning/V2/V2-G/01-stack-prerequisites.md`
+- `docs/hosted-runtime-planning/V2/V2-G/02-boundary-contract-tests.md`
+- `docs/hosted-runtime-planning/V2/V2-G/03-prototype-or-defer.md`
+- `docs/hosted-runtime-planning/V2/V2-G/04-decision-record.md`
+- `docs/hosted-runtime-planning/V2/V2-G/05-format-and-validate.md`
 
 For V1.5-E audit only, start from:
 - `docs/hosted-runtime-planning/V1.5/README.md`
@@ -401,7 +434,7 @@ Preserve WebSocket-first v1 runtime behavior.
 ## V2 Planning State
 
 Current active V2 slice:
-- `V2-F`: multi-module hosting exploration
+- `V2-G`: out-of-process module execution gate
 
 Completed V2 slices:
 - `V2-A`: runtime/module boundary hardening
@@ -409,6 +442,7 @@ Completed V2 slices:
 - `V2-C`: migration planning and validation
 - `V2-D`: declared read and SQL protocol convergence
 - `V2-E`: policy/auth enforcement foundation
+- `V2-F`: multi-module hosting exploration
 
 V2 planning slices are:
 1. `V2-A`: runtime/module boundary hardening
@@ -425,17 +459,17 @@ If V2 implementation starts, begin with:
 - that slice's `01-stack-prerequisites.md`
 - live code/package docs named by the slice
 
-Do not start V2-G or later until V2-F is complete or explicitly deferred with
-the reason recorded here.
+Do not start slices later than V2-G until V2-G is complete or explicitly
+deferred with the reason recorded here.
 
 ## Next Slice Notes
 
 No next V1.5 slice is queued. The active hosted-runtime implementation slice is
-V2-F.
+V2-G.
 
-After V2-F completes, update this handoff to:
-- mark V2-F complete with live proof and validation commands
-- set `V2-G` as the active target
+After V2-G completes, update this handoff to:
+- mark V2-G complete with live proof and validation commands
+- record the next hosted-runtime target or the reason no V2-H target is queued
 - preserve the rule that each handoff completes one full lettered slice,
   including tests and validations
 
@@ -491,6 +525,14 @@ Completed V2-E validation:
 - `rtk go test . -run 'Test.*(Permission|Auth|Reducer|Local|Network)' -count=1`
 - `rtk go test ./auth ./protocol ./executor ./codegen ./types -count=1`
 - `rtk go vet . ./auth ./protocol ./executor ./codegen ./types`
+- `rtk go test ./... -count=1`
+
+Completed V2-F validation:
+- `rtk go fmt .`
+- `rtk go test . -run 'Test.*(Host|MultiModule|Runtime|Network|Contract)' -count=1`
+- `rtk go test . -count=1`
+- `rtk go vet .`
+- `rtk go test ./protocol ./subscription ./executor -count=1`
 - `rtk go test ./... -count=1`
 
 Completed V1.5-E validation:

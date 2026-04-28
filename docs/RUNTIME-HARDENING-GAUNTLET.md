@@ -88,7 +88,12 @@ Current status:
   future cancellation pins prove one-shot rows can be cancelled while the
   scheduler is armed, and cancelling the earliest recovered future wakeup
   re-arms the scheduler to a later recovered row instead of retaining a stale
-  early wakeup.
+  early wakeup. Further notify/rearm pins prove a post-startup schedule later
+  than a recovered due time cannot postpone the recovered row, and a rolled-back
+  earlier schedule creation cannot replace the recovered future wakeup. Success
+  path rearm pins prove a completed early recovered one-shot re-arms a later
+  recovered row, and a recovered repeating row advanced into the future does
+  not overtake an earlier recovered one-shot.
 
 ## Goals
 

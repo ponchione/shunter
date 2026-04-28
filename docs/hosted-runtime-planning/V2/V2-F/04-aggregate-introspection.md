@@ -20,3 +20,9 @@ Guardrails:
 If aggregate output is not needed:
 - leave host diagnostics as health/description only
 - record that per-module contracts remain sufficient
+
+Recorded outcome:
+- V2-F added host diagnostics as `Host.Health` and `Host.Describe` only.
+- Per-module `Runtime.ExportContract` remains the canonical artifact for diff,
+  policy, and codegen workflows.
+- No aggregate contract artifact or contract merge was added.

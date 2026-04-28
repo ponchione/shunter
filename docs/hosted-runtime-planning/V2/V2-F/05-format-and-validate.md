@@ -4,6 +4,8 @@ Parent plan: `docs/hosted-runtime-planning/V2/V2-F/00-current-execution-plan.md`
 
 Objective: run multi-module hosting validation gates.
 
+Status: complete
+
 Commands:
 - `rtk go fmt .`
 - `rtk go test . -run 'Test.*(Host|MultiModule|Runtime|Network|Contract)' -count=1`
@@ -23,3 +25,11 @@ Validation checklist:
 - data directories or storage namespaces do not collide
 - per-module contracts remain canonical
 - no process isolation or dynamic loading leaked into V2-F
+
+Validation results:
+- `rtk go fmt .`
+- `rtk go test . -run 'Test.*(Host|MultiModule|Runtime|Network|Contract)' -count=1`
+- `rtk go test . -count=1`
+- `rtk go vet .`
+- `rtk go test ./protocol ./subscription ./executor -count=1`
+- `rtk go test ./... -count=1`

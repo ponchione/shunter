@@ -1430,6 +1430,220 @@ func TestStartup_CancellingEarliestRecoveredFutureRearmsLaterWakeup(t *testing.T
 	}
 }
 
+func TestStartup_PostStartupLaterScheduleDoesNotPostponeRecoveredEarlierWakeup(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 2)
+	recoveredAt := time.Unix(300, 0).UnixNano()
+	laterAt := time.Unix(900, 0)
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 133, reducerName: "recovered-earlier-than-post-startup", nextRunAtNs: recoveredAt},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("recovered-earlier-than-post-startup", fired),
+			scheduleAtReducer("schedule-later-after-startup", "later-after-startup", laterAt, nil),
+			recordStringReducer("later-after-startup", fired),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	submitWithContextAndExpectCommitted(t, execCtx, h.exec, "schedule-later-after-startup", "schedule later after startup")
+	assertNoReceive(t, fired, 50*time.Millisecond, "post-startup later schedule before recovered earlier due time")
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, fired, "recovered earlier schedule")
+	if got != "recovered-earlier-than-post-startup" {
+		t.Fatalf("first fired reducer after later schedule insert = %q, want recovered-earlier-than-post-startup", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after recovered earlier schedule")
+	assertNoReceive(t, fired, 50*time.Millisecond, "later post-startup schedule before its due time")
+
+	rows := h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("remaining future schedules=%d, want later post-startup row", len(rows))
+	}
+	if got := rows[0][SysScheduledColReducerName].AsString(); got != "later-after-startup" {
+		t.Fatalf("remaining reducer_name=%q, want later-after-startup", got)
+	}
+	if got := rows[0][SysScheduledColNextRunAtNs].AsInt64(); got != laterAt.UnixNano() {
+		t.Fatalf("remaining later next_run_at_ns=%d, want %d", got, laterAt.UnixNano())
+	}
+}
+
+func TestStartup_RolledBackEarlierScheduleDoesNotReplaceRecoveredFutureWakeup(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 2)
+	recoveredAt := time.Unix(900, 0).UnixNano()
+	rolledBackAt := time.Unix(300, 0)
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 134, reducerName: "recovered-after-rolled-back-schedule", nextRunAtNs: recoveredAt},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("recovered-after-rolled-back-schedule", fired),
+			scheduleAtReducer("schedule-earlier-then-fail", "rolled-back-earlier", rolledBackAt, errFireFailed),
+			recordStringReducer("rolled-back-earlier", fired),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	submitWithContextAndExpectStatus(t, execCtx, h.exec, "schedule-earlier-then-fail", "rolled-back earlier schedule", StatusFailedUser)
+	waitExecutorBarrier(t, h.exec, "after rolled-back earlier schedule")
+	rows := h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("rows after rolled-back schedule=%d, want only recovered future", len(rows))
+	}
+	if got := rows[0][SysScheduledColScheduleID].AsUint64(); got != 134 {
+		t.Fatalf("remaining schedule_id=%d, want recovered future 134", got)
+	}
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	assertNoReceive(t, fired, 50*time.Millisecond, "rolled-back earlier schedule after its due time")
+
+	nowNs.Store(time.Unix(950, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, fired, "recovered future after rolled-back earlier schedule")
+	if got != "recovered-after-rolled-back-schedule" {
+		t.Fatalf("fired reducer after rolled-back earlier schedule = %q, want recovered-after-rolled-back-schedule", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after recovered future post-rollback")
+	if rows := h.sysScheduledRows(); len(rows) != 0 {
+		t.Fatalf("rows after recovered future post-rollback=%d, want 0", len(rows))
+	}
+}
+
+func TestStartup_RecoveredFutureSuccessRearmsLaterWakeup(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 2)
+	earlyAt := time.Unix(300, 0).UnixNano()
+	lateAt := time.Unix(900, 0).UnixNano()
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 135, reducerName: "recovered-early-success", nextRunAtNs: earlyAt},
+			{id: 136, reducerName: "recovered-late-after-success", nextRunAtNs: lateAt},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("recovered-early-success", fired),
+			recordStringReducer("recovered-late-after-success", fired),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, fired, "early recovered future success")
+	if got != "recovered-early-success" {
+		t.Fatalf("first recovered future fired reducer=%q, want recovered-early-success", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after early recovered future success")
+	rows := h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("remaining recovered future rows=%d, want 1", len(rows))
+	}
+	if got := rows[0][SysScheduledColScheduleID].AsUint64(); got != 136 {
+		t.Fatalf("remaining schedule_id=%d, want late recovered schedule 136", got)
+	}
+	assertNoReceive(t, fired, 50*time.Millisecond, "late recovered future before its due time")
+
+	nowNs.Store(time.Unix(950, 0).UnixNano())
+	h.scheduler.Notify()
+	got = readReducerOrder(t, fired, "late recovered future after early success")
+	if got != "recovered-late-after-success" {
+		t.Fatalf("second recovered future fired reducer=%q, want recovered-late-after-success", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after late recovered future success")
+	if rows := h.sysScheduledRows(); len(rows) != 0 {
+		t.Fatalf("remaining recovered future rows after late success=%d, want 0", len(rows))
+	}
+}
+
+func TestStartup_RecoveredRepeatingFutureRearmsEarlierOneShotAfterAdvance(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 3)
+	repeatAt := time.Unix(300, 0).UnixNano()
+	oneShotAt := time.Unix(600, 0).UnixNano()
+	repeatNs := int64(700 * time.Second)
+	secondRepeatAt := repeatAt + repeatNs
+	thirdRepeatAt := secondRepeatAt + repeatNs
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 137, reducerName: "recovered-repeat-success", nextRunAtNs: repeatAt, repeatNs: repeatNs},
+			{id: 138, reducerName: "recovered-one-shot-before-repeat-next", nextRunAtNs: oneShotAt},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("recovered-repeat-success", fired),
+			recordStringReducer("recovered-one-shot-before-repeat-next", fired),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, fired, "first recovered repeating fire")
+	if got != "recovered-repeat-success" {
+		t.Fatalf("first recovered repeating fire=%q, want recovered-repeat-success", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after first recovered repeating fire")
+	assertScheduleRowNextRun(t, h, 137, secondRepeatAt)
+
+	nowNs.Store(time.Unix(700, 0).UnixNano())
+	h.scheduler.Notify()
+	got = readReducerOrder(t, fired, "one-shot before advanced repeat")
+	if got != "recovered-one-shot-before-repeat-next" {
+		t.Fatalf("second recovered fire=%q, want recovered-one-shot-before-repeat-next", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after one-shot before advanced repeat")
+	assertScheduleRowNextRun(t, h, 137, secondRepeatAt)
+	assertNoReceive(t, fired, 50*time.Millisecond, "advanced repeat before its next due time")
+
+	nowNs.Store(time.Unix(1100, 0).UnixNano())
+	h.scheduler.Notify()
+	got = readReducerOrder(t, fired, "second recovered repeating fire")
+	if got != "recovered-repeat-success" {
+		t.Fatalf("third recovered fire=%q, want recovered-repeat-success", got)
+	}
+	waitExecutorBarrier(t, h.exec, "after second recovered repeating fire")
+	assertScheduleRowNextRun(t, h, 137, thirdRepeatAt)
+}
+
 // Pin 12: Startup(ctx, nil) is the test-path shorthand — the scheduler
 // replay step is skipped entirely (no inbox enqueue, no scan). Used by
 // harnesses that do not need sys_scheduled replay.
@@ -1681,6 +1895,18 @@ func cancelScheduleReducer(name string, id ScheduleID) RegisteredReducer {
 	}
 }
 
+func scheduleAtReducer(name, scheduledReducer string, at time.Time, retErr error) RegisteredReducer {
+	return RegisteredReducer{
+		Name: name,
+		Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+			if _, err := ctx.Scheduler.Schedule(scheduledReducer, nil, at); err != nil {
+				return nil, err
+			}
+			return nil, retErr
+		}),
+	}
+}
+
 func readScheduledAttemptNextRun(t *testing.T, ch <-chan int64, label string) int64 {
 	t.Helper()
 	select {
@@ -1732,12 +1958,15 @@ func expectAnyResponse(t *testing.T, ch <-chan ReducerResponse, label string) Re
 func expectCommittedResponse(t *testing.T, ch <-chan ReducerResponse, label string) {
 	t.Helper()
 	resp := expectAnyResponse(t, ch, label)
-	if resp.Status != StatusCommitted {
-		t.Fatalf("%s status=%d err=%v, want committed", label, resp.Status, resp.Error)
-	}
+	expectResponseStatus(t, resp, label, StatusCommitted)
 }
 
 func submitWithContextAndExpectCommitted(t *testing.T, ctx context.Context, exec *Executor, reducerName, label string) {
+	t.Helper()
+	submitWithContextAndExpectStatus(t, ctx, exec, reducerName, label, StatusCommitted)
+}
+
+func submitWithContextAndExpectStatus(t *testing.T, ctx context.Context, exec *Executor, reducerName, label string, want ReducerStatus) {
 	t.Helper()
 	respCh := make(chan ReducerResponse, 1)
 	if err := exec.SubmitWithContext(ctx, CallReducerCmd{
@@ -1746,7 +1975,15 @@ func submitWithContextAndExpectCommitted(t *testing.T, ctx context.Context, exec
 	}); err != nil {
 		t.Fatalf("SubmitWithContext %s: %v", label, err)
 	}
-	expectCommittedResponse(t, respCh, label)
+	resp := expectAnyResponse(t, respCh, label)
+	expectResponseStatus(t, resp, label, want)
+}
+
+func expectResponseStatus(t *testing.T, resp ReducerResponse, label string, want ReducerStatus) {
+	t.Helper()
+	if resp.Status != want {
+		t.Fatalf("%s status=%d err=%v, want %d", label, resp.Status, resp.Error, want)
+	}
 }
 
 func assertNoReceive[T any](t *testing.T, ch <-chan T, d time.Duration, label string) {
@@ -1756,6 +1993,19 @@ func assertNoReceive[T any](t *testing.T, ch <-chan T, d time.Duration, label st
 		t.Fatalf("%s unexpectedly received %v", label, got)
 	case <-time.After(d):
 	}
+}
+
+func assertScheduleRowNextRun(t *testing.T, h *startupHarness, scheduleID ScheduleID, want int64) {
+	t.Helper()
+	for _, row := range h.sysScheduledRows() {
+		if ScheduleID(row[SysScheduledColScheduleID].AsUint64()) == scheduleID {
+			if got := row[SysScheduledColNextRunAtNs].AsInt64(); got != want {
+				t.Fatalf("schedule %d next_run_at_ns=%d, want %d", scheduleID, got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("schedule %d missing from sys_scheduled", scheduleID)
 }
 
 func waitExecutorBarrier(t *testing.T, exec *Executor, label string) {
