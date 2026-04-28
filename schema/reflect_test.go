@@ -54,8 +54,8 @@ func TestDiscoverFieldsPlatformInt(t *testing.T) {
 }
 
 type WithUnexported struct {
-	Exported   string
-	unexported string //nolint:unused
+	Exported string
+	_        string
 }
 
 func TestDiscoverFieldsSkipsUnexported(t *testing.T) {

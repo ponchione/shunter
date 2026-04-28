@@ -291,19 +291,6 @@ func (m *Manager) collectActiveColumns() map[TableID][]ColID {
 	return out
 }
 
-// collectCandidates walks the changeset and returns the union of candidate
-// query hashes across all three pruning tiers (SPEC-004 §7.2 step 3 / §7.3).
-func (m *Manager) collectCandidates(cs *store.Changeset, view store.CommittedReadView) map[QueryHash]struct{} {
-	st := acquireCandidateScratch()
-	defer releaseCandidateScratch(st)
-	out := m.collectCandidatesInto(cs, view, st)
-	copied := make(map[QueryHash]struct{}, len(out))
-	for h := range out {
-		copied[h] = struct{}{}
-	}
-	return copied
-}
-
 // collectCandidatesInto walks the changeset and populates the provided scratch
 // maps with the union of candidate query hashes across all three pruning tiers
 // (SPEC-004 §7.2 step 3 / §7.3). Batched Tier 1 optimization: collect distinct
@@ -573,34 +560,6 @@ func countProjectedRowsWithMultiplier(rows []types.ProductValue, multiplier int)
 		counts[key] += uint64(multiplier)
 	}
 	return counts, values, order
-}
-
-func diffProjectedRows(beforeRows, afterRows []types.ProductValue) (inserts, deletes []types.ProductValue) {
-	beforeCounts := make(map[string]int, len(beforeRows))
-	for _, row := range beforeRows {
-		beforeCounts[encodeRowKey(row)]++
-	}
-	for _, row := range afterRows {
-		key := encodeRowKey(row)
-		if beforeCounts[key] > 0 {
-			beforeCounts[key]--
-			continue
-		}
-		inserts = append(inserts, row)
-	}
-	afterCounts := make(map[string]int, len(afterRows))
-	for _, row := range afterRows {
-		afterCounts[encodeRowKey(row)]++
-	}
-	for _, row := range beforeRows {
-		key := encodeRowKey(row)
-		if afterCounts[key] > 0 {
-			afterCounts[key]--
-			continue
-		}
-		deletes = append(deletes, row)
-	}
-	return inserts, deletes
 }
 
 func projectedRowsBefore(dv *DeltaView, table TableID) []types.ProductValue {

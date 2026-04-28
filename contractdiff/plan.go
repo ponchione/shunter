@@ -224,12 +224,7 @@ func updatePlanSummaryForEntry(summary *PlanSummary, entry PlanEntry) {
 }
 
 func planWarningFromPolicy(warning PolicyWarning) PlanWarning {
-	return PlanWarning{
-		Code:    warning.Code,
-		Surface: warning.Surface,
-		Name:    warning.Name,
-		Detail:  warning.Detail,
-	}
+	return PlanWarning(warning)
 }
 
 func validatePlanContracts(old, current shunter.ModuleContract) []PlanWarning {

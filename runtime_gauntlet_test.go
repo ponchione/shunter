@@ -4964,11 +4964,6 @@ func queryGauntletProtocolExpectErrorWithLabel(t *testing.T, client *websocket.C
 	return resp
 }
 
-func readGauntletOneOffQueryResponse(t *testing.T, client *websocket.Conn, sql string, messageID []byte) protocol.OneOffQueryResponse {
-	t.Helper()
-	return readGauntletOneOffQueryResponseWithLabel(t, client, messageID, "one-off query "+sql)
-}
-
 func readGauntletOneOffQueryResponseWithLabel(t *testing.T, client *websocket.Conn, messageID []byte, label string) protocol.OneOffQueryResponse {
 	t.Helper()
 	_, msg := readGauntletProtocolMessage(t, client, label)

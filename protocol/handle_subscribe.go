@@ -283,6 +283,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	if stmt.Join != nil {
 		leftID, leftTS, ok := lookupSQLTableExact(sl, stmt.Join.LeftTable)
 		if !ok {
+			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.LeftTable)
 		}
 		// Reference `type_from` (`expr/src/check.rs:79-89`) resolves the
@@ -298,6 +299,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		}
 		rightID, rightTS, ok := lookupSQLTableExact(sl, stmt.Join.RightTable)
 		if !ok {
+			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.RightTable)
 		}
 		// Reference `type_from` (check.rs:99-104) types the JOIN ON
@@ -400,6 +402,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			return compiledSQLQuery{}, err
 		}
 		if !allowProjection && len(stmt.ProjectionColumns) != 0 {
+			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 		}
 		aggregate, err := compileAggregateProjection(stmt.Aggregate)
@@ -412,6 +415,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		// the column-list guard above so schema/WHERE/JOIN-ON errors
 		// surface first.
 		if !allowProjection && stmt.Aggregate != nil {
+			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 		}
 		limit, err := compileStatementLimit(stmt, qs)
@@ -449,6 +453,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			}
 		}
 		if !allowProjection && !sl.HasIndex(leftID, types.ColID(leftCol.Index)) && !sl.HasIndex(rightID, types.ColID(rightCol.Index)) {
+			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("Subscriptions require indexes on join columns")
 		}
 		join := subscription.Join{
@@ -472,6 +477,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	}
 	projectedID, ts, ok := lookupSQLTableExact(sl, stmt.ProjectedTable)
 	if !ok {
+		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 		return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.ProjectedTable)
 	}
 	// Reference type-checker order: `type_select` (WHERE) precedes
@@ -496,6 +502,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		return compiledSQLQuery{}, err
 	}
 	if !allowProjection && len(stmt.ProjectionColumns) != 0 {
+		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
 	aggregate, err := compileAggregateProjection(stmt.Aggregate)
@@ -507,6 +514,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	// resolves the projection. Aggregate guard mirrors the column-list
 	// guard above so schema/WHERE errors surface first.
 	if !allowProjection && stmt.Aggregate != nil {
+		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
 	limit, err := compileStatementLimit(stmt, qs)

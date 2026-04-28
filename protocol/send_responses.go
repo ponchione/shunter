@@ -3,7 +3,6 @@ package protocol
 import (
 	"fmt"
 
-	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -52,10 +51,6 @@ func SendSubscriptionError(sender ClientSender, conn *Conn, msg *SubscriptionErr
 }
 
 func optionalUint32(v uint32) *uint32 {
-	return &v
-}
-
-func optionalTableID(v schema.TableID) *schema.TableID {
 	return &v
 }
 

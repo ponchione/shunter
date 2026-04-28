@@ -192,35 +192,6 @@ func (m *mockSubExecutor) getRegisterSetReq() *RegisterSubscriptionSetRequest {
 	return m.registerSetReq
 }
 
-type validatingSubExecutor struct {
-	mockSubExecutor
-	schema subscription.SchemaLookup
-}
-
-func (v *validatingSubExecutor) RegisterSubscriptionSet(ctx context.Context, req RegisterSubscriptionSetRequest) error {
-	v.mockSubExecutor.RegisterSubscriptionSet(ctx, req)
-	for _, pred := range req.Predicates {
-		p, ok := pred.(subscription.Predicate)
-		if !ok {
-			req.Reply(SubscriptionSetCommandResponse{Error: &SubscriptionError{
-				RequestID: optionalUint32(req.RequestID),
-				QueryID:   optionalUint32(req.QueryID),
-				Error:     "invalid predicate request",
-			}})
-			return nil
-		}
-		if err := subscription.ValidatePredicate(p, v.schema); err != nil {
-			req.Reply(SubscriptionSetCommandResponse{Error: &SubscriptionError{
-				RequestID: optionalUint32(req.RequestID),
-				QueryID:   optionalUint32(req.QueryID),
-				Error:     err.Error(),
-			}})
-			return nil
-		}
-	}
-	return nil
-}
-
 // --- handleSubscribeSingle tests ---
 
 func TestHandleSubscribeSingleSuccess(t *testing.T) {

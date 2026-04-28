@@ -111,10 +111,7 @@ func (w *FanOutWorker) RemoveClient(connID types.ConnectionID) {
 func (w *FanOutWorker) requiresConfirmedRead(connID types.ConnectionID) bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	if w.fastReads[connID] {
-		return false
-	}
-	return true
+	return !w.fastReads[connID]
 }
 
 func waitForDurable(ctx context.Context, durable <-chan types.TxID, waited *bool, ready *bool) bool {

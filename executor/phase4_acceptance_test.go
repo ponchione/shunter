@@ -16,32 +16,6 @@ import (
 
 var errReducerBoom = errors.New("reducer boom")
 
-func phase4ExecutorHarness(t *testing.T) (*Executor, *store.CommittedState, schema.SchemaRegistry, *ReducerRegistry) {
-	t.Helper()
-	b := schema.NewBuilder()
-	b.SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name: "players",
-		Columns: []schema.ColumnDefinition{
-			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
-			{Name: "name", Type: types.KindString},
-		},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reg := eng.Registry()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
-	rr := NewReducerRegistry()
-	rr.Freeze()
-	return NewExecutor(ExecutorConfig{InboxCapacity: 32}, rr, cs, reg, 10), cs, reg, rr
-}
-
 func TestPhase4ReducerRegistryRules(t *testing.T) {
 	h := types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) { return nil, nil })
 	rr := NewReducerRegistry()

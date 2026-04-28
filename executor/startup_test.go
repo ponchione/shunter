@@ -1645,11 +1645,115 @@ func TestStartup_RecoveredRepeatingFutureRearmsEarlierOneShotAfterAdvance(t *tes
 }
 
 func TestStartup_FailedRecoveredFutureRetriesBeforeLaterWakeup(t *testing.T) {
-	runRecoveredFutureRetryBeforeLaterWakeup(t, false)
+	runRecoveredFutureRetryBeforeLaterWakeup(t, false, 0)
 }
 
 func TestStartup_PanickingRecoveredFutureRetriesBeforeLaterWakeup(t *testing.T) {
-	runRecoveredFutureRetryBeforeLaterWakeup(t, true)
+	runRecoveredFutureRetryBeforeLaterWakeup(t, true, 0)
+}
+
+func TestStartup_FailedRepeatingRecoveredFutureRetriesBeforeLaterWakeup(t *testing.T) {
+	runRecoveredFutureRetryBeforeLaterWakeup(t, false, int64(700*time.Second))
+}
+
+func TestStartup_PanickingRepeatingRecoveredFutureRetriesBeforeLaterWakeup(t *testing.T) {
+	runRecoveredFutureRetryBeforeLaterWakeup(t, true, int64(700*time.Second))
+}
+
+func TestStartup_RecoveredSameTimeFutureWakeupsAllFireOnce(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 2)
+	fireAt := time.Unix(300, 0).UnixNano()
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 141, reducerName: "recovered-same-time-a", nextRunAtNs: fireAt},
+			{id: 142, reducerName: "recovered-same-time-b", nextRunAtNs: fireAt},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("recovered-same-time-a", fired),
+			recordStringReducer("recovered-same-time-b", fired),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+	assertNoReceive(t, fired, 50*time.Millisecond, "same-time recovered futures before due time")
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	assertReducerEvents(t, fired, []string{"recovered-same-time-a", "recovered-same-time-b"}, "same-time recovered futures")
+	waitExecutorBarrier(t, h.exec, "after same-time recovered futures")
+	if rows := h.sysScheduledRows(); len(rows) != 0 {
+		t.Fatalf("same-time recovered future rows after fire=%d, want 0", len(rows))
+	}
+}
+
+func TestStartup_PostStartupSameTimeScheduleDoesNotHideRecoveredWakeup(t *testing.T) {
+	var nowNs atomic.Int64
+	fired := make(chan string, 2)
+	fireAt := time.Unix(300, 0)
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 143, reducerName: "recovered-same-time-existing", nextRunAtNs: fireAt.UnixNano()},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer("recovered-same-time-existing", fired),
+			scheduleAtReducer("schedule-same-time-after-startup", "same-time-after-startup", fireAt, nil),
+			recordStringReducer("same-time-after-startup", fired),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+
+	submitWithContextAndExpectCommitted(t, execCtx, h.exec, "schedule-same-time-after-startup", "schedule same-time after startup")
+	assertNoReceive(t, fired, 50*time.Millisecond, "same-time post-startup schedule before due time")
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	assertReducerEvents(t, fired, []string{"recovered-same-time-existing", "same-time-after-startup"}, "same-time recovered and post-startup futures")
+	waitExecutorBarrier(t, h.exec, "after same-time recovered and post-startup futures")
+	if rows := h.sysScheduledRows(); len(rows) != 0 {
+		t.Fatalf("same-time recovered/post-startup rows after fire=%d, want 0", len(rows))
+	}
+}
+
+func TestStartup_RecoveredSameTimeRepeatingAndOneShotFireOnce(t *testing.T) {
+	runSameTimeRepeatingAndOneShotFireOnce(t, false)
+}
+
+func TestStartup_PostStartupSameTimeOneShotDoesNotHideRecoveredRepeatingWakeup(t *testing.T) {
+	runSameTimeRepeatingAndOneShotFireOnce(t, true)
+}
+
+func TestStartup_FailedSameTimeRecoveredFutureRetriesWithoutDuplicatingSibling(t *testing.T) {
+	runSameTimeRecoveredFutureRetryWithoutDuplicatingSibling(t, false, 0)
+}
+
+func TestStartup_PanickingSameTimeRecoveredFutureRetriesWithoutDuplicatingSibling(t *testing.T) {
+	runSameTimeRecoveredFutureRetryWithoutDuplicatingSibling(t, true, 0)
+}
+
+func TestStartup_FailedSameTimeRepeatingRecoveredFutureRetriesWithoutDuplicatingSibling(t *testing.T) {
+	runSameTimeRecoveredFutureRetryWithoutDuplicatingSibling(t, false, int64(700*time.Second))
+}
+
+func TestStartup_PanickingSameTimeRepeatingRecoveredFutureRetriesWithoutDuplicatingSibling(t *testing.T) {
+	runSameTimeRecoveredFutureRetryWithoutDuplicatingSibling(t, true, int64(700*time.Second))
 }
 
 // Pin 12: Startup(ctx, nil) is the test-path shorthand — the scheduler
@@ -1877,10 +1981,10 @@ func runRepeatingFutureAdvanceWaitsForSchedulerClock(t *testing.T, overflow bool
 	}
 }
 
-func runRecoveredFutureRetryBeforeLaterWakeup(t *testing.T, panicFirst bool) {
+func runRecoveredFutureRetryBeforeLaterWakeup(t *testing.T, panicFirst bool, repeatNs int64) {
 	t.Helper()
 	var nowNs atomic.Int64
-	events := make(chan string, 3)
+	events := make(chan string, 4)
 	earlyAt := time.Unix(300, 0).UnixNano()
 	lateAt := time.Unix(900, 0).UnixNano()
 	earlyReducer := "failed-recovered-future"
@@ -1895,7 +1999,7 @@ func runRecoveredFutureRetryBeforeLaterWakeup(t *testing.T, panicFirst bool) {
 	var attempts atomic.Int32
 	seed := startupSeed{
 		schedules: []sysScheduledSeed{
-			{id: 139, reducerName: earlyReducer, nextRunAtNs: earlyAt},
+			{id: 139, reducerName: earlyReducer, nextRunAtNs: earlyAt, repeatNs: repeatNs},
 			{id: 140, reducerName: "later-after-future-retry", nextRunAtNs: lateAt},
 		},
 		reducers: []RegisteredReducer{
@@ -1913,6 +2017,7 @@ func runRecoveredFutureRetryBeforeLaterWakeup(t *testing.T, panicFirst bool) {
 						events <- secondEvent
 						return nil, nil
 					default:
+						events <- secondEvent
 						return nil, nil
 					}
 				}),
@@ -1941,12 +2046,17 @@ func runRecoveredFutureRetryBeforeLaterWakeup(t *testing.T, panicFirst bool) {
 		t.Fatalf("retry recovered future event=%q, want %q", got, secondEvent)
 	}
 	waitExecutorBarrier(t, h.exec, "after recovered future retry")
-	rows := h.sysScheduledRows()
-	if len(rows) != 1 {
-		t.Fatalf("remaining rows after recovered future retry=%d, want later row", len(rows))
-	}
-	if got := rows[0][SysScheduledColScheduleID].AsUint64(); got != 140 {
-		t.Fatalf("remaining schedule_id=%d, want later schedule 140", got)
+	if repeatNs == 0 {
+		rows := h.sysScheduledRows()
+		if len(rows) != 1 {
+			t.Fatalf("remaining rows after recovered future retry=%d, want later row", len(rows))
+		}
+		if got := rows[0][SysScheduledColScheduleID].AsUint64(); got != 140 {
+			t.Fatalf("remaining schedule_id=%d, want later schedule 140", got)
+		}
+	} else {
+		assertScheduleRowNextRun(t, h, 139, earlyAt+repeatNs)
+		assertScheduleRowNextRun(t, h, 140, lateAt)
 	}
 	assertNoReceive(t, events, 50*time.Millisecond, "later recovered future before its due time")
 
@@ -1957,12 +2067,187 @@ func runRecoveredFutureRetryBeforeLaterWakeup(t *testing.T, panicFirst bool) {
 		t.Fatalf("later recovered future event=%q, want later-after-future-retry", got)
 	}
 	waitExecutorBarrier(t, h.exec, "after later recovered future")
-	if rows := h.sysScheduledRows(); len(rows) != 0 {
-		t.Fatalf("remaining rows after later recovered future=%d, want 0", len(rows))
+	if repeatNs == 0 {
+		if rows := h.sysScheduledRows(); len(rows) != 0 {
+			t.Fatalf("remaining rows after later recovered future=%d, want 0", len(rows))
+		}
+	} else {
+		assertScheduleRowNextRun(t, h, 139, earlyAt+repeatNs)
+		assertNoReceive(t, events, 50*time.Millisecond, "advanced recovered repeating future before next due time")
+
+		nowNs.Store(time.Unix(1100, 0).UnixNano())
+		h.scheduler.Notify()
+		got = readReducerOrder(t, events, "advanced repeating recovered future after later row")
+		if got != secondEvent {
+			t.Fatalf("advanced repeating recovered future event=%q, want %q", got, secondEvent)
+		}
+		waitExecutorBarrier(t, h.exec, "after advanced repeating recovered future")
+		assertScheduleRowNextRun(t, h, 139, earlyAt+(2*repeatNs))
 	}
-	if got := attempts.Load(); got != 2 {
-		t.Fatalf("recovered future attempts=%d, want 2", got)
+	wantAttempts := int32(2)
+	if repeatNs != 0 {
+		wantAttempts = 3
 	}
+	if got := attempts.Load(); got != wantAttempts {
+		t.Fatalf("recovered future attempts=%d, want %d", got, wantAttempts)
+	}
+}
+
+func runSameTimeRecoveredFutureRetryWithoutDuplicatingSibling(t *testing.T, panicFirst bool, repeatNs int64) {
+	t.Helper()
+	var nowNs atomic.Int64
+	events := make(chan string, 5)
+	fireAt := time.Unix(300, 0).UnixNano()
+	flakyReducer := "failed-same-time-recovered"
+	firstEvent := "failed-same-time-first"
+	retryEvent := "failed-same-time-retry"
+	if panicFirst {
+		flakyReducer = "panicking-same-time-recovered"
+		firstEvent = "panic-same-time-first"
+		retryEvent = "panic-same-time-retry"
+	}
+
+	var attempts atomic.Int32
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: 144, reducerName: flakyReducer, nextRunAtNs: fireAt, repeatNs: repeatNs},
+			{id: 145, reducerName: "same-time-recovered-sibling", nextRunAtNs: fireAt},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: flakyReducer,
+				Handler: types.ReducerHandler(func(*types.ReducerContext, []byte) ([]byte, error) {
+					switch attempts.Add(1) {
+					case 1:
+						events <- firstEvent
+						if panicFirst {
+							panic("same-time recovered future panic")
+						}
+						return nil, errFireFailed
+					case 2:
+						events <- retryEvent
+						return nil, nil
+					default:
+						events <- retryEvent
+						return nil, nil
+					}
+				}),
+			},
+			recordStringReducer("same-time-recovered-sibling", events),
+		},
+	}
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+	assertNoReceive(t, events, 50*time.Millisecond, "same-time recovered failure siblings before due time")
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	assertReducerEvents(t, events, []string{firstEvent, "same-time-recovered-sibling"}, "same-time recovered first attempts")
+	got := readReducerOrder(t, events, "same-time recovered retry")
+	if got != retryEvent {
+		t.Fatalf("same-time recovered retry event=%q, want %q", got, retryEvent)
+	}
+	waitExecutorBarrier(t, h.exec, "after same-time recovered retry")
+	if repeatNs == 0 {
+		if rows := h.sysScheduledRows(); len(rows) != 0 {
+			t.Fatalf("same-time recovered rows after retry=%d, want 0", len(rows))
+		}
+		if got := attempts.Load(); got != 2 {
+			t.Fatalf("same-time recovered attempts=%d, want 2", got)
+		}
+		assertNoReceive(t, events, 50*time.Millisecond, "same-time sibling duplicate after retry")
+		return
+	}
+	nextAt := fireAt + repeatNs
+	assertScheduleRowNextRun(t, h, 144, nextAt)
+	assertNoReceive(t, events, 50*time.Millisecond, "same-time sibling duplicate before repeating retry next interval")
+
+	nowNs.Store(time.Unix(1100, 0).UnixNano())
+	h.scheduler.Notify()
+	got = readReducerOrder(t, events, "same-time repeating retry after next interval")
+	if got != retryEvent {
+		t.Fatalf("same-time repeating retry event=%q, want %q", got, retryEvent)
+	}
+	waitExecutorBarrier(t, h.exec, "after same-time repeating retry next interval")
+	assertScheduleRowNextRun(t, h, 144, fireAt+(2*repeatNs))
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("same-time repeating recovered attempts=%d, want 3", got)
+	}
+}
+
+func runSameTimeRepeatingAndOneShotFireOnce(t *testing.T, postStartupOneShot bool) {
+	t.Helper()
+	var nowNs atomic.Int64
+	events := make(chan string, 4)
+	fireAt := time.Unix(300, 0)
+	repeatNs := int64(700 * time.Second)
+	repeatID := ScheduleID(146)
+	firstRepeatAt := fireAt.UnixNano() + repeatNs
+	secondRepeatAt := fireAt.UnixNano() + 2*repeatNs
+	repeatingReducer := "same-time-recovered-repeat-success"
+	oneShotReducer := "same-time-recovered-one-shot"
+	expectedFirstEvents := []string{repeatingReducer, oneShotReducer}
+
+	seed := startupSeed{
+		schedules: []sysScheduledSeed{
+			{id: uint64(repeatID), reducerName: repeatingReducer, nextRunAtNs: fireAt.UnixNano(), repeatNs: repeatNs},
+		},
+		reducers: []RegisteredReducer{
+			recordStringReducer(repeatingReducer, events),
+		},
+	}
+	if postStartupOneShot {
+		oneShotReducer = "same-time-post-startup-one-shot"
+		expectedFirstEvents[1] = oneShotReducer
+		seed.reducers = append(seed.reducers,
+			scheduleAtReducer("schedule-same-time-one-shot-after-startup", oneShotReducer, fireAt, nil),
+			recordStringReducer(oneShotReducer, events),
+		)
+	} else {
+		seed.schedules = append(seed.schedules, sysScheduledSeed{
+			id:          147,
+			reducerName: oneShotReducer,
+			nextRunAtNs: fireAt.UnixNano(),
+		})
+		seed.reducers = append(seed.reducers, recordStringReducer(oneShotReducer, events))
+	}
+
+	h := newStartupHarness(t, seed)
+	nowNs.Store(time.Unix(100, 0).UnixNano())
+	h.scheduler.now = func() time.Time { return time.Unix(0, nowNs.Load()) }
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx := startHarnessExecutor(t, h)
+	startHarnessScheduler(t, h)
+	if postStartupOneShot {
+		submitWithContextAndExpectCommitted(t, execCtx, h.exec, "schedule-same-time-one-shot-after-startup", "schedule same-time one-shot after startup")
+	}
+	assertNoReceive(t, events, 50*time.Millisecond, "same-time repeating/one-shot before due time")
+
+	nowNs.Store(time.Unix(400, 0).UnixNano())
+	h.scheduler.Notify()
+	assertReducerEvents(t, events, expectedFirstEvents, "same-time repeating and one-shot futures")
+	waitExecutorBarrier(t, h.exec, "after same-time repeating and one-shot futures")
+	assertScheduleRowNextRun(t, h, repeatID, firstRepeatAt)
+	assertNoReceive(t, events, 50*time.Millisecond, "same-time one-shot duplicate before repeating next interval")
+
+	nowNs.Store(time.Unix(1100, 0).UnixNano())
+	h.scheduler.Notify()
+	got := readReducerOrder(t, events, "same-time repeating second fire")
+	if got != repeatingReducer {
+		t.Fatalf("same-time repeating second fire=%q, want %q", got, repeatingReducer)
+	}
+	waitExecutorBarrier(t, h.exec, "after same-time repeating second fire")
+	assertScheduleRowNextRun(t, h, repeatID, secondRepeatAt)
 }
 
 func recordStringReducer(name string, ch chan<- string) RegisteredReducer {
@@ -2022,6 +2307,27 @@ func readReducerOrder(t *testing.T, ch <-chan string, label string) string {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatalf("timeout waiting for %s", label)
 		return ""
+	}
+}
+
+func assertReducerEvents(t *testing.T, ch <-chan string, want []string, label string) {
+	t.Helper()
+	remaining := make(map[string]int, len(want))
+	for _, event := range want {
+		remaining[event]++
+	}
+	for range want {
+		got := readReducerOrder(t, ch, label)
+		if remaining[got] == 0 {
+			t.Fatalf("%s unexpected event %q, remaining want=%v", label, got, remaining)
+		}
+		remaining[got]--
+		if remaining[got] == 0 {
+			delete(remaining, got)
+		}
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("%s missing events: %v", label, remaining)
 	}
 }
 

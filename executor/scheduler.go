@@ -73,10 +73,6 @@ func (e *Executor) attachScheduler(scheduler *Scheduler) {
 // newSchedulerHandle builds a fresh SchedulerHandle bound to a reducer's
 // transaction. Each reducer call gets its own handle so that mutations
 // on sys_scheduled roll back with the reducer.
-//
-// Story 6.3 will replace the nil timerNotify with a closure that wakes
-// the scheduler worker after a successful commit that touched
-// sys_scheduled.
 func (e *Executor) newSchedulerHandle(tx *store.Transaction) *schedulerHandle {
 	return &schedulerHandle{
 		tx:      tx,
@@ -89,17 +85,12 @@ func (e *Executor) newSchedulerHandle(tx *store.Transaction) *schedulerHandle {
 // (SPEC-003 §9.3). It mutates sys_scheduled through the active
 // transaction so that Schedule/ScheduleRepeat/Cancel roll back with
 // the surrounding reducer (Story 6.2).
-//
-// The timer-notify hook is called by the post-commit pipeline once a
-// commit that touched sys_scheduled has been observed — Story 6.3
-// wires it to the scheduler worker. nil means "no timer yet."
 type schedulerHandle struct {
-	mu          sync.Mutex
-	closed      bool
-	tx          *store.Transaction
-	tableID     schema.TableID
-	seq         *store.Sequence
-	timerNotify func()
+	mu      sync.Mutex
+	closed  bool
+	tx      *store.Transaction
+	tableID schema.TableID
+	seq     *store.Sequence
 }
 
 func (h *schedulerHandle) close() {

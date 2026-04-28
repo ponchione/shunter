@@ -178,11 +178,6 @@ func (s *Scheduler) ReplayFromCommitted() ScheduleID {
 	return maxID
 }
 
-func (s *Scheduler) scanAndTrackMax() ScheduleID {
-	maxID, _ := s.scanAndTrackMaxWithContext(context.Background())
-	return maxID
-}
-
 func (s *Scheduler) scanAndTrackMaxWithContext(ctx context.Context) (ScheduleID, bool) {
 	nowNs := s.now().UnixNano()
 	rows := s.snapshotScheduleRows()
@@ -234,13 +229,6 @@ func (s *Scheduler) scanRows(rows []types.ProductValue, nowNs int64, enqueue fun
 		}
 	}
 	return maxID, nextWakeup, true
-}
-
-// enqueue sends a CallReducerCmd for a due schedule row. A blocked
-// inbox backpressures the scheduler — acceptable in v1 because the
-// executor drains at a much higher rate than schedules can be due.
-func (s *Scheduler) enqueue(row types.ProductValue) {
-	_ = s.enqueueWithContext(context.Background(), row)
 }
 
 func (s *Scheduler) tryEnqueue(row types.ProductValue) bool {

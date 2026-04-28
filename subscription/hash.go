@@ -168,10 +168,6 @@ func orderCanonicalChildren(left, right Predicate) (Predicate, Predicate) {
 	return right, left
 }
 
-func flattenCanonicalAnd(pred Predicate, table TableID, out []Predicate) []Predicate {
-	return flattenCanonicalAndForTable(pred, &table, out)
-}
-
 func flattenCanonicalAndForTable(pred Predicate, table *TableID, out []Predicate) []Predicate {
 	switch p := pred.(type) {
 	case And:
@@ -182,10 +178,6 @@ func flattenCanonicalAndForTable(pred Predicate, table *TableID, out []Predicate
 		}
 	}
 	return append(out, pred)
-}
-
-func flattenCanonicalOr(pred Predicate, table TableID, out []Predicate) []Predicate {
-	return flattenCanonicalOrForTable(pred, &table, out)
 }
 
 func flattenCanonicalOrForTable(pred Predicate, table *TableID, out []Predicate) []Predicate {

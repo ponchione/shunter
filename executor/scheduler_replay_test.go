@@ -193,6 +193,51 @@ func TestSchedulerReplayOverflowLeavesSkippedDueRowsRetryable(t *testing.T) {
 	}
 }
 
+func TestSchedulerRunPicksUpDueRowsSkippedBySaturatedReplay(t *testing.T) {
+	_, cs, tid, _ := schedulerWorkerFixture(t)
+	inbox := make(chan ExecutorCommand, 1)
+	s := NewScheduler(inbox, cs, tid)
+	s.now = func() time.Time { return time.Unix(100, 0) }
+	seedSchedule(t, cs, tid, 18, "replayed-due", nil, time.Unix(50, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 19, "overflowed-due", nil, time.Unix(60, 0).UnixNano(), 0)
+
+	s.ReplayFromCommitted()
+	var replayedID ScheduleID
+	select {
+	case cmd := <-inbox:
+		replayedID = cmd.(CallReducerCmd).Request.ScheduleID
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("replay should enqueue one due schedule before inbox saturation")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(runDone)
+	}()
+
+	select {
+	case cmd := <-inbox:
+		scannedID := cmd.(CallReducerCmd).Request.ScheduleID
+		if scannedID == replayedID {
+			t.Fatalf("Run duplicated replayed schedule %d instead of picking skipped due row", scannedID)
+		}
+		if replayedID+scannedID != 37 {
+			t.Fatalf("replay+Run schedule IDs = %d and %d, want 18 and 19 in either order", replayedID, scannedID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not pick up due schedule skipped by saturated replay")
+	}
+
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
 func TestSchedulerReplayOverflowStillArmsEarliestFutureWakeup(t *testing.T) {
 	_, cs, tid, _ := schedulerWorkerFixture(t)
 	inbox := make(chan ExecutorCommand, 1)

@@ -25,30 +25,6 @@ func (m *Manager) dropSub(connID types.ConnectionID, subID types.SubscriptionID)
 	}
 }
 
-// removeDroppedSub removes a single internal subscription that the eval
-// path has declared unrecoverable. Not exposed on the public manager
-// surface — callers outside the package use UnregisterSet. Unlike
-// dropSub it also culls the querySets entry the subID belonged to, so
-// the corresponding (ConnID, QueryID) bucket does not retain a stale
-// internal ID.
-func (m *Manager) removeDroppedSub(connID types.ConnectionID, subID types.SubscriptionID) {
-	m.dropSub(connID, subID)
-	for qid, sids := range m.querySets[connID] {
-		for i, s := range sids {
-			if s == subID {
-				m.querySets[connID][qid] = append(sids[:i], sids[i+1:]...)
-				if len(m.querySets[connID][qid]) == 0 {
-					delete(m.querySets[connID], qid)
-				}
-				if len(m.querySets[connID]) == 0 {
-					delete(m.querySets, connID)
-				}
-				return
-			}
-		}
-	}
-}
-
 // initialQuery scans committed state and returns rows matching the
 // predicate. Single-table predicates use a filtered table scan. Join
 // predicates re-evaluate the full join against committed state and project
@@ -269,25 +245,6 @@ func emittedTableID(p Predicate) TableID {
 		return 0
 	}
 	return tables[0]
-}
-
-func projectedCrossJoinRows(view store.CommittedReadView, p CrossJoin) []types.ProductValue {
-	if view == nil {
-		return nil
-	}
-	projectedTable := p.ProjectedTable()
-	otherTable := crossJoinOtherTable(p)
-	var rows []types.ProductValue
-	otherCount := view.RowCount(otherTable)
-	if otherCount == 0 {
-		return nil
-	}
-	for _, projectedRow := range view.TableScan(projectedTable) {
-		for i := 0; i < otherCount; i++ {
-			rows = append(rows, projectedRow)
-		}
-	}
-	return rows
 }
 
 // RegisterSet atomically registers 1..N predicates under a single

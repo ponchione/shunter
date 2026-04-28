@@ -1260,22 +1260,6 @@ func (p *parser) parseColumnRefForPredicate(bindings relationBindings) (ColumnRe
 	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
 }
 
-func (p *parser) parseComparison(bindings relationBindings) (Filter, error) {
-	ref, err := p.parseColumnRefForPredicate(bindings)
-	if err != nil {
-		return Filter{}, err
-	}
-	op, err := p.parseOperator()
-	if err != nil {
-		return Filter{}, err
-	}
-	lit, err := p.parseLiteral()
-	if err != nil {
-		return Filter{}, err
-	}
-	return Filter{Table: ref.Table, Column: ref.Column, Alias: ref.Alias, Op: op, Literal: lit}, nil
-}
-
 func (p *parser) parseOperator() (string, error) {
 	switch t := p.peek(); t.kind {
 	case tokEq, tokLt, tokGt, tokLe, tokGe:

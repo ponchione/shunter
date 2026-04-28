@@ -194,10 +194,6 @@ func memoizedRowListKey(rows []types.ProductValue) string {
 	return b.String()
 }
 
-func encodeSubscriptionUpdates(updates []subscription.SubscriptionUpdate) ([]SubscriptionUpdate, error) {
-	return encodeSubscriptionUpdatesMemoized(updates, nil)
-}
-
 func encodeSubscriptionUpdate(su subscription.SubscriptionUpdate) (SubscriptionUpdate, error) {
 	return encodeSubscriptionUpdateMemoized(su, nil)
 }

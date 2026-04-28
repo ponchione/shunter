@@ -172,7 +172,9 @@ func TestQueryHashTrueAndComparisonMatchesComparison(t *testing.T) {
 
 func TestQueryHashNoRowsStable(t *testing.T) {
 	pred := NoRows{Table: 1}
-	if ComputeQueryHash(pred, nil) != ComputeQueryHash(pred, nil) {
+	hashA := ComputeQueryHash(pred, nil)
+	hashB := ComputeQueryHash(pred, nil)
+	if hashA != hashB {
 		t.Fatal("NoRows hash should be deterministic")
 	}
 }

@@ -64,10 +64,13 @@ Current status:
   hide a failed recovered firing from the scheduler restart loop, and an
   overflowed-replay retry pin proving a recovered due schedule that did not
   fit during startup replay is still picked up and retried after a failed
-  scheduler-run attempt, plus a repeating-replay catch-up pin proving overdue
-  recovered interval schedules advance one intended fixed-rate interval per
-  fire across restart, an overflowed repeating-replay catch-up pin proving the
-  same fixed-rate advancement after startup replay saturation, a panicking
+  scheduler-run attempt, plus a scheduler-run pickup pin proving overflowed
+  due rows from saturated startup replay are recovered by the first run-loop
+  scan without duplicating the replay-queued row, plus a repeating-replay
+  catch-up pin proving overdue recovered interval schedules advance one
+  intended fixed-rate interval per fire across restart, an overflowed
+  repeating-replay catch-up pin proving the same fixed-rate advancement after
+  startup replay saturation, a panicking
   recovered one-shot retry pin, and a replay/external-admission ordering pin
   proving post-startup external reducers do not overtake recovered scheduled
   firings queued before the gate opens. Additional scheduler restart pins prove
@@ -95,7 +98,17 @@ Current status:
   recovered row, and a recovered repeating row advanced into the future does
   not overtake an earlier recovered one-shot. Future-armed failure pins prove
   recovered one-shots that fail or panic at their due time retry before later
-  recovered wakeups are allowed to fire.
+  recovered wakeups are allowed to fire, and the same ordering holds for
+  recovered repeating rows while preserving fixed-rate advancement after the
+  successful retry. Equal-time rearm pins prove multiple recovered future
+  wakeups at the same timestamp all fire once, and a post-startup schedule at
+  the same timestamp as a recovered row does not hide either firing. Equal-time
+  repeating pins prove a recovered repeating row sharing a timestamp with a
+  one-shot fires once, advances fixed-rate, and remains visible when the
+  one-shot is created after startup at that same timestamp. Equal-time
+  retry pins prove a failing or panicking recovered row retries without
+  duplicating its same-timestamp recovered sibling, including repeating rows
+  that must advance fixed-rate after the successful retry.
 
 ## Goals
 
