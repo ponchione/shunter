@@ -492,9 +492,13 @@ func projectJoinFragments(fragments [][]types.ProductValue, lhsWidth int, projec
 }
 
 func evalCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue) {
-	afterRows := materializeCrossJoinProjectedRows(tableRowsAfter(dv.CommittedView(), p.ProjectedTable()), tableRowsAfter(dv.CommittedView(), crossJoinOtherTable(p)))
-	beforeRows := materializeCrossJoinProjectedRows(projectedRowsBefore(dv, p.ProjectedTable()), projectedRowsBefore(dv, crossJoinOtherTable(p)))
-	return diffProjectedRows(beforeRows, afterRows)
+	projectedTable := p.ProjectedTable()
+	otherTable := crossJoinOtherTable(p)
+	afterProjectedRows := tableRowsAfter(dv.CommittedView(), projectedTable)
+	beforeProjectedRows := projectedRowsBefore(dv, projectedTable)
+	afterOtherCount := rowCountAfter(dv.CommittedView(), otherTable)
+	beforeOtherCount := rowCountBefore(dv, otherTable)
+	return diffProjectedRowsWithMultiplicity(beforeProjectedRows, beforeOtherCount, afterProjectedRows, afterOtherCount)
 }
 
 func crossJoinOtherTable(p CrossJoin) TableID {
@@ -516,17 +520,59 @@ func tableRowsAfter(view store.CommittedReadView, table TableID) []types.Product
 	return rows
 }
 
-func materializeCrossJoinProjectedRows(projectedRows, otherRows []types.ProductValue) []types.ProductValue {
-	if len(projectedRows) == 0 || len(otherRows) == 0 {
-		return nil
+func rowCountAfter(view store.CommittedReadView, table TableID) int {
+	if view == nil {
+		return 0
 	}
-	out := make([]types.ProductValue, 0, len(projectedRows)*len(otherRows))
-	for _, projectedRow := range projectedRows {
-		for range otherRows {
-			out = append(out, projectedRow)
+	return view.RowCount(table)
+}
+
+func rowCountBefore(dv *DeltaView, table TableID) int {
+	n := rowCountAfter(dv.CommittedView(), table) - len(dv.InsertedRows(table)) + len(dv.DeletedRows(table))
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+func diffProjectedRowsWithMultiplicity(beforeRows []types.ProductValue, beforeMultiplier int, afterRows []types.ProductValue, afterMultiplier int) (inserts, deletes []types.ProductValue) {
+	beforeCounts, beforeValues, beforeOrder := countProjectedRowsWithMultiplier(beforeRows, beforeMultiplier)
+	afterCounts, afterValues, afterOrder := countProjectedRowsWithMultiplier(afterRows, afterMultiplier)
+	for _, key := range afterOrder {
+		if afterCounts[key] <= beforeCounts[key] {
+			continue
+		}
+		for n := afterCounts[key] - beforeCounts[key]; n > 0; n-- {
+			inserts = append(inserts, afterValues[key])
 		}
 	}
-	return out
+	for _, key := range beforeOrder {
+		if beforeCounts[key] <= afterCounts[key] {
+			continue
+		}
+		for n := beforeCounts[key] - afterCounts[key]; n > 0; n-- {
+			deletes = append(deletes, beforeValues[key])
+		}
+	}
+	return inserts, deletes
+}
+
+func countProjectedRowsWithMultiplier(rows []types.ProductValue, multiplier int) (map[string]uint64, map[string]types.ProductValue, []string) {
+	counts := make(map[string]uint64, len(rows))
+	values := make(map[string]types.ProductValue, len(rows))
+	var order []string
+	if multiplier <= 0 {
+		return counts, values, order
+	}
+	for _, row := range rows {
+		key := encodeRowKey(row)
+		if _, ok := values[key]; !ok {
+			values[key] = row
+			order = append(order, key)
+		}
+		counts[key] += uint64(multiplier)
+	}
+	return counts, values, order
 }
 
 func diffProjectedRows(beforeRows, afterRows []types.ProductValue) (inserts, deletes []types.ProductValue) {

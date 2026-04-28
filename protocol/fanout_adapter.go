@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/subscription"
@@ -180,7 +182,16 @@ func memoizedRowListKey(rows []types.ProductValue) string {
 	if len(rows) == 0 {
 		return "binary-row-list:empty"
 	}
-	return fmt.Sprintf("binary-row-list:%x:%d", reflect.ValueOf(rows).Pointer(), len(rows))
+	var b strings.Builder
+	b.Grow(16 + len(rows)*24)
+	b.WriteString("binary-row-list")
+	for _, row := range rows {
+		b.WriteByte(':')
+		b.WriteString(strconv.FormatUint(uint64(reflect.ValueOf(row).Pointer()), 16))
+		b.WriteByte('/')
+		b.WriteString(strconv.Itoa(len(row)))
+	}
+	return b.String()
 }
 
 func encodeSubscriptionUpdates(updates []subscription.SubscriptionUpdate) ([]SubscriptionUpdate, error) {

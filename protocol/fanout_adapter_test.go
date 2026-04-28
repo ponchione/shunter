@@ -377,6 +377,34 @@ func TestFanOutSenderAdapter_MemoizesRowEncodingAcrossLightCalls(t *testing.T) {
 	}
 }
 
+func TestFanOutSenderAdapter_MemoizesClonedOuterRowLists(t *testing.T) {
+	mock := &mockClientSender{}
+	adapter := NewFanOutSenderAdapter(mock)
+	memo := subscription.NewEncodingMemo()
+
+	sharedRows := []types.ProductValue{{types.NewUint32(42), types.NewString("shared")}}
+	clonedRows := append([]types.ProductValue(nil), sharedRows...)
+	calls := 0
+	oldEncodeRows := encodeRowsUnmemoized
+	encodeRowsUnmemoized = func(rows []types.ProductValue) ([]byte, error) {
+		calls++
+		return oldEncodeRows(rows)
+	}
+	defer func() { encodeRowsUnmemoized = oldEncodeRows }()
+
+	updates1 := []subscription.SubscriptionUpdate{{QueryID: 1, TableName: "players", Inserts: sharedRows}}
+	updates2 := []subscription.SubscriptionUpdate{{QueryID: 2, TableName: "players", Inserts: clonedRows}}
+	if err := adapter.SendTransactionUpdateLight(connID(1), 55, updates1, memo); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.SendTransactionUpdateLight(connID(2), 55, updates2, memo); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("encodeRows calls = %d, want 1 shared binary encode for cloned outer rows", calls)
+	}
+}
+
 func TestFanOutSenderAdapter_MemoCacheDoesNotLeakAcrossTransactions(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)

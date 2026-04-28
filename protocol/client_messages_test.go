@@ -254,6 +254,19 @@ func TestSubscribeMultiRoundTripSQL(t *testing.T) {
 	}
 }
 
+func TestSubscribeMultiDecodeRejectsImpossibleCountBeforeAllocation(t *testing.T) {
+	var frame bytes.Buffer
+	frame.WriteByte(TagSubscribeMulti)
+	writeUint32(&frame, 1)
+	writeUint32(&frame, 2)
+	writeUint32(&frame, 1<<31)
+
+	_, _, err := DecodeClientMessage(frame.Bytes())
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
 func TestUnsubscribeMultiRoundTrip(t *testing.T) {
 	orig := UnsubscribeMultiMsg{RequestID: 3, QueryID: 99}
 	frame, err := EncodeClientMessage(orig)

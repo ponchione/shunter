@@ -32,6 +32,22 @@ func (b *BTreeIndex) search(key IndexKey) (int, bool) {
 
 // Insert adds a rowID under the given key.
 func (b *BTreeIndex) Insert(key IndexKey, rowID types.RowID) {
+	if n := len(b.entries); n > 0 {
+		last := &b.entries[n-1]
+		switch cmp := last.key.Compare(key); {
+		case cmp < 0:
+			b.entries = append(b.entries, btreeEntry{
+				key:    key,
+				rowIDs: []types.RowID{rowID},
+			})
+			return
+		case cmp == 0:
+			if len(last.rowIDs) == 0 || last.rowIDs[len(last.rowIDs)-1] < rowID {
+				last.rowIDs = append(last.rowIDs, rowID)
+				return
+			}
+		}
+	}
 	idx, found := b.search(key)
 	if found {
 		e := &b.entries[idx]

@@ -10,10 +10,27 @@ import (
 
 // Transaction provides read-write access to the store within a reducer.
 type Transaction struct {
-	committed  *CommittedState
-	tx         *TxState
-	registry   schema.SchemaRegistry
-	rolledBack bool
+	committed       *CommittedState
+	tx              *TxState
+	registry        schema.SchemaRegistry
+	rolledBack      bool
+	txUniqueIndexes map[txUniqueRef]map[uint64][]txUniqueEntry
+	txRowIndexes    map[schema.TableID]map[uint64][]txRowEntry
+}
+
+type txUniqueRef struct {
+	table schema.TableID
+	index int
+}
+
+type txUniqueEntry struct {
+	rowID types.RowID
+	key   IndexKey
+}
+
+type txRowEntry struct {
+	rowID types.RowID
+	row   types.ProductValue
 }
 
 // NewTransaction creates a transaction over the committed state.
@@ -119,7 +136,7 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 		return rowID, nil
 	}
 
-	for _, idx := range table.indexes {
+	for idxOrdinal, idx := range table.indexes {
 		if !idx.schema.Unique {
 			continue
 		}
@@ -127,13 +144,8 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 		if err := t.checkCommittedUnique(tableID, table, idx, key); err != nil {
 			return 0, err
 		}
-		for _, txRow := range t.tx.Inserts(tableID) {
-			if key.Equal(idx.ExtractKey(txRow)) {
-				if idx.schema.Primary {
-					return 0, &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
-				}
-				return 0, &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
-			}
+		if err := t.checkTxUnique(tableID, table, idxOrdinal, idx, key); err != nil {
+			return 0, err
 		}
 	}
 
@@ -147,15 +159,13 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 				return 0, ErrDuplicateRow
 			}
 		}
-		for _, txRow := range t.tx.Inserts(tableID) {
-			if txRow.Equal(row) {
-				return 0, ErrDuplicateRow
-			}
+		if t.hasTxDuplicateRow(tableID, row) {
+			return 0, ErrDuplicateRow
 		}
 	}
 
 	id := table.AllocRowID()
-	t.tx.AddInsert(tableID, id, row)
+	t.addInsert(tableID, id, row, table)
 	return id, nil
 }
 
@@ -170,6 +180,134 @@ func (t *Transaction) checkCommittedUnique(tableID schema.TableID, table *Table,
 		return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
 	}
 	return nil
+}
+
+func (t *Transaction) checkTxUnique(tableID schema.TableID, table *Table, idxOrdinal int, idx *Index, key IndexKey) error {
+	entries := t.ensureTxUniqueIndex(tableID, idxOrdinal, idx)
+	for _, entry := range entries[key.hash64()] {
+		if key.Equal(entry.key) {
+			if idx.schema.Primary {
+				return &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+			}
+			return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+		}
+	}
+	return nil
+}
+
+func (t *Transaction) ensureTxUniqueIndex(tableID schema.TableID, idxOrdinal int, idx *Index) map[uint64][]txUniqueEntry {
+	if t.txUniqueIndexes == nil {
+		t.txUniqueIndexes = make(map[txUniqueRef]map[uint64][]txUniqueEntry)
+	}
+	ref := txUniqueRef{table: tableID, index: idxOrdinal}
+	if entries, ok := t.txUniqueIndexes[ref]; ok {
+		return entries
+	}
+	entries := make(map[uint64][]txUniqueEntry, len(t.tx.Inserts(tableID)))
+	for rowID, row := range t.tx.Inserts(tableID) {
+		key := idx.ExtractKey(row)
+		entries[key.hash64()] = append(entries[key.hash64()], txUniqueEntry{rowID: rowID, key: key})
+	}
+	t.txUniqueIndexes[ref] = entries
+	return entries
+}
+
+func (t *Transaction) hasTxDuplicateRow(tableID schema.TableID, row types.ProductValue) bool {
+	entries := t.ensureTxRowIndex(tableID)
+	for _, entry := range entries[row.Hash64()] {
+		if entry.row.Equal(row) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Transaction) ensureTxRowIndex(tableID schema.TableID) map[uint64][]txRowEntry {
+	if t.txRowIndexes == nil {
+		t.txRowIndexes = make(map[schema.TableID]map[uint64][]txRowEntry)
+	}
+	if entries, ok := t.txRowIndexes[tableID]; ok {
+		return entries
+	}
+	entries := make(map[uint64][]txRowEntry, len(t.tx.Inserts(tableID)))
+	for rowID, row := range t.tx.Inserts(tableID) {
+		entries[row.Hash64()] = append(entries[row.Hash64()], txRowEntry{rowID: rowID, row: row})
+	}
+	t.txRowIndexes[tableID] = entries
+	return entries
+}
+
+func (t *Transaction) addInsert(tableID schema.TableID, rowID types.RowID, row types.ProductValue, table *Table) {
+	t.tx.AddInsert(tableID, rowID, row)
+	stored := t.tx.Inserts(tableID)[rowID]
+	t.trackTxInsert(tableID, rowID, stored, table)
+}
+
+func (t *Transaction) removeInsert(tableID schema.TableID, rowID types.RowID, table *Table) {
+	row, ok := t.tx.Inserts(tableID)[rowID]
+	if ok {
+		t.untrackTxInsert(tableID, rowID, row, table)
+	}
+	t.tx.RemoveInsert(tableID, rowID)
+}
+
+func (t *Transaction) trackTxInsert(tableID schema.TableID, rowID types.RowID, row types.ProductValue, table *Table) {
+	for idxOrdinal, idx := range table.indexes {
+		ref := txUniqueRef{table: tableID, index: idxOrdinal}
+		if t.txUniqueIndexes == nil {
+			continue
+		}
+		entries, ok := t.txUniqueIndexes[ref]
+		if !ok {
+			continue
+		}
+		key := idx.ExtractKey(row)
+		entries[key.hash64()] = append(entries[key.hash64()], txUniqueEntry{rowID: rowID, key: key})
+	}
+	if t.txRowIndexes != nil {
+		if entries, ok := t.txRowIndexes[tableID]; ok {
+			entries[row.Hash64()] = append(entries[row.Hash64()], txRowEntry{rowID: rowID, row: row})
+		}
+	}
+}
+
+func (t *Transaction) untrackTxInsert(tableID schema.TableID, rowID types.RowID, row types.ProductValue, table *Table) {
+	for idxOrdinal, idx := range table.indexes {
+		ref := txUniqueRef{table: tableID, index: idxOrdinal}
+		if t.txUniqueIndexes == nil {
+			continue
+		}
+		entries, ok := t.txUniqueIndexes[ref]
+		if !ok {
+			continue
+		}
+		key := idx.ExtractKey(row)
+		bucket := entries[key.hash64()]
+		for i, entry := range bucket {
+			if entry.rowID == rowID {
+				entries[key.hash64()] = append(bucket[:i], bucket[i+1:]...)
+				break
+			}
+		}
+		if len(entries[key.hash64()]) == 0 {
+			delete(entries, key.hash64())
+		}
+	}
+	if t.txRowIndexes != nil {
+		if entries, ok := t.txRowIndexes[tableID]; ok {
+			h := row.Hash64()
+			bucket := entries[h]
+			for i, entry := range bucket {
+				if entry.rowID == rowID {
+					entries[h] = append(bucket[:i], bucket[i+1:]...)
+					break
+				}
+			}
+			if len(entries[h]) == 0 {
+				delete(entries, h)
+			}
+		}
+	}
 }
 
 func (t *Transaction) tryUndelete(tableID schema.TableID, table *Table, row types.ProductValue) (types.RowID, bool, error) {
@@ -212,18 +350,18 @@ func (t *Transaction) Delete(tableID schema.TableID, rowID types.RowID) error {
 	if err := t.checkUsable(); err != nil {
 		return err
 	}
-	if _, ok := t.committed.Table(tableID); !ok {
+	table, ok := t.committed.Table(tableID)
+	if !ok {
 		return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 	}
 
 	// Check tx-local inserts first (insert-then-delete collapse).
 	if t.tx.IsInserted(tableID, rowID) {
-		t.tx.RemoveInsert(tableID, rowID)
+		t.removeInsert(tableID, rowID, table)
 		return nil
 	}
 
 	// Check committed state.
-	table, _ := t.committed.Table(tableID)
 	if _, ok := table.GetRow(rowID); !ok {
 		return fmt.Errorf("%w: %d", ErrRowNotFound, rowID)
 	}
@@ -270,7 +408,12 @@ func (t *Transaction) Update(tableID schema.TableID, rowID types.RowID, newRow t
 	if err != nil {
 		// Rollback delete.
 		if wasTxInsert {
-			t.tx.AddInsert(tableID, rowID, oldRow)
+			table, ok := t.committed.Table(tableID)
+			if ok {
+				t.addInsert(tableID, rowID, oldRow, table)
+			} else {
+				t.tx.AddInsert(tableID, rowID, oldRow)
+			}
 		} else {
 			t.tx.CancelDelete(tableID, rowID)
 		}

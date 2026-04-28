@@ -86,7 +86,8 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 		}
 	}
 
-	pending := make(map[schema.TableID][]types.ProductValue)
+	pendingUnique := make(map[txUniqueRef]map[uint64][]IndexKey)
+	pendingRows := make(map[schema.TableID]map[uint64][]types.ProductValue)
 	for tableID, inserts := range txState.AllInserts() {
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
@@ -96,32 +97,65 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 			if err := revalidateInsertAgainstCommitted(tableID, table, row, txState); err != nil {
 				return err
 			}
-			if err := revalidateInsertAgainstPending(table, row, pending[tableID]); err != nil {
+			if err := revalidateInsertAgainstPending(tableID, table, row, pendingUnique, pendingRows); err != nil {
 				return err
 			}
-			pending[tableID] = append(pending[tableID], row)
 		}
 	}
 	return nil
 }
 
-func revalidateInsertAgainstPending(table *Table, row types.ProductValue, pending []types.ProductValue) error {
-	for _, prior := range pending {
-		for _, idx := range table.indexes {
-			if !idx.schema.Unique {
-				continue
-			}
-			key := idx.ExtractKey(row)
-			if key.Equal(idx.ExtractKey(prior)) {
+func revalidateInsertAgainstPending(tableID schema.TableID, table *Table, row types.ProductValue, pendingUnique map[txUniqueRef]map[uint64][]IndexKey, pendingRows map[schema.TableID]map[uint64][]types.ProductValue) error {
+	for idxOrdinal, idx := range table.indexes {
+		if !idx.schema.Unique {
+			continue
+		}
+		key := idx.ExtractKey(row)
+		ref := txUniqueRef{table: tableID, index: idxOrdinal}
+		buckets := pendingUnique[ref]
+		if buckets == nil {
+			continue
+		}
+		for _, priorKey := range buckets[key.hash64()] {
+			if key.Equal(priorKey) {
 				if idx.schema.Primary {
 					return &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
 				}
 				return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
 			}
 		}
-		if table.rowHashIndex != nil && prior.Equal(row) {
-			return ErrDuplicateRow
+	}
+	if table.rowHashIndex != nil {
+		if buckets := pendingRows[tableID]; buckets != nil {
+			for _, prior := range buckets[row.Hash64()] {
+				if !prior.Equal(row) {
+					continue
+				}
+				return ErrDuplicateRow
+			}
 		}
+	}
+
+	for idxOrdinal, idx := range table.indexes {
+		if !idx.schema.Unique {
+			continue
+		}
+		key := idx.ExtractKey(row)
+		ref := txUniqueRef{table: tableID, index: idxOrdinal}
+		buckets := pendingUnique[ref]
+		if buckets == nil {
+			buckets = make(map[uint64][]IndexKey)
+			pendingUnique[ref] = buckets
+		}
+		buckets[key.hash64()] = append(buckets[key.hash64()], key)
+	}
+	if table.rowHashIndex != nil {
+		buckets := pendingRows[tableID]
+		if buckets == nil {
+			buckets = make(map[uint64][]types.ProductValue)
+			pendingRows[tableID] = buckets
+		}
+		buckets[row.Hash64()] = append(buckets[row.Hash64()], row)
 	}
 	return nil
 }

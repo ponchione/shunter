@@ -265,6 +265,33 @@ func TestDecodeServerMessageRejectsTrailingBytes(t *testing.T) {
 	}
 }
 
+func TestDecodeServerMessageRejectsImpossibleArrayCountsBeforeAllocation(t *testing.T) {
+	t.Run("one-off tables", func(t *testing.T) {
+		var frame bytes.Buffer
+		frame.WriteByte(TagOneOffQueryResponse)
+		writeBytes(&frame, nil)
+		writeOptionalString(&frame, nil)
+		writeUint32(&frame, 1<<31)
+
+		_, _, err := DecodeServerMessage(frame.Bytes())
+		if !errors.Is(err, ErrMalformedMessage) {
+			t.Fatalf("err = %v, want ErrMalformedMessage", err)
+		}
+	})
+
+	t.Run("subscription updates", func(t *testing.T) {
+		var frame bytes.Buffer
+		frame.WriteByte(TagTransactionUpdateLight)
+		writeUint32(&frame, 7)
+		writeUint32(&frame, 1<<31)
+
+		_, _, err := DecodeServerMessage(frame.Bytes())
+		if !errors.Is(err, ErrMalformedMessage) {
+			t.Fatalf("err = %v, want ErrMalformedMessage", err)
+		}
+	})
+}
+
 func TestTransactionUpdateLightRoundTrip(t *testing.T) {
 	rl := EncodeRowList([][]byte{{0x01}})
 	in := TransactionUpdateLight{

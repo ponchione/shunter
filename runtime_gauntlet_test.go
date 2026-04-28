@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"sort"
 	"strconv"
@@ -75,6 +77,169 @@ func TestRuntimeGauntletRestartEquivalence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRuntimeGauntletReadSnapshotIsolationDuringRuntimeReducers(t *testing.T) {
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.CloseNow()
+	const subscriberQueryID = uint32(8802)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 8801, subscriberQueryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("snapshot op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.Close(websocket.StatusNormalClosure, "")
+
+	initialOp := insertPlayerOp(&nextID, "snapshot_initial")
+	initialDelta := gauntletAllRowsDeltaForOp(t, model, initialOp)
+	initialOutcome := callGauntletRuntimeReducer(t, rt, initialOp, "snapshot op 0 initial insert")
+	advanceGauntletModel(t, &model, initialOp, initialOutcome, "snapshot op 0 initial insert")
+	gotInitialDelta := readGauntletTransactionUpdateLight(t, subscriber, subscriberQueryID, "snapshot op 0 initial insert")
+	assertGauntletDeltaEqual(t, gotInitialDelta, initialDelta, "snapshot op 0 initial insert")
+	assertGauntletReadMatchesModel(t, rt, model, "snapshot op 0 initial insert")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "snapshot op 0 initial insert")
+
+	heldRead := holdGauntletReadSnapshot(t, rt, model.players, "snapshot op 1 held read")
+
+	failedOp := failAfterInsertOp(nextID, "snapshot_failed_while_read_held")
+	failedCtx, failedCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	failedOutcome := callGauntletRuntimeReducerWithContext(t, rt, failedCtx, failedOp, "snapshot op 1 failed reducer while read held")
+	failedCancel()
+	advanceGauntletModel(t, &model, failedOp, failedOutcome, "snapshot op 1 failed reducer while read held")
+	assertGauntletReadMatchesModel(t, rt, model, "snapshot op 1 failed reducer while read held")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "snapshot op 1 failed reducer while read held")
+
+	commitOp := insertPlayerOp(&nextID, "snapshot_commit_after_read_release")
+	commitDelta := gauntletAllRowsDeltaForOp(t, model, commitOp)
+	commitResultCh := callGauntletRuntimeReducerAsync(rt, commitOp, 2*time.Second)
+	assertGauntletRuntimeReducerPending(t, commitResultCh, 50*time.Millisecond, "snapshot op 2 commit before read release")
+
+	heldRead.ReleaseAndWait(t, "snapshot op 3 held read release")
+	commitOutcome := waitGauntletRuntimeReducerOutcome(t, commitResultCh, "snapshot op 3 commit after read release")
+	advanceGauntletModel(t, &model, commitOp, commitOutcome, "snapshot op 3 commit after read release")
+	gotCommitDelta := readGauntletTransactionUpdateLight(t, subscriber, subscriberQueryID, "snapshot op 3 commit after read release")
+	assertGauntletDeltaEqual(t, gotCommitDelta, commitDelta, "snapshot op 3 commit after read release")
+	assertGauntletReadMatchesModel(t, rt, model, "snapshot op 3 commit after held read release")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "snapshot op 3 commit after held read release")
+}
+
+func TestRuntimeGauntletCloseWaitsForHeldReadBlockedReducer(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntime(t, dataDir)
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	initialOp := insertPlayerOp(&nextID, "close_wait_initial")
+	runGauntletTrace(t, rt, &model, []gauntletOp{initialOp}, 0, "close op 0 initial insert")
+
+	heldRead := holdGauntletReadSnapshot(t, rt, model.players, "close op 1 held read")
+	commitOp := insertPlayerOp(&nextID, "close_wait_inflight_commit")
+	commitResultCh := callGauntletRuntimeReducerAsync(rt, commitOp, 3*time.Second)
+	assertGauntletRuntimeReducerPending(t, commitResultCh, 50*time.Millisecond, "close op 2 in-flight commit before close")
+
+	closeCh := make(chan error, 1)
+	go func() {
+		closeCh <- rt.Close()
+	}()
+	waitGauntletRuntimeState(t, rt, shunter.RuntimeStateClosing, "close op 3 waiting for close to enter closing")
+	select {
+	case err := <-closeCh:
+		if err != nil {
+			t.Fatalf("close op 3 Close completed before held read release with error: %v", err)
+		}
+		t.Fatalf("close op 3 Close completed before held read release")
+	case <-time.After(50 * time.Millisecond):
+	}
+	assertGauntletRuntimeClosingLocalSurfaces(t, rt, "close op 3 while close is waiting")
+
+	heldRead.ReleaseAndWait(t, "close op 4 held read release")
+	commitOutcome := waitGauntletRuntimeReducerOutcome(t, commitResultCh, "close op 4 in-flight commit after read release")
+	advanceGauntletModel(t, &model, commitOp, commitOutcome, "close op 4 in-flight commit after read release")
+
+	select {
+	case err := <-closeCh:
+		if err != nil {
+			t.Fatalf("close op 4 Close returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("close op 4 timed out waiting for Close")
+	}
+	assertGauntletRuntimeClosedLocalSurfaces(t, rt, "close op 5 after close")
+
+	restartedRT := buildGauntletRuntime(t, dataDir)
+	defer restartedRT.Close()
+	assertGauntletReadMatchesModel(t, restartedRT, model, "close op 6 after restart")
+}
+
+func TestRuntimeGauntletListenAndServeProtocolWorkload(t *testing.T) {
+	dataDir := t.TempDir()
+	listenAddr := reserveGauntletListenAddr(t)
+	rt := buildGauntletRuntimeWithConfig(t, shunter.Config{DataDir: dataDir, ListenAddr: listenAddr}, false)
+
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	defer cancelServe()
+	serveErrCh := make(chan error, 1)
+	go func() {
+		serveErrCh <- rt.ListenAndServe(serveCtx)
+	}()
+
+	url := "ws://" + listenAddr + "/subscribe"
+	subscriber := dialGauntletProtocolURLEventually(t, url, "listen op 0 subscriber dial")
+	defer subscriber.CloseNow()
+	caller := dialGauntletProtocolURLEventually(t, url, "listen op 0 caller dial")
+	defer caller.CloseNow()
+	queryClient := dialGauntletProtocolURLEventually(t, url, "listen op 0 query dial")
+	defer queryClient.CloseNow()
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+
+	const subscriberQueryID = uint32(8902)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 8901, subscriberQueryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("listen op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	commitOp := insertPlayerOp(&nextID, "listen_commit")
+	commitDelta := gauntletAllRowsDeltaForOp(t, model, commitOp)
+	commitOutcome := callGauntletProtocolReducer(t, caller, commitOp, 8903, "listen op 1 protocol commit")
+	advanceGauntletModel(t, &model, commitOp, commitOutcome, "listen op 1 protocol commit")
+	gotCommitDelta := readGauntletTransactionUpdateLight(t, subscriber, subscriberQueryID, "listen op 1 protocol commit")
+	assertGauntletDeltaEqual(t, gotCommitDelta, commitDelta, "listen op 1 protocol commit")
+	assertGauntletReadMatchesModel(t, rt, model, "listen op 1 protocol commit")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "listen op 1 protocol commit")
+
+	failedOp := failAfterInsertOp(nextID, "listen_failed")
+	failedOutcome := callGauntletProtocolReducer(t, caller, failedOp, 8904, "listen op 2 protocol failed reducer")
+	advanceGauntletModel(t, &model, failedOp, failedOutcome, "listen op 2 protocol failed reducer")
+	assertGauntletReadMatchesModel(t, rt, model, "listen op 2 protocol failed reducer")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "listen op 2 protocol failed reducer")
+	assertNoGauntletProtocolMessageBeforeClose(t, subscriber, 50*time.Millisecond, "listen op 2 protocol failed reducer")
+
+	cancelServe()
+	select {
+	case err := <-serveErrCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("listen op 3 ListenAndServe error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("listen op 3 timed out waiting for ListenAndServe shutdown")
+	}
+	assertGauntletRuntimeClosedLocalSurfaces(t, rt, "listen op 4 after serve cancel")
+	if err := rt.ListenAndServe(context.Background()); !errors.Is(err, shunter.ErrRuntimeClosed) {
+		t.Fatalf("listen op 4 ListenAndServe after close error = %v, want ErrRuntimeClosed", err)
+	}
+
+	restartedRT := buildGauntletRuntime(t, dataDir)
+	defer restartedRT.Close()
+	assertGauntletReadMatchesModel(t, restartedRT, model, "listen op 5 after restart")
 }
 
 func TestRuntimeGauntletProtocolCallReducerRestartEquivalence(t *testing.T) {
@@ -2446,6 +2611,11 @@ type gauntletReducerOutcome struct {
 	err    string
 }
 
+type gauntletRuntimeReducerCallResult struct {
+	result shunter.ReducerResult
+	err    error
+}
+
 func gauntletReducerOutcomeFromResult(res shunter.ReducerResult) gauntletReducerOutcome {
 	outcome := gauntletReducerOutcome{status: res.Status}
 	if res.Error != nil {
@@ -2466,6 +2636,43 @@ func callGauntletRuntimeReducerWithContext(t *testing.T, rt *shunter.Runtime, ct
 		t.Fatalf("%s admission error: %v", label, err)
 	}
 	return gauntletReducerOutcomeFromResult(res)
+}
+
+func callGauntletRuntimeReducerAsync(rt *shunter.Runtime, op gauntletOp, timeout time.Duration) <-chan gauntletRuntimeReducerCallResult {
+	resultCh := make(chan gauntletRuntimeReducerCallResult, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		res, err := rt.CallReducer(ctx, op.reducer, []byte(op.args))
+		resultCh <- gauntletRuntimeReducerCallResult{result: res, err: err}
+	}()
+	return resultCh
+}
+
+func assertGauntletRuntimeReducerPending(t *testing.T, resultCh <-chan gauntletRuntimeReducerCallResult, wait time.Duration, label string) {
+	t.Helper()
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("%s completed before expected with error: %v", label, result.err)
+		}
+		t.Fatalf("%s completed before expected with status %v", label, result.result.Status)
+	case <-time.After(wait):
+	}
+}
+
+func waitGauntletRuntimeReducerOutcome(t *testing.T, resultCh <-chan gauntletRuntimeReducerCallResult, label string) gauntletReducerOutcome {
+	t.Helper()
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("%s returned error: %v", label, result.err)
+		}
+		return gauntletReducerOutcomeFromResult(result.result)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s timed out waiting for reducer result", label)
+		return gauntletReducerOutcome{}
+	}
 }
 
 func advanceGauntletModel(t *testing.T, model *gauntletModel, op gauntletOp, outcome gauntletReducerOutcome, label string) {
@@ -2616,6 +2823,11 @@ func gauntletName(rng *rand.Rand) string {
 
 func buildGauntletRuntime(t *testing.T, dataDir string) *shunter.Runtime {
 	t.Helper()
+	return buildGauntletRuntimeWithConfig(t, shunter.Config{DataDir: dataDir}, true)
+}
+
+func buildGauntletRuntimeWithConfig(t *testing.T, cfg shunter.Config, start bool) *shunter.Runtime {
+	t.Helper()
 	mod := shunter.NewModule("gauntlet").
 		SchemaVersion(1).
 		TableDef(schema.TableDefinition{
@@ -2631,14 +2843,29 @@ func buildGauntletRuntime(t *testing.T, dataDir string) *shunter.Runtime {
 		Reducer("fail_after_insert", failAfterInsertReducer).
 		Reducer("panic_after_insert", panicAfterInsertReducer)
 
-	rt, err := shunter.Build(mod, shunter.Config{DataDir: dataDir})
+	rt, err := shunter.Build(mod, cfg)
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	if err := rt.Start(context.Background()); err != nil {
-		t.Fatalf("Start returned error: %v", err)
+	if start {
+		if err := rt.Start(context.Background()); err != nil {
+			t.Fatalf("Start returned error: %v", err)
+		}
 	}
 	return rt
+}
+
+func reserveGauntletListenAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve listen addr: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close reserved listen addr: %v", err)
+	}
+	return addr
 }
 
 func dialGauntletProtocol(t *testing.T, rt *shunter.Runtime) *websocket.Conn {
@@ -2647,20 +2874,56 @@ func dialGauntletProtocol(t *testing.T, rt *shunter.Runtime) *websocket.Conn {
 	t.Cleanup(srv.Close)
 
 	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+	return dialGauntletProtocolURL(t, url, "protocol dial")
+}
+
+func dialGauntletProtocolURL(t *testing.T, url, label string) *websocket.Conn {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	client, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{
 		Subprotocols: []string{protocol.SubprotocolV1},
 	})
 	if err != nil {
-		t.Fatalf("protocol dial failed: %v (resp=%v)", err, resp)
+		t.Fatalf("%s failed: %v (resp=%v)", label, err, resp)
 	}
 
-	_, msg := readGauntletProtocolMessage(t, client, "identity token")
+	_, msg := readGauntletProtocolMessage(t, client, label+" identity token")
 	if _, ok := msg.(protocol.IdentityToken); !ok {
-		t.Fatalf("first protocol message = %T, want IdentityToken", msg)
+		t.Fatalf("%s first protocol message = %T, want IdentityToken", label, msg)
 	}
 	return client
+}
+
+func dialGauntletProtocolURLEventually(t *testing.T, url, label string) *websocket.Conn {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	var lastErr error
+	var lastResp *http.Response
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		client, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+			Subprotocols: []string{protocol.SubprotocolV1},
+		})
+		cancel()
+		if err == nil {
+			_, msg := readGauntletProtocolMessage(t, client, label+" identity token")
+			if _, ok := msg.(protocol.IdentityToken); !ok {
+				t.Fatalf("%s first protocol message = %T, want IdentityToken", label, msg)
+			}
+			return client
+		}
+		lastErr = err
+		lastResp = resp
+
+		select {
+		case <-ticker.C:
+		case <-deadline:
+			t.Fatalf("%s failed before deadline: %v (resp=%v)", label, lastErr, lastResp)
+		}
+	}
 }
 
 func insertPlayerReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
@@ -3544,28 +3807,103 @@ func assertGauntletReadMatchesModel(t *testing.T, rt *shunter.Runtime, model gau
 	}
 }
 
+type gauntletHeldReadSnapshot struct {
+	release func()
+	done    <-chan error
+}
+
+func holdGauntletReadSnapshot(t *testing.T, rt *shunter.Runtime, want map[uint64]string, label string) gauntletHeldReadSnapshot {
+	t.Helper()
+	snapshotRows := copyGauntletPlayers(want)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	releaseRead := func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}
+	t.Cleanup(releaseRead)
+
+	go func() {
+		done <- rt.Read(context.Background(), func(view shunter.LocalReadView) error {
+			before, err := collectGauntletPlayersFromReadView(view)
+			if err != nil {
+				return fmt.Errorf("%s initial snapshot scan: %w", label, err)
+			}
+			if diff := diffGauntletPlayers(before, snapshotRows); diff != "" {
+				return fmt.Errorf("%s initial snapshot mismatch:\n%s", label, diff)
+			}
+			close(started)
+			<-release
+			after, err := collectGauntletPlayersFromReadView(view)
+			if err != nil {
+				return fmt.Errorf("%s held snapshot rescan: %w", label, err)
+			}
+			if diff := diffGauntletPlayers(after, snapshotRows); diff != "" {
+				return fmt.Errorf("%s held snapshot changed:\n%s", label, diff)
+			}
+			return nil
+		})
+	}()
+
+	select {
+	case <-started:
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("%s returned before being held: %v", label, err)
+		}
+		t.Fatalf("%s returned before being held", label)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s timed out waiting for held read", label)
+	}
+	return gauntletHeldReadSnapshot{release: releaseRead, done: done}
+}
+
+func (h gauntletHeldReadSnapshot) ReleaseAndWait(t *testing.T, label string) {
+	t.Helper()
+	h.release()
+	select {
+	case err := <-h.done:
+		if err != nil {
+			t.Fatalf("%s returned error: %v", label, err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s timed out waiting for held read release", label)
+	}
+}
+
 func readGauntletPlayers(t *testing.T, rt *shunter.Runtime, label string) map[uint64]string {
 	t.Helper()
-	got := map[uint64]string{}
+	var got map[uint64]string
 	err := rt.Read(context.Background(), func(view shunter.LocalReadView) error {
-		rowCount := view.RowCount(gauntletPlayersTableID)
-		for _, row := range view.TableScan(gauntletPlayersTableID) {
-			id := row[0].AsUint64()
-			name := row[1].AsString()
-			if _, exists := got[id]; exists {
-				return fmt.Errorf("duplicate player id %d", id)
-			}
-			got[id] = name
-		}
-		if rowCount != len(got) {
-			return fmt.Errorf("row count = %d, scanned %d", rowCount, len(got))
-		}
-		return nil
+		var err error
+		got, err = collectGauntletPlayersFromReadView(view)
+		return err
 	})
 	if err != nil {
 		t.Fatalf("%s: Read returned error: %v", label, err)
 	}
 	return got
+}
+
+func collectGauntletPlayersFromReadView(view shunter.LocalReadView) (map[uint64]string, error) {
+	got := map[uint64]string{}
+	rowCount := view.RowCount(gauntletPlayersTableID)
+	for _, row := range view.TableScan(gauntletPlayersTableID) {
+		id := row[0].AsUint64()
+		name := row[1].AsString()
+		if _, exists := got[id]; exists {
+			return nil, fmt.Errorf("duplicate player id %d", id)
+		}
+		got[id] = name
+	}
+	if rowCount != len(got) {
+		return nil, fmt.Errorf("row count = %d, scanned %d", rowCount, len(got))
+	}
+	return got, nil
 }
 
 func diffGauntletPlayers(got, want map[uint64]string) string {
@@ -3626,6 +3964,50 @@ func assertGauntletProtocolClosed(t *testing.T, client *websocket.Conn, label st
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("%s protocol connection did not close before timeout", label)
+	}
+}
+
+func waitGauntletRuntimeState(t *testing.T, rt *shunter.Runtime, want shunter.RuntimeState, label string) {
+	t.Helper()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.After(2 * time.Second)
+	last := rt.Health()
+	for {
+		if last.State == want {
+			return
+		}
+		select {
+		case <-ticker.C:
+			last = rt.Health()
+		case <-timeout:
+			t.Fatalf("%s state = %s ready=%v, want %s", label, last.State, last.Ready, want)
+		}
+	}
+}
+
+func assertGauntletRuntimeClosingLocalSurfaces(t *testing.T, rt *shunter.Runtime, label string) {
+	t.Helper()
+	health := rt.Health()
+	if health.State != shunter.RuntimeStateClosing || health.Ready {
+		t.Fatalf("%s health = {%s ready=%v}, want closing and not ready", label, health.State, health.Ready)
+	}
+	if rt.Ready() {
+		t.Fatalf("%s Ready() = true, want false", label)
+	}
+	err := rt.Read(context.Background(), func(shunter.LocalReadView) error {
+		t.Fatalf("%s Read callback ran while runtime was closing", label)
+		return nil
+	})
+	if !errors.Is(err, shunter.ErrRuntimeClosed) {
+		t.Fatalf("%s Read error = %v, want ErrRuntimeClosed", label, err)
+	}
+	_, err = rt.CallReducer(context.Background(), "insert_player", []byte("999999:closing"))
+	if !errors.Is(err, shunter.ErrRuntimeClosed) {
+		t.Fatalf("%s CallReducer error = %v, want ErrRuntimeClosed", label, err)
+	}
+	if err := rt.Start(context.Background()); !errors.Is(err, shunter.ErrRuntimeClosed) {
+		t.Fatalf("%s Start error = %v, want ErrRuntimeClosed", label, err)
 	}
 }
 

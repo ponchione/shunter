@@ -34,6 +34,9 @@ func DecodeRowList(data []byte) ([][]byte, error) {
 	}
 	count := binary.LittleEndian.Uint32(data[0:4])
 	off := 4
+	if err := requireCountFitsRemaining("rowlist rows", count, data, off, 4); err != nil {
+		return nil, err
+	}
 	rows := make([][]byte, 0, count)
 	for i := uint32(0); i < count; i++ {
 		if len(data)-off < 4 {

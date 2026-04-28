@@ -60,9 +60,19 @@ func (s *mockSnapshot) RowCount(id schema.TableID) int { return len(s.rows[id]) 
 
 func (s *mockSnapshot) Close() {}
 
+type countingSnapshot struct {
+	*mockSnapshot
+	tableScans int
+}
+
+func (s *countingSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	s.tableScans++
+	return s.mockSnapshot.TableScan(id)
+}
+
 // mockStateAccess implements CommittedStateAccess.
 type mockStateAccess struct {
-	snap *mockSnapshot
+	snap store.CommittedReadView
 }
 
 func (m *mockStateAccess) Snapshot() store.CommittedReadView { return m.snap }
@@ -180,6 +190,40 @@ func TestHandleOneOffQuery_Valid(t *testing.T) {
 	}
 	if !pvs[0][1].Equal(types.NewString("bob")) {
 		t.Errorf("row[0].name = %v, want String(bob)", pvs[0][1])
+	}
+}
+
+func TestHandleOneOffQueryLimitZeroDoesNotScan(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+	)
+	snap := &countingSnapshot{mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1)},
+			{types.NewUint64(2)},
+		},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x10},
+		QueryString: "SELECT * FROM users LIMIT 0",
+	}, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil", *result.Error)
+	}
+	rawRows, err := DecodeRowList(firstTableRows(result))
+	if err != nil {
+		t.Fatalf("DecodeRowList: %v", err)
+	}
+	if len(rawRows) != 0 {
+		t.Fatalf("row count = %d, want 0", len(rawRows))
+	}
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0", snap.tableScans)
 	}
 }
 

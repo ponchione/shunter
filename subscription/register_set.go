@@ -73,11 +73,11 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 		}
 		out = joinedRows
 	case CrossJoin:
-		for _, row := range projectedCrossJoinRows(view, p) {
-			if err := add(row); err != nil {
-				return nil, err
-			}
+		crossRows, err := m.appendProjectedCrossJoinRows(out, view, p)
+		if err != nil {
+			return nil, err
 		}
+		out = crossRows
 	default:
 		tables := pred.Tables()
 		if len(tables) == 0 {
@@ -106,6 +106,33 @@ func (m *Manager) initialQuery(pred Predicate, view store.CommittedReadView) ([]
 				if err := add(row); err != nil {
 					return nil, err
 				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func (m *Manager) appendProjectedCrossJoinRows(out []types.ProductValue, view store.CommittedReadView, p CrossJoin) ([]types.ProductValue, error) {
+	if view == nil {
+		return out, nil
+	}
+	projectedTable := p.ProjectedTable()
+	otherTable := crossJoinOtherTable(p)
+	otherCount := view.RowCount(otherTable)
+	if otherCount == 0 {
+		return out, nil
+	}
+	add := func(row types.ProductValue) error {
+		if m.InitialRowLimit > 0 && len(out) >= m.InitialRowLimit {
+			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
+		}
+		out = append(out, row)
+		return nil
+	}
+	for _, projectedRow := range view.TableScan(projectedTable) {
+		for i := 0; i < otherCount; i++ {
+			if err := add(projectedRow); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -203,17 +230,14 @@ func projectedCrossJoinRows(view store.CommittedReadView, p CrossJoin) []types.P
 		return nil
 	}
 	projectedTable := p.ProjectedTable()
-	otherTable := p.Left
-	if projectedTable == p.Left {
-		otherTable = p.Right
-	}
+	otherTable := crossJoinOtherTable(p)
 	var rows []types.ProductValue
 	otherCount := view.RowCount(otherTable)
 	if otherCount == 0 {
 		return nil
 	}
 	for _, projectedRow := range view.TableScan(projectedTable) {
-		for range view.TableScan(otherTable) {
+		for i := 0; i < otherCount; i++ {
 			rows = append(rows, projectedRow)
 		}
 	}

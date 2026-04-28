@@ -276,6 +276,9 @@ func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 	if err != nil {
 		return m, err
 	}
+	if err := requireCountFitsRemaining("SubscribeMulti query_strings", count, body, off, 4); err != nil {
+		return m, err
+	}
 	m.QueryStrings = make([]string, 0, count)
 	for i := uint32(0); i < count; i++ {
 		s, next, serr := readString(body, off)
@@ -362,6 +365,17 @@ func readBytes(body []byte, off int) ([]byte, int, error) {
 	out := make([]byte, n)
 	copy(out, body[off:off+int(n)])
 	return out, off + int(n), nil
+}
+
+func requireCountFitsRemaining(name string, count uint32, body []byte, off int, minPerItem int) error {
+	if minPerItem <= 0 {
+		panic("minPerItem must be positive")
+	}
+	remaining := len(body) - off
+	if uint64(count) > uint64(remaining/minPerItem) {
+		return fmt.Errorf("%w: %s count %d exceeds remaining %d", ErrMalformedMessage, name, count, remaining)
+	}
+	return nil
 }
 
 func requireFullyConsumed(body []byte, off int, msgName string) error {

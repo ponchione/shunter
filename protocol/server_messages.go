@@ -513,6 +513,9 @@ func readOneOffTables(body []byte, off int) ([]OneOffTable, int, error) {
 	if err != nil {
 		return nil, off, err
 	}
+	if err := requireCountFitsRemaining("OneOffTable list", count, body, off, 8); err != nil {
+		return nil, off, err
+	}
 	tables := make([]OneOffTable, 0, count)
 	for i := uint32(0); i < count; i++ {
 		var t OneOffTable
@@ -683,6 +686,9 @@ func writeSubscriptionUpdates(buf *bytes.Buffer, ups []SubscriptionUpdate) {
 func readSubscriptionUpdates(body []byte, off int) ([]SubscriptionUpdate, int, error) {
 	count, off, err := readUint32(body, off)
 	if err != nil {
+		return nil, off, err
+	}
+	if err := requireCountFitsRemaining("SubscriptionUpdate list", count, body, off, 16); err != nil {
 		return nil, off, err
 	}
 	ups := make([]SubscriptionUpdate, 0, count)
