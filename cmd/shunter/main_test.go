@@ -65,6 +65,31 @@ func TestContractPolicyCommandFailsInStrictMode(t *testing.T) {
 	assertContains(t, stdout.String(), "missing-migration-metadata query recent_messages")
 }
 
+func TestContractPlanCommandReadsJSONFiles(t *testing.T) {
+	dir := t.TempDir()
+	previousPath := writeCLIContract(t, dir, "previous.json", cliContractFixture())
+	current := cliContractFixture()
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	currentPath := writeCLIContract(t, dir, "current.json", current)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "plan",
+		"--previous", previousPath,
+		"--current", currentPath,
+		"--format", "json",
+	})
+	if code != 0 {
+		t.Fatalf("contract plan exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("contract plan stderr = %s, want empty", stderr.String())
+	}
+	assertContains(t, stdout.String(), `"entries": [`)
+	assertContains(t, stdout.String(), `"action": "review-required"`)
+	assertContains(t, stdout.String(), `"warnings": [`)
+}
+
 func TestContractCodegenCommandWritesTypeScript(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())

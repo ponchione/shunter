@@ -70,7 +70,11 @@ Current status:
   same fixed-rate advancement after startup replay saturation, a panicking
   recovered one-shot retry pin, and a replay/external-admission ordering pin
   proving post-startup external reducers do not overtake recovered scheduled
-  firings queued before the gate opens.
+  firings queued before the gate opens. Additional scheduler restart pins prove
+  in-flight attempt tracking is established before an executor can complete a
+  due command, and recovered repeating schedules that fail or panic retry the
+  same intended fire time before advancing by one fixed-rate interval on the
+  successful retry.
 
 ## Goals
 

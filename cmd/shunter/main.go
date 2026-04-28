@@ -43,6 +43,8 @@ func runContract(stdout, stderr io.Writer, args []string) int {
 		return runContractDiff(stdout, stderr, args[1:])
 	case "policy":
 		return runContractPolicy(stdout, stderr, args[1:])
+	case "plan":
+		return runContractPlan(stdout, stderr, args[1:])
 	case "codegen":
 		return runContractCodegen(stdout, stderr, args[1:])
 	default:
@@ -130,6 +132,53 @@ func runContractPolicy(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+func runContractPlan(stdout, stderr io.Writer, args []string) int {
+	fs := newFlagSet(stderr, "shunter contract plan")
+	previousPath := fs.String("previous", "", "previous contract JSON path")
+	currentPath := fs.String("current", "", "current contract JSON path")
+	strict := fs.Bool("strict", false, "exit with failure when policy warnings are present")
+	requirePreviousVersion := fs.Bool("require-previous-version", false, "warn when module migration metadata omits previous_version")
+	validateContracts := fs.Bool("validate", false, "include read-only contract consistency validation warnings")
+	format := fs.String("format", contractworkflow.FormatText, "output format: text or json")
+	if code, stop := parseFlags(fs, args); stop {
+		return code
+	}
+	if code := requireNoArgs(stderr, fs); code != 0 {
+		return code
+	}
+	if code := requirePath(stderr, "previous", *previousPath); code != 0 {
+		return code
+	}
+	if code := requirePath(stderr, "current", *currentPath); code != 0 {
+		return code
+	}
+
+	plan, err := contractworkflow.PlanFiles(*previousPath, *currentPath, contractdiff.PlanOptions{
+		Policy: contractdiff.PolicyOptions{
+			RequirePreviousVersion: *requirePreviousVersion,
+			Strict:                 *strict,
+		},
+		ValidateContracts: *validateContracts,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	out, err := contractworkflow.FormatPlan(plan, *format)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if _, err := stdout.Write(out); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if plan.Summary.PolicyFailed {
+		return 1
+	}
+	return 0
+}
+
 func runContractCodegen(stdout, stderr io.Writer, args []string) int {
 	fs := newFlagSet(stderr, "shunter contract codegen")
 	contractPath := fs.String("contract", "", "contract JSON path")
@@ -198,6 +247,7 @@ func printRootHelp(w io.Writer) {
 Usage:
   shunter contract diff --previous old.json --current current.json [--format text|json]
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
+  shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
 
 This generic CLI operates only on existing ModuleContract JSON files. It does
@@ -210,6 +260,7 @@ func printContractHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   shunter contract diff --previous old.json --current current.json [--format text|json]
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
+  shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
 
 Contract commands operate on canonical ModuleContract JSON files only.

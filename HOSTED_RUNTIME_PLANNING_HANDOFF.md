@@ -7,9 +7,10 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-The active hosted-runtime implementation target is `V2-C`: migration planning
-and validation.
+The active hosted-runtime implementation target is `V2-D`: declared read and
+SQL protocol convergence.
 
+V2-C migration planning and validation is complete.
 V2-B contract artifact admin and CLI workflows are complete.
 V2-A runtime/module boundary hardening is complete.
 
@@ -20,7 +21,7 @@ V2 planning is now decomposed under `docs/hosted-runtime-planning/V2/`,
 starting from the code-grounded source direction in
 `docs/decomposition/hosted-runtime-v2-directions.md`.
 
-Next hosted-runtime work should start from `V2-C` unless a newer explicit user
+Next hosted-runtime work should start from `V2-D` unless a newer explicit user
 target supersedes this handoff. Do not reopen V1-H or V1.5-A through V1.5-E
 unless a new failing regression proves drift.
 
@@ -92,6 +93,32 @@ V2-B validation passed:
 - `rtk go test ./codegen ./contractdiff ./contractworkflow ./cmd/shunter -count=1`
 - `rtk go test ./... -run 'Test.*(Contract|Codegen|Diff|Policy)' -count=1`
 - `rtk go vet ./codegen ./contractdiff ./contractworkflow ./cmd/shunter`
+
+V2-C is complete. Its live proof is:
+- `contractdiff.Plan` and `PlanJSON` combine previous/current
+  `ModuleContract` snapshots with `contractdiff` changes and policy warnings.
+- `MigrationPlan` exposes deterministic summary counts, entries, warnings,
+  severity, action, attached migration metadata, and classifications for
+  review/CI use.
+- `contractdiff.Compare` now reports index definition changes and
+  migration-metadata changes alongside existing additive, breaking, and
+  metadata-only contract changes.
+- `PlanOptions.ValidateContracts` adds read-only contract consistency warnings
+  for module/schema/contract version metadata without opening or mutating
+  stored state.
+- `MigrationPlan.Text` and `MarshalCanonicalJSON` render deterministic text
+  and newline-terminated JSON.
+- `contractworkflow.PlanFiles` and `FormatPlan` expose JSON-file workflows.
+- `cmd/shunter contract plan` operates only on existing canonical JSON files.
+- no executable migration runner, stored-state rewrite, startup-blocking
+  migration enforcement, rollback, backup/restore, or runtime shape change was
+  added.
+
+V2-C validation passed:
+- `rtk go fmt ./contractdiff ./contractworkflow ./cmd/shunter`
+- `rtk go test ./contractdiff ./contractworkflow ./cmd/shunter -count=1`
+- `rtk go test ./... -run 'Test.*(Migration|ContractDiff|Policy|Plan)' -count=1`
+- `rtk go vet ./contractdiff ./contractworkflow ./cmd/shunter`
 
 The completed V1.5 proof below is historical context and should not be treated
 as an active target.
@@ -208,7 +235,7 @@ Former non-slice validation blocker resolved:
 
 ## Current Hosted-Runtime State
 
-V1-H, V1.5-A through V1.5-E, V2-A, and V2-B are audited as landed.
+V1-H, V1.5-A through V1.5-E, V2-A, V2-B, and V2-C are audited as landed.
 
 Live proof points:
 - root package imports as `github.com/ponchione/shunter`
@@ -237,6 +264,8 @@ Live proof points:
 - V2-B added reusable JSON-file contract workflows in `contractworkflow` and a
   generic `cmd/shunter` CLI for `contract diff`, `contract policy`, and
   `contract codegen`
+- V2-C added deterministic migration planning through `contractdiff.Plan`,
+  `contractworkflow.PlanFiles`, and `cmd/shunter contract plan`
 - generic contract workflows operate only on existing canonical JSON files;
   app-owned export remains based on `Runtime.ExportContractJSON`
 - root/runtime package tests are the live proof for hosted-runtime ownership,
@@ -255,13 +284,13 @@ Required:
 3. `docs/hosted-runtime-planning/V2/README.md`
 4. the active V2 slice execution plan and task docs
 
-For the current V2-C target, start from:
-- `docs/hosted-runtime-planning/V2/V2-C/00-current-execution-plan.md`
-- `docs/hosted-runtime-planning/V2/V2-C/01-stack-prerequisites.md`
-- `docs/hosted-runtime-planning/V2/V2-C/02-plan-report-tests.md`
-- `docs/hosted-runtime-planning/V2/V2-C/03-migration-plan-model.md`
-- `docs/hosted-runtime-planning/V2/V2-C/04-read-only-validation-hooks.md`
-- `docs/hosted-runtime-planning/V2/V2-C/05-format-and-validate.md`
+For the current V2-D target, start from:
+- `docs/hosted-runtime-planning/V2/V2-D/00-current-execution-plan.md`
+- `docs/hosted-runtime-planning/V2/V2-D/01-stack-prerequisites.md`
+- `docs/hosted-runtime-planning/V2/V2-D/02-convergence-tests.md`
+- `docs/hosted-runtime-planning/V2/V2-D/03-declared-read-model.md`
+- `docs/hosted-runtime-planning/V2/V2-D/04-contract-and-codegen-updates.md`
+- `docs/hosted-runtime-planning/V2/V2-D/05-format-and-validate.md`
 
 For V1.5-E audit only, start from:
 - `docs/hosted-runtime-planning/V1.5/README.md`
@@ -302,11 +331,12 @@ Preserve WebSocket-first v1 runtime behavior.
 ## V2 Planning State
 
 Current active V2 slice:
-- `V2-C`: migration planning and validation
+- `V2-D`: declared read and SQL protocol convergence
 
 Completed V2 slices:
 - `V2-A`: runtime/module boundary hardening
 - `V2-B`: contract artifact admin and CLI workflows
+- `V2-C`: migration planning and validation
 
 V2 planning slices are:
 1. `V2-A`: runtime/module boundary hardening
@@ -323,17 +353,17 @@ If V2 implementation starts, begin with:
 - that slice's `01-stack-prerequisites.md`
 - live code/package docs named by the slice
 
-Do not start V2-D or later until V2-C is complete or explicitly deferred with
+Do not start V2-E or later until V2-D is complete or explicitly deferred with
 the reason recorded here.
 
 ## Next Slice Notes
 
 No next V1.5 slice is queued. The active hosted-runtime implementation slice is
-V2-C.
+V2-D.
 
-After V2-C completes, update this handoff to:
-- mark V2-C complete with live proof and validation commands
-- set `V2-D` as the active target
+After V2-D completes, update this handoff to:
+- mark V2-D complete with live proof and validation commands
+- set `V2-E` as the active target
 - preserve the rule that each handoff completes one full lettered slice,
   including tests and validations
 
@@ -369,6 +399,12 @@ Completed V2-B validation:
 - `rtk go test ./codegen ./contractdiff ./contractworkflow ./cmd/shunter -count=1`
 - `rtk go test ./... -run 'Test.*(Contract|Codegen|Diff|Policy)' -count=1`
 - `rtk go vet ./codegen ./contractdiff ./contractworkflow ./cmd/shunter`
+
+Completed V2-C validation:
+- `rtk go fmt ./contractdiff ./contractworkflow ./cmd/shunter`
+- `rtk go test ./contractdiff ./contractworkflow ./cmd/shunter -count=1`
+- `rtk go test ./... -run 'Test.*(Migration|ContractDiff|Policy|Plan)' -count=1`
+- `rtk go vet ./contractdiff ./contractworkflow ./cmd/shunter`
 
 Completed V1.5-E validation:
 - `rtk go fmt <touched packages>`

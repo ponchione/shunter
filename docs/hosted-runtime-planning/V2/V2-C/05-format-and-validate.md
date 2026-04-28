@@ -24,3 +24,16 @@ Validation checklist:
 - plan output is deterministic
 - manual-review-needed remains a valid outcome
 - stored state is not mutated by planning or validation
+
+Recorded V2-C validation:
+- `rtk go fmt ./contractdiff ./contractworkflow ./cmd/shunter`
+- `rtk go test ./contractdiff ./contractworkflow ./cmd/shunter -count=1`
+- `rtk go test ./... -run 'Test.*(Migration|ContractDiff|Policy|Plan)' -count=1`
+- `rtk go vet ./contractdiff ./contractworkflow ./cmd/shunter`
+
+Checklist result:
+- no executable migration runner was added
+- normal runtime startup remains non-blocking
+- plan text and JSON output are deterministic
+- `manual-review-needed` and `data-rewrite-needed` classifications are surfaced
+- stored state is not opened or mutated by planning or validation

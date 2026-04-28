@@ -85,7 +85,7 @@ func migrationMetadataForChange(migrations shunter.MigrationContract, change Cha
 	switch change.Surface {
 	case SurfaceTable:
 		return findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceTable, change.Name)
-	case SurfaceColumn:
+	case SurfaceColumn, SurfaceIndex:
 		tableName := change.Name
 		if idx := strings.IndexByte(change.Name, '.'); idx >= 0 {
 			tableName = change.Name[:idx]

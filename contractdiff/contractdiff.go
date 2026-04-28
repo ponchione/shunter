@@ -24,16 +24,18 @@ const (
 type Surface string
 
 const (
-	SurfaceContract   Surface = "contract"
-	SurfaceModule     Surface = "module"
-	SurfaceSchema     Surface = "schema"
-	SurfaceTable      Surface = "table"
-	SurfaceColumn     Surface = "column"
-	SurfaceReducer    Surface = "reducer"
-	SurfaceQuery      Surface = "query"
-	SurfaceView       Surface = "view"
-	SurfacePermission Surface = "permission"
-	SurfaceReadModel  Surface = "read_model"
+	SurfaceContract          Surface = "contract"
+	SurfaceModule            Surface = "module"
+	SurfaceSchema            Surface = "schema"
+	SurfaceTable             Surface = "table"
+	SurfaceColumn            Surface = "column"
+	SurfaceIndex             Surface = "index"
+	SurfaceReducer           Surface = "reducer"
+	SurfaceQuery             Surface = "query"
+	SurfaceView              Surface = "view"
+	SurfacePermission        Surface = "permission"
+	SurfaceReadModel         Surface = "read_model"
+	SurfaceMigrationMetadata Surface = "migration_metadata"
 )
 
 type Change struct {
@@ -68,6 +70,7 @@ func Compare(old, current shunter.ModuleContract) Report {
 	compareNamedViews(&out, old.Views, current.Views)
 	comparePermissions(&out, old.Permissions, current.Permissions)
 	compareReadModels(&out, old.ReadModel.Declarations, current.ReadModel.Declarations)
+	compareMigrations(&out, old.Migrations, current.Migrations)
 	sortChanges(out.Changes)
 	return out
 }
@@ -109,10 +112,32 @@ func compareTables(out *Report, oldTables, currentTables []schema.TableExport) {
 			continue
 		}
 		compareColumns(out, old.Name, old.Columns, current.Columns)
+		compareIndexes(out, old.Name, old.Indexes, current.Indexes)
 	}
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {
 			out.add(ChangeKindBreaking, SurfaceTable, name, "table removed")
+		}
+	}
+}
+
+func compareIndexes(out *Report, tableName string, oldIndexes, currentIndexes []schema.IndexExport) {
+	oldByName := indexMap(oldIndexes)
+	currentByName := indexMap(currentIndexes)
+	for name, current := range currentByName {
+		old, ok := oldByName[name]
+		indexName := tableName + "." + name
+		if !ok {
+			out.add(ChangeKindAdditive, SurfaceIndex, indexName, "index added")
+			continue
+		}
+		if indexSignature(old) != indexSignature(current) {
+			out.add(ChangeKindBreaking, SurfaceIndex, indexName, fmt.Sprintf("index changed from %s to %s", indexSignature(old), indexSignature(current)))
+		}
+	}
+	for name := range oldByName {
+		if _, ok := currentByName[name]; !ok {
+			out.add(ChangeKindBreaking, SurfaceIndex, tableName+"."+name, "index removed")
 		}
 	}
 }
@@ -235,6 +260,31 @@ func compareReadModels(out *Report, oldDeclarations, currentDeclarations []shunt
 	}
 }
 
+func compareMigrations(out *Report, oldMigrations, currentMigrations shunter.MigrationContract) {
+	if migrationMetadataSignature(oldMigrations.Module) != migrationMetadataSignature(currentMigrations.Module) {
+		out.add(ChangeKindMetadata, SurfaceMigrationMetadata, "module", "module migration metadata changed")
+	}
+
+	oldByName := migrationDeclarationMap(oldMigrations.Declarations)
+	currentByName := migrationDeclarationMap(currentMigrations.Declarations)
+	for key, current := range currentByName {
+		old, ok := oldByName[key]
+		name := migrationDeclarationDisplayName(key)
+		if !ok {
+			out.add(ChangeKindMetadata, SurfaceMigrationMetadata, name, "migration metadata added")
+			continue
+		}
+		if migrationMetadataSignature(old.Metadata) != migrationMetadataSignature(current.Metadata) {
+			out.add(ChangeKindMetadata, SurfaceMigrationMetadata, name, "migration metadata changed")
+		}
+	}
+	for key := range oldByName {
+		if _, ok := currentByName[key]; !ok {
+			out.add(ChangeKindMetadata, SurfaceMigrationMetadata, migrationDeclarationDisplayName(key), "migration metadata removed")
+		}
+	}
+}
+
 func (r *Report) add(kind ChangeKind, surface Surface, name, detail string) {
 	r.Changes = append(r.Changes, Change{Kind: kind, Surface: surface, Name: name, Detail: detail})
 }
@@ -279,6 +329,14 @@ func reducerMap(reducers []schema.ReducerExport) map[string]schema.ReducerExport
 	return out
 }
 
+func indexMap(indexes []schema.IndexExport) map[string]schema.IndexExport {
+	out := make(map[string]schema.IndexExport, len(indexes))
+	for _, index := range indexes {
+		out[index.Name] = index
+	}
+	return out
+}
+
 func querySet(queries []shunter.QueryDescription) map[string]struct{} {
 	out := make(map[string]struct{}, len(queries))
 	for _, query := range queries {
@@ -313,6 +371,46 @@ func readModelMap(declarations []shunter.ReadModelContractDeclaration) map[strin
 
 func stringSliceSignature(values []string) string {
 	return strings.Join(values, "\x00")
+}
+
+func indexSignature(index schema.IndexExport) string {
+	return fmt.Sprintf("columns=%s unique=%t primary=%t", strings.Join(index.Columns, ","), index.Unique, index.Primary)
+}
+
+func migrationDeclarationMap(declarations []shunter.MigrationContractDeclaration) map[string]shunter.MigrationContractDeclaration {
+	out := make(map[string]shunter.MigrationContractDeclaration, len(declarations))
+	for _, declaration := range declarations {
+		out[migrationDeclarationKey(declaration.Surface, declaration.Name)] = declaration
+	}
+	return out
+}
+
+func migrationDeclarationKey(surface, name string) string {
+	return surface + "\x00" + name
+}
+
+func migrationDeclarationDisplayName(key string) string {
+	surface, name, ok := strings.Cut(key, "\x00")
+	if !ok {
+		return key
+	}
+	return surface + "." + name
+}
+
+func migrationMetadataSignature(metadata shunter.MigrationMetadata) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "module=%s\nschema=%d\ncontract=%d\nprevious=%s\ncompatibility=%s\nnotes=%s\n",
+		metadata.ModuleVersion,
+		metadata.SchemaVersion,
+		metadata.ContractVersion,
+		metadata.PreviousVersion,
+		metadata.Compatibility,
+		metadata.Notes,
+	)
+	for _, classification := range metadata.Classifications {
+		fmt.Fprintf(&b, "classification=%s\n", classification)
+	}
+	return b.String()
 }
 
 func nonEmptyName(first, fallback string) string {

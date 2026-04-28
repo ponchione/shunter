@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -105,6 +106,52 @@ func TestSchedulerScanEnqueuesDueRow(t *testing.T) {
 		}
 	default:
 		t.Fatal("scan should have enqueued exactly one command")
+	}
+}
+
+func TestSchedulerMarksInFlightBeforeDueCommandCanComplete(t *testing.T) {
+	oldProcs := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(oldProcs) })
+
+	_, cs, tid, _ := schedulerWorkerFixture(t)
+	inbox := make(chan ExecutorCommand)
+	s := NewScheduler(inbox, cs, tid)
+	s.now = func() time.Time { return time.Unix(100, 0) }
+	fireAt := time.Unix(50, 0).UnixNano()
+	seedSchedule(t, cs, tid, 101, "fast-complete", nil, fireAt, 0)
+
+	done := make(chan struct{})
+	go func() {
+		s.scan()
+		close(done)
+	}()
+
+	select {
+	case cmd := <-inbox:
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("enqueued cmd type=%T, want CallReducerCmd", cmd)
+		}
+		wasInFlight, _ := s.completeInFlight(call.Request.ScheduleID, call.Request.IntendedFireAt)
+		if !wasInFlight {
+			t.Fatal("scheduled attempt completed before scheduler marked it in-flight")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("scan did not enqueue due schedule")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("scan did not return after due command was received")
+	}
+
+	rows := s.snapshotScheduleRows()
+	if len(rows) != 1 {
+		t.Fatalf("schedule rows=%d, want 1", len(rows))
+	}
+	if s.isInFlight(rows[0]) {
+		t.Fatal("completed scheduled attempt left a stale in-flight marker")
 	}
 }
 

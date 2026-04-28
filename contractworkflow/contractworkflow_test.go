@@ -92,6 +92,44 @@ func TestCheckPolicyFilesReturnsDeterministicWarningsAndStrictFailure(t *testing
 	assertContains(t, string(jsonOut), `"code": "missing-migration-metadata"`)
 }
 
+func TestPlanFilesReturnsDeterministicMigrationPlan(t *testing.T) {
+	dir := t.TempDir()
+	previousPath := writeContractFixture(t, dir, "previous.json", workflowContractFixture())
+	current := workflowContractFixture()
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	currentPath := writeContractFixture(t, dir, "current.json", current)
+
+	plan, err := PlanFiles(previousPath, currentPath, contractdiff.PlanOptions{
+		Policy: contractdiff.PolicyOptions{RequirePreviousVersion: true},
+	})
+	if err != nil {
+		t.Fatalf("PlanFiles returned error: %v", err)
+	}
+
+	got, err := FormatPlan(plan, FormatText)
+	if err != nil {
+		t.Fatalf("FormatPlan returned error: %v", err)
+	}
+	want := strings.Join([]string{
+		"review review-required additive column messages.sent_at: column added with type timestamp",
+		"warning missing-migration-metadata column messages.sent_at: additive change has no migration metadata",
+		"warning missing-previous-version module chat: module migration metadata is missing previous_version",
+		"",
+	}, "\n")
+	if string(got) != want {
+		t.Fatalf("plan text =\n%s\nwant:\n%s", got, want)
+	}
+
+	jsonOut, err := FormatPlan(plan, FormatJSON)
+	if err != nil {
+		t.Fatalf("FormatPlan JSON returned error: %v", err)
+	}
+	assertContains(t, string(jsonOut), `"summary": {`)
+	assertContains(t, string(jsonOut), `"entries": [`)
+	assertContains(t, string(jsonOut), `"warnings": [`)
+	assertContains(t, string(jsonOut), `"action": "review-required"`)
+}
+
 func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
@@ -130,6 +168,14 @@ func TestWorkflowErrorsRemainClear(t *testing.T) {
 	}
 	if !errors.Is(err, contractdiff.ErrInvalidContractJSON) {
 		t.Fatalf("CompareFiles error = %v, want ErrInvalidContractJSON", err)
+	}
+
+	_, err = PlanFiles(malformedPath, contractPath, contractdiff.PlanOptions{})
+	if err == nil {
+		t.Fatal("PlanFiles returned nil error for malformed input")
+	}
+	if !errors.Is(err, contractdiff.ErrInvalidContractJSON) {
+		t.Fatalf("PlanFiles error = %v, want ErrInvalidContractJSON", err)
 	}
 
 	_, err = GenerateFromFile(contractPath, codegen.Options{Language: "go"})

@@ -859,6 +859,174 @@ func TestStartup_PanickingReplayedScheduleRetriesUnderSchedulerRun(t *testing.T)
 	}
 }
 
+func TestStartup_FailedRepeatingReplayedScheduleRetryAdvancesFromSameIntendedTime(t *testing.T) {
+	firstAt := time.Unix(95, 0).UnixNano()
+	repeatNs := int64(10 * time.Second)
+	finalAt := firstAt + repeatNs
+
+	observedNextRuns := make(chan int64, 2)
+	var attempts atomic.Int32
+	var schedTable schema.TableID
+
+	seed := startupSeed{
+		inboxCapacity: 1,
+		schedules: []sysScheduledSeed{
+			{id: 96, reducerName: "repeat-fail-then-ok", nextRunAtNs: firstAt, repeatNs: repeatNs},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: "repeat-fail-then-ok",
+				Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+					attempt := attempts.Add(1)
+					observedNextRuns <- scheduledNextRunFromReducer(ctx, schedTable, 96)
+					if attempt == 1 {
+						return nil, errFireFailed
+					}
+					return nil, nil
+				}),
+			},
+		},
+	}
+	h := newStartupHarness(t, seed)
+	schedTable = h.schedTable
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx, execCancel := context.WithCancel(context.Background())
+	defer execCancel()
+	go h.exec.Run(execCtx)
+
+	gotFirst := readScheduledAttemptNextRun(t, observedNextRuns, "failed repeating replay attempt")
+	if gotFirst != firstAt {
+		t.Fatalf("failed repeating replay attempt saw next_run_at_ns=%d, want %d", gotFirst, firstAt)
+	}
+	rows := h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("failed repeating schedule rows=%d, want 1", len(rows))
+	}
+	if got := rows[0][SysScheduledColNextRunAtNs].AsInt64(); got != firstAt {
+		t.Fatalf("failed repeating attempt advanced next_run_at_ns=%d, want unchanged %d", got, firstAt)
+	}
+
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	defer schedulerCancel()
+	go h.scheduler.Run(schedulerCtx)
+
+	gotSecond := readScheduledAttemptNextRun(t, observedNextRuns, "retry repeating replay attempt")
+	if gotSecond != firstAt {
+		t.Fatalf("retry repeating replay attempt saw next_run_at_ns=%d, want original intended %d", gotSecond, firstAt)
+	}
+
+	barrier := make(chan ReducerResponse, 1)
+	if err := h.exec.Submit(CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "not-registered"},
+		ResponseCh: barrier,
+	}); err != nil {
+		t.Fatalf("Submit barrier: %v", err)
+	}
+	select {
+	case <-barrier:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("executor barrier timed out after failed repeating retry")
+	}
+
+	rows = h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("repeating schedule rows after retry=%d, want 1", len(rows))
+	}
+	if got := rows[0][SysScheduledColNextRunAtNs].AsInt64(); got != finalAt {
+		t.Fatalf("final repeating next_run_at_ns=%d, want %d (original intended+repeat)", got, finalAt)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("failed repeating schedule attempts=%d, want 2", got)
+	}
+}
+
+func TestStartup_PanickingRepeatingReplayedScheduleRetryAdvancesFromSameIntendedTime(t *testing.T) {
+	firstAt := time.Unix(95, 0).UnixNano()
+	repeatNs := int64(10 * time.Second)
+	finalAt := firstAt + repeatNs
+
+	observedNextRuns := make(chan int64, 2)
+	var attempts atomic.Int32
+	var schedTable schema.TableID
+
+	seed := startupSeed{
+		inboxCapacity: 1,
+		schedules: []sysScheduledSeed{
+			{id: 97, reducerName: "repeat-panic-then-ok", nextRunAtNs: firstAt, repeatNs: repeatNs},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: "repeat-panic-then-ok",
+				Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+					attempt := attempts.Add(1)
+					observedNextRuns <- scheduledNextRunFromReducer(ctx, schedTable, 97)
+					if attempt == 1 {
+						panic("recovered repeating schedule panic")
+					}
+					return nil, nil
+				}),
+			},
+		},
+	}
+	h := newStartupHarness(t, seed)
+	schedTable = h.schedTable
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+
+	execCtx, execCancel := context.WithCancel(context.Background())
+	defer execCancel()
+	go h.exec.Run(execCtx)
+
+	gotFirst := readScheduledAttemptNextRun(t, observedNextRuns, "panicking repeating replay attempt")
+	if gotFirst != firstAt {
+		t.Fatalf("panicking repeating replay attempt saw next_run_at_ns=%d, want %d", gotFirst, firstAt)
+	}
+	rows := h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("panicking repeating schedule rows=%d, want 1", len(rows))
+	}
+	if got := rows[0][SysScheduledColNextRunAtNs].AsInt64(); got != firstAt {
+		t.Fatalf("panicking repeating attempt advanced next_run_at_ns=%d, want unchanged %d", got, firstAt)
+	}
+
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	defer schedulerCancel()
+	go h.scheduler.Run(schedulerCtx)
+
+	gotSecond := readScheduledAttemptNextRun(t, observedNextRuns, "retry panicking repeating replay attempt")
+	if gotSecond != firstAt {
+		t.Fatalf("retry panicking repeating replay attempt saw next_run_at_ns=%d, want original intended %d", gotSecond, firstAt)
+	}
+
+	barrier := make(chan ReducerResponse, 1)
+	if err := h.exec.Submit(CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "not-registered"},
+		ResponseCh: barrier,
+	}); err != nil {
+		t.Fatalf("Submit barrier: %v", err)
+	}
+	select {
+	case <-barrier:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("executor barrier timed out after panicking repeating retry")
+	}
+
+	rows = h.sysScheduledRows()
+	if len(rows) != 1 {
+		t.Fatalf("repeating schedule rows after panic retry=%d, want 1", len(rows))
+	}
+	if got := rows[0][SysScheduledColNextRunAtNs].AsInt64(); got != finalAt {
+		t.Fatalf("final panicking repeating next_run_at_ns=%d, want %d (original intended+repeat)", got, finalAt)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("panicking repeating schedule attempts=%d, want 2", got)
+	}
+}
+
 func TestStartup_RepeatingRecoveredScheduleCatchupStaysFixedRate(t *testing.T) {
 	firstAt := time.Unix(95, 0).UnixNano()
 	repeatNs := int64(3 * time.Second)
@@ -1179,6 +1347,15 @@ func readReducerOrder(t *testing.T, ch <-chan string, label string) string {
 		t.Fatalf("timeout waiting for %s", label)
 		return ""
 	}
+}
+
+func scheduledNextRunFromReducer(ctx *types.ReducerContext, schedTable schema.TableID, scheduleID ScheduleID) int64 {
+	for _, row := range ctx.DB.ScanTable(uint32(schedTable)) {
+		if ScheduleID(row[SysScheduledColScheduleID].AsUint64()) == scheduleID {
+			return row[SysScheduledColNextRunAtNs].AsInt64()
+		}
+	}
+	return 0
 }
 
 // countChangesetDeletes returns the number of sys_clients deletes in cs.

@@ -56,6 +56,19 @@ func CheckPolicyFiles(previousPath, currentPath string, opts contractdiff.Policy
 	return contractdiff.CheckPolicy(report, current, opts), nil
 }
 
+// PlanFiles builds a deterministic migration plan from two contract JSON files.
+func PlanFiles(previousPath, currentPath string, opts contractdiff.PlanOptions) (contractdiff.MigrationPlan, error) {
+	previousData, err := readRequiredFile("previous contract", previousPath)
+	if err != nil {
+		return contractdiff.MigrationPlan{}, err
+	}
+	currentData, err := readRequiredFile("current contract", currentPath)
+	if err != nil {
+		return contractdiff.MigrationPlan{}, err
+	}
+	return contractdiff.PlanJSON(previousData, currentData, opts)
+}
+
 // GenerateFromFile generates client bindings from a canonical ModuleContract JSON file.
 func GenerateFromFile(contractPath string, opts codegen.Options) ([]byte, error) {
 	data, err := readRequiredFile("contract input", contractPath)
@@ -131,6 +144,18 @@ func FormatPolicy(result contractdiff.PolicyResult, format string) ([]byte, erro
 			})
 		}
 		return marshalWorkflowJSON(out)
+	default:
+		return nil, fmt.Errorf("%w %q", ErrUnsupportedFormat, format)
+	}
+}
+
+// FormatPlan renders a migration plan in text or JSON form.
+func FormatPlan(plan contractdiff.MigrationPlan, format string) ([]byte, error) {
+	switch normalizedFormat(format) {
+	case FormatText:
+		return []byte(plan.Text()), nil
+	case FormatJSON:
+		return plan.MarshalCanonicalJSON()
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupportedFormat, format)
 	}
