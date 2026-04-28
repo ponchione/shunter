@@ -7,29 +7,13 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-The active hosted-runtime slice is V1.5-E migration metadata, contract diffs,
-and warning policy checks.
+There is no active hosted-runtime implementation slice pending. V1.5-E
+migration metadata, contract diffs, and warning policy checks are complete,
+which completes the initial V1.5 hosted-runtime follow-on plan.
 
-Next agent run: complete V1.5-E end to end, from prerequisites through tests,
-implementation, contract-diff tooling, warning policy checks, validation, and
-handoff upkeep.
-
-Start from:
-- `docs/hosted-runtime-planning/V1.5/README.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-E/01-stack-prerequisites.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-E/02-migration-metadata-tests.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-E/03-metadata-implementation.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-E/04-contract-diff-tooling.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-E/05-warning-policy-checks.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-E/06-format-and-validate.md`
-- `module.go`
-- `module_declarations.go`
-- `runtime_contract.go`
-- `runtime_contract_test.go`
-- `codegen/codegen.go`
-- `codegen/typescript.go`
-- `codegen/codegen_test.go`
+Next hosted-runtime work should start from a new explicit user target or a new
+planning handoff. Do not reopen V1-H or V1.5-A through V1.5-E unless a new
+failing regression proves drift.
 
 ## Execution Granularity
 
@@ -74,8 +58,8 @@ V1.5-B is complete. Its live proof is:
 - `DefaultContractSnapshotFilename` is `shunter.contract.json`.
 - contract export returns detached values and works before `Runtime.Start` and
   after `Runtime.Close`.
-- permission, read-model, and migration sections are reserved metadata only;
-  no executable behavior was added.
+- permission and read-model sections were reserved metadata only; migration
+  metadata was later populated in V1.5-E.
 
 V1.5-B validation passed:
 - `rtk go fmt .`
@@ -126,25 +110,40 @@ V1.5-D validation passed:
 - `rtk go test ./codegen -count=1`
 - `rtk go vet ./codegen`
 
-Known non-slice validation blocker:
-- `rtk go test ./... -count=1` currently fails in
-  `store.TestRapidStoreCommitMatchesModel`.
-- The same failure reproduces with
-  `rtk go test ./store -run TestRapidStoreCommitMatchesModel -count=1`.
-- V1.5-D did not touch `store/`, and the V1.5-D handoff explicitly avoided
-  rapid/fuzz-style store work.
+V1.5-E is complete. Its live proof is:
+- `MigrationMetadata`, compatibility constants, and classification constants
+  exist in the root package.
+- `Module.Migration(...)` exports descriptive module-level migration metadata.
+- `Module.TableMigration(...)` plus `QueryDeclaration.Migration` and
+  `ViewDeclaration.Migration` export declaration-level migration metadata.
+- `Runtime.ExportContract()` and `Runtime.ExportContractJSON()` include
+  deterministic migration metadata without changing runtime startup behavior.
+- `contractdiff.Compare(...)` and `contractdiff.CompareJSON(...)` report
+  deterministic additive, breaking, and metadata-only contract changes.
+- `contractdiff.CheckPolicy(...)` reports warning/CI-oriented migration
+  metadata findings, with warnings non-fatal by default and strict mode
+  explicitly opt-in.
+- no executable migration runner, state rewrite, or startup-blocking migration
+  enforcement was added.
 
-V1.5-E goal:
-- make schema/module evolution visible and reviewable without executing
-  migrations
-- export descriptive module-level and declaration-level migration metadata
-- add deterministic contract-diff tooling against `shunter.contract.json`
-- add warning/CI-oriented policy checks
-- keep runtime startup non-blocking for missing or risky migration metadata
+V1.5-E validation passed:
+- `rtk go fmt . ./store ./contractdiff`
+- `rtk go test ./... -run 'Test.*Migration|Test.*ContractDiff|Test.*Policy' -count=1`
+- `rtk go test . -count=1`
+- `rtk go test ./contractdiff -count=1`
+- `rtk go test ./codegen -count=1`
+- `rtk go test ./store -run TestRapidStoreCommitMatchesModel -count=50`
+- `rtk go test ./... -count=1`
+- `rtk go vet . ./store ./contractdiff ./codegen`
+
+Former non-slice validation blocker resolved:
+- `store.TestRapidStoreCommitMatchesModel` exposed a transaction undelete
+  constraint bug. A failed undelete now checks transaction-local unique/set
+  conflicts before canceling the pending delete.
 
 ## Current Hosted-Runtime State
 
-V1-H, V1.5-A, V1.5-B, V1.5-C, and V1.5-D are audited as landed.
+V1-H and V1.5-A through V1.5-E are audited as landed.
 
 Live proof points:
 - root package imports as `github.com/ponchione/shunter`
@@ -159,49 +158,44 @@ Live proof points:
 - `Runtime.ExportSchema` currently exposes lower-level schema/reducer metadata:
   `Version`, `Tables`, and `Reducers`
 - `Runtime.ExportContract` exposes the full canonical module contract for
-  codegen and reviewable JSON snapshots
+  codegen, reviewable JSON snapshots, migration metadata, and diff tooling
 - `Runtime.ExportContractJSON` exposes deterministic canonical contract JSON
 - `codegen.Generate` and `codegen.GenerateFromJSON` generate deterministic
   TypeScript client bindings from the canonical contract without starting a
   runtime
 - permission/read-model metadata is passive, exported in the canonical
   contract, and visible to generated TypeScript clients
+- migration metadata is passive, exported in the canonical contract, and
+  consumed by contract-diff/policy tooling only
 - root/runtime package tests are the live proof for hosted-runtime ownership,
   serving, local calls, describe, export, and lifecycle behavior
 - the prior bundled hello-world command was removed because it no longer served
   a maintained product or integration purpose
 
-Do not reopen V1-A through V1-H, V1.5-A, V1.5-B, V1.5-C, or V1.5-D unless a
-new failing regression proves drift.
+Do not reopen V1-A through V1-H or V1.5-A through V1.5-E unless a new failing
+regression proves drift.
 
 ## Startup Reading
 
 Required:
 1. `RTK.md`
 2. this file
-3. `docs/hosted-runtime-planning/V1.5/README.md`
-4. `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
-5. `docs/hosted-runtime-planning/V1.5/V1.5-E/01-stack-prerequisites.md`
-6. `docs/hosted-runtime-planning/V1.5/V1.5-E/02-migration-metadata-tests.md`
-7. `docs/hosted-runtime-planning/V1.5/V1.5-E/03-metadata-implementation.md`
-8. `docs/hosted-runtime-planning/V1.5/V1.5-E/04-contract-diff-tooling.md`
-9. `docs/hosted-runtime-planning/V1.5/V1.5-E/05-warning-policy-checks.md`
-10. `docs/hosted-runtime-planning/V1.5/V1.5-E/06-format-and-validate.md`
-11. `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
-    only if V1.5-D proof is needed
+3. the narrow handoff or issue for the next explicit hosted-runtime target
 
-V1.5-E Task 01 should run and record these checks:
-- `rtk go doc . Runtime.ExportContract`
-- inspect the V1.5-B contract JSON tests
-- inspect the V1.5-D metadata attachment patterns
+For V1.5-E audit only, start from:
+- `docs/hosted-runtime-planning/V1.5/README.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+- `runtime_migration_test.go`
+- `runtime_contract.go`
+- `contractdiff/`
 
-Open these only when the active V1.5-E docs or live code leave a contract,
-metadata, or diff-tooling question unresolved:
+Open this only when V1.5-E audit docs or live code leave a contract, metadata,
+or diff-tooling question unresolved:
 - `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
 
 Do not read broad roadmap, ledger, or decomposition docs by default.
 
-## V1.5-E Scope
+## Completed V1.5-E Scope
 
 In scope:
 - descriptive migration metadata types
@@ -226,27 +220,13 @@ Preserve WebSocket-first v1 runtime behavior.
 
 ## Next Slice Notes
 
-Complete V1.5-E in one run. Work through its numbered tasks in order:
-- reconfirm contract, metadata, and snapshot surfaces
-- add failing tests for descriptive migration metadata
-- implement module-level and declaration-level migration metadata
-- add deterministic contract-diff tooling
-- add warning/CI-oriented policy checks
-- format, test, vet, and update handoffs
-
-Prerequisite proof should verify V1.5-E builds on the canonical contract
-without changing runtime startup semantics:
-- canonical contract JSON is the source of truth for diffs
-- `shunter.contract.json` remains the recommended snapshot path
-- migration metadata is descriptive and exported
-- runtime startup must not fail solely because migration metadata is missing or
-  risky
-- tooling/CI may warn or fail based on project policy
+No next V1.5 slice is queued. Future hosted-runtime work should name its own
+target, scope, startup reading, and validation gates.
 
 ## Coordination Notes
 
 There may be concurrent gauntlet/dependency test work in the same worktree.
-For V1.5-E, avoid touching these unless the user explicitly redirects the work:
+Avoid touching these unless the user explicitly redirects the work:
 - `docs/RUNTIME-HARDENING-GAUNTLET.md`
 - `go.mod`
 - `go.sum`
@@ -258,19 +238,11 @@ Do not push unless explicitly asked.
 
 ## Validation
 
-Expected V1.5-E validation:
+Completed V1.5-E validation:
 - `rtk go fmt <touched packages>`
 - `rtk go test ./... -run 'Test.*Migration|Test.*ContractDiff|Test.*Policy' -count=1`
 - `rtk go test ./... -count=1`
 - `rtk go vet <touched packages>`
-
-If V1.5-E creates a command package, include that package explicitly in format
-and vet commands.
-
-Current broad-suite caveat:
-- `rtk go test ./... -count=1` is blocked by
-  `store.TestRapidStoreCommitMatchesModel` until that non-slice rapid test is
-  fixed or quarantined.
 
 Pinned Staticcheck is available as `rtk go tool staticcheck ./...`. Use it for
 static-analysis visibility when relevant, but do not treat a broad green run as
@@ -282,8 +254,7 @@ commands pass.
 
 ## Handoff Upkeep
 
-When V1.5-E completes:
-- update task progress in `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
-- update this file to make the next hosted-runtime target explicit
+For future hosted-runtime handoff updates:
+- make the active target explicit
 - keep startup reading minimal
 - record only future-relevant state, not closure archaeology

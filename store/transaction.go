@@ -345,22 +345,22 @@ func (t *Transaction) untrackTxInsert(tableID schema.TableID, rowID types.RowID,
 func (t *Transaction) tryUndelete(tableID schema.TableID, table *Table, row types.ProductValue) (types.RowID, bool, error) {
 	if pk := table.PrimaryIndex(); pk != nil {
 		key := pk.ExtractKey(row)
-		if rid, ok := t.tryUndeleteRowIDs(tableID, table, row, pk.btree.Seek(key)); ok {
-			return rid, true, nil
+		if rid, ok, err := t.tryUndeleteRowIDs(tableID, table, row, pk.btree.Seek(key)); err != nil || ok {
+			return rid, ok, err
 		}
 	}
 
 	if table.rowHashIndex != nil {
 		h := row.Hash64()
-		if rid, ok := t.tryUndeleteRowIDs(tableID, table, row, table.rowHashIndex[h]); ok {
-			return rid, true, nil
+		if rid, ok, err := t.tryUndeleteRowIDs(tableID, table, row, table.rowHashIndex[h]); err != nil || ok {
+			return rid, ok, err
 		}
 	}
 
 	return 0, false, nil
 }
 
-func (t *Transaction) tryUndeleteRowIDs(tableID schema.TableID, table *Table, row types.ProductValue, rowIDs []types.RowID) (types.RowID, bool) {
+func (t *Transaction) tryUndeleteRowIDs(tableID schema.TableID, table *Table, row types.ProductValue, rowIDs []types.RowID) (types.RowID, bool, error) {
 	for _, rid := range rowIDs {
 		if !t.tx.IsDeleted(tableID, rid) {
 			continue
@@ -370,11 +370,30 @@ func (t *Transaction) tryUndeleteRowIDs(tableID schema.TableID, table *Table, ro
 			continue
 		}
 		if committedRow.Equal(row) {
+			if err := t.checkTxInsertConflicts(tableID, table, row); err != nil {
+				return 0, false, err
+			}
 			t.tx.CancelDelete(tableID, rid)
-			return rid, true
+			return rid, true, nil
 		}
 	}
-	return 0, false
+	return 0, false, nil
+}
+
+func (t *Transaction) checkTxInsertConflicts(tableID schema.TableID, table *Table, row types.ProductValue) error {
+	for idxOrdinal, idx := range table.indexes {
+		if !idx.schema.Unique {
+			continue
+		}
+		key := idx.ExtractKey(row)
+		if err := t.checkTxUnique(tableID, table, idxOrdinal, idx, key); err != nil {
+			return err
+		}
+	}
+	if table.rowHashIndex != nil && t.hasTxDuplicateRow(tableID, row) {
+		return ErrDuplicateRow
+	}
+	return nil
 }
 
 // Delete removes a row by RowID.

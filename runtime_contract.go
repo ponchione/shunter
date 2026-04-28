@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"encoding/json"
+	"sort"
 
 	"github.com/ponchione/shunter/schema"
 )
@@ -65,14 +66,18 @@ type ReadModelContractDeclaration struct {
 	Tags    []string `json:"tags"`
 }
 
-// MigrationContract reserves migration declarations for later V1.5 slices.
+// MigrationContract records descriptive migration metadata for review tooling.
 type MigrationContract struct {
+	Module       MigrationMetadata              `json:"module"`
 	Declarations []MigrationContractDeclaration `json:"declarations"`
 }
 
-// MigrationContractDeclaration is a reserved migration declaration slot.
+// MigrationContractDeclaration records descriptive migration metadata for one
+// exported declaration.
 type MigrationContractDeclaration struct {
-	Name string `json:"name"`
+	Surface  string            `json:"surface"`
+	Name     string            `json:"name"`
+	Metadata MigrationMetadata `json:"metadata"`
 }
 
 // CodegenContractMetadata records stable export metadata for later codegen.
@@ -91,6 +96,7 @@ func (r *Runtime) ExportContract() ModuleContract {
 	desc := r.Describe()
 	queries := copyQueryDescriptions(desc.Module.Queries)
 	views := copyViewDescriptions(desc.Module.Views)
+	schemaExport := copySchemaExport(r.ExportSchema())
 	return ModuleContract{
 		ContractVersion: ModuleContractVersion,
 		Module: ModuleContractIdentity{
@@ -98,12 +104,12 @@ func (r *Runtime) ExportContract() ModuleContract {
 			Version:  desc.Module.Version,
 			Metadata: copyStringMap(desc.Module.Metadata),
 		},
-		Schema:      copySchemaExport(r.ExportSchema()),
+		Schema:      schemaExport,
 		Queries:     queries,
 		Views:       views,
 		Permissions: buildPermissionContract(r.moduleReducers, queries, views),
 		ReadModel:   buildReadModelContract(queries, views),
-		Migrations:  emptyMigrationContract(),
+		Migrations:  buildMigrationContract(schemaExport, desc.Module.Migration, desc.Module.TableMigrations, queries, views),
 		Codegen:     defaultCodegenContractMetadata(),
 	}
 }
@@ -162,6 +168,10 @@ func normalizeModuleContract(c ModuleContract) ModuleContract {
 	}
 	if c.Migrations.Declarations == nil {
 		c.Migrations.Declarations = []MigrationContractDeclaration{}
+	}
+	c.Migrations.Module = normalizeMigrationMetadata(c.Migrations.Module)
+	for i := range c.Migrations.Declarations {
+		c.Migrations.Declarations[i].Metadata = normalizeMigrationMetadata(c.Migrations.Declarations[i].Metadata)
 	}
 	return c
 }
@@ -260,8 +270,63 @@ func buildReadModelContract(queries []QueryDescription, views []ViewDescription)
 
 func emptyMigrationContract() MigrationContract {
 	return MigrationContract{
+		Module:       normalizeMigrationMetadata(MigrationMetadata{}),
 		Declarations: []MigrationContractDeclaration{},
 	}
+}
+
+func buildMigrationContract(schemaExport schema.SchemaExport, module MigrationMetadata, tableMigrations map[string]MigrationMetadata, queries []QueryDescription, views []ViewDescription) MigrationContract {
+	out := emptyMigrationContract()
+	out.Module = normalizeMigrationMetadata(module)
+
+	seenTables := make(map[string]struct{}, len(schemaExport.Tables))
+	for _, table := range schemaExport.Tables {
+		seenTables[table.Name] = struct{}{}
+		if metadata, ok := tableMigrations[table.Name]; ok && hasMigrationMetadata(metadata) {
+			out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceTable, table.Name, metadata))
+		}
+	}
+
+	var extraTables []string
+	for name, metadata := range tableMigrations {
+		if _, ok := seenTables[name]; ok || !hasMigrationMetadata(metadata) {
+			continue
+		}
+		extraTables = append(extraTables, name)
+	}
+	sort.Strings(extraTables)
+	for _, name := range extraTables {
+		out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceTable, name, tableMigrations[name]))
+	}
+
+	for _, query := range queries {
+		if hasMigrationMetadata(query.Migration) {
+			out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceQuery, query.Name, query.Migration))
+		}
+	}
+	for _, view := range views {
+		if hasMigrationMetadata(view.Migration) {
+			out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceView, view.Name, view.Migration))
+		}
+	}
+
+	return out
+}
+
+func migrationContractDeclaration(surface, name string, metadata MigrationMetadata) MigrationContractDeclaration {
+	return MigrationContractDeclaration{
+		Surface:  surface,
+		Name:     name,
+		Metadata: normalizeMigrationMetadata(metadata),
+	}
+}
+
+func normalizeMigrationMetadata(in MigrationMetadata) MigrationMetadata {
+	out := copyMigrationMetadata(in)
+	if out.Classifications == nil {
+		out.Classifications = []MigrationClassification{}
+	}
+	return out
 }
 
 func defaultCodegenContractMetadata() CodegenContractMetadata {
@@ -346,6 +411,7 @@ func copyQueryDescriptions(in []QueryDescription) []QueryDescription {
 			Name:        query.Name,
 			Permissions: copyPermissionMetadata(query.Permissions),
 			ReadModel:   copyReadModelMetadata(query.ReadModel),
+			Migration:   copyMigrationMetadata(query.Migration),
 		}
 	}
 	return out
@@ -361,6 +427,7 @@ func copyViewDescriptions(in []ViewDescription) []ViewDescription {
 			Name:        view.Name,
 			Permissions: copyPermissionMetadata(view.Permissions),
 			ReadModel:   copyReadModelMetadata(view.ReadModel),
+			Migration:   copyMigrationMetadata(view.Migration),
 		}
 	}
 	return out

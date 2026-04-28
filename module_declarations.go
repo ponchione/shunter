@@ -17,7 +17,46 @@ const (
 
 	// ReadModelSurfaceView identifies read-model metadata attached to a view.
 	ReadModelSurfaceView = "view"
+
+	// MigrationSurfaceTable identifies migration metadata attached to a table.
+	MigrationSurfaceTable = "table"
+
+	// MigrationSurfaceQuery identifies migration metadata attached to a query.
+	MigrationSurfaceQuery = "query"
+
+	// MigrationSurfaceView identifies migration metadata attached to a view.
+	MigrationSurfaceView = "view"
 )
+
+// MigrationCompatibility describes author-declared migration compatibility.
+type MigrationCompatibility string
+
+const (
+	MigrationCompatibilityCompatible MigrationCompatibility = "compatible"
+	MigrationCompatibilityBreaking   MigrationCompatibility = "breaking"
+	MigrationCompatibilityUnknown    MigrationCompatibility = "unknown"
+)
+
+// MigrationClassification describes an author-declared migration change class.
+type MigrationClassification string
+
+const (
+	MigrationClassificationAdditive           MigrationClassification = "additive"
+	MigrationClassificationDeprecated         MigrationClassification = "deprecated"
+	MigrationClassificationDataRewriteNeeded  MigrationClassification = "data-rewrite-needed"
+	MigrationClassificationManualReviewNeeded MigrationClassification = "manual-review-needed"
+)
+
+// MigrationMetadata describes schema/module evolution for review tooling.
+type MigrationMetadata struct {
+	ModuleVersion   string                    `json:"module_version"`
+	SchemaVersion   uint32                    `json:"schema_version"`
+	ContractVersion uint32                    `json:"contract_version"`
+	PreviousVersion string                    `json:"previous_version"`
+	Compatibility   MigrationCompatibility    `json:"compatibility"`
+	Classifications []MigrationClassification `json:"classifications"`
+	Notes           string                    `json:"notes"`
+}
 
 // PermissionMetadata describes passive permission tags required to access an
 // exported reducer, query, or view.
@@ -58,6 +97,7 @@ type QueryDeclaration struct {
 	Name        string
 	Permissions PermissionMetadata
 	ReadModel   ReadModelMetadata
+	Migration   MigrationMetadata
 }
 
 // ViewDeclaration declares a named live view/subscription surface owned by a
@@ -66,6 +106,7 @@ type ViewDeclaration struct {
 	Name        string
 	Permissions PermissionMetadata
 	ReadModel   ReadModelMetadata
+	Migration   MigrationMetadata
 }
 
 // Query registers a named read query declaration and returns the receiver for
@@ -119,6 +160,7 @@ func copyQueryDeclarations(in []QueryDeclaration) []QueryDeclaration {
 			Name:        query.Name,
 			Permissions: copyPermissionMetadata(query.Permissions),
 			ReadModel:   copyReadModelMetadata(query.ReadModel),
+			Migration:   copyMigrationMetadata(query.Migration),
 		}
 	}
 	return out
@@ -134,6 +176,7 @@ func copyViewDeclarations(in []ViewDeclaration) []ViewDeclaration {
 			Name:        view.Name,
 			Permissions: copyPermissionMetadata(view.Permissions),
 			ReadModel:   copyReadModelMetadata(view.ReadModel),
+			Migration:   copyMigrationMetadata(view.Migration),
 		}
 	}
 	return out
@@ -149,6 +192,7 @@ func describeQueryDeclarations(in []QueryDeclaration) []QueryDescription {
 			Name:        query.Name,
 			Permissions: copyPermissionMetadata(query.Permissions),
 			ReadModel:   copyReadModelMetadata(query.ReadModel),
+			Migration:   copyMigrationMetadata(query.Migration),
 		}
 	}
 	return out
@@ -164,6 +208,7 @@ func describeViewDeclarations(in []ViewDeclaration) []ViewDescription {
 			Name:        view.Name,
 			Permissions: copyPermissionMetadata(view.Permissions),
 			ReadModel:   copyReadModelMetadata(view.ReadModel),
+			Migration:   copyMigrationMetadata(view.Migration),
 		}
 	}
 	return out
@@ -194,12 +239,54 @@ func copyReadModelMetadata(in ReadModelMetadata) ReadModelMetadata {
 	}
 }
 
+func copyMigrationMetadata(in MigrationMetadata) MigrationMetadata {
+	return MigrationMetadata{
+		ModuleVersion:   in.ModuleVersion,
+		SchemaVersion:   in.SchemaVersion,
+		ContractVersion: in.ContractVersion,
+		PreviousVersion: in.PreviousVersion,
+		Compatibility:   in.Compatibility,
+		Classifications: copyMigrationClassifications(in.Classifications),
+		Notes:           in.Notes,
+	}
+}
+
+func copyMigrationClassifications(in []MigrationClassification) []MigrationClassification {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]MigrationClassification, len(in))
+	copy(out, in)
+	return out
+}
+
+func copyMigrationMetadataMap(in map[string]MigrationMetadata) map[string]MigrationMetadata {
+	if len(in) == 0 {
+		return map[string]MigrationMetadata{}
+	}
+	out := make(map[string]MigrationMetadata, len(in))
+	for k, v := range in {
+		out[k] = copyMigrationMetadata(v)
+	}
+	return out
+}
+
 func hasPermissionMetadata(in PermissionMetadata) bool {
 	return len(in.Required) > 0
 }
 
 func hasReadModelMetadata(in ReadModelMetadata) bool {
 	return len(in.Tables) > 0 || len(in.Tags) > 0
+}
+
+func hasMigrationMetadata(in MigrationMetadata) bool {
+	return in.ModuleVersion != "" ||
+		in.SchemaVersion != 0 ||
+		in.ContractVersion != 0 ||
+		in.PreviousVersion != "" ||
+		in.Compatibility != "" ||
+		len(in.Classifications) > 0 ||
+		in.Notes != ""
 }
 
 func copyStringSlice(in []string) []string {

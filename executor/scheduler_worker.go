@@ -35,6 +35,15 @@ type Scheduler struct {
 	// scan() and consumed by Run() to arm its timer. Zero means "no
 	// future schedules currently known."
 	nextWakeup time.Time
+	// replayQueued tracks due schedule firings already queued during
+	// Startup replay so the first Scheduler.Run scan does not enqueue
+	// the same missed timer a second time before the executor drains it.
+	replayQueued map[scheduledFireKey]struct{}
+}
+
+type scheduledFireKey struct {
+	id             ScheduleID
+	intendedFireAt int64
 }
 
 // NewScheduler constructs a Scheduler that reads sys_scheduled from
@@ -122,13 +131,44 @@ func (s *Scheduler) scanWithContext(ctx context.Context) bool {
 // ReplayFromCommitted is the startup entry point for SPEC-003 §9.2
 // persistence: rebuilds the in-memory wakeup cache from sys_scheduled
 // and enqueues any rows that are already past due so they fire
-// promptly after recovery (Story 6.5).
+// promptly after recovery (Story 6.5). Startup runs before Executor.Run, so
+// replay enqueue is bounded by the current inbox capacity; any due rows that do
+// not fit remain in sys_scheduled and are picked up by Scheduler.Run's first
+// post-startup scan.
 //
 // Returned: the largest observed schedule_id. Callers reset their
 // ScheduleID sequence to maxID+1 so post-replay Schedule() calls don't
 // collide with replayed rows.
 func (s *Scheduler) ReplayFromCommitted() ScheduleID {
-	maxID, _ := s.scanAndTrackMaxWithContext(context.Background())
+	nowNs := s.now().UnixNano()
+	rows := s.snapshotScheduleRows()
+
+	var (
+		maxID          ScheduleID
+		nextWakeup     time.Time
+		inboxSaturated bool
+	)
+	for _, row := range rows {
+		if id := ScheduleID(row[SysScheduledColScheduleID].AsUint64()); id > maxID {
+			maxID = id
+		}
+		nextNs := row[SysScheduledColNextRunAtNs].AsInt64()
+		if nextNs <= nowNs {
+			if !inboxSaturated {
+				if s.tryEnqueue(row) {
+					s.markReplayQueued(row)
+				} else {
+					inboxSaturated = true
+				}
+			}
+			continue
+		}
+		t := time.Unix(0, nextNs)
+		if nextWakeup.IsZero() || t.Before(nextWakeup) {
+			nextWakeup = t
+		}
+	}
+	s.nextWakeup = nextWakeup
 	return maxID
 }
 
@@ -139,6 +179,19 @@ func (s *Scheduler) scanAndTrackMax() ScheduleID {
 
 func (s *Scheduler) scanAndTrackMaxWithContext(ctx context.Context) (ScheduleID, bool) {
 	nowNs := s.now().UnixNano()
+	rows := s.snapshotScheduleRows()
+
+	maxID, nextWakeup, ok := s.scanRows(rows, nowNs, func(row types.ProductValue) bool {
+		if s.consumeReplayQueued(row) {
+			return true
+		}
+		return s.enqueueWithContext(ctx, row)
+	})
+	s.nextWakeup = nextWakeup
+	return maxID, ok
+}
+
+func (s *Scheduler) snapshotScheduleRows() []types.ProductValue {
 	view := s.cs.Snapshot()
 	defer view.Close()
 
@@ -146,12 +199,7 @@ func (s *Scheduler) scanAndTrackMaxWithContext(ctx context.Context) (ScheduleID,
 	for _, row := range view.TableScan(s.tableID) {
 		rows = append(rows, row)
 	}
-
-	maxID, nextWakeup, ok := s.scanRows(rows, nowNs, func(row types.ProductValue) bool {
-		return s.enqueueWithContext(ctx, row)
-	})
-	s.nextWakeup = nextWakeup
-	return maxID, ok
+	return rows
 }
 
 func (s *Scheduler) scanRows(rows []types.ProductValue, nowNs int64, enqueue func(types.ProductValue) bool) (ScheduleID, time.Time, bool) {
@@ -185,23 +233,61 @@ func (s *Scheduler) enqueue(row types.ProductValue) {
 	_ = s.enqueueWithContext(context.Background(), row)
 }
 
-func (s *Scheduler) enqueueWithContext(ctx context.Context, row types.ProductValue) bool {
-	scheduleID := ScheduleID(row[SysScheduledColScheduleID].AsUint64())
-	intendedFireAt := row[SysScheduledColNextRunAtNs].AsInt64()
-	cmd := CallReducerCmd{
-		Request: ReducerRequest{
-			ReducerName:    row[SysScheduledColReducerName].AsString(),
-			Args:           append([]byte(nil), row[SysScheduledColArgs].AsBytes()...),
-			Source:         CallSourceScheduled,
-			ScheduleID:     scheduleID,
-			IntendedFireAt: intendedFireAt,
-			// Caller left zero — scheduled calls have no connection.
-		},
+func (s *Scheduler) tryEnqueue(row types.ProductValue) bool {
+	cmd := scheduledCallReducerCommand(row)
+	select {
+	case s.inbox <- cmd:
+		return true
+	default:
+		return false
 	}
+}
+
+func (s *Scheduler) enqueueWithContext(ctx context.Context, row types.ProductValue) bool {
+	cmd := scheduledCallReducerCommand(row)
 	select {
 	case s.inbox <- cmd:
 		return true
 	case <-ctx.Done():
 		return false
+	}
+}
+
+func scheduledCallReducerCommand(row types.ProductValue) CallReducerCmd {
+	return CallReducerCmd{
+		Request: ReducerRequest{
+			ReducerName:    row[SysScheduledColReducerName].AsString(),
+			Args:           append([]byte(nil), row[SysScheduledColArgs].AsBytes()...),
+			Source:         CallSourceScheduled,
+			ScheduleID:     ScheduleID(row[SysScheduledColScheduleID].AsUint64()),
+			IntendedFireAt: row[SysScheduledColNextRunAtNs].AsInt64(),
+			// Caller left zero — scheduled calls have no connection.
+		},
+	}
+}
+
+func (s *Scheduler) markReplayQueued(row types.ProductValue) {
+	if s.replayQueued == nil {
+		s.replayQueued = make(map[scheduledFireKey]struct{})
+	}
+	s.replayQueued[scheduledFireKeyForRow(row)] = struct{}{}
+}
+
+func (s *Scheduler) consumeReplayQueued(row types.ProductValue) bool {
+	if len(s.replayQueued) == 0 {
+		return false
+	}
+	key := scheduledFireKeyForRow(row)
+	if _, ok := s.replayQueued[key]; !ok {
+		return false
+	}
+	delete(s.replayQueued, key)
+	return true
+}
+
+func scheduledFireKeyForRow(row types.ProductValue) scheduledFireKey {
+	return scheduledFireKey{
+		id:             ScheduleID(row[SysScheduledColScheduleID].AsUint64()),
+		intendedFireAt: row[SysScheduledColNextRunAtNs].AsInt64(),
 	}
 }

@@ -141,6 +141,36 @@ func TestTransactionInsertUndeletesCommittedPrimaryKey(t *testing.T) {
 	}
 }
 
+func TestTransactionUndeleteRejectsTxLocalPrimaryKeyConflict(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	originalID := tbl.AllocRowID()
+	original := mkRow(1, "alice")
+	if err := tbl.InsertRow(originalID, original); err != nil {
+		t.Fatal(err)
+	}
+
+	tx := NewTransaction(cs, reg)
+	if err := tx.Delete(0, originalID); err != nil {
+		t.Fatal(err)
+	}
+	replacementID, err := tx.Insert(0, mkRow(1, "replacement"))
+	if err != nil {
+		t.Fatalf("replacement insert should be allowed after delete: %v", err)
+	}
+	_, err = tx.Insert(0, original)
+	if !errors.Is(err, ErrPrimaryKeyViolation) {
+		t.Fatalf("undelete conflict err = %v, want ErrPrimaryKeyViolation", err)
+	}
+	if !tx.tx.IsDeleted(0, originalID) {
+		t.Fatal("failed undelete must leave original row deleted")
+	}
+	row, ok := tx.GetRow(0, replacementID)
+	if !ok || row[1].AsString() != "replacement" {
+		t.Fatalf("replacement row should remain visible after failed undelete: ok=%v row=%v", ok, row)
+	}
+}
+
 func TestTransactionInsertUndeletesCommittedSetSemanticsRow(t *testing.T) {
 	cs, reg := buildNoPKState(t)
 	tbl, _ := cs.Table(0)

@@ -5,11 +5,13 @@ import "github.com/ponchione/shunter/schema"
 // ModuleDescription is a detached snapshot of authored module identity and
 // declaration metadata.
 type ModuleDescription struct {
-	Name     string
-	Version  string
-	Metadata map[string]string
-	Queries  []QueryDescription
-	Views    []ViewDescription
+	Name            string
+	Version         string
+	Metadata        map[string]string
+	Queries         []QueryDescription
+	Views           []ViewDescription
+	Migration       MigrationMetadata
+	TableMigrations map[string]MigrationMetadata
 }
 
 // QueryDescription is a detached declaration summary for a named read query.
@@ -17,6 +19,7 @@ type QueryDescription struct {
 	Name        string
 	Permissions PermissionMetadata `json:"-"`
 	ReadModel   ReadModelMetadata  `json:"-"`
+	Migration   MigrationMetadata  `json:"-"`
 }
 
 // ViewDescription is a detached declaration summary for a named live view or
@@ -25,6 +28,7 @@ type ViewDescription struct {
 	Name        string
 	Permissions PermissionMetadata `json:"-"`
 	ReadModel   ReadModelMetadata  `json:"-"`
+	Migration   MigrationMetadata  `json:"-"`
 }
 
 // RuntimeDescription is a detached snapshot of V1 runtime diagnostics.
@@ -40,11 +44,13 @@ func (m *Module) Describe() ModuleDescription {
 		return ModuleDescription{Metadata: map[string]string{}}
 	}
 	return ModuleDescription{
-		Name:     m.name,
-		Version:  m.version,
-		Metadata: m.MetadataMap(),
-		Queries:  describeQueryDeclarations(m.queries),
-		Views:    describeViewDeclarations(m.views),
+		Name:            m.name,
+		Version:         m.version,
+		Metadata:        m.MetadataMap(),
+		Queries:         describeQueryDeclarations(m.queries),
+		Views:           describeViewDeclarations(m.views),
+		Migration:       copyMigrationMetadata(m.migration),
+		TableMigrations: copyMigrationMetadataMap(m.tableMigrations),
 	}
 }
 
@@ -63,11 +69,13 @@ func (r *Runtime) Describe() RuntimeDescription {
 	}
 	return RuntimeDescription{
 		Module: ModuleDescription{
-			Name:     r.moduleName,
-			Version:  r.moduleVersion,
-			Metadata: copyStringMap(r.moduleMetadata),
-			Queries:  describeQueryDeclarations(r.moduleQueries),
-			Views:    describeViewDeclarations(r.moduleViews),
+			Name:            r.moduleName,
+			Version:         r.moduleVersion,
+			Metadata:        copyStringMap(r.moduleMetadata),
+			Queries:         describeQueryDeclarations(r.moduleQueries),
+			Views:           describeViewDeclarations(r.moduleViews),
+			Migration:       copyMigrationMetadata(r.moduleMigration),
+			TableMigrations: copyMigrationMetadataMap(r.moduleTableMigrations),
 		},
 		Health: r.Health(),
 	}

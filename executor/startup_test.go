@@ -33,8 +33,9 @@ type startupHarness struct {
 }
 
 type startupSeed struct {
-	clients   []sysClientsSeed
-	schedules []sysScheduledSeed
+	clients       []sysClientsSeed
+	schedules     []sysScheduledSeed
+	inboxCapacity int
 }
 
 type sysClientsSeed struct {
@@ -107,8 +108,12 @@ func newStartupHarness(t *testing.T, seed startupSeed) *startupHarness {
 	rec := &recorder{}
 	dur := &fakeDurability{rec: rec}
 	subs := &fakeSubs{rec: rec}
+	inboxCapacity := seed.inboxCapacity
+	if inboxCapacity == 0 {
+		inboxCapacity = 16
+	}
 	exec := NewExecutor(ExecutorConfig{
-		InboxCapacity: 16,
+		InboxCapacity: inboxCapacity,
 		Durability:    dur,
 		Subscriptions: subs,
 	}, rr, cs, reg, 0)
@@ -479,6 +484,54 @@ func TestStartup_ReplayEnqueuesPastDueBeforeAccept(t *testing.T) {
 		}
 	default:
 		t.Fatal("past-due scheduled row was not enqueued during Startup replay")
+	}
+}
+
+func TestStartup_ReplayOverflowDoesNotBlockDanglingClientSweep(t *testing.T) {
+	seed := startupSeed{
+		clients:       []sysClientsSeed{{conn: types.ConnectionID{1}}},
+		inboxCapacity: 1,
+		schedules: []sysScheduledSeed{
+			{id: 41, reducerName: "past-due-a", nextRunAtNs: time.Unix(50, 0).UnixNano()},
+			{id: 42, reducerName: "past-due-b", nextRunAtNs: time.Unix(60, 0).UnixNano()},
+		},
+	}
+	h := newStartupHarness(t, seed)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- h.exec.Startup(context.Background(), h.scheduler)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Startup: %v", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Startup blocked on scheduler replay before dangling-client sweep")
+	}
+
+	if n := len(h.sysClientsRows()); n != 0 {
+		t.Fatalf("post-startup sys_clients rows=%d, want 0", n)
+	}
+	if !h.exec.externalReady.Load() {
+		t.Fatal("externalReady should be true after replay overflow and sweep complete")
+	}
+	if got, want := len(h.dur.txIDs), 1; got != want {
+		t.Fatalf("durability calls=%d, want %d dangling-client cleanup commit", got, want)
+	}
+	select {
+	case cmd := <-h.exec.inbox:
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("enqueued cmd type=%T, want CallReducerCmd", cmd)
+		}
+		if call.Request.Source != CallSourceScheduled {
+			t.Fatalf("source=%v, want CallSourceScheduled", call.Request.Source)
+		}
+	default:
+		t.Fatal("at least one past-due scheduled row should be queued during replay")
 	}
 }
 

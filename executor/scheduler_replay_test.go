@@ -79,6 +79,28 @@ func TestSchedulerReplayReturnsMaxID(t *testing.T) {
 	}
 }
 
+func TestSchedulerReplaySuppressesDuplicateFirstPostReplayScan(t *testing.T) {
+	s, cs, tid, inbox := schedulerWorkerFixture(t)
+	fireAt := time.Unix(50, 0).UnixNano()
+	seedSchedule(t, cs, tid, 7, "past", nil, fireAt, 0)
+
+	s.ReplayFromCommitted()
+	s.scan()
+
+	var got []ScheduleID
+	for {
+		select {
+		case cmd := <-inbox:
+			got = append(got, cmd.(CallReducerCmd).Request.ScheduleID)
+		default:
+			if len(got) != 1 || got[0] != 7 {
+				t.Fatalf("queued schedule IDs after replay+first scan = %v, want [7]", got)
+			}
+			return
+		}
+	}
+}
+
 // TestParityP0Sched001ReplayPreservesScanOrderWithoutSorting pins the
 // intentional divergence from reference scheduler.rs:118-130 that the
 // scheduler does not sort past-due rows by next_run_at_ns during replay;

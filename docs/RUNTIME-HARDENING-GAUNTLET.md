@@ -55,7 +55,11 @@ Current status:
   damaged tail segment remains recoverable after recovery resumes into a fresh
   successor segment and the process restarts again, plus a snapshot/log boundary
   pin proving recovery fails loudly instead of skipping the first post-snapshot
-  transaction when the log begins too late.
+  transaction when the log begins too late. Scheduler restart work has also
+  started with a missed-timer replay overflow pin proving startup cannot block
+  the dangling-client sweep when recovered due timers exceed executor inbox
+  capacity, and a duplicate-replay pin proving the first scheduler scan after
+  startup does not enqueue a recovered missed timer a second time.
 
 ## Goals
 

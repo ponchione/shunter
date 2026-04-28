@@ -7,13 +7,15 @@ import "github.com/ponchione/shunter/schema"
 // and lifecycle registration to the underlying schema builder while owning
 // query/view declaration metadata directly.
 type Module struct {
-	name     string
-	version  string
-	metadata map[string]string
-	builder  *schema.Builder
-	reducers []ReducerDeclaration
-	queries  []QueryDeclaration
-	views    []ViewDeclaration
+	name            string
+	version         string
+	metadata        map[string]string
+	builder         *schema.Builder
+	reducers        []ReducerDeclaration
+	queries         []QueryDeclaration
+	views           []ViewDeclaration
+	migration       MigrationMetadata
+	tableMigrations map[string]MigrationMetadata
 }
 
 // NewModule creates a module definition shell with the supplied name.
@@ -103,6 +105,22 @@ func (m *Module) Metadata(values map[string]string) *Module {
 // MetadataMap returns a defensive copy of the module metadata.
 func (m *Module) MetadataMap() map[string]string {
 	return copyStringMap(m.metadata)
+}
+
+// Migration stores descriptive module-level migration metadata and returns the
+// receiver for fluent module declarations.
+func (m *Module) Migration(metadata MigrationMetadata) *Module {
+	m.migration = copyMigrationMetadata(metadata)
+	return m
+}
+
+// TableMigration stores descriptive migration metadata for a named table.
+func (m *Module) TableMigration(tableName string, metadata MigrationMetadata) *Module {
+	if m.tableMigrations == nil {
+		m.tableMigrations = make(map[string]MigrationMetadata)
+	}
+	m.tableMigrations[tableName] = copyMigrationMetadata(metadata)
+	return m
 }
 
 func copyStringMap(values map[string]string) map[string]string {

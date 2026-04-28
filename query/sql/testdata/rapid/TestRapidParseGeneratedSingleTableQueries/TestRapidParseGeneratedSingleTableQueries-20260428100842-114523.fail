@@ -1,0 +1,25 @@
+# 2026/04/28 10:08:42.376916 [TestRapidParseGeneratedSingleTableQueries] [rapid] draw query: sql.rapidSQLQuery{SQL:"SELECT All.* FROM All", Table:"All", TableAlias:"All", ProjectedAlias:"All", ProjectedTable:"All", Filters:[]sql.rapidSQLFilter(nil), Limit:(*uint64)(nil), HasLimit:false, InvalidLimit:(*sql.Literal)(nil), UnsupportedLimit:false}
+# 2026/04/28 10:08:42.376929 [TestRapidParseGeneratedSingleTableQueries] Parse("SELECT All.* FROM All"): Unsupported: SELECT All.* FROM All
+# 
+v0.4.8#12803513648838884385
+0x0
+0x0
+0x0
+0x6666666666666
+0x0
+0xe3e05a098777c
+0x30
+0x6666666666666
+0x0
+0xe3e05a098777c
+0x30
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
