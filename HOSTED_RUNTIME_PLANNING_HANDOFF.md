@@ -7,36 +7,63 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-The active hosted-runtime slice is V1.5-A query/view declarations.
+The active hosted-runtime slice is V1.5-B canonical contract export.
 
-Next task: V1.5-A Task 02, add failing module-owned query/view declaration
-metadata tests.
+Next agent run: complete V1.5-B end to end, from prerequisites through tests,
+implementation, JSON output, validation, and handoff upkeep.
 
 Start from:
 - `docs/hosted-runtime-planning/V1.5/README.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-B/00-current-execution-plan.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-B/01-stack-prerequisites.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-B/02-contract-model-tests.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-B/03-contract-export-implementation.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-B/04-json-snapshot-output.md`
+- `docs/hosted-runtime-planning/V1.5/V1.5-B/05-format-and-validate.md`
 - `docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`
-- `docs/hosted-runtime-planning/V1.5/V1.5-A/02-declaration-metadata-tests.md`
+- `module_declarations_test.go`
 
-Task 01 is complete. Its live-code conclusions are recorded in:
-- `docs/hosted-runtime-planning/V1.5/V1.5-A/01-stack-prerequisites.md`
+## Execution Granularity
 
-V1.5-A goal:
-- add the smallest code-first query/view declaration surface to the module model
-- make declarations inspectable/exportable enough for V1.5-B
-- keep the existing v1 hosted-runtime shape intact
+V1.5 work should proceed one lettered slice at a time, not one numbered task at
+a time. A normal agent run should complete the whole active `V1.5-*` slice:
+1. read the slice execution plan and task docs
+2. run prerequisite inspection commands
+3. add the planned failing tests
+4. implement the slice
+5. expose any required metadata/output surface
+6. run the slice validation gates
+7. update the slice plan and this handoff to the next `V1.5-*` slice
 
-Remaining V1.5-A task order:
-1. Add failing tests for module-owned query/view declaration metadata.
-2. Implement declaration types and module registration methods.
-3. Expose declaration metadata through narrow descriptions.
-4. Format and validate the slice.
+Do not stop after a prerequisite or failing-test task unless there is a real
+blocker, an ambiguous contract decision, or a validation failure that cannot be
+resolved inside the active slice.
 
-After V1.5-A lands, update this handoff to point at V1.5-B canonical contract
-export.
+V1.5-A is complete. Its live proof is:
+- `QueryDeclaration` and `ViewDeclaration` exist in the root package.
+- `Module.Query(...)` and `Module.View(...)` register module-owned query/view
+  declarations fluently.
+- declaration names are validated during `Build`; blank names and duplicate
+  names are rejected, and query/view names share one namespace.
+- `Module.Describe` and `Runtime.Describe` expose detached query/view
+  declaration summaries through `Queries` and `Views`.
+- `Runtime.ExportSchema` remains the lower-level schema/reducer export.
+
+V1.5-A validation passed:
+- `rtk go fmt .`
+- `rtk go test . -run 'Test(Module.*Declaration|Runtime.*Declaration|.*Describe.*Declaration)' -count=1`
+- `rtk go test . -count=1`
+- `rtk go vet .`
+
+V1.5-B goal:
+- export a full module contract artifact as deterministic canonical JSON
+- combine module identity, schema/reducer export, and V1.5-A query/view
+  declarations
+- reserve but do not implement permissions/read-model and migration behavior
 
 ## Current Hosted-Runtime State
 
-V1-H is audited as landed.
+V1-H and V1.5-A are audited as landed.
 
 Live proof points:
 - root package imports as `github.com/ponchione/shunter`
@@ -44,9 +71,10 @@ Live proof points:
 - `Runtime.Start`, `Close`, `HTTPHandler`, `ListenAndServe`, local calls,
   describe, and schema export exist
 - `Module` registration remains fluent and code-first
-- `Module.Describe` currently exposes detached identity metadata only:
-  `Name`, `Version`, and `Metadata`
-- `Runtime.Describe` currently exposes module identity plus runtime health
+- `Module.Query(...)` and `Module.View(...)` register named read/view
+  declarations
+- `Module.Describe` exposes detached module identity plus `Queries` and `Views`
+- `Runtime.Describe` exposes module identity/declarations plus runtime health
 - `Runtime.ExportSchema` currently exposes lower-level schema/reducer metadata:
   `Version`, `Tables`, and `Reducers`
 - root/runtime package tests are the live proof for hosted-runtime ownership,
@@ -54,7 +82,8 @@ Live proof points:
 - the prior bundled hello-world command was removed because it no longer served
   a maintained product or integration purpose
 
-Do not reopen V1-A through V1-H unless a new failing regression proves drift.
+Do not reopen V1-A through V1-H or V1.5-A unless a new failing regression proves
+drift.
 
 ## Startup Reading
 
@@ -62,21 +91,24 @@ Required:
 1. `RTK.md`
 2. this file
 3. `docs/hosted-runtime-planning/V1.5/README.md`
-4. `docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`
-5. `docs/hosted-runtime-planning/V1.5/V1.5-A/02-declaration-metadata-tests.md`
-6. `docs/hosted-runtime-planning/V1.5/V1.5-A/01-stack-prerequisites.md` only
-   if the recorded Task 01 proof is needed
+4. `docs/hosted-runtime-planning/V1.5/V1.5-B/00-current-execution-plan.md`
+5. `docs/hosted-runtime-planning/V1.5/V1.5-B/01-stack-prerequisites.md`
+6. `docs/hosted-runtime-planning/V1.5/V1.5-B/02-contract-model-tests.md`
+7. `docs/hosted-runtime-planning/V1.5/V1.5-B/03-contract-export-implementation.md`
+8. `docs/hosted-runtime-planning/V1.5/V1.5-B/04-json-snapshot-output.md`
+9. `docs/hosted-runtime-planning/V1.5/V1.5-B/05-format-and-validate.md`
+10. `docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md` only
+   if V1.5-A proof is needed
 
-Task 01 already ran these checks. Rerun them before editing Go code if the
-current working tree has moved or if the next task needs fresh API confirmation:
+V1.5-B Task 01 should run and record these checks:
 - `rtk go doc . Module`
 - `rtk go doc . Module.Describe`
 - `rtk go doc . Runtime`
-- `rtk go doc . Runtime.Describe`
 - `rtk go doc . Runtime.ExportSchema`
 - `rtk go doc ./schema SchemaExport`
+- `rtk go doc ./schema ReducerExport`
 
-Open these only when the active V1.5-A docs or live code leave a contract
+Open these only when the active V1.5-B docs or live code leave a contract
 question unresolved:
 - `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
 - `docs/decomposition/hosted-runtime-version-phases.md`
@@ -85,22 +117,20 @@ question unresolved:
 
 Do not read broad roadmap, ledger, or decomposition docs by default.
 
-## V1.5-A Scope
+## V1.5-B Scope
 
 In scope:
-- named read query declarations
-- named live view/subscription declarations
-- fluent module registration methods
-- detached declaration metadata
-- narrow `Describe` or equivalent exposure for declaration metadata
-- tests proving declarations are module-owned and do not disturb existing v1
-  module/build behavior
+- in-memory full module contract model
+- deterministic canonical JSON contract snapshot output
+- contract content for module identity/version/metadata
+- schema/contract version, tables, reducers, queries, and views
+- reserved permissions/read-model and migration fields
+- codegen/export metadata enough for V1.5-C
 
 Out of scope:
-- canonical `shunter.contract.json`
 - client bindings or codegen
-- permissions/read-model metadata
-- migration metadata or contract diff tooling
+- executable permissions behavior
+- migration diff tooling or executable migrations
 - full SQL/view system
 - query engine surface widening
 - runtime shape changes
@@ -108,35 +138,27 @@ Out of scope:
 
 Preserve WebSocket-first v1 runtime behavior.
 
-## Next Task Notes
+## Next Slice Notes
 
-Task 02 should add tests before implementation.
+Complete V1.5-B in one run. Work through its numbered tasks in order:
+- reconfirm contract export prerequisites
+- add failing in-memory contract model tests
+- implement contract assembly from module, schema, reducers, queries, and views
+- add deterministic canonical JSON snapshot output
+- format, test, vet, and update handoffs
 
-Likely files:
-- create `module_declarations_test.go`
-- extend `runtime_describe_test.go` only if the selected narrow description API
-  requires runtime-level assertions
-
-Pin behavior for:
-- registering a named read query declaration
-- registering a named live view/subscription declaration
-- rejecting or surfacing empty declaration names
-- rejecting or surfacing duplicate query names
-- rejecting or surfacing duplicate view names
-- treating query and view names as one shared namespace unless the implementation
-  explicitly documents separate namespaces
-- returning detached declaration descriptions
-- keeping declarations visible before and after `Build`
-- preserving existing table/reducer registration behavior
-
-Do not implement the declaration API in Task 02 unless explicitly asked. The
-focused declaration tests are expected to fail until Tasks 03 and 04 implement
-the code.
+Prerequisite proof should verify V1.5-B can assemble its contract from live
+surfaces:
+- module description provides identity, metadata, queries, and views
+- schema export provides schema version, tables, and reducers
+- V1.5-B owns the first full module contract artifact
+- permissions and migration fields should be reserved, not behaviorally
+  implemented
 
 ## Coordination Notes
 
 There may be concurrent gauntlet/dependency test work in the same worktree.
-For V1.5-A, avoid touching these unless the user explicitly redirects the work:
+For V1.5-B, avoid touching these unless the user explicitly redirects the work:
 - `docs/RUNTIME-HARDENING-GAUNTLET.md`
 - `go.mod`
 - `go.sum`
@@ -148,17 +170,14 @@ Do not push unless explicitly asked.
 
 ## Validation
 
-For Task 02, run the focused declaration test command and record the failing
-result:
-- `rtk go test . -run 'Test(Module.*Declaration|Runtime.*Declaration|.*Describe.*Declaration)' -count=1`
-
-Expected full V1.5-A validation after implementation:
+Expected V1.5-B validation:
 - `rtk go fmt .`
-- `rtk go test . -run 'Test(Module.*Declaration|Runtime.*Declaration|.*Describe.*Declaration)' -count=1`
+- `rtk go test . -run 'Test.*Contract|Test.*Export.*JSON' -count=1`
 - `rtk go test . -count=1`
 - `rtk go vet .`
 
-Expand when root/runtime behavior changed beyond declaration metadata:
+Expand when contract code touches schema export or shared tooling:
+- `rtk go test ./schema -count=1`
 - `rtk go test ./... -count=1`
 
 Pinned Staticcheck is available as `rtk go tool staticcheck ./...`. Use it for
@@ -171,8 +190,8 @@ commands pass.
 
 ## Handoff Upkeep
 
-When V1.5-A completes:
-- update task progress in `docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`
-- update this file to make V1.5-B the current target
+When V1.5-B completes:
+- update task progress in `docs/hosted-runtime-planning/V1.5/V1.5-B/00-current-execution-plan.md`
+- update this file to make V1.5-C client bindings/codegen the current target
 - keep startup reading minimal
 - record only future-relevant state, not closure archaeology

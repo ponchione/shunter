@@ -4,12 +4,15 @@ import "github.com/ponchione/shunter/schema"
 
 // Module owns an application module definition before it is built into a
 // Runtime. It stores module identity metadata and delegates schema, reducer,
-// and lifecycle registration to the underlying schema builder.
+// and lifecycle registration to the underlying schema builder while owning
+// query/view declaration metadata directly.
 type Module struct {
 	name     string
 	version  string
 	metadata map[string]string
 	builder  *schema.Builder
+	queries  []QueryDeclaration
+	views    []ViewDeclaration
 }
 
 // NewModule creates a module definition shell with the supplied name.

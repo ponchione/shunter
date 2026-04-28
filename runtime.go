@@ -22,6 +22,8 @@ type Runtime struct {
 	moduleName     string
 	moduleVersion  string
 	moduleMetadata map[string]string
+	moduleQueries  []QueryDeclaration
+	moduleViews    []ViewDeclaration
 	config         Config
 	buildConfig    Config
 	engine         *schema.Engine
@@ -71,6 +73,9 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateModuleDeclarations(mod); err != nil {
+		return nil, err
+	}
 
 	engine, err := mod.builder.Build(schema.EngineOptions{
 		DataDir:                 dataDir,
@@ -97,6 +102,8 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		moduleName:     mod.name,
 		moduleVersion:  mod.version,
 		moduleMetadata: mod.MetadataMap(),
+		moduleQueries:  copyQueryDeclarations(mod.queries),
+		moduleViews:    copyViewDeclarations(mod.views),
 		config:         cfg,
 		buildConfig:    normalized,
 		engine:         engine,
