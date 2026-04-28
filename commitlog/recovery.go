@@ -122,6 +122,12 @@ func OpenAndRecoverWithReport(dir string, reg schema.SchemaRegistry) (*store.Com
 		return nil, 0, RecoveryResumePlan{}, report, ErrMissingBaseSnapshot
 	}
 
+	if snapshot != nil {
+		if err := validateSnapshotLogBoundary(segments, snapshot.TxID); err != nil {
+			return nil, 0, RecoveryResumePlan{}, report, err
+		}
+	}
+
 	maxAppliedTxID, err := ReplayLog(committed, segments, replayFrom, reg)
 	if err != nil {
 		return nil, 0, RecoveryResumePlan{}, report, err
@@ -248,6 +254,24 @@ func autoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, b
 	default:
 		return 0, false
 	}
+}
+
+func validateSnapshotLogBoundary(segments []SegmentInfo, snapshotTxID types.TxID) error {
+	for _, segment := range segments {
+		if segment.LastTx <= snapshotTxID {
+			continue
+		}
+		expected := snapshotTxID + 1
+		if segment.StartTx > expected {
+			return &HistoryGapError{
+				Expected: uint64(expected),
+				Got:      uint64(segment.StartTx),
+				Segment:  segment.Path,
+			}
+		}
+		return nil
+	}
+	return nil
 }
 
 func planRecoveryResume(segments []SegmentInfo, maxAppliedTxID types.TxID) (RecoveryResumePlan, error) {

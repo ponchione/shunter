@@ -126,6 +126,43 @@ func TestOpenAndRecoverWithReportReturnsStructuredRecoveryReport(t *testing.T) {
 	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol", 4: "dave", 5: "erin", 6: "frank"})
 }
 
+func TestOpenAndRecoverSnapshotLogBoundaryGapFailsLoudly(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	base := buildRecoveryCommittedState(t, reg)
+	players, _ := base.Table(0)
+	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("alice")}); err != nil {
+		t.Fatal(err)
+	}
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, base, 5)
+	writeReplaySegment(t, root, 7,
+		replayRecord{txID: 7, inserts: []types.ProductValue{{types.NewUint64(7), types.NewString("skipped-tx6")}}},
+	)
+
+	_, _, _, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected snapshot/log boundary gap error")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("boundary gap error = %v, want ErrOpen category", err)
+	}
+	var gapErr *HistoryGapError
+	if !errors.As(err, &gapErr) {
+		t.Fatalf("expected HistoryGapError, got %T (%v)", err, err)
+	}
+	if gapErr.Expected != 6 || gapErr.Got != 7 {
+		t.Fatalf("HistoryGapError = %+v, want Expected=6 Got=7", gapErr)
+	}
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 5 {
+		t.Fatalf("report selected snapshot = (%v, %d), want (true, 5)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 7 {
+		t.Fatalf("report durable log = (%v, %d), want (true, 7)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+}
+
 func TestOpenAndRecoverDetailedSnapshotReplayDoesNotRegressSequenceFromExplicitAutoincrementRows(t *testing.T) {
 	root := t.TempDir()
 	reg := buildRecoveryAutoIncrementRegistry(t)

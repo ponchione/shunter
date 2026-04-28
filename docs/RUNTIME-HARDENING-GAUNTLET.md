@@ -53,7 +53,9 @@ Current status:
   metamorphic expansion, race/soak, and release-candidate runs. The
   crash/recovery campaign has started with a deterministic restart pin proving a
   damaged tail segment remains recoverable after recovery resumes into a fresh
-  successor segment and the process restarts again.
+  successor segment and the process restarts again, plus a snapshot/log boundary
+  pin proving recovery fails loudly instead of skipping the first post-snapshot
+  transaction when the log begins too late.
 
 ## Goals
 
