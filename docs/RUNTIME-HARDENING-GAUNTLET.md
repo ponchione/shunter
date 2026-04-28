@@ -31,7 +31,9 @@ Current status:
   subscribed-caller suppression, disconnect/reconnect fanout, live-client
   close/restart, subscribe/unsubscribe multi, repeated subscribe/unsubscribe
   cycles, rejected subscribe multi atomicity, panic rollback, unknown reducer
-  admission failures, and reserved lifecycle reducer rejection.
+  admission failures, reserved lifecycle reducer rejection, one-shot scheduled
+  reducer firing through the hosted runtime, cancel-before-fire, and clean
+  restart firing for pre-close scheduled reducers.
 
 ## Goals
 

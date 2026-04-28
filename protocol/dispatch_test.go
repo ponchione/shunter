@@ -24,17 +24,20 @@ func testConnPair(t *testing.T, opts *ProtocolOptions) (*Conn, *websocket.Conn) 
 	}
 	var serverConn *websocket.Conn
 	ready := make(chan struct{})
+	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			t.Errorf("accept: %v", err)
 			return
 		}
+		defer c.CloseNow()
 		serverConn = c
 		close(ready)
-		<-r.Context().Done()
+		<-release
 	}))
 	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
 
 	ctx := context.Background()
 	client, _, err := websocket.Dial(ctx, srv.URL, nil)

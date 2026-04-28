@@ -94,6 +94,8 @@ func TestHandleCallReducer_Valid(t *testing.T) {
 	}
 	if req.ResponseCh == nil {
 		t.Error("ResponseCh = nil, want non-nil reducer response channel")
+	} else {
+		close(req.ResponseCh)
 	}
 
 	// No error message should have been sent.
@@ -232,6 +234,9 @@ func TestHandleCallReducer_ForwardsFlags_NoSuccessNotify(t *testing.T) {
 	if exec.callReducerReq.Flags != CallReducerFlagsNoSuccessNotify {
 		t.Errorf("CallReducerRequest.Flags = %d, want %d (NoSuccessNotify)",
 			exec.callReducerReq.Flags, CallReducerFlagsNoSuccessNotify)
+	}
+	if exec.callReducerReq.ResponseCh != nil {
+		close(exec.callReducerReq.ResponseCh)
 	}
 }
 

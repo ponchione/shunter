@@ -74,7 +74,8 @@ func seedSchedule(t testing.TB, cs *store.CommittedState, tableID schema.TableID
 func TestSchedulerScanEnqueuesDueRow(t *testing.T) {
 	s, cs, tid, inbox := schedulerWorkerFixture(t)
 	// Row fires at t=50s, now is t=100s → due.
-	seedSchedule(t, cs, tid, 1, "tick", []byte{0x01}, time.Unix(50, 0).UnixNano(), 0)
+	fireAt := time.Unix(50, 0).UnixNano()
+	seedSchedule(t, cs, tid, 1, "tick", []byte{0x01}, fireAt, 0)
 
 	s.scan()
 
@@ -89,6 +90,12 @@ func TestSchedulerScanEnqueuesDueRow(t *testing.T) {
 		}
 		if call.Request.Source != CallSourceScheduled {
 			t.Errorf("Source = %v, want CallSourceScheduled", call.Request.Source)
+		}
+		if call.Request.ScheduleID != 1 {
+			t.Errorf("ScheduleID = %d, want 1", call.Request.ScheduleID)
+		}
+		if call.Request.IntendedFireAt != fireAt {
+			t.Errorf("IntendedFireAt = %d, want %d", call.Request.IntendedFireAt, fireAt)
 		}
 		if call.ResponseCh != nil || call.ProtocolResponseCh != nil {
 			t.Fatal("scheduled call should not own a response channel")

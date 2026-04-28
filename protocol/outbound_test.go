@@ -14,17 +14,20 @@ import (
 func TestOutboundWriterDeliversFrames(t *testing.T) {
 	var serverConn *websocket.Conn
 	ready := make(chan struct{})
+	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			t.Errorf("accept: %v", err)
 			return
 		}
+		defer c.CloseNow()
 		serverConn = c
 		close(ready)
-		<-r.Context().Done()
+		<-release
 	}))
 	defer srv.Close()
+	defer close(release)
 
 	clientConn, _, err := websocket.Dial(context.Background(), srv.URL, nil)
 	if err != nil {

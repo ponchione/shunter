@@ -59,9 +59,10 @@ type Executor struct {
 	// transactions. Rollback produces gaps, matching Postgres
 	// sequence semantics. Story 6.5 resets this from the max existing
 	// schedule_id at startup so replayed schedules keep their IDs.
-	schedSeq   *store.Sequence
-	durability DurabilityHandle
-	subs       SubscriptionManager
+	schedSeq        *store.Sequence
+	schedulerNotify func()
+	durability      DurabilityHandle
+	subs            SubscriptionManager
 	// snapshotFn acquires the committed read view used by post-commit
 	// subscription evaluation. Defaults to e.committed.Snapshot(); tests
 	// override it to inject a tracking wrapper.
@@ -637,6 +638,11 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	e.nextTxID++
 	changeset.TxID = txID
 	e.committed.SetCommittedTxID(txID)
+	if e.schedulerNotify != nil {
+		if tc := changeset.TableChanges(e.schedTableID); tc != nil && (len(tc.Inserts) > 0 || len(tc.Deletes) > 0) {
+			e.schedulerNotify()
+		}
+	}
 
 	var opts postCommitOptions
 	opts.source = req.Source

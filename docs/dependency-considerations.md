@@ -11,40 +11,44 @@ Current repo context:
 - Shunter is intentionally dependency-light today.
 - Direct runtime dependencies are currently limited to `github.com/coder/websocket`,
   `github.com/golang-jwt/jwt/v5`, and `lukechampine.com/blake3`.
+- Direct test dependencies now include `go.uber.org/goleak v1.3.0`.
 - `github.com/coder/websocket` is replaced with the local Shunter fork
   `github.com/ponchione/websocket v1.8.14-shunter.1`.
-- The broad suite passed during the scan with:
+- The broad suite passed after adopting `goleak` with:
 
 ```bash
 rtk go test ./... -count=1
-# Go test: 2380 passed in 11 packages
+# Go test: 2387 passed in 11 packages
 ```
+
+## Adopted Test Dependencies
+
+### `go.uber.org/goleak`
+
+Added as a test-only dependency for goroutine leak detection.
+
+Enabled in:
+
+- root runtime tests
+- `protocol`
+- `executor`
+- `subscription`
+- `commitlog`
+
+Notes:
+
+- Use package-level `TestMain` with `goleak.VerifyTestMain(m)`.
+- Do not use per-test `VerifyNone` in packages with parallel tests; upstream
+  documents that `VerifyNone` is incompatible with `t.Parallel`.
+- Prefer explicit test cleanup over `IgnoreTopFunction` /
+  `IgnoreAnyFunction`. Use ignores only for proven benign external/library
+  goroutines, with a short comment.
+
+Docs: https://pkg.go.dev/go.uber.org/goleak
 
 ## Strong Candidates
 
 These are the highest-value additions to consider first.
-
-### `go.uber.org/goleak`
-
-Use as a test dependency for goroutine leak detection.
-
-Why it fits:
-
-- Shunter owns many long-lived and supervised goroutines: protocol read/write
-  loops, keepalives, executor lifecycle, fanout workers, scheduler loops, and
-  runtime serving.
-- Several correctness risks are lifecycle/teardown risks, where leaked goroutines
-  can hide until shutdown or repeated tests.
-- It is focused and test-only.
-
-Best first packages:
-
-- `protocol`
-- `executor`
-- `subscription`
-- root runtime tests
-
-Docs: https://pkg.go.dev/go.uber.org/goleak
 
 ### `github.com/google/go-cmp/cmp`
 

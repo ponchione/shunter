@@ -186,11 +186,15 @@ func (s *Scheduler) enqueue(row types.ProductValue) {
 }
 
 func (s *Scheduler) enqueueWithContext(ctx context.Context, row types.ProductValue) bool {
+	scheduleID := ScheduleID(row[SysScheduledColScheduleID].AsUint64())
+	intendedFireAt := row[SysScheduledColNextRunAtNs].AsInt64()
 	cmd := CallReducerCmd{
 		Request: ReducerRequest{
-			ReducerName: row[SysScheduledColReducerName].AsString(),
-			Args:        append([]byte(nil), row[SysScheduledColArgs].AsBytes()...),
-			Source:      CallSourceScheduled,
+			ReducerName:    row[SysScheduledColReducerName].AsString(),
+			Args:           append([]byte(nil), row[SysScheduledColArgs].AsBytes()...),
+			Source:         CallSourceScheduled,
+			ScheduleID:     scheduleID,
+			IntendedFireAt: intendedFireAt,
 			// Caller left zero — scheduled calls have no connection.
 		},
 	}

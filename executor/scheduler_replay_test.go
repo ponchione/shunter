@@ -30,7 +30,8 @@ func TestSchedulerReplayEmpty(t *testing.T) {
 func TestSchedulerReplayEnqueuesPastDue(t *testing.T) {
 	s, cs, tid, inbox := schedulerWorkerFixture(t)
 	// now = Unix(100, 0); row at T=50 is due.
-	seedSchedule(t, cs, tid, 3, "past", nil, time.Unix(50, 0).UnixNano(), 0)
+	fireAt := time.Unix(50, 0).UnixNano()
+	seedSchedule(t, cs, tid, 3, "past", nil, fireAt, 0)
 
 	s.ReplayFromCommitted()
 
@@ -42,6 +43,12 @@ func TestSchedulerReplayEnqueuesPastDue(t *testing.T) {
 		}
 		if call.Request.Source != CallSourceScheduled {
 			t.Errorf("Source = %v, want CallSourceScheduled", call.Request.Source)
+		}
+		if call.Request.ScheduleID != 3 {
+			t.Errorf("ScheduleID = %d, want 3", call.Request.ScheduleID)
+		}
+		if call.Request.IntendedFireAt != fireAt {
+			t.Errorf("IntendedFireAt = %d, want %d", call.Request.IntendedFireAt, fireAt)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("past-due row should have been enqueued by replay")
