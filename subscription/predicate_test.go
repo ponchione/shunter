@@ -1,17 +1,15 @@
 package subscription
 
 import (
-	"reflect"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/ponchione/shunter/types"
 )
 
 func TestColEqTablesSingle(t *testing.T) {
 	p := ColEq{Table: 7, Column: 2, Value: types.NewInt64(42)}
-	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{7}) {
-		t.Fatalf("ColEq.Tables() = %v, want [7]", got)
-	}
+	requireTables(t, "ColEq.Tables()", []TableID{7}, p.Tables())
 }
 
 func TestColRangeTablesSingle(t *testing.T) {
@@ -21,37 +19,27 @@ func TestColRangeTablesSingle(t *testing.T) {
 		Lower:  Bound{Value: types.NewInt64(10), Inclusive: true},
 		Upper:  Bound{Unbounded: true},
 	}
-	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{3}) {
-		t.Fatalf("ColRange.Tables() = %v, want [3]", got)
-	}
+	requireTables(t, "ColRange.Tables()", []TableID{3}, p.Tables())
 }
 
 func TestColNeTablesSingle(t *testing.T) {
 	p := ColNe{Table: 4, Column: 1, Value: types.NewInt64(9)}
-	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{4}) {
-		t.Fatalf("ColNe.Tables() = %v, want [4]", got)
-	}
+	requireTables(t, "ColNe.Tables()", []TableID{4}, p.Tables())
 }
 
 func TestAllRowsTablesSingle(t *testing.T) {
 	p := AllRows{Table: 9}
-	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{9}) {
-		t.Fatalf("AllRows.Tables() = %v, want [9]", got)
-	}
+	requireTables(t, "AllRows.Tables()", []TableID{9}, p.Tables())
 }
 
 func TestNoRowsTablesSingle(t *testing.T) {
 	p := NoRows{Table: 10}
-	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{10}) {
-		t.Fatalf("NoRows.Tables() = %v, want [10]", got)
-	}
+	requireTables(t, "NoRows.Tables()", []TableID{10}, p.Tables())
 }
 
 func TestJoinTablesBoth(t *testing.T) {
 	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
-	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{1, 2}) {
-		t.Fatalf("Join.Tables() = %v, want [1 2]", got)
-	}
+	requireTables(t, "Join.Tables()", []TableID{1, 2}, p.Tables())
 }
 
 func TestJoinNilFilterAllowed(t *testing.T) {
@@ -67,9 +55,7 @@ func TestAndTablesSameTableDedup(t *testing.T) {
 		Left:  ColEq{Table: 5, Column: 0, Value: types.NewInt32(1)},
 		Right: ColRange{Table: 5, Column: 1, Lower: Bound{Unbounded: true}, Upper: Bound{Unbounded: true}},
 	}
-	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{5}) {
-		t.Fatalf("And.Tables() same-table = %v, want [5]", got)
-	}
+	requireTables(t, "And.Tables() same-table", []TableID{5}, p.Tables())
 }
 
 func TestAndTablesTwoTablesOrdered(t *testing.T) {
@@ -77,9 +63,7 @@ func TestAndTablesTwoTablesOrdered(t *testing.T) {
 		Left:  ColEq{Table: 3, Column: 0, Value: types.NewInt32(1)},
 		Right: ColEq{Table: 7, Column: 0, Value: types.NewInt32(2)},
 	}
-	if got := p.Tables(); !reflect.DeepEqual(got, []TableID{3, 7}) {
-		t.Fatalf("And.Tables() two-table = %v, want [3 7]", got)
-	}
+	requireTables(t, "And.Tables() two-table", []TableID{3, 7}, p.Tables())
 }
 
 func TestAndTablesNestedDedup(t *testing.T) {
@@ -91,9 +75,7 @@ func TestAndTablesNestedDedup(t *testing.T) {
 		Left:  inner,
 		Right: ColEq{Table: 1, Column: 1, Value: types.NewInt32(3)},
 	}
-	if got := outer.Tables(); !reflect.DeepEqual(got, []TableID{1, 2}) {
-		t.Fatalf("And nested = %v, want [1 2]", got)
-	}
+	requireTables(t, "And nested", []TableID{1, 2}, outer.Tables())
 }
 
 func TestOrTablesNestedDedup(t *testing.T) {
@@ -105,8 +87,13 @@ func TestOrTablesNestedDedup(t *testing.T) {
 		Left:  inner,
 		Right: ColEq{Table: 1, Column: 1, Value: types.NewInt32(3)},
 	}
-	if got := outer.Tables(); !reflect.DeepEqual(got, []TableID{1, 2}) {
-		t.Fatalf("Or nested = %v, want [1 2]", got)
+	requireTables(t, "Or nested", []TableID{1, 2}, outer.Tables())
+}
+
+func requireTables(t *testing.T, name string, want, got []TableID) {
+	t.Helper()
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("%s mismatch (-want +got):\n%s", name, diff)
 	}
 }
 

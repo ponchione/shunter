@@ -35,8 +35,11 @@ Current status:
   reducer firing through the hosted runtime, cancel-before-fire, and clean
   restart firing for pre-close scheduled reducers, plus fixed-seed
   scheduled fire/cancel workloads and scheduled reducer failure rollback with
-  no fanout, repeating scheduled reducer fire/cancel behavior, and repeating
-  schedule resume after clean restart.
+  no fanout, scheduled reducer panic rollback with no fanout, repeating
+  scheduled reducer fire/cancel behavior, repeating schedule resume after clean
+  restart, cancelled schedule persistence across clean restart, and
+  transactional rollback of schedule creation, plus fixed-seed
+  runtime/scheduler interleaving workloads.
 
 ## Goals
 

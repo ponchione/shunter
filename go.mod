@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/coder/websocket v1.8.14
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/google/go-cmp v0.6.0
 	go.uber.org/goleak v1.3.0
 	lukechampine.com/blake3 v1.4.1
 )

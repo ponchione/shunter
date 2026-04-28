@@ -12,7 +12,8 @@ Current repo context:
 - Shunter is intentionally dependency-light today.
 - Direct runtime dependencies are currently limited to `github.com/coder/websocket`,
   `github.com/golang-jwt/jwt/v5`, and `lukechampine.com/blake3`.
-- Direct test dependencies now include `go.uber.org/goleak v1.3.0`.
+- Direct test dependencies now include `github.com/google/go-cmp v0.6.0`
+  and `go.uber.org/goleak v1.3.0`.
 - Pinned Go tool dependencies now include
   `honnef.co/go/tools/cmd/staticcheck v0.7.0`.
 - `github.com/coder/websocket` is replaced with the local Shunter fork
@@ -49,6 +50,23 @@ Notes:
 
 Docs: https://pkg.go.dev/go.uber.org/goleak
 
+### `github.com/google/go-cmp/cmp`
+
+Added as a direct test dependency for readable structured diffs.
+
+Notes:
+
+- Use `cmp.Diff` for nested structs, slices, maps, protocol messages,
+  schema descriptions, subscription updates, and recovery state where raw
+  equality failures are hard to diagnose.
+- Keep simple scalar and single-field checks as direct comparisons.
+- Use semantic comparers for Shunter domain values such as `types.Value` and
+  `types.ProductValue`; their `Equal` methods express the intended semantics
+  better than comparing implementation details.
+- Do not add broader assertion frameworks.
+
+Docs: https://pkg.go.dev/github.com/google/go-cmp/cmp
+
 ## Adopted Tool Dependencies
 
 ### `honnef.co/go/tools/cmd/staticcheck`
@@ -73,20 +91,6 @@ Notes:
 ## Strong Candidates
 
 These are the highest-value additions to consider first.
-
-### `github.com/google/go-cmp/cmp`
-
-Use as a test dependency for readable structured diffs.
-
-Why it fits:
-
-- The suite compares nested values across protocol messages, row payloads,
-  schema descriptions, subscription updates, and recovery state.
-- `cmp.Diff` would make failures easier to diagnose than raw `reflect.DeepEqual`
-  failures or custom mismatch text.
-- It should stay test-only.
-
-Docs: https://pkg.go.dev/github.com/google/go-cmp/cmp
 
 ### `pgregory.net/rapid`
 

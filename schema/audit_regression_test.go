@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -25,12 +26,15 @@ func TestBuildSystemTablesMatchSpecExactly(t *testing.T) {
 		{Index: 1, Name: "identity", Type: KindBytes, Nullable: false},
 		{Index: 2, Name: "connected_at", Type: KindInt64, Nullable: false},
 	}
-	if !reflect.DeepEqual(sysClients.Columns, wantClients) {
-		t.Fatalf("sys_clients columns = %+v, want %+v", sysClients.Columns, wantClients)
+	if diff := cmp.Diff(wantClients, sysClients.Columns); diff != "" {
+		t.Fatalf("sys_clients columns mismatch (-want +got):\n%s", diff)
 	}
 	pk, ok := sysClients.PrimaryIndex()
-	if !ok || pk.Name != "pk" || !pk.Primary || !pk.Unique || !reflect.DeepEqual(pk.Columns, []int{0}) {
+	if !ok || pk.Name != "pk" || !pk.Primary || !pk.Unique {
 		t.Fatalf("sys_clients pk = %+v", pk)
+	}
+	if diff := cmp.Diff([]int{0}, pk.Columns); diff != "" {
+		t.Fatalf("sys_clients pk columns mismatch (-want +got):\n%s", diff)
 	}
 
 	_, sysScheduled, ok := reg.TableByName("sys_scheduled")
@@ -44,12 +48,15 @@ func TestBuildSystemTablesMatchSpecExactly(t *testing.T) {
 		{Index: 3, Name: "next_run_at_ns", Type: KindInt64, Nullable: false},
 		{Index: 4, Name: "repeat_ns", Type: KindInt64, Nullable: false},
 	}
-	if !reflect.DeepEqual(sysScheduled.Columns, wantScheduled) {
-		t.Fatalf("sys_scheduled columns = %+v, want %+v", sysScheduled.Columns, wantScheduled)
+	if diff := cmp.Diff(wantScheduled, sysScheduled.Columns); diff != "" {
+		t.Fatalf("sys_scheduled columns mismatch (-want +got):\n%s", diff)
 	}
 	pk, ok = sysScheduled.PrimaryIndex()
-	if !ok || pk.Name != "pk" || !pk.Primary || !pk.Unique || !reflect.DeepEqual(pk.Columns, []int{0}) {
+	if !ok || pk.Name != "pk" || !pk.Primary || !pk.Unique {
 		t.Fatalf("sys_scheduled pk = %+v", pk)
+	}
+	if diff := cmp.Diff([]int{0}, pk.Columns); diff != "" {
+		t.Fatalf("sys_scheduled pk columns mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -65,13 +72,13 @@ func TestRegistryReducersPreserveRegistrationOrderAndFreshSlice(t *testing.T) {
 
 	got := reg.Reducers()
 	want := []string{"CreatePlayer", "DeletePlayer", "UpdateScore"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Reducers() = %v, want %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("Reducers() mismatch (-want +got):\n%s", diff)
 	}
 
 	mutated := reg.Reducers()
 	mutated[0] = "Mutated"
-	if reflect.DeepEqual(mutated, reg.Reducers()) {
+	if diff := cmp.Diff(mutated, reg.Reducers()); diff == "" {
 		t.Fatal("Reducers() should return a fresh slice")
 	}
 }

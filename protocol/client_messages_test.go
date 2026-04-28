@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestSubscribeSingleRoundTripSQLEmpty(t *testing.T) {
@@ -28,8 +30,8 @@ func TestSubscribeSingleRoundTripSQLEmpty(t *testing.T) {
 		t.Errorf("tag = %d, want TagSubscribeSingle", tag)
 	}
 	got := out.(SubscribeSingleMsg)
-	if got != in {
-		t.Errorf("round-trip mismatch: got %+v, want %+v", got, in)
+	if diff := cmp.Diff(in, got); diff != "" {
+		t.Errorf("SubscribeSingleMsg round-trip mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -61,8 +63,8 @@ func TestUnsubscribeSingleRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.(UnsubscribeSingleMsg)
-	if got != in {
-		t.Errorf("got %+v, want %+v", got, in)
+	if diff := cmp.Diff(in, got); diff != "" {
+		t.Errorf("UnsubscribeSingleMsg round-trip mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -79,14 +81,8 @@ func TestCallReducerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.(CallReducerMsg)
-	if got.RequestID != in.RequestID || got.ReducerName != in.ReducerName {
-		t.Errorf("ids mismatch: got %+v, want %+v", got, in)
-	}
-	if !bytes.Equal(got.Args, in.Args) {
-		t.Errorf("args mismatch: got % x, want % x", got.Args, in.Args)
-	}
-	if got.Flags != in.Flags {
-		t.Errorf("flags mismatch: got %d, want %d", got.Flags, in.Flags)
+	if diff := cmp.Diff(in, got); diff != "" {
+		t.Errorf("CallReducerMsg round-trip mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -154,8 +150,8 @@ func TestOneOffQueryRoundTripSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.(OneOffQueryMsg)
-	if !bytes.Equal(got.MessageID, in.MessageID) || got.QueryString != in.QueryString {
-		t.Errorf("round-trip mismatch: got %+v, want %+v", got, in)
+	if diff := cmp.Diff(in, got); diff != "" {
+		t.Errorf("OneOffQueryMsg round-trip mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -249,8 +245,8 @@ func TestSubscribeMultiRoundTripSQL(t *testing.T) {
 	if got.RequestID != orig.RequestID || got.QueryID != orig.QueryID {
 		t.Fatalf("ids = %+v, want %+v", got, orig)
 	}
-	if len(got.QueryStrings) != 2 || got.QueryStrings[0] != orig.QueryStrings[0] || got.QueryStrings[1] != orig.QueryStrings[1] {
-		t.Fatalf("query strings = %+v, want %+v", got.QueryStrings, orig.QueryStrings)
+	if diff := cmp.Diff(orig.QueryStrings, got.QueryStrings); diff != "" {
+		t.Fatalf("SubscribeMultiMsg query strings mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -280,7 +276,11 @@ func TestUnsubscribeMultiRoundTrip(t *testing.T) {
 	if tag != TagUnsubscribeMulti {
 		t.Fatalf("tag = %d, want %d", tag, TagUnsubscribeMulti)
 	}
-	if got, ok := decoded.(UnsubscribeMultiMsg); !ok || got != orig {
-		t.Fatalf("decoded = %+v, want %+v", decoded, orig)
+	got, ok := decoded.(UnsubscribeMultiMsg)
+	if !ok {
+		t.Fatalf("decoded type = %T, want UnsubscribeMultiMsg", decoded)
+	}
+	if diff := cmp.Diff(orig, got); diff != "" {
+		t.Fatalf("UnsubscribeMultiMsg round-trip mismatch (-want +got):\n%s", diff)
 	}
 }

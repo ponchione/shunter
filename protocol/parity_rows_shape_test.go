@@ -3,8 +3,9 @@ package protocol
 import (
 	"bytes"
 	"encoding/binary"
-	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // The pins in this file are the rolled-up canonical-contract layer for
@@ -67,9 +68,8 @@ func TestParityRowsShapeEnvelopesFlatShape(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := msgFieldNames(c.envelope); !reflect.DeepEqual(got, c.fields) {
-				t.Fatalf("%s fields = %v, want %v (see docs/parity-decisions.md#protocol-rows-shape)",
-					c.name, got, c.fields)
+			if diff := cmp.Diff(c.fields, msgFieldNames(c.envelope)); diff != "" {
+				t.Fatalf("%s fields mismatch (-want +got):\n%s", c.name, diff)
 			}
 		})
 	}
@@ -160,8 +160,8 @@ func TestParityTransactionUpdateLightWireShape(t *testing.T) {
 func TestParitySubscriptionUpdateInnerLayout(t *testing.T) {
 	fields := msgFieldNames(SubscriptionUpdate{})
 	want := []string{"QueryID", "TableName", "Inserts", "Deletes"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscriptionUpdate fields = %v, want %v", fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("SubscriptionUpdate fields mismatch (-want +got):\n%s", diff)
 	}
 
 	inserts := []byte{0x01, 0x02}

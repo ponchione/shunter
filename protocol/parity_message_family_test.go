@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/ponchione/shunter/schema"
 )
 
@@ -26,9 +27,8 @@ func TestPhase15TransactionUpdateHeavyShape(t *testing.T) {
 		"ReducerCall",
 		"TotalHostExecutionDuration",
 	}
-	if !reflect.DeepEqual(fields, want) {
-		t.Errorf("TransactionUpdate fields = %v, want %v",
-			fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Errorf("TransactionUpdate fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -38,9 +38,8 @@ func TestPhase15TransactionUpdateHeavyShape(t *testing.T) {
 func TestPhase15TransactionUpdateLightShape(t *testing.T) {
 	fields := msgFieldNames(TransactionUpdateLight{})
 	want := []string{"RequestID", "Update"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Errorf("TransactionUpdateLight fields = %v, want %v (Phase 1.5 light envelope)",
-			fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Errorf("TransactionUpdateLight fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -49,9 +48,8 @@ func TestPhase15TransactionUpdateLightShape(t *testing.T) {
 func TestPhase15ReducerCallInfoShape(t *testing.T) {
 	fields := msgFieldNames(ReducerCallInfo{})
 	want := []string{"ReducerName", "ReducerID", "Args", "RequestID"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Errorf("ReducerCallInfo fields = %v, want %v (Phase 1.5 reducer-call metadata)",
-			fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Errorf("ReducerCallInfo fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -61,11 +59,11 @@ func TestPhase15UpdateStatusVariants(t *testing.T) {
 	var _ UpdateStatus = StatusCommitted{}
 	var _ UpdateStatus = StatusFailed{}
 
-	if got := msgFieldNames(StatusCommitted{}); !reflect.DeepEqual(got, []string{"Update"}) {
-		t.Errorf("StatusCommitted fields = %v, want [Update]", got)
+	if diff := cmp.Diff([]string{"Update"}, msgFieldNames(StatusCommitted{})); diff != "" {
+		t.Errorf("StatusCommitted fields mismatch (-want +got):\n%s", diff)
 	}
-	if got := msgFieldNames(StatusFailed{}); !reflect.DeepEqual(got, []string{"Error"}) {
-		t.Errorf("StatusFailed fields = %v, want [Error]", got)
+	if diff := cmp.Diff([]string{"Error"}, msgFieldNames(StatusFailed{})); diff != "" {
+		t.Errorf("StatusFailed fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -91,8 +89,8 @@ func TestPhase15TagReducerCallResultReserved(t *testing.T) {
 func TestPhase2SubscribeSingleShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeSingleMsg{})
 	want := []string{"RequestID", "QueryID", "QueryString"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeSingleMsg fields = %v, want %v (Phase 2 Slice 1 SQL-string flip)", fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("SubscribeSingleMsg fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -106,8 +104,8 @@ func TestPhase2SubscribeSingleShape(t *testing.T) {
 func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeSingleMsg{})
 	want := []string{"RequestID", "QueryID"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("UnsubscribeSingleMsg fields = %v, want %v", fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("UnsubscribeSingleMsg fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -123,8 +121,8 @@ func TestPhase2UnsubscribeSingleShape(t *testing.T) {
 func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeSingleApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "TableName", "Rows"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeSingleApplied fields = %v, want %v (reference field order)", fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("SubscribeSingleApplied fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -139,8 +137,8 @@ func TestPhase2SubscribeSingleAppliedShape(t *testing.T) {
 func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeSingleApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "HasRows", "Rows"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("UnsubscribeSingleApplied fields = %v, want %v (reference field order)", fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("UnsubscribeSingleApplied fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -152,9 +150,8 @@ func TestPhase2UnsubscribeSingleAppliedShape(t *testing.T) {
 func TestPhase15CallReducerFlagsField(t *testing.T) {
 	fields := msgFieldNames(CallReducerMsg{})
 	want := []string{"ReducerName", "Args", "RequestID", "Flags"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("CallReducerMsg fields = %v, want %v (reference field order)",
-			fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("CallReducerMsg fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -166,8 +163,9 @@ func TestPhase15CallReducerFlagsField(t *testing.T) {
 // than a numeric RequestID.
 func TestPhase2Slice1COneOffQueryMessageIDBytes(t *testing.T) {
 	msgFields := msgFieldNames(OneOffQueryMsg{})
-	if want := []string{"MessageID", "QueryString"}; !reflect.DeepEqual(msgFields, want) {
-		t.Fatalf("OneOffQueryMsg fields = %v, want %v (Phase 2 Slice 1c message_id bytes)", msgFields, want)
+	wantMsgFields := []string{"MessageID", "QueryString"}
+	if diff := cmp.Diff(wantMsgFields, msgFields); diff != "" {
+		t.Fatalf("OneOffQueryMsg fields mismatch (-want +got):\n%s", diff)
 	}
 	msgField, ok := reflect.TypeOf(OneOffQueryMsg{}).FieldByName("MessageID")
 	if !ok {
@@ -178,8 +176,9 @@ func TestPhase2Slice1COneOffQueryMessageIDBytes(t *testing.T) {
 	}
 
 	resultFields := msgFieldNames(OneOffQueryResponse{})
-	if want := []string{"MessageID", "Error", "Tables", "TotalHostExecutionDuration"}; !reflect.DeepEqual(resultFields, want) {
-		t.Fatalf("OneOffQueryResponse fields = %v, want %v (reference field order v1.rs:654)", resultFields, want)
+	wantResultFields := []string{"MessageID", "Error", "Tables", "TotalHostExecutionDuration"}
+	if diff := cmp.Diff(wantResultFields, resultFields); diff != "" {
+		t.Fatalf("OneOffQueryResponse fields mismatch (-want +got):\n%s", diff)
 	}
 	resultField, ok := reflect.TypeOf(OneOffQueryResponse{}).FieldByName("MessageID")
 	if !ok {
@@ -198,9 +197,8 @@ func TestPhase2Slice1COneOffQueryMessageIDBytes(t *testing.T) {
 func TestPhase2SubscribeMultiShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeMultiMsg{})
 	want := []string{"RequestID", "QueryID", "QueryStrings"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeMultiMsg fields = %v, want %v (Phase 2 Slice 1 SQL-string flip)",
-			fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("SubscribeMultiMsg fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -210,9 +208,8 @@ func TestPhase2SubscribeMultiShape(t *testing.T) {
 func TestPhase2UnsubscribeMultiShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeMultiMsg{})
 	want := []string{"RequestID", "QueryID"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("UnsubscribeMultiMsg fields = %v, want %v (Phase 2 Slice 2 variant split)",
-			fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("UnsubscribeMultiMsg fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -227,8 +224,8 @@ func TestPhase2UnsubscribeMultiShape(t *testing.T) {
 func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(SubscribeMultiApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscribeMultiApplied fields = %v, want %v (reference field order)", fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("SubscribeMultiApplied fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -243,8 +240,8 @@ func TestPhase2SubscribeMultiAppliedShape(t *testing.T) {
 func TestPhase2UnsubscribeMultiAppliedShape(t *testing.T) {
 	fields := msgFieldNames(UnsubscribeMultiApplied{})
 	want := []string{"RequestID", "TotalHostExecutionDurationMicros", "QueryID", "Update"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("UnsubscribeMultiApplied fields = %v, want %v (reference field order)", fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("UnsubscribeMultiApplied fields mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -280,8 +277,8 @@ func TestPhase2SubscribeAppliedCarriesHostExecutionDuration(t *testing.T) {
 func TestPhase2SubscriptionErrorOptionalShape(t *testing.T) {
 	fields := msgFieldNames(SubscriptionError{})
 	want := []string{"TotalHostExecutionDurationMicros", "RequestID", "QueryID", "TableID", "Error"}
-	if !reflect.DeepEqual(fields, want) {
-		t.Fatalf("SubscriptionError fields = %v, want %v", fields, want)
+	if diff := cmp.Diff(want, fields); diff != "" {
+		t.Fatalf("SubscriptionError fields mismatch (-want +got):\n%s", diff)
 	}
 
 	typ := reflect.TypeOf(SubscriptionError{})
