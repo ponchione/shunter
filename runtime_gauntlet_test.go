@@ -160,6 +160,7 @@ func TestRuntimeGauntletProtocolCloseWithLiveClientsRestart(t *testing.T) {
 			assertGauntletProtocolClosed(t, caller, fmt.Sprintf("seed %d caller after runtime close", seed))
 			assertGauntletProtocolClosed(t, subscriber, fmt.Sprintf("seed %d subscriber after runtime close", seed))
 			assertGauntletProtocolClosed(t, queryClient, fmt.Sprintf("seed %d query client after runtime close", seed))
+			assertGauntletRuntimeClosedLocalSurfaces(t, rt, fmt.Sprintf("seed %d after runtime close", seed))
 
 			restartedRT := buildGauntletRuntime(t, dataDir)
 			defer restartedRT.Close()
@@ -427,6 +428,64 @@ func TestRuntimeGauntletProtocolMultiClientMixedWorkload(t *testing.T) {
 	}
 	assertGauntletReadMatchesModel(t, rt, model, "multi-client mixed final")
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "multi-client mixed final")
+}
+
+func TestRuntimeGauntletProtocolUnreadSubscriberDoesNotBlockFanout(t *testing.T) {
+	const (
+		slowRequestID     = uint32(8981)
+		slowQueryID       = uint32(8982)
+		observerRequestID = uint32(8983)
+		observerQueryID   = uint32(8984)
+		queryMessageID    = "unread-subscriber-final"
+	)
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	slowClient := dialGauntletProtocol(t, rt)
+	defer slowClient.CloseNow()
+	observer := dialGauntletProtocol(t, rt)
+	defer observer.Close(websocket.StatusNormalClosure, "")
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.Close(websocket.StatusNormalClosure, "")
+
+	model := gauntletModel{players: map[uint64]string{}}
+	slowInitial := subscribeGauntletProtocolPlayers(t, slowClient, "SELECT * FROM players", slowRequestID, slowQueryID)
+	if diff := diffGauntletPlayers(slowInitial, model.players); diff != "" {
+		t.Fatalf("unread subscriber slow initial mismatch:\n%s", diff)
+	}
+	observerInitial := subscribeGauntletProtocolPlayers(t, observer, "SELECT * FROM players", observerRequestID, observerQueryID)
+	if diff := diffGauntletPlayers(observerInitial, model.players); diff != "" {
+		t.Fatalf("unread subscriber observer initial mismatch:\n%s", diff)
+	}
+
+	nextID := uint64(1)
+	for step := 0; step < 48; step++ {
+		op := insertPlayerOp(&nextID, fmt.Sprintf("unread_%02d", step))
+		label := fmt.Sprintf("unread subscriber step %d %s", step, op)
+		wantDelta := gauntletAllRowsDeltaForOp(t, model, op)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		outcome := callGauntletRuntimeReducerWithContext(t, rt, ctx, op, label)
+		cancel()
+		advanceGauntletModel(t, &model, op, outcome, label)
+		gotDelta := readGauntletTransactionUpdateLight(t, observer, observerQueryID, label+" observer")
+		assertGauntletDeltaEqual(t, gotDelta, wantDelta, label+" observer")
+		assertGauntletReadMatchesModel(t, rt, model, label)
+	}
+
+	gotRows := queryGauntletProtocolPlayers(t, queryClient, "SELECT * FROM players", []byte(queryMessageID))
+	if diff := diffGauntletPlayers(gotRows, model.players); diff != "" {
+		t.Fatalf("unread subscriber final one-off mismatch:\n%s", diff)
+	}
+
+	if err := slowClient.CloseNow(); err != nil {
+		t.Fatalf("close unread slow client: %v", err)
+	}
+	afterSlowClose := insertPlayerOp(&nextID, "after_unread_close")
+	wantAfterSlowClose := gauntletAllRowsDeltaForOp(t, model, afterSlowClose)
+	runGauntletTrace(t, rt, &model, []gauntletOp{afterSlowClose}, 48, "after unread subscriber close")
+	gotAfterSlowClose := readGauntletTransactionUpdateLight(t, observer, observerQueryID, "after unread subscriber close observer")
+	assertGauntletDeltaEqual(t, gotAfterSlowClose, wantAfterSlowClose, "after unread subscriber close observer")
+	assertGauntletReadMatchesModel(t, rt, model, "unread subscriber final")
 }
 
 func TestRuntimeGauntletProtocolOneOffQueryModel(t *testing.T) {
@@ -1752,6 +1811,7 @@ func buildGauntletMixedProtocolClientWorkload(seed int64, steps int) []string {
 		"rejected_unsubscribe_single",
 		"runtime_reducer",
 		"unsubscribe_single",
+		"subscribe_predicate_single",
 		"subscribe_multi",
 		"rejected_subscribe_multi",
 		"rejected_unsubscribe_multi",
@@ -1766,6 +1826,8 @@ func buildGauntletMixedProtocolClientWorkload(seed int64, steps int) []string {
 		"protocol_panic_reducer",
 		"runtime_unknown_reducer",
 		"protocol_unknown_reducer",
+		"runtime_lifecycle_reducer",
+		"protocol_lifecycle_reducer",
 		"runtime_reducer",
 	}
 	if steps <= len(required) {
@@ -1785,6 +1847,7 @@ func buildGauntletMixedProtocolClientWorkload(seed int64, steps int) []string {
 		"rejected_unsubscribe_single",
 		"rejected_unsubscribe_multi",
 		"subscribe_single",
+		"subscribe_predicate_single",
 		"subscribe_multi",
 		"unsubscribe_single",
 		"unsubscribe_multi",
@@ -1797,6 +1860,8 @@ func buildGauntletMixedProtocolClientWorkload(seed int64, steps int) []string {
 		"protocol_panic_reducer",
 		"runtime_unknown_reducer",
 		"protocol_unknown_reducer",
+		"runtime_lifecycle_reducer",
+		"protocol_lifecycle_reducer",
 	}
 	rng := rand.New(rand.NewSource(seed))
 	for len(ops) < steps {
@@ -1849,10 +1914,24 @@ func (state *gauntletMixedClientWorkloadState) nextProtocolPanicOp() gauntletOp 
 	return op
 }
 
-func (state *gauntletMixedClientWorkloadState) nextUnknownReducerOp(status shunter.ReducerStatus) gauntletOp {
-	op := unknownReducerOp(state.nextPlayerID, gauntletName(state.rng))
+func (state *gauntletMixedClientWorkloadState) nextAdmissionFailureOp(status shunter.ReducerStatus, makeOp func(uint64, string) gauntletOp) gauntletOp {
+	op := makeOp(state.nextPlayerID, gauntletName(state.rng))
 	op.wantStatus = status
 	return op
+}
+
+func (state *gauntletMixedClientWorkloadState) nextUnknownReducerOp(status shunter.ReducerStatus) gauntletOp {
+	return state.nextAdmissionFailureOp(status, unknownReducerOp)
+}
+
+func (state *gauntletMixedClientWorkloadState) nextLifecycleReducerOp(status shunter.ReducerStatus) gauntletOp {
+	reducerName := "OnConnect"
+	if state.rng.Intn(2) == 0 {
+		reducerName = "OnDisconnect"
+	}
+	return state.nextAdmissionFailureOp(status, func(id uint64, name string) gauntletOp {
+		return lifecycleReducerOp(reducerName, id, name)
+	})
 }
 
 type gauntletMixedClientActiveSubscription struct {
@@ -1874,6 +1953,43 @@ type gauntletMultiSubscriptionShape struct {
 	id      string
 	sql     []string
 	matches func(uint64, string) bool
+}
+
+type gauntletPredicateSubscriptionShape struct {
+	id      string
+	sql     string
+	matches func(uint64, string) bool
+}
+
+func gauntletPredicateSubscriptionForModel(model gauntletModel) gauntletPredicateSubscriptionShape {
+	if len(model.players) == 0 {
+		return gauntletPredicateSubscriptionShape{
+			id:  "empty_id_1",
+			sql: "SELECT * FROM players WHERE id = 1",
+			matches: func(id uint64, _ string) bool {
+				return id == 1
+			},
+		}
+	}
+
+	id := firstGauntletPlayerID(model)
+	name := model.players[id]
+	if len(name)%2 == 0 {
+		return gauntletPredicateSubscriptionShape{
+			id:  fmt.Sprintf("name_%s", name),
+			sql: fmt.Sprintf("SELECT * FROM players WHERE name = '%s'", name),
+			matches: func(_ uint64, rowName string) bool {
+				return rowName == name
+			},
+		}
+	}
+	return gauntletPredicateSubscriptionShape{
+		id:  fmt.Sprintf("id_%d", id),
+		sql: fmt.Sprintf("SELECT * FROM players WHERE id = %d", id),
+		matches: func(rowID uint64, _ string) bool {
+			return rowID == id
+		},
+	}
 }
 
 func gauntletMultiSubscriptionForModel(model gauntletModel) gauntletMultiSubscriptionShape {
@@ -1962,6 +2078,27 @@ func runGauntletMixedProtocolClientWorkloadSegment(t *testing.T, rt *shunter.Run
 			finalRows: func(m gauntletModel) map[uint64]string { return copyGauntletPlayers(m.players) },
 		})
 	}
+	subscribePredicateSingle := func(opIndex int, role string) {
+		predicate := gauntletPredicateSubscriptionForModel(*model)
+		subLabel := stepLabel(opIndex, "subscribe_predicate_single "+role+" "+predicate.id)
+		client := dialGauntletProtocol(t, rt)
+		requestID := state.nextProtocolIDValue()
+		queryID := state.nextProtocolIDValue()
+		initial := subscribeGauntletProtocolPlayersWithLabel(t, client, predicate.sql, requestID, queryID, subLabel)
+		wantInitial := filterGauntletPlayersMatching(model.players, predicate.matches)
+		if diff := diffGauntletPlayers(initial, wantInitial); diff != "" {
+			t.Fatalf("%s initial snapshot mismatch:\n%s", subLabel, diff)
+		}
+		active = append(active, gauntletMixedClientActiveSubscription{
+			client:  client,
+			queryID: queryID,
+			role:    role,
+			matches: predicate.matches,
+			finalRows: func(m gauntletModel) map[uint64]string {
+				return filterGauntletPlayersMatching(m.players, predicate.matches)
+			},
+		})
+	}
 	subscribeMulti := func(opIndex int, role string) {
 		multi := gauntletMultiSubscriptionForModel(*model)
 		subLabel := stepLabel(opIndex, "subscribe_multi "+role+" "+multi.id)
@@ -2016,85 +2153,80 @@ func runGauntletMixedProtocolClientWorkloadSegment(t *testing.T, rt *shunter.Run
 			}
 		}
 	}
-	runRejectedOneOffQuery := func(opIndex int) {
-		queryLabel := stepLabel(opIndex, "rejected_one_off_query")
-		client := dialGauntletProtocol(t, rt)
-		resp := queryGauntletProtocolExpectErrorWithLabel(t, client, "SELECT * FROM players WHERE missing = 1", []byte(fmt.Sprintf("bad-one-off-%d", opIndex)), queryLabel)
-		if resp.Error == nil || *resp.Error == "" {
-			t.Fatalf("%s error = empty, want query failure detail", queryLabel)
-		}
-		if len(resp.Tables) != 0 {
-			t.Fatalf("%s returned %d tables, want 0", queryLabel, len(resp.Tables))
-		}
-		assertGauntletReadMatchesModel(t, rt, *model, queryLabel)
-		got := queryGauntletProtocolPlayersWithLabel(t, client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-one-off-%d", opIndex)), queryLabel+" recovery one-off")
+	runIsolatedProtocolError := func(opIndex int, action string, client *websocket.Conn, issue func(*websocket.Conn, string), after func(*websocket.Conn, string)) {
+		errorLabel := stepLabel(opIndex, action)
+		issue(client, errorLabel)
+		assertGauntletReadMatchesModel(t, rt, *model, errorLabel)
+		got := queryGauntletProtocolPlayersWithLabel(t, client, "SELECT * FROM players", []byte(fmt.Sprintf("%s-%d", action, opIndex)), errorLabel+" recovery one-off")
 		if diff := diffGauntletPlayers(got, model.players); diff != "" {
-			t.Fatalf("%s recovery one-off mismatch:\n%s", queryLabel, diff)
+			t.Fatalf("%s recovery one-off mismatch:\n%s", errorLabel, diff)
 		}
-		if err := client.Close(websocket.StatusNormalClosure, "rejected one-off complete"); err != nil {
-			t.Fatalf("%s close client: %v", queryLabel, err)
+		if after != nil {
+			after(client, errorLabel)
 		}
+	}
+	closeRejectedClient := func(client *websocket.Conn, errorLabel string) {
+		if err := client.Close(websocket.StatusNormalClosure, errorLabel); err != nil {
+			t.Fatalf("%s close client: %v", errorLabel, err)
+		}
+	}
+	retireRejectedClient := func(client *websocket.Conn, errorLabel string) {
+		quiet = append(quiet, gauntletMixedClientQuietClient{client: client, reason: errorLabel})
+	}
+	runRejectedOneOffQuery := func(opIndex int) {
+		client := dialGauntletProtocol(t, rt)
+		runIsolatedProtocolError(opIndex, "rejected_one_off_query", client, func(client *websocket.Conn, errorLabel string) {
+			resp := queryGauntletProtocolExpectErrorWithLabel(t, client, "SELECT * FROM players WHERE missing = 1", []byte(fmt.Sprintf("bad-one-off-%d", opIndex)), errorLabel)
+			if resp.Error == nil || *resp.Error == "" {
+				t.Fatalf("%s error = empty, want query failure detail", errorLabel)
+			}
+			if len(resp.Tables) != 0 {
+				t.Fatalf("%s returned %d tables, want 0", errorLabel, len(resp.Tables))
+			}
+		}, closeRejectedClient)
 	}
 	runRejectedSubscribeSingle := func(opIndex int) {
-		subLabel := stepLabel(opIndex, "rejected_subscribe_single")
 		client := dialGauntletProtocol(t, rt)
-		subErr := subscribeGauntletProtocolExpectErrorWithLabel(t, client, "SELECT * FROM players WHERE missing = 1", state.nextProtocolIDValue(), state.nextProtocolIDValue(), subLabel)
-		if subErr.Error == "" {
-			t.Fatalf("%s error = empty", subLabel)
-		}
-		assertGauntletReadMatchesModel(t, rt, *model, subLabel)
-		got := queryGauntletProtocolPlayersWithLabel(t, client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-sub-%d", opIndex)), subLabel+" recovery one-off")
-		if diff := diffGauntletPlayers(got, model.players); diff != "" {
-			t.Fatalf("%s recovery one-off mismatch:\n%s", subLabel, diff)
-		}
-		quiet = append(quiet, gauntletMixedClientQuietClient{client: client, reason: subLabel})
+		runIsolatedProtocolError(opIndex, "rejected_subscribe_single", client, func(client *websocket.Conn, errorLabel string) {
+			subErr := subscribeGauntletProtocolExpectErrorWithLabel(t, client, "SELECT * FROM players WHERE missing = 1", state.nextProtocolIDValue(), state.nextProtocolIDValue(), errorLabel)
+			if subErr.Error == "" {
+				t.Fatalf("%s error = empty", errorLabel)
+			}
+		}, retireRejectedClient)
 	}
 	runRejectedSubscribeMulti := func(opIndex int) {
-		subLabel := stepLabel(opIndex, "rejected_subscribe_multi")
 		client := dialGauntletProtocol(t, rt)
-		subErr := subscribeMultiGauntletProtocolExpectErrorWithLabel(t, client, []string{
-			"SELECT * FROM players WHERE id = 1",
-			"SELECT * FROM missing",
-		}, state.nextProtocolIDValue(), state.nextProtocolIDValue(), subLabel)
-		if subErr.Error == "" {
-			t.Fatalf("%s error = empty", subLabel)
-		}
-		assertGauntletReadMatchesModel(t, rt, *model, subLabel)
-		got := queryGauntletProtocolPlayersWithLabel(t, client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-multi-sub-%d", opIndex)), subLabel+" recovery one-off")
-		if diff := diffGauntletPlayers(got, model.players); diff != "" {
-			t.Fatalf("%s recovery one-off mismatch:\n%s", subLabel, diff)
-		}
-		quiet = append(quiet, gauntletMixedClientQuietClient{client: client, reason: subLabel})
+		runIsolatedProtocolError(opIndex, "rejected_subscribe_multi", client, func(client *websocket.Conn, errorLabel string) {
+			subErr := subscribeMultiGauntletProtocolExpectErrorWithLabel(t, client, []string{
+				"SELECT * FROM players WHERE id = 1",
+				"SELECT * FROM missing",
+			}, state.nextProtocolIDValue(), state.nextProtocolIDValue(), errorLabel)
+			if subErr.Error == "" {
+				t.Fatalf("%s error = empty", errorLabel)
+			}
+		}, retireRejectedClient)
 	}
 	runRejectedUnsubscribeSingle := func(opIndex int) {
 		sub := active[0]
-		unsubscribeLabel := stepLabel(opIndex, "rejected_unsubscribe_single "+sub.role)
-		requestID := state.nextProtocolIDValue()
-		missingQueryID := state.nextProtocolIDValue() + 500000
-		subErr := unsubscribeGauntletProtocolExpectErrorWithLabel(t, sub.client, requestID, missingQueryID, unsubscribeLabel)
-		if subErr.Error == "" {
-			t.Fatalf("%s error = empty", unsubscribeLabel)
-		}
-		assertGauntletReadMatchesModel(t, rt, *model, unsubscribeLabel)
-		got := queryGauntletProtocolPlayersWithLabel(t, sub.client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-unsub-%d", opIndex)), unsubscribeLabel+" recovery one-off")
-		if diff := diffGauntletPlayers(got, model.players); diff != "" {
-			t.Fatalf("%s recovery one-off mismatch:\n%s", unsubscribeLabel, diff)
-		}
+		runIsolatedProtocolError(opIndex, "rejected_unsubscribe_single "+sub.role, sub.client, func(client *websocket.Conn, errorLabel string) {
+			requestID := state.nextProtocolIDValue()
+			missingQueryID := state.nextProtocolIDValue() + 500000
+			subErr := unsubscribeGauntletProtocolExpectErrorWithLabel(t, client, requestID, missingQueryID, errorLabel)
+			if subErr.Error == "" {
+				t.Fatalf("%s error = empty", errorLabel)
+			}
+		}, nil)
 	}
 	runRejectedUnsubscribeMulti := func(opIndex int) {
 		sub := active[0]
-		unsubscribeLabel := stepLabel(opIndex, "rejected_unsubscribe_multi "+sub.role)
-		requestID := state.nextProtocolIDValue()
-		missingQueryID := state.nextProtocolIDValue() + 500000
-		subErr := unsubscribeMultiGauntletProtocolExpectErrorWithLabel(t, sub.client, requestID, missingQueryID, unsubscribeLabel)
-		if subErr.Error == "" {
-			t.Fatalf("%s error = empty", unsubscribeLabel)
-		}
-		assertGauntletReadMatchesModel(t, rt, *model, unsubscribeLabel)
-		got := queryGauntletProtocolPlayersWithLabel(t, sub.client, "SELECT * FROM players", []byte(fmt.Sprintf("after-bad-unsub-multi-%d", opIndex)), unsubscribeLabel+" recovery one-off")
-		if diff := diffGauntletPlayers(got, model.players); diff != "" {
-			t.Fatalf("%s recovery one-off mismatch:\n%s", unsubscribeLabel, diff)
-		}
+		runIsolatedProtocolError(opIndex, "rejected_unsubscribe_multi "+sub.role, sub.client, func(client *websocket.Conn, errorLabel string) {
+			requestID := state.nextProtocolIDValue()
+			missingQueryID := state.nextProtocolIDValue() + 500000
+			subErr := unsubscribeMultiGauntletProtocolExpectErrorWithLabel(t, client, requestID, missingQueryID, errorLabel)
+			if subErr.Error == "" {
+				t.Fatalf("%s error = empty", errorLabel)
+			}
+		}, nil)
 	}
 	assertQuietAfterCommittedUpdate := func(updateLabel string) {
 		for _, retired := range quiet {
@@ -2132,11 +2264,7 @@ func runGauntletMixedProtocolClientWorkloadSegment(t *testing.T, rt *shunter.Run
 		if viaProtocol {
 			outcome = callGauntletProtocolReducer(t, reducerClient, op, state.nextProtocolIDValue(), reducerLabel)
 		} else {
-			res, err := rt.CallReducer(context.Background(), op.reducer, []byte(op.args))
-			if err != nil {
-				t.Fatalf("%s admission error: %v", reducerLabel, err)
-			}
-			outcome = gauntletReducerOutcomeFromResult(res)
+			outcome = callGauntletRuntimeReducer(t, rt, op, reducerLabel)
 		}
 
 		advanceGauntletModel(t, model, op, outcome, reducerLabel)
@@ -2236,6 +2364,8 @@ func runGauntletMixedProtocolClientWorkloadSegment(t *testing.T, rt *shunter.Run
 		switch workloadOp {
 		case "subscribe_single":
 			subscribeSingle(opIndex, "transient")
+		case "subscribe_predicate_single":
+			subscribePredicateSingle(opIndex, "transient_predicate")
 		case "subscribe_multi":
 			subscribeMulti(opIndex, "transient_multi")
 		case "unsubscribe_single":
@@ -2298,6 +2428,10 @@ func runGauntletMixedProtocolClientWorkloadSegment(t *testing.T, rt *shunter.Run
 			runReducer(opIndex, "runtime unknown CallReducer", state.nextUnknownReducerOp(shunter.StatusFailedInternal), false)
 		case "protocol_unknown_reducer":
 			runReducer(opIndex, "protocol unknown CallReducer", state.nextUnknownReducerOp(shunter.StatusFailedUser), true)
+		case "runtime_lifecycle_reducer":
+			runReducer(opIndex, "runtime lifecycle CallReducer", state.nextLifecycleReducerOp(shunter.StatusFailedInternal), false)
+		case "protocol_lifecycle_reducer":
+			runReducer(opIndex, "protocol lifecycle CallReducer", state.nextLifecycleReducerOp(shunter.StatusFailedUser), true)
 		default:
 			t.Fatalf("%s unknown workload operation %q", stepLabel(opIndex, "dispatch"), workloadOp)
 		}
@@ -2320,6 +2454,20 @@ func gauntletReducerOutcomeFromResult(res shunter.ReducerResult) gauntletReducer
 	return outcome
 }
 
+func callGauntletRuntimeReducer(t *testing.T, rt *shunter.Runtime, op gauntletOp, label string) gauntletReducerOutcome {
+	t.Helper()
+	return callGauntletRuntimeReducerWithContext(t, rt, context.Background(), op, label)
+}
+
+func callGauntletRuntimeReducerWithContext(t *testing.T, rt *shunter.Runtime, ctx context.Context, op gauntletOp, label string) gauntletReducerOutcome {
+	t.Helper()
+	res, err := rt.CallReducer(ctx, op.reducer, []byte(op.args))
+	if err != nil {
+		t.Fatalf("%s admission error: %v", label, err)
+	}
+	return gauntletReducerOutcomeFromResult(res)
+}
+
 func advanceGauntletModel(t *testing.T, model *gauntletModel, op gauntletOp, outcome gauntletReducerOutcome, label string) {
 	t.Helper()
 	if outcome.status != op.wantStatus {
@@ -2336,11 +2484,8 @@ func runGauntletTrace(t *testing.T, rt *shunter.Runtime, model *gauntletModel, t
 	t.Helper()
 	for i, op := range trace {
 		step := startStep + i
-		res, err := rt.CallReducer(context.Background(), op.reducer, []byte(op.args))
-		if err != nil {
-			t.Fatalf("%s step %d %s admission error: %v", label, step, op, err)
-		}
-		advanceGauntletModel(t, model, op, gauntletReducerOutcomeFromResult(res), fmt.Sprintf("%s step %d %s", label, step, op))
+		stepLabel := fmt.Sprintf("%s step %d %s", label, step, op)
+		advanceGauntletModel(t, model, op, callGauntletRuntimeReducer(t, rt, op, stepLabel), stepLabel)
 		assertGauntletReadMatchesModel(t, rt, *model, fmt.Sprintf("%s after step %d %s", label, step, op))
 	}
 }
@@ -3481,6 +3626,35 @@ func assertGauntletProtocolClosed(t *testing.T, client *websocket.Conn, label st
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("%s protocol connection did not close before timeout", label)
+	}
+}
+
+func assertGauntletRuntimeClosedLocalSurfaces(t *testing.T, rt *shunter.Runtime, label string) {
+	t.Helper()
+	if rt.Ready() {
+		t.Fatalf("%s Ready = true, want false", label)
+	}
+	health := rt.Health()
+	if health.State != shunter.RuntimeStateClosed {
+		t.Fatalf("%s health state = %s, want %s", label, health.State, shunter.RuntimeStateClosed)
+	}
+	if health.Ready {
+		t.Fatalf("%s health Ready = true, want false", label)
+	}
+
+	err := rt.Read(context.Background(), func(shunter.LocalReadView) error { return nil })
+	if !errors.Is(err, shunter.ErrRuntimeClosed) {
+		t.Fatalf("%s Read error = %v, want ErrRuntimeClosed", label, err)
+	}
+	_, err = rt.CallReducer(context.Background(), "insert_player", []byte("1:after_close"))
+	if !errors.Is(err, shunter.ErrRuntimeClosed) {
+		t.Fatalf("%s CallReducer error = %v, want ErrRuntimeClosed", label, err)
+	}
+	if err := rt.Start(context.Background()); !errors.Is(err, shunter.ErrRuntimeClosed) {
+		t.Fatalf("%s Start error = %v, want ErrRuntimeClosed", label, err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("%s second Close returned error: %v", label, err)
 	}
 }
 
