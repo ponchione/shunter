@@ -20,16 +20,26 @@ func handleUnsubscribeSingle(
 	msg *UnsubscribeSingleMsg,
 	executor ExecutorInbox,
 ) {
+	handleUnsubscribeSet(ctx, conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle, executor)
+}
+
+func handleUnsubscribeSet(
+	ctx context.Context,
+	conn *Conn,
+	requestID, queryID uint32,
+	variant SubscriptionSetVariant,
+	executor ExecutorInbox,
+) {
 	receipt := time.Now()
 	if err := executor.UnregisterSubscriptionSet(ctx, UnregisterSubscriptionSetRequest{
 		ConnID:    conn.ID,
-		QueryID:   msg.QueryID,
-		RequestID: msg.RequestID,
-		Variant:   SubscriptionSetVariantSingle,
-		Reply:     makeUnsubscribeSetReply(conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle),
+		QueryID:   queryID,
+		RequestID: requestID,
+		Variant:   variant,
+		Reply:     makeUnsubscribeSetReply(conn, requestID, queryID, variant),
 		Receipt:   receipt,
 	}); err != nil {
-		sendExecutorUnavailableError(conn, receipt, msg.RequestID, msg.QueryID, err)
+		sendExecutorUnavailableError(conn, receipt, requestID, queryID, err)
 		return
 	}
 }

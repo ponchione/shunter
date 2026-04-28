@@ -30,11 +30,8 @@ type SchemaLookup interface {
 //  5. Join predicates require an index on at least one side of the join
 //  6. Predicates use literal values (no cross-column references outside joins)
 func ValidatePredicate(pred Predicate, schema SchemaLookup) error {
-	if pred == nil {
-		return fmt.Errorf("%w: nil predicate", ErrInvalidPredicate)
-	}
-	if tables := pred.Tables(); len(tables) > 2 {
-		return fmt.Errorf("%w: predicate references %d tables", ErrTooManyTables, len(tables))
+	if err := validateRootPredicate(pred); err != nil {
+		return err
 	}
 	return validateWithOptions(pred, schema, validateOptions{requireJoinIndex: true})
 }
@@ -44,13 +41,20 @@ func ValidatePredicate(pred Predicate, schema SchemaLookup) error {
 // execution may scan tables directly, so it does not require join-column
 // indexes.
 func ValidateQueryPredicate(pred Predicate, schema SchemaLookup) error {
+	if err := validateRootPredicate(pred); err != nil {
+		return err
+	}
+	return validateWithOptions(pred, schema, validateOptions{requireJoinIndex: false})
+}
+
+func validateRootPredicate(pred Predicate) error {
 	if pred == nil {
 		return fmt.Errorf("%w: nil predicate", ErrInvalidPredicate)
 	}
 	if tables := pred.Tables(); len(tables) > 2 {
 		return fmt.Errorf("%w: predicate references %d tables", ErrTooManyTables, len(tables))
 	}
-	return validateWithOptions(pred, schema, validateOptions{requireJoinIndex: false})
+	return nil
 }
 
 type validateOptions struct {
@@ -67,31 +71,13 @@ func validateWithOptions(pred Predicate, s SchemaLookup, opts validateOptions) e
 	case ColRange:
 		return validateColRange(p, s)
 	case And:
-		if p.Left == nil || p.Right == nil {
-			return fmt.Errorf("%w: And with nil child", ErrInvalidPredicate)
-		}
-		if err := validateWithOptions(p.Left, s, opts); err != nil {
-			return err
-		}
-		return validateWithOptions(p.Right, s, opts)
+		return validateBinaryPredicate("And", p.Left, p.Right, s, opts)
 	case Or:
-		if p.Left == nil || p.Right == nil {
-			return fmt.Errorf("%w: Or with nil child", ErrInvalidPredicate)
-		}
-		if err := validateWithOptions(p.Left, s, opts); err != nil {
-			return err
-		}
-		return validateWithOptions(p.Right, s, opts)
+		return validateBinaryPredicate("Or", p.Left, p.Right, s, opts)
 	case AllRows:
-		if !s.TableExists(p.Table) {
-			return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
-		}
-		return nil
+		return validateTableExists(p.Table, s)
 	case NoRows:
-		if !s.TableExists(p.Table) {
-			return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
-		}
-		return nil
+		return validateTableExists(p.Table, s)
 	case Join:
 		return validateJoin(p, s, opts)
 	case CrossJoin:
@@ -101,42 +87,40 @@ func validateWithOptions(pred Predicate, s SchemaLookup, opts validateOptions) e
 	}
 }
 
+func validateBinaryPredicate(name string, left, right Predicate, s SchemaLookup, opts validateOptions) error {
+	if left == nil || right == nil {
+		return fmt.Errorf("%w: %s with nil child", ErrInvalidPredicate, name)
+	}
+	if err := validateWithOptions(left, s, opts); err != nil {
+		return err
+	}
+	return validateWithOptions(right, s, opts)
+}
+
 func validateColEq(p ColEq, s SchemaLookup) error {
-	if !s.TableExists(p.Table) {
-		return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
-	}
-	if !s.ColumnExists(p.Table, p.Column) {
-		return fmt.Errorf("%w: table %d column %d", ErrColumnNotFound, p.Table, p.Column)
-	}
-	want := s.ColumnType(p.Table, p.Column)
-	if p.Value.Kind() != want {
-		return fmt.Errorf("%w: ColEq value kind %s does not match column kind %s", ErrInvalidPredicate, p.Value.Kind(), want)
-	}
-	return nil
+	return validateColumnValue("ColEq", p.Table, p.Column, p.Value.Kind(), s)
 }
 
 func validateColNe(p ColNe, s SchemaLookup) error {
-	if !s.TableExists(p.Table) {
-		return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
+	return validateColumnValue("ColNe", p.Table, p.Column, p.Value.Kind(), s)
+}
+
+func validateColumnValue(name string, table TableID, col ColID, got ValueKind, s SchemaLookup) error {
+	want, err := validateColumn(table, col, s)
+	if err != nil {
+		return err
 	}
-	if !s.ColumnExists(p.Table, p.Column) {
-		return fmt.Errorf("%w: table %d column %d", ErrColumnNotFound, p.Table, p.Column)
-	}
-	want := s.ColumnType(p.Table, p.Column)
-	if p.Value.Kind() != want {
-		return fmt.Errorf("%w: ColNe value kind %s does not match column kind %s", ErrInvalidPredicate, p.Value.Kind(), want)
+	if got != want {
+		return fmt.Errorf("%w: %s value kind %s does not match column kind %s", ErrInvalidPredicate, name, got, want)
 	}
 	return nil
 }
 
 func validateColRange(p ColRange, s SchemaLookup) error {
-	if !s.TableExists(p.Table) {
-		return fmt.Errorf("%w: table %d", ErrTableNotFound, p.Table)
+	want, err := validateColumn(p.Table, p.Column, s)
+	if err != nil {
+		return err
 	}
-	if !s.ColumnExists(p.Table, p.Column) {
-		return fmt.Errorf("%w: table %d column %d", ErrColumnNotFound, p.Table, p.Column)
-	}
-	want := s.ColumnType(p.Table, p.Column)
 	if !p.Lower.Unbounded && p.Lower.Value.Kind() != want {
 		return fmt.Errorf("%w: ColRange lower bound kind %s does not match column kind %s", ErrInvalidPredicate, p.Lower.Value.Kind(), want)
 	}
@@ -144,6 +128,23 @@ func validateColRange(p ColRange, s SchemaLookup) error {
 		return fmt.Errorf("%w: ColRange upper bound kind %s does not match column kind %s", ErrInvalidPredicate, p.Upper.Value.Kind(), want)
 	}
 	return nil
+}
+
+func validateTableExists(table TableID, s SchemaLookup) error {
+	if !s.TableExists(table) {
+		return fmt.Errorf("%w: table %d", ErrTableNotFound, table)
+	}
+	return nil
+}
+
+func validateColumn(table TableID, col ColID, s SchemaLookup) (ValueKind, error) {
+	if err := validateTableExists(table, s); err != nil {
+		return 0, err
+	}
+	if !s.ColumnExists(table, col) {
+		return 0, fmt.Errorf("%w: table %d column %d", ErrColumnNotFound, table, col)
+	}
+	return s.ColumnType(table, col), nil
 }
 
 func validateJoin(p Join, s SchemaLookup, opts validateOptions) error {
@@ -195,38 +196,38 @@ func validateJoin(p Join, s SchemaLookup, opts validateOptions) error {
 func validateSelfJoinFilterAliases(p Predicate, leftAlias, rightAlias uint8) error {
 	switch x := p.(type) {
 	case ColEq:
-		if x.Alias != leftAlias && x.Alias != rightAlias {
+		if !isJoinSideAlias(x.Alias, leftAlias, rightAlias) {
 			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.Alias, leftAlias, rightAlias)
 		}
 	case ColNe:
-		if x.Alias != leftAlias && x.Alias != rightAlias {
+		if !isJoinSideAlias(x.Alias, leftAlias, rightAlias) {
 			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.Alias, leftAlias, rightAlias)
 		}
 	case ColRange:
-		if x.Alias != leftAlias && x.Alias != rightAlias {
+		if !isJoinSideAlias(x.Alias, leftAlias, rightAlias) {
 			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.Alias, leftAlias, rightAlias)
 		}
 	case And:
-		if x.Left != nil {
-			if err := validateSelfJoinFilterAliases(x.Left, leftAlias, rightAlias); err != nil {
-				return err
-			}
-		}
-		if x.Right != nil {
-			if err := validateSelfJoinFilterAliases(x.Right, leftAlias, rightAlias); err != nil {
-				return err
-			}
-		}
+		return validateSelfJoinFilterAliasChildren(x.Left, x.Right, leftAlias, rightAlias)
 	case Or:
-		if x.Left != nil {
-			if err := validateSelfJoinFilterAliases(x.Left, leftAlias, rightAlias); err != nil {
-				return err
-			}
+		return validateSelfJoinFilterAliasChildren(x.Left, x.Right, leftAlias, rightAlias)
+	}
+	return nil
+}
+
+func isJoinSideAlias(alias, leftAlias, rightAlias uint8) bool {
+	return alias == leftAlias || alias == rightAlias
+}
+
+func validateSelfJoinFilterAliasChildren(left, right Predicate, leftAlias, rightAlias uint8) error {
+	if left != nil {
+		if err := validateSelfJoinFilterAliases(left, leftAlias, rightAlias); err != nil {
+			return err
 		}
-		if x.Right != nil {
-			if err := validateSelfJoinFilterAliases(x.Right, leftAlias, rightAlias); err != nil {
-				return err
-			}
+	}
+	if right != nil {
+		if err := validateSelfJoinFilterAliases(right, leftAlias, rightAlias); err != nil {
+			return err
 		}
 	}
 	return nil

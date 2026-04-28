@@ -1,25 +1,16 @@
 package types
 
-import (
-	"encoding/hex"
-	"errors"
-	"fmt"
-)
+import "errors"
 
 // IsZero reports whether c is the all-zero ConnectionID. The zero
 // value is reserved for internal callers (no active connection).
 func (c ConnectionID) IsZero() bool {
-	for _, b := range c {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
+	return isZeroBytes(c[:])
 }
 
 // Hex returns the canonical 32-char lowercase hex encoding of c.
 func (c ConnectionID) Hex() string {
-	return hex.EncodeToString(c[:])
+	return hexString(c[:])
 }
 
 // ErrInvalidConnectionIDHex is returned when ParseConnectionIDHex
@@ -30,12 +21,9 @@ var ErrInvalidConnectionIDHex = errors.New("types: invalid connection_id hex")
 // ConnectionID.Hex.
 func ParseConnectionIDHex(s string) (ConnectionID, error) {
 	var c ConnectionID
-	if len(s) != 32 {
-		return c, fmt.Errorf("%w: length %d, want 32", ErrInvalidConnectionIDHex, len(s))
-	}
-	b, err := hex.DecodeString(s)
+	b, err := parseFixedHex(s, 32, ErrInvalidConnectionIDHex)
 	if err != nil {
-		return c, fmt.Errorf("%w: %v", ErrInvalidConnectionIDHex, err)
+		return c, err
 	}
 	copy(c[:], b)
 	return c, nil

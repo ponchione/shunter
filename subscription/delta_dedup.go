@@ -48,25 +48,28 @@ func ReconcileJoinDelta(insertFragments, deleteFragments [][]types.ProductValue)
 		}
 	}
 
-	for _, k := range st.insertOrder {
-		n := st.insertCounts[k]
-		if n < 0 {
-			panic(fmt.Sprintf("subscription: negative insert count %d for row key", n))
-		}
-		for i := 0; i < n; i++ {
-			inserts = append(inserts, st.insertRows[k])
-		}
-	}
-	for _, k := range st.deleteOrder {
-		n := st.deleteCounts[k]
-		if n < 0 {
-			panic(fmt.Sprintf("subscription: negative delete count %d for row key", n))
-		}
-		for i := 0; i < n; i++ {
-			deletes = append(deletes, st.deleteRows[k])
-		}
-	}
+	inserts = appendReconciledRows(inserts, st.insertOrder, st.insertCounts, st.insertRows, "insert")
+	deletes = appendReconciledRows(deletes, st.deleteOrder, st.deleteCounts, st.deleteRows, "delete")
 	return inserts, deletes
+}
+
+func appendReconciledRows(
+	out []types.ProductValue,
+	order []string,
+	counts map[string]int,
+	rows map[string]types.ProductValue,
+	label string,
+) []types.ProductValue {
+	for _, k := range order {
+		n := counts[k]
+		if n < 0 {
+			panic(fmt.Sprintf("subscription: negative %s count %d for row key", label, n))
+		}
+		for i := 0; i < n; i++ {
+			out = append(out, rows[k])
+		}
+	}
+	return out
 }
 
 // encodeRowKey returns a deterministic byte string identifying row for use

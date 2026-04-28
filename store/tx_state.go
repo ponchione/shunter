@@ -55,22 +55,12 @@ func (tx *TxState) CancelDelete(tableID schema.TableID, id types.RowID) {
 
 // IsInserted returns whether a row was inserted in this tx.
 func (tx *TxState) IsInserted(tableID schema.TableID, id types.RowID) bool {
-	m := tx.inserts[tableID]
-	if m == nil {
-		return false
-	}
-	_, ok := m[id]
-	return ok
+	return mapContainsKey(tx.inserts[tableID], id)
 }
 
 // IsDeleted returns whether a committed row is marked for deletion.
 func (tx *TxState) IsDeleted(tableID schema.TableID, id types.RowID) bool {
-	m := tx.deletes[tableID]
-	if m == nil {
-		return false
-	}
-	_, ok := m[id]
-	return ok
+	return mapContainsKey(tx.deletes[tableID], id)
 }
 
 // Inserts returns all tx-local inserts for a table.

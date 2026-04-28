@@ -195,10 +195,7 @@ func decodeSubscribeSingle(body []byte) (SubscribeSingleMsg, error) {
 	var m SubscribeSingleMsg
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
 		return m, err
 	}
 	if m.QueryString, off, err = readString(body, off); err != nil {
@@ -214,10 +211,7 @@ func decodeUnsubscribeSingle(body []byte) (UnsubscribeSingleMsg, error) {
 	var m UnsubscribeSingleMsg
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "UnsubscribeSingle"); err != nil {
@@ -275,10 +269,7 @@ func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 	var m SubscribeMultiMsg
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
 		return m, err
 	}
 	count, off, err := readUint32(body, off)
@@ -304,16 +295,23 @@ func decodeUnsubscribeMulti(body []byte) (UnsubscribeMultiMsg, error) {
 	var m UnsubscribeMultiMsg
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
 		return m, err
 	}
 	if err := requireFullyConsumed(body, off, "UnsubscribeMulti"); err != nil {
 		return m, err
 	}
 	return m, nil
+}
+
+func readRequestQueryID(body []byte) (requestID uint32, queryID uint32, off int, err error) {
+	if requestID, off, err = readUint32(body, 0); err != nil {
+		return 0, 0, off, err
+	}
+	if queryID, off, err = readUint32(body, off); err != nil {
+		return 0, 0, off, err
+	}
+	return requestID, queryID, off, nil
 }
 
 // --- Framing primitives ---

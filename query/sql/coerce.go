@@ -192,49 +192,13 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 	case types.KindUint64:
 		return coerceUnsigned(lit, kind, math.MaxUint64, func(u uint64) types.Value { return types.NewUint64(u) })
 	case types.KindInt128:
-		switch lit.Kind {
-		case LitInt:
-			return types.NewInt128FromInt64(lit.Int), nil
-		case LitBigInt:
-			return coerceBigIntToInt128(lit, kind)
-		default:
-			return types.Value{}, mismatch(lit, kind)
-		}
+		return coerceWideSigned(lit, kind, types.NewInt128FromInt64, coerceBigIntToInt128)
 	case types.KindUint128:
-		switch lit.Kind {
-		case LitInt:
-			if lit.Int < 0 {
-				text, _ := renderLiteralSourceText(lit)
-				return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
-			}
-			return types.NewUint128FromUint64(uint64(lit.Int)), nil
-		case LitBigInt:
-			return coerceBigIntToUint128(lit, kind)
-		default:
-			return types.Value{}, mismatch(lit, kind)
-		}
+		return coerceWideUnsigned(lit, kind, types.NewUint128FromUint64, coerceBigIntToUint128)
 	case types.KindInt256:
-		switch lit.Kind {
-		case LitInt:
-			return types.NewInt256FromInt64(lit.Int), nil
-		case LitBigInt:
-			return coerceBigIntToInt256(lit, kind)
-		default:
-			return types.Value{}, mismatch(lit, kind)
-		}
+		return coerceWideSigned(lit, kind, types.NewInt256FromInt64, coerceBigIntToInt256)
 	case types.KindUint256:
-		switch lit.Kind {
-		case LitInt:
-			if lit.Int < 0 {
-				text, _ := renderLiteralSourceText(lit)
-				return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
-			}
-			return types.NewUint256FromUint64(uint64(lit.Int)), nil
-		case LitBigInt:
-			return coerceBigIntToUint256(lit, kind)
-		default:
-			return types.Value{}, mismatch(lit, kind)
-		}
+		return coerceWideUnsigned(lit, kind, types.NewUint256FromUint64, coerceBigIntToUint256)
 	case types.KindTimestamp:
 		// Reference `parse(value, Timestamp)` at expr/src/lib.rs:359 has no
 		// Timestamp arm in the type-match and falls to the catch-all
@@ -326,6 +290,42 @@ func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64
 		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
 	return mk(u), nil
+}
+
+func coerceWideSigned(
+	lit Literal,
+	kind types.ValueKind,
+	mkInt func(int64) types.Value,
+	mkBig func(Literal, types.ValueKind) (types.Value, error),
+) (types.Value, error) {
+	switch lit.Kind {
+	case LitInt:
+		return mkInt(lit.Int), nil
+	case LitBigInt:
+		return mkBig(lit, kind)
+	default:
+		return types.Value{}, mismatch(lit, kind)
+	}
+}
+
+func coerceWideUnsigned(
+	lit Literal,
+	kind types.ValueKind,
+	mkInt func(uint64) types.Value,
+	mkBig func(Literal, types.ValueKind) (types.Value, error),
+) (types.Value, error) {
+	switch lit.Kind {
+	case LitInt:
+		if lit.Int < 0 {
+			text, _ := renderLiteralSourceText(lit)
+			return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		}
+		return mkInt(uint64(lit.Int)), nil
+	case LitBigInt:
+		return mkBig(lit, kind)
+	default:
+		return types.Value{}, mismatch(lit, kind)
+	}
 }
 
 func mismatch(lit Literal, kind types.ValueKind) error {

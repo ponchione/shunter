@@ -57,14 +57,14 @@ func (s *connManagerSender) Send(connID types.ConnectionID, msg any) error {
 }
 
 func (s *connManagerSender) SendTransactionUpdate(connID types.ConnectionID, update *TransactionUpdate) error {
-	conn := s.mgr.Get(connID)
-	if conn == nil {
-		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])
-	}
-	return s.enqueueOnConn(conn, connID, *update)
+	return enqueueTransactionEnvelope(s, connID, update)
 }
 
 func (s *connManagerSender) SendTransactionUpdateLight(connID types.ConnectionID, update *TransactionUpdateLight) error {
+	return enqueueTransactionEnvelope(s, connID, update)
+}
+
+func enqueueTransactionEnvelope[T TransactionUpdate | TransactionUpdateLight](s *connManagerSender, connID types.ConnectionID, update *T) error {
 	conn := s.mgr.Get(connID)
 	if conn == nil {
 		return fmt.Errorf("%w: %x", ErrConnNotFound, connID[:])

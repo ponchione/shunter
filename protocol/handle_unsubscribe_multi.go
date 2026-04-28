@@ -1,9 +1,6 @@
 package protocol
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
 // handleUnsubscribeMulti processes an incoming UnsubscribeMultiMsg.
 // The wire QueryID (shared across every predicate in the set) is
@@ -21,16 +18,5 @@ func handleUnsubscribeMulti(
 	msg *UnsubscribeMultiMsg,
 	executor ExecutorInbox,
 ) {
-	receipt := time.Now()
-	if err := executor.UnregisterSubscriptionSet(ctx, UnregisterSubscriptionSetRequest{
-		ConnID:    conn.ID,
-		QueryID:   msg.QueryID,
-		RequestID: msg.RequestID,
-		Variant:   SubscriptionSetVariantMulti,
-		Reply:     makeUnsubscribeSetReply(conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantMulti),
-		Receipt:   receipt,
-	}); err != nil {
-		sendExecutorUnavailableError(conn, receipt, msg.RequestID, msg.QueryID, err)
-		return
-	}
+	handleUnsubscribeSet(ctx, conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantMulti, executor)
 }

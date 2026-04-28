@@ -69,44 +69,7 @@ func joinDriveCommitted(
 	join *Join,
 	resolver IndexResolver,
 ) []types.ProductValue {
-	if len(driving) == 0 || resolver == nil || dv.committed == nil {
-		return nil
-	}
-	if rhsIdx, ok := resolver.IndexIDForColumn(rhsTable, rhsCol); ok {
-		var out []types.ProductValue
-		for _, lrow := range driving {
-			if int(lhsCol) >= len(lrow) {
-				continue
-			}
-			key := store.NewIndexKey(lrow[lhsCol])
-			rowIDs := dv.committed.IndexSeek(rhsTable, rhsIdx, key)
-			for _, rid := range rowIDs {
-				rrow, ok := dv.committed.GetRow(rhsTable, rid)
-				if !ok {
-					continue
-				}
-				if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
-					out = append(out, joined)
-				}
-			}
-		}
-		return out
-	}
-	var out []types.ProductValue
-	for _, lrow := range driving {
-		if int(lhsCol) >= len(lrow) {
-			continue
-		}
-		for _, rrow := range dv.committed.TableScan(rhsTable) {
-			if int(rhsCol) >= len(rrow) || !lrow[lhsCol].Equal(rrow[rhsCol]) {
-				continue
-			}
-			if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
-				out = append(out, joined)
-			}
-		}
-	}
-	return out
+	return joinDriveCommittedRows(dv, driving, lhsTable, lhsCol, rhsTable, rhsCol, true, join, resolver)
 }
 
 // joinDriveCommittedReversed probes the committed LHS side while driving
@@ -119,23 +82,35 @@ func joinDriveCommittedReversed(
 	join *Join,
 	resolver IndexResolver,
 ) []types.ProductValue {
+	return joinDriveCommittedRows(dv, driving, rhsTable, rhsCol, lhsTable, lhsCol, false, join, resolver)
+}
+
+func joinDriveCommittedRows(
+	dv *DeltaView,
+	driving []types.ProductValue,
+	driveTable TableID, driveCol ColID,
+	probeTable TableID, probeCol ColID,
+	driveIsLeft bool,
+	join *Join,
+	resolver IndexResolver,
+) []types.ProductValue {
 	if len(driving) == 0 || resolver == nil || dv.committed == nil {
 		return nil
 	}
-	if lhsIdx, ok := resolver.IndexIDForColumn(lhsTable, lhsCol); ok {
+	if probeIdx, ok := resolver.IndexIDForColumn(probeTable, probeCol); ok {
 		var out []types.ProductValue
-		for _, rrow := range driving {
-			if int(rhsCol) >= len(rrow) {
+		for _, driveRow := range driving {
+			if int(driveCol) >= len(driveRow) {
 				continue
 			}
-			key := store.NewIndexKey(rrow[rhsCol])
-			rowIDs := dv.committed.IndexSeek(lhsTable, lhsIdx, key)
-			for _, lid := range rowIDs {
-				lrow, ok := dv.committed.GetRow(lhsTable, lid)
+			key := store.NewIndexKey(driveRow[driveCol])
+			rowIDs := dv.committed.IndexSeek(probeTable, probeIdx, key)
+			for _, rid := range rowIDs {
+				probeRow, ok := dv.committed.GetRow(probeTable, rid)
 				if !ok {
 					continue
 				}
-				if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
+				if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
 					out = append(out, joined)
 				}
 			}
@@ -143,20 +118,34 @@ func joinDriveCommittedReversed(
 		return out
 	}
 	var out []types.ProductValue
-	for _, rrow := range driving {
-		if int(rhsCol) >= len(rrow) {
+	for _, driveRow := range driving {
+		if int(driveCol) >= len(driveRow) {
 			continue
 		}
-		for _, lrow := range dv.committed.TableScan(lhsTable) {
-			if int(lhsCol) >= len(lrow) || !lrow[lhsCol].Equal(rrow[rhsCol]) {
+		for _, probeRow := range dv.committed.TableScan(probeTable) {
+			if int(probeCol) >= len(probeRow) || !driveRow[driveCol].Equal(probeRow[probeCol]) {
 				continue
 			}
-			if joined := tryJoinFilter(lrow, lhsTable, rrow, rhsTable, join); joined != nil {
+			if joined := tryJoinFilterFromDrive(driveRow, driveTable, probeRow, probeTable, driveIsLeft, join); joined != nil {
 				out = append(out, joined)
 			}
 		}
 	}
 	return out
+}
+
+func tryJoinFilterFromDrive(
+	driveRow types.ProductValue,
+	driveTable TableID,
+	probeRow types.ProductValue,
+	probeTable TableID,
+	driveIsLeft bool,
+	join *Join,
+) types.ProductValue {
+	if driveIsLeft {
+		return tryJoinFilter(driveRow, driveTable, probeRow, probeTable, join)
+	}
+	return tryJoinFilter(probeRow, probeTable, driveRow, driveTable, join)
 }
 
 // joinDriveDelta iterates the LHS delta driving slice and probes the RHS

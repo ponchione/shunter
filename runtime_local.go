@@ -122,13 +122,10 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 func (r *Runtime) readyExecutor() (*executor.Executor, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.stateName == RuntimeStateStarting {
-		return nil, ErrRuntimeStarting
+	if err := r.readyLocked(); err != nil {
+		return nil, err
 	}
-	if r.stateName == RuntimeStateClosing || r.stateName == RuntimeStateClosed {
-		return nil, ErrRuntimeClosed
-	}
-	if r.stateName != RuntimeStateReady || !r.ready.Load() || r.executor == nil {
+	if r.executor == nil {
 		return nil, ErrRuntimeNotReady
 	}
 	return r.executor, nil
@@ -163,14 +160,24 @@ func (r *Runtime) Read(ctx context.Context, fn func(LocalReadView) error) error 
 func (r *Runtime) readyState() (*store.CommittedState, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.stateName == RuntimeStateStarting {
-		return nil, ErrRuntimeStarting
+	if err := r.readyLocked(); err != nil {
+		return nil, err
 	}
-	if r.stateName == RuntimeStateClosing || r.stateName == RuntimeStateClosed {
-		return nil, ErrRuntimeClosed
-	}
-	if r.stateName != RuntimeStateReady || !r.ready.Load() || r.state == nil {
+	if r.state == nil {
 		return nil, ErrRuntimeNotReady
 	}
 	return r.state, nil
+}
+
+func (r *Runtime) readyLocked() error {
+	if r.stateName == RuntimeStateStarting {
+		return ErrRuntimeStarting
+	}
+	if r.stateName == RuntimeStateClosing || r.stateName == RuntimeStateClosed {
+		return ErrRuntimeClosed
+	}
+	if r.stateName != RuntimeStateReady || !r.ready.Load() {
+		return ErrRuntimeNotReady
+	}
+	return nil
 }

@@ -75,35 +75,27 @@ func (dv *DeltaView) Release() {
 
 func (dv *DeltaView) buildDeltaIndex(table TableID, cols []ColID) {
 	if ins := dv.inserts[table]; len(ins) > 0 {
-		byCol := acquireTableDeltaIndex()
-		for _, col := range cols {
-			byVal := acquireValuePositionIndex()
-			for i, row := range ins {
-				if int(col) >= len(row) {
-					continue
-				}
-				key := encodeValueKey(row[col])
-				byVal[key] = append(byVal[key], i)
-			}
-			byCol[col] = byVal
-		}
-		dv.deltaIdx.insertIdx[table] = byCol
+		dv.deltaIdx.insertIdx[table] = buildDeltaIndexForRows(ins, cols)
 	}
 	if del := dv.deletes[table]; len(del) > 0 {
-		byCol := acquireTableDeltaIndex()
-		for _, col := range cols {
-			byVal := acquireValuePositionIndex()
-			for i, row := range del {
-				if int(col) >= len(row) {
-					continue
-				}
-				key := encodeValueKey(row[col])
-				byVal[key] = append(byVal[key], i)
-			}
-			byCol[col] = byVal
-		}
-		dv.deltaIdx.deleteIdx[table] = byCol
+		dv.deltaIdx.deleteIdx[table] = buildDeltaIndexForRows(del, cols)
 	}
+}
+
+func buildDeltaIndexForRows(rows []types.ProductValue, cols []ColID) map[ColID]map[string][]int {
+	byCol := acquireTableDeltaIndex()
+	for _, col := range cols {
+		byVal := acquireValuePositionIndex()
+		for i, row := range rows {
+			if int(col) >= len(row) {
+				continue
+			}
+			key := encodeValueKey(row[col])
+			byVal[key] = append(byVal[key], i)
+		}
+		byCol[col] = byVal
+	}
+	return byCol
 }
 
 // InsertedRows returns the delta inserts for a table (nil if none).

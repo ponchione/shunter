@@ -240,16 +240,12 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		buf.Write(msg.ConnectionID[:])
 	case SubscribeSingleApplied:
 		buf.WriteByte(TagSubscribeSingleApplied)
-		writeUint32(&buf, msg.RequestID)
-		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
-		writeUint32(&buf, msg.QueryID)
+		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
 		writeString(&buf, msg.TableName)
 		writeBytes(&buf, msg.Rows)
 	case UnsubscribeSingleApplied:
 		buf.WriteByte(TagUnsubscribeSingleApplied)
-		writeUint32(&buf, msg.RequestID)
-		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
-		writeUint32(&buf, msg.QueryID)
+		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
 		if msg.HasRows {
 			buf.WriteByte(1)
 			writeBytes(&buf, msg.Rows)
@@ -285,15 +281,11 @@ func EncodeServerMessage(m any) ([]byte, error) {
 		writeInt64(&buf, msg.TotalHostExecutionDuration)
 	case SubscribeMultiApplied:
 		buf.WriteByte(TagSubscribeMultiApplied)
-		writeUint32(&buf, msg.RequestID)
-		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
-		writeUint32(&buf, msg.QueryID)
+		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
 		writeSubscriptionUpdates(&buf, msg.Update)
 	case UnsubscribeMultiApplied:
 		buf.WriteByte(TagUnsubscribeMultiApplied)
-		writeUint32(&buf, msg.RequestID)
-		writeUint64(&buf, msg.TotalHostExecutionDurationMicros)
-		writeUint32(&buf, msg.QueryID)
+		writeAppliedHeader(&buf, msg.RequestID, msg.TotalHostExecutionDurationMicros, msg.QueryID)
 		writeSubscriptionUpdates(&buf, msg.Update)
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnknownMessageTag, m)
@@ -374,13 +366,7 @@ func decodeSubscribeSingleApplied(body []byte) (SubscribeSingleApplied, error) {
 	var m SubscribeSingleApplied
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, off); err != nil {
-		return m, err
-	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.RequestID, m.TotalHostExecutionDurationMicros, m.QueryID, off, err = readAppliedHeader(body); err != nil {
 		return m, err
 	}
 	if m.TableName, off, err = readString(body, off); err != nil {
@@ -399,13 +385,7 @@ func decodeUnsubscribeSingleApplied(body []byte) (UnsubscribeSingleApplied, erro
 	var m UnsubscribeSingleApplied
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, off); err != nil {
-		return m, err
-	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.RequestID, m.TotalHostExecutionDurationMicros, m.QueryID, off, err = readAppliedHeader(body); err != nil {
 		return m, err
 	}
 	if len(body)-off < 1 {
@@ -572,17 +552,30 @@ func readOptionalString(body []byte, off int) (*string, int, error) {
 	return &s, off, nil
 }
 
+func writeAppliedHeader(buf *bytes.Buffer, requestID uint32, durationMicros uint64, queryID uint32) {
+	writeUint32(buf, requestID)
+	writeUint64(buf, durationMicros)
+	writeUint32(buf, queryID)
+}
+
+func readAppliedHeader(body []byte) (requestID uint32, durationMicros uint64, queryID uint32, off int, err error) {
+	if requestID, off, err = readUint32(body, 0); err != nil {
+		return 0, 0, 0, off, err
+	}
+	if durationMicros, off, err = readUint64(body, off); err != nil {
+		return 0, 0, 0, off, err
+	}
+	if queryID, off, err = readUint32(body, off); err != nil {
+		return 0, 0, 0, off, err
+	}
+	return requestID, durationMicros, queryID, off, nil
+}
+
 func decodeSubscribeMultiApplied(body []byte) (SubscribeMultiApplied, error) {
 	var m SubscribeMultiApplied
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, off); err != nil {
-		return m, err
-	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.RequestID, m.TotalHostExecutionDurationMicros, m.QueryID, off, err = readAppliedHeader(body); err != nil {
 		return m, err
 	}
 	if m.Update, off, err = readSubscriptionUpdates(body, off); err != nil {
@@ -598,13 +591,7 @@ func decodeUnsubscribeMultiApplied(body []byte) (UnsubscribeMultiApplied, error)
 	var m UnsubscribeMultiApplied
 	var off int
 	var err error
-	if m.RequestID, off, err = readUint32(body, 0); err != nil {
-		return m, err
-	}
-	if m.TotalHostExecutionDurationMicros, off, err = readUint64(body, off); err != nil {
-		return m, err
-	}
-	if m.QueryID, off, err = readUint32(body, off); err != nil {
+	if m.RequestID, m.TotalHostExecutionDurationMicros, m.QueryID, off, err = readAppliedHeader(body); err != nil {
 		return m, err
 	}
 	if m.Update, off, err = readSubscriptionUpdates(body, off); err != nil {

@@ -100,11 +100,7 @@ func (ji *JoinEdgeIndex) Lookup(edge JoinEdge, filterValue Value) []QueryHash {
 	if !ok {
 		return []QueryHash{}
 	}
-	out := make([]QueryHash, 0, len(set))
-	for h := range set {
-		out = append(out, h)
-	}
-	return out
+	return mapKeys(set)
 }
 
 // EdgesForTable returns all edges where LHSTable matches.
@@ -113,9 +109,5 @@ func (ji *JoinEdgeIndex) EdgesForTable(table TableID) []JoinEdge {
 	if !ok {
 		return []JoinEdge{}
 	}
-	out := make([]JoinEdge, 0, len(perEdge))
-	for e := range perEdge {
-		out = append(out, e)
-	}
-	return out
+	return mapKeys(perEdge)
 }

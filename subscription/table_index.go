@@ -42,9 +42,5 @@ func (ti *TableIndex) Lookup(table TableID) []QueryHash {
 	if !ok {
 		return []QueryHash{}
 	}
-	out := make([]QueryHash, 0, len(set))
-	for h := range set {
-		out = append(out, h)
-	}
-	return out
+	return mapKeys(set)
 }

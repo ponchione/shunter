@@ -36,33 +36,32 @@ func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
 		buf.Write(scratch[:])
 
 		// Inserts.
-		binary.LittleEndian.PutUint32(scratch[:], uint32(len(tc.Inserts)))
-		buf.Write(scratch[:])
-		for _, row := range tc.Inserts {
-			rowBytes, err := encodeRow(row)
-			if err != nil {
-				return nil, err
-			}
-			binary.LittleEndian.PutUint32(scratch[:], uint32(len(rowBytes)))
-			buf.Write(scratch[:])
-			buf.Write(rowBytes)
+		if err := writeChangesetRows(&buf, tc.Inserts, &scratch); err != nil {
+			return nil, err
 		}
 
 		// Deletes.
-		binary.LittleEndian.PutUint32(scratch[:], uint32(len(tc.Deletes)))
-		buf.Write(scratch[:])
-		for _, row := range tc.Deletes {
-			rowBytes, err := encodeRow(row)
-			if err != nil {
-				return nil, err
-			}
-			binary.LittleEndian.PutUint32(scratch[:], uint32(len(rowBytes)))
-			buf.Write(scratch[:])
-			buf.Write(rowBytes)
+		if err := writeChangesetRows(&buf, tc.Deletes, &scratch); err != nil {
+			return nil, err
 		}
 	}
 
 	return buf.Bytes(), nil
+}
+
+func writeChangesetRows(buf *bytes.Buffer, rows []types.ProductValue, scratch *[4]byte) error {
+	binary.LittleEndian.PutUint32(scratch[:], uint32(len(rows)))
+	buf.Write(scratch[:])
+	for _, row := range rows {
+		rowBytes, err := encodeRow(row)
+		if err != nil {
+			return err
+		}
+		binary.LittleEndian.PutUint32(scratch[:], uint32(len(rowBytes)))
+		buf.Write(scratch[:])
+		buf.Write(rowBytes)
+	}
+	return nil
 }
 
 // DecodeChangeset deserializes a Changeset from bytes using the default row-size limit.

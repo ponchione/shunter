@@ -175,39 +175,36 @@ func (t *Transaction) checkCommittedUnique(tableID schema.TableID, table *Table,
 func (t *Transaction) tryUndelete(tableID schema.TableID, table *Table, row types.ProductValue) (types.RowID, bool, error) {
 	if pk := table.PrimaryIndex(); pk != nil {
 		key := pk.ExtractKey(row)
-		for _, rid := range pk.btree.Seek(key) {
-			if !t.tx.IsDeleted(tableID, rid) {
-				continue
-			}
-			committedRow, ok := table.GetRow(rid)
-			if !ok {
-				continue
-			}
-			if committedRow.Equal(row) {
-				t.tx.CancelDelete(tableID, rid)
-				return rid, true, nil
-			}
+		if rid, ok := t.tryUndeleteRowIDs(tableID, table, row, pk.btree.Seek(key)); ok {
+			return rid, true, nil
 		}
 	}
 
 	if table.rowHashIndex != nil {
 		h := row.Hash64()
-		for _, rid := range table.rowHashIndex[h] {
-			if !t.tx.IsDeleted(tableID, rid) {
-				continue
-			}
-			committedRow, ok := table.GetRow(rid)
-			if !ok {
-				continue
-			}
-			if committedRow.Equal(row) {
-				t.tx.CancelDelete(tableID, rid)
-				return rid, true, nil
-			}
+		if rid, ok := t.tryUndeleteRowIDs(tableID, table, row, table.rowHashIndex[h]); ok {
+			return rid, true, nil
 		}
 	}
 
 	return 0, false, nil
+}
+
+func (t *Transaction) tryUndeleteRowIDs(tableID schema.TableID, table *Table, row types.ProductValue, rowIDs []types.RowID) (types.RowID, bool) {
+	for _, rid := range rowIDs {
+		if !t.tx.IsDeleted(tableID, rid) {
+			continue
+		}
+		committedRow, ok := table.GetRow(rid)
+		if !ok {
+			continue
+		}
+		if committedRow.Equal(row) {
+			t.tx.CancelDelete(tableID, rid)
+			return rid, true
+		}
+	}
+	return 0, false
 }
 
 // Delete removes a row by RowID.

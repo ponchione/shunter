@@ -169,11 +169,15 @@ func orderCanonicalChildren(left, right Predicate) (Predicate, Predicate) {
 }
 
 func flattenCanonicalAnd(pred Predicate, table TableID, out []Predicate) []Predicate {
+	return flattenCanonicalAndForTable(pred, &table, out)
+}
+
+func flattenCanonicalAndForTable(pred Predicate, table *TableID, out []Predicate) []Predicate {
 	switch p := pred.(type) {
 	case And:
-		if predTable, ok := canonicalGroupTable(p); ok && predTable == table {
-			out = flattenCanonicalAnd(p.Left, table, out)
-			out = flattenCanonicalAnd(p.Right, table, out)
+		if table == nil || canonicalGroupMatchesTable(p, *table) {
+			out = flattenCanonicalAndForTable(p.Left, table, out)
+			out = flattenCanonicalAndForTable(p.Right, table, out)
 			return out
 		}
 	}
@@ -181,15 +185,24 @@ func flattenCanonicalAnd(pred Predicate, table TableID, out []Predicate) []Predi
 }
 
 func flattenCanonicalOr(pred Predicate, table TableID, out []Predicate) []Predicate {
+	return flattenCanonicalOrForTable(pred, &table, out)
+}
+
+func flattenCanonicalOrForTable(pred Predicate, table *TableID, out []Predicate) []Predicate {
 	switch p := pred.(type) {
 	case Or:
-		if predTable, ok := canonicalGroupTable(p); ok && predTable == table {
-			out = flattenCanonicalOr(p.Left, table, out)
-			out = flattenCanonicalOr(p.Right, table, out)
+		if table == nil || canonicalGroupMatchesTable(p, *table) {
+			out = flattenCanonicalOrForTable(p.Left, table, out)
+			out = flattenCanonicalOrForTable(p.Right, table, out)
 			return out
 		}
 	}
 	return append(out, pred)
+}
+
+func canonicalGroupMatchesTable(pred Predicate, table TableID) bool {
+	predTable, ok := canonicalGroupTable(pred)
+	return ok && predTable == table
 }
 
 func sortCanonicalPredicates(preds []Predicate) {
@@ -229,7 +242,7 @@ func dedupeCanonicalPredicates(preds []Predicate) []Predicate {
 	return out
 }
 
-func absorbCanonicalPredicates(preds []Predicate, groupTag byte, table TableID) []Predicate {
+func absorbCanonicalPredicates(preds []Predicate, groupTag byte, table *TableID) []Predicate {
 	if len(preds) < 2 {
 		return preds
 	}
@@ -250,7 +263,7 @@ func absorbCanonicalPredicates(preds []Predicate, groupTag byte, table TableID) 
 	return out
 }
 
-func shouldAbsorbCanonicalPredicate(pred Predicate, groupTag byte, table TableID, present map[string]struct{}) bool {
+func shouldAbsorbCanonicalPredicate(pred Predicate, groupTag byte, table *TableID, present map[string]struct{}) bool {
 	var targetChildren []Predicate
 	switch groupTag {
 	case tagOr:
@@ -258,19 +271,19 @@ func shouldAbsorbCanonicalPredicate(pred Predicate, groupTag byte, table TableID
 		if !ok {
 			return false
 		}
-		if predTable, ok := canonicalGroupTable(andPred); !ok || predTable != table {
+		if table != nil && !canonicalGroupMatchesTable(andPred, *table) {
 			return false
 		}
-		targetChildren = flattenCanonicalAnd(andPred, table, nil)
+		targetChildren = flattenCanonicalAndForTable(andPred, table, nil)
 	case tagAnd:
 		orPred, ok := pred.(Or)
 		if !ok {
 			return false
 		}
-		if predTable, ok := canonicalGroupTable(orPred); !ok || predTable != table {
+		if table != nil && !canonicalGroupMatchesTable(orPred, *table) {
 			return false
 		}
-		targetChildren = flattenCanonicalOr(orPred, table, nil)
+		targetChildren = flattenCanonicalOrForTable(orPred, table, nil)
 	default:
 		return false
 	}
@@ -304,108 +317,33 @@ func rebuildCanonicalOr(preds []Predicate) Predicate {
 	return result
 }
 
-func orderSelfJoinCanonicalChildren(left, right Predicate) (Predicate, Predicate) {
-	leftBytes := canonicalPredicateBytes(left)
-	rightBytes := canonicalPredicateBytes(right)
-	if bytes.Compare(leftBytes, rightBytes) <= 0 {
-		return left, right
-	}
-	return right, left
+type canonicalLogicalOps struct {
+	tag     byte
+	flatten func(Predicate, *TableID, []Predicate) []Predicate
+	rebuild func([]Predicate) Predicate
+	combine func(Predicate, Predicate) Predicate
 }
 
-func flattenSelfJoinCanonicalAnd(pred Predicate, out []Predicate) []Predicate {
-	switch p := pred.(type) {
-	case And:
-		out = flattenSelfJoinCanonicalAnd(p.Left, out)
-		out = flattenSelfJoinCanonicalAnd(p.Right, out)
-		return out
-	default:
-		return append(out, pred)
-	}
+var canonicalAndOps = canonicalLogicalOps{
+	tag:     tagAnd,
+	flatten: flattenCanonicalAndForTable,
+	rebuild: rebuildCanonicalAnd,
+	combine: func(left, right Predicate) Predicate { return And{Left: left, Right: right} },
 }
 
-func flattenSelfJoinCanonicalOr(pred Predicate, out []Predicate) []Predicate {
-	switch p := pred.(type) {
-	case Or:
-		out = flattenSelfJoinCanonicalOr(p.Left, out)
-		out = flattenSelfJoinCanonicalOr(p.Right, out)
-		return out
-	default:
-		return append(out, pred)
-	}
-}
-
-func absorbSelfJoinCanonicalPredicates(preds []Predicate, groupTag byte) []Predicate {
-	if len(preds) < 2 {
-		return preds
-	}
-	present := make(map[string]struct{}, len(preds))
-	for _, pred := range preds {
-		present[string(canonicalPredicateBytes(pred))] = struct{}{}
-	}
-	out := preds[:0]
-	for _, pred := range preds {
-		if shouldAbsorbSelfJoinCanonicalPredicate(pred, groupTag, present) {
-			continue
-		}
-		out = append(out, pred)
-	}
-	if len(out) == 0 {
-		return preds
-	}
-	return out
-}
-
-func shouldAbsorbSelfJoinCanonicalPredicate(pred Predicate, groupTag byte, present map[string]struct{}) bool {
-	var targetChildren []Predicate
-	switch groupTag {
-	case tagOr:
-		andPred, ok := pred.(And)
-		if !ok {
-			return false
-		}
-		targetChildren = flattenSelfJoinCanonicalAnd(andPred, nil)
-	case tagAnd:
-		orPred, ok := pred.(Or)
-		if !ok {
-			return false
-		}
-		targetChildren = flattenSelfJoinCanonicalOr(orPred, nil)
-	default:
-		return false
-	}
-	for _, child := range targetChildren {
-		if _, ok := present[string(canonicalPredicateBytes(child))]; ok {
-			return true
-		}
-	}
-	return false
+var canonicalOrOps = canonicalLogicalOps{
+	tag:     tagOr,
+	flatten: flattenCanonicalOrForTable,
+	rebuild: rebuildCanonicalOr,
+	combine: func(left, right Predicate) Predicate { return Or{Left: left, Right: right} },
 }
 
 func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 	switch p := pred.(type) {
 	case And:
-		left := canonicalizeSelfJoinFilter(p.Left)
-		right := canonicalizeSelfJoinFilter(p.Right)
-		if left == nil || right == nil {
-			return And{Left: left, Right: right}
-		}
-		children := flattenSelfJoinCanonicalAnd(And{Left: left, Right: right}, nil)
-		sortCanonicalPredicates(children)
-		children = dedupeCanonicalPredicates(children)
-		children = absorbSelfJoinCanonicalPredicates(children, tagAnd)
-		return rebuildCanonicalAnd(children)
+		return canonicalizeSelfJoinLogical(p.Left, p.Right, canonicalAndOps)
 	case Or:
-		left := canonicalizeSelfJoinFilter(p.Left)
-		right := canonicalizeSelfJoinFilter(p.Right)
-		if left == nil || right == nil {
-			return Or{Left: left, Right: right}
-		}
-		children := flattenSelfJoinCanonicalOr(Or{Left: left, Right: right}, nil)
-		sortCanonicalPredicates(children)
-		children = dedupeCanonicalPredicates(children)
-		children = absorbSelfJoinCanonicalPredicates(children, tagOr)
-		return rebuildCanonicalOr(children)
+		return canonicalizeSelfJoinLogical(p.Left, p.Right, canonicalOrOps)
 	case Join, CrossJoin:
 		return p
 	default:
@@ -413,64 +351,26 @@ func canonicalizeSelfJoinFilter(pred Predicate) Predicate {
 	}
 }
 
+func canonicalizeSelfJoinLogical(leftPred, rightPred Predicate, ops canonicalLogicalOps) Predicate {
+	left := canonicalizeSelfJoinFilter(leftPred)
+	right := canonicalizeSelfJoinFilter(rightPred)
+	combined := ops.combine(left, right)
+	if left == nil || right == nil {
+		return combined
+	}
+	children := ops.flatten(combined, nil, nil)
+	sortCanonicalPredicates(children)
+	children = dedupeCanonicalPredicates(children)
+	children = absorbCanonicalPredicates(children, ops.tag, nil)
+	return ops.rebuild(children)
+}
+
 func canonicalizePredicate(pred Predicate) Predicate {
 	switch p := pred.(type) {
 	case And:
-		left := canonicalizePredicate(p.Left)
-		right := canonicalizePredicate(p.Right)
-		if left == nil || right == nil {
-			return And{Left: left, Right: right}
-		}
-		if isNoRowsPredicate(left) && sameCanonicalTable(left, right) {
-			return left
-		}
-		if isNoRowsPredicate(right) && sameCanonicalTable(left, right) {
-			return right
-		}
-		if isAllRowsPredicate(left) && sameCanonicalTable(left, right) {
-			return right
-		}
-		if isAllRowsPredicate(right) && sameCanonicalTable(left, right) {
-			return left
-		}
-		combined := And{Left: left, Right: right}
-		if table, ok := canonicalGroupTable(combined); ok {
-			children := flattenCanonicalAnd(combined, table, nil)
-			sortCanonicalPredicates(children)
-			children = dedupeCanonicalPredicates(children)
-			children = absorbCanonicalPredicates(children, tagAnd, table)
-			return rebuildCanonicalAnd(children)
-		}
-		left, right = orderCanonicalChildren(left, right)
-		return And{Left: left, Right: right}
+		return canonicalizeLogicalPredicate(p.Left, p.Right, canonicalAndOps)
 	case Or:
-		left := canonicalizePredicate(p.Left)
-		right := canonicalizePredicate(p.Right)
-		if left == nil || right == nil {
-			return Or{Left: left, Right: right}
-		}
-		if isAllRowsPredicate(left) && sameCanonicalTable(left, right) {
-			return left
-		}
-		if isAllRowsPredicate(right) && sameCanonicalTable(left, right) {
-			return right
-		}
-		if isNoRowsPredicate(left) && sameCanonicalTable(left, right) {
-			return right
-		}
-		if isNoRowsPredicate(right) && sameCanonicalTable(left, right) {
-			return left
-		}
-		combined := Or{Left: left, Right: right}
-		if table, ok := canonicalGroupTable(combined); ok {
-			children := flattenCanonicalOr(combined, table, nil)
-			sortCanonicalPredicates(children)
-			children = dedupeCanonicalPredicates(children)
-			children = absorbCanonicalPredicates(children, tagOr, table)
-			return rebuildCanonicalOr(children)
-		}
-		left, right = orderCanonicalChildren(left, right)
-		return Or{Left: left, Right: right}
+		return canonicalizeLogicalPredicate(p.Left, p.Right, canonicalOrOps)
 	case Join:
 		if p.Filter == nil {
 			return p
@@ -484,6 +384,50 @@ func canonicalizePredicate(pred Predicate) Predicate {
 	default:
 		return pred
 	}
+}
+
+func canonicalizeLogicalPredicate(leftPred, rightPred Predicate, ops canonicalLogicalOps) Predicate {
+	left := canonicalizePredicate(leftPred)
+	right := canonicalizePredicate(rightPred)
+	combined := ops.combine(left, right)
+	if left == nil || right == nil {
+		return combined
+	}
+	if simplified, ok := simplifyCanonicalLogical(left, right, ops.tag); ok {
+		return simplified
+	}
+	if table, ok := canonicalGroupTable(combined); ok {
+		children := ops.flatten(combined, &table, nil)
+		sortCanonicalPredicates(children)
+		children = dedupeCanonicalPredicates(children)
+		children = absorbCanonicalPredicates(children, ops.tag, &table)
+		return ops.rebuild(children)
+	}
+	left, right = orderCanonicalChildren(left, right)
+	return ops.combine(left, right)
+}
+
+func simplifyCanonicalLogical(left, right Predicate, groupTag byte) (Predicate, bool) {
+	if !sameCanonicalTable(left, right) {
+		return nil, false
+	}
+	switch groupTag {
+	case tagAnd:
+		if isNoRowsPredicate(left) || isAllRowsPredicate(right) {
+			return left, true
+		}
+		if isNoRowsPredicate(right) || isAllRowsPredicate(left) {
+			return right, true
+		}
+	case tagOr:
+		if isAllRowsPredicate(left) || isNoRowsPredicate(right) {
+			return left, true
+		}
+		if isAllRowsPredicate(right) || isNoRowsPredicate(left) {
+			return right, true
+		}
+	}
+	return nil, false
 }
 
 // ComputeQueryHash returns the blake3-32 digest of the predicate's canonical

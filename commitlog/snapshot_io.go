@@ -550,32 +550,20 @@ func readSnapshotSchema(payload io.Reader) ([]schema.TableSchema, uint32, map[sc
 }
 
 func readSnapshotSequences(payload io.Reader) (map[schema.TableID]uint64, error) {
-	sequences := map[schema.TableID]uint64{}
-	var seqCount uint32
-	if err := binary.Read(payload, binary.LittleEndian, &seqCount); err != nil {
-		return nil, err
-	}
-	for range seqCount {
-		var tableID uint32
-		var next uint64
-		if err := binary.Read(payload, binary.LittleEndian, &tableID); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(payload, binary.LittleEndian, &next); err != nil {
-			return nil, err
-		}
-		sequences[schema.TableID(tableID)] = next
-	}
-	return sequences, nil
+	return readSnapshotTableUint64Map(payload)
 }
 
 func readSnapshotNextIDs(payload io.Reader) (map[schema.TableID]uint64, error) {
-	nextIDs := map[schema.TableID]uint64{}
-	var nextIDCount uint32
-	if err := binary.Read(payload, binary.LittleEndian, &nextIDCount); err != nil {
+	return readSnapshotTableUint64Map(payload)
+}
+
+func readSnapshotTableUint64Map(payload io.Reader) (map[schema.TableID]uint64, error) {
+	values := map[schema.TableID]uint64{}
+	var count uint32
+	if err := binary.Read(payload, binary.LittleEndian, &count); err != nil {
 		return nil, err
 	}
-	for range nextIDCount {
+	for range count {
 		var tableID uint32
 		var next uint64
 		if err := binary.Read(payload, binary.LittleEndian, &tableID); err != nil {
@@ -584,9 +572,9 @@ func readSnapshotNextIDs(payload io.Reader) (map[schema.TableID]uint64, error) {
 		if err := binary.Read(payload, binary.LittleEndian, &next); err != nil {
 			return nil, err
 		}
-		nextIDs[schema.TableID(tableID)] = next
+		values[schema.TableID(tableID)] = next
 	}
-	return nextIDs, nil
+	return values, nil
 }
 
 func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema.TableSchema) ([]SnapshotTableData, error) {

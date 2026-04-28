@@ -204,18 +204,14 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 			errText = fmt.Sprintf("%s, executing: `%s`", errText, req.SQLText)
 		}
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: errText},
+			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, errText),
 		}
 	}
-	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))
-	for _, update := range result.Update {
-		encoded, err := encodeProtocolSubscriptionUpdate(update)
-		if err != nil {
-			return protocol.SubscriptionSetCommandResponse{
-				Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: err.Error()},
-			}
+	updates, err := encodeProtocolSubscriptionUpdates(result.Update)
+	if err != nil {
+		return protocol.SubscriptionSetCommandResponse{
+			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, err.Error()),
 		}
-		updates = append(updates, encoded)
 	}
 	if req.Variant == protocol.SubscriptionSetVariantMulti {
 		return protocol.SubscriptionSetCommandResponse{
@@ -225,7 +221,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 	rows, err := encodeProductRows(collectInsertRows(result.Update))
 	if err != nil {
 		return protocol.SubscriptionSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: err.Error()},
+			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, err.Error()),
 		}
 	}
 	return protocol.SubscriptionSetCommandResponse{
@@ -258,18 +254,14 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 			errText = fmt.Sprintf("%s, executing: `%s`", errText, result.SQLText)
 		}
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: errText},
+			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, errText),
 		}
 	}
-	updates := make([]protocol.SubscriptionUpdate, 0, len(result.Update))
-	for _, update := range result.Update {
-		encoded, err := encodeProtocolSubscriptionUpdate(update)
-		if err != nil {
-			return protocol.UnsubscribeSetCommandResponse{
-				Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: err.Error()},
-			}
+	updates, err := encodeProtocolSubscriptionUpdates(result.Update)
+	if err != nil {
+		return protocol.UnsubscribeSetCommandResponse{
+			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, err.Error()),
 		}
-		updates = append(updates, encoded)
 	}
 	if req.Variant == protocol.SubscriptionSetVariantMulti {
 		return protocol.UnsubscribeSetCommandResponse{
@@ -279,7 +271,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 	rows, err := encodeProductRows(collectDeleteRows(result.Update))
 	if err != nil {
 		return protocol.UnsubscribeSetCommandResponse{
-			Error: &protocol.SubscriptionError{TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros, RequestID: optionalUint32(req.RequestID), QueryID: optionalUint32(req.QueryID), Error: err.Error()},
+			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, err.Error()),
 		}
 	}
 	return protocol.UnsubscribeSetCommandResponse{
@@ -312,20 +304,45 @@ func (a *ProtocolInboxAdapter) singleTableName(preds []subscription.Predicate, u
 	return ""
 }
 
+func newProtocolSubscriptionError(durationMicros uint64, requestID, queryID uint32, errText string) *protocol.SubscriptionError {
+	return &protocol.SubscriptionError{
+		TotalHostExecutionDurationMicros: durationMicros,
+		RequestID:                        optionalUint32(requestID),
+		QueryID:                          optionalUint32(queryID),
+		Error:                            errText,
+	}
+}
+
 func collectInsertRows(updates []subscription.SubscriptionUpdate) []types.ProductValue {
+	return collectSubscriptionRows(updates, func(update subscription.SubscriptionUpdate) []types.ProductValue {
+		return update.Inserts
+	})
+}
+
+func collectDeleteRows(updates []subscription.SubscriptionUpdate) []types.ProductValue {
+	return collectSubscriptionRows(updates, func(update subscription.SubscriptionUpdate) []types.ProductValue {
+		return update.Deletes
+	})
+}
+
+func collectSubscriptionRows(updates []subscription.SubscriptionUpdate, rowsFor func(subscription.SubscriptionUpdate) []types.ProductValue) []types.ProductValue {
 	var rows []types.ProductValue
 	for _, update := range updates {
-		rows = append(rows, update.Inserts...)
+		rows = append(rows, rowsFor(update)...)
 	}
 	return rows
 }
 
-func collectDeleteRows(updates []subscription.SubscriptionUpdate) []types.ProductValue {
-	var rows []types.ProductValue
+func encodeProtocolSubscriptionUpdates(updates []subscription.SubscriptionUpdate) ([]protocol.SubscriptionUpdate, error) {
+	encoded := make([]protocol.SubscriptionUpdate, 0, len(updates))
 	for _, update := range updates {
-		rows = append(rows, update.Deletes...)
+		wireUpdate, err := encodeProtocolSubscriptionUpdate(update)
+		if err != nil {
+			return nil, err
+		}
+		encoded = append(encoded, wireUpdate)
 	}
-	return rows
+	return encoded, nil
 }
 
 func encodeProtocolSubscriptionUpdate(update subscription.SubscriptionUpdate) (protocol.SubscriptionUpdate, error) {

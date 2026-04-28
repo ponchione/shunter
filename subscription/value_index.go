@@ -116,11 +116,7 @@ func (v *ValueIndex) Lookup(table TableID, col ColID, value Value) []QueryHash {
 	if !ok {
 		return []QueryHash{}
 	}
-	out := make([]QueryHash, 0, len(set))
-	for h := range set {
-		out = append(out, h)
-	}
-	return out
+	return mapKeys(set)
 }
 
 // TrackedColumns returns the columns that have at least one subscription
@@ -130,11 +126,7 @@ func (v *ValueIndex) TrackedColumns(table TableID) []ColID {
 	if !ok {
 		return []ColID{}
 	}
-	out := make([]ColID, 0, len(byCol))
-	for c := range byCol {
-		out = append(out, c)
-	}
-	return out
+	return mapKeys(byCol)
 }
 
 // encodeValueKey produces a stable string key for a Value so it can be used

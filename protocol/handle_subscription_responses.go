@@ -24,45 +24,140 @@ func sendExecutorUnavailableError(conn *Conn, receipt time.Time, requestID, quer
 }
 
 func makeSubscribeSetReply(conn *Conn, requestID, queryID uint32, variant SubscriptionSetVariant) func(SubscriptionSetCommandResponse) {
-	return func(resp SubscriptionSetCommandResponse) {
-		sender := connOnlySender{conn: conn}
-		switch {
-		case resp.Error != nil:
-			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: SubscriptionError delivery failed for conn %x query_id=%s: %v", conn.ID[:], subscriptionErrorQueryIDForLog(resp.Error), err)
-			}
-		case variant == SubscriptionSetVariantSingle && resp.SingleApplied != nil:
-			if err := SendSubscribeSingleApplied(sender, conn, resp.SingleApplied); err != nil {
-				log.Printf("protocol: SubscribeSingleApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.SingleApplied.QueryID, err)
-			}
-		case variant == SubscriptionSetVariantMulti && resp.MultiApplied != nil:
-			if err := SendSubscribeMultiApplied(sender, conn, resp.MultiApplied); err != nil {
-				log.Printf("protocol: SubscribeMultiApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.MultiApplied.QueryID, err)
-			}
-		default:
-			log.Printf("protocol: malformed SubscriptionSetCommandResponse (req=%d query=%d)", requestID, queryID)
-		}
-	}
+	return makeSetReply(conn, requestID, queryID, variant, subscribeSetReplyDelivery)
 }
 
 func makeUnsubscribeSetReply(conn *Conn, requestID, queryID uint32, variant SubscriptionSetVariant) func(UnsubscribeSetCommandResponse) {
-	return func(resp UnsubscribeSetCommandResponse) {
-		sender := connOnlySender{conn: conn}
-		switch {
-		case resp.Error != nil:
-			if err := SendSubscriptionError(sender, conn, resp.Error); err != nil {
-				log.Printf("protocol: unsubscribe SubscriptionError delivery failed for conn %x query_id=%s: %v", conn.ID[:], subscriptionErrorQueryIDForLog(resp.Error), err)
-			}
-		case variant == SubscriptionSetVariantSingle && resp.SingleApplied != nil:
-			if err := SendUnsubscribeSingleApplied(sender, conn, resp.SingleApplied); err != nil {
-				log.Printf("protocol: UnsubscribeSingleApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.SingleApplied.QueryID, err)
-			}
-		case variant == SubscriptionSetVariantMulti && resp.MultiApplied != nil:
-			if err := SendUnsubscribeMultiApplied(sender, conn, resp.MultiApplied); err != nil {
-				log.Printf("protocol: UnsubscribeMultiApplied delivery failed for conn %x query_id=%d: %v", conn.ID[:], resp.MultiApplied.QueryID, err)
-			}
-		default:
-			log.Printf("protocol: malformed UnsubscribeSetCommandResponse (req=%d query=%d)", requestID, queryID)
-		}
+	return makeSetReply(conn, requestID, queryID, variant, unsubscribeSetReplyDelivery)
+}
+
+type setReplyDelivery[R any] struct {
+	errorLabel    string
+	singleLabel   string
+	multiLabel    string
+	malformedType string
+	errorOf       func(R) *SubscriptionError
+	sendSingle    func(connOnlySender, *Conn, R) (uint32, bool, error)
+	sendMulti     func(connOnlySender, *Conn, R) (uint32, bool, error)
+}
+
+var subscribeSetReplyDelivery = newSetReplyDelivery(
+	"SubscriptionError",
+	"SubscribeSingleApplied",
+	"SubscribeMultiApplied",
+	"SubscriptionSetCommandResponse",
+	func(resp SubscriptionSetCommandResponse) *SubscriptionError { return resp.Error },
+	func(resp SubscriptionSetCommandResponse) *SubscribeSingleApplied { return resp.SingleApplied },
+	func(resp SubscriptionSetCommandResponse) *SubscribeMultiApplied { return resp.MultiApplied },
+	SendSubscribeSingleApplied,
+	SendSubscribeMultiApplied,
+)
+
+var unsubscribeSetReplyDelivery = newSetReplyDelivery(
+	"unsubscribe SubscriptionError",
+	"UnsubscribeSingleApplied",
+	"UnsubscribeMultiApplied",
+	"UnsubscribeSetCommandResponse",
+	func(resp UnsubscribeSetCommandResponse) *SubscriptionError { return resp.Error },
+	func(resp UnsubscribeSetCommandResponse) *UnsubscribeSingleApplied { return resp.SingleApplied },
+	func(resp UnsubscribeSetCommandResponse) *UnsubscribeMultiApplied { return resp.MultiApplied },
+	SendUnsubscribeSingleApplied,
+	SendUnsubscribeMultiApplied,
+)
+
+func newSetReplyDelivery[R any, S interface {
+	*SubscribeSingleApplied | *UnsubscribeSingleApplied
+}, M interface {
+	*SubscribeMultiApplied | *UnsubscribeMultiApplied
+}](
+	errorLabel, singleLabel, multiLabel, malformedType string,
+	errorOf func(R) *SubscriptionError,
+	singleOf func(R) S,
+	multiOf func(R) M,
+	sendSingle func(ClientSender, *Conn, S) error,
+	sendMulti func(ClientSender, *Conn, M) error,
+) setReplyDelivery[R] {
+	return setReplyDelivery[R]{
+		errorLabel:    errorLabel,
+		singleLabel:   singleLabel,
+		multiLabel:    multiLabel,
+		malformedType: malformedType,
+		errorOf:       errorOf,
+		sendSingle:    sendPresentApplied(singleOf, appliedQueryID[S], sendSingle),
+		sendMulti:     sendPresentApplied(multiOf, appliedQueryID[M], sendMulti),
 	}
+}
+
+func appliedQueryID[A interface {
+	*SubscribeSingleApplied | *UnsubscribeSingleApplied | *SubscribeMultiApplied | *UnsubscribeMultiApplied
+}](msg A) uint32 {
+	switch v := any(msg).(type) {
+	case *SubscribeSingleApplied:
+		return v.QueryID
+	case *UnsubscribeSingleApplied:
+		return v.QueryID
+	case *SubscribeMultiApplied:
+		return v.QueryID
+	case *UnsubscribeMultiApplied:
+		return v.QueryID
+	default:
+		return 0
+	}
+}
+
+func sendPresentApplied[R any, A comparable](
+	appliedOf func(R) A,
+	queryIDOf func(A) uint32,
+	send func(ClientSender, *Conn, A) error,
+) func(connOnlySender, *Conn, R) (uint32, bool, error) {
+	return func(sender connOnlySender, conn *Conn, resp R) (uint32, bool, error) {
+		applied := appliedOf(resp)
+		var zero A
+		if applied == zero {
+			return 0, false, nil
+		}
+		return queryIDOf(applied), true, send(sender, conn, applied)
+	}
+}
+
+func makeSetReply[R any](
+	conn *Conn,
+	requestID, queryID uint32,
+	variant SubscriptionSetVariant,
+	delivery setReplyDelivery[R],
+) func(R) {
+	return func(resp R) {
+		sender := connOnlySender{conn: conn}
+		if respErr := delivery.errorOf(resp); respErr != nil {
+			if err := SendSubscriptionError(sender, conn, respErr); err != nil {
+				logSubscriptionErrorDeliveryFailure(conn, delivery.errorLabel, respErr, err)
+			}
+			return
+		}
+		if variant == SubscriptionSetVariantSingle {
+			if deliveredQueryID, ok, err := delivery.sendSingle(sender, conn, resp); ok {
+				if err != nil {
+					logAppliedDeliveryFailure(conn, delivery.singleLabel, deliveredQueryID, err)
+				}
+				return
+			}
+		}
+		if variant == SubscriptionSetVariantMulti {
+			if deliveredQueryID, ok, err := delivery.sendMulti(sender, conn, resp); ok {
+				if err != nil {
+					logAppliedDeliveryFailure(conn, delivery.multiLabel, deliveredQueryID, err)
+				}
+				return
+			}
+		}
+		log.Printf("protocol: malformed %s (req=%d query=%d)", delivery.malformedType, requestID, queryID)
+	}
+}
+
+func logSubscriptionErrorDeliveryFailure(conn *Conn, label string, resp *SubscriptionError, err error) {
+	log.Printf("protocol: %s delivery failed for conn %x query_id=%s: %v", label, conn.ID[:], subscriptionErrorQueryIDForLog(resp), err)
+}
+
+func logAppliedDeliveryFailure(conn *Conn, label string, queryID uint32, err error) {
+	log.Printf("protocol: %s delivery failed for conn %x query_id=%d: %v", label, conn.ID[:], queryID, err)
 }

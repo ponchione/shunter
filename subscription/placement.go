@@ -50,33 +50,17 @@ func (p *PruningIndexes) TestOnlyIsEmpty() bool {
 // would prune out legitimate candidates whose insertion plays the other
 // (unconstrained) side.
 func PlaceSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
-	if j, ok := pred.(Join); ok && j.Left == j.Right {
-		idx.Table.Add(j.Left, hash)
-		return
-	}
-	join := findJoin(pred)
-	for _, t := range pred.Tables() {
-		colEqs := findColEqs(pred, t)
-		if len(colEqs) > 0 {
-			for _, ce := range colEqs {
-				idx.Value.Add(t, ce.Column, ce.Value, hash)
-			}
-			continue
-		}
-		if join != nil {
-			if edge, val, ok := joinEdgeFor(pred, join, t); ok {
-				idx.JoinEdge.Add(edge, val, hash)
-				continue
-			}
-		}
-		idx.Table.Add(t, hash)
-	}
+	mutateSubscriptionPlacement(idx, pred, hash, true)
 }
 
 // RemoveSubscription reverses PlaceSubscription.
 func RemoveSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
+	mutateSubscriptionPlacement(idx, pred, hash, false)
+}
+
+func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash QueryHash, add bool) {
 	if j, ok := pred.(Join); ok && j.Left == j.Right {
-		idx.Table.Remove(j.Left, hash)
+		mutateTablePlacement(idx, j.Left, hash, add)
 		return
 	}
 	join := findJoin(pred)
@@ -84,18 +68,42 @@ func RemoveSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
 		colEqs := findColEqs(pred, t)
 		if len(colEqs) > 0 {
 			for _, ce := range colEqs {
-				idx.Value.Remove(t, ce.Column, ce.Value, hash)
+				mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
 			}
 			continue
 		}
 		if join != nil {
 			if edge, val, ok := joinEdgeFor(pred, join, t); ok {
-				idx.JoinEdge.Remove(edge, val, hash)
+				mutateJoinEdgePlacement(idx, edge, val, hash, add)
 				continue
 			}
 		}
-		idx.Table.Remove(t, hash)
+		mutateTablePlacement(idx, t, hash, add)
 	}
+}
+
+func mutateValuePlacement(idx *PruningIndexes, table TableID, col ColID, value Value, hash QueryHash, add bool) {
+	if add {
+		idx.Value.Add(table, col, value, hash)
+		return
+	}
+	idx.Value.Remove(table, col, value, hash)
+}
+
+func mutateJoinEdgePlacement(idx *PruningIndexes, edge JoinEdge, value Value, hash QueryHash, add bool) {
+	if add {
+		idx.JoinEdge.Add(edge, value, hash)
+		return
+	}
+	idx.JoinEdge.Remove(edge, value, hash)
+}
+
+func mutateTablePlacement(idx *PruningIndexes, table TableID, hash QueryHash, add bool) {
+	if add {
+		idx.Table.Add(table, hash)
+		return
+	}
+	idx.Table.Remove(table, hash)
 }
 
 // CollectCandidatesForTable returns the set of candidate query hashes for a

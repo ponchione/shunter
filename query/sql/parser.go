@@ -391,53 +391,20 @@ func tokenize(s string) ([]token, error) {
 			i++
 		case c == '\'':
 			start := i
-			i++
-			var sb strings.Builder
-			closed := false
-			for i < len(s) {
-				if s[i] == '\'' {
-					if i+1 < len(s) && s[i+1] == '\'' {
-						sb.WriteByte('\'')
-						i += 2
-						continue
-					}
-					closed = true
-					i++
-					break
-				}
-				sb.WriteByte(s[i])
-				i++
+			text, next, err := scanDelimitedSQLText(s, i, '\'', "string literal", true)
+			if err != nil {
+				return nil, err
 			}
-			if !closed {
-				return nil, fmt.Errorf("%w: unterminated string literal at position %d", ErrUnsupportedSQL, start)
-			}
-			out = append(out, token{kind: tokString, text: sb.String(), pos: start})
+			out = append(out, token{kind: tokString, text: text, pos: start})
+			i = next
 		case c == '"':
 			start := i
-			i++
-			var sb strings.Builder
-			closed := false
-			for i < len(s) {
-				if s[i] == '"' {
-					if i+1 < len(s) && s[i+1] == '"' {
-						sb.WriteByte('"')
-						i += 2
-						continue
-					}
-					closed = true
-					i++
-					break
-				}
-				sb.WriteByte(s[i])
-				i++
+			text, next, err := scanDelimitedSQLText(s, i, '"', "quoted identifier", false)
+			if err != nil {
+				return nil, err
 			}
-			if !closed {
-				return nil, fmt.Errorf("%w: unterminated quoted identifier at position %d", ErrUnsupportedSQL, start)
-			}
-			if sb.Len() == 0 {
-				return nil, fmt.Errorf("%w: empty quoted identifier at position %d", ErrUnsupportedSQL, start)
-			}
-			out = append(out, token{kind: tokIdent, text: sb.String(), pos: start, quoted: true})
+			out = append(out, token{kind: tokIdent, text: text, pos: start, quoted: true})
+			i = next
 		case c == '0' && i+1 < len(s) && (s[i+1] == 'x' || s[i+1] == 'X'):
 			start := i
 			i += 2
@@ -499,6 +466,28 @@ func tokenize(s string) ([]token, error) {
 	}
 	out = append(out, token{kind: tokEOF, pos: len(s)})
 	return out, nil
+}
+
+func scanDelimitedSQLText(s string, start int, quote byte, label string, allowEmpty bool) (string, int, error) {
+	i := start + 1
+	var sb strings.Builder
+	for i < len(s) {
+		if s[i] == quote {
+			if i+1 < len(s) && s[i+1] == quote {
+				sb.WriteByte(quote)
+				i += 2
+				continue
+			}
+			i++
+			if !allowEmpty && sb.Len() == 0 {
+				return "", 0, fmt.Errorf("%w: empty %s at position %d", ErrUnsupportedSQL, label, start)
+			}
+			return sb.String(), i, nil
+		}
+		sb.WriteByte(s[i])
+		i++
+	}
+	return "", 0, fmt.Errorf("%w: unterminated %s at position %d", ErrUnsupportedSQL, label, start)
 }
 
 // tokenizeNumeric consumes a numeric literal body starting at i. `start` is
@@ -681,17 +670,11 @@ func (p *parser) parseStatement() (Statement, error) {
 		// "Invalid number of tables in subscription: {N}" for N >= 3. Shunter
 		// rejects the chain shape at the parser boundary so the rejection is
 		// intentional and pinned, not an incidental "unexpected token" miss.
-		if isKeywordToken(p.peek(), "INNER") {
-			if p.pos+1 < len(p.toks) && isKeywordToken(p.toks[p.pos+1], "JOIN") {
-				return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
-			}
-			return Statement{}, p.unsupported("expected JOIN after INNER")
+		if msg, ok := p.trailingJoinKeywordError("INNER"); ok {
+			return Statement{}, p.unsupported(msg)
 		}
-		if isKeywordToken(p.peek(), "CROSS") {
-			if p.pos+1 < len(p.toks) && isKeywordToken(p.toks[p.pos+1], "JOIN") {
-				return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
-			}
-			return Statement{}, p.unsupported("expected JOIN after CROSS")
+		if msg, ok := p.trailingJoinKeywordError("CROSS"); ok {
+			return Statement{}, p.unsupported(msg)
 		}
 		if isUnsupportedJoinStartToken(p.peek()) {
 			return Statement{}, UnsupportedJoinTypeError{}
@@ -745,6 +728,16 @@ func (p *parser) parseStatement() (Statement, error) {
 		return Statement{}, p.unsupported(fmt.Sprintf("unexpected token %q", p.peek().text))
 	}
 	return stmt, nil
+}
+
+func (p *parser) trailingJoinKeywordError(keyword string) (string, bool) {
+	if !isKeywordToken(p.peek(), keyword) {
+		return "", false
+	}
+	if p.pos+1 < len(p.toks) && isKeywordToken(p.toks[p.pos+1], "JOIN") {
+		return "multi-way join not supported: subscriptions are limited to at most two relations", true
+	}
+	return "expected JOIN after " + keyword, true
 }
 
 func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjection, error) {
@@ -1111,33 +1104,34 @@ func (p *parser) parseLimit() (*uint64, *Literal, bool, bool, error) {
 }
 
 func (p *parser) parseDisjunction(bindings relationBindings) (Predicate, error) {
-	left, err := p.parseConjunction(bindings)
-	if err != nil {
-		return nil, err
-	}
-	for isKeywordToken(p.peek(), "OR") {
-		p.advance()
-		right, err := p.parseConjunction(bindings)
-		if err != nil {
-			return nil, err
-		}
-		left = OrPredicate{Left: left, Right: right}
-	}
-	return left, nil
+	return p.parseBinaryPredicate(bindings, "OR", p.parseConjunction, func(left, right Predicate) Predicate {
+		return OrPredicate{Left: left, Right: right}
+	})
 }
 
 func (p *parser) parseConjunction(bindings relationBindings) (Predicate, error) {
-	left, err := p.parsePredicateTerm(bindings)
+	return p.parseBinaryPredicate(bindings, "AND", p.parsePredicateTerm, func(left, right Predicate) Predicate {
+		return AndPredicate{Left: left, Right: right}
+	})
+}
+
+func (p *parser) parseBinaryPredicate(
+	bindings relationBindings,
+	operator string,
+	parseOperand func(relationBindings) (Predicate, error),
+	join func(Predicate, Predicate) Predicate,
+) (Predicate, error) {
+	left, err := parseOperand(bindings)
 	if err != nil {
 		return nil, err
 	}
-	for isKeywordToken(p.peek(), "AND") {
+	for isKeywordToken(p.peek(), operator) {
 		p.advance()
-		right, err := p.parsePredicateTerm(bindings)
+		right, err := parseOperand(bindings)
 		if err != nil {
 			return nil, err
 		}
-		left = AndPredicate{Left: left, Right: right}
+		left = join(left, right)
 	}
 	return left, nil
 }

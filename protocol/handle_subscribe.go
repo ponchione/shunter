@@ -765,25 +765,17 @@ func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema
 		f.Table = tableAlias
 		return normalizeSQLFilterForRelations(f, map[string]relationSchema{tableAlias: rel}, func(string) uint8 { return 0 }, caller)
 	case sql.AndPredicate:
-		left, err := compileSQLPredicateForSingleRelation(p.Left, rel, tableAlias, caller)
-		if err != nil {
-			return nil, err
-		}
-		right, err := compileSQLPredicateForSingleRelation(p.Right, rel, tableAlias, caller)
-		if err != nil {
-			return nil, err
-		}
-		return subscription.And{Left: left, Right: right}, nil
+		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
+			return compileSQLPredicateForSingleRelation(child, rel, tableAlias, caller)
+		}, func(left, right subscription.Predicate) subscription.Predicate {
+			return subscription.And{Left: left, Right: right}
+		})
 	case sql.OrPredicate:
-		left, err := compileSQLPredicateForSingleRelation(p.Left, rel, tableAlias, caller)
-		if err != nil {
-			return nil, err
-		}
-		right, err := compileSQLPredicateForSingleRelation(p.Right, rel, tableAlias, caller)
-		if err != nil {
-			return nil, err
-		}
-		return subscription.Or{Left: left, Right: right}, nil
+		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
+			return compileSQLPredicateForSingleRelation(child, rel, tableAlias, caller)
+		}, func(left, right subscription.Predicate) subscription.Predicate {
+			return subscription.Or{Left: left, Right: right}
+		})
 	default:
 		return nil, fmt.Errorf("unsupported SQL predicate %T", pred)
 	}
@@ -926,28 +918,36 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 	case sql.ColumnComparisonPredicate:
 		return nil, fmt.Errorf("join WHERE column comparisons not supported")
 	case sql.AndPredicate:
-		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag, caller)
-		if err != nil {
-			return nil, err
-		}
-		right, err := compileSQLPredicateForRelations(p.Right, relations, aliasTag, caller)
-		if err != nil {
-			return nil, err
-		}
-		return subscription.And{Left: left, Right: right}, nil
+		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
+			return compileSQLPredicateForRelations(child, relations, aliasTag, caller)
+		}, func(left, right subscription.Predicate) subscription.Predicate {
+			return subscription.And{Left: left, Right: right}
+		})
 	case sql.OrPredicate:
-		left, err := compileSQLPredicateForRelations(p.Left, relations, aliasTag, caller)
-		if err != nil {
-			return nil, err
-		}
-		right, err := compileSQLPredicateForRelations(p.Right, relations, aliasTag, caller)
-		if err != nil {
-			return nil, err
-		}
-		return subscription.Or{Left: left, Right: right}, nil
+		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
+			return compileSQLPredicateForRelations(child, relations, aliasTag, caller)
+		}, func(left, right subscription.Predicate) subscription.Predicate {
+			return subscription.Or{Left: left, Right: right}
+		})
 	default:
 		return nil, fmt.Errorf("unsupported SQL predicate %T", pred)
 	}
+}
+
+func compileSQLBinaryPredicate(
+	leftSQL, rightSQL sql.Predicate,
+	compileChild func(sql.Predicate) (subscription.Predicate, error),
+	combine func(subscription.Predicate, subscription.Predicate) subscription.Predicate,
+) (subscription.Predicate, error) {
+	left, err := compileChild(leftSQL)
+	if err != nil {
+		return nil, err
+	}
+	right, err := compileChild(rightSQL)
+	if err != nil {
+		return nil, err
+	}
+	return combine(left, right), nil
 }
 
 func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity) (subscription.Predicate, error) {
