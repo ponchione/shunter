@@ -206,6 +206,58 @@ func TestScanSegmentsChecksumMismatchAfterValidPrefixUsesFreshNextSegment(t *tes
 	}
 }
 
+func TestScanSegmentsStructuredRecordFaultAfterValidPrefixFailsLoudly(t *testing.T) {
+	cases := []struct {
+		name      string
+		record    Record
+		assertErr func(*testing.T, error)
+	}{
+		{
+			name:   "unknown-record-type",
+			record: Record{TxID: 2, RecordType: RecordTypeChangeset + 1, Payload: []byte{0x02}},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				var typeErr *UnknownRecordTypeError
+				if !errors.As(err, &typeErr) {
+					t.Fatalf("ScanSegments error = %T (%v), want UnknownRecordTypeError", err, err)
+				}
+				if typeErr.Type != RecordTypeChangeset+1 {
+					t.Fatalf("unknown record type = %d, want %d", typeErr.Type, RecordTypeChangeset+1)
+				}
+			},
+		},
+		{
+			name:   "bad-record-flags",
+			record: Record{TxID: 2, RecordType: RecordTypeChangeset, Flags: 1, Payload: []byte{0x02}},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				if !errors.Is(err, ErrBadFlags) {
+					t.Fatalf("ScanSegments error = %v, want ErrBadFlags", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			makeManualScanTestRecords(t, dir, 1,
+				Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte{0x01}},
+				tc.record,
+			)
+
+			segments, horizon, err := ScanSegments(dir)
+			if err == nil {
+				t.Fatal("expected structured record fault to fail loudly")
+			}
+			if len(segments) != 0 || horizon != 0 {
+				t.Fatalf("partial scan = (%+v, %d), want no segments or horizon", segments, horizon)
+			}
+			tc.assertErr(t, err)
+		})
+	}
+}
+
 func TestScanSegmentsZeroHeaderWithNonZeroTailIsDamagedTail(t *testing.T) {
 	dir := t.TempDir()
 
@@ -248,6 +300,15 @@ func makeScanTestSegment(t *testing.T, dir string, startTx uint64, txs ...uint64
 
 func makeManualScanTestSegment(t *testing.T, dir string, startTx uint64, txs ...uint64) string {
 	t.Helper()
+	records := make([]Record, 0, len(txs))
+	for _, tx := range txs {
+		records = append(records, Record{TxID: tx, RecordType: RecordTypeChangeset, Payload: []byte{byte(tx)}})
+	}
+	return makeManualScanTestRecords(t, dir, startTx, records...)
+}
+
+func makeManualScanTestRecords(t *testing.T, dir string, startTx uint64, records ...Record) string {
+	t.Helper()
 
 	path := filepath.Join(dir, SegmentFileName(startTx))
 	f, err := os.Create(path)
@@ -259,9 +320,9 @@ func makeManualScanTestSegment(t *testing.T, dir string, startTx uint64, txs ...
 	if err := WriteSegmentHeader(f); err != nil {
 		t.Fatalf("WriteSegmentHeader() error = %v", err)
 	}
-	for _, tx := range txs {
-		if err := EncodeRecord(f, &Record{TxID: tx, RecordType: RecordTypeChangeset, Payload: []byte{byte(tx)}}); err != nil {
-			t.Fatalf("EncodeRecord(%d) error = %v", tx, err)
+	for i := range records {
+		if err := EncodeRecord(f, &records[i]); err != nil {
+			t.Fatalf("EncodeRecord(%d) error = %v", records[i].TxID, err)
 		}
 	}
 	return path
