@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -735,6 +736,33 @@ func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 	})
 }
 
+func TestOpenAndRecoverSnapshotNextIDBelowRestoredRowsFailsLoudly(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+	rewriteSnapshotNextID(t, root, 2, 0, 1)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected regressed snapshot next_id to fail recovery")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot next_id 1 for table 0 is below restored next row ID 3") {
+		t.Fatalf("error = %v, want explicit next_id regression detail", err)
+	}
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
+		t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
+	}
+}
+
 func TestOpenAndRecoverFallsBackWhenOffsetIndexPointsInsideSegmentHeader(t *testing.T) {
 	root := t.TempDir()
 	const horizon = types.TxID(512)
@@ -883,6 +911,58 @@ func createMissingSnapshotCandidate(t *testing.T, root string, txID types.TxID) 
 	if err := os.MkdirAll(filepath.Join(root, "snapshots", txIDString(uint64(txID))), 0o755); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func rewriteSnapshotNextID(t *testing.T, root string, txID types.TxID, tableID schema.TableID, nextID uint64) {
+	t.Helper()
+	path := filepath.Join(root, "snapshots", txIDString(uint64(txID)), snapshotFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < SnapshotHeaderSize {
+		t.Fatalf("snapshot %s is too short: %d bytes", path, len(data))
+	}
+	body := data[SnapshotHeaderSize:]
+	offset := 0
+	readUint32 := func(section string) uint32 {
+		t.Helper()
+		if offset+4 > len(body) {
+			t.Fatalf("snapshot %s ended before %s at body offset %d", path, section, offset)
+		}
+		v := binary.LittleEndian.Uint32(body[offset : offset+4])
+		offset += 4
+		return v
+	}
+
+	schemaLen := int(readUint32("schema length"))
+	if offset+schemaLen > len(body) {
+		t.Fatalf("snapshot %s has invalid schema length %d at body offset %d", path, schemaLen, offset)
+	}
+	offset += schemaLen
+	sequenceCount := int(readUint32("sequence count"))
+	offset += sequenceCount * 12
+	if offset > len(body) {
+		t.Fatalf("snapshot %s ended inside sequence entries", path)
+	}
+	nextIDCount := int(readUint32("next_id count"))
+	for range nextIDCount {
+		if offset+12 > len(body) {
+			t.Fatalf("snapshot %s ended inside next_id entries", path)
+		}
+		gotTableID := binary.LittleEndian.Uint32(body[offset : offset+4])
+		if gotTableID == uint32(tableID) {
+			binary.LittleEndian.PutUint64(body[offset+4:offset+12], nextID)
+			hash := ComputeSnapshotHash(body)
+			copy(data[20:52], hash[:])
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		offset += 12
+	}
+	t.Fatalf("snapshot %s has no next_id entry for table %d", path, tableID)
 }
 
 func appendZeroTail(t *testing.T, path string, byteCount int) {
