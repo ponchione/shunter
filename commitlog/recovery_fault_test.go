@@ -3089,6 +3089,41 @@ func TestOpenAndRecoverAfterSegmentSyncFailureIgnoresUnsyncedAppend(t *testing.T
 	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 3 {
 		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 3", plan)
 	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(root, plan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(3, &store.Changeset{
+		TxID: 3,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts:   []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}},
+			},
+		},
+	})
+	if finalTxID, fatalErr := dw.Close(); fatalErr != nil {
+		t.Fatal(fatalErr)
+	} else if finalTxID != 3 {
+		t.Fatalf("resumed durability final txID = %d, want 3", finalTxID)
+	}
+
+	recovered, maxTxID, plan, report, err = OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("second recovery maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+		t.Fatalf("second replayed range = %+v, want 1..3", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+		t.Fatalf("second recovery plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+	}
 }
 
 func assertNoRecoveredStateAfterReplayFault(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, durableHorizon types.TxID) {
