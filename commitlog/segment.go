@@ -390,12 +390,12 @@ func (sr *SegmentReader) nextWithMax(maxPayload uint32) (*Record, error) {
 func (sr *SegmentReader) SeekToTxID(target types.TxID, idx *OffsetIndex) error {
 	startOff := int64(SegmentHeaderSize)
 	if idx != nil {
-		if _, off, err := idx.KeyLookup(target); err == nil {
-			info, statErr := sr.file.Stat()
-			if statErr != nil {
-				return statErr
+		if key, off, err := idx.KeyLookup(target); err == nil {
+			valid, err := sr.validIndexedOffset(off, uint64(key))
+			if err != nil {
+				return err
 			}
-			if off >= uint64(SegmentHeaderSize) && off < uint64(info.Size()) {
+			if valid {
 				startOff = int64(off)
 			}
 		} else if !errors.Is(err, ErrOffsetIndexKeyNotFound) {
@@ -428,6 +428,34 @@ func (sr *SegmentReader) SeekToTxID(target types.TxID, idx *OffsetIndex) error {
 			return nil
 		}
 	}
+}
+
+func (sr *SegmentReader) validIndexedOffset(off uint64, txID uint64) (bool, error) {
+	pos, err := sr.file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return false, err
+	}
+	lastTx := sr.lastTx
+	defer func() {
+		sr.lastTx = lastTx
+		_, _ = sr.file.Seek(pos, io.SeekStart)
+	}()
+
+	info, err := sr.file.Stat()
+	if err != nil {
+		return false, err
+	}
+	if off < uint64(SegmentHeaderSize) || off >= uint64(info.Size()) {
+		return false, nil
+	}
+	if _, err := sr.file.Seek(int64(off), io.SeekStart); err != nil {
+		return false, err
+	}
+	rec, err := scanNextRecord(sr)
+	if err != nil {
+		return false, nil
+	}
+	return rec.TxID == txID, nil
 }
 
 // Close closes the file.
