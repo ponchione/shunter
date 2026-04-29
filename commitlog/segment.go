@@ -240,13 +240,14 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 	var lastTx uint64
 	var lastRecordOffset int64
 	var recordCount int
+	reader := &SegmentReader{file: f, startTx: startTxID}
 
 	// Scan forward through valid records.
 	for {
 		recordStart := size
-		rec, err := DecodeRecord(f, 0)
+		rec, err := scanNextRecord(reader)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			if recordCount == 0 || !isDamagedTailError(err) {

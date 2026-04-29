@@ -240,6 +240,38 @@ func TestOpenSegmentForAppendTruncatesDamagedTailAfterValidPrefix(t *testing.T) 
 	}
 }
 
+func TestOpenSegmentForAppendTruncatesZeroHeaderWithNonZeroTail(t *testing.T) {
+	dir := t.TempDir()
+	path := makeScanTestSegment(t, dir, 1, 1, 2)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSize := before.Size()
+	appendZeroHeaderNonZeroTail(t, path)
+
+	sw, err := OpenSegmentForAppend(dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sw.lastTx != 2 {
+		t.Fatalf("lastTx = %d, want 2", sw.lastTx)
+	}
+	if sw.size != wantSize {
+		t.Fatalf("size = %d, want %d", sw.size, wantSize)
+	}
+	if err := sw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != wantSize {
+		t.Fatalf("truncated size = %d, want %d", info.Size(), wantSize)
+	}
+}
+
 // --- Changeset codec tests ---
 
 func testSchema() (*schema.Engine, schema.SchemaRegistry) {

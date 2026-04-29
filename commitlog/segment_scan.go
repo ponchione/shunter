@@ -132,6 +132,13 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 		return nil, err
 	}
 	if isZeroRecordHeader(header) {
+		ok, err := remainingBytesAreZero(sr.file, remaining-RecordHeaderSize)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ErrTruncatedRecord
+		}
 		return nil, io.EOF
 	}
 
@@ -175,6 +182,26 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 
 	sr.lastTx = rec.TxID
 	return rec, nil
+}
+
+func remainingBytesAreZero(r io.Reader, remaining int64) (bool, error) {
+	var buf [32 * 1024]byte
+	for remaining > 0 {
+		n := len(buf)
+		if int64(n) > remaining {
+			n = int(remaining)
+		}
+		if _, err := io.ReadFull(r, buf[:n]); err != nil {
+			return false, err
+		}
+		for _, b := range buf[:n] {
+			if b != 0 {
+				return false, nil
+			}
+		}
+		remaining -= int64(n)
+	}
+	return true, nil
 }
 
 func isDamagedTailError(err error) bool {
