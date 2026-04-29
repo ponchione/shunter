@@ -1,23 +1,5 @@
 # Shunter
 
-Shunter is a Go-native, clean-room real-time database/runtime inspired by the publicly documented design of SpacetimeDB.
-
-SpacetimeDB is an architectural inspiration, not a product-compatibility target.
-Shunter is for local/self-hosted apps built against Shunter-owned Go APIs and
-Shunter-owned clients. It is not trying to be wire-compatible with SpacetimeDB
-clients, mirror SpacetimeDB's hosted business model, or implement usage
-metering as a billing primitive.
-
-Important reality check: this repo is no longer just a docs/spec exercise. It contains substantial implementation across the core subsystem packages, and the test suite currently passes. But it is also not a polished, production-ready database you can confidently drop into an app today.
-
-Latest broad verification during active audit work:
-- `rtk go test ./... -count=1`
-- Result: `Go test: 2006 passed in 11 packages`
-- `rtk go vet ./...`
-- Result: `Go vet: No issues found`
-- `rtk go build ./...`
-- Result: `Go build: Success`
-
 ## What this repo is
 
 Shunter is trying to be a hosted runtime that combines:
