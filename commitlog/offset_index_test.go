@@ -90,6 +90,24 @@ func TestCreateOffsetIndexRejectsSymlinkWithoutTruncatingTarget(t *testing.T) {
 	}
 }
 
+func TestCreateOffsetIndexRejectsDirectoryArtifactWithoutRemoving(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := CreateOffsetIndex(path, 4)
+	if err == nil {
+		_ = idx.Close()
+		t.Fatal("expected directory offset index artifact to fail creation")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("CreateOffsetIndex error = %v, want ErrOpen category", err)
+	}
+	assertDirectoryArtifactExists(t, path)
+}
+
 func TestOpenOffsetIndexRejectsSymlink(t *testing.T) {
 	targetDir := t.TempDir()
 	targetPath := filepath.Join(targetDir, "external.idx")
@@ -140,6 +158,24 @@ func TestOpenOffsetIndexMutRejectsSymlinkWithoutExtendingTarget(t *testing.T) {
 	if !bytes.Equal(after, before) {
 		t.Fatalf("symlink target changed: got %q want %q", after, before)
 	}
+}
+
+func TestOpenOffsetIndexMutRejectsDirectoryArtifactWithoutRemoving(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := OpenOffsetIndexMut(path, 4)
+	if err == nil {
+		_ = idx.Close()
+		t.Fatal("expected directory offset index artifact to fail writable open")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenOffsetIndexMut error = %v, want ErrOpen category", err)
+	}
+	assertDirectoryArtifactExists(t, path)
 }
 
 // Pin 1.

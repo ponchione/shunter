@@ -192,6 +192,24 @@ func TestCreateSegmentRejectsSymlinkWithoutTruncatingTarget(t *testing.T) {
 	}
 }
 
+func TestCreateSegmentRejectsDirectoryArtifactWithoutRemoving(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, SegmentFileName(1))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sw, err := CreateSegment(dir, 1)
+	if err == nil {
+		_ = sw.Close()
+		t.Fatal("expected directory segment artifact to fail creation")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("CreateSegment error = %v, want ErrOpen category", err)
+	}
+	assertDirectoryArtifactExists(t, path)
+}
+
 func TestOpenSegmentForAppendCorruptFirstRecordFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	path := makeScanTestSegment(t, dir, 1, 1)
@@ -235,6 +253,24 @@ func TestOpenSegmentForAppendRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentForAppendRejectsDirectoryArtifactWithoutRemoving(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, SegmentFileName(1))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sw, err := OpenSegmentForAppend(dir, 1)
+	if err == nil {
+		_ = sw.Close()
+		t.Fatal("expected directory segment artifact to fail append reopen")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenSegmentForAppend error = %v, want ErrOpen category", err)
+	}
+	assertDirectoryArtifactExists(t, path)
+}
+
 func TestOpenSegmentForAppendFirstTxMismatchFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	path := makeManualScanTestSegment(t, dir, 1, 2)
@@ -258,6 +294,17 @@ func symlinkOrSkip(t testing.TB, target, link string) {
 	t.Helper()
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink not supported: %v", err)
+	}
+}
+
+func assertDirectoryArtifactExists(t testing.TB, path string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("directory artifact missing: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("artifact mode = %s, want directory", info.Mode())
 	}
 }
 
