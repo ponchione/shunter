@@ -756,13 +756,13 @@ func TestReadSnapshotRejectsDuplicateUint64MapTableIDs(t *testing.T) {
 			name: "sequence",
 			writeMaps: func(body *bytes.Buffer) {
 				writeUint32(t, body, 2)
-				writeUint32(t, body, 0)
+				writeUint32(t, body, 2)
 				writeUint64(t, body, 11)
-				writeUint32(t, body, 0)
+				writeUint32(t, body, 2)
 				writeUint64(t, body, 12)
 				writeUint32(t, body, 0)
 			},
-			wantDetail: "duplicate snapshot sequence table ID 0",
+			wantDetail: "duplicate snapshot sequence table ID 2",
 		},
 		{
 			name: "next-id",
@@ -894,6 +894,35 @@ func TestReadSnapshotRejectsUnknownTableReferences(t *testing.T) {
 				t.Fatalf("ReadSnapshot error = %v, want %q detail", err, tc.wantDetail)
 			}
 		})
+	}
+}
+
+func TestReadSnapshotRejectsSequenceForTableWithoutAutoIncrement(t *testing.T) {
+	_, reg := testSchema()
+	var schemaBuf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&schemaBuf, reg); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	writeUint32(t, &body, uint32(schemaBuf.Len()))
+	body.Write(schemaBuf.Bytes())
+	writeUint32(t, &body, 1)  // sequence entries
+	writeUint32(t, &body, 0)  // players table has no autoincrement column
+	writeUint64(t, &body, 11) // sequence value
+	writeUint32(t, &body, 0)  // next ID entries
+	writeUint32(t, &body, 0)  // table sections
+
+	baseDir := t.TempDir()
+	snapshotDir := filepath.Join(baseDir, "snapshots", "96")
+	writeSnapshotBytes(t, snapshotDir, 96, reg.Version(), body.Bytes())
+
+	_, err := ReadSnapshot(snapshotDir)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot sequence references table 0 without autoincrement column") {
+		t.Fatalf("ReadSnapshot error = %v, want non-autoincrement sequence detail", err)
 	}
 }
 

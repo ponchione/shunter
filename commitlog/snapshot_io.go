@@ -682,12 +682,25 @@ func readSnapshotTableUint64Map(payload io.Reader, section string, schemaByID ma
 		if _, exists := values[id]; exists {
 			return nil, fmt.Errorf("%w: duplicate snapshot %s table ID %d", ErrSnapshot, section, tableID)
 		}
-		if _, ok := schemaByID[id]; !ok {
+		tableSchema, ok := schemaByID[id]
+		if !ok {
 			return nil, fmt.Errorf("%w: snapshot %s references unknown table %d", ErrSnapshot, section, tableID)
+		}
+		if section == "sequence" && !snapshotSchemaHasAutoIncrement(tableSchema) {
+			return nil, fmt.Errorf("%w: snapshot sequence references table %d without autoincrement column", ErrSnapshot, tableID)
 		}
 		values[id] = next
 	}
 	return values, nil
+}
+
+func snapshotSchemaHasAutoIncrement(tableSchema *schema.TableSchema) bool {
+	for i := range tableSchema.Columns {
+		if tableSchema.Columns[i].AutoIncrement {
+			return true
+		}
+	}
+	return false
 }
 
 func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema.TableSchema) ([]SnapshotTableData, error) {
