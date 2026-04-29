@@ -139,6 +139,30 @@ func TestSelectSnapshotSkipsSnapshotsPastDurableHorizon(t *testing.T) {
 	}
 }
 
+func TestSelectSnapshotPastDurableHorizonDoesNotReadCandidate(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+	if err := os.MkdirAll(filepath.Join(root, "snapshots", "10", snapshotFileName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, skipped, err := selectSnapshotWithReport(root, 7, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap == nil || snap.TxID != 5 {
+		t.Fatalf("selected snapshot = %+v, want tx 5", snap)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped snapshots = %+v, want one past-horizon skip", skipped)
+	}
+	got := skipped[0]
+	if got.TxID != 10 || got.Reason != SnapshotSkipPastDurableHorizon || got.Detail != "" {
+		t.Fatalf("skipped snapshot = %+v, want tx 10 past_horizon without read detail", got)
+	}
+}
+
 func TestSelectSnapshotSchemaMismatchColumnType(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
