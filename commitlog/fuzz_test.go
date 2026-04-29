@@ -107,6 +107,55 @@ func FuzzReadSnapshot(f *testing.F) {
 	})
 }
 
+func FuzzOpenOffsetIndex(f *testing.F) {
+	for _, seed := range offsetIndexFuzzSeeds() {
+		f.Add(seed)
+	}
+
+	const maxIndexBytes = 64 << 10
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > maxIndexBytes {
+			t.Skip("offset index fuzz input above bounded local limit")
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, OffsetIndexFileName(1))
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		idx, err := OpenOffsetIndex(path)
+		if err != nil {
+			return
+		}
+		defer idx.Close()
+
+		entries, err := idx.Entries()
+		if err != nil {
+			t.Fatalf("read accepted offset index entries: %v", err)
+		}
+		if idx.NumEntries() != uint64(len(entries)) {
+			t.Fatalf("NumEntries = %d, want %d", idx.NumEntries(), len(entries))
+		}
+		var last types.TxID
+		for _, entry := range entries {
+			if entry.TxID == 0 || entry.ByteOffset == 0 {
+				t.Fatalf("accepted sentinel entry: %+v", entry)
+			}
+			if entry.TxID <= last {
+				t.Fatalf("accepted non-monotonic entries: %+v", entries)
+			}
+			key, off, err := idx.KeyLookup(entry.TxID)
+			if err != nil {
+				t.Fatalf("lookup accepted entry %d: %v", entry.TxID, err)
+			}
+			if key != entry.TxID || off != entry.ByteOffset {
+				t.Fatalf("lookup(%d) = (%d, %d), want (%d, %d)", entry.TxID, key, off, entry.TxID, entry.ByteOffset)
+			}
+			last = entry.TxID
+		}
+	})
+}
+
 func recordFuzzSeeds(t testing.TB) [][]byte {
 	t.Helper()
 	var seeds [][]byte
@@ -139,6 +188,47 @@ func recordFuzzSeeds(t testing.TB) [][]byte {
 	zeroHeaderNonZeroTail := append(make([]byte, RecordHeaderSize), 1)
 	seeds = append(seeds, zeroHeaderNonZeroTail)
 	return seeds
+}
+
+func offsetIndexFuzzSeeds() [][]byte {
+	var seeds [][]byte
+	seeds = append(seeds, nil)
+	seeds = append(seeds, make([]byte, OffsetIndexEntrySize))
+	var valid []byte
+	valid = appendOffsetIndexSeedEntry(valid, 1, SegmentHeaderSize)
+	valid = appendOffsetIndexSeedEntry(valid, 3, SegmentHeaderSize+128)
+	valid = append(valid, make([]byte, OffsetIndexEntrySize)...)
+	seeds = append(seeds, valid)
+	seeds = append(seeds, valid[:OffsetIndexEntrySize+8])
+
+	keyOnlyTail := appendOffsetIndexSeedEntry(nil, 1, SegmentHeaderSize)
+	keyOnlyTail = appendOffsetIndexSeedKey(keyOnlyTail, 2)
+	keyOnlyTail = append(keyOnlyTail, make([]byte, 8)...)
+	seeds = append(seeds, keyOnlyTail)
+
+	var nonMonotonic []byte
+	nonMonotonic = appendOffsetIndexSeedEntry(nonMonotonic, 2, SegmentHeaderSize)
+	nonMonotonic = appendOffsetIndexSeedEntry(nonMonotonic, 1, SegmentHeaderSize+64)
+	seeds = append(seeds, nonMonotonic)
+
+	var zeroOffset []byte
+	zeroOffset = appendOffsetIndexSeedEntry(zeroOffset, 1, 0)
+	zeroOffset = appendOffsetIndexSeedEntry(zeroOffset, 2, SegmentHeaderSize+64)
+	seeds = append(seeds, zeroOffset)
+	return seeds
+}
+
+func appendOffsetIndexSeedEntry(dst []byte, key uint64, off uint64) []byte {
+	dst = appendOffsetIndexSeedKey(dst, key)
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], off)
+	return append(dst, buf[:]...)
+}
+
+func appendOffsetIndexSeedKey(dst []byte, key uint64) []byte {
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], key)
+	return append(dst, buf[:]...)
 }
 
 func changesetFuzzSeeds(t testing.TB) [][]byte {
