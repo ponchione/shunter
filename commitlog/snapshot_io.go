@@ -554,6 +554,9 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateSnapshotCompleteness(schemaByID, sequences, nextIDs, snapshotTables); err != nil {
+		return nil, err
+	}
 	if err := requireNoTrailingBytes(f, "trailing snapshot bytes"); err != nil {
 		return nil, err
 	}
@@ -701,6 +704,27 @@ func snapshotSchemaHasAutoIncrement(tableSchema *schema.TableSchema) bool {
 		}
 	}
 	return false
+}
+
+func validateSnapshotCompleteness(schemaByID map[schema.TableID]*schema.TableSchema, sequences, nextIDs map[schema.TableID]uint64, tables []SnapshotTableData) error {
+	tableSections := map[schema.TableID]struct{}{}
+	for _, table := range tables {
+		tableSections[table.TableID] = struct{}{}
+	}
+	for tableID, tableSchema := range schemaByID {
+		if _, ok := nextIDs[tableID]; !ok {
+			return fmt.Errorf("%w: snapshot missing next_id for table %d", ErrSnapshot, tableID)
+		}
+		if _, ok := tableSections[tableID]; !ok {
+			return fmt.Errorf("%w: snapshot missing table section for table %d", ErrSnapshot, tableID)
+		}
+		if snapshotSchemaHasAutoIncrement(tableSchema) {
+			if _, ok := sequences[tableID]; !ok {
+				return fmt.Errorf("%w: snapshot missing sequence for autoincrement table %d", ErrSnapshot, tableID)
+			}
+		}
+	}
+	return nil
 }
 
 func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema.TableSchema) ([]SnapshotTableData, error) {

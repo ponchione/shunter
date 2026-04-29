@@ -926,6 +926,93 @@ func TestReadSnapshotRejectsSequenceForTableWithoutAutoIncrement(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsMissingTableMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		autoIncrement bool
+		writeMetadata func(*bytes.Buffer)
+		wantDetail    string
+	}{
+		{
+			name:          "next-id",
+			autoIncrement: false,
+			writeMetadata: func(body *bytes.Buffer) {
+				writeUint32(t, body, 0) // sequence entries
+				writeUint32(t, body, 0) // next ID entries
+				writeUint32(t, body, 1) // table sections
+				writeUint32(t, body, 0) // table ID
+				writeUint32(t, body, 0) // row count
+			},
+			wantDetail: "snapshot missing next_id for table 0",
+		},
+		{
+			name:          "table-section",
+			autoIncrement: false,
+			writeMetadata: func(body *bytes.Buffer) {
+				writeUint32(t, body, 0) // sequence entries
+				writeUint32(t, body, 1) // next ID entries
+				writeUint32(t, body, 0) // table ID
+				writeUint64(t, body, 1) // next row ID
+				writeUint32(t, body, 0) // table sections
+			},
+			wantDetail: "snapshot missing table section for table 0",
+		},
+		{
+			name:          "sequence",
+			autoIncrement: true,
+			writeMetadata: func(body *bytes.Buffer) {
+				writeUint32(t, body, 0) // sequence entries
+				writeUint32(t, body, 1) // next ID entries
+				writeUint32(t, body, 0) // table ID
+				writeUint64(t, body, 1) // next row ID
+				writeUint32(t, body, 1) // table sections
+				writeUint32(t, body, 0) // table ID
+				writeUint32(t, body, 0) // row count
+			},
+			wantDetail: "snapshot missing sequence for autoincrement table 0",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schemaBuf := encodeSingleTableSchemaSnapshot(t, tc.autoIncrement)
+			var body bytes.Buffer
+			writeUint32(t, &body, uint32(len(schemaBuf)))
+			body.Write(schemaBuf)
+			tc.writeMetadata(&body)
+
+			baseDir := t.TempDir()
+			snapshotDir := filepath.Join(baseDir, "snapshots", "97")
+			writeSnapshotBytes(t, snapshotDir, 97, 1, body.Bytes())
+
+			_, err := ReadSnapshot(snapshotDir)
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("ReadSnapshot error = %v, want %q detail", err, tc.wantDetail)
+			}
+		})
+	}
+}
+
+func encodeSingleTableSchemaSnapshot(t testing.TB, autoIncrement bool) []byte {
+	t.Helper()
+	var schemaBuf bytes.Buffer
+	writeUint32(t, &schemaBuf, 1) // schema snapshot version
+	writeUint32(t, &schemaBuf, 1) // table count
+	writeUint32(t, &schemaBuf, 0) // table ID
+	if err := writeString(&schemaBuf, "players"); err != nil {
+		t.Fatal(err)
+	}
+	writeUint32(t, &schemaBuf, 1) // column count
+	writeUint32(t, &schemaBuf, 0) // column index
+	if err := writeString(&schemaBuf, "id"); err != nil {
+		t.Fatal(err)
+	}
+	schemaBuf.Write([]byte{byte(schema.KindUint64), 0, boolByte(autoIncrement)})
+	writeUint32(t, &schemaBuf, 0) // index count
+	return schemaBuf.Bytes()
+}
+
 func TestReadSnapshotRejectsHeaderVersionMismatch(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
