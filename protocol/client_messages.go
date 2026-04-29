@@ -93,6 +93,14 @@ type OneOffQueryMsg struct {
 	QueryString string
 }
 
+// DeclaredQueryMsg executes a module-owned QueryDeclaration by name. The
+// server receives Name as the execution authority; it must not infer declared
+// reads from matching raw SQL text.
+type DeclaredQueryMsg struct {
+	MessageID []byte
+	Name      string
+}
+
 // SubscribeMultiMsg is the client-side SubscribeMulti message
 // (SPEC-005 §7.1b). Reference: SubscribeMulti at
 // reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:203
@@ -103,6 +111,14 @@ type SubscribeMultiMsg struct {
 	RequestID    uint32
 	QueryID      uint32
 	QueryStrings []string
+}
+
+// SubscribeDeclaredViewMsg subscribes to a module-owned ViewDeclaration by
+// name. The wire carries the declaration name rather than the authored SQL.
+type SubscribeDeclaredViewMsg struct {
+	RequestID uint32
+	QueryID   uint32
+	Name      string
 }
 
 // UnsubscribeMultiMsg drops every query registered under the given
@@ -136,6 +152,10 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		buf.WriteByte(TagOneOffQuery)
 		writeBytes(&buf, msg.MessageID)
 		writeString(&buf, msg.QueryString)
+	case DeclaredQueryMsg:
+		buf.WriteByte(TagDeclaredQuery)
+		writeBytes(&buf, msg.MessageID)
+		writeString(&buf, msg.Name)
 	case SubscribeMultiMsg:
 		buf.WriteByte(TagSubscribeMulti)
 		writeUint32(&buf, msg.RequestID)
@@ -144,6 +164,11 @@ func EncodeClientMessage(m any) ([]byte, error) {
 		for _, qs := range msg.QueryStrings {
 			writeString(&buf, qs)
 		}
+	case SubscribeDeclaredViewMsg:
+		buf.WriteByte(TagSubscribeDeclaredView)
+		writeUint32(&buf, msg.RequestID)
+		writeUint32(&buf, msg.QueryID)
+		writeString(&buf, msg.Name)
 	case UnsubscribeMultiMsg:
 		buf.WriteByte(TagUnsubscribeMulti)
 		writeUint32(&buf, msg.RequestID)
@@ -156,8 +181,8 @@ func EncodeClientMessage(m any) ([]byte, error) {
 
 // DecodeClientMessage parses a wire frame into its concrete message
 // type. The returned any is one of SubscribeSingleMsg, UnsubscribeSingleMsg,
-// CallReducerMsg, OneOffQueryMsg, SubscribeMultiMsg, UnsubscribeMultiMsg
-// — matching the tag byte.
+// CallReducerMsg, OneOffQueryMsg, DeclaredQueryMsg, SubscribeMultiMsg,
+// SubscribeDeclaredViewMsg, UnsubscribeMultiMsg — matching the tag byte.
 func DecodeClientMessage(frame []byte) (uint8, any, error) {
 	if len(frame) < 1 {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)
@@ -180,8 +205,12 @@ func decodeClientMessageParts(tag uint8, body []byte) (any, error) {
 		return decodeCallReducer(body)
 	case TagOneOffQuery:
 		return decodeOneOffQuery(body)
+	case TagDeclaredQuery:
+		return decodeDeclaredQuery(body)
 	case TagSubscribeMulti:
 		return decodeSubscribeMulti(body)
+	case TagSubscribeDeclaredView:
+		return decodeSubscribeDeclaredView(body)
 	case TagUnsubscribeMulti:
 		return decodeUnsubscribeMulti(body)
 	default:
@@ -265,6 +294,22 @@ func decodeOneOffQuery(body []byte) (OneOffQueryMsg, error) {
 	return m, nil
 }
 
+func decodeDeclaredQuery(body []byte) (DeclaredQueryMsg, error) {
+	var m DeclaredQueryMsg
+	var off int
+	var err error
+	if m.MessageID, off, err = readBytes(body, 0); err != nil {
+		return m, err
+	}
+	if m.Name, off, err = readString(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "DeclaredQuery"); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
 func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 	var m SubscribeMultiMsg
 	var off int
@@ -289,6 +334,22 @@ func decodeSubscribeMulti(body []byte) (SubscribeMultiMsg, error) {
 		m.QueryStrings = append(m.QueryStrings, s)
 	}
 	if err := requireFullyConsumed(body, off, "SubscribeMulti"); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+func decodeSubscribeDeclaredView(body []byte) (SubscribeDeclaredViewMsg, error) {
+	var m SubscribeDeclaredViewMsg
+	var off int
+	var err error
+	if m.RequestID, m.QueryID, off, err = readRequestQueryID(body); err != nil {
+		return m, err
+	}
+	if m.Name, off, err = readString(body, off); err != nil {
+		return m, err
+	}
+	if err := requireFullyConsumed(body, off, "SubscribeDeclaredView"); err != nil {
 		return m, err
 	}
 	return m, nil

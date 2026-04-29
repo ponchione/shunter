@@ -1,10 +1,13 @@
 package shunter
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/subscription"
@@ -243,6 +246,138 @@ func collectDeclaredInitialRows(updates []subscription.SubscriptionUpdate) []typ
 		rows = append(rows, update.Inserts...)
 	}
 	return copyRuntimeProductRows(rows)
+}
+
+// HandleDeclaredQuery handles the protocol named-query message by delegating to
+// the runtime-owned declared read API.
+func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, msg *protocol.DeclaredQueryMsg) {
+	receipt := time.Now()
+	result, err := r.CallQuery(ctx, msg.Name, protocolDeclaredReadOptions(conn, nil)...)
+	if err != nil {
+		sendProtocolDeclaredQueryError(conn, msg.MessageID, err.Error(), receipt)
+		return
+	}
+	rows, err := encodeDeclaredReadRows(result.Rows)
+	if err != nil {
+		sendProtocolDeclaredQueryError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
+		return
+	}
+	sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
+		MessageID: msg.MessageID,
+		Tables: []protocol.OneOffTable{{
+			TableName: result.TableName,
+			Rows:      rows,
+		}},
+		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
+	})
+}
+
+// HandleSubscribeDeclaredView handles the protocol named-view subscription
+// message by delegating to the runtime-owned declared read API.
+func (r *Runtime) HandleSubscribeDeclaredView(ctx context.Context, conn *protocol.Conn, msg *protocol.SubscribeDeclaredViewMsg) {
+	receipt := time.Now()
+	sub, err := r.SubscribeView(ctx, msg.Name, msg.QueryID, protocolDeclaredReadOptions(conn, &msg.RequestID)...)
+	if err != nil {
+		sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, err.Error(), receipt)
+		return
+	}
+	rows, err := encodeDeclaredReadRows(sub.InitialRows)
+	if err != nil {
+		sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, "encode error: "+err.Error(), receipt)
+		return
+	}
+	sendProtocolDeclaredReadMessage(conn, protocol.SubscribeSingleApplied{
+		RequestID:                        msg.RequestID,
+		TotalHostExecutionDurationMicros: declaredReadElapsedMicrosU64(receipt),
+		QueryID:                          msg.QueryID,
+		TableName:                        sub.TableName,
+		Rows:                             rows,
+	})
+}
+
+func protocolDeclaredReadOptions(conn *protocol.Conn, requestID *uint32) []DeclaredReadOption {
+	opts := []DeclaredReadOption{}
+	if conn != nil {
+		opts = append(opts,
+			WithDeclaredReadIdentity(conn.Identity),
+			WithDeclaredReadConnectionID(conn.ID),
+		)
+		if conn.AllowAllPermissions {
+			opts = append(opts, WithDeclaredReadAllowAllPermissions())
+		} else {
+			opts = append(opts, WithDeclaredReadPermissions(conn.Permissions...))
+		}
+	} else {
+		opts = append(opts, WithDeclaredReadPermissions())
+	}
+	if requestID != nil {
+		opts = append(opts, WithDeclaredReadRequestID(*requestID))
+	}
+	return opts
+}
+
+func sendProtocolDeclaredQueryError(conn *protocol.Conn, messageID []byte, errText string, receipt time.Time) {
+	sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
+		MessageID:                  messageID,
+		Error:                      &errText,
+		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
+	})
+}
+
+func sendProtocolDeclaredViewError(conn *protocol.Conn, requestID, queryID uint32, errText string, receipt time.Time) {
+	sendProtocolDeclaredReadMessage(conn, protocol.SubscriptionError{
+		TotalHostExecutionDurationMicros: declaredReadElapsedMicrosU64(receipt),
+		RequestID:                        declaredReadOptionalUint32(requestID),
+		QueryID:                          declaredReadOptionalUint32(queryID),
+		Error:                            errText,
+	})
+}
+
+func sendProtocolDeclaredReadMessage(conn *protocol.Conn, msg any) {
+	if conn == nil {
+		return
+	}
+	frame, err := protocol.EncodeServerMessage(msg)
+	if err != nil {
+		return
+	}
+	wrapped := protocol.EncodeFrame(frame[0], frame[1:], conn.Compression, protocol.CompressionNone)
+	select {
+	case conn.OutboundCh <- wrapped:
+	default:
+	}
+}
+
+func encodeDeclaredReadRows(rows []types.ProductValue) ([]byte, error) {
+	encodedRows := make([][]byte, len(rows))
+	for i, row := range rows {
+		var buf bytes.Buffer
+		if err := bsatn.EncodeProductValue(&buf, row); err != nil {
+			return nil, err
+		}
+		encodedRows[i] = buf.Bytes()
+	}
+	return protocol.EncodeRowList(encodedRows), nil
+}
+
+func declaredReadElapsedMicrosI64(receipt time.Time) int64 {
+	us := time.Since(receipt).Microseconds()
+	if us <= 0 {
+		return 1
+	}
+	return us
+}
+
+func declaredReadElapsedMicrosU64(receipt time.Time) uint64 {
+	us := uint64(time.Since(receipt).Microseconds())
+	if us == 0 {
+		return 1
+	}
+	return us
+}
+
+func declaredReadOptionalUint32(v uint32) *uint32 {
+	return &v
 }
 
 func copyRuntimeProductRows(rows []types.ProductValue) []types.ProductValue {

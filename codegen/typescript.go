@@ -29,6 +29,8 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type ReducerCaller = (name: string, args: Uint8Array) => Promise<Uint8Array>;\n")
 	b.WriteString("export type QueryRunner = (sql: string) => Promise<Uint8Array>;\n")
 	b.WriteString("export type ViewSubscriber = (sql: string) => Promise<() => void>;\n")
+	b.WriteString("export type DeclaredQueryRunner = (name: string) => Promise<Uint8Array>;\n")
+	b.WriteString("export type DeclaredViewSubscriber = (name: string) => Promise<() => void>;\n")
 	b.WriteString("export type TableSubscriber<Row> = (table: string, onRows?: (rows: Row[]) => void) => Promise<() => void>;\n")
 	b.WriteString("\n")
 
@@ -102,8 +104,8 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type ExecutableQueryName = keyof typeof querySQL;\n\n")
 	for _, query := range executableQueries {
 		functionName := "query" + upperFirst(query.identifier)
-		fmt.Fprintf(&b, "export function %s(runQuery: QueryRunner): Promise<Uint8Array> {\n", functionName)
-		fmt.Fprintf(&b, "  return runQuery(%s);\n", strconv.Quote(query.sql))
+		fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {\n", functionName)
+		fmt.Fprintf(&b, "  return runDeclaredQuery(%s);\n", strconv.Quote(query.name))
 		b.WriteString("}\n\n")
 	}
 
@@ -119,8 +121,8 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type ExecutableViewName = keyof typeof viewSQL;\n\n")
 	for _, view := range executableViews {
 		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), subscribeFunctionNames)
-		fmt.Fprintf(&b, "export function %s(subscribeView: ViewSubscriber): Promise<() => void> {\n", functionName)
-		fmt.Fprintf(&b, "  return subscribeView(%s);\n", strconv.Quote(view.sql))
+		fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {\n", functionName)
+		fmt.Fprintf(&b, "  return subscribeDeclaredView(%s);\n", strconv.Quote(view.name))
 		b.WriteString("}\n\n")
 	}
 

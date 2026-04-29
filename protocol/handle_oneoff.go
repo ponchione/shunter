@@ -92,6 +92,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 	query := compiled.query
 	tableID, _, ok := sl.TableByName(query.TableName)
 	if !ok {
+		//lint:ignore ST1005 protocol tests pin this sentence-form error text.
 		return SQLQueryResult{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", query.TableName)
 	}
 

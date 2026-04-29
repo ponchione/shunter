@@ -113,3 +113,61 @@ When complete, update this file with:
 - compatibility notes for raw SQL callbacks
 - validation commands run
 
+Completed 2026-04-29.
+
+Protocol/server declared-read surface names:
+
+- Client messages:
+  - `protocol.DeclaredQueryMsg`
+  - `protocol.SubscribeDeclaredViewMsg`
+- Client tags:
+  - `protocol.TagDeclaredQuery`
+  - `protocol.TagSubscribeDeclaredView`
+- Server/runtime seam:
+  - `protocol.DeclaredReadHandler`
+  - `Runtime.HandleDeclaredQuery`
+  - `Runtime.HandleSubscribeDeclaredView`
+
+Generated TypeScript callback/helper behavior:
+
+- Raw SQL callback types remain:
+  - `QueryRunner = (sql: string) => Promise<Uint8Array>`
+  - `ViewSubscriber = (sql: string) => Promise<() => void>`
+- Declared-read callback types are separate:
+  - `DeclaredQueryRunner = (name: string) => Promise<Uint8Array>`
+  - `DeclaredViewSubscriber = (name: string) => Promise<() => void>`
+- Executable generated query helpers now call
+  `runDeclaredQuery("<query_declaration_name>")`.
+- Executable generated view helpers now call
+  `subscribeDeclaredView("<view_declaration_name>")`.
+- `querySQL` and `viewSQL` continue to export declaration SQL metadata, but
+  generated declaration helpers do not pass that SQL as execution input.
+
+Raw SQL separation behavior:
+
+- Raw `OneOffQueryMsg`, `SubscribeSingleMsg`, and `SubscribeMultiMsg` remain
+  raw SQL surfaces.
+- Declared reads are routed by explicit declaration name only.
+- Raw SQL equivalent to a declaration still goes through raw SQL table-read
+  admission and does not inherit declaration permissions.
+- No exact-SQL matching or declaration inference was added.
+
+Validation commands run:
+
+```sh
+rtk go test ./codegen -count=1
+rtk go test ./protocol -run 'Test.*(Declared|Tags|ClientMessage)' -count=1
+rtk go test . -run 'TestProtocol.*Declared|TestProtocolRawSQLEquivalentDoesNotUseDeclarationPermission' -count=1
+rtk go test ./protocol -count=1
+rtk go test . -run 'Test.*(Declaration|Read|Query|View|Permission|Codegen|Protocol)' -count=1
+rtk go vet ./protocol ./codegen . ./executor
+rtk go test ./... -count=1
+rtk go tool staticcheck ./...
+```
+
+Follow-up remaining for row-level visibility tasks:
+
+- Declared reads still execute the cataloged SQL without row-level visibility
+  expansion.
+- Tasks 07/08 still need authored visibility filter declarations and
+  relation-aware visibility expansion for one-off reads and subscriptions.

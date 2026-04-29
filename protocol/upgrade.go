@@ -50,11 +50,22 @@ type Server struct {
 	// State provides read-only snapshot access for OneOffQuery.
 	// Required for OneOffQuery to work.
 	State CommittedStateAccess
+	// DeclaredReads handles named QueryDeclaration and ViewDeclaration
+	// protocol messages. Raw SQL handlers remain wired through Schema/State
+	// and Executor; declared reads use this explicit name-based surface.
+	DeclaredReads DeclaredReadHandler
 	// Upgraded, when non-nil, overrides the built-in lifecycle and is
 	// called immediately after the WebSocket handshake completes. It
 	// is the extension point for tests that want to bypass OnConnect
 	// and for advanced hosts that want custom admission semantics.
 	Upgraded func(ctx context.Context, uc *UpgradeContext)
+}
+
+// DeclaredReadHandler is the protocol/server seam for module-owned declared
+// reads. Implementations receive the declaration name from the client message.
+type DeclaredReadHandler interface {
+	HandleDeclaredQuery(ctx context.Context, conn *Conn, msg *DeclaredQueryMsg)
+	HandleSubscribeDeclaredView(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewMsg)
 }
 
 // UpgradeContext is the per-connection package that the upgrade
@@ -247,6 +258,10 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 		handlers.OnOneOffQuery = func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg) {
 			handleOneOffQuery(ctx, conn, msg, s.State, s.Schema)
 		}
+	}
+	if s.DeclaredReads != nil {
+		handlers.OnDeclaredQuery = s.DeclaredReads.HandleDeclaredQuery
+		handlers.OnSubscribeDeclaredView = s.DeclaredReads.HandleSubscribeDeclaredView
 	}
 	return handlers
 }

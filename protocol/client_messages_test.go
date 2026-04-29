@@ -155,6 +155,57 @@ func TestOneOffQueryRoundTripSQL(t *testing.T) {
 	}
 }
 
+func TestDeclaredQueryRoundTripName(t *testing.T) {
+	in := DeclaredQueryMsg{
+		MessageID: []byte{0x07, 0x08},
+		Name:      "recent_messages",
+	}
+	frame, err := EncodeClientMessage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame[0] != TagDeclaredQuery {
+		t.Fatalf("tag = %d, want TagDeclaredQuery", frame[0])
+	}
+	tag, out, err := DecodeClientMessage(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag != TagDeclaredQuery {
+		t.Fatalf("tag = %d, want TagDeclaredQuery", tag)
+	}
+	got := out.(DeclaredQueryMsg)
+	if diff := cmp.Diff(in, got); diff != "" {
+		t.Errorf("DeclaredQueryMsg round-trip mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestSubscribeDeclaredViewRoundTripName(t *testing.T) {
+	in := SubscribeDeclaredViewMsg{
+		RequestID: 31,
+		QueryID:   41,
+		Name:      "live_messages",
+	}
+	frame, err := EncodeClientMessage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame[0] != TagSubscribeDeclaredView {
+		t.Fatalf("tag = %d, want TagSubscribeDeclaredView", frame[0])
+	}
+	tag, out, err := DecodeClientMessage(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag != TagSubscribeDeclaredView {
+		t.Fatalf("tag = %d, want TagSubscribeDeclaredView", tag)
+	}
+	got := out.(SubscribeDeclaredViewMsg)
+	if diff := cmp.Diff(in, got); diff != "" {
+		t.Errorf("SubscribeDeclaredViewMsg round-trip mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestDecodeClientMessageUnknownTag(t *testing.T) {
 	frame := []byte{99}
 	_, _, err := DecodeClientMessage(frame)
@@ -192,7 +243,9 @@ func TestDecodeClientMessageRejectsTrailingBytes(t *testing.T) {
 		{"UnsubscribeSingle", UnsubscribeSingleMsg{RequestID: 3, QueryID: 4}},
 		{"CallReducer", CallReducerMsg{ReducerName: "doit", Args: []byte{0x01}, RequestID: 5, Flags: CallReducerFlagsFullUpdate}},
 		{"OneOffQuery", OneOffQueryMsg{MessageID: []byte{0x06}, QueryString: "SELECT * FROM users"}},
+		{"DeclaredQuery", DeclaredQueryMsg{MessageID: []byte{0x06}, Name: "recent_messages"}},
 		{"SubscribeMulti", SubscribeMultiMsg{RequestID: 7, QueryID: 8, QueryStrings: []string{"SELECT * FROM users", "SELECT * FROM orders"}}},
+		{"SubscribeDeclaredView", SubscribeDeclaredViewMsg{RequestID: 9, QueryID: 10, Name: "live_messages"}},
 		{"UnsubscribeMulti", UnsubscribeMultiMsg{RequestID: 9, QueryID: 10}},
 	}
 	for _, tc := range cases {

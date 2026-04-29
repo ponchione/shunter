@@ -12,12 +12,14 @@ import (
 // the host. A nil field means the message type is not supported on this
 // connection -- the dispatch loop closes with 1002 if it encounters one.
 type MessageHandlers struct {
-	OnSubscribeSingle   func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg)
-	OnSubscribeMulti    func(ctx context.Context, conn *Conn, msg *SubscribeMultiMsg)
-	OnUnsubscribeSingle func(ctx context.Context, conn *Conn, msg *UnsubscribeSingleMsg)
-	OnUnsubscribeMulti  func(ctx context.Context, conn *Conn, msg *UnsubscribeMultiMsg)
-	OnCallReducer       func(ctx context.Context, conn *Conn, msg *CallReducerMsg)
-	OnOneOffQuery       func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg)
+	OnSubscribeSingle       func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg)
+	OnSubscribeMulti        func(ctx context.Context, conn *Conn, msg *SubscribeMultiMsg)
+	OnUnsubscribeSingle     func(ctx context.Context, conn *Conn, msg *UnsubscribeSingleMsg)
+	OnUnsubscribeMulti      func(ctx context.Context, conn *Conn, msg *UnsubscribeMultiMsg)
+	OnCallReducer           func(ctx context.Context, conn *Conn, msg *CallReducerMsg)
+	OnOneOffQuery           func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg)
+	OnDeclaredQuery         func(ctx context.Context, conn *Conn, msg *DeclaredQueryMsg)
+	OnSubscribeDeclaredView func(ctx context.Context, conn *Conn, msg *SubscribeDeclaredViewMsg)
 }
 
 // sendError encodes a server message, wraps it in the connection's
@@ -175,6 +177,18 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 				return
 			}
 			run = func() { handlers.OnOneOffQuery(handlerCtx, c, &m) }
+		case DeclaredQueryMsg:
+			if handlers.OnDeclaredQuery == nil {
+				closeProtocolError(c, "unsupported message type")
+				return
+			}
+			run = func() { handlers.OnDeclaredQuery(handlerCtx, c, &m) }
+		case SubscribeDeclaredViewMsg:
+			if handlers.OnSubscribeDeclaredView == nil {
+				closeProtocolError(c, "unsupported message type")
+				return
+			}
+			run = func() { handlers.OnSubscribeDeclaredView(handlerCtx, c, &m) }
 		}
 
 		// Incoming backpressure (SPEC-005 §10.2, Story 6.2):

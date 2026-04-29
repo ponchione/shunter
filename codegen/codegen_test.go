@@ -31,20 +31,26 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
 	assertContains(t, ts, `export const lifecycleReducers = {`)
 	assertContains(t, ts, `OnConnect: "OnConnect",`)
+	assertContains(t, ts, `export type QueryRunner = (sql: string) => Promise<Uint8Array>;`)
+	assertContains(t, ts, `export type ViewSubscriber = (sql: string) => Promise<() => void>;`)
+	assertContains(t, ts, `export type DeclaredQueryRunner = (name: string) => Promise<Uint8Array>;`)
+	assertContains(t, ts, `export type DeclaredViewSubscriber = (name: string) => Promise<() => void>;`)
 	assertContains(t, ts, `export const tableReadPolicies = {`)
 	assertContains(t, ts, `messages: { access: "private", permissions: [] },`)
 	assertContains(t, ts, `export const queries = {`)
 	assertContains(t, ts, `recentMessages: "recent_messages",`)
 	assertContains(t, ts, `export const querySQL = {`)
 	assertContains(t, ts, `recentMessages: "SELECT * FROM messages",`)
-	assertContains(t, ts, `export function queryRecentMessages(runQuery: QueryRunner): Promise<Uint8Array> {`)
-	assertContains(t, ts, `return runQuery("SELECT * FROM messages");`)
+	assertContains(t, ts, `export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("recent_messages");`)
 	assertContains(t, ts, `export const views = {`)
 	assertContains(t, ts, `liveMessages: "live_messages",`)
 	assertContains(t, ts, `export const viewSQL = {`)
 	assertContains(t, ts, `liveMessages: "SELECT * FROM messages",`)
-	assertContains(t, ts, `export function subscribeLiveMessages(subscribeView: ViewSubscriber): Promise<() => void> {`)
-	assertContains(t, ts, `return subscribeView("SELECT * FROM messages");`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_messages");`)
+	assertNotContains(t, ts, `return runQuery("SELECT * FROM messages");`)
+	assertNotContains(t, ts, `return subscribeView("SELECT * FROM messages");`)
 	assertContains(t, ts, `export const permissions = {`)
 	assertContains(t, ts, `reducers: {`)
 	assertContains(t, ts, `sendMessage: { required: ["messages:send"] },`)
@@ -135,7 +141,28 @@ func TestTypeScriptGeneratorAvoidsTableViewSubscribeHelperNameCollisions(t *test
 	ts := string(out)
 
 	assertContains(t, ts, `export function subscribeLiveMessages(subscribeTable: TableSubscriber<LiveMessagesRow>): Promise<() => void> {`)
-	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeView: ViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+}
+
+func TestTypeScriptGeneratorDeclaredHelpersUseNamedCallbacksNotSQL(t *testing.T) {
+	out, err := Generate(contractFixture(), Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export type QueryRunner = (sql: string) => Promise<Uint8Array>;`)
+	assertContains(t, ts, `export type ViewSubscriber = (sql: string) => Promise<() => void>;`)
+	assertContains(t, ts, `export type DeclaredQueryRunner = (name: string) => Promise<Uint8Array>;`)
+	assertContains(t, ts, `export type DeclaredViewSubscriber = (name: string) => Promise<() => void>;`)
+	assertContains(t, ts, `export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("recent_messages");`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_messages");`)
+	assertNotContains(t, ts, `return runDeclaredQuery("SELECT * FROM messages");`)
+	assertNotContains(t, ts, `return subscribeDeclaredView("SELECT * FROM messages");`)
+	assertNotContains(t, ts, `return runQuery("SELECT * FROM messages");`)
+	assertNotContains(t, ts, `return subscribeView("SELECT * FROM messages");`)
 }
 
 func TestTypeScriptGeneratorDoesNotEmitExecutableHelpersForMetadataOnlyDeclarations(t *testing.T) {
