@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -277,6 +278,118 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 			recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
 			tc.assert(t, recovered, maxTxID, plan, report, err)
 		})
+	}
+}
+
+func TestOpenAndRecoverSegmentHeaderFaultsFailLoudly(t *testing.T) {
+	cases := []struct {
+		name   string
+		bytes  []byte
+		assert func(t *testing.T, err error)
+	}{
+		{
+			name:  "bad-magic",
+			bytes: []byte{'X', 'X', 'X', 'X', SegmentVersion, 0, 0, 0},
+			assert: func(t *testing.T, err error) {
+				if !errors.Is(err, ErrBadMagic) {
+					t.Fatalf("error = %v, want ErrBadMagic", err)
+				}
+				if !errors.Is(err, ErrOpen) {
+					t.Fatalf("error = %v, want ErrOpen category", err)
+				}
+			},
+		},
+		{
+			name:  "bad-version",
+			bytes: []byte{SegmentMagic[0], SegmentMagic[1], SegmentMagic[2], SegmentMagic[3], SegmentVersion + 1, 0, 0, 0},
+			assert: func(t *testing.T, err error) {
+				var versionErr *BadVersionError
+				if !errors.As(err, &versionErr) {
+					t.Fatalf("expected BadVersionError, got %T (%v)", err, err)
+				}
+				if versionErr.Got != SegmentVersion+1 {
+					t.Fatalf("bad version got = %d, want %d", versionErr.Got, SegmentVersion+1)
+				}
+				if !errors.Is(err, ErrOpen) {
+					t.Fatalf("error = %v, want ErrOpen category", err)
+				}
+			},
+		},
+		{
+			name:  "bad-flags",
+			bytes: []byte{SegmentMagic[0], SegmentMagic[1], SegmentMagic[2], SegmentMagic[3], SegmentVersion, 1, 0, 0},
+			assert: func(t *testing.T, err error) {
+				if !errors.Is(err, ErrBadFlags) {
+					t.Fatalf("error = %v, want ErrBadFlags", err)
+				}
+			},
+		},
+		{
+			name:  "truncated-header",
+			bytes: []byte{SegmentMagic[0], SegmentMagic[1], SegmentMagic[2]},
+			assert: func(t *testing.T, err error) {
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("error = %v, want io.ErrUnexpectedEOF", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			_, reg := testSchema()
+			path := filepath.Join(root, SegmentFileName(1))
+			if err := os.WriteFile(path, tc.bytes, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+			if err == nil {
+				t.Fatal("expected recovery to fail loudly")
+			}
+			if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+				t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+			}
+			assertZeroRecoveryReport(t, report)
+			tc.assert(t, err)
+		})
+	}
+}
+
+func TestOpenAndRecoverSnapshotSchemaMismatchFailsLoudly(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 5, map[uint64]string{1: "alice"})
+	writeReplaySegment(t, root, 6,
+		replayRecord{txID: 6, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+	)
+
+	mismatchReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+		players := tables[0]
+		players.Columns[1].Type = schema.KindUint64
+		tables[0] = players
+	})
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, mismatchReg)
+	if err == nil {
+		t.Fatal("expected schema mismatch error")
+	}
+	var mismatchErr *SchemaMismatchError
+	if !errors.As(err, &mismatchErr) {
+		t.Fatalf("expected SchemaMismatchError, got %T (%v)", err, err)
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("error = %v, want ErrSnapshot category", err)
+	}
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 6 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 6)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.HasSelectedSnapshot || len(report.SkippedSnapshots) != 0 || report.RecoveredTxID != 0 {
+		t.Fatalf("report = %+v, want no selected/skipped snapshot and no recovered tx", report)
 	}
 }
 
