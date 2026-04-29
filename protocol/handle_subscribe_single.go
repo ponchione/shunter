@@ -30,7 +30,8 @@ func handleSubscribeSingle(
 	sl SchemaLookup,
 ) {
 	receipt := time.Now()
-	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity, false, false)
+	readSL := authorizedSchemaLookupForConn(sl, conn)
+	compiled, err := compileSQLQueryString(msg.QueryString, readSL, &conn.Identity, false, false)
 	if err != nil {
 		sendSubscribeCompileError(conn, receipt, msg.RequestID, msg.QueryID, err, msg.QueryString)
 		return

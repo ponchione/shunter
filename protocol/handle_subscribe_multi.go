@@ -27,10 +27,11 @@ func handleSubscribeMulti(
 	sl SchemaLookup,
 ) {
 	receipt := time.Now()
+	readSL := authorizedSchemaLookupForConn(sl, conn)
 	preds := make([]any, 0, len(msg.QueryStrings))
 	hashIdentities := make([]*types.Identity, 0, len(msg.QueryStrings))
 	for _, qs := range msg.QueryStrings {
-		compiled, err := compileSQLQueryString(qs, sl, &conn.Identity, false, false)
+		compiled, err := compileSQLQueryString(qs, readSL, &conn.Identity, false, false)
 		if err != nil {
 			sendSubscribeCompileError(conn, receipt, msg.RequestID, msg.QueryID, err, qs)
 			return

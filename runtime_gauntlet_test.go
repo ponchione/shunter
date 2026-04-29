@@ -4293,7 +4293,7 @@ func buildGauntletRuntimeWithConfig(t *testing.T, cfg shunter.Config, start bool
 				{Name: "id", Type: types.KindUint64, PrimaryKey: true},
 				{Name: "name", Type: types.KindString},
 			},
-		}).
+		}, schema.WithPublicRead()).
 		Reducer("insert_player", insertPlayerReducer).
 		Reducer("insert_next_player", insertNextPlayerReducer).
 		Reducer("rename_player", renamePlayerReducer).

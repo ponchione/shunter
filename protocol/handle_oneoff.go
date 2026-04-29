@@ -37,20 +37,21 @@ func handleOneOffQuery(
 		ctx = context.Background()
 	}
 	receipt := time.Now()
-	compiled, err := compileSQLQueryString(msg.QueryString, sl, &conn.Identity, true, true)
+	readSL := authorizedSchemaLookupForConn(sl, conn)
+	compiled, err := compileSQLQueryString(msg.QueryString, readSL, &conn.Identity, true, true)
 	if err != nil {
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
 		return
 	}
 
-	tableID, _, ok := sl.TableByName(compiled.TableName)
+	tableID, _, ok := readSL.TableByName(compiled.TableName)
 	if !ok {
 		sendOneOffError(conn, msg.MessageID, fmt.Sprintf("no such table: `%s`. If the table exists, it may be marked private.", compiled.TableName), receipt)
 		return
 	}
 
 	pred := compiled.Predicate
-	if err := subscription.ValidateQueryPredicate(pred, sl); err != nil {
+	if err := subscription.ValidateQueryPredicate(pred, readSL); err != nil {
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
 		return
 	}
@@ -76,7 +77,7 @@ func handleOneOffQuery(
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
 		return true
 	}
-	resolver, _ := sl.(schema.IndexResolver)
+	resolver, _ := readSL.(schema.IndexResolver)
 	rowLimit := oneOffRowLimit(compiled.Limit)
 	var matchedRows []types.ProductValue
 	var encodedRows []types.ProductValue

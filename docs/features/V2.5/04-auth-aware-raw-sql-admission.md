@@ -120,3 +120,77 @@ When complete, update this file with:
 - validation commands run
 - any remaining declared-read or row-level work that tasks 05-08 must handle
 
+Completed 2026-04-29.
+
+Authorized lookup implementation location:
+
+- `protocol/read_authorization.go`
+- `protocol.NewAuthorizedSchemaLookup`
+- raw handler wiring in `protocol/handle_oneoff.go`,
+  `protocol/handle_subscribe_single.go`, and
+  `protocol/handle_subscribe_multi.go`
+
+Raw one-off behavior:
+
+- `handleOneOffQuery` builds a `types.CallerContext` from `Conn.Identity`,
+  `Conn.ID`, `Conn.Permissions`, and `Conn.AllowAllPermissions`.
+- One-off SQL now compiles against the authorized lookup, so private or
+  permission-missing tables are invisible during table resolution.
+- The compiled predicate is validated against the same authorized lookup before
+  snapshot execution.
+- Unauthorized tables emit the existing one-off compiler text:
+
+  ```text
+  no such table: `{name}`. If the table exists, it may be marked private.
+  ```
+
+- `AllowAllPermissions` bypasses private and permissioned table access checks.
+
+Raw subscription behavior:
+
+- `SubscribeSingle` and every `SubscribeMulti` SQL string compile against the
+  caller-authorized lookup before registration.
+- `SubscribeMulti` remains atomic: the first unauthorized query returns a
+  `SubscriptionError`, and no predicates are submitted to the executor.
+- Subscription compile errors preserve the existing SQL wrapper:
+
+  ```text
+  {inner error}, executing: `{sql}`
+  ```
+
+- Authorization happens through table resolution, so JOIN sides, projected
+  tables, non-projected tables, WHERE predicates, and join predicates are
+  covered before registration.
+
+Tests added:
+
+- `protocol/auth_read_admission_test.go` covers default-private rejection,
+  public success, permissioned access, `AllowAllPermissions`, private JOIN
+  tables projected and non-projected, shape-hiding for private join predicate
+  references, `SubscribeMulti` atomicity, and existing error text.
+- Existing broad protocol handler fixtures use an explicit allow-all test
+  connection so SQL compiler/error-shape tests remain about SQL semantics
+  rather than table policy.
+- The runtime gauntlet `players` table is explicitly public because that
+  strict-auth workload uses raw SQL without read tags.
+
+Validation commands run:
+
+```sh
+rtk go fmt ./protocol ./schema ./subscription ./executor .
+rtk go test ./protocol -run AuthReadAdmission -count=1
+rtk go test ./protocol -count=1
+rtk go test ./subscription -count=1
+rtk go test . -run 'Test.*(Read|Query|Subscribe|Permission|Auth)' -count=1
+rtk go vet ./protocol ./schema ./subscription ./executor .
+rtk go test ./... -count=1
+```
+
+Remaining work for tasks 05-08:
+
+- Runtime read catalog construction for declared query/view surfaces.
+- Named declared read execution and declaration permission enforcement.
+- Generated clients must call named declared-read callbacks instead of raw SQL
+  for declarations.
+- Row-level visibility declarations, validation, read-plan expansion, and
+  per-relation enforcement before joins/evaluation.

@@ -16,14 +16,15 @@ func testConnDirect(opts *ProtocolOptions) *Conn {
 	}
 	readCtx, cancelRead := context.WithCancel(context.Background())
 	return &Conn{
-		ID:          GenerateConnectionID(),
-		Identity:    [32]byte{1},
-		OutboundCh:  make(chan []byte, opts.OutgoingBufferMessages),
-		inflightSem: make(chan struct{}, opts.IncomingQueueMessages),
-		opts:        opts,
-		readCtx:     readCtx,
-		cancelRead:  cancelRead,
-		closed:      make(chan struct{}),
+		ID:                  GenerateConnectionID(),
+		Identity:            [32]byte{1},
+		AllowAllPermissions: true,
+		OutboundCh:          make(chan []byte, opts.OutgoingBufferMessages),
+		inflightSem:         make(chan struct{}, opts.IncomingQueueMessages),
+		opts:                opts,
+		readCtx:             readCtx,
+		cancelRead:          cancelRead,
+		closed:              make(chan struct{}),
 	}
 }
 
