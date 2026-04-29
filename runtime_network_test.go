@@ -109,6 +109,44 @@ func TestBuildAuthConfigStrictMapsAudiencesAndCopiesKey(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
+	key := []byte("strict-runtime-secret")
+	audiences := []string{"app"}
+	cfg := Config{
+		DataDir:        t.TempDir(),
+		AuthMode:       AuthModeStrict,
+		AuthSigningKey: key,
+		AuthAudiences:  audiences,
+	}
+
+	rt, err := Build(validChatModule(), cfg)
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	key[0] = 'X'
+	audiences[0] = "mutated"
+
+	got := rt.Config()
+	if string(got.AuthSigningKey) != "strict-runtime-secret" {
+		t.Fatalf("Config AuthSigningKey = %q, want original key", got.AuthSigningKey)
+	}
+	if len(got.AuthAudiences) != 1 || got.AuthAudiences[0] != "app" {
+		t.Fatalf("Config AuthAudiences = %#v, want original audience", got.AuthAudiences)
+	}
+
+	got.AuthSigningKey[0] = 'Y'
+	got.AuthAudiences[0] = "changed"
+
+	again := rt.Config()
+	if string(again.AuthSigningKey) != "strict-runtime-secret" {
+		t.Fatalf("second Config AuthSigningKey = %q, want detached original key", again.AuthSigningKey)
+	}
+	if len(again.AuthAudiences) != 1 || again.AuthAudiences[0] != "app" {
+		t.Fatalf("second Config AuthAudiences = %#v, want detached original audience", again.AuthAudiences)
+	}
+}
+
 func TestRuntimeStartStrictAuthWithoutSigningKeyFails(t *testing.T) {
 	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), AuthMode: AuthModeStrict})
 	if err != nil {
@@ -205,6 +243,40 @@ func TestListenAndServeStartsRuntimeAndStopsOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestListenAndServeDuplicateCallReturnsRuntimeServing(t *testing.T) {
+	addr := reserveRuntimeListenAddr(t)
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), ListenAddr: addr})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- rt.ListenAndServe(ctx) }()
+
+	eventually(t, func() bool {
+		rt.mu.Lock()
+		serving := rt.serving
+		rt.mu.Unlock()
+		return serving
+	})
+
+	err = rt.ListenAndServe(context.Background())
+	if !errors.Is(err, ErrRuntimeServing) {
+		t.Fatalf("duplicate ListenAndServe error = %v, want ErrRuntimeServing", err)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("first ListenAndServe returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first ListenAndServe did not exit after cancellation")
+	}
+}
+
 func TestListenAndServeAfterClosePreservesClosedError(t *testing.T) {
 	rt := buildValidTestRuntime(t)
 	if err := rt.Close(); err != nil {
@@ -259,6 +331,19 @@ func TestRuntimeCloseClearsProtocolGraphBeforeExecutorResources(t *testing.T) {
 	if rt.executor != nil || rt.durability != nil || rt.scheduler != nil {
 		t.Fatalf("lifecycle resources not cleared after Close")
 	}
+}
+
+func reserveRuntimeListenAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return addr
 }
 
 func eventually(t *testing.T, fn func() bool) {

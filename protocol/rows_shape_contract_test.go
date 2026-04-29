@@ -198,7 +198,7 @@ func TestShunterSubscriptionUpdateInnerLayout(t *testing.T) {
 // TestShunterRowsShapeRowListFormatReference pins the per-row-length-
 // prefix EncodeRowList layout as the canonical Shunter rows-data
 // format. See SPEC-005 §3.4
-// (`docs/decomposition/005-protocol/SPEC-005-protocol.md:132-143`) and
+// (`docs/specs/005-protocol/SPEC-005-protocol.md:132-143`) and
 // delta #10 in `docs/shunter-design-decisions.md#protocol-rows-shape`. The reference
 // `BsatnRowList { size_hint: RowSizeHint, rows_data: Bytes }` layout
 // is deliberately deferred to v2.

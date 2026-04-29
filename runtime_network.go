@@ -138,34 +138,53 @@ func (r *Runtime) ListenAndServe(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if !r.tryBeginServing() {
+		return ErrRuntimeServing
+	}
 	addr := r.buildConfig.ListenAddr
 	if addr == "" {
 		addr = defaultListenAddr
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
+		r.endServing()
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
-	return r.serve(ctx, ln)
+	return r.serveStarted(ctx, ln)
 }
 
 func (r *Runtime) serve(ctx context.Context, ln net.Listener) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	r.mu.Lock()
-	if r.serving {
-		r.mu.Unlock()
+	if !r.tryBeginServing() {
 		_ = ln.Close()
 		return ErrRuntimeServing
 	}
+	return r.serveStarted(ctx, ln)
+}
+
+func (r *Runtime) tryBeginServing() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.serving {
+		return false
+	}
 	r.serving = true
+	return true
+}
+
+func (r *Runtime) endServing() {
+	r.mu.Lock()
+	r.serving = false
 	r.mu.Unlock()
-	defer func() {
-		r.mu.Lock()
-		r.serving = false
-		r.mu.Unlock()
-	}()
+}
+
+func (r *Runtime) serveStarted(ctx context.Context, ln net.Listener) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	defer r.endServing()
 
 	if err := r.Start(ctx); err != nil {
 		_ = ln.Close()

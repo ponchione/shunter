@@ -30,7 +30,7 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 		return Config{}, "", fmt.Errorf("auth mode is invalid")
 	}
 
-	normalized := cfg
+	normalized := copyConfig(cfg)
 	dataDir := strings.TrimSpace(cfg.DataDir)
 	if dataDir == "" {
 		dataDir = defaultDataDir
@@ -42,6 +42,13 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 		normalized.DurabilityQueueCapacity = defaultDurabilityQueueCapacity
 	}
 	return normalized, dataDir, nil
+}
+
+func copyConfig(cfg Config) Config {
+	out := cfg
+	out.AuthSigningKey = append([]byte(nil), cfg.AuthSigningKey...)
+	out.AuthAudiences = append([]string(nil), cfg.AuthAudiences...)
+	return out
 }
 
 func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, commitlog.RecoveryResumePlan, error) {

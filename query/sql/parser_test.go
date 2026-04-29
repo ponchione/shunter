@@ -197,7 +197,7 @@ func TestParseWhereLeadingDotFloat(t *testing.T) {
 // where f32 = 1e40` / "Infinity" and `select * from t where u256 = 1e40` /
 // "u256"): an integer-valued exponent-form numeric whose magnitude exceeds
 // int64 must parse as LitBigInt so the coerce boundary can bind it to a
-// 256-bit integer column (via exact BigInt decomposition) or to a float
+// 256-bit integer column (via exact BigInt specs) or to a float
 // column (via big.Float → f64, which rounds to +Inf on f32). Matches the
 // reference BigDecimal is_integer path in
 // crates/expr/src/lib.rs::parse_int.

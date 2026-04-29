@@ -241,14 +241,14 @@ func (r *Runtime) Close() error {
 	if lifecycleCancel != nil {
 		lifecycleCancel()
 	}
-	r.schedulerWG.Wait()
-	if exec != nil {
-		exec.Shutdown()
-	}
 	if fanOutCancel != nil {
 		fanOutCancel()
 	}
+	r.schedulerWG.Wait()
 	r.fanOutWG.Wait()
+	if exec != nil {
+		exec.Shutdown()
+	}
 	var closeErr error
 	if durability != nil {
 		_, closeErr = durability.Close()

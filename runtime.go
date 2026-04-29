@@ -99,7 +99,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 
 	return &Runtime{
 		module:        newModuleSnapshot(mod),
-		config:        cfg,
+		config:        copyConfig(cfg),
 		buildConfig:   normalized,
 		engine:        engine,
 		registry:      registry,
@@ -119,5 +119,5 @@ func (r *Runtime) ModuleName() string {
 
 // Config returns the runtime configuration by value.
 func (r *Runtime) Config() Config {
-	return r.config
+	return copyConfig(r.config)
 }
