@@ -284,6 +284,15 @@ func segmentFuzzSeeds(t testing.TB) [][]byte {
 	seeds = append(seeds, []byte{SegmentMagic[0], SegmentMagic[1], SegmentMagic[2]})
 	headerOnly := segmentHeaderSeed(t)
 	seeds = append(seeds, headerOnly)
+	for _, mutate := range []func([]byte){
+		func(seed []byte) { seed[0] ^= 0xff },
+		func(seed []byte) { seed[4] = SegmentVersion + 1 },
+		func(seed []byte) { seed[5] = 1 },
+	} {
+		corruptHeader := append([]byte(nil), headerOnly...)
+		mutate(corruptHeader)
+		seeds = append(seeds, corruptHeader)
+	}
 
 	validOne := segmentSeed(t, &Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("one")})
 	seeds = append(seeds, validOne)
@@ -291,9 +300,18 @@ func segmentFuzzSeeds(t testing.TB) [][]byte {
 	zeroTail := append([]byte(nil), validOne...)
 	zeroTail = append(zeroTail, make([]byte, RecordOverhead)...)
 	seeds = append(seeds, zeroTail)
+	zeroHeaderNonZeroTail := append([]byte(nil), validOne...)
+	zeroHeaderNonZeroTail = append(zeroHeaderNonZeroTail, make([]byte, RecordHeaderSize)...)
+	zeroHeaderNonZeroTail = append(zeroHeaderNonZeroTail, 1)
+	seeds = append(seeds, zeroHeaderNonZeroTail)
 	partialZeroTail := append([]byte(nil), validOne...)
 	partialZeroTail = append(partialZeroTail, make([]byte, RecordHeaderSize-1)...)
 	seeds = append(seeds, partialZeroTail)
+	partialNonZeroTail := append([]byte(nil), validOne...)
+	partialNonZero := make([]byte, RecordHeaderSize-1)
+	partialNonZero[len(partialNonZero)-1] = 1
+	partialNonZeroTail = append(partialNonZeroTail, partialNonZero...)
+	seeds = append(seeds, partialNonZeroTail)
 
 	validTwo := segmentSeed(t,
 		&Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("one")},
@@ -314,9 +332,21 @@ func segmentFuzzSeeds(t testing.TB) [][]byte {
 		&Record{TxID: 3, RecordType: RecordTypeChangeset, Payload: []byte("gap")},
 	)
 	seeds = append(seeds, gap)
+	firstTxMismatch := segmentSeed(t, &Record{TxID: 2, RecordType: RecordTypeChangeset, Payload: []byte("mismatch")})
+	seeds = append(seeds, firstTxMismatch)
 
 	badFlags := segmentSeed(t, &Record{TxID: 1, RecordType: RecordTypeChangeset, Flags: 1, Payload: []byte("bad")})
 	seeds = append(seeds, badFlags)
+	unknownTypeAfterPrefix := segmentSeed(t,
+		&Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("one")},
+		&Record{TxID: 2, RecordType: RecordTypeChangeset + 1, Payload: []byte("unknown")},
+	)
+	seeds = append(seeds, unknownTypeAfterPrefix)
+	badFlagsAfterPrefix := segmentSeed(t,
+		&Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("one")},
+		&Record{TxID: 2, RecordType: RecordTypeChangeset, Flags: 1, Payload: []byte("bad")},
+	)
+	seeds = append(seeds, badFlagsAfterPrefix)
 	return seeds
 }
 
@@ -443,6 +473,51 @@ func snapshotFuzzSeeds(t testing.TB) [][]byte {
 	oversizedSchema := append([]byte(nil), valid...)
 	binary.LittleEndian.PutUint32(oversizedSchema[SnapshotHeaderSize:SnapshotHeaderSize+4], DefaultCommitLogOptions().MaxRecordPayloadBytes+1)
 	seeds = append(seeds, snapshotSeedWithRecomputedHash(t, oversizedSchema))
+
+	singleTableSchema := encodeSingleTableSchemaSnapshot(t, false)
+	var duplicateTables bytes.Buffer
+	writeUint32(t, &duplicateTables, uint32(len(singleTableSchema)))
+	duplicateTables.Write(singleTableSchema)
+	writeUint32(t, &duplicateTables, 0) // sequence entries
+	writeUint32(t, &duplicateTables, 1) // next ID entries
+	writeUint32(t, &duplicateTables, 0)
+	writeUint64(t, &duplicateTables, 1)
+	writeUint32(t, &duplicateTables, 2) // table sections
+	writeUint32(t, &duplicateTables, 0)
+	writeUint32(t, &duplicateTables, 0)
+	writeUint32(t, &duplicateTables, 0)
+	writeUint32(t, &duplicateTables, 0)
+	seeds = append(seeds, snapshotSeedFromBody(t, 1, duplicateTables.Bytes()))
+
+	autoIncrementSchema := encodeSingleTableSchemaSnapshot(t, true)
+	var duplicateSequence bytes.Buffer
+	writeUint32(t, &duplicateSequence, uint32(len(autoIncrementSchema)))
+	duplicateSequence.Write(autoIncrementSchema)
+	writeUint32(t, &duplicateSequence, 2) // sequence entries
+	writeUint32(t, &duplicateSequence, 0)
+	writeUint64(t, &duplicateSequence, 1)
+	writeUint32(t, &duplicateSequence, 0)
+	writeUint64(t, &duplicateSequence, 2)
+	writeUint32(t, &duplicateSequence, 1) // next ID entries
+	writeUint32(t, &duplicateSequence, 0)
+	writeUint64(t, &duplicateSequence, 1)
+	writeUint32(t, &duplicateSequence, 1) // table sections
+	writeUint32(t, &duplicateSequence, 0)
+	writeUint32(t, &duplicateSequence, 0)
+	seeds = append(seeds, snapshotSeedFromBody(t, 1, duplicateSequence.Bytes()))
+
+	var oversizedRow bytes.Buffer
+	writeUint32(t, &oversizedRow, uint32(len(singleTableSchema)))
+	oversizedRow.Write(singleTableSchema)
+	writeUint32(t, &oversizedRow, 0) // sequence entries
+	writeUint32(t, &oversizedRow, 1) // next ID entries
+	writeUint32(t, &oversizedRow, 0)
+	writeUint64(t, &oversizedRow, 1)
+	writeUint32(t, &oversizedRow, 1) // table sections
+	writeUint32(t, &oversizedRow, 0)
+	writeUint32(t, &oversizedRow, 1)
+	writeUint32(t, &oversizedRow, DefaultCommitLogOptions().MaxRowBytes+1)
+	seeds = append(seeds, snapshotSeedFromBody(t, 1, oversizedRow.Bytes()))
 	return seeds
 }
 
@@ -505,6 +580,23 @@ func snapshotSeedWithRecomputedHash(t testing.TB, data []byte) []byte {
 	hash := ComputeSnapshotHash(data[SnapshotHeaderSize:])
 	copy(data[20:52], hash[:])
 	return data
+}
+
+func snapshotSeedFromBody(t testing.TB, schemaVersion uint32, body []byte) []byte {
+	t.Helper()
+	var file bytes.Buffer
+	file.Write(SnapshotMagic[:])
+	file.Write([]byte{SnapshotVersion, 0, 0, 0})
+	var txID [8]byte
+	binary.LittleEndian.PutUint64(txID[:], 1)
+	file.Write(txID[:])
+	var version [4]byte
+	binary.LittleEndian.PutUint32(version[:], schemaVersion)
+	file.Write(version[:])
+	hash := ComputeSnapshotHash(body)
+	file.Write(hash[:])
+	file.Write(body)
+	return file.Bytes()
 }
 
 func assertChangesetsEquivalent(t *testing.T, a, b *store.Changeset) {
