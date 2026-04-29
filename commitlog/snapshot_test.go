@@ -247,6 +247,65 @@ func TestDecodeSchemaSnapshotRejectsPrimaryIndexWithoutUniqueFlag(t *testing.T) 
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsInvalidKeyConstraints(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		writeData  func(*bytes.Buffer)
+		wantDetail string
+	}{
+		{
+			name: "auto-increment-without-unique-index",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, "jobs"); err != nil {
+					t.Fatal(err)
+				}
+				writeUint32(t, buf, 1) // column count
+				writeUint32(t, buf, 0) // column index
+				if err := writeString(buf, "id"); err != nil {
+					t.Fatal(err)
+				}
+				buf.Write([]byte{byte(schema.KindUint64), 0, 1})
+				writeUint32(t, buf, 0) // index count
+			},
+			wantDetail: `schema snapshot auto_increment column "id" in table 0 is not backed by a unique index`,
+		},
+		{
+			name: "multiple-primary-indexes",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, "players"); err != nil {
+					t.Fatal(err)
+				}
+				writeUint32(t, buf, 2) // column count
+				writeSchemaSnapshotColumn(t, buf, 0, "id")
+				writeSchemaSnapshotColumn(t, buf, 1, "name")
+				writeUint32(t, buf, 2) // index count
+				writeSchemaSnapshotIndex(t, buf, "primary_id", 0)
+				writeSchemaSnapshotIndex(t, buf, "primary_name", 1)
+			},
+			wantDetail: "schema snapshot table 0 has multiple primary indexes",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			tc.writeData(&buf)
+
+			_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want %q detail", err, tc.wantDetail)
+			}
+		})
+	}
+}
+
 func TestDecodeSchemaSnapshotRejectsDuplicateTableIDs(t *testing.T) {
 	var buf bytes.Buffer
 	writeUint32(t, &buf, 1) // schema snapshot version
@@ -1031,7 +1090,12 @@ func encodeSingleTableSchemaSnapshot(t testing.TB, autoIncrement bool) []byte {
 		t.Fatal(err)
 	}
 	schemaBuf.Write([]byte{byte(schema.KindUint64), 0, boolByte(autoIncrement)})
-	writeUint32(t, &schemaBuf, 0) // index count
+	if autoIncrement {
+		writeUint32(t, &schemaBuf, 1) // index count
+		writeSchemaSnapshotIndex(t, &schemaBuf, "primary", 0)
+	} else {
+		writeUint32(t, &schemaBuf, 0) // index count
+	}
 	return schemaBuf.Bytes()
 }
 

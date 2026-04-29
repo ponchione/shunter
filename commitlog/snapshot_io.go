@@ -216,6 +216,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		}
 		var indexes []schema.IndexSchema
 		seenIndexNames := map[string]struct{}{}
+		primaryIndexes := 0
 		for idxID := uint32(0); idxID < idxCount; idxID++ {
 			idxName, err := readString(r)
 			if err != nil {
@@ -243,6 +244,12 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			if primary && !unique {
 				return nil, 0, fmt.Errorf("%w: schema snapshot primary index %q in table %d is not unique", ErrSnapshot, idxName, tableID)
 			}
+			if primary {
+				primaryIndexes++
+				if primaryIndexes > 1 {
+					return nil, 0, fmt.Errorf("%w: schema snapshot table %d has multiple primary indexes", ErrSnapshot, tableID)
+				}
+			}
 			var colsCount uint32
 			if err := binary.Read(r, binary.LittleEndian, &colsCount); err != nil {
 				return nil, 0, err
@@ -266,6 +273,11 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			}
 			indexes = append(indexes, schema.IndexSchema{ID: schema.IndexID(idxID), Name: idxName, Columns: idxCols, Unique: unique, Primary: primary})
 		}
+		for _, col := range cols {
+			if col.AutoIncrement && !snapshotSchemaHasUniqueSingleColumnIndex(indexes, col.Index) {
+				return nil, 0, fmt.Errorf("%w: schema snapshot auto_increment column %q in table %d is not backed by a unique index", ErrSnapshot, col.Name, tableID)
+			}
+		}
 		tables = append(tables, schema.TableSchema{ID: schemaTableID, Name: name, Columns: cols, Indexes: indexes})
 	}
 	if err := requireNoTrailingBytes(r, "trailing schema snapshot bytes"); err != nil {
@@ -276,6 +288,15 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 
 func validSchemaSnapshotValueKind(kind schema.ValueKind) bool {
 	return kind >= schema.KindBool && kind <= schema.KindArrayString
+}
+
+func snapshotSchemaHasUniqueSingleColumnIndex(indexes []schema.IndexSchema, columnIndex int) bool {
+	for _, idx := range indexes {
+		if idx.Unique && len(idx.Columns) == 1 && idx.Columns[0] == columnIndex {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeSchemaSnapshotBool(v byte, field string) (bool, error) {
