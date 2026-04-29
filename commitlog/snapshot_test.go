@@ -769,6 +769,59 @@ func TestListSnapshotsSkipsMalformedNamesAndMarkerDirectories(t *testing.T) {
 	}
 }
 
+func TestListSnapshotsSkipsMarkerSymlinksAndRegularTempArtifacts(t *testing.T) {
+	baseDir := t.TempDir()
+	for _, txID := range []uint64{10, 20} {
+		dir := filepath.Join(baseDir, txIDString(txID))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, snapshotFileName), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	targetDir := t.TempDir()
+	lockTarget := filepath.Join(targetDir, "lock-target")
+	tempTarget := filepath.Join(targetDir, "temp-target")
+	lockBefore := []byte("external lock marker target")
+	tempBefore := []byte("external temp marker target")
+	if err := os.WriteFile(lockTarget, lockBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tempTarget, tempBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lockDir := filepath.Join(baseDir, "30")
+	if err := os.MkdirAll(lockDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, lockTarget, filepath.Join(lockDir, ".lock"))
+	tempSymlinkDir := filepath.Join(baseDir, "40")
+	if err := os.MkdirAll(tempSymlinkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, tempTarget, filepath.Join(tempSymlinkDir, snapshotTempFileName))
+	tempRegularDir := filepath.Join(baseDir, "50")
+	if err := os.MkdirAll(tempRegularDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempRegularDir, snapshotTempFileName), []byte("regular temp marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := ListSnapshots(baseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != 20 || ids[1] != 10 {
+		t.Fatalf("ListSnapshots = %v, want [20 10]", ids)
+	}
+	assertSymlinkExists(t, filepath.Join(lockDir, ".lock"))
+	assertSymlinkExists(t, filepath.Join(tempSymlinkDir, snapshotTempFileName))
+	assertFileBytes(t, lockTarget, lockBefore)
+	assertFileBytes(t, tempTarget, tempBefore)
+}
+
 func TestReadSnapshotHashMismatch(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
