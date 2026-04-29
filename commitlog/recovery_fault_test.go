@@ -386,6 +386,46 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "snapshot-log-gap-to-truncated-rollover-first-record-fails-loudly",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+				path := writeReplaySegment(t, root, 4,
+					replayRecord{txID: 4, inserts: []types.ProductValue{{types.NewUint64(4), types.NewString("partial-dave")}}},
+				)
+				truncateScanTestFileToOffset(t, path, int64(SegmentHeaderSize+RecordHeaderSize-1))
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err == nil {
+					t.Fatal("expected snapshot/log boundary gap error")
+				}
+				var gapErr *HistoryGapError
+				if !errors.As(err, &gapErr) {
+					t.Fatalf("expected HistoryGapError, got %T (%v)", err, err)
+				}
+				if gapErr.Expected != 3 || gapErr.Got != 4 {
+					t.Fatalf("HistoryGapError = %+v, want Expected=3 Got=4", gapErr)
+				}
+				if !errors.Is(err, ErrOpen) {
+					t.Fatalf("boundary gap error = %v, want ErrOpen category", err)
+				}
+				if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+				}
+				if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+					t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
+				}
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 4 || report.DamagedTailSegments[0].LastTx != 3 {
+					t.Fatalf("damaged tail report = %+v, want empty damaged segment 4..3", report.DamagedTailSegments)
+				}
+				if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
+					t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
+				}
+			},
+		},
+		{
 			name: "full-log-prefix-with-truncated-rollover-first-record-recovers-prefix",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				writeReplaySegment(t, root, 1,
