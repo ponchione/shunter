@@ -1898,6 +1898,58 @@ func TestOpenAndRecoverAfterCompactionSyncFailureUsesSnapshotAndRemainingTail(t 
 	}
 }
 
+func TestOpenAndRecoverIgnoresCoveredOrphanIndexesAfterCompactedPrefix(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 6, map[uint64]string{
+		1: "alice",
+		2: "bob",
+		3: "carol",
+		4: "dave",
+		5: "eve",
+		6: "frank",
+	})
+	createOrphanOffsetIndex(t, root, 1, OffsetIndexEntry{TxID: 1, ByteOffset: SegmentHeaderSize})
+	createOrphanOffsetIndex(t, root, 4, OffsetIndexEntry{TxID: 4, ByteOffset: SegmentHeaderSize})
+	writeReplaySegment(t, root, 7,
+		replayRecord{txID: 7, inserts: []types.ProductValue{{types.NewUint64(7), types.NewString("grace")}}},
+		replayRecord{txID: 8, inserts: []types.ProductValue{{types.NewUint64(8), types.NewString("heidi")}}},
+	)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 8 {
+		t.Fatalf("maxTxID = %d, want 8", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{
+		1: "alice",
+		2: "bob",
+		3: "carol",
+		4: "dave",
+		5: "eve",
+		6: "frank",
+		7: "grace",
+		8: "heidi",
+	})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 6 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 6)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 8 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 8)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 7 || report.SegmentCoverage[0].MaxTxID != 8 {
+		t.Fatalf("segment coverage = %+v, want only live tail segment 7..8", report.SegmentCoverage)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 7, End: 8}) {
+		t.Fatalf("replayed range = %+v, want 7..8", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 7 || plan.NextTxID != 9 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 7 at tx 9", plan)
+	}
+}
+
 func assertNoRecoveredStateAfterReplayFault(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, durableHorizon types.TxID) {
 	t.Helper()
 	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {

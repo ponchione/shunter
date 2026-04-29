@@ -69,6 +69,54 @@ func TestOpenAndRecoverSnapshotAndLogRecovery(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverSnapshotPlusTailMatchesFullLogReplay(t *testing.T) {
+	fullLogRoot := t.TempDir()
+	snapshotRoot := t.TempDir()
+	_, reg := testSchema()
+	writeReplaySegment(t, fullLogRoot, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+		replayRecord{txID: 4, inserts: []types.ProductValue{{types.NewUint64(4), types.NewString("dave")}}},
+		replayRecord{txID: 5, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("eve")}}},
+	)
+	writeFaultSnapshot(t, snapshotRoot, reg, 3, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	writeReplaySegment(t, snapshotRoot, 4,
+		replayRecord{txID: 4, inserts: []types.ProductValue{{types.NewUint64(4), types.NewString("dave")}}},
+		replayRecord{txID: 5, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("eve")}}},
+	)
+
+	fullRecovered, fullMaxTxID, fullPlan, fullReport, err := OpenAndRecoverWithReport(fullLogRoot, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotRecovered, snapshotMaxTxID, snapshotPlan, snapshotReport, err := OpenAndRecoverWithReport(snapshotRoot, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fullMaxTxID != 5 || snapshotMaxTxID != 5 {
+		t.Fatalf("max tx mismatch: full=%d snapshot=%d want 5", fullMaxTxID, snapshotMaxTxID)
+	}
+	assertReplayStatesEqual(t, fullRecovered, snapshotRecovered)
+	assertReplayPlayerRows(t, snapshotRecovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol", 4: "dave", 5: "eve"})
+
+	if fullReport.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 5}) {
+		t.Fatalf("full-log replay range = %+v, want 1..5", fullReport.ReplayedTxRange)
+	}
+	if fullPlan.AppendMode != AppendInPlace || fullPlan.SegmentStartTx != 1 || fullPlan.NextTxID != 6 {
+		t.Fatalf("full-log resume plan = %+v, want append-in-place on segment 1 at tx 6", fullPlan)
+	}
+	if !snapshotReport.HasSelectedSnapshot || snapshotReport.SelectedSnapshotTxID != 3 {
+		t.Fatalf("snapshot report selected = (%v, %d), want (true, 3)", snapshotReport.HasSelectedSnapshot, snapshotReport.SelectedSnapshotTxID)
+	}
+	if snapshotReport.ReplayedTxRange != (RecoveryTxIDRange{Start: 4, End: 5}) {
+		t.Fatalf("snapshot replay range = %+v, want 4..5", snapshotReport.ReplayedTxRange)
+	}
+	if snapshotPlan.AppendMode != AppendInPlace || snapshotPlan.SegmentStartTx != 4 || snapshotPlan.NextTxID != 6 {
+		t.Fatalf("snapshot resume plan = %+v, want append-in-place on segment 4 at tx 6", snapshotPlan)
+	}
+}
+
 func TestOpenAndRecoverWithReportReturnsStructuredRecoveryReport(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()

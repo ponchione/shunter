@@ -224,6 +224,57 @@ func TestRunCompactionRemovesCoveredOrphansButRetainsUncoveredOrphans(t *testing
 	assertFileExists(t, futureOrphan)
 }
 
+func TestRunCompactionRemovesCoveredOrphansAfterEntirePrefixGone(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	seg2 := makeScanTestSegment(t, dir, 4, 4, 5, 6)
+	active := makeScanTestSegment(t, dir, 7, 7, 8)
+
+	idx1Path := filepath.Join(dir, OffsetIndexFileName(1))
+	idx4Path := filepath.Join(dir, OffsetIndexFileName(4))
+	idx7Path := filepath.Join(dir, OffsetIndexFileName(7))
+	for _, p := range []string{idx1Path, idx4Path, idx7Path} {
+		idx, err := CreateOffsetIndex(p, 4)
+		if err != nil {
+			t.Fatalf("CreateOffsetIndex(%s): %v", p, err)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Simulate a crash after the covered prefix segments were removed but
+	// before either covered sidecar was cleaned.
+	if err := os.Remove(seg1); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(seg2); err != nil {
+		t.Fatal(err)
+	}
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		syncCalls++
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 6); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	if syncCalls != 1 {
+		t.Fatalf("syncDir calls = %d, want 1", syncCalls)
+	}
+	assertFileMissing(t, idx1Path)
+	assertFileMissing(t, idx4Path)
+	assertFileExists(t, active)
+	assertFileExists(t, idx7Path)
+}
+
 func TestRunCompactionSegmentRemovalFailureIncludesOperationPathAndWraps(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
