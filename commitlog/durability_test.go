@@ -277,6 +277,134 @@ func TestDurabilityWorkerResumeSyncFailureLeavesRecoverableDurablePrefix(t *test
 	}
 }
 
+func TestDurabilityWorkerResumeFreshSegmentReplacesRolloverArtifacts(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+	}{
+		{
+			name: "zero-length-rollover",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				createZeroLengthSegment(t, dir, 3)
+			},
+		},
+		{
+			name: "truncated-first-record-rollover",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				path := writeReplaySegment(t, dir, 3,
+					replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("partial")}}},
+				)
+				truncateScanTestFileToOffset(t, path, int64(SegmentHeaderSize+RecordHeaderSize-1))
+			},
+		},
+		{
+			name: "directory-rollover",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				createRolloverDirectoryArtifact(t, dir, 3)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			_, reg := testSchema()
+			writeFaultSnapshot(t, dir, reg, 2, map[uint64]string{1: "p", 2: "p"})
+			tc.setup(t, dir)
+
+			recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if maxTxID != 2 {
+				t.Fatalf("maxTxID before resume = %d, want 2", maxTxID)
+			}
+			assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p"})
+			if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+				t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+			}
+			if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+				t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+			}
+
+			opts := DefaultCommitLogOptions()
+			opts.OffsetIndexIntervalBytes = 0
+			opts.OffsetIndexCap = 0
+			dw, err := NewDurabilityWorkerWithResumePlan(dir, plan, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dw.EnqueueCommitted(3, makeDurabilityTestChangeset(3))
+			if finalTx, fatalErr := dw.Close(); fatalErr != nil {
+				t.Fatal(fatalErr)
+			} else if finalTx != 3 {
+				t.Fatalf("final durable tx = %d, want 3", finalTx)
+			}
+
+			if info, err := os.Stat(filepath.Join(dir, SegmentFileName(3))); err != nil {
+				t.Fatalf("replacement segment missing: %v", err)
+			} else if info.IsDir() {
+				t.Fatal("replacement segment path is still a directory artifact")
+			}
+
+			recovered, maxTxID, plan, report, err = OpenAndRecoverWithReport(dir, reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if maxTxID != 3 {
+				t.Fatalf("maxTxID after resume = %d, want 3", maxTxID)
+			}
+			assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p", 3: "p"})
+			if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+				t.Fatalf("selected snapshot report after resume = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+			}
+			if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 3, End: 3}) {
+				t.Fatalf("replayed range after resume = %+v, want 3..3", report.ReplayedTxRange)
+			}
+			if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 3 || plan.NextTxID != 4 {
+				t.Fatalf("post-resume plan = %+v, want append-in-place on segment 3 at tx 4", plan)
+			}
+		})
+	}
+}
+
+func TestDurabilityWorkerResumeFreshSegmentRejectsNonEmptyRolloverDirectoryArtifact(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, dir, reg, 2, map[uint64]string{1: "p", 2: "p"})
+	artifactDir := filepath.Join(dir, SegmentFileName(3))
+	if err := os.Mkdir(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	artifactFile := filepath.Join(artifactDir, "leftover")
+	if err := os.WriteFile(artifactFile, []byte("unsafe artifact"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, maxTxID, plan, _, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID before resume = %d, want 2", maxTxID)
+	}
+	if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+	}
+
+	_, err = NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions())
+	if err == nil {
+		t.Fatal("expected non-empty rollover directory artifact to block resume")
+	}
+	if !strings.Contains(err.Error(), "remove rollover segment directory artifact") {
+		t.Fatalf("resume error = %v, want artifact removal context", err)
+	}
+	if _, statErr := os.Stat(artifactFile); statErr != nil {
+		t.Fatalf("non-empty artifact contents should be preserved: %v", statErr)
+	}
+}
+
 func TestDurabilityWorkerRolloverCreateFailureLeavesRecoverableDurablePrefix(t *testing.T) {
 	dir := t.TempDir()
 	_, reg := testSchema()

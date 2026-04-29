@@ -191,6 +191,9 @@ func openSegmentForResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWrit
 		if plan.SegmentStartTx == 0 || plan.NextTxID == 0 {
 			return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v", plan)
 		}
+		if err := removeEmptySegmentDirectoryArtifact(dir, uint64(plan.SegmentStartTx)); err != nil {
+			return nil, 0, err
+		}
 		seg, err := CreateSegment(dir, uint64(plan.SegmentStartTx))
 		if err != nil {
 			return nil, 0, err
@@ -201,6 +204,24 @@ func openSegmentForResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWrit
 	default:
 		return nil, 0, fmt.Errorf("commitlog: unknown append mode %d", plan.AppendMode)
 	}
+}
+
+func removeEmptySegmentDirectoryArtifact(dir string, startTxID uint64) error {
+	path := filepath.Join(dir, SegmentFileName(startTxID))
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("commitlog: remove rollover segment directory artifact %s: %w", path, err)
+	}
+	return nil
 }
 
 // EnqueueCommitted sends a committed changeset for durability.
