@@ -214,6 +214,17 @@ func TestDecodeSchemaSnapshotRejectsInvalidBoolFlags(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsInvalidColumnType(t *testing.T) {
+	data := encodeSchemaSnapshotWithFlags(t, [3]byte{byte(schema.KindArrayString) + 1, 0, 0}, [2]byte{1, 1})
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(data))
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), `invalid schema snapshot column "id" type`) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want invalid column type detail", err)
+	}
+}
+
 func TestDecodeSchemaSnapshotRejectsDuplicateTableIDs(t *testing.T) {
 	var buf bytes.Buffer
 	writeUint32(t, &buf, 1) // schema snapshot version
@@ -227,6 +238,71 @@ func TestDecodeSchemaSnapshotRejectsDuplicateTableIDs(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "duplicate schema snapshot table ID 0") {
 		t.Fatalf("DecodeSchemaSnapshot error = %v, want duplicate table ID detail", err)
+	}
+}
+
+func TestDecodeSchemaSnapshotRejectsDuplicateNames(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		writeData  func(*bytes.Buffer)
+		wantDetail string
+	}{
+		{
+			name: "table",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 2) // table count
+				writeMinimalSchemaSnapshotTable(t, buf, 0, "players")
+				writeMinimalSchemaSnapshotTable(t, buf, 1, "players")
+			},
+			wantDetail: `duplicate schema snapshot table name "players"`,
+		},
+		{
+			name: "column",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, "players"); err != nil {
+					t.Fatal(err)
+				}
+				writeUint32(t, buf, 2) // column count
+				writeSchemaSnapshotColumn(t, buf, 0, "id")
+				writeSchemaSnapshotColumn(t, buf, 1, "id")
+				writeUint32(t, buf, 0) // index count
+			},
+			wantDetail: `duplicate schema snapshot column name "id" in table 0`,
+		},
+		{
+			name: "index",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, "players"); err != nil {
+					t.Fatal(err)
+				}
+				writeUint32(t, buf, 1) // column count
+				writeSchemaSnapshotColumn(t, buf, 0, "id")
+				writeUint32(t, buf, 2) // index count
+				writeSchemaSnapshotIndex(t, buf, "primary", 0)
+				writeSchemaSnapshotIndex(t, buf, "primary", 0)
+			},
+			wantDetail: `duplicate schema snapshot index name "primary" in table 0`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			tc.writeData(&buf)
+
+			_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want %q detail", err, tc.wantDetail)
+			}
+		})
 	}
 }
 
@@ -279,6 +355,103 @@ func TestDecodeSchemaSnapshotRejectsIndexUnknownColumn(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsEmptySchemaSections(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		writeData  func(*bytes.Buffer)
+		wantDetail string
+	}{
+		{
+			name: "table-name",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, ""); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantDetail: "schema snapshot table 0 has empty name",
+		},
+		{
+			name: "columns",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, "players"); err != nil {
+					t.Fatal(err)
+				}
+				writeUint32(t, buf, 0) // column count
+			},
+			wantDetail: "schema snapshot table 0 has no columns",
+		},
+		{
+			name: "column-name",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, "players"); err != nil {
+					t.Fatal(err)
+				}
+				writeUint32(t, buf, 1) // column count
+				writeSchemaSnapshotColumn(t, buf, 0, "")
+			},
+			wantDetail: "schema snapshot column 0 in table 0 has empty name",
+		},
+		{
+			name: "index-name",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, "players"); err != nil {
+					t.Fatal(err)
+				}
+				writeUint32(t, buf, 1) // column count
+				writeSchemaSnapshotColumn(t, buf, 0, "id")
+				writeUint32(t, buf, 1) // index count
+				writeSchemaSnapshotIndex(t, buf, "", 0)
+			},
+			wantDetail: "schema snapshot index 0 in table 0 has empty name",
+		},
+		{
+			name: "index-columns",
+			writeData: func(buf *bytes.Buffer) {
+				writeUint32(t, buf, 1) // schema snapshot version
+				writeUint32(t, buf, 1) // table count
+				writeUint32(t, buf, 0) // table ID
+				if err := writeString(buf, "players"); err != nil {
+					t.Fatal(err)
+				}
+				writeUint32(t, buf, 1) // column count
+				writeSchemaSnapshotColumn(t, buf, 0, "id")
+				writeUint32(t, buf, 1) // index count
+				if err := writeString(buf, "primary"); err != nil {
+					t.Fatal(err)
+				}
+				buf.Write([]byte{1, 1}) // unique, primary
+				writeUint32(t, buf, 0)  // index column count
+			},
+			wantDetail: `schema snapshot index "primary" in table 0 has no columns`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			tc.writeData(&buf)
+
+			_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want %q detail", err, tc.wantDetail)
+			}
+		})
+	}
+}
+
 func writeSchemaSnapshotColumn(t testing.TB, dst *bytes.Buffer, index uint32, name string) {
 	t.Helper()
 	writeUint32(t, dst, index)
@@ -288,13 +461,26 @@ func writeSchemaSnapshotColumn(t testing.TB, dst *bytes.Buffer, index uint32, na
 	dst.Write([]byte{byte(schema.KindUint64), 0, 0})
 }
 
+func writeSchemaSnapshotIndex(t testing.TB, dst *bytes.Buffer, name string, columns ...uint32) {
+	t.Helper()
+	if err := writeString(dst, name); err != nil {
+		t.Fatal(err)
+	}
+	dst.Write([]byte{1, 1})
+	writeUint32(t, dst, uint32(len(columns)))
+	for _, col := range columns {
+		writeUint32(t, dst, col)
+	}
+}
+
 func writeMinimalSchemaSnapshotTable(t testing.TB, dst *bytes.Buffer, tableID uint32, name string) {
 	t.Helper()
 	writeUint32(t, dst, tableID)
 	if err := writeString(dst, name); err != nil {
 		t.Fatal(err)
 	}
-	writeUint32(t, dst, 0) // column count
+	writeUint32(t, dst, 1) // column count
+	writeSchemaSnapshotColumn(t, dst, 0, "id")
 	writeUint32(t, dst, 0) // index count
 }
 

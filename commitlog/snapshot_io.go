@@ -131,6 +131,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 	}
 	var tables []schema.TableSchema
 	seenTables := map[schema.TableID]struct{}{}
+	seenTableNames := map[string]struct{}{}
 	for range tableCount {
 		var tableID uint32
 		if err := binary.Read(r, binary.LittleEndian, &tableID); err != nil {
@@ -145,12 +146,23 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		if err != nil {
 			return nil, 0, err
 		}
+		if name == "" {
+			return nil, 0, fmt.Errorf("%w: schema snapshot table %d has empty name", ErrSnapshot, tableID)
+		}
+		if _, exists := seenTableNames[name]; exists {
+			return nil, 0, fmt.Errorf("%w: duplicate schema snapshot table name %q", ErrSnapshot, name)
+		}
+		seenTableNames[name] = struct{}{}
 		var colCount uint32
 		if err := binary.Read(r, binary.LittleEndian, &colCount); err != nil {
 			return nil, 0, err
 		}
+		if colCount == 0 {
+			return nil, 0, fmt.Errorf("%w: schema snapshot table %d has no columns", ErrSnapshot, tableID)
+		}
 		var cols []schema.ColumnSchema
 		seenColumns := map[int]struct{}{}
+		seenColumnNames := map[string]struct{}{}
 		for range colCount {
 			var colIdx uint32
 			if err := binary.Read(r, binary.LittleEndian, &colIdx); err != nil {
@@ -168,9 +180,20 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			if err != nil {
 				return nil, 0, err
 			}
+			if colName == "" {
+				return nil, 0, fmt.Errorf("%w: schema snapshot column %d in table %d has empty name", ErrSnapshot, colIdx, tableID)
+			}
+			if _, exists := seenColumnNames[colName]; exists {
+				return nil, 0, fmt.Errorf("%w: duplicate schema snapshot column name %q in table %d", ErrSnapshot, colName, tableID)
+			}
+			seenColumnNames[colName] = struct{}{}
 			flags := make([]byte, 3)
 			if _, err := io.ReadFull(r, flags); err != nil {
 				return nil, 0, err
+			}
+			kind := schema.ValueKind(flags[0])
+			if !validSchemaSnapshotValueKind(kind) {
+				return nil, 0, fmt.Errorf("%w: invalid schema snapshot column %q type %d in table %d", ErrSnapshot, colName, flags[0], tableID)
 			}
 			nullable, err := decodeSchemaSnapshotBool(flags[1], "column nullable")
 			if err != nil {
@@ -180,18 +203,26 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			if err != nil {
 				return nil, 0, err
 			}
-			cols = append(cols, schema.ColumnSchema{Index: index, Name: colName, Type: schema.ValueKind(flags[0]), Nullable: nullable, AutoIncrement: autoIncrement})
+			cols = append(cols, schema.ColumnSchema{Index: index, Name: colName, Type: kind, Nullable: nullable, AutoIncrement: autoIncrement})
 		}
 		var idxCount uint32
 		if err := binary.Read(r, binary.LittleEndian, &idxCount); err != nil {
 			return nil, 0, err
 		}
 		var indexes []schema.IndexSchema
+		seenIndexNames := map[string]struct{}{}
 		for idxID := uint32(0); idxID < idxCount; idxID++ {
 			idxName, err := readString(r)
 			if err != nil {
 				return nil, 0, err
 			}
+			if idxName == "" {
+				return nil, 0, fmt.Errorf("%w: schema snapshot index %d in table %d has empty name", ErrSnapshot, idxID, tableID)
+			}
+			if _, exists := seenIndexNames[idxName]; exists {
+				return nil, 0, fmt.Errorf("%w: duplicate schema snapshot index name %q in table %d", ErrSnapshot, idxName, tableID)
+			}
+			seenIndexNames[idxName] = struct{}{}
 			flags := make([]byte, 2)
 			if _, err := io.ReadFull(r, flags); err != nil {
 				return nil, 0, err
@@ -207,6 +238,9 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			var colsCount uint32
 			if err := binary.Read(r, binary.LittleEndian, &colsCount); err != nil {
 				return nil, 0, err
+			}
+			if colsCount == 0 {
+				return nil, 0, fmt.Errorf("%w: schema snapshot index %q in table %d has no columns", ErrSnapshot, idxName, tableID)
 			}
 			var idxCols []int
 			for range colsCount {
@@ -230,6 +264,10 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		return nil, 0, err
 	}
 	return tables, version, nil
+}
+
+func validSchemaSnapshotValueKind(kind schema.ValueKind) bool {
+	return kind >= schema.KindBool && kind <= schema.KindArrayString
 }
 
 func decodeSchemaSnapshotBool(v byte, field string) (bool, error) {
