@@ -700,10 +700,13 @@ func TestListSnapshotsSkipsMalformedNamesAndMarkerDirectories(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"not-a-snapshot", "18446744073709551616"} {
+	for _, name := range []string{"not-a-snapshot", "18446744073709551616", "00000000000000000030"} {
 		if err := os.MkdirAll(filepath.Join(baseDir, name), 0o755); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "50"), []byte("not a snapshot directory"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(baseDir, "30", ".lock"), 0o755); err != nil {
 		t.Fatal(err)

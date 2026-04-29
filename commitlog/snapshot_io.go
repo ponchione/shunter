@@ -842,6 +842,9 @@ func ListSnapshots(baseDir string) ([]types.TxID, error) {
 		if err != nil {
 			continue
 		}
+		if strconv.FormatUint(txID, 10) != entry.Name() {
+			continue
+		}
 		dir := filepath.Join(baseDir, entry.Name())
 		if HasLockFile(dir) || HasSnapshotTempFile(dir) {
 			continue
