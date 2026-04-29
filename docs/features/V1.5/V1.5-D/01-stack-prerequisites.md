@@ -1,6 +1,6 @@
 # V1.5-D Task 01: Reconfirm Permission Metadata Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-D/00-current-execution-plan.md`
 
 Objective: verify permission/read-model metadata can annotate existing exported
 surfaces without changing the runtime shape.

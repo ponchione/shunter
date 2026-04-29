@@ -313,7 +313,8 @@ V1.5-D is complete. Its live proof is:
   contract arrays.
 - TypeScript codegen exposes passive `permissions` and `readModels` constants.
 - no runtime access-control enforcement, policy engine, migration metadata, or
-  runtime shape change was added.
+  runtime shape change was added by V1.5-D itself. V2-E later added narrow
+  reducer permission enforcement from reducer metadata.
 
 V1.5-D validation passed:
 - `rtk go fmt .`
@@ -377,8 +378,10 @@ Live proof points:
 - `codegen.Generate` and `codegen.GenerateFromJSON` generate deterministic
   TypeScript client bindings from the canonical contract without starting a
   runtime
-- permission/read-model metadata is passive, exported in the canonical
-  contract, and visible to generated TypeScript clients
+- reducer permission metadata is exported in the canonical contract, visible to
+  generated TypeScript clients, and enforced for reducer calls by V2-E;
+  query/view permission metadata and read-model metadata remain exported and
+  passive pending a table/read-model policy design
 - migration metadata is passive, exported in the canonical contract, and
   consumed by contract-diff/policy tooling only
 - V2-A hardened the runtime/module boundary with a private `moduleSnapshot`

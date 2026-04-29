@@ -1,6 +1,6 @@
 # V1.5-D Task 03: Implement Narrow Permission/Read-Model Metadata
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-D/00-current-execution-plan.md`
 
 Objective: attach policy metadata to exported read/write surfaces without
 expanding Shunter into a broad auth framework.

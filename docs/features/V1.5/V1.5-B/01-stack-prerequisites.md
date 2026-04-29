@@ -1,6 +1,6 @@
 # V1.5-B Task 01: Reconfirm Contract Export Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-B/00-current-execution-plan.md`
 
 Objective: verify the full contract export can be assembled from live v1 and
 V1.5-A surfaces.

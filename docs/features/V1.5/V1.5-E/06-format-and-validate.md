@@ -1,6 +1,6 @@
 # V1.5-E Task 06: Format And Validate The Slice
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-E/00-current-execution-plan.md`
 
 Objective: run migration metadata and contract-diff verification gates.
 

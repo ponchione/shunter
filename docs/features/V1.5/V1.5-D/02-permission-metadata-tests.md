@@ -1,6 +1,6 @@
 # V1.5-D Task 02: Add Failing Permission Metadata Tests
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-D/00-current-execution-plan.md`
 
 Objective: pin narrow permission/read-model metadata as exported declaration
 metadata.

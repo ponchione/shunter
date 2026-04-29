@@ -1,6 +1,6 @@
 # V1.5-E Task 02: Add Failing Migration Metadata Tests
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-E/00-current-execution-plan.md`
 
 Objective: pin descriptive migration metadata before diff tooling is added.
 

@@ -1,6 +1,6 @@
 # V1.5-A Task 04: Expose Declaration Metadata Through Narrow Descriptions
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-A/00-current-execution-plan.md`
 
 Objective: make query/view declarations inspectable without implementing the
 V1.5-B canonical contract.

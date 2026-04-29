@@ -1,6 +1,6 @@
 # V1.5-A Task 01: Reconfirm Query/View Declaration Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-A/00-current-execution-plan.md`
 
 Objective: verify V1.5-A is stacked on the live v1 root package and does not
 reopen V1-A through V1-G.
@@ -16,8 +16,8 @@ Checks:
 - `rtk go doc ./schema SchemaExport`
 
 Read only if needed:
-- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
-- `docs/decomposition/hosted-runtime-version-phases.md`
+- `docs/specs/hosted-runtime-v1.5-follow-ons.md`
+- `docs/specs/hosted-runtime-version-phases.md`
 - `docs/hosted-runtime-implementation-roadmap.md`
 
 Prerequisite conclusions to record in Task 01:

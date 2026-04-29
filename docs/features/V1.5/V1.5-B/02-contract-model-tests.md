@@ -1,6 +1,6 @@
 # V1.5-B Task 02: Add Failing Contract Model Tests
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-B/00-current-execution-plan.md`
 
 Objective: pin the in-memory full module contract before JSON output is added.
 

@@ -1,6 +1,6 @@
 # V1.5-C Task 03: Implement The First Client Binding Generator
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-C/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-C/00-current-execution-plan.md`
 
 Objective: generate frontend/client bindings from the canonical contract, with
 TypeScript as the first narrow target.

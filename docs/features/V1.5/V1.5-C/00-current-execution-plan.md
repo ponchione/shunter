@@ -34,8 +34,8 @@ Completion notes:
 - `codegen.GenerateFromJSON` accepts canonical `ModuleContract` JSON.
 - TypeScript is the only supported language target in this slice.
 - generated TypeScript covers table row types, table subscription helpers,
-  reducer raw-byte call helpers, declared query helpers, and declared view
-  subscription helpers.
+  reducer raw-byte call helpers, query/view declaration maps, and SQL-backed
+  query/view helper functions when declaration SQL metadata is present.
 - lifecycle reducers are exposed separately from normal callable reducer helpers.
 - unsupported language values and unusable contract JSON fail with clear errors.
 

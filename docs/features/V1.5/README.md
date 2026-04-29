@@ -1,17 +1,21 @@
 # Hosted Runtime V1.5 Planning
 
-Status: draft decomposition
+Status: complete; historical implementation plan
 Scope: bite-sized implementation plans for the v1.5 hosted-runtime follow-ons.
 
 Source docs:
-- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
-- `docs/decomposition/hosted-runtime-version-phases.md`
+- `docs/specs/hosted-runtime-v1.5-follow-ons.md`
+- `docs/specs/hosted-runtime-version-phases.md`
 - `docs/hosted-runtime-implementation-roadmap.md`
 - `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
 
 V1.5 starts after the v1 hosted-runtime owner is live. It should improve
 developer ergonomics and platform usability without reopening the v1 runtime
 shape.
+
+Later hosted-runtime V2 slices have landed after this set. Treat these files as
+V1.5 implementation history and use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+the current hosted-runtime state.
 
 ## Slice Order
 
@@ -58,4 +62,3 @@ Each implementation slice should:
 - run focused package tests first
 - run `rtk go fmt` and `rtk go vet` for touched packages
 - expand to `rtk go test ./... -count=1` when root/runtime contracts change
-

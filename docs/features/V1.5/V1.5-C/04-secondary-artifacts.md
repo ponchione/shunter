@@ -1,6 +1,6 @@
 # V1.5-C Task 04: Keep Secondary Artifacts Separate
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-C/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-C/00-current-execution-plan.md`
 
 Objective: add secondary generator outputs only when they are small, useful, and
 clearly separate from the first frontend binding target.

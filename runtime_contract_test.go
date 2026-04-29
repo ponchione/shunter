@@ -242,6 +242,60 @@ func TestRuntimeExportContractJSONIsDeterministicAndRoundTrips(t *testing.T) {
 	}
 }
 
+func TestRuntimeExportContractJSONUsesCanonicalDeclarationKeys(t *testing.T) {
+	mod := validChatModule().
+		Query(QueryDeclaration{
+			Name: "recent_messages",
+			SQL:  "SELECT * FROM messages",
+		}).
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT * FROM messages",
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	data, err := rt.ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON returned error: %v", err)
+	}
+
+	var topLevel map[string]json.RawMessage
+	if err := json.Unmarshal(data, &topLevel); err != nil {
+		t.Fatalf("Unmarshal contract JSON: %v", err)
+	}
+	assertCanonicalDeclarationKeys(t, topLevel["queries"], "recent_messages", "SELECT * FROM messages")
+	assertCanonicalDeclarationKeys(t, topLevel["views"], "live_messages", "SELECT * FROM messages")
+}
+
+func TestModuleContractJSONAcceptsLegacyDeclarationKeys(t *testing.T) {
+	data := []byte(`{
+  "contract_version": 1,
+  "module": {"name": "chat", "version": "v1.0.0", "metadata": {}},
+  "schema": {"version": 1, "tables": [], "reducers": []},
+  "queries": [{"Name": "recent_messages", "SQL": "SELECT * FROM messages"}],
+  "views": [{"Name": "live_messages", "SQL": "SELECT * FROM messages"}],
+  "permissions": {"reducers": [], "queries": [], "views": []},
+  "read_model": {"declarations": []},
+  "migrations": {"module": {"classifications": []}, "declarations": []},
+  "codegen": {
+    "contract_format": "shunter.module_contract",
+    "contract_version": 1,
+    "default_snapshot_filename": "shunter.contract.json"
+  }
+}`)
+
+	var contract ModuleContract
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatalf("Unmarshal legacy contract JSON: %v", err)
+	}
+	assertQuerySQL(t, contract.Queries, "recent_messages", "SELECT * FROM messages")
+	assertViewSQL(t, contract.Views, "live_messages", "SELECT * FROM messages")
+}
+
 func TestRuntimeExportContractJSONDocumentsDefaultSnapshotFilename(t *testing.T) {
 	if DefaultContractSnapshotFilename != "shunter.contract.json" {
 		t.Fatalf("DefaultContractSnapshotFilename = %q, want shunter.contract.json", DefaultContractSnapshotFilename)
@@ -345,4 +399,35 @@ func assertViewSQL(t *testing.T, views []ViewDescription, name, sql string) {
 		return
 	}
 	t.Fatalf("views = %#v, want %q", views, name)
+}
+
+func assertCanonicalDeclarationKeys(t *testing.T, raw json.RawMessage, name, sql string) {
+	t.Helper()
+	var declarations []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &declarations); err != nil {
+		t.Fatalf("Unmarshal declarations: %v", err)
+	}
+	if len(declarations) != 1 {
+		t.Fatalf("declarations = %#v, want one declaration", declarations)
+	}
+	if _, ok := declarations[0]["Name"]; ok {
+		t.Fatalf("declaration used legacy Name key: %s", raw)
+	}
+	if _, ok := declarations[0]["SQL"]; ok {
+		t.Fatalf("declaration used legacy SQL key: %s", raw)
+	}
+	var gotName string
+	if err := json.Unmarshal(declarations[0]["name"], &gotName); err != nil {
+		t.Fatalf("Unmarshal declaration name: %v", err)
+	}
+	if gotName != name {
+		t.Fatalf("declaration name = %q, want %q", gotName, name)
+	}
+	var gotSQL string
+	if err := json.Unmarshal(declarations[0]["sql"], &gotSQL); err != nil {
+		t.Fatalf("Unmarshal declaration sql: %v", err)
+	}
+	if gotSQL != sql {
+		t.Fatalf("declaration sql = %q, want %q", gotSQL, sql)
+	}
 }

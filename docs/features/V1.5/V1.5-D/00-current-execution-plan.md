@@ -33,7 +33,10 @@ V1.5-D landed proof:
 - generated TypeScript exposes `permissions` and `readModels` constants for
   inspection only
 - no runtime access-control enforcement, policy engine, migration metadata, or
-  runtime shape change was added
+  runtime shape change was added by V1.5-D itself
+- current code includes later V2-E reducer permission enforcement; read
+  permission metadata remains exported/passive pending a table/read-model
+  policy design
 
 Validation:
 - `rtk go fmt .`
@@ -62,6 +65,10 @@ V1.5-D must not become:
 - a full multi-tenant auth product
 - runtime-blocking access-control enforcement unless a later contract explicitly
   designs that behavior
+
+Current-state note: the later V2-E slice explicitly designed and landed narrow
+reducer permission enforcement from the same reducer metadata. These V1.5-D
+files should not be read as forbidding that completed later work.
 
 Historical sequencing note: later hosted-runtime slices have since landed. Do
 not treat this completed V1.5-D plan as a live handoff; use

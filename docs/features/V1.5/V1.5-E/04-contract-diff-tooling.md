@@ -1,6 +1,6 @@
 # V1.5-E Task 04: Add Contract-Diff Tooling
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-E/00-current-execution-plan.md`
 
 Objective: compare a current canonical contract to a previous
 `shunter.contract.json` and infer schema/module surface changes.

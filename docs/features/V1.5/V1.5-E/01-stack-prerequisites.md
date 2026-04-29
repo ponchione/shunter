@@ -1,6 +1,6 @@
 # V1.5-E Task 01: Reconfirm Migration Metadata Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-E/00-current-execution-plan.md`
 
 Objective: verify migration metadata and diff tooling can build on the
 canonical contract without changing runtime startup semantics.

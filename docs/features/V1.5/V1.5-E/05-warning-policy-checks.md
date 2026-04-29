@@ -1,6 +1,6 @@
 # V1.5-E Task 05: Add Warning And CI-Oriented Policy Checks
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-E/00-current-execution-plan.md`
 
 Objective: turn metadata plus inferred diffs into warnings that apps can use in
 review or CI.

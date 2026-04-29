@@ -1,6 +1,6 @@
 # V1.5-E Task 03: Implement Descriptive Migration Metadata
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-E/00-current-execution-plan.md`
 
 Objective: add exported migration metadata without implying Shunter executes
 migrations in V1.5.

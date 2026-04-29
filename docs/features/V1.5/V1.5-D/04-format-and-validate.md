@@ -1,6 +1,6 @@
 # V1.5-D Task 04: Format And Validate The Slice
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-D/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-D/00-current-execution-plan.md`
 
 Objective: run permission/read-model metadata verification gates.
 

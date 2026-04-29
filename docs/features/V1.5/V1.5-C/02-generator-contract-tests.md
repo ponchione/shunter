@@ -1,6 +1,6 @@
 # V1.5-C Task 02: Add Failing Generator Contract Tests
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-C/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-C/00-current-execution-plan.md`
 
 Objective: pin generator behavior against a checked-in or in-test canonical
 contract fixture before implementation.

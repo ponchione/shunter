@@ -1,6 +1,6 @@
 # V1.5-B Task 05: Format And Validate The Slice
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-B/00-current-execution-plan.md`
 
 Objective: run canonical contract export verification gates.
 

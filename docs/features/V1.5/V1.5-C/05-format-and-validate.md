@@ -1,6 +1,6 @@
 # V1.5-C Task 05: Format And Validate The Slice
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-C/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-C/00-current-execution-plan.md`
 
 Objective: run client binding/codegen verification gates.
 

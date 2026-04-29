@@ -1,6 +1,6 @@
 # V1.5-A Task 02: Add Failing Declaration Metadata Tests
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-A/00-current-execution-plan.md`
 
 Objective: pin the public module-owned query/view declaration behavior before
 implementation.

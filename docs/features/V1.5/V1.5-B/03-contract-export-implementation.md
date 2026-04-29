@@ -1,6 +1,6 @@
 # V1.5-B Task 03: Implement Contract Export Assembly
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-B/00-current-execution-plan.md`
 
 Objective: assemble a detached full module contract from existing module,
 schema, reducer, query, and view metadata.

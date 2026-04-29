@@ -1,6 +1,6 @@
 # V1.5-A Task 03: Implement Query/View Declaration API
 
-Parent plan: `docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`
+Parent plan: `docs/features/V1.5/V1.5-A/00-current-execution-plan.md`
 
 Objective: add the smallest root-package declarations that can be registered on
 `*shunter.Module` and later exported in a contract artifact.
