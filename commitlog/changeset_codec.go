@@ -92,6 +92,9 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		tableID := schema.TableID(binary.LittleEndian.Uint32(data[pos:]))
 		pos += 4
 
+		if _, exists := cs.Tables[tableID]; exists {
+			return nil, fmt.Errorf("commitlog: duplicate table ID %d", tableID)
+		}
 		ts, ok := reg.Table(tableID)
 		if !ok {
 			return nil, fmt.Errorf("commitlog: unknown table ID %d", tableID)

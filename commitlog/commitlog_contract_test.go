@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,6 +310,19 @@ func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 	unknownTable := []byte{1, 1, 0, 0, 0, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	if _, err := DecodeChangeset(unknownTable, reg); err == nil {
 		t.Fatal("expected unknown table error")
+	}
+	duplicateTable := []byte{
+		1,          // changeset version
+		2, 0, 0, 0, // table count
+		0, 0, 0, 0, // table 0
+		0, 0, 0, 0, // insert count
+		0, 0, 0, 0, // delete count
+		0, 0, 0, 0, // duplicate table 0
+		0, 0, 0, 0, // insert count
+		0, 0, 0, 0, // delete count
+	}
+	if _, err := DecodeChangeset(duplicateTable, reg); err == nil || !strings.Contains(err.Error(), "duplicate table ID 0") {
+		t.Fatalf("duplicate table error = %v, want duplicate table ID detail", err)
 	}
 	tooLargeRow := []byte{1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 8, 0, 0, 0}
 	if _, err := decodeChangesetWithMax(tooLargeRow, reg, 4); err == nil {
