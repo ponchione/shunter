@@ -128,9 +128,6 @@ func orphanedCoveredOffsetIndexes(dir string, segments []SegmentInfo, snapshotTx
 
 	var orphaned []string
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
 		startTxID, ok := parseOffsetIndexFileStartTx(entry.Name())
 		if !ok || types.TxID(startTxID) > snapshotTxID {
 			continue
