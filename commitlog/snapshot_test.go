@@ -631,6 +631,25 @@ func TestCreateAndReadSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsSymlinkSnapshotFile(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 77)
+	replaceSnapshotFileWithSymlinkCandidate(t, baseDir, 77)
+
+	_, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "77"))
+	if err == nil {
+		t.Fatal("expected symlink snapshot file to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("ReadSnapshot error = %v, want regular-file rejection detail", err)
+	}
+}
+
 func TestSnapshotBodyRejectsShortWrite(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	cs.SetCommittedTxID(91)

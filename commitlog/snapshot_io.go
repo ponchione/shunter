@@ -572,7 +572,11 @@ type SnapshotTableData struct {
 }
 
 func ReadSnapshot(dir string) (*SnapshotData, error) {
-	f, err := os.Open(filepath.Join(dir, snapshotFileName))
+	path := filepath.Join(dir, snapshotFileName)
+	if err := requireRegularSnapshotFile(path); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -618,6 +622,17 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 		NextIDs:               nextIDs,
 		Schema:                tables,
 	}, nil
+}
+
+func requireRegularSnapshotFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: snapshot file %s is not a regular file", ErrSnapshot, path)
+	}
+	return nil
 }
 
 func readSnapshotHeader(f *os.File) (uint64, uint32, [32]byte, error) {

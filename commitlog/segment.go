@@ -234,6 +234,9 @@ func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 // positioned at the end.
 func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) {
 	path := filepath.Join(dir, SegmentFileName(startTxID))
+	if err := requireRegularSegmentFile(path); err != nil {
+		return nil, err
+	}
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
@@ -370,6 +373,9 @@ type SegmentReader struct {
 
 // OpenSegment opens and validates a segment file.
 func OpenSegment(path string) (*SegmentReader, error) {
+	if err := requireRegularSegmentFile(path); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -391,6 +397,17 @@ func OpenSegment(path string) (*SegmentReader, error) {
 	}
 
 	return &SegmentReader{file: f, startTx: startTx}, nil
+}
+
+func requireRegularSegmentFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: segment file %s is not a regular file", ErrOpen, path)
+	}
+	return nil
 }
 
 // Next reads the next record using the default max record payload limit.

@@ -141,6 +141,22 @@ func TestOpenSegmentRejectsNonCanonicalFilename(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentRejectsSymlink(t *testing.T) {
+	targetDir := t.TempDir()
+	targetPath := makeScanTestSegment(t, targetDir, 1, 1)
+	dir := t.TempDir()
+	path := filepath.Join(dir, SegmentFileName(1))
+	symlinkOrSkip(t, targetPath, path)
+
+	_, err := OpenSegment(path)
+	if err == nil {
+		t.Fatal("expected symlink segment to fail")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenSegment error = %v, want ErrOpen category", err)
+	}
+}
+
 func TestSegmentFileName(t *testing.T) {
 	got := SegmentFileName(1)
 	if got != "00000000000000000001.log" {
@@ -174,6 +190,23 @@ func TestOpenSegmentForAppendCorruptFirstRecordFailsClosed(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentForAppendRejectsSymlink(t *testing.T) {
+	targetDir := t.TempDir()
+	targetPath := makeScanTestSegment(t, targetDir, 1, 1)
+	dir := t.TempDir()
+	path := filepath.Join(dir, SegmentFileName(1))
+	symlinkOrSkip(t, targetPath, path)
+
+	sw, err := OpenSegmentForAppend(dir, 1)
+	if err == nil {
+		_ = sw.Close()
+		t.Fatal("expected symlink segment reopen to fail")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenSegmentForAppend error = %v, want ErrOpen category", err)
+	}
+}
+
 func TestOpenSegmentForAppendFirstTxMismatchFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	path := makeManualScanTestSegment(t, dir, 1, 2)
@@ -190,6 +223,13 @@ func TestOpenSegmentForAppendFirstTxMismatchFailsClosed(t *testing.T) {
 	}
 	if after.Size() != before.Size() {
 		t.Fatalf("segment size changed after failed reopen: before=%d after=%d", before.Size(), after.Size())
+	}
+}
+
+func symlinkOrSkip(t testing.TB, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
 	}
 }
 

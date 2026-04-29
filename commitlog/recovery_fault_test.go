@@ -1084,6 +1084,31 @@ func TestOpenAndRecoverMalformedSegmentFilenamesFailLoudly(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverSymlinkSegmentFailsLoudly(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	targetRoot := t.TempDir()
+	targetPath := writeReplaySegment(t, targetRoot, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("external")}}},
+	)
+	symlinkOrSkip(t, targetPath, filepath.Join(root, SegmentFileName(1)))
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected symlink segment to fail recovery loudly")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("recovery error = %v, want ErrOpen category", err)
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("recovery error = %v, want regular-file rejection detail", err)
+	}
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	assertZeroRecoveryReport(t, report)
+}
+
 func TestOpenAndRecoverSnapshotSchemaMismatchFailsLoudly(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
@@ -1350,6 +1375,43 @@ func TestOpenAndRecoverSnapshotMarkerDirectoryArtifactsAreIgnored(t *testing.T) 
 				t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
 			}
 		})
+	}
+}
+
+func TestOpenAndRecoverSnapshotFileSymlinkRecoversCompleteLog(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 2, map[uint64]string{99: "unsafe-symlink"})
+	replaceSnapshotFileWithSymlinkCandidate(t, root, 2)
+	writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	assertSkippedSnapshot(t, report, 2, SnapshotSkipReadFailed)
+	if !strings.Contains(report.SkippedSnapshots[0].Detail, "not a regular file") {
+		t.Fatalf("skipped snapshot detail = %q, want regular-file rejection", report.SkippedSnapshots[0].Detail)
+	}
+	if report.HasSelectedSnapshot {
+		t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+		t.Fatalf("replayed range = %+v, want 1..3", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
 	}
 }
 
@@ -2746,6 +2808,17 @@ func createSnapshotFileDirectoryCandidate(t *testing.T, root string, txID types.
 	if err := os.MkdirAll(filepath.Join(snapshotDir, snapshotFileName), 0o755); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func replaceSnapshotFileWithSymlinkCandidate(t *testing.T, root string, txID types.TxID) {
+	t.Helper()
+	snapshotDir := filepath.Join(root, "snapshots", txIDString(uint64(txID)))
+	snapshotPath := filepath.Join(snapshotDir, snapshotFileName)
+	targetPath := filepath.Join(snapshotDir, "snapshot.target")
+	if err := os.Rename(snapshotPath, targetPath); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, filepath.Base(targetPath), snapshotPath)
 }
 
 func markSnapshotLocked(t *testing.T, root string, txID types.TxID) {
