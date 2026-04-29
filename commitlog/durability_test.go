@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -402,6 +403,76 @@ func TestDurabilityWorkerResumeFreshSegmentRejectsNonEmptyRolloverDirectoryArtif
 	}
 	if _, statErr := os.Stat(artifactFile); statErr != nil {
 		t.Fatalf("non-empty artifact contents should be preserved: %v", statErr)
+	}
+}
+
+func TestDurabilityWorkerResumeIgnoresSymlinkOffsetIndexWithoutMutatingTarget(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, dir, reg, 2, map[uint64]string{1: "p", 2: "p"})
+	writeReplaySegment(t, dir, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("p")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("p")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("p")}}},
+	)
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, "external.idx")
+	before := []byte("external offset index target")
+	if err := os.WriteFile(targetPath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	idxPath := filepath.Join(dir, OffsetIndexFileName(1))
+	symlinkOrSkip(t, targetPath, idxPath)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID before resume = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p", 3: "p"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 3, End: 3}) {
+		t.Fatalf("replayed range = %+v, want 3..3", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(4, makeDurabilityTestChangeset(4))
+	if finalTx, fatalErr := dw.Close(); fatalErr != nil {
+		t.Fatal(fatalErr)
+	} else if finalTx != 4 {
+		t.Fatalf("final durable tx = %d, want 4", finalTx)
+	}
+	after, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("symlink target changed: got %q want %q", after, before)
+	}
+
+	recovered, maxTxID, plan, report, err = OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 4 {
+		t.Fatalf("maxTxID after resume = %d, want 4", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p", 3: "p", 4: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 3, End: 4}) {
+		t.Fatalf("replayed range after resume = %+v, want 3..4", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 5 {
+		t.Fatalf("post-resume plan = %+v, want append-in-place on segment 1 at tx 5", plan)
 	}
 }
 

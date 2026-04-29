@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -58,6 +59,86 @@ func TestOpenOffsetIndexMutRejectsOversizedCap(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("OpenOffsetIndexMut error = %v, want too large", err)
+	}
+}
+
+func TestCreateOffsetIndexRejectsSymlinkWithoutTruncatingTarget(t *testing.T) {
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, "external.idx")
+	before := []byte("external offset index bytes")
+	if err := os.WriteFile(targetPath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	linkPath := filepath.Join(dir, OffsetIndexFileName(1))
+	symlinkOrSkip(t, targetPath, linkPath)
+
+	idx, err := CreateOffsetIndex(linkPath, 4)
+	if err == nil {
+		_ = idx.Close()
+		t.Fatal("expected symlink offset index path to fail creation")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("CreateOffsetIndex error = %v, want ErrOpen category", err)
+	}
+	after, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("symlink target changed: got %q want %q", after, before)
+	}
+}
+
+func TestOpenOffsetIndexRejectsSymlink(t *testing.T) {
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, "external.idx")
+	idx, err := CreateOffsetIndex(targetPath, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	linkPath := filepath.Join(dir, OffsetIndexFileName(1))
+	symlinkOrSkip(t, targetPath, linkPath)
+
+	ro, err := OpenOffsetIndex(linkPath)
+	if err == nil {
+		_ = ro.Close()
+		t.Fatal("expected symlink offset index to fail read-only open")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenOffsetIndex error = %v, want ErrOpen category", err)
+	}
+}
+
+func TestOpenOffsetIndexMutRejectsSymlinkWithoutExtendingTarget(t *testing.T) {
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, "external.idx")
+	before := []byte("external")
+	if err := os.WriteFile(targetPath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	linkPath := filepath.Join(dir, OffsetIndexFileName(1))
+	symlinkOrSkip(t, targetPath, linkPath)
+
+	idx, err := OpenOffsetIndexMut(linkPath, 4)
+	if err == nil {
+		_ = idx.Close()
+		t.Fatal("expected symlink offset index to fail writable open")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenOffsetIndexMut error = %v, want ErrOpen category", err)
+	}
+	after, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("symlink target changed: got %q want %q", after, before)
 	}
 }
 
