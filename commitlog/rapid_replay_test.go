@@ -67,6 +67,152 @@ func TestRapidReplayFromHorizonMatchesSuffixModel(t *testing.T) {
 	})
 }
 
+func TestRapidOpenAndRecoverSnapshotTailMatchesFullLog(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		fullRoot := rapidTempDir(t)
+		defer os.RemoveAll(fullRoot)
+		snapshotRoot := rapidTempDir(t)
+		defer os.RemoveAll(snapshotRoot)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 2, 18)
+		finalTxID := types.TxID(len(log.records))
+
+		fullSegmentCount := rapid.IntRange(1, min(4, len(log.records))).Draw(t, "fullSegmentCount")
+		rapidWriteReplaySegments(t, fullRoot, log.records, fullSegmentCount)
+		fullRecovered, fullMaxTxID, fullPlan, fullReport, err := OpenAndRecoverWithReport(fullRoot, reg)
+		if err != nil {
+			t.Fatalf("full-log OpenAndRecoverWithReport: %v", err)
+		}
+		if fullMaxTxID != finalTxID {
+			t.Fatalf("full-log maxTxID = %d, want %d", fullMaxTxID, finalTxID)
+		}
+		assertRapidReplayRows(t, fullRecovered, log.models[len(log.records)])
+		if fullReport.HasSelectedSnapshot {
+			t.Fatalf("full-log selected snapshot report = (%v, %d), want none", fullReport.HasSelectedSnapshot, fullReport.SelectedSnapshotTxID)
+		}
+		if fullReport.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: finalTxID}) {
+			t.Fatalf("full-log replay range = %+v, want 1..%d", fullReport.ReplayedTxRange, finalTxID)
+		}
+		if fullPlan.AppendMode != AppendInPlace || fullPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("full-log resume plan = %+v, want append-in-place at tx %d", fullPlan, finalTxID+1)
+		}
+
+		horizon := rapid.IntRange(1, len(log.records)-1).Draw(t, "snapshotHorizon")
+		snapshotState := rapidBuildReplayCommittedState(reg)
+		rapidSeedReplayRows(t, snapshotState, log.models[horizon])
+		writer := NewSnapshotWriter(filepath.Join(snapshotRoot, "snapshots"), reg)
+		snapshotState.SetCommittedTxID(types.TxID(horizon))
+		if err := writer.CreateSnapshot(snapshotState, types.TxID(horizon)); err != nil {
+			t.Fatalf("CreateSnapshot at horizon %d: %v", horizon, err)
+		}
+		tailRecords := log.records[horizon:]
+		tailSegmentCount := rapid.IntRange(1, min(4, len(tailRecords))).Draw(t, "tailSegmentCount")
+		tailSegments := rapidWriteReplaySegments(t, snapshotRoot, tailRecords, tailSegmentCount)
+
+		snapshotRecovered, snapshotMaxTxID, snapshotPlan, snapshotReport, err := OpenAndRecoverWithReport(snapshotRoot, reg)
+		if err != nil {
+			t.Fatalf("snapshot-tail OpenAndRecoverWithReport: %v", err)
+		}
+		if snapshotMaxTxID != fullMaxTxID {
+			t.Fatalf("snapshot-tail maxTxID = %d, want full-log max %d", snapshotMaxTxID, fullMaxTxID)
+		}
+		assertRapidReplayStatesEqual(t, snapshotRecovered, fullRecovered)
+		if !snapshotReport.HasSelectedSnapshot || snapshotReport.SelectedSnapshotTxID != types.TxID(horizon) {
+			t.Fatalf("snapshot-tail selected snapshot report = (%v, %d), want tx %d",
+				snapshotReport.HasSelectedSnapshot, snapshotReport.SelectedSnapshotTxID, horizon)
+		}
+		if !snapshotReport.HasDurableLog || snapshotReport.DurableLogHorizon != finalTxID {
+			t.Fatalf("snapshot-tail durable log report = (%v, %d), want (true, %d)",
+				snapshotReport.HasDurableLog, snapshotReport.DurableLogHorizon, finalTxID)
+		}
+		if snapshotReport.ReplayedTxRange != (RecoveryTxIDRange{Start: types.TxID(horizon + 1), End: finalTxID}) {
+			t.Fatalf("snapshot-tail replay range = %+v, want %d..%d", snapshotReport.ReplayedTxRange, horizon+1, finalTxID)
+		}
+		lastTailSegment := tailSegments[len(tailSegments)-1]
+		if snapshotPlan.AppendMode != AppendInPlace || snapshotPlan.SegmentStartTx != lastTailSegment.StartTx || snapshotPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("snapshot-tail resume plan = %+v, want append-in-place on segment %d at tx %d",
+				snapshotPlan, lastTailSegment.StartTx, finalTxID+1)
+		}
+	})
+}
+
+func TestRapidOpenAndRecoverAfterCompactionMatchesUncompactedSnapshotTail(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		root := rapidTempDir(t)
+		defer os.RemoveAll(root)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 2, 18)
+		finalTxID := types.TxID(len(log.records))
+		horizon := rapid.IntRange(1, len(log.records)-1).Draw(t, "snapshotHorizon")
+
+		snapshotState := rapidBuildReplayCommittedState(reg)
+		rapidSeedReplayRows(t, snapshotState, log.models[horizon])
+		writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+		snapshotState.SetCommittedTxID(types.TxID(horizon))
+		if err := writer.CreateSnapshot(snapshotState, types.TxID(horizon)); err != nil {
+			t.Fatalf("CreateSnapshot at horizon %d: %v", horizon, err)
+		}
+
+		coveredSegment := rapidWriteReplaySegment(t, root, 1, log.records[:horizon])
+		tailSegment := rapidWriteReplaySegment(t, root, uint64(horizon+1), log.records[horizon:])
+		coveredIdx := filepath.Join(root, OffsetIndexFileName(1))
+		tailIdx := filepath.Join(root, OffsetIndexFileName(uint64(horizon+1)))
+		rapidCreateOneEntryOffsetIndex(t, coveredIdx, types.TxID(1))
+		rapidCreateOneEntryOffsetIndex(t, tailIdx, types.TxID(horizon+1))
+
+		before, beforeMaxTxID, _, _, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("pre-compaction OpenAndRecoverWithReport: %v", err)
+		}
+		if beforeMaxTxID != finalTxID {
+			t.Fatalf("pre-compaction maxTxID = %d, want %d", beforeMaxTxID, finalTxID)
+		}
+
+		if err := RunCompaction(root, types.TxID(horizon)); err != nil {
+			t.Fatalf("RunCompaction at horizon %d: %v", horizon, err)
+		}
+		if _, err := os.Stat(coveredSegment); !os.IsNotExist(err) {
+			t.Fatalf("covered segment should be compacted, stat err=%v", err)
+		}
+		if _, err := os.Stat(coveredIdx); !os.IsNotExist(err) {
+			t.Fatalf("covered offset index should be compacted, stat err=%v", err)
+		}
+		if _, err := os.Stat(tailSegment); err != nil {
+			t.Fatalf("tail segment should remain after compaction: %v", err)
+		}
+		if _, err := os.Stat(tailIdx); err != nil {
+			t.Fatalf("tail offset index should remain after compaction: %v", err)
+		}
+
+		after, afterMaxTxID, afterPlan, afterReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("post-compaction OpenAndRecoverWithReport: %v", err)
+		}
+		if afterMaxTxID != beforeMaxTxID {
+			t.Fatalf("post-compaction maxTxID = %d, want pre-compaction max %d", afterMaxTxID, beforeMaxTxID)
+		}
+		assertRapidReplayStatesEqual(t, after, before)
+		assertRapidReplayRows(t, after, log.models[len(log.records)])
+		if !afterReport.HasSelectedSnapshot || afterReport.SelectedSnapshotTxID != types.TxID(horizon) {
+			t.Fatalf("post-compaction selected snapshot report = (%v, %d), want tx %d",
+				afterReport.HasSelectedSnapshot, afterReport.SelectedSnapshotTxID, horizon)
+		}
+		if !afterReport.HasDurableLog || afterReport.DurableLogHorizon != finalTxID {
+			t.Fatalf("post-compaction durable log report = (%v, %d), want (true, %d)",
+				afterReport.HasDurableLog, afterReport.DurableLogHorizon, finalTxID)
+		}
+		if afterReport.ReplayedTxRange != (RecoveryTxIDRange{Start: types.TxID(horizon + 1), End: finalTxID}) {
+			t.Fatalf("post-compaction replay range = %+v, want %d..%d", afterReport.ReplayedTxRange, horizon+1, finalTxID)
+		}
+		if len(afterReport.SegmentCoverage) != 1 || afterReport.SegmentCoverage[0].MinTxID != types.TxID(horizon+1) || afterReport.SegmentCoverage[0].MaxTxID != finalTxID {
+			t.Fatalf("post-compaction segment coverage = %+v, want only tail %d..%d", afterReport.SegmentCoverage, horizon+1, finalTxID)
+		}
+		if afterPlan.AppendMode != AppendInPlace || afterPlan.SegmentStartTx != types.TxID(horizon+1) || afterPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("post-compaction resume plan = %+v, want append-in-place on tail at tx %d", afterPlan, finalTxID+1)
+		}
+	})
+}
+
 func TestRapidReplayWithAndWithoutOffsetIndexEquivalent(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		root := rapidTempDir(t)
@@ -377,6 +523,25 @@ func rapidPopulateSparseIndex(t rapidCommitlogFataler, path string, cap uint64, 
 		t.Fatalf("OpenOffsetIndex: %v", err)
 	}
 	return idx
+}
+
+func rapidCreateOneEntryOffsetIndex(t rapidCommitlogFataler, path string, txID types.TxID) {
+	t.Helper()
+	idx, err := CreateOffsetIndex(path, 2)
+	if err != nil {
+		t.Fatalf("CreateOffsetIndex: %v", err)
+	}
+	if err := idx.Append(txID, SegmentHeaderSize); err != nil {
+		_ = idx.Close()
+		t.Fatalf("offset index append tx %d: %v", txID, err)
+	}
+	if err := idx.Sync(); err != nil {
+		_ = idx.Close()
+		t.Fatalf("offset index sync: %v", err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatalf("offset index close: %v", err)
+	}
 }
 
 func rapidRecordPayloadOffset(t rapidCommitlogFataler, path string, recordIndex int, payloadOffset int) int {
