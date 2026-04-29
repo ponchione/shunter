@@ -1,6 +1,6 @@
 # V2-B Task 03: Implement Contract Workflow Helpers
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-B/00-current-execution-plan.md`
 
 Objective: provide reusable workflow code for scripts, CI, and any CLI wrapper.
 

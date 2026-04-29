@@ -12,6 +12,8 @@ var (
 	ErrUnsupportedTransactionDecision   = errors.New("processboundary: unsupported transaction decision")
 	ErrUnsupportedSubscriptionSemantics = errors.New("processboundary: unsupported subscription semantics")
 	ErrInvalidContract                  = errors.New("processboundary: invalid contract")
+	ErrInvalidInvocationStatus          = errors.New("processboundary: invalid invocation status")
+	ErrInvalidFailureClassification     = errors.New("processboundary: invalid failure classification")
 )
 
 type Decision string
@@ -143,6 +145,19 @@ func (r InvocationResponse) IsBoundaryFailure() bool {
 }
 
 func ValidateInvocationResponse(resp InvocationResponse) error {
+	expectedFailure, ok := failureClassForInvocationStatus(resp.Status)
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrInvalidInvocationStatus, resp.Status)
+	}
+	if resp.Failure.Class != expectedFailure {
+		return fmt.Errorf(
+			"%w: status %q has failure class %q, want %q",
+			ErrInvalidFailureClassification,
+			resp.Status,
+			resp.Failure.Class,
+			expectedFailure,
+		)
+	}
 	if resp.Transaction.Mode == "" || resp.Transaction.Decision == "" {
 		return ErrMissingTransactionSemantics
 	}
@@ -151,6 +166,25 @@ func ValidateInvocationResponse(resp InvocationResponse) error {
 		return ErrUnsupportedTransactionDecision
 	}
 	return nil
+}
+
+func failureClassForInvocationStatus(status InvocationStatus) (FailureClass, bool) {
+	switch status {
+	case InvocationStatusCommitted:
+		return FailureClassNone, true
+	case InvocationStatusUserError:
+		return FailureClassUser, true
+	case InvocationStatusPanic:
+		return FailureClassPanic, true
+	case InvocationStatusPermission:
+		return FailureClassPermission, true
+	case InvocationStatusInternalFailure:
+		return FailureClassInternal, true
+	case InvocationStatusBoundaryFailure:
+		return FailureClassBoundary, true
+	default:
+		return FailureClassNone, false
+	}
 }
 
 type Contract struct {

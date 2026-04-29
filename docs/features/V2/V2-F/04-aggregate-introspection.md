@@ -1,6 +1,6 @@
 # V2-F Task 04: Add Aggregate Introspection Only If Needed
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-F/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-F/00-current-execution-plan.md`
 
 Objective: expose multi-module host diagnostics without replacing per-module
 contracts.

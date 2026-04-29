@@ -1,6 +1,6 @@
 # V2-C Task 04: Add Read-Only Validation Hooks
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-C/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-C/00-current-execution-plan.md`
 
 Objective: add optional preflight validation only where it can remain read-only
 and deterministic.

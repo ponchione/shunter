@@ -1,6 +1,6 @@
 # V2-D Task 02: Add Failing Read-Surface Convergence Tests
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-D/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-D/00-current-execution-plan.md`
 
 Objective: make the declaration-vs-SQL decision testable.
 

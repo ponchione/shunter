@@ -12,6 +12,7 @@ import (
 var (
 	ErrEmptyDeclarationName     = errors.New("declaration name must not be empty")
 	ErrDuplicateDeclarationName = errors.New("duplicate declaration name")
+	ErrInvalidModuleMetadata    = errors.New("invalid module metadata")
 	ErrUnknownTableMigration    = errors.New("table migration metadata references unknown table")
 
 	// ErrInvalidDeclarationSQL reports SQL metadata that cannot be compiled
@@ -164,24 +165,6 @@ func validateModuleDeclarations(m *Module) error {
 	return nil
 }
 
-func hasModuleDeclarationSQL(m *Module) bool {
-	for _, query := range m.queries {
-		if strings.TrimSpace(query.SQL) != "" {
-			return true
-		}
-	}
-	for _, view := range m.views {
-		if strings.TrimSpace(view.SQL) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func hasModuleTableMigrations(m *Module) bool {
-	return len(m.tableMigrations) > 0
-}
-
 func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
 	for _, query := range m.queries {
 		if strings.TrimSpace(query.SQL) == "" {
@@ -208,6 +191,66 @@ func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
 		}
 	}
 	return nil
+}
+
+func validateModuleMetadata(m *Module, reg schema.SchemaRegistry) error {
+	var errs []error
+	for key := range m.metadata {
+		if strings.TrimSpace(key) == "" {
+			errs = append(errs, fmt.Errorf("module.metadata key must not be empty"))
+		}
+	}
+
+	validateMigrationMetadata("migrations.module", m.migration, &errs)
+	for tableName, metadata := range m.tableMigrations {
+		validateMigrationMetadata("migrations.table."+tableName, metadata, &errs)
+	}
+	for _, reducer := range m.reducers {
+		validateAuthoredPermissionMetadata("permissions.reducer."+reducer.Name, reducer.Permissions, &errs)
+	}
+	for _, query := range m.queries {
+		validateAuthoredPermissionMetadata("permissions.query."+query.Name, query.Permissions, &errs)
+		validateAuthoredReadModelMetadata("read_model.query."+query.Name, query.ReadModel, reg, &errs)
+		validateMigrationMetadata("migrations.query."+query.Name, query.Migration, &errs)
+	}
+	for _, view := range m.views {
+		validateAuthoredPermissionMetadata("permissions.view."+view.Name, view.Permissions, &errs)
+		validateAuthoredReadModelMetadata("read_model.view."+view.Name, view.ReadModel, reg, &errs)
+		validateMigrationMetadata("migrations.view."+view.Name, view.Migration, &errs)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%w: %v", ErrInvalidModuleMetadata, errors.Join(errs...))
+	}
+	return nil
+}
+
+func validateAuthoredPermissionMetadata(path string, metadata PermissionMetadata, errs *[]error) {
+	for _, required := range metadata.Required {
+		if strings.TrimSpace(required) == "" {
+			*errs = append(*errs, fmt.Errorf("%s requirement must not be empty", path))
+		}
+	}
+}
+
+func validateAuthoredReadModelMetadata(path string, metadata ReadModelMetadata, reg schema.SchemaRegistry, errs *[]error) {
+	for _, table := range metadata.Tables {
+		if strings.TrimSpace(table) == "" {
+			*errs = append(*errs, fmt.Errorf("%s table must not be empty", path))
+			continue
+		}
+		if reg == nil {
+			continue
+		}
+		_, tableSchema, ok := reg.TableByName(table)
+		if !ok || tableSchema == nil || tableSchema.Name != table {
+			*errs = append(*errs, fmt.Errorf("%s references unknown table %q", path, table))
+		}
+	}
+	for _, tag := range metadata.Tags {
+		if strings.TrimSpace(tag) == "" {
+			*errs = append(*errs, fmt.Errorf("%s tag must not be empty", path))
+		}
+	}
 }
 
 func validateModuleTableMigrations(m *Module, reg schema.SchemaRegistry) error {

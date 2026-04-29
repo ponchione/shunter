@@ -1,6 +1,6 @@
 # Hosted Runtime V2 Planning
 
-Status: draft decomposition
+Status: complete through V2-G
 Scope: implementation-facing slice plans for hosted-runtime v2 structural work.
 
 Source docs:

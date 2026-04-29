@@ -1,6 +1,6 @@
 # V2-B Task 02: Add Failing Contract Workflow Tests
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-B/00-current-execution-plan.md`
 
 Objective: pin the admin/CLI behavior around existing contract artifacts.
 

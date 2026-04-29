@@ -3,6 +3,7 @@ package shunter
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -87,6 +88,169 @@ func TestRuntimeExportContractIncludesPermissionAndReadModelMetadata(t *testing.
 	assertPermissionContractDeclaration(t, contract.Permissions.Views, "live_messages", "messages:subscribe")
 	assertReadModelContractDeclaration(t, contract.ReadModel.Declarations, ReadModelSurfaceQuery, "recent_messages", "messages", "history")
 	assertReadModelContractDeclaration(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_messages", "messages", "realtime")
+}
+
+func TestRuntimeExportContractWithAuthoredMetadataValidates(t *testing.T) {
+	mod := validChatModule().
+		Version("v1.2.3").
+		Metadata(map[string]string{"team": "runtime"}).
+		Migration(MigrationMetadata{
+			ModuleVersion:   "v1.2.3",
+			SchemaVersion:   1,
+			ContractVersion: ModuleContractVersion,
+			Compatibility:   MigrationCompatibilityCompatible,
+			Classifications: []MigrationClassification{MigrationClassificationAdditive},
+		}).
+		TableMigration("messages", MigrationMetadata{
+			Compatibility:   MigrationCompatibilityCompatible,
+			Classifications: []MigrationClassification{MigrationClassificationAdditive},
+		}).
+		Reducer("send_message", noopReducer, WithReducerPermissions(PermissionMetadata{
+			Required: []string{"messages:send"},
+		})).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"history"}},
+			Migration: MigrationMetadata{
+				Compatibility:   MigrationCompatibilityCompatible,
+				Classifications: []MigrationClassification{MigrationClassificationAdditive},
+			},
+		}).
+		View(ViewDeclaration{
+			Name:        "live_messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+			ReadModel:   ReadModelMetadata{Tables: []string{"messages"}, Tags: []string{"realtime"}},
+			Migration: MigrationMetadata{
+				Compatibility:   MigrationCompatibilityCompatible,
+				Classifications: []MigrationClassification{MigrationClassificationAdditive},
+			},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if err := ValidateModuleContract(rt.ExportContract()); err != nil {
+		t.Fatalf("ExportContract did not validate: %v", err)
+	}
+	data, err := rt.ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON returned error: %v", err)
+	}
+	var decoded ModuleContract
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal contract JSON: %v", err)
+	}
+	if err := ValidateModuleContract(decoded); err != nil {
+		t.Fatalf("decoded ExportContractJSON did not validate: %v", err)
+	}
+}
+
+func TestBuildRejectsAuthoredMetadataThatWouldInvalidateContract(t *testing.T) {
+	tests := []struct {
+		name string
+		mod  *Module
+	}{
+		{
+			name: "blank module metadata key",
+			mod:  validChatModule().Metadata(map[string]string{" ": "ops"}),
+		},
+		{
+			name: "empty reducer permission",
+			mod: validChatModule().Reducer("send_message", noopReducer, WithReducerPermissions(PermissionMetadata{
+				Required: []string{"messages:send", " "},
+			})),
+		},
+		{
+			name: "empty query permission",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "recent_messages",
+				Permissions: PermissionMetadata{
+					Required: []string{"messages:read", ""},
+				},
+			}),
+		},
+		{
+			name: "unknown query read model table",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "recent_messages",
+				ReadModel: ReadModelMetadata{
+					Tables: []string{"missing"},
+				},
+			}),
+		},
+		{
+			name: "empty view read model tag",
+			mod: validChatModule().View(ViewDeclaration{
+				Name: "live_messages",
+				ReadModel: ReadModelMetadata{
+					Tables: []string{"messages"},
+					Tags:   []string{" "},
+				},
+			}),
+		},
+		{
+			name: "invalid module migration compatibility",
+			mod: validChatModule().Migration(MigrationMetadata{
+				Compatibility: MigrationCompatibility("unsupported"),
+			}),
+		},
+		{
+			name: "invalid table migration classification",
+			mod: validChatModule().TableMigration("messages", MigrationMetadata{
+				Classifications: []MigrationClassification{MigrationClassification("rewrite")},
+			}),
+		},
+		{
+			name: "invalid query migration compatibility",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "recent_messages",
+				Migration: MigrationMetadata{
+					Compatibility: MigrationCompatibility("unsupported"),
+				},
+			}),
+		},
+		{
+			name: "invalid view migration classification",
+			mod: validChatModule().View(ViewDeclaration{
+				Name: "live_messages",
+				Migration: MigrationMetadata{
+					Classifications: []MigrationClassification{MigrationClassification("rewrite")},
+				},
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(tt.mod, Config{DataDir: t.TempDir()})
+			if err == nil || !errors.Is(err, ErrInvalidModuleMetadata) {
+				t.Fatalf("expected ErrInvalidModuleMetadata, got %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildInvalidReadModelMetadataDoesNotFreezeModule(t *testing.T) {
+	mod := validChatModule().Query(QueryDeclaration{
+		Name: "missing_messages",
+		ReadModel: ReadModelMetadata{
+			Tables: []string{"missing"},
+		},
+	})
+
+	_, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err == nil || !errors.Is(err, ErrInvalidModuleMetadata) {
+		t.Fatalf("expected ErrInvalidModuleMetadata, got %v", err)
+	}
+
+	missing := messagesTableDef()
+	missing.Name = "missing"
+	mod.TableDef(missing)
+	if _, err := Build(mod, Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build after adding missing read-model table returned error: %v", err)
+	}
 }
 
 func TestRuntimeExportContractIncludesDeclarationSQLMetadata(t *testing.T) {

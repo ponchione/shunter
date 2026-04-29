@@ -1,6 +1,6 @@
 # V2-B Task 01: Reconfirm Contract Tooling Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-B/00-current-execution-plan.md`
 
 Objective: verify the existing reusable contract tooling before adding
 admin/CLI workflows.

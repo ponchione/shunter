@@ -53,6 +53,48 @@ func TestExportSchemaIncludesTablesReducersAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestExportSchemaIncludesExtendedColumnKinds(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "extended",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+			{Name: "i128", Type: KindInt128},
+			{Name: "u128", Type: KindUint128},
+			{Name: "i256", Type: KindInt256},
+			{Name: "u256", Type: KindUint256},
+			{Name: "created_at", Type: KindTimestamp},
+			{Name: "tags", Type: KindArrayString},
+		},
+	})
+
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	export := e.ExportSchema()
+	got := map[string]string{}
+	for _, column := range export.Tables[0].Columns {
+		got[column.Name] = column.Type
+	}
+	want := map[string]string{
+		"id":         "uint64",
+		"i128":       "int128",
+		"u128":       "uint128",
+		"i256":       "int256",
+		"u256":       "uint256",
+		"created_at": "timestamp",
+		"tags":       "arrayString",
+	}
+	for name, wantType := range want {
+		if got[name] != wantType {
+			t.Fatalf("exported column %q type = %q, want %q; all columns = %#v", name, got[name], wantType, export.Tables[0].Columns)
+		}
+	}
+}
+
 func TestExportSchemaReturnsDetachedSnapshot(t *testing.T) {
 	e, err := validBuilder().Build(EngineOptions{})
 	if err != nil {

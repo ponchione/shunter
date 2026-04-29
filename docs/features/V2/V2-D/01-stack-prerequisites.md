@@ -1,6 +1,6 @@
 # V2-D Task 01: Reconfirm Declared Read And SQL Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-D/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-D/00-current-execution-plan.md`
 
 Objective: verify the live read surfaces before designing convergence.
 

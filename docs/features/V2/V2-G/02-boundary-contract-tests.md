@@ -1,6 +1,6 @@
 # V2-G Task 02: Add Failing Process Boundary Contract Tests
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-G/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-G/00-current-execution-plan.md`
 
 Objective: prove the minimal interface needed for out-of-process execution
 before building a runner.

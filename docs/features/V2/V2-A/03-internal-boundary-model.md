@@ -1,6 +1,6 @@
 # V2-A Task 03: Introduce The Internal Boundary Model
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-A/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-A/00-current-execution-plan.md`
 
 Objective: reduce implicit coupling inside `Runtime` while preserving the
 existing public API.

@@ -106,6 +106,99 @@ func TestValidateInvocationResponseRequiresExplicitTransactionSemantics(t *testi
 	}
 }
 
+func TestValidateInvocationResponseAcceptsExpectedFailureClasses(t *testing.T) {
+	tests := []InvocationResponse{
+		{
+			Status:      InvocationStatusCommitted,
+			Transaction: UnsupportedTransaction("host transaction objects cannot cross the process boundary"),
+		},
+		{
+			Status:      InvocationStatusUserError,
+			Failure:     Failure{Class: FailureClassUser, Message: "reducer rejected input"},
+			Transaction: UnsupportedTransaction("user reducer failure does not commit host state"),
+		},
+		{
+			Status:      InvocationStatusPanic,
+			Failure:     Failure{Class: FailureClassPanic, Message: "panic"},
+			Transaction: UnsupportedTransaction("panic does not commit host state"),
+		},
+		{
+			Status:      InvocationStatusPermission,
+			Failure:     Failure{Class: FailureClassPermission, Message: "missing permission"},
+			Transaction: UnsupportedTransaction("permission denial does not commit host state"),
+		},
+		{
+			Status:      InvocationStatusInternalFailure,
+			Failure:     Failure{Class: FailureClassInternal, Message: "internal error"},
+			Transaction: UnsupportedTransaction("internal failure does not commit host state"),
+		},
+		{
+			Status:      InvocationStatusBoundaryFailure,
+			Failure:     Failure{Class: FailureClassBoundary, Message: "transport closed"},
+			Transaction: UnsupportedTransaction("boundary failure occurs outside host transaction semantics"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.Status), func(t *testing.T) {
+			if err := ValidateInvocationResponse(tt); err != nil {
+				t.Fatalf("ValidateInvocationResponse returned error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateInvocationResponseRejectsAmbiguousFailureClassification(t *testing.T) {
+	tests := []struct {
+		name string
+		resp InvocationResponse
+		want error
+	}{
+		{
+			name: "unknown status",
+			resp: InvocationResponse{
+				Status:      InvocationStatus("unknown"),
+				Transaction: UnsupportedTransaction("unknown status"),
+			},
+			want: ErrInvalidInvocationStatus,
+		},
+		{
+			name: "committed response with failure class",
+			resp: InvocationResponse{
+				Status:      InvocationStatusCommitted,
+				Failure:     Failure{Class: FailureClassUser, Message: "should not be classified"},
+				Transaction: UnsupportedTransaction("host transaction objects cannot cross the process boundary"),
+			},
+			want: ErrInvalidFailureClassification,
+		},
+		{
+			name: "user error with boundary class",
+			resp: InvocationResponse{
+				Status:      InvocationStatusUserError,
+				Failure:     Failure{Class: FailureClassBoundary, Message: "wrong class"},
+				Transaction: UnsupportedTransaction("user reducer failure does not commit host state"),
+			},
+			want: ErrInvalidFailureClassification,
+		},
+		{
+			name: "permission denial without permission class",
+			resp: InvocationResponse{
+				Status:      InvocationStatusPermission,
+				Transaction: UnsupportedTransaction("permission denial does not commit host state"),
+			},
+			want: ErrInvalidFailureClassification,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateInvocationResponse(tt.resp); !errors.Is(err, tt.want) {
+				t.Fatalf("ValidateInvocationResponse error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestDefaultContractDeclaresLifecycleAndSubscriptionSemantics(t *testing.T) {
 	contract := DefaultContract()
 

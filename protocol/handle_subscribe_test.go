@@ -5936,8 +5936,8 @@ func TestHandleSubscribeSingle_ShunterJoinColumnKindMismatchRejectText(t *testin
 // TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText pins
 // the reference `InvalidOp` literal for an ON binop comparing two
 // Array<…> columns. SubscribeSingle wraps with DBError::WithSql. Schema
-// uses a hand-built `mockSchemaLookup` because `schema.NewBuilder`
-// rejects `KindArrayString` as a column-storage kind.
+// uses a hand-built `mockSchemaLookup` to keep the test focused on
+// protocol-layer compile checks without a full engine.
 func TestHandleSubscribeSingle_ShunterJoinArrayColumnInvalidOpRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

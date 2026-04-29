@@ -89,6 +89,24 @@ func TestPolicyAllowsModuleMigrationMetadataForRemovedReadSurfaces(t *testing.T)
 	}
 }
 
+func TestPolicyAllowsModuleMigrationMetadataForRemovedTables(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables = nil
+	current.Migrations.Module = shunter.MigrationMetadata{
+		Compatibility: shunter.MigrationCompatibilityBreaking,
+		Notes:         "remove legacy table",
+	}
+
+	result := CheckPolicy(Compare(old, current), current, PolicyOptions{Strict: true})
+	if hasWarning(result.Warnings, WarningMissingMigrationMetadata, SurfaceTable, "messages") {
+		t.Fatalf("table removal should be covered by module migration metadata: %#v", result.Warnings)
+	}
+	if result.Failed {
+		t.Fatalf("strict policy failed despite module migration metadata: %#v", result.Warnings)
+	}
+}
+
 func TestPolicyCanRequirePreviousVersionReference(t *testing.T) {
 	current := contractFixture()
 

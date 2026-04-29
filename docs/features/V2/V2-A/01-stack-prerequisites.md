@@ -1,6 +1,6 @@
 # V2-A Task 01: Reconfirm Runtime/Module Boundary Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-A/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-A/00-current-execution-plan.md`
 
 Objective: verify V2-A is stacked on the live v1/v1.5 runtime owner and does
 not reopen completed V1 or V1.5 slices.

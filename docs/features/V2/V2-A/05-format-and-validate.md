@@ -1,6 +1,6 @@
 # V2-A Task 05: Format And Validate The Slice
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-A/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-A/00-current-execution-plan.md`
 
 Objective: run boundary-hardening verification gates.
 

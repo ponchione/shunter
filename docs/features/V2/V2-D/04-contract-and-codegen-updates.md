@@ -1,6 +1,6 @@
 # V2-D Task 04: Update Contract And Codegen Metadata
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-D/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-D/00-current-execution-plan.md`
 
 Objective: expose any stable declared-read execution metadata through existing
 tooling.

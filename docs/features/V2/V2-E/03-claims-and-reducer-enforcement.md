@@ -1,6 +1,6 @@
 # V2-E Task 03: Implement Claims And Reducer Enforcement
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-E/00-current-execution-plan.md`
 
 Objective: enforce reducer permission metadata through the smallest claims
 model that fits the current auth and caller paths.

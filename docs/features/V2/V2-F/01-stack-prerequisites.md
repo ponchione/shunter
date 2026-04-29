@@ -1,6 +1,6 @@
 # V2-F Task 01: Reconfirm Multi-Module Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-F/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-F/00-current-execution-plan.md`
 
 Objective: verify that current one-module runtime behavior is stable before
 adding any host abstraction.

@@ -1,6 +1,6 @@
 # V2-F Task 03: Implement The Host Abstraction
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-F/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-F/00-current-execution-plan.md`
 
 Objective: add a minimal owner for multiple runtime instances while preserving
 the existing `Runtime` API.

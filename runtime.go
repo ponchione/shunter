@@ -79,23 +79,19 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		DurabilityQueueCapacity: normalized.DurabilityQueueCapacity,
 		EnableProtocol:          normalized.EnableProtocol,
 	}
-	needsRegistryValidation := hasModuleDeclarationSQL(mod) || hasModuleTableMigrations(mod)
-	if needsRegistryValidation {
-		preview, err := mod.builder.BuildPreview(schemaOpts)
-		if err != nil {
-			return nil, fmt.Errorf("build hosted runtime schema: %w", err)
-		}
-		registry := preview.Registry()
-		if hasModuleDeclarationSQL(mod) {
-			if err := validateModuleDeclarationSQL(mod, registry); err != nil {
-				return nil, err
-			}
-		}
-		if hasModuleTableMigrations(mod) {
-			if err := validateModuleTableMigrations(mod, registry); err != nil {
-				return nil, err
-			}
-		}
+	preview, err := mod.builder.BuildPreview(schemaOpts)
+	if err != nil {
+		return nil, fmt.Errorf("build hosted runtime schema: %w", err)
+	}
+	previewRegistry := preview.Registry()
+	if err := validateModuleDeclarationSQL(mod, previewRegistry); err != nil {
+		return nil, err
+	}
+	if err := validateModuleTableMigrations(mod, previewRegistry); err != nil {
+		return nil, err
+	}
+	if err := validateModuleMetadata(mod, previewRegistry); err != nil {
+		return nil, err
 	}
 
 	engine, err := mod.builder.Build(schemaOpts)

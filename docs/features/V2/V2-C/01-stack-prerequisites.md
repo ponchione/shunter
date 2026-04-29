@@ -1,6 +1,6 @@
 # V2-C Task 01: Reconfirm Migration Planning Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-C/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-C/00-current-execution-plan.md`
 
 Objective: verify V2-C can build on landed V1.5-E metadata and diff tooling.
 

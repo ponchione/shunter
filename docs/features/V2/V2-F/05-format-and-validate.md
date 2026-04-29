@@ -1,6 +1,6 @@
 # V2-F Task 05: Format And Validate The Slice
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-F/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-F/00-current-execution-plan.md`
 
 Objective: run multi-module hosting validation gates.
 

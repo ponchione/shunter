@@ -123,5 +123,5 @@ func validateStructure(b *Builder) []error {
 }
 
 func isValidValueKind(kind ValueKind) bool {
-	return kind >= KindBool && kind <= KindBytes
+	return kind >= KindBool && kind <= KindArrayString
 }

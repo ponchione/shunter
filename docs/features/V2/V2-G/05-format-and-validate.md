@@ -1,6 +1,6 @@
 # V2-G Task 05: Format And Validate The Slice
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-G/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-G/00-current-execution-plan.md`
 
 Objective: run process-boundary gate validation.
 

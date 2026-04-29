@@ -1,6 +1,6 @@
 # V2-C Task 02: Add Failing Migration Plan Report Tests
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-C/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-C/00-current-execution-plan.md`
 
 Objective: pin deterministic planning behavior before implementation.
 

@@ -1,6 +1,6 @@
 # V2-C Task 03: Implement The Migration Plan Model
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-C/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-C/00-current-execution-plan.md`
 
 Objective: produce a deterministic migration plan/report from old and current
 contracts.

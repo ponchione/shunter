@@ -1,6 +1,6 @@
 # V2-E Task 02: Add Failing Permission Enforcement Tests
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-E/00-current-execution-plan.md`
 
 Objective: pin narrow enforcement behavior before implementation.
 

@@ -6824,11 +6824,8 @@ func TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText(t *testing.T)
 // "Array<String>"}`. The previous Shunter literal embedded contextual
 // `join ON t.arr = s.arr: ...` which does not match the reference shape.
 //
-// Schema is wired through a hand-built `mockSchemaLookup` because
-// `schema.NewBuilder` rejects `KindArrayString` as a column-storage kind
-// (see `schema/validate_structure.go::isValidValueKind`). The mock
-// schema lookup goes only as deep as the protocol-layer compile checks
-// reach.
+// Schema is wired through a hand-built `mockSchemaLookup` so the test stays
+// focused on protocol-layer compile checks and does not need a full engine.
 func TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}

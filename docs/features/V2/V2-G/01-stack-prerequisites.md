@@ -1,6 +1,6 @@
 # V2-G Task 01: Reconfirm Process Boundary Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-G/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-G/00-current-execution-plan.md`
 
 Objective: identify every live seam that an out-of-process module would cross.
 

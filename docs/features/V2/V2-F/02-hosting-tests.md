@@ -1,6 +1,6 @@
 # V2-F Task 02: Add Failing Multi-Module Hosting Tests
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-F/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-F/00-current-execution-plan.md`
 
 Objective: pin the host behavior before implementation.
 

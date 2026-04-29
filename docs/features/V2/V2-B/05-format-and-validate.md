@@ -1,6 +1,6 @@
 # V2-B Task 05: Format And Validate The Slice
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-B/00-current-execution-plan.md`
 
 Objective: run contract workflow validation gates.
 

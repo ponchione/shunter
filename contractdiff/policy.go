@@ -84,7 +84,13 @@ func CheckPolicy(report Report, current shunter.ModuleContract, opts PolicyOptio
 func migrationMetadataForChange(migrations shunter.MigrationContract, change Change) (shunter.MigrationMetadata, bool) {
 	switch change.Surface {
 	case SurfaceTable:
-		return findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceTable, change.Name)
+		if metadata, ok := findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceTable, change.Name); ok {
+			return metadata, true
+		}
+		if change.Kind == ChangeKindBreaking {
+			return migrations.Module, true
+		}
+		return shunter.MigrationMetadata{}, false
 	case SurfaceColumn, SurfaceIndex:
 		tableName := change.Name
 		if idx := strings.IndexByte(change.Name, '.'); idx >= 0 {

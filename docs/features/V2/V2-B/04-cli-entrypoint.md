@@ -1,6 +1,6 @@
 # V2-B Task 04: Add The Minimal CLI Entrypoint
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-B/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-B/00-current-execution-plan.md`
 
 Objective: expose only the generic contract-file workflows that the current
 codebase can honestly support.

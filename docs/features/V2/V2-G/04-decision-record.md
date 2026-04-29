@@ -1,6 +1,6 @@
 # V2-G Task 04: Record The Process Isolation Decision
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-G/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-G/00-current-execution-plan.md`
 
 Objective: leave a clear decision trail regardless of implementation outcome.
 

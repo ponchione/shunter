@@ -1,6 +1,6 @@
 # V2-E Task 01: Reconfirm Policy/Auth Prerequisites
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-E/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-E/00-current-execution-plan.md`
 
 Objective: verify the current identity and passive metadata surfaces before
 adding enforcement.

@@ -1,6 +1,6 @@
 # V2-G Task 03: Prototype Or Defer Process Isolation
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-G/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-G/00-current-execution-plan.md`
 
 Objective: make an explicit, evidence-based decision.
 

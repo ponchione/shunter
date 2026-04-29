@@ -1,6 +1,6 @@
 # V2-A Task 02: Add Failing Boundary Invariant Tests
 
-Parent plan: `docs/hosted-runtime-planning/V2/V2-A/00-current-execution-plan.md`
+Parent plan: `docs/features/V2/V2-A/00-current-execution-plan.md`
 
 Objective: pin the current in-process boundary before internal cleanup.
 

@@ -23,7 +23,7 @@ V2-A runtime/module boundary hardening is complete.
 V1.5-E migration metadata, contract diffs, and warning policy checks are
 complete, which completes the initial V1.5 hosted-runtime follow-on plan.
 
-V2 planning is now decomposed under `docs/hosted-runtime-planning/V2/`,
+V2 planning is now decomposed under `docs/features/V2/`,
 starting from the code-grounded source direction in
 `docs/decomposition/hosted-runtime-v2-directions.md`.
 
@@ -425,13 +425,13 @@ Required:
 No V2-H target is queued.
 
 For V2-G audit only, start from:
-- `docs/hosted-runtime-planning/V2/README.md`
-- `docs/hosted-runtime-planning/V2/V2-G/00-current-execution-plan.md`
-- `docs/hosted-runtime-planning/V2/V2-G/01-stack-prerequisites.md`
-- `docs/hosted-runtime-planning/V2/V2-G/02-boundary-contract-tests.md`
-- `docs/hosted-runtime-planning/V2/V2-G/03-prototype-or-defer.md`
-- `docs/hosted-runtime-planning/V2/V2-G/04-decision-record.md`
-- `docs/hosted-runtime-planning/V2/V2-G/05-format-and-validate.md`
+- `docs/features/V2/README.md`
+- `docs/features/V2/V2-G/00-current-execution-plan.md`
+- `docs/features/V2/V2-G/01-stack-prerequisites.md`
+- `docs/features/V2/V2-G/02-boundary-contract-tests.md`
+- `docs/features/V2/V2-G/03-prototype-or-defer.md`
+- `docs/features/V2/V2-G/04-decision-record.md`
+- `docs/features/V2/V2-G/05-format-and-validate.md`
 
 For V1.5-E audit only, start from:
 - `docs/hosted-runtime-planning/V1.5/README.md`
@@ -493,7 +493,7 @@ V2 planning slices are:
 7. `V2-G`: out-of-process module execution gate
 
 If new V2 implementation starts from an explicit user target, begin with:
-- `docs/hosted-runtime-planning/V2/README.md`
+- `docs/features/V2/README.md`
 - the selected slice `00-current-execution-plan.md`
 - that slice's `01-stack-prerequisites.md`
 - live code/package docs named by the slice
