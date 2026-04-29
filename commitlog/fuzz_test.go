@@ -2,6 +2,8 @@ package commitlog
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -67,6 +69,43 @@ func FuzzDecodeChangeset(f *testing.F) {
 	})
 }
 
+func FuzzReadSnapshot(f *testing.F) {
+	for _, seed := range snapshotFuzzSeeds(f) {
+		f.Add(seed)
+	}
+
+	const maxSnapshotBytes = 64 << 10
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > maxSnapshotBytes {
+			t.Skip("snapshot fuzz input above bounded local limit")
+		}
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, snapshotFileName), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		snapshot, err := ReadSnapshot(dir)
+		if err != nil {
+			return
+		}
+		schemaByID := make(map[schema.TableID]schema.TableSchema, len(snapshot.Schema))
+		for _, table := range snapshot.Schema {
+			schemaByID[table.ID] = table
+		}
+		for _, tableData := range snapshot.Tables {
+			tableSchema, ok := schemaByID[tableData.TableID]
+			if !ok {
+				t.Fatalf("snapshot table %d missing from schema", tableData.TableID)
+			}
+			for rowIdx, row := range tableData.Rows {
+				if len(row) != len(tableSchema.Columns) {
+					t.Fatalf("table %d row %d width = %d, want %d", tableData.TableID, rowIdx, len(row), len(tableSchema.Columns))
+				}
+			}
+		}
+	})
+}
+
 func recordFuzzSeeds(t testing.TB) [][]byte {
 	t.Helper()
 	var seeds [][]byte
@@ -124,6 +163,30 @@ func changesetFuzzSeeds(t testing.TB) [][]byte {
 	return seeds
 }
 
+func snapshotFuzzSeeds(t testing.TB) [][]byte {
+	t.Helper()
+	var seeds [][]byte
+	seeds = append(seeds, nil)
+	seeds = append(seeds, make([]byte, SnapshotHeaderSize))
+	valid := validSnapshotSeed(t)
+	seeds = append(seeds, valid)
+	seeds = append(seeds, valid[:SnapshotHeaderSize-1])
+	seeds = append(seeds, valid[:len(valid)-1])
+
+	hashCorrupt := append([]byte(nil), valid...)
+	hashCorrupt[len(hashCorrupt)-1] ^= 0xff
+	seeds = append(seeds, hashCorrupt)
+
+	badMagic := append([]byte(nil), valid...)
+	badMagic[0] ^= 0xff
+	seeds = append(seeds, badMagic)
+
+	badVersion := append([]byte(nil), valid...)
+	badVersion[4] = SnapshotVersion + 1
+	seeds = append(seeds, badVersion)
+	return seeds
+}
+
 func encodeRecordSeed(t testing.TB, rec *Record) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -136,6 +199,39 @@ func encodeRecordSeed(t testing.TB, rec *Record) []byte {
 func encodeChangesetSeed(t testing.TB, cs *store.Changeset) []byte {
 	t.Helper()
 	data, err := EncodeChangeset(cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func validSnapshotSeed(t testing.TB) []byte {
+	t.Helper()
+	_, reg := testSchema()
+	committed := store.NewCommittedState()
+	for _, tableID := range reg.Tables() {
+		tableSchema, ok := reg.Table(tableID)
+		if !ok {
+			t.Fatalf("registry missing table %d", tableID)
+		}
+		committed.RegisterTable(tableID, store.NewTable(tableSchema))
+	}
+	players, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	for _, row := range []types.ProductValue{
+		{types.NewUint64(1), types.NewString("alice")},
+		{types.NewUint64(2), types.NewString("bob")},
+	} {
+		if err := players.InsertRow(players.AllocRowID(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 1)
+	data, err := os.ReadFile(filepath.Join(root, "snapshots", "1", snapshotFileName))
 	if err != nil {
 		t.Fatal(err)
 	}
