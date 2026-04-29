@@ -212,6 +212,66 @@ func TestOpenSegmentForAppendInteriorHistoryGapFailsClosed(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentForAppendStructuredRecordFaultAfterValidPrefixFailsClosed(t *testing.T) {
+	cases := []struct {
+		name      string
+		record    Record
+		assertErr func(*testing.T, error)
+	}{
+		{
+			name:   "unknown-record-type",
+			record: Record{TxID: 2, RecordType: RecordTypeChangeset + 1, Payload: []byte{0x02}},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				var typeErr *UnknownRecordTypeError
+				if !errors.As(err, &typeErr) {
+					t.Fatalf("OpenSegmentForAppend error = %T (%v), want UnknownRecordTypeError", err, err)
+				}
+				if typeErr.Type != RecordTypeChangeset+1 {
+					t.Fatalf("unknown record type = %d, want %d", typeErr.Type, RecordTypeChangeset+1)
+				}
+			},
+		},
+		{
+			name:   "bad-record-flags",
+			record: Record{TxID: 2, RecordType: RecordTypeChangeset, Flags: 1, Payload: []byte{0x02}},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				if !errors.Is(err, ErrBadFlags) {
+					t.Fatalf("OpenSegmentForAppend error = %v, want ErrBadFlags", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := makeManualScanTestRecords(t, dir, 1,
+				Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte{0x01}},
+				tc.record,
+			)
+			before, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = OpenSegmentForAppend(dir, 1)
+			if err == nil {
+				t.Fatal("expected structured record fault to fail reopen")
+			}
+			tc.assertErr(t, err)
+			after, statErr := os.Stat(path)
+			if statErr != nil {
+				t.Fatal(statErr)
+			}
+			if after.Size() != before.Size() {
+				t.Fatalf("segment size changed after failed reopen: before=%d after=%d", before.Size(), after.Size())
+			}
+		})
+	}
+}
+
 func TestOpenSegmentForAppendTruncatesDamagedTailAfterValidPrefix(t *testing.T) {
 	dir := t.TempDir()
 	path := makeScanTestSegment(t, dir, 1, 1, 2, 3)
