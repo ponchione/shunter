@@ -1095,6 +1095,40 @@ func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 		}
 	})
 
+	t.Run("valid-record-with-row-shape-mismatch", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		payload, err := EncodeChangeset(&store.Changeset{
+			TxID: 2,
+			Tables: map[schema.TableID]*store.TableChangeset{
+				0: {
+					TableID:   0,
+					TableName: "players",
+					Inserts:   []types.ProductValue{{types.NewUint64(2)}},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, rawPayload: payload},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected row shape mismatch to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay decode error %q missing tx or segment context", err)
+		}
+		if !strings.Contains(err.Error(), "row shape mismatch") {
+			t.Fatalf("replay decode error %q missing row shape detail", err)
+		}
+	})
+
 	t.Run("valid-record-with-trailing-changeset-bytes", func(t *testing.T) {
 		root := t.TempDir()
 		_, reg := testSchema()
