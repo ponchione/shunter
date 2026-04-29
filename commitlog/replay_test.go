@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
@@ -393,6 +394,58 @@ func TestReplayCorrectAfterPartialIndexTail(t *testing.T) {
 	}
 
 	assertReplayStatesEqual(t, committedClean, committedPartial)
+}
+
+func TestReplayCorrectAfterIndexOffsetPastEOF(t *testing.T) {
+	root := t.TempDir()
+	const startTx = uint64(1)
+	const n = uint64(1024)
+	const horizon = types.TxID(512)
+
+	segPath, entries := writeDenseReplaySegment(t, root, startTx, n)
+
+	sparse := make([]OffsetIndexEntry, 0, n/64)
+	var corruptEntry int
+	for i := uint64(0); i < uint64(len(entries)); i += 64 {
+		if entries[i].TxID == horizon+1 {
+			corruptEntry = len(sparse)
+		}
+		sparse = append(sparse, entries[i])
+	}
+	idxPath := filepath.Join(root, OffsetIndexFileName(startTx))
+	idx := populateSparseIndex(t, idxPath, 64, sparse)
+	_ = idx.Close()
+
+	segments := []SegmentInfo{{Path: segPath, StartTx: types.TxID(startTx), LastTx: types.TxID(startTx + n - 1), Valid: true}}
+	committedClean, reg := buildReplayCommittedState(t)
+	if _, err := ReplayLog(committedClean, segments, horizon, reg); err != nil {
+		t.Fatalf("clean-index replay: %v", err)
+	}
+
+	segInfo, err := os.Stat(segPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(idxPath, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bogus [8]byte
+	binary.LittleEndian.PutUint64(bogus[:], uint64(segInfo.Size())+1024)
+	if _, err := f.WriteAt(bogus[:], int64(corruptEntry*OffsetIndexEntrySize+offsetIndexValOff)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	committedCorrupt, regCorrupt := buildReplayCommittedState(t)
+	if _, err := ReplayLog(committedCorrupt, segments, horizon, regCorrupt); err != nil {
+		t.Fatalf("past-EOF-index replay: %v", err)
+	}
+
+	assertReplayStatesEqual(t, committedClean, committedCorrupt)
 }
 
 func assertReplayStatesEqual(t *testing.T, a, b *store.CommittedState) {

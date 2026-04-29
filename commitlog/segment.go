@@ -391,7 +391,13 @@ func (sr *SegmentReader) SeekToTxID(target types.TxID, idx *OffsetIndex) error {
 	startOff := int64(SegmentHeaderSize)
 	if idx != nil {
 		if _, off, err := idx.KeyLookup(target); err == nil {
-			startOff = int64(off)
+			info, statErr := sr.file.Stat()
+			if statErr != nil {
+				return statErr
+			}
+			if off >= uint64(SegmentHeaderSize) && off < uint64(info.Size()) {
+				startOff = int64(off)
+			}
 		} else if !errors.Is(err, ErrOffsetIndexKeyNotFound) {
 			log.Printf("commitlog: offset index lookup failed, falling back to linear scan: %v", err)
 		}
