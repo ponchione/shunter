@@ -1043,6 +1043,58 @@ func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 		}
 	})
 
+	t.Run("valid-record-with-unknown-table-changeset", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		payload := []byte{changesetVersion}
+		payload = appendUint32(payload, 1)
+		payload = appendUint32(payload, 99)
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, rawPayload: payload},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected unknown table changeset to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay decode error %q missing tx or segment context", err)
+		}
+		if !strings.Contains(err.Error(), "unknown table ID 99") {
+			t.Fatalf("replay decode error %q missing unknown table detail", err)
+		}
+	})
+
+	t.Run("valid-record-with-duplicate-table-changeset", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		payload := []byte{changesetVersion}
+		payload = appendUint32(payload, 2)
+		for range 2 {
+			payload = appendUint32(payload, 0)
+			payload = appendUint32(payload, 0)
+			payload = appendUint32(payload, 0)
+		}
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, rawPayload: payload},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected duplicate table changeset to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay decode error %q missing tx or segment context", err)
+		}
+		if !strings.Contains(err.Error(), "duplicate table ID 0") {
+			t.Fatalf("replay decode error %q missing duplicate table detail", err)
+		}
+	})
+
 	t.Run("valid-record-with-trailing-changeset-bytes", func(t *testing.T) {
 		root := t.TempDir()
 		_, reg := testSchema()
