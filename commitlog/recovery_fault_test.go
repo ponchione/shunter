@@ -20,6 +20,37 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 
 	cases := []faultCase{
 		{
+			name: "damaged-snapshot-with-complete-log-recovers-full-log",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+				corruptSelectionSnapshot(t, root, 2)
+				writeReplaySegment(t, root, 1,
+					replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+					replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+					replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+				)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 3 {
+					t.Fatalf("maxTxID = %d, want 3", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+				assertSkippedSnapshot(t, report, 2, SnapshotSkipReadFailed)
+				if report.HasSelectedSnapshot {
+					t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+					t.Fatalf("replayed range = %+v, want 1..3", report.ReplayedTxRange)
+				}
+				if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+					t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+				}
+			},
+		},
+		{
 			name: "missing-snapshot-file-with-complete-log-recovers-full-log",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				createMissingSnapshotCandidate(t, root, 2)
@@ -37,7 +68,7 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 					t.Fatalf("maxTxID = %d, want 3", maxTxID)
 				}
 				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
-				assertMissingSnapshotWasSkipped(t, report, 2)
+				assertSkippedSnapshot(t, report, 2, SnapshotSkipReadFailed)
 				if report.HasSelectedSnapshot {
 					t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
 				}
@@ -46,6 +77,36 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 				}
 				if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
 					t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+				}
+			},
+		},
+		{
+			name: "missing-newest-snapshot-file-falls-back-to-older-snapshot-and-log",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 5, map[uint64]string{1: "alice"})
+				createMissingSnapshotCandidate(t, root, 7)
+				writeReplaySegment(t, root, 6,
+					replayRecord{txID: 6, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+					replayRecord{txID: 7, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+				)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 7 {
+					t.Fatalf("maxTxID = %d, want 7", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+				assertSkippedSnapshot(t, report, 7, SnapshotSkipReadFailed)
+				if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 5 {
+					t.Fatalf("selected snapshot report = (%v, %d), want (true, 5)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 6, End: 7}) {
+					t.Fatalf("replayed range = %+v, want 6..7", report.ReplayedTxRange)
+				}
+				if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 6 || plan.NextTxID != 8 {
+					t.Fatalf("resume plan = %+v, want append-in-place on segment 6 at tx 8", plan)
 				}
 			},
 		},
@@ -67,7 +128,7 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 				if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
 					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
 				}
-				assertMissingSnapshotWasSkipped(t, report, 2)
+				assertSkippedSnapshot(t, report, 2, SnapshotSkipReadFailed)
 				if !report.HasDurableLog || report.DurableLogHorizon != 3 {
 					t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
 				}
@@ -105,6 +166,35 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "damaged-sealed-segment-tail-fails-loudly",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				sealedPath := writeReplaySegment(t, root, 1,
+					replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+					replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+				)
+				writeReplaySegment(t, root, 3,
+					replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+				)
+				corruptScanTestRecordPayloadByte(t, sealedPath, 1, 0)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err == nil {
+					t.Fatal("expected history gap error")
+				}
+				var gapErr *HistoryGapError
+				if !errors.As(err, &gapErr) {
+					t.Fatalf("expected HistoryGapError, got %T (%v)", err, err)
+				}
+				if gapErr.Expected != 2 || gapErr.Got != 3 {
+					t.Fatalf("HistoryGapError = %+v, want Expected=2 Got=3", gapErr)
+				}
+				if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+				}
+				assertZeroRecoveryReport(t, report)
+			},
+		},
+		{
 			name: "truncated-first-record-fails-loudly",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				path := writeReplaySegment(t, root, 1,
@@ -123,6 +213,32 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
 				}
 				assertZeroRecoveryReport(t, report)
+			},
+		},
+		{
+			name: "truncated-active-tail-header-recovers-valid-prefix",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				path := writeReplaySegment(t, root, 1,
+					replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+					replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+					replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("partial-carol")}}},
+				)
+				truncateScanTestFileToOffset(t, path, int64(scanTestRecordOffset(t, path, 2)+RecordHeaderSize-1))
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 2 {
+					t.Fatalf("maxTxID = %d, want 2", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].LastTx != 2 {
+					t.Fatalf("damaged tail report = %+v, want one segment with LastTx 2", report.DamagedTailSegments)
+				}
+				if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+					t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+				}
 			},
 		},
 		{
@@ -164,6 +280,81 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshotParentSyncFailureLeavesNoSelectableArtifacts(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	committed := buildRecoveryCommittedState(t, reg)
+	players, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("alice")}); err != nil {
+		t.Fatal(err)
+	}
+	committed.SetCommittedTxID(9)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg).(*FileSnapshotWriter)
+	syncErr := errors.New("parent sync failed")
+	writer.syncDir = func(path string) error {
+		if path == writer.baseDir {
+			return syncErr
+		}
+		return nil
+	}
+
+	err := writer.CreateSnapshot(committed, 9)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("snapshot creation error = %v, want ErrSnapshot category", err)
+	}
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("snapshot creation error = %v, want wrapped sync failure", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "sync-parent" || completionErr.Path != writer.baseDir {
+		t.Fatalf("completion error = %+v, want sync-parent on base dir", completionErr)
+	}
+
+	snapshotDir := filepath.Join(writer.baseDir, "9")
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should not exist when parent sync fails before lock creation")
+	}
+	for _, name := range []string{snapshotTempFileName, snapshotFileName} {
+		if _, err := os.Stat(filepath.Join(snapshotDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s should not exist after parent sync failure, stat err=%v", name, err)
+		}
+	}
+	ids, listErr := ListSnapshots(writer.baseDir)
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(ids) != 1 || ids[0] != 9 {
+		t.Fatalf("ListSnapshots = %v, want incomplete directory to remain discoverable for read-failure reporting", ids)
+	}
+	_, readErr := ReadSnapshot(snapshotDir)
+	if readErr == nil {
+		t.Fatal("incomplete snapshot directory should not be readable")
+	}
+}
+
+func writeFaultSnapshot(t *testing.T, root string, reg schema.SchemaRegistry, txID types.TxID, rows map[uint64]string) {
+	t.Helper()
+	committed := buildRecoveryCommittedState(t, reg)
+	players, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	for id, name := range rows {
+		if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(id), types.NewString(name)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, txID)
+}
+
 func createMissingSnapshotCandidate(t *testing.T, root string, txID types.TxID) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "snapshots", txIDString(uint64(txID))), 0o755); err != nil {
@@ -186,14 +377,14 @@ func appendZeroTail(t *testing.T, path string, byteCount int) {
 	}
 }
 
-func assertMissingSnapshotWasSkipped(t *testing.T, report RecoveryReport, txID types.TxID) {
+func assertSkippedSnapshot(t *testing.T, report RecoveryReport, txID types.TxID, reason SnapshotSkipReason) {
 	t.Helper()
 	if len(report.SkippedSnapshots) != 1 {
-		t.Fatalf("skipped snapshots = %+v, want one missing snapshot", report.SkippedSnapshots)
+		t.Fatalf("skipped snapshots = %+v, want one skipped snapshot", report.SkippedSnapshots)
 	}
 	skipped := report.SkippedSnapshots[0]
-	if skipped.TxID != txID || skipped.Reason != SnapshotSkipReadFailed || skipped.Detail == "" {
-		t.Fatalf("skipped snapshot = %+v, want tx %d read_failed with detail", skipped, txID)
+	if skipped.TxID != txID || skipped.Reason != reason || skipped.Detail == "" {
+		t.Fatalf("skipped snapshot = %+v, want tx %d %s with detail", skipped, txID, reason)
 	}
 }
 
