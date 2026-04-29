@@ -242,7 +242,7 @@ func nextSequenceValueForTable(table *store.Table) (uint64, bool) {
 	for _, row := range table.Scan() {
 		value, ok := autoIncrementValueAsUint64(row[sequenceCol], ts.Columns[sequenceCol].Type)
 		if !ok {
-			return 0, false
+			continue
 		}
 		if value > maxSeen {
 			maxSeen = value

@@ -896,6 +896,46 @@ func TestOpenAndRecoverSnapshotSequenceBelowRestoredRowsFailsLoudly(t *testing.T
 	}
 }
 
+func TestOpenAndRecoverSnapshotSequenceBelowPositiveSignedRowsFailsWithNegativeRowsPresent(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoverySignedAutoIncrementRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+	jobs, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("jobs table missing")
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewInt64(-7), types.NewString("explicit-negative")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewInt64(42), types.NewString("explicit-positive")}); err != nil {
+		t.Fatal(err)
+	}
+	jobs.SetSequenceValue(43)
+	committed.SetCommittedTxID(2)
+	createSnapshotAt(t, NewSnapshotWriter(filepath.Join(root, "snapshots"), reg), committed, 2)
+	rewriteSnapshotSequence(t, root, 2, 0, 1)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected regressed signed snapshot sequence to fail recovery")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot sequence 1 for table 0 is below restored next sequence value 43") {
+		t.Fatalf("error = %v, want explicit sequence regression detail", err)
+	}
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
+		t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
+	}
+}
+
 func TestOpenAndRecoverFallsBackWhenOffsetIndexPointsInsideSegmentHeader(t *testing.T) {
 	root := t.TempDir()
 	const horizon = types.TxID(512)

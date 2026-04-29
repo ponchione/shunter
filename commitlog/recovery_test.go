@@ -343,6 +343,53 @@ func TestOpenAndRecoverDetailedReplayExplicitSignedAutoincrementValueRaisesRecov
 	}
 }
 
+func TestOpenAndRecoverDetailedReplayNegativeSignedAutoincrementDoesNotMaskPositiveSequenceAdvance(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoverySignedAutoIncrementRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+	committed.SetCommittedTxID(1)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 1)
+	writeRecoverySegment(t, root, reg, 2,
+		recoveryRecord{txID: 2, inserts: []types.ProductValue{{types.NewInt64(-7), types.NewString("explicit-negative")}}},
+		recoveryRecord{txID: 3, inserts: []types.ProductValue{{types.NewInt64(42), types.NewString("explicit-positive")}}},
+	)
+
+	recovered, maxTxID, plan, err := OpenAndRecoverDetailed(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID = %d, want 3", maxTxID)
+	}
+	if plan.NextTxID != 4 {
+		t.Fatalf("resume plan next tx = %d, want 4", plan.NextTxID)
+	}
+
+	recoveredJobs, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("recovered jobs table missing")
+	}
+	assertSignedRecoveryRows(t, recoveredJobs, map[int64]string{-7: "explicit-negative", 42: "explicit-positive"})
+	if seq, has := recoveredJobs.SequenceValue(); !has || seq != 43 {
+		t.Fatalf("SequenceValue after recovery = (%d, %v), want (43, true)", seq, has)
+	}
+
+	tx := store.NewTransaction(recovered, reg)
+	rowID, err := tx.Insert(0, types.ProductValue{types.NewInt64(0), types.NewString("post-recovery-auto")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := tx.GetRow(0, rowID)
+	if !ok {
+		t.Fatal("post-recovery row missing from transaction view")
+	}
+	if got := row[0].AsInt64(); got != 43 {
+		t.Fatalf("post-recovery autoincrement value = %d, want 43", got)
+	}
+}
+
 func TestOpenAndRecoverFromScratchWithoutSnapshot(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
