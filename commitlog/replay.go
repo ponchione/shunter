@@ -53,6 +53,9 @@ func ReplayLog(committed *store.CommittedState, segments []SegmentInfo, fromTxID
 	maxAppliedTxID := fromTxID
 
 	for _, segment := range segments {
+		if isEmptyDamagedTail(segment) {
+			continue
+		}
 		if segment.LastTx <= fromTxID {
 			continue
 		}

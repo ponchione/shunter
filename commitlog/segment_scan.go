@@ -214,7 +214,7 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			if canTreatAsDamagedTail(err, recordCount) {
+			if canTreatAsDamagedTail(err, recordCount) || canTreatAsEmptyDamagedTail(err, recordCount, isLast) {
 				info.AppendMode = AppendByFreshNextSegment
 				break
 			}
@@ -252,4 +252,8 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 
 	info.LastTx = types.TxID(lastTx)
 	return info, nil
+}
+
+func canTreatAsEmptyDamagedTail(err error, recordCount int, isLast bool) bool {
+	return isLast && recordCount == 0 && isDamagedTailError(err)
 }

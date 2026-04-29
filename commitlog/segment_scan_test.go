@@ -140,15 +140,25 @@ func TestScanSegmentsCorruptSealedSegment(t *testing.T) {
 	}
 }
 
-func TestScanSegmentsCorruptFirstRecordActiveSegment(t *testing.T) {
+func TestScanSegmentsCorruptFirstRecordActiveSegmentClassifiesEmptyDamagedTail(t *testing.T) {
 	dir := t.TempDir()
 
 	path := makeScanTestSegment(t, dir, 7, 7)
 	corruptScanTestByte(t, path, SegmentHeaderSize+RecordHeaderSize)
 
-	_, _, err := ScanSegments(dir)
-	if err == nil {
-		t.Fatal("expected error for corrupt first record in active segment")
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatalf("ScanSegments() error = %v", err)
+	}
+	if len(segments) != 1 {
+		t.Fatalf("len(segments) = %d, want 1", len(segments))
+	}
+	assertSegmentInfo(t, segments[0], path, 7, 6, true)
+	if horizon != 6 {
+		t.Fatalf("horizon = %d, want 6", horizon)
+	}
+	if segments[0].AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("append mode = %d, want %d", segments[0].AppendMode, AppendByFreshNextSegment)
 	}
 }
 

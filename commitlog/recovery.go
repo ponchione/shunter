@@ -98,6 +98,9 @@ func OpenAndRecoverWithReport(dir string, reg schema.SchemaRegistry) (*store.Com
 	if err != nil {
 		return nil, 0, RecoveryResumePlan{}, report, err
 	}
+	if snapshot == nil && len(segments) > 0 && isEmptyDamagedTail(segments[0]) {
+		return nil, 0, RecoveryResumePlan{}, report, ErrTruncatedRecord
+	}
 
 	committed := store.NewCommittedState()
 	for _, tableID := range reg.Tables() {
@@ -151,6 +154,10 @@ func OpenAndRecoverWithReport(dir string, reg schema.SchemaRegistry) (*store.Com
 	report.ResumePlan = plan
 
 	return committed, maxAppliedTxID, plan, report, nil
+}
+
+func isEmptyDamagedTail(segment SegmentInfo) bool {
+	return segment.AppendMode == AppendByFreshNextSegment && segment.LastTx < segment.StartTx
 }
 
 func damagedTailSegments(segments []SegmentInfo) []SegmentInfo {
