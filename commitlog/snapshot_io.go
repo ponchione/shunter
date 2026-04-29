@@ -24,10 +24,11 @@ import (
 var SnapshotMagic = [4]byte{'S', 'H', 'S', 'N'}
 
 const (
-	SnapshotVersion      uint8 = 1
-	SnapshotHeaderSize         = 52
-	snapshotFileName           = "snapshot"
-	snapshotTempFileName       = "snapshot.tmp"
+	SnapshotVersion        uint8 = 1
+	SnapshotHeaderSize           = 52
+	snapshotFileName             = "snapshot"
+	snapshotTempFileName         = "snapshot.tmp"
+	maxSnapshotStringBytes       = 1 << 20
 )
 
 type ErrSnapshotHashMismatch = SnapshotHashMismatchError
@@ -128,7 +129,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 	if err := binary.Read(r, binary.LittleEndian, &tableCount); err != nil {
 		return nil, 0, err
 	}
-	tables := make([]schema.TableSchema, 0, tableCount)
+	var tables []schema.TableSchema
 	for range tableCount {
 		var tableID uint32
 		if err := binary.Read(r, binary.LittleEndian, &tableID); err != nil {
@@ -142,7 +143,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		if err := binary.Read(r, binary.LittleEndian, &colCount); err != nil {
 			return nil, 0, err
 		}
-		cols := make([]schema.ColumnSchema, 0, colCount)
+		var cols []schema.ColumnSchema
 		for range colCount {
 			var colIdx uint32
 			if err := binary.Read(r, binary.LittleEndian, &colIdx); err != nil {
@@ -165,7 +166,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		if err := binary.Read(r, binary.LittleEndian, &idxCount); err != nil {
 			return nil, 0, err
 		}
-		indexes := make([]schema.IndexSchema, 0, idxCount)
+		var indexes []schema.IndexSchema
 		for idxID := uint32(0); idxID < idxCount; idxID++ {
 			idxName, err := readString(r)
 			if err != nil {
@@ -179,8 +180,8 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			if err := binary.Read(r, binary.LittleEndian, &colsCount); err != nil {
 				return nil, 0, err
 			}
-			idxCols := make([]int, colsCount)
-			for i := range idxCols {
+			var idxCols []int
+			for range colsCount {
 				var colIdx uint32
 				if err := binary.Read(r, binary.LittleEndian, &colIdx); err != nil {
 					return nil, 0, err
@@ -188,7 +189,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 				if colIdx > math.MaxInt32 {
 					return nil, 0, fmt.Errorf("column index overflow: %d", colIdx)
 				}
-				idxCols[i] = int(colIdx)
+				idxCols = append(idxCols, int(colIdx))
 			}
 			indexes = append(indexes, schema.IndexSchema{ID: schema.IndexID(idxID), Name: idxName, Columns: idxCols, Unique: flags[0] == 1, Primary: flags[1] == 1})
 		}
@@ -552,6 +553,9 @@ func readSnapshotSchema(payload io.Reader) ([]schema.TableSchema, uint32, map[sc
 	if err := binary.Read(payload, binary.LittleEndian, &schemaLen); err != nil {
 		return nil, 0, nil, err
 	}
+	if max := DefaultCommitLogOptions().MaxRecordPayloadBytes; schemaLen > max {
+		return nil, 0, nil, snapshotSectionTooLarge("schema", schemaLen, max)
+	}
 	schemaBytes := make([]byte, schemaLen)
 	if _, err := io.ReadFull(payload, schemaBytes); err != nil {
 		return nil, 0, nil, err
@@ -601,7 +605,7 @@ func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema
 	if err := binary.Read(payload, binary.LittleEndian, &tableCount); err != nil {
 		return nil, err
 	}
-	tables := make([]SnapshotTableData, 0, tableCount)
+	var tables []SnapshotTableData
 	var rowBuf []byte
 	for range tableCount {
 		var tableID uint32
@@ -621,6 +625,9 @@ func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema
 			var rowLen uint32
 			if err := binary.Read(payload, binary.LittleEndian, &rowLen); err != nil {
 				return nil, err
+			}
+			if max := DefaultCommitLogOptions().MaxRowBytes; rowLen > max {
+				return nil, snapshotSectionTooLarge("row", rowLen, max)
 			}
 			if cap(rowBuf) < int(rowLen) {
 				rowBuf = make([]byte, rowLen)
@@ -707,11 +714,18 @@ func readString(r io.Reader) (string, error) {
 	if err := binary.Read(r, binary.LittleEndian, &n); err != nil {
 		return "", err
 	}
+	if n > maxSnapshotStringBytes {
+		return "", snapshotSectionTooLarge("schema string", n, maxSnapshotStringBytes)
+	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return "", err
 	}
 	return string(buf), nil
+}
+
+func snapshotSectionTooLarge(section string, size uint32, max uint32) error {
+	return fmt.Errorf("%w: snapshot %s section %d exceeds max %d", ErrSnapshot, section, size, max)
 }
 
 func boolByte(v bool) byte {

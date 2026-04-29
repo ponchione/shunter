@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -119,6 +120,35 @@ func TestDecodeSchemaSnapshotRejectsTrailingBytes(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "trailing schema snapshot bytes") {
 		t.Fatalf("trailing schema snapshot error = %v, want explicit trailing-bytes detail", err)
+	}
+}
+
+func TestDecodeSchemaSnapshotRejectsOversizedStringLength(t *testing.T) {
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1) // schema snapshot version
+	writeUint32(t, &buf, 1) // table count
+	writeUint32(t, &buf, 0) // table ID
+	writeUint32(t, &buf, maxSnapshotStringBytes+1)
+
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+	if err == nil {
+		t.Fatal("expected oversized schema string length to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("oversized schema string error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "schema string") {
+		t.Fatalf("oversized schema string error = %v, want schema string detail", err)
+	}
+}
+
+func TestDecodeSchemaSnapshotDoesNotPreallocateClaimedTableCount(t *testing.T) {
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1)
+	writeUint32(t, &buf, ^uint32(0))
+
+	if _, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes())); err == nil {
+		t.Fatal("expected claimed table count without table bytes to fail")
 	}
 }
 
@@ -247,6 +277,88 @@ func TestReadSnapshotRejectsTrailingPayloadBytes(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "trailing snapshot bytes") {
 		t.Fatalf("trailing snapshot error = %v, want explicit trailing-bytes detail", err)
+	}
+}
+
+func TestReadSnapshotRejectsOversizedSectionsBeforeAllocation(t *testing.T) {
+	_, reg := testSchema()
+	var schemaBuf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&schemaBuf, reg); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name       string
+		body       []byte
+		wantDetail string
+	}{
+		{
+			name: "schema-section",
+			body: func() []byte {
+				var body bytes.Buffer
+				writeUint32(t, &body, DefaultCommitLogOptions().MaxRecordPayloadBytes+1)
+				return body.Bytes()
+			}(),
+			wantDetail: "snapshot schema section",
+		},
+		{
+			name: "row-section",
+			body: func() []byte {
+				var body bytes.Buffer
+				writeUint32(t, &body, uint32(schemaBuf.Len()))
+				body.Write(schemaBuf.Bytes())
+				writeUint32(t, &body, 0) // sequence entries
+				writeUint32(t, &body, 0) // next ID entries
+				writeUint32(t, &body, 1) // table sections
+				writeUint32(t, &body, 0) // players table
+				writeUint32(t, &body, 1) // row count
+				writeUint32(t, &body, DefaultCommitLogOptions().MaxRowBytes+1)
+				return body.Bytes()
+			}(),
+			wantDetail: "snapshot row section",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			baseDir := t.TempDir()
+			snapshotDir := filepath.Join(baseDir, "snapshots", "91")
+			writeSnapshotBytes(t, snapshotDir, 91, reg.Version(), tc.body)
+
+			_, err := ReadSnapshot(snapshotDir)
+			if err == nil {
+				t.Fatal("expected oversized snapshot section to fail")
+			}
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("oversized snapshot section error = %v, want ErrSnapshot category", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("oversized snapshot section error = %v, want %q detail", err, tc.wantDetail)
+			}
+		})
+	}
+}
+
+func TestReadSnapshotDoesNotPreallocateClaimedTableCount(t *testing.T) {
+	_, reg := testSchema()
+	var schemaBuf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&schemaBuf, reg); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	writeUint32(t, &body, uint32(schemaBuf.Len()))
+	body.Write(schemaBuf.Bytes())
+	writeUint32(t, &body, 0) // sequence entries
+	writeUint32(t, &body, 0) // next ID entries
+	writeUint32(t, &body, ^uint32(0))
+
+	baseDir := t.TempDir()
+	snapshotDir := filepath.Join(baseDir, "snapshots", "92")
+	writeSnapshotBytes(t, snapshotDir, 92, reg.Version(), body.Bytes())
+
+	if _, err := ReadSnapshot(snapshotDir); err == nil {
+		t.Fatal("expected claimed snapshot table count without table bytes to fail")
 	}
 }
 
@@ -597,4 +709,36 @@ func BenchmarkCreateSnapshotLarge(b *testing.B) {
 
 func txIDString(txID uint64) string {
 	return fmt.Sprintf("%d", txID)
+}
+
+func writeSnapshotBytes(t testing.TB, dir string, txID types.TxID, schemaVersion uint32, body []byte) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var file bytes.Buffer
+	file.Write(SnapshotMagic[:])
+	file.Write([]byte{SnapshotVersion, 0, 0, 0})
+	writeUint64(t, &file, uint64(txID))
+	writeUint32(t, &file, schemaVersion)
+	hash := ComputeSnapshotHash(body)
+	file.Write(hash[:])
+	file.Write(body)
+	if err := os.WriteFile(filepath.Join(dir, snapshotFileName), file.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeUint32(t testing.TB, dst *bytes.Buffer, value uint32) {
+	t.Helper()
+	if err := binary.Write(dst, binary.LittleEndian, value); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeUint64(t testing.TB, dst *bytes.Buffer, value uint64) {
+	t.Helper()
+	if err := binary.Write(dst, binary.LittleEndian, value); err != nil {
+		t.Fatal(err)
+	}
 }
