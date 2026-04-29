@@ -40,3 +40,12 @@ Reason:
   enforcement foundation.
 
 Reducer enforcement is complete and tested.
+
+## Follow-Up Authority
+
+The implementation-facing design for completing read authorization is now
+`docs/features/V2/READ-AUTHORIZATION-DESIGN.md`. Future workers should treat
+that document as the authority for table read policy, declared read execution,
+raw SQL authorization, generated-client behavior, and row-level visibility.
+
+The worker-sized implementation decomposition lives in `docs/features/V2.5/`.

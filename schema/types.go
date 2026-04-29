@@ -42,10 +42,11 @@ type IndexID uint32
 
 // TableSchema describes a registered table.
 type TableSchema struct {
-	ID      TableID        `json:"id"`
-	Name    string         `json:"name"`
-	Columns []ColumnSchema `json:"columns"`
-	Indexes []IndexSchema  `json:"indexes"`
+	ID         TableID        `json:"id"`
+	Name       string         `json:"name"`
+	Columns    []ColumnSchema `json:"columns"`
+	Indexes    []IndexSchema  `json:"indexes"`
+	ReadPolicy ReadPolicy     `json:"read_policy"`
 }
 
 // ColumnSchema describes a single column.

@@ -83,6 +83,31 @@ func TestContractDiffReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceReadModel, "query.history")
 }
 
+func TestContractDiffDetectsTableReadPolicyChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPermissioned,
+		Permissions: []string{"messages:read"},
+	}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceTableReadPolicy, "messages")
+
+	old = current
+	current = contractFixture()
+	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{Access: schema.TableAccessPublic}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceTableReadPolicy, "messages")
+
+	old = current
+	current = contractFixture()
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceTableReadPolicy, "messages")
+}
+
 func TestContractDiffReportsModuleMetadataChanges(t *testing.T) {
 	old := contractFixture()
 	old.Module.Metadata = map[string]string{

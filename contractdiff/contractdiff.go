@@ -28,6 +28,7 @@ const (
 	SurfaceModule            Surface = "module"
 	SurfaceSchema            Surface = "schema"
 	SurfaceTable             Surface = "table"
+	SurfaceTableReadPolicy   Surface = "table_read_policy"
 	SurfaceColumn            Surface = "column"
 	SurfaceIndex             Surface = "index"
 	SurfaceReducer           Surface = "reducer"
@@ -143,6 +144,7 @@ func compareTables(out *Report, oldTables, currentTables []schema.TableExport) {
 			out.add(ChangeKindAdditive, SurfaceTable, name, "table added")
 			continue
 		}
+		compareTableReadPolicy(out, old.Name, old.ReadPolicy, current.ReadPolicy)
 		compareColumns(out, old.Name, old.Columns, current.Columns)
 		compareIndexes(out, old.Name, old.Indexes, current.Indexes)
 	}
@@ -150,6 +152,43 @@ func compareTables(out *Report, oldTables, currentTables []schema.TableExport) {
 		if _, ok := currentByName[name]; !ok {
 			out.add(ChangeKindBreaking, SurfaceTable, name, "table removed")
 		}
+	}
+}
+
+func compareTableReadPolicy(out *Report, tableName string, oldPolicy, currentPolicy schema.ReadPolicy) {
+	oldSignature := readPolicySignature(oldPolicy)
+	currentSignature := readPolicySignature(currentPolicy)
+	if oldSignature == currentSignature {
+		return
+	}
+	out.add(tableReadPolicyChangeKind(oldPolicy, currentPolicy), SurfaceTableReadPolicy, tableName, fmt.Sprintf("read policy changed from %s to %s", oldSignature, currentSignature))
+}
+
+func tableReadPolicyChangeKind(oldPolicy, currentPolicy schema.ReadPolicy) ChangeKind {
+	if oldPolicy.Access == schema.TableAccessPermissioned && currentPolicy.Access == schema.TableAccessPermissioned {
+		if stringSliceSubset(currentPolicy.Permissions, oldPolicy.Permissions) {
+			return ChangeKindAdditive
+		}
+		return ChangeKindBreaking
+	}
+	oldRank := tableAccessRank(oldPolicy)
+	currentRank := tableAccessRank(currentPolicy)
+	if currentRank > oldRank {
+		return ChangeKindAdditive
+	}
+	return ChangeKindBreaking
+}
+
+func tableAccessRank(policy schema.ReadPolicy) int {
+	switch policy.Access {
+	case schema.TableAccessPrivate:
+		return 0
+	case schema.TableAccessPermissioned:
+		return 1
+	case schema.TableAccessPublic:
+		return 2
+	default:
+		return 0
 	}
 }
 
@@ -424,8 +463,28 @@ func stringSliceSignature(values []string) string {
 	return strings.Join(values, "\x00")
 }
 
+func stringSliceSubset(values, allowed []string) bool {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, value := range allowed {
+		allowedSet[value] = struct{}{}
+	}
+	for _, value := range values {
+		if _, ok := allowedSet[value]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func indexSignature(index schema.IndexExport) string {
 	return fmt.Sprintf("columns=%s unique=%t primary=%t", strings.Join(index.Columns, ","), index.Unique, index.Primary)
+}
+
+func readPolicySignature(policy schema.ReadPolicy) string {
+	if policy.Access != schema.TableAccessPermissioned {
+		return policy.Access.String()
+	}
+	return fmt.Sprintf("%s(%s)", policy.Access, strings.Join(policy.Permissions, ","))
 }
 
 func migrationDeclarationMap(declarations []shunter.MigrationContractDeclaration) map[string]shunter.MigrationContractDeclaration {

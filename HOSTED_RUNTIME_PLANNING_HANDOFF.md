@@ -30,6 +30,19 @@ starting from the code-grounded source direction in
 Do not reopen V1-H, V1.5-A through V1.5-E, or V2-A through V2-G unless a new
 failing regression proves drift.
 
+## Persistent Deferred Direction
+
+Out-of-process module execution is a preserved future direction, not a rejected
+idea. V2-G deliberately deferred production process isolation after adding the
+internal `processboundary` contract gate. Do not start a runner, supervisor, or
+dynamic module-loading path until there is an explicit new target and a design
+for serializable reducer transaction mutation, reducer scheduler access,
+lifecycle rollback/cleanup behavior, and committed-state-driven subscription
+fan-out across a process boundary.
+
+The supported runtime model remains statically linked in-process Go modules
+built with `shunter.Build(...)` until that future design exists.
+
 ## Execution Granularity
 
 V2 work should proceed one lettered slice at a time, not one numbered task at a

@@ -31,6 +31,8 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
 	assertContains(t, ts, `export const lifecycleReducers = {`)
 	assertContains(t, ts, `OnConnect: "OnConnect",`)
+	assertContains(t, ts, `export const tableReadPolicies = {`)
+	assertContains(t, ts, `messages: { access: "private", permissions: [] },`)
 	assertContains(t, ts, `export const queries = {`)
 	assertContains(t, ts, `recentMessages: "recent_messages",`)
 	assertContains(t, ts, `export const querySQL = {`)
@@ -155,6 +157,23 @@ func TestTypeScriptGeneratorDoesNotEmitExecutableHelpersForMetadataOnlyDeclarati
 	assertContains(t, ts, `liveMessages: "live_messages",`)
 	assertContains(t, ts, `export const viewSQL = {`)
 	assertNotContains(t, ts, `export function subscribeLiveMessages(`)
+}
+
+func TestTypeScriptGeneratorEmitsTableReadPolicyMetadata(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPermissioned,
+		Permissions: []string{"messages:read"},
+	}
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export const tableReadPolicies = {`)
+	assertContains(t, ts, `messages: { access: "permissioned", permissions: ["messages:read"] },`)
 }
 
 func contractFixture() shunter.ModuleContract {

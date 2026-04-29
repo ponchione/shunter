@@ -59,8 +59,9 @@ func (b *Builder) buildEngine(opts EngineOptions) (*Engine, error) {
 	schemas := make([]TableSchema, len(builtBuilder.tables))
 	for i, td := range builtBuilder.tables {
 		ts := TableSchema{
-			ID:   TableID(i),
-			Name: td.Name,
+			ID:         TableID(i),
+			Name:       td.Name,
+			ReadPolicy: copyReadPolicy(td.ReadPolicy),
 		}
 
 		// Build columns.

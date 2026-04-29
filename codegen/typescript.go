@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	shunter "github.com/ponchione/shunter"
+	"github.com/ponchione/shunter/schema"
 )
 
 type namedTypeScriptIdentifier struct {
@@ -57,6 +58,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 
 	writeTypeScriptConstMap(&b, "tables", tableConstants)
 	b.WriteString("export type TableName = (typeof tables)[keyof typeof tables];\n\n")
+	writeTypeScriptTableReadPolicies(&b, contract.Schema.Tables, tableConstants)
 	subscribeFunctionNames := make(map[string]int, len(contract.Schema.Tables)+len(contract.Views))
 	for i, table := range contract.Schema.Tables {
 		rowType := tableTypes[i].identifier + "Row"
@@ -140,6 +142,20 @@ func writeTypeScriptSQLConstMap(b *bytes.Buffer, name string, identifiers []name
 	fmt.Fprintf(b, "export const %s = {\n", name)
 	for _, identifier := range identifiers {
 		fmt.Fprintf(b, "  %s: %s,\n", identifier.identifier, strconv.Quote(identifier.sql))
+	}
+	b.WriteString("} as const;\n\n")
+}
+
+func writeTypeScriptTableReadPolicies(b *bytes.Buffer, tables []schema.TableExport, identifiers []namedTypeScriptIdentifier) {
+	b.WriteString("export const tableReadPolicies = {\n")
+	for i, table := range tables {
+		fmt.Fprintf(
+			b,
+			"  %s: { access: %s, permissions: %s },\n",
+			identifiers[i].identifier,
+			strconv.Quote(table.ReadPolicy.Access.String()),
+			typeScriptStringArray(table.ReadPolicy.Permissions),
+		)
 	}
 	b.WriteString("} as const;\n\n")
 }

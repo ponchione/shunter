@@ -95,6 +95,68 @@ func TestExportSchemaIncludesExtendedColumnKinds(t *testing.T) {
 	}
 }
 
+func TestExportSchemaIncludesTableReadPolicy(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "messages",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+		},
+	}, WithReadPermissions("messages:read"))
+
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	export := e.ExportSchema()
+	if len(export.Tables) == 0 {
+		t.Fatal("ExportSchema returned no tables")
+	}
+	policy := export.Tables[0].ReadPolicy
+	if policy.Access != TableAccessPermissioned {
+		t.Fatalf("export read access = %s, want permissioned", policy.Access)
+	}
+	if len(policy.Permissions) != 1 || policy.Permissions[0] != "messages:read" {
+		t.Fatalf("export read permissions = %#v, want [messages:read]", policy.Permissions)
+	}
+
+	export.Tables[0].ReadPolicy.Permissions[0] = "mutated"
+	again := e.ExportSchema()
+	if got := again.Tables[0].ReadPolicy.Permissions[0]; got != "messages:read" {
+		t.Fatalf("second export read permission = %q, want detached copy", got)
+	}
+}
+
+func TestSchemaExportJSONRoundTripIncludesTableReadPolicy(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "messages",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+		},
+	}, WithPublicRead())
+
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	data, err := json.Marshal(e.ExportSchema())
+	if err != nil {
+		t.Fatalf("Marshal export: %v", err)
+	}
+	var decoded SchemaExport
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal export: %v", err)
+	}
+	if decoded.Tables[0].ReadPolicy.Access != TableAccessPublic {
+		t.Fatalf("decoded read access = %s, want public; json=%s", decoded.Tables[0].ReadPolicy.Access, data)
+	}
+}
+
 func TestExportSchemaReturnsDetachedSnapshot(t *testing.T) {
 	e, err := validBuilder().Build(EngineOptions{})
 	if err != nil {

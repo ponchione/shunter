@@ -360,9 +360,10 @@ func normalizeSchemaExport(in schema.SchemaExport) schema.SchemaExport {
 
 func copyTableExport(in schema.TableExport) schema.TableExport {
 	out := schema.TableExport{
-		Name:    in.Name,
-		Columns: make([]schema.ColumnExport, len(in.Columns)),
-		Indexes: make([]schema.IndexExport, len(in.Indexes)),
+		Name:       in.Name,
+		Columns:    make([]schema.ColumnExport, len(in.Columns)),
+		Indexes:    make([]schema.IndexExport, len(in.Indexes)),
+		ReadPolicy: normalizeSchemaReadPolicy(in.ReadPolicy),
 	}
 	copy(out.Columns, in.Columns)
 	for i, idx := range in.Indexes {
@@ -382,6 +383,17 @@ func copyTableExport(in schema.TableExport) schema.TableExport {
 	}
 	if out.Indexes == nil {
 		out.Indexes = []schema.IndexExport{}
+	}
+	return out
+}
+
+func normalizeSchemaReadPolicy(in schema.ReadPolicy) schema.ReadPolicy {
+	out := schema.ReadPolicy{
+		Access:      in.Access,
+		Permissions: append([]string(nil), in.Permissions...),
+	}
+	if out.Permissions == nil {
+		out.Permissions = []string{}
 	}
 	return out
 }

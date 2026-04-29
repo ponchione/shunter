@@ -10,6 +10,11 @@ Source docs:
 - `docs/decomposition/hosted-runtime-version-phases.md`
 - `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
 
+Follow-up design authority:
+- `docs/features/V2/READ-AUTHORIZATION-DESIGN.md` for completing raw SQL,
+  declared read, generated-client, and row-level read authorization.
+- `docs/features/V2.5/` decomposes that design into implementation tasks.
+
 V2 starts from the live v1/v1.5 codebase. It should not reopen landed
 hosted-runtime work unless a failing regression proves drift.
 

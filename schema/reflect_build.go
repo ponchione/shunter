@@ -13,6 +13,10 @@ func buildTableDefinition(typeName string, fields []fieldInfo, opts ...TableOpti
 	if tableName == "" {
 		tableName = ToSnakeCase(typeName)
 	}
+	readPolicy := ReadPolicy{}
+	if o.readPolicy != nil {
+		readPolicy = copyReadPolicy(*o.readPolicy)
+	}
 
 	columns := make([]ColumnDefinition, len(fields))
 	for i, f := range fields {
@@ -80,9 +84,10 @@ func buildTableDefinition(typeName string, fields []fieldInfo, opts ...TableOpti
 	}
 
 	return TableDefinition{
-		Name:    tableName,
-		Columns: columns,
-		Indexes: indexes,
+		Name:       tableName,
+		Columns:    columns,
+		Indexes:    indexes,
+		ReadPolicy: readPolicy,
 	}, nil
 }
 

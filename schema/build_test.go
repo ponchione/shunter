@@ -109,6 +109,145 @@ func TestBuildAssignsTableIDs(t *testing.T) {
 	}
 }
 
+func TestBuildDefaultTableReadPolicyIsPrivate(t *testing.T) {
+	e, err := validBuilder().Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	_, ts, ok := e.Registry().TableByName("players")
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	if ts.ReadPolicy.Access != TableAccessPrivate {
+		t.Fatalf("default read access = %s, want private", ts.ReadPolicy.Access)
+	}
+	if len(ts.ReadPolicy.Permissions) != 0 {
+		t.Fatalf("default read permissions = %#v, want none", ts.ReadPolicy.Permissions)
+	}
+}
+
+func TestBuildTableReadPolicyOptions(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       []TableOption
+		wantAccess TableAccess
+		wantPerms  []string
+		tableName  string
+	}{
+		{
+			name:       "public",
+			opts:       []TableOption{WithPublicRead()},
+			wantAccess: TableAccessPublic,
+			tableName:  "public_messages",
+		},
+		{
+			name:       "private",
+			opts:       []TableOption{WithPrivateRead()},
+			wantAccess: TableAccessPrivate,
+			tableName:  "private_messages",
+		},
+		{
+			name:       "permissioned",
+			opts:       []TableOption{WithReadPermissions("messages:read")},
+			wantAccess: TableAccessPermissioned,
+			wantPerms:  []string{"messages:read"},
+			tableName:  "permissioned_messages",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBuilder().SchemaVersion(1)
+			b.TableDef(TableDefinition{
+				Name: tt.tableName,
+				Columns: []ColumnDefinition{
+					{Name: "id", Type: KindUint64, PrimaryKey: true},
+				},
+			}, tt.opts...)
+
+			e, err := b.Build(EngineOptions{})
+			if err != nil {
+				t.Fatalf("Build failed: %v", err)
+			}
+			_, ts, ok := e.Registry().TableByName(tt.tableName)
+			if !ok {
+				t.Fatalf("%s table missing", tt.tableName)
+			}
+			if ts.ReadPolicy.Access != tt.wantAccess {
+				t.Fatalf("read access = %s, want %s", ts.ReadPolicy.Access, tt.wantAccess)
+			}
+			if !equalStringSlices(ts.ReadPolicy.Permissions, tt.wantPerms) {
+				t.Fatalf("read permissions = %#v, want %#v", ts.ReadPolicy.Permissions, tt.wantPerms)
+			}
+		})
+	}
+}
+
+func TestBuildWithReadPermissionsCopiesPermissionSlicesDefensively(t *testing.T) {
+	permissions := []string{"messages:read"}
+	readOption := WithReadPermissions(permissions...)
+	permissions[0] = "mutated_before_registration"
+
+	b := NewBuilder().SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "messages",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+		},
+	}, readOption)
+	permissions[0] = "mutated_after_registration"
+
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ts, ok := e.Registry().TableByName("messages")
+	if !ok {
+		t.Fatal("messages table missing")
+	}
+	if len(ts.ReadPolicy.Permissions) != 1 || ts.ReadPolicy.Permissions[0] != "messages:read" {
+		t.Fatalf("read permissions = %#v, want defensive copy", ts.ReadPolicy.Permissions)
+	}
+
+	ts.ReadPolicy.Permissions[0] = "mutated"
+	_, again, ok := e.Registry().TableByName("messages")
+	if !ok {
+		t.Fatal("messages table missing on second lookup")
+	}
+	if len(again.ReadPolicy.Permissions) != 1 || again.ReadPolicy.Permissions[0] != "messages:read" {
+		t.Fatalf("second read permissions = %#v, want detached registry copy", again.ReadPolicy.Permissions)
+	}
+}
+
+func TestBuildInvalidTableReadPermissionTagsFail(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []TableOption
+	}{
+		{name: "blank", opts: []TableOption{WithReadPermissions("messages:read", " ")}},
+		{name: "none", opts: []TableOption{WithReadPermissions()}},
+		{name: "duplicate", opts: []TableOption{WithReadPermissions("messages:read", "messages:read")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBuilder().SchemaVersion(1)
+			b.TableDef(TableDefinition{
+				Name: "messages",
+				Columns: []ColumnDefinition{
+					{Name: "id", Type: KindUint64, PrimaryKey: true},
+				},
+			}, tt.opts...)
+
+			_, err := b.Build(EngineOptions{})
+			if err == nil || !errors.Is(err, ErrInvalidTableReadPolicy) {
+				t.Fatalf("expected ErrInvalidTableReadPolicy, got %v", err)
+			}
+		})
+	}
+}
+
 func TestBuildSystemTablesExist(t *testing.T) {
 	e, _ := validBuilder().Build(EngineOptions{})
 	reg := e.Registry()
@@ -464,6 +603,18 @@ func TestRegistryVersion(t *testing.T) {
 	if e.Registry().Version() != 1 {
 		t.Fatalf("expected version 1, got %d", e.Registry().Version())
 	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestRegistryReducer(t *testing.T) {

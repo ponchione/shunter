@@ -62,6 +62,9 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 		if !validateContractName("schema.tables", table.Name, names, errs) {
 			continue
 		}
+		if err := schema.ValidateReadPolicy(table.ReadPolicy); err != nil {
+			*errs = append(*errs, fmt.Errorf("schema.tables.%s.read_policy invalid: %v", table.Name, err))
+		}
 		columnNames := make(map[string]struct{}, len(table.Columns))
 		for _, column := range table.Columns {
 			validateContractName("schema.tables."+table.Name+".columns", column.Name, columnNames, errs)
@@ -283,10 +286,11 @@ func newContractSchemaLookup(schemaExport schema.SchemaExport) contractSchemaLoo
 	for i, table := range schemaExport.Tables {
 		tableID := schema.TableID(i)
 		ts := schema.TableSchema{
-			ID:      tableID,
-			Name:    table.Name,
-			Columns: make([]schema.ColumnSchema, len(table.Columns)),
-			Indexes: make([]schema.IndexSchema, 0, len(table.Indexes)),
+			ID:         tableID,
+			Name:       table.Name,
+			Columns:    make([]schema.ColumnSchema, len(table.Columns)),
+			Indexes:    make([]schema.IndexSchema, 0, len(table.Indexes)),
+			ReadPolicy: copyContractReadPolicy(table.ReadPolicy),
 		}
 		columnByName := make(map[string]int, len(table.Columns))
 		for j, column := range table.Columns {
@@ -384,15 +388,23 @@ func (l contractSchemaLookup) ColumnCount(table schema.TableID) int {
 
 func cloneContractTableSchema(in schema.TableSchema) schema.TableSchema {
 	out := schema.TableSchema{
-		ID:      in.ID,
-		Name:    in.Name,
-		Columns: append([]schema.ColumnSchema(nil), in.Columns...),
-		Indexes: make([]schema.IndexSchema, len(in.Indexes)),
+		ID:         in.ID,
+		Name:       in.Name,
+		Columns:    append([]schema.ColumnSchema(nil), in.Columns...),
+		Indexes:    make([]schema.IndexSchema, len(in.Indexes)),
+		ReadPolicy: copyContractReadPolicy(in.ReadPolicy),
 	}
 	for i, index := range in.Indexes {
 		out.Indexes[i] = schema.NewIndexSchema(index.ID, index.Name, append([]int(nil), index.Columns...), index.Unique, index.Primary)
 	}
 	return out
+}
+
+func copyContractReadPolicy(in schema.ReadPolicy) schema.ReadPolicy {
+	return schema.ReadPolicy{
+		Access:      in.Access,
+		Permissions: append([]string(nil), in.Permissions...),
+	}
 }
 
 func valueKindFromExportString(value string) (schema.ValueKind, bool) {

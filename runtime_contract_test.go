@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/ponchione/shunter/schema"
 )
 
 func TestRuntimeExportContractIncludesModuleSchemaDeclarationsAndReservedSections(t *testing.T) {
@@ -89,6 +91,40 @@ func TestRuntimeExportContractIncludesPermissionAndReadModelMetadata(t *testing.
 	assertPermissionContractDeclaration(t, contract.Permissions.Views, "live_messages", "messages:subscribe")
 	assertReadModelContractDeclaration(t, contract.ReadModel.Declarations, ReadModelSurfaceQuery, "recent_messages", "messages", "history")
 	assertReadModelContractDeclaration(t, contract.ReadModel.Declarations, ReadModelSurfaceView, "live_messages", "messages", "realtime")
+}
+
+func TestRuntimeExportContractIncludesTableReadPolicyMetadata(t *testing.T) {
+	mod := NewModule("chat").
+		SchemaVersion(1).
+		TableDef(messagesTableDef(), schema.WithReadPermissions("messages:read"))
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	if len(contract.Schema.Tables) == 0 {
+		t.Fatal("contract schema has no tables")
+	}
+	policy := contract.Schema.Tables[0].ReadPolicy
+	if policy.Access != schema.TableAccessPermissioned {
+		t.Fatalf("contract read access = %s, want permissioned", policy.Access)
+	}
+	if len(policy.Permissions) != 1 || policy.Permissions[0] != "messages:read" {
+		t.Fatalf("contract read permissions = %#v, want [messages:read]", policy.Permissions)
+	}
+
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	if !strings.Contains(string(data), `"read_policy": {`) ||
+		!strings.Contains(string(data), `"access": "permissioned"`) ||
+		!strings.Contains(string(data), `"permissions": [`) ||
+		!strings.Contains(string(data), `"messages:read"`) {
+		t.Fatalf("contract JSON missing table read policy metadata:\n%s", data)
+	}
 }
 
 func TestRuntimeExportContractWithAuthoredMetadataValidates(t *testing.T) {
@@ -196,6 +232,45 @@ func TestModuleContractValidationRejectsInvalidDeclarationSQL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "views.live_messages.sql") {
 		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+}
+
+func TestModuleContractValidationRejectsInvalidTableReadPolicyMetadata(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy schema.ReadPolicy
+	}{
+		{
+			name:   "invalid access",
+			policy: schema.ReadPolicy{Access: schema.TableAccess(99)},
+		},
+		{
+			name:   "permissioned blank tag",
+			policy: schema.ReadPolicy{Access: schema.TableAccessPermissioned, Permissions: []string{"messages:read", " "}},
+		},
+		{
+			name:   "permissioned duplicate tag",
+			policy: schema.ReadPolicy{Access: schema.TableAccessPermissioned, Permissions: []string{"messages:read", "messages:read"}},
+		},
+		{
+			name:   "public with permissions",
+			policy: schema.ReadPolicy{Access: schema.TableAccessPublic, Permissions: []string{"messages:read"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contract := buildContractRuntime(t).ExportContract()
+			contract.Schema.Tables[0].ReadPolicy = tt.policy
+
+			err := ValidateModuleContract(contract)
+			if err == nil {
+				t.Fatal("ValidateModuleContract accepted invalid table read policy metadata")
+			}
+			if !strings.Contains(err.Error(), "read_policy") {
+				t.Fatalf("ValidateModuleContract error = %v, want read_policy context", err)
+			}
+		})
 	}
 }
 

@@ -29,6 +29,9 @@ func validateStructure(b *Builder) []error {
 			errs = append(errs, fmt.Errorf("%w: %q", ErrDuplicateTableName, t.Name))
 		}
 		tableNames[t.Name] = true
+		if err := ValidateReadPolicy(t.ReadPolicy); err != nil {
+			errs = append(errs, fmt.Errorf("table %q read policy: %w", t.Name, err))
+		}
 
 		// Must have at least one column.
 		if len(t.Columns) == 0 {

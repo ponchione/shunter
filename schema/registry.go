@@ -233,5 +233,6 @@ func cloneTableSchema(ts TableSchema) TableSchema {
 		idxClone.Columns = append([]int(nil), idx.Columns...)
 		clone.Indexes[i] = idxClone
 	}
+	clone.ReadPolicy = copyReadPolicy(ts.ReadPolicy)
 	return clone
 }

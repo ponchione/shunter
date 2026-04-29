@@ -29,9 +29,10 @@ func NewBuilder() *Builder {
 
 // TableDefinition describes a table before validation and ID assignment.
 type TableDefinition struct {
-	Name    string
-	Columns []ColumnDefinition
-	Indexes []IndexDefinition
+	Name       string
+	Columns    []ColumnDefinition
+	Indexes    []IndexDefinition
+	ReadPolicy ReadPolicy
 }
 
 // ColumnDefinition describes a column in a table definition.
@@ -54,13 +55,44 @@ type IndexDefinition struct {
 type TableOption func(*tableOptions)
 
 type tableOptions struct {
-	name string
+	name       string
+	readPolicy *ReadPolicy
 }
 
 // WithTableName overrides the table name derived from the Go type name.
 func WithTableName(name string) TableOption {
 	return func(o *tableOptions) {
 		o.name = name
+	}
+}
+
+// WithPrivateRead marks a table private to external raw SQL reads.
+func WithPrivateRead() TableOption {
+	return func(o *tableOptions) {
+		policy := ReadPolicy{Access: TableAccessPrivate}
+		o.readPolicy = &policy
+	}
+}
+
+// WithPublicRead marks a table readable by external raw SQL without
+// permission tags.
+func WithPublicRead() TableOption {
+	return func(o *tableOptions) {
+		policy := ReadPolicy{Access: TableAccessPublic}
+		o.readPolicy = &policy
+	}
+}
+
+// WithReadPermissions marks a table readable by external raw SQL only when all
+// supplied permission tags are present.
+func WithReadPermissions(permissions ...string) TableOption {
+	copied := append([]string(nil), permissions...)
+	return func(o *tableOptions) {
+		policy := ReadPolicy{
+			Access:      TableAccessPermissioned,
+			Permissions: append([]string(nil), copied...),
+		}
+		o.readPolicy = &policy
 	}
 }
 
@@ -72,6 +104,11 @@ func (b *Builder) TableDef(def TableDefinition, opts ...TableOption) *Builder {
 	}
 	if o.name != "" {
 		def.Name = o.name
+	}
+	if o.readPolicy != nil {
+		def.ReadPolicy = copyReadPolicy(*o.readPolicy)
+	} else {
+		def.ReadPolicy = copyReadPolicy(def.ReadPolicy)
 	}
 	b.tables = append(b.tables, def)
 	return b
