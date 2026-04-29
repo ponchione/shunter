@@ -225,6 +225,28 @@ func TestDecodeSchemaSnapshotRejectsInvalidColumnType(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsInvalidAutoIncrementType(t *testing.T) {
+	data := encodeSchemaSnapshotWithFlags(t, [3]byte{byte(schema.KindString), 0, 1}, [2]byte{1, 1})
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(data))
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), `schema snapshot column "id" in table 0 has invalid auto_increment type String`) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want invalid auto_increment type detail", err)
+	}
+}
+
+func TestDecodeSchemaSnapshotRejectsPrimaryIndexWithoutUniqueFlag(t *testing.T) {
+	data := encodeSchemaSnapshotWithFlags(t, [3]byte{byte(schema.KindUint64), 0, 0}, [2]byte{0, 1})
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(data))
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), `schema snapshot primary index "primary" in table 0 is not unique`) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want primary-not-unique detail", err)
+	}
+}
+
 func TestDecodeSchemaSnapshotRejectsDuplicateTableIDs(t *testing.T) {
 	var buf bytes.Buffer
 	writeUint32(t, &buf, 1) // schema snapshot version

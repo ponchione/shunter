@@ -203,6 +203,11 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			if err != nil {
 				return nil, 0, err
 			}
+			if autoIncrement {
+				if _, _, ok := schema.AutoIncrementBounds(kind); !ok {
+					return nil, 0, fmt.Errorf("%w: schema snapshot column %q in table %d has invalid auto_increment type %s", ErrSnapshot, colName, tableID, kind)
+				}
+			}
 			cols = append(cols, schema.ColumnSchema{Index: index, Name: colName, Type: kind, Nullable: nullable, AutoIncrement: autoIncrement})
 		}
 		var idxCount uint32
@@ -234,6 +239,9 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			primary, err := decodeSchemaSnapshotBool(flags[1], "index primary")
 			if err != nil {
 				return nil, 0, err
+			}
+			if primary && !unique {
+				return nil, 0, fmt.Errorf("%w: schema snapshot primary index %q in table %d is not unique", ErrSnapshot, idxName, tableID)
 			}
 			var colsCount uint32
 			if err := binary.Read(r, binary.LittleEndian, &colsCount); err != nil {
