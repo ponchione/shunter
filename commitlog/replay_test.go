@@ -346,6 +346,35 @@ func TestReplayLogCorrectWhenIndexMissing(t *testing.T) {
 	assertReplayStatesEqual(t, committedWith, committedWithout)
 }
 
+func TestReplayLogFallsBackWhenOffsetIndexPathIsUnopenable(t *testing.T) {
+	root := t.TempDir()
+	const startTx = uint64(1)
+	const n = uint64(16)
+	const horizon = types.TxID(8)
+
+	segPath, _ := writeDenseReplaySegment(t, root, startTx, n)
+	idxPath := filepath.Join(root, OffsetIndexFileName(startTx))
+	if err := os.Mkdir(idxPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	segments := []SegmentInfo{{Path: segPath, StartTx: types.TxID(startTx), LastTx: types.TxID(startTx + n - 1), Valid: true}}
+	committed, reg := buildReplayCommittedState(t)
+	maxTxID, err := ReplayLog(committed, segments, horizon, reg)
+	if err != nil {
+		t.Fatalf("replay with unopenable advisory index: %v", err)
+	}
+	if maxTxID != types.TxID(n) {
+		t.Fatalf("ReplayLog max tx = %d, want %d", maxTxID, n)
+	}
+
+	wantRows := map[uint64]string{}
+	for tx := uint64(horizon + 1); tx <= n; tx++ {
+		wantRows[tx] = "p"
+	}
+	assertReplayPlayerRows(t, committed, wantRows)
+}
+
 // Pin 23.
 func TestReplayCorrectAfterPartialIndexTail(t *testing.T) {
 	root := t.TempDir()

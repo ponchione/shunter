@@ -1521,6 +1521,42 @@ func TestOpenAndRecoverOrphanOffsetIndexDoesNotStandInForMissingLog(t *testing.T
 	})
 }
 
+func TestOpenAndRecoverFallsBackWhenOffsetIndexPathIsUnopenable(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+	writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	idxPath := filepath.Join(root, OffsetIndexFileName(1))
+	if err := os.Mkdir(idxPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 3, End: 3}) {
+		t.Fatalf("replayed range = %+v, want 3..3", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+	}
+}
+
 func TestCreateSnapshotParentSyncFailureLeavesNoSelectableArtifacts(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()

@@ -321,6 +321,79 @@ func TestDurabilityWorkerAppendInPlaceResumeTruncatesStaleOffsetIndexTail(t *tes
 	}
 }
 
+func TestDurabilityWorkerResumeWithUnopenableOffsetIndexDisablesIndexAndRecovers(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+
+	initialOpts := DefaultCommitLogOptions()
+	initialOpts.ChannelCapacity = 2
+	initialOpts.DrainBatchSize = 1
+	initialOpts.OffsetIndexIntervalBytes = 0
+	initialOpts.OffsetIndexCap = 0
+	initial, err := NewDurabilityWorker(dir, 1, initialOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	initial.EnqueueCommitted(2, makeDurabilityTestChangeset(2))
+	if finalTx, fatalErr := initial.Close(); fatalErr != nil {
+		t.Fatal(fatalErr)
+	} else if finalTx != 2 {
+		t.Fatalf("initial final durable tx = %d, want 2", finalTx)
+	}
+
+	idxPath := filepath.Join(dir, OffsetIndexFileName(1))
+	if err := os.Mkdir(idxPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.OffsetIndexIntervalBytes = 1
+	opts.OffsetIndexCap = 8
+	dw, err := NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{
+		SegmentStartTx: 1,
+		NextTxID:       3,
+		AppendMode:     AppendInPlace,
+	}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dw.DurableTxID(); got != 2 {
+		t.Fatalf("resumed durable tx = %d, want 2", got)
+	}
+	if dw.idx != nil {
+		t.Fatal("unopenable advisory offset index should disable indexing")
+	}
+	dw.EnqueueCommitted(3, makeDurabilityTestChangeset(3))
+	finalTx, fatalErr := dw.Close()
+	if fatalErr != nil {
+		t.Fatal(fatalErr)
+	}
+	if finalTx != 3 {
+		t.Fatalf("final durable tx = %d, want 3", finalTx)
+	}
+	if info, err := os.Stat(idxPath); err != nil || !info.IsDir() {
+		t.Fatalf("unopenable index artifact stat = (%v, %v), want directory still present", info, err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p", 3: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+		t.Fatalf("replayed range = %+v, want 1..3", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+	}
+}
+
 func TestDurabilityWorkerOffsetIndexFailureDoesNotBlockDurablePrefix(t *testing.T) {
 	dir := t.TempDir()
 	_, reg := testSchema()
