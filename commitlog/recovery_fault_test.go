@@ -926,6 +926,30 @@ func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 		}
 	})
 
+	t.Run("valid-record-with-delete-of-missing-row", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, deletes: []types.ProductValue{{types.NewUint64(2), types.NewString("missing-bob")}}},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected missing-row delete to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		if !errors.Is(err, store.ErrRowNotFound) {
+			t.Fatalf("expected ErrRowNotFound, got %T (%v)", err, err)
+		}
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay apply error %q missing tx or segment context", err)
+		}
+		if !strings.Contains(err.Error(), "replay delete row not found") {
+			t.Fatalf("replay apply error %q missing delete failure detail", err)
+		}
+	})
+
 	t.Run("valid-record-with-trailing-changeset-bytes", func(t *testing.T) {
 		root := t.TempDir()
 		_, reg := testSchema()
