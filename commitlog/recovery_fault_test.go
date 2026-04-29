@@ -879,6 +879,34 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "zero-header-with-nonzero-first-tail-fails-loudly",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				createHeaderOnlySegment(t, root, 1)
+				path := filepath.Join(root, SegmentFileName(1))
+				appendZeroHeaderNonZeroTail(t, path)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err == nil {
+					t.Fatal("expected zero-header nonzero first tail error")
+				}
+				if !errors.Is(err, ErrTruncatedRecord) {
+					t.Fatalf("error = %v, want ErrTruncatedRecord", err)
+				}
+				if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 0 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 0)", report.HasDurableLog, report.DurableLogHorizon)
+				}
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 1 || report.DamagedTailSegments[0].LastTx != 0 {
+					t.Fatalf("damaged tail report = %+v, want empty damaged segment 1..0", report.DamagedTailSegments)
+				}
+				if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 1 || report.SegmentCoverage[0].MaxTxID != 0 {
+					t.Fatalf("segment coverage = %+v, want one empty 1..0 segment", report.SegmentCoverage)
+				}
+			},
+		},
+		{
 			name: "truncated-active-tail-header-recovers-valid-prefix",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				path := writeReplaySegment(t, root, 1,
@@ -897,6 +925,31 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 				}
 				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
 				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].LastTx != 2 {
+					t.Fatalf("damaged tail report = %+v, want one segment with LastTx 2", report.DamagedTailSegments)
+				}
+				if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+					t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+				}
+			},
+		},
+		{
+			name: "zero-header-with-nonzero-active-tail-recovers-valid-prefix",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				path := writeReplaySegment(t, root, 1,
+					replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+					replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+				)
+				appendZeroHeaderNonZeroTail(t, path)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 2 {
+					t.Fatalf("maxTxID = %d, want 2", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 1 || report.DamagedTailSegments[0].LastTx != 2 {
 					t.Fatalf("damaged tail report = %+v, want one segment with LastTx 2", report.DamagedTailSegments)
 				}
 				if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
@@ -2043,6 +2096,163 @@ func TestCreateSnapshotParentSyncFailureLeavesNoSelectableArtifacts(t *testing.T
 	}
 }
 
+func TestCreateSnapshotPrePublishFailuresLeaveNoSelectableSnapshotAndCompleteLogRecovers(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		phase             string
+		configure         func(t *testing.T, root string, writer *FileSnapshotWriter, snapshotDir string, faultErr error)
+		assertArtifacts   func(t *testing.T, snapshotDir string)
+		assertSnapshotLog func(t *testing.T, report RecoveryReport)
+	}{
+		{
+			name:  "mkdir",
+			phase: "mkdir",
+			configure: func(t *testing.T, root string, writer *FileSnapshotWriter, snapshotDir string, faultErr error) {
+				t.Helper()
+				if err := os.MkdirAll(writer.baseDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(snapshotDir, []byte("not a snapshot directory"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			assertArtifacts: func(t *testing.T, snapshotDir string) {
+				t.Helper()
+				info, err := os.Stat(snapshotDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if info.IsDir() {
+					t.Fatalf("snapshot path %s should remain a file after mkdir failure", snapshotDir)
+				}
+			},
+			assertSnapshotLog: func(t *testing.T, report RecoveryReport) {
+				t.Helper()
+				if report.HasSelectedSnapshot || len(report.SkippedSnapshots) != 0 {
+					t.Fatalf("snapshot report = selected(%v, %d) skipped=%+v, want file artifact ignored", report.HasSelectedSnapshot, report.SelectedSnapshotTxID, report.SkippedSnapshots)
+				}
+			},
+		},
+		{
+			name:  "create-lock",
+			phase: "create-lock",
+			configure: func(t *testing.T, root string, writer *FileSnapshotWriter, snapshotDir string, faultErr error) {
+				t.Helper()
+				if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := CreateLockFile(snapshotDir); err != nil {
+					t.Fatal(err)
+				}
+			},
+			assertArtifacts: func(t *testing.T, snapshotDir string) {
+				t.Helper()
+				if !HasLockFile(snapshotDir) {
+					t.Fatal("pre-existing lock should remain after create-lock failure")
+				}
+				for _, name := range []string{snapshotTempFileName, snapshotFileName} {
+					if _, err := os.Stat(filepath.Join(snapshotDir, name)); !os.IsNotExist(err) {
+						t.Fatalf("%s should not exist after create-lock failure, stat err=%v", name, err)
+					}
+				}
+			},
+			assertSnapshotLog: func(t *testing.T, report RecoveryReport) {
+				t.Helper()
+				if report.HasSelectedSnapshot || len(report.SkippedSnapshots) != 0 {
+					t.Fatalf("snapshot report = selected(%v, %d) skipped=%+v, want locked candidate ignored", report.HasSelectedSnapshot, report.SelectedSnapshotTxID, report.SkippedSnapshots)
+				}
+			},
+		},
+		{
+			name:  "rename-before-move",
+			phase: "rename",
+			configure: func(t *testing.T, root string, writer *FileSnapshotWriter, snapshotDir string, faultErr error) {
+				t.Helper()
+				finalPath := filepath.Join(snapshotDir, snapshotFileName)
+				writer.rename = func(oldPath, newPath string) error {
+					if filepath.Base(oldPath) != snapshotTempFileName || newPath != finalPath {
+						t.Fatalf("rename paths = (%q, %q), want temp to final snapshot", oldPath, newPath)
+					}
+					return faultErr
+				}
+			},
+			assertArtifacts: func(t *testing.T, snapshotDir string) {
+				t.Helper()
+				if HasLockFile(snapshotDir) {
+					t.Fatal("snapshot lock should be removed after rename failure cleanup")
+				}
+				for _, name := range []string{snapshotTempFileName, snapshotFileName} {
+					if _, err := os.Stat(filepath.Join(snapshotDir, name)); !os.IsNotExist(err) {
+						t.Fatalf("%s should not exist after rename failure, stat err=%v", name, err)
+					}
+				}
+			},
+			assertSnapshotLog: func(t *testing.T, report RecoveryReport) {
+				t.Helper()
+				assertSkippedSnapshot(t, report, 2, SnapshotSkipReadFailed)
+				if report.HasSelectedSnapshot {
+					t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			_, reg := testSchema()
+			committed := buildSnapshotFaultCommittedState(t, reg, map[uint64]string{
+				1: "alice",
+				2: "bob",
+			})
+			committed.SetCommittedTxID(2)
+
+			writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg).(*FileSnapshotWriter)
+			snapshotDir := filepath.Join(writer.baseDir, "2")
+			faultErr := errors.New(tc.name + " failed")
+			tc.configure(t, root, writer, snapshotDir, faultErr)
+
+			err := writer.CreateSnapshot(committed, 2)
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("snapshot creation error = %v, want ErrSnapshot category", err)
+			}
+			if tc.name == "rename-before-move" && !errors.Is(err, faultErr) {
+				t.Fatalf("snapshot creation error = %v, want wrapped injected fault", err)
+			}
+			var completionErr *SnapshotCompletionError
+			if !errors.As(err, &completionErr) {
+				t.Fatalf("expected SnapshotCompletionError, got %v", err)
+			}
+			if completionErr.Phase != tc.phase || completionErr.Path == "" {
+				t.Fatalf("completion error = %+v, want phase %s with path", completionErr, tc.phase)
+			}
+			tc.assertArtifacts(t, snapshotDir)
+
+			writeReplaySegment(t, root, 1,
+				replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+				replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+				replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+			)
+			recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if maxTxID != 3 {
+				t.Fatalf("maxTxID = %d, want 3", maxTxID)
+			}
+			assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+			tc.assertSnapshotLog(t, report)
+			if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+				t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
+			}
+			if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+				t.Fatalf("replayed range = %+v, want 1..3", report.ReplayedTxRange)
+			}
+			if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+				t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+			}
+		})
+	}
+}
+
 func TestCreateSnapshotUnlockSyncFailureFailsLoudlyAndLeavesRecoverableSnapshot(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
@@ -2781,6 +2991,49 @@ func TestOpenAndRecoverIgnoresCoveredOrphanIndexesAfterCompactedPrefix(t *testin
 	}
 }
 
+func TestOpenAndRecoverIgnoresCoveredOrphanIndexesWhenCompactedPrefixFullyGone(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 6, map[uint64]string{
+		1: "alice",
+		2: "bob",
+		3: "carol",
+		4: "dave",
+		5: "eve",
+		6: "frank",
+	})
+	createOrphanOffsetIndex(t, root, 1, OffsetIndexEntry{TxID: 1, ByteOffset: SegmentHeaderSize})
+	createOrphanOffsetIndex(t, root, 4, OffsetIndexEntry{TxID: 4, ByteOffset: SegmentHeaderSize})
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 6 {
+		t.Fatalf("maxTxID = %d, want 6", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{
+		1: "alice",
+		2: "bob",
+		3: "carol",
+		4: "dave",
+		5: "eve",
+		6: "frank",
+	})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 6 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 6)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.HasDurableLog || report.DurableLogHorizon != 0 || len(report.SegmentCoverage) != 0 {
+		t.Fatalf("durable log report = %+v, want no log coverage from orphan indexes", report)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+		t.Fatalf("replayed range = %+v, want none", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 7 || plan.NextTxID != 7 {
+		t.Fatalf("resume plan = %+v, want fresh segment at tx 7", plan)
+	}
+}
+
 func assertNoRecoveredStateAfterReplayFault(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, durableHorizon types.TxID) {
 	t.Helper()
 	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
@@ -2802,6 +3055,13 @@ func appendUint32(dst []byte, v uint32) []byte {
 
 func writeFaultSnapshot(t *testing.T, root string, reg schema.SchemaRegistry, txID types.TxID, rows map[uint64]string) {
 	t.Helper()
+	committed := buildSnapshotFaultCommittedState(t, reg, rows)
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, txID)
+}
+
+func buildSnapshotFaultCommittedState(t *testing.T, reg schema.SchemaRegistry, rows map[uint64]string) *store.CommittedState {
+	t.Helper()
 	committed := buildRecoveryCommittedState(t, reg)
 	players, ok := committed.Table(0)
 	if !ok {
@@ -2812,8 +3072,7 @@ func writeFaultSnapshot(t *testing.T, root string, reg schema.SchemaRegistry, tx
 			t.Fatal(err)
 		}
 	}
-	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
-	createSnapshotAt(t, writer, committed, txID)
+	return committed
 }
 
 func createHeaderOnlySegment(t *testing.T, root string, startTxID uint64) {
