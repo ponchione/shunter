@@ -2939,6 +2939,151 @@ func TestOpenAndRecoverAfterCompactionSyncFailureWithSidecarsUsesSnapshotAndTail
 	}
 }
 
+func TestOpenAndRecoverAfterCompactionSegmentRemoveFailureUsesSnapshotAndTail(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 6, map[uint64]string{
+		1: "alice",
+		2: "bob",
+		3: "carol",
+		4: "dave",
+		5: "eve",
+		6: "frank",
+	})
+	removedPrefix := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	failedCovered := writeReplaySegment(t, root, 4,
+		replayRecord{txID: 4, inserts: []types.ProductValue{{types.NewUint64(4), types.NewString("dave")}}},
+		replayRecord{txID: 5, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("eve")}}},
+		replayRecord{txID: 6, inserts: []types.ProductValue{{types.NewUint64(6), types.NewString("frank")}}},
+	)
+	tail := writeReplaySegment(t, root, 7,
+		replayRecord{txID: 7, inserts: []types.ProductValue{{types.NewUint64(7), types.NewString("grace")}}},
+		replayRecord{txID: 8, inserts: []types.ProductValue{{types.NewUint64(8), types.NewString("heidi")}}},
+	)
+	removeErr := errors.New("covered segment remove failed")
+
+	originalRemoveFile := removeFile
+	removeFile = func(path string) error {
+		if path == failedCovered {
+			return removeErr
+		}
+		return originalRemoveFile(path)
+	}
+	err := RunCompaction(root, 6)
+	removeFile = originalRemoveFile
+	defer func() { removeFile = originalRemoveFile }()
+	assertCompactionFailureContext(t, err, removeErr, "remove covered segment", failedCovered)
+	assertFileMissing(t, removedPrefix)
+	assertFileExists(t, failedCovered)
+	assertFileExists(t, tail)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 8 {
+		t.Fatalf("maxTxID = %d, want 8", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{
+		1: "alice",
+		2: "bob",
+		3: "carol",
+		4: "dave",
+		5: "eve",
+		6: "frank",
+		7: "grace",
+		8: "heidi",
+	})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 6 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 6)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 8 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 8)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 7, End: 8}) {
+		t.Fatalf("replayed range = %+v, want 7..8", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 7 || plan.NextTxID != 9 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 7 at tx 9", plan)
+	}
+
+	if err := RunCompaction(root, 6); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	assertFileMissing(t, failedCovered)
+	assertFileExists(t, tail)
+}
+
+func TestOpenAndRecoverAfterCompactionSidecarRemoveFailureIgnoresOrphanAndRetries(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 3, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	covered := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	tail := writeReplaySegment(t, root, 4,
+		replayRecord{txID: 4, inserts: []types.ProductValue{{types.NewUint64(4), types.NewString("dave")}}},
+		replayRecord{txID: 5, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("eve")}}},
+	)
+	coveredIdx := filepath.Join(root, OffsetIndexFileName(1))
+	idx, err := CreateOffsetIndex(coveredIdx, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+	removeErr := errors.New("covered sidecar remove failed")
+
+	originalRemoveFile := removeFile
+	removeFile = func(path string) error {
+		if path == coveredIdx {
+			return removeErr
+		}
+		return originalRemoveFile(path)
+	}
+	err = RunCompaction(root, 3)
+	removeFile = originalRemoveFile
+	defer func() { removeFile = originalRemoveFile }()
+	assertCompactionFailureContext(t, err, removeErr, "remove covered offset index", coveredIdx)
+	assertFileMissing(t, covered)
+	assertFileExists(t, coveredIdx)
+	assertFileExists(t, tail)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 5 {
+		t.Fatalf("maxTxID = %d, want 5", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol", 4: "dave", 5: "eve"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 3 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 3)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 5 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 5)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 4, End: 5}) {
+		t.Fatalf("replayed range = %+v, want 4..5", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 4 || plan.NextTxID != 6 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 4 at tx 6", plan)
+	}
+
+	if err := RunCompaction(root, 3); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	assertFileMissing(t, coveredIdx)
+	assertFileExists(t, tail)
+}
+
 func TestOpenAndRecoverIgnoresCoveredOrphanIndexesAfterCompactedPrefix(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
