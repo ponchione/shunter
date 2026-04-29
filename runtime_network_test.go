@@ -81,6 +81,49 @@ func TestBuildAuthConfigDevGeneratesAnonymousMintConfig(t *testing.T) {
 	}
 }
 
+func TestBuildAuthConfigDevMintedTokenValidatesWithConfiguredAudiences(t *testing.T) {
+	jwtCfg, mintCfg, err := buildAuthConfig(Config{
+		AuthMode:      AuthModeDev,
+		AuthAudiences: []string{"app"},
+	})
+	if err != nil {
+		t.Fatalf("buildAuthConfig returned error: %v", err)
+	}
+	if mintCfg.Audience != "app" {
+		t.Fatalf("mint audience = %q, want configured audience app", mintCfg.Audience)
+	}
+
+	token, _, err := auth.MintAnonymousToken(mintCfg)
+	if err != nil {
+		t.Fatalf("MintAnonymousToken returned error: %v", err)
+	}
+	if _, err := auth.ValidateJWT(token, jwtCfg); err != nil {
+		t.Fatalf("minted token did not validate against runtime JWT config: %v", err)
+	}
+}
+
+func TestBuildAuthConfigDevExplicitAnonymousAudienceIsAccepted(t *testing.T) {
+	jwtCfg, mintCfg, err := buildAuthConfig(Config{
+		AuthMode:               AuthModeDev,
+		AuthAudiences:          []string{"app"},
+		AnonymousTokenAudience: "anonymous-app",
+	})
+	if err != nil {
+		t.Fatalf("buildAuthConfig returned error: %v", err)
+	}
+	if !stringSliceContains(jwtCfg.Audiences, "anonymous-app") {
+		t.Fatalf("JWT audiences = %#v, want explicit anonymous audience accepted", jwtCfg.Audiences)
+	}
+
+	token, _, err := auth.MintAnonymousToken(mintCfg)
+	if err != nil {
+		t.Fatalf("MintAnonymousToken returned error: %v", err)
+	}
+	if _, err := auth.ValidateJWT(token, jwtCfg); err != nil {
+		t.Fatalf("minted token did not validate against runtime JWT config: %v", err)
+	}
+}
+
 func TestBuildAuthConfigStrictRequiresSigningKey(t *testing.T) {
 	_, _, err := buildAuthConfig(Config{AuthMode: AuthModeStrict})
 	if !errors.Is(err, ErrAuthSigningKeyRequired) {
@@ -144,6 +187,29 @@ func TestRuntimeConfigDefensivelyCopiesAuthSlices(t *testing.T) {
 	}
 	if len(again.AuthAudiences) != 1 || again.AuthAudiences[0] != "app" {
 		t.Fatalf("second Config AuthAudiences = %#v, want detached original audience", again.AuthAudiences)
+	}
+}
+
+func TestRuntimeListenAddrDefaultsWhenBlank(t *testing.T) {
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if got := rt.listenAddr(); got != defaultListenAddr {
+		t.Fatalf("listenAddr() = %q, want %q", got, defaultListenAddr)
+	}
+}
+
+func TestRuntimeListenAddrKeepsExplicitValue(t *testing.T) {
+	rt, err := Build(validChatModule(), Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0",
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if got := rt.listenAddr(); got != "127.0.0.1:0" {
+		t.Fatalf("listenAddr() = %q, want explicit listen address", got)
 	}
 }
 

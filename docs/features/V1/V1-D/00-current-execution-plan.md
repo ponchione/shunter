@@ -1,5 +1,9 @@
 # V1-D Current Execution Plan
 
+Historical note: V1-D and later hosted-runtime slices have landed. Do not treat
+this file as an active handoff; use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+current hosted-runtime status.
+
 Parent plan: `docs/features/V1/V1-D/2026-04-23_210537-hosted-runtime-v1d-runtime-lifecycle-ownership-implplan.md`
 
 Goal: complete hosted runtime V1-D by adding lifecycle ownership to the V1-C-built runtime: `Start(ctx)`, `Close()`, readiness, health, and private ownership of started kernel resources.

@@ -95,7 +95,13 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 		}
 		audience := cfg.AnonymousTokenAudience
 		if audience == "" {
-			audience = "shunter-dev"
+			if len(audiences) > 0 {
+				audience = audiences[0]
+			} else {
+				audience = "shunter-dev"
+			}
+		} else if len(audiences) > 0 && !stringSliceContains(audiences, audience) {
+			audiences = append(audiences, audience)
 		}
 		jwtCfg := &auth.JWTConfig{SigningKey: append([]byte(nil), signingKey...), Audiences: audiences, AuthMode: auth.AuthModeAnonymous}
 		mintCfg := &auth.MintConfig{Issuer: issuer, Audience: audience, SigningKey: append([]byte(nil), signingKey...), Expiry: cfg.AnonymousTokenTTL}
@@ -108,6 +114,15 @@ func buildAuthConfig(cfg Config) (*auth.JWTConfig, *auth.MintConfig, error) {
 	default:
 		return nil, nil, fmt.Errorf("auth mode is invalid")
 	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // HTTPHandler returns a composable HTTP handler for the runtime network surface.
@@ -141,16 +156,20 @@ func (r *Runtime) ListenAndServe(ctx context.Context) error {
 	if !r.tryBeginServing() {
 		return ErrRuntimeServing
 	}
-	addr := r.buildConfig.ListenAddr
-	if addr == "" {
-		addr = defaultListenAddr
-	}
+	addr := r.listenAddr()
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		r.endServing()
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
 	return r.serveStarted(ctx, ln)
+}
+
+func (r *Runtime) listenAddr() string {
+	if r.buildConfig.ListenAddr == "" {
+		return defaultListenAddr
+	}
+	return r.buildConfig.ListenAddr
 }
 
 func (r *Runtime) serve(ctx context.Context, ln net.Listener) error {
