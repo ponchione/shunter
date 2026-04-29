@@ -441,6 +441,113 @@ func TestOffsetIndexPartialTailIsIgnored(t *testing.T) {
 	}
 }
 
+func TestOffsetIndexKeyOnlyPartialTailIsIgnoredAndOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "00000000000000000001.idx")
+
+	idx, err := CreateOffsetIndex(path, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []OffsetIndexEntry{
+		{TxID: 2, ByteOffset: 20},
+		{TxID: 4, ByteOffset: 40},
+	} {
+		if err := idx.Append(e.TxID, e.ByteOffset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := idx.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	writeRawOffsetIndexEntry(t, path, 2, 6, 0)
+	reopened, err := OpenOffsetIndexMut(path, 8)
+	if err != nil {
+		t.Fatalf("OpenOffsetIndexMut: %v", err)
+	}
+	if got := reopened.NumEntries(); got != 2 {
+		t.Fatalf("NumEntries after partial key tail = %d, want 2", got)
+	}
+	if err := reopened.Append(6, 60); err != nil {
+		t.Fatalf("Append over partial key tail: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ro, err := OpenOffsetIndex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	entries, err := ro.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 || entries[2].TxID != 6 || entries[2].ByteOffset != 60 {
+		t.Fatalf("entries after overwriting partial key tail = %+v, want tail {6,60}", entries)
+	}
+}
+
+func TestOffsetIndexNonMonotonicTailIsIgnoredAndOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "00000000000000000001.idx")
+
+	idx, err := CreateOffsetIndex(path, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []OffsetIndexEntry{
+		{TxID: 10, ByteOffset: 100},
+		{TxID: 20, ByteOffset: 200},
+	} {
+		if err := idx.Append(e.TxID, e.ByteOffset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := idx.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	writeRawOffsetIndexEntry(t, path, 2, 15, 150)
+	reopened, err := OpenOffsetIndexMut(path, 8)
+	if err != nil {
+		t.Fatalf("OpenOffsetIndexMut: %v", err)
+	}
+	if got := reopened.NumEntries(); got != 2 {
+		t.Fatalf("NumEntries after non-monotonic tail = %d, want 2", got)
+	}
+	if err := reopened.Append(30, 300); err != nil {
+		t.Fatalf("Append over non-monotonic tail: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ro, err := OpenOffsetIndex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	entries, err := ro.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 || entries[0].TxID != 10 || entries[1].TxID != 20 || entries[2].TxID != 30 {
+		t.Fatalf("entries after overwriting non-monotonic tail = %+v, want [10 20 30]", entries)
+	}
+	if entries[2].ByteOffset != 300 {
+		t.Fatalf("overwritten tail byte offset = %d, want 300", entries[2].ByteOffset)
+	}
+}
+
 func TestOffsetIndexEntriesDoesNotPreallocateClaimedCount(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "00000000000000000001.idx")
@@ -682,4 +789,22 @@ func (shortWriteAtSink) WriteAt(p []byte, _ int64) (int, error) {
 		return 0, nil
 	}
 	return len(p) - 1, nil
+}
+
+func writeRawOffsetIndexEntry(t testing.TB, path string, entryIdx uint64, txID uint64, byteOffset uint64) {
+	t.Helper()
+	var buf [OffsetIndexEntrySize]byte
+	binary.LittleEndian.PutUint64(buf[offsetIndexKeyOff:], txID)
+	binary.LittleEndian.PutUint64(buf[offsetIndexValOff:], byteOffset)
+	f, err := os.OpenFile(path, os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt(buf[:], int64(entryIdx*OffsetIndexEntrySize)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
