@@ -174,6 +174,44 @@ func TestOpenSegmentForAppendCorruptFirstRecordFailsClosed(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentForAppendFirstTxMismatchFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := makeManualScanTestSegment(t, dir, 1, 2)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = OpenSegmentForAppend(dir, 1)
+	assertHistoryGap(t, err, 1, 2)
+	after, statErr := os.Stat(path)
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if after.Size() != before.Size() {
+		t.Fatalf("segment size changed after failed reopen: before=%d after=%d", before.Size(), after.Size())
+	}
+}
+
+func TestOpenSegmentForAppendInteriorHistoryGapFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := makeManualScanTestSegment(t, dir, 1, 1, 3)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = OpenSegmentForAppend(dir, 1)
+	assertHistoryGap(t, err, 2, 3)
+	after, statErr := os.Stat(path)
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if after.Size() != before.Size() {
+		t.Fatalf("segment size changed after failed reopen: before=%d after=%d", before.Size(), after.Size())
+	}
+}
+
 func TestOpenSegmentForAppendTruncatesDamagedTailAfterValidPrefix(t *testing.T) {
 	dir := t.TempDir()
 	path := makeScanTestSegment(t, dir, 1, 1, 2, 3)
