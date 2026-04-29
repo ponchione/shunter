@@ -609,14 +609,14 @@ func readSnapshotSchema(payload io.Reader) ([]schema.TableSchema, uint32, map[sc
 }
 
 func readSnapshotSequences(payload io.Reader) (map[schema.TableID]uint64, error) {
-	return readSnapshotTableUint64Map(payload)
+	return readSnapshotTableUint64Map(payload, "sequence")
 }
 
 func readSnapshotNextIDs(payload io.Reader) (map[schema.TableID]uint64, error) {
-	return readSnapshotTableUint64Map(payload)
+	return readSnapshotTableUint64Map(payload, "next_id")
 }
 
-func readSnapshotTableUint64Map(payload io.Reader) (map[schema.TableID]uint64, error) {
+func readSnapshotTableUint64Map(payload io.Reader, section string) (map[schema.TableID]uint64, error) {
 	values := map[schema.TableID]uint64{}
 	var count uint32
 	if err := binary.Read(payload, binary.LittleEndian, &count); err != nil {
@@ -631,7 +631,11 @@ func readSnapshotTableUint64Map(payload io.Reader) (map[schema.TableID]uint64, e
 		if err := binary.Read(payload, binary.LittleEndian, &next); err != nil {
 			return nil, err
 		}
-		values[schema.TableID(tableID)] = next
+		id := schema.TableID(tableID)
+		if _, exists := values[id]; exists {
+			return nil, fmt.Errorf("%w: duplicate snapshot %s table ID %d", ErrSnapshot, section, tableID)
+		}
+		values[id] = next
 	}
 	return values, nil
 }

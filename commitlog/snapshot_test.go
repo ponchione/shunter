@@ -496,6 +496,65 @@ func TestReadSnapshotDoesNotPreallocateClaimedTableCount(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsDuplicateUint64MapTableIDs(t *testing.T) {
+	_, reg := testSchema()
+	var schemaBuf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&schemaBuf, reg); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		writeMaps  func(*bytes.Buffer)
+		wantDetail string
+	}{
+		{
+			name: "sequence",
+			writeMaps: func(body *bytes.Buffer) {
+				writeUint32(t, body, 2)
+				writeUint32(t, body, 0)
+				writeUint64(t, body, 11)
+				writeUint32(t, body, 0)
+				writeUint64(t, body, 12)
+				writeUint32(t, body, 0)
+			},
+			wantDetail: "duplicate snapshot sequence table ID 0",
+		},
+		{
+			name: "next-id",
+			writeMaps: func(body *bytes.Buffer) {
+				writeUint32(t, body, 0)
+				writeUint32(t, body, 2)
+				writeUint32(t, body, 0)
+				writeUint64(t, body, 21)
+				writeUint32(t, body, 0)
+				writeUint64(t, body, 22)
+			},
+			wantDetail: "duplicate snapshot next_id table ID 0",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body bytes.Buffer
+			writeUint32(t, &body, uint32(schemaBuf.Len()))
+			body.Write(schemaBuf.Bytes())
+			tc.writeMaps(&body)
+			writeUint32(t, &body, 0) // table sections
+
+			baseDir := t.TempDir()
+			snapshotDir := filepath.Join(baseDir, "snapshots", "93")
+			writeSnapshotBytes(t, snapshotDir, 93, reg.Version(), body.Bytes())
+
+			_, err := ReadSnapshot(snapshotDir)
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("ReadSnapshot error = %v, want %q detail", err, tc.wantDetail)
+			}
+		})
+	}
+}
+
 func TestReadSnapshotRejectsHeaderVersionMismatch(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
