@@ -1243,6 +1243,67 @@ func TestOpenAndRecoverHeaderOnlySegmentBoundaries(t *testing.T) {
 	})
 }
 
+func TestOpenAndRecoverIgnoresRolloverDirectoryArtifact(t *testing.T) {
+	t.Run("full-log-prefix-recovers-and-appends-in-place", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		)
+		createRolloverDirectoryArtifact(t, root, 3)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if maxTxID != 2 {
+			t.Fatalf("maxTxID = %d, want 2", maxTxID)
+		}
+		assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+		if !report.HasDurableLog || report.DurableLogHorizon != 2 {
+			t.Fatalf("durable log report = (%v, %d), want (true, 2)", report.HasDurableLog, report.DurableLogHorizon)
+		}
+		if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 1 || report.SegmentCoverage[0].MaxTxID != 2 {
+			t.Fatalf("segment coverage = %+v, want only valid prefix segment 1..2", report.SegmentCoverage)
+		}
+		if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 3 {
+			t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 3", plan)
+		}
+	})
+
+	t.Run("snapshot-covered-recovers-snapshot-and-starts-fresh-log", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+		createRolloverDirectoryArtifact(t, root, 3)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if maxTxID != 2 {
+			t.Fatalf("maxTxID = %d, want 2", maxTxID)
+		}
+		assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+		if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+			t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+		}
+		if report.HasDurableLog || report.DurableLogHorizon != 0 {
+			t.Fatalf("durable log report = (%v, %d), want no durable log", report.HasDurableLog, report.DurableLogHorizon)
+		}
+		if len(report.SegmentCoverage) != 0 {
+			t.Fatalf("segment coverage = %+v, want no log coverage", report.SegmentCoverage)
+		}
+		if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+			t.Fatalf("replayed range = %+v, want none", report.ReplayedTxRange)
+		}
+		if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+			t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+		}
+	})
+}
+
 func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 	t.Run("valid-record-with-invalid-changeset-payload", func(t *testing.T) {
 		root := t.TempDir()
@@ -2439,6 +2500,13 @@ func createHeaderOnlySegment(t *testing.T, root string, startTxID uint64) {
 		t.Fatal(err)
 	}
 	if err := seg.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createRolloverDirectoryArtifact(t *testing.T, root string, startTxID uint64) {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(root, SegmentFileName(startTxID)), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
