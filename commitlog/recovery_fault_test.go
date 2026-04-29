@@ -3034,6 +3034,63 @@ func TestOpenAndRecoverIgnoresCoveredOrphanIndexesWhenCompactedPrefixFullyGone(t
 	}
 }
 
+func TestOpenAndRecoverAfterSegmentSyncFailureIgnoresUnsyncedAppend(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+	)
+
+	sw, err := OpenSegmentForAppend(root, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := EncodeChangeset(&store.Changeset{
+		TxID: 3,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts:   []types.ProductValue{{types.NewUint64(3), types.NewString("unsynced-carol")}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Append(&Record{TxID: 3, RecordType: RecordTypeChangeset, Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Sync(); err == nil {
+		t.Fatal("expected sync to fail after file close")
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID = %d, want durable prefix 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+	if !report.HasDurableLog || report.DurableLogHorizon != 2 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 2)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 2}) {
+		t.Fatalf("replayed range = %+v, want 1..2", report.ReplayedTxRange)
+	}
+	if len(report.DamagedTailSegments) != 0 {
+		t.Fatalf("damaged tail report = %+v, want none because unsynced bytes never reached disk", report.DamagedTailSegments)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 3", plan)
+	}
+}
+
 func assertNoRecoveredStateAfterReplayFault(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, durableHorizon types.TxID) {
 	t.Helper()
 	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
