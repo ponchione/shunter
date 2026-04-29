@@ -130,11 +130,17 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		return nil, 0, err
 	}
 	var tables []schema.TableSchema
+	seenTables := map[schema.TableID]struct{}{}
 	for range tableCount {
 		var tableID uint32
 		if err := binary.Read(r, binary.LittleEndian, &tableID); err != nil {
 			return nil, 0, err
 		}
+		schemaTableID := schema.TableID(tableID)
+		if _, exists := seenTables[schemaTableID]; exists {
+			return nil, 0, fmt.Errorf("%w: duplicate schema snapshot table ID %d", ErrSnapshot, tableID)
+		}
+		seenTables[schemaTableID] = struct{}{}
 		name, err := readString(r)
 		if err != nil {
 			return nil, 0, err
@@ -209,7 +215,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			}
 			indexes = append(indexes, schema.IndexSchema{ID: schema.IndexID(idxID), Name: idxName, Columns: idxCols, Unique: unique, Primary: primary})
 		}
-		tables = append(tables, schema.TableSchema{ID: schema.TableID(tableID), Name: name, Columns: cols, Indexes: indexes})
+		tables = append(tables, schema.TableSchema{ID: schemaTableID, Name: name, Columns: cols, Indexes: indexes})
 	}
 	if err := requireNoTrailingBytes(r, "trailing schema snapshot bytes"); err != nil {
 		return nil, 0, err

@@ -214,6 +214,32 @@ func TestDecodeSchemaSnapshotRejectsInvalidBoolFlags(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsDuplicateTableIDs(t *testing.T) {
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1) // schema snapshot version
+	writeUint32(t, &buf, 2) // table count
+	writeMinimalSchemaSnapshotTable(t, &buf, 0, "players")
+	writeMinimalSchemaSnapshotTable(t, &buf, 0, "players-again")
+
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "duplicate schema snapshot table ID 0") {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want duplicate table ID detail", err)
+	}
+}
+
+func writeMinimalSchemaSnapshotTable(t testing.TB, dst *bytes.Buffer, tableID uint32, name string) {
+	t.Helper()
+	writeUint32(t, dst, tableID)
+	if err := writeString(dst, name); err != nil {
+		t.Fatal(err)
+	}
+	writeUint32(t, dst, 0) // column count
+	writeUint32(t, dst, 0) // index count
+}
+
 func encodeSchemaSnapshotWithFlags(t testing.TB, columnFlags [3]byte, indexFlags [2]byte) []byte {
 	t.Helper()
 
