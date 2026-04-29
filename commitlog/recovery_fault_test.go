@@ -625,6 +625,41 @@ func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 			t.Fatalf("replay apply error %q missing tx or segment context", err)
 		}
 	})
+
+	t.Run("valid-record-with-trailing-changeset-bytes", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		payload, err := EncodeChangeset(&store.Changeset{
+			TxID: 2,
+			Tables: map[schema.TableID]*store.TableChangeset{
+				0: {
+					TableID:   0,
+					TableName: "players",
+					Inserts:   []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload = append(payload, 0xde, 0xad, 0xbe, 0xef)
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, rawPayload: payload},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected trailing changeset bytes to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay decode error %q missing tx or segment context", err)
+		}
+		if !strings.Contains(err.Error(), "trailing changeset bytes") {
+			t.Fatalf("replay decode error %q missing trailing-bytes detail", err)
+		}
+	})
 }
 
 func TestOpenAndRecoverFallsBackWhenOffsetIndexPointsInsideSegmentHeader(t *testing.T) {

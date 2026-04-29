@@ -132,6 +132,9 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		cs.Tables[tableID] = tc
 	}
 
+	if pos != len(data) {
+		return nil, fmt.Errorf("commitlog: trailing changeset bytes")
+	}
 	return cs, nil
 }
 
