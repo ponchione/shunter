@@ -689,6 +689,38 @@ func TestListSnapshotsSkipsLockAndSortsNewestFirst(t *testing.T) {
 	}
 }
 
+func TestListSnapshotsSkipsMalformedNamesAndMarkerDirectories(t *testing.T) {
+	baseDir := t.TempDir()
+	for _, txID := range []uint64{10, 20} {
+		dir := filepath.Join(baseDir, txIDString(txID))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, snapshotFileName), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"not-a-snapshot", "18446744073709551616"} {
+		if err := os.MkdirAll(filepath.Join(baseDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(baseDir, "30", ".lock"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(baseDir, "40", snapshotTempFileName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := ListSnapshots(baseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != 20 || ids[1] != 10 {
+		t.Fatalf("ListSnapshots = %v, want [20 10]", ids)
+	}
+}
+
 func TestReadSnapshotHashMismatch(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
