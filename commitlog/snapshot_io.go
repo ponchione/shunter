@@ -312,10 +312,10 @@ func validateSnapshotHorizon(committed *store.CommittedState, txID types.TxID) e
 }
 
 func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.CommittedState, txID types.TxID) error {
-	if _, err := f.Write(SnapshotMagic[:]); err != nil {
+	if err := writeFull(f, SnapshotMagic[:]); err != nil {
 		return err
 	}
-	if _, err := f.Write([]byte{SnapshotVersion, 0, 0, 0}); err != nil {
+	if err := writeFull(f, []byte{SnapshotVersion, 0, 0, 0}); err != nil {
 		return err
 	}
 	if err := binary.Write(f, binary.LittleEndian, uint64(txID)); err != nil {
@@ -324,7 +324,7 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.Comm
 	if err := binary.Write(f, binary.LittleEndian, w.reg.Version()); err != nil {
 		return err
 	}
-	if _, err := f.Write(make([]byte, 32)); err != nil {
+	if err := writeFull(f, make([]byte, 32)); err != nil {
 		return err
 	}
 
@@ -335,7 +335,7 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.Comm
 	}
 	var hash [32]byte
 	copy(hash[:], hasher.Sum(nil))
-	if _, err := f.WriteAt(hash[:], 20); err != nil {
+	if err := writeAtFull(f, hash[:], 20); err != nil {
 		return err
 	}
 	return nil
@@ -359,7 +359,7 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 	if err := binary.Write(dst, binary.LittleEndian, uint32(schemaBuf.Len())); err != nil {
 		return err
 	}
-	if _, err := dst.Write(schemaBuf.Bytes()); err != nil {
+	if err := writeFull(dst, schemaBuf.Bytes()); err != nil {
 		return err
 	}
 	ids := committed.TableIDs()
@@ -420,7 +420,7 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 			if err := binary.Write(dst, binary.LittleEndian, uint32(rowBuf.Len())); err != nil {
 				return err
 			}
-			if _, err := dst.Write(rowBuf.Bytes()); err != nil {
+			if err := writeFull(dst, rowBuf.Bytes()); err != nil {
 				return err
 			}
 		}
@@ -702,11 +702,26 @@ func deterministicRows(table *store.Table) ([]types.ProductValue, error) {
 }
 
 func writeString(w io.Writer, s string) error {
-	if err := binary.Write(w, binary.LittleEndian, uint32(len(s))); err != nil {
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(s)))
+	if err := writeFull(w, lenBuf[:]); err != nil {
 		return err
 	}
-	_, err := io.WriteString(w, s)
-	return err
+	return writeFull(w, []byte(s))
+}
+
+func writeAtFull(f *os.File, p []byte, off int64) error {
+	if len(p) == 0 {
+		return nil
+	}
+	n, err := f.WriteAt(p, off)
+	if err != nil {
+		return err
+	}
+	if n != len(p) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func readString(r io.Reader) (string, error) {

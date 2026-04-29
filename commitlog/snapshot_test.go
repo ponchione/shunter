@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -123,6 +124,21 @@ func TestDecodeSchemaSnapshotRejectsTrailingBytes(t *testing.T) {
 	}
 }
 
+func TestEncodeSchemaSnapshotRejectsShortWrite(t *testing.T) {
+	_, reg := testSchema()
+	err := EncodeSchemaSnapshot(shortWriteSink{}, reg)
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("EncodeSchemaSnapshot short write error = %v, want io.ErrShortWrite", err)
+	}
+}
+
+func TestWriteStringRejectsShortWrite(t *testing.T) {
+	err := writeString(shortWriteSink{}, "players")
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("writeString short write error = %v, want io.ErrShortWrite", err)
+	}
+}
+
 func TestDecodeSchemaSnapshotRejectsOversizedStringLength(t *testing.T) {
 	var buf bytes.Buffer
 	writeUint32(t, &buf, 1) // schema snapshot version
@@ -179,6 +195,16 @@ func TestCreateAndReadSnapshotRoundTrip(t *testing.T) {
 	}
 	if playerRows != 2 {
 		t.Fatalf("players snapshot row count = %d, want 2 (tables=%+v)", playerRows, data.Tables)
+	}
+}
+
+func TestSnapshotBodyRejectsShortWrite(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	cs.SetCommittedTxID(91)
+	writer := NewSnapshotWriter(filepath.Join(t.TempDir(), "snapshots"), reg).(*FileSnapshotWriter)
+	err := writer.writeSnapshotBody(shortWriteSink{}, cs, 91)
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("writeSnapshotBody short write error = %v, want io.ErrShortWrite", err)
 	}
 }
 
