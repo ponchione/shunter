@@ -154,6 +154,30 @@ func TestSelectSnapshotSchemaMismatchColumnType(t *testing.T) {
 	assertSchemaMismatchDetail(t, err, "type")
 }
 
+func TestSelectSnapshotSchemaMismatchNewestDoesNotFallBackToOlderSnapshot(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+	newerReg := buildSelectionRegistry(t, selectionRegistryConfig{tableName: "users"})
+	newerState := buildSelectionCommittedState(t, newerReg)
+	writeSelectionSnapshot(t, root, newerReg, newerState, 10)
+
+	snap, skipped, err := selectSnapshotWithReport(root, 10, reg)
+	if err == nil {
+		t.Fatal("expected newest schema mismatch to fail loudly")
+	}
+	if snap != nil {
+		t.Fatalf("selected snapshot = %+v, want none on schema mismatch", snap)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("skipped snapshots = %+v, want no fallback-style skip for schema mismatch", skipped)
+	}
+	assertSchemaMismatchDetail(t, err, "name")
+	if !strings.Contains(err.Error(), "users") || !strings.Contains(err.Error(), "players") {
+		t.Fatalf("schema mismatch error = %v, want conflicting table names", err)
+	}
+}
+
 func TestSelectSnapshotSchemaMismatchTableName(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
