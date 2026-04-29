@@ -1316,6 +1316,54 @@ func TestOpenAndRecoverFallsBackWhenOffsetIndexPointsInsideSegmentHeader(t *test
 	}
 }
 
+func TestOpenAndRecoverOrphanOffsetIndexDoesNotStandInForMissingLog(t *testing.T) {
+	t.Run("snapshot-recovers-and-resumes-at-next-tx", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+		createOrphanOffsetIndex(t, root, 3, OffsetIndexEntry{TxID: 3, ByteOffset: SegmentHeaderSize})
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if maxTxID != 2 {
+			t.Fatalf("maxTxID = %d, want 2", maxTxID)
+		}
+		assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+		if report.HasDurableLog || report.DurableLogHorizon != 0 || len(report.SegmentCoverage) != 0 {
+			t.Fatalf("durable log report = %+v, want no log coverage from orphan index", report)
+		}
+		if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+			t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+		}
+		if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+			t.Fatalf("replayed range = %+v, want none", report.ReplayedTxRange)
+		}
+		if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+			t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+		}
+	})
+
+	t.Run("without-base-snapshot-fails-as-no-data", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		createOrphanOffsetIndex(t, root, 1, OffsetIndexEntry{TxID: 1, ByteOffset: SegmentHeaderSize})
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected orphan offset index without snapshot or log to fail")
+		}
+		if !errors.Is(err, ErrNoData) {
+			t.Fatalf("error = %v, want ErrNoData", err)
+		}
+		if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+			t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+		}
+		assertZeroRecoveryReport(t, report)
+	})
+}
+
 func TestCreateSnapshotParentSyncFailureLeavesNoSelectableArtifacts(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
@@ -1515,6 +1563,23 @@ func markSnapshotTemp(t *testing.T, root string, txID types.TxID) {
 func truncateSnapshotFile(t *testing.T, root string, txID types.TxID, size int64) {
 	t.Helper()
 	if err := os.Truncate(filepath.Join(root, "snapshots", txIDString(uint64(txID)), snapshotFileName), size); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createOrphanOffsetIndex(t *testing.T, root string, startTx uint64, entries ...OffsetIndexEntry) {
+	t.Helper()
+	idx, err := CreateOffsetIndex(filepath.Join(root, OffsetIndexFileName(startTx)), uint64(len(entries)+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if err := idx.Append(entry.TxID, entry.ByteOffset); err != nil {
+			_ = idx.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := idx.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
