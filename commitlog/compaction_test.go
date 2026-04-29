@@ -406,6 +406,54 @@ func TestRunCompactionRetriesDirectorySyncAfterPriorSyncFailure(t *testing.T) {
 	}
 }
 
+func TestRunCompactionRetriesDirectorySyncAfterOrphanSidecarCleanup(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	seg2 := makeScanTestSegment(t, dir, 4, 4, 5)
+	idx1Path := filepath.Join(dir, OffsetIndexFileName(1))
+	idx2Path := filepath.Join(dir, OffsetIndexFileName(4))
+	for _, path := range []string{idx1Path, idx2Path} {
+		idx, err := CreateOffsetIndex(path, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Remove(seg1); err != nil {
+		t.Fatal(err)
+	}
+	syncErr := errors.New("sync failed")
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		syncCalls++
+		if syncCalls == 1 {
+			return syncErr
+		}
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	err := RunCompaction(dir, 3)
+	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
+	assertFileMissing(t, idx1Path)
+	assertFileExists(t, seg2)
+	assertFileExists(t, idx2Path)
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	if syncCalls != 2 {
+		t.Fatalf("syncDir calls = %d, want 2", syncCalls)
+	}
+}
+
 func TestRunCompactionRejectsSnapshotBeyondDurableHorizon(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)

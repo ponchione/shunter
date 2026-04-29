@@ -2077,6 +2077,80 @@ func TestOpenAndRecoverAfterCompactionSyncFailureUsesSnapshotAndRemainingTail(t 
 	}
 }
 
+func TestOpenAndRecoverAfterCompactionSyncFailureWithSidecarsUsesSnapshotAndTail(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 3, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	covered := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	tail := writeReplaySegment(t, root, 4,
+		replayRecord{txID: 4, inserts: []types.ProductValue{{types.NewUint64(4), types.NewString("dave")}}},
+		replayRecord{txID: 5, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("eve")}}},
+	)
+	coveredIdx := filepath.Join(root, OffsetIndexFileName(1))
+	tailIdx := filepath.Join(root, OffsetIndexFileName(4))
+	for _, path := range []string{coveredIdx, tailIdx} {
+		idx, err := CreateOffsetIndex(path, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	syncErr := errors.New("compaction sync failed")
+	originalSyncDir := syncDir
+	syncDir = func(path string) error {
+		if path != root {
+			t.Fatalf("syncDir path = %q, want %q", path, root)
+		}
+		return syncErr
+	}
+	err := RunCompaction(root, 3)
+	syncDir = originalSyncDir
+	defer func() { syncDir = originalSyncDir }()
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("compaction error = %v, want wrapped sync failure", err)
+	}
+	if _, err := os.Stat(covered); !os.IsNotExist(err) {
+		t.Fatalf("covered segment should be removed before sync failure is reported, stat err=%v", err)
+	}
+	if _, err := os.Stat(coveredIdx); !os.IsNotExist(err) {
+		t.Fatalf("covered sidecar should be removed before sync failure is reported, stat err=%v", err)
+	}
+	if _, err := os.Stat(tail); err != nil {
+		t.Fatalf("tail segment should remain after compaction sync failure: %v", err)
+	}
+	if _, err := os.Stat(tailIdx); err != nil {
+		t.Fatalf("tail sidecar should remain after compaction sync failure: %v", err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 5 {
+		t.Fatalf("maxTxID = %d, want 5", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol", 4: "dave", 5: "eve"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 3 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 3)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 5 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 5)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 4, End: 5}) {
+		t.Fatalf("replayed range = %+v, want 4..5", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 4 || plan.NextTxID != 6 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 4 at tx 6", plan)
+	}
+}
+
 func TestOpenAndRecoverIgnoresCoveredOrphanIndexesAfterCompactedPrefix(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
