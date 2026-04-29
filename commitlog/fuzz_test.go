@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,6 +133,11 @@ func recordFuzzSeeds(t testing.TB) [][]byte {
 	seeds = append(seeds, unknownType)
 	badFlags := encodeRecordSeed(t, &Record{TxID: 3, RecordType: RecordTypeChangeset, Flags: 1, Payload: []byte("x")})
 	seeds = append(seeds, badFlags)
+	partialNonZero := make([]byte, RecordHeaderSize-1)
+	partialNonZero[len(partialNonZero)-1] = 1
+	seeds = append(seeds, partialNonZero)
+	zeroHeaderNonZeroTail := append(make([]byte, RecordHeaderSize), 1)
+	seeds = append(seeds, zeroHeaderNonZeroTail)
 	return seeds
 }
 
@@ -158,8 +164,34 @@ func changesetFuzzSeeds(t testing.TB) [][]byte {
 	valid := encodeChangesetSeed(t, withRows)
 	seeds = append(seeds, valid)
 	seeds = append(seeds, valid[:len(valid)-1])
+	seeds = append(seeds, append(append([]byte(nil), valid...), 0xde, 0xad, 0xbe, 0xef))
+	rowShapeMismatch := &store.Changeset{
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts:   []types.ProductValue{{types.NewUint64(1)}},
+			},
+		},
+	}
+	seeds = append(seeds, encodeChangesetSeed(t, rowShapeMismatch))
 	unknownTable := append([]byte(nil), []byte{changesetVersion, 1, 0, 0, 0, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}...)
 	seeds = append(seeds, unknownTable)
+	duplicateTable := []byte{changesetVersion}
+	duplicateTable = appendUint32(duplicateTable, 2)
+	for range 2 {
+		duplicateTable = appendUint32(duplicateTable, 0)
+		duplicateTable = appendUint32(duplicateTable, 0)
+		duplicateTable = appendUint32(duplicateTable, 0)
+	}
+	seeds = append(seeds, duplicateTable)
+	oversizedRow := []byte{changesetVersion}
+	oversizedRow = appendUint32(oversizedRow, 1)
+	oversizedRow = appendUint32(oversizedRow, 0)
+	oversizedRow = appendUint32(oversizedRow, 1)
+	oversizedRow = appendUint32(oversizedRow, DefaultCommitLogOptions().MaxRowBytes+1)
+	oversizedRow = appendUint32(oversizedRow, 0)
+	seeds = append(seeds, oversizedRow)
 	return seeds
 }
 
@@ -184,6 +216,18 @@ func snapshotFuzzSeeds(t testing.TB) [][]byte {
 	badVersion := append([]byte(nil), valid...)
 	badVersion[4] = SnapshotVersion + 1
 	seeds = append(seeds, badVersion)
+
+	badFlags := append([]byte(nil), valid...)
+	badFlags[5] = 1
+	seeds = append(seeds, badFlags)
+
+	trailing := append([]byte(nil), valid...)
+	trailing = append(trailing, 0)
+	seeds = append(seeds, snapshotSeedWithRecomputedHash(t, trailing))
+
+	oversizedSchema := append([]byte(nil), valid...)
+	binary.LittleEndian.PutUint32(oversizedSchema[SnapshotHeaderSize:SnapshotHeaderSize+4], DefaultCommitLogOptions().MaxRecordPayloadBytes+1)
+	seeds = append(seeds, snapshotSeedWithRecomputedHash(t, oversizedSchema))
 	return seeds
 }
 
@@ -235,6 +279,16 @@ func validSnapshotSeed(t testing.TB) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return data
+}
+
+func snapshotSeedWithRecomputedHash(t testing.TB, data []byte) []byte {
+	t.Helper()
+	if len(data) < SnapshotHeaderSize {
+		t.Fatalf("snapshot seed too short: %d", len(data))
+	}
+	hash := ComputeSnapshotHash(data[SnapshotHeaderSize:])
+	copy(data[20:52], hash[:])
 	return data
 }
 
