@@ -999,6 +999,76 @@ func TestCreateSnapshotParentSyncFailureLeavesNoSelectableArtifacts(t *testing.T
 	}
 }
 
+func TestCreateSnapshotUnlockSyncFailureFailsLoudlyAndLeavesRecoverableSnapshot(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	committed := buildRecoveryCommittedState(t, reg)
+	players, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("alice")}); err != nil {
+		t.Fatal(err)
+	}
+	committed.SetCommittedTxID(9)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg).(*FileSnapshotWriter)
+	snapshotDir := filepath.Join(writer.baseDir, "9")
+	syncErr := errors.New("unlock sync failed")
+	var snapshotDirSyncs int
+	writer.syncDir = func(path string) error {
+		if path == snapshotDir {
+			snapshotDirSyncs++
+			if snapshotDirSyncs == 2 {
+				return syncErr
+			}
+		}
+		return nil
+	}
+
+	err := writer.CreateSnapshot(committed, 9)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("snapshot creation error = %v, want ErrSnapshot category", err)
+	}
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("snapshot creation error = %v, want wrapped sync failure", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "sync-unlock" || completionErr.Path != snapshotDir {
+		t.Fatalf("completion error = %+v, want sync-unlock on snapshot dir", completionErr)
+	}
+	if snapshotDirSyncs != 2 {
+		t.Fatalf("snapshot dir sync count = %d, want 2", snapshotDirSyncs)
+	}
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed before sync-unlock failure is reported")
+	}
+	if _, err := ReadSnapshot(snapshotDir); err != nil {
+		t.Fatalf("snapshot should be readable after sync-unlock failure in current filesystem state: %v", err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 9 {
+		t.Fatalf("maxTxID = %d, want 9", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 9 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 9)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+		t.Fatalf("replayed range = %+v, want none", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 10 || plan.NextTxID != 10 {
+		t.Fatalf("resume plan = %+v, want fresh segment at tx 10", plan)
+	}
+}
+
 func assertNoRecoveredStateAfterReplayFault(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, durableHorizon types.TxID) {
 	t.Helper()
 	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
