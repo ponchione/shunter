@@ -149,6 +149,18 @@ func TestRecordCRCAndValidationCoverage(t *testing.T) {
 	}
 }
 
+func TestDecodeRecordPartialZeroHeaderIsSafeEOF(t *testing.T) {
+	if _, err := DecodeRecord(bytes.NewReader(make([]byte, RecordHeaderSize-1)), 0); !errors.Is(err, io.EOF) {
+		t.Fatalf("partial zero header error = %v, want EOF", err)
+	}
+
+	partialNonZero := make([]byte, RecordHeaderSize-1)
+	partialNonZero[len(partialNonZero)-1] = 1
+	if _, err := DecodeRecord(bytes.NewReader(partialNonZero), 0); !errors.Is(err, ErrTruncatedRecord) {
+		t.Fatalf("partial non-zero header error = %v, want ErrTruncatedRecord", err)
+	}
+}
+
 func TestSegmentReaderDetectsEOFTruncationAndCorruption(t *testing.T) {
 	dir := t.TempDir()
 	sw, err := CreateSegment(dir, 1)

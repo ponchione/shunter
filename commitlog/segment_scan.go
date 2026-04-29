@@ -121,6 +121,13 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 		return nil, io.EOF
 	}
 	if remaining < RecordHeaderSize {
+		ok, err := remainingBytesAreZero(sr.file, remaining)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return nil, io.EOF
+		}
 		return nil, ErrTruncatedRecord
 	}
 

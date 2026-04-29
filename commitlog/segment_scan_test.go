@@ -385,6 +385,52 @@ func TestScanSegmentsZeroHeaderWithNonZeroTailIsDamagedTail(t *testing.T) {
 	}
 }
 
+func TestScanSegmentsPartialZeroTailIsSafe(t *testing.T) {
+	dir := t.TempDir()
+
+	path := makeScanTestSegment(t, dir, 1, 1, 2)
+	appendTailBytes(t, path, make([]byte, RecordHeaderSize-1))
+
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatalf("ScanSegments() error = %v", err)
+	}
+	if len(segments) != 1 {
+		t.Fatalf("len(segments) = %d, want 1", len(segments))
+	}
+	assertSegmentInfo(t, segments[0], path, 1, 2, true)
+	if horizon != 2 {
+		t.Fatalf("horizon = %d, want 2", horizon)
+	}
+	if segments[0].AppendMode != AppendInPlace {
+		t.Fatalf("append mode = %d, want %d", segments[0].AppendMode, AppendInPlace)
+	}
+}
+
+func TestScanSegmentsPartialNonZeroTailIsDamagedTail(t *testing.T) {
+	dir := t.TempDir()
+
+	path := makeScanTestSegment(t, dir, 1, 1, 2)
+	tail := make([]byte, RecordHeaderSize-1)
+	tail[len(tail)-1] = 1
+	appendTailBytes(t, path, tail)
+
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatalf("ScanSegments() error = %v", err)
+	}
+	if len(segments) != 1 {
+		t.Fatalf("len(segments) = %d, want 1", len(segments))
+	}
+	assertSegmentInfo(t, segments[0], path, 1, 2, true)
+	if horizon != 2 {
+		t.Fatalf("horizon = %d, want 2", horizon)
+	}
+	if segments[0].AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("append mode = %d, want %d", segments[0].AppendMode, AppendByFreshNextSegment)
+	}
+}
+
 func makeScanTestSegment(t *testing.T, dir string, startTx uint64, txs ...uint64) string {
 	t.Helper()
 
@@ -453,6 +499,21 @@ func appendZeroHeaderNonZeroTail(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	if _, err := f.Write([]byte{1}); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func appendTailBytes(t *testing.T, path string, tail []byte) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(tail); err != nil {
 		_ = f.Close()
 		t.Fatal(err)
 	}
