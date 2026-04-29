@@ -594,6 +594,46 @@ func TestRunCompactionRejectsSnapshotBeyondZeroLengthActiveTailHorizon(t *testin
 	assertFileExists(t, active)
 }
 
+func TestRunCompactionMalformedSegmentFilenameFailsBeforeDeletingCoveredSegments(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		fileName   string
+		wantDetail string
+	}{
+		{
+			name:       "invalid",
+			fileName:   "not-a-segment.log",
+			wantDetail: `invalid segment filename "not-a-segment.log"`,
+		},
+		{
+			name:       "non-canonical",
+			fileName:   "1.log",
+			wantDetail: `non-canonical segment filename "1.log"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			covered := makeScanTestSegment(t, dir, 1, 1, 2)
+			active := makeScanTestSegment(t, dir, 3, 3, 4)
+			malformed := filepath.Join(dir, tc.fileName)
+			if err := os.WriteFile(malformed, []byte("not used"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			err := RunCompaction(dir, 2)
+			if err == nil {
+				t.Fatal("expected malformed segment filename to abort compaction")
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("RunCompaction error = %v, want detail %q", err, tc.wantDetail)
+			}
+			assertFileExists(t, covered)
+			assertFileExists(t, active)
+			assertFileExists(t, malformed)
+		})
+	}
+}
+
 func assertCompactionFailureContext(t *testing.T, err, cause error, operation, path string) {
 	t.Helper()
 	if !errors.Is(err, cause) {
