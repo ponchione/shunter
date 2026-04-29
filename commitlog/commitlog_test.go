@@ -164,6 +164,34 @@ func TestSegmentFileName(t *testing.T) {
 	}
 }
 
+func TestCreateSegmentRejectsSymlinkWithoutTruncatingTarget(t *testing.T) {
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, "external.log")
+	before := []byte("external segment bytes")
+	if err := os.WriteFile(targetPath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	linkPath := filepath.Join(dir, SegmentFileName(1))
+	symlinkOrSkip(t, targetPath, linkPath)
+
+	sw, err := CreateSegment(dir, 1)
+	if err == nil {
+		_ = sw.Close()
+		t.Fatal("expected symlink segment path to fail creation")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("CreateSegment error = %v, want ErrOpen category", err)
+	}
+	after, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("symlink target changed: got %q want %q", after, before)
+	}
+}
+
 func TestOpenSegmentForAppendCorruptFirstRecordFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	path := makeScanTestSegment(t, dir, 1, 1)

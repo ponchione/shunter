@@ -268,16 +268,32 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 	r.protocolInbox = inbox
 	r.protocolSender = clientSender
 	r.protocolServer = &protocol.Server{
-		JWT:           jwtCfg,
-		Mint:          mintCfg,
-		Options:       opts,
-		Executor:      inbox,
-		Conns:         conns,
-		Schema:        r.registry,
-		State:         committedStateAccess{state: r.state},
-		DeclaredReads: r,
+		JWT:               jwtCfg,
+		Mint:              mintCfg,
+		Options:           opts,
+		Executor:          inbox,
+		Conns:             conns,
+		Schema:            r.registry,
+		State:             committedStateAccess{state: r.state},
+		DeclaredReads:     r,
+		VisibilityFilters: runtimeProtocolVisibilityFilters(r.module.visibilityFilters),
 	}
 	return nil
+}
+
+func runtimeProtocolVisibilityFilters(filters []VisibilityFilterDescription) []protocol.VisibilityFilter {
+	if len(filters) == 0 {
+		return nil
+	}
+	out := make([]protocol.VisibilityFilter, len(filters))
+	for i, filter := range filters {
+		out[i] = protocol.VisibilityFilter{
+			SQL:                filter.SQL,
+			ReturnTableID:      filter.ReturnTableID,
+			UsesCallerIdentity: filter.UsesCallerIdentity,
+		}
+	}
+	return out
 }
 
 func (r *Runtime) closeProtocolGraph(conns *protocol.ConnManager, inbox *executor.ProtocolInboxAdapter) {

@@ -29,14 +29,29 @@ func handleSubscribeSingle(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
+	handleSubscribeSingleWithVisibility(ctx, conn, msg, executor, sl, nil)
+}
+
+func handleSubscribeSingleWithVisibility(
+	ctx context.Context,
+	conn *Conn,
+	msg *SubscribeSingleMsg,
+	executor ExecutorInbox,
+	sl SchemaLookup,
+	visibilityFilters []VisibilityFilter,
+) {
 	receipt := time.Now()
 	readSL := authorizedSchemaLookupForConn(sl, conn)
-	compiled, err := compileSQLQueryString(msg.QueryString, readSL, &conn.Identity, false, false)
+	caller := readCallerContext(conn)
+	compiled, err := CompileSQLQueryStringWithVisibility(msg.QueryString, readSL, &caller.Identity, SQLQueryValidationOptions{
+		AllowLimit:      false,
+		AllowProjection: false,
+	}, visibilityFilters, caller.AllowAllPermissions)
 	if err != nil {
 		sendSubscribeCompileError(conn, receipt, msg.RequestID, msg.QueryID, err, msg.QueryString)
 		return
 	}
-	pred := compiled.Predicate
+	pred := compiled.Predicate()
 
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
 		ConnID:                  conn.ID,
@@ -44,7 +59,7 @@ func handleSubscribeSingle(
 		RequestID:               msg.RequestID,
 		Variant:                 SubscriptionSetVariantSingle,
 		Predicates:              []any{pred},
-		PredicateHashIdentities: []*types.Identity{callerHashIdentity(conn, compiled)},
+		PredicateHashIdentities: []*types.Identity{compiled.PredicateHashIdentity(caller.Identity)},
 		Reply:                   makeSubscribeSetReply(conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle),
 		Receipt:                 receipt,
 		SQLText:                 msg.QueryString,

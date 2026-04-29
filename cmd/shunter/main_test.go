@@ -45,6 +45,45 @@ func TestContractDiffCommandReadsJSONFiles(t *testing.T) {
 	assertContains(t, stdout.String(), "additive column messages.sent_at: column added with type timestamp")
 }
 
+func TestContractCommandsRoundTripReadPolicyMetadata(t *testing.T) {
+	dir := t.TempDir()
+	previousPath := writeCLIContract(t, dir, "previous.json", cliContractFixture())
+	current := cliContractFixture()
+	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{Access: schema.TableAccessPublic}
+	current.VisibilityFilters = []shunter.VisibilityFilterDescription{{
+		Name:          "published_messages",
+		SQL:           "SELECT * FROM messages WHERE body = 'published'",
+		ReturnTable:   "messages",
+		ReturnTableID: 0,
+	}}
+	currentPath := writeCLIContract(t, dir, "current.json", current)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "diff",
+		"--previous", previousPath,
+		"--current", currentPath,
+	})
+	if code != 0 {
+		t.Fatalf("contract diff exit code = %d, stderr = %s", code, stderr.String())
+	}
+	assertContains(t, stdout.String(), "table_read_policy messages")
+	assertContains(t, stdout.String(), "visibility_filter published_messages")
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run(&stdout, &stderr, []string{
+		"contract", "plan",
+		"--previous", previousPath,
+		"--current", currentPath,
+	})
+	if code != 0 {
+		t.Fatalf("contract plan exit code = %d, stderr = %s", code, stderr.String())
+	}
+	assertContains(t, stdout.String(), "table_read_policy messages")
+	assertContains(t, stdout.String(), "visibility_filter published_messages")
+}
+
 func TestContractPolicyCommandFailsInStrictMode(t *testing.T) {
 	dir := t.TempDir()
 	previousPath := writeCLIContract(t, dir, "previous.json", cliContractFixture())

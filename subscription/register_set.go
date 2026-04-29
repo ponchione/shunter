@@ -130,6 +130,29 @@ func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.
 		out = append(out, row)
 		return nil
 	}
+	if p.Filter != nil {
+		for _, leftRow := range view.TableScan(p.Left) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			for _, rightRow := range view.TableScan(p.Right) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				if !MatchJoinPair(p.Filter, p.Left, p.LeftAlias, leftRow, p.Right, p.RightAlias, rightRow) {
+					continue
+				}
+				if p.ProjectRight {
+					if err := add(rightRow); err != nil {
+						return nil, err
+					}
+				} else if err := add(leftRow); err != nil {
+					return nil, err
+				}
+			}
+		}
+		return out, nil
+	}
 	for _, projectedRow := range view.TableScan(projectedTable) {
 		if err := ctx.Err(); err != nil {
 			return nil, err

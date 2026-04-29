@@ -154,6 +154,7 @@ func newPlanEntry(migrations shunter.MigrationContract, change Change) PlanEntry
 		metadataPtr = &metadataCopy
 		classifications = copyPlanClassifications(metadataCopy.Classifications)
 	}
+	classifications = appendInferredPlanClassifications(change, classifications)
 	severity, action := actionForPlanChange(change, classifications)
 	if change.Surface == SurfaceMigrationMetadata {
 		severity = PlanSeverityReview
@@ -168,6 +169,30 @@ func newPlanEntry(migrations shunter.MigrationContract, change Change) PlanEntry
 		Action:            action,
 		MigrationMetadata: metadataPtr,
 		Classifications:   normalizePlanClassifications(classifications),
+	}
+}
+
+func appendInferredPlanClassifications(change Change, classifications []shunter.MigrationClassification) []shunter.MigrationClassification {
+	if !needsPolicyManualReviewClassification(change) ||
+		hasPlanClassification(classifications, shunter.MigrationClassificationManualReviewNeeded) {
+		return classifications
+	}
+	out := copyPlanClassifications(classifications)
+	return append(out, shunter.MigrationClassificationManualReviewNeeded)
+}
+
+func needsPolicyManualReviewClassification(change Change) bool {
+	if change.Kind != ChangeKindAdditive {
+		return false
+	}
+	switch change.Surface {
+	case SurfaceTableReadPolicy:
+		return true
+	case SurfacePermission:
+		surface, _, ok := strings.Cut(change.Name, ".")
+		return ok && (surface == shunter.MigrationSurfaceQuery || surface == shunter.MigrationSurfaceView)
+	default:
+		return false
 	}
 }
 

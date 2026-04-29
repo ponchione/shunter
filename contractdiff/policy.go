@@ -113,6 +113,29 @@ func migrationMetadataForChange(migrations shunter.MigrationContract, change Cha
 			return migrations.Module, true
 		}
 		return shunter.MigrationMetadata{}, false
+	case SurfacePermission:
+		surface, name, ok := strings.Cut(change.Name, ".")
+		if !ok {
+			return shunter.MigrationMetadata{}, false
+		}
+		switch surface {
+		case shunter.MigrationSurfaceQuery:
+			if metadata, ok := findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceQuery, name); ok {
+				return metadata, true
+			}
+		case shunter.MigrationSurfaceView:
+			if metadata, ok := findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceView, name); ok {
+				return metadata, true
+			}
+		default:
+			return shunter.MigrationMetadata{}, false
+		}
+		if change.Kind == ChangeKindBreaking {
+			return migrations.Module, true
+		}
+		return shunter.MigrationMetadata{}, false
+	case SurfaceVisibilityFilter:
+		return migrations.Module, true
 	case SurfaceReducer, SurfaceContract, SurfaceModule, SurfaceSchema:
 		return migrations.Module, true
 	default:

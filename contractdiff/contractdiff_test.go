@@ -69,7 +69,6 @@ func TestContractDiffReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
 	current.Module.Version = "v1.1.0"
-	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{Name: "history", Required: []string{"messages:read"}}}
 	current.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
 		Surface: shunter.ReadModelSurfaceQuery,
 		Name:    "history",
@@ -79,7 +78,6 @@ func TestContractDiffReportsMetadataOnlyChangesSeparately(t *testing.T) {
 
 	report := Compare(old, current)
 	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceModule, "chat")
-	assertChange(t, report.Changes, ChangeKindMetadata, SurfacePermission, "query.history")
 	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceReadModel, "query.history")
 }
 
@@ -106,6 +104,54 @@ func TestContractDiffDetectsTableReadPolicyChanges(t *testing.T) {
 
 	report = Compare(old, current)
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceTableReadPolicy, "messages")
+}
+
+func TestContractDiffClassifiesDeclaredReadPermissionChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:read"},
+	}}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfacePermission, "query.history")
+
+	old = current
+	current = contractFixture()
+	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:read", "messages:audit"},
+	}}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfacePermission, "query.history")
+
+	old = current
+	current = contractFixture()
+	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:read"},
+	}}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfacePermission, "query.history")
+
+	old = current
+	current = contractFixture()
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfacePermission, "query.history")
+
+	old = contractFixture()
+	current = contractFixture()
+	current.Permissions.Views = []shunter.PermissionContractDeclaration{{
+		Name:     "live",
+		Required: []string{"messages:subscribe"},
+	}}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfacePermission, "view.live")
 }
 
 func TestContractDiffReportsModuleMetadataChanges(t *testing.T) {

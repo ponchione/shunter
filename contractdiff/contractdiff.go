@@ -338,18 +338,28 @@ func comparePermissionCategory(out *Report, category string, oldDeclarations, cu
 		old, ok := oldByName[name]
 		fullName := category + "." + name
 		if !ok {
-			out.add(ChangeKindMetadata, SurfacePermission, fullName, "permission metadata added")
+			out.add(permissionChangeKind(category, nil, current.Required), SurfacePermission, fullName, "permission requirements added")
 			continue
 		}
 		if stringSliceSignature(old.Required) != stringSliceSignature(current.Required) {
-			out.add(ChangeKindMetadata, SurfacePermission, fullName, "permission requirements changed")
+			out.add(permissionChangeKind(category, old.Required, current.Required), SurfacePermission, fullName, "permission requirements changed")
 		}
 	}
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {
-			out.add(ChangeKindMetadata, SurfacePermission, category+"."+name, "permission metadata removed")
+			out.add(permissionChangeKind(category, oldByName[name].Required, nil), SurfacePermission, category+"."+name, "permission requirements removed")
 		}
 	}
+}
+
+func permissionChangeKind(category string, oldRequired, currentRequired []string) ChangeKind {
+	if category == "reducer" {
+		return ChangeKindMetadata
+	}
+	if stringSliceSubset(currentRequired, oldRequired) {
+		return ChangeKindAdditive
+	}
+	return ChangeKindBreaking
 }
 
 func compareReadModels(out *Report, oldDeclarations, currentDeclarations []shunter.ReadModelContractDeclaration) {

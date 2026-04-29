@@ -31,6 +31,15 @@ type compiledSQLAggregate struct {
 	ResultColumn schema.ColumnSchema
 }
 
+// VisibilityFilter is validated row-level visibility metadata supplied by the
+// hosted runtime. SQL must compile to one table-shaped predicate for
+// ReturnTableID.
+type VisibilityFilter struct {
+	SQL                string
+	ReturnTableID      schema.TableID
+	UsesCallerIdentity bool
+}
+
 // CompiledSQLQuery is prevalidated SQL metadata produced by the protocol SQL
 // compiler. It is used by runtime-owned declared reads without routing those
 // reads through raw SQL admission.
@@ -238,14 +247,6 @@ func sqlPredicateUsesCallerIdentity(pred sql.Predicate) bool {
 	}
 }
 
-func callerHashIdentity(conn *Conn, compiled compiledSQLQuery) *types.Identity {
-	if !compiled.UsesCallerIdentity {
-		return nil
-	}
-	id := conn.Identity
-	return &id
-}
-
 // wrapSubscribeCompileErrorSQL mirrors reference `DBError::WithSql`
 // (reference/SpacetimeDB/crates/core/src/error.rs:140,
 // `"{error}, executing: `{sql}`"`). SubscribeSingle/SubscribeMulti
@@ -293,6 +294,150 @@ func CompileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, o
 		return CompiledSQLQuery{}, err
 	}
 	return newCompiledSQLQuery(compiled), nil
+}
+
+// CompileSQLQueryStringWithVisibility compiles SQL and expands matching
+// row-level visibility filters into every table relation before execution.
+func CompileSQLQueryStringWithVisibility(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions, filters []VisibilityFilter, allowAll bool) (CompiledSQLQuery, error) {
+	compiled, err := CompileSQLQueryString(qs, sl, caller, opts)
+	if err != nil {
+		return CompiledSQLQuery{}, err
+	}
+	return ApplyVisibilityFilters(compiled, sl, caller, filters, allowAll)
+}
+
+// ApplyVisibilityFilters returns a copy of compiled with visibility predicates
+// attached to each table relation. allowAll bypasses row-level visibility.
+func ApplyVisibilityFilters(compiled CompiledSQLQuery, sl SchemaLookup, caller *types.Identity, filters []VisibilityFilter, allowAll bool) (CompiledSQLQuery, error) {
+	if sl == nil {
+		return CompiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
+	}
+	query := copyCompiledSQLQuery(compiled.query)
+	if allowAll || len(filters) == 0 || query.Predicate == nil {
+		return newCompiledSQLQuery(query), nil
+	}
+	expanded, usesCallerIdentity, err := expandPredicateVisibility(query.Predicate, sl, caller, filters)
+	if err != nil {
+		return CompiledSQLQuery{}, err
+	}
+	query.Predicate = expanded
+	query.UsesCallerIdentity = query.UsesCallerIdentity || usesCallerIdentity
+	return newCompiledSQLQuery(query), nil
+}
+
+func expandPredicateVisibility(pred subscription.Predicate, sl SchemaLookup, caller *types.Identity, filters []VisibilityFilter) (subscription.Predicate, bool, error) {
+	switch p := pred.(type) {
+	case subscription.Join:
+		leftVis, leftUses, err := visibilityPredicateForRelation(p.Left, p.LeftAlias, sl, caller, filters)
+		if err != nil {
+			return nil, false, err
+		}
+		rightVis, rightUses, err := visibilityPredicateForRelation(p.Right, p.RightAlias, sl, caller, filters)
+		if err != nil {
+			return nil, false, err
+		}
+		p.Filter = andSubscriptionPredicates(p.Filter, andSubscriptionPredicates(leftVis, rightVis))
+		return p, leftUses || rightUses, nil
+	case subscription.CrossJoin:
+		leftVis, leftUses, err := visibilityPredicateForRelation(p.Left, p.LeftAlias, sl, caller, filters)
+		if err != nil {
+			return nil, false, err
+		}
+		rightVis, rightUses, err := visibilityPredicateForRelation(p.Right, p.RightAlias, sl, caller, filters)
+		if err != nil {
+			return nil, false, err
+		}
+		p.Filter = andSubscriptionPredicates(p.Filter, andSubscriptionPredicates(leftVis, rightVis))
+		return p, leftUses || rightUses, nil
+	default:
+		tables := pred.Tables()
+		if len(tables) == 0 {
+			return pred, false, nil
+		}
+		vis, uses, err := visibilityPredicateForRelation(tables[0], 0, sl, caller, filters)
+		if err != nil {
+			return nil, false, err
+		}
+		return andSubscriptionPredicates(pred, vis), uses, nil
+	}
+}
+
+func visibilityPredicateForRelation(table schema.TableID, alias uint8, sl SchemaLookup, caller *types.Identity, filters []VisibilityFilter) (subscription.Predicate, bool, error) {
+	var out subscription.Predicate
+	var usesCallerIdentity bool
+	for _, filter := range filters {
+		if filter.ReturnTableID != table {
+			continue
+		}
+		compiled, err := CompileSQLQueryString(filter.SQL, sl, caller, SQLQueryValidationOptions{
+			AllowLimit:      false,
+			AllowProjection: false,
+		})
+		if err != nil {
+			return nil, false, fmt.Errorf("visibility filter %q: %w", filter.SQL, err)
+		}
+		referenced := compiled.ReferencedTables()
+		if len(referenced) != 1 || referenced[0] != table {
+			return nil, false, fmt.Errorf("visibility filter %q does not return table %d", filter.SQL, table)
+		}
+		usesCallerIdentity = usesCallerIdentity || filter.UsesCallerIdentity || compiled.UsesCallerIdentity()
+		out = orSubscriptionPredicates(out, retagVisibilityPredicate(compiled.Predicate(), table, alias))
+	}
+	return out, usesCallerIdentity, nil
+}
+
+func retagVisibilityPredicate(pred subscription.Predicate, table schema.TableID, alias uint8) subscription.Predicate {
+	switch p := pred.(type) {
+	case subscription.ColEq:
+		if p.Table == table {
+			p.Alias = alias
+		}
+		return p
+	case subscription.ColNe:
+		if p.Table == table {
+			p.Alias = alias
+		}
+		return p
+	case subscription.ColRange:
+		if p.Table == table {
+			p.Alias = alias
+		}
+		return p
+	case subscription.And:
+		return subscription.And{
+			Left:  retagVisibilityPredicate(p.Left, table, alias),
+			Right: retagVisibilityPredicate(p.Right, table, alias),
+		}
+	case subscription.Or:
+		return subscription.Or{
+			Left:  retagVisibilityPredicate(p.Left, table, alias),
+			Right: retagVisibilityPredicate(p.Right, table, alias),
+		}
+	default:
+		return pred
+	}
+}
+
+func andSubscriptionPredicates(left, right subscription.Predicate) subscription.Predicate {
+	switch {
+	case left == nil:
+		return right
+	case right == nil:
+		return left
+	default:
+		return subscription.And{Left: left, Right: right}
+	}
+}
+
+func orSubscriptionPredicates(left, right subscription.Predicate) subscription.Predicate {
+	switch {
+	case left == nil:
+		return right
+	case right == nil:
+		return left
+	default:
+		return subscription.Or{Left: left, Right: right}
+	}
 }
 
 func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool) (compiledSQLQuery, error) {

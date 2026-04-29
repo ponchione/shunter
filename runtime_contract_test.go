@@ -277,6 +277,65 @@ func TestModuleContractValidationRejectsInvalidTableReadPolicyMetadata(t *testin
 	}
 }
 
+func TestModuleContractValidationRejectsInvalidDeclaredReadPermissionMetadata(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*ModuleContract)
+	}{
+		{
+			name: "duplicate query permission tag",
+			mutate: func(c *ModuleContract) {
+				c.Permissions.Queries = []PermissionContractDeclaration{{
+					Name:     "recent_messages",
+					Required: []string{"messages:read", "messages:read"},
+				}}
+			},
+		},
+		{
+			name: "empty query permission requirements",
+			mutate: func(c *ModuleContract) {
+				c.Permissions.Queries = []PermissionContractDeclaration{{
+					Name:     "recent_messages",
+					Required: nil,
+				}}
+			},
+		},
+		{
+			name: "duplicate view permission tag",
+			mutate: func(c *ModuleContract) {
+				c.Permissions.Views = []PermissionContractDeclaration{{
+					Name:     "live_messages",
+					Required: []string{"messages:subscribe", "messages:subscribe"},
+				}}
+			},
+		},
+		{
+			name: "unknown query permission target",
+			mutate: func(c *ModuleContract) {
+				c.Permissions.Queries = []PermissionContractDeclaration{{
+					Name:     "missing",
+					Required: []string{"messages:read"},
+				}}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contract := buildContractRuntime(t).ExportContract()
+			tt.mutate(&contract)
+
+			err := ValidateModuleContract(contract)
+			if err == nil {
+				t.Fatal("ValidateModuleContract accepted invalid declared read permission metadata")
+			}
+			if !strings.Contains(err.Error(), "permissions.") {
+				t.Fatalf("ValidateModuleContract error = %v, want permissions context", err)
+			}
+		})
+	}
+}
+
 func TestBuildRejectsAuthoredMetadataThatWouldInvalidateContract(t *testing.T) {
 	tests := []struct {
 		name string
@@ -298,6 +357,15 @@ func TestBuildRejectsAuthoredMetadataThatWouldInvalidateContract(t *testing.T) {
 				Name: "recent_messages",
 				Permissions: PermissionMetadata{
 					Required: []string{"messages:read", ""},
+				},
+			}),
+		},
+		{
+			name: "duplicate query permission",
+			mod: validChatModule().Query(QueryDeclaration{
+				Name: "recent_messages",
+				Permissions: PermissionMetadata{
+					Required: []string{"messages:read", "messages:read"},
 				},
 			}),
 		},

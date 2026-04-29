@@ -185,11 +185,12 @@ func validatePermissionContract(surface string, declarations []PermissionContrac
 		if _, ok := declaredNames[declaration.Name]; !ok {
 			*errs = append(*errs, fmt.Errorf("permissions.%s.%s references unknown %s", surface, declaration.Name, surface))
 		}
-		for _, required := range declaration.Required {
-			if strings.TrimSpace(required) == "" {
-				*errs = append(*errs, fmt.Errorf("permissions.%s.%s requirement must not be empty", surface, declaration.Name))
-			}
+		isReadPermission := surface == ReadModelSurfaceQuery || surface == ReadModelSurfaceView
+		if isReadPermission && len(declaration.Required) == 0 {
+			*errs = append(*errs, fmt.Errorf("permissions.%s.%s requirements must not be empty", surface, declaration.Name))
+			continue
 		}
+		validatePermissionRequirements("permissions."+surface+"."+declaration.Name, declaration.Required, isReadPermission, errs)
 	}
 }
 

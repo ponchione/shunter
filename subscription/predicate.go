@@ -223,6 +223,7 @@ type CrossJoin struct {
 	LeftAlias    uint8
 	RightAlias   uint8
 	ProjectRight bool
+	Filter       Predicate // optional additional filter (may be nil)
 }
 
 func (CrossJoin) sealed() {}

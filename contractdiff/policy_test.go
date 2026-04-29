@@ -67,6 +67,54 @@ func TestPolicyWarnsWhenAdditiveChangeDeclaredBreaking(t *testing.T) {
 	assertWarning(t, result.Warnings, WarningBreakingDeclaredForAdditiveChange, SurfaceColumn, "messages.sent_at")
 }
 
+func TestPolicyRequiresMigrationMetadataForDeclaredReadPermissionChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:read"},
+	}}
+
+	result := CheckPolicy(Compare(old, current), current, PolicyOptions{})
+	assertWarning(t, result.Warnings, WarningMissingMigrationMetadata, SurfacePermission, "query.history")
+
+	current.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: shunter.MigrationSurfaceQuery,
+		Name:    "history",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityBreaking,
+			Notes:         "tighten query permission",
+		},
+	}}
+	result = CheckPolicy(Compare(old, current), current, PolicyOptions{Strict: true})
+	if result.Failed {
+		t.Fatalf("strict policy failed despite query migration metadata: %#v", result.Warnings)
+	}
+}
+
+func TestPolicyAllowsModuleMigrationMetadataForVisibilityFilterChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.VisibilityFilters = []shunter.VisibilityFilterDescription{{
+		Name:          "published_messages",
+		SQL:           "SELECT * FROM messages WHERE body = 'published'",
+		ReturnTable:   "messages",
+		ReturnTableID: 0,
+	}}
+	current.Migrations.Module = shunter.MigrationMetadata{
+		Compatibility: shunter.MigrationCompatibilityBreaking,
+		Notes:         "visibility policy changed",
+	}
+
+	result := CheckPolicy(Compare(old, current), current, PolicyOptions{Strict: true})
+	if hasWarning(result.Warnings, WarningMissingMigrationMetadata, SurfaceVisibilityFilter, "published_messages") {
+		t.Fatalf("visibility filter change should be covered by module migration metadata: %#v", result.Warnings)
+	}
+	if result.Failed {
+		t.Fatalf("strict policy failed despite module migration metadata: %#v", result.Warnings)
+	}
+}
+
 func TestPolicyAllowsModuleMigrationMetadataForRemovedReadSurfaces(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()

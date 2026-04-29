@@ -157,3 +157,72 @@ When complete, update this file with:
 - one-off/subscription behavior for caller-specific filters
 - validation commands run
 - any performance risks that remain outside the correctness work
+
+Completed 2026-04-29.
+
+Read plan / predicate changes:
+
+- The Task 08 implementation expands validated visibility-filter metadata into
+  the existing relation-aware `subscription.Predicate` execution plan.
+- `protocol.VisibilityFilter` is the protocol-layer runtime metadata shape used
+  by raw SQL and declared-read paths. Runtime metadata is mapped from stored
+  `VisibilityFilterDescription` values.
+- `protocol.CompileSQLQueryStringWithVisibility` compiles raw SQL and then
+  calls `protocol.ApplyVisibilityFilters`; declared reads call
+  `ApplyVisibilityFilters` after declaration permission succeeds.
+- Single-table predicates are expanded as:
+  `query_predicate AND (filter_1 OR filter_2 ...)`.
+- Equi-joins are expanded by attaching per-relation visibility predicates to
+  `subscription.Join.Filter`.
+- `subscription.CrossJoin` now has an optional `Filter` field so cartesian
+  plans can enforce the same per-relation visibility semantics in initial
+  snapshots, one-off reads, deltas, validation, hashing, and active-column
+  collection.
+
+Visibility enforcement semantics:
+
+- Visibility filters are applied to every external read path:
+  raw one-off SQL, raw subscriptions, named declared queries, and named
+  declared views.
+- Base table raw-read admission is unchanged and still happens through the
+  authorized schema lookup before visibility expansion.
+- Declared reads still bypass base-table raw-read policy but do not bypass
+  row-level visibility.
+- Multiple filters for a table are ORed in stored declaration order.
+- Self-joins retag each expanded filter per relation alias, so the left and
+  right table occurrences are filtered independently.
+- Join and cross-join filters are evaluated before row emission, projection,
+  aggregate counting, limit handling, subscription initial rows, and
+  post-commit deltas. This prevents a filtered non-projected table from leaking
+  rows through join participation.
+- `AllowAllPermissions` bypasses row-level visibility, matching the existing
+  admin/dev bypass semantics for read authorization.
+- Caller-specific filters using `:sender` are compiled with the caller identity
+  and mark the compiled query as caller-identity-sensitive for subscription
+  hashing.
+
+Validation commands run:
+
+```sh
+rtk go fmt ./protocol ./subscription ./query/sql . ./executor
+rtk go test ./protocol -run VisibilityExpansion -count=1
+rtk go test . -run 'TestDeclared(Query|View)AppliesVisibility' -count=1
+rtk go test ./subscription -run 'Test.*CrossJoin|TestEvalSelfEquiJoinWithAliasedWhere' -count=1
+rtk go test ./protocol -count=1
+rtk go test ./subscription -count=1
+rtk go test . -run 'Test.*(Visibility|Read|Query|View|Subscribe|Permission)' -count=1
+rtk go vet ./protocol ./subscription ./query/sql . ./executor
+rtk go test ./... -count=1
+rtk go tool staticcheck ./...
+```
+
+Task 09 assumptions and follow-up:
+
+- Task 09 can treat visibility-filter execution as enforced for all external
+  read surfaces.
+- Visibility filters remain deliberately restricted to Task 07's validated
+  single-table, table-shape SQL subset.
+- The remaining performance risk is filtered cross joins: correctness uses a
+  full pair evaluation when a `CrossJoin.Filter` is present. This is acceptable
+  for Task 08 correctness but is a future optimization candidate if filtered
+  cartesian plans become common.

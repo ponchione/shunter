@@ -275,6 +275,10 @@ func (m *Manager) collectActiveColumns() map[TableID][]ColID {
 			if x.Filter != nil {
 				walk(x.Filter)
 			}
+		case CrossJoin:
+			if x.Filter != nil {
+				walk(x.Filter)
+			}
 		}
 	}
 	for _, qs := range m.registry.byHash {
@@ -479,6 +483,11 @@ func projectJoinFragments(fragments [][]types.ProductValue, lhsWidth int, projec
 }
 
 func evalCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue) {
+	if p.Filter != nil {
+		before := crossJoinProjectedRows(p, projectedRowsBefore(dv, p.Left), projectedRowsBefore(dv, p.Right))
+		after := crossJoinProjectedRows(p, tableRowsAfter(dv.CommittedView(), p.Left), tableRowsAfter(dv.CommittedView(), p.Right))
+		return diffProjectedRowBags(before, after)
+	}
 	projectedTable := p.ProjectedTable()
 	otherTable := crossJoinOtherTable(p)
 	afterProjectedRows := tableRowsAfter(dv.CommittedView(), projectedTable)
@@ -486,6 +495,23 @@ func evalCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.Pr
 	afterOtherCount := rowCountAfter(dv.CommittedView(), otherTable)
 	beforeOtherCount := rowCountBefore(dv, otherTable)
 	return diffProjectedRowsWithMultiplicity(beforeProjectedRows, beforeOtherCount, afterProjectedRows, afterOtherCount)
+}
+
+func crossJoinProjectedRows(p CrossJoin, leftRows, rightRows []types.ProductValue) []types.ProductValue {
+	var rows []types.ProductValue
+	for _, leftRow := range leftRows {
+		for _, rightRow := range rightRows {
+			if !MatchJoinPair(p.Filter, p.Left, p.LeftAlias, leftRow, p.Right, p.RightAlias, rightRow) {
+				continue
+			}
+			if p.ProjectRight {
+				rows = append(rows, rightRow)
+			} else {
+				rows = append(rows, leftRow)
+			}
+		}
+	}
+	return rows
 }
 
 func crossJoinOtherTable(p CrossJoin) TableID {
@@ -560,6 +586,28 @@ func countProjectedRowsWithMultiplier(rows []types.ProductValue, multiplier int)
 		counts[key] += uint64(multiplier)
 	}
 	return counts, values, order
+}
+
+func diffProjectedRowBags(beforeRows, afterRows []types.ProductValue) (inserts, deletes []types.ProductValue) {
+	beforeCounts, beforeValues, beforeOrder := countProjectedRowsWithMultiplier(beforeRows, 1)
+	afterCounts, afterValues, afterOrder := countProjectedRowsWithMultiplier(afterRows, 1)
+	for _, key := range afterOrder {
+		if afterCounts[key] <= beforeCounts[key] {
+			continue
+		}
+		for n := afterCounts[key] - beforeCounts[key]; n > 0; n-- {
+			inserts = append(inserts, afterValues[key])
+		}
+	}
+	for _, key := range beforeOrder {
+		if beforeCounts[key] <= afterCounts[key] {
+			continue
+		}
+		for n := beforeCounts[key] - afterCounts[key]; n > 0; n-- {
+			deletes = append(deletes, beforeValues[key])
+		}
+	}
+	return inserts, deletes
 }
 
 func projectedRowsBefore(dv *DeltaView, table TableID) []types.ProductValue {

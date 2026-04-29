@@ -112,6 +112,10 @@ func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredRe
 	if err != nil {
 		return DeclaredQueryResult{}, err
 	}
+	compiled, err = r.applyDeclaredReadVisibility(compiled, callOpts.caller)
+	if err != nil {
+		return DeclaredQueryResult{}, err
+	}
 	result, err := protocol.ExecuteCompiledSQLQuery(ctx, compiled, committedStateAccess{state: state}, r.registry)
 	if err != nil {
 		return DeclaredQueryResult{}, err
@@ -142,6 +146,10 @@ func (r *Runtime) SubscribeView(ctx context.Context, name string, queryID uint32
 		return DeclaredViewSubscription{}, err
 	}
 	compiled, err := r.executableDeclaredRead(entry, callOpts.caller)
+	if err != nil {
+		return DeclaredViewSubscription{}, err
+	}
+	compiled, err = r.applyDeclaredReadVisibility(compiled, callOpts.caller)
 	if err != nil {
 		return DeclaredViewSubscription{}, err
 	}
@@ -222,6 +230,16 @@ func (r *Runtime) executableDeclaredRead(entry declaredReadEntry, caller types.C
 		return protocol.CompileSQLQueryString(entry.SQL, r.registry, &caller.Identity, validationOptionsForDeclaredRead(entry.Kind))
 	}
 	return entry.compiled.Copy(), nil
+}
+
+func (r *Runtime) applyDeclaredReadVisibility(compiled protocol.CompiledSQLQuery, caller types.CallerContext) (protocol.CompiledSQLQuery, error) {
+	return protocol.ApplyVisibilityFilters(
+		compiled,
+		r.registry,
+		&caller.Identity,
+		runtimeProtocolVisibilityFilters(r.module.visibilityFilters),
+		caller.AllowAllPermissions,
+	)
 }
 
 func validationOptionsForDeclaredRead(kind declaredReadKind) protocol.SQLQueryValidationOptions {

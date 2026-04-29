@@ -35,9 +35,9 @@ func TestCompareFilesReturnsDeterministicContractChanges(t *testing.T) {
 	want := strings.Join([]string{
 		"additive column messages.sent_at: column added with type timestamp",
 		"additive query recent_messages: query added",
+		"breaking permission query.history: permission requirements added",
 		"breaking reducer send_message: reducer removed",
 		"metadata module chat: module version changed from \"v1.0.0\" to \"v1.1.0\"",
-		"metadata permission query.history: permission metadata added",
 		"",
 	}, "\n")
 	if string(got) != want {

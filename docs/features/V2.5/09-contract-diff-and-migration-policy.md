@@ -99,3 +99,81 @@ When complete, update this file with:
 - migration compatibility decisions
 - validation commands run
 
+Completed 2026-04-29.
+
+Final contract fields:
+
+- Table raw-read policy is exported on
+  `schema.tables[].read_policy.access` and
+  `schema.tables[].read_policy.permissions`.
+- Declared query/view SQL metadata remains on `queries[].sql` and
+  `views[].sql`.
+- Declared query/view permission metadata is exported through
+  `permissions.queries[].required` and `permissions.views[].required`.
+- Visibility filter metadata is exported through `visibility_filters[]` with
+  `name`, `sql`, `return_table`, `return_table_id`, and
+  `uses_caller_identity`.
+- Codegen metadata still exports `contract_format`, `contract_version`, and
+  `default_snapshot_filename`; TypeScript codegen preserves
+  `tableReadPolicies`, `visibilityFilters`, `permissions`, `querySQL`, and
+  `viewSQL`, while declared read helpers execute by declaration name.
+
+Validation behavior:
+
+- `ValidateModuleContract` rejects malformed table read policy metadata,
+  invalid declaration SQL, invalid visibility filter metadata, unknown
+  permission targets, blank permission requirements, duplicate declared
+  query/view permission requirements, and explicit declared query/view
+  permission declarations with no requirements.
+- Authored module query/view permission metadata rejects duplicate requirements
+  before build, so invalid read permission metadata is not exported.
+
+Diff classifications:
+
+- `table_read_policy` changes continue to distinguish direction:
+  stricter/less-visible changes are `breaking`; looser/more-visible changes
+  are `additive` but are treated as manual-review policy changes in migration
+  planning.
+- Query/view permission changes now use the `permission` surface. Adding a
+  required permission, expanding the required set, or replacing it with an
+  incomparable set is `breaking`; removing requirements or shrinking the set is
+  `additive` and manual-review-sensitive. Reducer permission diffs remain
+  metadata-only.
+- Declared query/view SQL additions are `additive`; SQL removal or SQL changes
+  are `breaking`.
+- Visibility filter addition, removal, SQL change, return-table change, or
+  caller-identity metadata change is `breaking`.
+
+Migration compatibility decisions:
+
+- Stricter read policy and stricter declared read permissions produce blocking
+  manual-review plan entries.
+- Looser read policy and looser declared read permissions remain
+  client-compatible additive diffs, but the migration plan infers
+  `manual-review-needed` as the nearest existing security-sensitive
+  classification.
+- Query/view permission changes are covered by matching query/view migration
+  metadata; breaking permission changes may also be covered by module migration
+  metadata following existing removal/breaking conventions.
+- Visibility filter changes are covered by module migration metadata because
+  contracts do not have a filter-specific migration metadata surface.
+
+Validation commands run:
+
+```sh
+rtk go fmt . ./contractdiff ./contractworkflow ./cmd/shunter ./codegen
+rtk go test ./contractdiff ./contractworkflow ./cmd/shunter ./codegen -count=1
+rtk go test . -run 'Test.*(Contract|Migration|Permission|Visibility|Codegen)' -count=1
+rtk go vet . ./contractdiff ./contractworkflow ./cmd/shunter ./codegen
+rtk go test ./... -count=1
+rtk go tool staticcheck ./...
+```
+
+Final validation note:
+
+- Task 09 targeted tests, vet, and Staticcheck passed.
+- `rtk go test ./... -count=1` passed once during validation. A final rerun
+  after the last Task 09 scope correction failed only in pre-existing dirty
+  `./commitlog` tests:
+  `TestCreateSegmentRejectsExistingFileWithoutTruncating` and
+  `TestCreateSegmentRejectsSymlinkWithoutTruncatingTarget`.

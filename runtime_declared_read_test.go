@@ -188,6 +188,66 @@ func TestSubscribeViewOverPrivateBaseTableUsesDeclarationPermission(t *testing.T
 	}
 }
 
+func TestDeclaredQueryAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x21)
+	bob := visibilityRuntimeIdentity(0x22)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	result, err := rt.CallQuery(context.Background(), "recent_messages",
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:read"),
+	)
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if len(result.Rows) != 1 || result.Rows[0][1].AsString() != alice.Hex() {
+		t.Fatalf("visible query rows = %#v, want only caller row", result.Rows)
+	}
+}
+
+func TestDeclaredViewAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x23)
+	bob := visibilityRuntimeIdentity(0x24)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		View(ViewDeclaration{
+			Name:        "live_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+
+	sub, err := rt.SubscribeView(context.Background(), "live_messages", 8,
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:subscribe"),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeView: %v", err)
+	}
+	if len(sub.InitialRows) != 1 || sub.InitialRows[0][1].AsString() != alice.Hex() {
+		t.Fatalf("visible view rows = %#v, want only caller row", sub.InitialRows)
+	}
+}
+
 func TestDeclaredReadMissingPermissionRejectsBeforeExecutionOrRegistration(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
@@ -344,6 +404,14 @@ func insertMessageReducer(ctx *schema.ReducerContext, args []byte) ([]byte, erro
 	return nil, err
 }
 
+func insertMessageWithBodyReducer(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("missing id")
+	}
+	_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(uint64(args[0])), types.NewString(string(args[1:]))})
+	return nil, err
+}
+
 func insertMessage(t *testing.T, rt *Runtime, body string) {
 	t.Helper()
 	res, err := rt.CallReducer(context.Background(), "insert_message", []byte(body))
@@ -353,6 +421,26 @@ func insertMessage(t *testing.T, rt *Runtime, body string) {
 	if res.Status != StatusCommitted {
 		t.Fatalf("insert reducer status = %v, err = %v, want committed", res.Status, res.Error)
 	}
+}
+
+func insertMessageWithBody(t *testing.T, rt *Runtime, id byte, body string) {
+	t.Helper()
+	args := append([]byte{id}, []byte(body)...)
+	res, err := rt.CallReducer(context.Background(), "insert_message_with_body", args)
+	if err != nil {
+		t.Fatalf("insert visibility reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("insert visibility reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+}
+
+func visibilityRuntimeIdentity(seed byte) types.Identity {
+	var id types.Identity
+	for i := range id {
+		id[i] = seed
+	}
+	return id
 }
 
 func assertStringSlice(t *testing.T, got, want []string, label string) {

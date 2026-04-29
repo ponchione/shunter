@@ -211,6 +211,9 @@ type SegmentWriter struct {
 // CreateSegment creates a new segment file.
 func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 	path := filepath.Join(dir, SegmentFileName(startTxID))
+	if err := requireCreatableSegmentPath(path); err != nil {
+		return nil, err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return nil, err
@@ -226,6 +229,20 @@ func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 		size:    SegmentHeaderSize,
 		startTx: startTxID,
 	}, nil
+}
+
+func requireCreatableSegmentPath(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: segment file %s is not a regular file", ErrOpen, path)
+	}
+	return nil
 }
 
 // OpenSegmentForAppend opens an existing segment for appending.

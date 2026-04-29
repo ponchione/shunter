@@ -373,6 +373,16 @@ func canonicalizePredicate(pred Predicate) Predicate {
 		}
 		p.Filter = canonicalizePredicate(p.Filter)
 		return p
+	case CrossJoin:
+		if p.Filter == nil {
+			return p
+		}
+		if p.Left == p.Right {
+			p.Filter = canonicalizeSelfJoinFilter(p.Filter)
+			return p
+		}
+		p.Filter = canonicalizePredicate(p.Filter)
+		return p
 	default:
 		return pred
 	}
@@ -505,6 +515,12 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 			e.writeByte(1)
 		} else {
 			e.writeByte(0)
+		}
+		if p.Filter == nil {
+			e.writeByte(0)
+		} else {
+			e.writeByte(1)
+			encodePredicate(e, p.Filter)
 		}
 	default:
 		// Sealed interface — no external impls reach this point.

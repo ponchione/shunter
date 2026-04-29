@@ -127,7 +127,6 @@ func TestMigrationPlanReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
 	current.Module.Version = "v1.1.0"
-	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{Name: "history", Required: []string{"messages:read"}}}
 	current.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
 		Surface: shunter.ReadModelSurfaceQuery,
 		Name:    "history",
@@ -147,15 +146,45 @@ func TestMigrationPlanReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	plan := Plan(old, current, PlanOptions{})
 
 	requirePlanEntry(t, plan, ChangeKindMetadata, SurfaceModule, "chat")
-	requirePlanEntry(t, plan, ChangeKindMetadata, SurfacePermission, "query.history")
 	requirePlanEntry(t, plan, ChangeKindMetadata, SurfaceReadModel, "query.history")
 	migrationEntry := requirePlanEntry(t, plan, ChangeKindMetadata, SurfaceMigrationMetadata, "module")
 	if migrationEntry.MigrationMetadata == nil || migrationEntry.MigrationMetadata.Notes != "metadata-only release" {
 		t.Fatalf("migration metadata entry = %#v, want current module metadata", migrationEntry.MigrationMetadata)
 	}
-	if plan.Summary.MetadataOnly != 4 {
-		t.Fatalf("summary metadata only = %d, want 4", plan.Summary.MetadataOnly)
+	if plan.Summary.MetadataOnly != 3 {
+		t.Fatalf("summary metadata only = %d, want 3", plan.Summary.MetadataOnly)
 	}
+}
+
+func TestMigrationPlanClassifiesStricterReadPolicyAsBreaking(t *testing.T) {
+	old := contractFixture()
+	old.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{Access: schema.TableAccessPublic}
+	current := contractFixture()
+	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPermissioned,
+		Permissions: []string{"messages:read"},
+	}
+
+	plan := Plan(old, current, PlanOptions{})
+
+	entry := requirePlanEntry(t, plan, ChangeKindBreaking, SurfaceTableReadPolicy, "messages")
+	if entry.Action != PlanActionManualReviewNeeded || entry.Severity != PlanSeverityBlocking {
+		t.Fatalf("read policy entry action/severity = %s/%s, want blocking manual review", entry.Action, entry.Severity)
+	}
+}
+
+func TestMigrationPlanClassifiesLooserReadPolicyAsManualReview(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{Access: schema.TableAccessPublic}
+
+	plan := Plan(old, current, PlanOptions{})
+
+	entry := requirePlanEntry(t, plan, ChangeKindAdditive, SurfaceTableReadPolicy, "messages")
+	if entry.Action != PlanActionManualReviewNeeded || entry.Severity != PlanSeverityWarning {
+		t.Fatalf("read policy entry action/severity = %s/%s, want warning manual review", entry.Action, entry.Severity)
+	}
+	assertPlanClassification(t, entry, shunter.MigrationClassificationManualReviewNeeded)
 }
 
 func TestMigrationPlanJSONIsDeterministicAndNewlineTerminated(t *testing.T) {

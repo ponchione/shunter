@@ -26,18 +26,33 @@ func handleSubscribeMulti(
 	executor ExecutorInbox,
 	sl SchemaLookup,
 ) {
+	handleSubscribeMultiWithVisibility(ctx, conn, msg, executor, sl, nil)
+}
+
+func handleSubscribeMultiWithVisibility(
+	ctx context.Context,
+	conn *Conn,
+	msg *SubscribeMultiMsg,
+	executor ExecutorInbox,
+	sl SchemaLookup,
+	visibilityFilters []VisibilityFilter,
+) {
 	receipt := time.Now()
 	readSL := authorizedSchemaLookupForConn(sl, conn)
+	caller := readCallerContext(conn)
 	preds := make([]any, 0, len(msg.QueryStrings))
 	hashIdentities := make([]*types.Identity, 0, len(msg.QueryStrings))
 	for _, qs := range msg.QueryStrings {
-		compiled, err := compileSQLQueryString(qs, readSL, &conn.Identity, false, false)
+		compiled, err := CompileSQLQueryStringWithVisibility(qs, readSL, &caller.Identity, SQLQueryValidationOptions{
+			AllowLimit:      false,
+			AllowProjection: false,
+		}, visibilityFilters, caller.AllowAllPermissions)
 		if err != nil {
 			sendSubscribeCompileError(conn, receipt, msg.RequestID, msg.QueryID, err, qs)
 			return
 		}
-		preds = append(preds, compiled.Predicate)
-		hashIdentities = append(hashIdentities, callerHashIdentity(conn, compiled))
+		preds = append(preds, compiled.Predicate())
+		hashIdentities = append(hashIdentities, compiled.PredicateHashIdentity(caller.Identity))
 	}
 
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{

@@ -81,7 +81,7 @@ func validateWithOptions(pred Predicate, s SchemaLookup, opts validateOptions) e
 	case Join:
 		return validateJoin(p, s, opts)
 	case CrossJoin:
-		return validateCrossJoin(p, s)
+		return validateCrossJoin(p, s, opts)
 	default:
 		return fmt.Errorf("%w: unsupported predicate %T", ErrInvalidPredicate, pred)
 	}
@@ -233,7 +233,7 @@ func validateSelfJoinFilterAliasChildren(left, right Predicate, leftAlias, right
 	return nil
 }
 
-func validateCrossJoin(p CrossJoin, s SchemaLookup) error {
+func validateCrossJoin(p CrossJoin, s SchemaLookup, opts validateOptions) error {
 	if !s.TableExists(p.Left) {
 		return fmt.Errorf("%w: cross join left table %d", ErrTableNotFound, p.Left)
 	}
@@ -242,6 +242,21 @@ func validateCrossJoin(p CrossJoin, s SchemaLookup) error {
 	}
 	if p.Left == p.Right && p.LeftAlias == p.RightAlias {
 		return fmt.Errorf("%w: self-cross-join requires distinct relation aliases (table %d)", ErrInvalidPredicate, p.Left)
+	}
+	if p.Filter != nil {
+		for _, ft := range p.Filter.Tables() {
+			if ft != p.Left && ft != p.Right {
+				return fmt.Errorf("%w: cross join filter references table %d outside join", ErrInvalidPredicate, ft)
+			}
+		}
+		if p.Left == p.Right {
+			if err := validateSelfJoinFilterAliases(p.Filter, p.LeftAlias, p.RightAlias); err != nil {
+				return err
+			}
+		}
+		if err := validateWithOptions(p.Filter, s, opts); err != nil {
+			return err
+		}
 	}
 	return nil
 }

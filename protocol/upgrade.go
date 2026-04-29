@@ -54,6 +54,9 @@ type Server struct {
 	// protocol messages. Raw SQL handlers remain wired through Schema/State
 	// and Executor; declared reads use this explicit name-based surface.
 	DeclaredReads DeclaredReadHandler
+	// VisibilityFilters are row-level filters expanded into raw external SQL
+	// predicates after table-read admission and before execution/registration.
+	VisibilityFilters []VisibilityFilter
 	// Upgraded, when non-nil, overrides the built-in lifecycle and is
 	// called immediately after the WebSocket handshake completes. It
 	// is the extension point for tests that want to bypass OnConnect
@@ -237,10 +240,10 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 	handlers := &MessageHandlers{}
 	if s.Executor != nil && s.Schema != nil {
 		handlers.OnSubscribeSingle = func(ctx context.Context, conn *Conn, msg *SubscribeSingleMsg) {
-			handleSubscribeSingle(ctx, conn, msg, s.Executor, s.Schema)
+			handleSubscribeSingleWithVisibility(ctx, conn, msg, s.Executor, s.Schema, s.VisibilityFilters)
 		}
 		handlers.OnSubscribeMulti = func(ctx context.Context, conn *Conn, msg *SubscribeMultiMsg) {
-			handleSubscribeMulti(ctx, conn, msg, s.Executor, s.Schema)
+			handleSubscribeMultiWithVisibility(ctx, conn, msg, s.Executor, s.Schema, s.VisibilityFilters)
 		}
 	}
 	if s.Executor != nil {
@@ -256,7 +259,7 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 	}
 	if s.Schema != nil && s.State != nil {
 		handlers.OnOneOffQuery = func(ctx context.Context, conn *Conn, msg *OneOffQueryMsg) {
-			handleOneOffQuery(ctx, conn, msg, s.State, s.Schema)
+			handleOneOffQueryWithVisibility(ctx, conn, msg, s.State, s.Schema, s.VisibilityFilters)
 		}
 	}
 	if s.DeclaredReads != nil {

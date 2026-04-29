@@ -225,11 +225,29 @@ func validateModuleMetadata(m *Module, reg schema.SchemaRegistry) error {
 }
 
 func validateAuthoredPermissionMetadata(path string, metadata PermissionMetadata, errs *[]error) {
-	for _, required := range metadata.Required {
+	validatePermissionRequirements(path, metadata.Required, isReadPermissionMetadataPath(path), errs)
+}
+
+func validatePermissionRequirements(path string, required []string, rejectDuplicates bool, errs *[]error) {
+	seen := make(map[string]struct{}, len(required))
+	for _, required := range required {
 		if strings.TrimSpace(required) == "" {
 			*errs = append(*errs, fmt.Errorf("%s requirement must not be empty", path))
+			continue
 		}
+		if rejectDuplicates {
+			if _, exists := seen[required]; exists {
+				*errs = append(*errs, fmt.Errorf("%s requirement %q is duplicated", path, required))
+				continue
+			}
+		}
+		seen[required] = struct{}{}
 	}
+}
+
+func isReadPermissionMetadataPath(path string) bool {
+	return strings.Contains(path, "permissions.query.") ||
+		strings.Contains(path, "permissions.view.")
 }
 
 func validateAuthoredReadModelMetadata(path string, metadata ReadModelMetadata, reg schema.SchemaRegistry, errs *[]error) {
