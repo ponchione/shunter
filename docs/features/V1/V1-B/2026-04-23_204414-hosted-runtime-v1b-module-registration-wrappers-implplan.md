@@ -2,6 +2,8 @@
 
 > For Hermes: use the subagent-driven-development skill to execute this plan task-by-task if the user asks for implementation.
 
+Historical status: landed; retained as planning context only.
+
 Goal: add the V1-B top-level module authoring wrappers so an explicitly versioned, non-empty module can build successfully through the root `shunter` API.
 
 Architecture: keep `shunter.Module` as a thin owner over the existing `schema.Builder` seam. Do not redesign schema semantics and do not start runtime lifecycle/network work. V1-B should only expose root-package registration methods that delegate to the already-implemented schema builder and preserve existing schema-layer validation/errors.
@@ -37,9 +39,9 @@ Read and verified while writing this plan:
   - `schema.ErrAlreadyBuilt`
 - The minimal successful lower-level shape is established by the `schema.Builder` API itself: `SchemaVersion(1)` + `TableDef(...)` + `Build(...)`.
 
-Important live-repo reality right now:
-- `rtk go list .` still fails with `no Go files in /home/ponchione/source/shunter`.
-- So this plan assumes V1-A lands first or that V1-B is implemented stacked directly on top of the V1-A patch. Do not try to implement V1-B without the root-package owner types existing.
+Original live-repo reality while this plan was written:
+- `rtk go list .` still failed with `no Go files in /home/ponchione/source/shunter`.
+- This historical plan assumed V1-A would land first or that V1-B would be implemented stacked directly on top of the V1-A patch.
 
 ## Scope
 
@@ -633,8 +635,8 @@ V1-B is complete when all of the following are true:
 
 ## Risks and guardrails
 
-1. Current tree still lacks V1-A files.
-   - Guardrail: do not blur this into an implementation request for both V1-A and V1-B unless the user explicitly wants stacked implementation.
+1. The original tree still lacked V1-A files.
+   - Historical guardrail: do not blur this into an implementation request for both V1-A and V1-B unless the user explicitly wants stacked implementation.
 
 2. Testability of success-path internals.
    - Guardrail: keep root tests in package `shunter` so they can inspect `rt.engine` until public export/introspection APIs arrive in later slices.

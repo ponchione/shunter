@@ -2,8 +2,8 @@
 
 > For Hermes: use the subagent-driven-development skill to execute this plan task-by-task if the user asks for implementation.
 
-Status: concretely validated against the live repo on 2026-04-23.
-Scope: V1-C only; planning artifact, not implementation.
+Historical status: landed; retained as planning context only.
+Scope: V1-C only; planning artifact, not current implementation target.
 
 Goal: make `shunter.Build(module, config)` own the hosted-runtime build/recovery foundation instead of returning only a schema-engine-backed shell, while still deferring started goroutines, lifecycle, network serving, local calls, and public shutdown APIs to later V1 slices.
 
@@ -21,7 +21,7 @@ Read and verified while writing this plan:
 - `docs/specs/hosted-runtime-version-phases.md` defines V1-C as the runtime build pipeline after V1-A/V1-B.
 - `docs/hosted-runtime-implementation-roadmap.md` V1-3 says `Build(module, config)` should own subsystem assembly.
 - `docs/specs/hosted-runtime-v1-contract.md` says the normal app path should not manually assemble kernel internals.
-- Live repo reality at validation time: root-package V1-A/V1-B code is not present in this checkout yet (`module.go`, `config.go`, `runtime.go`, and `module_test.go` are absent). This plan is therefore stacked after the V1-A and V1-B implplans.
+- Original live-repo reality at planning time: root-package V1-A/V1-B code was not present in that checkout yet (`module.go`, `config.go`, `runtime.go`, and `module_test.go` were absent). This plan was therefore stacked after the V1-A and V1-B implplans.
 - Example binaries are not implementation sources of truth for this slice. Do not inspect or copy example code to design the runtime build pipeline.
 
 Go API facts verified with `rtk go doc` / file inspection:

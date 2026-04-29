@@ -73,19 +73,27 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		return nil, err
 	}
 
-	engine, err := mod.builder.Build(schema.EngineOptions{
+	schemaOpts := schema.EngineOptions{
 		DataDir:                 dataDir,
 		ExecutorQueueCapacity:   normalized.ExecutorQueueCapacity,
 		DurabilityQueueCapacity: normalized.DurabilityQueueCapacity,
 		EnableProtocol:          normalized.EnableProtocol,
-	})
+	}
+	if hasModuleDeclarationSQL(mod) {
+		preview, err := mod.builder.BuildPreview(schemaOpts)
+		if err != nil {
+			return nil, fmt.Errorf("build hosted runtime schema: %w", err)
+		}
+		if err := validateModuleDeclarationSQL(mod, preview.Registry()); err != nil {
+			return nil, err
+		}
+	}
+
+	engine, err := mod.builder.Build(schemaOpts)
 	if err != nil {
 		return nil, fmt.Errorf("build hosted runtime schema: %w", err)
 	}
 	registry := engine.Registry()
-	if err := validateModuleDeclarationSQL(mod, registry); err != nil {
-		return nil, err
-	}
 
 	state, recoveredTxID, resumePlan, err := openOrBootstrapState(dataDir, registry)
 	if err != nil {

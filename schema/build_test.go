@@ -50,6 +50,30 @@ func TestBuildSecondCallFails(t *testing.T) {
 	}
 }
 
+func TestBuildPreviewDoesNotFreezeBuilder(t *testing.T) {
+	b := validBuilder()
+	preview, err := b.BuildPreview(EngineOptions{})
+	if err != nil {
+		t.Fatalf("BuildPreview failed: %v", err)
+	}
+	if preview == nil {
+		t.Fatal("BuildPreview returned nil engine")
+	}
+
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build after preview failed: %v", err)
+	}
+	if e == nil {
+		t.Fatal("Build after preview returned nil engine")
+	}
+
+	_, err = b.Build(EngineOptions{})
+	if !errors.Is(err, ErrAlreadyBuilt) {
+		t.Fatalf("second Build should return ErrAlreadyBuilt, got %v", err)
+	}
+}
+
 func TestBuildAssignsTableIDs(t *testing.T) {
 	b := NewBuilder()
 	b.SchemaVersion(1)

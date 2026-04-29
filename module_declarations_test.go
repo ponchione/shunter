@@ -187,6 +187,25 @@ func TestBuildValidatesDeclaredReadSQLAgainstSchema(t *testing.T) {
 	}
 }
 
+func TestBuildInvalidDeclaredReadSQLDoesNotFreezeModule(t *testing.T) {
+	mod := validChatModule().Query(QueryDeclaration{
+		Name: "missing_messages",
+		SQL:  "SELECT * FROM missing",
+	})
+
+	_, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err == nil || !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("expected ErrInvalidDeclarationSQL, got %v", err)
+	}
+
+	missing := messagesTableDef()
+	missing.Name = "missing"
+	mod.TableDef(missing)
+	if _, err := Build(mod, Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build after fixing declaration SQL returned error: %v", err)
+	}
+}
+
 func TestBuildAcceptsValidDeclaredReadSQL(t *testing.T) {
 	mod := validChatModule().
 		Query(QueryDeclaration{

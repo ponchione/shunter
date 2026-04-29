@@ -2,8 +2,8 @@
 
 > For Hermes: use the subagent-driven-development skill to execute this plan task-by-task if the user asks for implementation.
 
-Status: concretely validated against the live repo on 2026-04-23.
-Scope: V1-F only; planning artifact, not implementation.
+Historical status: landed; retained as planning context only.
+Scope: V1-F only; planning artifact, not current implementation target.
 
 Goal: expose local reducer calls and minimal local read/query helpers on `shunter.Runtime` as legitimate secondary APIs for tests, tools, admin flows, and in-process integrations, without replacing the WebSocket-first external client model.
 
@@ -21,7 +21,7 @@ Read and verified while writing this plan:
 - `docs/specs/hosted-runtime-v1-contract.md` says the primary external client surface remains WebSocket, while local reducer/query calls are legitimate secondary APIs for tests, tooling, admin/maintenance flows, and in-process integrations.
 - `docs/features/V1/V1-D/2026-04-23_210537-hosted-runtime-v1d-runtime-lifecycle-ownership-implplan.md` defines `Start(ctx)`, `Close()`, `Ready()`, lifecycle state, and lifecycle-owned executor/scheduler/fan-out resources.
 - `docs/features/V1/V1-E/2026-04-23_212032-hosted-runtime-v1e-runtime-network-surface-implplan.md` defines the protocol-backed network surface and keeps local reducer/query APIs out of V1-E.
-- Live repo reality at validation time: the root `shunter` package is still absent in this checkout (`rtk go list .` reports `no Go files in /home/ponchione/source/shunter`). This plan is therefore stacked after V1-A, V1-B, V1-C, V1-D, and V1-E implementation plans.
+- Original live-repo reality at planning time: the root `shunter` package was absent in that checkout (`rtk go list .` reported `no Go files in /home/ponchione/source/shunter`). This plan was therefore stacked after V1-A, V1-B, V1-C, V1-D, and V1-E implementation plans.
 - The former bundled demo command is a demo consumer, not an implementation source of truth for V1-F runtime architecture.
 
 Go API facts verified with `rtk go doc` and file inspection:

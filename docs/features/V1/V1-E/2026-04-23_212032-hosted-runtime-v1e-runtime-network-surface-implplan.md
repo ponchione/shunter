@@ -2,8 +2,8 @@
 
 > For Hermes: use the subagent-driven-development skill to execute this plan task-by-task if the user asks for implementation.
 
-Status: concretely validated against the live repo on 2026-04-23.
-Scope: V1-E only; planning artifact, not implementation.
+Historical status: landed; retained as planning context only.
+Scope: V1-E only; planning artifact, not current implementation target.
 
 Goal: expose the V1-D lifecycle-owned runtime through a WebSocket-first network surface with both a simple serving call and a composable HTTP handler, while replacing V1-D's private no-op fan-out sender with protocol-backed delivery.
 
@@ -23,7 +23,7 @@ Read and verified while writing this plan:
   - protocol/network options through top-level config
 - `docs/specs/hosted-runtime-v1-contract.md` says the primary external client surface is the realtime WebSocket protocol, not REST or MCP.
 - `docs/features/V1/V1-D/2026-04-23_210537-hosted-runtime-v1d-runtime-lifecycle-ownership-implplan.md` deliberately keeps network serving out of V1-D and says V1-E owns protocol-backed fan-out delivery.
-- Live repo reality at validation time: the root `shunter` package is still absent in this checkout (`rtk go list .` reports `no Go files in /home/ponchione/source/shunter`). This V1-E plan is therefore stacked after the V1-A, V1-B, V1-C, and V1-D implementation plans.
+- Original live-repo reality at planning time: the root `shunter` package was absent in that checkout (`rtk go list .` reported `no Go files in /home/ponchione/source/shunter`). This V1-E plan was therefore stacked after the V1-A, V1-B, V1-C, and V1-D implementation plans.
 - The former bundled demo command remains a demo consumer, not an implementation source of truth for runtime architecture.
 
 Go API facts verified with `rtk go doc` and file inspection:

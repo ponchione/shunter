@@ -162,6 +162,20 @@ func validateModuleDeclarations(m *Module) error {
 	return nil
 }
 
+func hasModuleDeclarationSQL(m *Module) bool {
+	for _, query := range m.queries {
+		if strings.TrimSpace(query.SQL) != "" {
+			return true
+		}
+	}
+	for _, view := range m.views {
+		if strings.TrimSpace(view.SQL) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
 	for _, query := range m.queries {
 		if strings.TrimSpace(query.SQL) == "" {

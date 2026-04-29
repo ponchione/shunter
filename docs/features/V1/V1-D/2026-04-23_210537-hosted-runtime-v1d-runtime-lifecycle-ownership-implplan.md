@@ -2,8 +2,8 @@
 
 > For Hermes: use the subagent-driven-development skill to execute this plan task-by-task if the user asks for implementation.
 
-Status: concretely validated against the live repo on 2026-04-23.
-Scope: V1-D only; planning artifact, not implementation.
+Historical status: landed; retained as planning context only.
+Scope: V1-D only; planning artifact, not current implementation target.
 
 Goal: add `shunter.Runtime` lifecycle ownership so a V1-C-built runtime can start and stop its long-lived kernel workers safely, while keeping network serving, `ListenAndServe`, `HTTPHandler`, and local reducer/query APIs deferred to later V1 slices.
 
@@ -26,7 +26,7 @@ Read and verified while writing this plan:
   - fatal subsystem state observability
 - `docs/specs/hosted-runtime-v1-contract.md` says `Runtime` is the stable owner object for lifecycle and later network/local/export surfaces.
 - `docs/features/V1/V1-C/2026-04-23_205158-hosted-runtime-v1c-runtime-build-pipeline-implplan.md` deliberately defers started goroutines, public lifecycle APIs, network serving, and public shutdown APIs to V1-D/V1-E.
-- Live repo reality at validation time: the root `shunter` package is still not present in this checkout (`rtk go list .` reports `no Go files`). This plan is therefore stacked after the V1-A, V1-B, and V1-C implementation plans.
+- Original live-repo reality at planning time: the root `shunter` package was not present in that checkout (`rtk go list .` reported `no Go files`). This plan was therefore stacked after the V1-A, V1-B, and V1-C implementation plans.
 - The former bundled demo command remains a demo consumer, not an implementation source of truth for this slice.
 
 Go API facts verified with `rtk go doc` and file inspection:

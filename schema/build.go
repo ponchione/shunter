@@ -12,12 +12,31 @@ type Engine struct {
 // Registry returns the immutable schema registry.
 func (e *Engine) Registry() SchemaRegistry { return e.registry }
 
-// Build validates all registrations, assigns stable IDs, and constructs the Engine.
+// Build validates all registrations, assigns stable IDs, constructs the Engine,
+// and freezes the builder against later builds.
 func (b *Builder) Build(opts EngineOptions) (*Engine, error) {
 	if b.built {
 		return nil, ErrAlreadyBuilt
 	}
+	engine, err := b.buildEngine(opts)
+	if err != nil {
+		return nil, err
+	}
+	b.built = true
+	return engine, nil
+}
 
+// BuildPreview validates all registrations and constructs an Engine without
+// freezing the builder. It is intended for higher-level validation that needs a
+// schema registry before deciding whether to consume the module.
+func (b *Builder) BuildPreview(opts EngineOptions) (*Engine, error) {
+	if b.built {
+		return nil, ErrAlreadyBuilt
+	}
+	return b.buildEngine(opts)
+}
+
+func (b *Builder) buildEngine(opts EngineOptions) (*Engine, error) {
 	// Validate structure + reducer/schema rules on user registrations.
 	var allErrs []error
 	allErrs = append(allErrs, validateStructure(b)...)
@@ -100,7 +119,6 @@ func (b *Builder) Build(opts EngineOptions) (*Engine, error) {
 	}
 
 	reg := newSchemaRegistry(schemas, &builtBuilder)
-	b.built = true
 
 	return &Engine{registry: reg, opts: opts}, nil
 }

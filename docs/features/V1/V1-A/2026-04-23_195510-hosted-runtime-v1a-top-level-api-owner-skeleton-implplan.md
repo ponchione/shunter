@@ -1,7 +1,7 @@
 # Implplan: Hosted Runtime V1-A Top-Level API Owner Skeleton
 
-Status: ready for implementation after review/acceptance
-Scope: V1-A only; planning artifact, not implementation
+Historical status: landed; retained as planning context only.
+Scope: V1-A only; planning artifact, not current implementation target.
 
 ## Goal
 
@@ -38,9 +38,9 @@ This slice creates the owner vocabulary and public validation boundary. It delib
 
 ## Grounded repo facts
 
-Verified while writing this plan:
+Original facts verified while writing this plan:
 
-- `rtk go list .` currently fails with `no Go files in /home/gernsback/source/shunter`; V1-A creates the root package.
+- `rtk go list .` failed with `no Go files in /home/gernsback/source/shunter`; V1-A created the root package.
 - `schema.NewBuilder() *schema.Builder` exists.
 - `(*schema.Builder).Build(schema.EngineOptions) (*schema.Engine, error)` exists.
 - `schema.EngineOptions` currently has `DataDir`, `ExecutorQueueCapacity`, `DurabilityQueueCapacity`, `EnableProtocol`, and `StartupSnapshotSchema`.

@@ -1,5 +1,9 @@
 # V1-C Task 01: Reconfirm stack prerequisites and kernel contracts
 
+Historical note: V1-C has landed. In the current repo, the root package and
+V1-B success-path tests should already pass; failures here indicate regression
+or an intentionally old checkout, not active implementation prerequisites.
+
 Parent plan: `docs/features/V1/V1-C/2026-04-23_205158-hosted-runtime-v1c-runtime-build-pipeline-implplan.md`
 
 Objective: verify V1-C is stacked on V1-A and V1-B and re-ground the build/recovery design against kernel contracts.
@@ -15,6 +19,6 @@ Checks:
 - `rtk go doc ./commitlog.NewSnapshotWriter`
 - `rtk go doc ./executor.ReducerRegistry`
 
-Stop if:
-- the root package is still absent
+Historical stop conditions:
+- the root package is absent in an old checkout
 - V1-B success-path tests fail

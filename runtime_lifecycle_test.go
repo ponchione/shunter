@@ -3,6 +3,7 @@ package shunter
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -91,6 +92,77 @@ func TestRuntimeCloseIsIdempotent(t *testing.T) {
 	}
 	if err := rt.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
+	}
+}
+
+func TestRuntimeConcurrentDuplicateStartIsStable(t *testing.T) {
+	rt := buildValidTestRuntime(t)
+	startedHook := make(chan struct{})
+	releaseHook := make(chan struct{})
+	oldHook := runtimeStartAfterDurabilityHook
+	runtimeStartAfterDurabilityHook = func(*Runtime) error {
+		close(startedHook)
+		<-releaseHook
+		return nil
+	}
+	defer func() { runtimeStartAfterDurabilityHook = oldHook }()
+
+	firstErr := make(chan error, 1)
+	go func() {
+		firstErr <- rt.Start(context.Background())
+	}()
+	<-startedHook
+
+	const duplicateStarts = 8
+	errs := make(chan error, duplicateStarts)
+	for range duplicateStarts {
+		go func() {
+			errs <- rt.Start(context.Background())
+		}()
+	}
+	for range duplicateStarts {
+		if err := <-errs; !errors.Is(err, ErrRuntimeStarting) {
+			t.Fatalf("duplicate Start error = %v, want ErrRuntimeStarting", err)
+		}
+	}
+
+	close(releaseHook)
+	if err := <-firstErr; err != nil {
+		t.Fatalf("first Start returned error: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close after concurrent Start: %v", err)
+	}
+}
+
+func TestRuntimeConcurrentDuplicateCloseIsStable(t *testing.T) {
+	rt := buildValidTestRuntime(t)
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	const closers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, closers)
+	for range closers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- rt.Close()
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Close returned error: %v", err)
+		}
+	}
+	if rt.Ready() {
+		t.Fatal("runtime ready after concurrent Close")
+	}
+	if got := rt.Health().State; got != RuntimeStateClosed {
+		t.Fatalf("state after concurrent Close = %q, want %q", got, RuntimeStateClosed)
 	}
 }
 
