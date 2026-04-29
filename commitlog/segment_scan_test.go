@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -225,6 +226,44 @@ func TestScanSegmentsZeroLengthSealedSegmentFailsLoudly(t *testing.T) {
 	}
 	if len(segments) != 0 || horizon != 0 {
 		t.Fatalf("partial scan = (%+v, %d), want no segments or horizon", segments, horizon)
+	}
+}
+
+func TestScanSegmentsMalformedSegmentFilenameFailsLoudly(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		fileName   string
+		wantDetail string
+	}{
+		{
+			name:       "invalid",
+			fileName:   "not-a-segment.log",
+			wantDetail: `invalid segment filename "not-a-segment.log"`,
+		},
+		{
+			name:       "non-canonical",
+			fileName:   "1.log",
+			wantDetail: `non-canonical segment filename "1.log"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, tc.fileName)
+			if err := os.WriteFile(path, []byte("not used"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			segments, horizon, err := ScanSegments(dir)
+			if err == nil {
+				t.Fatal("expected malformed segment filename to fail loudly")
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("ScanSegments error = %v, want detail %q", err, tc.wantDetail)
+			}
+			if len(segments) != 0 || horizon != 0 {
+				t.Fatalf("partial scan = (%+v, %d), want no segments or horizon", segments, horizon)
+			}
+		})
 	}
 }
 

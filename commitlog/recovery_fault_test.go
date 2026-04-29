@@ -1019,6 +1019,46 @@ func TestOpenAndRecoverSegmentHeaderFaultsFailLoudly(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverMalformedSegmentFilenamesFailLoudly(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		fileName   string
+		wantDetail string
+	}{
+		{
+			name:       "invalid",
+			fileName:   "not-a-segment.log",
+			wantDetail: `invalid segment filename "not-a-segment.log"`,
+		},
+		{
+			name:       "non-canonical",
+			fileName:   "1.log",
+			wantDetail: `non-canonical segment filename "1.log"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			_, reg := testSchema()
+			writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+			if err := os.WriteFile(filepath.Join(root, tc.fileName), []byte("not used"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+			if err == nil {
+				t.Fatal("expected malformed segment filename to fail recovery loudly")
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("recovery error = %v, want detail %q", err, tc.wantDetail)
+			}
+			if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+				t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+			}
+			assertZeroRecoveryReport(t, report)
+		})
+	}
+}
+
 func TestOpenAndRecoverSnapshotSchemaMismatchFailsLoudly(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
