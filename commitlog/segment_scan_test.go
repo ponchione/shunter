@@ -3,6 +3,7 @@ package commitlog
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,6 +163,71 @@ func TestScanSegmentsCorruptFirstRecordActiveSegmentClassifiesEmptyDamagedTail(t
 	}
 }
 
+func TestScanSegmentsZeroLengthActiveSegmentClassifiesEmptyDamagedTail(t *testing.T) {
+	dir := t.TempDir()
+
+	path := createZeroLengthSegment(t, dir, 7)
+
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatalf("ScanSegments() error = %v", err)
+	}
+	if len(segments) != 1 {
+		t.Fatalf("len(segments) = %d, want 1", len(segments))
+	}
+	assertSegmentInfo(t, segments[0], path, 7, 6, true)
+	if horizon != 6 {
+		t.Fatalf("horizon = %d, want 6", horizon)
+	}
+	if segments[0].AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("append mode = %d, want %d", segments[0].AppendMode, AppendByFreshNextSegment)
+	}
+}
+
+func TestScanSegmentsZeroLengthRolloverRecoversValidPrefix(t *testing.T) {
+	dir := t.TempDir()
+
+	makeScanTestSegment(t, dir, 1, 1, 2)
+	path := createZeroLengthSegment(t, dir, 3)
+
+	segments, horizon, err := ScanSegments(dir)
+	if err != nil {
+		t.Fatalf("ScanSegments() error = %v", err)
+	}
+	if len(segments) != 2 {
+		t.Fatalf("len(segments) = %d, want 2", len(segments))
+	}
+	assertSegmentInfo(t, segments[0], filepath.Join(dir, SegmentFileName(1)), 1, 2, true)
+	assertSegmentInfo(t, segments[1], path, 3, 2, true)
+	if horizon != 2 {
+		t.Fatalf("horizon = %d, want 2", horizon)
+	}
+	if segments[0].AppendMode != AppendForbidden {
+		t.Fatalf("first append mode = %d, want %d", segments[0].AppendMode, AppendForbidden)
+	}
+	if segments[1].AppendMode != AppendByFreshNextSegment {
+		t.Fatalf("last append mode = %d, want %d", segments[1].AppendMode, AppendByFreshNextSegment)
+	}
+}
+
+func TestScanSegmentsZeroLengthSealedSegmentFailsLoudly(t *testing.T) {
+	dir := t.TempDir()
+
+	createZeroLengthSegment(t, dir, 1)
+	makeScanTestSegment(t, dir, 2, 2)
+
+	segments, horizon, err := ScanSegments(dir)
+	if err == nil {
+		t.Fatal("expected zero-length sealed segment to fail loudly")
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("ScanSegments error = %v, want io.EOF", err)
+	}
+	if len(segments) != 0 || horizon != 0 {
+		t.Fatalf("partial scan = (%+v, %d), want no segments or horizon", segments, horizon)
+	}
+}
+
 func TestScanSegmentsCorruptActiveSegmentAfterValidPrefixUsesFreshNextSegment(t *testing.T) {
 	dir := t.TempDir()
 
@@ -296,6 +362,15 @@ func makeScanTestSegment(t *testing.T, dir string, startTx uint64, txs ...uint64
 		t.Fatalf("Close() error = %v", err)
 	}
 	return filepath.Join(dir, SegmentFileName(startTx))
+}
+
+func createZeroLengthSegment(t *testing.T, dir string, startTx uint64) string {
+	t.Helper()
+	path := filepath.Join(dir, SegmentFileName(startTx))
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	return path
 }
 
 func makeManualScanTestSegment(t *testing.T, dir string, startTx uint64, txs ...uint64) string {

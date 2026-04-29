@@ -513,6 +513,40 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "snapshot-covered-zero-length-rollover-recovers-snapshot",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+				createZeroLengthSegment(t, root, 3)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 2 {
+					t.Fatalf("maxTxID = %d, want 2", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+				if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+					t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+					t.Fatalf("replayed range = %+v, want none", report.ReplayedTxRange)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 2 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 2)", report.HasDurableLog, report.DurableLogHorizon)
+				}
+				if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 3 || report.SegmentCoverage[0].MaxTxID != 2 {
+					t.Fatalf("segment coverage = %+v, want empty rollover segment 3..2", report.SegmentCoverage)
+				}
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 3 || report.DamagedTailSegments[0].LastTx != 2 {
+					t.Fatalf("damaged tail report = %+v, want empty damaged segment 3..2", report.DamagedTailSegments)
+				}
+				if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+					t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+				}
+			},
+		},
+		{
 			name: "snapshot-log-gap-to-truncated-rollover-first-record-fails-loudly",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
@@ -593,6 +627,46 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "snapshot-log-gap-to-zero-length-rollover-fails-loudly",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+				createZeroLengthSegment(t, root, 4)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err == nil {
+					t.Fatal("expected snapshot/log boundary gap error")
+				}
+				var gapErr *HistoryGapError
+				if !errors.As(err, &gapErr) {
+					t.Fatalf("expected HistoryGapError, got %T (%v)", err, err)
+				}
+				if gapErr.Expected != 3 || gapErr.Got != 4 {
+					t.Fatalf("HistoryGapError = %+v, want Expected=3 Got=4", gapErr)
+				}
+				if !errors.Is(err, ErrOpen) {
+					t.Fatalf("boundary gap error = %v, want ErrOpen category", err)
+				}
+				if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+				}
+				if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+					t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
+				}
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 4 || report.DamagedTailSegments[0].LastTx != 3 {
+					t.Fatalf("damaged tail report = %+v, want empty damaged segment 4..3", report.DamagedTailSegments)
+				}
+				if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 4 || report.SegmentCoverage[0].MaxTxID != 3 {
+					t.Fatalf("segment coverage = %+v, want empty rollover segment 4..3", report.SegmentCoverage)
+				}
+				if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
+					t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
+				}
+			},
+		},
+		{
 			name: "full-log-prefix-with-truncated-rollover-first-record-recovers-prefix",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				writeReplaySegment(t, root, 1,
@@ -617,6 +691,40 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 				}
 				if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 2}) {
 					t.Fatalf("replayed range = %+v, want 1..2", report.ReplayedTxRange)
+				}
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 3 || report.DamagedTailSegments[0].LastTx != 2 {
+					t.Fatalf("damaged tail report = %+v, want empty damaged segment 3..2", report.DamagedTailSegments)
+				}
+				if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+					t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+				}
+			},
+		},
+		{
+			name: "full-log-prefix-with-zero-length-rollover-recovers-prefix",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeReplaySegment(t, root, 1,
+					replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+					replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+				)
+				createZeroLengthSegment(t, root, 3)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 2 {
+					t.Fatalf("maxTxID = %d, want 2", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+				if report.HasSelectedSnapshot {
+					t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 2}) {
+					t.Fatalf("replayed range = %+v, want 1..2", report.ReplayedTxRange)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 2 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 2)", report.HasDurableLog, report.DurableLogHorizon)
 				}
 				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 3 || report.DamagedTailSegments[0].LastTx != 2 {
 					t.Fatalf("damaged tail report = %+v, want empty damaged segment 3..2", report.DamagedTailSegments)
@@ -653,6 +761,32 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
 				}
 				assertZeroRecoveryReport(t, report)
+			},
+		},
+		{
+			name: "zero-length-first-segment-fails-loudly",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				createZeroLengthSegment(t, root, 1)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err == nil {
+					t.Fatal("expected zero-length first segment error")
+				}
+				if !errors.Is(err, ErrTruncatedRecord) {
+					t.Fatalf("error = %v, want ErrTruncatedRecord", err)
+				}
+				if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 0 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 0)", report.HasDurableLog, report.DurableLogHorizon)
+				}
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 1 || report.DamagedTailSegments[0].LastTx != 0 {
+					t.Fatalf("damaged tail report = %+v, want empty damaged segment 1..0", report.DamagedTailSegments)
+				}
+				if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 1 || report.SegmentCoverage[0].MaxTxID != 0 {
+					t.Fatalf("segment coverage = %+v, want one empty 1..0 segment", report.SegmentCoverage)
+				}
 			},
 		},
 		{

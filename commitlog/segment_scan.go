@@ -219,6 +219,13 @@ func canTreatAsDamagedTail(err error, recordCount int) bool {
 func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 	sr, err := OpenSegment(path)
 	if err != nil {
+		if isLast && isUnwrittenSegmentHeaderError(err) {
+			startTx, parseErr := parseSegmentFileStartTx(filepath.Base(path))
+			if parseErr != nil {
+				return SegmentInfo{}, parseErr
+			}
+			return emptyDamagedTailSegmentInfo(path, startTx), nil
+		}
 		return SegmentInfo{}, err
 	}
 	defer sr.Close()
@@ -279,6 +286,24 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 
 	info.LastTx = types.TxID(lastTx)
 	return info, nil
+}
+
+func isUnwrittenSegmentHeaderError(err error) bool {
+	return errors.Is(err, io.EOF)
+}
+
+func emptyDamagedTailSegmentInfo(path string, startTx uint64) SegmentInfo {
+	lastTx := types.TxID(0)
+	if startTx > 0 {
+		lastTx = types.TxID(startTx - 1)
+	}
+	return SegmentInfo{
+		Path:       path,
+		StartTx:    types.TxID(startTx),
+		LastTx:     lastTx,
+		Valid:      true,
+		AppendMode: AppendByFreshNextSegment,
+	}
 }
 
 func canTreatAsEmptyDamagedTail(err error, recordCount int, isLast bool) bool {
