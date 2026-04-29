@@ -2319,89 +2319,111 @@ func TestCreateSnapshotRemoveLockFailureLeavesLockedSnapshotIgnoredAndCompleteLo
 	}
 }
 
-func TestCreateSnapshotTempWriteFailureLeavesNoSelectableSnapshotAndCompleteLogRecovers(t *testing.T) {
-	root := t.TempDir()
-	_, reg := testSchema()
-	committed := buildRecoveryCommittedState(t, reg)
-	players, ok := committed.Table(0)
-	if !ok {
-		t.Fatal("players table missing")
-	}
-	for _, row := range []types.ProductValue{
-		{types.NewUint64(1), types.NewString("alice")},
-		{types.NewUint64(2), types.NewString("bob")},
+func TestCreateSnapshotTempWriteFailuresLeaveNoSelectableSnapshotAndCompleteLogRecovers(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		configure func(*faultingSnapshotTempFile, error)
+	}{
+		{
+			name: "write",
+			configure: func(file *faultingSnapshotTempFile, faultErr error) {
+				file.writeErr = faultErr
+			},
+		},
+		{
+			name: "write-at",
+			configure: func(file *faultingSnapshotTempFile, faultErr error) {
+				file.writeAtErr = faultErr
+			},
+		},
 	} {
-		if err := players.InsertRow(players.AllocRowID(), row); err != nil {
-			t.Fatal(err)
-		}
-	}
-	committed.SetCommittedTxID(2)
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			_, reg := testSchema()
+			committed := buildRecoveryCommittedState(t, reg)
+			players, ok := committed.Table(0)
+			if !ok {
+				t.Fatal("players table missing")
+			}
+			for _, row := range []types.ProductValue{
+				{types.NewUint64(1), types.NewString("alice")},
+				{types.NewUint64(2), types.NewString("bob")},
+			} {
+				if err := players.InsertRow(players.AllocRowID(), row); err != nil {
+					t.Fatal(err)
+				}
+			}
+			committed.SetCommittedTxID(2)
 
-	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg).(*FileSnapshotWriter)
-	snapshotDir := filepath.Join(writer.baseDir, "2")
-	tmpPath := filepath.Join(snapshotDir, snapshotTempFileName)
-	writeErr := errors.New("temp write failed")
-	writer.openTemp = func(path string) (snapshotTempFile, error) {
-		if path != tmpPath {
-			t.Fatalf("open temp path = %q, want %q", path, tmpPath)
-		}
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-		if err != nil {
-			return nil, err
-		}
-		return &faultingSnapshotTempFile{File: file, writeErr: writeErr}, nil
-	}
+			writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg).(*FileSnapshotWriter)
+			snapshotDir := filepath.Join(writer.baseDir, "2")
+			tmpPath := filepath.Join(snapshotDir, snapshotTempFileName)
+			faultErr := errors.New("temp " + tc.name + " failed")
+			writer.openTemp = func(path string) (snapshotTempFile, error) {
+				if path != tmpPath {
+					t.Fatalf("open temp path = %q, want %q", path, tmpPath)
+				}
+				file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+				if err != nil {
+					return nil, err
+				}
+				wrapped := &faultingSnapshotTempFile{File: file}
+				tc.configure(wrapped, faultErr)
+				return wrapped, nil
+			}
 
-	err := writer.CreateSnapshot(committed, 2)
-	if !errors.Is(err, ErrSnapshot) {
-		t.Fatalf("snapshot creation error = %v, want ErrSnapshot category", err)
-	}
-	if !errors.Is(err, writeErr) {
-		t.Fatalf("snapshot creation error = %v, want wrapped write failure", err)
-	}
-	var completionErr *SnapshotCompletionError
-	if !errors.As(err, &completionErr) {
-		t.Fatalf("expected SnapshotCompletionError, got %v", err)
-	}
-	if completionErr.Phase != "write-temp" || completionErr.Path != tmpPath {
-		t.Fatalf("completion error = %+v, want write-temp on temp path", completionErr)
-	}
-	if HasLockFile(snapshotDir) {
-		t.Fatal("snapshot lock should be removed after temp write failure")
-	}
-	for _, name := range []string{snapshotTempFileName, snapshotFileName} {
-		if _, err := os.Stat(filepath.Join(snapshotDir, name)); !os.IsNotExist(err) {
-			t.Fatalf("%s should not exist after temp write failure, stat err=%v", name, err)
-		}
-	}
+			err := writer.CreateSnapshot(committed, 2)
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("snapshot creation error = %v, want ErrSnapshot category", err)
+			}
+			if !errors.Is(err, faultErr) {
+				t.Fatalf("snapshot creation error = %v, want wrapped %s failure", err, tc.name)
+			}
+			var completionErr *SnapshotCompletionError
+			if !errors.As(err, &completionErr) {
+				t.Fatalf("expected SnapshotCompletionError, got %v", err)
+			}
+			if completionErr.Phase != "write-temp" || completionErr.Path != tmpPath {
+				t.Fatalf("completion error = %+v, want write-temp on temp path", completionErr)
+			}
+			if HasLockFile(snapshotDir) {
+				t.Fatal("snapshot lock should be removed after temp write failure")
+			}
+			for _, name := range []string{snapshotTempFileName, snapshotFileName} {
+				if _, err := os.Stat(filepath.Join(snapshotDir, name)); !os.IsNotExist(err) {
+					t.Fatalf("%s should not exist after temp %s failure, stat err=%v", name, tc.name, err)
+				}
+			}
 
-	writeReplaySegment(t, root, 1,
-		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
-		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
-		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
-	)
+			writeReplaySegment(t, root, 1,
+				replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+				replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+				replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+			)
 
-	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if maxTxID != 3 {
-		t.Fatalf("maxTxID = %d, want 3", maxTxID)
-	}
-	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
-	assertSkippedSnapshot(t, report, 2, SnapshotSkipReadFailed)
-	if report.HasSelectedSnapshot {
-		t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
-	}
-	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
-		t.Fatalf("replayed range = %+v, want 1..3", report.ReplayedTxRange)
-	}
-	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
-		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+			recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if maxTxID != 3 {
+				t.Fatalf("maxTxID = %d, want 3", maxTxID)
+			}
+			assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+			assertSkippedSnapshot(t, report, 2, SnapshotSkipReadFailed)
+			if report.HasSelectedSnapshot {
+				t.Fatalf("selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+			}
+			if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+				t.Fatalf("replayed range = %+v, want 1..3", report.ReplayedTxRange)
+			}
+			if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+				t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+			}
+		})
 	}
 }
 
-func TestCreateSnapshotTempOpenAndSyncFailuresLeaveNoSelectableSnapshotAndCompleteLogRecovers(t *testing.T) {
+func TestCreateSnapshotTempOpenSyncAndCloseFailuresLeaveNoSelectableSnapshotAndCompleteLogRecovers(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		phase     string
@@ -2434,6 +2456,23 @@ func TestCreateSnapshotTempOpenAndSyncFailuresLeaveNoSelectableSnapshotAndComple
 						return nil, err
 					}
 					return &faultingSnapshotTempFile{File: file, syncErr: faultErr}, nil
+				}
+			},
+		},
+		{
+			name:  "close-temp",
+			phase: "close-temp",
+			configure: func(t *testing.T, writer *FileSnapshotWriter, tmpPath string, faultErr error) {
+				t.Helper()
+				writer.openTemp = func(path string) (snapshotTempFile, error) {
+					if path != tmpPath {
+						t.Fatalf("open temp path = %q, want %q", path, tmpPath)
+					}
+					file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+					if err != nil {
+						return nil, err
+					}
+					return &faultingSnapshotTempFile{File: file, closeErr: faultErr}, nil
 				}
 			},
 		},
