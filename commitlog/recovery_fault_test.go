@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -581,6 +582,51 @@ func TestOpenAndRecoverHeaderOnlySegmentBoundaries(t *testing.T) {
 	})
 }
 
+func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
+	t.Run("valid-record-with-invalid-changeset-payload", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, rawPayload: []byte{0xff}},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected invalid changeset payload to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay decode error %q missing tx or segment context", err)
+		}
+		if !strings.Contains(err.Error(), "changeset too short") {
+			t.Fatalf("replay decode error %q missing payload failure detail", err)
+		}
+	})
+
+	t.Run("valid-record-with-unsafe-duplicate-primary-key", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice-again")}}},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected duplicate primary key payload to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		var pkErr *store.PrimaryKeyViolationError
+		if !errors.As(err, &pkErr) {
+			t.Fatalf("expected PrimaryKeyViolationError, got %T (%v)", err, err)
+		}
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay apply error %q missing tx or segment context", err)
+		}
+	})
+}
+
 func TestCreateSnapshotParentSyncFailureLeavesNoSelectableArtifacts(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
@@ -637,6 +683,19 @@ func TestCreateSnapshotParentSyncFailureLeavesNoSelectableArtifacts(t *testing.T
 	_, readErr := ReadSnapshot(snapshotDir)
 	if readErr == nil {
 		t.Fatal("incomplete snapshot directory should not be readable")
+	}
+}
+
+func assertNoRecoveredStateAfterReplayFault(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, durableHorizon types.TxID) {
+	t.Helper()
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != durableHorizon {
+		t.Fatalf("durable log report = (%v, %d), want (true, %d)", report.HasDurableLog, report.DurableLogHorizon, durableHorizon)
+	}
+	if report.HasSelectedSnapshot || report.RecoveredTxID != 0 || report.ReplayedTxRange != (RecoveryTxIDRange{}) || report.ResumePlan != (RecoveryResumePlan{}) {
+		t.Fatalf("report = %+v, want no selected snapshot, recovered tx, replay range, or resume plan", report)
 	}
 }
 
