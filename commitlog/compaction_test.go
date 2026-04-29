@@ -363,6 +363,47 @@ func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	assertFileExists(t, active)
 }
 
+func TestRunCompactionRetainsEmptyDamagedActiveTail(t *testing.T) {
+	dir := t.TempDir()
+	covered := makeScanTestSegment(t, dir, 1, 1, 2)
+	active := makeScanTestSegment(t, dir, 3, 3)
+	truncateScanTestFileToOffset(t, active, int64(SegmentHeaderSize+RecordHeaderSize-1))
+
+	coveredIdx := filepath.Join(dir, OffsetIndexFileName(1))
+	activeIdx := filepath.Join(dir, OffsetIndexFileName(3))
+	for _, path := range []string{coveredIdx, activeIdx} {
+		idx, err := CreateOffsetIndex(path, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		syncCalls++
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 2); err != nil {
+		t.Fatalf("RunCompaction() error = %v", err)
+	}
+	if syncCalls != 1 {
+		t.Fatalf("syncDir calls = %d, want 1", syncCalls)
+	}
+	assertFileMissing(t, covered)
+	assertFileMissing(t, coveredIdx)
+	assertFileExists(t, active)
+	assertFileExists(t, activeIdx)
+}
+
 func assertCompactionFailureContext(t *testing.T, err, cause error, operation, path string) {
 	t.Helper()
 	if !errors.Is(err, cause) {
