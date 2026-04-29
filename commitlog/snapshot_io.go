@@ -314,6 +314,13 @@ type SnapshotWriter interface {
 	CreateSnapshot(committed *store.CommittedState, txID types.TxID) error
 }
 
+type snapshotTempFile interface {
+	io.Writer
+	WriteAt([]byte, int64) (int, error)
+	Sync() error
+	Close() error
+}
+
 type FileSnapshotWriter struct {
 	baseDir       string
 	reg           schema.SchemaRegistry
@@ -321,13 +328,18 @@ type FileSnapshotWriter struct {
 	inProgress    bool
 	beforeWrite   chan struct{}
 	continueWrite chan struct{}
+	openTemp      func(string) (snapshotTempFile, error)
 	rename        func(string, string) error
 	syncDir       func(string) error
 	removeLock    func(string) error
 }
 
 func NewSnapshotWriter(baseDir string, reg schema.SchemaRegistry) SnapshotWriter {
-	return &FileSnapshotWriter{baseDir: baseDir, reg: reg, rename: os.Rename, syncDir: syncDir, removeLock: RemoveLockFile}
+	return &FileSnapshotWriter{baseDir: baseDir, reg: reg, openTemp: openSnapshotTempFile, rename: os.Rename, syncDir: syncDir, removeLock: RemoveLockFile}
+}
+
+func openSnapshotTempFile(path string) (snapshotTempFile, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 }
 
 func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txID types.TxID) error {
@@ -369,7 +381,11 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 			_ = os.Remove(tmpPath)
 		}
 	}()
-	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	openTemp := w.openTemp
+	if openTemp == nil {
+		openTemp = openSnapshotTempFile
+	}
+	f, err := openTemp(tmpPath)
 	if err != nil {
 		return &SnapshotCompletionError{Phase: "open-temp", Path: tmpPath, Err: err}
 	}
@@ -420,7 +436,7 @@ func validateSnapshotHorizon(committed *store.CommittedState, txID types.TxID) e
 	return nil
 }
 
-func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.CommittedState, txID types.TxID) error {
+func (w *FileSnapshotWriter) writeSnapshotFile(f snapshotTempFile, committed *store.CommittedState, txID types.TxID) error {
 	if err := writeFull(f, SnapshotMagic[:]); err != nil {
 		return err
 	}

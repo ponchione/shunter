@@ -1275,6 +1275,94 @@ func TestCreateSnapshotOpenTempFailureReturnsSnapshotCompletionErrorAndCleansArt
 	}
 }
 
+func TestCreateSnapshotTempFileFaultsReturnSnapshotCompletionErrorAndCleanArtifacts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		phase     string
+		configure func(*faultingSnapshotTempFile, error)
+	}{
+		{
+			name:  "write",
+			phase: "write-temp",
+			configure: func(f *faultingSnapshotTempFile, err error) {
+				f.writeErr = err
+			},
+		},
+		{
+			name:  "write-at",
+			phase: "write-temp",
+			configure: func(f *faultingSnapshotTempFile, err error) {
+				f.writeAtErr = err
+			},
+		},
+		{
+			name:  "sync",
+			phase: "sync-temp",
+			configure: func(f *faultingSnapshotTempFile, err error) {
+				f.syncErr = err
+			},
+		},
+		{
+			name:  "close",
+			phase: "close-temp",
+			configure: func(f *faultingSnapshotTempFile, err error) {
+				f.closeErr = err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs, reg := buildSnapshotCommittedState(t)
+			baseDir := t.TempDir()
+			snapshotBase := filepath.Join(baseDir, "snapshots")
+			snapshotDir := filepath.Join(snapshotBase, "97")
+			tmpPath := filepath.Join(snapshotDir, snapshotTempFileName)
+			finalPath := filepath.Join(snapshotDir, snapshotFileName)
+			faultErr := errors.New(tc.name + " failed")
+			writer := NewSnapshotWriter(snapshotBase, reg).(*FileSnapshotWriter)
+			writer.openTemp = func(path string) (snapshotTempFile, error) {
+				if path != tmpPath {
+					t.Fatalf("open temp path = %q, want %q", path, tmpPath)
+				}
+				file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+				if err != nil {
+					return nil, err
+				}
+				wrapped := &faultingSnapshotTempFile{File: file}
+				tc.configure(wrapped, faultErr)
+				return wrapped, nil
+			}
+
+			cs.SetCommittedTxID(97)
+			err := writer.CreateSnapshot(cs, 97)
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("snapshot temp %s error = %v, want ErrSnapshot category", tc.name, err)
+			}
+			if !errors.Is(err, faultErr) {
+				t.Fatalf("snapshot temp %s error = %v, want wrapped injected fault", tc.name, err)
+			}
+			var completionErr *SnapshotCompletionError
+			if !errors.As(err, &completionErr) {
+				t.Fatalf("expected SnapshotCompletionError, got %v", err)
+			}
+			if completionErr.Phase != tc.phase || completionErr.Path != tmpPath {
+				t.Fatalf("completion error = %+v, want %s on temp path", completionErr, tc.phase)
+			}
+			if HasLockFile(snapshotDir) {
+				t.Fatal("snapshot lock should be removed after temp-file fault")
+			}
+			if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+				t.Fatalf("snapshot temp file should be removed after %s fault, stat err=%v", tc.name, err)
+			}
+			if _, err := os.Stat(finalPath); !os.IsNotExist(err) {
+				t.Fatalf("final snapshot should not exist after %s fault, stat err=%v", tc.name, err)
+			}
+			if _, err := ReadSnapshot(snapshotDir); err == nil {
+				t.Fatalf("snapshot should not be readable after %s fault", tc.name)
+			}
+		})
+	}
+}
+
 func TestCreateSnapshotRenameFailureReturnsSnapshotErrorAndCleansArtifacts(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
@@ -1404,6 +1492,43 @@ func TestCreateSnapshotRejectsTxIDThatDoesNotMatchCommittedHorizon(t *testing.T)
 	if mismatch.SnapshotTxID != 3 || mismatch.CommittedTxID != 2 {
 		t.Fatalf("mismatch = %+v, want SnapshotTxID=3 CommittedTxID=2", mismatch)
 	}
+}
+
+type faultingSnapshotTempFile struct {
+	*os.File
+	writeErr   error
+	writeAtErr error
+	syncErr    error
+	closeErr   error
+}
+
+func (f *faultingSnapshotTempFile) Write(p []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return f.File.Write(p)
+}
+
+func (f *faultingSnapshotTempFile) WriteAt(p []byte, off int64) (int, error) {
+	if f.writeAtErr != nil {
+		return 0, f.writeAtErr
+	}
+	return f.File.WriteAt(p, off)
+}
+
+func (f *faultingSnapshotTempFile) Sync() error {
+	if f.syncErr != nil {
+		return f.syncErr
+	}
+	return f.File.Sync()
+}
+
+func (f *faultingSnapshotTempFile) Close() error {
+	err := f.File.Close()
+	if f.closeErr != nil {
+		return f.closeErr
+	}
+	return err
 }
 
 func buildLargeSnapshotCommittedState(t testing.TB, rowCount int) (*store.CommittedState, schema.SchemaRegistry) {
