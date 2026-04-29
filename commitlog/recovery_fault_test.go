@@ -1713,6 +1713,149 @@ func TestCreateSnapshotDirectorySyncFailureFailsLoudlyAndLeavesRecoverableSnapsh
 	}
 }
 
+func TestCreateSnapshotRenameAfterMoveFailureFailsLoudlyAndLeavesRecoverableSnapshot(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	committed := buildRecoveryCommittedState(t, reg)
+	players, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("alice")}); err != nil {
+		t.Fatal(err)
+	}
+	committed.SetCommittedTxID(9)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg).(*FileSnapshotWriter)
+	snapshotDir := filepath.Join(writer.baseDir, "9")
+	finalPath := filepath.Join(snapshotDir, snapshotFileName)
+	renameErr := errors.New("rename moved file then failed")
+	writer.rename = func(oldPath, newPath string) error {
+		if filepath.Base(oldPath) != snapshotTempFileName || newPath != finalPath {
+			t.Fatalf("rename paths = (%q, %q), want temp to final snapshot", oldPath, newPath)
+		}
+		if err := os.Rename(oldPath, newPath); err != nil {
+			return err
+		}
+		return renameErr
+	}
+
+	err := writer.CreateSnapshot(committed, 9)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("snapshot creation error = %v, want ErrSnapshot category", err)
+	}
+	if !errors.Is(err, renameErr) {
+		t.Fatalf("snapshot creation error = %v, want wrapped rename failure", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "rename" || completionErr.Path != finalPath {
+		t.Fatalf("completion error = %+v, want rename on final snapshot path", completionErr)
+	}
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed after rename failure cleanup")
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotTempFileName)); !os.IsNotExist(err) {
+		t.Fatalf("snapshot temp should not remain after moved rename failure, stat err=%v", err)
+	}
+	if _, err := ReadSnapshot(snapshotDir); err != nil {
+		t.Fatalf("snapshot should be readable after post-move rename failure in current filesystem state: %v", err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 9 {
+		t.Fatalf("maxTxID = %d, want 9", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 9 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 9)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+		t.Fatalf("replayed range = %+v, want none", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 10 || plan.NextTxID != 10 {
+		t.Fatalf("resume plan = %+v, want fresh segment at tx 10", plan)
+	}
+}
+
+func TestCreateSnapshotRemoveLockFailureLeavesLockedSnapshotIgnoredAndCompleteLogRecovers(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	committed := buildRecoveryCommittedState(t, reg)
+	players, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	for _, row := range []types.ProductValue{
+		{types.NewUint64(1), types.NewString("alice")},
+		{types.NewUint64(2), types.NewString("bob")},
+	} {
+		if err := players.InsertRow(players.AllocRowID(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	committed.SetCommittedTxID(2)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg).(*FileSnapshotWriter)
+	removeErr := errors.New("remove lock failed")
+	writer.removeLock = func(string) error {
+		return removeErr
+	}
+
+	err := writer.CreateSnapshot(committed, 2)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("snapshot creation error = %v, want ErrSnapshot category", err)
+	}
+	if !errors.Is(err, removeErr) {
+		t.Fatalf("snapshot creation error = %v, want wrapped remove-lock failure", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "remove-lock" || filepath.Base(completionErr.Path) != ".lock" {
+		t.Fatalf("completion error = %+v, want remove-lock on lock path", completionErr)
+	}
+	snapshotDir := filepath.Join(writer.baseDir, "2")
+	if !HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should remain after remove-lock failure")
+	}
+	if _, err := ReadSnapshot(snapshotDir); err != nil {
+		t.Fatalf("final snapshot payload should be readable even while locked: %v", err)
+	}
+
+	writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+	)
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	if report.HasSelectedSnapshot || len(report.SkippedSnapshots) != 0 {
+		t.Fatalf("snapshot report = selected(%v, %d) skipped=%+v, want locked candidate ignored", report.HasSelectedSnapshot, report.SelectedSnapshotTxID, report.SkippedSnapshots)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+		t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+		t.Fatalf("replayed range = %+v, want 1..3", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+	}
+}
+
 func TestCreateSnapshotTempWriteFailureLeavesNoSelectableSnapshotAndCompleteLogRecovers(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
