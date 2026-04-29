@@ -48,8 +48,7 @@ func WriteSegmentHeader(w io.Writer) error {
 	buf[4] = SegmentVersion
 	// buf[5] = flags (0)
 	// buf[6:8] = padding (0)
-	_, err := w.Write(buf[:])
-	return err
+	return writeFull(w, buf[:])
 }
 
 // ReadSegmentHeader validates an 8-byte segment header.
@@ -93,17 +92,30 @@ func EncodeRecord(w io.Writer, rec *Record) error {
 	buf[8] = rec.RecordType
 	buf[9] = rec.Flags
 	binary.LittleEndian.PutUint32(buf[10:14], uint32(len(rec.Payload)))
-	if _, err := w.Write(buf[:]); err != nil {
+	if err := writeFull(w, buf[:]); err != nil {
 		return err
 	}
-	if _, err := w.Write(rec.Payload); err != nil {
+	if err := writeFull(w, rec.Payload); err != nil {
 		return err
 	}
 	crc := ComputeRecordCRC(rec)
 	var crcBuf [4]byte
 	binary.LittleEndian.PutUint32(crcBuf[:], crc)
-	_, err := w.Write(crcBuf[:])
-	return err
+	return writeFull(w, crcBuf[:])
+}
+
+func writeFull(w io.Writer, p []byte) error {
+	if len(p) == 0 {
+		return nil
+	}
+	n, err := w.Write(p)
+	if err != nil {
+		return err
+	}
+	if n != len(p) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func isZeroRecordHeader(buf [RecordHeaderSize]byte) bool {

@@ -42,6 +42,13 @@ func TestWireShapeSegmentHeaderLayoutBytes(t *testing.T) {
 	}
 }
 
+func TestWireShapeSegmentHeaderRejectsShortWrite(t *testing.T) {
+	err := WriteSegmentHeader(shortWriteSink{})
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("WriteSegmentHeader short write error = %v, want io.ErrShortWrite", err)
+	}
+}
+
 // Pin 2.
 func TestWireShapeSegmentHeaderSizeConstant(t *testing.T) {
 	if SegmentHeaderSize != 8 {
@@ -171,6 +178,14 @@ func TestWireShapeRecordHeaderLayoutBytes(t *testing.T) {
 	}
 	if !bytes.Equal(got[:RecordHeaderSize], wantHeader) {
 		t.Fatalf("record header bytes = %v, want %v", got[:RecordHeaderSize], wantHeader)
+	}
+}
+
+func TestWireShapeEncodeRecordRejectsShortWrite(t *testing.T) {
+	rec := &Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("payload")}
+	err := EncodeRecord(shortWriteSink{}, rec)
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("EncodeRecord short write error = %v, want io.ErrShortWrite", err)
 	}
 }
 
@@ -755,4 +770,13 @@ func wireShapeLookupTableID(t *testing.T, reg schema.SchemaRegistry, name string
 	}
 	t.Fatalf("table %q not found in registry", name)
 	return 0
+}
+
+type shortWriteSink struct{}
+
+func (shortWriteSink) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, nil
 }
