@@ -156,6 +156,65 @@ func FuzzOpenOffsetIndex(f *testing.F) {
 	})
 }
 
+func FuzzScanSingleSegment(f *testing.F) {
+	for _, seed := range segmentFuzzSeeds(f) {
+		f.Add(seed)
+	}
+
+	const maxSegmentBytes = 64 << 10
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > maxSegmentBytes {
+			t.Skip("segment fuzz input above bounded local limit")
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, SegmentFileName(1))
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		segments, horizon, err := ScanSegments(dir)
+		if err != nil {
+			return
+		}
+		if len(segments) != 1 {
+			t.Fatalf("accepted segment count = %d, want 1", len(segments))
+		}
+		seg := segments[0]
+		if seg.Path != path || seg.StartTx != 1 || !seg.Valid {
+			t.Fatalf("accepted segment info = %+v, want path %s start tx 1 valid", seg, path)
+		}
+		if seg.LastTx != horizon {
+			t.Fatalf("horizon = %d, want segment LastTx %d", horizon, seg.LastTx)
+		}
+		if seg.LastTx > 0 && seg.LastTx < seg.StartTx {
+			t.Fatalf("accepted segment has inverted non-empty range: %+v", seg)
+		}
+		if seg.AppendMode != AppendInPlace && seg.AppendMode != AppendByFreshNextSegment {
+			t.Fatalf("accepted active segment append mode = %d, want in-place or fresh-next", seg.AppendMode)
+		}
+
+		reader, err := OpenSegment(path)
+		if err != nil {
+			return
+		}
+		defer reader.Close()
+		for tx := types.TxID(1); tx <= seg.LastTx; tx++ {
+			rec, err := reader.Next()
+			if err != nil {
+				t.Fatalf("read accepted record tx %d: %v", tx, err)
+			}
+			if types.TxID(rec.TxID) != tx {
+				t.Fatalf("record tx = %d, want %d", rec.TxID, tx)
+			}
+		}
+		if seg.AppendMode == AppendInPlace {
+			if rec, err := reader.Next(); err == nil {
+				t.Fatalf("append-in-place segment had extra record after horizon: %+v", rec)
+			}
+		}
+	})
+}
+
 func recordFuzzSeeds(t testing.TB) [][]byte {
 	t.Helper()
 	var seeds [][]byte
@@ -216,6 +275,72 @@ func offsetIndexFuzzSeeds() [][]byte {
 	zeroOffset = appendOffsetIndexSeedEntry(zeroOffset, 2, SegmentHeaderSize+64)
 	seeds = append(seeds, zeroOffset)
 	return seeds
+}
+
+func segmentFuzzSeeds(t testing.TB) [][]byte {
+	t.Helper()
+	var seeds [][]byte
+	seeds = append(seeds, nil)
+	seeds = append(seeds, []byte{SegmentMagic[0], SegmentMagic[1], SegmentMagic[2]})
+	headerOnly := segmentHeaderSeed(t)
+	seeds = append(seeds, headerOnly)
+
+	validOne := segmentSeed(t, &Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("one")})
+	seeds = append(seeds, validOne)
+	seeds = append(seeds, validOne[:len(validOne)-1])
+	zeroTail := append([]byte(nil), validOne...)
+	zeroTail = append(zeroTail, make([]byte, RecordOverhead)...)
+	seeds = append(seeds, zeroTail)
+	partialZeroTail := append([]byte(nil), validOne...)
+	partialZeroTail = append(partialZeroTail, make([]byte, RecordHeaderSize-1)...)
+	seeds = append(seeds, partialZeroTail)
+
+	validTwo := segmentSeed(t,
+		&Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("one")},
+		&Record{TxID: 2, RecordType: RecordTypeChangeset, Payload: []byte("two")},
+	)
+	seeds = append(seeds, validTwo)
+
+	corruptTail := segmentSeed(t,
+		&Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("one")},
+		&Record{TxID: 2, RecordType: RecordTypeChangeset, Payload: []byte("two")},
+		&Record{TxID: 3, RecordType: RecordTypeChangeset, Payload: []byte("three")},
+	)
+	corruptTail[len(corruptTail)-1] ^= 0xff
+	seeds = append(seeds, corruptTail)
+
+	gap := segmentSeed(t,
+		&Record{TxID: 1, RecordType: RecordTypeChangeset, Payload: []byte("one")},
+		&Record{TxID: 3, RecordType: RecordTypeChangeset, Payload: []byte("gap")},
+	)
+	seeds = append(seeds, gap)
+
+	badFlags := segmentSeed(t, &Record{TxID: 1, RecordType: RecordTypeChangeset, Flags: 1, Payload: []byte("bad")})
+	seeds = append(seeds, badFlags)
+	return seeds
+}
+
+func segmentHeaderSeed(t testing.TB) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := WriteSegmentHeader(&buf); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func segmentSeed(t testing.TB, records ...*Record) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := WriteSegmentHeader(&buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range records {
+		if err := EncodeRecord(&buf, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return buf.Bytes()
 }
 
 func appendOffsetIndexSeedEntry(dst []byte, key uint64, off uint64) []byte {
