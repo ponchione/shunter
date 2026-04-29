@@ -252,6 +252,33 @@ func TestDecodeSchemaSnapshotRejectsDuplicateColumnIndexes(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsIndexUnknownColumn(t *testing.T) {
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1) // schema snapshot version
+	writeUint32(t, &buf, 1) // table count
+	writeUint32(t, &buf, 0) // table ID
+	if err := writeString(&buf, "players"); err != nil {
+		t.Fatal(err)
+	}
+	writeUint32(t, &buf, 1) // column count
+	writeSchemaSnapshotColumn(t, &buf, 0, "id")
+	writeUint32(t, &buf, 1) // index count
+	if err := writeString(&buf, "primary"); err != nil {
+		t.Fatal(err)
+	}
+	buf.Write([]byte{1, 1}) // unique, primary
+	writeUint32(t, &buf, 1) // index column count
+	writeUint32(t, &buf, 99)
+
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), `schema snapshot index "primary" references unknown column index 99 in table 0`) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want unknown index column detail", err)
+	}
+}
+
 func writeSchemaSnapshotColumn(t testing.TB, dst *bytes.Buffer, index uint32, name string) {
 	t.Helper()
 	writeUint32(t, dst, index)

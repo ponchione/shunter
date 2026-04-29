@@ -217,6 +217,9 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 				if colIdx > math.MaxInt32 {
 					return nil, 0, fmt.Errorf("column index overflow: %d", colIdx)
 				}
+				if _, ok := seenColumns[int(colIdx)]; !ok {
+					return nil, 0, fmt.Errorf("%w: schema snapshot index %q references unknown column index %d in table %d", ErrSnapshot, idxName, colIdx, tableID)
+				}
 				idxCols = append(idxCols, int(colIdx))
 			}
 			indexes = append(indexes, schema.IndexSchema{ID: schema.IndexID(idxID), Name: idxName, Columns: idxCols, Unique: unique, Primary: primary})
