@@ -162,7 +162,7 @@ func validateModuleDeclarations(m *Module) error {
 		names[name] = struct{}{}
 	}
 
-	return nil
+	return validateModuleVisibilityFilterNames(m)
 }
 
 func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {

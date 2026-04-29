@@ -34,6 +34,7 @@ const (
 	SurfaceReducer           Surface = "reducer"
 	SurfaceQuery             Surface = "query"
 	SurfaceView              Surface = "view"
+	SurfaceVisibilityFilter  Surface = "visibility_filter"
 	SurfacePermission        Surface = "permission"
 	SurfaceReadModel         Surface = "read_model"
 	SurfaceMigrationMetadata Surface = "migration_metadata"
@@ -81,6 +82,7 @@ func Compare(old, current shunter.ModuleContract) Report {
 	compareReducers(&out, old.Schema.Reducers, current.Schema.Reducers)
 	compareNamedQueries(&out, SurfaceQuery, old.Queries, current.Queries)
 	compareNamedViews(&out, old.Views, current.Views)
+	compareVisibilityFilters(&out, old.VisibilityFilters, current.VisibilityFilters)
 	comparePermissions(&out, old.Permissions, current.Permissions)
 	compareReadModels(&out, old.ReadModel.Declarations, current.ReadModel.Declarations)
 	compareMigrations(&out, old.Migrations, current.Migrations)
@@ -303,6 +305,26 @@ func compareNamedReadSQL(out *Report, addedKind, changedKind ChangeKind, surface
 	}
 }
 
+func compareVisibilityFilters(out *Report, oldFilters, currentFilters []shunter.VisibilityFilterDescription) {
+	oldByName := visibilityFilterMap(oldFilters)
+	currentByName := visibilityFilterMap(currentFilters)
+	for name, current := range currentByName {
+		old, ok := oldByName[name]
+		if !ok {
+			out.add(ChangeKindBreaking, SurfaceVisibilityFilter, name, "visibility filter added")
+			continue
+		}
+		if visibilityFilterSignature(old) != visibilityFilterSignature(current) {
+			out.add(ChangeKindBreaking, SurfaceVisibilityFilter, name, "visibility filter changed")
+		}
+	}
+	for name := range oldByName {
+		if _, ok := currentByName[name]; !ok {
+			out.add(ChangeKindBreaking, SurfaceVisibilityFilter, name, "visibility filter removed")
+		}
+	}
+}
+
 func comparePermissions(out *Report, oldPermissions, currentPermissions shunter.PermissionContract) {
 	comparePermissionCategory(out, "reducer", oldPermissions.Reducers, currentPermissions.Reducers)
 	comparePermissionCategory(out, "query", oldPermissions.Queries, currentPermissions.Queries)
@@ -443,6 +465,14 @@ func viewMap(views []shunter.ViewDescription) map[string]shunter.ViewDescription
 	return out
 }
 
+func visibilityFilterMap(filters []shunter.VisibilityFilterDescription) map[string]shunter.VisibilityFilterDescription {
+	out := make(map[string]shunter.VisibilityFilterDescription, len(filters))
+	for _, filter := range filters {
+		out[filter.Name] = filter
+	}
+	return out
+}
+
 func permissionMap(declarations []shunter.PermissionContractDeclaration) map[string]shunter.PermissionContractDeclaration {
 	out := make(map[string]shunter.PermissionContractDeclaration, len(declarations))
 	for _, declaration := range declarations {
@@ -485,6 +515,10 @@ func readPolicySignature(policy schema.ReadPolicy) string {
 		return policy.Access.String()
 	}
 	return fmt.Sprintf("%s(%s)", policy.Access, strings.Join(policy.Permissions, ","))
+}
+
+func visibilityFilterSignature(filter shunter.VisibilityFilterDescription) string {
+	return fmt.Sprintf("sql=%s table=%s table_id=%d sender=%t", filter.SQL, filter.ReturnTable, filter.ReturnTableID, filter.UsesCallerIdentity)
 }
 
 func migrationDeclarationMap(declarations []shunter.MigrationContractDeclaration) map[string]shunter.MigrationContractDeclaration {

@@ -125,3 +125,80 @@ When complete, update this file with:
 - validation commands run
 - task 08 assumptions about stored filter metadata
 
+Completed 2026-04-29.
+
+Public declaration API:
+
+- `VisibilityFilterDeclaration{Name, SQL}` in the root `shunter` package.
+- `(*Module).VisibilityFilter(VisibilityFilterDeclaration) *Module` registers
+  authored row-level visibility filter declarations.
+
+Validation rules actually enforced:
+
+- Blank visibility filter names fail build with `ErrEmptyDeclarationName`.
+- Duplicate visibility filter names fail build with
+  `ErrDuplicateDeclarationName`. Visibility filter names are checked within
+  the visibility-filter namespace.
+- Blank SQL fails build with `ErrInvalidDeclarationSQL`.
+- Filter SQL is compiled with `protocol.CompileSQLQueryString` using
+  subscription/table-shape options: `AllowLimit=false` and
+  `AllowProjection=false`.
+- Invalid SQL and unknown return tables fail build with
+  `ErrInvalidDeclarationSQL`.
+- The compiled filter must resolve exactly one referenced table, and that table
+  must be the filter return table.
+- Unsupported filter forms are rejected at build time: joins, column-list
+  projections, aggregate projections, and `LIMIT`.
+- Multiple filters for one return table are accepted and preserved in authored
+  declaration order.
+- `:sender` usage is recorded as `UsesCallerIdentity`.
+
+Contract metadata shape:
+
+```json
+"visibility_filters": [
+  {
+    "name": "own_messages",
+    "sql": "SELECT * FROM messages WHERE body = :sender",
+    "return_table": "messages",
+    "return_table_id": 0,
+    "uses_caller_identity": true
+  }
+]
+```
+
+Additional metadata consumers:
+
+- `ValidateModuleContract` recompiles visibility filter SQL against the
+  contract schema and verifies stored return-table and `:sender` metadata.
+- `contractdiff` reports add/remove/change events on the
+  `visibility_filter` surface.
+- TypeScript codegen emits a `visibilityFilters` metadata constant; generated
+  declaration execution remains unchanged.
+
+Validation commands run:
+
+```sh
+rtk go fmt . ./protocol ./query/sql ./codegen ./contractdiff
+rtk go test . -run 'Test.*(Visibility|Declaration|Contract|Read|Query|View)' -count=1
+rtk go test ./protocol ./query/sql ./codegen ./contractdiff -count=1
+rtk go vet . ./protocol ./query/sql ./codegen ./contractdiff
+rtk go test ./... -count=1
+rtk go tool staticcheck ./...
+```
+
+Task 08 assumptions about stored filter metadata:
+
+- Validated filter metadata is stored on the built runtime module snapshot as
+  `VisibilityFilterDescription` values and is exposed through
+  `Runtime.Describe()` and `Runtime.ExportContract()`.
+- Each stored filter has authored SQL, resolved return table name, resolved
+  return table ID, and `:sender` usage metadata.
+- Filters are not applied to raw SQL, declared queries, declared views, or
+  subscriptions yet; Task 08 owns read-plan visibility expansion and execution
+  filtering.
+- Task 08 can group filters by `ReturnTableID` and OR multiple filters for the
+  same table in stored declaration order.
+- The current Task 07 validation deliberately accepts only single-table,
+  table-shape filters so Task 08 does not need to support joins, projections,
+  aggregates, or limits in visibility filters before expanding them.

@@ -7,15 +7,16 @@ import "github.com/ponchione/shunter/schema"
 // and lifecycle registration to the underlying schema builder while owning
 // query/view declaration metadata directly.
 type Module struct {
-	name            string
-	version         string
-	metadata        map[string]string
-	builder         *schema.Builder
-	reducers        []ReducerDeclaration
-	queries         []QueryDeclaration
-	views           []ViewDeclaration
-	migration       MigrationMetadata
-	tableMigrations map[string]MigrationMetadata
+	name              string
+	version           string
+	metadata          map[string]string
+	builder           *schema.Builder
+	reducers          []ReducerDeclaration
+	queries           []QueryDeclaration
+	views             []ViewDeclaration
+	visibilityFilters []VisibilityFilterDeclaration
+	migration         MigrationMetadata
+	tableMigrations   map[string]MigrationMetadata
 }
 
 // NewModule creates a module definition shell with the supplied name.

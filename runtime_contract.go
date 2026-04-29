@@ -19,15 +19,16 @@ const (
 
 // ModuleContract is the canonical full module contract artifact.
 type ModuleContract struct {
-	ContractVersion uint32                  `json:"contract_version"`
-	Module          ModuleContractIdentity  `json:"module"`
-	Schema          schema.SchemaExport     `json:"schema"`
-	Queries         []QueryDescription      `json:"queries"`
-	Views           []ViewDescription       `json:"views"`
-	Permissions     PermissionContract      `json:"permissions"`
-	ReadModel       ReadModelContract       `json:"read_model"`
-	Migrations      MigrationContract       `json:"migrations"`
-	Codegen         CodegenContractMetadata `json:"codegen"`
+	ContractVersion   uint32                        `json:"contract_version"`
+	Module            ModuleContractIdentity        `json:"module"`
+	Schema            schema.SchemaExport           `json:"schema"`
+	Queries           []QueryDescription            `json:"queries"`
+	Views             []ViewDescription             `json:"views"`
+	VisibilityFilters []VisibilityFilterDescription `json:"visibility_filters"`
+	Permissions       PermissionContract            `json:"permissions"`
+	ReadModel         ReadModelContract             `json:"read_model"`
+	Migrations        MigrationContract             `json:"migrations"`
+	Codegen           CodegenContractMetadata       `json:"codegen"`
 }
 
 // ModuleContractIdentity is the module identity section of a contract.
@@ -103,13 +104,14 @@ func (r *Runtime) ExportContract() ModuleContract {
 			Version:  desc.Module.Version,
 			Metadata: copyStringMap(desc.Module.Metadata),
 		},
-		Schema:      schemaExport,
-		Queries:     queries,
-		Views:       views,
-		Permissions: buildPermissionContract(r.module.reducerDeclarations(), queries, views),
-		ReadModel:   buildReadModelContract(queries, views),
-		Migrations:  buildMigrationContract(schemaExport, desc.Module.Migration, desc.Module.TableMigrations, queries, views),
-		Codegen:     defaultCodegenContractMetadata(),
+		Schema:            schemaExport,
+		Queries:           queries,
+		Views:             views,
+		VisibilityFilters: normalizeVisibilityFilterDescriptions(desc.Module.VisibilityFilters),
+		Permissions:       buildPermissionContract(r.module.reducerDeclarations(), queries, views),
+		ReadModel:         buildReadModelContract(queries, views),
+		Migrations:        buildMigrationContract(schemaExport, desc.Module.Migration, desc.Module.TableMigrations, queries, views),
+		Codegen:           defaultCodegenContractMetadata(),
 	}
 }
 
@@ -140,6 +142,7 @@ func normalizeModuleContract(c ModuleContract) ModuleContract {
 	if c.Views == nil {
 		c.Views = []ViewDescription{}
 	}
+	c.VisibilityFilters = normalizeVisibilityFilterDescriptions(c.VisibilityFilters)
 	if c.Permissions.Reducers == nil {
 		c.Permissions.Reducers = []PermissionContractDeclaration{}
 	}
@@ -185,12 +188,13 @@ func emptyModuleContract() ModuleContract {
 			Tables:   []schema.TableExport{},
 			Reducers: []schema.ReducerExport{},
 		},
-		Queries:     []QueryDescription{},
-		Views:       []ViewDescription{},
-		Permissions: emptyPermissionContract(),
-		ReadModel:   emptyReadModelContract(),
-		Migrations:  emptyMigrationContract(),
-		Codegen:     defaultCodegenContractMetadata(),
+		Queries:           []QueryDescription{},
+		Views:             []ViewDescription{},
+		VisibilityFilters: []VisibilityFilterDescription{},
+		Permissions:       emptyPermissionContract(),
+		ReadModel:         emptyReadModelContract(),
+		Migrations:        emptyMigrationContract(),
+		Codegen:           defaultCodegenContractMetadata(),
 	}
 }
 

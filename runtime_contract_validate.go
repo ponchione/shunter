@@ -45,6 +45,7 @@ func (c ModuleContract) Validate() error {
 	reducerNames := validateContractReducers(c.Schema.Reducers, &errs)
 	queryNames, viewNames := validateContractReadDeclarations(c.Queries, c.Views, &errs)
 	validateContractDeclarationSQL(c.Schema, c.Queries, c.Views, &errs)
+	validateVisibilityFilterContract(c.VisibilityFilters, newContractSchemaLookup(c.Schema), &errs)
 
 	validatePermissionContract("reducer", c.Permissions.Reducers, reducerNames, &errs)
 	validatePermissionContract("query", c.Permissions.Queries, queryNames, &errs)
@@ -145,6 +146,32 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 		})
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
+		}
+	}
+}
+
+func validateVisibilityFilterContract(filters []VisibilityFilterDescription, lookup contractSchemaLookup, errs *[]error) {
+	seen := make(map[string]struct{}, len(filters))
+	for _, filter := range filters {
+		if !validateContractName("visibility_filters", filter.Name, seen, errs) {
+			continue
+		}
+		expected, err := visibilityFilterDescription(VisibilityFilterDeclaration{
+			Name: filter.Name,
+			SQL:  filter.SQL,
+		}, lookup)
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("visibility_filters.%s.sql invalid: %v", filter.Name, err))
+			continue
+		}
+		if filter.ReturnTable != expected.ReturnTable {
+			*errs = append(*errs, fmt.Errorf("visibility_filters.%s return_table = %q, want %q", filter.Name, filter.ReturnTable, expected.ReturnTable))
+		}
+		if filter.ReturnTableID != expected.ReturnTableID {
+			*errs = append(*errs, fmt.Errorf("visibility_filters.%s return_table_id = %d, want %d", filter.Name, filter.ReturnTableID, expected.ReturnTableID))
+		}
+		if filter.UsesCallerIdentity != expected.UsesCallerIdentity {
+			*errs = append(*errs, fmt.Errorf("visibility_filters.%s uses_caller_identity = %t, want %t", filter.Name, filter.UsesCallerIdentity, expected.UsesCallerIdentity))
 		}
 	}
 }

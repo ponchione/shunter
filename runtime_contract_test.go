@@ -52,6 +52,9 @@ func TestRuntimeExportContractIncludesModuleSchemaDeclarationsAndReservedSection
 	if contract.ReadModel.Declarations == nil || len(contract.ReadModel.Declarations) != 0 {
 		t.Fatalf("read model declarations = %#v, want reserved empty slice", contract.ReadModel.Declarations)
 	}
+	if contract.VisibilityFilters == nil || len(contract.VisibilityFilters) != 0 {
+		t.Fatalf("visibility filters = %#v, want reserved empty slice", contract.VisibilityFilters)
+	}
 	if contract.Migrations.Declarations == nil || len(contract.Migrations.Declarations) != 0 {
 		t.Fatalf("migration declarations = %#v, want reserved empty slice", contract.Migrations.Declarations)
 	}
@@ -412,6 +415,134 @@ func TestRuntimeExportContractIncludesDeclarationSQLMetadata(t *testing.T) {
 	assertViewSQL(t, decoded.Views, "live_messages", "SELECT * FROM messages WHERE body = 'hello'")
 }
 
+func TestRuntimeExportContractIncludesVisibilityFilterMetadata(t *testing.T) {
+	mod := validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+		Name: "own_messages",
+		SQL:  "SELECT * FROM messages WHERE body = :sender",
+	})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	if len(contract.VisibilityFilters) != 1 {
+		t.Fatalf("visibility filters = %#v, want one filter", contract.VisibilityFilters)
+	}
+	filter := contract.VisibilityFilters[0]
+	if filter.Name != "own_messages" {
+		t.Fatalf("filter name = %q, want own_messages", filter.Name)
+	}
+	if filter.SQL != "SELECT * FROM messages WHERE body = :sender" {
+		t.Fatalf("filter SQL = %q, want authored SQL", filter.SQL)
+	}
+	if filter.ReturnTable != "messages" || filter.ReturnTableID != 0 {
+		t.Fatalf("filter return table = %q/%d, want messages/0", filter.ReturnTable, filter.ReturnTableID)
+	}
+	if !filter.UsesCallerIdentity {
+		t.Fatal("filter UsesCallerIdentity = false, want true")
+	}
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected visibility filter metadata: %v", err)
+	}
+
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	if !strings.Contains(string(data), `"visibility_filters": [`) ||
+		!strings.Contains(string(data), `"return_table": "messages"`) ||
+		!strings.Contains(string(data), `"uses_caller_identity": true`) {
+		t.Fatalf("contract JSON missing visibility filter metadata:\n%s", data)
+	}
+	var decoded ModuleContract
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal contract JSON: %v", err)
+	}
+	if len(decoded.VisibilityFilters) != 1 || decoded.VisibilityFilters[0].Name != "own_messages" {
+		t.Fatalf("decoded visibility filters = %#v, want own_messages", decoded.VisibilityFilters)
+	}
+}
+
+func TestModuleContractValidationRejectsInvalidVisibilityFilterMetadata(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*ModuleContract)
+	}{
+		{
+			name: "blank name",
+			mutate: func(c *ModuleContract) {
+				c.VisibilityFilters[0].Name = " "
+			},
+		},
+		{
+			name: "invalid SQL",
+			mutate: func(c *ModuleContract) {
+				c.VisibilityFilters[0].SQL = "SELECT * FROM missing"
+			},
+		},
+		{
+			name: "wrong return table",
+			mutate: func(c *ModuleContract) {
+				c.VisibilityFilters[0].ReturnTable = "missing"
+			},
+		},
+		{
+			name: "wrong caller identity metadata",
+			mutate: func(c *ModuleContract) {
+				c.VisibilityFilters[0].UsesCallerIdentity = false
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mod := validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+				Name: "own_messages",
+				SQL:  "SELECT * FROM messages WHERE body = :sender",
+			})
+			rt, err := Build(mod, Config{DataDir: t.TempDir()})
+			if err != nil {
+				t.Fatalf("Build returned error: %v", err)
+			}
+			contract := rt.ExportContract()
+			tt.mutate(&contract)
+
+			err = ValidateModuleContract(contract)
+			if err == nil {
+				t.Fatal("ValidateModuleContract accepted invalid visibility filter metadata")
+			}
+			if !strings.Contains(err.Error(), "visibility_filters") {
+				t.Fatalf("ValidateModuleContract error = %v, want visibility_filters context", err)
+			}
+		})
+	}
+}
+
+func TestRuntimeExportContractVisibilityFiltersAreDetached(t *testing.T) {
+	mod := validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+		Name: "own_messages",
+		SQL:  "SELECT * FROM messages WHERE body = :sender",
+	})
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	contract.VisibilityFilters[0].Name = "mutated"
+	contract.VisibilityFilters[0].ReturnTable = "mutated"
+
+	again := rt.ExportContract()
+	if len(again.VisibilityFilters) != 1 {
+		t.Fatalf("visibility filters = %#v, want one filter", again.VisibilityFilters)
+	}
+	if again.VisibilityFilters[0].Name != "own_messages" || again.VisibilityFilters[0].ReturnTable != "messages" {
+		t.Fatalf("second visibility filter = %#v, want detached metadata", again.VisibilityFilters[0])
+	}
+}
+
 func TestRuntimeExportContractReturnsDetachedSnapshot(t *testing.T) {
 	rt := buildContractRuntime(t)
 
@@ -425,6 +556,7 @@ func TestRuntimeExportContractReturnsDetachedSnapshot(t *testing.T) {
 	contract.Views[0].Name = "mutated_view"
 	contract.Permissions.Reducers = append(contract.Permissions.Reducers, PermissionContractDeclaration{Name: "mutated"})
 	contract.ReadModel.Declarations = append(contract.ReadModel.Declarations, ReadModelContractDeclaration{Name: "mutated"})
+	contract.VisibilityFilters = append(contract.VisibilityFilters, VisibilityFilterDescription{Name: "mutated"})
 	contract.Migrations.Declarations = append(contract.Migrations.Declarations, MigrationContractDeclaration{Name: "mutated"})
 
 	again := rt.ExportContract()
@@ -444,6 +576,9 @@ func TestRuntimeExportContractReturnsDetachedSnapshot(t *testing.T) {
 	}
 	if len(again.ReadModel.Declarations) != 0 {
 		t.Fatalf("second contract read model declarations = %#v, want empty", again.ReadModel.Declarations)
+	}
+	if len(again.VisibilityFilters) != 0 {
+		t.Fatalf("second contract visibility filters = %#v, want empty", again.VisibilityFilters)
 	}
 	if len(again.Migrations.Declarations) != 0 {
 		t.Fatalf("second contract migration declarations = %#v, want empty", again.Migrations.Declarations)

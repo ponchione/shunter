@@ -150,6 +150,39 @@ func TestContractDiffDetectsDeclaredReadSQLChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceView, "live")
 }
 
+func TestContractDiffDetectsVisibilityFilterChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.VisibilityFilters = []shunter.VisibilityFilterDescription{{
+		Name:               "own_messages",
+		SQL:                "SELECT * FROM messages WHERE body = :sender",
+		ReturnTable:        "messages",
+		ReturnTableID:      0,
+		UsesCallerIdentity: true,
+	}}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceVisibilityFilter, "own_messages")
+
+	old = current
+	current = contractFixture()
+	current.VisibilityFilters = []shunter.VisibilityFilterDescription{{
+		Name:          "own_messages",
+		SQL:           "SELECT * FROM messages WHERE body = 'hello'",
+		ReturnTable:   "messages",
+		ReturnTableID: 0,
+	}}
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceVisibilityFilter, "own_messages")
+
+	old = current
+	current = contractFixture()
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceVisibilityFilter, "own_messages")
+}
+
 func TestContractDiffJSONFailsClearlyForMalformedInput(t *testing.T) {
 	_, err := CompareJSON([]byte(`{`), mustContractJSON(t, contractFixture()))
 	if err == nil {

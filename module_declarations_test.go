@@ -3,6 +3,9 @@ package shunter
 import (
 	"errors"
 	"testing"
+
+	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/types"
 )
 
 func TestModuleQueryDeclarationMetadataIsDescribed(t *testing.T) {
@@ -22,6 +25,24 @@ func TestModuleViewDeclarationMetadataIsDescribed(t *testing.T) {
 	assertViewDescription(t, desc.Views, "live_messages")
 	if len(desc.Queries) != 0 {
 		t.Fatalf("queries = %#v, want none", desc.Queries)
+	}
+}
+
+func TestModuleVisibilityFilterDeclarationMetadataIsDescribed(t *testing.T) {
+	mod := NewModule("chat").VisibilityFilter(VisibilityFilterDeclaration{
+		Name: "own_messages",
+		SQL:  "SELECT * FROM messages WHERE body = :sender",
+	})
+
+	desc := mod.Describe()
+	if len(desc.VisibilityFilters) != 1 {
+		t.Fatalf("visibility filters = %#v, want one filter", desc.VisibilityFilters)
+	}
+	if got := desc.VisibilityFilters[0].Name; got != "own_messages" {
+		t.Fatalf("filter name = %q, want own_messages", got)
+	}
+	if got := desc.VisibilityFilters[0].SQL; got != "SELECT * FROM messages WHERE body = :sender" {
+		t.Fatalf("filter SQL = %q, want authored SQL", got)
 	}
 }
 
@@ -222,6 +243,79 @@ func TestBuildAcceptsValidDeclaredReadSQL(t *testing.T) {
 	}
 }
 
+func TestBuildValidatesVisibilityFilterDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		mod  *Module
+		want error
+	}{
+		{
+			name: "blank name",
+			mod: validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+				Name: " ",
+				SQL:  "SELECT * FROM messages",
+			}),
+			want: ErrEmptyDeclarationName,
+		},
+		{
+			name: "duplicate name",
+			mod: validChatModule().
+				VisibilityFilter(VisibilityFilterDeclaration{Name: "own_messages", SQL: "SELECT * FROM messages"}).
+				VisibilityFilter(VisibilityFilterDeclaration{Name: "own_messages", SQL: "SELECT * FROM messages WHERE body = 'hello'"}),
+			want: ErrDuplicateDeclarationName,
+		},
+		{
+			name: "blank SQL",
+			mod: validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+				Name: "own_messages",
+				SQL:  " ",
+			}),
+			want: ErrInvalidDeclarationSQL,
+		},
+		{
+			name: "invalid SQL",
+			mod: validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+				Name: "own_messages",
+				SQL:  "SELECT FROM messages",
+			}),
+			want: ErrInvalidDeclarationSQL,
+		},
+		{
+			name: "unknown return table",
+			mod: validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+				Name: "own_messages",
+				SQL:  "SELECT * FROM missing",
+			}),
+			want: ErrInvalidDeclarationSQL,
+		},
+		{
+			name: "unsupported join",
+			mod: validChatModule().
+				TableDef(schema.TableDefinition{
+					Name: "owners",
+					Columns: []schema.ColumnDefinition{
+						{Name: "id", Type: types.KindUint64, PrimaryKey: true},
+						{Name: "body", Type: types.KindString},
+					},
+				}).
+				VisibilityFilter(VisibilityFilterDeclaration{
+					Name: "joined_messages",
+					SQL:  "SELECT messages.* FROM messages JOIN owners ON messages.id = owners.id",
+				}),
+			want: ErrInvalidDeclarationSQL,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(tt.mod, Config{DataDir: t.TempDir()})
+			if err == nil || !errors.Is(err, tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
 func TestModuleDeclarationNamesMustBeNonEmpty(t *testing.T) {
 	tests := []struct {
 		name string
@@ -340,6 +434,84 @@ func TestRuntimeDescribeIncludesBuiltModuleDeclarations(t *testing.T) {
 	runtimeDesc := rt.Describe()
 	assertQueryDescription(t, runtimeDesc.Module.Queries, "recent_messages")
 	assertViewDescription(t, runtimeDesc.Module.Views, "live_messages")
+}
+
+func TestRuntimeDescribeIncludesValidatedVisibilityFilterMetadata(t *testing.T) {
+	mod := validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+		Name: "own_messages",
+		SQL:  "SELECT * FROM messages WHERE body = :sender",
+	})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	desc := rt.Describe()
+	if len(desc.Module.VisibilityFilters) != 1 {
+		t.Fatalf("visibility filters = %#v, want one filter", desc.Module.VisibilityFilters)
+	}
+	filter := desc.Module.VisibilityFilters[0]
+	if filter.Name != "own_messages" {
+		t.Fatalf("filter name = %q, want own_messages", filter.Name)
+	}
+	if filter.SQL != "SELECT * FROM messages WHERE body = :sender" {
+		t.Fatalf("filter SQL = %q, want authored SQL", filter.SQL)
+	}
+	if filter.ReturnTable != "messages" || filter.ReturnTableID != 0 {
+		t.Fatalf("filter return table = %q/%d, want messages/0", filter.ReturnTable, filter.ReturnTableID)
+	}
+	if !filter.UsesCallerIdentity {
+		t.Fatal("filter UsesCallerIdentity = false, want true")
+	}
+}
+
+func TestRuntimeDescribePreservesMultipleVisibilityFiltersForOneTableInOrder(t *testing.T) {
+	mod := validChatModule().
+		VisibilityFilter(VisibilityFilterDeclaration{Name: "hello_messages", SQL: "SELECT * FROM messages WHERE body = 'hello'"}).
+		VisibilityFilter(VisibilityFilterDeclaration{Name: "own_messages", SQL: "SELECT * FROM messages WHERE body = :sender"})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	filters := rt.Describe().Module.VisibilityFilters
+	if len(filters) != 2 {
+		t.Fatalf("visibility filters = %#v, want two filters", filters)
+	}
+	if filters[0].Name != "hello_messages" || filters[1].Name != "own_messages" {
+		t.Fatalf("filter order = %#v, want declaration order", filters)
+	}
+	if filters[0].ReturnTable != "messages" || filters[1].ReturnTable != "messages" {
+		t.Fatalf("filter return tables = %#v, want messages for both", filters)
+	}
+}
+
+func TestRuntimeVisibilityFilterDescriptionsAreDetached(t *testing.T) {
+	mod := validChatModule().VisibilityFilter(VisibilityFilterDeclaration{
+		Name: "own_messages",
+		SQL:  "SELECT * FROM messages WHERE body = :sender",
+	})
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	desc := rt.Describe()
+	desc.Module.VisibilityFilters[0].Name = "mutated"
+	desc.Module.VisibilityFilters[0].SQL = "SELECT * FROM mutated"
+	desc.Module.VisibilityFilters[0].ReturnTable = "mutated"
+	desc.Module.VisibilityFilters[0].UsesCallerIdentity = false
+
+	again := rt.Describe()
+	filter := again.Module.VisibilityFilters[0]
+	if filter.Name != "own_messages" ||
+		filter.SQL != "SELECT * FROM messages WHERE body = :sender" ||
+		filter.ReturnTable != "messages" ||
+		!filter.UsesCallerIdentity {
+		t.Fatalf("second visibility filter = %#v, want detached metadata", filter)
+	}
 }
 
 func TestModuleDeclarationsDoNotAffectTableOrReducerRegistration(t *testing.T) {

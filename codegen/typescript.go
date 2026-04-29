@@ -61,6 +61,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptConstMap(&b, "tables", tableConstants)
 	b.WriteString("export type TableName = (typeof tables)[keyof typeof tables];\n\n")
 	writeTypeScriptTableReadPolicies(&b, contract.Schema.Tables, tableConstants)
+	writeTypeScriptVisibilityFilters(&b, contract.VisibilityFilters)
 	subscribeFunctionNames := make(map[string]int, len(contract.Schema.Tables)+len(contract.Views))
 	for i, table := range contract.Schema.Tables {
 		rowType := tableTypes[i].identifier + "Row"
@@ -162,6 +163,24 @@ func writeTypeScriptTableReadPolicies(b *bytes.Buffer, tables []schema.TableExpo
 	b.WriteString("} as const;\n\n")
 }
 
+func writeTypeScriptVisibilityFilters(b *bytes.Buffer, filters []shunter.VisibilityFilterDescription) {
+	b.WriteString("export const visibilityFilters = {\n")
+	identifiers := visibilityFilterTypeScriptIdentifiers(filters)
+	for i, identifier := range identifiers {
+		filter := filters[i]
+		fmt.Fprintf(
+			b,
+			"  %s: { sql: %s, returnTable: %s, returnTableId: %d, usesCallerIdentity: %t },\n",
+			identifier.identifier,
+			strconv.Quote(filter.SQL),
+			strconv.Quote(filter.ReturnTable),
+			filter.ReturnTableID,
+			filter.UsesCallerIdentity,
+		)
+	}
+	b.WriteString("} as const;\n\n")
+}
+
 func executableQueryIdentifiers(queries []shunter.QueryDescription, identifiers []namedTypeScriptIdentifier) []namedTypeScriptIdentifier {
 	out := make([]namedTypeScriptIdentifier, 0, len(queries))
 	for i, query := range queries {
@@ -247,6 +266,14 @@ func readModelTypeScriptIdentifiers(declarations []shunter.ReadModelContractDecl
 	names := make([]string, len(declarations))
 	for i, declaration := range declarations {
 		names[i] = declaration.Name
+	}
+	return uniqueTypeScriptIdentifiers(names, typeScriptCamelIdentifier)
+}
+
+func visibilityFilterTypeScriptIdentifiers(filters []shunter.VisibilityFilterDescription) []namedTypeScriptIdentifier {
+	names := make([]string, len(filters))
+	for i, filter := range filters {
+		names[i] = filter.Name
 	}
 	return uniqueTypeScriptIdentifiers(names, typeScriptCamelIdentifier)
 }

@@ -203,6 +203,26 @@ func TestTypeScriptGeneratorEmitsTableReadPolicyMetadata(t *testing.T) {
 	assertContains(t, ts, `messages: { access: "permissioned", permissions: ["messages:read"] },`)
 }
 
+func TestTypeScriptGeneratorEmitsVisibilityFilterMetadata(t *testing.T) {
+	contract := contractFixture()
+	contract.VisibilityFilters = []shunter.VisibilityFilterDescription{{
+		Name:               "own_messages",
+		SQL:                "SELECT * FROM messages WHERE body = :sender",
+		ReturnTable:        "messages",
+		ReturnTableID:      0,
+		UsesCallerIdentity: true,
+	}}
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export const visibilityFilters = {`)
+	assertContains(t, ts, `ownMessages: { sql: "SELECT * FROM messages WHERE body = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },`)
+}
+
 func contractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,

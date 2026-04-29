@@ -5,13 +5,14 @@ import "github.com/ponchione/shunter/schema"
 // ModuleDescription is a detached snapshot of authored module identity and
 // declaration metadata.
 type ModuleDescription struct {
-	Name            string
-	Version         string
-	Metadata        map[string]string
-	Queries         []QueryDescription
-	Views           []ViewDescription
-	Migration       MigrationMetadata
-	TableMigrations map[string]MigrationMetadata
+	Name              string
+	Version           string
+	Metadata          map[string]string
+	Queries           []QueryDescription
+	Views             []ViewDescription
+	VisibilityFilters []VisibilityFilterDescription
+	Migration         MigrationMetadata
+	TableMigrations   map[string]MigrationMetadata
 }
 
 // QueryDescription is a detached declaration summary for a named read query.
@@ -46,13 +47,14 @@ func (m *Module) Describe() ModuleDescription {
 		return ModuleDescription{Metadata: map[string]string{}}
 	}
 	return ModuleDescription{
-		Name:            m.name,
-		Version:         m.version,
-		Metadata:        m.MetadataMap(),
-		Queries:         describeQueryDeclarations(m.queries),
-		Views:           describeViewDeclarations(m.views),
-		Migration:       copyMigrationMetadata(m.migration),
-		TableMigrations: copyMigrationMetadataMap(m.tableMigrations),
+		Name:              m.name,
+		Version:           m.version,
+		Metadata:          m.MetadataMap(),
+		Queries:           describeQueryDeclarations(m.queries),
+		Views:             describeViewDeclarations(m.views),
+		VisibilityFilters: describeVisibilityFilterDeclarations(m.visibilityFilters),
+		Migration:         copyMigrationMetadata(m.migration),
+		TableMigrations:   copyMigrationMetadataMap(m.tableMigrations),
 	}
 }
 

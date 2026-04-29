@@ -88,6 +88,10 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	if err := validateModuleDeclarationSQL(mod, previewRegistry); err != nil {
 		return nil, err
 	}
+	visibilityFilters, err := validateModuleVisibilityFilters(mod, previewRegistry)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateModuleTableMigrations(mod, previewRegistry); err != nil {
 		return nil, err
 	}
@@ -116,7 +120,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		module:        newModuleSnapshot(mod),
+		module:        newModuleSnapshot(mod, visibilityFilters),
 		config:        copyConfig(cfg),
 		buildConfig:   normalized,
 		engine:        engine,
