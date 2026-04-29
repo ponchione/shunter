@@ -501,11 +501,11 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 	if err != nil {
 		return nil, err
 	}
-	sequences, err := readSnapshotSequences(f)
+	sequences, err := readSnapshotSequences(f, schemaByID)
 	if err != nil {
 		return nil, err
 	}
-	nextIDs, err := readSnapshotNextIDs(f)
+	nextIDs, err := readSnapshotNextIDs(f, schemaByID)
 	if err != nil {
 		return nil, err
 	}
@@ -614,15 +614,15 @@ func readSnapshotSchema(payload io.Reader) ([]schema.TableSchema, uint32, map[sc
 	return tables, schemaSnapshotVersion, schemaByID, nil
 }
 
-func readSnapshotSequences(payload io.Reader) (map[schema.TableID]uint64, error) {
-	return readSnapshotTableUint64Map(payload, "sequence")
+func readSnapshotSequences(payload io.Reader, schemaByID map[schema.TableID]*schema.TableSchema) (map[schema.TableID]uint64, error) {
+	return readSnapshotTableUint64Map(payload, "sequence", schemaByID)
 }
 
-func readSnapshotNextIDs(payload io.Reader) (map[schema.TableID]uint64, error) {
-	return readSnapshotTableUint64Map(payload, "next_id")
+func readSnapshotNextIDs(payload io.Reader, schemaByID map[schema.TableID]*schema.TableSchema) (map[schema.TableID]uint64, error) {
+	return readSnapshotTableUint64Map(payload, "next_id", schemaByID)
 }
 
-func readSnapshotTableUint64Map(payload io.Reader, section string) (map[schema.TableID]uint64, error) {
+func readSnapshotTableUint64Map(payload io.Reader, section string, schemaByID map[schema.TableID]*schema.TableSchema) (map[schema.TableID]uint64, error) {
 	values := map[schema.TableID]uint64{}
 	var count uint32
 	if err := binary.Read(payload, binary.LittleEndian, &count); err != nil {
@@ -640,6 +640,9 @@ func readSnapshotTableUint64Map(payload io.Reader, section string) (map[schema.T
 		id := schema.TableID(tableID)
 		if _, exists := values[id]; exists {
 			return nil, fmt.Errorf("%w: duplicate snapshot %s table ID %d", ErrSnapshot, section, tableID)
+		}
+		if _, ok := schemaByID[id]; !ok {
+			return nil, fmt.Errorf("%w: snapshot %s references unknown table %d", ErrSnapshot, section, tableID)
 		}
 		values[id] = next
 	}
@@ -671,7 +674,7 @@ func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema
 		snapshotTable := SnapshotTableData{TableID: id}
 		ts, ok := schemaByID[id]
 		if !ok {
-			return nil, fmt.Errorf("snapshot references unknown table %d", tableID)
+			return nil, fmt.Errorf("%w: snapshot table section references unknown table %d", ErrSnapshot, tableID)
 		}
 		for range rowCount {
 			var rowLen uint32
