@@ -157,6 +157,24 @@ func TestOpenSegmentRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestOpenSegmentRejectsDirectoryArtifactWithoutRemoving(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, SegmentFileName(1))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sr, err := OpenSegment(path)
+	if err == nil {
+		_ = sr.Close()
+		t.Fatal("expected directory segment artifact to fail read-only open")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenSegment error = %v, want ErrOpen category", err)
+	}
+	assertDirectoryArtifactExists(t, path)
+}
+
 func TestSegmentFileName(t *testing.T) {
 	got := SegmentFileName(1)
 	if got != "00000000000000000001.log" {

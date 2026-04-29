@@ -650,6 +650,32 @@ func TestReadSnapshotRejectsSymlinkSnapshotFile(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsDirectorySnapshotFileWithoutRemoving(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 77)
+	snapshotPath := filepath.Join(baseDir, "snapshots", "77", snapshotFileName)
+	if err := os.Remove(snapshotPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(snapshotPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadSnapshot(filepath.Join(baseDir, "snapshots", "77"))
+	if err == nil {
+		t.Fatal("expected directory snapshot file artifact to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("ReadSnapshot error = %v, want regular-file rejection detail", err)
+	}
+	assertDirectoryArtifactExists(t, snapshotPath)
+}
+
 func TestSnapshotBodyRejectsShortWrite(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	cs.SetCommittedTxID(91)

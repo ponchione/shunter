@@ -132,6 +132,24 @@ func TestOpenOffsetIndexRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestOpenOffsetIndexRejectsDirectoryArtifactWithoutRemoving(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := OpenOffsetIndex(path)
+	if err == nil {
+		_ = idx.Close()
+		t.Fatal("expected directory offset index artifact to fail read-only open")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenOffsetIndex error = %v, want ErrOpen category", err)
+	}
+	assertDirectoryArtifactExists(t, path)
+}
+
 func TestOpenOffsetIndexMutRejectsSymlinkWithoutExtendingTarget(t *testing.T) {
 	targetDir := t.TempDir()
 	targetPath := filepath.Join(targetDir, "external.idx")
