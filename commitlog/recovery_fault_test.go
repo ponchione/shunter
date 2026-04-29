@@ -1283,6 +1283,49 @@ func TestOpenAndRecoverHeaderOnlySegmentBoundaries(t *testing.T) {
 	})
 }
 
+func TestOpenAndRecoverSnapshotMarkerDirectoryArtifactsAreIgnored(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mark func(t *testing.T, root string, txID types.TxID)
+	}{
+		{name: "lock-directory", mark: markSnapshotLockedDirectory},
+		{name: "temp-directory", mark: markSnapshotTempDirectory},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			_, reg := testSchema()
+			writeFaultSnapshot(t, root, reg, 2, map[uint64]string{99: "unsafe-marker"})
+			tc.mark(t, root, 2)
+			writeReplaySegment(t, root, 1,
+				replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+				replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+				replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+			)
+
+			recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if maxTxID != 3 {
+				t.Fatalf("maxTxID = %d, want 3", maxTxID)
+			}
+			assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+			if report.HasSelectedSnapshot || len(report.SkippedSnapshots) != 0 {
+				t.Fatalf("snapshot report = selected(%v, %d) skipped=%+v, want marker candidate ignored", report.HasSelectedSnapshot, report.SelectedSnapshotTxID, report.SkippedSnapshots)
+			}
+			if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+				t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
+			}
+			if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+				t.Fatalf("replayed range = %+v, want 1..3", report.ReplayedTxRange)
+			}
+			if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+				t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+			}
+		})
+	}
+}
+
 func TestOpenAndRecoverIgnoresRolloverDirectoryArtifact(t *testing.T) {
 	t.Run("full-log-prefix-recovers-and-appends-in-place", func(t *testing.T) {
 		root := t.TempDir()
@@ -2573,9 +2616,23 @@ func markSnapshotLocked(t *testing.T, root string, txID types.TxID) {
 	}
 }
 
+func markSnapshotLockedDirectory(t *testing.T, root string, txID types.TxID) {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(root, "snapshots", txIDString(uint64(txID)), ".lock"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func markSnapshotTemp(t *testing.T, root string, txID types.TxID) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(root, "snapshots", txIDString(uint64(txID)), snapshotTempFileName), []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func markSnapshotTempDirectory(t *testing.T, root string, txID types.TxID) {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(root, "snapshots", txIDString(uint64(txID)), snapshotTempFileName), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
