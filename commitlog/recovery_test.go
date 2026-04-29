@@ -661,6 +661,69 @@ func TestOpenAndRecoverDetailedSecondRestartKeepsDamagedTailSegmentRecoverable(t
 	}
 }
 
+func TestOpenAndRecoverDetailedSecondRestartReplacesTornRolloverTail(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+	)
+	damagedPath := writeReplaySegment(t, root, 3,
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("partial-carol")}}},
+	)
+	truncateScanTestFileToOffset(t, damagedPath, int64(SegmentHeaderSize+RecordHeaderSize-1))
+
+	firstRecovered, firstMaxTxID, firstPlan, firstReport, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstMaxTxID != 2 {
+		t.Fatalf("first recovery maxTxID = %d, want 2", firstMaxTxID)
+	}
+	assertReplayPlayerRows(t, firstRecovered, map[uint64]string{1: "alice", 2: "bob"})
+	if firstPlan.AppendMode != AppendByFreshNextSegment || firstPlan.SegmentStartTx != 3 || firstPlan.NextTxID != 3 {
+		t.Fatalf("first recovery plan = %+v, want fresh segment at tx 3", firstPlan)
+	}
+	if len(firstReport.DamagedTailSegments) != 1 || firstReport.DamagedTailSegments[0].Path != damagedPath {
+		t.Fatalf("first damaged tail report = %+v, want only %s", firstReport.DamagedTailSegments, damagedPath)
+	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(root, firstPlan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(3, &store.Changeset{
+		TxID: 3,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts:   []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}},
+			},
+		},
+	})
+	if finalTxID, err := dw.Close(); err != nil {
+		t.Fatal(err)
+	} else if finalTxID != 3 {
+		t.Fatalf("durability final txID = %d, want 3", finalTxID)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("second recovery maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 3 || plan.NextTxID != 4 {
+		t.Fatalf("second recovery plan = %+v, want append-in-place on replacement tx 3 segment", plan)
+	}
+	if len(report.DamagedTailSegments) != 0 {
+		t.Fatalf("second damaged tail report = %+v, want none after replacement", report.DamagedTailSegments)
+	}
+}
+
 type recoveryRecord struct {
 	txID    uint64
 	inserts []types.ProductValue
