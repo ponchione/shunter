@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -134,4 +135,54 @@ func TestDurabilityWorkerRotatesIndexOnSegmentRotation(t *testing.T) {
 				tx, ents[0].ByteOffset, SegmentHeaderSize)
 		}
 	}
+}
+
+func TestDurabilityWorkerSegmentWriteFailureFailsClosedWithoutAdvancingDurable(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := dw.WaitUntilDurable(1)
+	if err := dw.seg.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	finalTx, fatalErr := dw.Close()
+	if fatalErr == nil {
+		t.Fatal("expected segment write failure to be returned on close")
+	}
+	if finalTx != 0 {
+		t.Fatalf("final durable tx = %d, want 0 after failed write", finalTx)
+	}
+	if got := dw.DurableTxID(); got != 0 {
+		t.Fatalf("DurableTxID = %d, want 0 after failed write", got)
+	}
+	select {
+	case txID := <-wait:
+		t.Fatalf("waiter released for tx %d despite failed write", txID)
+	default:
+	}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected enqueue after fatal durability failure to panic")
+		}
+		err, ok := r.(error)
+		if !ok {
+			t.Fatalf("panic = %T(%v), want error wrapping ErrDurabilityFailed", r, r)
+		}
+		if !errors.Is(err, ErrDurabilityFailed) {
+			t.Fatalf("panic error = %v, want ErrDurabilityFailed", err)
+		}
+	}()
+	dw.EnqueueCommitted(2, makeDurabilityTestChangeset(2))
 }
