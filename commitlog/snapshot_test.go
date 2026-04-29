@@ -102,6 +102,26 @@ func TestSchemaSnapshotCodecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsTrailingBytes(t *testing.T) {
+	_, reg := testSchema()
+	var buf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&buf, reg); err != nil {
+		t.Fatal(err)
+	}
+	buf.Write([]byte{0xde, 0xad, 0xbe, 0xef})
+
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+	if err == nil {
+		t.Fatal("expected trailing schema snapshot bytes to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("trailing schema snapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "trailing schema snapshot bytes") {
+		t.Fatalf("trailing schema snapshot error = %v, want explicit trailing-bytes detail", err)
+	}
+}
+
 func TestCreateAndReadSnapshotRoundTrip(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()

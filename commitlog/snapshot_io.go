@@ -194,6 +194,9 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		}
 		tables = append(tables, schema.TableSchema{ID: schema.TableID(tableID), Name: name, Columns: cols, Indexes: indexes})
 	}
+	if err := requireNoTrailingBytes(r, "trailing schema snapshot bytes"); err != nil {
+		return nil, 0, err
+	}
 	return tables, version, nil
 }
 
@@ -470,7 +473,7 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := requireSnapshotEOF(f); err != nil {
+	if err := requireNoTrailingBytes(f, "trailing snapshot bytes"); err != nil {
 		return nil, err
 	}
 
@@ -518,11 +521,11 @@ func readSnapshotHeader(f *os.File) (uint64, uint32, [32]byte, error) {
 	return txID, schemaVersion, expected, nil
 }
 
-func requireSnapshotEOF(f *os.File) error {
+func requireNoTrailingBytes(r io.Reader, detail string) error {
 	var trailing [1]byte
-	n, err := f.Read(trailing[:])
+	n, err := r.Read(trailing[:])
 	if n != 0 {
-		return fmt.Errorf("%w: trailing snapshot bytes", ErrSnapshot)
+		return fmt.Errorf("%w: %s", ErrSnapshot, detail)
 	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
