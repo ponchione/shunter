@@ -75,8 +75,9 @@ func RunCompaction(dir string, snapshotTxID types.TxID) error {
 	if len(deleted) == 0 && len(orphanedIndexes) == 0 {
 		// A prior attempt may have deleted the covered prefix and then failed
 		// while syncing the directory. Once the remaining log no longer starts
-		// at tx 1, a no-op retry still needs to make that cleanup durable.
-		if snapshotTxID != 0 && len(segments) > 0 && segments[0].StartTx > 1 {
+		// at tx 1, or no segment remains in an existing log directory, a no-op
+		// retry still needs to make that cleanup durable.
+		if snapshotTxID != 0 && compactionNoopNeedsSync(dir, segments) {
 			if err := syncDir(dir); err != nil {
 				return fmt.Errorf("commitlog: compact sync directory %s: %w", dir, err)
 			}
@@ -102,6 +103,14 @@ func RunCompaction(dir string, snapshotTxID types.TxID) error {
 		return fmt.Errorf("commitlog: compact sync directory %s: %w", dir, err)
 	}
 	return nil
+}
+
+func compactionNoopNeedsSync(dir string, segments []SegmentInfo) bool {
+	if len(segments) > 0 {
+		return segments[0].StartTx > 1
+	}
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
 }
 
 func orphanedCoveredOffsetIndexes(dir string, segments []SegmentInfo, snapshotTxID types.TxID) ([]string, error) {

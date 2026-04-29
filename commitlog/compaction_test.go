@@ -581,6 +581,44 @@ func TestRunCompactionRetriesDirectorySyncAfterOrphanSidecarCleanup(t *testing.T
 	}
 }
 
+func TestRunCompactionRetriesDirectorySyncAfterOnlyOrphanSidecarCleanup(t *testing.T) {
+	dir := t.TempDir()
+	idxPath := filepath.Join(dir, OffsetIndexFileName(1))
+	idx, err := CreateOffsetIndex(idxPath, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+	syncErr := errors.New("sync failed")
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		syncCalls++
+		if syncCalls == 1 {
+			return syncErr
+		}
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	err = RunCompaction(dir, 3)
+	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
+	assertFileMissing(t, idxPath)
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	if syncCalls != 2 {
+		t.Fatalf("syncDir calls = %d, want 2", syncCalls)
+	}
+}
+
 func TestRunCompactionRejectsSnapshotBeyondDurableHorizon(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
