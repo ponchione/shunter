@@ -188,6 +188,95 @@ func TestDurabilityWorkerSegmentWriteFailureFailsClosedWithoutAdvancingDurable(t
 	dw.EnqueueCommitted(2, makeDurabilityTestChangeset(2))
 }
 
+func TestDurabilityWorkerResumeSyncFailureLeavesRecoverableDurablePrefix(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+
+	initial, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	initial.EnqueueCommitted(2, makeDurabilityTestChangeset(2))
+	if finalTx, fatalErr := initial.Close(); fatalErr != nil {
+		t.Fatal(fatalErr)
+	} else if finalTx != 2 {
+		t.Fatalf("initial final durable tx = %d, want 2", finalTx)
+	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{
+		SegmentStartTx: 1,
+		NextTxID:       3,
+		AppendMode:     AppendInPlace,
+	}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := dw.WaitUntilDurable(3)
+	if err := dw.seg.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(3, makeDurabilityTestChangeset(3))
+	finalTx, fatalErr := dw.Close()
+	if fatalErr == nil {
+		t.Fatal("expected resumed segment sync failure")
+	}
+	if finalTx != 2 || dw.DurableTxID() != 2 {
+		t.Fatalf("durable tx after resumed sync failure = (%d, %d), want (2, 2)", finalTx, dw.DurableTxID())
+	}
+	select {
+	case txID := <-wait:
+		t.Fatalf("waiter released for tx %d despite sync failure", txID)
+	default:
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 2}) {
+		t.Fatalf("replayed range = %+v, want 1..2", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 3", plan)
+	}
+
+	resumed, err := NewDurabilityWorkerWithResumePlan(dir, plan, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed.EnqueueCommitted(3, makeDurabilityTestChangeset(3))
+	if finalTx, fatalErr := resumed.Close(); fatalErr != nil {
+		t.Fatal(fatalErr)
+	} else if finalTx != 3 {
+		t.Fatalf("resumed final durable tx = %d, want 3", finalTx)
+	}
+
+	recovered, maxTxID, plan, report, err = OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("second maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p", 3: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+		t.Fatalf("second replayed range = %+v, want 1..3", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+		t.Fatalf("second resume plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+	}
+}
+
 func TestDurabilityWorkerRolloverCreateFailureLeavesRecoverableDurablePrefix(t *testing.T) {
 	dir := t.TempDir()
 	_, reg := testSchema()
