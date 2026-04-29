@@ -259,6 +259,78 @@ func TestSegmentWriterEnforcesStartTxAlignment(t *testing.T) {
 	}
 }
 
+func TestSegmentWriterRejectsRecordShapesBeforeDurabilityWrite(t *testing.T) {
+	dir := t.TempDir()
+	sw, err := CreateSegment(dir, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = sw.Append(&Record{TxID: 10, RecordType: RecordTypeChangeset + 1, Payload: []byte("bad-type")})
+	var typeErr *UnknownRecordTypeError
+	if !errors.As(err, &typeErr) {
+		t.Fatalf("bad record type append error = %T (%v), want UnknownRecordTypeError", err, err)
+	}
+	if typeErr.Type != RecordTypeChangeset+1 {
+		t.Fatalf("unknown record type = %d, want %d", typeErr.Type, RecordTypeChangeset+1)
+	}
+	if got := sw.Size(); got != SegmentHeaderSize {
+		t.Fatalf("size after rejected first append = %d, want header size %d", got, SegmentHeaderSize)
+	}
+	if off, ok := sw.LastRecordByteOffset(); ok || off != 0 {
+		t.Fatalf("last record offset after rejected first append = (%d, %v), want unset", off, ok)
+	}
+
+	if err := sw.Append(&Record{TxID: 10, RecordType: RecordTypeChangeset, Payload: []byte("good")}); err != nil {
+		t.Fatalf("valid first append after rejected type: %v", err)
+	}
+	sizeAfterFirst := sw.Size()
+	offsetAfterFirst, ok := sw.LastRecordByteOffset()
+	if !ok {
+		t.Fatal("last record offset should be set after valid append")
+	}
+
+	if err := sw.Append(&Record{TxID: 11, RecordType: RecordTypeChangeset, Flags: 1, Payload: []byte("bad-flags")}); !errors.Is(err, ErrBadFlags) {
+		t.Fatalf("bad flags append error = %v, want ErrBadFlags", err)
+	}
+	if got := sw.Size(); got != sizeAfterFirst {
+		t.Fatalf("size after rejected second append = %d, want %d", got, sizeAfterFirst)
+	}
+	if off, ok := sw.LastRecordByteOffset(); !ok || off != offsetAfterFirst {
+		t.Fatalf("last record offset after rejected second append = (%d, %v), want (%d, true)", off, ok, offsetAfterFirst)
+	}
+
+	if err := sw.Append(&Record{TxID: 11, RecordType: RecordTypeChangeset, Payload: []byte("next")}); err != nil {
+		t.Fatalf("valid second append after rejected flags: %v", err)
+	}
+	if err := sw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sr, err := OpenSegment(filepath.Join(dir, SegmentFileName(10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sr.Close()
+	first, err := sr.Next()
+	if err != nil {
+		t.Fatalf("read first record: %v", err)
+	}
+	if first.TxID != 10 || string(first.Payload) != "good" {
+		t.Fatalf("first record = %+v, want tx 10 good payload", first)
+	}
+	second, err := sr.Next()
+	if err != nil {
+		t.Fatalf("read second record: %v", err)
+	}
+	if second.TxID != 11 || string(second.Payload) != "next" {
+		t.Fatalf("second record = %+v, want tx 11 next payload", second)
+	}
+	if _, err := sr.Next(); !errors.Is(err, io.EOF) {
+		t.Fatalf("third read error = %v, want EOF", err)
+	}
+}
+
 func TestChangesetCodecDeterministicOrderingAndLengthPrefixes(t *testing.T) {
 	reg := contractTestSchema(t)
 	cs := sampleChangeset()

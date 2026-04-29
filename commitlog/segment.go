@@ -303,6 +303,12 @@ func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) 
 
 // Append writes a record. TxID must be monotonically increasing.
 func (sw *SegmentWriter) Append(rec *Record) error {
+	if rec.RecordType != RecordTypeChangeset {
+		return &UnknownRecordTypeError{Type: rec.RecordType}
+	}
+	if rec.Flags != 0 {
+		return ErrBadFlags
+	}
 	if sw.lastTx == 0 {
 		if rec.TxID != sw.startTx {
 			return fmt.Errorf("commitlog: first tx_id %d must equal segment start %d", rec.TxID, sw.startTx)
