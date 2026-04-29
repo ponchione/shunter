@@ -710,7 +710,9 @@ func writeString(w io.Writer, s string) error {
 	return writeFull(w, []byte(s))
 }
 
-func writeAtFull(f *os.File, p []byte, off int64) error {
+func writeAtFull(f interface {
+	WriteAt([]byte, int64) (int, error)
+}, p []byte, off int64) error {
 	if len(p) == 0 {
 		return nil
 	}

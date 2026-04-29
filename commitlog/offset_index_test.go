@@ -3,6 +3,7 @@ package commitlog
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -401,6 +402,30 @@ func TestOffsetIndexPartialTailIsIgnored(t *testing.T) {
 	}
 }
 
+func TestOffsetIndexEntriesDoesNotPreallocateClaimedCount(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "00000000000000000001.idx")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	if _, err := readOffsetIndexEntries(f, ^uint64(0)); err == nil {
+		t.Fatal("expected read failure for impossible claimed entry count")
+	}
+}
+
+func TestOffsetIndexWriteAtFullRejectsShortWrite(t *testing.T) {
+	err := writeAtFull(shortWriteAtSink{}, make([]byte, OffsetIndexEntrySize), 0)
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("writeAtFull short write error = %v, want io.ErrShortWrite", err)
+	}
+}
+
 // Pin 11.
 func TestOffsetIndexWriterCadenceHoldsCandidate(t *testing.T) {
 	idx, _ := mustCreate(t, 16)
@@ -609,4 +634,13 @@ func TestOffsetIndexWriterCadenceAdvancesEarliestInWindow(t *testing.T) {
 	if len(entries) != 3 || entries[2].TxID != 21 {
 		t.Fatalf("post-final-Sync: got %+v want tail {21,2100}", entries)
 	}
+}
+
+type shortWriteAtSink struct{}
+
+func (shortWriteAtSink) WriteAt(p []byte, _ int64) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, nil
 }

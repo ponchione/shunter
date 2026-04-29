@@ -108,7 +108,7 @@ func (o *OffsetIndexMut) Append(txID types.TxID, byteOffset uint64) error {
 	var buf [OffsetIndexEntrySize]byte
 	binary.LittleEndian.PutUint64(buf[offsetIndexKeyOff:], key)
 	binary.LittleEndian.PutUint64(buf[offsetIndexValOff:], byteOffset)
-	if _, err := o.f.WriteAt(buf[:], int64(o.numEntries*OffsetIndexEntrySize)); err != nil {
+	if err := writeAtFull(o.f, buf[:], int64(o.numEntries*OffsetIndexEntrySize)); err != nil {
 		return err
 	}
 	o.numEntries++
@@ -162,7 +162,7 @@ func (o *OffsetIndexMut) Truncate(target types.TxID) error {
 		return nil
 	}
 	zero := make([]byte, OffsetIndexEntrySize*(n-drop))
-	if _, err := o.f.WriteAt(zero, int64(drop*OffsetIndexEntrySize)); err != nil {
+	if err := writeAtFull(o.f, zero, int64(drop*OffsetIndexEntrySize)); err != nil {
 		return err
 	}
 	o.numEntries = drop
@@ -325,7 +325,7 @@ func readOffsetIndexEntries(f *os.File, n uint64) ([]OffsetIndexEntry, error) {
 	if n == 0 {
 		return nil, nil
 	}
-	out := make([]OffsetIndexEntry, 0, n)
+	var out []OffsetIndexEntry
 	for i := uint64(0); i < n; i++ {
 		key, val, err := readOffsetIndexEntryAt(f, i)
 		if err != nil {
