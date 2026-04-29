@@ -1295,6 +1295,70 @@ func TestCreateSnapshotMkdirFailureReturnsSnapshotCompletionError(t *testing.T) 
 	}
 }
 
+func TestCreateSnapshotParentSyncFailureReturnsSnapshotCompletionError(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	snapshotBase := filepath.Join(baseDir, "snapshots")
+	writer := NewSnapshotWriter(snapshotBase, reg).(*FileSnapshotWriter)
+	syncErr := errors.New("sync parent failed")
+	writer.syncDir = func(path string) error {
+		if path == snapshotBase {
+			return syncErr
+		}
+		return nil
+	}
+
+	cs.SetCommittedTxID(99)
+	err := writer.CreateSnapshot(cs, 99)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("sync-parent error should be categorized as snapshot error, got %v", err)
+	}
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("sync-parent error should wrap original error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "sync-parent" || completionErr.Path != snapshotBase {
+		t.Fatalf("completion error = %+v, want sync-parent phase and snapshot base path", completionErr)
+	}
+	snapshotDir := filepath.Join(snapshotBase, "99")
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should not be created after parent sync failure")
+	}
+	assertSnapshotPayloadArtifactsMissing(t, snapshotDir)
+}
+
+func TestCreateSnapshotLockCreateFailureReturnsSnapshotCompletionError(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	snapshotBase := filepath.Join(baseDir, "snapshots")
+	snapshotDir := filepath.Join(snapshotBase, "100")
+	lockPath := filepath.Join(snapshotDir, ".lock")
+	if err := os.MkdirAll(lockPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writer := NewSnapshotWriter(snapshotBase, reg)
+
+	cs.SetCommittedTxID(100)
+	err := writer.CreateSnapshot(cs, 100)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("create-lock error should be categorized as snapshot error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "create-lock" || completionErr.Path != lockPath {
+		t.Fatalf("completion error = %+v, want create-lock phase and lock path", completionErr)
+	}
+	if !HasLockFile(snapshotDir) {
+		t.Fatal("pre-existing lock artifact should remain after create-lock failure")
+	}
+	assertSnapshotPayloadArtifactsMissing(t, snapshotDir)
+}
+
 func TestCreateSnapshotOpenTempFailureReturnsSnapshotCompletionErrorAndCleansArtifacts(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()
@@ -1576,6 +1640,53 @@ func TestCreateSnapshotRemoveLockFailureReturnsSnapshotCompletionError(t *testin
 	}
 }
 
+func TestCreateSnapshotSyncUnlockFailureReturnsSnapshotCompletionError(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	snapshotBase := filepath.Join(baseDir, "snapshots")
+	snapshotDir := filepath.Join(snapshotBase, "105")
+	writer := NewSnapshotWriter(snapshotBase, reg).(*FileSnapshotWriter)
+	syncErr := errors.New("sync unlock failed")
+	syncSnapshotCalls := 0
+	writer.syncDir = func(path string) error {
+		if path != snapshotBase && path != snapshotDir {
+			t.Fatalf("syncDir path = %q, want snapshot base or tx directory", path)
+		}
+		if path == snapshotDir {
+			syncSnapshotCalls++
+			if syncSnapshotCalls == 2 {
+				return syncErr
+			}
+		}
+		return nil
+	}
+
+	cs.SetCommittedTxID(105)
+	err := writer.CreateSnapshot(cs, 105)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("sync-unlock error should be categorized as snapshot error, got %v", err)
+	}
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("sync-unlock error should wrap original error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "sync-unlock" || completionErr.Path != snapshotDir {
+		t.Fatalf("completion error = %+v, want sync-unlock phase and snapshot dir", completionErr)
+	}
+	if syncSnapshotCalls != 2 {
+		t.Fatalf("snapshot directory sync calls = %d, want 2", syncSnapshotCalls)
+	}
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be absent after remove-lock before sync-unlock failure")
+	}
+	if _, err := ReadSnapshot(snapshotDir); err != nil {
+		t.Fatalf("snapshot should be readable after unlock sync failure: %v", err)
+	}
+}
+
 func TestCreateSnapshotRejectsTxIDThatDoesNotMatchCommittedHorizon(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	cs.SetCommittedTxID(2)
@@ -1592,6 +1703,15 @@ func TestCreateSnapshotRejectsTxIDThatDoesNotMatchCommittedHorizon(t *testing.T)
 	}
 	if mismatch.SnapshotTxID != 3 || mismatch.CommittedTxID != 2 {
 		t.Fatalf("mismatch = %+v, want SnapshotTxID=3 CommittedTxID=2", mismatch)
+	}
+}
+
+func assertSnapshotPayloadArtifactsMissing(t *testing.T, snapshotDir string) {
+	t.Helper()
+	for _, name := range []string{snapshotTempFileName, snapshotFileName} {
+		if _, err := os.Stat(filepath.Join(snapshotDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s should be absent, stat err=%v", name, err)
+		}
 	}
 }
 
