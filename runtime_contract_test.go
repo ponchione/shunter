@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -144,6 +145,57 @@ func TestRuntimeExportContractWithAuthoredMetadataValidates(t *testing.T) {
 	}
 	if err := ValidateModuleContract(decoded); err != nil {
 		t.Fatalf("decoded ExportContractJSON did not validate: %v", err)
+	}
+}
+
+func TestModuleContractValidationAllowsMigrationMetadataNamesAcrossSurfaces(t *testing.T) {
+	mod := validChatModule().
+		TableMigration("messages", MigrationMetadata{
+			Compatibility:   MigrationCompatibilityCompatible,
+			Classifications: []MigrationClassification{MigrationClassificationAdditive},
+		}).
+		Query(QueryDeclaration{
+			Name: "messages",
+			Migration: MigrationMetadata{
+				Compatibility:   MigrationCompatibilityCompatible,
+				Classifications: []MigrationClassification{MigrationClassificationManualReviewNeeded},
+			},
+		})
+
+	rt, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	contract := rt.ExportContract()
+	assertMigrationDeclaration(t, contract.Migrations.Declarations, MigrationSurfaceTable, "messages", MigrationCompatibilityCompatible, MigrationClassificationAdditive)
+	assertMigrationDeclaration(t, contract.Migrations.Declarations, MigrationSurfaceQuery, "messages", MigrationCompatibilityCompatible, MigrationClassificationManualReviewNeeded)
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected surface-scoped migration metadata names: %v", err)
+	}
+}
+
+func TestModuleContractValidationRejectsInvalidDeclarationSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Queries = []QueryDescription{{Name: "recent_messages", SQL: "SELECT * FROM missing"}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted invalid query SQL")
+	}
+	if !strings.Contains(err.Error(), "queries.recent_messages.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want query SQL context", err)
+	}
+
+	contract = buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{Name: "live_messages", SQL: "SELECT id FROM messages"}}
+
+	err = ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted invalid view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_messages.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
 	}
 }
 

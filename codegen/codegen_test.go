@@ -85,6 +85,23 @@ func TestGeneratorRejectsUnusableContractJSON(t *testing.T) {
 	}
 }
 
+func TestGeneratorRejectsContractWithInvalidDeclarationSQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Queries[0].SQL = "SELECT * FROM missing"
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+
+	_, err = GenerateFromJSON(data, Options{Language: LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid contract error")
+	}
+	if !strings.Contains(err.Error(), "queries.recent_messages.sql") {
+		t.Fatalf("GenerateFromJSON error = %v, want declaration SQL context", err)
+	}
+}
+
 func TestTypeScriptGeneratorIsDeterministic(t *testing.T) {
 	first, err := Generate(contractFixture(), Options{Language: LanguageTypeScript})
 	if err != nil {

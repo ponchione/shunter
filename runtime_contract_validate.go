@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/types"
 )
 
 // ValidateModuleContract verifies that a detached ModuleContract is a
@@ -42,6 +44,7 @@ func (c ModuleContract) Validate() error {
 	tableNames := validateContractTables(c.Schema.Tables, &errs)
 	reducerNames := validateContractReducers(c.Schema.Reducers, &errs)
 	queryNames, viewNames := validateContractReadDeclarations(c.Queries, c.Views, &errs)
+	validateContractDeclarationSQL(c.Schema, c.Queries, c.Views, &errs)
 
 	validatePermissionContract("reducer", c.Permissions.Reducers, reducerNames, &errs)
 	validatePermissionContract("query", c.Permissions.Queries, queryNames, &errs)
@@ -64,6 +67,8 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 			validateContractName("schema.tables."+table.Name+".columns", column.Name, columnNames, errs)
 			if strings.TrimSpace(column.Type) == "" {
 				*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s type must not be empty", table.Name, column.Name))
+			} else if _, ok := valueKindFromExportString(column.Type); !ok {
+				*errs = append(*errs, fmt.Errorf("schema.tables.%s.columns.%s type %q is invalid", table.Name, column.Name, column.Type))
 			}
 		}
 		indexNames := make(map[string]struct{}, len(table.Indexes))
@@ -111,6 +116,34 @@ func validateContractReadDeclarations(queries []QueryDescription, views []ViewDe
 		}
 	}
 	return queriesByName, viewsByName
+}
+
+func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []QueryDescription, views []ViewDescription, errs *[]error) {
+	lookup := newContractSchemaLookup(schemaExport)
+	for _, query := range queries {
+		if strings.TrimSpace(query.SQL) == "" {
+			continue
+		}
+		err := protocol.ValidateSQLQueryString(query.SQL, lookup, protocol.SQLQueryValidationOptions{
+			AllowLimit:      true,
+			AllowProjection: true,
+		})
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("queries.%s.sql invalid: %v", query.Name, err))
+		}
+	}
+	for _, view := range views {
+		if strings.TrimSpace(view.SQL) == "" {
+			continue
+		}
+		err := protocol.ValidateSQLQueryString(view.SQL, lookup, protocol.SQLQueryValidationOptions{
+			AllowLimit:      false,
+			AllowProjection: false,
+		})
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("views.%s.sql invalid: %v", view.Name, err))
+		}
+	}
 }
 
 func validatePermissionContract(surface string, declarations []PermissionContractDeclaration, declaredNames map[string]struct{}, errs *[]error) {
@@ -184,7 +217,7 @@ func validateMigrationContract(declarations []MigrationContractDeclaration, tabl
 		default:
 			*errs = append(*errs, fmt.Errorf("migrations surface %q is invalid", declaration.Surface))
 		}
-		if validateContractName("migrations."+declaration.Surface, declaration.Name, seen, errs) {
+		if validateContractSurfaceName("migrations."+declaration.Surface, declaration.Surface, declaration.Name, seen, errs) {
 			validateMigrationMetadata("migrations."+declaration.Surface+"."+declaration.Name, declaration.Metadata, errs)
 		}
 	}
@@ -219,4 +252,190 @@ func validateContractName(path, name string, seen map[string]struct{}, errs *[]e
 	}
 	seen[name] = struct{}{}
 	return true
+}
+
+func validateContractSurfaceName(path, surface, name string, seen map[string]struct{}, errs *[]error) bool {
+	if strings.TrimSpace(name) == "" {
+		*errs = append(*errs, fmt.Errorf("%s name must not be empty", path))
+		return false
+	}
+	key := surface + "\x00" + name
+	if _, ok := seen[key]; ok {
+		*errs = append(*errs, fmt.Errorf("%s name %q is duplicated", path, name))
+		return false
+	}
+	seen[key] = struct{}{}
+	return true
+}
+
+type contractSchemaLookup struct {
+	tables []schema.TableSchema
+	byID   map[schema.TableID]int
+	byName map[string]int
+}
+
+func newContractSchemaLookup(schemaExport schema.SchemaExport) contractSchemaLookup {
+	lookup := contractSchemaLookup{
+		tables: make([]schema.TableSchema, 0, len(schemaExport.Tables)),
+		byID:   make(map[schema.TableID]int, len(schemaExport.Tables)),
+		byName: make(map[string]int, len(schemaExport.Tables)),
+	}
+	for i, table := range schemaExport.Tables {
+		tableID := schema.TableID(i)
+		ts := schema.TableSchema{
+			ID:      tableID,
+			Name:    table.Name,
+			Columns: make([]schema.ColumnSchema, len(table.Columns)),
+			Indexes: make([]schema.IndexSchema, 0, len(table.Indexes)),
+		}
+		columnByName := make(map[string]int, len(table.Columns))
+		for j, column := range table.Columns {
+			kind, _ := valueKindFromExportString(column.Type)
+			ts.Columns[j] = schema.ColumnSchema{
+				Index: j,
+				Name:  column.Name,
+				Type:  kind,
+			}
+			if _, exists := columnByName[column.Name]; !exists {
+				columnByName[column.Name] = j
+			}
+		}
+		for j, index := range table.Indexes {
+			columns := make([]int, 0, len(index.Columns))
+			for _, columnName := range index.Columns {
+				if columnIndex, ok := columnByName[columnName]; ok {
+					columns = append(columns, columnIndex)
+				}
+			}
+			ts.Indexes = append(ts.Indexes, schema.NewIndexSchema(schema.IndexID(j), index.Name, columns, index.Unique, index.Primary))
+		}
+		lookup.byID[tableID] = len(lookup.tables)
+		if _, exists := lookup.byName[table.Name]; !exists {
+			lookup.byName[table.Name] = len(lookup.tables)
+		}
+		lookup.tables = append(lookup.tables, ts)
+	}
+	return lookup
+}
+
+func (l contractSchemaLookup) Table(id schema.TableID) (*schema.TableSchema, bool) {
+	i, ok := l.byID[id]
+	if !ok {
+		return nil, false
+	}
+	ts := cloneContractTableSchema(l.tables[i])
+	return &ts, true
+}
+
+func (l contractSchemaLookup) TableByName(name string) (schema.TableID, *schema.TableSchema, bool) {
+	i, ok := l.byName[name]
+	if !ok {
+		return 0, nil, false
+	}
+	ts := cloneContractTableSchema(l.tables[i])
+	return ts.ID, &ts, true
+}
+
+func (l contractSchemaLookup) TableExists(table schema.TableID) bool {
+	_, ok := l.byID[table]
+	return ok
+}
+
+func (l contractSchemaLookup) TableName(table schema.TableID) string {
+	i, ok := l.byID[table]
+	if !ok {
+		return ""
+	}
+	return l.tables[i].Name
+}
+
+func (l contractSchemaLookup) ColumnExists(table schema.TableID, col types.ColID) bool {
+	i, ok := l.byID[table]
+	return ok && int(col) >= 0 && int(col) < len(l.tables[i].Columns)
+}
+
+func (l contractSchemaLookup) ColumnType(table schema.TableID, col types.ColID) schema.ValueKind {
+	if !l.ColumnExists(table, col) {
+		return 0
+	}
+	return l.tables[l.byID[table]].Columns[int(col)].Type
+}
+
+func (l contractSchemaLookup) HasIndex(table schema.TableID, col types.ColID) bool {
+	i, ok := l.byID[table]
+	if !ok {
+		return false
+	}
+	for _, index := range l.tables[i].Indexes {
+		if len(index.Columns) == 1 && index.Columns[0] == int(col) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l contractSchemaLookup) ColumnCount(table schema.TableID) int {
+	i, ok := l.byID[table]
+	if !ok {
+		return 0
+	}
+	return len(l.tables[i].Columns)
+}
+
+func cloneContractTableSchema(in schema.TableSchema) schema.TableSchema {
+	out := schema.TableSchema{
+		ID:      in.ID,
+		Name:    in.Name,
+		Columns: append([]schema.ColumnSchema(nil), in.Columns...),
+		Indexes: make([]schema.IndexSchema, len(in.Indexes)),
+	}
+	for i, index := range in.Indexes {
+		out.Indexes[i] = schema.NewIndexSchema(index.ID, index.Name, append([]int(nil), index.Columns...), index.Unique, index.Primary)
+	}
+	return out
+}
+
+func valueKindFromExportString(value string) (schema.ValueKind, bool) {
+	switch value {
+	case "bool":
+		return schema.KindBool, true
+	case "int8":
+		return schema.KindInt8, true
+	case "uint8":
+		return schema.KindUint8, true
+	case "int16":
+		return schema.KindInt16, true
+	case "uint16":
+		return schema.KindUint16, true
+	case "int32":
+		return schema.KindInt32, true
+	case "uint32":
+		return schema.KindUint32, true
+	case "int64":
+		return schema.KindInt64, true
+	case "uint64":
+		return schema.KindUint64, true
+	case "float32":
+		return schema.KindFloat32, true
+	case "float64":
+		return schema.KindFloat64, true
+	case "string":
+		return schema.KindString, true
+	case "bytes":
+		return schema.KindBytes, true
+	case "int128":
+		return schema.KindInt128, true
+	case "uint128":
+		return schema.KindUint128, true
+	case "int256":
+		return schema.KindInt256, true
+	case "uint256":
+		return schema.KindUint256, true
+	case "timestamp":
+		return schema.KindTimestamp, true
+	case "arrayString":
+		return schema.KindArrayString, true
+	default:
+		return 0, false
+	}
 }
