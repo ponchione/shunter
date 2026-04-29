@@ -491,6 +491,67 @@ func TestCreateSnapshotUsesTempFileUntilRename(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshotMkdirFailureReturnsSnapshotCompletionError(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	snapshotBase := filepath.Join(baseDir, "snapshots")
+	if err := os.MkdirAll(snapshotBase, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	snapshotDir := filepath.Join(snapshotBase, "95")
+	if err := os.WriteFile(snapshotDir, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writer := NewSnapshotWriter(snapshotBase, reg)
+
+	cs.SetCommittedTxID(95)
+	err := writer.CreateSnapshot(cs, 95)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("mkdir error should be categorized as snapshot error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "mkdir" || completionErr.Path != snapshotDir {
+		t.Fatalf("completion error = %+v, want mkdir phase and snapshot dir", completionErr)
+	}
+}
+
+func TestCreateSnapshotOpenTempFailureReturnsSnapshotCompletionErrorAndCleansArtifacts(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	snapshotBase := filepath.Join(baseDir, "snapshots")
+	snapshotDir := filepath.Join(snapshotBase, "96")
+	tmpPath := filepath.Join(snapshotDir, snapshotTempFileName)
+	if err := os.MkdirAll(tmpPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writer := NewSnapshotWriter(snapshotBase, reg)
+
+	cs.SetCommittedTxID(96)
+	err := writer.CreateSnapshot(cs, 96)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("open-temp error should be categorized as snapshot error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "open-temp" || completionErr.Path != tmpPath {
+		t.Fatalf("completion error = %+v, want open-temp phase and temp path", completionErr)
+	}
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed after temp open failure")
+	}
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Fatalf("snapshot temp path should be removed after open failure, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); !os.IsNotExist(err) {
+		t.Fatalf("final snapshot should not exist after open failure, stat err=%v", err)
+	}
+}
+
 func TestCreateSnapshotRenameFailureReturnsSnapshotErrorAndCleansArtifacts(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()

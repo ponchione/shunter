@@ -241,7 +241,7 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 
 	snapshotDir := filepath.Join(w.baseDir, strconv.FormatUint(uint64(txID), 10))
 	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
-		return err
+		return &SnapshotCompletionError{Phase: "mkdir", Path: snapshotDir, Err: err}
 	}
 	if err := w.syncDir(w.baseDir); err != nil {
 		return &SnapshotCompletionError{Phase: "sync-parent", Path: w.baseDir, Err: err}
@@ -262,7 +262,7 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 	}()
 	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
-		return err
+		return &SnapshotCompletionError{Phase: "open-temp", Path: tmpPath, Err: err}
 	}
 	if w.beforeWrite != nil {
 		w.beforeWrite <- struct{}{}
@@ -273,7 +273,7 @@ func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txI
 
 	if err := w.writeSnapshotFile(f, committed, txID); err != nil {
 		f.Close()
-		return err
+		return &SnapshotCompletionError{Phase: "write-temp", Path: tmpPath, Err: err}
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()

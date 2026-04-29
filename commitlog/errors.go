@@ -229,8 +229,8 @@ func (e *SnapshotHorizonMismatchError) Is(target error) bool {
 	return target == ErrSnapshot
 }
 
-// SnapshotCompletionError reports a filesystem failure while making a snapshot
-// selectable after its body has been written.
+// SnapshotCompletionError reports a filesystem failure while creating or
+// completing snapshot artifacts.
 type SnapshotCompletionError struct {
 	Phase string // Phase names the completion step that failed.
 	Path  string // Path names the affected artifact or directory when available.
