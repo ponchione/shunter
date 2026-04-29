@@ -1,6 +1,6 @@
 # Hosted Runtime V2.5 Current Execution Plan
 
-Status: pending implementation
+Status: complete
 
 Goal: complete read authorization so external reads have comparable behavior
 to Shunter's reducer permission enforcement and to the reference system's
@@ -54,6 +54,32 @@ apply to every relation participating in a read.
 
 Tasks 09-10 close the feature. Do not call V2.5 complete without them.
 
+## Completion Proof
+
+Completed 2026-04-29.
+
+V2.5 is complete. The final Task 10 gauntlet adds
+`runtime_read_auth_gauntlet_test.go`, a public-surface strict-auth hosted
+runtime/protocol test that composes raw table policy, named declared reads,
+row-level visibility, contract metadata, joins, aggregates, limits,
+subscriptions, deltas, `SubscribeMulti` atomicity, and the anonymous/dev
+`AllowAllPermissions` bypass.
+
+Final validation passed:
+
+```sh
+rtk go fmt ./...
+rtk go test ./schema ./protocol ./subscription ./executor ./codegen ./contractdiff ./contractworkflow ./cmd/shunter -count=1
+rtk go test . -run 'Test.*(Permission|Auth|Read|Query|View|Subscribe|Contract|Codegen|Gauntlet|Visibility)' -count=1
+rtk go vet ./...
+rtk go test ./... -count=1
+rtk go tool staticcheck ./...
+```
+
+No V2.5 behavior gaps remain documented from the final gauntlet. Task 10 did
+not change read execution behavior, reducer permission behavior, or raw SQL
+admission behavior.
+
 ## Validation Posture
 
 Each worker should:
@@ -75,4 +101,3 @@ rtk go vet ./protocol ./schema ./subscription ./executor ./codegen ./contractdif
 rtk go test ./... -count=1
 rtk go tool staticcheck ./...
 ```
-

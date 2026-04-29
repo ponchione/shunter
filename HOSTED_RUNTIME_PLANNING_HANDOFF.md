@@ -7,12 +7,14 @@ Use `NEXT_SESSION_HANDOFF.md` instead for TECH-DEBT / correctness work.
 
 ## Current Target
 
-Hosted-runtime V2 is complete through `V2-G`.
+Hosted-runtime V2 is complete through `V2-G`, and the follow-on V2.5 read
+authorization campaign is complete.
 
 No `V2-H` target is queued. Future hosted-runtime work should start only from a
 new explicit user target or a failing regression that proves drift.
 
 V2-G out-of-process module execution gate is complete.
+V2.5 read authorization is complete.
 V2-F multi-module hosting exploration is complete.
 V2-E policy/auth enforcement foundation is complete.
 V2-D declared read and SQL protocol convergence is complete.
@@ -29,6 +31,38 @@ starting from the code-grounded source direction in
 
 Do not reopen V1-H, V1.5-A through V1.5-E, or V2-A through V2-G unless a new
 failing regression proves drift.
+
+V2.5 is complete. Its live proof is:
+- schema table metadata defaults raw external reads to private and exports
+  public, private, and permissioned read policies.
+- raw one-off SQL and raw subscription SQL resolve tables through caller-aware
+  authorization before execution or registration; unauthorized tables remain
+  shaped as unresolved/private table errors, including joins where the denied
+  table is not projected.
+- named declared query/view runtime and protocol surfaces execute by
+  declaration name, enforce declaration permissions, and do not infer declared
+  reads from matching raw SQL.
+- generated TypeScript declaration helpers use named declared-read callbacks
+  while retaining raw SQL callbacks as separate raw surfaces.
+- row-level visibility filters are validated at build, exported in contracts,
+  and expanded into external read plans for raw one-off reads, raw
+  subscriptions, declared queries, and declared views before joins,
+  aggregates, limits, initial snapshots, and deltas can leak rows.
+- contracts, validation, contractdiff, migration planning, CLI workflows, and
+  TypeScript metadata expose/classify table read policy, declared read
+  permissions, declared SQL metadata, and visibility filter metadata.
+- the final public-surface gauntlet in `runtime_read_auth_gauntlet_test.go`
+  composes strict-auth protocol reads, table policy, declared reads,
+  visibility, joins, subscriptions, deltas, `SubscribeMulti` atomicity,
+  contract metadata, and the anonymous/dev `AllowAllPermissions` bypass.
+
+V2.5 validation passed:
+- `rtk go fmt ./...`
+- `rtk go test ./schema ./protocol ./subscription ./executor ./codegen ./contractdiff ./contractworkflow ./cmd/shunter -count=1`
+- `rtk go test . -run 'Test.*(Permission|Auth|Read|Query|View|Subscribe|Contract|Codegen|Gauntlet|Visibility)' -count=1`
+- `rtk go vet ./...`
+- `rtk go test ./... -count=1`
+- `rtk go tool staticcheck ./...`
 
 ## Persistent Deferred Direction
 
@@ -393,8 +427,8 @@ Live proof points:
   runtime
 - reducer permission metadata is exported in the canonical contract, visible to
   generated TypeScript clients, and enforced for reducer calls by V2-E;
-  query/view permission metadata and read-model metadata remain exported and
-  passive pending a table/read-model policy design
+  V2.5 now enforces declared query/view permission metadata on named declared
+  read surfaces and table read policy on raw SQL surfaces
 - migration metadata is passive, exported in the canonical contract, and
   consumed by contract-diff/policy tooling only
 - V2-A hardened the runtime/module boundary with a private `moduleSnapshot`
@@ -409,8 +443,7 @@ Live proof points:
   visible to contractdiff
 - V2-E added narrow permission claim extraction, caller permission context,
   reducer permission enforcement for local/protocol external calls, and stable
-  permission-denied results; read permission enforcement remains deferred to a
-  future table/read-model policy surface
+  permission-denied results
 - V2-F added a root-package `Host` owner for already-built runtimes with
   explicit module names, route prefixes, data-dir collision checks,
   deterministic lifecycle cleanup, prefixed HTTP routing, and detached
@@ -418,6 +451,10 @@ Live proof points:
 - V2-G added an internal `processboundary` contract gate and deferred
   production out-of-process execution until transaction mutation and
   subscription semantics have a dedicated design
+- V2.5 added complete read authorization: table read policy for raw SQL, named
+  declared read execution and permissions, generated named-read helpers,
+  row-level visibility expansion, policy-aware contracts/diffs/migration
+  planning, and final public-surface gauntlet coverage
 - generic contract workflows operate only on existing canonical JSON files;
   app-owned export remains based on `Runtime.ExportContractJSON`
 - root/runtime package tests are the live proof for hosted-runtime ownership,
@@ -485,7 +522,8 @@ Preserve WebSocket-first v1 runtime behavior.
 ## V2 Planning State
 
 Current active V2 slice:
-- none; `V2-G` is complete and no `V2-H` target is queued
+- none; `V2-G` and the follow-on V2.5 read authorization campaign are complete,
+  and no `V2-H` target is queued
 
 Completed V2 slices:
 - `V2-A`: runtime/module boundary hardening
@@ -495,6 +533,7 @@ Completed V2 slices:
 - `V2-E`: policy/auth enforcement foundation
 - `V2-F`: multi-module hosting exploration
 - `V2-G`: out-of-process module execution gate
+- `V2.5`: read authorization follow-on
 
 V2 planning slices are:
 1. `V2-A`: runtime/module boundary hardening
@@ -511,7 +550,7 @@ If new V2 implementation starts from an explicit user target, begin with:
 - that slice's `01-stack-prerequisites.md`
 - live code/package docs named by the slice
 
-Do not invent slices later than V2-G without an explicit new target.
+Do not invent new V2/V2.5 slices without an explicit new target.
 
 ## Next Slice Notes
 

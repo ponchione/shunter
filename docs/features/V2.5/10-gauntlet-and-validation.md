@@ -105,3 +105,74 @@ When complete, update:
 V2.5 is not complete until this task's final validation passes or any residual
 failure is explicitly documented as unrelated with concrete evidence.
 
+Completed 2026-04-29.
+
+Final coverage added:
+
+- Added `runtime_read_auth_gauntlet_test.go` with a public-surface strict-auth
+  runtime/protocol gauntlet that composes table read policy, declared reads,
+  row-level visibility, subscriptions, joins, aggregates, limits, contract
+  metadata, and protocol error behavior in one hosted runtime.
+- The end-to-end gauntlet now proves:
+  - default-private `secrets` rejects raw one-off and raw subscription reads
+    while declared query/view reads over that private table succeed with
+    declaration permissions.
+  - public `messages` allows raw one-off and raw subscription reads while
+    visibility filters restrict rows by caller identity plus a public filter.
+  - permissioned `audit_logs` rejects callers without `audit:read` and accepts
+    callers with the tag.
+  - raw SQL equivalent to a declared read does not inherit declaration
+    permissions, and SQL-shaped unknown declared names fail as unknown declared
+    reads.
+  - private tables referenced only as non-projected join participants are
+    rejected before execution.
+  - `SubscribeMulti` containing an unauthorized member returns an error and
+    registers no visible query.
+  - one-off reads, subscription initial rows, and subscription deltas expose
+    only caller-visible rows.
+  - two clients with different identities see different visible rows for the
+    same raw SQL.
+  - multiple filters OR together, self-joins apply visibility per alias, and a
+    filtered non-projected join side cannot leak rows through participation.
+  - aggregate count and limit operate after visibility filtering.
+  - anonymous/dev protocol `AllowAllPermissions` bypasses private table policy,
+    permissioned table policy, and visibility filters.
+  - exported contracts include table read policy, declared read permissions,
+    and visibility filter metadata for the gauntlet module.
+- Existing focused coverage from Tasks 04, 06, 08, and 09 remains the pin for
+  lower-level edge cases including generated declared-read callbacks,
+  malformed policy metadata validation, contract diff/migration classification,
+  raw SQL parse/type/error ordering, reducer permission behavior, and protocol
+  lifecycle/backpressure/close behavior.
+
+Behavior gaps found:
+
+- No V2.5 behavior gaps were found.
+- No read execution behavior, reducer permission behavior, or raw SQL admission
+  behavior was changed for Task 10.
+- The only adjustment during validation was making the new gauntlet's row-set
+  assertions order-insensitive where SQL result order is not part of the
+  contract; the limit assertion still proves the limited row is caller-visible.
+
+Validation commands run:
+
+```sh
+rtk rg -n "Gauntlet|Protocol|Subscribe|OneOff|Generated|Contract|Visibility|Permission" runtime_gauntlet_test.go protocol codegen contractdiff .
+rtk go list -json ./...
+rtk go fmt .
+rtk go test . -run 'TestRuntimeGauntletReadAuthorization' -count=1
+rtk go test ./schema ./protocol ./subscription ./executor ./codegen ./contractdiff ./contractworkflow ./cmd/shunter -count=1
+rtk go test . -run 'Test.*(Permission|Auth|Read|Query|View|Subscribe|Contract|Codegen|Gauntlet|Visibility)' -count=1
+rtk go fmt ./...
+rtk go vet ./...
+rtk go test ./... -count=1
+rtk go tool staticcheck ./...
+```
+
+Final validation status:
+
+- Focused package gate passed: `1586` tests across `8` packages.
+- Focused root read/auth/gauntlet gate passed: `272` tests.
+- Full repository gate passed: `2960` tests across `16` packages.
+- `rtk go vet ./...` reported no issues.
+- `rtk go tool staticcheck ./...` passed.
