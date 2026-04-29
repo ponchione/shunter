@@ -422,6 +422,27 @@ func TestReadSnapshotRejectsHeaderVersionMismatch(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsNonZeroHeaderPadding(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 44)
+	path := filepath.Join(baseDir, "snapshots", "44", snapshotFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[5] = 1
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ReadSnapshot(filepath.Join(baseDir, "snapshots", "44"))
+	if !errors.Is(err, ErrBadFlags) {
+		t.Fatalf("ReadSnapshot non-zero padding error = %v, want ErrBadFlags", err)
+	}
+}
+
 func TestConcurrentSnapshotReturnsInProgress(t *testing.T) {
 	cs, reg := buildSnapshotCommittedState(t)
 	baseDir := t.TempDir()

@@ -505,6 +505,9 @@ func readSnapshotHeader(f *os.File) (uint64, uint32, [32]byte, error) {
 	if versionAndPad[0] != SnapshotVersion {
 		return 0, 0, [32]byte{}, &BadVersionError{Got: versionAndPad[0]}
 	}
+	if versionAndPad[1] != 0 || versionAndPad[2] != 0 || versionAndPad[3] != 0 {
+		return 0, 0, [32]byte{}, ErrBadFlags
+	}
 
 	var txID uint64
 	var schemaVersion uint32
