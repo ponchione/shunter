@@ -66,10 +66,10 @@ func RemoveLockFile(snapshotDir string) error {
 func EncodeSchemaSnapshot(w io.Writer, reg schema.SchemaRegistry) error {
 	ids := reg.Tables()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	if err := binary.Write(w, binary.LittleEndian, reg.Version()); err != nil {
+	if err := writeUint32Full(w, reg.Version()); err != nil {
 		return err
 	}
-	if err := binary.Write(w, binary.LittleEndian, uint32(len(ids))); err != nil {
+	if err := writeUint32Full(w, uint32(len(ids))); err != nil {
 		return err
 	}
 	for _, id := range ids {
@@ -77,41 +77,41 @@ func EncodeSchemaSnapshot(w io.Writer, reg schema.SchemaRegistry) error {
 		if !ok {
 			return fmt.Errorf("missing schema table %d", id)
 		}
-		if err := binary.Write(w, binary.LittleEndian, uint32(ts.ID)); err != nil {
+		if err := writeUint32Full(w, uint32(ts.ID)); err != nil {
 			return err
 		}
 		if err := writeString(w, ts.Name); err != nil {
 			return err
 		}
-		if err := binary.Write(w, binary.LittleEndian, uint32(len(ts.Columns))); err != nil {
+		if err := writeUint32Full(w, uint32(len(ts.Columns))); err != nil {
 			return err
 		}
 		for _, col := range ts.Columns {
-			if err := binary.Write(w, binary.LittleEndian, uint32(col.Index)); err != nil {
+			if err := writeUint32Full(w, uint32(col.Index)); err != nil {
 				return err
 			}
 			if err := writeString(w, col.Name); err != nil {
 				return err
 			}
-			if _, err := w.Write([]byte{byte(col.Type), boolByte(col.Nullable), boolByte(col.AutoIncrement)}); err != nil {
+			if err := writeFull(w, []byte{byte(col.Type), boolByte(col.Nullable), boolByte(col.AutoIncrement)}); err != nil {
 				return err
 			}
 		}
-		if err := binary.Write(w, binary.LittleEndian, uint32(len(ts.Indexes))); err != nil {
+		if err := writeUint32Full(w, uint32(len(ts.Indexes))); err != nil {
 			return err
 		}
 		for _, idx := range ts.Indexes {
 			if err := writeString(w, idx.Name); err != nil {
 				return err
 			}
-			if _, err := w.Write([]byte{boolByte(idx.Unique), boolByte(idx.Primary)}); err != nil {
+			if err := writeFull(w, []byte{boolByte(idx.Unique), boolByte(idx.Primary)}); err != nil {
 				return err
 			}
-			if err := binary.Write(w, binary.LittleEndian, uint32(len(idx.Columns))); err != nil {
+			if err := writeUint32Full(w, uint32(len(idx.Columns))); err != nil {
 				return err
 			}
 			for _, colIdx := range idx.Columns {
-				if err := binary.Write(w, binary.LittleEndian, uint32(colIdx)); err != nil {
+				if err := writeUint32Full(w, uint32(colIdx)); err != nil {
 					return err
 				}
 			}
@@ -318,10 +318,10 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f *os.File, committed *store.Comm
 	if err := writeFull(f, []byte{SnapshotVersion, 0, 0, 0}); err != nil {
 		return err
 	}
-	if err := binary.Write(f, binary.LittleEndian, uint64(txID)); err != nil {
+	if err := writeUint64Full(f, uint64(txID)); err != nil {
 		return err
 	}
-	if err := binary.Write(f, binary.LittleEndian, w.reg.Version()); err != nil {
+	if err := writeUint32Full(f, w.reg.Version()); err != nil {
 		return err
 	}
 	if err := writeFull(f, make([]byte, 32)); err != nil {
@@ -356,7 +356,7 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 	if err := EncodeSchemaSnapshot(&schemaBuf, w.reg); err != nil {
 		return err
 	}
-	if err := binary.Write(dst, binary.LittleEndian, uint32(schemaBuf.Len())); err != nil {
+	if err := writeUint32Full(dst, uint32(schemaBuf.Len())); err != nil {
 		return err
 	}
 	if err := writeFull(dst, schemaBuf.Bytes()); err != nil {
@@ -371,32 +371,32 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 			sequenceTableIDs = append(sequenceTableIDs, tableID)
 		}
 	}
-	if err := binary.Write(dst, binary.LittleEndian, uint32(len(sequenceTableIDs))); err != nil {
+	if err := writeUint32Full(dst, uint32(len(sequenceTableIDs))); err != nil {
 		return err
 	}
 	for _, tableID := range sequenceTableIDs {
 		table, _ := committed.Table(tableID)
 		seq, _ := table.SequenceValue()
-		if err := binary.Write(dst, binary.LittleEndian, uint32(tableID)); err != nil {
+		if err := writeUint32Full(dst, uint32(tableID)); err != nil {
 			return err
 		}
-		if err := binary.Write(dst, binary.LittleEndian, seq); err != nil {
+		if err := writeUint64Full(dst, seq); err != nil {
 			return err
 		}
 	}
-	if err := binary.Write(dst, binary.LittleEndian, uint32(len(ids))); err != nil {
+	if err := writeUint32Full(dst, uint32(len(ids))); err != nil {
 		return err
 	}
 	for _, tableID := range ids {
 		table, _ := committed.Table(tableID)
-		if err := binary.Write(dst, binary.LittleEndian, uint32(tableID)); err != nil {
+		if err := writeUint32Full(dst, uint32(tableID)); err != nil {
 			return err
 		}
-		if err := binary.Write(dst, binary.LittleEndian, uint64(table.NextID())); err != nil {
+		if err := writeUint64Full(dst, uint64(table.NextID())); err != nil {
 			return err
 		}
 	}
-	if err := binary.Write(dst, binary.LittleEndian, uint32(len(ids))); err != nil {
+	if err := writeUint32Full(dst, uint32(len(ids))); err != nil {
 		return err
 	}
 	var rowBuf bytes.Buffer
@@ -406,10 +406,10 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 		if err != nil {
 			return err
 		}
-		if err := binary.Write(dst, binary.LittleEndian, uint32(tableID)); err != nil {
+		if err := writeUint32Full(dst, uint32(tableID)); err != nil {
 			return err
 		}
-		if err := binary.Write(dst, binary.LittleEndian, uint32(len(rows))); err != nil {
+		if err := writeUint32Full(dst, uint32(len(rows))); err != nil {
 			return err
 		}
 		for _, row := range rows {
@@ -417,7 +417,7 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 			if err := bsatn.EncodeProductValue(&rowBuf, row); err != nil {
 				return err
 			}
-			if err := binary.Write(dst, binary.LittleEndian, uint32(rowBuf.Len())); err != nil {
+			if err := writeUint32Full(dst, uint32(rowBuf.Len())); err != nil {
 				return err
 			}
 			if err := writeFull(dst, rowBuf.Bytes()); err != nil {
@@ -702,12 +702,22 @@ func deterministicRows(table *store.Table) ([]types.ProductValue, error) {
 }
 
 func writeString(w io.Writer, s string) error {
-	var lenBuf [4]byte
-	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(s)))
-	if err := writeFull(w, lenBuf[:]); err != nil {
+	if err := writeUint32Full(w, uint32(len(s))); err != nil {
 		return err
 	}
 	return writeFull(w, []byte(s))
+}
+
+func writeUint32Full(w io.Writer, v uint32) error {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], v)
+	return writeFull(w, buf[:])
+}
+
+func writeUint64Full(w io.Writer, v uint64) error {
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], v)
+	return writeFull(w, buf[:])
 }
 
 func writeAtFull(f interface {

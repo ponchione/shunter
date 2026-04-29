@@ -139,6 +139,15 @@ func TestWriteStringRejectsShortWrite(t *testing.T) {
 	}
 }
 
+func TestSnapshotNumericWritesRejectShortWrite(t *testing.T) {
+	if err := writeUint32Full(shortWriteSink{}, 1); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("writeUint32Full short write error = %v, want io.ErrShortWrite", err)
+	}
+	if err := writeUint64Full(shortWriteSink{}, 1); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("writeUint64Full short write error = %v, want io.ErrShortWrite", err)
+	}
+}
+
 func TestDecodeSchemaSnapshotRejectsOversizedStringLength(t *testing.T) {
 	var buf bytes.Buffer
 	writeUint32(t, &buf, 1) // schema snapshot version
