@@ -40,6 +40,15 @@ func selectSnapshotWithReport(baseDir string, durableHorizon types.TxID, reg sch
 			})
 			continue
 		}
+		if snapshot.TxID != txID {
+			err := fmt.Errorf("%w: snapshot tx_id mismatch: directory=%d header=%d", ErrSnapshot, txID, snapshot.TxID)
+			skipped = append(skipped, SkippedSnapshotReport{
+				TxID:   txID,
+				Reason: SnapshotSkipReadFailed,
+				Detail: err.Error(),
+			})
+			continue
+		}
 		if err := compareSnapshotSchema(snapshot, reg); err != nil {
 			return nil, skipped, err
 		}

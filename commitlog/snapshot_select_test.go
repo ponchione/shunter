@@ -45,6 +45,38 @@ func TestSelectSnapshotCorruptNewestFallsBack(t *testing.T) {
 	}
 }
 
+func TestSelectSnapshotHeaderTxIDMismatchFallsBack(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writeSelectionSnapshot(t, root, reg, cs, 4)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+
+	snapshotBase := filepath.Join(root, "snapshots")
+	if err := os.Rename(filepath.Join(snapshotBase, "5"), filepath.Join(snapshotBase, "10")); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, skipped, err := selectSnapshotWithReport(root, 10, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap == nil || snap.TxID != 4 {
+		t.Fatalf("selected snapshot = %+v, want tx 4 fallback", snap)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped snapshots = %+v, want one mismatch skip", skipped)
+	}
+	got := skipped[0]
+	if got.TxID != 10 || got.Reason != SnapshotSkipReadFailed {
+		t.Fatalf("skipped snapshot = %+v, want tx 10 read_failed", got)
+	}
+	for _, want := range []string{"tx_id mismatch", "directory=10", "header=5"} {
+		if !strings.Contains(got.Detail, want) {
+			t.Fatalf("skipped snapshot detail = %q, want %q", got.Detail, want)
+		}
+	}
+}
+
 func TestSelectSnapshotTempFileCandidateFallsBack(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
