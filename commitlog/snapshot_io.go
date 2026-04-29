@@ -38,12 +38,15 @@ func ComputeSnapshotHash(data []byte) [32]byte {
 }
 
 func HasLockFile(snapshotDir string) bool {
-	_, err := os.Stat(filepath.Join(snapshotDir, ".lock"))
-	return err == nil
+	return snapshotMarkerExists(filepath.Join(snapshotDir, ".lock"))
 }
 
 func HasSnapshotTempFile(snapshotDir string) bool {
-	_, err := os.Stat(filepath.Join(snapshotDir, snapshotTempFileName))
+	return snapshotMarkerExists(filepath.Join(snapshotDir, snapshotTempFileName))
+}
+
+func snapshotMarkerExists(path string) bool {
+	_, err := os.Lstat(path)
 	return err == nil
 }
 

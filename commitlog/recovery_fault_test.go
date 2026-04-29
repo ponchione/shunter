@@ -1315,6 +1315,8 @@ func TestOpenAndRecoverSnapshotMarkerDirectoryArtifactsAreIgnored(t *testing.T) 
 	}{
 		{name: "lock-directory", mark: markSnapshotLockedDirectory},
 		{name: "temp-directory", mark: markSnapshotTempDirectory},
+		{name: "lock-dangling-symlink", mark: markSnapshotLockedDanglingSymlink},
+		{name: "temp-dangling-symlink", mark: markSnapshotTempDanglingSymlink},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -2760,6 +2762,11 @@ func markSnapshotLockedDirectory(t *testing.T, root string, txID types.TxID) {
 	}
 }
 
+func markSnapshotLockedDanglingSymlink(t *testing.T, root string, txID types.TxID) {
+	t.Helper()
+	markSnapshotDanglingSymlink(t, root, txID, ".lock")
+}
+
 func markSnapshotTemp(t *testing.T, root string, txID types.TxID) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(root, "snapshots", txIDString(uint64(txID)), snapshotTempFileName), []byte("partial"), 0o644); err != nil {
@@ -2771,6 +2778,19 @@ func markSnapshotTempDirectory(t *testing.T, root string, txID types.TxID) {
 	t.Helper()
 	if err := os.Mkdir(filepath.Join(root, "snapshots", txIDString(uint64(txID)), snapshotTempFileName), 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func markSnapshotTempDanglingSymlink(t *testing.T, root string, txID types.TxID) {
+	t.Helper()
+	markSnapshotDanglingSymlink(t, root, txID, snapshotTempFileName)
+}
+
+func markSnapshotDanglingSymlink(t *testing.T, root string, txID types.TxID, name string) {
+	t.Helper()
+	path := filepath.Join(root, "snapshots", txIDString(uint64(txID)), name)
+	if err := os.Symlink("missing-marker-target", path); err != nil {
+		t.Skipf("symlink marker artifact unsupported on this filesystem: %v", err)
 	}
 }
 
