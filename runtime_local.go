@@ -34,7 +34,7 @@ type ReducerResult = executor.ReducerResponse
 var (
 	// ErrLocalReadNilCallback reports that Runtime.Read was called without a read callback.
 	ErrLocalReadNilCallback = errors.New("shunter: local read callback must not be nil")
-	// ErrPermissionDenied reports that a caller lacks required reducer permissions.
+	// ErrPermissionDenied reports that a caller lacks required permissions.
 	ErrPermissionDenied = executor.ErrPermissionDenied
 )
 

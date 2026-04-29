@@ -128,3 +128,65 @@ When complete, update this file with:
 - named-read authorization behavior
 - validation commands run
 - any protocol/codegen follow-up required by task 06
+
+Completed 2026-04-29.
+
+Read catalog type/location:
+
+- `declared_read_catalog.go`
+- `declaredReadCatalog` stored on `Runtime.readCatalog`
+- `declaredReadEntry` preserves declaration name, kind, SQL, permission
+  metadata, read-model metadata, migration metadata, referenced table IDs,
+  `:sender` usage, and prevalidated `protocol.CompiledSQLQuery` metadata for
+  executable declarations.
+- Metadata-only declarations are present in the catalog with no compiled plan.
+
+Local/runtime API names:
+
+- `Runtime.CallQuery(ctx, declarationName, opts...)`
+- `Runtime.SubscribeView(ctx, declarationName, queryID, opts...)`
+- Local named-read options added:
+  `WithDeclaredReadIdentity`, `WithDeclaredReadConnectionID`,
+  `WithDeclaredReadPermissions`, `WithDeclaredReadAllowAllPermissions`, and
+  `WithDeclaredReadRequestID`.
+
+Named-read authorization behavior:
+
+- Named query/view APIs look up the explicit declaration name and kind; unknown
+  names return `ErrUnknownDeclaredRead` and never fall back to raw SQL text.
+- Declaration permissions are checked with `types.MissingRequiredPermission`
+  before one-off execution or subscription registration.
+- Missing declaration permission returns `ErrPermissionDenied`.
+- `AllowAllPermissions` bypasses declaration permission checks.
+- Metadata-only declarations return `ErrDeclaredReadNotExecutable`.
+- Declared reads compile/execute against the runtime schema, not the
+  caller-authorized raw-SQL lookup, so private base-table raw-read policy does
+  not block module-owned declared reads.
+- Raw SQL equivalent to a declaration still uses raw-SQL admission and does
+  not inherit declaration permissions.
+
+Protocol/runtime seam added for Task 05:
+
+- `protocol.CompiledSQLQuery`
+- `protocol.CompileSQLQueryString`
+- `protocol.ExecuteCompiledSQLQuery`
+
+Validation commands run:
+
+```sh
+rtk go fmt . ./protocol ./executor ./schema
+rtk go test . -run 'Test.*(Declaration|Read|Query|View|Permission|Runtime)' -count=1
+rtk go test ./protocol ./executor ./schema -count=1
+rtk go vet . ./protocol ./executor ./schema
+rtk go test ./commitlog -count=1
+rtk go test ./... -count=1
+```
+
+Task 06 protocol/codegen follow-up:
+
+- Add external protocol/server surfaces that receive declared read names for
+  named one-off query and named view subscribe.
+- Update generated clients so declaration helpers call named declared-read
+  callbacks/API paths instead of raw SQL callbacks.
+- Keep raw SQL helpers separate from declared-read helpers; do not infer
+  declarations from matching SQL text.

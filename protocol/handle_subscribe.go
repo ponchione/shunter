@@ -31,6 +31,75 @@ type compiledSQLAggregate struct {
 	ResultColumn schema.ColumnSchema
 }
 
+// CompiledSQLQuery is prevalidated SQL metadata produced by the protocol SQL
+// compiler. It is used by runtime-owned declared reads without routing those
+// reads through raw SQL admission.
+type CompiledSQLQuery struct {
+	query compiledSQLQuery
+}
+
+func newCompiledSQLQuery(query compiledSQLQuery) CompiledSQLQuery {
+	return CompiledSQLQuery{query: copyCompiledSQLQuery(query)}
+}
+
+// Copy returns a detached copy of the compiled SQL metadata.
+func (q CompiledSQLQuery) Copy() CompiledSQLQuery {
+	return newCompiledSQLQuery(q.query)
+}
+
+// TableName returns the projected table name for this compiled query.
+func (q CompiledSQLQuery) TableName() string {
+	return q.query.TableName
+}
+
+// Predicate returns the compiled subscription predicate backing the query.
+func (q CompiledSQLQuery) Predicate() subscription.Predicate {
+	return q.query.Predicate
+}
+
+// UsesCallerIdentity reports whether the compiled SQL references :sender.
+func (q CompiledSQLQuery) UsesCallerIdentity() bool {
+	return q.query.UsesCallerIdentity
+}
+
+// ReferencedTables returns the table IDs referenced by the compiled predicate.
+func (q CompiledSQLQuery) ReferencedTables() []schema.TableID {
+	if q.query.Predicate == nil {
+		return nil
+	}
+	tables := q.query.Predicate.Tables()
+	out := make([]schema.TableID, len(tables))
+	copy(out, tables)
+	return out
+}
+
+// PredicateHashIdentity returns the hash identity needed for :sender-aware
+// subscription predicates. Queries without :sender return nil.
+func (q CompiledSQLQuery) PredicateHashIdentity(identity types.Identity) *types.Identity {
+	if !q.query.UsesCallerIdentity {
+		return nil
+	}
+	id := identity
+	return &id
+}
+
+func copyCompiledSQLQuery(query compiledSQLQuery) compiledSQLQuery {
+	out := query
+	if len(query.ProjectionColumns) > 0 {
+		out.ProjectionColumns = make([]compiledSQLProjectionColumn, len(query.ProjectionColumns))
+		copy(out.ProjectionColumns, query.ProjectionColumns)
+	}
+	if query.Aggregate != nil {
+		aggregate := *query.Aggregate
+		out.Aggregate = &aggregate
+	}
+	if query.Limit != nil {
+		limit := *query.Limit
+		out.Limit = &limit
+	}
+	return out
+}
+
 // SQLQueryValidationOptions controls how ValidateSQLQueryString applies the
 // protocol SQL compiler to authored declaration metadata.
 type SQLQueryValidationOptions struct {
@@ -208,8 +277,22 @@ func ValidateSQLQueryString(qs string, sl SchemaLookup, opts SQLQueryValidationO
 		return fmt.Errorf("schema lookup must not be nil")
 	}
 	var caller types.Identity
-	_, err := compileSQLQueryString(qs, sl, &caller, opts.AllowLimit, opts.AllowProjection)
+	_, err := CompileSQLQueryString(qs, sl, &caller, opts)
 	return err
+}
+
+// CompileSQLQueryString compiles SQL against the supplied schema lookup and
+// caller identity. It is a narrow runtime seam for declared reads; raw external
+// SQL must still pass an auth-aware SchemaLookup when using this compiler.
+func CompileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, opts SQLQueryValidationOptions) (CompiledSQLQuery, error) {
+	if sl == nil {
+		return CompiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
+	}
+	compiled, err := compileSQLQueryString(qs, sl, caller, opts.AllowLimit, opts.AllowProjection)
+	if err != nil {
+		return CompiledSQLQuery{}, err
+	}
+	return newCompiledSQLQuery(compiled), nil
 }
 
 func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool) (compiledSQLQuery, error) {

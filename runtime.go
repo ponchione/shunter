@@ -24,6 +24,7 @@ type Runtime struct {
 	buildConfig   Config
 	engine        *schema.Engine
 	registry      schema.SchemaRegistry
+	readCatalog   *declaredReadCatalog
 	dataDir       string
 	state         *store.CommittedState
 	recoveredTxID types.TxID
@@ -99,6 +100,10 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		return nil, fmt.Errorf("build hosted runtime schema: %w", err)
 	}
 	registry := engine.Registry()
+	readCatalog, err := newDeclaredReadCatalog(mod.queries, mod.views, registry)
+	if err != nil {
+		return nil, fmt.Errorf("build hosted runtime declared reads: %w", err)
+	}
 
 	state, recoveredTxID, resumePlan, err := openOrBootstrapState(dataDir, registry)
 	if err != nil {
@@ -116,6 +121,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		buildConfig:   normalized,
 		engine:        engine,
 		registry:      registry,
+		readCatalog:   readCatalog,
 		dataDir:       dataDir,
 		state:         state,
 		recoveredTxID: recoveredTxID,

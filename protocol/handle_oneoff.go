@@ -19,6 +19,12 @@ type CommittedStateAccess interface {
 	Snapshot() store.CommittedReadView
 }
 
+// SQLQueryResult is the unencoded row result for a compiled one-off SQL query.
+type SQLQueryResult struct {
+	TableName string
+	Rows      []types.ProductValue
+}
+
 // handleOneOffQuery executes a one-off table scan with optional
 // comparison predicates against committed state and sends the result
 // back to the client (SPEC-005 §7.4).
@@ -44,105 +50,14 @@ func handleOneOffQuery(
 		return
 	}
 
-	tableID, _, ok := readSL.TableByName(compiled.TableName)
-	if !ok {
-		sendOneOffError(conn, msg.MessageID, fmt.Sprintf("no such table: `%s`. If the table exists, it may be marked private.", compiled.TableName), receipt)
-		return
-	}
-
-	pred := compiled.Predicate
-	if err := subscription.ValidateQueryPredicate(pred, readSL); err != nil {
-		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
-		return
-	}
-	if err := ctx.Err(); err != nil {
+	result, err := ExecuteCompiledSQLQuery(ctx, newCompiledSQLQuery(compiled), stateAccess, readSL)
+	if err != nil {
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
 		return
 	}
 
-	view := stateAccess.Snapshot()
-	viewClosed := false
-	closeView := func() {
-		if !viewClosed {
-			view.Close()
-			viewClosed = true
-		}
-	}
-	defer closeView()
-	failRead := func(err error) bool {
-		if err == nil {
-			return false
-		}
-		closeView()
-		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
-		return true
-	}
-	resolver, _ := readSL.(schema.IndexResolver)
-	rowLimit := oneOffRowLimit(compiled.Limit)
-	var matchedRows []types.ProductValue
-	var encodedRows []types.ProductValue
-	rowsAlreadyProjected := false
-	if compiled.Aggregate != nil {
-		// Aggregate shape happens over the full matched input; LIMIT then
-		// constrains the one-row aggregate output (reference ProjectList::Limit
-		// wraps ProjectList::Agg). LIMIT 0 drops the aggregate row entirely;
-		// LIMIT >= 1 keeps the single count row.
-		matchedCount, err := countOneOffMatches(ctx, view, tableID, pred, resolver)
-		if failRead(err) {
-			return
-		}
-		if compiled.Limit == nil || *compiled.Limit > 0 {
-			encodedRows = []types.ProductValue{{types.NewUint64(matchedCount)}}
-		}
-	} else if rowLimit != 0 {
-		if joinPred, ok := pred.(subscription.Join); ok {
-			if len(compiled.ProjectionColumns) != 0 {
-				matchedRows, err = evaluateOneOffJoinProjection(ctx, view, joinPred, compiled.ProjectionColumns, resolver, rowLimit)
-				if failRead(err) {
-					return
-				}
-				rowsAlreadyProjected = true
-			} else {
-				matchedRows, err = evaluateOneOffJoin(ctx, view, tableID, joinPred, resolver, rowLimit)
-				if failRead(err) {
-					return
-				}
-			}
-		} else if crossPred, ok := pred.(subscription.CrossJoin); ok {
-			if len(compiled.ProjectionColumns) != 0 {
-				matchedRows, err = evaluateOneOffCrossJoinProjection(ctx, view, crossPred, compiled.ProjectionColumns, rowLimit)
-				if failRead(err) {
-					return
-				}
-				rowsAlreadyProjected = true
-			} else {
-				matchedRows, err = evaluateOneOffCrossJoin(ctx, view, tableID, crossPred, rowLimit)
-				if failRead(err) {
-					return
-				}
-			}
-		} else {
-			for _, pv := range view.TableScan(tableID) {
-				if failRead(ctx.Err()) {
-					return
-				}
-				if subscription.MatchRow(pred, tableID, pv) {
-					matchedRows = append(matchedRows, pv)
-					if oneOffLimitReached(len(matchedRows), rowLimit) {
-						break
-					}
-				}
-			}
-		}
-		if len(compiled.ProjectionColumns) != 0 && !rowsAlreadyProjected {
-			encodedRows = projectOneOffRows(matchedRows, compiled.ProjectionColumns)
-		} else {
-			encodedRows = matchedRows
-		}
-	}
-	closeView()
 	var rows [][]byte
-	for _, pv := range encodedRows {
+	for _, pv := range result.Rows {
 		var buf bytes.Buffer
 		if err := bsatn.EncodeProductValue(&buf, pv); err != nil {
 			sendOneOffError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
@@ -155,11 +70,121 @@ func handleOneOffQuery(
 	sendError(conn, OneOffQueryResponse{
 		MessageID: msg.MessageID,
 		Tables: []OneOffTable{{
-			TableName: compiled.TableName,
+			TableName: result.TableName,
 			Rows:      encoded,
 		}},
 		TotalHostExecutionDuration: elapsedMicrosI64(receipt),
 	})
+}
+
+// ExecuteCompiledSQLQuery evaluates a precompiled one-off SQL query against a
+// committed snapshot and returns detached row values.
+func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, stateAccess CommittedStateAccess, sl SchemaLookup) (SQLQueryResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if stateAccess == nil {
+		return SQLQueryResult{}, fmt.Errorf("committed state access must not be nil")
+	}
+	if sl == nil {
+		return SQLQueryResult{}, fmt.Errorf("schema lookup must not be nil")
+	}
+	query := compiled.query
+	tableID, _, ok := sl.TableByName(query.TableName)
+	if !ok {
+		return SQLQueryResult{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", query.TableName)
+	}
+
+	pred := query.Predicate
+	if err := subscription.ValidateQueryPredicate(pred, sl); err != nil {
+		return SQLQueryResult{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return SQLQueryResult{}, err
+	}
+
+	view := stateAccess.Snapshot()
+	defer view.Close()
+
+	resolver, _ := sl.(schema.IndexResolver)
+	rowLimit := oneOffRowLimit(query.Limit)
+	var matchedRows []types.ProductValue
+	var encodedRows []types.ProductValue
+	rowsAlreadyProjected := false
+	if query.Aggregate != nil {
+		// Aggregate shape happens over the full matched input; LIMIT then
+		// constrains the one-row aggregate output (reference ProjectList::Limit
+		// wraps ProjectList::Agg). LIMIT 0 drops the aggregate row entirely;
+		// LIMIT >= 1 keeps the single count row.
+		matchedCount, err := countOneOffMatches(ctx, view, tableID, pred, resolver)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		if query.Limit == nil || *query.Limit > 0 {
+			encodedRows = []types.ProductValue{{types.NewUint64(matchedCount)}}
+		}
+	} else if rowLimit != 0 {
+		if joinPred, ok := pred.(subscription.Join); ok {
+			if len(query.ProjectionColumns) != 0 {
+				rows, err := evaluateOneOffJoinProjection(ctx, view, joinPred, query.ProjectionColumns, resolver, rowLimit)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				matchedRows = rows
+				rowsAlreadyProjected = true
+			} else {
+				rows, err := evaluateOneOffJoin(ctx, view, tableID, joinPred, resolver, rowLimit)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				matchedRows = rows
+			}
+		} else if crossPred, ok := pred.(subscription.CrossJoin); ok {
+			if len(query.ProjectionColumns) != 0 {
+				rows, err := evaluateOneOffCrossJoinProjection(ctx, view, crossPred, query.ProjectionColumns, rowLimit)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				matchedRows = rows
+				rowsAlreadyProjected = true
+			} else {
+				rows, err := evaluateOneOffCrossJoin(ctx, view, tableID, crossPred, rowLimit)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				matchedRows = rows
+			}
+		} else {
+			for _, pv := range view.TableScan(tableID) {
+				if err := ctx.Err(); err != nil {
+					return SQLQueryResult{}, err
+				}
+				if subscription.MatchRow(pred, tableID, pv) {
+					matchedRows = append(matchedRows, pv)
+					if oneOffLimitReached(len(matchedRows), rowLimit) {
+						break
+					}
+				}
+			}
+		}
+		if len(query.ProjectionColumns) != 0 && !rowsAlreadyProjected {
+			encodedRows = projectOneOffRows(matchedRows, query.ProjectionColumns)
+		} else {
+			encodedRows = matchedRows
+		}
+	}
+	return SQLQueryResult{TableName: query.TableName, Rows: copyProductRows(encodedRows)}, nil
+}
+
+func copyProductRows(rows []types.ProductValue) []types.ProductValue {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]types.ProductValue, len(rows))
+	for i, row := range rows {
+		out[i] = row.Copy()
+	}
+	return out
 }
 
 // sendOneOffError emits a failure OneOffQueryResponse matching reference
