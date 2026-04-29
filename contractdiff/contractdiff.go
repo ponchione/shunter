@@ -50,20 +50,32 @@ type Report struct {
 }
 
 func CompareJSON(oldData, currentData []byte) (Report, error) {
-	var old shunter.ModuleContract
-	if err := json.Unmarshal(oldData, &old); err != nil {
-		return Report{}, fmt.Errorf("%w: previous contract: %v", ErrInvalidContractJSON, err)
+	old, err := decodeContractJSON("previous", oldData)
+	if err != nil {
+		return Report{}, err
 	}
-	var current shunter.ModuleContract
-	if err := json.Unmarshal(currentData, &current); err != nil {
-		return Report{}, fmt.Errorf("%w: current contract: %v", ErrInvalidContractJSON, err)
+	current, err := decodeContractJSON("current", currentData)
+	if err != nil {
+		return Report{}, err
 	}
 	return Compare(old, current), nil
+}
+
+func decodeContractJSON(label string, data []byte) (shunter.ModuleContract, error) {
+	var contract shunter.ModuleContract
+	if err := json.Unmarshal(data, &contract); err != nil {
+		return shunter.ModuleContract{}, fmt.Errorf("%w: %s contract: %v", ErrInvalidContractJSON, label, err)
+	}
+	if err := shunter.ValidateModuleContract(contract); err != nil {
+		return shunter.ModuleContract{}, fmt.Errorf("%w: %s contract: %v", ErrInvalidContractJSON, label, err)
+	}
+	return contract, nil
 }
 
 func Compare(old, current shunter.ModuleContract) Report {
 	var out Report
 	compareVersions(&out, old, current)
+	compareModuleMetadata(&out, old.Module, current.Module)
 	compareTables(&out, old.Schema.Tables, current.Schema.Tables)
 	compareReducers(&out, old.Schema.Reducers, current.Schema.Reducers)
 	compareNamedQueries(&out, SurfaceQuery, old.Queries, current.Queries)
@@ -98,6 +110,26 @@ func compareVersions(out *Report, old, current shunter.ModuleContract) {
 	}
 	if old.Schema.Version != current.Schema.Version {
 		out.add(ChangeKindMetadata, SurfaceSchema, "schema", fmt.Sprintf("schema version changed from %d to %d", old.Schema.Version, current.Schema.Version))
+	}
+}
+
+func compareModuleMetadata(out *Report, old, current shunter.ModuleContractIdentity) {
+	moduleName := nonEmptyName(current.Name, old.Name)
+	for key, currentValue := range current.Metadata {
+		oldValue, ok := old.Metadata[key]
+		name := moduleName + ".metadata." + key
+		if !ok {
+			out.add(ChangeKindMetadata, SurfaceModule, name, fmt.Sprintf("module metadata %q added", key))
+			continue
+		}
+		if oldValue != currentValue {
+			out.add(ChangeKindMetadata, SurfaceModule, name, fmt.Sprintf("module metadata %q changed", key))
+		}
+	}
+	for key := range old.Metadata {
+		if _, ok := current.Metadata[key]; !ok {
+			out.add(ChangeKindMetadata, SurfaceModule, moduleName+".metadata."+key, fmt.Sprintf("module metadata %q removed", key))
+		}
 	}
 }
 

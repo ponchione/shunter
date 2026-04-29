@@ -2,7 +2,6 @@ package shunter
 
 import (
 	"encoding/json"
-	"sort"
 
 	"github.com/ponchione/shunter/schema"
 )
@@ -279,24 +278,10 @@ func buildMigrationContract(schemaExport schema.SchemaExport, module MigrationMe
 	out := emptyMigrationContract()
 	out.Module = normalizeMigrationMetadata(module)
 
-	seenTables := make(map[string]struct{}, len(schemaExport.Tables))
 	for _, table := range schemaExport.Tables {
-		seenTables[table.Name] = struct{}{}
 		if metadata, ok := tableMigrations[table.Name]; ok && hasMigrationMetadata(metadata) {
 			out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceTable, table.Name, metadata))
 		}
-	}
-
-	var extraTables []string
-	for name, metadata := range tableMigrations {
-		if _, ok := seenTables[name]; ok || !hasMigrationMetadata(metadata) {
-			continue
-		}
-		extraTables = append(extraTables, name)
-	}
-	sort.Strings(extraTables)
-	for _, name := range extraTables {
-		out.Declarations = append(out.Declarations, migrationContractDeclaration(MigrationSurfaceTable, name, tableMigrations[name]))
 	}
 
 	for _, query := range queries {

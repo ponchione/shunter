@@ -160,7 +160,15 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			if _, err := io.ReadFull(r, flags); err != nil {
 				return nil, 0, err
 			}
-			cols = append(cols, schema.ColumnSchema{Index: int(colIdx), Name: colName, Type: schema.ValueKind(flags[0]), Nullable: flags[1] == 1, AutoIncrement: flags[2] == 1})
+			nullable, err := decodeSchemaSnapshotBool(flags[1], "column nullable")
+			if err != nil {
+				return nil, 0, err
+			}
+			autoIncrement, err := decodeSchemaSnapshotBool(flags[2], "column auto_increment")
+			if err != nil {
+				return nil, 0, err
+			}
+			cols = append(cols, schema.ColumnSchema{Index: int(colIdx), Name: colName, Type: schema.ValueKind(flags[0]), Nullable: nullable, AutoIncrement: autoIncrement})
 		}
 		var idxCount uint32
 		if err := binary.Read(r, binary.LittleEndian, &idxCount); err != nil {
@@ -174,6 +182,14 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			}
 			flags := make([]byte, 2)
 			if _, err := io.ReadFull(r, flags); err != nil {
+				return nil, 0, err
+			}
+			unique, err := decodeSchemaSnapshotBool(flags[0], "index unique")
+			if err != nil {
+				return nil, 0, err
+			}
+			primary, err := decodeSchemaSnapshotBool(flags[1], "index primary")
+			if err != nil {
 				return nil, 0, err
 			}
 			var colsCount uint32
@@ -191,7 +207,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 				}
 				idxCols = append(idxCols, int(colIdx))
 			}
-			indexes = append(indexes, schema.IndexSchema{ID: schema.IndexID(idxID), Name: idxName, Columns: idxCols, Unique: flags[0] == 1, Primary: flags[1] == 1})
+			indexes = append(indexes, schema.IndexSchema{ID: schema.IndexID(idxID), Name: idxName, Columns: idxCols, Unique: unique, Primary: primary})
 		}
 		tables = append(tables, schema.TableSchema{ID: schema.TableID(tableID), Name: name, Columns: cols, Indexes: indexes})
 	}
@@ -199,6 +215,17 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 		return nil, 0, err
 	}
 	return tables, version, nil
+}
+
+func decodeSchemaSnapshotBool(v byte, field string) (bool, error) {
+	switch v {
+	case 0:
+		return false, nil
+	case 1:
+		return true, nil
+	default:
+		return false, fmt.Errorf("%w: invalid schema snapshot %s flag %d", ErrSnapshot, field, v)
+	}
 }
 
 type SnapshotWriter interface {

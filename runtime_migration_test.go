@@ -3,6 +3,7 @@ package shunter
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -124,6 +125,25 @@ func TestMissingMigrationMetadataDoesNotBlockRuntimeBuildOrStart(t *testing.T) {
 	}
 	if contract.Migrations.Declarations == nil {
 		t.Fatalf("missing migration declarations = nil, want stable empty slice")
+	}
+}
+
+func TestTableMigrationMetadataForUnknownTableFailsBuildWithoutFreezingModule(t *testing.T) {
+	mod := validChatModule().TableMigration("missing", MigrationMetadata{
+		Compatibility: MigrationCompatibilityBreaking,
+		Notes:         "typo should not become dead contract metadata",
+	})
+
+	_, err := Build(mod, Config{DataDir: t.TempDir()})
+	if err == nil || !errors.Is(err, ErrUnknownTableMigration) {
+		t.Fatalf("expected ErrUnknownTableMigration, got %v", err)
+	}
+
+	missing := messagesTableDef()
+	missing.Name = "missing"
+	mod.TableDef(missing)
+	if _, err := Build(mod, Config{DataDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build after adding missing table returned error: %v", err)
 	}
 }
 

@@ -56,81 +56,13 @@ func GenerateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 }
 
 func validateContract(contract shunter.ModuleContract) error {
-	if contract.ContractVersion != shunter.ModuleContractVersion {
-		return fmt.Errorf("%w: contract_version = %d, want %d", ErrInvalidContract, contract.ContractVersion, shunter.ModuleContractVersion)
-	}
-	if contract.Codegen.ContractFormat != shunter.ModuleContractFormat {
-		return fmt.Errorf("%w: codegen.contract_format = %q, want %q", ErrInvalidContract, contract.Codegen.ContractFormat, shunter.ModuleContractFormat)
-	}
-	if contract.Codegen.ContractVersion != shunter.ModuleContractVersion {
-		return fmt.Errorf("%w: codegen.contract_version = %d, want %d", ErrInvalidContract, contract.Codegen.ContractVersion, shunter.ModuleContractVersion)
+	if err := shunter.ValidateModuleContract(contract); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidContract, err)
 	}
 	for _, table := range contract.Schema.Tables {
-		if strings.TrimSpace(table.Name) == "" {
-			return fmt.Errorf("%w: table name must not be empty", ErrInvalidContract)
-		}
 		for _, column := range table.Columns {
-			if strings.TrimSpace(column.Name) == "" {
-				return fmt.Errorf("%w: column name must not be empty in table %q", ErrInvalidContract, table.Name)
-			}
 			if _, err := typeScriptColumnType(column.Type); err != nil {
 				return fmt.Errorf("%w: table %q column %q: %v", ErrInvalidContract, table.Name, column.Name, err)
-			}
-		}
-	}
-	for _, reducer := range contract.Schema.Reducers {
-		if strings.TrimSpace(reducer.Name) == "" {
-			return fmt.Errorf("%w: reducer name must not be empty", ErrInvalidContract)
-		}
-	}
-	for _, query := range contract.Queries {
-		if strings.TrimSpace(query.Name) == "" {
-			return fmt.Errorf("%w: query name must not be empty", ErrInvalidContract)
-		}
-	}
-	for _, view := range contract.Views {
-		if strings.TrimSpace(view.Name) == "" {
-			return fmt.Errorf("%w: view name must not be empty", ErrInvalidContract)
-		}
-	}
-	if err := validatePermissionDeclarations("reducer", contract.Permissions.Reducers); err != nil {
-		return err
-	}
-	if err := validatePermissionDeclarations("query", contract.Permissions.Queries); err != nil {
-		return err
-	}
-	if err := validatePermissionDeclarations("view", contract.Permissions.Views); err != nil {
-		return err
-	}
-	for _, declaration := range contract.ReadModel.Declarations {
-		if declaration.Surface != shunter.ReadModelSurfaceQuery && declaration.Surface != shunter.ReadModelSurfaceView {
-			return fmt.Errorf("%w: read model surface %q is invalid", ErrInvalidContract, declaration.Surface)
-		}
-		if strings.TrimSpace(declaration.Name) == "" {
-			return fmt.Errorf("%w: read model %s name must not be empty", ErrInvalidContract, declaration.Surface)
-		}
-		for _, table := range declaration.Tables {
-			if strings.TrimSpace(table) == "" {
-				return fmt.Errorf("%w: read model %s %q table must not be empty", ErrInvalidContract, declaration.Surface, declaration.Name)
-			}
-		}
-		for _, tag := range declaration.Tags {
-			if strings.TrimSpace(tag) == "" {
-				return fmt.Errorf("%w: read model %s %q tag must not be empty", ErrInvalidContract, declaration.Surface, declaration.Name)
-			}
-		}
-	}
-	return nil
-}
-
-func validatePermissionDeclarations(surface string, declarations []shunter.PermissionContractDeclaration) error {
-	for _, declaration := range declarations {
-		if strings.TrimSpace(declaration.Name) == "" {
-			return fmt.Errorf("%w: permission %s name must not be empty", ErrInvalidContract, surface)
-		}
-		for _, required := range declaration.Required {
-			if strings.TrimSpace(required) == "" {
-				return fmt.Errorf("%w: permission %s %q requirement must not be empty", ErrInvalidContract, surface, declaration.Name)
 			}
 		}
 	}

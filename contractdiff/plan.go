@@ -80,13 +80,13 @@ type PlanWarning struct {
 }
 
 func PlanJSON(oldData, currentData []byte, opts PlanOptions) (MigrationPlan, error) {
-	var old shunter.ModuleContract
-	if err := json.Unmarshal(oldData, &old); err != nil {
-		return MigrationPlan{}, fmt.Errorf("%w: previous contract: %v", ErrInvalidContractJSON, err)
+	old, err := decodeContractJSON("previous", oldData)
+	if err != nil {
+		return MigrationPlan{}, err
 	}
-	var current shunter.ModuleContract
-	if err := json.Unmarshal(currentData, &current); err != nil {
-		return MigrationPlan{}, fmt.Errorf("%w: current contract: %v", ErrInvalidContractJSON, err)
+	current, err := decodeContractJSON("current", currentData)
+	if err != nil {
+		return MigrationPlan{}, err
 	}
 	return Plan(old, current, opts), nil
 }

@@ -205,6 +205,9 @@ func decodeCurrentContract(data []byte) (shunter.ModuleContract, error) {
 	if err := json.Unmarshal(data, &contract); err != nil {
 		return shunter.ModuleContract{}, fmt.Errorf("%w: current contract: %v", contractdiff.ErrInvalidContractJSON, err)
 	}
+	if err := shunter.ValidateModuleContract(contract); err != nil {
+		return shunter.ModuleContract{}, fmt.Errorf("%w: current contract: %v", contractdiff.ErrInvalidContractJSON, err)
+	}
 	return contract, nil
 }
 

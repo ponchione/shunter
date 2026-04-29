@@ -83,6 +83,26 @@ func TestContractDiffReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceReadModel, "query.history")
 }
 
+func TestContractDiffReportsModuleMetadataChanges(t *testing.T) {
+	old := contractFixture()
+	old.Module.Metadata = map[string]string{
+		"removed": "old",
+		"stable":  "same",
+		"team":    "runtime",
+	}
+	current := contractFixture()
+	current.Module.Metadata = map[string]string{
+		"added":  "new",
+		"stable": "same",
+		"team":   "platform",
+	}
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceModule, "chat.metadata.added")
+	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceModule, "chat.metadata.removed")
+	assertChange(t, report.Changes, ChangeKindMetadata, SurfaceModule, "chat.metadata.team")
+}
+
 func TestContractDiffDetectsDeclaredReadSQLChanges(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
@@ -112,6 +132,19 @@ func TestContractDiffJSONFailsClearlyForMalformedInput(t *testing.T) {
 	}
 	if !errors.Is(err, ErrInvalidContractJSON) {
 		t.Fatalf("CompareJSON error = %v, want ErrInvalidContractJSON", err)
+	}
+}
+
+func TestContractDiffJSONFailsClearlyForSemanticInvalidContract(t *testing.T) {
+	_, err := CompareJSON([]byte(`{}`), mustContractJSON(t, contractFixture()))
+	if err == nil {
+		t.Fatal("CompareJSON returned nil error, want invalid contract")
+	}
+	if !errors.Is(err, ErrInvalidContractJSON) {
+		t.Fatalf("CompareJSON error = %v, want ErrInvalidContractJSON", err)
+	}
+	if !strings.Contains(err.Error(), "previous contract") {
+		t.Fatalf("CompareJSON error = %v, want previous contract context", err)
 	}
 }
 

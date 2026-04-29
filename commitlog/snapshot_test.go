@@ -167,6 +167,79 @@ func TestDecodeSchemaSnapshotRejectsOversizedStringLength(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsInvalidBoolFlags(t *testing.T) {
+	validColumnFlags := [3]byte{byte(schema.KindUint64), 0, 0}
+	validIndexFlags := [2]byte{1, 1}
+	for _, tc := range []struct {
+		name        string
+		columnFlags [3]byte
+		indexFlags  [2]byte
+		wantDetail  string
+	}{
+		{
+			name:        "column-nullable",
+			columnFlags: [3]byte{byte(schema.KindUint64), 2, 0},
+			indexFlags:  validIndexFlags,
+			wantDetail:  "column nullable",
+		},
+		{
+			name:        "column-auto-increment",
+			columnFlags: [3]byte{byte(schema.KindUint64), 0, 2},
+			indexFlags:  validIndexFlags,
+			wantDetail:  "column auto_increment",
+		},
+		{
+			name:        "index-unique",
+			columnFlags: validColumnFlags,
+			indexFlags:  [2]byte{2, 1},
+			wantDetail:  "index unique",
+		},
+		{
+			name:        "index-primary",
+			columnFlags: validColumnFlags,
+			indexFlags:  [2]byte{1, 2},
+			wantDetail:  "index primary",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := encodeSchemaSnapshotWithFlags(t, tc.columnFlags, tc.indexFlags)
+			_, _, err := DecodeSchemaSnapshot(bytes.NewReader(data))
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("DecodeSchemaSnapshot error = %v, want %q detail", err, tc.wantDetail)
+			}
+		})
+	}
+}
+
+func encodeSchemaSnapshotWithFlags(t testing.TB, columnFlags [3]byte, indexFlags [2]byte) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1) // schema snapshot version
+	writeUint32(t, &buf, 1) // table count
+	writeUint32(t, &buf, 0) // table ID
+	if err := writeString(&buf, "players"); err != nil {
+		t.Fatal(err)
+	}
+	writeUint32(t, &buf, 1) // column count
+	writeUint32(t, &buf, 0) // column index
+	if err := writeString(&buf, "id"); err != nil {
+		t.Fatal(err)
+	}
+	buf.Write(columnFlags[:])
+	writeUint32(t, &buf, 1) // index count
+	if err := writeString(&buf, "primary"); err != nil {
+		t.Fatal(err)
+	}
+	buf.Write(indexFlags[:])
+	writeUint32(t, &buf, 1) // index column count
+	writeUint32(t, &buf, 0) // indexed column
+	return buf.Bytes()
+}
+
 func TestDecodeSchemaSnapshotDoesNotPreallocateClaimedTableCount(t *testing.T) {
 	var buf bytes.Buffer
 	writeUint32(t, &buf, 1)

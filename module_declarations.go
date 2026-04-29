@@ -6,11 +6,13 @@ import (
 	"strings"
 
 	"github.com/ponchione/shunter/protocol"
+	"github.com/ponchione/shunter/schema"
 )
 
 var (
 	ErrEmptyDeclarationName     = errors.New("declaration name must not be empty")
 	ErrDuplicateDeclarationName = errors.New("duplicate declaration name")
+	ErrUnknownTableMigration    = errors.New("table migration metadata references unknown table")
 
 	// ErrInvalidDeclarationSQL reports SQL metadata that cannot be compiled
 	// against the built module schema.
@@ -176,6 +178,10 @@ func hasModuleDeclarationSQL(m *Module) bool {
 	return false
 }
 
+func hasModuleTableMigrations(m *Module) bool {
+	return len(m.tableMigrations) > 0
+}
+
 func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
 	for _, query := range m.queries {
 		if strings.TrimSpace(query.SQL) == "" {
@@ -199,6 +205,19 @@ func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
 		})
 		if err != nil {
 			return fmt.Errorf("%w: view %q: %v", ErrInvalidDeclarationSQL, view.Name, err)
+		}
+	}
+	return nil
+}
+
+func validateModuleTableMigrations(m *Module, reg schema.SchemaRegistry) error {
+	for tableName := range m.tableMigrations {
+		if strings.TrimSpace(tableName) == "" {
+			return fmt.Errorf("%w: empty table name", ErrUnknownTableMigration)
+		}
+		_, table, ok := reg.TableByName(tableName)
+		if !ok || table == nil || table.Name != tableName {
+			return fmt.Errorf("%w: %q", ErrUnknownTableMigration, tableName)
 		}
 	}
 	return nil

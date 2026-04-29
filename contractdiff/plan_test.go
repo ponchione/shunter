@@ -1,6 +1,7 @@
 package contractdiff
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -182,6 +183,19 @@ func TestMigrationPlanJSONIsDeterministicAndNewlineTerminated(t *testing.T) {
 	}
 	if !strings.Contains(string(first), `"action": "review-required"`) {
 		t.Fatalf("plan JSON missing review action:\n%s", first)
+	}
+}
+
+func TestMigrationPlanJSONFailsClearlyForSemanticInvalidContract(t *testing.T) {
+	_, err := PlanJSON([]byte(`{}`), mustContractJSON(t, contractFixture()), PlanOptions{})
+	if err == nil {
+		t.Fatal("PlanJSON returned nil error, want invalid contract")
+	}
+	if !errors.Is(err, ErrInvalidContractJSON) {
+		t.Fatalf("PlanJSON error = %v, want ErrInvalidContractJSON", err)
+	}
+	if !strings.Contains(err.Error(), "previous contract") {
+		t.Fatalf("PlanJSON error = %v, want previous contract context", err)
 	}
 }
 
