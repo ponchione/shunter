@@ -564,7 +564,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		return
 	}
 	if req.Source == CallSourceExternal {
-		if missing, denied := missingRequiredPermission(req.Caller, rr.RequiredPermissions); denied {
+		if missing, denied := types.MissingRequiredPermission(req.Caller, rr.RequiredPermissions); denied {
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedPermission,
 				Error:  fmt.Errorf("%w: reducer %q missing permission %q", ErrPermissionDenied, req.ReducerName, missing),
@@ -687,30 +687,6 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		opts.startTime = start
 	}
 	e.postCommit(txID, changeset, ret, cmd, opts)
-}
-
-func missingRequiredPermission(caller types.CallerContext, required []string) (string, bool) {
-	if caller.AllowAllPermissions {
-		return "", false
-	}
-	for _, requiredPermission := range required {
-		if requiredPermission == "" {
-			continue
-		}
-		if !callerHasPermission(caller, requiredPermission) {
-			return requiredPermission, true
-		}
-	}
-	return "", false
-}
-
-func callerHasPermission(caller types.CallerContext, permission string) bool {
-	for _, granted := range caller.Permissions {
-		if granted == permission {
-			return true
-		}
-	}
-	return false
 }
 
 // postCommit runs the ordered post-commit pipeline (SPEC-003 §5.1–§5.4,

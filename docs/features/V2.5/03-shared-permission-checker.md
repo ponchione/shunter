@@ -68,9 +68,21 @@ Expand if package placement touches other consumers.
 
 ## Completion Notes
 
-When complete, update this file with:
+- Helper location: `types/permissions.go`.
+- Helper function: `types.MissingRequiredPermission(caller CallerContext, required []string) (string, bool)`.
+- Reducer enforcement now calls the shared helper from
+  `executor.(*Executor).handleCallReducer`; reducer permission behavior did not
+  change. `AllowAllPermissions` still bypasses required permissions, empty
+  required strings are ignored, every non-empty required permission must be
+  present, and the first missing required permission is reported in the existing
+  `ErrPermissionDenied` error shape.
+- Added focused helper tests in `types/permissions_test.go`.
 
-- helper location and function names
-- confirmation that reducer behavior did not change
-- validation commands run
+Validation run:
 
+```sh
+rtk go fmt ./types ./executor ./protocol .
+rtk go test ./types ./executor ./protocol -count=1
+rtk go test . -run 'Test.*(Permission|Reducer|Auth|Local|Network)' -count=1
+rtk go vet ./types ./executor ./protocol .
+```
