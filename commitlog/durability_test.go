@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -185,4 +186,204 @@ func TestDurabilityWorkerSegmentWriteFailureFailsClosedWithoutAdvancingDurable(t
 		}
 	}()
 	dw.EnqueueCommitted(2, makeDurabilityTestChangeset(2))
+}
+
+func TestDurabilityWorkerRolloverCreateFailureLeavesRecoverableDurablePrefix(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+	blockedNextSegment := filepath.Join(dir, SegmentFileName(2))
+	if err := os.Mkdir(blockedNextSegment, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.MaxSegmentSize = 1
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := dw.WaitUntilDurable(1)
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	finalTx, fatalErr := dw.Close()
+	if fatalErr == nil {
+		t.Fatal("expected rollover create failure")
+	}
+	if !strings.Contains(fatalErr.Error(), SegmentFileName(2)) {
+		t.Fatalf("rollover failure = %v, want blocked successor segment path", fatalErr)
+	}
+	if finalTx != 1 || dw.DurableTxID() != 1 {
+		t.Fatalf("durable tx after rollover failure = (%d, %d), want (1, 1)", finalTx, dw.DurableTxID())
+	}
+	select {
+	case txID := <-wait:
+		if txID != 1 {
+			t.Fatalf("waiter tx = %d, want 1", txID)
+		}
+	default:
+		t.Fatal("waiter for synced prefix should be released before rollover failure")
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 1 {
+		t.Fatalf("maxTxID = %d, want 1", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 1}) {
+		t.Fatalf("replayed range = %+v, want 1..1", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 2 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 2", plan)
+	}
+}
+
+func TestDurabilityWorkerAppendInPlaceResumeTruncatesStaleOffsetIndexTail(t *testing.T) {
+	dir := t.TempDir()
+	makeScanTestSegment(t, dir, 1, 1, 2)
+
+	idxPath := filepath.Join(dir, OffsetIndexFileName(1))
+	idx, err := CreateOffsetIndex(idxPath, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleFutureOffset := uint64(1 << 32)
+	for _, entry := range []OffsetIndexEntry{
+		{TxID: 1, ByteOffset: uint64(SegmentHeaderSize)},
+		{TxID: 2, ByteOffset: uint64(SegmentHeaderSize + RecordOverhead + 1)},
+		{TxID: 3, ByteOffset: staleFutureOffset},
+	} {
+		if err := idx.Append(entry.TxID, entry.ByteOffset); err != nil {
+			_ = idx.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := idx.Sync(); err != nil {
+		_ = idx.Close()
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.OffsetIndexIntervalBytes = 1
+	opts.OffsetIndexCap = 8
+	dw, err := NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{
+		SegmentStartTx: 1,
+		NextTxID:       3,
+		AppendMode:     AppendInPlace,
+	}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dw.DurableTxID(); got != 2 {
+		t.Fatalf("resumed durable tx = %d, want 2", got)
+	}
+	dw.EnqueueCommitted(3, makeDurabilityTestChangeset(3))
+	finalTx, fatalErr := dw.Close()
+	if fatalErr != nil {
+		t.Fatal(fatalErr)
+	}
+	if finalTx != 3 {
+		t.Fatalf("final durable tx = %d, want 3", finalTx)
+	}
+
+	reopened, err := OpenOffsetIndex(idxPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	entries, err := reopened.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("offset index entries = %+v, want tx 1,2 plus rewritten tx 3", entries)
+	}
+	for i, wantTx := range []types.TxID{1, 2, 3} {
+		if entries[i].TxID != wantTx {
+			t.Fatalf("offset index entries = %+v, want tx sequence [1 2 3]", entries)
+		}
+	}
+	if entries[2].ByteOffset == staleFutureOffset {
+		t.Fatalf("stale future index offset survived resume: %+v", entries)
+	}
+	if entries[2].ByteOffset <= entries[1].ByteOffset {
+		t.Fatalf("rewritten tx 3 offset = %d, want beyond tx 2 offset %d", entries[2].ByteOffset, entries[1].ByteOffset)
+	}
+}
+
+func TestDurabilityWorkerOffsetIndexFailureDoesNotBlockDurablePrefix(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.OffsetIndexIntervalBytes = 1
+	opts.OffsetIndexCap = 8
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dw.idx == nil || dw.idx.head == nil || dw.idx.head.f == nil {
+		t.Fatal("expected enabled offset index writer")
+	}
+	if err := dw.idx.head.f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	wait := dw.WaitUntilDurable(1)
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	finalTx, fatalErr := dw.Close()
+	if fatalErr != nil {
+		t.Fatalf("offset index failure should not fail durability: %v", fatalErr)
+	}
+	if finalTx != 1 || dw.DurableTxID() != 1 {
+		t.Fatalf("durable tx after offset index failure = (%d, %d), want (1, 1)", finalTx, dw.DurableTxID())
+	}
+	select {
+	case txID := <-wait:
+		if txID != 1 {
+			t.Fatalf("waiter tx = %d, want 1", txID)
+		}
+	default:
+		t.Fatal("waiter for segment-synced prefix should be released despite index failure")
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 1 {
+		t.Fatalf("maxTxID = %d, want 1", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 1}) {
+		t.Fatalf("replayed range = %+v, want 1..1", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 2 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 2", plan)
+	}
+
+	idx, err := OpenOffsetIndex(filepath.Join(dir, OffsetIndexFileName(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+	entries, err := idx.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed advisory index entries = %+v, want empty safe sidecar", entries)
+	}
 }
