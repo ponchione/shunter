@@ -190,6 +190,40 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarOnRetry(t *testing.T) {
 	assertFileExists(t, idx2Path)
 }
 
+func TestRunCompactionRemovesCoveredOrphansButRetainsUncoveredOrphans(t *testing.T) {
+	dir := t.TempDir()
+	covered := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	active := makeScanTestSegment(t, dir, 4, 4, 5)
+
+	coveredIdx := filepath.Join(dir, OffsetIndexFileName(1))
+	coveredOrphan := filepath.Join(dir, OffsetIndexFileName(2))
+	activeIdx := filepath.Join(dir, OffsetIndexFileName(4))
+	futureOrphan := filepath.Join(dir, OffsetIndexFileName(6))
+	for _, p := range []string{coveredIdx, coveredOrphan, activeIdx, futureOrphan} {
+		idx, err := CreateOffsetIndex(p, 4)
+		if err != nil {
+			t.Fatalf("CreateOffsetIndex(%s): %v", p, err)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	originalSyncDir := syncDir
+	syncDir = func(string) error { return nil }
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction: %v", err)
+	}
+	assertFileMissing(t, covered)
+	assertFileMissing(t, coveredIdx)
+	assertFileMissing(t, coveredOrphan)
+	assertFileExists(t, active)
+	assertFileExists(t, activeIdx)
+	assertFileExists(t, futureOrphan)
+}
+
 func TestRunCompactionSegmentRemovalFailureIncludesOperationPathAndWraps(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
