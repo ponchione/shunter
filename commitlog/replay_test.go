@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"os"
@@ -366,6 +367,46 @@ func TestReplayLogFallsBackWhenOffsetIndexPathIsUnopenable(t *testing.T) {
 	}
 	if maxTxID != types.TxID(n) {
 		t.Fatalf("ReplayLog max tx = %d, want %d", maxTxID, n)
+	}
+
+	wantRows := map[uint64]string{}
+	for tx := uint64(horizon + 1); tx <= n; tx++ {
+		wantRows[tx] = "p"
+	}
+	assertReplayPlayerRows(t, committed, wantRows)
+}
+
+func TestReplayLogFallsBackWhenOffsetIndexPathIsSymlinkWithoutMutatingTarget(t *testing.T) {
+	root := t.TempDir()
+	const startTx = uint64(1)
+	const n = uint64(16)
+	const horizon = types.TxID(8)
+
+	segPath, _ := writeDenseReplaySegment(t, root, startTx, n)
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, "external.idx")
+	before := []byte("external replay index target")
+	if err := os.WriteFile(targetPath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	idxPath := filepath.Join(root, OffsetIndexFileName(startTx))
+	symlinkOrSkip(t, targetPath, idxPath)
+
+	segments := []SegmentInfo{{Path: segPath, StartTx: types.TxID(startTx), LastTx: types.TxID(startTx + n - 1), Valid: true}}
+	committed, reg := buildReplayCommittedState(t)
+	maxTxID, err := ReplayLog(committed, segments, horizon, reg)
+	if err != nil {
+		t.Fatalf("replay with symlink advisory index: %v", err)
+	}
+	if maxTxID != types.TxID(n) {
+		t.Fatalf("ReplayLog max tx = %d, want %d", maxTxID, n)
+	}
+	after, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("symlink index target changed: got %q want %q", after, before)
 	}
 
 	wantRows := map[uint64]string{}
