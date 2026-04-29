@@ -370,6 +370,83 @@ func TestDurabilityWorkerResumeFreshSegmentReplacesRolloverArtifacts(t *testing.
 	}
 }
 
+func TestDurabilityWorkerResumeFreshSegmentTruncatesStaleOffsetIndexSidecar(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, dir, reg, 2, map[uint64]string{1: "p", 2: "p"})
+	path := writeReplaySegment(t, dir, 3,
+		replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("discarded")}}},
+	)
+	truncateScanTestFileToOffset(t, path, int64(SegmentHeaderSize+RecordHeaderSize-1))
+	createOrphanOffsetIndex(t, dir, 3,
+		OffsetIndexEntry{TxID: 3, ByteOffset: 1 << 32},
+	)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID before resume = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want fresh segment at tx 3", plan)
+	}
+
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.OffsetIndexIntervalBytes = 1
+	opts.OffsetIndexCap = 8
+	dw, err := NewDurabilityWorkerWithResumePlan(dir, plan, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(3, makeDurabilityTestChangeset(3))
+	if finalTx, fatalErr := dw.Close(); fatalErr != nil {
+		t.Fatal(fatalErr)
+	} else if finalTx != 3 {
+		t.Fatalf("final durable tx = %d, want 3", finalTx)
+	}
+
+	idx, err := OpenOffsetIndex(filepath.Join(dir, OffsetIndexFileName(3)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := idx.Entries()
+	if closeErr := idx.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("offset index entries after fresh resume = %+v, want exactly tx 3", entries)
+	}
+	if entries[0].TxID != 3 || entries[0].ByteOffset != uint64(SegmentHeaderSize) {
+		t.Fatalf("fresh segment offset index entry = %+v, want tx 3 at segment header boundary", entries[0])
+	}
+
+	recovered, maxTxID, plan, report, err = OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID after resume = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p", 3: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 3, End: 3}) {
+		t.Fatalf("replayed range after resume = %+v, want 3..3", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 3 || plan.NextTxID != 4 {
+		t.Fatalf("post-resume plan = %+v, want append-in-place on segment 3 at tx 4", plan)
+	}
+}
+
 func TestDurabilityWorkerResumeFreshSegmentRejectsNonEmptyRolloverDirectoryArtifact(t *testing.T) {
 	dir := t.TempDir()
 	_, reg := testSchema()

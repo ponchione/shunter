@@ -391,6 +391,41 @@ func TestRunCompactionRemovesCoveredOrphansButRetainsUncoveredOrphans(t *testing
 	assertFileExists(t, futureOrphan)
 }
 
+func TestRunCompactionRemovesCoveredSymlinkOrphanButRetainsFutureSymlinkOrphan(t *testing.T) {
+	dir := t.TempDir()
+	covered := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	active := makeScanTestSegment(t, dir, 4, 4, 5)
+	targetDir := t.TempDir()
+	coveredTarget := filepath.Join(targetDir, "covered.idx")
+	futureTarget := filepath.Join(targetDir, "future.idx")
+	coveredBefore := []byte("covered symlink target")
+	futureBefore := []byte("future symlink target")
+	if err := os.WriteFile(coveredTarget, coveredBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(futureTarget, futureBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coveredOrphan := filepath.Join(dir, OffsetIndexFileName(2))
+	futureOrphan := filepath.Join(dir, OffsetIndexFileName(6))
+	symlinkOrSkip(t, coveredTarget, coveredOrphan)
+	symlinkOrSkip(t, futureTarget, futureOrphan)
+
+	originalSyncDir := syncDir
+	syncDir = func(string) error { return nil }
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction: %v", err)
+	}
+	assertFileMissing(t, covered)
+	assertFileMissing(t, coveredOrphan)
+	assertFileExists(t, active)
+	assertSymlinkExists(t, futureOrphan)
+	assertFileBytes(t, coveredTarget, coveredBefore)
+	assertFileBytes(t, futureTarget, futureBefore)
+}
+
 func TestRunCompactionRemovesCoveredOrphansAfterEntirePrefixGone(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
@@ -922,6 +957,28 @@ func assertFileExists(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected %s to exist: %v", filepath.Base(path), err)
+	}
+}
+
+func assertSymlinkExists(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("expected %s symlink to exist: %v", filepath.Base(path), err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected %s to be a symlink, mode=%s", filepath.Base(path), info.Mode())
+	}
+}
+
+func assertFileBytes(t *testing.T, path string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s bytes = %q, want %q", filepath.Base(path), got, want)
 	}
 }
 
