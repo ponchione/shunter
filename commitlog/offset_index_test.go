@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/types"
@@ -20,6 +21,44 @@ func mustCreate(t *testing.T, cap uint64) (*OffsetIndexMut, string) {
 		t.Fatalf("CreateOffsetIndex: %v", err)
 	}
 	return idx, path
+}
+
+func TestCreateOffsetIndexRejectsOversizedCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "00000000000000000001.idx")
+
+	idx, err := CreateOffsetIndex(path, maxOffsetIndexCap+1)
+	if err == nil {
+		if idx != nil {
+			_ = idx.Close()
+		}
+		t.Fatal("CreateOffsetIndex with oversized cap succeeded")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("CreateOffsetIndex error = %v, want too large", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("CreateOffsetIndex left file after oversized cap: stat error = %v", statErr)
+	}
+}
+
+func TestOpenOffsetIndexMutRejectsOversizedCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "00000000000000000001.idx")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := OpenOffsetIndexMut(path, maxOffsetIndexCap+1)
+	if err == nil {
+		if idx != nil {
+			_ = idx.Close()
+		}
+		t.Fatal("OpenOffsetIndexMut with oversized cap succeeded")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("OpenOffsetIndexMut error = %v, want too large", err)
+	}
 }
 
 // Pin 1.

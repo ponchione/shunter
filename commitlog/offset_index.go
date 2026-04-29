@@ -22,6 +22,8 @@ func OffsetIndexFileName(startTxID uint64) string {
 const (
 	offsetIndexKeyOff = 0
 	offsetIndexValOff = 8
+
+	maxOffsetIndexCap = uint64((1<<63 - 1) / OffsetIndexEntrySize)
 )
 
 // OffsetIndexEntry is one (tx id, segment byte offset) pair.
@@ -45,14 +47,15 @@ type OffsetIndexMut struct {
 // CreateOffsetIndex creates a new index file preallocated to cap entries.
 // Every slot is zero-initialised, which the sentinel rule treats as absent.
 func CreateOffsetIndex(path string, cap uint64) (*OffsetIndexMut, error) {
-	if cap == 0 {
-		return nil, fmt.Errorf("commitlog: offset index cap must be > 0")
+	size, err := offsetIndexFileSize(cap)
+	if err != nil {
+		return nil, err
 	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.Truncate(int64(cap * OffsetIndexEntrySize)); err != nil {
+	if err := f.Truncate(size); err != nil {
 		f.Close()
 		os.Remove(path)
 		return nil, err
@@ -65,8 +68,9 @@ func CreateOffsetIndex(path string, cap uint64) (*OffsetIndexMut, error) {
 // trailing partial or corrupt tail is zero-filled by subsequent Truncate /
 // Append activity but is ignored on read.
 func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
-	if cap == 0 {
-		return nil, fmt.Errorf("commitlog: offset index cap must be > 0")
+	want, err := offsetIndexFileSize(cap)
+	if err != nil {
+		return nil, err
 	}
 	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
 	if err != nil {
@@ -77,7 +81,6 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 		f.Close()
 		return nil, err
 	}
-	want := int64(cap * OffsetIndexEntrySize)
 	if info.Size() < want {
 		if err := f.Truncate(want); err != nil {
 			f.Close()
@@ -90,6 +93,16 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 		return nil, err
 	}
 	return &OffsetIndexMut{path: path, f: f, cap: cap, numEntries: n, lastKey: last}, nil
+}
+
+func offsetIndexFileSize(cap uint64) (int64, error) {
+	if cap == 0 {
+		return 0, fmt.Errorf("commitlog: offset index cap must be > 0")
+	}
+	if cap > maxOffsetIndexCap {
+		return 0, fmt.Errorf("commitlog: offset index cap %d too large", cap)
+	}
+	return int64(cap * OffsetIndexEntrySize), nil
 }
 
 // Append writes (txID, byteOffset) as the next entry.
