@@ -190,6 +190,50 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarOnRetry(t *testing.T) {
 	assertFileExists(t, idx2Path)
 }
 
+func TestRunCompactionRemovesCorruptOrphanedCoveredSidecarOnRetry(t *testing.T) {
+	dir := t.TempDir()
+	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
+	seg2 := makeScanTestSegment(t, dir, 4, 4, 5, 6)
+
+	idx1Path := filepath.Join(dir, OffsetIndexFileName(1))
+	if err := os.WriteFile(idx1Path, []byte("not an offset index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	idx2Path := filepath.Join(dir, OffsetIndexFileName(4))
+	idx, err := CreateOffsetIndex(idx2Path, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(seg1); err != nil {
+		t.Fatal(err)
+	}
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		syncCalls++
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 3); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	if syncCalls != 1 {
+		t.Fatalf("syncDir calls = %d, want 1", syncCalls)
+	}
+	assertFileMissing(t, idx1Path)
+	assertFileExists(t, seg2)
+	assertFileExists(t, idx2Path)
+}
+
 func TestRunCompactionRemovesCoveredOrphansButRetainsUncoveredOrphans(t *testing.T) {
 	dir := t.TempDir()
 	covered := makeScanTestSegment(t, dir, 1, 1, 2, 3)
