@@ -627,6 +627,50 @@ func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 	})
 }
 
+func TestOpenAndRecoverFallsBackWhenOffsetIndexPointsInsideSegmentHeader(t *testing.T) {
+	root := t.TempDir()
+	const horizon = types.TxID(512)
+	const lastTx = uint64(1024)
+
+	committed, reg := buildLargeSnapshotCommittedState(t, int(horizon))
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, horizon)
+
+	_, entries := writeDenseReplaySegment(t, root, 1, lastTx)
+	idxPath := filepath.Join(root, OffsetIndexFileName(1))
+	idx := populateSparseIndex(t, idxPath, 4, []OffsetIndexEntry{
+		{TxID: horizon, ByteOffset: 1},
+		entries[768],
+	})
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != types.TxID(lastTx) {
+		t.Fatalf("maxTxID = %d, want %d", maxTxID, lastTx)
+	}
+	players, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	if players.RowCount() != int(lastTx) {
+		t.Fatalf("players row count = %d, want %d", players.RowCount(), lastTx)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != types.TxID(lastTx+1) {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx %d", plan, lastTx+1)
+	}
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != horizon {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, %d)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID, horizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: horizon + 1, End: types.TxID(lastTx)}) {
+		t.Fatalf("replayed range = %+v, want %d..%d", report.ReplayedTxRange, horizon+1, lastTx)
+	}
+}
+
 func TestCreateSnapshotParentSyncFailureLeavesNoSelectableArtifacts(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
