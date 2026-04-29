@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -197,6 +198,35 @@ func TestReadSnapshotHashMismatch(t *testing.T) {
 	var hashErr *SnapshotHashMismatchError
 	if !errors.As(err, &hashErr) {
 		t.Fatalf("expected SnapshotHashMismatchError, got %v", err)
+	}
+}
+
+func TestReadSnapshotRejectsTrailingPayloadBytes(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	writer := NewSnapshotWriter(filepath.Join(baseDir, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 90)
+	path := filepath.Join(baseDir, "snapshots", "90", snapshotFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, 0xde, 0xad, 0xbe, 0xef)
+	hash := ComputeSnapshotHash(data[SnapshotHeaderSize:])
+	copy(data[20:52], hash[:])
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ReadSnapshot(filepath.Join(baseDir, "snapshots", "90"))
+	if err == nil {
+		t.Fatal("expected trailing snapshot bytes to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("trailing snapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "trailing snapshot bytes") {
+		t.Fatalf("trailing snapshot error = %v, want explicit trailing-bytes detail", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package commitlog
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -469,6 +470,9 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := requireSnapshotEOF(f); err != nil {
+		return nil, err
+	}
 
 	return &SnapshotData{
 		TxID:                  types.TxID(txID),
@@ -512,6 +516,18 @@ func readSnapshotHeader(f *os.File) (uint64, uint32, [32]byte, error) {
 		return 0, 0, [32]byte{}, err
 	}
 	return txID, schemaVersion, expected, nil
+}
+
+func requireSnapshotEOF(f *os.File) error {
+	var trailing [1]byte
+	n, err := f.Read(trailing[:])
+	if n != 0 {
+		return fmt.Errorf("%w: trailing snapshot bytes", ErrSnapshot)
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 func verifySnapshotPayloadHash(f *os.File, expected [32]byte) error {
