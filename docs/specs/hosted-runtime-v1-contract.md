@@ -13,9 +13,9 @@ Current repo reality behind this contract:
 - this document remains the v1 contract and reference point for polish/follow-on work
 
 Related docs:
-- `docs/decomposition/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md` explains the high-level hosted-runtime layer
-- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md` defines the near-follow-on usability/platform surfaces
-- `docs/decomposition/hosted-runtime-v2-directions.md` parks larger structural/runtime evolution
+- `docs/specs/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md` explains the high-level hosted-runtime layer
+- `docs/specs/hosted-runtime-v1.5-follow-ons.md` defines the near-follow-on usability/platform surfaces
+- `docs/specs/hosted-runtime-v2-directions.md` parks larger structural/runtime evolution
 - `docs/hosted-runtime-implementation-roadmap.md` breaks the direction into implementation epics
 
 ---

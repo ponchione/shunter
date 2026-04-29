@@ -150,7 +150,7 @@ func newPlanEntry(migrations shunter.MigrationContract, change Change) PlanEntry
 	metadataCopy := copyPlanMigrationMetadata(metadata)
 	var metadataPtr *shunter.MigrationMetadata
 	var classifications []shunter.MigrationClassification
-	if ok && planMigrationMetadataPresent(metadataCopy) {
+	if ok && migrationMetadataPresent(metadataCopy) {
 		metadataPtr = &metadataCopy
 		classifications = copyPlanClassifications(metadataCopy.Classifications)
 	}
@@ -366,16 +366,6 @@ func normalizePlanClassifications(in []shunter.MigrationClassification) []shunte
 		return []shunter.MigrationClassification{}
 	}
 	return copyPlanClassifications(in)
-}
-
-func planMigrationMetadataPresent(metadata shunter.MigrationMetadata) bool {
-	return metadata.ModuleVersion != "" ||
-		metadata.SchemaVersion != 0 ||
-		metadata.ContractVersion != 0 ||
-		metadata.PreviousVersion != "" ||
-		metadata.Compatibility != "" ||
-		len(metadata.Classifications) > 0 ||
-		metadata.Notes != ""
 }
 
 func hasPlanClassification(classifications []shunter.MigrationClassification, want shunter.MigrationClassification) bool {

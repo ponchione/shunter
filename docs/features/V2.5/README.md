@@ -1,6 +1,6 @@
 # Hosted Runtime V2.5 Planning
 
-Status: pending implementation
+Status: complete
 Scope: read authorization completion for hosted-runtime V2.
 
 Primary authority:
@@ -11,11 +11,10 @@ Supporting completed slices:
 - `docs/features/V2/V2-E/` for permission claims and reducer enforcement
 - `docs/features/V2/V2-F/` for hosted runtime/protocol wiring
 
-V2.5 turns the V2 read-authorization design into worker-sized implementation
-tasks. It should be treated as a real feature campaign, not a speculative
-follow-up. The end state is that Shunter enforces external read authorization
-with table policy, named declared read execution, generated-client alignment,
-and row-level visibility.
+V2.5 turned the V2 read-authorization design into worker-sized implementation
+tasks. The completed end state is that Shunter enforces external read
+authorization with table policy, named declared read execution,
+generated-client alignment, and row-level visibility.
 
 ## Phase Order
 
@@ -86,3 +85,20 @@ V2.5 is complete when:
 - contracts and diffs expose policy changes
 - the V2.5 gauntlet and full validation gates pass
 
+## Accepted Closure Caveats
+
+These are not V2.5 blockers:
+
+- The final runtime gauntlet intentionally does not duplicate every
+  package/tooling edge case. Generated declared-read callbacks, malformed
+  metadata validation, contract diff and migration classification, raw SQL
+  parse/type/error ordering, reducer permission behavior, and protocol
+  lifecycle behavior remain pinned by focused package tests.
+- Generated TypeScript still exposes table-level raw SQL helper surfaces for
+  tables whose read policy may be private or permissioned. That is metadata and
+  client ergonomics, not execution authority; server-side raw SQL admission
+  still enforces table policy and visibility.
+
+Reopen V2.5 only for a confirmed read-authorization behavior regression.
+Client API polish or broader gauntlet duplication should be tracked as a
+separate follow-up.

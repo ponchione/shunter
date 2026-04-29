@@ -106,6 +106,23 @@ func TestContractDiffDetectsTableReadPolicyChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceTableReadPolicy, "messages")
 }
 
+func TestContractDiffIgnoresTableReadPolicyPermissionOrder(t *testing.T) {
+	old := contractFixture()
+	old.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPermissioned,
+		Permissions: []string{"messages:read", "messages:audit"},
+	}
+	current := contractFixture()
+	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPermissioned,
+		Permissions: []string{"messages:audit", "messages:read"},
+	}
+
+	report := Compare(old, current)
+
+	assertNoChange(t, report.Changes, SurfaceTableReadPolicy, "messages")
+}
+
 func TestContractDiffClassifiesDeclaredReadPermissionChanges(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
@@ -152,6 +169,32 @@ func TestContractDiffClassifiesDeclaredReadPermissionChanges(t *testing.T) {
 
 	report = Compare(old, current)
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfacePermission, "view.live")
+}
+
+func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
+	old := contractFixture()
+	old.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:read", "messages:audit"},
+	}}
+	old.Permissions.Views = []shunter.PermissionContractDeclaration{{
+		Name:     "live",
+		Required: []string{"messages:subscribe", "messages:audit"},
+	}}
+	current := contractFixture()
+	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:audit", "messages:read"},
+	}}
+	current.Permissions.Views = []shunter.PermissionContractDeclaration{{
+		Name:     "live",
+		Required: []string{"messages:audit", "messages:subscribe"},
+	}}
+
+	report := Compare(old, current)
+
+	assertNoChange(t, report.Changes, SurfacePermission, "query.history")
+	assertNoChange(t, report.Changes, SurfacePermission, "view.live")
 }
 
 func TestContractDiffReportsModuleMetadataChanges(t *testing.T) {
@@ -311,4 +354,13 @@ func assertChange(t *testing.T, changes []Change, kind ChangeKind, surface Surfa
 		}
 	}
 	t.Fatalf("changes = %#v, want %s %s %s", changes, kind, surface, name)
+}
+
+func assertNoChange(t *testing.T, changes []Change, surface Surface, name string) {
+	t.Helper()
+	for _, change := range changes {
+		if change.Surface == surface && change.Name == name {
+			t.Fatalf("changes = %#v, want no %s %s change", changes, surface, name)
+		}
+	}
 }

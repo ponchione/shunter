@@ -166,28 +166,13 @@ func validateModuleDeclarations(m *Module) error {
 }
 
 func validateModuleDeclarationSQL(m *Module, sl protocol.SchemaLookup) error {
-	for _, query := range m.queries {
-		if strings.TrimSpace(query.SQL) == "" {
+	for _, spec := range declaredReadSpecs(m.queries, m.views) {
+		if strings.TrimSpace(spec.SQL) == "" {
 			continue
 		}
-		err := protocol.ValidateSQLQueryString(query.SQL, sl, protocol.SQLQueryValidationOptions{
-			AllowLimit:      true,
-			AllowProjection: true,
-		})
+		err := protocol.ValidateSQLQueryString(spec.SQL, sl, spec.Validation)
 		if err != nil {
-			return fmt.Errorf("%w: query %q: %v", ErrInvalidDeclarationSQL, query.Name, err)
-		}
-	}
-	for _, view := range m.views {
-		if strings.TrimSpace(view.SQL) == "" {
-			continue
-		}
-		err := protocol.ValidateSQLQueryString(view.SQL, sl, protocol.SQLQueryValidationOptions{
-			AllowLimit:      false,
-			AllowProjection: false,
-		})
-		if err != nil {
-			return fmt.Errorf("%w: view %q: %v", ErrInvalidDeclarationSQL, view.Name, err)
+			return fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 		}
 	}
 	return nil

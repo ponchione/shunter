@@ -92,7 +92,7 @@ Phase 8: Fan-out integration
 
 ### 1. SPEC-006 cannot be treated as entirely before SPEC-003
 
-`docs/decomposition/006-schema/epic-3-builder-registration/story-3.2-reducer-registration.md`
+`docs/specs/006-schema/epic-3-builder-registration/story-3.2-reducer-registration.md`
 explicitly depends on `ReducerHandler` and `ReducerContext` from SPEC-003.
 
 That means:
@@ -106,11 +106,11 @@ So the safe split is:
 
 ### 2. SPEC-004 cannot be finished entirely before SPEC-005
 
-`docs/decomposition/004-subscriptions/epic-6-fanout-delivery/EPIC.md`
+`docs/specs/004-subscriptions/epic-6-fanout-delivery/EPIC.md`
 and Story 6.1 explicitly say fan-out delivery depends on SPEC-005’s `ClientSender` and outbound buffering contract.
 
 At the same time,
-`docs/decomposition/005-protocol/epic-5-server-message-delivery/EPIC.md`
+`docs/specs/005-protocol/epic-5-server-message-delivery/EPIC.md`
 consumes `CommitFanout` / `SubscriptionUpdate` from SPEC-004.
 
 So the correct split is:
@@ -121,7 +121,7 @@ So the correct split is:
 
 ### 3. SPEC-005 transport core and lifecycle wiring should be split
 
-`docs/decomposition/005-protocol/epic-3-websocket-transport-lifecycle/EPIC.md`
+`docs/specs/005-protocol/epic-3-websocket-transport-lifecycle/EPIC.md`
 shows that only Stories 3.4 and 3.6 are lifecycle-hook integration work. Stories 3.1, 3.2, 3.3, and 3.5 are transport/config/connection-state work.
 
 That means:

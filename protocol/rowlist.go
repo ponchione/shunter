@@ -1,8 +1,12 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+
+	"github.com/ponchione/shunter/bsatn"
+	"github.com/ponchione/shunter/types"
 )
 
 // EncodeRowList encodes a batch of raw BSATN-encoded rows per SPEC-005
@@ -23,6 +27,21 @@ func EncodeRowList(rows [][]byte) []byte {
 		off += len(r)
 	}
 	return out
+}
+
+// EncodeProductRows encodes schema-aligned ProductValue rows into the RowList
+// payload carried by protocol messages. Row payloads are treated as read-only:
+// bsatn.EncodeProductValue must not mutate shared ProductValue backing arrays.
+func EncodeProductRows(rows []types.ProductValue) ([]byte, error) {
+	encoded := make([][]byte, len(rows))
+	for i, row := range rows {
+		var buf bytes.Buffer
+		if err := bsatn.EncodeProductValue(&buf, row); err != nil {
+			return nil, err
+		}
+		encoded[i] = buf.Bytes()
+	}
+	return EncodeRowList(encoded), nil
 }
 
 // DecodeRowList parses the wire format emitted by EncodeRowList.

@@ -1,12 +1,10 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 
-	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
@@ -222,7 +220,7 @@ func (a *ProtocolInboxAdapter) buildRegisterResponse(
 			MultiApplied: &protocol.SubscribeMultiApplied{RequestID: req.RequestID, QueryID: req.QueryID, Update: updates, TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros},
 		}
 	}
-	rows, err := encodeProductRows(collectInsertRows(result.Update))
+	rows, err := protocol.EncodeProductRows(collectInsertRows(result.Update))
 	if err != nil {
 		return protocol.SubscriptionSetCommandResponse{
 			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, err.Error()),
@@ -272,7 +270,7 @@ func (a *ProtocolInboxAdapter) buildUnregisterResponse(
 			MultiApplied: &protocol.UnsubscribeMultiApplied{RequestID: req.RequestID, QueryID: req.QueryID, Update: updates, TotalHostExecutionDurationMicros: result.TotalHostExecutionDurationMicros},
 		}
 	}
-	rows, err := encodeProductRows(collectDeleteRows(result.Update))
+	rows, err := protocol.EncodeProductRows(collectDeleteRows(result.Update))
 	if err != nil {
 		return protocol.UnsubscribeSetCommandResponse{
 			Error: newProtocolSubscriptionError(result.TotalHostExecutionDurationMicros, req.RequestID, req.QueryID, err.Error()),
@@ -350,11 +348,11 @@ func encodeProtocolSubscriptionUpdates(updates []subscription.SubscriptionUpdate
 }
 
 func encodeProtocolSubscriptionUpdate(update subscription.SubscriptionUpdate) (protocol.SubscriptionUpdate, error) {
-	inserts, err := encodeProductRows(update.Inserts)
+	inserts, err := protocol.EncodeProductRows(update.Inserts)
 	if err != nil {
 		return protocol.SubscriptionUpdate{}, fmt.Errorf("encode inserts: %w", err)
 	}
-	deletes, err := encodeProductRows(update.Deletes)
+	deletes, err := protocol.EncodeProductRows(update.Deletes)
 	if err != nil {
 		return protocol.SubscriptionUpdate{}, fmt.Errorf("encode deletes: %w", err)
 	}
@@ -364,18 +362,6 @@ func encodeProtocolSubscriptionUpdate(update subscription.SubscriptionUpdate) (p
 		Inserts:   inserts,
 		Deletes:   deletes,
 	}, nil
-}
-
-func encodeProductRows(rows []types.ProductValue) ([]byte, error) {
-	encoded := make([][]byte, len(rows))
-	for i, row := range rows {
-		var buf bytes.Buffer
-		if err := bsatn.EncodeProductValue(&buf, row); err != nil {
-			return nil, err
-		}
-		encoded[i] = buf.Bytes()
-	}
-	return protocol.EncodeRowList(encoded), nil
 }
 
 // forwardReducerResponse bridges the executor-internal

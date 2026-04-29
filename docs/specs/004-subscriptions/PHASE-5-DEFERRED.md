@@ -63,7 +63,7 @@ Current code keeps the evaluation-cycle cache hook, but protocol-backed lazy bin
 
 Files:
 - `subscription/eval.go`
-- `docs/decomposition/004-subscriptions/epic-5-evaluation-loop/story-5.3-memoized-encoding.md`
+- `docs/specs/004-subscriptions/epic-5-evaluation-loop/story-5.3-memoized-encoding.md`
 
 ---
 
@@ -84,10 +84,10 @@ Sub-item resolved 2026-04-14: Story 2.4 and Story 5.2 now document the
 real code in `subscription/placement.go`. Pure doc fix.
 
 Revised files:
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md` §5.1–5.2
-- `docs/decomposition/004-subscriptions/EPICS.md` (Epic 2 scope bullets)
-- `docs/decomposition/004-subscriptions/epic-2-pruning-indexes/story-2.1-value-index.md`
-- `docs/decomposition/004-subscriptions/epic-2-pruning-indexes/story-2.2-join-edge-index.md`
+- `docs/specs/004-subscriptions/SPEC-004-subscriptions.md` §5.1–5.2
+- `docs/specs/004-subscriptions/EPICS.md` (Epic 2 scope bullets)
+- `docs/specs/004-subscriptions/epic-2-pruning-indexes/story-2.1-value-index.md`
+- `docs/specs/004-subscriptions/epic-2-pruning-indexes/story-2.2-join-edge-index.md`
 
 ### B. Epic 3 DeltaView contract reconciliation — FIXED 2026-04-14 (docs revised)
 
@@ -100,9 +100,9 @@ delta view that does not depend on `SchemaRegistry` / `IndexResolver` at
 construction time. Committed-side access still uses the real `IndexID`.
 
 Revised files:
-- `docs/decomposition/004-subscriptions/SPEC-004-subscriptions.md` §6.4
-- `docs/decomposition/004-subscriptions/EPICS.md` (Epic 3 scope bullets)
-- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.1-delta-view.md`
+- `docs/specs/004-subscriptions/SPEC-004-subscriptions.md` §6.4
+- `docs/specs/004-subscriptions/EPICS.md` (Epic 3 scope bullets)
+- `docs/specs/004-subscriptions/epic-3-deltaview-delta-computation/story-3.1-delta-view.md`
 
 ### C. Epic 3.5 allocation-discipline work is incomplete
 
@@ -114,7 +114,7 @@ Still missing:
 Files:
 - `subscription/delta_pool.go`
 - `subscription/delta_view.go`
-- `docs/decomposition/004-subscriptions/epic-3-deltaview-delta-computation/story-3.5-allocation-discipline.md`
+- `docs/specs/004-subscriptions/epic-3-deltaview-delta-computation/story-3.5-allocation-discipline.md`
 
 ### D. Epic 4 join bootstrap error handling — FIXED 2026-04-14
 
@@ -149,7 +149,7 @@ the method exists so the same lookup serves eval-time wire/debug paths
 (SubscriptionError, FanOut labels). No code change.
 
 Revised files:
-- `docs/decomposition/004-subscriptions/epic-1-predicate-types-query-hash/story-1.2-predicate-validation.md`
+- `docs/specs/004-subscriptions/epic-1-predicate-types-query-hash/story-1.2-predicate-validation.md`
 
 ### F. Story 5.4 verification backlog — FIXED 2026-04-14
 

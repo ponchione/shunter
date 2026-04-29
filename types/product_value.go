@@ -59,3 +59,15 @@ func (pv ProductValue) Copy() ProductValue {
 	}
 	return cp
 }
+
+// CopyProductValues returns detached copies of every row in rows.
+func CopyProductValues(rows []ProductValue) []ProductValue {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]ProductValue, len(rows))
+	for i, row := range rows {
+		out[i] = row.Copy()
+	}
+	return out
+}

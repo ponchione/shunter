@@ -1,13 +1,11 @@
 package shunter
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/subscription"
@@ -123,7 +121,7 @@ func (r *Runtime) CallQuery(ctx context.Context, name string, opts ...DeclaredRe
 	return DeclaredQueryResult{
 		Name:      entry.Name,
 		TableName: result.TableName,
-		Rows:      copyRuntimeProductRows(result.Rows),
+		Rows:      types.CopyProductValues(result.Rows),
 	}, nil
 }
 
@@ -263,7 +261,7 @@ func collectDeclaredInitialRows(updates []subscription.SubscriptionUpdate) []typ
 	for _, update := range updates {
 		rows = append(rows, update.Inserts...)
 	}
-	return copyRuntimeProductRows(rows)
+	return types.CopyProductValues(rows)
 }
 
 // HandleDeclaredQuery handles the protocol named-query message by delegating to
@@ -367,15 +365,7 @@ func sendProtocolDeclaredReadMessage(conn *protocol.Conn, msg any) {
 }
 
 func encodeDeclaredReadRows(rows []types.ProductValue) ([]byte, error) {
-	encodedRows := make([][]byte, len(rows))
-	for i, row := range rows {
-		var buf bytes.Buffer
-		if err := bsatn.EncodeProductValue(&buf, row); err != nil {
-			return nil, err
-		}
-		encodedRows[i] = buf.Bytes()
-	}
-	return protocol.EncodeRowList(encodedRows), nil
+	return protocol.EncodeProductRows(rows)
 }
 
 func declaredReadElapsedMicrosI64(receipt time.Time) int64 {
@@ -396,15 +386,4 @@ func declaredReadElapsedMicrosU64(receipt time.Time) uint64 {
 
 func declaredReadOptionalUint32(v uint32) *uint32 {
 	return &v
-}
-
-func copyRuntimeProductRows(rows []types.ProductValue) []types.ProductValue {
-	if len(rows) == 0 {
-		return nil
-	}
-	out := make([]types.ProductValue, len(rows))
-	for i, row := range rows {
-		out[i] = row.Copy()
-	}
-	return out
 }

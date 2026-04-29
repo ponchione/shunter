@@ -154,6 +154,28 @@ Behavior gaps found:
   assertions order-insensitive where SQL result order is not part of the
   contract; the limit assertion still proves the limited row is caller-visible.
 
+Accepted closure caveats:
+
+- Focused package tests remain the authority for generated declared-read
+  callbacks, malformed metadata validation, contract diff/migration
+  classification, raw SQL parse/type/error ordering, reducer permission
+  behavior, and protocol lifecycle/backpressure/close behavior. These are not
+  repeated in full inside the hosted-runtime gauntlet.
+- Generated TypeScript table-level raw SQL helper surfaces may still mention
+  private/default-private or permissioned table names. That does not grant
+  execution authority because raw SQL admission is server-side and still checks
+  table read policy plus visibility before execution or subscription
+  registration.
+
+Post-completion audit 2026-04-29:
+
+- No V2.5 correctness, security, regression, contract, codegen, or
+  documentation-blocking findings were confirmed.
+- The caveats above are accepted closeout caveats, not reasons to leave V2.5
+  open.
+- The audit ran against the current worktree, including pre-existing
+  `contractdiff` edits.
+
 Validation commands run:
 
 ```sh
@@ -174,5 +196,13 @@ Final validation status:
 - Focused package gate passed: `1586` tests across `8` packages.
 - Focused root read/auth/gauntlet gate passed: `272` tests.
 - Full repository gate passed: `2960` tests across `16` packages.
+- `rtk go vet ./...` reported no issues.
+- `rtk go tool staticcheck ./...` passed.
+
+Post-completion audit validation status:
+
+- Focused package gate passed: `1589` tests across `8` packages.
+- Focused root read/auth/gauntlet gate passed: `272` tests.
+- Full repository gate passed: `2990` tests across `16` packages.
 - `rtk go vet ./...` reported no issues.
 - `rtk go tool staticcheck ./...` passed.

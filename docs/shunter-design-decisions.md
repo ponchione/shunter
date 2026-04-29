@@ -81,7 +81,7 @@ Authoritative pins:
 - `protocol/subscription_response_wire_test.go`
 - `protocol/message_family_contract_test.go`
 - `protocol/rowlist.go`
-- `docs/decomposition/005-protocol/SPEC-005-protocol.md`
+- `docs/specs/005-protocol/SPEC-005-protocol.md`
 
 ## Outbound Lag Policy
 

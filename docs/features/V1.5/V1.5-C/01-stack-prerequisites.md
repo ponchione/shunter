@@ -10,8 +10,8 @@ Checks:
 - `rtk go doc ./schema SchemaExport`
 
 Relevant docs:
-- `docs/decomposition/006-schema/SPEC-006-schema.md#12-client-code-generation-interface`
-- `docs/decomposition/006-schema/epic-6-schema-export/story-6.3-codegen-tool-contract.md`
+- `docs/specs/006-schema/SPEC-006-schema.md#12-client-code-generation-interface`
+- `docs/specs/006-schema/epic-6-schema-export/story-6.3-codegen-tool-contract.md`
 - `docs/specs/hosted-runtime-v1.5-follow-ons.md`
 
 Prerequisite conclusions to record in Task 01:

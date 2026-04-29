@@ -1,14 +1,12 @@
 package protocol
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 
-	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
@@ -125,7 +123,7 @@ func mapDeliveryError(err error) error {
 	return err
 }
 
-var encodeRowsUnmemoized = encodeRows
+var encodeRowsUnmemoized = EncodeProductRows
 var emptyEncodedRowList = EncodeRowList(nil)
 
 func encodeSubscriptionUpdatesMemoized(updates []subscription.SubscriptionUpdate, memo *subscription.EncodingMemo) ([]SubscriptionUpdate, error) {
@@ -196,28 +194,6 @@ func memoizedRowListKey(rows []types.ProductValue) string {
 
 func encodeSubscriptionUpdate(su subscription.SubscriptionUpdate) (SubscriptionUpdate, error) {
 	return encodeSubscriptionUpdateMemoized(su, nil)
-}
-
-// encodeRows encodes each row to BSATN bytes. Row payloads are
-// treated as READ-ONLY: row-payload sharing contract governs
-// `types.ProductValue` backing-array sharing across subscribers of
-// the same query (pinned by subscription fanout row-payload sharing
-// regression tests and `subscription/eval.go::evaluate`). `bsatn.EncodeProductValue`
-// only reads `row` — any future change that mutated `row[i]` in place
-// during encoding (for example, column-level normalization before
-// serialization) would silently corrupt every other subscriber's
-// view of the same commit. Preserve the read-only discipline at this
-// seam.
-func encodeRows(rows []types.ProductValue) ([]byte, error) {
-	encoded := make([][]byte, len(rows))
-	for i, row := range rows {
-		var buf bytes.Buffer
-		if err := bsatn.EncodeProductValue(&buf, row); err != nil {
-			return nil, err
-		}
-		encoded[i] = buf.Bytes()
-	}
-	return EncodeRowList(encoded), nil
 }
 
 func buildUpdateStatus(

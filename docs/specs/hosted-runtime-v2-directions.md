@@ -15,13 +15,13 @@ Current framing:
   module isolation, executable migration planning, and read/policy semantics.
 
 Related docs:
-- `docs/decomposition/hosted-runtime-v1-contract.md` defines the base runtime
+- `docs/specs/hosted-runtime-v1-contract.md` defines the base runtime
   shape v2 must not retroactively distort.
-- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md` defines the
+- `docs/specs/hosted-runtime-v1.5-follow-ons.md` defines the
   transitional usability/platform surfaces v2 may later clean up.
-- `docs/decomposition/hosted-runtime-version-phases.md` keeps phase ordering
+- `docs/specs/hosted-runtime-version-phases.md` keeps phase ordering
   and parking-lot context.
-- `docs/hosted-runtime-planning/V2/` decomposes this document into
+- `docs/features/V2/` decomposes this document into
   implementation-facing slices.
 
 The goal is not to commit to every v2 feature now.

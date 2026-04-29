@@ -340,7 +340,7 @@ bridge state exists where both systems coexist mid-slice.
 ## References
 
 - TECH-DEBT entries TD-136, TD-137, TD-138, TD-139, TD-140.
-- SPEC-005 §9.1 and §9.4 (`docs/decomposition/005-protocol/SPEC-005-protocol.md:480-529`).
+- SPEC-005 §9.1 and §9.4 (`docs/specs/005-protocol/SPEC-005-protocol.md:480-529`).
 - Set-based subscription design spec (`docs/superpowers/specs/2026-04-18-subscribe-multi-single-split-design.md`).
 - Reference admission:
   `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:841-1101`.

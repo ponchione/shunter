@@ -80,6 +80,21 @@ No V2.5 behavior gaps remain documented from the final gauntlet. Task 10 did
 not change read execution behavior, reducer permission behavior, or raw SQL
 admission behavior.
 
+Accepted closeout caveats:
+
+- Some lower-level checks remain intentionally covered by focused package tests
+  rather than repeated in the final runtime gauntlet: generated declared-read
+  callbacks, malformed metadata validation, contract diff and migration
+  classification, raw SQL parse/type/error ordering, reducer permission
+  behavior, and protocol lifecycle behavior.
+- Generated TypeScript may still expose table-level raw SQL helper surfaces for
+  private/default-private or permissioned tables. Those helpers do not grant
+  execution authority; raw SQL admission remains server-enforced by table
+  policy and visibility.
+
+These caveats do not keep V2.5 open. Reopen this feature only for a confirmed
+read-authorization behavior regression.
+
 ## Validation Posture
 
 Each worker should:

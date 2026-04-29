@@ -33,17 +33,20 @@ type declaredReadEntry struct {
 	compiled *protocol.CompiledSQLQuery
 }
 
+type declaredReadSpec struct {
+	Name        string
+	Kind        declaredReadKind
+	SQL         string
+	Permissions PermissionMetadata
+	ReadModel   ReadModelMetadata
+	Migration   MigrationMetadata
+	Validation  protocol.SQLQueryValidationOptions
+}
+
 func newDeclaredReadCatalog(queries []QueryDeclaration, views []ViewDeclaration, sl protocol.SchemaLookup) (*declaredReadCatalog, error) {
 	catalog := &declaredReadCatalog{entries: make(map[string]declaredReadEntry, len(queries)+len(views))}
-	for _, query := range queries {
-		entry, err := declaredQueryCatalogEntry(query, sl)
-		if err != nil {
-			return nil, err
-		}
-		catalog.entries[entry.Name] = entry
-	}
-	for _, view := range views {
-		entry, err := declaredViewCatalogEntry(view, sl)
+	for _, spec := range declaredReadSpecs(queries, views) {
+		entry, err := declaredReadCatalogEntry(spec, sl)
 		if err != nil {
 			return nil, err
 		}
@@ -52,47 +55,54 @@ func newDeclaredReadCatalog(queries []QueryDeclaration, views []ViewDeclaration,
 	return catalog, nil
 }
 
-func declaredQueryCatalogEntry(query QueryDeclaration, sl protocol.SchemaLookup) (declaredReadEntry, error) {
-	entry := declaredReadEntry{
-		Name:        query.Name,
-		Kind:        declaredReadKindQuery,
-		SQL:         query.SQL,
-		Permissions: copyPermissionMetadata(query.Permissions),
-		ReadModel:   copyReadModelMetadata(query.ReadModel),
-		Migration:   copyMigrationMetadata(query.Migration),
+func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []declaredReadSpec {
+	specs := make([]declaredReadSpec, 0, len(queries)+len(views))
+	for _, query := range queries {
+		specs = append(specs, declaredReadSpec{
+			Name:        query.Name,
+			Kind:        declaredReadKindQuery,
+			SQL:         query.SQL,
+			Permissions: query.Permissions,
+			ReadModel:   query.ReadModel,
+			Migration:   query.Migration,
+			Validation: protocol.SQLQueryValidationOptions{
+				AllowLimit:      true,
+				AllowProjection: true,
+			},
+		})
 	}
-	if strings.TrimSpace(query.SQL) == "" {
-		return entry, nil
+	for _, view := range views {
+		specs = append(specs, declaredReadSpec{
+			Name:        view.Name,
+			Kind:        declaredReadKindView,
+			SQL:         view.SQL,
+			Permissions: view.Permissions,
+			ReadModel:   view.ReadModel,
+			Migration:   view.Migration,
+			Validation: protocol.SQLQueryValidationOptions{
+				AllowLimit:      false,
+				AllowProjection: false,
+			},
+		})
 	}
-	compiled, err := compileDeclaredReadSQL(query.SQL, sl, protocol.SQLQueryValidationOptions{
-		AllowLimit:      true,
-		AllowProjection: true,
-	})
-	if err != nil {
-		return declaredReadEntry{}, fmt.Errorf("%w: query %q: %v", ErrInvalidDeclarationSQL, query.Name, err)
-	}
-	entry.attachCompiled(compiled)
-	return entry, nil
+	return specs
 }
 
-func declaredViewCatalogEntry(view ViewDeclaration, sl protocol.SchemaLookup) (declaredReadEntry, error) {
+func declaredReadCatalogEntry(spec declaredReadSpec, sl protocol.SchemaLookup) (declaredReadEntry, error) {
 	entry := declaredReadEntry{
-		Name:        view.Name,
-		Kind:        declaredReadKindView,
-		SQL:         view.SQL,
-		Permissions: copyPermissionMetadata(view.Permissions),
-		ReadModel:   copyReadModelMetadata(view.ReadModel),
-		Migration:   copyMigrationMetadata(view.Migration),
+		Name:        spec.Name,
+		Kind:        spec.Kind,
+		SQL:         spec.SQL,
+		Permissions: copyPermissionMetadata(spec.Permissions),
+		ReadModel:   copyReadModelMetadata(spec.ReadModel),
+		Migration:   copyMigrationMetadata(spec.Migration),
 	}
-	if strings.TrimSpace(view.SQL) == "" {
+	if strings.TrimSpace(spec.SQL) == "" {
 		return entry, nil
 	}
-	compiled, err := compileDeclaredReadSQL(view.SQL, sl, protocol.SQLQueryValidationOptions{
-		AllowLimit:      false,
-		AllowProjection: false,
-	})
+	compiled, err := compileDeclaredReadSQL(spec.SQL, sl, spec.Validation)
 	if err != nil {
-		return declaredReadEntry{}, fmt.Errorf("%w: view %q: %v", ErrInvalidDeclarationSQL, view.Name, err)
+		return declaredReadEntry{}, fmt.Errorf("%w: %s %q: %v", ErrInvalidDeclarationSQL, spec.Kind, spec.Name, err)
 	}
 	entry.attachCompiled(compiled)
 	return entry, nil

@@ -1,12 +1,10 @@
 package protocol
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
@@ -71,17 +69,11 @@ func handleOneOffQueryWithVisibility(
 		return
 	}
 
-	var rows [][]byte
-	for _, pv := range result.Rows {
-		var buf bytes.Buffer
-		if err := bsatn.EncodeProductValue(&buf, pv); err != nil {
-			sendOneOffError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
-			return
-		}
-		rows = append(rows, buf.Bytes())
+	encoded, err := EncodeProductRows(result.Rows)
+	if err != nil {
+		sendOneOffError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
+		return
 	}
-
-	encoded := EncodeRowList(rows)
 	sendError(conn, OneOffQueryResponse{
 		MessageID: msg.MessageID,
 		Tables: []OneOffTable{{
@@ -189,18 +181,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 			encodedRows = matchedRows
 		}
 	}
-	return SQLQueryResult{TableName: query.TableName, Rows: copyProductRows(encodedRows)}, nil
-}
-
-func copyProductRows(rows []types.ProductValue) []types.ProductValue {
-	if len(rows) == 0 {
-		return nil
-	}
-	out := make([]types.ProductValue, len(rows))
-	for i, row := range rows {
-		out[i] = row.Copy()
-	}
-	return out
+	return SQLQueryResult{TableName: query.TableName, Rows: types.CopyProductValues(encodedRows)}, nil
 }
 
 // sendOneOffError emits a failure OneOffQueryResponse matching reference
@@ -425,44 +406,11 @@ func oneOffJoinPairMatches(join subscription.Join, leftRow, rightRow types.Produ
 
 func evaluateOneOffCrossJoinProjection(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, limit int) ([]types.ProductValue, error) {
 	var rows []types.ProductValue
-	if cross.ProjectRight {
-		for _, rightRow := range view.TableScan(cross.Right) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			for _, leftRow := range view.TableScan(cross.Left) {
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				if cross.Filter != nil && !subscription.MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
-					continue
-				}
-				rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns))
-				if oneOffLimitReached(len(rows), limit) {
-					return rows, nil
-				}
-			}
-		}
-		return rows, nil
-	}
-	for _, leftRow := range view.TableScan(cross.Left) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		for _, rightRow := range view.TableScan(cross.Right) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			if cross.Filter != nil && !subscription.MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
-				continue
-			}
-			rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns))
-			if oneOffLimitReached(len(rows), limit) {
-				return rows, nil
-			}
-		}
-	}
-	return rows, nil
+	err := visitOneOffCrossJoinPairs(ctx, view, cross, true, func(leftRow, rightRow types.ProductValue) bool {
+		rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns))
+		return !oneOffLimitReached(len(rows), limit)
+	})
+	return rows, err
 }
 
 func projectOneOffJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn) types.ProductValue {
@@ -508,28 +456,15 @@ func evaluateOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, 
 	}
 	if cross.Filter != nil {
 		var rows []types.ProductValue
-		for _, leftRow := range view.TableScan(cross.Left) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
+		err := visitOneOffCrossJoinPairs(ctx, view, cross, false, func(leftRow, rightRow types.ProductValue) bool {
+			if cross.ProjectRight {
+				rows = append(rows, rightRow)
+			} else {
+				rows = append(rows, leftRow)
 			}
-			for _, rightRow := range view.TableScan(cross.Right) {
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				if !subscription.MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
-					continue
-				}
-				if cross.ProjectRight {
-					rows = append(rows, rightRow)
-				} else {
-					rows = append(rows, leftRow)
-				}
-				if oneOffLimitReached(len(rows), limit) {
-					return rows, nil
-				}
-			}
-		}
-		return rows, nil
+			return !oneOffLimitReached(len(rows), limit)
+		})
+		return rows, err
 	}
 	otherTable := cross.Left
 	if projectedTable == cross.Left {
@@ -566,24 +501,54 @@ func countOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, pro
 	}
 	if cross.Filter != nil {
 		var count uint64
-		for _, leftRow := range view.TableScan(cross.Left) {
-			if err := ctx.Err(); err != nil {
-				return 0, err
-			}
-			for _, rightRow := range view.TableScan(cross.Right) {
-				if err := ctx.Err(); err != nil {
-					return 0, err
-				}
-				if subscription.MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
-					count++
-				}
-			}
-		}
-		return count, nil
+		err := visitOneOffCrossJoinPairs(ctx, view, cross, false, func(leftRow, rightRow types.ProductValue) bool {
+			count++
+			return true
+		})
+		return count, err
 	}
 	otherTable := cross.Left
 	if projectedTable == cross.Left {
 		otherTable = cross.Right
 	}
 	return uint64(view.RowCount(projectedTable)) * uint64(view.RowCount(otherTable)), nil
+}
+
+func visitOneOffCrossJoinPairs(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, projectedSideOuter bool, visit func(leftRow, rightRow types.ProductValue) bool) error {
+	visitIfMatch := func(leftRow, rightRow types.ProductValue) bool {
+		if cross.Filter != nil && !subscription.MatchJoinPair(cross.Filter, cross.Left, cross.LeftAlias, leftRow, cross.Right, cross.RightAlias, rightRow) {
+			return true
+		}
+		return visit(leftRow, rightRow)
+	}
+	if projectedSideOuter && cross.ProjectRight {
+		for _, rightRow := range view.TableScan(cross.Right) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			for _, leftRow := range view.TableScan(cross.Left) {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if !visitIfMatch(leftRow, rightRow) {
+					return nil
+				}
+			}
+		}
+		return nil
+	}
+	for _, leftRow := range view.TableScan(cross.Left) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for _, rightRow := range view.TableScan(cross.Right) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if !visitIfMatch(leftRow, rightRow) {
+				return nil
+			}
+		}
+	}
+	return nil
 }

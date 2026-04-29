@@ -187,6 +187,41 @@ func TestMigrationPlanClassifiesLooserReadPolicyAsManualReview(t *testing.T) {
 	assertPlanClassification(t, entry, shunter.MigrationClassificationManualReviewNeeded)
 }
 
+func TestMigrationPlanIgnoresPermissionOrderOnlyChanges(t *testing.T) {
+	old := contractFixture()
+	old.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPermissioned,
+		Permissions: []string{"messages:read", "messages:audit"},
+	}
+	old.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:read", "messages:audit"},
+	}}
+	old.Permissions.Views = []shunter.PermissionContractDeclaration{{
+		Name:     "live",
+		Required: []string{"messages:subscribe", "messages:audit"},
+	}}
+	current := contractFixture()
+	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPermissioned,
+		Permissions: []string{"messages:audit", "messages:read"},
+	}
+	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "history",
+		Required: []string{"messages:audit", "messages:read"},
+	}}
+	current.Permissions.Views = []shunter.PermissionContractDeclaration{{
+		Name:     "live",
+		Required: []string{"messages:audit", "messages:subscribe"},
+	}}
+
+	plan := Plan(old, current, PlanOptions{})
+
+	if len(plan.Entries) != 0 || len(plan.Warnings) != 0 {
+		t.Fatalf("plan = %#v, want no entries or warnings for order-only permission changes", plan)
+	}
+}
+
 func TestMigrationPlanJSONIsDeterministicAndNewlineTerminated(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()

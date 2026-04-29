@@ -22,18 +22,28 @@ Do not read broad roadmap, ledger, or full decomposition specs by default.
 
 ## Current Docs
 
-- `docs/hosted-runtime-implementation-roadmap.md` — hosted-runtime phase tracker
-  while that implementation track is active.
+- `docs/hosted-runtime-implementation-roadmap.md` — historical hosted-runtime
+  phase tracker through completed V2.5; current active state belongs in the
+  root handoff.
 - `docs/RUNTIME-HARDENING-GAUNTLET.md` — post-tech-debt test campaign for
   model-based, fault-injected, fuzzed, and soak-tested runtime confidence.
+- `docs/dependency-considerations.md` — adopted dependency policy, dependency
+  candidates, and explicit dependency rejections.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design
   decisions that code and tests still cite.
 - `TECH-DEBT.md` — open issue list and follow-up ownership.
 
+## Legacy Redirects
+
+- `docs/parity-decisions.md` — short redirect kept for older links. Do not add
+  new content there; update `docs/shunter-design-decisions.md` instead.
+
 ## Baseline Specs
 
-- `docs/decomposition/` — implementation specs, epics, and tasks.
-- `docs/hosted-runtime-planning/` — active hosted-runtime implementation plans.
+- `docs/specs/` — broad baseline specs, execution-order docs, and archived
+  hosted-runtime direction notes.
+- `docs/features/` — feature implementation slices, task plans, and completion
+  notes.
 - `docs/adr/` and `docs/decisions/` — durable architecture decisions.
 
 ## Cleanup Rule

@@ -4,9 +4,9 @@ Status: v1 initial implementation landed; v1.5 slice planning is decomposed
 Scope: version-phase plan for hosted-runtime work. This is not an implementation plan and should not be used as permission to write code directly.
 
 This document sits between the architecture contracts and detailed implementation plans:
-- `docs/decomposition/hosted-runtime-v1-contract.md` defines the target v1 contract.
-- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md` defines near-follow-on platform usability work.
-- `docs/decomposition/hosted-runtime-v2-directions.md` parks larger structural/runtime evolution.
+- `docs/specs/hosted-runtime-v1-contract.md` defines the target v1 contract.
+- `docs/specs/hosted-runtime-v1.5-follow-ons.md` defines near-follow-on platform usability work.
+- `docs/specs/hosted-runtime-v2-directions.md` parks larger structural/runtime evolution.
 - `docs/hosted-runtime-implementation-roadmap.md` remains the epic/order tracker.
 
 Decision baseline:
@@ -510,7 +510,7 @@ V2 planning posture:
 ## Next implementation step
 
 The next hosted-runtime implementation step should start from
-`docs/hosted-runtime-planning/V1.5/V1.5-A/00-current-execution-plan.md`, not
+`docs/features/V1.5/V1.5-A/00-current-execution-plan.md`, not
 more V1 bootstrap work.
 
 Before implementation, reconfirm:

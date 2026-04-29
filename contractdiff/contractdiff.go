@@ -158,11 +158,11 @@ func compareTables(out *Report, oldTables, currentTables []schema.TableExport) {
 }
 
 func compareTableReadPolicy(out *Report, tableName string, oldPolicy, currentPolicy schema.ReadPolicy) {
-	oldSignature := readPolicySignature(oldPolicy)
-	currentSignature := readPolicySignature(currentPolicy)
-	if oldSignature == currentSignature {
+	if readPolicySemanticSignature(oldPolicy) == readPolicySemanticSignature(currentPolicy) {
 		return
 	}
+	oldSignature := readPolicySignature(oldPolicy)
+	currentSignature := readPolicySignature(currentPolicy)
 	out.add(tableReadPolicyChangeKind(oldPolicy, currentPolicy), SurfaceTableReadPolicy, tableName, fmt.Sprintf("read policy changed from %s to %s", oldSignature, currentSignature))
 }
 
@@ -341,7 +341,7 @@ func comparePermissionCategory(out *Report, category string, oldDeclarations, cu
 			out.add(permissionChangeKind(category, nil, current.Required), SurfacePermission, fullName, "permission requirements added")
 			continue
 		}
-		if stringSliceSignature(old.Required) != stringSliceSignature(current.Required) {
+		if unorderedStringSliceSignature(old.Required) != unorderedStringSliceSignature(current.Required) {
 			out.add(permissionChangeKind(category, old.Required, current.Required), SurfacePermission, fullName, "permission requirements changed")
 		}
 	}
@@ -428,79 +428,59 @@ func sortChanges(changes []Change) {
 }
 
 func tableMap(tables []schema.TableExport) map[string]schema.TableExport {
-	out := make(map[string]schema.TableExport, len(tables))
-	for _, table := range tables {
-		out[table.Name] = table
-	}
-	return out
+	return mapBy(tables, func(table schema.TableExport) string { return table.Name })
 }
 
 func columnMap(columns []schema.ColumnExport) map[string]schema.ColumnExport {
-	out := make(map[string]schema.ColumnExport, len(columns))
-	for _, column := range columns {
-		out[column.Name] = column
-	}
-	return out
+	return mapBy(columns, func(column schema.ColumnExport) string { return column.Name })
 }
 
 func reducerMap(reducers []schema.ReducerExport) map[string]schema.ReducerExport {
-	out := make(map[string]schema.ReducerExport, len(reducers))
-	for _, reducer := range reducers {
-		out[reducer.Name] = reducer
-	}
-	return out
+	return mapBy(reducers, func(reducer schema.ReducerExport) string { return reducer.Name })
 }
 
 func indexMap(indexes []schema.IndexExport) map[string]schema.IndexExport {
-	out := make(map[string]schema.IndexExport, len(indexes))
-	for _, index := range indexes {
-		out[index.Name] = index
-	}
-	return out
+	return mapBy(indexes, func(index schema.IndexExport) string { return index.Name })
 }
 
 func queryMap(queries []shunter.QueryDescription) map[string]shunter.QueryDescription {
-	out := make(map[string]shunter.QueryDescription, len(queries))
-	for _, query := range queries {
-		out[query.Name] = query
-	}
-	return out
+	return mapBy(queries, func(query shunter.QueryDescription) string { return query.Name })
 }
 
 func viewMap(views []shunter.ViewDescription) map[string]shunter.ViewDescription {
-	out := make(map[string]shunter.ViewDescription, len(views))
-	for _, view := range views {
-		out[view.Name] = view
-	}
-	return out
+	return mapBy(views, func(view shunter.ViewDescription) string { return view.Name })
 }
 
 func visibilityFilterMap(filters []shunter.VisibilityFilterDescription) map[string]shunter.VisibilityFilterDescription {
-	out := make(map[string]shunter.VisibilityFilterDescription, len(filters))
-	for _, filter := range filters {
-		out[filter.Name] = filter
-	}
-	return out
+	return mapBy(filters, func(filter shunter.VisibilityFilterDescription) string { return filter.Name })
 }
 
 func permissionMap(declarations []shunter.PermissionContractDeclaration) map[string]shunter.PermissionContractDeclaration {
-	out := make(map[string]shunter.PermissionContractDeclaration, len(declarations))
-	for _, declaration := range declarations {
-		out[declaration.Name] = declaration
-	}
-	return out
+	return mapBy(declarations, func(declaration shunter.PermissionContractDeclaration) string { return declaration.Name })
 }
 
 func readModelMap(declarations []shunter.ReadModelContractDeclaration) map[string]shunter.ReadModelContractDeclaration {
-	out := make(map[string]shunter.ReadModelContractDeclaration, len(declarations))
-	for _, declaration := range declarations {
-		out[declaration.Surface+"."+declaration.Name] = declaration
+	return mapBy(declarations, func(declaration shunter.ReadModelContractDeclaration) string {
+		return declaration.Surface + "." + declaration.Name
+	})
+}
+
+func mapBy[T any](values []T, key func(T) string) map[string]T {
+	out := make(map[string]T, len(values))
+	for _, value := range values {
+		out[key(value)] = value
 	}
 	return out
 }
 
 func stringSliceSignature(values []string) string {
 	return strings.Join(values, "\x00")
+}
+
+func unorderedStringSliceSignature(values []string) string {
+	copied := append([]string(nil), values...)
+	sort.Strings(copied)
+	return stringSliceSignature(copied)
 }
 
 func stringSliceSubset(values, allowed []string) bool {
@@ -525,6 +505,13 @@ func readPolicySignature(policy schema.ReadPolicy) string {
 		return policy.Access.String()
 	}
 	return fmt.Sprintf("%s(%s)", policy.Access, strings.Join(policy.Permissions, ","))
+}
+
+func readPolicySemanticSignature(policy schema.ReadPolicy) string {
+	if policy.Access != schema.TableAccessPermissioned {
+		return policy.Access.String()
+	}
+	return fmt.Sprintf("%s(%s)", policy.Access, unorderedStringSliceSignature(policy.Permissions))
 }
 
 func visibilityFilterSignature(filter shunter.VisibilityFilterDescription) string {

@@ -4,10 +4,10 @@ Status: complete through V2-G
 Scope: implementation-facing slice plans for hosted-runtime v2 structural work.
 
 Source docs:
-- `docs/decomposition/hosted-runtime-v2-directions.md`
-- `docs/decomposition/hosted-runtime-v1-contract.md`
-- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
-- `docs/decomposition/hosted-runtime-version-phases.md`
+- `docs/specs/hosted-runtime-v2-directions.md`
+- `docs/specs/hosted-runtime-v1-contract.md`
+- `docs/specs/hosted-runtime-v1.5-follow-ons.md`
+- `docs/specs/hosted-runtime-version-phases.md`
 - `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
 
 Follow-up design authority:

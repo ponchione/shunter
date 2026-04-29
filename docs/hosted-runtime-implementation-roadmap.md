@@ -1,20 +1,30 @@
 # Hosted runtime implementation roadmap
 
-Status: v1 hosted-runtime proof landed; V1.5 planning decomposed into implementation slices
-Scope: implementation-facing roadmap for turning the hosted-runtime architecture docs into ordered epics. This is not a detailed first-patch implementation plan.
+Status: historical implementation tracker through completed V2.5; no active
+hosted-runtime slice queued
+Scope: implementation-facing roadmap for turning the hosted-runtime
+architecture docs into ordered epics. This is not a detailed first-patch
+implementation plan.
 
 This roadmap follows:
-- `docs/decomposition/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md`
-- `docs/decomposition/hosted-runtime-version-phases.md`
-- `docs/decomposition/hosted-runtime-v1-contract.md`
-- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
-- `docs/decomposition/hosted-runtime-v2-directions.md`
-- `docs/decomposition/EXECUTION-ORDER.md`
+- `docs/specs/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md`
+- `docs/specs/hosted-runtime-version-phases.md`
+- `docs/specs/hosted-runtime-v1-contract.md`
+- `docs/specs/hosted-runtime-v1.5-follow-ons.md`
+- `docs/specs/hosted-runtime-v2-directions.md`
+- `docs/specs/EXECUTION-ORDER.md`
 
 Audit result:
 - the hosted-runtime doc set has been reconciled for v1/v1.5/v2 scope boundaries
 - this roadmap is ready to drive the next post-audit implementation-planning step
 - this roadmap should still be treated as an epic/order document, not as the detailed first-patch implementation plan
+
+Current status note:
+- V1, V1.5, V2, and the V2.5 read-authorization follow-on have landed in
+  live code.
+- This file is no longer the active next-slice tracker. Use
+  `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime state and
+  open a new feature-specific plan only when a new target is explicitly queued.
 
 Current repo reality:
 - Shunter already has substantial kernel packages: `schema`, `store`, `commitlog`, `executor`, `subscription`, `protocol`, and `query`.
@@ -31,11 +41,14 @@ The next implementation track should be hosted-runtime-first.
 That means the next major product of the repo should not be another manually wired example.
 It should be a top-level Shunter API that lets an app define a module, build a runtime, and serve clients without directly assembling the kernel graph.
 
-The target progression is:
-1. v1: top-level hosted runtime API — initial implementation landed
-2. v1 hardening: app-author path replaces manual bootstrap — V1-H landed, bundled demo removed
-3. v1.5: query/view declarations, export, codegen, permissions metadata, migration metadata — not started
-4. v2+: larger structural runtime evolution after real apps prove the pressure
+The completed progression is:
+1. v1: top-level hosted runtime API
+2. v1 hardening: app-author path replaces manual bootstrap
+3. v1.5: query/view declarations, export, codegen, permissions metadata, and
+   migration metadata
+4. v2: hosted-runtime hardening through completed V2-G
+5. v2.5: read-authorization completion for table policy, declared reads, and
+   row-level visibility
 
 ---
 
@@ -75,7 +88,7 @@ Likely work:
 
 Acceptance criteria:
 - a consumer can import the top-level package and construct a module/config/runtime without touching subsystem constructors directly
-- the API shape matches `docs/decomposition/hosted-runtime-v1-contract.md`
+- the API shape matches `docs/specs/hosted-runtime-v1-contract.md`
 - no v1.5 declarations are required yet
 
 Non-goals:
@@ -393,7 +406,7 @@ Do not implement these as part of v1/v1.5 unless a later audit explicitly moves 
 - broad standalone policy framework
 - cross-language module authoring
 
-These belong in `docs/decomposition/hosted-runtime-v2-directions.md` until real app usage proves the need.
+These belong in `docs/specs/hosted-runtime-v2-directions.md` until real app usage proves the need.
 
 ---
 
@@ -401,41 +414,45 @@ These belong in `docs/decomposition/hosted-runtime-v2-directions.md` until real 
 
 As implementation lands, keep these docs aligned:
 
-- `docs/decomposition/hosted-runtime-v1-contract.md`
+- `docs/specs/hosted-runtime-v1-contract.md`
   - update when public v1 API names settle
   - update when lifecycle/network/local-call behavior changes
 
-- `docs/decomposition/hosted-runtime-v1.5-follow-ons.md`
+- `docs/specs/hosted-runtime-v1.5-follow-ons.md`
   - update when export/codegen/query/migration details become concrete
   - keep transitional "both" surfaces documented
 
-- `docs/decomposition/hosted-runtime-v2-directions.md`
+- `docs/specs/hosted-runtime-v2-directions.md`
   - move items out only when they are intentionally pulled earlier
   - add cleanup notes when v1.5 overlaps become obsolete
 
-- `docs/decomposition/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md`
+- `docs/specs/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md`
   - keep as the high-level model, not the detailed task tracker
 
-- `docs/decomposition/EXECUTION-ORDER.md`
+- `docs/specs/EXECUTION-ORDER.md`
   - add hosted-runtime phases after the core kernel execution order when implementation work begins
 
 ---
 
 ## 9. Current hosted-runtime slice marker
 
-The initial v1 hosted-runtime sequence through V1-H has landed in live code.
+Hosted-runtime work through V2.5 has landed in live code. No next hosted-runtime
+slice is queued in this roadmap.
 
 Landed proof points:
 - root package imports as `github.com/ponchione/shunter`
 - `Module`, `Config`, `Runtime`, and `Build(...)` exist
 - `Runtime.Start`, `Close`, `HTTPHandler`, `ListenAndServe`, local calls, describe, and schema export exist
-- root/runtime tests now carry the maintained hosted-runtime proof
+- query/view declarations, contract export, codegen, permission metadata, and
+  migration metadata exist
+- V2.5 read authorization enforces table policy, declared reads, and
+  row-level visibility
+- root/runtime tests now carry the maintained hosted-runtime and
+  read-authorization proofs
 - the prior bundled demo command was removed because it was throwaway code, not a durable product surface
 
-If hosted-runtime work continues, the next marker is V1.5-A query/view
-declarations using `docs/hosted-runtime-planning/V1.5/V1.5-A/`. Do not start
-later v1.5 slices until V1.5-A is grounded against the live v1 API and keeps
-codegen/contract/migration work out of the first query/view slice.
+If hosted-runtime work continues, start from an explicit user target and add a
+fresh feature-specific plan under `docs/features/`.
 
 ---
 
@@ -444,7 +461,8 @@ codegen/contract/migration work out of the first query/view slice.
 The architecture docs are now clear enough to stop asking broad design questions.
 
 The hosted-runtime implementation path is now:
-- keep the v1 top-level runtime proof green
-- if continuing hosted-runtime usability work, start with the V1.5-A query/view declaration plan
-- only after query/view declarations exist, continue toward canonical export, codegen, permissions metadata, and migration metadata
-- leave v2 structural ambitions parked until real hosted apps create pressure
+- keep the current hosted-runtime and read-authorization gauntlets green
+- start new hosted-runtime work only from an explicit target and a
+  feature-specific plan
+- leave remaining structural ambitions parked until real hosted apps create
+  pressure
