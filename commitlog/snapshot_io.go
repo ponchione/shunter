@@ -342,7 +342,7 @@ func NewSnapshotWriter(baseDir string, reg schema.SchemaRegistry) SnapshotWriter
 }
 
 func openSnapshotTempFile(path string) (snapshotTempFile, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 }
 
 func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txID types.TxID) error {

@@ -1329,6 +1329,53 @@ func TestCreateSnapshotOpenTempFailureReturnsSnapshotCompletionErrorAndCleansArt
 	}
 }
 
+func TestCreateSnapshotOpenTempRejectsSymlinkAndDoesNotTruncateTarget(t *testing.T) {
+	cs, reg := buildSnapshotCommittedState(t)
+	baseDir := t.TempDir()
+	snapshotBase := filepath.Join(baseDir, "snapshots")
+	snapshotDir := filepath.Join(snapshotBase, "98")
+	tmpPath := filepath.Join(snapshotDir, snapshotTempFileName)
+	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(baseDir, "external-temp-target")
+	before := []byte("external snapshot temp target")
+	if err := os.WriteFile(targetPath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, targetPath, tmpPath)
+	writer := NewSnapshotWriter(snapshotBase, reg)
+
+	cs.SetCommittedTxID(98)
+	err := writer.CreateSnapshot(cs, 98)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("open-temp symlink error should be categorized as snapshot error, got %v", err)
+	}
+	var completionErr *SnapshotCompletionError
+	if !errors.As(err, &completionErr) {
+		t.Fatalf("expected SnapshotCompletionError, got %v", err)
+	}
+	if completionErr.Phase != "open-temp" || completionErr.Path != tmpPath {
+		t.Fatalf("completion error = %+v, want open-temp phase and temp path", completionErr)
+	}
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed after temp symlink open failure")
+	}
+	if _, err := os.Lstat(tmpPath); !os.IsNotExist(err) {
+		t.Fatalf("snapshot temp symlink should be removed after open failure, lstat err=%v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(snapshotDir, snapshotFileName)); !os.IsNotExist(err) {
+		t.Fatalf("final snapshot should not exist after temp symlink open failure, lstat err=%v", err)
+	}
+	after, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("temp symlink target changed: got %q want %q", after, before)
+	}
+}
+
 func TestCreateSnapshotTempFileFaultsReturnSnapshotCompletionErrorAndCleanArtifacts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
