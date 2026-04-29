@@ -230,6 +230,37 @@ func TestDecodeSchemaSnapshotRejectsDuplicateTableIDs(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsDuplicateColumnIndexes(t *testing.T) {
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1) // schema snapshot version
+	writeUint32(t, &buf, 1) // table count
+	writeUint32(t, &buf, 0) // table ID
+	if err := writeString(&buf, "players"); err != nil {
+		t.Fatal(err)
+	}
+	writeUint32(t, &buf, 2) // column count
+	writeSchemaSnapshotColumn(t, &buf, 0, "id")
+	writeSchemaSnapshotColumn(t, &buf, 0, "id-again")
+	writeUint32(t, &buf, 0) // index count
+
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "duplicate schema snapshot column index 0 in table 0") {
+		t.Fatalf("DecodeSchemaSnapshot error = %v, want duplicate column index detail", err)
+	}
+}
+
+func writeSchemaSnapshotColumn(t testing.TB, dst *bytes.Buffer, index uint32, name string) {
+	t.Helper()
+	writeUint32(t, dst, index)
+	if err := writeString(dst, name); err != nil {
+		t.Fatal(err)
+	}
+	dst.Write([]byte{byte(schema.KindUint64), 0, 0})
+}
+
 func writeMinimalSchemaSnapshotTable(t testing.TB, dst *bytes.Buffer, tableID uint32, name string) {
 	t.Helper()
 	writeUint32(t, dst, tableID)
@@ -552,6 +583,37 @@ func TestReadSnapshotRejectsDuplicateUint64MapTableIDs(t *testing.T) {
 				t.Fatalf("ReadSnapshot error = %v, want %q detail", err, tc.wantDetail)
 			}
 		})
+	}
+}
+
+func TestReadSnapshotRejectsDuplicateTableSections(t *testing.T) {
+	_, reg := testSchema()
+	var schemaBuf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&schemaBuf, reg); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	writeUint32(t, &body, uint32(schemaBuf.Len()))
+	body.Write(schemaBuf.Bytes())
+	writeUint32(t, &body, 0) // sequence entries
+	writeUint32(t, &body, 0) // next ID entries
+	writeUint32(t, &body, 2) // table sections
+	writeUint32(t, &body, 0) // players table
+	writeUint32(t, &body, 0) // row count
+	writeUint32(t, &body, 0) // duplicate players table
+	writeUint32(t, &body, 0) // row count
+
+	baseDir := t.TempDir()
+	snapshotDir := filepath.Join(baseDir, "snapshots", "94")
+	writeSnapshotBytes(t, snapshotDir, 94, reg.Version(), body.Bytes())
+
+	_, err := ReadSnapshot(snapshotDir)
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "duplicate snapshot table section 0") {
+		t.Fatalf("ReadSnapshot error = %v, want duplicate table section detail", err)
 	}
 }
 

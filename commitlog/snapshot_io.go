@@ -150,6 +150,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			return nil, 0, err
 		}
 		var cols []schema.ColumnSchema
+		seenColumns := map[int]struct{}{}
 		for range colCount {
 			var colIdx uint32
 			if err := binary.Read(r, binary.LittleEndian, &colIdx); err != nil {
@@ -158,6 +159,11 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			if colIdx > math.MaxInt32 {
 				return nil, 0, fmt.Errorf("column index overflow: %d", colIdx)
 			}
+			index := int(colIdx)
+			if _, exists := seenColumns[index]; exists {
+				return nil, 0, fmt.Errorf("%w: duplicate schema snapshot column index %d in table %d", ErrSnapshot, colIdx, tableID)
+			}
+			seenColumns[index] = struct{}{}
 			colName, err := readString(r)
 			if err != nil {
 				return nil, 0, err
@@ -174,7 +180,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 			if err != nil {
 				return nil, 0, err
 			}
-			cols = append(cols, schema.ColumnSchema{Index: int(colIdx), Name: colName, Type: schema.ValueKind(flags[0]), Nullable: nullable, AutoIncrement: autoIncrement})
+			cols = append(cols, schema.ColumnSchema{Index: index, Name: colName, Type: schema.ValueKind(flags[0]), Nullable: nullable, AutoIncrement: autoIncrement})
 		}
 		var idxCount uint32
 		if err := binary.Read(r, binary.LittleEndian, &idxCount); err != nil {
@@ -646,6 +652,7 @@ func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema
 		return nil, err
 	}
 	var tables []SnapshotTableData
+	seenTables := map[schema.TableID]struct{}{}
 	var rowBuf []byte
 	for range tableCount {
 		var tableID uint32
@@ -656,8 +663,13 @@ func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema
 		if err := binary.Read(payload, binary.LittleEndian, &rowCount); err != nil {
 			return nil, err
 		}
-		snapshotTable := SnapshotTableData{TableID: schema.TableID(tableID)}
-		ts, ok := schemaByID[schema.TableID(tableID)]
+		id := schema.TableID(tableID)
+		if _, exists := seenTables[id]; exists {
+			return nil, fmt.Errorf("%w: duplicate snapshot table section %d", ErrSnapshot, tableID)
+		}
+		seenTables[id] = struct{}{}
+		snapshotTable := SnapshotTableData{TableID: id}
+		ts, ok := schemaByID[id]
 		if !ok {
 			return nil, fmt.Errorf("snapshot references unknown table %d", tableID)
 		}
