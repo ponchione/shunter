@@ -1424,6 +1424,12 @@ func assertNoRecoveredStateAfterReplayFault(t *testing.T, recovered *store.Commi
 	}
 }
 
+func appendUint32(dst []byte, v uint32) []byte {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], v)
+	return append(dst, buf[:]...)
+}
+
 func writeFaultSnapshot(t *testing.T, root string, reg schema.SchemaRegistry, txID types.TxID, rows map[uint64]string) {
 	t.Helper()
 	committed := buildRecoveryCommittedState(t, reg)
