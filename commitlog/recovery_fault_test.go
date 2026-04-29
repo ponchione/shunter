@@ -997,6 +997,27 @@ func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 		}
 	})
 
+	t.Run("valid-record-with-unsupported-changeset-version", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, rawPayload: []byte{changesetVersion + 1, 0, 0, 0, 0}},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected unsupported changeset version to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay decode error %q missing tx or segment context", err)
+		}
+		if !strings.Contains(err.Error(), "unsupported changeset version") {
+			t.Fatalf("replay decode error %q missing version failure detail", err)
+		}
+	})
+
 	t.Run("valid-record-with-unsafe-duplicate-primary-key", func(t *testing.T) {
 		root := t.TempDir()
 		_, reg := testSchema()
@@ -1126,6 +1147,68 @@ func TestOpenAndRecoverLogicalReplayFaultsFailLoudly(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "row shape mismatch") {
 			t.Fatalf("replay decode error %q missing row shape detail", err)
+		}
+	})
+
+	t.Run("valid-record-with-row-type-tag-mismatch", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		payload, err := EncodeChangeset(&store.Changeset{
+			TxID: 2,
+			Tables: map[schema.TableID]*store.TableChangeset{
+				0: {
+					TableID:   0,
+					TableName: "players",
+					Inserts:   []types.ProductValue{{types.NewString("not-a-uint64"), types.NewString("bob")}},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, rawPayload: payload},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected row type tag mismatch to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay decode error %q missing tx or segment context", err)
+		}
+		if !strings.Contains(err.Error(), "type tag mismatch") {
+			t.Fatalf("replay decode error %q missing type tag detail", err)
+		}
+	})
+
+	t.Run("valid-record-with-oversized-row-payload", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		payload := []byte{changesetVersion}
+		payload = appendUint32(payload, 1)
+		payload = appendUint32(payload, 0)
+		payload = appendUint32(payload, 1)
+		payload = appendUint32(payload, DefaultCommitLogOptions().MaxRowBytes+1)
+		payload = appendUint32(payload, 0)
+		segmentPath := writeReplaySegment(t, root, 1,
+			replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+			replayRecord{txID: 2, rawPayload: payload},
+		)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatal("expected oversized row payload to fail recovery")
+		}
+		assertNoRecoveredStateAfterReplayFault(t, recovered, maxTxID, plan, report, 2)
+		var rowErr *RowTooLargeError
+		if !errors.As(err, &rowErr) {
+			t.Fatalf("expected RowTooLargeError, got %T (%v)", err, err)
+		}
+		if !strings.Contains(err.Error(), "tx 2") || !strings.Contains(err.Error(), segmentPath) {
+			t.Fatalf("replay decode error %q missing tx or segment context", err)
 		}
 	})
 
