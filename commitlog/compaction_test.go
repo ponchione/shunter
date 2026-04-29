@@ -365,6 +365,43 @@ func TestRunCompactionRemovesCoveredOrphansAfterEntirePrefixGone(t *testing.T) {
 	assertFileExists(t, idx7Path)
 }
 
+func TestRunCompactionRemovesCoveredOrphansWhenNoLogSegmentsRemain(t *testing.T) {
+	dir := t.TempDir()
+	coveredIdx1 := filepath.Join(dir, OffsetIndexFileName(1))
+	coveredIdx4 := filepath.Join(dir, OffsetIndexFileName(4))
+	futureIdx := filepath.Join(dir, OffsetIndexFileName(7))
+	for _, p := range []string{coveredIdx1, coveredIdx4, futureIdx} {
+		idx, err := CreateOffsetIndex(p, 4)
+		if err != nil {
+			t.Fatalf("CreateOffsetIndex(%s): %v", p, err)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	originalSyncDir := syncDir
+	syncCalls := 0
+	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("syncDir path = %q, want %q", path, dir)
+		}
+		syncCalls++
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := RunCompaction(dir, 6); err != nil {
+		t.Fatalf("RunCompaction retry: %v", err)
+	}
+	if syncCalls != 1 {
+		t.Fatalf("syncDir calls = %d, want 1", syncCalls)
+	}
+	assertFileMissing(t, coveredIdx1)
+	assertFileMissing(t, coveredIdx4)
+	assertFileExists(t, futureIdx)
+}
+
 func TestRunCompactionSegmentRemovalFailureIncludesOperationPathAndWraps(t *testing.T) {
 	dir := t.TempDir()
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
