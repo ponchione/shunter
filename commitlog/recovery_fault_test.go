@@ -763,6 +763,46 @@ func TestOpenAndRecoverSnapshotNextIDBelowRestoredRowsFailsLoudly(t *testing.T) 
 	}
 }
 
+func TestOpenAndRecoverSnapshotSequenceBelowRestoredRowsFailsLoudly(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoveryAutoIncrementRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+	jobs, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("jobs table missing")
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("seed-1")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewUint64(2), types.NewString("seed-2")}); err != nil {
+		t.Fatal(err)
+	}
+	jobs.SetSequenceValue(3)
+	committed.SetCommittedTxID(2)
+	createSnapshotAt(t, NewSnapshotWriter(filepath.Join(root, "snapshots"), reg), committed, 2)
+	rewriteSnapshotSequence(t, root, 2, 0, 1)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected regressed snapshot sequence to fail recovery")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot sequence 1 for table 0 is below restored next sequence value 3") {
+		t.Fatalf("error = %v, want explicit sequence regression detail", err)
+	}
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
+		t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
+	}
+}
+
 func TestOpenAndRecoverFallsBackWhenOffsetIndexPointsInsideSegmentHeader(t *testing.T) {
 	root := t.TempDir()
 	const horizon = types.TxID(512)
@@ -915,6 +955,16 @@ func createMissingSnapshotCandidate(t *testing.T, root string, txID types.TxID) 
 
 func rewriteSnapshotNextID(t *testing.T, root string, txID types.TxID, tableID schema.TableID, nextID uint64) {
 	t.Helper()
+	rewriteSnapshotUint64Map(t, root, txID, tableID, nextID, false)
+}
+
+func rewriteSnapshotSequence(t *testing.T, root string, txID types.TxID, tableID schema.TableID, sequence uint64) {
+	t.Helper()
+	rewriteSnapshotUint64Map(t, root, txID, tableID, sequence, true)
+}
+
+func rewriteSnapshotUint64Map(t *testing.T, root string, txID types.TxID, tableID schema.TableID, value uint64, sequence bool) {
+	t.Helper()
 	path := filepath.Join(root, "snapshots", txIDString(uint64(txID)), snapshotFileName)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -941,18 +991,27 @@ func rewriteSnapshotNextID(t *testing.T, root string, txID types.TxID, tableID s
 	}
 	offset += schemaLen
 	sequenceCount := int(readUint32("sequence count"))
+	if sequence {
+		rewriteSnapshotUint64MapEntry(t, path, data, body, &offset, sequenceCount, tableID, value, "sequence")
+		return
+	}
 	offset += sequenceCount * 12
 	if offset > len(body) {
 		t.Fatalf("snapshot %s ended inside sequence entries", path)
 	}
 	nextIDCount := int(readUint32("next_id count"))
-	for range nextIDCount {
-		if offset+12 > len(body) {
-			t.Fatalf("snapshot %s ended inside next_id entries", path)
+	rewriteSnapshotUint64MapEntry(t, path, data, body, &offset, nextIDCount, tableID, value, "next_id")
+}
+
+func rewriteSnapshotUint64MapEntry(t *testing.T, path string, data []byte, body []byte, offset *int, count int, tableID schema.TableID, value uint64, section string) {
+	t.Helper()
+	for range count {
+		if *offset+12 > len(body) {
+			t.Fatalf("snapshot %s ended inside %s entries", path, section)
 		}
-		gotTableID := binary.LittleEndian.Uint32(body[offset : offset+4])
+		gotTableID := binary.LittleEndian.Uint32(body[*offset : *offset+4])
 		if gotTableID == uint32(tableID) {
-			binary.LittleEndian.PutUint64(body[offset+4:offset+12], nextID)
+			binary.LittleEndian.PutUint64(body[*offset+4:*offset+12], value)
 			hash := ComputeSnapshotHash(body)
 			copy(data[20:52], hash[:])
 			if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -960,9 +1019,9 @@ func rewriteSnapshotNextID(t *testing.T, root string, txID types.TxID, tableID s
 			}
 			return
 		}
-		offset += 12
+		*offset += 12
 	}
-	t.Fatalf("snapshot %s has no next_id entry for table %d", path, tableID)
+	t.Fatalf("snapshot %s has no %s entry for table %d", path, section, tableID)
 }
 
 func appendZeroTail(t *testing.T, path string, byteCount int) {

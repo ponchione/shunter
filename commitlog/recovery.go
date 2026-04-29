@@ -188,6 +188,9 @@ func restoreSnapshot(committed *store.CommittedState, snapshot *SnapshotData) er
 		if !ok {
 			return fmt.Errorf("commitlog: snapshot sequence references unknown table %d", tableID)
 		}
+		if minNext, ok := nextSequenceValueForTable(table); ok && next < minNext {
+			return fmt.Errorf("%w: snapshot sequence %d for table %d is below restored next sequence value %d", ErrSnapshot, next, tableID, minNext)
+		}
 		table.SetSequenceValue(next)
 	}
 	for tableID, next := range snapshot.NextIDs {
