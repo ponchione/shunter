@@ -479,6 +479,40 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "snapshot-covered-header-only-rollover-recovers-snapshot",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+				createHeaderOnlySegment(t, root, 3)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 2 {
+					t.Fatalf("maxTxID = %d, want 2", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+				if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+					t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+					t.Fatalf("replayed range = %+v, want none", report.ReplayedTxRange)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 2 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 2)", report.HasDurableLog, report.DurableLogHorizon)
+				}
+				if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 3 || report.SegmentCoverage[0].MaxTxID != 2 {
+					t.Fatalf("segment coverage = %+v, want empty rollover segment 3..2", report.SegmentCoverage)
+				}
+				if len(report.DamagedTailSegments) != 0 {
+					t.Fatalf("damaged tail report = %+v, want none for header-only segment", report.DamagedTailSegments)
+				}
+				if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+					t.Fatalf("resume plan = %+v, want append-in-place on segment 3 at tx 3", plan)
+				}
+			},
+		},
+		{
 			name: "snapshot-log-gap-to-truncated-rollover-first-record-fails-loudly",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
@@ -512,6 +546,46 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 				}
 				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 4 || report.DamagedTailSegments[0].LastTx != 3 {
 					t.Fatalf("damaged tail report = %+v, want empty damaged segment 4..3", report.DamagedTailSegments)
+				}
+				if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
+					t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
+				}
+			},
+		},
+		{
+			name: "snapshot-log-gap-to-header-only-rollover-fails-loudly",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+				createHeaderOnlySegment(t, root, 4)
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err == nil {
+					t.Fatal("expected snapshot/log boundary gap error")
+				}
+				var gapErr *HistoryGapError
+				if !errors.As(err, &gapErr) {
+					t.Fatalf("expected HistoryGapError, got %T (%v)", err, err)
+				}
+				if gapErr.Expected != 3 || gapErr.Got != 4 {
+					t.Fatalf("HistoryGapError = %+v, want Expected=3 Got=4", gapErr)
+				}
+				if !errors.Is(err, ErrOpen) {
+					t.Fatalf("boundary gap error = %v, want ErrOpen category", err)
+				}
+				if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+					t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+				}
+				if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+					t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 3)", report.HasDurableLog, report.DurableLogHorizon)
+				}
+				if len(report.DamagedTailSegments) != 0 {
+					t.Fatalf("damaged tail report = %+v, want none for header-only gap", report.DamagedTailSegments)
+				}
+				if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 4 || report.SegmentCoverage[0].MaxTxID != 3 {
+					t.Fatalf("segment coverage = %+v, want empty rollover segment 4..3", report.SegmentCoverage)
 				}
 				if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
 					t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
