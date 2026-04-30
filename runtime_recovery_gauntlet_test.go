@@ -97,6 +97,63 @@ func TestRuntimeGauntletRejectedReducerRestartNoGhostRows(t *testing.T) {
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "restart ghost-row final")
 }
 
+func TestRuntimeGauntletRejectedProtocolControlPlaneRestartRecovery(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntime(t, dataDir)
+
+	rejectedClient := dialGauntletProtocol(t, rt)
+
+	queryResp := queryGauntletProtocolExpectErrorWithLabel(t, rejectedClient, "SELECT * FROM players WHERE missing = 1", []byte("bad-query-before-restart"), "rejected control-plane one-off before restart")
+	if queryResp.Error == nil || *queryResp.Error == "" {
+		t.Fatal("rejected control-plane one-off error = empty")
+	}
+
+	singleErr := subscribeGauntletProtocolExpectErrorWithLabel(t, rejectedClient, "SELECT * FROM players WHERE missing = 1", 9951, 9952, "rejected control-plane single subscribe before restart")
+	if singleErr.Error == "" {
+		t.Fatal("rejected control-plane single subscribe error = empty")
+	}
+
+	multiErr := subscribeMultiGauntletProtocolExpectErrorWithLabel(t, rejectedClient, []string{
+		"SELECT * FROM players",
+		"SELECT * FROM missing",
+	}, 9953, 9954, "rejected control-plane multi subscribe before restart")
+	if multiErr.Error == "" {
+		t.Fatal("rejected control-plane multi subscribe error = empty")
+	}
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	beforeRestart := insertPlayerOp(&nextID, "after_rejected_control_plane")
+	runGauntletTrace(t, rt, &model, []gauntletOp{beforeRestart}, 0, "rejected control-plane before restart")
+	assertNoGauntletProtocolMessageBeforeClose(t, rejectedClient, 50*time.Millisecond, "rejected control-plane before restart fanout")
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("rejected control-plane Close before restart returned error: %v", err)
+	}
+
+	rt = buildGauntletRuntime(t, dataDir)
+	defer rt.Close()
+	assertGauntletReadMatchesModel(t, rt, model, "rejected control-plane after restart")
+
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.Close(websocket.StatusNormalClosure, "")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "rejected control-plane after restart")
+
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.Close(websocket.StatusNormalClosure, "")
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9955, 9956)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("rejected control-plane restarted initial snapshot mismatch:\n%s", diff)
+	}
+
+	afterRestart := insertPlayerOp(&nextID, "after_rejected_control_plane_restart")
+	wantDelta := gauntletAllRowsDeltaForOp(t, model, afterRestart)
+	runGauntletTrace(t, rt, &model, []gauntletOp{afterRestart}, 1, "rejected control-plane after restart")
+	gotDelta := readGauntletTransactionUpdateLight(t, subscriber, 9956, "rejected control-plane after restart")
+	assertGauntletDeltaEqual(t, gotDelta, wantDelta, "rejected control-plane after restart")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "rejected control-plane final")
+}
+
 func TestRuntimeGauntletDeterministicConcurrentReadShortSoak(t *testing.T) {
 	const (
 		steps       = 18

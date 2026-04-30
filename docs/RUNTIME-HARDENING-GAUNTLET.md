@@ -20,6 +20,9 @@ Current status:
 - Public hosted-runtime/protocol restart coverage also pins rejected reducer
   attempts immediately before restart so failed/panicking reducers cannot
   recover ghost rows or block reuse of the rejected primary key after restart.
+- Rejected protocol control-plane requests before restart are pinned through
+  one-off query, single subscribe, and multi subscribe errors so they cannot
+  leave recovered subscriptions or corrupt follow-up protocol reads.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
