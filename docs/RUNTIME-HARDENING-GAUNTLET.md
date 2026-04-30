@@ -97,6 +97,8 @@ Current status:
   state through writer, reader, and recovery-report paths.
   Snapshot reader validation now rejects zero next-id and autoincrement sequence
   counters before recovery can restore regressed allocators.
+  Snapshot header faults are categorized as snapshot read failures while
+  preserving their underlying bad-magic, bad-version, or bad-flags leaf errors.
   Fresh recovery resume plans now reject mismatched segment-start and next-tx
   values before creating a segment or publishing a false durable horizon.
   Unsafe history checks now also cover generated snapshot/log boundary gaps and

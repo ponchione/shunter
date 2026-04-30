@@ -379,6 +379,69 @@ func TestSnapshotHashMismatchReturnsSnapshotCategory(t *testing.T) {
 	}
 }
 
+func TestSnapshotHeaderFaultsReturnSnapshotCategory(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		bytes     []byte
+		assertErr func(*testing.T, error)
+	}{
+		{
+			name:  "bad-magic",
+			bytes: []byte{'B', 'A', 'D', '!'},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				if !errors.Is(err, ErrBadMagic) {
+					t.Fatalf("errors.Is(err, ErrBadMagic) = false: %v", err)
+				}
+			},
+		},
+		{
+			name:  "bad-version",
+			bytes: []byte{'S', 'H', 'S', 'N', SnapshotVersion + 1, 0, 0, 0},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				var versionErr *BadVersionError
+				if !errors.As(err, &versionErr) {
+					t.Fatalf("errors.As(*BadVersionError) = false: %v", err)
+				}
+				if versionErr.Got != SnapshotVersion+1 {
+					t.Fatalf("bad version = %d, want %d", versionErr.Got, SnapshotVersion+1)
+				}
+			},
+		},
+		{
+			name:  "bad-flags",
+			bytes: []byte{'S', 'H', 'S', 'N', SnapshotVersion, 1, 0, 0},
+			assertErr: func(t *testing.T, err error) {
+				t.Helper()
+				if !errors.Is(err, ErrBadFlags) {
+					t.Fatalf("errors.Is(err, ErrBadFlags) = false: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			snapshotDir := filepath.Join(root, "snapshots", "5")
+			if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(snapshotDir, snapshotFileName), tc.bytes, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := ReadSnapshot(snapshotDir)
+			if err == nil {
+				t.Fatal("expected snapshot header fault")
+			}
+			if !errors.Is(err, ErrSnapshot) {
+				t.Fatalf("errors.Is(err, ErrSnapshot) = false: %v", err)
+			}
+			tc.assertErr(t, err)
+		})
+	}
+}
+
 // Pin 20.
 func TestSnapshotSelectSchemaMismatchReturnsSnapshotCategory(t *testing.T) {
 	root := t.TempDir()

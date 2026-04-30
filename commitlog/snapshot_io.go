@@ -631,7 +631,7 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 
 	txID, schemaVersion, expected, err := readSnapshotHeader(f)
 	if err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 	if err := verifySnapshotPayloadHash(f, expected); err != nil {
 		return nil, err
@@ -683,6 +683,13 @@ func requireRegularSnapshotFile(path string) error {
 		return fmt.Errorf("%w: snapshot file %s is not a regular file", ErrSnapshot, path)
 	}
 	return nil
+}
+
+func snapshotReadError(err error) error {
+	if err == nil || errors.Is(err, ErrSnapshot) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrSnapshot, err)
 }
 
 func readSnapshotHeader(f *os.File) (uint64, uint32, [32]byte, error) {
