@@ -48,6 +48,10 @@ Current status:
   subscriber checking reducer deltas while transient protocol clients
   subscribe and unsubscribe concurrently, validating each observed snapshot
   against committed history with seed/worker/op/runtime-config labels.
+- Protocol transport race coverage now also sends concurrently through
+  `ClientSender` while `ConnManager.CloseAll` tears down multiple connections,
+  accepting only delivered sends or post-teardown `ErrConnNotFound` results
+  under fixed seed/worker/op labels.
 - A fixed-seed protocol metamorphic trace now compares one long-lived
   subscription with per-operation subscribe/unsubscribe cycles, requiring
   matching deltas, final unsubscribe rows, and one-off query probes.

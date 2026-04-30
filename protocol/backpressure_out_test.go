@@ -3,7 +3,10 @@ package protocol
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,4 +152,97 @@ func TestOutgoingBackpressure_SendConcurrentWithDisconnectDoesNotPanic(t *testin
 	readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer readCancel()
 	_, _, _ = clientWS.Read(readCtx)
+}
+
+func TestClientSenderConcurrentCloseAllShortSoak(t *testing.T) {
+	const (
+		seed        = uint64(0xc105e411)
+		connections = 4
+		workers     = 6
+		iterations  = 96
+	)
+	opts := DefaultProtocolOptions()
+	opts.OutgoingBufferMessages = connections*workers*iterations + 16
+	opts.DisconnectTimeout = 500 * time.Millisecond
+
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	conns := make([]*Conn, 0, connections)
+	for range connections {
+		conn := testConnDirect(&opts)
+		conns = append(conns, conn)
+		mgr.Add(conn)
+	}
+	sender := NewClientSender(mgr, inbox)
+	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: nil}
+
+	start := make(chan struct{})
+	ready := make(chan struct{}, workers)
+	failures := make(chan string, workers*iterations)
+	var sent atomic.Int64
+	var notFound atomic.Int64
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			ready <- struct{}{}
+			<-start
+			for op := range iterations {
+				conn := conns[(int(seed)+worker*17+op*31)%len(conns)]
+				err := sender.Send(conn.ID, msg)
+				switch {
+				case err == nil:
+					sent.Add(1)
+				case errors.Is(err, ErrConnNotFound):
+					notFound.Add(1)
+				default:
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=connections=%d/workers=%d/iterations=%d operation=Send(%x) observed_error=%v expected=nil-or-ErrConnNotFound",
+						seed, worker, op, connections, workers, iterations, conn.ID[:], err)
+				}
+				if (int(seed)+worker+op)%5 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(worker)
+	}
+	waitForSignals(t, ready, workers, "seed=0xc105e411 concurrent CloseAll senders started")
+
+	close(start)
+	closeAllDone := make(chan struct{})
+	go func() {
+		mgr.CloseAll(context.Background(), inbox)
+		close(closeAllDone)
+	}()
+
+	wg.Wait()
+	select {
+	case <-closeAllDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("seed=0xc105e411 op=close-all runtime_config=connections=4/workers=6/iterations=96 observed=timeout expected=CloseAll-complete")
+	}
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
+	}
+
+	total := sent.Load() + notFound.Load()
+	if total != workers*iterations {
+		t.Fatalf("seed=%#x op=final-count runtime_config=connections=%d/workers=%d/iterations=%d observed=%d expected=%d sent=%d not_found=%d",
+			seed, connections, workers, iterations, total, workers*iterations, sent.Load(), notFound.Load())
+	}
+	for op, conn := range conns {
+		select {
+		case <-conn.closed:
+		default:
+			t.Fatalf("seed=%#x op=closed-%d runtime_config=connections=%d/workers=%d/iterations=%d observed=open expected=closed", seed, op, connections, workers, iterations)
+		}
+		if got := mgr.Get(conn.ID); got != nil {
+			t.Fatalf("seed=%#x op=manager-remove-%d runtime_config=connections=%d/workers=%d/iterations=%d observed=%p expected=nil", seed, op, connections, workers, iterations, got)
+		}
+		err := sender.Send(conn.ID, msg)
+		if !errors.Is(err, ErrConnNotFound) {
+			t.Fatalf("seed=%#x op=post-close-send-%d runtime_config=connections=%d/workers=%d/iterations=%d observed_error=%v expected=ErrConnNotFound", seed, op, connections, workers, iterations, err)
+		}
+	}
 }
