@@ -44,7 +44,7 @@ Active audit note (2026-04-26):
 - hosted-runtime V1 is landed and verified; `docs/hosted-runtime-planning/V1/` is no longer the active implementation campaign
 - the former lifecycle/fanout-aliasing audit placeholders were removed after the post-V1 audit found no concrete remaining open defect on the hosted-runtime path
 - OI-002 is closed for current evidence and should reopen only from a fresh Shunter-visible failing example
-- OI-003 is complete; `OI-003.md` remains the audit/progress authority for the closed recovery/store semantics campaign
+- OI-003 is complete; use tests and git history for closed recovery/store audit detail
 - OI-005 remains open but narrowed to lower-level raw read-view/snapshot lifetime discipline as an accepted expert-API risk
 - the next broad confidence campaign is `docs/RUNTIME-HARDENING-GAUNTLET.md`, not another known-issue comparison pass
 - do not close behavior items solely because they are reachable through the hosted-runtime API; close or narrow them only when the underlying Shunter correctness gap is pinned by live tests
@@ -57,7 +57,6 @@ Status: open — narrowed to conditional protocol follow-ups
 Severity: medium
 
 Summary:
-- all OI-001 A1 wire-shape and measured-duration comparison slices identified to date are closed and pinned
 - the product contract is Shunter-native; SpacetimeDB client/wire compatibility is no longer a correctness goal
 - `v1.bsatn.shunter` is the only Shunter token. Shunter does not advertise or accept the SpacetimeDB-specific protocol token.
 - brotli remains recognized-but-unsupported; implement it only if Shunter clients need it
@@ -69,8 +68,8 @@ Summary:
 - energy accounting is explicitly out of scope for Shunter's product model. The energy-shaped protocol surface has been removed: no `TransactionUpdate.EnergyQuantaUsed`, no `StatusOutOfEnergy`, no `CallerOutcomeOutOfEnergy`, and no subscription/fanout energy fields. Do not replace this with a quota/metering abstraction unless a future Shunter-local product need appears.
 
 Why this matters:
-- protocol behavior is still one of the biggest blockers to serious Shunter client/runtime claims
-- the wire contract needs to be owned, documented, and tested as Shunter's protocol instead of treated as a compatibility exercise
+- future protocol changes must be owned, documented, and tested as Shunter's
+  protocol instead of treated as a compatibility exercise
 
 Primary code surfaces:
 - `protocol/upgrade.go`
@@ -88,7 +87,9 @@ Source docs:
 - `docs/shunter-design-decisions.md#protocol-rows-shape`
 
 Execution note:
-- The Shunter-native subprotocol, energy-removal, decoder body-consumption, and subscribe/unsubscribe response-helper cleanup slices are closed and pinned. Remaining OI-001 work is conditional: implement brotli only if clients need it, and redesign failure arms only if clients need a more machine-readable outcome contract.
+- Remaining OI-001 work is conditional: implement brotli only if clients need
+  it, and redesign failure arms only if clients need a more machine-readable
+  outcome contract.
 
 ### OI-002: Query and subscription behavior needs a Shunter-owned correctness pass
 
@@ -96,75 +97,26 @@ Status: closed for current evidence
 Severity: high
 
 Summary:
-Current contract:
 - Shunter's v1 SQL surface is intentionally narrow: single-table equality/range predicates with `AND` / `OR`, plus the subset of joins and one-off projections already documented in SPEC-005.
 - One-off reads and subscriptions should agree anywhere they share syntax and type semantics.
 - Observable behavior should be stable for Shunter clients: accepted queries should return correct rows, rejected queries should fail before registration/execution, and errors should be diagnosable.
 - SpacetimeDB behavior may guide tricky ordering/type decisions, but byte-for-byte parser error matching is not a product goal.
-
-Current open work:
 - None in the runtime model as of the latest OI-002 scout. Projection, validation-ordering, identifier lookup, join-WHERE policy, structured-query protocol cleanup, and clear duplicated fixture blocks are pinned by focused tests.
 - Future OI-002 work should be opened only from a fresh Shunter-visible failing example: wrong accepted/rejected query, wrong rows, misleading user-visible error, or one-off/subscription drift. Do not reopen parser-message matching or historical projection risk without new evidence.
-
-Execution note:
 - `NEXT_SESSION_HANDOFF.md` should not queue more OI-002 runtime-model work unless the next user supplies a fresh failing scenario.
 - Completed OI-002 slices belong in tests and git history, not this open-issues file. Do not reopen them without a fresh Shunter-visible failing example.
-
-Why this matters:
-- the system can look architecturally right while still behaving differently under realistic subscription workloads
-- query-surface limitations and subscribe/one-off drift directly cap what Shunter clients can build safely
-
-Primary code surfaces:
-- `query/sql/parser.go`
-- `protocol/handle_subscribe.go`
-- `protocol/handle_subscribe_single.go`
-- `protocol/handle_subscribe_multi.go`
-- `protocol/handle_oneoff.go`
-- `subscription/predicate.go`
-- `subscription/validate.go`
-- `subscription/eval.go`
-- `subscription/manager.go`
-- `subscription/fanout.go`
-- `subscription/fanout_worker.go`
-- `executor/executor.go`
-- `executor/scheduler.go`
 
 ### OI-003: Recovery and store semantics needed Shunter operational hardening
 
 Status: closed for current evidence
 Severity: high
 
-Planning/progress authority: `OI-003.md`
-
-This `TECH-DEBT.md` entry is now only a closure marker for OI-003. Use
-`OI-003.md` for design decisions, workstream boundaries, progress tracking, and
-audit history.
-
 Summary:
 - Shunter's value model, changeset format, commit log, and snapshot/recovery flow are intentionally Shunter-owned, not byte-format compatible with SpacetimeDB.
 - the OI-003 campaign pinned crash/restart correctness, deterministic replay, snapshot compatibility, compaction safety, and clear operator failure modes for the current evidence set.
 - format differences are tech debt only when they produce a Shunter data-loss, recovery, observability, or operational limitation.
 - future recovery/store work should start from a fresh Shunter-visible failing example or from the runtime hardening gauntlet finding a concrete gap.
-
-Why this matters:
-- storage and recovery semantics are central to the "run my apps on this" claim
-- restart behavior is where runtime correctness becomes operational trust
-
-Primary code surfaces:
-- `types/`
-- `bsatn/encode.go`
-- `bsatn/decode.go`
-- `store/commit.go`
-- `store/recovery.go`
-- `store/snapshot.go`
-- `store/transaction.go`
-- `commitlog/changeset_codec.go`
-- `commitlog/segment.go`
-- `commitlog/replay.go`
-- `commitlog/recovery.go`
-- `commitlog/snapshot_io.go`
-- `commitlog/compaction.go`
-- `executor/executor.go`
+- Completed OI-003 audit detail belongs in tests and git history, not in startup context.
 
 ### OI-005: Lower-level read-view/snapshot lifetime discipline remains an expert-API contract
 
@@ -172,15 +124,20 @@ Status: open — narrowed to accepted lower-level/expert API risk
 Severity: low
 
 Summary:
-- hosted-runtime V1-F closes the normal root-runtime read-path concern: `Runtime.Read(ctx, fn)` exposes a callback-scoped `LocalReadView`, defers committed snapshot close before returning, and is pinned by tests for readiness/closed-state behavior, committed-row access, and post-read commit progress
-- the previously identified snapshot/StateView aliasing and use-after-close sub-hazards are closed and pinned by store, subscription, and executor regression tests
-- the concrete executor post-commit panic-close gap is now closed: `executor.postCommit` defers the acquired committed read-view close immediately after `snapshotFn()`, and `TestPostCommitPanicInEvalSetsFatal` asserts the view is closed even when `EvalAndBroadcast` panics
-- remaining risk is intentionally lower-level and specific: raw `store.CommittedState.Snapshot()` / `store.CommittedReadView` still require caller-owned explicit close; `CommittedState.Table` and `StateView` still rely on documented envelope/single-executor discipline; subscription committed views remain borrowed and must not escape
-- `Runtime.Read` callbacks remain snapshot-scoped and should not synchronously wait on reducer/write work while holding the snapshot; treat that as expert API discipline unless a concrete normal-runtime deadlock reproducer appears
+- normal root-runtime reads and executor post-commit fanout no longer expose a
+  known unclosed-snapshot path; those concerns are pinned by focused tests
+- remaining risk is intentionally lower-level and specific: raw
+  `store.CommittedState.Snapshot()` / `store.CommittedReadView` still require
+  caller-owned explicit close
+- `CommittedState.Table` and `StateView` still rely on documented
+  envelope/single-executor discipline
+- subscription committed views remain borrowed and must not escape
+- `Runtime.Read` callbacks remain snapshot-scoped and should not synchronously
+  wait on reducer/write work while holding the snapshot; treat that as expert
+  API discipline unless a concrete normal-runtime deadlock reproducer appears
 
 Why this matters:
 - leaked raw committed snapshots can stall commits until explicitly closed or until the best-effort finalizer runs
-- the root runtime API and executor post-commit path no longer expose a known unclosed-snapshot path
 - the remaining lower-level APIs preserve v1 simplicity but require callers to honor explicit read-view ownership rules
 
 Primary code surfaces:
@@ -230,30 +187,8 @@ Status: closed — cleanup completed and verified on 2026-04-28
 Severity: medium
 
 Summary:
-- legacy compatibility, audit-slice, delivery-slice, and phase-slice names were removed from test filenames, test identifiers, comments, and active docs where they obscured Shunter-owned behavior
-- `docs/shunter-design-decisions.md` is now the implementation-facing decision document; `docs/parity-decisions.md` remains only as a short redirect for old links
-- protocol and subscription contract pins now use behavior-oriented filenames and `TestShunter*` / descriptive names
-- comments in `protocol/`, `subscription/`, `query/sql/`, `executor/`, and `commitlog/` now frame SpacetimeDB references as design evidence, not ongoing interop or byte-for-byte goals
-- dead durability-worker fsync-count instrumentation was removed and the test now asserts the durable transaction behavior it actually covers
-- fixed sleep windows in async/fanout-worker and runtime polling coverage were replaced with condition/event waits or stability assertions
-- duplicated protocol message-family field-order checks were collapsed where rows-shape coverage already owns the same contract
-- stale hosted-runtime planning next-slice notes now point readers to `HOSTED_RUNTIME_PLANNING_HANDOFF.md` instead of presenting completed work as live sequencing
-- pinned Staticcheck is now green through `rtk go tool staticcheck ./...`
-
-Why this matters:
-- stale labels make failure output point maintainers toward closed or nonexistent work
-- duplicated tests and fixed sleeps slow down behavior changes while still missing some real regressions
-- dead instrumentation gives a false sense that low-level durability behavior is being asserted
-
-Primary code surfaces:
-- `commitlog/commitlog_contract_test.go`
-- `docs/shunter-design-decisions.md`
-- `docs/parity-decisions.md`
-- `AGENTS.md`
-- `CLAUDE.md`
-- `docs/README.md`
-- `NEXT_SESSION_HANDOFF.md`
-- `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
-- `protocol/*_test.go`
-- `subscription/fanout_worker_test.go`
-- `docs/hosted-runtime-planning/`
+- stale compatibility/audit labels were removed from active docs, test names, and comments where they obscured Shunter-owned behavior
+- `docs/shunter-design-decisions.md` is the implementation-facing decision document; `docs/parity-decisions.md` is only a redirect for older links
+- duplicated or sleep-based cleanup tests were collapsed or made event/condition driven
+- pinned Staticcheck is expected to stay green through `rtk go tool staticcheck ./...`
+- reopen OI-008 only for fresh cleanup debt that obscures current behavior or slows future correctness work

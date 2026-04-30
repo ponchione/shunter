@@ -12,127 +12,21 @@ workloads with reproducible seeds.
 
 Current status:
 
-- OI-002 is closed for current query/subscription evidence.
-- OI-003 is closed for current recovery/store evidence.
-- `runtime_gauntlet_test.go` now carries short deterministic public-surface
-  checks for reducer/read modeling, clean restart equivalence, protocol
-  `CallReducer` restart equivalence, one-off reads and isolated one-off errors,
-  same-connection one-off/subscription interleaving, subscription initial rows,
-  subscribe-initial/one-off equivalence, live subscription deltas,
-  multi-subscriber fanout contract, same-connection subscription multiplexing,
-  same-connection `SubscribeMulti`/`SubscribeSingle` coexistence, predicate
-  subscription deltas, rejected subscribe cleanup and same-connection recovery,
-  rejected subscribe-multi cleanup and same-connection recovery,
-  unsubscribe and unknown unsubscribe isolation including same-connection
-  subscription preservation, mixed-surface protocol/runtime traces,
-  multi-client mixed workloads with dual subscribers and resubscribe, protocol
-  `CallReducer` read-your-writes one-offs, protocol `CallReducer` subscribed
-  caller heavy deltas, heavy multiplexed caller deltas, and `NoSuccessNotify`
-  subscribed-caller suppression, disconnect/reconnect fanout, live-client
-  close/restart, subscribe/unsubscribe multi, repeated subscribe/unsubscribe
-  cycles, rejected subscribe multi atomicity, panic rollback, unknown reducer
-  admission failures, reserved lifecycle reducer rejection, one-shot scheduled
-  reducer firing through the hosted runtime, cancel-before-fire, and clean
-  restart firing for pre-close scheduled reducers, plus fixed-seed
-  scheduled fire/cancel workloads and scheduled reducer failure rollback with
-  no fanout, scheduled reducer panic rollback with no fanout, repeating
-  scheduled reducer fire/cancel behavior, repeating schedule resume after clean
-  restart, cancelled schedule persistence across clean restart, and
-  transactional rollback of schedule creation, immediate and past-due scheduled
-  one-shot firing, scheduled due-time ordering, scheduled predicate
-  subscription deltas, scheduled multi-subscriber fanout contract, cancel
-  idempotence and unknown-cancel no-effect controls, protocol `CallReducer`
-  schedule/cancel coverage including clean restart, protocol rollback of
-  schedule creation, scheduled fire isolation for unsubscribed clients, and
-  scheduled `SubscribeMulti` deltas with unsubscribe controls,
-  `NoSuccessNotify` protocol scheduling that still fires, protocol-created
-  repeating schedule firing, and fixed-seed runtime/scheduler interleaving
-  workloads. The short deterministic root runtime gauntlet is saturated for the
-  current public hosted-runtime, protocol, and scheduler surfaces; remaining
-  campaign work moves to crash/recovery, fault injection, fuzzing/corpus,
-  metamorphic expansion, race/soak, and release-candidate runs. The
-  crash/recovery campaign has started with a deterministic restart pin proving a
-  damaged tail segment remains recoverable after recovery resumes into a fresh
-  successor segment and the process restarts again, plus a snapshot/log boundary
-  pin proving recovery fails loudly instead of skipping the first post-snapshot
-  transaction when the log begins too late. Commitlog recovery/metamorphic
-  coverage now also includes rapid damaged-tail resume equivalence, snapshot
-  replay with and without offset indexes, and boundary-segment compaction
-  equivalence. Scheduler restart work has also
-  started with a missed-timer replay overflow pin proving startup cannot block
-  the dangling-client sweep when recovered due timers exceed executor inbox
-  capacity, and a duplicate-replay pin proving the first scheduler scan after
-  startup does not enqueue a recovered missed timer a second time, plus a
-  failed-replay retry pin proving stale startup duplicate suppression cannot
-  hide a failed recovered firing from the scheduler restart loop, and an
-  overflowed-replay retry pin proving a recovered due schedule that did not
-  fit during startup replay is still picked up and retried after a failed
-  scheduler-run attempt, plus a scheduler-run pickup pin proving overflowed
-  due rows from saturated startup replay are recovered by the first run-loop
-  scan without duplicating the replay-queued row, plus a repeating-replay
-  catch-up pin proving overdue recovered interval schedules advance one
-  intended fixed-rate interval per fire across restart, an overflowed
-  repeating-replay catch-up pin proving the same fixed-rate advancement after
-  startup replay saturation, a panicking
-  recovered one-shot retry pin, and a replay/external-admission ordering pin
-  proving post-startup external reducers do not overtake recovered scheduled
-  firings queued before the gate opens. Additional scheduler restart pins prove
-  in-flight attempt tracking is established before an executor can complete a
-  due command, and recovered repeating schedules that fail or panic retry the
-  same intended fire time before advancing by one fixed-rate interval on the
-  successful retry. Scheduler clock injection is now pinned across future
-  wakeups, notify-driven rescans, and replayed future wakeups so recovered
-  schedules cannot fire early just because their recovered due time predates
-  the host wall clock. Additional replay-saturation pins prove skipped due
-  rows remain retryable, the earliest future wakeup survives a saturated replay
-  pass, and recovered repeating schedules that advance into the future after
-  either replay or overflow wait for the scheduler clock before firing again.
-  Follow-on restart/notify pins prove such advanced repeating rows can be
-  cancelled before the next due time without a stale firing, and that a
-  post-startup schedule earlier than a recovered future wakeup re-arms the
-  scheduler without firing the later recovered row early. Additional recovered
-  future cancellation pins prove one-shot rows can be cancelled while the
-  scheduler is armed, and cancelling the earliest recovered future wakeup
-  re-arms the scheduler to a later recovered row instead of retaining a stale
-  early wakeup. Further notify/rearm pins prove a post-startup schedule later
-  than a recovered due time cannot postpone the recovered row, and a rolled-back
-  earlier schedule creation cannot replace the recovered future wakeup. Success
-  path rearm pins prove a completed early recovered one-shot re-arms a later
-  recovered row, and a recovered repeating row advanced into the future does
-  not overtake an earlier recovered one-shot. Future-armed failure pins prove
-  recovered one-shots that fail or panic at their due time retry before later
-  recovered wakeups are allowed to fire, and the same ordering holds for
-  recovered repeating rows while preserving fixed-rate advancement after the
-  successful retry. Equal-time rearm pins prove multiple recovered future
-  wakeups at the same timestamp all fire once, and a post-startup schedule at
-  the same timestamp as a recovered row does not hide either firing. Equal-time
-  repeating pins prove a recovered repeating row sharing a timestamp with a
-  one-shot fires once, advances fixed-rate, and remains visible when the
-  one-shot is created after startup at that same timestamp. Equal-time
-  retry pins prove a failing or panicking recovered row retries without
-  duplicating its same-timestamp recovered sibling, including repeating rows
-  that must advance fixed-rate after the successful retry. Final replay-overflow
-  pins prove multiple overflowed due rows drain exactly once, stale snapshot
-  rows already in flight cannot be re-enqueued after a fast executor commit,
-  the recovered future wakeup survives after the overflow clears, same-time
-  replay-queued failure retries do not duplicate a committed sibling, and
-  cancelling an advanced recovered repeating row sharing a future wakeup leaves
-  the one-shot wakeup armed. A final rearm pin proves a successful recovered
-  repeating fire notifies the scheduler after advancing `next_run_at_ns`, so the
-  next wakeup is armed without relying on an external Notify. Final
-  cancel-before-retry pins prove a failed or panicking recovered due row can be
-  cancelled before scheduler retry and cannot be resurrected by stale retry
-  notification state. A deeper final audit also closed scheduler contract gaps:
-  `ScheduleRepeat` now rejects non-positive intervals before mutating
-  `sys_scheduled` or consuming a schedule ID, and failed or panicking
-  rolled-back cancellations of recovered future rows keep those rows armed and
-  able to fire. One more deep pass pinned direct replay idempotence for
-  already in-flight due rows and fixed Startup idempotence so a failed first
-  startup call returns the original error on later no-op calls instead of
-  falsely reporting success while external admission remains closed. The
-  deterministic root runtime and scheduler restart slices are saturated for the
-  current surface; remaining gauntlet work should move to broader
-  crash/fault/fuzz/metamorphic/race/soak coverage unless a new invariant appears.
+- OI-002 and OI-003 are closed for current query/subscription and recovery/store
+  evidence. Reopen them only from a fresh Shunter-visible failing example.
+- The deterministic root runtime gauntlet in `runtime_gauntlet_test.go` is
+  saturated for the current hosted-runtime, protocol, subscription, reducer,
+  scheduler, and clean-restart surfaces.
+- The scheduler restart campaign has pinned replay overflow, duplicate replay,
+  retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
+  cancellation/rearm behavior, startup idempotence, and external admission
+  ordering.
+- Commitlog recovery/metamorphic coverage now includes rapid damaged-tail
+  resume equivalence, snapshot replay with and without offset indexes, and
+  boundary-segment compaction equivalence.
+- Remaining campaign work should move to broader crash/recovery, fault
+  injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
+  coverage unless a new invariant or failing seed appears.
 
 ## Goals
 

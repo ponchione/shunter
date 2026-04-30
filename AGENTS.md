@@ -4,12 +4,13 @@ Default startup reading:
 1. `RTK.md`
 2. The active root handoff:
    - `NEXT_SESSION_HANDOFF.md` for future correctness / TECH-DEBT regressions
-   - `OI-003_SESSION_HANDOFF.md` only when auditing completed OI-003 recovery /
-     store semantics work
    - `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
    - `docs/RUNTIME-HARDENING-GAUNTLET.md` for the post-tech-debt runtime
      hardening test campaign
-3. Only the code, package docs, and narrow spec sections named by that handoff or by the slice you are touching
+3. `TECH-DEBT.md` only for the active issue section named by the handoff or
+   user task
+4. Only the code, package docs, and narrow spec sections named by that handoff
+   or by the slice you are touching
 
 Do not read broad roadmap, ledger, or full decomposition specs by default. Open them only when the active handoff says they are required, when a dependency question cannot be answered from code, or when you are editing that document.
 
