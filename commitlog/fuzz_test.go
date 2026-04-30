@@ -215,6 +215,123 @@ func FuzzScanSingleSegment(f *testing.F) {
 	})
 }
 
+func FuzzOpenAndRecoverSnapshotSegmentBoundary(f *testing.F) {
+	for _, seed := range recoveryBoundaryFuzzSeeds(f) {
+		f.Add(seed.snapshot, seed.segment)
+	}
+
+	_, reg := testSchema()
+	const maxArtifactBytes = 64 << 10
+	f.Fuzz(func(t *testing.T, snapshotBytes []byte, segmentBytes []byte) {
+		if len(snapshotBytes) > maxArtifactBytes || len(segmentBytes) > maxArtifactBytes {
+			t.Skip("recovery fuzz input above bounded local limit")
+		}
+
+		root := t.TempDir()
+		if snapshotBytes != nil {
+			snapshotDir := filepath.Join(root, "snapshots", "1")
+			if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(snapshotDir, snapshotFileName), snapshotBytes, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if segmentBytes != nil {
+			if err := os.WriteFile(filepath.Join(root, SegmentFileName(1)), segmentBytes, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			return
+		}
+		if recovered == nil {
+			t.Fatalf("accepted recovery returned nil state: maxTxID=%d plan=%+v report=%+v", maxTxID, plan, report)
+		}
+		if got := recovered.CommittedTxID(); got != maxTxID {
+			t.Fatalf("recovered committed txID = %d, want maxTxID %d (plan=%+v report=%+v)", got, maxTxID, plan, report)
+		}
+		if report.RecoveredTxID != maxTxID {
+			t.Fatalf("report recovered txID = %d, want maxTxID %d (plan=%+v report=%+v)", report.RecoveredTxID, maxTxID, plan, report)
+		}
+		if report.ResumePlan != plan {
+			t.Fatalf("report resume plan = %+v, want returned plan %+v", report.ResumePlan, plan)
+		}
+		if report.HasSelectedSnapshot && report.SelectedSnapshotTxID > maxTxID {
+			t.Fatalf("selected snapshot txID %d exceeds recovered max txID %d (report=%+v)", report.SelectedSnapshotTxID, maxTxID, report)
+		}
+		if report.HasDurableLog && report.DurableLogHorizon < maxTxID && !report.HasSelectedSnapshot {
+			t.Fatalf("durable log horizon %d below recovered max txID %d without snapshot (report=%+v)", report.DurableLogHorizon, maxTxID, report)
+		}
+		replayed := report.ReplayedTxRange
+		if replayed != (RecoveryTxIDRange{}) {
+			if replayed.Start == 0 || replayed.End == 0 || replayed.Start > replayed.End {
+				t.Fatalf("invalid replay range %+v (report=%+v)", replayed, report)
+			}
+			if replayed.End > maxTxID {
+				t.Fatalf("replay range %+v exceeds recovered max txID %d (report=%+v)", replayed, maxTxID, report)
+			}
+			if report.HasSelectedSnapshot && replayed.Start <= report.SelectedSnapshotTxID {
+				t.Fatalf("replay range %+v overlaps selected snapshot txID %d (report=%+v)", replayed, report.SelectedSnapshotTxID, report)
+			}
+		}
+	})
+}
+
+type recoveryBoundaryFuzzSeed struct {
+	snapshot []byte
+	segment  []byte
+}
+
+func recoveryBoundaryFuzzSeeds(t testing.TB) []recoveryBoundaryFuzzSeed {
+	t.Helper()
+
+	validSnapshot := validSnapshotSeed(t)
+	corruptSnapshot := append([]byte(nil), validSnapshot...)
+	corruptSnapshot[len(corruptSnapshot)-1] ^= 0xff
+
+	validLog := recoveryBoundarySegmentSeed(t,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("one")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("two")}}},
+	)
+	snapshotBoundaryLog := recoveryBoundarySegmentSeed(t,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(99), types.NewString("skipped")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("after_snapshot")}}},
+	)
+	firstTxMismatch := recoveryBoundarySegmentSeed(t,
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("first_mismatch")}}},
+	)
+	truncatedBoundary := append([]byte(nil), snapshotBoundaryLog...)
+	truncatedBoundary = truncatedBoundary[:len(truncatedBoundary)-1]
+
+	return []recoveryBoundaryFuzzSeed{
+		{snapshot: nil, segment: nil},
+		{snapshot: []byte{}, segment: nil},
+		{snapshot: nil, segment: []byte{}},
+		{snapshot: nil, segment: validLog},
+		{snapshot: validSnapshot, segment: nil},
+		{snapshot: validSnapshot, segment: snapshotBoundaryLog},
+		{snapshot: corruptSnapshot, segment: validLog},
+		{snapshot: validSnapshot, segment: firstTxMismatch},
+		{snapshot: validSnapshot, segment: truncatedBoundary},
+	}
+}
+
+func recoveryBoundarySegmentSeed(t testing.TB, records ...replayRecord) []byte {
+	t.Helper()
+	encoded := make([]*Record, 0, len(records))
+	for _, rec := range records {
+		encoded = append(encoded, &Record{
+			TxID:       rec.txID,
+			RecordType: RecordTypeChangeset,
+			Payload:    rapidEncodeReplayChangeset(t, rec),
+		})
+	}
+	return segmentSeed(t, encoded...)
+}
+
 func recordFuzzSeeds(t testing.TB) [][]byte {
 	t.Helper()
 	var seeds [][]byte
