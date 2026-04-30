@@ -50,6 +50,9 @@ Current status:
 - Protocol RowList plus client/server message decoding now have bounded fuzz
   seed corpora that check malformed-input categorization and accepted-input
   canonical round trips.
+- BSATN product-value decoding now has a bounded public-surface fuzz corpus
+  across scalar and variable-length columns, checking malformed-input
+  categorization plus accepted-row canonical re-encoding.
 - SQL parser fuzzing now drives arbitrary bounded query text through the
   public `Parse` surface, checking unsupported-error categorization and
   deterministic accepted parses.
