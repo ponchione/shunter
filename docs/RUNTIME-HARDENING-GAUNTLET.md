@@ -63,7 +63,9 @@ Current status:
   initial snapshots after each restart.
 - Protocol RowList plus client/server message decoding now have bounded fuzz
   seed corpora that check malformed-input categorization and accepted-input
-  canonical round trips.
+  canonical round trips. Protocol compression envelopes now also have a
+  bounded generated-body fuzz corpus that checks none/gzip round trips and
+  brotli/unknown-mode error categorization.
 - BSATN standalone value and product-value decoding now have bounded
   public-surface fuzz corpora across scalar and variable-length payloads,
   checking malformed-input categorization plus accepted-value/row canonical

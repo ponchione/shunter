@@ -71,6 +71,54 @@ func FuzzDecodeServerMessage(f *testing.F) {
 	})
 }
 
+func FuzzWrapCompressedRoundTrip(f *testing.F) {
+	for _, seed := range []struct {
+		tag  byte
+		body []byte
+		mode byte
+	}{
+		{TagSubscribeSingleApplied, nil, CompressionNone},
+		{TagTransactionUpdate, bytes.Repeat([]byte{0x42}, 128), CompressionGzip},
+		{TagSubscribeSingle, []byte("brotli-reserved"), CompressionBrotli},
+		{TagTransactionUpdate, []byte("unknown-mode"), 0xff},
+	} {
+		f.Add(seed.tag, seed.body, seed.mode)
+	}
+
+	f.Fuzz(func(t *testing.T, tag byte, body []byte, mode byte) {
+		const maxCompressionFuzzBodyBytes = 64 << 10
+		if len(body) > maxCompressionFuzzBodyBytes {
+			t.Skip("compression fuzz body above bounded local limit")
+		}
+
+		frame, err := WrapCompressed(tag, body, mode)
+		switch mode {
+		case CompressionNone, CompressionGzip:
+			if err != nil {
+				t.Fatalf("WrapCompressed(tag=%d mode=%d body_len=%d): %v", tag, mode, len(body), err)
+			}
+			gotTag, gotBody, err := UnwrapCompressed(frame)
+			if err != nil {
+				t.Fatalf("UnwrapCompressed(WrapCompressed(tag=%d mode=%d body_len=%d)): %v", tag, mode, len(body), err)
+			}
+			if gotTag != tag {
+				t.Fatalf("compression round trip tag = %d, want %d for mode=%d body_len=%d", gotTag, tag, mode, len(body))
+			}
+			if !bytes.Equal(gotBody, body) {
+				t.Fatalf("compression round trip body_len=%d, want %d for tag=%d mode=%d", len(gotBody), len(body), tag, mode)
+			}
+		case CompressionBrotli:
+			if !errors.Is(err, ErrBrotliUnsupported) {
+				t.Fatalf("WrapCompressed brotli err = %v, want ErrBrotliUnsupported", err)
+			}
+		default:
+			if !errors.Is(err, ErrUnknownCompressionTag) {
+				t.Fatalf("WrapCompressed unknown mode=%d err = %v, want ErrUnknownCompressionTag", mode, err)
+			}
+		}
+	})
+}
+
 func fuzzDecodeMessage(t *testing.T, frame []byte, decode func([]byte) (uint8, any, error), encode func(any) ([]byte, error), label string) {
 	t.Helper()
 	const maxMessageFuzzBytes = 64 << 10
