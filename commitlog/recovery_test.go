@@ -537,6 +537,85 @@ func TestOpenAndRecoverSnapshotOnlyReturnsSnapshotState(t *testing.T) {
 	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice"})
 }
 
+func TestOpenAndRecoverSnapshotOnlyResumeAppendsTail(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	committed := buildRecoveryCommittedState(t, reg)
+	players, _ := committed.Table(0)
+	for _, row := range []types.ProductValue{
+		{types.NewUint64(1), types.NewString("alice")},
+		{types.NewUint64(2), types.NewString("bob")},
+	} {
+		if err := players.InsertRow(players.AllocRowID(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 2)
+
+	firstRecovered, firstMaxTxID, firstPlan, firstReport, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstMaxTxID != 2 {
+		t.Fatalf("first maxTxID = %d, want 2", firstMaxTxID)
+	}
+	assertReplayPlayerRows(t, firstRecovered, map[uint64]string{1: "alice", 2: "bob"})
+	if !firstReport.HasSelectedSnapshot || firstReport.SelectedSnapshotTxID != 2 {
+		t.Fatalf("first selected snapshot = (%v, %d), want tx 2 (report=%+v)",
+			firstReport.HasSelectedSnapshot, firstReport.SelectedSnapshotTxID, firstReport)
+	}
+	if firstReport.HasDurableLog || firstReport.ReplayedTxRange != (RecoveryTxIDRange{}) {
+		t.Fatalf("first report = %+v, want snapshot-only recovery without durable log replay", firstReport)
+	}
+	if firstPlan.AppendMode != AppendByFreshNextSegment || firstPlan.SegmentStartTx != 3 || firstPlan.NextTxID != 3 {
+		t.Fatalf("first plan = %+v, want fresh segment at tx 3", firstPlan)
+	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(root, firstPlan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatalf("resume from snapshot-only plan %+v: %v", firstPlan, err)
+	}
+	dw.EnqueueCommitted(3, &store.Changeset{
+		TxID: 3,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts:   []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}},
+			},
+		},
+	})
+	if finalTxID, err := dw.Close(); err != nil {
+		t.Fatal(err)
+	} else if finalTxID != 3 {
+		t.Fatalf("durability final txID = %d, want 3", finalTxID)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("second maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+		t.Fatalf("second selected snapshot = (%v, %d), want tx 2 (report=%+v)",
+			report.HasSelectedSnapshot, report.SelectedSnapshotTxID, report)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 3 {
+		t.Fatalf("second durable log = (%v, %d), want horizon 3 (report=%+v)",
+			report.HasDurableLog, report.DurableLogHorizon, report)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 3, End: 3}) {
+		t.Fatalf("second replay range = %+v, want 3..3 (report=%+v)", report.ReplayedTxRange, report)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 3 || plan.NextTxID != 4 {
+		t.Fatalf("second plan = %+v, want append-in-place on tx 3 segment", plan)
+	}
+}
+
 func TestOpenAndRecoverSnapshotRebuildsSecondaryIndexes(t *testing.T) {
 	root := t.TempDir()
 	reg := buildSelectionRegistry(t, selectionRegistryConfig{extraNameIndex: true})

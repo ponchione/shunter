@@ -35,7 +35,9 @@ Current status:
   are replaced through the recovery resume plan, and corrupt offset indexes fall
   back to linear replay. The fuzz corpus now includes combined snapshot plus
   segment recovery-boundary artifacts and asserts accepted recovery report
-  invariants. Unsafe history checks now also cover generated
+  invariants. Snapshot-only recovery now also checks that the returned fresh
+  resume plan can append a tail that is replayed on the next restart. Unsafe
+  history checks now also cover generated
   snapshot/log boundary gaps and missing-base log suffixes. Compaction retry
   coverage now checks covered orphan sidecar cleanup without changing recovery,
   full-horizon compaction without changing active-segment resume semantics, and
