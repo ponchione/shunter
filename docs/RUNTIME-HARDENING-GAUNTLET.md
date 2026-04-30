@@ -138,6 +138,7 @@ Current status:
   missing-base log suffixes.
   Compaction retry
   coverage now checks covered orphan sidecar cleanup without changing recovery,
+  snapshot-only retry sync failures after orphan sidecar cleanup,
   full-horizon compaction without changing active-segment resume semantics, and
   future-snapshot rejection without mutating replayable log or sidecars. Pure
   compaction planner fuzzing now checks arbitrary bounded active/sealed ranges

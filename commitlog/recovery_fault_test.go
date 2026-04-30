@@ -3268,6 +3268,66 @@ func TestOpenAndRecoverAfterCompactionSyncFailureWithSidecarsUsesSnapshotAndTail
 	}
 }
 
+func TestOpenAndRecoverAfterSnapshotOnlyCompactionRetrySyncFailure(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 3, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	orphanIdx := filepath.Join(root, OffsetIndexFileName(1))
+	idx, err := CreateOffsetIndex(orphanIdx, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	syncErr := errors.New("full compaction sync failed")
+	originalSyncDir := syncDir
+	syncDir = func(path string) error {
+		if path != root {
+			t.Fatalf("syncDir path = %q, want %q", path, root)
+		}
+		return syncErr
+	}
+	err = RunCompaction(root, 3)
+	syncDir = originalSyncDir
+	defer func() { syncDir = originalSyncDir }()
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("seed=0xf011c0de op=compaction runtime_config=snapshot=3/segments=0/orphan_sidecars=1 operation=RunCompaction observed_error=%v expected_wrapped=%v", err, syncErr)
+	}
+	assertFileMissing(t, orphanIdx)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatalf("seed=0xf011c0de op=recover runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=OpenAndRecoverWithReport observed_error=%v expected=nil", err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("seed=0xf011c0de op=recover runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=maxTxID observed=%d expected=3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 3 {
+		t.Fatalf("seed=0xf011c0de op=recover runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=selected-snapshot observed=(%v,%d) expected=(true,3)",
+			report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.HasDurableLog || report.DurableLogHorizon != 0 {
+		t.Fatalf("seed=0xf011c0de op=recover runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=durable-log observed=(%v,%d) expected=(false,0)",
+			report.HasDurableLog, report.DurableLogHorizon)
+	}
+	if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+		t.Fatalf("seed=0xf011c0de op=recover runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=replayed-range observed=%+v expected=none", report.ReplayedTxRange)
+	}
+	if len(report.SegmentCoverage) != 0 {
+		t.Fatalf("seed=0xf011c0de op=recover runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=segment-coverage observed=%+v expected=empty", report.SegmentCoverage)
+	}
+	if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 4 || plan.NextTxID != 4 {
+		t.Fatalf("seed=0xf011c0de op=recover runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=resume-plan observed=%+v expected=fresh-segment-4-next-4", plan)
+	}
+
+	if err := RunCompaction(root, 3); err != nil {
+		t.Fatalf("seed=0xf011c0de op=retry runtime_config=snapshot=3/segments=0/orphan_sidecars=0 operation=RunCompaction observed_error=%v expected=nil", err)
+	}
+}
+
 func TestOpenAndRecoverAfterCompactionSegmentRemoveFailureUsesSnapshotAndTail(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
