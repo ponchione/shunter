@@ -834,6 +834,47 @@ func TestDurabilityWorkerResumePlanAppendForbiddenFailsClosed(t *testing.T) {
 	}
 }
 
+func TestDurabilityWorkerAppendInPlaceResumePlanMismatchedMissingSegmentFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	plan := RecoveryResumePlan{SegmentStartTx: 3, NextTxID: 4, AppendMode: AppendInPlace}
+
+	_, err := NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions())
+	if err == nil {
+		t.Fatal("expected mismatched append-in-place resume plan to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid recovery resume plan") ||
+		!strings.Contains(err.Error(), "SegmentStartTx:3") ||
+		!strings.Contains(err.Error(), "NextTxID:4") {
+		t.Fatalf("resume plan error = %v, want compact plan context", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, SegmentFileName(3))); !os.IsNotExist(statErr) {
+		t.Fatalf("append-in-place resume segment stat err = %v, want no segment created", statErr)
+	}
+}
+
+func TestDurabilityWorkerAppendInPlaceResumePlanMismatchedExistingSegmentFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	makeScanTestSegment(t, dir, 3, 3, 4)
+	plan := RecoveryResumePlan{SegmentStartTx: 3, NextTxID: 4, AppendMode: AppendInPlace}
+
+	_, err := NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions())
+	if err == nil {
+		t.Fatal("expected mismatched append-in-place resume plan to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid recovery resume plan") ||
+		!strings.Contains(err.Error(), "SegmentStartTx:3") ||
+		!strings.Contains(err.Error(), "NextTxID:4") {
+		t.Fatalf("resume plan error = %v, want compact plan context", err)
+	}
+	segments, horizon, scanErr := ScanSegments(dir)
+	if scanErr != nil {
+		t.Fatal(scanErr)
+	}
+	if horizon != 4 || len(segments) != 1 || segments[0].LastTx != 4 {
+		t.Fatalf("segments after rejected plan = %+v horizon=%d, want original segment through tx 4", segments, horizon)
+	}
+}
+
 func TestDurabilityWorkerFreshResumePlanMismatchedNextTxFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	plan := RecoveryResumePlan{SegmentStartTx: 3, NextTxID: 4, AppendMode: AppendByFreshNextSegment}

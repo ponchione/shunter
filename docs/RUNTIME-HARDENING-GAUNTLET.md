@@ -107,6 +107,8 @@ Current status:
   read-time and selection fail-loud treatment.
   Fresh recovery resume plans now reject mismatched segment-start and next-tx
   values before creating a segment or publishing a false durable horizon.
+  Append-in-place resume plans now also validate next-tx against missing or
+  existing segment state before opening durability admission.
   Unsafe history checks now also cover generated snapshot/log boundary gaps and
   missing-base log suffixes.
   Compaction retry

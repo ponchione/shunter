@@ -84,11 +84,14 @@ type DurabilityWorker struct {
 // If an active segment already exists for startTxID, it is reopened for appending.
 // Otherwise a new segment is created.
 func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*DurabilityWorker, error) {
-	return NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{
-		SegmentStartTx: types.TxID(startTxID),
-		NextTxID:       types.TxID(startTxID),
-		AppendMode:     AppendInPlace,
-	}, opts)
+	if err := validateFsyncMode(opts.FsyncMode); err != nil {
+		return nil, err
+	}
+	seg, err := openOrCreateSegment(dir, startTxID)
+	if err != nil {
+		return nil, err
+	}
+	return newDurabilityWorkerFromSegment(dir, seg, 0, opts), nil
 }
 
 func validateFsyncMode(mode FsyncMode) error {
@@ -108,6 +111,10 @@ func NewDurabilityWorkerWithResumePlan(dir string, plan RecoveryResumePlan, opts
 	if err != nil {
 		return nil, err
 	}
+	return newDurabilityWorkerFromSegment(dir, seg, durableTxID, opts), nil
+}
+
+func newDurabilityWorkerFromSegment(dir string, seg *SegmentWriter, durableTxID uint64, opts CommitLogOptions) *DurabilityWorker {
 	dw := &DurabilityWorker{
 		ch:      make(chan durabilityItem, opts.ChannelCapacity),
 		closeCh: make(chan struct{}),
@@ -126,7 +133,7 @@ func NewDurabilityWorkerWithResumePlan(dir string, plan RecoveryResumePlan, opts
 	}
 	dw.idx = initOffsetIndexForSegment(dir, seg, opts)
 	go dw.run()
-	return dw, nil
+	return dw
 }
 
 // initOffsetIndexForSegment opens or creates the per-segment offset index
@@ -182,11 +189,7 @@ func openOrCreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 func openSegmentForResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWriter, uint64, error) {
 	switch plan.AppendMode {
 	case AppendInPlace:
-		seg, err := openOrCreateSegment(dir, uint64(plan.SegmentStartTx))
-		if err != nil {
-			return nil, 0, err
-		}
-		return seg, seg.lastTx, nil
+		return openSegmentForAppendInPlaceResumePlan(dir, plan)
 	case AppendByFreshNextSegment:
 		if plan.SegmentStartTx == 0 || plan.NextTxID == 0 || plan.SegmentStartTx != plan.NextTxID {
 			return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v", plan)
@@ -204,6 +207,39 @@ func openSegmentForResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWrit
 	default:
 		return nil, 0, fmt.Errorf("commitlog: unknown append mode %d", plan.AppendMode)
 	}
+}
+
+func openSegmentForAppendInPlaceResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWriter, uint64, error) {
+	if plan.SegmentStartTx == 0 || plan.NextTxID == 0 {
+		return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v", plan)
+	}
+	path := filepath.Join(dir, SegmentFileName(uint64(plan.SegmentStartTx)))
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if plan.NextTxID != plan.SegmentStartTx {
+			return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v", plan)
+		}
+		seg, err := CreateSegment(dir, uint64(plan.SegmentStartTx))
+		if err != nil {
+			return nil, 0, err
+		}
+		return seg, 0, nil
+	}
+	seg, err := OpenSegmentForAppend(dir, uint64(plan.SegmentStartTx))
+	if err != nil {
+		return nil, 0, err
+	}
+	expectedNextTxID := plan.SegmentStartTx
+	if seg.hasLastRecord {
+		expectedNextTxID = types.TxID(seg.lastTx + 1)
+	}
+	if plan.NextTxID != expectedNextTxID {
+		closeErr := seg.Close()
+		if closeErr != nil {
+			return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v (close error: %w)", plan, closeErr)
+		}
+		return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v", plan)
+	}
+	return seg, seg.lastTx, nil
 }
 
 func removeEmptySegmentDirectoryArtifact(dir string, startTxID uint64) error {
