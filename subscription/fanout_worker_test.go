@@ -986,6 +986,64 @@ func TestFanOutWorker_ConfirmedReadPolicyConcurrentToggle(t *testing.T) {
 	close(ready)
 }
 
+func TestFanOutWorker_ConcurrentPolicyChurnShortSoak(t *testing.T) {
+	const (
+		seed       = int64(20260506)
+		workers    = 3
+		iterations = 64
+	)
+	mock := &mockFanOutSender{}
+	w := NewFanOutWorker(nil, mock, make(chan types.ConnectionID, 16))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	connIDs := []types.ConnectionID{cid(1), cid(2), cid(3), cid(4)}
+	caller := cid(9)
+	ready := make(chan types.TxID)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.deliver(ctx, FanOutMessage{
+			TxID:          7,
+			TxDurable:     ready,
+			CallerConnID:  &caller,
+			CallerOutcome: committedOutcome(700),
+			Fanout: CommitFanout{
+				connIDs[0]: {{SubscriptionID: 10, TableName: "players"}},
+				connIDs[1]: {{SubscriptionID: 11, TableName: "players"}},
+				connIDs[2]: {{SubscriptionID: 12, TableName: "players"}},
+				connIDs[3]: {{SubscriptionID: 13, TableName: "players"}},
+				caller:     {{SubscriptionID: 99, TableName: "players"}},
+			},
+		})
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		worker := worker
+		go func() {
+			defer wg.Done()
+			for op := 0; op < iterations; op++ {
+				conn := connIDs[(int(seed)+worker+op)%len(connIDs)]
+				w.SetConfirmedReads(conn, (op+worker)%3 != 0)
+				if op%5 == 0 {
+					w.RemoveClient(connIDs[(worker+op/5)%len(connIDs)])
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(ready)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("seed %d policy churn delivery did not finish after %d workers x %d ops", seed, workers, iterations)
+	}
+	assertMockCounts(t, mock, "seed 20260506 policy churn", len(connIDs), 1, 0)
+}
+
 func TestFanOutWorker_SubscriptionErrorDelivery(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)

@@ -65,7 +65,9 @@ Current status:
   canonicalization laws, self-join filter alias identity, and client
   parameterization. A short fixed-seed concurrent hash determinism soak also
   exercises pooled canonical encoders with compact worker/iteration/seed
-  failure labels.
+  failure labels. Subscription fanout worker race coverage now also churns
+  confirmed-read policy and client removal concurrently with an in-flight
+  delivery using fixed seed/worker/op labels.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
