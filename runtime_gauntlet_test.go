@@ -332,6 +332,47 @@ func TestRuntimeGauntletStrictAuthProtocolWorkload(t *testing.T) {
 	restartedRT := buildGauntletRuntimeWithConfig(t, cfg, true)
 	defer restartedRT.Close()
 	assertGauntletReadMatchesModel(t, restartedRT, model, "strict op 7 after restart")
+
+	restartedSrv := httptest.NewServer(restartedRT.HTTPHandler())
+	defer restartedSrv.Close()
+	restartedURL := strings.Replace(restartedSrv.URL, "http://", "ws://", 1) + "/subscribe"
+	assertGauntletProtocolDialRejected(t, restartedURL, nil, http.StatusUnauthorized, "strict op 8 after restart no token")
+
+	restartedSubscriber, restartedSubscriberIdentity := dialGauntletProtocolURLWithHeaders(t, restartedURL, gauntletBearerHeader(validToken), "strict op 9 after restart subscriber dial")
+	defer restartedSubscriber.CloseNow()
+	restartedCaller, restartedCallerIdentity := dialGauntletProtocolURLWithHeaders(t, restartedURL, gauntletBearerHeader(validToken), "strict op 9 after restart caller dial")
+	defer restartedCaller.CloseNow()
+	restartedQueryClient, restartedQueryIdentity := dialGauntletProtocolURLWithHeaders(t, restartedURL, gauntletBearerHeader(validToken), "strict op 9 after restart query dial")
+	defer restartedQueryClient.CloseNow()
+
+	for label, got := range map[string]protocol.IdentityToken{
+		"restarted subscriber": restartedSubscriberIdentity,
+		"restarted caller":     restartedCallerIdentity,
+		"restarted query":      restartedQueryIdentity,
+	} {
+		if got.Identity != wantIdentity {
+			t.Fatalf("strict op 9 %s identity = %x, want %x", label, got.Identity, wantIdentity)
+		}
+		if got.Token != "" {
+			t.Fatalf("strict op 9 %s minted token = %q, want empty in strict mode", label, got.Token)
+		}
+	}
+
+	const restartedSubscriberQueryID = uint32(8926)
+	restartedInitialRows := subscribeGauntletProtocolPlayers(t, restartedSubscriber, "SELECT * FROM players", 8925, restartedSubscriberQueryID)
+	if diff := diffGauntletPlayers(restartedInitialRows, model.players); diff != "" {
+		t.Fatalf("strict op 10 restarted subscriber snapshot mismatch:\n%s", diff)
+	}
+	assertGauntletProtocolQueriesMatchModel(t, restartedQueryClient, model, "strict op 10 after restart protocol query")
+
+	afterRestartOp := insertPlayerOp(&nextID, "strict_auth_after_restart")
+	afterRestartDelta := gauntletAllRowsDeltaForOp(t, model, afterRestartOp)
+	afterRestartOutcome := callGauntletProtocolReducer(t, restartedCaller, afterRestartOp, 8927, "strict op 11 after restart protocol commit")
+	advanceGauntletModel(t, &model, afterRestartOp, afterRestartOutcome, "strict op 11 after restart protocol commit")
+	gotAfterRestartDelta := readGauntletTransactionUpdateLight(t, restartedSubscriber, restartedSubscriberQueryID, "strict op 11 after restart protocol commit")
+	assertGauntletDeltaEqual(t, gotAfterRestartDelta, afterRestartDelta, "strict op 11 after restart protocol commit")
+	assertGauntletReadMatchesModel(t, restartedRT, model, "strict op 11 after restart protocol commit")
+	assertGauntletProtocolQueriesMatchModel(t, restartedQueryClient, model, "strict op 11 after restart protocol commit")
 }
 
 func TestRuntimeGauntletProtocolConnectionIDReconnectIsolation(t *testing.T) {
