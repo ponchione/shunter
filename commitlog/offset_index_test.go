@@ -774,6 +774,63 @@ func TestOffsetIndexWriteAtFullRejectsShortWrite(t *testing.T) {
 	}
 }
 
+func TestOffsetIndexWriterFixedSeedCadenceTruncateSyncModel(t *testing.T) {
+	const (
+		capEntries = uint64(64)
+		interval   = uint64(96)
+	)
+	seeds := []uint64{0x0ff1ce17, 0x5eedcafe, 0x1badcafe}
+
+	for _, seed := range seeds {
+		idx, _ := mustCreate(t, capEntries)
+		w := NewOffsetIndexWriter(idx, interval)
+		model := offsetIndexWriterModel{cap: capEntries, interval: interval}
+		rng := offsetIndexSoakRand{state: seed}
+		var nextTx types.TxID = 1
+		trace := []string{}
+
+		for op := 0; op < 128; op++ {
+			switch rng.next(5) {
+			case 0, 1, 2:
+				recordLen := rng.next(144) + 1
+				byteOffset := uint64(SegmentHeaderSize) + rng.next(16*1024)
+				trace = appendOffsetIndexTrace(trace, fmt.Sprintf("append_after_commit(%d,%d,%d)", nextTx, byteOffset, recordLen))
+				if err := w.AppendAfterCommit(nextTx, byteOffset, recordLen); err != nil {
+					t.Fatalf("seed=%#x op=%d trace=%s AppendAfterCommit: %v", seed, op, strings.Join(trace, " "), err)
+				}
+				model.appendAfterCommit(OffsetIndexEntry{TxID: nextTx, ByteOffset: byteOffset}, recordLen)
+				nextTx += types.TxID(rng.next(3) + 1)
+			case 3:
+				target := types.TxID(rng.next(uint64(nextTx) + 4))
+				trace = appendOffsetIndexTrace(trace, fmt.Sprintf("truncate(%d)", target))
+				if err := w.Truncate(target); err != nil {
+					t.Fatalf("seed=%#x op=%d trace=%s Truncate(%d): %v", seed, op, strings.Join(trace, " "), target, err)
+				}
+				model.truncate(target)
+			case 4:
+				trace = appendOffsetIndexTrace(trace, "sync")
+				if err := w.Sync(); err != nil {
+					t.Fatalf("seed=%#x op=%d trace=%s Sync: %v", seed, op, strings.Join(trace, " "), err)
+				}
+				model.sync()
+			}
+			assertOffsetIndexViewMatchesModel(t, idx, model.entries, seed, op, trace)
+		}
+
+		if err := w.Close(); err != nil {
+			t.Fatalf("seed=%#x final Close: %v", seed, err)
+		}
+		ro, err := OpenOffsetIndex(idx.path)
+		if err != nil {
+			t.Fatalf("seed=%#x final OpenOffsetIndex: %v", seed, err)
+		}
+		assertOffsetIndexViewMatchesModel(t, ro, model.entries, seed, 128, appendOffsetIndexTrace(trace, "readonly-reopen"))
+		if err := ro.Close(); err != nil {
+			t.Fatalf("seed=%#x read-only Close: %v", seed, err)
+		}
+	}
+}
+
 // Pin 11.
 func TestOffsetIndexWriterCadenceHoldsCandidate(t *testing.T) {
 	idx, _ := mustCreate(t, 16)
@@ -1009,6 +1066,60 @@ func (r *offsetIndexSoakRand) next(n uint64) uint64 {
 		return r.state
 	}
 	return r.state % n
+}
+
+type offsetIndexWriterModel struct {
+	entries   []OffsetIndexEntry
+	candidate OffsetIndexEntry
+	have      bool
+	full      bool
+	bytes     uint64
+	cap       uint64
+	interval  uint64
+}
+
+func (m *offsetIndexWriterModel) appendAfterCommit(entry OffsetIndexEntry, recordLen uint64) {
+	if m.full {
+		return
+	}
+	m.bytes += recordLen
+	if !m.have {
+		m.candidate = entry
+		m.have = true
+		return
+	}
+	if m.bytes >= m.interval {
+		if uint64(len(m.entries)) >= m.cap {
+			m.full = true
+			m.have = false
+			m.bytes = 0
+			return
+		}
+		m.entries = append(m.entries, m.candidate)
+		m.candidate = entry
+		m.bytes = 0
+	}
+}
+
+func (m *offsetIndexWriterModel) sync() {
+	if !m.have {
+		return
+	}
+	if uint64(len(m.entries)) >= m.cap {
+		m.full = true
+	} else {
+		m.entries = append(m.entries, m.candidate)
+	}
+	m.have = false
+	m.bytes = 0
+}
+
+func (m *offsetIndexWriterModel) truncate(target types.TxID) {
+	if m.have && m.candidate.TxID >= target {
+		m.have = false
+		m.bytes = 0
+	}
+	m.entries = truncateOffsetIndexModel(m.entries, target)
 }
 
 func appendOffsetIndexTrace(trace []string, op string) []string {
