@@ -1044,6 +1044,41 @@ func TestOpenAndRecoverBootstrapSegmentFailsLoudly(t *testing.T) {
 	assertZeroRecoveryReport(t, report)
 }
 
+func TestOpenAndRecoverSnapshotAtMaxTxIDFailsWithoutZeroResumePlan(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	maxTxID := types.TxID(^uint64(0))
+	writeFaultSnapshot(t, root, reg, maxTxID, map[uint64]string{1: "alice"})
+
+	recovered, gotTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected max tx snapshot recovery to fail before returning a zero resume plan")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenAndRecoverWithReport error = %v, want ErrOpen category", err)
+	}
+	for _, want := range []string{"leaves no next tx_id", "18446744073709551615"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("OpenAndRecoverWithReport error = %v, want detail %q", err, want)
+		}
+	}
+	if recovered != nil || gotTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, gotTxID, plan)
+	}
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != maxTxID {
+		t.Fatalf("selected snapshot report = (%v, %d), want max tx snapshot", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.RecoveredTxID != maxTxID {
+		t.Fatalf("report recovered txID = %d, want %d", report.RecoveredTxID, maxTxID)
+	}
+	if report.ResumePlan != (RecoveryResumePlan{}) {
+		t.Fatalf("report resume plan = %+v, want zero after terminal horizon failure", report.ResumePlan)
+	}
+	if report.HasDurableLog || report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+		t.Fatalf("log report = durable(%v,%d) replay=%+v, want snapshot-only failure", report.HasDurableLog, report.DurableLogHorizon, report.ReplayedTxRange)
+	}
+}
+
 func TestOpenAndRecoverSegmentHeaderFaultsFailLoudly(t *testing.T) {
 	cases := []struct {
 		name   string

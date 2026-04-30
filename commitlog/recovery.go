@@ -288,9 +288,13 @@ func validateSnapshotLogBoundary(segments []SegmentInfo, snapshotTxID types.TxID
 }
 
 func planRecoveryResume(segments []SegmentInfo, maxAppliedTxID types.TxID) (RecoveryResumePlan, error) {
+	nextTxID, err := recoveryNextTxID(maxAppliedTxID)
+	if err != nil {
+		return RecoveryResumePlan{}, err
+	}
 	plan := RecoveryResumePlan{
-		SegmentStartTx: maxAppliedTxID + 1,
-		NextTxID:       maxAppliedTxID + 1,
+		SegmentStartTx: nextTxID,
+		NextTxID:       nextTxID,
 		AppendMode:     AppendByFreshNextSegment,
 	}
 	if len(segments) == 0 {
@@ -302,15 +306,22 @@ func planRecoveryResume(segments []SegmentInfo, maxAppliedTxID types.TxID) (Reco
 	switch last.AppendMode {
 	case AppendInPlace:
 		plan.SegmentStartTx = last.StartTx
-		plan.NextTxID = maxAppliedTxID + 1
+		plan.NextTxID = nextTxID
 		return plan, nil
 	case AppendByFreshNextSegment:
-		plan.SegmentStartTx = maxAppliedTxID + 1
-		plan.NextTxID = maxAppliedTxID + 1
+		plan.SegmentStartTx = nextTxID
+		plan.NextTxID = nextTxID
 		return plan, nil
 	case AppendForbidden:
 		return RecoveryResumePlan{}, fmt.Errorf("commitlog: append forbidden for recovery tail segment %s", last.Path)
 	default:
 		return RecoveryResumePlan{}, fmt.Errorf("commitlog: unknown append mode %d", last.AppendMode)
 	}
+}
+
+func recoveryNextTxID(maxAppliedTxID types.TxID) (types.TxID, error) {
+	if maxAppliedTxID == types.TxID(^uint64(0)) {
+		return 0, fmt.Errorf("%w: recovered tx_id %d leaves no next tx_id", ErrOpen, maxAppliedTxID)
+	}
+	return maxAppliedTxID + 1, nil
 }
