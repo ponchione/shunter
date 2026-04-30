@@ -23,6 +23,9 @@ Current status:
 - Rejected protocol control-plane requests before restart are pinned through
   one-off query, single subscribe, and multi subscribe errors so they cannot
   leave recovered subscriptions or corrupt follow-up protocol reads.
+- Declared query and declared view protocol paths are checked across clean
+  restart over private base tables, including live declared-view delta fanout
+  after recovery.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,

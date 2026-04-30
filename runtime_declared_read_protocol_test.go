@@ -88,6 +88,105 @@ func TestProtocolDeclaredViewSucceedsWithDeclarationPermission(t *testing.T) {
 	}
 }
 
+func TestProtocolDeclaredReadsSurviveCleanRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := declaredReadProtocolConfig(t)
+	cfg.DataDir = dataDir
+	module := func() *Module {
+		return validChatModule().
+			Reducer("insert_message", insertMessageReducer).
+			Query(QueryDeclaration{
+				Name:        "recent_messages",
+				SQL:         "SELECT * FROM messages",
+				Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+			}).
+			View(ViewDeclaration{
+				Name:        "live_messages",
+				SQL:         "SELECT * FROM messages",
+				Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+			})
+	}
+
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, module(), cfg)
+	insertMessage(t, rt, "hello")
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close before declared-read restart: %v", err)
+	}
+
+	rt = buildStartedDeclaredReadRuntimeWithConfig(t, module(), cfg)
+	defer rt.Close()
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "restart-client", "messages:read", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryMsg{
+		MessageID: []byte("declared-query-after-restart"),
+		Name:      "recent_messages",
+	})
+	tag, msg := readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagOneOffQueryResponse {
+		t.Fatalf("declared query after restart tag = %d, want OneOffQueryResponse", tag)
+	}
+	resp := msg.(protocol.OneOffQueryResponse)
+	if resp.Error != nil {
+		t.Fatalf("declared query after restart error = %q, want nil", *resp.Error)
+	}
+	if len(resp.Tables) != 1 || resp.Tables[0].TableName != "messages" {
+		t.Fatalf("declared query after restart tables = %+v, want messages table", resp.Tables)
+	}
+	queryRows, err := protocol.DecodeRowList(resp.Tables[0].Rows)
+	if err != nil {
+		t.Fatalf("DecodeRowList query after restart: %v", err)
+	}
+	if len(queryRows) != 1 {
+		t.Fatalf("declared query after restart row count = %d, want 1", len(queryRows))
+	}
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 51,
+		QueryID:   61,
+		Name:      "live_messages",
+	})
+	tag, msg = readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagSubscribeSingleApplied {
+		t.Fatalf("declared view after restart tag = %d, want SubscribeSingleApplied", tag)
+	}
+	applied := msg.(protocol.SubscribeSingleApplied)
+	if applied.RequestID != 51 || applied.QueryID != 61 || applied.TableName != "messages" {
+		t.Fatalf("declared view after restart applied = %+v, want request/query/table identity", applied)
+	}
+	initialRows, err := protocol.DecodeRowList(applied.Rows)
+	if err != nil {
+		t.Fatalf("DecodeRowList declared view after restart: %v", err)
+	}
+	if len(initialRows) != 1 {
+		t.Fatalf("declared view after restart initial row count = %d, want 1", len(initialRows))
+	}
+
+	insertMessage(t, rt, "world")
+	tag, msg = readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagTransactionUpdateLight {
+		t.Fatalf("declared view after restart update tag = %d, want TransactionUpdateLight", tag)
+	}
+	update := msg.(protocol.TransactionUpdateLight)
+	if len(update.Update) != 1 {
+		t.Fatalf("declared view after restart update entries = %+v, want one entry", update.Update)
+	}
+	entry := update.Update[0]
+	if entry.QueryID != 61 || entry.TableName != "messages" {
+		t.Fatalf("declared view after restart update entry = %+v, want query 61/messages", entry)
+	}
+	insertRows, err := protocol.DecodeRowList(entry.Inserts)
+	if err != nil {
+		t.Fatalf("DecodeRowList declared view delta inserts: %v", err)
+	}
+	deleteRows, err := protocol.DecodeRowList(entry.Deletes)
+	if err != nil {
+		t.Fatalf("DecodeRowList declared view delta deletes: %v", err)
+	}
+	if len(insertRows) != 1 || len(deleteRows) != 0 {
+		t.Fatalf("declared view after restart delta inserts/deletes = %d/%d, want 1/0", len(insertRows), len(deleteRows))
+	}
+}
+
 func TestProtocolDeclaredReadsReportPermissionDeniedAndUnknownName(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
 		Query(QueryDeclaration{
