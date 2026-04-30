@@ -3,12 +3,15 @@ package shunter_test
 import (
 	"context"
 	"fmt"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	shunter "github.com/ponchione/shunter"
+	"github.com/ponchione/shunter/types"
 )
 
 func TestRuntimeGauntletRejectedReducerRestartNoGhostRows(t *testing.T) {
@@ -152,6 +155,110 @@ func TestRuntimeGauntletRejectedProtocolControlPlaneRestartRecovery(t *testing.T
 	gotDelta := readGauntletTransactionUpdateLight(t, subscriber, 9956, "rejected control-plane after restart")
 	assertGauntletDeltaEqual(t, gotDelta, wantDelta, "rejected control-plane after restart")
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "rejected control-plane final")
+}
+
+func TestRuntimeGauntletDevTokenReconnectAfterCleanRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := shunter.Config{
+		DataDir:        dataDir,
+		AuthMode:       shunter.AuthModeDev,
+		AuthSigningKey: []byte("gauntlet-dev-token-restart-key"),
+	}
+	rt := buildGauntletRuntimeWithConfig(t, cfg, true)
+
+	srv := httptest.NewServer(rt.HTTPHandler())
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+	wantConnID := types.ConnectionID{0xDE, 0xAD, 0xBE, 0xEF}
+	reconnectURL := gauntletURLWithConnectionID(url, wantConnID)
+
+	first, firstIdentity := dialGauntletProtocolURLWithHeaders(t, reconnectURL, nil, "dev-token restart op 0 first dial")
+	if firstIdentity.ConnectionID != wantConnID {
+		t.Fatalf("dev-token restart op 0 connection ID = %x, want %x", firstIdentity.ConnectionID, wantConnID)
+	}
+	if firstIdentity.Identity == (types.Identity{}) || firstIdentity.Token == "" {
+		t.Fatalf("dev-token restart op 0 identity=%x token length=%d, want anonymous identity and minted token", firstIdentity.Identity, len(firstIdentity.Token))
+	}
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	const firstQueryID = uint32(9962)
+	initialRows := subscribeGauntletProtocolPlayers(t, first, "SELECT * FROM players", 9961, firstQueryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("dev-token restart op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+	if err := first.Close(websocket.StatusNormalClosure, "dev-token restart op 0 complete"); err != nil {
+		t.Fatalf("dev-token restart op 0 close first client: %v", err)
+	}
+
+	caller, callerIdentity := dialGauntletProtocolURLWithHeaders(t, url, gauntletBearerHeader(firstIdentity.Token), "dev-token restart op 1 bearer caller")
+	if callerIdentity.Identity != firstIdentity.Identity {
+		t.Fatalf("dev-token restart op 1 caller identity = %x, want %x", callerIdentity.Identity, firstIdentity.Identity)
+	}
+	if callerIdentity.Token != "" {
+		t.Fatalf("dev-token restart op 1 caller token = %q, want empty for bearer reconnect", callerIdentity.Token)
+	}
+	beforeRestart := insertPlayerOp(&nextID, "dev_token_before_restart")
+	beforeOutcome := callGauntletProtocolReducer(t, caller, beforeRestart, 9963, "dev-token restart op 2 before restart commit")
+	advanceGauntletModel(t, &model, beforeRestart, beforeOutcome, "dev-token restart op 2 before restart commit")
+	assertGauntletReadMatchesModel(t, rt, model, "dev-token restart op 2 before restart commit")
+	if err := caller.Close(websocket.StatusNormalClosure, "dev-token restart op 2 caller complete"); err != nil {
+		t.Fatalf("dev-token restart op 2 close caller: %v", err)
+	}
+
+	srv.Close()
+	if err := rt.Close(); err != nil {
+		t.Fatalf("dev-token restart op 3 Close before restart returned error: %v", err)
+	}
+
+	rt = buildGauntletRuntimeWithConfig(t, cfg, true)
+	defer rt.Close()
+	assertGauntletReadMatchesModel(t, rt, model, "dev-token restart op 4 after restart")
+	restartedSrv := httptest.NewServer(rt.HTTPHandler())
+	defer restartedSrv.Close()
+	restartedURL := strings.Replace(restartedSrv.URL, "http://", "ws://", 1) + "/subscribe"
+	restartedReconnectURL := gauntletURLWithConnectionID(restartedURL, wantConnID)
+
+	idle, idleIdentity := dialGauntletProtocolURLWithHeaders(t, restartedReconnectURL, gauntletBearerHeader(firstIdentity.Token), "dev-token restart op 5 idle reconnect")
+	if idleIdentity.ConnectionID != wantConnID || idleIdentity.Identity != firstIdentity.Identity {
+		t.Fatalf("dev-token restart op 5 identity token = {identity=%x conn=%x}, want {identity=%x conn=%x}", idleIdentity.Identity, idleIdentity.ConnectionID, firstIdentity.Identity, wantConnID)
+	}
+	if idleIdentity.Token != "" {
+		t.Fatalf("dev-token restart op 5 idle token = %q, want empty for bearer reconnect", idleIdentity.Token)
+	}
+
+	restartedCaller, restartedCallerIdentity := dialGauntletProtocolURLWithHeaders(t, restartedURL, gauntletBearerHeader(firstIdentity.Token), "dev-token restart op 6 restarted caller")
+	defer restartedCaller.CloseNow()
+	if restartedCallerIdentity.Identity != firstIdentity.Identity || restartedCallerIdentity.Token != "" {
+		t.Fatalf("dev-token restart op 6 caller identity token = {identity=%x token=%q}, want identity %x and empty token", restartedCallerIdentity.Identity, restartedCallerIdentity.Token, firstIdentity.Identity)
+	}
+
+	afterIdleReconnect := insertPlayerOp(&nextID, "dev_token_after_idle_reconnect")
+	afterIdleOutcome := callGauntletProtocolReducer(t, restartedCaller, afterIdleReconnect, 9964, "dev-token restart op 7 after idle reconnect commit")
+	advanceGauntletModel(t, &model, afterIdleReconnect, afterIdleOutcome, "dev-token restart op 7 after idle reconnect commit")
+	assertNoGauntletProtocolMessageBeforeClose(t, idle, 50*time.Millisecond, "dev-token restart op 7 idle reconnect has no recovered subscription")
+	if err := idle.Close(websocket.StatusNormalClosure, "dev-token restart op 7 idle complete"); err != nil {
+		t.Fatalf("dev-token restart op 7 close idle reconnect: %v", err)
+	}
+	assertGauntletReadMatchesModel(t, rt, model, "dev-token restart op 7 after idle reconnect commit")
+
+	subscriber, subscriberIdentity := dialGauntletProtocolURLWithHeaders(t, restartedReconnectURL, gauntletBearerHeader(firstIdentity.Token), "dev-token restart op 8 subscriber reconnect")
+	defer subscriber.CloseNow()
+	if subscriberIdentity.ConnectionID != wantConnID || subscriberIdentity.Identity != firstIdentity.Identity || subscriberIdentity.Token != "" {
+		t.Fatalf("dev-token restart op 8 subscriber identity token = {identity=%x conn=%x token=%q}, want identity %x conn %x empty token", subscriberIdentity.Identity, subscriberIdentity.ConnectionID, subscriberIdentity.Token, firstIdentity.Identity, wantConnID)
+	}
+	const subscriberQueryID = uint32(9966)
+	restartedInitial := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9965, subscriberQueryID)
+	if diff := diffGauntletPlayers(restartedInitial, model.players); diff != "" {
+		t.Fatalf("dev-token restart op 8 restarted subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	afterSubscribe := insertPlayerOp(&nextID, "dev_token_after_resubscribe")
+	afterSubscribeDelta := gauntletAllRowsDeltaForOp(t, model, afterSubscribe)
+	afterSubscribeOutcome := callGauntletProtocolReducer(t, restartedCaller, afterSubscribe, 9967, "dev-token restart op 9 after resubscribe commit")
+	advanceGauntletModel(t, &model, afterSubscribe, afterSubscribeOutcome, "dev-token restart op 9 after resubscribe commit")
+	gotAfterSubscribeDelta := readGauntletTransactionUpdateLight(t, subscriber, subscriberQueryID, "dev-token restart op 9 after resubscribe commit")
+	assertGauntletDeltaEqual(t, gotAfterSubscribeDelta, afterSubscribeDelta, "dev-token restart op 9 after resubscribe commit")
+	assertGauntletReadMatchesModel(t, rt, model, "dev-token restart op 9 after resubscribe commit")
 }
 
 func TestRuntimeGauntletDeterministicConcurrentReadShortSoak(t *testing.T) {

@@ -29,6 +29,10 @@ Current status:
 - Strict-auth protocol coverage now re-dials after clean restart, rejects
   unauthenticated clients, preserves identity derivation, and verifies
   post-restart reducer fanout.
+- Dev-auth protocol coverage now reuses a minted anonymous bearer token with an
+  explicit connection ID across clean restart, verifies that disconnected
+  subscriptions do not recover as ghost subscribers, and resubscribes before
+  checking post-restart fanout.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
