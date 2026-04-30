@@ -50,9 +50,10 @@ Current status:
 - Protocol RowList plus client/server message decoding now have bounded fuzz
   seed corpora that check malformed-input categorization and accepted-input
   canonical round trips.
-- BSATN product-value decoding now has a bounded public-surface fuzz corpus
-  across scalar and variable-length columns, checking malformed-input
-  categorization plus accepted-row canonical re-encoding.
+- BSATN standalone value and product-value decoding now have bounded
+  public-surface fuzz corpora across scalar and variable-length payloads,
+  checking malformed-input categorization plus accepted-value/row canonical
+  re-encoding.
 - Subscription query hashing now has a bounded fuzz corpus for same-table
   canonicalization laws, self-join filter alias identity, and client
   parameterization. A short fixed-seed concurrent hash determinism soak also

@@ -71,46 +71,46 @@ func FuzzDecodeProductValueFromBytes(f *testing.F) {
 		fromBytes, fromBytesErr := DecodeProductValueFromBytes(data, fuzzProductValueSchema)
 		fromReader, fromReaderErr := DecodeProductValue(bytes.NewReader(data), fuzzProductValueSchema)
 		if fromBytesErr != nil {
-			assertClassifiedFuzzProductValueError(t, "DecodeProductValueFromBytes", data, fromBytesErr)
+			assertClassifiedFuzzBSATNError(t, "DecodeProductValueFromBytes", data, fromBytesErr)
 		}
 		if fromReaderErr != nil {
-			assertClassifiedFuzzProductValueError(t, "DecodeProductValue", data, fromReaderErr)
+			assertClassifiedFuzzBSATNError(t, "DecodeProductValue", data, fromReaderErr)
 		}
 		if (fromBytesErr == nil) != (fromReaderErr == nil) {
-			t.Fatalf("decode success mismatch: fromBytesErr=%v fromReaderErr=%v %s", fromBytesErr, fromReaderErr, fuzzProductValueInputLabel(data))
+			t.Fatalf("decode success mismatch: fromBytesErr=%v fromReaderErr=%v %s", fromBytesErr, fromReaderErr, fuzzBSATNInputLabel(data))
 		}
 		if fromBytesErr != nil {
 			return
 		}
 		if !fromBytes.Equal(fromReader) {
-			t.Fatalf("decode value mismatch %s", fuzzProductValueInputLabel(data))
+			t.Fatalf("decode value mismatch %s", fuzzBSATNInputLabel(data))
 		}
 
 		appended, err := AppendProductValue(nil, fromBytes)
 		if err != nil {
-			t.Fatalf("AppendProductValue accepted row: %v %s", err, fuzzProductValueInputLabel(data))
+			t.Fatalf("AppendProductValue accepted row: %v %s", err, fuzzBSATNInputLabel(data))
 		}
 		var written bytes.Buffer
 		if err := EncodeProductValue(&written, fromBytes); err != nil {
-			t.Fatalf("EncodeProductValue accepted row: %v %s", err, fuzzProductValueInputLabel(data))
+			t.Fatalf("EncodeProductValue accepted row: %v %s", err, fuzzBSATNInputLabel(data))
 		}
 		if !bytes.Equal(appended, written.Bytes()) {
-			t.Fatalf("append/write encoding mismatch: append=%x write=%x %s", appended, written.Bytes(), fuzzProductValueInputLabel(data))
+			t.Fatalf("append/write encoding mismatch: append=%x write=%x %s", appended, written.Bytes(), fuzzBSATNInputLabel(data))
 		}
 
 		decodedAgain, err := DecodeProductValueFromBytes(appended, fuzzProductValueSchema)
 		if err != nil {
-			t.Fatalf("canonical decode failed: %v encoded=%x original=%s", err, appended, fuzzProductValueInputLabel(data))
+			t.Fatalf("canonical decode failed: %v encoded=%x original=%s", err, appended, fuzzBSATNInputLabel(data))
 		}
 		if !fromBytes.Equal(decodedAgain) {
-			t.Fatalf("canonical round trip mismatch: encoded=%x original=%s", appended, fuzzProductValueInputLabel(data))
+			t.Fatalf("canonical round trip mismatch: encoded=%x original=%s", appended, fuzzBSATNInputLabel(data))
 		}
 		appendedAgain, err := AppendProductValue(nil, decodedAgain)
 		if err != nil {
-			t.Fatalf("AppendProductValue decoded row: %v encoded=%x original=%s", err, appended, fuzzProductValueInputLabel(data))
+			t.Fatalf("AppendProductValue decoded row: %v encoded=%x original=%s", err, appended, fuzzBSATNInputLabel(data))
 		}
 		if !bytes.Equal(appended, appendedAgain) {
-			t.Fatalf("canonical encoding is unstable: first=%x second=%x original=%s", appended, appendedAgain, fuzzProductValueInputLabel(data))
+			t.Fatalf("canonical encoding is unstable: first=%x second=%x original=%s", appended, appendedAgain, fuzzBSATNInputLabel(data))
 		}
 	})
 }
@@ -224,13 +224,14 @@ func readFuzzU32(data []byte, pos int) (uint32, bool) {
 	return binary.LittleEndian.Uint32(data[pos : pos+4]), true
 }
 
-func assertClassifiedFuzzProductValueError(t *testing.T, op string, data []byte, err error) {
+func assertClassifiedFuzzBSATNError(t *testing.T, op string, data []byte, err error) {
 	t.Helper()
 	var shapeErr *RowShapeMismatchError
 	var tagErr *TypeTagMismatchError
 	var unknownTagErr *UnknownValueTagError
 	if errors.Is(err, ErrRowLengthMismatch) ||
 		errors.Is(err, ErrInvalidUTF8) ||
+		errors.Is(err, types.ErrInvalidFloat) ||
 		errors.Is(err, io.EOF) ||
 		errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.As(err, &shapeErr) ||
@@ -238,10 +239,10 @@ func assertClassifiedFuzzProductValueError(t *testing.T, op string, data []byte,
 		errors.As(err, &unknownTagErr) {
 		return
 	}
-	t.Fatalf("%s returned unclassified error %T: %v %s", op, err, err, fuzzProductValueInputLabel(data))
+	t.Fatalf("%s returned unclassified error %T: %v %s", op, err, err, fuzzBSATNInputLabel(data))
 }
 
-func fuzzProductValueInputLabel(data []byte) string {
+func fuzzBSATNInputLabel(data []byte) string {
 	if len(data) <= 80 {
 		return fmt.Sprintf("len=%d data=%x", len(data), data)
 	}
