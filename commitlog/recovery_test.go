@@ -537,6 +537,32 @@ func TestOpenAndRecoverSnapshotOnlyReturnsSnapshotState(t *testing.T) {
 	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice"})
 }
 
+func TestOpenAndRecoverEmptyBootstrapSnapshotOnlyReturnsEmptyState(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	committed := buildRecoveryCommittedState(t, reg)
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 0)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 0 {
+		t.Fatalf("maxTxID = %d, want 0", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{})
+	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 0 {
+		t.Fatalf("selected snapshot report = (%v, %d), want bootstrap snapshot", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	}
+	if report.RecoveredTxID != 0 || report.ReplayedTxRange != (RecoveryTxIDRange{}) || report.HasDurableLog {
+		t.Fatalf("report = %+v, want bootstrap snapshot-only recovery without log replay", report)
+	}
+	if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 1 || plan.NextTxID != 1 {
+		t.Fatalf("resume plan = %+v, want fresh segment at tx 1", plan)
+	}
+}
+
 func TestOpenAndRecoverSnapshotOnlyResumeAppendsTail(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()

@@ -43,6 +43,105 @@ func createSnapshotAt(t testing.TB, writer SnapshotWriter, cs *store.CommittedSt
 	}
 }
 
+func rewriteSnapshotHeaderTxID(t testing.TB, snapshotDir string, txID types.TxID) {
+	t.Helper()
+	f, err := os.OpenFile(filepath.Join(snapshotDir, snapshotFileName), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], uint64(txID))
+	if _, err := f.WriteAt(buf[:], 8); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateAndReadSnapshotAllowsEmptyBootstrapState(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	cs := store.NewCommittedState()
+	for _, tableID := range reg.Tables() {
+		tableSchema, ok := reg.Table(tableID)
+		if !ok {
+			t.Fatalf("registry missing table %d", tableID)
+		}
+		cs.RegisterTable(tableID, store.NewTable(tableSchema))
+	}
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	if err := writer.CreateSnapshot(cs, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ReadSnapshot(filepath.Join(root, "snapshots", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.TxID != 0 {
+		t.Fatalf("snapshot txID = %d, want 0", data.TxID)
+	}
+	for _, table := range data.Tables {
+		if len(table.Rows) != 0 {
+			t.Fatalf("bootstrap snapshot table %d rows = %d, want empty", table.TableID, len(table.Rows))
+		}
+		if nextID := data.NextIDs[table.TableID]; nextID != 1 {
+			t.Fatalf("bootstrap snapshot table %d next_id = %d, want 1", table.TableID, nextID)
+		}
+	}
+}
+
+func TestCreateSnapshotRejectsBootstrapRows(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	cs.SetCommittedTxID(0)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	err := writer.CreateSnapshot(cs, 0)
+	if err == nil {
+		t.Fatal("expected bootstrap snapshot with rows to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("CreateSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	for _, want := range []string{"bootstrap tx 0", "contains 2 rows"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("CreateSnapshot error = %v, want detail %q", err, want)
+		}
+	}
+	snapshotDir := filepath.Join(root, "snapshots", "0")
+	if HasLockFile(snapshotDir) {
+		t.Fatal("snapshot lock should be removed after bootstrap rejection")
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap snapshot file stat err = %v, want missing final snapshot", err)
+	}
+}
+
+func TestReadSnapshotRejectsBootstrapRows(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 1)
+	snapshotDir := filepath.Join(root, "snapshots", "1")
+	rewriteSnapshotHeaderTxID(t, snapshotDir, 0)
+
+	data, err := ReadSnapshot(snapshotDir)
+	if err == nil {
+		t.Fatalf("ReadSnapshot accepted bootstrap snapshot with rows: %+v", data)
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	for _, want := range []string{"bootstrap tx 0", "contains 2 rows"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ReadSnapshot error = %v, want detail %q", err, want)
+		}
+	}
+}
+
 func TestSnapshotPublicAPIContractCompiles(t *testing.T) {
 	var _ = SnapshotMagic
 	var _ uint8 = SnapshotVersion

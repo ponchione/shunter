@@ -474,6 +474,9 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 	if err != nil {
 		return err
 	}
+	if err := validateSnapshotBootstrapState(txID, snapshotBodyBootstrapSequences(body), snapshotBodyBootstrapNextIDs(body), snapshotBodyBootstrapRowCounts(body)); err != nil {
+		return err
+	}
 	if err := writeUint32Full(dst, uint32(len(body.schema))); err != nil {
 		return err
 	}
@@ -648,6 +651,9 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 		return nil, err
 	}
 	if err := validateSnapshotCompleteness(schemaByID, sequences, nextIDs, snapshotTables); err != nil {
+		return nil, err
+	}
+	if err := validateSnapshotBootstrapState(types.TxID(txID), sequences, nextIDs, snapshotDataBootstrapRowCounts(snapshotTables)); err != nil {
 		return nil, err
 	}
 	if err := requireNoTrailingBytes(f, "trailing snapshot bytes"); err != nil {
@@ -829,6 +835,72 @@ func validateSnapshotCompleteness(schemaByID map[schema.TableID]*schema.TableSch
 		}
 	}
 	return nil
+}
+
+func snapshotBodyBootstrapSequences(body snapshotBodyCapture) map[schema.TableID]uint64 {
+	values := make(map[schema.TableID]uint64, len(body.sequences))
+	for _, seq := range body.sequences {
+		values[seq.tableID] = seq.value
+	}
+	return values
+}
+
+func snapshotBodyBootstrapNextIDs(body snapshotBodyCapture) map[schema.TableID]uint64 {
+	values := make(map[schema.TableID]uint64, len(body.nextIDs))
+	for _, nextID := range body.nextIDs {
+		values[nextID.tableID] = nextID.value
+	}
+	return values
+}
+
+func snapshotBodyBootstrapRowCounts(body snapshotBodyCapture) map[schema.TableID]int {
+	counts := make(map[schema.TableID]int, len(body.tables))
+	for _, table := range body.tables {
+		counts[table.tableID] = len(table.rows)
+	}
+	return counts
+}
+
+func snapshotDataBootstrapRowCounts(tables []SnapshotTableData) map[schema.TableID]int {
+	counts := make(map[schema.TableID]int, len(tables))
+	for _, table := range tables {
+		counts[table.TableID] = len(table.Rows)
+	}
+	return counts
+}
+
+func validateSnapshotBootstrapState(txID types.TxID, sequences, nextIDs map[schema.TableID]uint64, rowCounts map[schema.TableID]int) error {
+	if txID != 0 {
+		return nil
+	}
+	tableIDs := sortedSnapshotBootstrapTableIDs(rowCounts)
+	for _, tableID := range tableIDs {
+		if rowCounts[tableID] != 0 {
+			return fmt.Errorf("%w: snapshot at bootstrap tx 0 contains %d rows for table %d", ErrSnapshot, rowCounts[tableID], tableID)
+		}
+	}
+	tableIDs = sortedSnapshotBootstrapTableIDs(nextIDs)
+	for _, tableID := range tableIDs {
+		if nextIDs[tableID] != 1 {
+			return fmt.Errorf("%w: snapshot at bootstrap tx 0 has next_id %d for table %d", ErrSnapshot, nextIDs[tableID], tableID)
+		}
+	}
+	tableIDs = sortedSnapshotBootstrapTableIDs(sequences)
+	for _, tableID := range tableIDs {
+		if sequences[tableID] != 1 {
+			return fmt.Errorf("%w: snapshot at bootstrap tx 0 has sequence %d for table %d", ErrSnapshot, sequences[tableID], tableID)
+		}
+	}
+	return nil
+}
+
+func sortedSnapshotBootstrapTableIDs[T any](values map[schema.TableID]T) []schema.TableID {
+	tableIDs := make([]schema.TableID, 0, len(values))
+	for tableID := range values {
+		tableIDs = append(tableIDs, tableID)
+	}
+	sort.Slice(tableIDs, func(i, j int) bool { return tableIDs[i] < tableIDs[j] })
+	return tableIDs
 }
 
 func readSnapshotTables(payload io.Reader, schemaByID map[schema.TableID]*schema.TableSchema) ([]SnapshotTableData, error) {

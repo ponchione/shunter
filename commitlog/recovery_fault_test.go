@@ -1079,6 +1079,39 @@ func TestOpenAndRecoverSnapshotAtMaxTxIDFailsWithoutZeroResumePlan(t *testing.T)
 	}
 }
 
+func TestOpenAndRecoverReportsRejectedBootstrapSnapshotRows(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 1)
+	snapshotDir := filepath.Join(root, "snapshots", "1")
+	rewriteSnapshotHeaderTxID(t, snapshotDir, 0)
+	bootstrapDir := filepath.Join(root, "snapshots", "0")
+	if err := os.Rename(snapshotDir, bootstrapDir); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected rejected bootstrap snapshot without log to fail")
+	}
+	if !errors.Is(err, ErrNoData) {
+		t.Fatalf("OpenAndRecoverWithReport error = %v, want ErrNoData after skipping invalid snapshot", err)
+	}
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	assertSkippedSnapshot(t, report, 0, SnapshotSkipReadFailed)
+	for _, want := range []string{"bootstrap tx 0", "contains 2 rows"} {
+		if !strings.Contains(report.SkippedSnapshots[0].Detail, want) {
+			t.Fatalf("skipped snapshot detail = %q, want %q", report.SkippedSnapshots[0].Detail, want)
+		}
+	}
+	if report.HasSelectedSnapshot || report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
+		t.Fatalf("report = %+v, want no selected snapshot, recovered tx, or resume plan", report)
+	}
+}
+
 func TestOpenAndRecoverSegmentHeaderFaultsFailLoudly(t *testing.T) {
 	cases := []struct {
 		name   string

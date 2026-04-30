@@ -92,6 +92,8 @@ Current status:
   the snapshot horizon. Segment creation, scanning, and recovery now reject
   bootstrap tx 0 segment starts as unsafe history, and terminal max-tx
   snapshot horizons fail before returning an overflowing zero resume plan.
+  Bootstrap tx 0 snapshots are also checked to reject impossible row or counter
+  state through writer, reader, and recovery-report paths.
   Unsafe history checks now also cover generated snapshot/log boundary gaps and
   missing-base log suffixes.
   Compaction retry
