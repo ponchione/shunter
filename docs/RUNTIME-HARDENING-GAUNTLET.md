@@ -24,6 +24,9 @@ Current status:
   one-off query, single subscribe, multi subscribe, single unsubscribe, and
   multi unsubscribe errors so they cannot leave recovered subscriptions or
   corrupt follow-up protocol reads.
+- Malformed protocol frames before restart are checked to close only the
+  offending connection while leaving the runtime able to commit, restart, query,
+  and fan out subscription deltas.
 - Declared query and declared view protocol paths are checked across clean
   restart over private base tables, including live declared-view delta fanout
   after recovery.

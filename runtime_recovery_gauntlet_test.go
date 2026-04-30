@@ -216,6 +216,61 @@ func TestRuntimeGauntletRejectedUnsubscribeRestartRecovery(t *testing.T) {
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "rejected unsubscribe op 8 final")
 }
 
+func TestRuntimeGauntletMalformedProtocolFrameRestartRecovery(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntime(t, dataDir)
+
+	malformedClient := dialGauntletProtocol(t, rt)
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if err := malformedClient.Write(writeCtx, websocket.MessageBinary, []byte{0xff, 0x00, 0x00}); err != nil {
+		writeCancel()
+		t.Fatalf("malformed protocol op 0 write invalid frame: %v", err)
+	}
+	writeCancel()
+	assertGauntletProtocolClosed(t, malformedClient, "malformed protocol op 0 invalid frame")
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	caller := dialGauntletProtocol(t, rt)
+	beforeRestart := insertPlayerOp(&nextID, "after_malformed_frame")
+	beforeOutcome := callGauntletProtocolReducer(t, caller, beforeRestart, 9981, "malformed protocol op 1 before restart commit")
+	advanceGauntletModel(t, &model, beforeRestart, beforeOutcome, "malformed protocol op 1 before restart commit")
+	assertGauntletReadMatchesModel(t, rt, model, "malformed protocol op 1 before restart commit")
+	if err := caller.Close(websocket.StatusNormalClosure, "malformed protocol op 2 caller complete"); err != nil {
+		t.Fatalf("malformed protocol op 2 close caller: %v", err)
+	}
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("malformed protocol op 3 Close before restart returned error: %v", err)
+	}
+
+	rt = buildGauntletRuntime(t, dataDir)
+	defer rt.Close()
+	assertGauntletReadMatchesModel(t, rt, model, "malformed protocol op 4 after restart")
+
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.Close(websocket.StatusNormalClosure, "")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "malformed protocol op 4 after restart")
+
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.Close(websocket.StatusNormalClosure, "")
+	const subscriberQueryID = uint32(9983)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9982, subscriberQueryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("malformed protocol op 5 restarted subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	restartedCaller := dialGauntletProtocol(t, rt)
+	defer restartedCaller.Close(websocket.StatusNormalClosure, "")
+	afterRestart := insertPlayerOp(&nextID, "after_malformed_frame_restart")
+	afterDelta := gauntletAllRowsDeltaForOp(t, model, afterRestart)
+	afterOutcome := callGauntletProtocolReducer(t, restartedCaller, afterRestart, 9984, "malformed protocol op 6 after restart commit")
+	advanceGauntletModel(t, &model, afterRestart, afterOutcome, "malformed protocol op 6 after restart commit")
+	gotAfterDelta := readGauntletTransactionUpdateLight(t, subscriber, subscriberQueryID, "malformed protocol op 6 after restart commit")
+	assertGauntletDeltaEqual(t, gotAfterDelta, afterDelta, "malformed protocol op 6 after restart commit")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "malformed protocol op 6 final")
+}
+
 func TestRuntimeGauntletDevTokenReconnectAfterCleanRestart(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := shunter.Config{
