@@ -261,6 +261,133 @@ func TestRapidReplayWithAndWithoutOffsetIndexEquivalent(t *testing.T) {
 	})
 }
 
+func TestRapidOpenAndRecoverWithAndWithoutOffsetIndexEquivalent(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		withIndexRoot := rapidTempDir(t)
+		defer os.RemoveAll(withIndexRoot)
+		withoutIndexRoot := rapidTempDir(t)
+		defer os.RemoveAll(withoutIndexRoot)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 3, 24)
+		finalTxID := types.TxID(len(log.records))
+		horizon := rapid.IntRange(1, len(log.records)-1).Draw(t, "snapshotHorizon")
+
+		rapidWriteReplaySnapshot(t, withIndexRoot, reg, types.TxID(horizon), log.models[horizon])
+		rapidWriteReplaySnapshot(t, withoutIndexRoot, reg, types.TxID(horizon), log.models[horizon])
+		withSegmentPath, entries := rapidWriteReplaySegmentWithOffsets(t, withIndexRoot, 1, log.records)
+		withoutSegmentPath := rapidWriteReplaySegment(t, withoutIndexRoot, 1, log.records)
+
+		idx := rapidPopulateSparseIndex(t, filepath.Join(withIndexRoot, OffsetIndexFileName(1)), uint64(len(entries)+1), entries)
+		if err := idx.Close(); err != nil {
+			t.Fatalf("close offset index: %v", err)
+		}
+
+		withIndexRecovered, withIndexMaxTxID, withIndexPlan, withIndexReport, err := OpenAndRecoverWithReport(withIndexRoot, reg)
+		if err != nil {
+			t.Fatalf("OpenAndRecoverWithReport with offset index: %v", err)
+		}
+		withoutIndexRecovered, withoutIndexMaxTxID, withoutIndexPlan, withoutIndexReport, err := OpenAndRecoverWithReport(withoutIndexRoot, reg)
+		if err != nil {
+			t.Fatalf("OpenAndRecoverWithReport without offset index: %v", err)
+		}
+
+		if withIndexMaxTxID != finalTxID || withoutIndexMaxTxID != finalTxID {
+			t.Fatalf("max tx mismatch: with=%d without=%d want=%d (withReport=%+v withoutReport=%+v)",
+				withIndexMaxTxID, withoutIndexMaxTxID, finalTxID, withIndexReport, withoutIndexReport)
+		}
+		assertRapidReplayStatesEqual(t, withIndexRecovered, withoutIndexRecovered)
+		assertRapidReplayRows(t, withIndexRecovered, log.models[len(log.records)])
+		if withIndexPlan != withoutIndexPlan {
+			t.Fatalf("resume plan mismatch: with=%+v without=%+v", withIndexPlan, withoutIndexPlan)
+		}
+		wantReplay := RecoveryTxIDRange{Start: types.TxID(horizon + 1), End: finalTxID}
+		if withIndexReport.ReplayedTxRange != wantReplay || withoutIndexReport.ReplayedTxRange != wantReplay {
+			t.Fatalf("replay range mismatch: with=%+v without=%+v want=%+v (segments with=%s without=%s)",
+				withIndexReport.ReplayedTxRange, withoutIndexReport.ReplayedTxRange, wantReplay, withSegmentPath, withoutSegmentPath)
+		}
+		if !withIndexReport.HasSelectedSnapshot || withIndexReport.SelectedSnapshotTxID != types.TxID(horizon) ||
+			!withoutIndexReport.HasSelectedSnapshot || withoutIndexReport.SelectedSnapshotTxID != types.TxID(horizon) {
+			t.Fatalf("snapshot selection mismatch: with=%+v without=%+v want tx %d", withIndexReport, withoutIndexReport, horizon)
+		}
+		if withIndexPlan.AppendMode != AppendInPlace || withIndexPlan.SegmentStartTx != 1 || withIndexPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("resume plan = %+v, want append-in-place on original segment at tx %d", withIndexPlan, finalTxID+1)
+		}
+	})
+}
+
+func TestRapidOpenAndRecoverAfterBoundaryCompactionMatchesUncompacted(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		root := rapidTempDir(t)
+		defer os.RemoveAll(root)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 4, 24)
+		finalTxID := types.TxID(len(log.records))
+		horizon := rapid.IntRange(2, len(log.records)-1).Draw(t, "snapshotHorizon")
+		boundaryStartIndex := rapid.IntRange(1, horizon-1).Draw(t, "boundaryStartIndex")
+		boundaryEndExclusive := rapid.IntRange(horizon+1, len(log.records)).Draw(t, "boundaryEndExclusive")
+		boundaryStartTx := types.TxID(boundaryStartIndex + 1)
+		tailStartTx := types.TxID(boundaryEndExclusive + 1)
+
+		rapidWriteReplaySnapshot(t, root, reg, types.TxID(horizon), log.models[horizon])
+		prefixPath, prefixEntries := rapidWriteReplaySegmentWithOffsets(t, root, 1, log.records[:boundaryStartIndex])
+		boundaryPath, boundaryEntries := rapidWriteReplaySegmentWithOffsets(t, root, uint64(boundaryStartTx), log.records[boundaryStartIndex:boundaryEndExclusive])
+		prefixIdxPath := filepath.Join(root, OffsetIndexFileName(1))
+		boundaryIdxPath := filepath.Join(root, OffsetIndexFileName(uint64(boundaryStartTx)))
+		rapidCreateOffsetIndexFromEntries(t, prefixIdxPath, prefixEntries)
+		rapidCreateOffsetIndexFromEntries(t, boundaryIdxPath, boundaryEntries)
+
+		var tailPath string
+		if boundaryEndExclusive < len(log.records) {
+			var tailEntries []OffsetIndexEntry
+			tailPath, tailEntries = rapidWriteReplaySegmentWithOffsets(t, root, uint64(tailStartTx), log.records[boundaryEndExclusive:])
+			rapidCreateOffsetIndexFromEntries(t, filepath.Join(root, OffsetIndexFileName(uint64(tailStartTx))), tailEntries)
+		}
+
+		before, beforeMaxTxID, beforePlan, beforeReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("pre-compaction OpenAndRecoverWithReport: %v", err)
+		}
+		if beforeMaxTxID != finalTxID {
+			t.Fatalf("pre-compaction maxTxID = %d, want %d (report=%+v)", beforeMaxTxID, finalTxID, beforeReport)
+		}
+		assertRapidReplayRows(t, before, log.models[len(log.records)])
+
+		if err := RunCompaction(root, types.TxID(horizon)); err != nil {
+			t.Fatalf("RunCompaction at horizon %d with boundary %d..%d: %v", horizon, boundaryStartIndex+1, boundaryEndExclusive, err)
+		}
+		rapidAssertFileMissing(t, prefixPath)
+		rapidAssertFileMissing(t, prefixIdxPath)
+		rapidAssertFileExists(t, boundaryPath)
+		rapidAssertFileExists(t, boundaryIdxPath)
+		if tailPath != "" {
+			rapidAssertFileExists(t, tailPath)
+		}
+
+		after, afterMaxTxID, afterPlan, afterReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("post-compaction OpenAndRecoverWithReport: %v", err)
+		}
+		if afterMaxTxID != beforeMaxTxID {
+			t.Fatalf("post-compaction maxTxID = %d, want pre-compaction max %d (report=%+v)", afterMaxTxID, beforeMaxTxID, afterReport)
+		}
+		assertRapidReplayStatesEqual(t, after, before)
+		assertRapidReplayRows(t, after, log.models[len(log.records)])
+		if afterPlan != beforePlan {
+			t.Fatalf("post-compaction resume plan = %+v, want pre-compaction plan %+v", afterPlan, beforePlan)
+		}
+		if !afterReport.HasSelectedSnapshot || afterReport.SelectedSnapshotTxID != types.TxID(horizon) {
+			t.Fatalf("post-compaction selected snapshot report = (%v, %d), want tx %d",
+				afterReport.HasSelectedSnapshot, afterReport.SelectedSnapshotTxID, horizon)
+		}
+		if afterReport.ReplayedTxRange != (RecoveryTxIDRange{Start: types.TxID(horizon + 1), End: finalTxID}) {
+			t.Fatalf("post-compaction replay range = %+v, want %d..%d (report=%+v)", afterReport.ReplayedTxRange, horizon+1, finalTxID, afterReport)
+		}
+		if len(afterReport.SegmentCoverage) == 0 || afterReport.SegmentCoverage[0].MinTxID != boundaryStartTx {
+			t.Fatalf("post-compaction segment coverage = %+v, want first retained segment to start at tx %d", afterReport.SegmentCoverage, boundaryStartTx)
+		}
+	})
+}
+
 func TestRapidScanDamagedTailReplaysValidPrefix(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		root := rapidTempDir(t)
@@ -306,6 +433,89 @@ func TestRapidScanDamagedTailReplaysValidPrefix(t *testing.T) {
 		assertRapidReplayRows(t, recovered, log.models[validPrefix])
 		if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != recoveredTxID+1 || plan.NextTxID != recoveredTxID+1 {
 			t.Fatalf("resume plan = %+v, want fresh next segment at tx %d", plan, recoveredTxID+1)
+		}
+	})
+}
+
+func TestRapidDamagedTailResumeMatchesFullLogRecovery(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		fullRoot := rapidTempDir(t)
+		defer os.RemoveAll(fullRoot)
+		damagedRoot := rapidTempDir(t)
+		defer os.RemoveAll(damagedRoot)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 3, 24)
+		finalTxID := types.TxID(len(log.records))
+		validPrefix := rapid.IntRange(1, len(log.records)-1).Draw(t, "validPrefix")
+
+		fullSegmentCount := rapid.IntRange(1, min(4, len(log.records))).Draw(t, "fullSegmentCount")
+		rapidWriteReplaySegments(t, fullRoot, log.records, fullSegmentCount)
+		fullRecovered, fullMaxTxID, _, fullReport, err := OpenAndRecoverWithReport(fullRoot, reg)
+		if err != nil {
+			t.Fatalf("full-log OpenAndRecoverWithReport: %v", err)
+		}
+		if fullMaxTxID != finalTxID {
+			t.Fatalf("full-log maxTxID = %d, want %d (report=%+v)", fullMaxTxID, finalTxID, fullReport)
+		}
+		assertRapidReplayRows(t, fullRecovered, log.models[len(log.records)])
+
+		damagedPath := rapidWriteReplaySegment(t, damagedRoot, uint64(log.records[0].txID), log.records)
+		nextPayload := rapidEncodeReplayChangeset(t, log.records[validPrefix])
+		payloadBytesKept := rapid.IntRange(0, len(nextPayload)).Draw(t, "damagedTailPayloadBytesKept")
+		truncateAt := rapidRecordPayloadOffset(t, damagedPath, validPrefix, payloadBytesKept)
+		if err := os.Truncate(damagedPath, int64(truncateAt)); err != nil {
+			t.Fatalf("truncate damaged tail at byte %d after prefix %d: %v", truncateAt, validPrefix, err)
+		}
+
+		prefixRecovered, prefixMaxTxID, prefixPlan, prefixReport, err := OpenAndRecoverWithReport(damagedRoot, reg)
+		if err != nil {
+			t.Fatalf("prefix OpenAndRecoverWithReport after truncating %s at byte %d: %v", damagedPath, truncateAt, err)
+		}
+		if prefixMaxTxID != types.TxID(validPrefix) {
+			t.Fatalf("prefix maxTxID = %d, want %d (report=%+v)", prefixMaxTxID, validPrefix, prefixReport)
+		}
+		assertRapidReplayRows(t, prefixRecovered, log.models[validPrefix])
+		if len(prefixReport.DamagedTailSegments) != 1 || prefixReport.DamagedTailSegments[0].Path != damagedPath {
+			t.Fatalf("prefix damaged tails = %+v, want only %s", prefixReport.DamagedTailSegments, damagedPath)
+		}
+		if prefixReport.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: types.TxID(validPrefix)}) {
+			t.Fatalf("prefix replay range = %+v, want 1..%d (report=%+v)", prefixReport.ReplayedTxRange, validPrefix, prefixReport)
+		}
+		if prefixPlan.AppendMode != AppendByFreshNextSegment || prefixPlan.SegmentStartTx != prefixMaxTxID+1 || prefixPlan.NextTxID != prefixMaxTxID+1 {
+			t.Fatalf("prefix resume plan = %+v, want fresh successor at tx %d (report=%+v)", prefixPlan, prefixMaxTxID+1, prefixReport)
+		}
+
+		dw, err := NewDurabilityWorkerWithResumePlan(damagedRoot, prefixPlan, DefaultCommitLogOptions())
+		if err != nil {
+			t.Fatalf("NewDurabilityWorkerWithResumePlan(%+v): %v", prefixPlan, err)
+		}
+		for _, rec := range log.records[validPrefix:] {
+			dw.EnqueueCommitted(rec.txID, rapidReplayChangeset(rec))
+		}
+		if durableTxID, err := dw.Close(); err != nil {
+			t.Fatalf("Close resumed durability worker after prefix %d with plan %+v: %v", validPrefix, prefixPlan, err)
+		} else if durableTxID != uint64(finalTxID) {
+			t.Fatalf("resumed durable txID = %d, want %d", durableTxID, finalTxID)
+		}
+
+		resumedRecovered, resumedMaxTxID, resumedPlan, resumedReport, err := OpenAndRecoverWithReport(damagedRoot, reg)
+		if err != nil {
+			t.Fatalf("resumed OpenAndRecoverWithReport: %v", err)
+		}
+		if resumedMaxTxID != finalTxID {
+			t.Fatalf("resumed maxTxID = %d, want %d (report=%+v)", resumedMaxTxID, finalTxID, resumedReport)
+		}
+		assertRapidReplayStatesEqual(t, resumedRecovered, fullRecovered)
+		assertRapidReplayRows(t, resumedRecovered, log.models[len(log.records)])
+		if len(resumedReport.DamagedTailSegments) != 1 || resumedReport.DamagedTailSegments[0].Path != damagedPath {
+			t.Fatalf("resumed damaged tails = %+v, want retained damaged predecessor %s", resumedReport.DamagedTailSegments, damagedPath)
+		}
+		if resumedReport.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: finalTxID}) {
+			t.Fatalf("resumed replay range = %+v, want 1..%d (report=%+v)", resumedReport.ReplayedTxRange, finalTxID, resumedReport)
+		}
+		if resumedPlan.AppendMode != AppendInPlace || resumedPlan.SegmentStartTx != types.TxID(validPrefix+1) || resumedPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("resumed plan = %+v, want append-in-place on successor %d at tx %d (report=%+v)",
+				resumedPlan, validPrefix+1, finalTxID+1, resumedReport)
 		}
 	})
 }
@@ -383,6 +593,17 @@ func rapidTempDir(t rapidCommitlogFataler) string {
 	return dir
 }
 
+func rapidWriteReplaySnapshot(t rapidCommitlogFataler, root string, reg schema.SchemaRegistry, txID types.TxID, rows map[uint64]string) {
+	t.Helper()
+	snapshotState := rapidBuildReplayCommittedState(reg)
+	rapidSeedReplayRows(t, snapshotState, rows)
+	snapshotState.SetCommittedTxID(txID)
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	if err := writer.CreateSnapshot(snapshotState, txID); err != nil {
+		t.Fatalf("CreateSnapshot at horizon %d: %v", txID, err)
+	}
+}
+
 func rapidSeedReplayRows(t rapidCommitlogFataler, committed *store.CommittedState, rows map[uint64]string) {
 	t.Helper()
 	table, ok := committed.Table(0)
@@ -430,10 +651,17 @@ func rapidWriteReplaySegments(t rapidCommitlogFataler, root string, records []re
 
 func rapidWriteReplaySegment(t rapidCommitlogFataler, root string, startTx uint64, records []replayRecord) string {
 	t.Helper()
+	path, _ := rapidWriteReplaySegmentWithOffsets(t, root, startTx, records)
+	return path
+}
+
+func rapidWriteReplaySegmentWithOffsets(t rapidCommitlogFataler, root string, startTx uint64, records []replayRecord) (string, []OffsetIndexEntry) {
+	t.Helper()
 	seg, err := CreateSegment(root, startTx)
 	if err != nil {
 		t.Fatalf("CreateSegment: %v", err)
 	}
+	entries := make([]OffsetIndexEntry, 0, len(records))
 	for _, rec := range records {
 		payload := rec.rawPayload
 		if payload == nil {
@@ -443,16 +671,21 @@ func rapidWriteReplaySegment(t rapidCommitlogFataler, root string, startTx uint6
 			_ = seg.Close()
 			t.Fatalf("Append tx %d: %v", rec.txID, err)
 		}
+		off, ok := seg.LastRecordByteOffset()
+		if !ok {
+			_ = seg.Close()
+			t.Fatalf("LastRecordByteOffset missing after tx %d", rec.txID)
+		}
+		entries = append(entries, OffsetIndexEntry{TxID: types.TxID(rec.txID), ByteOffset: uint64(off)})
 	}
 	if err := seg.Close(); err != nil {
 		t.Fatalf("Close segment: %v", err)
 	}
-	return filepath.Join(root, SegmentFileName(startTx))
+	return filepath.Join(root, SegmentFileName(startTx)), entries
 }
 
-func rapidEncodeReplayChangeset(t rapidCommitlogFataler, rec replayRecord) []byte {
-	t.Helper()
-	payload, err := EncodeChangeset(&store.Changeset{
+func rapidReplayChangeset(rec replayRecord) *store.Changeset {
+	return &store.Changeset{
 		TxID: types.TxID(rec.txID),
 		Tables: map[schema.TableID]*store.TableChangeset{
 			0: {
@@ -462,7 +695,12 @@ func rapidEncodeReplayChangeset(t rapidCommitlogFataler, rec replayRecord) []byt
 				Deletes:   rec.deletes,
 			},
 		},
-	})
+	}
+}
+
+func rapidEncodeReplayChangeset(t rapidCommitlogFataler, rec replayRecord) []byte {
+	t.Helper()
+	payload, err := EncodeChangeset(rapidReplayChangeset(rec))
 	if err != nil {
 		t.Fatalf("EncodeChangeset tx %d: %v", rec.txID, err)
 	}
@@ -525,6 +763,14 @@ func rapidPopulateSparseIndex(t rapidCommitlogFataler, path string, cap uint64, 
 	return idx
 }
 
+func rapidCreateOffsetIndexFromEntries(t rapidCommitlogFataler, path string, entries []OffsetIndexEntry) {
+	t.Helper()
+	idx := rapidPopulateSparseIndex(t, path, uint64(len(entries)+1), entries)
+	if err := idx.Close(); err != nil {
+		t.Fatalf("close offset index: %v", err)
+	}
+}
+
 func rapidCreateOneEntryOffsetIndex(t rapidCommitlogFataler, path string, txID types.TxID) {
 	t.Helper()
 	idx, err := CreateOffsetIndex(path, 2)
@@ -562,6 +808,20 @@ func rapidRecordPayloadOffset(t rapidCommitlogFataler, path string, recordIndex 
 		t.Fatalf("record %d header out of bounds in %s", recordIndex, path)
 	}
 	return offset + RecordHeaderSize + payloadOffset
+}
+
+func rapidAssertFileMissing(t rapidCommitlogFataler, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected %s to be removed, stat err=%v", filepath.Base(path), err)
+	}
+}
+
+func rapidAssertFileExists(t rapidCommitlogFataler, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected %s to exist: %v", filepath.Base(path), err)
+	}
 }
 
 func assertRapidReplayRows(t rapidCommitlogFataler, committed *store.CommittedState, want map[uint64]string) {
