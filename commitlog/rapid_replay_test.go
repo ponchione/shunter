@@ -214,6 +214,72 @@ func TestRapidOpenAndRecoverAfterCompactionMatchesUncompactedSnapshotTail(t *tes
 	})
 }
 
+func TestRapidCompactionRetryRemovesCoveredOrphanIndexAndPreservesRecovery(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		root := rapidTempDir(t)
+		defer os.RemoveAll(root)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 2, 24)
+		finalTxID := types.TxID(len(log.records))
+		horizon := rapid.IntRange(1, len(log.records)-1).Draw(t, "snapshotHorizon")
+
+		rapidWriteReplaySnapshot(t, root, reg, types.TxID(horizon), log.models[horizon])
+		coveredPath, coveredEntries := rapidWriteReplaySegmentWithOffsets(t, root, 1, log.records[:horizon])
+		tailPath, tailEntries := rapidWriteReplaySegmentWithOffsets(t, root, uint64(horizon+1), log.records[horizon:])
+		coveredIdxPath := filepath.Join(root, OffsetIndexFileName(1))
+		tailIdxPath := filepath.Join(root, OffsetIndexFileName(uint64(horizon+1)))
+		rapidCreateOffsetIndexFromEntries(t, coveredIdxPath, coveredEntries)
+		rapidCreateOffsetIndexFromEntries(t, tailIdxPath, tailEntries)
+
+		if err := os.Remove(coveredPath); err != nil {
+			t.Fatalf("remove covered segment %s to simulate compaction crash: %v", coveredPath, err)
+		}
+		rapidAssertFileExists(t, coveredIdxPath)
+		rapidAssertFileExists(t, tailPath)
+		rapidAssertFileExists(t, tailIdxPath)
+
+		beforeRetry, beforeRetryMaxTxID, beforeRetryPlan, beforeRetryReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("OpenAndRecoverWithReport with orphan covered index %s: %v", coveredIdxPath, err)
+		}
+		if beforeRetryMaxTxID != finalTxID {
+			t.Fatalf("pre-retry maxTxID = %d, want %d (report=%+v)", beforeRetryMaxTxID, finalTxID, beforeRetryReport)
+		}
+		assertRapidReplayRows(t, beforeRetry, log.models[len(log.records)])
+		if beforeRetryPlan.AppendMode != AppendInPlace || beforeRetryPlan.SegmentStartTx != types.TxID(horizon+1) || beforeRetryPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("pre-retry resume plan = %+v, want append-in-place on tail %d at tx %d",
+				beforeRetryPlan, horizon+1, finalTxID+1)
+		}
+
+		if err := RunCompaction(root, types.TxID(horizon)); err != nil {
+			t.Fatalf("RunCompaction retry at horizon %d with orphan index %s: %v", horizon, coveredIdxPath, err)
+		}
+		if err := RunCompaction(root, types.TxID(horizon)); err != nil {
+			t.Fatalf("RunCompaction second retry at horizon %d: %v", horizon, err)
+		}
+		rapidAssertFileMissing(t, coveredPath)
+		rapidAssertFileMissing(t, coveredIdxPath)
+		rapidAssertFileExists(t, tailPath)
+		rapidAssertFileExists(t, tailIdxPath)
+
+		afterRetry, afterRetryMaxTxID, afterRetryPlan, afterRetryReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("post-retry OpenAndRecoverWithReport: %v", err)
+		}
+		if afterRetryMaxTxID != beforeRetryMaxTxID {
+			t.Fatalf("post-retry maxTxID = %d, want pre-retry max %d (report=%+v)", afterRetryMaxTxID, beforeRetryMaxTxID, afterRetryReport)
+		}
+		assertRapidReplayStatesEqual(t, afterRetry, beforeRetry)
+		assertRapidReplayRows(t, afterRetry, log.models[len(log.records)])
+		if afterRetryPlan != beforeRetryPlan {
+			t.Fatalf("post-retry resume plan = %+v, want pre-retry plan %+v", afterRetryPlan, beforeRetryPlan)
+		}
+		if len(afterRetryReport.SegmentCoverage) != 1 || afterRetryReport.SegmentCoverage[0].MinTxID != types.TxID(horizon+1) || afterRetryReport.SegmentCoverage[0].MaxTxID != finalTxID {
+			t.Fatalf("post-retry segment coverage = %+v, want only tail %d..%d", afterRetryReport.SegmentCoverage, horizon+1, finalTxID)
+		}
+	})
+}
+
 func TestRapidReplayWithAndWithoutOffsetIndexEquivalent(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		root := rapidTempDir(t)

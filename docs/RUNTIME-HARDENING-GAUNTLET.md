@@ -28,7 +28,8 @@ Current status:
   snapshot fallback to an older valid snapshot plus log; torn rollover segments
   are replaced through the recovery resume plan, and corrupt offset indexes fall
   back to linear replay. Unsafe history checks now also cover generated
-  snapshot/log boundary gaps and missing-base log suffixes.
+  snapshot/log boundary gaps and missing-base log suffixes. Compaction retry
+  coverage now checks covered orphan sidecar cleanup without changing recovery.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.
