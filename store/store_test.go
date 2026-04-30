@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -178,6 +179,47 @@ func TestBTreeScan(t *testing.T) {
 	}
 	if len(got) != 3 {
 		t.Fatalf("Scan = %v, want 3 entries", got)
+	}
+}
+
+func TestBTreePagedInsertRemoveMaintainsOrderedScan(t *testing.T) {
+	bt := NewBTreeIndex()
+	for i := 200; i >= 1; i-- {
+		bt.Insert(NewIndexKey(types.NewUint64(uint64(i))), types.RowID(i))
+	}
+	if len(bt.pages) < 2 {
+		t.Fatalf("paged index did not split: pages=%d", len(bt.pages))
+	}
+	var got []types.RowID
+	for rid := range bt.Scan() {
+		got = append(got, rid)
+	}
+	want := make([]types.RowID, 200)
+	for i := range want {
+		want[i] = types.RowID(i + 1)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Scan after paged inserts = %v, want %v", got, want)
+	}
+
+	for i := 1; i <= 200; i += 3 {
+		bt.Remove(NewIndexKey(types.NewUint64(uint64(i))), types.RowID(i))
+	}
+	got = got[:0]
+	for rid := range bt.Scan() {
+		got = append(got, rid)
+	}
+	want = want[:0]
+	for i := 1; i <= 200; i++ {
+		if i%3 != 1 {
+			want = append(want, types.RowID(i))
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Scan after paged removes = %v, want %v", got, want)
+	}
+	if bt.Len() != len(want) {
+		t.Fatalf("Len = %d, want %d", bt.Len(), len(want))
 	}
 }
 

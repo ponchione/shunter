@@ -181,7 +181,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 			encodedRows = matchedRows
 		}
 	}
-	return SQLQueryResult{TableName: query.TableName, Rows: types.CopyProductValues(encodedRows)}, nil
+	return SQLQueryResult{TableName: query.TableName, Rows: encodedRows}, nil
 }
 
 // sendOneOffError emits a failure OneOffQueryResponse matching reference

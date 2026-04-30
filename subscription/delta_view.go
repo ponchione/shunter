@@ -26,8 +26,8 @@ type DeltaView struct {
 // corresponding inserts/deletes slice. Positions (int indices) avoid
 // double-storing row data.
 type DeltaIndexes struct {
-	insertIdx map[TableID]map[ColID]map[string][]int
-	deleteIdx map[TableID]map[ColID]map[string][]int
+	insertIdx map[TableID]map[ColID]map[valueKey][]int
+	deleteIdx map[TableID]map[ColID]map[valueKey][]int
 }
 
 // NewDeltaView constructs a DeltaView from a changeset and a committed snapshot.
@@ -82,7 +82,7 @@ func (dv *DeltaView) buildDeltaIndex(table TableID, cols []ColID) {
 	}
 }
 
-func buildDeltaIndexForRows(rows []types.ProductValue, cols []ColID) map[ColID]map[string][]int {
+func buildDeltaIndexForRows(rows []types.ProductValue, cols []ColID) map[ColID]map[valueKey][]int {
 	byCol := acquireTableDeltaIndex()
 	for _, col := range cols {
 		byVal := acquireValuePositionIndex()

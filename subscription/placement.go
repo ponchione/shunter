@@ -136,23 +136,23 @@ func collectCandidatesForTableInto(
 	}
 
 	// Tier 1: equality-indexed subscriptions.
-	for _, col := range idx.Value.TrackedColumns(table) {
+	idx.Value.ForEachTrackedColumn(table, func(col ColID) {
 		for _, row := range rows {
 			if int(col) >= len(row) {
 				continue
 			}
-			for _, h := range idx.Value.Lookup(table, col, row[col]) {
+			idx.Value.ForEachHash(table, col, row[col], func(h QueryHash) {
 				set[h] = struct{}{}
-			}
+			})
 		}
-	}
+	})
 
 	// Tier 2: join edges where this table is the LHS side.
 	if committed != nil && resolver != nil {
-		for _, edge := range idx.JoinEdge.EdgesForTable(table) {
+		idx.JoinEdge.ForEachEdge(table, func(edge JoinEdge) {
 			rhsIdx, ok := resolver.IndexIDForColumn(edge.RHSTable, edge.RHSJoinCol)
 			if !ok {
-				continue
+				return
 			}
 			for _, row := range rows {
 				if int(edge.LHSJoinCol) >= len(row) {
@@ -169,18 +169,18 @@ func collectCandidatesForTableInto(
 					if int(edge.RHSFilterCol) >= len(rhsRow) {
 						continue
 					}
-					for _, h := range idx.JoinEdge.Lookup(edge, rhsRow[edge.RHSFilterCol]) {
+					idx.JoinEdge.ForEachHash(edge, rhsRow[edge.RHSFilterCol], func(h QueryHash) {
 						set[h] = struct{}{}
-					}
+					})
 				}
 			}
-		}
+		})
 	}
 
 	// Tier 3: table fallback.
-	for _, h := range idx.Table.Lookup(table) {
+	idx.Table.ForEachHash(table, func(h QueryHash) {
 		set[h] = struct{}{}
-	}
+	})
 
 	out := make([]QueryHash, 0, len(set))
 	for h := range set {

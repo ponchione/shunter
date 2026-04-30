@@ -31,6 +31,103 @@ const (
 	TagArrayString byte = 18
 )
 
+// AppendValue appends v in BSATN format to dst and returns the extended slice.
+func AppendValue(dst []byte, v types.Value) ([]byte, error) {
+	start := len(dst)
+	tag := byte(v.Kind())
+	dst = append(dst, tag)
+	var buf [8]byte
+	switch v.Kind() {
+	case types.KindBool:
+		if v.AsBool() {
+			dst = append(dst, 1)
+		} else {
+			dst = append(dst, 0)
+		}
+	case types.KindInt8:
+		dst = append(dst, byte(v.AsInt8()))
+	case types.KindUint8:
+		dst = append(dst, v.AsUint8())
+	case types.KindInt16:
+		binary.LittleEndian.PutUint16(buf[:2], uint16(v.AsInt16()))
+		dst = append(dst, buf[:2]...)
+	case types.KindUint16:
+		binary.LittleEndian.PutUint16(buf[:2], v.AsUint16())
+		dst = append(dst, buf[:2]...)
+	case types.KindInt32:
+		binary.LittleEndian.PutUint32(buf[:4], uint32(v.AsInt32()))
+		dst = append(dst, buf[:4]...)
+	case types.KindUint32:
+		binary.LittleEndian.PutUint32(buf[:4], v.AsUint32())
+		dst = append(dst, buf[:4]...)
+	case types.KindInt64:
+		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsInt64()))
+		dst = append(dst, buf[:8]...)
+	case types.KindUint64:
+		binary.LittleEndian.PutUint64(buf[:8], v.AsUint64())
+		dst = append(dst, buf[:8]...)
+	case types.KindFloat32:
+		binary.LittleEndian.PutUint32(buf[:4], math.Float32bits(v.AsFloat32()))
+		dst = append(dst, buf[:4]...)
+	case types.KindFloat64:
+		binary.LittleEndian.PutUint64(buf[:8], math.Float64bits(v.AsFloat64()))
+		dst = append(dst, buf[:8]...)
+	case types.KindString:
+		s := v.AsString()
+		binary.LittleEndian.PutUint32(buf[:4], uint32(len(s)))
+		dst = append(dst, buf[:4]...)
+		dst = append(dst, s...)
+	case types.KindBytes:
+		b := v.BytesView()
+		binary.LittleEndian.PutUint32(buf[:4], uint32(len(b)))
+		dst = append(dst, buf[:4]...)
+		dst = append(dst, b...)
+	case types.KindInt128:
+		hi, lo := v.AsInt128()
+		var wide [16]byte
+		binary.LittleEndian.PutUint64(wide[0:8], lo)
+		binary.LittleEndian.PutUint64(wide[8:16], uint64(hi))
+		dst = append(dst, wide[:]...)
+	case types.KindUint128:
+		hi, lo := v.AsUint128()
+		var wide [16]byte
+		binary.LittleEndian.PutUint64(wide[0:8], lo)
+		binary.LittleEndian.PutUint64(wide[8:16], hi)
+		dst = append(dst, wide[:]...)
+	case types.KindInt256:
+		w0, w1, w2, w3 := v.AsInt256()
+		var wide [32]byte
+		binary.LittleEndian.PutUint64(wide[0:8], w3)
+		binary.LittleEndian.PutUint64(wide[8:16], w2)
+		binary.LittleEndian.PutUint64(wide[16:24], w1)
+		binary.LittleEndian.PutUint64(wide[24:32], uint64(w0))
+		dst = append(dst, wide[:]...)
+	case types.KindUint256:
+		w0, w1, w2, w3 := v.AsUint256()
+		var wide [32]byte
+		binary.LittleEndian.PutUint64(wide[0:8], w3)
+		binary.LittleEndian.PutUint64(wide[8:16], w2)
+		binary.LittleEndian.PutUint64(wide[16:24], w1)
+		binary.LittleEndian.PutUint64(wide[24:32], w0)
+		dst = append(dst, wide[:]...)
+	case types.KindTimestamp:
+		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsTimestamp()))
+		dst = append(dst, buf[:8]...)
+	case types.KindArrayString:
+		xs := v.ArrayStringView()
+		binary.LittleEndian.PutUint32(buf[:4], uint32(len(xs)))
+		dst = append(dst, buf[:4]...)
+		for _, s := range xs {
+			binary.LittleEndian.PutUint32(buf[:4], uint32(len(s)))
+			dst = append(dst, buf[:4]...)
+			dst = append(dst, s...)
+		}
+	default:
+		return dst[:start], &UnknownValueTagError{Tag: tag}
+	}
+	return dst, nil
+}
+
 // EncodeValue writes a Value in BSATN format: tag byte + LE payload.
 func EncodeValue(w io.Writer, v types.Value) error {
 	tag := byte(v.Kind())
@@ -94,7 +191,7 @@ func EncodeValue(w io.Writer, v types.Value) error {
 		_, err := io.WriteString(w, s)
 		return err
 	case types.KindBytes:
-		b := v.AsBytes()
+		b := v.BytesView()
 		binary.LittleEndian.PutUint32(buf[:4], uint32(len(b)))
 		if _, err := w.Write(buf[:4]); err != nil {
 			return err
@@ -138,7 +235,7 @@ func EncodeValue(w io.Writer, v types.Value) error {
 		_, err := w.Write(buf[:8])
 		return err
 	case types.KindArrayString:
-		xs := v.AsArrayString()
+		xs := v.ArrayStringView()
 		binary.LittleEndian.PutUint32(buf[:4], uint32(len(xs)))
 		if _, err := w.Write(buf[:4]); err != nil {
 			return err
@@ -172,7 +269,7 @@ func EncodedValueSize(v types.Value) int {
 	case types.KindString:
 		return 1 + 4 + len(v.AsString())
 	case types.KindBytes:
-		return 1 + 4 + len(v.AsBytes())
+		return 1 + 4 + len(v.BytesView())
 	case types.KindInt128, types.KindUint128:
 		return 17
 	case types.KindInt256, types.KindUint256:
@@ -180,7 +277,7 @@ func EncodedValueSize(v types.Value) int {
 	case types.KindTimestamp:
 		return 9
 	case types.KindArrayString:
-		xs := v.AsArrayString()
+		xs := v.ArrayStringView()
 		n := 1 + 4
 		for _, s := range xs {
 			n += 4 + len(s)
@@ -199,6 +296,18 @@ func EncodeProductValue(w io.Writer, pv types.ProductValue) error {
 		}
 	}
 	return nil
+}
+
+// AppendProductValue appends all columns in order.
+func AppendProductValue(dst []byte, pv types.ProductValue) ([]byte, error) {
+	var err error
+	for _, v := range pv {
+		dst, err = AppendValue(dst, v)
+		if err != nil {
+			return dst, err
+		}
+	}
+	return dst, nil
 }
 
 // EncodedProductValueSize returns the total encoded size.

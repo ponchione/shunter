@@ -124,6 +124,26 @@ func TestProductValueRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAppendProductValueMatchesWriterEncoding(t *testing.T) {
+	pv := types.ProductValue{
+		types.NewUint64(42),
+		types.NewString("alice"),
+		types.NewBytes([]byte{1, 2, 3}),
+		types.NewArrayString([]string{"red", "blue"}),
+	}
+	var buf bytes.Buffer
+	if err := EncodeProductValue(&buf, pv); err != nil {
+		t.Fatal(err)
+	}
+	got, err := AppendProductValue(make([]byte, 0, EncodedProductValueSize(pv)), pv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, buf.Bytes()) {
+		t.Fatalf("AppendProductValue bytes = %x, want %x", got, buf.Bytes())
+	}
+}
+
 func TestDecodeProductValueFromBytesTrailing(t *testing.T) {
 	ts := &schema.TableSchema{
 		Name: "players",

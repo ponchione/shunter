@@ -97,14 +97,15 @@ type SubscriptionManager interface {
 // Manager is the default SubscriptionManager implementation.
 // It is single-goroutine safe (the executor drives it).
 type Manager struct {
-	schema    SchemaLookup
-	resolver  IndexResolver
-	registry  *queryRegistry
-	indexes   *PruningIndexes
-	inbox     chan<- FanOutMessage
-	dropped   chan types.ConnectionID
-	querySets map[types.ConnectionID]map[uint32][]types.SubscriptionID
-	nextSubID types.SubscriptionID
+	schema        SchemaLookup
+	resolver      IndexResolver
+	registry      *queryRegistry
+	indexes       *PruningIndexes
+	inbox         chan<- FanOutMessage
+	dropped       chan types.ConnectionID
+	activeColumns map[TableID]map[ColID]int
+	querySets     map[types.ConnectionID]map[uint32][]types.SubscriptionID
+	nextSubID     types.SubscriptionID
 
 	// InitialRowLimit caps the initial-query row count returned to the
 	// client. Zero means unlimited.
@@ -129,12 +130,13 @@ func WithFanOutInbox(inbox chan<- FanOutMessage) ManagerOption {
 // NewManager constructs a Manager.
 func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOption) *Manager {
 	m := &Manager{
-		schema:    schema,
-		resolver:  resolver,
-		registry:  newQueryRegistry(),
-		indexes:   NewPruningIndexes(),
-		dropped:   make(chan types.ConnectionID, 64),
-		querySets: make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
+		schema:        schema,
+		resolver:      resolver,
+		registry:      newQueryRegistry(),
+		indexes:       NewPruningIndexes(),
+		dropped:       make(chan types.ConnectionID, 64),
+		activeColumns: make(map[TableID]map[ColID]int),
+		querySets:     make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
 	}
 	for _, opt := range opts {
 		opt(m)

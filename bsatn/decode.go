@@ -113,7 +113,7 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 		if _, err := io.ReadFull(r, data); err != nil {
 			return types.Value{}, err
 		}
-		return types.NewBytes(data), nil
+		return types.NewBytesOwned(data), nil
 	case TagInt128:
 		var wide [16]byte
 		if _, err := io.ReadFull(r, wide[:]); err != nil {
@@ -175,7 +175,7 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			}
 			xs[i] = string(data)
 		}
-		return types.NewArrayString(xs), nil
+		return types.NewArrayStringOwned(xs), nil
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}
@@ -211,16 +211,20 @@ func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue
 
 // DecodeProductValueFromBytes decodes and rejects trailing bytes.
 func DecodeProductValueFromBytes(data []byte, ts *schema.TableSchema) (types.ProductValue, error) {
-	r := &countingReader{data: data}
-	pv, err := DecodeProductValue(r, ts)
-	if err != nil {
-		var shapeErr *RowShapeMismatchError
-		if errors.As(err, &shapeErr) {
-			return nil, errors.Join(ErrRowLengthMismatch, shapeErr)
+	d := byteDecoder{data: data}
+	pv := make(types.ProductValue, len(ts.Columns))
+	for i, col := range ts.Columns {
+		v, err := d.decodeValueExpecting(col.Type, col.Name)
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				shapeErr := &RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: i}
+				return nil, errors.Join(ErrRowLengthMismatch, shapeErr)
+			}
+			return nil, err
 		}
-		return nil, err
+		pv[i] = v
 	}
-	if r.pos < len(r.data) {
+	if d.pos < len(d.data) {
 		return nil, errors.Join(
 			ErrRowLengthMismatch,
 			&RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: len(ts.Columns) + 1},
@@ -229,16 +233,200 @@ func DecodeProductValueFromBytes(data []byte, ts *schema.TableSchema) (types.Pro
 	return pv, nil
 }
 
-type countingReader struct {
+type byteDecoder struct {
 	data []byte
 	pos  int
 }
 
-func (r *countingReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
+func (d *byteDecoder) read(n int) ([]byte, error) {
+	if n < 0 || len(d.data)-d.pos < n {
+		if d.pos >= len(d.data) {
+			return nil, io.EOF
+		}
+		d.pos = len(d.data)
+		return nil, io.ErrUnexpectedEOF
 	}
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
+	out := d.data[d.pos : d.pos+n]
+	d.pos += n
+	return out, nil
+}
+
+func (d *byteDecoder) readU32() (uint32, error) {
+	data, err := d.read(4)
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(data), nil
+}
+
+func (d *byteDecoder) decodeValueExpecting(expected types.ValueKind, colName string) (types.Value, error) {
+	tag, err := d.read(1)
+	if err != nil {
+		return types.Value{}, err
+	}
+	if tag[0] != byte(expected) {
+		return types.Value{}, &TypeTagMismatchError{Column: colName, Expected: expected, Got: tag[0]}
+	}
+	return d.decodePayload(tag[0])
+}
+
+func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {
+	switch tag {
+	case TagBool:
+		data, err := d.read(1)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewBool(data[0] != 0), nil
+	case TagInt8:
+		data, err := d.read(1)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewInt8(int8(data[0])), nil
+	case TagUint8:
+		data, err := d.read(1)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewUint8(data[0]), nil
+	case TagInt16:
+		data, err := d.read(2)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewInt16(int16(binary.LittleEndian.Uint16(data))), nil
+	case TagUint16:
+		data, err := d.read(2)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewUint16(binary.LittleEndian.Uint16(data)), nil
+	case TagInt32:
+		data, err := d.read(4)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewInt32(int32(binary.LittleEndian.Uint32(data))), nil
+	case TagUint32:
+		data, err := d.read(4)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewUint32(binary.LittleEndian.Uint32(data)), nil
+	case TagInt64:
+		data, err := d.read(8)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewInt64(int64(binary.LittleEndian.Uint64(data))), nil
+	case TagUint64:
+		data, err := d.read(8)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewUint64(binary.LittleEndian.Uint64(data)), nil
+	case TagFloat32:
+		data, err := d.read(4)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewFloat32(math.Float32frombits(binary.LittleEndian.Uint32(data)))
+	case TagFloat64:
+		data, err := d.read(8)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewFloat64(math.Float64frombits(binary.LittleEndian.Uint64(data)))
+	case TagString:
+		n, err := d.readU32()
+		if err != nil {
+			return types.Value{}, err
+		}
+		data, err := d.read(int(n))
+		if err != nil {
+			return types.Value{}, err
+		}
+		if !utf8.Valid(data) {
+			return types.Value{}, ErrInvalidUTF8
+		}
+		return types.NewString(string(data)), nil
+	case TagBytes:
+		n, err := d.readU32()
+		if err != nil {
+			return types.Value{}, err
+		}
+		data, err := d.read(int(n))
+		if err != nil {
+			return types.Value{}, err
+		}
+		owned := make([]byte, len(data))
+		copy(owned, data)
+		return types.NewBytesOwned(owned), nil
+	case TagInt128:
+		data, err := d.read(16)
+		if err != nil {
+			return types.Value{}, err
+		}
+		lo := binary.LittleEndian.Uint64(data[0:8])
+		hi := binary.LittleEndian.Uint64(data[8:16])
+		return types.NewInt128(int64(hi), lo), nil
+	case TagUint128:
+		data, err := d.read(16)
+		if err != nil {
+			return types.Value{}, err
+		}
+		lo := binary.LittleEndian.Uint64(data[0:8])
+		hi := binary.LittleEndian.Uint64(data[8:16])
+		return types.NewUint128(hi, lo), nil
+	case TagInt256:
+		data, err := d.read(32)
+		if err != nil {
+			return types.Value{}, err
+		}
+		w3 := binary.LittleEndian.Uint64(data[0:8])
+		w2 := binary.LittleEndian.Uint64(data[8:16])
+		w1 := binary.LittleEndian.Uint64(data[16:24])
+		w0 := binary.LittleEndian.Uint64(data[24:32])
+		return types.NewInt256(int64(w0), w1, w2, w3), nil
+	case TagUint256:
+		data, err := d.read(32)
+		if err != nil {
+			return types.Value{}, err
+		}
+		w3 := binary.LittleEndian.Uint64(data[0:8])
+		w2 := binary.LittleEndian.Uint64(data[8:16])
+		w1 := binary.LittleEndian.Uint64(data[16:24])
+		w0 := binary.LittleEndian.Uint64(data[24:32])
+		return types.NewUint256(w0, w1, w2, w3), nil
+	case TagTimestamp:
+		data, err := d.read(8)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewTimestamp(int64(binary.LittleEndian.Uint64(data))), nil
+	case TagArrayString:
+		count, err := d.readU32()
+		if err != nil {
+			return types.Value{}, err
+		}
+		xs := make([]string, count)
+		for i := range count {
+			n, err := d.readU32()
+			if err != nil {
+				return types.Value{}, err
+			}
+			data, err := d.read(int(n))
+			if err != nil {
+				return types.Value{}, err
+			}
+			if !utf8.Valid(data) {
+				return types.Value{}, ErrInvalidUTF8
+			}
+			xs[i] = string(data)
+		}
+		return types.NewArrayStringOwned(xs), nil
+	default:
+		return types.Value{}, &UnknownValueTagError{Tag: tag}
+	}
 }

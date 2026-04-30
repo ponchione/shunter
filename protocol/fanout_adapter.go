@@ -3,9 +3,8 @@ package protocol
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"strconv"
-	"strings"
+	"unsafe"
 
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
@@ -180,16 +179,16 @@ func memoizedRowListKey(rows []types.ProductValue) string {
 	if len(rows) == 0 {
 		return "binary-row-list:empty"
 	}
-	var b strings.Builder
-	b.Grow(16 + len(rows)*24)
-	b.WriteString("binary-row-list")
+	buf := make([]byte, 0, 16+len(rows)*24)
+	buf = append(buf, "binary-row-list"...)
 	for _, row := range rows {
-		b.WriteByte(':')
-		b.WriteString(strconv.FormatUint(uint64(reflect.ValueOf(row).Pointer()), 16))
-		b.WriteByte('/')
-		b.WriteString(strconv.Itoa(len(row)))
+		buf = append(buf, ':')
+		ptr := uintptr(unsafe.Pointer(unsafe.SliceData(row)))
+		buf = strconv.AppendUint(buf, uint64(ptr), 16)
+		buf = append(buf, '/')
+		buf = strconv.AppendInt(buf, int64(len(row)), 10)
 	}
-	return b.String()
+	return string(buf)
 }
 
 func encodeSubscriptionUpdate(su subscription.SubscriptionUpdate) (SubscriptionUpdate, error) {

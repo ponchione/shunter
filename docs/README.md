@@ -27,6 +27,8 @@ Do not read broad roadmap, ledger, or full decomposition specs by default.
   root handoff.
 - `docs/RUNTIME-HARDENING-GAUNTLET.md` — post-tech-debt test campaign for
   model-based, fault-injected, fuzzed, and soak-tested runtime confidence.
+- `docs/PERFORMANCE-BENCHMARKS.md` — benchmark run instructions and current
+  performance baselines for comparison across optimization work.
 - `docs/dependency-considerations.md` — adopted dependency policy, dependency
   candidates, and explicit dependency rejections.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design

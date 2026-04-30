@@ -929,6 +929,82 @@ func TestEvalCrossJoinProjectsRightOnProjectedInsert(t *testing.T) {
 	}
 }
 
+func TestEvalFilteredCrossJoinDeltaMatchesFullBagDiff(t *testing.T) {
+	pred := CrossJoin{
+		Left:  1,
+		Right: 2,
+		Filter: ColEq{
+			Table:  2,
+			Column: 0,
+			Value:  types.NewUint64(10),
+		},
+	}
+	beforeLeft := []types.ProductValue{{types.NewUint64(1)}, {types.NewUint64(2)}}
+	beforeRight := []types.ProductValue{{types.NewUint64(10)}, {types.NewUint64(20)}}
+	afterLeft := []types.ProductValue{{types.NewUint64(1)}, {types.NewUint64(3)}}
+	afterRight := []types.ProductValue{{types.NewUint64(10)}, {types.NewUint64(10)}}
+
+	committed := newMockCommitted()
+	for i, row := range afterLeft {
+		committed.addRow(1, types.RowID(i+1), row)
+	}
+	for i, row := range afterRight {
+		committed.addRow(2, types.RowID(i+1), row)
+	}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID: 1,
+			Inserts: []types.ProductValue{
+				{types.NewUint64(3)},
+			},
+			Deletes: []types.ProductValue{
+				{types.NewUint64(2)},
+			},
+		},
+		2: {
+			TableID: 2,
+			Inserts: []types.ProductValue{
+				{types.NewUint64(10)},
+			},
+			Deletes: []types.ProductValue{
+				{types.NewUint64(20)},
+			},
+		},
+	}}
+	dv := NewDeltaView(committed, cs, nil)
+	defer dv.Release()
+
+	gotIns, gotDel := evalCrossJoinDelta(dv, pred)
+	wantIns, wantDel := diffProjectedRowBags(
+		crossJoinProjectedRows(pred, beforeLeft, beforeRight),
+		crossJoinProjectedRows(pred, afterLeft, afterRight),
+	)
+	if !sameRowBag(gotIns, wantIns) || !sameRowBag(gotDel, wantDel) {
+		t.Fatalf("filtered cross join delta got inserts=%v deletes=%v, want inserts=%v deletes=%v", gotIns, gotDel, wantIns, wantDel)
+	}
+}
+
+func sameRowBag(a, b []types.ProductValue) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, row := range a {
+		counts[encodeRowKey(row)]++
+	}
+	for _, row := range b {
+		key := encodeRowKey(row)
+		if counts[key] == 0 {
+			return false
+		}
+		counts[key]--
+		if counts[key] == 0 {
+			delete(counts, key)
+		}
+	}
+	return len(counts) == 0
+}
+
 func TestEvalPruningFallbackVsBaseline(t *testing.T) {
 	// Pruning safety: ensure an affected subscription is picked up via the
 	// expected tier.

@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -33,15 +32,30 @@ func EncodeRowList(rows [][]byte) []byte {
 // payload carried by protocol messages. Row payloads are treated as read-only:
 // bsatn.EncodeProductValue must not mutate shared ProductValue backing arrays.
 func EncodeProductRows(rows []types.ProductValue) ([]byte, error) {
-	encoded := make([][]byte, len(rows))
+	size := 4
+	rowSizes := make([]int, len(rows))
 	for i, row := range rows {
-		var buf bytes.Buffer
-		if err := bsatn.EncodeProductValue(&buf, row); err != nil {
+		n := bsatn.EncodedProductValueSize(row)
+		rowSizes[i] = n
+		size += 4 + n
+	}
+	out := make([]byte, 4, size)
+	binary.LittleEndian.PutUint32(out[0:4], uint32(len(rows)))
+	var scratch [4]byte
+	for i, row := range rows {
+		binary.LittleEndian.PutUint32(scratch[:], uint32(rowSizes[i]))
+		out = append(out, scratch[:]...)
+		before := len(out)
+		var err error
+		out, err = bsatn.AppendProductValue(out, row)
+		if err != nil {
 			return nil, err
 		}
-		encoded[i] = buf.Bytes()
+		if got := len(out) - before; got != rowSizes[i] {
+			return nil, fmt.Errorf("protocol: encoded row size changed from %d to %d", rowSizes[i], got)
+		}
 	}
-	return EncodeRowList(encoded), nil
+	return out, nil
 }
 
 // DecodeRowList parses the wire format emitted by EncodeRowList.

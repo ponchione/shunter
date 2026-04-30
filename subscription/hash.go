@@ -66,8 +66,6 @@ func releaseCanonicalEncoder(enc *canonicalEncoder) {
 	encoderPool.Put(enc)
 }
 
-func (e *canonicalEncoder) reset() { e.buf = e.buf[:0] }
-
 func (e *canonicalEncoder) writeByte(b byte) { e.buf = append(e.buf, b) }
 
 func (e *canonicalEncoder) writeU32(v uint32) {
@@ -576,7 +574,7 @@ func encodeValue(e *canonicalEncoder, v Value) {
 		e.writeU32(uint32(len(s)))
 		e.buf = append(e.buf, s...)
 	case types.KindBytes:
-		b := v.AsBytes()
+		b := v.BytesView()
 		e.writeU32(uint32(len(b)))
 		e.buf = append(e.buf, b...)
 	case types.KindInt128:
@@ -602,7 +600,7 @@ func encodeValue(e *canonicalEncoder, v Value) {
 	case types.KindTimestamp:
 		e.writeU64(uint64(v.AsTimestamp()))
 	case types.KindArrayString:
-		xs := v.AsArrayString()
+		xs := v.ArrayStringView()
 		e.writeU32(uint32(len(xs)))
 		for _, s := range xs {
 			e.writeU32(uint32(len(s)))

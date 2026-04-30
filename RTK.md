@@ -8,6 +8,10 @@ Always prefix shell commands with `rtk`.
 
 Prefer RTK-native subcommands when available instead of wrapping the underlying tool directly.
 
+Exception: run Go benchmarks directly with `go test -bench ...` instead of
+`rtk go test -bench ...`. RTK summarizes benchmark commands and may suppress
+the raw `Benchmark... ns/op B/op allocs/op` lines needed for performance work.
+
 ## Preferred command mapping
 
 - Directory listing/tree/search: `rtk ls`, `rtk tree`, `rtk find`

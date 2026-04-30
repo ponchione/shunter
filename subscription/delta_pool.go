@@ -24,7 +24,7 @@ type dedupState struct {
 // the evaluation loop to avoid re-allocating hot-path maps per transaction.
 type candidateScratch struct {
 	candidates map[QueryHash]struct{}
-	distinct   map[string]Value
+	distinct   map[valueKey]Value
 }
 
 var dedupPool = sync.Pool{
@@ -51,7 +51,7 @@ var candidateScratchPool = sync.Pool{
 	New: func() any {
 		return &candidateScratch{
 			candidates: make(map[QueryHash]struct{}),
-			distinct:   make(map[string]Value),
+			distinct:   make(map[valueKey]Value),
 		}
 	},
 }
@@ -65,13 +65,13 @@ var productValueSlicePool = sync.Pool{
 
 var tableDeltaIndexPool = sync.Pool{
 	New: func() any {
-		return make(map[ColID]map[string][]int)
+		return make(map[ColID]map[valueKey][]int)
 	},
 }
 
 var valuePositionIndexPool = sync.Pool{
 	New: func() any {
-		return make(map[string][]int)
+		return make(map[valueKey][]int)
 	},
 }
 
@@ -81,8 +81,8 @@ var deltaViewPool = sync.Pool{
 			inserts: make(map[TableID][]types.ProductValue),
 			deletes: make(map[TableID][]types.ProductValue),
 			deltaIdx: DeltaIndexes{
-				insertIdx: make(map[TableID]map[ColID]map[string][]int),
-				deleteIdx: make(map[TableID]map[ColID]map[string][]int),
+				insertIdx: make(map[TableID]map[ColID]map[valueKey][]int),
+				deleteIdx: make(map[TableID]map[ColID]map[valueKey][]int),
 			},
 		}
 	},
@@ -138,11 +138,11 @@ func releaseProductValueSlice(rows []types.ProductValue) {
 	productValueSlicePool.Put(&rows)
 }
 
-func acquireTableDeltaIndex() map[ColID]map[string][]int {
-	return tableDeltaIndexPool.Get().(map[ColID]map[string][]int)
+func acquireTableDeltaIndex() map[ColID]map[valueKey][]int {
+	return tableDeltaIndexPool.Get().(map[ColID]map[valueKey][]int)
 }
 
-func releaseTableDeltaIndex(byCol map[ColID]map[string][]int) {
+func releaseTableDeltaIndex(byCol map[ColID]map[valueKey][]int) {
 	for col, byVal := range byCol {
 		releaseValuePositionIndex(byVal)
 		delete(byCol, col)
@@ -150,11 +150,11 @@ func releaseTableDeltaIndex(byCol map[ColID]map[string][]int) {
 	tableDeltaIndexPool.Put(byCol)
 }
 
-func acquireValuePositionIndex() map[string][]int {
-	return valuePositionIndexPool.Get().(map[string][]int)
+func acquireValuePositionIndex() map[valueKey][]int {
+	return valuePositionIndexPool.Get().(map[valueKey][]int)
 }
 
-func releaseValuePositionIndex(byVal map[string][]int) {
+func releaseValuePositionIndex(byVal map[valueKey][]int) {
 	for key, positions := range byVal {
 		byVal[key] = positions[:0]
 		delete(byVal, key)

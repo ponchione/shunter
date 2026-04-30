@@ -11,6 +11,20 @@ import (
 
 func benchSchema() *fakeSchema { return testSchema() }
 
+func drainBenchmarkInbox(b *testing.B, inbox chan FanOutMessage) {
+	b.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range inbox {
+		}
+	}()
+	b.Cleanup(func() {
+		close(inbox)
+		<-done
+	})
+}
+
 func BenchmarkEvalEqualitySubs1K(b *testing.B) {
 	s := benchSchema()
 	inbox := make(chan FanOutMessage, 1024)
@@ -27,11 +41,7 @@ func BenchmarkEvalEqualitySubs1K(b *testing.B) {
 	}
 	cs := simpleChangeset(1,
 		[]types.ProductValue{{types.NewUint64(500), types.NewString("x")}}, nil)
-	// drain inbox in goroutine
-	go func() {
-		for range inbox {
-		}
-	}()
+	drainBenchmarkInbox(b, inbox)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -55,10 +65,7 @@ func BenchmarkEvalEqualitySubs10K(b *testing.B) {
 	}
 	cs := simpleChangeset(1,
 		[]types.ProductValue{{types.NewUint64(5000), types.NewString("x")}}, nil)
-	go func() {
-		for range inbox {
-		}
-	}()
+	drainBenchmarkInbox(b, inbox)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -153,10 +160,7 @@ func BenchmarkFanOut1KClientsSameQuery(b *testing.B) {
 		}, nil)
 	}
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
-	go func() {
-		for range inbox {
-		}
-	}()
+	drainBenchmarkInbox(b, inbox)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -218,10 +222,7 @@ func BenchmarkJoinFragmentEval(b *testing.B) {
 		},
 	}
 
-	go func() {
-		for range inbox {
-		}
-	}()
+	drainBenchmarkInbox(b, inbox)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

@@ -89,7 +89,10 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 		return fmt.Errorf("encode server message: %w", err)
 	}
 
-	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, CompressionNone)
+	wrapped := frame
+	if conn.Compression {
+		wrapped = EncodeFrame(frame[0], frame[1:], true, CompressionNone)
+	}
 
 	select {
 	case <-conn.closed:

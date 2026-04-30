@@ -17,7 +17,7 @@ type JoinEdge struct {
 // query hashes that could be affected.
 type JoinEdgeIndex struct {
 	// edges: JoinEdge → encoded(filter value) → set of query hashes.
-	edges map[JoinEdge]map[string]map[QueryHash]struct{}
+	edges map[JoinEdge]map[valueKey]map[QueryHash]struct{}
 	// byTable tracks edges per LHS table for EdgesForTable iteration.
 	byTable map[TableID]map[JoinEdge]int
 }
@@ -25,7 +25,7 @@ type JoinEdgeIndex struct {
 // NewJoinEdgeIndex constructs an empty JoinEdgeIndex.
 func NewJoinEdgeIndex() *JoinEdgeIndex {
 	return &JoinEdgeIndex{
-		edges:   make(map[JoinEdge]map[string]map[QueryHash]struct{}),
+		edges:   make(map[JoinEdge]map[valueKey]map[QueryHash]struct{}),
 		byTable: make(map[TableID]map[JoinEdge]int),
 	}
 }
@@ -34,7 +34,7 @@ func NewJoinEdgeIndex() *JoinEdgeIndex {
 func (ji *JoinEdgeIndex) Add(edge JoinEdge, filterValue Value, hash QueryHash) {
 	byVal, ok := ji.edges[edge]
 	if !ok {
-		byVal = make(map[string]map[QueryHash]struct{})
+		byVal = make(map[valueKey]map[QueryHash]struct{})
 		ji.edges[edge] = byVal
 	}
 	key := encodeValueKey(filterValue)
@@ -103,6 +103,21 @@ func (ji *JoinEdgeIndex) Lookup(edge JoinEdge, filterValue Value) []QueryHash {
 	return mapKeys(set)
 }
 
+// ForEachHash calls fn for every query hash registered for (edge, filterValue).
+func (ji *JoinEdgeIndex) ForEachHash(edge JoinEdge, filterValue Value, fn func(QueryHash)) {
+	byVal, ok := ji.edges[edge]
+	if !ok {
+		return
+	}
+	set, ok := byVal[encodeValueKey(filterValue)]
+	if !ok {
+		return
+	}
+	for h := range set {
+		fn(h)
+	}
+}
+
 // EdgesForTable returns all edges where LHSTable matches.
 func (ji *JoinEdgeIndex) EdgesForTable(table TableID) []JoinEdge {
 	perEdge, ok := ji.byTable[table]
@@ -110,4 +125,15 @@ func (ji *JoinEdgeIndex) EdgesForTable(table TableID) []JoinEdge {
 		return []JoinEdge{}
 	}
 	return mapKeys(perEdge)
+}
+
+// ForEachEdge calls fn for every join edge whose LHSTable matches table.
+func (ji *JoinEdgeIndex) ForEachEdge(table TableID, fn func(JoinEdge)) {
+	perEdge, ok := ji.byTable[table]
+	if !ok {
+		return
+	}
+	for edge := range perEdge {
+		fn(edge)
+	}
 }

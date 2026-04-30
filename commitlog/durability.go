@@ -336,7 +336,12 @@ func (dw *DurabilityWorker) run() {
 		if !ok {
 			return
 		}
-		batch := []durabilityItem{item}
+		batchCap := min(dw.opts.DrainBatchSize, 1024)
+		if batchCap < 1 {
+			batchCap = 1
+		}
+		batch := make([]durabilityItem, 0, batchCap)
+		batch = append(batch, item)
 	drain:
 		for range dw.opts.DrainBatchSize - 1 {
 			select {

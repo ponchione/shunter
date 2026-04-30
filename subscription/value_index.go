@@ -1,5 +1,11 @@
 package subscription
 
+import (
+	"math"
+
+	"github.com/ponchione/shunter/types"
+)
+
 // ValueIndex is the Tier 1 pruning index (SPEC-004 §5.1).
 //
 // Maps (table, column, value) → set of query hashes for subscriptions with
@@ -10,26 +16,26 @@ package subscription
 type ValueIndex struct {
 	cols map[TableID]map[ColID]int
 	// args: table → column → encoded(value) → set of query hashes.
-	args map[TableID]map[ColID]map[string]map[QueryHash]struct{}
+	args map[TableID]map[ColID]map[valueKey]map[QueryHash]struct{}
 }
 
 // NewValueIndex constructs an empty ValueIndex.
 func NewValueIndex() *ValueIndex {
 	return &ValueIndex{
 		cols: make(map[TableID]map[ColID]int),
-		args: make(map[TableID]map[ColID]map[string]map[QueryHash]struct{}),
+		args: make(map[TableID]map[ColID]map[valueKey]map[QueryHash]struct{}),
 	}
 }
 
-func (v *ValueIndex) argsMap(t TableID, c ColID) map[string]map[QueryHash]struct{} {
+func (v *ValueIndex) argsMap(t TableID, c ColID) map[valueKey]map[QueryHash]struct{} {
 	byCol, ok := v.args[t]
 	if !ok {
-		byCol = make(map[ColID]map[string]map[QueryHash]struct{})
+		byCol = make(map[ColID]map[valueKey]map[QueryHash]struct{})
 		v.args[t] = byCol
 	}
 	byVal, ok := byCol[c]
 	if !ok {
-		byVal = make(map[string]map[QueryHash]struct{})
+		byVal = make(map[valueKey]map[QueryHash]struct{})
 		byCol[c] = byVal
 	}
 	return byVal
@@ -119,6 +125,25 @@ func (v *ValueIndex) Lookup(table TableID, col ColID, value Value) []QueryHash {
 	return mapKeys(set)
 }
 
+// ForEachHash calls fn for every query hash registered for (table, col, value).
+func (v *ValueIndex) ForEachHash(table TableID, col ColID, value Value, fn func(QueryHash)) {
+	byCol, ok := v.args[table]
+	if !ok {
+		return
+	}
+	byVal, ok := byCol[col]
+	if !ok {
+		return
+	}
+	set, ok := byVal[encodeValueKey(value)]
+	if !ok {
+		return
+	}
+	for h := range set {
+		fn(h)
+	}
+}
+
 // TrackedColumns returns the columns that have at least one subscription
 // registered for the given table. Used during candidate collection.
 func (v *ValueIndex) TrackedColumns(table TableID) []ColID {
@@ -129,15 +154,84 @@ func (v *ValueIndex) TrackedColumns(table TableID) []ColID {
 	return mapKeys(byCol)
 }
 
-// encodeValueKey produces a stable string key for a Value so it can be used
-// as a map key (Value itself is not comparable because of the []byte field).
-// Reuses the canonical predicate encoder so ordering stays consistent.
-func encodeValueKey(v Value) string {
-	enc := encoderPool.Get().(*canonicalEncoder)
-	defer func() {
-		enc.reset()
-		encoderPool.Put(enc)
-	}()
-	encodeValue(enc, v)
-	return string(enc.buf)
+// ForEachTrackedColumn calls fn for every tracked column on table.
+func (v *ValueIndex) ForEachTrackedColumn(table TableID, fn func(ColID)) {
+	byCol, ok := v.cols[table]
+	if !ok {
+		return
+	}
+	for col := range byCol {
+		fn(col)
+	}
+}
+
+type valueKey struct {
+	kind  types.ValueKind
+	i64   int64
+	u64   uint64
+	str   string
+	bytes string
+	hi    uint64
+	lo    uint64
+	w256  [4]uint64
+}
+
+// encodeValueKey produces a stable comparable key for a Value.
+func encodeValueKey(v Value) valueKey {
+	k := valueKey{kind: v.Kind()}
+	switch v.Kind() {
+	case types.KindBool:
+		if v.AsBool() {
+			k.u64 = 1
+		}
+	case types.KindInt8:
+		k.i64 = int64(v.AsInt8())
+	case types.KindInt16:
+		k.i64 = int64(v.AsInt16())
+	case types.KindInt32:
+		k.i64 = int64(v.AsInt32())
+	case types.KindInt64:
+		k.i64 = v.AsInt64()
+	case types.KindUint8:
+		k.u64 = uint64(v.AsUint8())
+	case types.KindUint16:
+		k.u64 = uint64(v.AsUint16())
+	case types.KindUint32:
+		k.u64 = uint64(v.AsUint32())
+	case types.KindUint64:
+		k.u64 = v.AsUint64()
+	case types.KindFloat32:
+		k.u64 = uint64(math.Float32bits(v.AsFloat32()))
+	case types.KindFloat64:
+		k.u64 = math.Float64bits(v.AsFloat64())
+	case types.KindString:
+		k.str = v.AsString()
+	case types.KindBytes:
+		k.bytes = string(v.BytesView())
+	case types.KindInt128:
+		hi, lo := v.AsInt128()
+		k.hi = uint64(hi)
+		k.lo = lo
+	case types.KindUint128:
+		k.hi, k.lo = v.AsUint128()
+	case types.KindInt256:
+		w0, w1, w2, w3 := v.AsInt256()
+		k.w256 = [4]uint64{uint64(w0), w1, w2, w3}
+	case types.KindUint256:
+		w0, w1, w2, w3 := v.AsUint256()
+		k.w256 = [4]uint64{w0, w1, w2, w3}
+	case types.KindTimestamp:
+		k.i64 = v.AsTimestamp()
+	case types.KindArrayString:
+		enc := acquireCanonicalEncoder()
+		xs := v.ArrayStringView()
+		enc.writeU32(uint32(len(xs)))
+		for _, s := range xs {
+			enc.writeU32(uint32(len(s)))
+			enc.buf = append(enc.buf, s...)
+		}
+		k.str = string(enc.buf)
+		releaseCanonicalEncoder(enc)
+	}
+	return k
 }

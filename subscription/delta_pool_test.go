@@ -53,7 +53,7 @@ func TestCandidateScratchReleaseClearsMapsBeforeReuse(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		st := acquireCandidateScratch()
 		st.candidates[hashN(byte(i+1))] = struct{}{}
-		st.distinct["x"] = types.NewUint64(uint64(i + 1))
+		st.distinct[encodeValueKey(types.NewString("x"))] = types.NewUint64(uint64(i + 1))
 		releaseCandidateScratch(st)
 
 		reused := acquireCandidateScratch()
@@ -64,7 +64,7 @@ func TestCandidateScratchReleaseClearsMapsBeforeReuse(t *testing.T) {
 			t.Fatalf("iteration %d: reused distinct map len = %d, want 0", i, len(reused.distinct))
 		}
 		reused.candidates[hashN(byte(i+100))] = struct{}{}
-		reused.distinct["fresh"] = types.NewUint64(uint64(i + 100))
+		reused.distinct[encodeValueKey(types.NewString("fresh"))] = types.NewUint64(uint64(i + 100))
 		releaseCandidateScratch(reused)
 	}
 }

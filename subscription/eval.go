@@ -237,24 +237,61 @@ func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.Conne
 // collectActiveColumns gathers every (table, column) referenced by an active
 // predicate. Used to decide which delta indexes NewDeltaView should build.
 func (m *Manager) collectActiveColumns() map[TableID][]ColID {
-	tmp := make(map[TableID]map[ColID]struct{})
-	ensure := func(t TableID, c ColID) {
-		cols, ok := tmp[t]
-		if !ok {
-			cols = make(map[ColID]struct{})
-			tmp[t] = cols
+	out := make(map[TableID][]ColID, len(m.activeColumns))
+	for table, cols := range m.activeColumns {
+		if len(cols) == 0 {
+			continue
 		}
-		cols[c] = struct{}{}
+		list := make([]ColID, 0, len(cols))
+		for col := range cols {
+			list = append(list, col)
+		}
+		out[table] = list
 	}
+	return out
+}
+
+func (m *Manager) addActiveColumns(pred Predicate) {
+	m.mutateActiveColumns(pred, 1)
+}
+
+func (m *Manager) removeActiveColumns(pred Predicate) {
+	m.mutateActiveColumns(pred, -1)
+}
+
+func (m *Manager) mutateActiveColumns(pred Predicate, delta int) {
+	if m.activeColumns == nil {
+		m.activeColumns = make(map[TableID]map[ColID]int)
+	}
+	walkPredicateColumns(pred, func(t TableID, c ColID) {
+		cols, ok := m.activeColumns[t]
+		if !ok {
+			if delta <= 0 {
+				return
+			}
+			cols = make(map[ColID]int)
+			m.activeColumns[t] = cols
+		}
+		cols[c] += delta
+		if cols[c] <= 0 {
+			delete(cols, c)
+		}
+		if len(cols) == 0 {
+			delete(m.activeColumns, t)
+		}
+	})
+}
+
+func walkPredicateColumns(pred Predicate, visit func(TableID, ColID)) {
 	var walk func(p Predicate)
 	walk = func(p Predicate) {
 		switch x := p.(type) {
 		case ColEq:
-			ensure(x.Table, x.Column)
+			visit(x.Table, x.Column)
 		case ColNe:
-			ensure(x.Table, x.Column)
+			visit(x.Table, x.Column)
 		case ColRange:
-			ensure(x.Table, x.Column)
+			visit(x.Table, x.Column)
 		case And:
 			if x.Left != nil {
 				walk(x.Left)
@@ -270,8 +307,8 @@ func (m *Manager) collectActiveColumns() map[TableID][]ColID {
 				walk(x.Right)
 			}
 		case Join:
-			ensure(x.Left, x.LeftCol)
-			ensure(x.Right, x.RightCol)
+			visit(x.Left, x.LeftCol)
+			visit(x.Right, x.RightCol)
 			if x.Filter != nil {
 				walk(x.Filter)
 			}
@@ -281,18 +318,9 @@ func (m *Manager) collectActiveColumns() map[TableID][]ColID {
 			}
 		}
 	}
-	for _, qs := range m.registry.byHash {
-		walk(qs.predicate)
+	if pred != nil {
+		walk(pred)
 	}
-	out := make(map[TableID][]ColID, len(tmp))
-	for t, cols := range tmp {
-		list := make([]ColID, 0, len(cols))
-		for c := range cols {
-			list = append(list, c)
-		}
-		out[t] = list
-	}
-	return out
 }
 
 // collectCandidatesInto walks the changeset and populates the provided scratch
@@ -310,7 +338,7 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 		}
 
 		// Tier 1: batched value-index lookup.
-		for _, col := range m.indexes.Value.TrackedColumns(tid) {
+		m.indexes.Value.ForEachTrackedColumn(tid, func(col ColID) {
 			distinct := st.distinct
 			for k := range distinct {
 				delete(distinct, k)
@@ -329,18 +357,18 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 			collectDistinct(tc.Inserts)
 			collectDistinct(tc.Deletes)
 			for _, v := range distinct {
-				for _, h := range m.indexes.Value.Lookup(tid, col, v) {
+				m.indexes.Value.ForEachHash(tid, col, v, func(h QueryHash) {
 					cands[h] = struct{}{}
-				}
+				})
 			}
-		}
+		})
 
 		// Tier 2: join edges where this table is the LHS.
 		if view != nil && m.resolver != nil {
-			for _, edge := range m.indexes.JoinEdge.EdgesForTable(tid) {
+			m.indexes.JoinEdge.ForEachEdge(tid, func(edge JoinEdge) {
 				rhsIdx, ok := m.resolver.IndexIDForColumn(edge.RHSTable, edge.RHSJoinCol)
 				if !ok {
-					continue
+					return
 				}
 				probe := func(row types.ProductValue) {
 					if int(edge.LHSJoinCol) >= len(row) {
@@ -356,9 +384,9 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 						if int(edge.RHSFilterCol) >= len(rhsRow) {
 							continue
 						}
-						for _, h := range m.indexes.JoinEdge.Lookup(edge, rhsRow[edge.RHSFilterCol]) {
+						m.indexes.JoinEdge.ForEachHash(edge, rhsRow[edge.RHSFilterCol], func(h QueryHash) {
 							cands[h] = struct{}{}
-						}
+						})
 					}
 				}
 				for _, row := range tc.Inserts {
@@ -367,13 +395,13 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 				for _, row := range tc.Deletes {
 					probe(row)
 				}
-			}
+			})
 		}
 
 		// Tier 3: table fallback.
-		for _, h := range m.indexes.Table.Lookup(tid) {
+		m.indexes.Table.ForEachHash(tid, func(h QueryHash) {
 			cands[h] = struct{}{}
-		}
+		})
 	}
 	return cands
 }
@@ -484,6 +512,9 @@ func projectJoinFragments(fragments [][]types.ProductValue, lhsWidth int, projec
 
 func evalCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue) {
 	if p.Filter != nil {
+		if p.Left != p.Right {
+			return evalFilteredCrossJoinDelta(dv, p)
+		}
 		before := crossJoinProjectedRows(p, projectedRowsBefore(dv, p.Left), projectedRowsBefore(dv, p.Right))
 		after := crossJoinProjectedRows(p, tableRowsAfter(dv.CommittedView(), p.Left), tableRowsAfter(dv.CommittedView(), p.Right))
 		return diffProjectedRowBags(before, after)
@@ -495,6 +526,30 @@ func evalCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.Pr
 	afterOtherCount := rowCountAfter(dv.CommittedView(), otherTable)
 	beforeOtherCount := rowCountBefore(dv, otherTable)
 	return diffProjectedRowsWithMultiplicity(beforeProjectedRows, beforeOtherCount, afterProjectedRows, afterOtherCount)
+}
+
+func evalFilteredCrossJoinDelta(dv *DeltaView, p CrossJoin) (inserts, deletes []types.ProductValue) {
+	leftInserts := dv.InsertedRows(p.Left)
+	rightInserts := dv.InsertedRows(p.Right)
+	leftDeletes := dv.DeletedRows(p.Left)
+	rightDeletes := dv.DeletedRows(p.Right)
+
+	leftAfter := tableRowsAfter(dv.CommittedView(), p.Left)
+	rightAfter := tableRowsAfter(dv.CommittedView(), p.Right)
+	leftBefore := projectedRowsBefore(dv, p.Left)
+	rightBefore := projectedRowsBefore(dv, p.Right)
+
+	leftAfterWithoutInserts := subtractProjectedRowsByKey(leftAfter, leftInserts)
+	leftBeforeWithoutDeletes := subtractProjectedRowsByKey(leftBefore, leftDeletes)
+
+	insertFromLeft := crossJoinProjectedRows(p, leftInserts, rightAfter)
+	insertFromRight := crossJoinProjectedRows(p, leftAfterWithoutInserts, rightInserts)
+	deleteFromLeft := crossJoinProjectedRows(p, leftDeletes, rightBefore)
+	deleteFromRight := crossJoinProjectedRows(p, leftBeforeWithoutDeletes, rightDeletes)
+	return ReconcileJoinDelta(
+		[][]types.ProductValue{insertFromLeft, insertFromRight},
+		[][]types.ProductValue{deleteFromLeft, deleteFromRight},
+	)
 }
 
 func crossJoinProjectedRows(p CrossJoin, leftRows, rightRows []types.ProductValue) []types.ProductValue {

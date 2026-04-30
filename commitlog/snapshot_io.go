@@ -470,90 +470,131 @@ func (w *FileSnapshotWriter) writeSnapshotFile(f snapshotTempFile, committed *st
 }
 
 func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.CommittedState, txID types.TxID) error {
-	committed.RLock()
-	defer committed.RUnlock()
-
-	if committedTxID := committed.CommittedTxIDLocked(); committedTxID != txID {
-		return &SnapshotHorizonMismatchError{
-			SnapshotTxID:  txID,
-			CommittedTxID: committedTxID,
-		}
-	}
-
-	var schemaBuf bytes.Buffer
-	if err := EncodeSchemaSnapshot(&schemaBuf, w.reg); err != nil {
+	body, err := w.captureSnapshotBody(committed, txID)
+	if err != nil {
 		return err
 	}
-	if err := writeUint32Full(dst, uint32(schemaBuf.Len())); err != nil {
+	if err := writeUint32Full(dst, uint32(len(body.schema))); err != nil {
 		return err
 	}
-	if err := writeFull(dst, schemaBuf.Bytes()); err != nil {
+	if err := writeFull(dst, body.schema); err != nil {
 		return err
 	}
-	ids := committed.TableIDs()
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	sequenceTableIDs := make([]schema.TableID, 0, len(ids))
-	for _, tableID := range ids {
-		table, _ := committed.Table(tableID)
-		if _, ok := table.SequenceValue(); ok {
-			sequenceTableIDs = append(sequenceTableIDs, tableID)
-		}
-	}
-	if err := writeUint32Full(dst, uint32(len(sequenceTableIDs))); err != nil {
+	if err := writeUint32Full(dst, uint32(len(body.sequences))); err != nil {
 		return err
 	}
-	for _, tableID := range sequenceTableIDs {
-		table, _ := committed.Table(tableID)
-		seq, _ := table.SequenceValue()
-		if err := writeUint32Full(dst, uint32(tableID)); err != nil {
+	for _, seq := range body.sequences {
+		if err := writeUint32Full(dst, uint32(seq.tableID)); err != nil {
 			return err
 		}
-		if err := writeUint64Full(dst, seq); err != nil {
+		if err := writeUint64Full(dst, seq.value); err != nil {
 			return err
 		}
 	}
-	if err := writeUint32Full(dst, uint32(len(ids))); err != nil {
+	if err := writeUint32Full(dst, uint32(len(body.nextIDs))); err != nil {
 		return err
 	}
-	for _, tableID := range ids {
-		table, _ := committed.Table(tableID)
-		if err := writeUint32Full(dst, uint32(tableID)); err != nil {
+	for _, nextID := range body.nextIDs {
+		if err := writeUint32Full(dst, uint32(nextID.tableID)); err != nil {
 			return err
 		}
-		if err := writeUint64Full(dst, uint64(table.NextID())); err != nil {
+		if err := writeUint64Full(dst, nextID.value); err != nil {
 			return err
 		}
 	}
-	if err := writeUint32Full(dst, uint32(len(ids))); err != nil {
+	if err := writeUint32Full(dst, uint32(len(body.tables))); err != nil {
 		return err
 	}
-	var rowBuf bytes.Buffer
-	for _, tableID := range ids {
-		table, _ := committed.Table(tableID)
-		rows, err := deterministicRows(table)
-		if err != nil {
+	rowBuf := make([]byte, 0, 1024)
+	for _, table := range body.tables {
+		if err := writeUint32Full(dst, uint32(table.tableID)); err != nil {
 			return err
 		}
-		if err := writeUint32Full(dst, uint32(tableID)); err != nil {
+		if err := writeUint32Full(dst, uint32(len(table.rows))); err != nil {
 			return err
 		}
-		if err := writeUint32Full(dst, uint32(len(rows))); err != nil {
-			return err
-		}
-		for _, row := range rows {
-			rowBuf.Reset()
-			if err := bsatn.EncodeProductValue(&rowBuf, row); err != nil {
+		for _, row := range table.rows {
+			rowBuf = rowBuf[:0]
+			var err error
+			rowBuf, err = bsatn.AppendProductValue(rowBuf, row)
+			if err != nil {
 				return err
 			}
-			if err := writeUint32Full(dst, uint32(rowBuf.Len())); err != nil {
+			if err := writeUint32Full(dst, uint32(len(rowBuf))); err != nil {
 				return err
 			}
-			if err := writeFull(dst, rowBuf.Bytes()); err != nil {
+			if err := writeFull(dst, rowBuf); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+type snapshotBodyCapture struct {
+	schema    []byte
+	sequences []snapshotSequenceCapture
+	nextIDs   []snapshotNextIDCapture
+	tables    []snapshotTableCapture
+}
+
+type snapshotSequenceCapture struct {
+	tableID schema.TableID
+	value   uint64
+}
+
+type snapshotNextIDCapture struct {
+	tableID schema.TableID
+	value   uint64
+}
+
+type snapshotTableCapture struct {
+	tableID schema.TableID
+	rows    []types.ProductValue
+}
+
+func (w *FileSnapshotWriter) captureSnapshotBody(committed *store.CommittedState, txID types.TxID) (snapshotBodyCapture, error) {
+	var body snapshotBodyCapture
+	var schemaBuf bytes.Buffer
+	if err := EncodeSchemaSnapshot(&schemaBuf, w.reg); err != nil {
+		return body, err
+	}
+	body.schema = append(body.schema, schemaBuf.Bytes()...)
+
+	committed.RLock()
+	defer committed.RUnlock()
+
+	if committedTxID := committed.CommittedTxIDLocked(); committedTxID != txID {
+		return body, &SnapshotHorizonMismatchError{
+			SnapshotTxID:  txID,
+			CommittedTxID: committedTxID,
+		}
+	}
+
+	ids := committed.TableIDs()
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, tableID := range ids {
+		table, _ := committed.Table(tableID)
+		if seq, ok := table.SequenceValue(); ok {
+			body.sequences = append(body.sequences, snapshotSequenceCapture{tableID: tableID, value: seq})
+		}
+	}
+	for _, tableID := range ids {
+		table, _ := committed.Table(tableID)
+		body.nextIDs = append(body.nextIDs, snapshotNextIDCapture{
+			tableID: tableID,
+			value:   uint64(table.NextID()),
+		})
+	}
+	for _, tableID := range ids {
+		table, _ := committed.Table(tableID)
+		rows, err := deterministicRows(table)
+		if err != nil {
+			return body, err
+		}
+		body.tables = append(body.tables, snapshotTableCapture{tableID: tableID, rows: rows})
+	}
+	return body, nil
 }
 
 type SnapshotData struct {

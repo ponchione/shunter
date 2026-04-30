@@ -1,7 +1,6 @@
 package commitlog
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"slices"
@@ -16,9 +15,6 @@ const changesetVersion byte = 1
 
 // EncodeChangeset serializes a Changeset to bytes.
 func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteByte(changesetVersion)
-
 	// Sort table IDs for deterministic output.
 	tableIDs := make([]schema.TableID, 0, len(cs.Tables))
 	for id := range cs.Tables {
@@ -26,42 +22,68 @@ func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
 	}
 	slices.Sort(tableIDs)
 
-	var scratch [4]byte
-	binary.LittleEndian.PutUint32(scratch[:], uint32(len(tableIDs)))
-	buf.Write(scratch[:])
+	size := 1 + 4
+	for _, id := range tableIDs {
+		tc := cs.Tables[id]
+		size += 4
+		size += encodedChangesetRowsSize(tc.Inserts)
+		size += encodedChangesetRowsSize(tc.Deletes)
+	}
+	out := make([]byte, 0, size)
+	out = append(out, changesetVersion)
+	out = appendUint32LE(out, uint32(len(tableIDs)))
 
 	for _, id := range tableIDs {
 		tc := cs.Tables[id]
-		binary.LittleEndian.PutUint32(scratch[:], uint32(id))
-		buf.Write(scratch[:])
+		out = appendUint32LE(out, uint32(id))
 
 		// Inserts.
-		if err := writeChangesetRows(&buf, tc.Inserts, &scratch); err != nil {
+		var err error
+		out, err = appendChangesetRows(out, tc.Inserts)
+		if err != nil {
 			return nil, err
 		}
 
 		// Deletes.
-		if err := writeChangesetRows(&buf, tc.Deletes, &scratch); err != nil {
+		out, err = appendChangesetRows(out, tc.Deletes)
+		if err != nil {
 			return nil, err
 		}
 	}
 
-	return buf.Bytes(), nil
+	return out, nil
 }
 
-func writeChangesetRows(buf *bytes.Buffer, rows []types.ProductValue, scratch *[4]byte) error {
-	binary.LittleEndian.PutUint32(scratch[:], uint32(len(rows)))
-	buf.Write(scratch[:])
+func encodedChangesetRowsSize(rows []types.ProductValue) int {
+	size := 4
 	for _, row := range rows {
-		rowBytes, err := encodeRow(row)
-		if err != nil {
-			return err
-		}
-		binary.LittleEndian.PutUint32(scratch[:], uint32(len(rowBytes)))
-		buf.Write(scratch[:])
-		buf.Write(rowBytes)
+		size += 4 + bsatn.EncodedProductValueSize(row)
 	}
-	return nil
+	return size
+}
+
+func appendChangesetRows(out []byte, rows []types.ProductValue) ([]byte, error) {
+	out = appendUint32LE(out, uint32(len(rows)))
+	for _, row := range rows {
+		rowLen := bsatn.EncodedProductValueSize(row)
+		out = appendUint32LE(out, uint32(rowLen))
+		before := len(out)
+		var err error
+		out, err = bsatn.AppendProductValue(out, row)
+		if err != nil {
+			return out, err
+		}
+		if got := len(out) - before; got != rowLen {
+			return out, fmt.Errorf("commitlog: encoded row size changed from %d to %d", rowLen, got)
+		}
+	}
+	return out, nil
+}
+
+func appendUint32LE(out []byte, v uint32) []byte {
+	var scratch [4]byte
+	binary.LittleEndian.PutUint32(scratch[:], v)
+	return append(out, scratch[:]...)
 }
 
 // DecodeChangeset deserializes a Changeset from bytes using the default row-size limit.
@@ -139,14 +161,6 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 		return nil, fmt.Errorf("commitlog: trailing changeset bytes")
 	}
 	return cs, nil
-}
-
-func encodeRow(row types.ProductValue) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := bsatn.EncodeProductValue(&buf, row); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }
 
 func decodeRow(data []byte, ts *schema.TableSchema, maxRowBytes uint32) (types.ProductValue, int, error) {

@@ -21,6 +21,7 @@ func (m *Manager) dropSub(connID types.ConnectionID, subID types.SubscriptionID)
 	_, last, _ := m.registry.removeSubscriber(connID, subID)
 	if last && qs != nil {
 		RemoveSubscription(m.indexes, qs.predicate, hash)
+		m.removeActiveColumns(qs.predicate)
 		m.registry.removeQueryState(hash)
 	}
 }
@@ -371,6 +372,7 @@ func (m *Manager) RegisterSet(
 			// the `DBError::WithSql` suffix.
 			qs.sqlText = req.SQLText
 			PlaceSubscription(m.indexes, p, hash)
+			m.addActiveColumns(p)
 		}
 		m.registry.addSubscriber(hash, req.ConnID, subID, req.RequestID, req.QueryID)
 		allocated = append(allocated, subID)

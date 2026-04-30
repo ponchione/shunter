@@ -156,6 +156,12 @@ func NewBytes(x []byte) Value {
 	return Value{kind: KindBytes, buf: cp}
 }
 
+// NewBytesOwned builds a Bytes value by taking ownership of x.
+// Callers must not mutate x after passing it here.
+func NewBytesOwned(x []byte) Value {
+	return Value{kind: KindBytes, buf: x}
+}
+
 // NewInt128 builds a 128-bit signed value from its high (signed) and low
 // words. hi is the signed high word; lo is the unsigned low word.
 func NewInt128(hi int64, lo uint64) Value {
@@ -222,6 +228,12 @@ func NewArrayString(xs []string) Value {
 	cp := make([]string, len(xs))
 	copy(cp, xs)
 	return Value{kind: KindArrayString, strArr: cp}
+}
+
+// NewArrayStringOwned builds an ArrayString value by taking ownership of xs.
+// Callers must not mutate xs after passing it here.
+func NewArrayStringOwned(xs []string) Value {
+	return Value{kind: KindArrayString, strArr: xs}
 }
 
 // --- Accessors ---
@@ -293,6 +305,13 @@ func (v Value) AsBytes() []byte {
 	return cp
 }
 
+// BytesView returns the Bytes payload without copying.
+// The returned slice is read-only by convention; mutating it would mutate v.
+func (v Value) BytesView() []byte {
+	v.mustKind(KindBytes)
+	return v.buf
+}
+
 // AsInt128 returns the signed high word and unsigned low word of an Int128.
 func (v Value) AsInt128() (hi int64, lo uint64) {
 	v.mustKind(KindInt128)
@@ -331,6 +350,13 @@ func (v Value) AsArrayString() []string {
 	cp := make([]string, len(v.strArr))
 	copy(cp, v.strArr)
 	return cp
+}
+
+// ArrayStringView returns the ArrayString payload without copying.
+// The returned slice is read-only by convention; mutating it would mutate v.
+func (v Value) ArrayStringView() []string {
+	v.mustKind(KindArrayString)
+	return v.strArr
 }
 
 func (v Value) mustKind(want ValueKind) {

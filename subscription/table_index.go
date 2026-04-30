@@ -44,3 +44,14 @@ func (ti *TableIndex) Lookup(table TableID) []QueryHash {
 	}
 	return mapKeys(set)
 }
+
+// ForEachHash calls fn for every query hash registered for table.
+func (ti *TableIndex) ForEachHash(table TableID, fn func(QueryHash)) {
+	set, ok := ti.tables[table]
+	if !ok {
+		return
+	}
+	for h := range set {
+		fn(h)
+	}
+}
