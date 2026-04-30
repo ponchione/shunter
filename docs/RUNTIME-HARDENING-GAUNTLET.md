@@ -89,7 +89,9 @@ Current status:
   also checks that the returned fresh
   resume plan can append a tail that is replayed on the next restart, and
   snapshot recovery handles a header-only rollover segment immediately after
-  the snapshot horizon. Segment creation, scanning, and recovery now reject
+  the snapshot horizon. Header-only active-segment resume plans are also
+  exercised through durability append and a second recovery. Segment creation,
+  scanning, and recovery now reject
   bootstrap tx 0 segment starts as unsafe history, and terminal max-tx
   snapshot horizons are rejected by the writer or fail before recovery can
   return an overflowing zero resume plan.

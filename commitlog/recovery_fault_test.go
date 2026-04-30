@@ -1514,6 +1514,55 @@ func TestOpenAndRecoverHeaderOnlySegmentBoundaries(t *testing.T) {
 	})
 }
 
+func TestOpenAndRecoverHeaderOnlyResumePlanAppendsAndReplays(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	createHeaderOnlySegment(t, root, 1)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 0 {
+		t.Fatalf("maxTxID = %d, want 0", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{})
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 1 {
+		t.Fatalf("resume plan = %+v, want append-in-place on header-only segment 1 at tx 1", plan)
+	}
+	if !report.HasDurableLog || report.DurableLogHorizon != 0 {
+		t.Fatalf("durable log report = (%v, %d), want header-only horizon 0", report.HasDurableLog, report.DurableLogHorizon)
+	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(root, plan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatalf("resume durability worker with plan %+v: %v", plan, err)
+	}
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	finalTxID, err := dw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalTxID != 1 {
+		t.Fatalf("final txID = %d, want 1", finalTxID)
+	}
+
+	recovered, maxTxID, plan, report, err = OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 1 {
+		t.Fatalf("second recovery maxTxID = %d, want 1", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 1}) {
+		t.Fatalf("second recovery replayed range = %+v, want 1..1", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 2 {
+		t.Fatalf("second recovery resume plan = %+v, want append-in-place on segment 1 at tx 2", plan)
+	}
+}
+
 func TestOpenAndRecoverSnapshotTailZeroFilledPadding(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
