@@ -99,6 +99,8 @@ Current status:
   counters before recovery can restore regressed allocators.
   Snapshot header faults are categorized as snapshot read failures while
   preserving their underlying bad-magic, bad-version, or bad-flags leaf errors.
+  Truncated snapshot payloads now receive the same snapshot category while
+  retaining their underlying EOF cause.
   Fresh recovery resume plans now reject mismatched segment-start and next-tx
   values before creating a segment or publishing a false durable horizon.
   Unsafe history checks now also cover generated snapshot/log boundary gaps and

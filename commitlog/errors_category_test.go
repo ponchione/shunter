@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -439,6 +440,23 @@ func TestSnapshotHeaderFaultsReturnSnapshotCategory(t *testing.T) {
 			}
 			tc.assertErr(t, err)
 		})
+	}
+}
+
+func TestSnapshotPayloadTruncationReturnsSnapshotCategory(t *testing.T) {
+	root := t.TempDir()
+	snapshotDir := filepath.Join(root, "snapshots", "5")
+	writeSnapshotBytes(t, snapshotDir, 5, 1, nil)
+
+	_, err := ReadSnapshot(snapshotDir)
+	if err == nil {
+		t.Fatal("expected truncated snapshot payload")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("errors.Is(err, ErrSnapshot) = false: %v", err)
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("errors.Is(err, io.EOF) = false: %v", err)
 	}
 }
 

@@ -634,33 +634,33 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 		return nil, snapshotReadError(err)
 	}
 	if err := verifySnapshotPayloadHash(f, expected); err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 
 	tables, schemaSnapshotVersion, schemaByID, err := readSnapshotSchema(f)
 	if err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 	sequences, err := readSnapshotSequences(f, schemaByID)
 	if err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 	nextIDs, err := readSnapshotNextIDs(f, schemaByID)
 	if err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 	snapshotTables, err := readSnapshotTables(f, schemaByID)
 	if err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 	if err := validateSnapshotCompleteness(schemaByID, sequences, nextIDs, snapshotTables); err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 	if err := validateSnapshotBootstrapState(types.TxID(txID), sequences, nextIDs, snapshotDataBootstrapRowCounts(snapshotTables)); err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 	if err := requireNoTrailingBytes(f, "trailing snapshot bytes"); err != nil {
-		return nil, err
+		return nil, snapshotReadError(err)
 	}
 
 	return &SnapshotData{
