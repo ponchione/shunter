@@ -25,6 +25,7 @@ func FuzzDecodeRecord(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		rec, err := DecodeRecord(bytes.NewReader(data), maxPayload)
 		if err != nil {
+			assertRecordDecodeFuzzError(t, data, err)
 			return
 		}
 		if rec.RecordType != RecordTypeChangeset {
@@ -49,6 +50,16 @@ func FuzzDecodeRecord(f *testing.F) {
 			t.Fatalf("record round-trip mismatch: before=%+v after=%+v", rec, roundTrip)
 		}
 	})
+}
+
+func assertRecordDecodeFuzzError(t *testing.T, data []byte, err error) {
+	t.Helper()
+	if errors.Is(err, ErrTraversal) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return
+	}
+	t.Fatalf("DecodeRecord returned unclassified error %T: %v %s", err, err, recordDecodeFuzzLabel(data))
 }
 
 func FuzzDecodeChangeset(f *testing.F) {
@@ -866,6 +877,13 @@ func snapshotFuzzSeeds(t testing.TB) [][]byte {
 	writeUint32(t, &oversizedRow, DefaultCommitLogOptions().MaxRowBytes+1)
 	seeds = append(seeds, snapshotSeedFromBody(t, 1, oversizedRow.Bytes()))
 	return seeds
+}
+
+func recordDecodeFuzzLabel(data []byte) string {
+	if len(data) <= 80 {
+		return fmt.Sprintf("len=%d data=%x", len(data), data)
+	}
+	return fmt.Sprintf("len=%d data_prefix=%x", len(data), data[:80])
 }
 
 func schemaSnapshotFuzzLabel(data []byte) string {
