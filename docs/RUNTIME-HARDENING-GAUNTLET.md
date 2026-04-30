@@ -101,6 +101,8 @@ Current status:
   preserving their underlying bad-magic, bad-version, or bad-flags leaf errors.
   Truncated snapshot payloads now receive the same snapshot category while
   retaining their underlying EOF cause.
+  Snapshot next-id values below the restored row allocator are rejected at read
+  time and remain fail-loud during selection instead of falling back.
   Fresh recovery resume plans now reject mismatched segment-start and next-tx
   values before creating a segment or publishing a false durable horizon.
   Unsafe history checks now also cover generated snapshot/log boundary gaps and

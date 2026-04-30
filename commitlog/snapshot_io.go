@@ -656,6 +656,9 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 	if err := validateSnapshotCompleteness(schemaByID, sequences, nextIDs, snapshotTables); err != nil {
 		return nil, snapshotReadError(err)
 	}
+	if err := validateSnapshotAllocatorBounds(nextIDs, snapshotTables); err != nil {
+		return nil, snapshotReadError(err)
+	}
 	if err := validateSnapshotBootstrapState(types.TxID(txID), sequences, nextIDs, snapshotDataBootstrapRowCounts(snapshotTables)); err != nil {
 		return nil, snapshotReadError(err)
 	}
@@ -851,6 +854,20 @@ func validateSnapshotCompleteness(schemaByID map[schema.TableID]*schema.TableSch
 		if snapshotSchemaHasAutoIncrement(tableSchema) {
 			if _, ok := sequences[tableID]; !ok {
 				return fmt.Errorf("%w: snapshot missing sequence for autoincrement table %d", ErrSnapshot, tableID)
+			}
+		}
+	}
+	return nil
+}
+
+func validateSnapshotAllocatorBounds(nextIDs map[schema.TableID]uint64, tables []SnapshotTableData) error {
+	for _, table := range tables {
+		minNext := uint64(len(table.Rows)) + 1
+		if nextIDs[table.TableID] < minNext {
+			return &SnapshotAllocatorBoundsError{
+				TableID: uint32(table.TableID),
+				NextID:  nextIDs[table.TableID],
+				MinNext: minNext,
 			}
 		}
 	}

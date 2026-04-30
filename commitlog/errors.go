@@ -229,6 +229,22 @@ func (e *SnapshotHorizonMismatchError) Is(target error) bool {
 	return target == ErrSnapshot
 }
 
+// SnapshotAllocatorBoundsError reports a snapshot counter that would regress
+// the restored table allocator.
+type SnapshotAllocatorBoundsError struct {
+	TableID uint32
+	NextID  uint64
+	MinNext uint64
+}
+
+func (e *SnapshotAllocatorBoundsError) Error() string {
+	return fmt.Sprintf("commitlog: snapshot next_id %d for table %d is below restored next row ID %d", e.NextID, e.TableID, e.MinNext)
+}
+
+func (e *SnapshotAllocatorBoundsError) Is(target error) bool {
+	return target == ErrSnapshot
+}
+
 // SnapshotCompletionError reports a filesystem failure while creating or
 // completing snapshot artifacts.
 type SnapshotCompletionError struct {

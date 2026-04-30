@@ -199,7 +199,11 @@ func restoreSnapshot(committed *store.CommittedState, snapshot *SnapshotData) er
 			return fmt.Errorf("commitlog: snapshot next_id references unknown table %d", tableID)
 		}
 		if next < uint64(table.NextID()) {
-			return fmt.Errorf("%w: snapshot next_id %d for table %d is below restored next row ID %d", ErrSnapshot, next, tableID, table.NextID())
+			return &SnapshotAllocatorBoundsError{
+				TableID: uint32(tableID),
+				NextID:  next,
+				MinNext: uint64(table.NextID()),
+			}
 		}
 		table.SetNextID(types.RowID(next))
 	}

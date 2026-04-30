@@ -2021,8 +2021,12 @@ func TestOpenAndRecoverSnapshotNextIDBelowRestoredRowsFailsLoudly(t *testing.T) 
 	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
 		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
 	}
-	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
-		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	var allocatorErr *SnapshotAllocatorBoundsError
+	if !errors.As(err, &allocatorErr) {
+		t.Fatalf("error = %v, want SnapshotAllocatorBoundsError", err)
+	}
+	if report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 0 {
+		t.Fatalf("selected snapshot report = (%v, %d), want none after read-time allocator rejection", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
 	}
 	if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
 		t.Fatalf("report = %+v, want no recovered tx or resume plan", report)

@@ -219,6 +219,28 @@ func TestReadSnapshotRejectsZeroNextID(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsNextIDBelowRows(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 1, map[uint64]string{1: "alice", 2: "bob"})
+	rewriteSnapshotNextID(t, root, 1, 0, 1)
+
+	data, err := ReadSnapshot(filepath.Join(root, "snapshots", "1"))
+	if err == nil {
+		t.Fatalf("ReadSnapshot accepted regressed next_id: %+v", data)
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	var allocatorErr *SnapshotAllocatorBoundsError
+	if !errors.As(err, &allocatorErr) {
+		t.Fatalf("ReadSnapshot error = %v, want SnapshotAllocatorBoundsError", err)
+	}
+	if allocatorErr.TableID != 0 || allocatorErr.NextID != 1 || allocatorErr.MinNext != 3 {
+		t.Fatalf("allocator bounds error = %+v, want table 0 next 1 min 3", allocatorErr)
+	}
+}
+
 func TestReadSnapshotRejectsZeroSequence(t *testing.T) {
 	root := t.TempDir()
 	reg := buildRecoveryAutoIncrementRegistry(t)

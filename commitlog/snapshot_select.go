@@ -1,6 +1,7 @@
 package commitlog
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,6 +34,9 @@ func selectSnapshotWithReport(baseDir string, durableHorizon types.TxID, reg sch
 		}
 		snapshot, err := ReadSnapshot(filepath.Join(snapshotDir, fmt.Sprintf("%d", txID)))
 		if err != nil {
+			if isUnsafeSnapshotSelectionError(err) {
+				return nil, skipped, err
+			}
 			skipped = append(skipped, SkippedSnapshotReport{
 				TxID:   txID,
 				Reason: SnapshotSkipReadFailed,
@@ -110,6 +114,11 @@ func compareSnapshotSchema(snapshot *SnapshotData, reg schema.SchemaRegistry) er
 	}
 
 	return nil
+}
+
+func isUnsafeSnapshotSelectionError(err error) bool {
+	var allocatorErr *SnapshotAllocatorBoundsError
+	return errors.As(err, &allocatorErr)
 }
 
 func compareTableSchema(registered schema.TableSchema, snapshot schema.TableSchema) error {
