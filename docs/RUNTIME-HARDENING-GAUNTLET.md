@@ -32,7 +32,8 @@ Current status:
 - Idle protocol clients are also checked through the same restart recovery path,
   pinning keepalive timeout isolation before recovered reads and deltas.
 - Declared query and declared view protocol paths are checked across clean
-  restart over private base tables, including live declared-view delta fanout
+  restart over private base tables, including rejected declared-read
+  control-plane requests before restart and live declared-view delta fanout
   after recovery.
 - Strict-auth protocol coverage now re-dials after clean restart, rejects
   unauthenticated clients, preserves identity derivation, and verifies

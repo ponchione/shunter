@@ -32,25 +32,7 @@ func TestProtocolDeclaredQuerySucceedsWithDeclarationPermission(t *testing.T) {
 		MessageID: []byte("declared-query"),
 		Name:      "recent_messages",
 	})
-
-	tag, msg := readDeclaredReadProtocolMessage(t, client)
-	if tag != protocol.TagOneOffQueryResponse {
-		t.Fatalf("tag = %d, want OneOffQueryResponse", tag)
-	}
-	resp := msg.(protocol.OneOffQueryResponse)
-	if resp.Error != nil {
-		t.Fatalf("declared query error = %q, want nil", *resp.Error)
-	}
-	if len(resp.Tables) != 1 || resp.Tables[0].TableName != "messages" {
-		t.Fatalf("declared query tables = %+v, want messages table", resp.Tables)
-	}
-	rows, err := protocol.DecodeRowList(resp.Tables[0].Rows)
-	if err != nil {
-		t.Fatalf("DecodeRowList: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("declared query row count = %d, want 1", len(rows))
-	}
+	requireDeclaredReadOneOffRows(t, client, "messages", 1)
 }
 
 func TestProtocolDeclaredViewSucceedsWithDeclarationPermission(t *testing.T) {
@@ -70,22 +52,7 @@ func TestProtocolDeclaredViewSucceedsWithDeclarationPermission(t *testing.T) {
 		QueryID:   41,
 		Name:      "live_messages",
 	})
-
-	tag, msg := readDeclaredReadProtocolMessage(t, client)
-	if tag != protocol.TagSubscribeSingleApplied {
-		t.Fatalf("tag = %d, want SubscribeSingleApplied", tag)
-	}
-	applied := msg.(protocol.SubscribeSingleApplied)
-	if applied.RequestID != 31 || applied.QueryID != 41 || applied.TableName != "messages" {
-		t.Fatalf("declared view applied = %+v, want request/query/table identity", applied)
-	}
-	rows, err := protocol.DecodeRowList(applied.Rows)
-	if err != nil {
-		t.Fatalf("DecodeRowList: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("declared view initial row count = %d, want 1", len(rows))
-	}
+	requireDeclaredReadAppliedRows(t, client, 31, 41, "messages", 1)
 }
 
 func TestProtocolDeclaredReadsSurviveCleanRestart(t *testing.T) {
@@ -121,70 +88,90 @@ func TestProtocolDeclaredReadsSurviveCleanRestart(t *testing.T) {
 		MessageID: []byte("declared-query-after-restart"),
 		Name:      "recent_messages",
 	})
-	tag, msg := readDeclaredReadProtocolMessage(t, client)
-	if tag != protocol.TagOneOffQueryResponse {
-		t.Fatalf("declared query after restart tag = %d, want OneOffQueryResponse", tag)
-	}
-	resp := msg.(protocol.OneOffQueryResponse)
-	if resp.Error != nil {
-		t.Fatalf("declared query after restart error = %q, want nil", *resp.Error)
-	}
-	if len(resp.Tables) != 1 || resp.Tables[0].TableName != "messages" {
-		t.Fatalf("declared query after restart tables = %+v, want messages table", resp.Tables)
-	}
-	queryRows, err := protocol.DecodeRowList(resp.Tables[0].Rows)
-	if err != nil {
-		t.Fatalf("DecodeRowList query after restart: %v", err)
-	}
-	if len(queryRows) != 1 {
-		t.Fatalf("declared query after restart row count = %d, want 1", len(queryRows))
-	}
+	requireDeclaredReadOneOffRows(t, client, "messages", 1)
 
 	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
 		RequestID: 51,
 		QueryID:   61,
 		Name:      "live_messages",
 	})
-	tag, msg = readDeclaredReadProtocolMessage(t, client)
-	if tag != protocol.TagSubscribeSingleApplied {
-		t.Fatalf("declared view after restart tag = %d, want SubscribeSingleApplied", tag)
-	}
-	applied := msg.(protocol.SubscribeSingleApplied)
-	if applied.RequestID != 51 || applied.QueryID != 61 || applied.TableName != "messages" {
-		t.Fatalf("declared view after restart applied = %+v, want request/query/table identity", applied)
-	}
-	initialRows, err := protocol.DecodeRowList(applied.Rows)
-	if err != nil {
-		t.Fatalf("DecodeRowList declared view after restart: %v", err)
-	}
-	if len(initialRows) != 1 {
-		t.Fatalf("declared view after restart initial row count = %d, want 1", len(initialRows))
-	}
+	requireDeclaredReadAppliedRows(t, client, 51, 61, "messages", 1)
 
 	insertMessage(t, rt, "world")
-	tag, msg = readDeclaredReadProtocolMessage(t, client)
-	if tag != protocol.TagTransactionUpdateLight {
-		t.Fatalf("declared view after restart update tag = %d, want TransactionUpdateLight", tag)
+	requireDeclaredReadDeltaRows(t, client, 61, "messages", 1, 0)
+}
+
+func TestProtocolDeclaredReadRejectionsDoNotRecoverAfterCleanRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := declaredReadProtocolConfig(t)
+	cfg.DataDir = dataDir
+	module := func() *Module {
+		return validChatModule().
+			Reducer("insert_message", insertMessageReducer).
+			Query(QueryDeclaration{
+				Name:        "recent_messages",
+				SQL:         "SELECT * FROM messages",
+				Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+			}).
+			View(ViewDeclaration{
+				Name:        "live_messages",
+				SQL:         "SELECT * FROM messages",
+				Permissions: PermissionMetadata{Required: []string{"messages:subscribe"}},
+			})
 	}
-	update := msg.(protocol.TransactionUpdateLight)
-	if len(update.Update) != 1 {
-		t.Fatalf("declared view after restart update entries = %+v, want one entry", update.Update)
+
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, module(), cfg)
+	deniedClient := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "denied-before-restart"))
+	writeDeclaredReadProtocolMessage(t, deniedClient, protocol.DeclaredQueryMsg{
+		MessageID: []byte("denied-declared-query-before-restart"),
+		Name:      "recent_messages",
+	})
+	requireDeclaredReadOneOffError(t, deniedClient, "permission denied")
+
+	writeDeclaredReadProtocolMessage(t, deniedClient, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 71,
+		QueryID:   81,
+		Name:      "live_messages",
+	})
+	requireDeclaredReadSubscriptionError(t, deniedClient, 71, 81, "permission denied")
+
+	writeDeclaredReadProtocolMessage(t, deniedClient, protocol.DeclaredQueryMsg{
+		MessageID: []byte("unknown-declared-query-before-restart"),
+		Name:      "missing_declared_query",
+	})
+	requireDeclaredReadOneOffError(t, deniedClient, "unknown declared read")
+
+	writeDeclaredReadProtocolMessage(t, deniedClient, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 72,
+		QueryID:   82,
+		Name:      "missing_declared_view",
+	})
+	requireDeclaredReadSubscriptionError(t, deniedClient, 72, 82, "unknown declared read")
+
+	insertMessage(t, rt, "before-restart")
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close after rejected declared reads before restart: %v", err)
 	}
-	entry := update.Update[0]
-	if entry.QueryID != 61 || entry.TableName != "messages" {
-		t.Fatalf("declared view after restart update entry = %+v, want query 61/messages", entry)
-	}
-	insertRows, err := protocol.DecodeRowList(entry.Inserts)
-	if err != nil {
-		t.Fatalf("DecodeRowList declared view delta inserts: %v", err)
-	}
-	deleteRows, err := protocol.DecodeRowList(entry.Deletes)
-	if err != nil {
-		t.Fatalf("DecodeRowList declared view delta deletes: %v", err)
-	}
-	if len(insertRows) != 1 || len(deleteRows) != 0 {
-		t.Fatalf("declared view after restart delta inserts/deletes = %d/%d, want 1/0", len(insertRows), len(deleteRows))
-	}
+
+	rt = buildStartedDeclaredReadRuntimeWithConfig(t, module(), cfg)
+	defer rt.Close()
+
+	client := dialDeclaredReadProtocol(t, rt, mintDeclaredReadProtocolToken(t, "authorized-after-restart", "messages:read", "messages:subscribe"))
+	writeDeclaredReadProtocolMessage(t, client, protocol.DeclaredQueryMsg{
+		MessageID: []byte("declared-query-after-rejected-restart"),
+		Name:      "recent_messages",
+	})
+	requireDeclaredReadOneOffRows(t, client, "messages", 1)
+
+	writeDeclaredReadProtocolMessage(t, client, protocol.SubscribeDeclaredViewMsg{
+		RequestID: 71,
+		QueryID:   81,
+		Name:      "live_messages",
+	})
+	requireDeclaredReadAppliedRows(t, client, 71, 81, "messages", 1)
+
+	insertMessage(t, rt, "after-restart")
+	requireDeclaredReadDeltaRows(t, client, 81, "messages", 1, 0)
 }
 
 func TestProtocolDeclaredReadsReportPermissionDeniedAndUnknownName(t *testing.T) {
@@ -333,6 +320,74 @@ func readDeclaredReadProtocolMessage(t *testing.T, client *websocket.Conn) (uint
 		t.Fatalf("DecodeServerMessage: %v", err)
 	}
 	return tag, msg
+}
+
+func requireDeclaredReadOneOffRows(t *testing.T, client *websocket.Conn, wantTable string, wantRows int) {
+	t.Helper()
+	tag, msg := readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagOneOffQueryResponse {
+		t.Fatalf("tag = %d, want OneOffQueryResponse", tag)
+	}
+	resp := msg.(protocol.OneOffQueryResponse)
+	if resp.Error != nil {
+		t.Fatalf("declared query error = %q, want nil", *resp.Error)
+	}
+	if len(resp.Tables) != 1 || resp.Tables[0].TableName != wantTable {
+		t.Fatalf("declared query tables = %+v, want table %q", resp.Tables, wantTable)
+	}
+	rows, err := protocol.DecodeRowList(resp.Tables[0].Rows)
+	if err != nil {
+		t.Fatalf("DecodeRowList declared query rows for table %q: %v", wantTable, err)
+	}
+	if len(rows) != wantRows {
+		t.Fatalf("declared query row count = %d, want %d for table %q", len(rows), wantRows, wantTable)
+	}
+}
+
+func requireDeclaredReadAppliedRows(t *testing.T, client *websocket.Conn, requestID, queryID uint32, wantTable string, wantRows int) {
+	t.Helper()
+	tag, msg := readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagSubscribeSingleApplied {
+		t.Fatalf("tag = %d, want SubscribeSingleApplied for request=%d query=%d", tag, requestID, queryID)
+	}
+	applied := msg.(protocol.SubscribeSingleApplied)
+	if applied.RequestID != requestID || applied.QueryID != queryID || applied.TableName != wantTable {
+		t.Fatalf("declared view applied = %+v, want request=%d query=%d table=%q", applied, requestID, queryID, wantTable)
+	}
+	rows, err := protocol.DecodeRowList(applied.Rows)
+	if err != nil {
+		t.Fatalf("DecodeRowList declared view rows for request=%d query=%d table=%q: %v", requestID, queryID, wantTable, err)
+	}
+	if len(rows) != wantRows {
+		t.Fatalf("declared view initial row count = %d, want %d for request=%d query=%d table=%q", len(rows), wantRows, requestID, queryID, wantTable)
+	}
+}
+
+func requireDeclaredReadDeltaRows(t *testing.T, client *websocket.Conn, queryID uint32, wantTable string, wantInserts, wantDeletes int) {
+	t.Helper()
+	tag, msg := readDeclaredReadProtocolMessage(t, client)
+	if tag != protocol.TagTransactionUpdateLight {
+		t.Fatalf("tag = %d, want TransactionUpdateLight for query=%d", tag, queryID)
+	}
+	update := msg.(protocol.TransactionUpdateLight)
+	if len(update.Update) != 1 {
+		t.Fatalf("declared view update entries = %+v, want one entry for query=%d", update.Update, queryID)
+	}
+	entry := update.Update[0]
+	if entry.QueryID != queryID || entry.TableName != wantTable {
+		t.Fatalf("declared view update entry = %+v, want query=%d table=%q", entry, queryID, wantTable)
+	}
+	insertRows, err := protocol.DecodeRowList(entry.Inserts)
+	if err != nil {
+		t.Fatalf("DecodeRowList declared view delta inserts for query=%d table=%q: %v", queryID, wantTable, err)
+	}
+	deleteRows, err := protocol.DecodeRowList(entry.Deletes)
+	if err != nil {
+		t.Fatalf("DecodeRowList declared view delta deletes for query=%d table=%q: %v", queryID, wantTable, err)
+	}
+	if len(insertRows) != wantInserts || len(deleteRows) != wantDeletes {
+		t.Fatalf("declared view delta inserts/deletes = %d/%d, want %d/%d for query=%d table=%q", len(insertRows), len(deleteRows), wantInserts, wantDeletes, queryID, wantTable)
+	}
 }
 
 func requireDeclaredReadOneOffError(t *testing.T, client *websocket.Conn, wantSubstring string) {
