@@ -657,6 +657,81 @@ func TestRapidDamagedTailResumeMatchesFullLogRecovery(t *testing.T) {
 	})
 }
 
+func TestRapidTornRolloverTailResumeMatchesFullLogRecovery(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		fullRoot := rapidTempDir(t)
+		defer os.RemoveAll(fullRoot)
+		tornRoot := rapidTempDir(t)
+		defer os.RemoveAll(tornRoot)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 3, 24)
+		finalTxID := types.TxID(len(log.records))
+		validPrefix := rapid.IntRange(1, len(log.records)-1).Draw(t, "validPrefix")
+		partialHeaderBytes := rapid.IntRange(1, RecordHeaderSize-1).Draw(t, "partialHeaderBytes")
+
+		fullSegmentCount := rapid.IntRange(1, min(4, len(log.records))).Draw(t, "fullSegmentCount")
+		rapidWriteReplaySegments(t, fullRoot, log.records, fullSegmentCount)
+		fullRecovered, fullMaxTxID, _, fullReport, err := OpenAndRecoverWithReport(fullRoot, reg)
+		if err != nil {
+			t.Fatalf("full-log OpenAndRecoverWithReport: %v", err)
+		}
+		if fullMaxTxID != finalTxID {
+			t.Fatalf("full-log maxTxID = %d, want %d (report=%+v)", fullMaxTxID, finalTxID, fullReport)
+		}
+
+		prefixPath := rapidWriteReplaySegment(t, tornRoot, 1, log.records[:validPrefix])
+		tornPath := rapidWriteTornRolloverSegment(t, tornRoot, uint64(validPrefix+1), partialHeaderBytes)
+
+		prefixRecovered, prefixMaxTxID, prefixPlan, prefixReport, err := OpenAndRecoverWithReport(tornRoot, reg)
+		if err != nil {
+			t.Fatalf("prefix OpenAndRecoverWithReport with torn rollover %s after prefix %s: %v", tornPath, prefixPath, err)
+		}
+		if prefixMaxTxID != types.TxID(validPrefix) {
+			t.Fatalf("prefix maxTxID = %d, want %d (report=%+v)", prefixMaxTxID, validPrefix, prefixReport)
+		}
+		assertRapidReplayRows(t, prefixRecovered, log.models[validPrefix])
+		if len(prefixReport.DamagedTailSegments) != 1 || prefixReport.DamagedTailSegments[0].Path != tornPath {
+			t.Fatalf("prefix damaged tails = %+v, want only torn rollover %s", prefixReport.DamagedTailSegments, tornPath)
+		}
+		if prefixPlan.AppendMode != AppendByFreshNextSegment || prefixPlan.SegmentStartTx != prefixMaxTxID+1 || prefixPlan.NextTxID != prefixMaxTxID+1 {
+			t.Fatalf("prefix resume plan = %+v, want fresh replacement at tx %d (report=%+v)", prefixPlan, prefixMaxTxID+1, prefixReport)
+		}
+
+		dw, err := NewDurabilityWorkerWithResumePlan(tornRoot, prefixPlan, DefaultCommitLogOptions())
+		if err != nil {
+			t.Fatalf("NewDurabilityWorkerWithResumePlan(%+v): %v", prefixPlan, err)
+		}
+		for _, rec := range log.records[validPrefix:] {
+			dw.EnqueueCommitted(rec.txID, rapidReplayChangeset(rec))
+		}
+		if durableTxID, err := dw.Close(); err != nil {
+			t.Fatalf("Close resumed durability worker after torn rollover %s: %v", tornPath, err)
+		} else if durableTxID != uint64(finalTxID) {
+			t.Fatalf("resumed durable txID = %d, want %d", durableTxID, finalTxID)
+		}
+
+		resumedRecovered, resumedMaxTxID, resumedPlan, resumedReport, err := OpenAndRecoverWithReport(tornRoot, reg)
+		if err != nil {
+			t.Fatalf("resumed OpenAndRecoverWithReport after torn rollover replacement: %v", err)
+		}
+		if resumedMaxTxID != finalTxID {
+			t.Fatalf("resumed maxTxID = %d, want %d (report=%+v)", resumedMaxTxID, finalTxID, resumedReport)
+		}
+		assertRapidReplayStatesEqual(t, resumedRecovered, fullRecovered)
+		assertRapidReplayRows(t, resumedRecovered, log.models[len(log.records)])
+		if len(resumedReport.DamagedTailSegments) != 0 {
+			t.Fatalf("resumed damaged tails = %+v, want none after torn rollover replacement", resumedReport.DamagedTailSegments)
+		}
+		if resumedReport.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: finalTxID}) {
+			t.Fatalf("resumed replay range = %+v, want 1..%d (report=%+v)", resumedReport.ReplayedTxRange, finalTxID, resumedReport)
+		}
+		if resumedPlan.AppendMode != AppendInPlace || resumedPlan.SegmentStartTx != types.TxID(validPrefix+1) || resumedPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("resumed plan = %+v, want append-in-place on replacement segment %d at tx %d",
+				resumedPlan, validPrefix+1, finalTxID+1)
+		}
+	})
+}
+
 func drawRapidReplayLog(t *rapid.T, minRecords, maxRecords int) rapidReplayLog {
 	n := rapid.IntRange(minRecords, maxRecords).Draw(t, "recordCount")
 	model := make(map[uint64]string)
@@ -976,6 +1051,39 @@ func rapidAppendZeroTail(t rapidCommitlogFataler, path string, byteCount int) {
 	}
 	if err := f.Close(); err != nil {
 		t.Fatalf("close %s after zero tail append: %v", path, err)
+	}
+}
+
+func rapidWriteTornRolloverSegment(t rapidCommitlogFataler, root string, startTx uint64, partialHeaderBytes int) string {
+	t.Helper()
+	seg, err := CreateSegment(root, startTx)
+	if err != nil {
+		t.Fatalf("CreateSegment torn rollover: %v", err)
+	}
+	if err := seg.Close(); err != nil {
+		t.Fatalf("Close torn rollover segment: %v", err)
+	}
+	path := filepath.Join(root, SegmentFileName(startTx))
+	rapidAppendNonZeroTail(t, path, partialHeaderBytes)
+	return path
+}
+
+func rapidAppendNonZeroTail(t rapidCommitlogFataler, path string, byteCount int) {
+	t.Helper()
+	data := make([]byte, byteCount)
+	for i := range data {
+		data[i] = 0xa5
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open %s for nonzero tail append: %v", path, err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		t.Fatalf("append %d nonzero tail bytes to %s: %v", byteCount, path, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close %s after nonzero tail append: %v", path, err)
 	}
 }
 
