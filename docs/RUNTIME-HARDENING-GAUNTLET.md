@@ -17,6 +17,9 @@ Current status:
 - The deterministic root runtime gauntlet in `runtime_gauntlet_test.go` is
   saturated for the current hosted-runtime, protocol, subscription, reducer,
   scheduler, and clean-restart surfaces.
+- Public hosted-runtime/protocol restart coverage also pins rejected reducer
+  attempts immediately before restart so failed/panicking reducers cannot
+  recover ghost rows or block reuse of the rejected primary key after restart.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission
