@@ -61,8 +61,9 @@ Current status:
   resume plan, and corrupt offset indexes fall
   back to linear replay. The fuzz corpus now includes combined snapshot plus
   segment recovery-boundary artifacts, selected-snapshot safe and unsafe tail
-  padding seeds, indexed replay boundary sidecars, and accepted recovery report
-  invariants. Snapshot-only recovery now also checks that the returned fresh
+  padding seeds, valid, partial, and sentinel-corrupt indexed replay boundary
+  sidecars, and accepted recovery report invariants. Snapshot-only recovery now
+  also checks that the returned fresh
   resume plan can append a tail that is replayed on the next restart, and
   snapshot recovery handles a header-only rollover segment immediately after
   the snapshot horizon. Unsafe history checks now also cover generated

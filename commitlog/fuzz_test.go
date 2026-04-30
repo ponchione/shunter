@@ -313,6 +313,10 @@ func recoveryBoundaryFuzzSeeds(t testing.TB) []recoveryBoundaryFuzzSeed {
 	snapshotBoundaryNonzeroTail = append(snapshotBoundaryNonzeroTail, 1)
 	snapshotBoundaryIndex := recoveryBoundaryOffsetIndexSeed(t, snapshotBoundaryLog)
 	snapshotBoundaryCorruptIndex := appendOffsetIndexSeedEntry(nil, 2, 1)
+	snapshotBoundaryPartialIndex := append([]byte(nil), snapshotBoundaryIndex...)
+	snapshotBoundaryPartialIndex = appendOffsetIndexSeedKey(snapshotBoundaryPartialIndex, 99)
+	snapshotBoundarySentinelIndex := append(make([]byte, 8), make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(snapshotBoundarySentinelIndex[8:], SegmentHeaderSize)
 	firstTxMismatch := recoveryBoundarySegmentSeed(t,
 		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("first_mismatch")}}},
 	)
@@ -328,6 +332,8 @@ func recoveryBoundaryFuzzSeeds(t testing.TB) []recoveryBoundaryFuzzSeed {
 		{snapshot: validSnapshot, segment: snapshotBoundaryLog},
 		{snapshot: validSnapshot, segment: snapshotBoundaryLog, offsetIndex: snapshotBoundaryIndex},
 		{snapshot: validSnapshot, segment: snapshotBoundaryLog, offsetIndex: snapshotBoundaryCorruptIndex},
+		{snapshot: validSnapshot, segment: snapshotBoundaryLog, offsetIndex: snapshotBoundaryPartialIndex},
+		{snapshot: validSnapshot, segment: snapshotBoundaryLog, offsetIndex: snapshotBoundarySentinelIndex},
 		{snapshot: validSnapshot, segment: snapshotBoundaryZeroTail},
 		{snapshot: validSnapshot, segment: snapshotBoundaryZeroTail, offsetIndex: snapshotBoundaryIndex},
 		{snapshot: validSnapshot, segment: snapshotBoundaryNonzeroTail},
