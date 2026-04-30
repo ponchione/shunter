@@ -152,6 +152,10 @@ Current status:
   during initial durability startup and rollover are checked to leave the log
   recoverable, and segment-reader indexed seeks are fuzzed against linear seek
   results over generated TxID ranges.
+- Release-candidate validation now includes a compact public hosted-runtime
+  task-board workload under strict auth, with app reducers, private-table
+  declared query/view reads, clean restart recovery, and fixed seed/op labels
+  comparing observed rows against an independent model.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.
