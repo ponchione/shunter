@@ -35,6 +35,9 @@ Current status:
   checking post-restart fanout.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
+- A compact fixed-seed protocol restart-loop soak now drives reducer traces
+  across repeated clean restarts, probing one-off reads and subscription
+  initial snapshots after each restart.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission

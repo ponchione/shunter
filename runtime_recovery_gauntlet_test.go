@@ -326,3 +326,63 @@ func TestRuntimeGauntletDeterministicConcurrentReadShortSoak(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeGauntletProtocolRestartLoopShortSoak(t *testing.T) {
+	const (
+		steps        = 18
+		restartEvery = 3
+	)
+
+	for _, seed := range []int64{20260502, 20260503} {
+		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
+			dataDir := t.TempDir()
+			rt := buildGauntletRuntime(t, dataDir)
+			t.Cleanup(func() {
+				if rt != nil {
+					_ = rt.Close()
+				}
+			})
+
+			trace := buildGauntletTrace(seed, steps)
+			model := gauntletModel{players: map[uint64]string{}}
+
+			for chunkStart := 0; chunkStart < steps; chunkStart += restartEvery {
+				chunkEnd := chunkStart + restartEvery
+				if chunkEnd > steps {
+					chunkEnd = steps
+				}
+				label := fmt.Sprintf("seed %d restart-loop chunk %02d-%02d", seed, chunkStart, chunkEnd)
+
+				caller := dialGauntletProtocol(t, rt)
+				runGauntletProtocolTrace(t, rt, caller, &model, trace[chunkStart:chunkEnd], chunkStart, uint32(10000+chunkStart*10), label)
+				if err := caller.Close(websocket.StatusNormalClosure, label+" caller complete"); err != nil {
+					t.Fatalf("%s close caller: %v", label, err)
+				}
+
+				queryClient := dialGauntletProtocol(t, rt)
+				assertGauntletProtocolQueriesMatchModel(t, queryClient, model, label+" pre-restart probe")
+				if err := queryClient.Close(websocket.StatusNormalClosure, label+" query complete"); err != nil {
+					t.Fatalf("%s close query client: %v", label, err)
+				}
+				assertGauntletReadMatchesModel(t, rt, model, label+" pre-restart local read")
+
+				if chunkEnd == steps {
+					continue
+				}
+				if err := rt.Close(); err != nil {
+					t.Fatalf("%s Close before restart returned error: %v", label, err)
+				}
+				rt = buildGauntletRuntime(t, dataDir)
+				afterRestartLabel := fmt.Sprintf("seed %d restart-loop after restart at %02d", seed, chunkEnd)
+				assertGauntletReadMatchesModel(t, rt, model, afterRestartLabel)
+				assertGauntletSubscribeInitialMatchesModel(t, rt, model, afterRestartLabel)
+			}
+
+			finalLabel := fmt.Sprintf("seed %d restart-loop final", seed)
+			assertGauntletReadMatchesModel(t, rt, model, finalLabel)
+			finalQueryClient := dialGauntletProtocol(t, rt)
+			defer finalQueryClient.Close(websocket.StatusNormalClosure, finalLabel)
+			assertGauntletProtocolQueriesMatchModel(t, finalQueryClient, model, finalLabel)
+		})
+	}
+}
