@@ -3,6 +3,7 @@ package commitlog
 import (
 	"bytes"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,86 @@ func TestDurabilityWorkerRotatesIndexOnSegmentRotation(t *testing.T) {
 			t.Fatalf("segment %d: first entry byteOffset=%d want %d (segment-local coord space)",
 				tx, ents[0].ByteOffset, SegmentHeaderSize)
 		}
+	}
+}
+
+func TestDurabilityWorkerRolloverRecoveryMetamorphicEquivalence(t *testing.T) {
+	const n = uint64(6)
+	_, reg := testSchema()
+	cases := []struct {
+		name             string
+		maxSegmentSize   int64
+		wantSegmentStart types.TxID
+		wantNextTxID     types.TxID
+	}{
+		{
+			name:             "single-segment",
+			maxSegmentSize:   DefaultCommitLogOptions().MaxSegmentSize,
+			wantSegmentStart: 1,
+			wantNextTxID:     types.TxID(n + 1),
+		},
+		{
+			name:             "rollover-each-tx",
+			maxSegmentSize:   1,
+			wantSegmentStart: types.TxID(n + 1),
+			wantNextTxID:     types.TxID(n + 1),
+		},
+	}
+
+	var baselineRows map[uint64]string
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := DefaultCommitLogOptions()
+			opts.ChannelCapacity = int(n)
+			opts.DrainBatchSize = 1
+			opts.MaxSegmentSize = tc.maxSegmentSize
+			opts.OffsetIndexIntervalBytes = 1
+			opts.OffsetIndexCap = 16
+
+			dw, err := NewDurabilityWorker(dir, 1, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for txID := uint64(1); txID <= n; txID++ {
+				dw.EnqueueCommitted(txID, makeDurabilityTestChangeset(txID))
+			}
+			finalTx, fatalErr := dw.Close()
+			if fatalErr != nil {
+				t.Fatalf("%s Close fatal: %v", tc.name, fatalErr)
+			}
+			if finalTx != n {
+				t.Fatalf("%s final durable tx = %d, want %d", tc.name, finalTx, n)
+			}
+
+			recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+			if err != nil {
+				t.Fatalf("%s recovery: %v", tc.name, err)
+			}
+			if maxTxID != types.TxID(n) {
+				t.Fatalf("%s maxTxID = %d, want %d", tc.name, maxTxID, n)
+			}
+			if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: types.TxID(n)}) {
+				t.Fatalf("%s replayed range = %+v, want 1..%d", tc.name, report.ReplayedTxRange, n)
+			}
+			if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != tc.wantSegmentStart || plan.NextTxID != tc.wantNextTxID {
+				t.Fatalf("%s resume plan = %+v, want append-in-place on segment %d at tx %d",
+					tc.name, plan, tc.wantSegmentStart, tc.wantNextTxID)
+			}
+			rows := map[uint64]string{}
+			for txID := uint64(1); txID <= n; txID++ {
+				rows[txID] = "p"
+			}
+			assertReplayPlayerRows(t, recovered, rows)
+			recoveredRows := collectReplayPlayerRows(t, recovered)
+			if baselineRows == nil {
+				baselineRows = recoveredRows
+				return
+			}
+			if !maps.Equal(recoveredRows, baselineRows) {
+				t.Fatalf("%s recovered rows = %+v, want baseline %+v", tc.name, recoveredRows, baselineRows)
+			}
+		})
 	}
 }
 

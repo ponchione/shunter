@@ -130,8 +130,10 @@ Current status:
   against deterministic delete/retain partition invariants. Offset-index
   append/truncate/reopen behavior now has a fixed-seed model soak with compact
   operation traces, writer cadence/truncate/sync behavior has a fixed-seed
-  model soak, mutable reopen fuzzing now checks that ignored sidecar tails cannot
-  be resurrected by later appends, advisory offset-index create/open failures
+  model soak, durability recovery now compares single-segment and forced-rollover
+  traces for equivalent recovered rows and horizons, mutable reopen fuzzing now
+  checks that ignored sidecar tails cannot be resurrected by later appends,
+  advisory offset-index create/open failures
   during initial durability startup and rollover are checked to leave the log
   recoverable, and segment-reader indexed seeks are fuzzed against linear seek
   results over generated TxID ranges.

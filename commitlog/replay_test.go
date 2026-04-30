@@ -769,14 +769,7 @@ func writeReplaySegment(t *testing.T, root string, startTx uint64, records ...re
 
 func assertReplayPlayerRows(t *testing.T, committed *store.CommittedState, want map[uint64]string) {
 	t.Helper()
-	table, ok := committed.Table(0)
-	if !ok {
-		t.Fatal("players table missing")
-	}
-	got := make(map[uint64]string, table.RowCount())
-	for _, row := range table.Scan() {
-		got[row[0].AsUint64()] = row[1].AsString()
-	}
+	got := collectReplayPlayerRows(t, committed)
 	if len(got) != len(want) {
 		t.Fatalf("players row count = %d, want %d (got=%v)", len(got), len(want), got)
 	}
@@ -785,4 +778,17 @@ func assertReplayPlayerRows(t *testing.T, committed *store.CommittedState, want 
 			t.Fatalf("players rows = %v, want %v", got, want)
 		}
 	}
+}
+
+func collectReplayPlayerRows(t *testing.T, committed *store.CommittedState) map[uint64]string {
+	t.Helper()
+	table, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	got := make(map[uint64]string, table.RowCount())
+	for _, row := range table.Scan() {
+		got[row[0].AsUint64()] = row[1].AsString()
+	}
+	return got
 }
