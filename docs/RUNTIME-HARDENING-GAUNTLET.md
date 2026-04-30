@@ -43,7 +43,8 @@ Current status:
   resume equivalence, snapshot replay with and without offset indexes, and
   boundary-segment compaction equivalence. Full-log recovery is also checked
   across generated segment split choices. Fault coverage now also checks safe
-  zero-filled tails on full logs and selected-snapshot tails, corrupt sealed
+  zero-filled tails on full logs and selected-snapshot tails, unsafe
+  zero-header/nonzero tails on selected-snapshot replay tails, corrupt sealed
   predecessor segments, and corrupt newest snapshot fallback to an older valid
   snapshot plus log; torn rollover segments are replaced through the recovery
   resume plan, and corrupt offset indexes fall
