@@ -120,8 +120,7 @@ For human orientation, start with:
 1. `README.md` - project overview and current status
 2. `docs/decomposition/hosted-runtime-version-phases.md` - hosted-runtime phase
    map
-3. `TECH-DEBT.md` - active correctness and cleanup priorities
-4. `docs/shunter-design-decisions.md` - design notes and tradeoffs
+3. `docs/shunter-design-decisions.md` - design notes and tradeoffs
 
 For implementation work, inspect the active packages directly:
 
@@ -136,6 +135,8 @@ For implementation work, inspect the active packages directly:
 
 For automation or agent-driven work, follow `AGENTS.md` and `RTK.md` before
 running commands or editing files.
+
+Active development handoffs and issue tracking live under `docs/internal/`.
 
 ## Validation
 

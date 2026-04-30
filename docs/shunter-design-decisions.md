@@ -2,7 +2,8 @@
 
 This file keeps current implementation-facing Shunter design decisions that
 are still cited by code or tests. It is not a history log. For active status
-and prioritization, use `TECH-DEBT.md` and the active root handoff.
+and prioritization, use `docs/internal/TECH-DEBT.md` and the active internal
+handoff.
 
 Reference paths are grounding only. Do not copy or port source from
 `reference/SpacetimeDB/`.

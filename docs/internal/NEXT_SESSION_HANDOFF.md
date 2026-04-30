@@ -2,7 +2,7 @@
 
 Use this file to start the next Shunter correctness / TECH-DEBT agent with no
 prior chat context. Hosted-runtime planning uses
-`HOSTED_RUNTIME_PLANNING_HANDOFF.md` instead.
+`docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` instead.
 
 ## Startup
 
@@ -10,7 +10,7 @@ Required reading before editing:
 
 1. `RTK.md`
 2. This file
-3. `TECH-DEBT.md` only for the active issue section you are taking
+3. `docs/internal/TECH-DEBT.md` only for the active issue section you are taking
 4. `docs/RUNTIME-HARDENING-GAUNTLET.md` only when running the runtime hardening
    campaign
 
@@ -37,8 +37,8 @@ No fixed implementation slice is queued. The best next live TECH-DEBT target is
 OI-007 replay-edge and scheduler restart behavior, unless the user explicitly
 chooses a different open issue or asks for the runtime hardening gauntlet.
 
-For OI-007, start from the issue section in `TECH-DEBT.md`, then inspect only
-the relevant restart/replay code and tests:
+For OI-007, start from the issue section in `docs/internal/TECH-DEBT.md`, then
+inspect only the relevant restart/replay code and tests:
 
 - `commitlog/replay.go`
 - `commitlog/recovery.go`

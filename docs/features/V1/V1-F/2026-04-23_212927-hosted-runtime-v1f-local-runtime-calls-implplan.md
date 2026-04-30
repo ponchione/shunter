@@ -762,5 +762,5 @@ Expected:
 ## Historical sequencing note
 
 The later hosted-runtime slices have since landed. Do not treat this completed
-V1-F plan as a live handoff; use `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+V1-F plan as a live handoff; use `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
 current hosted-runtime status.

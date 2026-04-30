@@ -51,4 +51,4 @@ Scope boundaries:
 
 Historical sequencing note: later hosted-runtime slices have since landed. Do
 not treat this completed V2-C plan as a live handoff; use
-`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
+`docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

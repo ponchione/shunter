@@ -2,13 +2,14 @@
 
 Default startup reading:
 1. `RTK.md`
-2. The active root handoff:
-   - `NEXT_SESSION_HANDOFF.md` for future correctness / TECH-DEBT regressions
-   - `HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
+2. The active internal handoff:
+   - `docs/internal/NEXT_SESSION_HANDOFF.md` for future correctness /
+     TECH-DEBT regressions
+   - `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
    - `docs/RUNTIME-HARDENING-GAUNTLET.md` for the post-tech-debt runtime
      hardening test campaign
-3. `TECH-DEBT.md` only for the active issue section named by the handoff or
-   user task
+3. `docs/internal/TECH-DEBT.md` only for the active issue section named by the
+   handoff or user task
 4. Only the code, package docs, and narrow spec sections named by that handoff
    or by the slice you are touching
 

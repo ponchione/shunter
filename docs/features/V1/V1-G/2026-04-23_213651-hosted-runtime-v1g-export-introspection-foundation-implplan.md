@@ -799,4 +799,4 @@ Expected:
 
 Later hosted-runtime slices have landed. Do not use this completed V1-G
 implementation plan as a live handoff; use
-`HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
+`docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.

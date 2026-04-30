@@ -8,7 +8,7 @@ Source docs:
 - `docs/specs/hosted-runtime-v1-contract.md`
 - `docs/specs/hosted-runtime-v1.5-follow-ons.md`
 - `docs/specs/hosted-runtime-version-phases.md`
-- `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
+- `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md`
 
 Follow-up design authority:
 - `docs/features/V2/READ-AUTHORIZATION-DESIGN.md` for completing raw SQL,

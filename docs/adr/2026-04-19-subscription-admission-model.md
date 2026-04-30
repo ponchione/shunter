@@ -282,7 +282,7 @@ are removed. New regression pins:
   reached incidentally. The executor handler now passes a populated
   response (result or error) to `Reply`; no zero-value-on-error
   footgun survives. As a consequence, Group C's TD-138 work is a
-  TECH-DEBT.md closure note ("resolved by Group B PR"); no additional
+  docs/internal/TECH-DEBT.md closure note ("resolved by Group B PR"); no additional
   code change is required.
 - TD-139: `Predicates []any` compile-time safety. Unaffected by this
   ADR; retained as-is. Group C remains the place where TD-139's code
@@ -329,7 +329,7 @@ One slice, one PR. Strict TDD per `superpowers:test-driven-development`:
     `docs/superpowers/specs/2026-04-18-subscribe-multi-single-split-design.md`
     §4 to note that the set-based manager is the single admission
     authority.
-13. Update `TECH-DEBT.md`: close TD-136 and TD-137, reference the
+13. Update `docs/internal/TECH-DEBT.md`: close TD-136 and TD-137, reference the
     Group B PR and this ADR; note TD-140 closed by this ADR.
 
 Full migration is feasible as one PR because the change is a single

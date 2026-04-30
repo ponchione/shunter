@@ -1,8 +1,8 @@
 # Hosted Runtime Planning Handoff
 
 Use this file as the primary cross-agent handoff only for hosted-runtime
-planning or implementation work. Use `NEXT_SESSION_HANDOFF.md` for TECH-DEBT /
-correctness work.
+planning or implementation work. Use `docs/internal/NEXT_SESSION_HANDOFF.md`
+for TECH-DEBT / correctness work.
 
 ## Current Target
 

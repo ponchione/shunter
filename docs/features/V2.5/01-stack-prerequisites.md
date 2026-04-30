@@ -10,8 +10,8 @@ directly blocks V2.5 implementation.
 
 Read:
 - `RTK.md`
-- `NEXT_SESSION_HANDOFF.md`
-- `HOSTED_RUNTIME_PLANNING_HANDOFF.md`
+- `docs/internal/NEXT_SESSION_HANDOFF.md`
+- `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md`
 - `docs/features/V2/READ-AUTHORIZATION-DESIGN.md`
 - `docs/features/V2.5/README.md`
 - `docs/features/V2.5/00-current-execution-plan.md`

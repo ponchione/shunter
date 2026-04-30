@@ -302,7 +302,7 @@ Still rejected in protocol v1 (each as `SubscriptionError`):
 - the same `query_id` is already active **or pending** on the connection
 - the expression shape is not part of the v1 subset
 
-**Design decision — SQL in v1.** The structured-predicate shape was rejected once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and gives Shunter clients one query language across subscribe and one-off reads. The original structured-predicate design is now superseded by the SQL wire surface. See `TECH-DEBT.md::OI-002` and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for current status.
+**Design decision — SQL in v1.** The structured-predicate shape was rejected once `SubscribeMulti` required carrying multiple queries under one envelope: a SQL string is a natural multi-element payload and gives Shunter clients one query language across subscribe and one-off reads. The original structured-predicate design is now superseded by the SQL wire surface. See `docs/internal/TECH-DEBT.md` OI-002 and the parser doc comments on `SubscribeSingleMsg.QueryString` / `SubscribeMultiMsg.QueryStrings` / `OneOffQueryMsg.QueryString` in `protocol/client_messages.go` for current status.
 
 **Design decision — bounded joins in v1.** Equality / range predicates on one table remain the common hot-path subscription shape and map cleanly onto SPEC-004's pruning indexes. v1 also exposes the bounded two-relation join subset above because it lowers directly into the existing SPEC-004 `Join` / `CrossJoin` predicate model. Broader relational SQL remains out of scope.
 
