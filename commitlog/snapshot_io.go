@@ -172,7 +172,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 				return nil, 0, err
 			}
 			if colIdx > math.MaxInt32 {
-				return nil, 0, fmt.Errorf("column index overflow: %d", colIdx)
+				return nil, 0, fmt.Errorf("%w: schema snapshot column index overflow: %d", ErrSnapshot, colIdx)
 			}
 			index := int(colIdx)
 			if _, exists := seenColumns[index]; exists {
@@ -267,7 +267,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 					return nil, 0, err
 				}
 				if colIdx > math.MaxInt32 {
-					return nil, 0, fmt.Errorf("column index overflow: %d", colIdx)
+					return nil, 0, fmt.Errorf("%w: schema snapshot column index overflow: %d", ErrSnapshot, colIdx)
 				}
 				if _, ok := seenColumns[int(colIdx)]; !ok {
 					return nil, 0, fmt.Errorf("%w: schema snapshot index %q references unknown column index %d in table %d", ErrSnapshot, idxName, colIdx, tableID)

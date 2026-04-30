@@ -82,7 +82,8 @@ Current status:
   back to linear replay. The fuzz corpus now includes combined snapshot plus
   segment recovery-boundary artifacts, selected-snapshot safe and unsafe tail
   padding seeds, valid, partial, safe-tail-pointing, and sentinel-corrupt
-  indexed replay boundary sidecars, and accepted recovery report invariants.
+  indexed replay boundary sidecars, standalone schema-snapshot decode
+  boundaries, and accepted recovery report invariants.
   Snapshot-only recovery now
   also checks that the returned fresh
   resume plan can append a tail that is replayed on the next restart, and

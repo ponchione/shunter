@@ -3,8 +3,12 @@ package commitlog
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/ponchione/shunter/schema"
@@ -107,6 +111,33 @@ func FuzzReadSnapshot(f *testing.F) {
 	})
 }
 
+func FuzzDecodeSchemaSnapshot(f *testing.F) {
+	for _, seed := range schemaSnapshotFuzzSeeds(f) {
+		f.Add(seed)
+	}
+
+	const maxSchemaSnapshotBytes = 32 << 10
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > maxSchemaSnapshotBytes {
+			t.Skip("schema snapshot fuzz input above bounded local limit")
+		}
+
+		tables, version, err := DecodeSchemaSnapshot(bytes.NewReader(data))
+		if err != nil {
+			assertSchemaSnapshotFuzzError(t, data, err)
+			return
+		}
+		again, againVersion, err := DecodeSchemaSnapshot(bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("DecodeSchemaSnapshot accepted once then failed: %v %s", err, schemaSnapshotFuzzLabel(data))
+		}
+		if version != againVersion || !reflect.DeepEqual(tables, again) {
+			t.Fatalf("DecodeSchemaSnapshot is not deterministic: version=%d/%d tables=%#v again=%#v %s", version, againVersion, tables, again, schemaSnapshotFuzzLabel(data))
+		}
+		assertDecodedSchemaSnapshotInvariants(t, data, tables)
+	})
+}
+
 func FuzzOpenOffsetIndex(f *testing.F) {
 	for _, seed := range offsetIndexFuzzSeeds() {
 		f.Add(seed)
@@ -154,6 +185,91 @@ func FuzzOpenOffsetIndex(f *testing.F) {
 			last = entry.TxID
 		}
 	})
+}
+
+func assertSchemaSnapshotFuzzError(t *testing.T, data []byte, err error) {
+	t.Helper()
+	if errors.Is(err, ErrSnapshot) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return
+	}
+	t.Fatalf("DecodeSchemaSnapshot returned unclassified error %T: %v %s", err, err, schemaSnapshotFuzzLabel(data))
+}
+
+func assertDecodedSchemaSnapshotInvariants(t *testing.T, data []byte, tables []schema.TableSchema) {
+	t.Helper()
+	seenTables := make(map[schema.TableID]struct{}, len(tables))
+	seenTableNames := make(map[string]struct{}, len(tables))
+	for _, table := range tables {
+		if table.Name == "" {
+			t.Fatalf("accepted empty table name: table=%+v %s", table, schemaSnapshotFuzzLabel(data))
+		}
+		if _, ok := seenTables[table.ID]; ok {
+			t.Fatalf("accepted duplicate table ID %d: tables=%+v %s", table.ID, tables, schemaSnapshotFuzzLabel(data))
+		}
+		seenTables[table.ID] = struct{}{}
+		if _, ok := seenTableNames[table.Name]; ok {
+			t.Fatalf("accepted duplicate table name %q: tables=%+v %s", table.Name, tables, schemaSnapshotFuzzLabel(data))
+		}
+		seenTableNames[table.Name] = struct{}{}
+		if len(table.Columns) == 0 {
+			t.Fatalf("accepted table without columns: table=%+v %s", table, schemaSnapshotFuzzLabel(data))
+		}
+
+		seenColumns := make(map[int]struct{}, len(table.Columns))
+		seenColumnNames := make(map[string]struct{}, len(table.Columns))
+		for _, col := range table.Columns {
+			if col.Name == "" {
+				t.Fatalf("accepted empty column name: table=%+v col=%+v %s", table, col, schemaSnapshotFuzzLabel(data))
+			}
+			if _, ok := seenColumns[col.Index]; ok {
+				t.Fatalf("accepted duplicate column index %d: table=%+v %s", col.Index, table, schemaSnapshotFuzzLabel(data))
+			}
+			seenColumns[col.Index] = struct{}{}
+			if _, ok := seenColumnNames[col.Name]; ok {
+				t.Fatalf("accepted duplicate column name %q: table=%+v %s", col.Name, table, schemaSnapshotFuzzLabel(data))
+			}
+			seenColumnNames[col.Name] = struct{}{}
+			if col.Type < schema.KindBool || col.Type > schema.KindArrayString {
+				t.Fatalf("accepted invalid column type %d: table=%+v col=%+v %s", col.Type, table, col, schemaSnapshotFuzzLabel(data))
+			}
+		}
+
+		primaryIndexes := 0
+		seenIndexNames := make(map[string]struct{}, len(table.Indexes))
+		for _, idx := range table.Indexes {
+			if idx.Name == "" {
+				t.Fatalf("accepted empty index name: table=%+v idx=%+v %s", table, idx, schemaSnapshotFuzzLabel(data))
+			}
+			if _, ok := seenIndexNames[idx.Name]; ok {
+				t.Fatalf("accepted duplicate index name %q: table=%+v %s", idx.Name, table, schemaSnapshotFuzzLabel(data))
+			}
+			seenIndexNames[idx.Name] = struct{}{}
+			if idx.Primary {
+				primaryIndexes++
+				if !idx.Unique {
+					t.Fatalf("accepted non-unique primary index: table=%+v idx=%+v %s", table, idx, schemaSnapshotFuzzLabel(data))
+				}
+			}
+			if len(idx.Columns) == 0 {
+				t.Fatalf("accepted index without columns: table=%+v idx=%+v %s", table, idx, schemaSnapshotFuzzLabel(data))
+			}
+			for _, colIdx := range idx.Columns {
+				if _, ok := seenColumns[colIdx]; !ok {
+					t.Fatalf("accepted index referencing missing column %d: table=%+v idx=%+v %s", colIdx, table, idx, schemaSnapshotFuzzLabel(data))
+				}
+			}
+		}
+		if primaryIndexes > 1 {
+			t.Fatalf("accepted multiple primary indexes: table=%+v %s", table, schemaSnapshotFuzzLabel(data))
+		}
+		for _, col := range table.Columns {
+			if col.AutoIncrement && !snapshotSchemaHasUniqueSingleColumnIndex(table.Indexes, col.Index) {
+				t.Fatalf("accepted auto_increment without unique single-column index: table=%+v col=%+v %s", table, col, schemaSnapshotFuzzLabel(data))
+			}
+		}
+	}
 }
 
 func FuzzScanSingleSegment(f *testing.F) {
@@ -605,6 +721,72 @@ func changesetFuzzSeeds(t testing.TB) [][]byte {
 	return seeds
 }
 
+func schemaSnapshotFuzzSeeds(t testing.TB) [][]byte {
+	t.Helper()
+	var seeds [][]byte
+	seeds = append(seeds, nil)
+	seeds = append(seeds, []byte{1, 0, 0, 0})
+	seeds = append(seeds, []byte{1, 0, 0, 0, 1, 0, 0, 0})
+
+	_, reg := testSchema()
+	var encoded bytes.Buffer
+	if err := EncodeSchemaSnapshot(&encoded, reg); err != nil {
+		t.Fatal(err)
+	}
+	valid := encoded.Bytes()
+	seeds = append(seeds, valid)
+	seeds = append(seeds, append(append([]byte(nil), valid...), 0))
+	for _, n := range []int{0, 4, 8, len(valid) - 1} {
+		if n >= 0 && n <= len(valid) {
+			seeds = append(seeds, append([]byte(nil), valid[:n]...))
+		}
+	}
+	seeds = append(seeds, encodeSingleTableSchemaSnapshot(t, false))
+	seeds = append(seeds, encodeSingleTableSchemaSnapshot(t, true))
+	seeds = append(seeds, schemaSnapshotColumnIndexOverflowSeed(t))
+	seeds = append(seeds, schemaSnapshotIndexColumnOverflowSeed(t))
+	return seeds
+}
+
+func schemaSnapshotColumnIndexOverflowSeed(t testing.TB) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1) // schema snapshot version
+	writeUint32(t, &buf, 1) // table count
+	writeUint32(t, &buf, 0) // table ID
+	if err := writeString(&buf, "players"); err != nil {
+		t.Fatal(err)
+	}
+	writeUint32(t, &buf, 1)           // column count
+	writeUint32(t, &buf, 0x8000_0000) // column index just above MaxInt32
+	return buf.Bytes()
+}
+
+func schemaSnapshotIndexColumnOverflowSeed(t testing.TB) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1) // schema snapshot version
+	writeUint32(t, &buf, 1) // table count
+	writeUint32(t, &buf, 0) // table ID
+	if err := writeString(&buf, "players"); err != nil {
+		t.Fatal(err)
+	}
+	writeUint32(t, &buf, 1) // column count
+	writeUint32(t, &buf, 0) // column index
+	if err := writeString(&buf, "id"); err != nil {
+		t.Fatal(err)
+	}
+	buf.Write([]byte{byte(schema.KindUint64), 0, 0})
+	writeUint32(t, &buf, 1) // index count
+	if err := writeString(&buf, "by_id"); err != nil {
+		t.Fatal(err)
+	}
+	buf.Write([]byte{1, 0})           // unique, not primary
+	writeUint32(t, &buf, 1)           // index column count
+	writeUint32(t, &buf, 0x8000_0000) // index column just above MaxInt32
+	return buf.Bytes()
+}
+
 func snapshotFuzzSeeds(t testing.TB) [][]byte {
 	t.Helper()
 	var seeds [][]byte
@@ -684,6 +866,13 @@ func snapshotFuzzSeeds(t testing.TB) [][]byte {
 	writeUint32(t, &oversizedRow, DefaultCommitLogOptions().MaxRowBytes+1)
 	seeds = append(seeds, snapshotSeedFromBody(t, 1, oversizedRow.Bytes()))
 	return seeds
+}
+
+func schemaSnapshotFuzzLabel(data []byte) string {
+	if len(data) <= 80 {
+		return fmt.Sprintf("len=%d data=%x", len(data), data)
+	}
+	return fmt.Sprintf("len=%d data_prefix=%x", len(data), data[:80])
 }
 
 func encodeRecordSeed(t testing.TB, rec *Record) []byte {
