@@ -1,7 +1,11 @@
 package protocol
 
 import (
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -40,4 +44,77 @@ func TestConnManagerGetMissingReturnsNil(t *testing.T) {
 	if m.Get(id) != nil {
 		t.Error("Get on empty manager should return nil")
 	}
+}
+
+func TestConnManagerConcurrentAddGetRemoveShortSoak(t *testing.T) {
+	const (
+		seed       = uint64(0xc011ec72)
+		workers    = 6
+		iterations = 96
+	)
+	m := NewConnManager()
+	opts := DefaultProtocolOptions()
+	start := make(chan struct{})
+	failures := make(chan string, workers*iterations)
+
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for op := range iterations {
+				id := connManagerSoakID(worker, op)
+				conn := NewConn(id, types.Identity{}, "", false, nil, &opts)
+				m.Add(conn)
+				if got := m.Get(id); got != conn {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d operation=Add+Get observed=%p expected=%p",
+						seed, worker, op, workers, iterations, got, conn)
+					return
+				}
+				probeID := connManagerSoakID((worker+1)%workers, (op*17+int(seed))%iterations)
+				if got := m.Get(probeID); got != nil && got.ID != probeID {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d operation=probe-Get observed_id=%x expected_id=%x",
+						seed, worker, op, workers, iterations, got.ID[:], probeID[:])
+					return
+				}
+				m.Remove(id)
+				if got := m.Get(id); got != nil {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d operation=Remove+Get observed=%p expected=nil",
+						seed, worker, op, workers, iterations, got)
+					return
+				}
+				if (int(seed)+worker+op)%5 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(worker)
+	}
+
+	close(start)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("seed=%#x op=wait runtime_config=workers=%d/iterations=%d operation=wait observed=timeout expected=all-workers-finished",
+			seed, workers, iterations)
+	}
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
+	}
+}
+
+func connManagerSoakID(worker, op int) types.ConnectionID {
+	var id types.ConnectionID
+	id[0] = byte(worker + 1)
+	id[1] = byte(op + 1)
+	id[2] = byte((worker+1)*17 + op*3)
+	id[3] = byte((op + 1) * 11)
+	return id
 }
