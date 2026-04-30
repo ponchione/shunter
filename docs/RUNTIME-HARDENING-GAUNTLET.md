@@ -58,9 +58,10 @@ Current status:
   parameterization. A short fixed-seed concurrent hash determinism soak also
   exercises pooled canonical encoders with compact worker/iteration/seed
   failure labels.
-- SQL parser fuzzing now drives arbitrary bounded query text through the
-  public `Parse` surface, checking unsupported-error categorization and
-  deterministic accepted parses.
+- SQL parser and literal coercion fuzzing now drive arbitrary bounded query
+  text through the public `Parse` surface and generated literal/kind pairs
+  through `CoerceWithCaller`, checking unsupported-error categorization and
+  deterministic accepted results.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission
