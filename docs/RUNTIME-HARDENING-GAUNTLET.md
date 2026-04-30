@@ -50,6 +50,9 @@ Current status:
 - Protocol RowList plus client/server message decoding now have bounded fuzz
   seed corpora that check malformed-input categorization and accepted-input
   canonical round trips.
+- SQL parser fuzzing now drives arbitrary bounded query text through the
+  public `Parse` surface, checking unsupported-error categorization and
+  deterministic accepted parses.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission
