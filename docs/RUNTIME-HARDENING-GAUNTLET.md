@@ -23,7 +23,8 @@ Current status:
   ordering.
 - Commitlog recovery/metamorphic coverage now includes rapid damaged-tail
   resume equivalence, snapshot replay with and without offset indexes, and
-  boundary-segment compaction equivalence; fault coverage now also checks safe
+  boundary-segment compaction equivalence. Full-log recovery is also checked
+  across generated segment split choices. Fault coverage now also checks safe
   zero-filled tails, corrupt sealed predecessor segments, and corrupt newest
   snapshot fallback to an older valid snapshot plus log; torn rollover segments
   are replaced through the recovery resume plan, and corrupt offset indexes fall

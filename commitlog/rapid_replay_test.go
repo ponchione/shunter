@@ -68,6 +68,54 @@ func TestRapidReplayFromHorizonMatchesSuffixModel(t *testing.T) {
 	})
 }
 
+func TestRapidOpenAndRecoverSegmentSplitsEquivalent(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		singleRoot := rapidTempDir(t)
+		defer os.RemoveAll(singleRoot)
+		splitRoot := rapidTempDir(t)
+		defer os.RemoveAll(splitRoot)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 2, 24)
+		finalTxID := types.TxID(len(log.records))
+		splitSegmentCount := rapid.IntRange(2, min(6, len(log.records))).Draw(t, "splitSegmentCount")
+
+		rapidWriteReplaySegments(t, singleRoot, log.records, 1)
+		splitSegments := rapidWriteReplaySegments(t, splitRoot, log.records, splitSegmentCount)
+
+		singleRecovered, singleMaxTxID, singlePlan, singleReport, err := OpenAndRecoverWithReport(singleRoot, reg)
+		if err != nil {
+			t.Fatalf("single-segment OpenAndRecoverWithReport: %v", err)
+		}
+		splitRecovered, splitMaxTxID, splitPlan, splitReport, err := OpenAndRecoverWithReport(splitRoot, reg)
+		if err != nil {
+			t.Fatalf("split-segment OpenAndRecoverWithReport with %d segments: %v", splitSegmentCount, err)
+		}
+
+		if singleMaxTxID != finalTxID || splitMaxTxID != finalTxID {
+			t.Fatalf("max tx mismatch: single=%d split=%d want=%d (singleReport=%+v splitReport=%+v)",
+				singleMaxTxID, splitMaxTxID, finalTxID, singleReport, splitReport)
+		}
+		assertRapidReplayStatesEqual(t, singleRecovered, splitRecovered)
+		assertRapidReplayRows(t, splitRecovered, log.models[len(log.records)])
+		if singleReport.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: finalTxID}) ||
+			splitReport.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: finalTxID}) {
+			t.Fatalf("replay ranges: single=%+v split=%+v, want 1..%d", singleReport.ReplayedTxRange, splitReport.ReplayedTxRange, finalTxID)
+		}
+		if !singleReport.HasDurableLog || !splitReport.HasDurableLog ||
+			singleReport.DurableLogHorizon != finalTxID || splitReport.DurableLogHorizon != finalTxID {
+			t.Fatalf("durable log reports: single=%+v split=%+v, want horizon %d", singleReport, splitReport, finalTxID)
+		}
+		lastSplitSegment := splitSegments[len(splitSegments)-1]
+		if singlePlan.AppendMode != AppendInPlace || singlePlan.NextTxID != finalTxID+1 {
+			t.Fatalf("single resume plan = %+v, want append-in-place at tx %d", singlePlan, finalTxID+1)
+		}
+		if splitPlan.AppendMode != AppendInPlace || splitPlan.SegmentStartTx != lastSplitSegment.StartTx || splitPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("split resume plan = %+v, want append-in-place on segment %d at tx %d",
+				splitPlan, lastSplitSegment.StartTx, finalTxID+1)
+		}
+	})
+}
+
 func TestRapidOpenAndRecoverSnapshotTailMatchesFullLog(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		fullRoot := rapidTempDir(t)
