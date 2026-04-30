@@ -53,6 +53,9 @@ Current status:
 - BSATN product-value decoding now has a bounded public-surface fuzz corpus
   across scalar and variable-length columns, checking malformed-input
   categorization plus accepted-row canonical re-encoding.
+- Subscription query hashing now has a bounded fuzz corpus for same-table
+  canonicalization laws, self-join filter alias identity, and client
+  parameterization.
 - SQL parser fuzzing now drives arbitrary bounded query text through the
   public `Parse` surface, checking unsupported-error categorization and
   deterministic accepted parses.
