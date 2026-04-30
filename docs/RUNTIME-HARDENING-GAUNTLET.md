@@ -129,8 +129,10 @@ Current status:
   append/truncate/reopen behavior now has a fixed-seed model soak with compact
   operation traces, writer cadence/truncate/sync behavior has a fixed-seed
   model soak, mutable reopen fuzzing now checks that ignored sidecar tails cannot
-  be resurrected by later appends, and segment-reader indexed seeks are fuzzed
-  against linear seek results over generated TxID ranges.
+  be resurrected by later appends, advisory offset-index create/open failures
+  during initial durability startup and rollover are checked to leave the log
+  recoverable, and segment-reader indexed seeks are fuzzed against linear seek
+  results over generated TxID ranges.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.

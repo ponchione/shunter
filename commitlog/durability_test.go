@@ -759,6 +759,52 @@ func TestDurabilityWorkerResumeWithUnopenableOffsetIndexDisablesIndexAndRecovers
 	}
 }
 
+func TestDurabilityWorkerInitialUnopenableOffsetIndexDoesNotBlockRecovery(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+	idxPath := filepath.Join(dir, OffsetIndexFileName(1))
+	if err := os.Mkdir(idxPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 2
+	opts.DrainBatchSize = 1
+	opts.OffsetIndexIntervalBytes = 1
+	opts.OffsetIndexCap = 8
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	dw.EnqueueCommitted(2, makeDurabilityTestChangeset(2))
+	finalTx, fatalErr := dw.Close()
+	if fatalErr != nil {
+		t.Fatalf("initial unopenable offset index should not fail durability: %v", fatalErr)
+	}
+	if finalTx != 2 || dw.DurableTxID() != 2 {
+		t.Fatalf("durable tx after unopenable initial index = (%d, %d), want (2, 2)", finalTx, dw.DurableTxID())
+	}
+	if info, err := os.Stat(idxPath); err != nil || !info.IsDir() {
+		t.Fatalf("unopenable initial index artifact stat = (%v, %v), want directory still present", info, err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 2}) {
+		t.Fatalf("replayed range = %+v, want 1..2", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want append-in-place on segment 1 at tx 3", plan)
+	}
+}
+
 func TestDurabilityWorkerOffsetIndexFailureDoesNotBlockDurablePrefix(t *testing.T) {
 	dir := t.TempDir()
 	_, reg := testSchema()
@@ -823,5 +869,52 @@ func TestDurabilityWorkerOffsetIndexFailureDoesNotBlockDurablePrefix(t *testing.
 	}
 	if len(entries) != 0 {
 		t.Fatalf("failed advisory index entries = %+v, want empty safe sidecar", entries)
+	}
+}
+
+func TestDurabilityWorkerRolloverUnopenableOffsetIndexDoesNotBlockRecovery(t *testing.T) {
+	dir := t.TempDir()
+	_, reg := testSchema()
+	idxPath := filepath.Join(dir, OffsetIndexFileName(2))
+	if err := os.Mkdir(idxPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 2
+	opts.DrainBatchSize = 1
+	opts.MaxSegmentSize = 1
+	opts.OffsetIndexIntervalBytes = 1
+	opts.OffsetIndexCap = 8
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	dw.EnqueueCommitted(2, makeDurabilityTestChangeset(2))
+	finalTx, fatalErr := dw.Close()
+	if fatalErr != nil {
+		t.Fatalf("rollover unopenable offset index should not fail durability: %v", fatalErr)
+	}
+	if finalTx != 2 || dw.DurableTxID() != 2 {
+		t.Fatalf("durable tx after unopenable rollover index = (%d, %d), want (2, 2)", finalTx, dw.DurableTxID())
+	}
+	if info, err := os.Stat(idxPath); err != nil || !info.IsDir() {
+		t.Fatalf("unopenable rollover index artifact stat = (%v, %v), want directory still present", info, err)
+	}
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("maxTxID = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "p", 2: "p"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 2}) {
+		t.Fatalf("replayed range = %+v, want 1..2", report.ReplayedTxRange)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+		t.Fatalf("resume plan = %+v, want append-in-place on header-only segment 3 at tx 3", plan)
 	}
 }
