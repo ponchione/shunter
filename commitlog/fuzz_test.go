@@ -342,6 +342,48 @@ func FuzzScanSingleSegment(f *testing.F) {
 	})
 }
 
+func FuzzSegmentReaderSeekToTxIDMatchesLinear(f *testing.F) {
+	for _, seed := range [][]byte{
+		nil,
+		{0, 1, 2, 3, 4, 5},
+		{0xff, 0x10, 0x20, 0x30, 0x40},
+		[]byte("segment-seek-boundary"),
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 256 {
+			t.Skip("segment seek fuzz input above bounded local limit")
+		}
+		r := newFuzzByteReader(data)
+		txs := segmentSeekFuzzTxIDs(r, 32)
+		target := r.txID(txs[len(txs)-1] + 5)
+		label := segmentSeekFuzzLabel(data, txs, target)
+
+		dir := t.TempDir()
+		entries := buildSegmentWithTxIDs(t, dir, txs)
+		sparse := segmentSeekFuzzSparseEntries(r, entries)
+		idx := populateSparseIndex(t, filepath.Join(dir, OffsetIndexFileName(txs[0])), uint64(len(entries)+4), sparse)
+		defer idx.Close()
+
+		indexed := openSegmentReader(t, dir, txs[0])
+		defer indexed.Close()
+		linear := openSegmentReader(t, dir, txs[0])
+		defer linear.Close()
+
+		indexedTx, indexedOK := readSegmentSeekFuzzNext(t, indexed, target, idx, label)
+		linearTx, linearOK := readSegmentSeekFuzzNext(t, linear, target, nil, label)
+		wantTx, wantOK := segmentSeekFuzzExpected(txs, target)
+		if indexedOK != linearOK || indexedTx != linearTx {
+			t.Fatalf("indexed/linear seek mismatch: indexed=(%d,%v) linear=(%d,%v) sparse=%+v %s", indexedTx, indexedOK, linearTx, linearOK, sparse, label)
+		}
+		if indexedOK != wantOK || indexedTx != wantTx {
+			t.Fatalf("seek result mismatch: got=(%d,%v) want=(%d,%v) sparse=%+v %s", indexedTx, indexedOK, wantTx, wantOK, sparse, label)
+		}
+	})
+}
+
 func FuzzOpenAndRecoverSnapshotSegmentBoundary(f *testing.F) {
 	for _, seed := range recoveryBoundaryFuzzSeeds(f) {
 		f.Add(seed.snapshot, seed.segment, seed.offsetIndex)
@@ -640,6 +682,63 @@ func segmentFuzzSeeds(t testing.TB) [][]byte {
 	)
 	seeds = append(seeds, badFlagsAfterPrefix)
 	return seeds
+}
+
+func segmentSeekFuzzTxIDs(r *fuzzByteReader, maxRecords int) []uint64 {
+	n := int(r.byte()%byte(maxRecords)) + 1
+	txs := make([]uint64, n)
+	txID := uint64(r.txID(8)) + 1
+	for i := range txs {
+		if i > 0 {
+			txID += uint64(r.txID(5)) + 1
+		}
+		txs[i] = txID
+	}
+	return txs
+}
+
+func segmentSeekFuzzSparseEntries(r *fuzzByteReader, entries []OffsetIndexEntry) []OffsetIndexEntry {
+	out := make([]OffsetIndexEntry, 0, len(entries))
+	for _, entry := range entries {
+		if r.byte()%3 == 0 {
+			out = append(out, entry)
+		}
+	}
+	if len(out) == 0 && len(entries) > 0 && r.byte()%2 == 0 {
+		out = append(out, entries[int(r.byte())%len(entries)])
+	}
+	return out
+}
+
+func readSegmentSeekFuzzNext(t *testing.T, reader *SegmentReader, target types.TxID, idx *OffsetIndex, label string) (uint64, bool) {
+	t.Helper()
+	if err := reader.SeekToTxID(target, idx); err != nil {
+		t.Fatalf("SeekToTxID(%d): %v %s", target, err, label)
+	}
+	rec, err := reader.Next()
+	if errors.Is(err, io.EOF) {
+		return 0, false
+	}
+	if err != nil {
+		t.Fatalf("Next after SeekToTxID(%d): %v %s", target, err, label)
+	}
+	return rec.TxID, true
+}
+
+func segmentSeekFuzzExpected(txs []uint64, target types.TxID) (uint64, bool) {
+	for _, txID := range txs {
+		if txID >= uint64(target) {
+			return txID, true
+		}
+	}
+	return 0, false
+}
+
+func segmentSeekFuzzLabel(data []byte, txs []uint64, target types.TxID) string {
+	if len(data) <= 80 {
+		return fmt.Sprintf("seed_len=%d seed=%x target=%d txs=%v", len(data), data, target, txs)
+	}
+	return fmt.Sprintf("seed_len=%d seed_prefix=%x target=%d txs=%v", len(data), data[:80], target, txs)
 }
 
 func segmentHeaderSeed(t testing.TB) []byte {

@@ -87,7 +87,7 @@ func FuzzCompactPlanner(f *testing.F) {
 		if len(data) > 512 {
 			return
 		}
-		r := newCompactFuzzReader(data)
+		r := newFuzzByteReader(data)
 		snapshotTxID := r.txID(64)
 		segments := r.segmentRanges(16)
 		label := compactFuzzLabel(data, snapshotTxID, segments)
@@ -1054,38 +1054,7 @@ func contiguousTxs(start, end uint64) []uint64 {
 	return txs
 }
 
-type compactFuzzReader struct {
-	data []byte
-	pos  int
-}
-
-func newCompactFuzzReader(data []byte) *compactFuzzReader {
-	return &compactFuzzReader{data: data}
-}
-
-func (r *compactFuzzReader) byte() byte {
-	if r.pos >= len(r.data) {
-		b := byte(19 + r.pos*29)
-		r.pos++
-		return b
-	}
-	b := r.data[r.pos]
-	r.pos++
-	return b
-}
-
-func (r *compactFuzzReader) txID(max uint64) types.TxID {
-	var out uint64
-	for i := 0; i < 8; i++ {
-		out = (out << 8) | uint64(r.byte())
-	}
-	if max == 0 {
-		return types.TxID(out)
-	}
-	return types.TxID(out % (max + 1))
-}
-
-func (r *compactFuzzReader) segmentRanges(maxSegments int) []SegmentRange {
+func (r *fuzzByteReader) segmentRanges(maxSegments int) []SegmentRange {
 	n := int(r.byte() % byte(maxSegments+1))
 	out := make([]SegmentRange, n)
 	for i := range out {
