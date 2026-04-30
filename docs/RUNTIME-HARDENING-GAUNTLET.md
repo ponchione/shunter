@@ -50,7 +50,9 @@ Current status:
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission
-  ordering.
+  ordering. Scheduler worker coverage also guards stale scheduled-attempt
+  completions so mismatched intended fire times cannot clear active in-flight
+  attempts.
 - Commitlog recovery/metamorphic coverage now includes rapid damaged-tail
   resume equivalence, snapshot replay with and without offset indexes, and
   boundary-segment compaction equivalence. Full-log recovery is also checked

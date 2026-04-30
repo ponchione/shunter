@@ -157,6 +157,67 @@ func TestSchedulerMarksInFlightBeforeDueCommandCanComplete(t *testing.T) {
 	}
 }
 
+func TestSchedulerCompletionWithWrongFireAtDoesNotClearInFlight(t *testing.T) {
+	s, cs, tid, inbox := schedulerWorkerFixture(t)
+	fireAt := time.Unix(50, 0).UnixNano()
+	seedSchedule(t, cs, tid, 102, "stale-completion", nil, fireAt, 0)
+
+	s.scan()
+	select {
+	case cmd := <-inbox:
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("enqueued cmd type=%T, want CallReducerCmd", cmd)
+		}
+		if call.Request.ScheduleID != 102 || call.Request.IntendedFireAt != fireAt {
+			t.Fatalf("enqueued request = %+v, want schedule 102 at %d", call.Request, fireAt)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("scan did not enqueue due schedule")
+	}
+
+	wasInFlight, wasReplayQueued := s.completeInFlight(102, fireAt+1)
+	if wasInFlight || wasReplayQueued {
+		t.Fatalf("wrong-fire-at completeInFlight = (%v, %v), want false/false", wasInFlight, wasReplayQueued)
+	}
+	rows := s.snapshotScheduleRows()
+	if len(rows) != 1 {
+		t.Fatalf("schedule rows=%d, want 1", len(rows))
+	}
+	if !s.isInFlight(rows[0]) {
+		t.Fatal("wrong-fire-at completion cleared the active in-flight marker")
+	}
+
+	s.scan()
+	select {
+	case cmd := <-inbox:
+		t.Fatalf("scan duplicated in-flight schedule after wrong-fire-at completion: %+v", cmd)
+	default:
+	}
+
+	wasInFlight, wasReplayQueued = s.completeInFlight(102, fireAt)
+	if !wasInFlight || wasReplayQueued {
+		t.Fatalf("correct completeInFlight = (%v, %v), want true/false", wasInFlight, wasReplayQueued)
+	}
+	if s.isInFlight(rows[0]) {
+		t.Fatal("correct completion left active in-flight marker")
+	}
+
+	s.scan()
+	select {
+	case cmd := <-inbox:
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("requeued cmd type=%T, want CallReducerCmd", cmd)
+		}
+		if call.Request.ScheduleID != 102 || call.Request.IntendedFireAt != fireAt {
+			t.Fatalf("requeued request = %+v, want schedule 102 at %d", call.Request, fireAt)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("scan did not retry due row after correct completion")
+	}
+}
+
 func TestSchedulerScanSkipsFuture(t *testing.T) {
 	s, cs, tid, inbox := schedulerWorkerFixture(t)
 	// Row fires at t=500s, now=100s → future.
