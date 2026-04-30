@@ -245,6 +245,22 @@ func (e *SnapshotAllocatorBoundsError) Is(target error) bool {
 	return target == ErrSnapshot
 }
 
+// SnapshotSequenceBoundsError reports a snapshot autoincrement counter that
+// would regress below restored row values.
+type SnapshotSequenceBoundsError struct {
+	TableID uint32
+	Next    uint64
+	MinNext uint64
+}
+
+func (e *SnapshotSequenceBoundsError) Error() string {
+	return fmt.Sprintf("commitlog: snapshot sequence %d for table %d is below restored next sequence value %d", e.Next, e.TableID, e.MinNext)
+}
+
+func (e *SnapshotSequenceBoundsError) Is(target error) bool {
+	return target == ErrSnapshot
+}
+
 // SnapshotCompletionError reports a filesystem failure while creating or
 // completing snapshot artifacts.
 type SnapshotCompletionError struct {

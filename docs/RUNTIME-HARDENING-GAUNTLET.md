@@ -103,6 +103,8 @@ Current status:
   retaining their underlying EOF cause.
   Snapshot next-id values below the restored row allocator are rejected at read
   time and remain fail-loud during selection instead of falling back.
+  Autoincrement sequence values below restored row values now receive the same
+  read-time and selection fail-loud treatment.
   Fresh recovery resume plans now reject mismatched segment-start and next-tx
   values before creating a segment or publishing a false durable horizon.
   Unsafe history checks now also cover generated snapshot/log boundary gaps and

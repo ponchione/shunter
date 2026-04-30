@@ -118,7 +118,11 @@ func compareSnapshotSchema(snapshot *SnapshotData, reg schema.SchemaRegistry) er
 
 func isUnsafeSnapshotSelectionError(err error) bool {
 	var allocatorErr *SnapshotAllocatorBoundsError
-	return errors.As(err, &allocatorErr)
+	if errors.As(err, &allocatorErr) {
+		return true
+	}
+	var sequenceErr *SnapshotSequenceBoundsError
+	return errors.As(err, &sequenceErr)
 }
 
 func compareTableSchema(registered schema.TableSchema, snapshot schema.TableSchema) error {

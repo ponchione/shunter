@@ -659,6 +659,9 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 	if err := validateSnapshotAllocatorBounds(nextIDs, snapshotTables); err != nil {
 		return nil, snapshotReadError(err)
 	}
+	if err := validateSnapshotSequenceBounds(sequences, schemaByID, snapshotTables); err != nil {
+		return nil, snapshotReadError(err)
+	}
 	if err := validateSnapshotBootstrapState(types.TxID(txID), sequences, nextIDs, snapshotDataBootstrapRowCounts(snapshotTables)); err != nil {
 		return nil, snapshotReadError(err)
 	}
@@ -867,6 +870,48 @@ func validateSnapshotAllocatorBounds(nextIDs map[schema.TableID]uint64, tables [
 			return &SnapshotAllocatorBoundsError{
 				TableID: uint32(table.TableID),
 				NextID:  nextIDs[table.TableID],
+				MinNext: minNext,
+			}
+		}
+	}
+	return nil
+}
+
+func validateSnapshotSequenceBounds(sequences map[schema.TableID]uint64, schemaByID map[schema.TableID]*schema.TableSchema, tables []SnapshotTableData) error {
+	for _, table := range tables {
+		next, ok := sequences[table.TableID]
+		if !ok {
+			continue
+		}
+		tableSchema := schemaByID[table.TableID]
+		sequenceCol := -1
+		for i := range tableSchema.Columns {
+			if tableSchema.Columns[i].AutoIncrement {
+				sequenceCol = i
+				break
+			}
+		}
+		if sequenceCol < 0 {
+			continue
+		}
+		maxSeen := uint64(0)
+		for _, row := range table.Rows {
+			value, ok := autoIncrementValueAsUint64(row[sequenceCol], tableSchema.Columns[sequenceCol].Type)
+			if !ok {
+				continue
+			}
+			if value > maxSeen {
+				maxSeen = value
+			}
+		}
+		minNext := maxSeen + 1
+		if maxSeen == ^uint64(0) {
+			minNext = maxSeen
+		}
+		if next < minNext {
+			return &SnapshotSequenceBoundsError{
+				TableID: uint32(table.TableID),
+				Next:    next,
 				MinNext: minNext,
 			}
 		}

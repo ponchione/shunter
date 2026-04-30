@@ -261,6 +261,40 @@ func TestReadSnapshotRejectsZeroSequence(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsSequenceBelowRows(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoveryAutoIncrementRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+	jobs, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("jobs table missing")
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("seed-1")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewUint64(2), types.NewString("seed-2")}); err != nil {
+		t.Fatal(err)
+	}
+	jobs.SetSequenceValue(3)
+	createSnapshotAt(t, NewSnapshotWriter(filepath.Join(root, "snapshots"), reg), committed, 1)
+	rewriteSnapshotSequence(t, root, 1, 0, 1)
+
+	data, err := ReadSnapshot(filepath.Join(root, "snapshots", "1"))
+	if err == nil {
+		t.Fatalf("ReadSnapshot accepted regressed sequence: %+v", data)
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	var sequenceErr *SnapshotSequenceBoundsError
+	if !errors.As(err, &sequenceErr) {
+		t.Fatalf("ReadSnapshot error = %v, want SnapshotSequenceBoundsError", err)
+	}
+	if sequenceErr.TableID != 0 || sequenceErr.Next != 1 || sequenceErr.MinNext != 3 {
+		t.Fatalf("sequence bounds error = %+v, want table 0 next 1 min 3", sequenceErr)
+	}
+}
+
 func TestReadSnapshotRejectsBootstrapRows(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)

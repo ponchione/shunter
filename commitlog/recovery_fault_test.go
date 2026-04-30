@@ -2062,11 +2062,15 @@ func TestOpenAndRecoverSnapshotSequenceBelowRestoredRowsFailsLoudly(t *testing.T
 	if !strings.Contains(err.Error(), "snapshot sequence 1 for table 0 is below restored next sequence value 3") {
 		t.Fatalf("error = %v, want explicit sequence regression detail", err)
 	}
+	var sequenceErr *SnapshotSequenceBoundsError
+	if !errors.As(err, &sequenceErr) {
+		t.Fatalf("error = %v, want SnapshotSequenceBoundsError", err)
+	}
 	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
 		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
 	}
-	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
-		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	if report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 0 {
+		t.Fatalf("selected snapshot report = (%v, %d), want none after read-time sequence rejection", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
 	}
 	if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
 		t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
@@ -2102,11 +2106,15 @@ func TestOpenAndRecoverSnapshotSequenceBelowPositiveSignedRowsFailsWithNegativeR
 	if !strings.Contains(err.Error(), "snapshot sequence 1 for table 0 is below restored next sequence value 43") {
 		t.Fatalf("error = %v, want explicit sequence regression detail", err)
 	}
+	var sequenceErr *SnapshotSequenceBoundsError
+	if !errors.As(err, &sequenceErr) {
+		t.Fatalf("error = %v, want SnapshotSequenceBoundsError", err)
+	}
 	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
 		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
 	}
-	if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
-		t.Fatalf("selected snapshot report = (%v, %d), want (true, 2)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+	if report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 0 {
+		t.Fatalf("selected snapshot report = (%v, %d), want none after read-time sequence rejection", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
 	}
 	if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) {
 		t.Fatalf("report = %+v, want no recovered tx or resume plan", report)
