@@ -613,6 +613,90 @@ func TestRapidOpenAndRecoverAfterBoundaryCompactionMatchesUncompacted(t *testing
 	})
 }
 
+func TestRapidOpenAndRecoverAfterFullHorizonCompactionKeepsActiveResume(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		root := rapidTempDir(t)
+		defer os.RemoveAll(root)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 3, 24)
+		finalTxID := types.TxID(len(log.records))
+		segmentCount := rapid.IntRange(2, min(6, len(log.records))).Draw(t, "segmentCount")
+
+		rapidWriteReplaySnapshot(t, root, reg, finalTxID, log.models[len(log.records)])
+		segments := rapidWriteReplaySegments(t, root, log.records, segmentCount)
+		indexPaths := make([]string, 0, len(segments))
+		for _, segment := range segments {
+			idxPath := filepath.Join(root, OffsetIndexFileName(uint64(segment.StartTx)))
+			rapidCreateOneEntryOffsetIndex(t, idxPath, segment.StartTx)
+			indexPaths = append(indexPaths, idxPath)
+		}
+		lastSegment := segments[len(segments)-1]
+		lastIndexPath := indexPaths[len(indexPaths)-1]
+
+		before, beforeMaxTxID, beforePlan, beforeReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("pre-compaction OpenAndRecoverWithReport at full horizon %d: %v", finalTxID, err)
+		}
+		if beforeMaxTxID != finalTxID {
+			t.Fatalf("pre-compaction maxTxID = %d, want %d (report=%+v)", beforeMaxTxID, finalTxID, beforeReport)
+		}
+		assertRapidReplayRows(t, before, log.models[len(log.records)])
+		if !beforeReport.HasSelectedSnapshot || beforeReport.SelectedSnapshotTxID != finalTxID {
+			t.Fatalf("pre-compaction selected snapshot report = (%v, %d), want tx %d",
+				beforeReport.HasSelectedSnapshot, beforeReport.SelectedSnapshotTxID, finalTxID)
+		}
+		if !beforeReport.HasDurableLog || beforeReport.DurableLogHorizon != finalTxID {
+			t.Fatalf("pre-compaction durable log report = (%v, %d), want (true, %d)",
+				beforeReport.HasDurableLog, beforeReport.DurableLogHorizon, finalTxID)
+		}
+		if beforeReport.ReplayedTxRange != (RecoveryTxIDRange{}) {
+			t.Fatalf("pre-compaction replay range = %+v, want none with snapshot at durable horizon", beforeReport.ReplayedTxRange)
+		}
+		if beforePlan.AppendMode != AppendInPlace || beforePlan.SegmentStartTx != lastSegment.StartTx || beforePlan.NextTxID != finalTxID+1 {
+			t.Fatalf("pre-compaction resume plan = %+v, want append-in-place on active segment %d at tx %d",
+				beforePlan, lastSegment.StartTx, finalTxID+1)
+		}
+
+		if err := RunCompaction(root, finalTxID); err != nil {
+			t.Fatalf("RunCompaction at full horizon %d with %d segments: %v", finalTxID, segmentCount, err)
+		}
+		for i, segment := range segments[:len(segments)-1] {
+			rapidAssertFileMissing(t, segment.Path)
+			rapidAssertFileMissing(t, indexPaths[i])
+		}
+		rapidAssertFileExists(t, lastSegment.Path)
+		rapidAssertFileExists(t, lastIndexPath)
+
+		after, afterMaxTxID, afterPlan, afterReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("post-compaction OpenAndRecoverWithReport at full horizon %d: %v", finalTxID, err)
+		}
+		if afterMaxTxID != beforeMaxTxID {
+			t.Fatalf("post-compaction maxTxID = %d, want pre-compaction max %d (report=%+v)", afterMaxTxID, beforeMaxTxID, afterReport)
+		}
+		assertRapidReplayStatesEqual(t, after, before)
+		assertRapidReplayRows(t, after, log.models[len(log.records)])
+		if afterPlan != beforePlan {
+			t.Fatalf("post-compaction resume plan = %+v, want pre-compaction plan %+v", afterPlan, beforePlan)
+		}
+		if !afterReport.HasSelectedSnapshot || afterReport.SelectedSnapshotTxID != finalTxID {
+			t.Fatalf("post-compaction selected snapshot report = (%v, %d), want tx %d",
+				afterReport.HasSelectedSnapshot, afterReport.SelectedSnapshotTxID, finalTxID)
+		}
+		if !afterReport.HasDurableLog || afterReport.DurableLogHorizon != finalTxID {
+			t.Fatalf("post-compaction durable log report = (%v, %d), want (true, %d)",
+				afterReport.HasDurableLog, afterReport.DurableLogHorizon, finalTxID)
+		}
+		if afterReport.ReplayedTxRange != (RecoveryTxIDRange{}) {
+			t.Fatalf("post-compaction replay range = %+v, want none with snapshot at durable horizon", afterReport.ReplayedTxRange)
+		}
+		if len(afterReport.SegmentCoverage) != 1 || afterReport.SegmentCoverage[0].MinTxID != lastSegment.StartTx || afterReport.SegmentCoverage[0].MaxTxID != finalTxID {
+			t.Fatalf("post-compaction segment coverage = %+v, want only active segment %d..%d",
+				afterReport.SegmentCoverage, lastSegment.StartTx, finalTxID)
+		}
+	})
+}
+
 func TestRapidOpenAndRecoverCorruptNewestSnapshotFallsBackToOlder(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		fullRoot := rapidTempDir(t)
