@@ -109,7 +109,9 @@ Current status:
   Snapshot header faults are categorized as snapshot read failures while
   preserving their underlying bad-magic, bad-version, or bad-flags leaf errors.
   Truncated snapshot payloads now receive the same snapshot category while
-  retaining their underlying EOF cause.
+  retaining their underlying EOF cause. Temp snapshot short writes and
+  short write-at failures now also leave no selectable snapshot while complete
+  log replay recovers the committed state.
   Snapshot next-id values below the restored row allocator are rejected at read
   time and remain fail-loud during selection instead of falling back.
   Autoincrement sequence values below restored row values now receive the same

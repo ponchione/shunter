@@ -2070,15 +2070,20 @@ func assertSnapshotPayloadArtifactsMissing(t *testing.T, snapshotDir string) {
 
 type faultingSnapshotTempFile struct {
 	*os.File
-	writeErr   error
-	writeAtErr error
-	syncErr    error
-	closeErr   error
+	shortWrite   bool
+	shortWriteAt bool
+	writeErr     error
+	writeAtErr   error
+	syncErr      error
+	closeErr     error
 }
 
 func (f *faultingSnapshotTempFile) Write(p []byte) (int, error) {
 	if f.writeErr != nil {
 		return 0, f.writeErr
+	}
+	if f.shortWrite && len(p) > 0 {
+		return len(p) - 1, nil
 	}
 	return f.File.Write(p)
 }
@@ -2086,6 +2091,9 @@ func (f *faultingSnapshotTempFile) Write(p []byte) (int, error) {
 func (f *faultingSnapshotTempFile) WriteAt(p []byte, off int64) (int, error) {
 	if f.writeAtErr != nil {
 		return 0, f.writeAtErr
+	}
+	if f.shortWriteAt && len(p) > 0 {
+		return len(p) - 1, nil
 	}
 	return f.File.WriteAt(p, off)
 }

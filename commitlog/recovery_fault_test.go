@@ -2843,6 +2843,7 @@ func TestCreateSnapshotTempWriteFailuresLeaveNoSelectableSnapshotAndCompleteLogR
 	for _, tc := range []struct {
 		name      string
 		configure func(*faultingSnapshotTempFile, error)
+		wantCause error
 	}{
 		{
 			name: "write",
@@ -2851,10 +2852,24 @@ func TestCreateSnapshotTempWriteFailuresLeaveNoSelectableSnapshotAndCompleteLogR
 			},
 		},
 		{
+			name: "short-write",
+			configure: func(file *faultingSnapshotTempFile, _ error) {
+				file.shortWrite = true
+			},
+			wantCause: io.ErrShortWrite,
+		},
+		{
 			name: "write-at",
 			configure: func(file *faultingSnapshotTempFile, faultErr error) {
 				file.writeAtErr = faultErr
 			},
+		},
+		{
+			name: "short-write-at",
+			configure: func(file *faultingSnapshotTempFile, _ error) {
+				file.shortWriteAt = true
+			},
+			wantCause: io.ErrShortWrite,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2896,8 +2911,12 @@ func TestCreateSnapshotTempWriteFailuresLeaveNoSelectableSnapshotAndCompleteLogR
 			if !errors.Is(err, ErrSnapshot) {
 				t.Fatalf("snapshot creation error = %v, want ErrSnapshot category", err)
 			}
-			if !errors.Is(err, faultErr) {
-				t.Fatalf("snapshot creation error = %v, want wrapped %s failure", err, tc.name)
+			wantCause := tc.wantCause
+			if wantCause == nil {
+				wantCause = faultErr
+			}
+			if !errors.Is(err, wantCause) {
+				t.Fatalf("snapshot creation error = %v, want wrapped %s failure %v", err, tc.name, wantCause)
 			}
 			var completionErr *SnapshotCompletionError
 			if !errors.As(err, &completionErr) {
