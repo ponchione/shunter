@@ -47,8 +47,9 @@ Current status:
 - A compact fixed-seed protocol restart-loop soak now drives reducer traces
   across repeated clean restarts, probing one-off reads and subscription
   initial snapshots after each restart.
-- Protocol RowList decoding now has a bounded fuzz seed corpus that checks
-  malformed-input categorization and accepted-input canonical round trips.
+- Protocol RowList plus client/server message decoding now have bounded fuzz
+  seed corpora that check malformed-input categorization and accepted-input
+  canonical round trips.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission
