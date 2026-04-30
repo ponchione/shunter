@@ -267,6 +267,27 @@ func TestScanSegmentsMalformedSegmentFilenameFailsLoudly(t *testing.T) {
 	}
 }
 
+func TestScanSegmentsBootstrapStartFailsLoudly(t *testing.T) {
+	dir := t.TempDir()
+	path := makeManualScanTestRecords(t, dir, 0, Record{TxID: 0, RecordType: RecordTypeChangeset, Payload: []byte{0}})
+
+	segments, horizon, err := ScanSegments(dir)
+	if err == nil {
+		t.Fatal("expected bootstrap segment start to fail loudly")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("ScanSegments error = %v, want ErrOpen category", err)
+	}
+	for _, want := range []string{"bootstrap tx 0", path} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ScanSegments error = %v, want detail %q", err, want)
+		}
+	}
+	if len(segments) != 0 || horizon != 0 {
+		t.Fatalf("partial scan = (%+v, %d), want no segments or horizon", segments, horizon)
+	}
+}
+
 func TestScanSegmentsSymlinkSegmentFailsLoudly(t *testing.T) {
 	targetDir := t.TempDir()
 	targetPath := makeScanTestSegment(t, targetDir, 1, 1)

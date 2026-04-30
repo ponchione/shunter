@@ -60,6 +60,9 @@ func ScanSegments(dir string) ([]SegmentInfo, types.TxID, error) {
 		if err != nil {
 			return nil, 0, err
 		}
+		if err := rejectBootstrapSegmentStart(startTx, filepath.Join(dir, entry.Name())); err != nil {
+			return nil, 0, err
+		}
 		paths = append(paths, segmentPath{
 			path:    filepath.Join(dir, entry.Name()),
 			startTx: startTx,

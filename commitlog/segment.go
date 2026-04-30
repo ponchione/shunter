@@ -211,6 +211,9 @@ type SegmentWriter struct {
 // CreateSegment creates a new segment file.
 func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 	path := filepath.Join(dir, SegmentFileName(startTxID))
+	if err := rejectBootstrapSegmentStart(startTxID, path); err != nil {
+		return nil, err
+	}
 	if err := requireCreatableSegmentPath(path); err != nil {
 		return nil, err
 	}
@@ -251,6 +254,9 @@ func requireCreatableSegmentPath(path string) error {
 // positioned at the end.
 func OpenSegmentForAppend(dir string, startTxID uint64) (*SegmentWriter, error) {
 	path := filepath.Join(dir, SegmentFileName(startTxID))
+	if err := rejectBootstrapSegmentStart(startTxID, path); err != nil {
+		return nil, err
+	}
 	if err := requireRegularSegmentFile(path); err != nil {
 		return nil, err
 	}
@@ -353,6 +359,16 @@ func (sw *SegmentWriter) Append(rec *Record) error {
 	sw.lastRecordOffset = byteOffset
 	sw.hasLastRecord = true
 	return nil
+}
+
+func rejectBootstrapSegmentStart(startTxID uint64, path string) error {
+	if startTxID != 0 {
+		return nil
+	}
+	if path == "" {
+		return fmt.Errorf("%w: segment starts at bootstrap tx 0", ErrOpen)
+	}
+	return fmt.Errorf("%w: segment %s starts at bootstrap tx 0", ErrOpen, path)
 }
 
 // LastRecordByteOffset returns the segment byte offset of the most recently

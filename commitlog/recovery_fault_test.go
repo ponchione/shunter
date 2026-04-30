@@ -1021,6 +1021,29 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverBootstrapSegmentFailsLoudly(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	path := makeManualScanTestRecords(t, root, 0, Record{TxID: 0, RecordType: RecordTypeChangeset, Payload: []byte{0}})
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err == nil {
+		t.Fatal("expected bootstrap segment start to fail loudly")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenAndRecoverWithReport error = %v, want ErrOpen category", err)
+	}
+	for _, want := range []string{"bootstrap tx 0", path} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("OpenAndRecoverWithReport error = %v, want detail %q", err, want)
+		}
+	}
+	if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+		t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero", recovered, maxTxID, plan)
+	}
+	assertZeroRecoveryReport(t, report)
+}
+
 func TestOpenAndRecoverSegmentHeaderFaultsFailLoudly(t *testing.T) {
 	cases := []struct {
 		name   string

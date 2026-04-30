@@ -72,6 +72,24 @@ func openSegmentReader(t *testing.T, dir string, startTx uint64) *SegmentReader 
 	return sr
 }
 
+func TestSegmentWriterRejectsBootstrapStartTx(t *testing.T) {
+	dir := t.TempDir()
+
+	if writer, err := CreateSegment(dir, 0); err == nil {
+		_ = writer.Close()
+		t.Fatal("CreateSegment accepted bootstrap tx 0")
+	} else if !errors.Is(err, ErrOpen) {
+		t.Fatalf("CreateSegment error = %v, want ErrOpen category", err)
+	}
+
+	if writer, err := OpenSegmentForAppend(dir, 0); err == nil {
+		_ = writer.Close()
+		t.Fatal("OpenSegmentForAppend accepted bootstrap tx 0")
+	} else if !errors.Is(err, ErrOpen) {
+		t.Fatalf("OpenSegmentForAppend error = %v, want ErrOpen category", err)
+	}
+}
+
 // Pin 14.
 func TestSegmentReaderSeekToTxIDUsesIndex(t *testing.T) {
 	dir := t.TempDir()

@@ -89,8 +89,10 @@ Current status:
   also checks that the returned fresh
   resume plan can append a tail that is replayed on the next restart, and
   snapshot recovery handles a header-only rollover segment immediately after
-  the snapshot horizon. Unsafe history checks now also cover generated
-  snapshot/log boundary gaps and missing-base log suffixes. Compaction retry
+  the snapshot horizon. Segment creation, scanning, and recovery now reject
+  bootstrap tx 0 segment starts as unsafe history. Unsafe history checks now
+  also cover generated snapshot/log boundary gaps and missing-base log suffixes.
+  Compaction retry
   coverage now checks covered orphan sidecar cleanup without changing recovery,
   full-horizon compaction without changing active-segment resume semantics, and
   future-snapshot rejection without mutating replayable log or sidecars. Pure
