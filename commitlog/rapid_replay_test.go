@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -495,6 +496,80 @@ func TestRapidOpenAndRecoverCorruptNewestSnapshotFallsBackToOlder(t *testing.T) 
 		if fallbackPlan.AppendMode != AppendInPlace || fallbackPlan.SegmentStartTx != lastTailSegment.StartTx || fallbackPlan.NextTxID != finalTxID+1 {
 			t.Fatalf("fallback resume plan = %+v, want append-in-place on segment %d at tx %d",
 				fallbackPlan, lastTailSegment.StartTx, finalTxID+1)
+		}
+	})
+}
+
+func TestRapidOpenAndRecoverSnapshotLogBoundaryGapFailsLoudly(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		root := rapidTempDir(t)
+		defer os.RemoveAll(root)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 3, 24)
+		finalTxID := types.TxID(len(log.records))
+		horizon := rapid.IntRange(1, len(log.records)-2).Draw(t, "snapshotHorizon")
+		gapStartTx := rapid.IntRange(horizon+2, len(log.records)).Draw(t, "gapStartTx")
+
+		rapidWriteReplaySnapshot(t, root, reg, types.TxID(horizon), log.models[horizon])
+		segmentPath := rapidWriteReplaySegment(t, root, uint64(gapStartTx), log.records[gapStartTx-1:])
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatalf("OpenAndRecoverWithReport accepted snapshot/log gap: snapshot=%d gapStart=%d segment=%s recoveredTxID=%d plan=%+v report=%+v",
+				horizon, gapStartTx, segmentPath, maxTxID, plan, report)
+		}
+		var gapErr *HistoryGapError
+		if !errors.As(err, &gapErr) {
+			t.Fatalf("error = %T (%v), want HistoryGapError for snapshot=%d gapStart=%d segment=%s", err, err, horizon, gapStartTx, segmentPath)
+		}
+		if gapErr.Expected != uint64(horizon+1) || gapErr.Got != uint64(gapStartTx) {
+			t.Fatalf("HistoryGapError = %+v, want Expected=%d Got=%d", gapErr, horizon+1, gapStartTx)
+		}
+		if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+			t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero after boundary gap (report=%+v)", recovered, maxTxID, plan, report)
+		}
+		if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != types.TxID(horizon) {
+			t.Fatalf("report selected snapshot = (%v, %d), want tx %d (report=%+v)",
+				report.HasSelectedSnapshot, report.SelectedSnapshotTxID, horizon, report)
+		}
+		if !report.HasDurableLog || report.DurableLogHorizon != finalTxID {
+			t.Fatalf("report durable log = (%v, %d), want (true, %d)", report.HasDurableLog, report.DurableLogHorizon, finalTxID)
+		}
+		if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) || report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+			t.Fatalf("report after boundary gap = %+v, want no recovered tx, resume plan, or replay range", report)
+		}
+	})
+}
+
+func TestRapidOpenAndRecoverMissingBaseSnapshotFailsLoudly(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		root := rapidTempDir(t)
+		defer os.RemoveAll(root)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 2, 24)
+		finalTxID := types.TxID(len(log.records))
+		startTx := rapid.IntRange(2, len(log.records)).Draw(t, "logStartTx")
+		segmentPath := rapidWriteReplaySegment(t, root, uint64(startTx), log.records[startTx-1:])
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatalf("OpenAndRecoverWithReport accepted missing base snapshot: startTx=%d segment=%s recoveredTxID=%d plan=%+v report=%+v",
+				startTx, segmentPath, maxTxID, plan, report)
+		}
+		if !errors.Is(err, ErrMissingBaseSnapshot) {
+			t.Fatalf("error = %T (%v), want ErrMissingBaseSnapshot for startTx=%d segment=%s", err, err, startTx, segmentPath)
+		}
+		if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+			t.Fatalf("partial recovery = (%v, %d, %+v), want nil/zero after missing base snapshot (report=%+v)", recovered, maxTxID, plan, report)
+		}
+		if report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 0 {
+			t.Fatalf("report selected snapshot = (%v, %d), want none", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+		}
+		if !report.HasDurableLog || report.DurableLogHorizon != finalTxID {
+			t.Fatalf("report durable log = (%v, %d), want (true, %d)", report.HasDurableLog, report.DurableLogHorizon, finalTxID)
+		}
+		if report.RecoveredTxID != 0 || report.ResumePlan != (RecoveryResumePlan{}) || report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+			t.Fatalf("report after missing base snapshot = %+v, want no recovered tx, resume plan, or replay range", report)
 		}
 	})
 }
