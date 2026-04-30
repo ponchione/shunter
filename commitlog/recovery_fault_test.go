@@ -1365,6 +1365,38 @@ func TestOpenAndRecoverHeaderOnlySegmentBoundaries(t *testing.T) {
 		}
 	})
 
+	t.Run("snapshot-followed-by-header-only-rollover-recovers-snapshot", func(t *testing.T) {
+		root := t.TempDir()
+		_, reg := testSchema()
+		writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
+		createHeaderOnlySegment(t, root, 3)
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if maxTxID != 2 {
+			t.Fatalf("maxTxID = %d, want 2", maxTxID)
+		}
+		assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+		if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 2 {
+			t.Fatalf("selected snapshot = (%v, %d), want tx 2 (report=%+v)",
+				report.HasSelectedSnapshot, report.SelectedSnapshotTxID, report)
+		}
+		if !report.HasDurableLog || report.DurableLogHorizon != 2 {
+			t.Fatalf("durable log report = (%v, %d), want (true, 2)", report.HasDurableLog, report.DurableLogHorizon)
+		}
+		if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+			t.Fatalf("replayed range = %+v, want none for header-only tail after snapshot", report.ReplayedTxRange)
+		}
+		if len(report.SegmentCoverage) != 1 || report.SegmentCoverage[0].MinTxID != 3 || report.SegmentCoverage[0].MaxTxID != 2 {
+			t.Fatalf("segment coverage = %+v, want empty active rollover segment 3..2", report.SegmentCoverage)
+		}
+		if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 3 || plan.NextTxID != 3 {
+			t.Fatalf("resume plan = %+v, want append-in-place on segment 3 at tx 3", plan)
+		}
+	})
+
 	t.Run("header-only-segment-after-gap-fails-loudly", func(t *testing.T) {
 		root := t.TempDir()
 		_, reg := testSchema()
