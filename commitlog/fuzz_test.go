@@ -300,6 +300,11 @@ func recoveryBoundaryFuzzSeeds(t testing.TB) []recoveryBoundaryFuzzSeed {
 		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(99), types.NewString("skipped")}}},
 		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("after_snapshot")}}},
 	)
+	snapshotBoundaryZeroTail := append([]byte(nil), snapshotBoundaryLog...)
+	snapshotBoundaryZeroTail = append(snapshotBoundaryZeroTail, make([]byte, RecordOverhead)...)
+	snapshotBoundaryNonzeroTail := append([]byte(nil), snapshotBoundaryLog...)
+	snapshotBoundaryNonzeroTail = append(snapshotBoundaryNonzeroTail, make([]byte, RecordHeaderSize)...)
+	snapshotBoundaryNonzeroTail = append(snapshotBoundaryNonzeroTail, 1)
 	firstTxMismatch := recoveryBoundarySegmentSeed(t,
 		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("first_mismatch")}}},
 	)
@@ -313,6 +318,8 @@ func recoveryBoundaryFuzzSeeds(t testing.TB) []recoveryBoundaryFuzzSeed {
 		{snapshot: nil, segment: validLog},
 		{snapshot: validSnapshot, segment: nil},
 		{snapshot: validSnapshot, segment: snapshotBoundaryLog},
+		{snapshot: validSnapshot, segment: snapshotBoundaryZeroTail},
+		{snapshot: validSnapshot, segment: snapshotBoundaryNonzeroTail},
 		{snapshot: corruptSnapshot, segment: validLog},
 		{snapshot: validSnapshot, segment: firstTxMismatch},
 		{snapshot: validSnapshot, segment: truncatedBoundary},
