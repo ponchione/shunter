@@ -92,7 +92,9 @@ Current status:
   snapshot/log boundary gaps and missing-base log suffixes. Compaction retry
   coverage now checks covered orphan sidecar cleanup without changing recovery,
   full-horizon compaction without changing active-segment resume semantics, and
-  future-snapshot rejection without mutating replayable log or sidecars.
+  future-snapshot rejection without mutating replayable log or sidecars. Pure
+  compaction planner fuzzing now checks arbitrary bounded active/sealed ranges
+  against deterministic delete/retain partition invariants.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.
