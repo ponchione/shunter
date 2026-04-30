@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -513,5 +514,124 @@ func TestSchedulerNotifyNonBlocking(t *testing.T) {
 		// good
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Notify blocked when channel was full — must be non-blocking")
+	}
+}
+
+func TestSchedulerNotifyCompletionChurnDoesNotDuplicateInFlightDueRows(t *testing.T) {
+	const (
+		seed          = uint64(0x5eed2026)
+		scheduleCount = 4
+		workers       = 4
+		iterations    = 64
+	)
+	s, cs, tid, inbox := schedulerWorkerFixture(t)
+	fireAt := time.Unix(50, 0).UnixNano()
+	for i := range scheduleCount {
+		seedSchedule(t, cs, tid, uint64(i+1), fmt.Sprintf("churn-%d", i+1), nil, fireAt, 0)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(runDone)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-runDone:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("seed=0x5eed2026 op=cleanup runtime_config=schedules=4/workers=4/iterations=64 observed=scheduler-still-running expected=stopped")
+		}
+	}()
+
+	initial := readSchedulerCallBatch(t, inbox, scheduleCount, seed, "initial")
+	assertSchedulerCallSet(t, initial, seed, "initial", scheduleCount, fireAt)
+	assertNoReceive(t, inbox, 50*time.Millisecond, "seed=0x5eed2026 op=initial-duplicate-check runtime_config=schedules=4/workers=4/iterations=64 observed=extra-command expected=no-duplicate-while-in-flight")
+
+	start := make(chan struct{})
+	failures := make(chan string, scheduleCount)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for op := range iterations {
+				s.Notify()
+				if (int(seed)+worker+op)%3 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(worker)
+	}
+	for op, call := range initial {
+		wg.Add(1)
+		go func(op int, call CallReducerCmd) {
+			defer wg.Done()
+			<-start
+			if (int(seed)+op)%2 == 0 {
+				runtime.Gosched()
+			}
+			wasInFlight, wasReplayQueued := s.completeInFlight(call.Request.ScheduleID, call.Request.IntendedFireAt)
+			if !wasInFlight || wasReplayQueued {
+				failures <- fmt.Sprintf("seed=%#x op=complete-%d runtime_config=schedules=%d/workers=%d/iterations=%d operation=completeInFlight(%d,%d) observed=(%v,%v) expected=(true,false)",
+					seed, op, scheduleCount, workers, iterations, call.Request.ScheduleID, call.Request.IntendedFireAt, wasInFlight, wasReplayQueued)
+			}
+			s.Notify()
+		}(op, call)
+	}
+	close(start)
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
+	}
+
+	s.Notify()
+	requeued := readSchedulerCallBatch(t, inbox, scheduleCount, seed, "requeued")
+	assertSchedulerCallSet(t, requeued, seed, "requeued", scheduleCount, fireAt)
+	assertNoReceive(t, inbox, 50*time.Millisecond, "seed=0x5eed2026 op=requeue-duplicate-check runtime_config=schedules=4/workers=4/iterations=64 observed=extra-command expected=one-requeue-per-completed-row")
+}
+
+func readSchedulerCallBatch(t *testing.T, inbox <-chan ExecutorCommand, want int, seed uint64, phase string) []CallReducerCmd {
+	t.Helper()
+	calls := make([]CallReducerCmd, 0, want)
+	for op := range want {
+		select {
+		case cmd := <-inbox:
+			call, ok := cmd.(CallReducerCmd)
+			if !ok {
+				t.Fatalf("seed=%#x phase=%s op=%d operation=read-scheduler-command observed_type=%T expected_type=CallReducerCmd", seed, phase, op, cmd)
+			}
+			calls = append(calls, call)
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("seed=%#x phase=%s op=%d operation=read-scheduler-command observed=timeout expected=%d commands", seed, phase, op, want)
+		}
+	}
+	return calls
+}
+
+func assertSchedulerCallSet(t *testing.T, calls []CallReducerCmd, seed uint64, phase string, scheduleCount int, fireAt int64) {
+	t.Helper()
+	seen := make(map[ScheduleID]struct{}, len(calls))
+	for op, call := range calls {
+		id := call.Request.ScheduleID
+		if id < 1 || id > ScheduleID(scheduleCount) {
+			t.Fatalf("seed=%#x phase=%s op=%d operation=validate-schedule-id observed=%d expected=1..%d", seed, phase, op, id, scheduleCount)
+		}
+		if _, exists := seen[id]; exists {
+			t.Fatalf("seed=%#x phase=%s op=%d operation=validate-schedule-id observed=duplicate-%d expected=unique-due-row", seed, phase, op, id)
+		}
+		seen[id] = struct{}{}
+		if call.Request.Source != CallSourceScheduled {
+			t.Fatalf("seed=%#x phase=%s op=%d operation=validate-source observed=%d expected=%d", seed, phase, op, call.Request.Source, CallSourceScheduled)
+		}
+		if call.Request.IntendedFireAt != fireAt {
+			t.Fatalf("seed=%#x phase=%s op=%d operation=validate-fire-at observed=%d expected=%d", seed, phase, op, call.Request.IntendedFireAt, fireAt)
+		}
+	}
+	if len(seen) != scheduleCount {
+		t.Fatalf("seed=%#x phase=%s operation=validate-cardinality observed=%d expected=%d", seed, phase, len(seen), scheduleCount)
 	}
 }

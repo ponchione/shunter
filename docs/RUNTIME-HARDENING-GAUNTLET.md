@@ -77,7 +77,8 @@ Current status:
   cancellation/rearm behavior, startup idempotence, and external admission
   ordering. Scheduler worker coverage also guards stale scheduled-attempt
   completions so mismatched intended fire times cannot clear active in-flight
-  attempts.
+  attempts, and now churns concurrent wakeup notifications plus completion
+  callbacks to reject duplicate in-flight due rows under a fixed seed.
 - Commitlog recovery/metamorphic coverage now includes rapid damaged-tail
   resume equivalence, snapshot replay with and without offset indexes, and
   boundary-segment compaction equivalence. Full-log recovery is also checked
