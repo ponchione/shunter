@@ -141,7 +141,7 @@ Why this matters:
 - the remaining lower-level APIs preserve v1 simplicity but require callers to honor explicit read-view ownership rules
 
 Primary code surfaces:
-- `runtime_local.go`
+- `local.go`
 - `store/snapshot.go`
 - `store/committed_state.go`
 - `store/state_view.go`

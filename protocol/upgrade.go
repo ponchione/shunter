@@ -218,7 +218,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 			close(keepaliveDone)
 		}()
 		// Outbound writer goroutine drains OutboundCh → WebSocket.
-		// Exits when OutboundCh is closed during Disconnect.
+		// It exits when Disconnect closes c.closed.
 		outboundDone := make(chan struct{})
 		go func() {
 			c.runOutboundWriter(context.Background())

@@ -3,10 +3,13 @@ package commitlog
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ponchione/shunter/types"
 )
 
 func TestSegmentCoverageBuildsRangesFromSegmentInfo(t *testing.T) {
@@ -67,6 +70,67 @@ func TestCompactKeepsEverythingWithoutSnapshotAndDeletesMultipleCoveredSegments(
 	deleted, retained = Compact(segments, 8)
 	assertStringSlicesEqual(t, deleted, []string{"seg-1", "seg-2"})
 	assertStringSlicesEqual(t, retained, []string{"seg-3"})
+}
+
+func FuzzCompactPlanner(f *testing.F) {
+	for _, seed := range [][]byte{
+		nil,
+		{0, 0, 0},
+		{1, 2, 3, 4, 5, 6, 7, 8},
+		{0xff, 0, 0x7f, 0x80, 0x40, 0x20},
+		[]byte("compaction-boundary"),
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 512 {
+			return
+		}
+		r := newCompactFuzzReader(data)
+		snapshotTxID := r.txID(64)
+		segments := r.segmentRanges(16)
+		label := compactFuzzLabel(data, snapshotTxID, segments)
+
+		deleted, retained := Compact(segments, snapshotTxID)
+		deletedAgain, retainedAgain := Compact(segments, snapshotTxID)
+		assertStringSlicesEqual(t, deletedAgain, deleted)
+		assertStringSlicesEqual(t, retainedAgain, retained)
+
+		seen := make(map[string]string, len(segments))
+		for _, path := range deleted {
+			if _, ok := seen[path]; ok {
+				t.Fatalf("duplicate compact output path %q in deleted: deleted=%v retained=%v %s", path, deleted, retained, label)
+			}
+			seen[path] = "deleted"
+		}
+		for _, path := range retained {
+			if _, ok := seen[path]; ok {
+				t.Fatalf("duplicate compact output path %q in retained: deleted=%v retained=%v %s", path, deleted, retained, label)
+			}
+			seen[path] = "retained"
+		}
+		if len(seen) != len(segments) {
+			t.Fatalf("compact output cardinality = %d, want %d: deleted=%v retained=%v %s", len(seen), len(segments), deleted, retained, label)
+		}
+
+		for _, seg := range segments {
+			decision, ok := seen[seg.Path]
+			if !ok {
+				t.Fatalf("missing compact output for %q: deleted=%v retained=%v %s", seg.Path, deleted, retained, label)
+			}
+			wantDeleted := snapshotTxID != 0 && !seg.Active && seg.MaxTxID <= snapshotTxID
+			if wantDeleted && decision != "deleted" {
+				t.Fatalf("covered sealed segment retained: seg=%+v snapshot=%d deleted=%v retained=%v %s", seg, snapshotTxID, deleted, retained, label)
+			}
+			if !wantDeleted && decision != "retained" {
+				t.Fatalf("uncovered/active segment deleted: seg=%+v snapshot=%d deleted=%v retained=%v %s", seg, snapshotTxID, deleted, retained, label)
+			}
+		}
+		if snapshotTxID == 0 && len(deleted) != 0 {
+			t.Fatalf("snapshot=0 deleted segments: deleted=%v retained=%v %s", deleted, retained, label)
+		}
+	})
 }
 
 func TestRunCompactionDeletesCoveredSegmentsAndFsyncsDirectory(t *testing.T) {
@@ -988,4 +1052,91 @@ func contiguousTxs(start, end uint64) []uint64 {
 		txs = append(txs, tx)
 	}
 	return txs
+}
+
+type compactFuzzReader struct {
+	data []byte
+	pos  int
+}
+
+func newCompactFuzzReader(data []byte) *compactFuzzReader {
+	return &compactFuzzReader{data: data}
+}
+
+func (r *compactFuzzReader) byte() byte {
+	if r.pos >= len(r.data) {
+		b := byte(19 + r.pos*29)
+		r.pos++
+		return b
+	}
+	b := r.data[r.pos]
+	r.pos++
+	return b
+}
+
+func (r *compactFuzzReader) txID(max uint64) types.TxID {
+	var out uint64
+	for i := 0; i < 8; i++ {
+		out = (out << 8) | uint64(r.byte())
+	}
+	if max == 0 {
+		return types.TxID(out)
+	}
+	return types.TxID(out % (max + 1))
+}
+
+func (r *compactFuzzReader) segmentRanges(maxSegments int) []SegmentRange {
+	n := int(r.byte() % byte(maxSegments+1))
+	out := make([]SegmentRange, n)
+	for i := range out {
+		start := r.txID(64)
+		width := r.txID(16)
+		maxTxID := start + width
+		if r.byte()%7 == 0 && start > 0 {
+			maxTxID = start - 1
+		}
+		out[i] = SegmentRange{
+			Path:    "fuzz-seg-" + string(rune('a'+i)),
+			MinTxID: start,
+			MaxTxID: maxTxID,
+			Active:  r.byte()%5 == 0,
+		}
+	}
+	return out
+}
+
+func compactFuzzLabel(data []byte, snapshotTxID types.TxID, segments []SegmentRange) string {
+	if len(data) <= 80 {
+		return fmt.Sprintf("seed_len=%d seed=%s snapshot=%d segments=%s", len(data), fmtBytes(data), snapshotTxID, fmtSegments(segments))
+	}
+	return fmt.Sprintf("seed_len=%d seed_prefix=%s snapshot=%d segments=%s", len(data), fmtBytes(data[:80]), snapshotTxID, fmtSegments(segments))
+}
+
+func fmtBytes(data []byte) string {
+	const hex = "0123456789abcdef"
+	out := make([]byte, 0, len(data)*2)
+	for _, b := range data {
+		out = append(out, hex[b>>4], hex[b&0x0f])
+	}
+	return string(out)
+}
+
+func fmtSegments(segments []SegmentRange) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, seg := range segments {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(seg.Path)
+		b.WriteByte(':')
+		b.WriteString(fmt.Sprintf("%d", seg.MinTxID))
+		b.WriteString("..")
+		b.WriteString(fmt.Sprintf("%d", seg.MaxTxID))
+		if seg.Active {
+			b.WriteString(":active")
+		}
+	}
+	b.WriteByte(']')
+	return b.String()
 }

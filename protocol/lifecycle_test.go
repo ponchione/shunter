@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -132,6 +133,34 @@ func readOneBinary(t *testing.T, c *websocket.Conn, timeout time.Duration) ([]by
 		return nil, fmt.Errorf("got message type %v, want MessageBinary", mt)
 	}
 	return data, nil
+}
+
+func TestTruncateCloseReasonPreservesUTF8(t *testing.T) {
+	reason := strings.Repeat("\u00e9", 61)
+	got := truncateCloseReason(reason)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated close reason is not valid UTF-8: %q", got)
+	}
+	if got != strings.Repeat("\u00e9", 60) {
+		t.Fatalf("truncated close reason = %q, want 60 complete two-byte runes", got)
+	}
+	if len(got) > 120 {
+		t.Fatalf("truncated close reason length = %d, want <= 120", len(got))
+	}
+}
+
+func TestTruncateCloseReasonDropsInvalidUTF8(t *testing.T) {
+	reason := "prefix" + string([]byte{0xff}) + strings.Repeat("a", 140)
+	got := truncateCloseReason(reason)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated close reason is not valid UTF-8: %q", got)
+	}
+	if strings.Contains(got, "\ufffd") {
+		t.Fatalf("truncated close reason should drop invalid bytes, got %q", got)
+	}
+	if len(got) > 120 {
+		t.Fatalf("truncated close reason length = %d, want <= 120", len(got))
+	}
 }
 
 func TestRunLifecycleSuccessSendsIdentityToken(t *testing.T) {

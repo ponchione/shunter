@@ -90,6 +90,20 @@ func TestValidateJWTBadSignatureRejected(t *testing.T) {
 	}
 }
 
+func TestValidateJWTRejectsNonHS256HMAC(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS384, jwt.MapClaims{"sub": "a", "iss": "b"})
+	s, err := tok.SignedString(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ValidateJWT(s, cfg)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("got %v, want ErrJWTInvalid for HS384 token", err)
+	}
+}
+
 func TestValidateJWTMissingSub(t *testing.T) {
 	cfg := &JWTConfig{SigningKey: testKey}
 	s := mintHS256(t, jwt.MapClaims{"iss": "b"})

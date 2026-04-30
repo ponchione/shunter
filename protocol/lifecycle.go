@@ -3,7 +3,9 @@ package protocol
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -256,8 +258,19 @@ func encodeIdentityTokenFrame(msg IdentityToken, compressionNegotiated bool) ([]
 // leaves headroom for UTF-8 multi-byte sequences at the boundary.
 func truncateCloseReason(s string) string {
 	const maxLen = 120
+	if !utf8.ValidString(s) {
+		s = strings.ToValidUTF8(s, "")
+	}
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen]
+	end := 0
+	for end < len(s) {
+		_, size := utf8.DecodeRuneInString(s[end:])
+		if end+size > maxLen {
+			break
+		}
+		end += size
+	}
+	return s[:end]
 }

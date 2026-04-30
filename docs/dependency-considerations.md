@@ -127,8 +127,8 @@ Why it fits:
 
 Candidate surfaces:
 
-- `runtime_network.go`
-- `runtime_lifecycle.go`
+- `network.go`
+- `lifecycle.go`
 - protocol supervision / dispatch code
 
 Do not use it as a blanket replacement for every `WaitGroup`.

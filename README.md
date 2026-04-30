@@ -1,187 +1,168 @@
 # Shunter
 
-## What this repo is
+Shunter is a Go-native hosted runtime for stateful realtime applications. It
+combines module definition, embedded relational storage, durable commit logging,
+serialized reducer execution, subscription delta evaluation, and WebSocket
+delivery behind a single runtime-owned API.
 
-Shunter is trying to be a hosted runtime that combines:
-- schema definition
-- in-memory relational storage
-- append-only commit log + recovery
-- single-threaded transaction execution
-- subscription-based delta evaluation
-- WebSocket protocol delivery
+The project is under active development. Core subsystems are implemented and
+covered by meaningful tests, while the top-level developer experience is still
+being refined.
 
-The implementation is intended to be clean-room:
-- inspired by public SpacetimeDB docs and architecture discussions
-- not copied from SpacetimeDB source
-- developed from independent specs, decomposition docs, tests, and audit passes
+## Project Status
 
-## Core thesis and boundaries
+The supported app-facing entrypoint is the root `shunter` package:
 
-Traditional app architecture separates the database, application server, and
-client-side state layer. Shunter's thesis is that a single runtime can own the
-data, run app logic next to it, evaluate subscriptions at commit time, and push
-precise deltas to clients without a separate cache/API/WebSocket glue layer.
+- `Module` defines application tables, reducers, lifecycle hooks, queries,
+  views, visibility filters, metadata, and migration metadata.
+- `Config` controls runtime startup, persistence, authentication, protocol
+  settings, and serving behavior.
+- `Build` validates and constructs a runtime from a module definition.
+- `Runtime` owns lifecycle, local reads, reducer calls, declared reads,
+  contract/schema export, HTTP serving, and graceful shutdown.
 
-The intended developer surface is Go-native: applications define modules,
-tables, reducers, and runtime configuration in Go. Shunter is not a managed
-cloud service, not a multi-language module host, not a distributed database,
-not a full SQL database, and not a SpacetimeDB client-compatibility layer.
+Shunter is not currently positioned as a production-ready database or managed
+service. It is best understood as an implementation-focused runtime project
+with substantial subsystem coverage and an emerging hosted-runtime API.
 
-SpacetimeDB remains useful as a reference design for hard runtime questions:
-transaction ordering, subscription delta semantics, reducer outcomes, binary
-encoding tradeoffs, and hosted-runtime ergonomics. When those ideas conflict
-with Shunter's simpler self-hosted product goals, Shunter's goals win.
+## Goals
 
-## What is actually implemented today
+Shunter is designed to:
 
-There is working code in these packages:
-- `types` — core value/identity/connection/reducer types
-- `auth` — JWT validation, identity derivation, anonymous minting
-- `schema` — builder, reflection path, registry, export, startup schema compatibility checks
-- `store` — tables, indexes, transactions, changesets, snapshots, recovery hooks
-- `commitlog` — record format, durability worker, snapshot I/O, replay, recovery, compaction
-- `executor` — reducer registry, serialized execution, lifecycle/scheduler wiring, subscription dispatch
-- `subscription` — predicate model, pruning indexes, delta evaluation, fanout, confirmed-read delivery
-- `protocol` — wire codecs, upgrade/auth path, connection lifecycle, dispatch, outbound delivery, backpressure handling
-- `query/sql` — the current narrow SQL surface used by subscribe and one-off query paths
-- `bsatn` — binary value encoding used across the system
-- root `shunter` package — hosted-runtime API (`Module`, `Config`, `Runtime`, `Build`, lifecycle/serving/local/describe helpers)
+- let applications define their state model and business logic in Go
+- execute reducers against runtime-owned state with serialized transaction
+  semantics
+- persist committed changes through an append-only durability path
+- evaluate subscriptions at commit time and deliver precise client deltas
+- expose authentication, lifecycle, protocol, and serving primitives from one
+  self-hosted runtime
+- keep the implementation independent, auditable, and testable
 
-In other words: this is not vaporware anymore. There is a real subsystem implementation here.
+Current non-goals:
 
-## Hosted-runtime entrypoint
+- managed cloud hosting
+- distributed database behavior
+- broad SQL compatibility
+- multi-language module hosting
+- protocol or client compatibility with another runtime
 
-The prior bundled demo command has been removed. It no longer served a useful
-role as a maintained app surface, and the root `shunter` package is the
-supported hosted-runtime entrypoint.
+## Implemented Components
 
-Current app-facing proof lives in the root runtime API and package tests:
-`Module`, `Config`, `Runtime`, `Build`, lifecycle/serving helpers, local calls,
-and schema/export helpers. A new runnable example should be added only when it
-proves a real product or integration path rather than another throwaway demo.
+The repository contains working implementations across the main runtime
+subsystems:
 
-## What is not true yet
+- `types` - core value, identity, connection, and reducer types
+- `auth` - JWT validation, identity derivation, and anonymous token minting
+- `schema` - schema builder, reflection path, registry, export, and startup
+  compatibility checks
+- `store` - tables, indexes, transactions, changesets, snapshots, and recovery
+  hooks
+- `commitlog` - durable record format, worker, snapshot I/O, replay, recovery,
+  and compaction
+- `executor` - reducer registry, serialized execution, lifecycle and scheduler
+  wiring, and subscription dispatch
+- `subscription` - predicate model, pruning indexes, delta evaluation, fanout,
+  and confirmed-read delivery
+- `protocol` - wire codecs, WebSocket upgrade/auth path, connection lifecycle,
+  dispatch, outbound delivery, and backpressure handling
+- `query/sql` - the intentionally narrow SQL surface used by subscription and
+  one-off query paths
+- `bsatn` - binary value encoding used across runtime boundaries
+- root `shunter` package - hosted-runtime API, lifecycle management, local
+  calls, protocol serving, declared reads, schema export, and contract export
 
-This repo is not yet a clear, finished product experience.
+## Runtime Entrypoint
 
-Specifically:
-- the top-level hosted-runtime path exists, but it is still early and intentionally narrow
-- there is no maintained bundled runnable hello-world command
-- there is no full tutorial site, generated frontend, or client-binding/codegen workflow yet
-- v1.5 query/view declarations, contract export, permissions metadata, and migration metadata are not implemented yet
-- there is still active debt reconciliation work in `TECH-DEBT.md`
+There is no maintained bundled demo command at the moment. The root package is
+the maintained integration surface for application code and tests.
 
-Also important: `schema.Engine.Start(...)` is not the app-facing runtime owner. The root `shunter.Runtime` is now the hosted-runtime owner that wires the subsystem graph behind a top-level API.
+Important public APIs include:
 
-## So is the clean-room effort functional?
+- `NewModule`
+- `Module.TableDef`
+- `Module.Reducer`
+- `Module.Query`
+- `Module.View`
+- `Module.VisibilityFilter`
+- `Build`
+- `Runtime.Start`
+- `Runtime.Close`
+- `Runtime.CallReducer`
+- `Runtime.CallQuery`
+- `Runtime.SubscribeView`
+- `Runtime.HTTPHandler`
+- `Runtime.ListenAndServe`
+- `Runtime.ExportSchema`
+- `Runtime.ExportContract`
 
-My honest answer:
-- As a collection of implemented subsystems with meaningful tests: yes
-- As a finished replacement for SpacetimeDB: no
-- As a polished thing that clearly justifies unlimited audit/token burn by default: also no
+A runnable example should be added when it can demonstrate the intended product
+workflow end to end rather than serve as a temporary smoke test.
 
-A better framing is:
-- there is real technical progress here
-- the repo has crossed the line from "spec-only" into "substantial prototype/runtime pieces"
-- but the project still lacks a crisp productized narrative and end-to-end developer experience
+## Current Limitations
 
-## When continuing this project makes sense
+The runtime has meaningful implementation depth, but several areas are still
+early or intentionally narrow:
 
-Continuing makes sense if the goal is one of these:
-- finish a clean-room experimental runtime in Go
-- validate the architecture and core invariants
-- turn the existing subsystem work into one coherent hosted runtime / app-definition model
+- developer onboarding material is limited
+- there is no maintained hello-world command or tutorial flow
+- client bindings and code generation are not yet part of the supported
+  workflow
+- SQL support is scoped to the current query and subscription paths
+- protocol, recovery, subscription, and reducer semantics are still being
+  hardened through focused tests and debt reconciliation
+- public API stability should be expected to evolve while the hosted-runtime
+  surface settles
 
+## Repository Guide
 
-Continuing probably does not make sense if the goal is:
-- "I need a production-ready SpacetimeDB alternative right now"
-- "I want a short path to a stable OSS release without more integration/product work"
-- "I only want to keep doing narrow audit passes forever"
+For human orientation, start with:
 
-## Why the repo feels confusing right now
+1. `README.md` - project overview and current status
+2. `docs/decomposition/hosted-runtime-version-phases.md` - hosted-runtime phase
+   map
+3. `TECH-DEBT.md` - active correctness and cleanup priorities
+4. `docs/shunter-design-decisions.md` - design notes and tradeoffs
 
-Because it has two different realities at once:
+For implementation work, inspect the active packages directly:
 
-1. The codebase is much more real than an early-spec project.
-2. The top-level framing is still missing the one document that says, plainly:
-   - what exists
-   - what works
-   - what does not
-   - what to build next
-   - whether this should become a product, a research prototype, or a stopped experiment
-
-That gap is exactly what this README is trying to close.
-
-## Recommended way to read the repo
-
-For agent work, do not use this list as startup context. Read `RTK.md`, then the active root handoff (`NEXT_SESSION_HANDOFF.md` or `HOSTED_RUNTIME_PLANNING_HANDOFF.md`), then inspect live code.
-
-For human orientation instead of another audit spiral, read in this order:
-1. `README.md` — this file
-2. `docs/decomposition/hosted-runtime-version-phases.md` — hosted-runtime phase map
-3. `TECH-DEBT.md` — live debt and Shunter correctness priority framing
-4. `docs/shunter-design-decisions.md` — Shunter design decisions informed by SpacetimeDB
-
-Then inspect the main implementation packages:
 - `schema/`
 - `store/`
 - `commitlog/`
 - `executor/`
 - `subscription/`
 - `protocol/`
-- root `shunter` package files (`module.go`, `runtime*.go`, `config.go`)
+- root package files such as `module.go`, `runtime.go`, `lifecycle.go`,
+  `network.go`, and `config.go`
 
-## Current practical status
-
-If you want the blunt summary:
-- The repo is worth keeping if you still care about building your own SpacetimeDB-like runtime.
-- The repo is not yet worth pretending it is "done."
-- The next high-leverage work is not more tiny audit slices by default.
-- If continuing hosted-runtime usability, plan V1.5-A query/view declarations from `HOSTED_RUNTIME_PLANNING_HANDOFF.md`.
-- If continuing correctness/completeness, use `NEXT_SESSION_HANDOFF.md` as the active driver and open the roadmap only for priority questions.
-
-## What I would do next
-
-If continuing correctness/completeness work, the most useful next step is:
-
-1. Use `NEXT_SESSION_HANDOFF.md` as the active driver
-- Shunter protocol correctness first
-- one end-to-end delivery correctness slice second
-- query/subscription-surface correctness third
-- runtime/recovery semantics immediately after that, with scheduling pulled forward when the workload depends on it
-- cleanup after the product contract is locked
-
-2. Build scenario harnesses before broad refactors
-- protocol scenario tests
-- subscribe/reducer/update end-to-end tests
-- recovery/replay scenario tests
-
-3. Close the biggest externally visible differences before internal cleanup
-- wire/protocol behavior
-- query/subscription behavior
-- reducer/update semantics
-- recovery/store behavior
-
-If that sequence is not followed, it is easy to keep improving isolated
-internals without ending up with one coherent app runtime.
+For automation or agent-driven work, follow `AGENTS.md` and `RTK.md` before
+running commands or editing files.
 
 ## Validation
 
-To run the broad test suite:
+Run the full Go test suite:
 
 ```bash
-rtk go test ./...
+go test ./...
 ```
 
-Pinned static analysis is available through:
+Run Go vet:
 
 ```bash
-rtk go tool staticcheck ./...
+go vet ./...
 ```
 
-Staticcheck is expected to pass after OI-008 cleanup; treat failures as real
-cleanup findings unless a task explicitly narrows verification.
+Run pinned static analysis:
 
-## Clean-room note
+```bash
+go tool staticcheck ./...
+```
 
-Shunter is intended to be a clean-room implementation inspired by public documentation and independent analysis of SpacetimeDB's architecture. The goal is architectural learning and independent implementation, not source reuse.
+Staticcheck is expected to pass. Treat failures as real cleanup findings unless
+a task explicitly narrows the verification scope.
+
+## Source Provenance
+
+Shunter is intended to be an independent clean-room implementation. The project
+uses public documentation, behavior analysis, original specifications, tests,
+and implementation audits as design inputs; it does not rely on source reuse
+from external projects.

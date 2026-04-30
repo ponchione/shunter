@@ -39,14 +39,14 @@ For V2-G audit only, start from:
 - `docs/features/V2/V2-G/04-decision-record.md`
 - `internal/processboundary/`
 - `executor/`
-- `runtime_lifecycle.go`
+- `lifecycle.go`
 - `subscription/`
 
 For V1.5-E audit only, start from:
 
 - `docs/hosted-runtime-planning/V1.5/V1.5-E/00-current-execution-plan.md`
-- `runtime_migration_test.go`
-- `runtime_contract.go`
+- `migration_test.go`
+- `contract.go`
 - `contractdiff/`
 
 ## Current Hosted-Runtime State

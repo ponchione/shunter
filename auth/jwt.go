@@ -72,7 +72,7 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 		// attacker can't downgrade to `alg: none` or request a
 		// different algorithm whose key material we haven't
 		// configured.
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		if t.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("%w: unsupported signing alg %v", ErrJWTInvalid, t.Header["alg"])
 		}
 		return config.SigningKey, nil

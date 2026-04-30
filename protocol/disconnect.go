@@ -22,9 +22,9 @@ import (
 //     teardown (disconnect cannot be vetoed — SPEC-003 §10.4).
 //  3. ConnManager.Remove — drop the ConnectionID pointer so no
 //     further fan-out resolution finds this connection.
-//  4. close(c.closed) — signals runDispatchLoop, runKeepalive, and the
-//     Epic 4 write loop to exit. OutboundCh is closed alongside so
-//     any writer goroutine blocked on a send unblocks cleanly.
+//  4. close(c.closed) — signals runDispatchLoop, runKeepalive, sender
+//     paths, and the outbound writer to exit. OutboundCh is not closed;
+//     c.closed is the lifecycle signal.
 //  5. c.ws.Close — drives the WebSocket Close handshake. Fired in a
 //     background goroutine because coder/websocket.Conn.Close has a
 //     hard-coded 5 s internal handshake wait; blocking the caller

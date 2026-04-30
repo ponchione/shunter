@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/ponchione/shunter/protocol"
+	"github.com/ponchione/shunter/types"
 )
 
 const declaredReadProtocolSigningKey = "declared-read-protocol-secret"
@@ -245,6 +247,61 @@ func TestProtocolRawSQLEquivalentDoesNotUseDeclarationPermission(t *testing.T) {
 	requireDeclaredReadSubscriptionError(t, client, 34, 44, "no such table: `messages`. If the table exists, it may be marked private.")
 }
 
+func TestProtocolDeclaredQueryUsesRuntimeClientSender(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			SQL:         "SELECT * FROM messages",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}), declaredReadProtocolConfig(t))
+	defer rt.Close()
+	insertMessage(t, rt, "hello")
+
+	sender := &declaredReadCapturingSender{}
+	rt.mu.Lock()
+	rt.protocolSender = sender
+	rt.mu.Unlock()
+
+	conn := newDeclaredReadProtocolTestConn(t, "messages:read")
+	rt.HandleDeclaredQuery(context.Background(), conn, &protocol.DeclaredQueryMsg{
+		MessageID: []byte("declared-query-through-sender"),
+		Name:      "recent_messages",
+	})
+
+	sendCalls, gotConnID, gotMsg, heavyCalls, lightCalls := sender.snapshot()
+	if sendCalls != 1 {
+		t.Fatalf("sender Send calls = %d, want 1", sendCalls)
+	}
+	if heavyCalls != 0 || lightCalls != 0 {
+		t.Fatalf("transaction sender calls = heavy:%d light:%d, want 0/0", heavyCalls, lightCalls)
+	}
+	if gotConnID != conn.ID {
+		t.Fatalf("sender conn ID = %x, want %x", gotConnID[:], conn.ID[:])
+	}
+	if got := len(conn.OutboundCh); got != 0 {
+		t.Fatalf("conn outbound queue length = %d, want 0; declared reads must use ClientSender", got)
+	}
+
+	resp, ok := gotMsg.(protocol.OneOffQueryResponse)
+	if !ok {
+		t.Fatalf("sender msg = %T, want OneOffQueryResponse", gotMsg)
+	}
+	if resp.Error != nil {
+		t.Fatalf("declared query error = %q, want nil", *resp.Error)
+	}
+	if len(resp.Tables) != 1 || resp.Tables[0].TableName != "messages" {
+		t.Fatalf("declared query tables = %+v, want messages table", resp.Tables)
+	}
+	rows, err := protocol.DecodeRowList(resp.Tables[0].Rows)
+	if err != nil {
+		t.Fatalf("DecodeRowList sender response: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("sender response rows = %d, want 1", len(rows))
+	}
+}
+
 func declaredReadProtocolConfig(t *testing.T) Config {
 	t.Helper()
 	return Config{
@@ -267,6 +324,56 @@ func mintDeclaredReadProtocolToken(t *testing.T, subject string, permissions ...
 		t.Fatalf("sign token: %v", err)
 	}
 	return signed
+}
+
+type declaredReadCapturingSender struct {
+	mu sync.Mutex
+
+	sendCalls int
+	sendConn  types.ConnectionID
+	sendMsg   any
+	sendErr   error
+
+	heavyCalls int
+	lightCalls int
+}
+
+func (s *declaredReadCapturingSender) Send(connID types.ConnectionID, msg any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sendCalls++
+	s.sendConn = connID
+	s.sendMsg = msg
+	return s.sendErr
+}
+
+func (s *declaredReadCapturingSender) SendTransactionUpdate(types.ConnectionID, *protocol.TransactionUpdate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.heavyCalls++
+	return nil
+}
+
+func (s *declaredReadCapturingSender) SendTransactionUpdateLight(types.ConnectionID, *protocol.TransactionUpdateLight) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lightCalls++
+	return nil
+}
+
+func (s *declaredReadCapturingSender) snapshot() (sendCalls int, sendConn types.ConnectionID, sendMsg any, heavyCalls, lightCalls int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sendCalls, s.sendConn, s.sendMsg, s.heavyCalls, s.lightCalls
+}
+
+func newDeclaredReadProtocolTestConn(t *testing.T, permissions ...string) *protocol.Conn {
+	t.Helper()
+	opts := protocol.DefaultProtocolOptions()
+	opts.OutgoingBufferMessages = 1
+	conn := protocol.NewConn(protocol.GenerateConnectionID(), types.Identity{1}, "", false, nil, &opts)
+	conn.Permissions = append([]string(nil), permissions...)
+	return conn
 }
 
 func dialDeclaredReadProtocol(t *testing.T, rt *Runtime, token string) *websocket.Conn {

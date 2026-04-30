@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/ponchione/shunter/executor"
@@ -270,22 +271,24 @@ func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, 
 	receipt := time.Now()
 	result, err := r.CallQuery(ctx, msg.Name, protocolDeclaredReadOptions(conn, nil)...)
 	if err != nil {
-		sendProtocolDeclaredQueryError(conn, msg.MessageID, err.Error(), receipt)
+		r.sendProtocolDeclaredQueryError(conn, msg.MessageID, err.Error(), receipt)
 		return
 	}
 	rows, err := encodeDeclaredReadRows(result.Rows)
 	if err != nil {
-		sendProtocolDeclaredQueryError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
+		r.sendProtocolDeclaredQueryError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
 		return
 	}
-	sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
+	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
 		MessageID: msg.MessageID,
 		Tables: []protocol.OneOffTable{{
 			TableName: result.TableName,
 			Rows:      rows,
 		}},
 		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
-	})
+	}); err != nil {
+		logProtocolDeclaredReadSendError(conn, "query response", err)
+	}
 }
 
 // HandleSubscribeDeclaredView handles the protocol named-view subscription
@@ -294,21 +297,23 @@ func (r *Runtime) HandleSubscribeDeclaredView(ctx context.Context, conn *protoco
 	receipt := time.Now()
 	sub, err := r.SubscribeView(ctx, msg.Name, msg.QueryID, protocolDeclaredReadOptions(conn, &msg.RequestID)...)
 	if err != nil {
-		sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, err.Error(), receipt)
+		r.sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, err.Error(), receipt)
 		return
 	}
 	rows, err := encodeDeclaredReadRows(sub.InitialRows)
 	if err != nil {
-		sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, "encode error: "+err.Error(), receipt)
+		r.sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, "encode error: "+err.Error(), receipt)
 		return
 	}
-	sendProtocolDeclaredReadMessage(conn, protocol.SubscribeSingleApplied{
+	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.SubscribeSingleApplied{
 		RequestID:                        msg.RequestID,
 		TotalHostExecutionDurationMicros: declaredReadElapsedMicrosU64(receipt),
 		QueryID:                          msg.QueryID,
 		TableName:                        sub.TableName,
 		Rows:                             rows,
-	})
+	}); err != nil {
+		logProtocolDeclaredReadSendError(conn, "view response", err)
+	}
 }
 
 func protocolDeclaredReadOptions(conn *protocol.Conn, requestID *uint32) []DeclaredReadOption {
@@ -332,36 +337,56 @@ func protocolDeclaredReadOptions(conn *protocol.Conn, requestID *uint32) []Decla
 	return opts
 }
 
-func sendProtocolDeclaredQueryError(conn *protocol.Conn, messageID []byte, errText string, receipt time.Time) {
-	sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
+func (r *Runtime) sendProtocolDeclaredQueryError(conn *protocol.Conn, messageID []byte, errText string, receipt time.Time) {
+	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
 		MessageID:                  messageID,
 		Error:                      &errText,
 		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
-	})
+	}); err != nil {
+		logProtocolDeclaredReadSendError(conn, "query error response", err)
+	}
 }
 
-func sendProtocolDeclaredViewError(conn *protocol.Conn, requestID, queryID uint32, errText string, receipt time.Time) {
-	sendProtocolDeclaredReadMessage(conn, protocol.SubscriptionError{
+func (r *Runtime) sendProtocolDeclaredViewError(conn *protocol.Conn, requestID, queryID uint32, errText string, receipt time.Time) {
+	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.SubscriptionError{
 		TotalHostExecutionDurationMicros: declaredReadElapsedMicrosU64(receipt),
 		RequestID:                        declaredReadOptionalUint32(requestID),
 		QueryID:                          declaredReadOptionalUint32(queryID),
 		Error:                            errText,
-	})
+	}); err != nil {
+		logProtocolDeclaredReadSendError(conn, "view error response", err)
+	}
 }
 
-func sendProtocolDeclaredReadMessage(conn *protocol.Conn, msg any) {
+func (r *Runtime) sendProtocolDeclaredReadMessage(conn *protocol.Conn, msg any) error {
 	if conn == nil {
-		return
+		return nil
 	}
-	frame, err := protocol.EncodeServerMessage(msg)
+	sender, err := r.readyProtocolSender()
 	if err != nil {
+		return err
+	}
+	return sender.Send(conn.ID, msg)
+}
+
+func (r *Runtime) readyProtocolSender() (protocol.ClientSender, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.readyLocked(); err != nil {
+		return nil, err
+	}
+	if r.protocolSender == nil {
+		return nil, ErrRuntimeNotReady
+	}
+	return r.protocolSender, nil
+}
+
+func logProtocolDeclaredReadSendError(conn *protocol.Conn, label string, err error) {
+	if conn == nil {
+		log.Printf("runtime: send declared-read %s failed: %v", label, err)
 		return
 	}
-	wrapped := protocol.EncodeFrame(frame[0], frame[1:], conn.Compression, protocol.CompressionNone)
-	select {
-	case conn.OutboundCh <- wrapped:
-	default:
-	}
+	log.Printf("runtime: send declared-read %s for %x failed: %v", label, conn.ID[:], err)
 }
 
 func encodeDeclaredReadRows(rows []types.ProductValue) ([]byte, error) {
