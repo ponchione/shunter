@@ -388,6 +388,82 @@ func TestRapidOpenAndRecoverAfterBoundaryCompactionMatchesUncompacted(t *testing
 	})
 }
 
+func TestRapidZeroFilledTailMatchesCleanRecovery(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		cleanRoot := rapidTempDir(t)
+		defer os.RemoveAll(cleanRoot)
+		zeroTailRoot := rapidTempDir(t)
+		defer os.RemoveAll(zeroTailRoot)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 1, 24)
+		finalTxID := types.TxID(len(log.records))
+		zeroTailBytes := rapid.IntRange(1, RecordOverhead*3).Draw(t, "zeroTailBytes")
+
+		cleanPath := rapidWriteReplaySegment(t, cleanRoot, 1, log.records)
+		zeroTailPath := rapidWriteReplaySegment(t, zeroTailRoot, 1, log.records)
+		rapidAppendZeroTail(t, zeroTailPath, zeroTailBytes)
+
+		cleanRecovered, cleanMaxTxID, cleanPlan, cleanReport, err := OpenAndRecoverWithReport(cleanRoot, reg)
+		if err != nil {
+			t.Fatalf("clean OpenAndRecoverWithReport for %s: %v", cleanPath, err)
+		}
+		zeroTailRecovered, zeroTailMaxTxID, zeroTailPlan, zeroTailReport, err := OpenAndRecoverWithReport(zeroTailRoot, reg)
+		if err != nil {
+			t.Fatalf("zero-tail OpenAndRecoverWithReport for %s with %d zero bytes: %v", zeroTailPath, zeroTailBytes, err)
+		}
+
+		if cleanMaxTxID != finalTxID || zeroTailMaxTxID != finalTxID {
+			t.Fatalf("max tx mismatch: clean=%d zeroTail=%d want=%d (cleanReport=%+v zeroTailReport=%+v)",
+				cleanMaxTxID, zeroTailMaxTxID, finalTxID, cleanReport, zeroTailReport)
+		}
+		assertRapidReplayStatesEqual(t, zeroTailRecovered, cleanRecovered)
+		assertRapidReplayRows(t, zeroTailRecovered, log.models[len(log.records)])
+		if zeroTailReport.ReplayedTxRange != cleanReport.ReplayedTxRange {
+			t.Fatalf("zero-tail replay range = %+v, want clean range %+v (zeroTailReport=%+v)",
+				zeroTailReport.ReplayedTxRange, cleanReport.ReplayedTxRange, zeroTailReport)
+		}
+		if len(zeroTailReport.DamagedTailSegments) != 0 {
+			t.Fatalf("zero-tail damaged tail report = %+v, want none for safe zero tail", zeroTailReport.DamagedTailSegments)
+		}
+		if zeroTailPlan != cleanPlan || zeroTailPlan.AppendMode != AppendInPlace || zeroTailPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("zero-tail resume plan = %+v, clean plan = %+v, want append-in-place at tx %d",
+				zeroTailPlan, cleanPlan, finalTxID+1)
+		}
+	})
+}
+
+func TestRapidSealedSegmentCorruptionFailsLoudly(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		root := rapidTempDir(t)
+		defer os.RemoveAll(root)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 3, 24)
+		split := rapid.IntRange(2, len(log.records)-1).Draw(t, "sealedSegmentRecordCount")
+		corruptRecordIndex := rapid.IntRange(1, split-1).Draw(t, "corruptSealedRecordIndex")
+
+		sealedPath := rapidWriteReplaySegment(t, root, 1, log.records[:split])
+		tailPath := rapidWriteReplaySegment(t, root, uint64(split+1), log.records[split:])
+		corruptOffset := rapidRecordPayloadOffset(t, sealedPath, corruptRecordIndex, 0)
+		rapidCorruptFileByte(t, sealedPath, corruptOffset)
+
+		segments, horizon, scanErr := ScanSegments(root)
+		if scanErr == nil {
+			t.Fatalf("ScanSegments accepted corrupt sealed segment %s at record index %d byte offset %d; segments=%+v horizon=%d tail=%s",
+				sealedPath, corruptRecordIndex, corruptOffset, segments, horizon, tailPath)
+		}
+
+		recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+		if err == nil {
+			t.Fatalf("OpenAndRecoverWithReport accepted corrupt sealed segment %s at record index %d byte offset %d; recoveredTxID=%d plan=%+v report=%+v tail=%s",
+				sealedPath, corruptRecordIndex, corruptOffset, maxTxID, plan, report, tailPath)
+		}
+		if recovered != nil || maxTxID != 0 || plan != (RecoveryResumePlan{}) {
+			t.Fatalf("partial recovery after corrupt sealed segment: recovered=%v maxTxID=%d plan=%+v report=%+v scanErr=%v err=%v",
+				recovered, maxTxID, plan, report, scanErr, err)
+		}
+	})
+}
+
 func TestRapidScanDamagedTailReplaysValidPrefix(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		root := rapidTempDir(t)
@@ -808,6 +884,36 @@ func rapidRecordPayloadOffset(t rapidCommitlogFataler, path string, recordIndex 
 		t.Fatalf("record %d header out of bounds in %s", recordIndex, path)
 	}
 	return offset + RecordHeaderSize + payloadOffset
+}
+
+func rapidAppendZeroTail(t rapidCommitlogFataler, path string, byteCount int) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open %s for zero tail append: %v", path, err)
+	}
+	if _, err := f.Write(make([]byte, byteCount)); err != nil {
+		_ = f.Close()
+		t.Fatalf("append %d zero tail bytes to %s: %v", byteCount, path, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close %s after zero tail append: %v", path, err)
+	}
+}
+
+func rapidCorruptFileByte(t rapidCommitlogFataler, path string, offset int) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s for byte corruption: %v", path, err)
+	}
+	if offset < 0 || offset >= len(data) {
+		t.Fatalf("corrupt offset %d out of bounds for %s (%d bytes)", offset, path, len(data))
+	}
+	data[offset] ^= 0xff
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write corrupted %s: %v", path, err)
+	}
 }
 
 func rapidAssertFileMissing(t rapidCommitlogFataler, path string) {

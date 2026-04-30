@@ -23,7 +23,8 @@ Current status:
   ordering.
 - Commitlog recovery/metamorphic coverage now includes rapid damaged-tail
   resume equivalence, snapshot replay with and without offset indexes, and
-  boundary-segment compaction equivalence.
+  boundary-segment compaction equivalence; fault coverage now also checks safe
+  zero-filled tails and corrupt sealed predecessor segments.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.
