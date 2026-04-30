@@ -171,29 +171,67 @@ func FuzzOpenOffsetIndex(f *testing.F) {
 		}
 		defer idx.Close()
 
-		entries, err := idx.Entries()
+		_ = assertOffsetIndexEntriesConsistent(t, idx, offsetIndexFuzzLabel(data))
+	})
+}
+
+func FuzzOpenOffsetIndexMutAppendAfterTail(f *testing.F) {
+	for _, seed := range offsetIndexMutableReopenSeeds() {
+		f.Add(seed)
+	}
+
+	const maxIndexBytes = 64 << 10
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > maxIndexBytes {
+			t.Skip("offset index fuzz input above bounded local limit")
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, OffsetIndexFileName(1))
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		capEntries := uint64(len(data)/OffsetIndexEntrySize) + 2
+		idx, err := OpenOffsetIndexMut(path, capEntries)
 		if err != nil {
-			t.Fatalf("read accepted offset index entries: %v", err)
+			return
 		}
-		if idx.NumEntries() != uint64(len(entries)) {
-			t.Fatalf("NumEntries = %d, want %d", idx.NumEntries(), len(entries))
+		label := offsetIndexFuzzLabel(data)
+		before := assertOffsetIndexEntriesConsistent(t, idx, label)
+		last := types.TxID(0)
+		if len(before) > 0 {
+			last = before[len(before)-1].TxID
 		}
-		var last types.TxID
-		for _, entry := range entries {
-			if entry.TxID == 0 || entry.ByteOffset == 0 {
-				t.Fatalf("accepted sentinel entry: %+v", entry)
+		if last == ^types.TxID(0) {
+			if err := idx.Close(); err != nil {
+				t.Fatalf("Close after max-key accepted prefix: %v %s", err, label)
 			}
-			if entry.TxID <= last {
-				t.Fatalf("accepted non-monotonic entries: %+v", entries)
-			}
-			key, off, err := idx.KeyLookup(entry.TxID)
-			if err != nil {
-				t.Fatalf("lookup accepted entry %d: %v", entry.TxID, err)
-			}
-			if key != entry.TxID || off != entry.ByteOffset {
-				t.Fatalf("lookup(%d) = (%d, %d), want (%d, %d)", entry.TxID, key, off, entry.TxID, entry.ByteOffset)
-			}
-			last = entry.TxID
+			return
+		}
+
+		appended := OffsetIndexEntry{
+			TxID:       last + 1,
+			ByteOffset: uint64(SegmentHeaderSize) + uint64(len(data)) + 1,
+		}
+		if err := idx.Append(appended.TxID, appended.ByteOffset); err != nil {
+			t.Fatalf("Append(%d,%d) after mutable reopen: %v before=%+v %s", appended.TxID, appended.ByteOffset, err, before, label)
+		}
+		if err := idx.Sync(); err != nil {
+			t.Fatalf("Sync after mutable reopen append: %v %s", err, label)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatalf("Close after mutable reopen append: %v %s", err, label)
+		}
+
+		ro, err := OpenOffsetIndex(path)
+		if err != nil {
+			t.Fatalf("OpenOffsetIndex after mutable append: %v before=%+v appended=%+v %s", err, before, appended, label)
+		}
+		defer ro.Close()
+		after := assertOffsetIndexEntriesConsistent(t, ro, label)
+		want := append(append([]OffsetIndexEntry(nil), before...), appended)
+		if !reflect.DeepEqual(after, want) {
+			t.Fatalf("offset index mutable append resurrected stale tail: got=%+v want=%+v %s", after, want, label)
 		}
 	})
 }
@@ -611,6 +649,46 @@ func offsetIndexFuzzSeeds() [][]byte {
 	return seeds
 }
 
+func offsetIndexMutableReopenSeeds() [][]byte {
+	seeds := offsetIndexFuzzSeeds()
+	var staleTail []byte
+	staleTail = appendOffsetIndexSeedEntry(staleTail, 10, SegmentHeaderSize)
+	staleTail = appendOffsetIndexSeedEntry(staleTail, 20, SegmentHeaderSize+64)
+	staleTail = appendOffsetIndexSeedEntry(staleTail, 15, SegmentHeaderSize+128)
+	staleTail = appendOffsetIndexSeedEntry(staleTail, 30, SegmentHeaderSize+192)
+	seeds = append(seeds, staleTail)
+	return seeds
+}
+
+func assertOffsetIndexEntriesConsistent(t *testing.T, idx offsetIndexView, label string) []OffsetIndexEntry {
+	t.Helper()
+	entries, err := idx.Entries()
+	if err != nil {
+		t.Fatalf("read accepted offset index entries: %v %s", err, label)
+	}
+	if idx.NumEntries() != uint64(len(entries)) {
+		t.Fatalf("NumEntries = %d, want %d: entries=%+v %s", idx.NumEntries(), len(entries), entries, label)
+	}
+	var last types.TxID
+	for _, entry := range entries {
+		if entry.TxID == 0 || entry.ByteOffset == 0 {
+			t.Fatalf("accepted sentinel entry: %+v entries=%+v %s", entry, entries, label)
+		}
+		if entry.TxID <= last {
+			t.Fatalf("accepted non-monotonic entries: %+v %s", entries, label)
+		}
+		key, off, err := idx.KeyLookup(entry.TxID)
+		if err != nil {
+			t.Fatalf("lookup accepted entry %d: %v entries=%+v %s", entry.TxID, err, entries, label)
+		}
+		if key != entry.TxID || off != entry.ByteOffset {
+			t.Fatalf("lookup(%d) = (%d, %d), want (%d, %d): entries=%+v %s", entry.TxID, key, off, entry.TxID, entry.ByteOffset, entries, label)
+		}
+		last = entry.TxID
+	}
+	return entries
+}
+
 func segmentFuzzSeeds(t testing.TB) [][]byte {
 	t.Helper()
 	var seeds [][]byte
@@ -979,6 +1057,13 @@ func snapshotFuzzSeeds(t testing.TB) [][]byte {
 }
 
 func recordDecodeFuzzLabel(data []byte) string {
+	if len(data) <= 80 {
+		return fmt.Sprintf("len=%d data=%x", len(data), data)
+	}
+	return fmt.Sprintf("len=%d data_prefix=%x", len(data), data[:80])
+}
+
+func offsetIndexFuzzLabel(data []byte) string {
 	if len(data) <= 80 {
 		return fmt.Sprintf("len=%d data=%x", len(data), data)
 	}

@@ -35,7 +35,8 @@ type OffsetIndexEntry struct {
 // OffsetIndexMut is a writable, pre-allocated, sparse per-segment offset
 // index. On-disk layout: cap * 16 bytes, each entry two little-endian uint64
 // (key, value). Key `0` is the reserved empty-slot sentinel; appends with
-// txID <= lastKey (including 0) are rejected as non-monotonic.
+// txID <= lastKey (including 0) are rejected as non-monotonic. Mutable reopen
+// clears any ignored tail so later appends cannot resurrect stale entries.
 type OffsetIndexMut struct {
 	path       string
 	f          *os.File
@@ -67,9 +68,8 @@ func CreateOffsetIndex(path string, cap uint64) (*OffsetIndexMut, error) {
 }
 
 // OpenOffsetIndexMut opens an existing index file for append. Scans the
-// leading valid prefix (until first zero-key or non-monotonic key); any
-// trailing partial or corrupt tail is zero-filled by subsequent Truncate /
-// Append activity but is ignored on read.
+// leading valid prefix (until first zero-key or non-monotonic key), clears the
+// ignored tail, and leaves the file at the requested capacity for append.
 func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 	want, err := offsetIndexFileSize(cap)
 	if err != nil {
@@ -97,6 +97,16 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 	if err != nil {
 		f.Close()
 		return nil, err
+	}
+	if n < cap {
+		if err := f.Truncate(int64(n * OffsetIndexEntrySize)); err != nil {
+			f.Close()
+			return nil, err
+		}
+		if err := f.Truncate(want); err != nil {
+			f.Close()
+			return nil, err
+		}
 	}
 	return &OffsetIndexMut{path: path, f: f, cap: cap, numEntries: n, lastKey: last}, nil
 }
