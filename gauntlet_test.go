@@ -1887,6 +1887,156 @@ func TestRuntimeGauntletProtocolUnreadSubscriberDoesNotBlockFanout(t *testing.T)
 	assertGauntletReadMatchesModel(t, rt, model, "unread subscriber final")
 }
 
+func TestRuntimeGauntletProtocolSubscribeChurnShortSoak(t *testing.T) {
+	const (
+		seed            = int64(20260504)
+		steps           = 16
+		workerCount     = 3
+		cyclesPerWorker = 8
+		runtimeConfig   = "data=temp auth=dev protocol=httptest workers=3 cycles=8 steps=16"
+	)
+
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	srv := httptest.NewServer(rt.HTTPHandler())
+	defer srv.Close()
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+
+	stableSubscriber := dialGauntletProtocolURL(t, url, "subscription churn stable subscriber")
+	defer stableSubscriber.Close(websocket.StatusNormalClosure, "")
+	queryClient := dialGauntletProtocolURL(t, url, "subscription churn query client")
+	defer queryClient.Close(websocket.StatusNormalClosure, "")
+
+	model := gauntletModel{players: map[uint64]string{}}
+	testLabel := fmt.Sprintf("seed %d runtime_config=%q subscription churn", seed, runtimeConfig)
+	const stableQueryID = uint32(11902)
+	stableInitial := subscribeGauntletProtocolPlayersWithLabel(t, stableSubscriber, "SELECT * FROM players", 11901, stableQueryID, testLabel+" stable subscribe")
+	if diff := diffGauntletPlayers(stableInitial, model.players); diff != "" {
+		t.Fatalf("%s stable initial mismatch:\n%s", testLabel, diff)
+	}
+
+	history := []gauntletProtocolChurnHistory{{
+		label: "initial",
+		rows:  copyGauntletPlayers(model.players),
+	}}
+	trace := buildGauntletTrace(seed, steps)
+	observations := make(chan gauntletProtocolChurnObservation, workerCount*cyclesPerWorker*2)
+	workerErrs := make(chan error, workerCount)
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+
+	for workerID := 0; workerID < workerCount; workerID++ {
+		workerID := workerID
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			rng := rand.New(rand.NewSource(seed + int64(workerID)*7919))
+			for opIndex := 0; opIndex < cyclesPerWorker; opIndex++ {
+				time.Sleep(time.Duration(rng.Intn(3)) * time.Millisecond)
+
+				queryID := uint32(22000 + workerID*1000 + opIndex)
+				subscribeRequestID := uint32(12000 + workerID*1000 + opIndex*2)
+				unsubscribeRequestID := subscribeRequestID + 1
+				label := fmt.Sprintf("seed %d subscription churn worker %d op %02d", seed, workerID, opIndex)
+				client, _, err := dialGauntletProtocolURLWithHeadersResult(url, nil, label+" dial")
+				if err != nil {
+					workerErrs <- fmt.Errorf("%s runtime_config=%q operation=dial observed_error=%w", label, runtimeConfig, err)
+					return
+				}
+
+				rows, err := subscribeGauntletProtocolRowsForChurn(client, "SELECT * FROM players", subscribeRequestID, queryID, label+" subscribe")
+				if err != nil {
+					_ = client.CloseNow()
+					workerErrs <- fmt.Errorf("%s runtime_config=%q operation=subscribe observed_error=%w", label, runtimeConfig, err)
+					return
+				}
+				observations <- gauntletProtocolChurnObservation{
+					seed:          seed,
+					workerID:      workerID,
+					opIndex:       opIndex,
+					runtimeConfig: runtimeConfig,
+					phase:         "subscribe",
+					operation:     "SubscribeSingle SELECT * FROM players",
+					rows:          rows,
+				}
+
+				time.Sleep(time.Duration(1+rng.Intn(3)) * time.Millisecond)
+				finalRows, err := unsubscribeGauntletProtocolRowsForChurn(client, unsubscribeRequestID, queryID, label+" unsubscribe")
+				if err != nil {
+					_ = client.CloseNow()
+					workerErrs <- fmt.Errorf("%s runtime_config=%q operation=unsubscribe observed_error=%w", label, runtimeConfig, err)
+					return
+				}
+				observations <- gauntletProtocolChurnObservation{
+					seed:          seed,
+					workerID:      workerID,
+					opIndex:       opIndex,
+					runtimeConfig: runtimeConfig,
+					phase:         "unsubscribe",
+					operation:     fmt.Sprintf("UnsubscribeSingle query_id=%d", queryID),
+					rows:          finalRows,
+				}
+				if err := client.Close(websocket.StatusNormalClosure, label+" complete"); err != nil {
+					workerErrs <- fmt.Errorf("%s runtime_config=%q operation=close observed_error=%w", label, runtimeConfig, err)
+					return
+				}
+			}
+		}()
+	}
+
+	close(start)
+	for opIndex, op := range trace {
+		label := fmt.Sprintf("%s reducer op %02d %s", testLabel, opIndex, op)
+		wantDelta := gauntletAllRowsDeltaForOp(t, model, op)
+		outcome := callGauntletRuntimeReducer(t, rt, op, label)
+		advanceGauntletModel(t, &model, op, outcome, label)
+		history = append(history, gauntletProtocolChurnHistory{
+			label: fmt.Sprintf("after reducer op %02d %s", opIndex, op),
+			rows:  copyGauntletPlayers(model.players),
+		})
+		if op.wantStatus == shunter.StatusCommitted && !gauntletDeltaIsEmpty(wantDelta) {
+			gotDelta := readGauntletTransactionUpdateLight(t, stableSubscriber, stableQueryID, label+" stable subscriber")
+			assertGauntletDeltaEqual(t, gotDelta, wantDelta, label+" stable subscriber")
+		}
+		assertGauntletReadMatchesModel(t, rt, model, label)
+		if opIndex%4 == 3 {
+			assertGauntletProtocolQueriesMatchModel(t, queryClient, model, label+" protocol probe")
+		}
+		time.Sleep(time.Duration(1+opIndex%3) * time.Millisecond)
+	}
+
+	workers.Wait()
+	close(workerErrs)
+	for err := range workerErrs {
+		t.Fatal(err)
+	}
+	close(observations)
+
+	historyByRows := map[string]string{}
+	for _, snapshot := range history {
+		historyByRows[gauntletProtocolChurnRowsKey(snapshot.rows)] = snapshot.label
+	}
+	for observed := range observations {
+		key := gauntletProtocolChurnRowsKey(observed.rows)
+		if _, ok := historyByRows[key]; !ok {
+			t.Fatalf("seed %d subscription churn worker %d op %02d phase=%s runtime_config=%q operation=%q observed_rows=%s want_one_of_committed_history=%v",
+				observed.seed,
+				observed.workerID,
+				observed.opIndex,
+				observed.phase,
+				observed.runtimeConfig,
+				observed.operation,
+				key,
+				historyByRows,
+			)
+		}
+	}
+	assertGauntletReadMatchesModel(t, rt, model, testLabel+" final")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, testLabel+" final")
+}
+
 func TestRuntimeGauntletProtocolOneOffQueryModel(t *testing.T) {
 	for _, seed := range []int64{1, 17, 20260427} {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
@@ -4399,14 +4549,28 @@ func dialGauntletProtocolURL(t *testing.T, url, label string) *websocket.Conn {
 
 func dialGauntletProtocolURLWithHeaders(t *testing.T, url string, headers http.Header, label string) (*websocket.Conn, protocol.IdentityToken) {
 	t.Helper()
+	client, identityToken, err := dialGauntletProtocolURLWithHeadersResult(url, headers, label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client, identityToken
+}
+
+func dialGauntletProtocolURLWithHeadersResult(url string, headers http.Header, label string) (*websocket.Conn, protocol.IdentityToken, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	client, resp, err := websocket.Dial(ctx, url, gauntletWebSocketDialOptions(headers))
+	defer closeGauntletHTTPResponse(resp)
 	if err != nil {
-		t.Fatalf("%s failed: %v (resp=%v)", label, err, resp)
+		return nil, protocol.IdentityToken{}, fmt.Errorf("%s failed: %w (resp=%v)", label, err, resp)
 	}
 
-	return client, readGauntletIdentityToken(t, client, label)
+	identityToken, err := readGauntletIdentityTokenResult(client, label)
+	if err != nil {
+		_ = client.CloseNow()
+		return nil, protocol.IdentityToken{}, err
+	}
+	return client, identityToken, nil
 }
 
 func dialGauntletProtocolURLEventually(t *testing.T, url, label string) *websocket.Conn {
@@ -4446,15 +4610,155 @@ func gauntletWebSocketDialOptions(headers http.Header) *websocket.DialOptions {
 
 func readGauntletIdentityToken(t *testing.T, client *websocket.Conn, label string) protocol.IdentityToken {
 	t.Helper()
-	tag, msg := readGauntletProtocolMessage(t, client, label+" identity token")
+	identityToken, err := readGauntletIdentityTokenResult(client, label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identityToken
+}
+
+func readGauntletIdentityTokenResult(client *websocket.Conn, label string) (protocol.IdentityToken, error) {
+	tag, msg, err := readGauntletProtocolMessageResult(client, label+" identity token")
+	if err != nil {
+		return protocol.IdentityToken{}, err
+	}
 	if tag != protocol.TagIdentityToken {
-		t.Fatalf("%s first protocol tag = %d, want IdentityToken", label, tag)
+		return protocol.IdentityToken{}, fmt.Errorf("%s first protocol tag = %d, want IdentityToken", label, tag)
 	}
 	identityToken, ok := msg.(protocol.IdentityToken)
 	if !ok {
-		t.Fatalf("%s first protocol message = %T, want IdentityToken", label, msg)
+		return protocol.IdentityToken{}, fmt.Errorf("%s first protocol message = %T, want IdentityToken", label, msg)
 	}
-	return identityToken
+	return identityToken, nil
+}
+
+type gauntletProtocolChurnHistory struct {
+	label string
+	rows  map[uint64]string
+}
+
+type gauntletProtocolChurnObservation struct {
+	seed          int64
+	workerID      int
+	opIndex       int
+	runtimeConfig string
+	phase         string
+	operation     string
+	rows          map[uint64]string
+}
+
+func subscribeGauntletProtocolRowsForChurn(client *websocket.Conn, sql string, requestID, queryID uint32, label string) (map[uint64]string, error) {
+	if err := writeGauntletProtocolMessageResult(client, protocol.SubscribeSingleMsg{
+		RequestID:   requestID,
+		QueryID:     queryID,
+		QueryString: sql,
+	}, label); err != nil {
+		return nil, err
+	}
+
+	for {
+		tag, msg, err := readGauntletProtocolMessageResult(client, label)
+		if err != nil {
+			return nil, err
+		}
+		switch msg := msg.(type) {
+		case protocol.SubscribeSingleApplied:
+			if tag != protocol.TagSubscribeSingleApplied {
+				return nil, fmt.Errorf("%s tag = %d, want SubscribeSingleApplied", label, tag)
+			}
+			if msg.RequestID != requestID {
+				return nil, fmt.Errorf("%s request ID = %d, want %d", label, msg.RequestID, requestID)
+			}
+			if msg.QueryID != queryID {
+				return nil, fmt.Errorf("%s query ID = %d, want %d", label, msg.QueryID, queryID)
+			}
+			if msg.TableName != "players" {
+				return nil, fmt.Errorf("%s table = %q, want players", label, msg.TableName)
+			}
+			return decodeGauntletProtocolRowsResult(msg.Rows, label)
+		case protocol.SubscriptionError:
+			return nil, fmt.Errorf("%s subscription error = %q", label, msg.Error)
+		case protocol.TransactionUpdateLight:
+			if err := validateGauntletChurnLightUpdate(queryID, msg.Update, label+" pre-applied update"); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("%s response = %T, want SubscribeSingleApplied", label, msg)
+		}
+	}
+}
+
+func unsubscribeGauntletProtocolRowsForChurn(client *websocket.Conn, requestID, queryID uint32, label string) (map[uint64]string, error) {
+	if err := writeGauntletProtocolMessageResult(client, protocol.UnsubscribeSingleMsg{
+		RequestID: requestID,
+		QueryID:   queryID,
+	}, label); err != nil {
+		return nil, err
+	}
+
+	for {
+		tag, msg, err := readGauntletProtocolMessageResult(client, label)
+		if err != nil {
+			return nil, err
+		}
+		switch msg := msg.(type) {
+		case protocol.UnsubscribeSingleApplied:
+			if tag != protocol.TagUnsubscribeSingleApplied {
+				return nil, fmt.Errorf("%s tag = %d, want UnsubscribeSingleApplied", label, tag)
+			}
+			if msg.RequestID != requestID {
+				return nil, fmt.Errorf("%s request ID = %d, want %d", label, msg.RequestID, requestID)
+			}
+			if msg.QueryID != queryID {
+				return nil, fmt.Errorf("%s query ID = %d, want %d", label, msg.QueryID, queryID)
+			}
+			if !msg.HasRows {
+				return map[uint64]string{}, nil
+			}
+			return decodeGauntletProtocolRowsResult(msg.Rows, label)
+		case protocol.SubscriptionError:
+			return nil, fmt.Errorf("%s subscription error = %q", label, msg.Error)
+		case protocol.TransactionUpdateLight:
+			if err := validateGauntletChurnLightUpdate(queryID, msg.Update, label+" in-flight update"); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("%s response = %T, want UnsubscribeSingleApplied", label, msg)
+		}
+	}
+}
+
+func validateGauntletChurnLightUpdate(queryID uint32, updates []protocol.SubscriptionUpdate, label string) error {
+	for i, entry := range updates {
+		entryLabel := fmt.Sprintf("%s update %d", label, i)
+		if entry.QueryID != queryID {
+			return fmt.Errorf("%s query ID = %d, want %d", entryLabel, entry.QueryID, queryID)
+		}
+		if entry.TableName != "players" {
+			return fmt.Errorf("%s table = %q, want players", entryLabel, entry.TableName)
+		}
+		if _, err := decodeGauntletProtocolRowsResult(entry.Inserts, entryLabel+" inserts"); err != nil {
+			return err
+		}
+		if _, err := decodeGauntletProtocolRowsResult(entry.Deletes, entryLabel+" deletes"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func gauntletProtocolChurnRowsKey(rows map[uint64]string) string {
+	ids := make([]uint64, 0, len(rows))
+	for id := range rows {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	var b strings.Builder
+	for _, id := range ids {
+		fmt.Fprintf(&b, "%d=%q;", id, rows[id])
+	}
+	return b.String()
 }
 
 func assertGauntletProtocolDialRejected(t *testing.T, url string, headers http.Header, wantStatus int, label string) {
@@ -5330,16 +5634,23 @@ func assertGauntletReducerCallInfo(t *testing.T, got protocol.ReducerCallInfo, o
 
 func writeGauntletProtocolMessage(t *testing.T, client *websocket.Conn, msg any, label string) {
 	t.Helper()
+	if err := writeGauntletProtocolMessageResult(client, msg, label); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeGauntletProtocolMessageResult(client *websocket.Conn, msg any, label string) error {
 	frame, err := protocol.EncodeClientMessage(msg)
 	if err != nil {
-		t.Fatalf("encode %s: %v", label, err)
+		return fmt.Errorf("encode %s: %w", label, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := client.Write(ctx, websocket.MessageBinary, frame); err != nil {
-		t.Fatalf("write %s: %v", label, err)
+		return fmt.Errorf("write %s: %w", label, err)
 	}
+	return nil
 }
 
 func readGauntletTransactionUpdateLight(t *testing.T, client *websocket.Conn, queryID uint32, label string) gauntletDelta {
@@ -5443,23 +5754,31 @@ func assertGauntletDeltaEqual(t *testing.T, got, want gauntletDelta, label strin
 
 func decodeGauntletProtocolRows(t *testing.T, encoded []byte, label string) map[uint64]string {
 	t.Helper()
+	got, err := decodeGauntletProtocolRowsResult(encoded, label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func decodeGauntletProtocolRowsResult(encoded []byte, label string) (map[uint64]string, error) {
 	rawRows, err := protocol.DecodeRowList(encoded)
 	if err != nil {
-		t.Fatalf("decode %s RowList: %v", label, err)
+		return nil, fmt.Errorf("decode %s RowList: %w", label, err)
 	}
 	got := map[uint64]string{}
 	for i, raw := range rawRows {
 		row, err := bsatn.DecodeProductValueFromBytes(raw, gauntletPlayerTableSchema())
 		if err != nil {
-			t.Fatalf("decode %s row %d: %v", label, i, err)
+			return nil, fmt.Errorf("decode %s row %d: %w", label, i, err)
 		}
 		id := row[0].AsUint64()
 		if _, exists := got[id]; exists {
-			t.Fatalf("%s returned duplicate player id %d", label, id)
+			return nil, fmt.Errorf("%s returned duplicate player id %d", label, id)
 		}
 		got[id] = row[1].AsString()
 	}
-	return got
+	return got, nil
 }
 
 func decodeGauntletSubscriptionUpdates(t *testing.T, updates []protocol.SubscriptionUpdate, queryID uint32, label string) gauntletDelta {
@@ -5658,20 +5977,28 @@ func diffGauntletPlayers(got, want map[uint64]string) string {
 
 func readGauntletProtocolMessage(t *testing.T, client *websocket.Conn, label string) (uint8, any) {
 	t.Helper()
+	tag, msg, err := readGauntletProtocolMessageResult(client, label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tag, msg
+}
+
+func readGauntletProtocolMessageResult(client *websocket.Conn, label string) (uint8, any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	messageType, data, err := client.Read(ctx)
 	if err != nil {
-		t.Fatalf("%s read: %v", label, err)
+		return 0, nil, fmt.Errorf("%s read: %w", label, err)
 	}
 	if messageType != websocket.MessageBinary {
-		t.Fatalf("%s message type = %v, want MessageBinary", label, messageType)
+		return 0, nil, fmt.Errorf("%s message type = %v, want MessageBinary", label, messageType)
 	}
 	tag, msg, err := protocol.DecodeServerMessage(data)
 	if err != nil {
-		t.Fatalf("%s DecodeServerMessage: %v", label, err)
+		return 0, nil, fmt.Errorf("%s DecodeServerMessage: %w", label, err)
 	}
-	return tag, msg
+	return tag, msg, nil
 }
 
 func assertGauntletProtocolClosed(t *testing.T, client *websocket.Conn, label string) {
