@@ -802,8 +802,18 @@ func readSnapshotTableUint64Map(payload io.Reader, section string, schemaByID ma
 		if !ok {
 			return nil, fmt.Errorf("%w: snapshot %s references unknown table %d", ErrSnapshot, section, tableID)
 		}
-		if section == "sequence" && !snapshotSchemaHasAutoIncrement(tableSchema) {
-			return nil, fmt.Errorf("%w: snapshot sequence references table %d without autoincrement column", ErrSnapshot, tableID)
+		switch section {
+		case "next_id":
+			if next == 0 {
+				return nil, fmt.Errorf("%w: snapshot next_id 0 for table %d is below initial row ID 1", ErrSnapshot, tableID)
+			}
+		case "sequence":
+			if !snapshotSchemaHasAutoIncrement(tableSchema) {
+				return nil, fmt.Errorf("%w: snapshot sequence references table %d without autoincrement column", ErrSnapshot, tableID)
+			}
+			if next == 0 {
+				return nil, fmt.Errorf("%w: snapshot sequence 0 for table %d is below initial value 1", ErrSnapshot, tableID)
+			}
 		}
 		values[id] = next
 	}

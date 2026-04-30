@@ -201,6 +201,44 @@ func TestReadSnapshotRejectsBootstrapAdvancedNextID(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotRejectsZeroNextID(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	writeFaultSnapshot(t, root, reg, 1, nil)
+	rewriteSnapshotNextID(t, root, 1, 0, 0)
+
+	data, err := ReadSnapshot(filepath.Join(root, "snapshots", "1"))
+	if err == nil {
+		t.Fatalf("ReadSnapshot accepted zero next_id: %+v", data)
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot next_id 0 for table 0 is below initial row ID 1") {
+		t.Fatalf("ReadSnapshot error = %v, want zero next_id detail", err)
+	}
+}
+
+func TestReadSnapshotRejectsZeroSequence(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoveryAutoIncrementRegistry(t)
+	committed := buildEmptySnapshotCommittedState(t, reg)
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 1)
+	rewriteSnapshotSequence(t, root, 1, 0, 0)
+
+	data, err := ReadSnapshot(filepath.Join(root, "snapshots", "1"))
+	if err == nil {
+		t.Fatalf("ReadSnapshot accepted zero sequence: %+v", data)
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot sequence 0 for table 0 is below initial value 1") {
+		t.Fatalf("ReadSnapshot error = %v, want zero sequence detail", err)
+	}
+}
+
 func TestReadSnapshotRejectsBootstrapRows(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
