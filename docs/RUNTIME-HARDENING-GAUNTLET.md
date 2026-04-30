@@ -21,8 +21,9 @@ Current status:
   attempts immediately before restart so failed/panicking reducers cannot
   recover ghost rows or block reuse of the rejected primary key after restart.
 - Rejected protocol control-plane requests before restart are pinned through
-  one-off query, single subscribe, and multi subscribe errors so they cannot
-  leave recovered subscriptions or corrupt follow-up protocol reads.
+  one-off query, single subscribe, multi subscribe, single unsubscribe, and
+  multi unsubscribe errors so they cannot leave recovered subscriptions or
+  corrupt follow-up protocol reads.
 - Declared query and declared view protocol paths are checked across clean
   restart over private base tables, including live declared-view delta fanout
   after recovery.

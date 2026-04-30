@@ -157,6 +157,65 @@ func TestRuntimeGauntletRejectedProtocolControlPlaneRestartRecovery(t *testing.T
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "rejected control-plane final")
 }
 
+func TestRuntimeGauntletRejectedUnsubscribeRestartRecovery(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntime(t, dataDir)
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	subscriber := dialGauntletProtocol(t, rt)
+	const liveQueryID = uint32(9972)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9971, liveQueryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("rejected unsubscribe op 0 initial subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	singleErr := unsubscribeGauntletProtocolExpectErrorWithLabel(t, subscriber, 9973, 9974, "rejected unsubscribe op 1 unknown single unsubscribe")
+	if singleErr.Error == "" {
+		t.Fatal("rejected unsubscribe op 1 single unsubscribe error = empty")
+	}
+	multiErr := unsubscribeMultiGauntletProtocolExpectErrorWithLabel(t, subscriber, 9975, 9976, "rejected unsubscribe op 2 unknown multi unsubscribe")
+	if multiErr.Error == "" {
+		t.Fatal("rejected unsubscribe op 2 multi unsubscribe error = empty")
+	}
+
+	beforeRestart := insertPlayerOp(&nextID, "after_rejected_unsubscribe")
+	beforeDelta := gauntletAllRowsDeltaForOp(t, model, beforeRestart)
+	runGauntletTrace(t, rt, &model, []gauntletOp{beforeRestart}, 0, "rejected unsubscribe op 3 before restart")
+	gotBeforeDelta := readGauntletTransactionUpdateLight(t, subscriber, liveQueryID, "rejected unsubscribe op 3 before restart")
+	assertGauntletDeltaEqual(t, gotBeforeDelta, beforeDelta, "rejected unsubscribe op 3 before restart")
+	if err := subscriber.Close(websocket.StatusNormalClosure, "rejected unsubscribe op 4 subscriber complete"); err != nil {
+		t.Fatalf("rejected unsubscribe op 4 close subscriber: %v", err)
+	}
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("rejected unsubscribe op 5 Close before restart returned error: %v", err)
+	}
+
+	rt = buildGauntletRuntime(t, dataDir)
+	defer rt.Close()
+	assertGauntletReadMatchesModel(t, rt, model, "rejected unsubscribe op 6 after restart")
+
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.Close(websocket.StatusNormalClosure, "")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "rejected unsubscribe op 6 after restart")
+
+	restartedSubscriber := dialGauntletProtocol(t, rt)
+	defer restartedSubscriber.Close(websocket.StatusNormalClosure, "")
+	const restartedQueryID = uint32(9978)
+	restartedInitial := subscribeGauntletProtocolPlayers(t, restartedSubscriber, "SELECT * FROM players", 9977, restartedQueryID)
+	if diff := diffGauntletPlayers(restartedInitial, model.players); diff != "" {
+		t.Fatalf("rejected unsubscribe op 7 restarted subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	afterRestart := insertPlayerOp(&nextID, "after_rejected_unsubscribe_restart")
+	afterDelta := gauntletAllRowsDeltaForOp(t, model, afterRestart)
+	runGauntletTrace(t, rt, &model, []gauntletOp{afterRestart}, 1, "rejected unsubscribe op 8 after restart")
+	gotAfterDelta := readGauntletTransactionUpdateLight(t, restartedSubscriber, restartedQueryID, "rejected unsubscribe op 8 after restart")
+	assertGauntletDeltaEqual(t, gotAfterDelta, afterDelta, "rejected unsubscribe op 8 after restart")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "rejected unsubscribe op 8 final")
+}
+
 func TestRuntimeGauntletDevTokenReconnectAfterCleanRestart(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := shunter.Config{
