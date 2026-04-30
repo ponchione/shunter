@@ -44,6 +44,9 @@ Current status:
   checking post-restart fanout.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
+- Store read-view race coverage now includes a fixed-seed snapshot/commit
+  soak that checks concurrent snapshots only observe complete committed
+  prefixes with seed/reader/op/runtime-config labels.
 - A fixed-seed protocol subscription-churn race soak now keeps a stable
   subscriber checking reducer deltas while transient protocol clients
   subscribe and unsubscribe concurrently, validating each observed snapshot
