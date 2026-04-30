@@ -20,11 +20,7 @@ import (
 func buildSnapshotCommittedState(t *testing.T) (*store.CommittedState, schema.SchemaRegistry) {
 	t.Helper()
 	_, reg := testSchema()
-	cs := store.NewCommittedState()
-	for _, tid := range reg.Tables() {
-		ts, _ := reg.Table(tid)
-		cs.RegisterTable(tid, store.NewTable(ts))
-	}
+	cs := buildEmptySnapshotCommittedState(t, reg)
 	players, _ := cs.Table(0)
 	if err := players.InsertRow(players.AllocRowID(), types.ProductValue{types.NewUint64(1), types.NewString("alice")}); err != nil {
 		t.Fatal(err)
@@ -33,6 +29,19 @@ func buildSnapshotCommittedState(t *testing.T) (*store.CommittedState, schema.Sc
 		t.Fatal(err)
 	}
 	return cs, reg
+}
+
+func buildEmptySnapshotCommittedState(t testing.TB, reg schema.SchemaRegistry) *store.CommittedState {
+	t.Helper()
+	cs := store.NewCommittedState()
+	for _, tableID := range reg.Tables() {
+		tableSchema, ok := reg.Table(tableID)
+		if !ok {
+			t.Fatalf("registry missing table %d", tableID)
+		}
+		cs.RegisterTable(tableID, store.NewTable(tableSchema))
+	}
+	return cs
 }
 
 func createSnapshotAt(t testing.TB, writer SnapshotWriter, cs *store.CommittedState, txID types.TxID) {
@@ -63,14 +72,7 @@ func rewriteSnapshotHeaderTxID(t testing.TB, snapshotDir string, txID types.TxID
 func TestCreateAndReadSnapshotAllowsEmptyBootstrapState(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
-	cs := store.NewCommittedState()
-	for _, tableID := range reg.Tables() {
-		tableSchema, ok := reg.Table(tableID)
-		if !ok {
-			t.Fatalf("registry missing table %d", tableID)
-		}
-		cs.RegisterTable(tableID, store.NewTable(tableSchema))
-	}
+	cs := buildEmptySnapshotCommittedState(t, reg)
 
 	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
 	if err := writer.CreateSnapshot(cs, 0); err != nil {
@@ -89,6 +91,31 @@ func TestCreateAndReadSnapshotAllowsEmptyBootstrapState(t *testing.T) {
 		}
 		if nextID := data.NextIDs[table.TableID]; nextID != 1 {
 			t.Fatalf("bootstrap snapshot table %d next_id = %d, want 1", table.TableID, nextID)
+		}
+	}
+}
+
+func TestCreateSnapshotRejectsBootstrapAdvancedNextID(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	cs := buildEmptySnapshotCommittedState(t, reg)
+	players, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	players.SetNextID(2)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	err := writer.CreateSnapshot(cs, 0)
+	if err == nil {
+		t.Fatal("expected bootstrap snapshot with advanced next_id to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("CreateSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	for _, want := range []string{"bootstrap tx 0", "next_id 2", "table 0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("CreateSnapshot error = %v, want detail %q", err, want)
 		}
 	}
 }
@@ -117,6 +144,34 @@ func TestCreateSnapshotRejectsBootstrapRows(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(snapshotDir, snapshotFileName)); !os.IsNotExist(err) {
 		t.Fatalf("bootstrap snapshot file stat err = %v, want missing final snapshot", err)
+	}
+}
+
+func TestReadSnapshotRejectsBootstrapAdvancedNextID(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	cs := buildEmptySnapshotCommittedState(t, reg)
+	players, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+	players.SetNextID(2)
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, cs, 1)
+	snapshotDir := filepath.Join(root, "snapshots", "1")
+	rewriteSnapshotHeaderTxID(t, snapshotDir, 0)
+
+	data, err := ReadSnapshot(snapshotDir)
+	if err == nil {
+		t.Fatalf("ReadSnapshot accepted bootstrap snapshot with advanced next_id: %+v", data)
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("ReadSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	for _, want := range []string{"bootstrap tx 0", "next_id 2", "table 0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ReadSnapshot error = %v, want detail %q", err, want)
+		}
 	}
 }
 
