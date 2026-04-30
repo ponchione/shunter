@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -683,6 +684,72 @@ func TestOffsetIndexNonMonotonicTailIsIgnoredAndOverwritten(t *testing.T) {
 	}
 }
 
+func TestOffsetIndexFixedSeedAppendTruncateReopenModel(t *testing.T) {
+	const capEntries = uint64(16)
+	seeds := []uint64{0x1d0ff51de, 0x51deca11, 0xc0ffee17}
+
+	for _, seed := range seeds {
+		dir := t.TempDir()
+		path := filepath.Join(dir, OffsetIndexFileName(1))
+		idx, err := CreateOffsetIndex(path, capEntries)
+		if err != nil {
+			t.Fatalf("seed=%#x CreateOffsetIndex: %v", seed, err)
+		}
+
+		rng := offsetIndexSoakRand{state: seed}
+		model := []OffsetIndexEntry{}
+		trace := []string{}
+		for op := 0; op < 96; op++ {
+			switch rng.next(5) {
+			case 0, 1, 2:
+				txID := offsetIndexModelLastTxID(model) + types.TxID(rng.next(5)+1)
+				byteOffset := uint64(SegmentHeaderSize) + rng.next(8192) + 1
+				trace = appendOffsetIndexTrace(trace, fmt.Sprintf("append(%d,%d)", txID, byteOffset))
+				err := idx.Append(txID, byteOffset)
+				if uint64(len(model)) == capEntries {
+					if !errors.Is(err, ErrOffsetIndexFull) {
+						t.Fatalf("seed=%#x op=%d trace=%s Append full error = %v, want ErrOffsetIndexFull", seed, op, strings.Join(trace, " "), err)
+					}
+					break
+				}
+				if err != nil {
+					t.Fatalf("seed=%#x op=%d trace=%s Append(%d,%d): %v", seed, op, strings.Join(trace, " "), txID, byteOffset, err)
+				}
+				model = append(model, OffsetIndexEntry{TxID: txID, ByteOffset: byteOffset})
+			case 3:
+				target := types.TxID(rng.next(uint64(offsetIndexModelLastTxID(model)) + 8))
+				trace = appendOffsetIndexTrace(trace, fmt.Sprintf("truncate(%d)", target))
+				if err := idx.Truncate(target); err != nil {
+					t.Fatalf("seed=%#x op=%d trace=%s Truncate(%d): %v", seed, op, strings.Join(trace, " "), target, err)
+				}
+				model = truncateOffsetIndexModel(model, target)
+			case 4:
+				trace = appendOffsetIndexTrace(trace, "reopen")
+				if err := idx.Close(); err != nil {
+					t.Fatalf("seed=%#x op=%d trace=%s Close: %v", seed, op, strings.Join(trace, " "), err)
+				}
+				idx, err = OpenOffsetIndexMut(path, capEntries)
+				if err != nil {
+					t.Fatalf("seed=%#x op=%d trace=%s OpenOffsetIndexMut: %v", seed, op, strings.Join(trace, " "), err)
+				}
+			}
+			assertOffsetIndexViewMatchesModel(t, idx, model, seed, op, trace)
+		}
+		if err := idx.Close(); err != nil {
+			t.Fatalf("seed=%#x final Close: %v", seed, err)
+		}
+
+		ro, err := OpenOffsetIndex(path)
+		if err != nil {
+			t.Fatalf("seed=%#x OpenOffsetIndex final: %v", seed, err)
+		}
+		assertOffsetIndexViewMatchesModel(t, ro, model, seed, 96, appendOffsetIndexTrace(trace, "readonly-reopen"))
+		if err := ro.Close(); err != nil {
+			t.Fatalf("seed=%#x read-only Close: %v", seed, err)
+		}
+	}
+}
+
 func TestOffsetIndexEntriesDoesNotPreallocateClaimedCount(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "00000000000000000001.idx")
@@ -924,6 +991,101 @@ func (shortWriteAtSink) WriteAt(p []byte, _ int64) (int, error) {
 		return 0, nil
 	}
 	return len(p) - 1, nil
+}
+
+type offsetIndexView interface {
+	Entries() ([]OffsetIndexEntry, error)
+	KeyLookup(types.TxID) (types.TxID, uint64, error)
+	NumEntries() uint64
+}
+
+type offsetIndexSoakRand struct {
+	state uint64
+}
+
+func (r *offsetIndexSoakRand) next(n uint64) uint64 {
+	r.state = r.state*6364136223846793005 + 1442695040888963407
+	if n == 0 {
+		return r.state
+	}
+	return r.state % n
+}
+
+func appendOffsetIndexTrace(trace []string, op string) []string {
+	trace = append(trace, op)
+	if len(trace) <= 32 {
+		return trace
+	}
+	return trace[len(trace)-32:]
+}
+
+func offsetIndexModelLastTxID(model []OffsetIndexEntry) types.TxID {
+	if len(model) == 0 {
+		return 0
+	}
+	return model[len(model)-1].TxID
+}
+
+func truncateOffsetIndexModel(model []OffsetIndexEntry, target types.TxID) []OffsetIndexEntry {
+	for i, entry := range model {
+		if entry.TxID >= target {
+			return model[:i]
+		}
+	}
+	return model
+}
+
+func assertOffsetIndexViewMatchesModel(t *testing.T, view offsetIndexView, model []OffsetIndexEntry, seed uint64, op int, trace []string) {
+	t.Helper()
+	if got := view.NumEntries(); got != uint64(len(model)) {
+		t.Fatalf("seed=%#x op=%d trace=%s NumEntries = %d, want %d", seed, op, strings.Join(trace, " "), got, len(model))
+	}
+	got, err := view.Entries()
+	if err != nil {
+		t.Fatalf("seed=%#x op=%d trace=%s Entries: %v", seed, op, strings.Join(trace, " "), err)
+	}
+	if len(got) != len(model) {
+		t.Fatalf("seed=%#x op=%d trace=%s Entries len = %d, want %d; got=%+v want=%+v", seed, op, strings.Join(trace, " "), len(got), len(model), got, model)
+	}
+	for i, want := range model {
+		if got[i] != want {
+			t.Fatalf("seed=%#x op=%d trace=%s Entries[%d] = %+v, want %+v; got=%+v want=%+v", seed, op, strings.Join(trace, " "), i, got[i], want, got, model)
+		}
+	}
+
+	queries := []types.TxID{0, 1, offsetIndexModelLastTxID(model) + 3}
+	if len(model) > 0 {
+		queries = append(queries, model[0].TxID-1, model[0].TxID, model[len(model)/2].TxID, model[len(model)-1].TxID)
+	}
+	for _, query := range queries {
+		want, ok := offsetIndexModelLookup(model, query)
+		gotTxID, gotByteOffset, err := view.KeyLookup(query)
+		if !ok {
+			if !errors.Is(err, ErrOffsetIndexKeyNotFound) {
+				t.Fatalf("seed=%#x op=%d trace=%s KeyLookup(%d) error = %v, want ErrOffsetIndexKeyNotFound", seed, op, strings.Join(trace, " "), query, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("seed=%#x op=%d trace=%s KeyLookup(%d): %v", seed, op, strings.Join(trace, " "), query, err)
+		}
+		if gotTxID != want.TxID || gotByteOffset != want.ByteOffset {
+			t.Fatalf("seed=%#x op=%d trace=%s KeyLookup(%d) = (%d,%d), want (%d,%d)", seed, op, strings.Join(trace, " "), query, gotTxID, gotByteOffset, want.TxID, want.ByteOffset)
+		}
+	}
+}
+
+func offsetIndexModelLookup(model []OffsetIndexEntry, target types.TxID) (OffsetIndexEntry, bool) {
+	var out OffsetIndexEntry
+	ok := false
+	for _, entry := range model {
+		if entry.TxID > target {
+			break
+		}
+		out = entry
+		ok = true
+	}
+	return out, ok
 }
 
 func writeRawOffsetIndexEntry(t testing.TB, path string, entryIdx uint64, txID uint64, byteOffset uint64) {

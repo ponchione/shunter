@@ -94,7 +94,9 @@ Current status:
   full-horizon compaction without changing active-segment resume semantics, and
   future-snapshot rejection without mutating replayable log or sidecars. Pure
   compaction planner fuzzing now checks arbitrary bounded active/sealed ranges
-  against deterministic delete/retain partition invariants.
+  against deterministic delete/retain partition invariants. Offset-index
+  append/truncate/reopen behavior now has a fixed-seed model soak with compact
+  operation traces.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.
