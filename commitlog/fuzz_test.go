@@ -217,13 +217,13 @@ func FuzzScanSingleSegment(f *testing.F) {
 
 func FuzzOpenAndRecoverSnapshotSegmentBoundary(f *testing.F) {
 	for _, seed := range recoveryBoundaryFuzzSeeds(f) {
-		f.Add(seed.snapshot, seed.segment)
+		f.Add(seed.snapshot, seed.segment, seed.offsetIndex)
 	}
 
 	_, reg := testSchema()
 	const maxArtifactBytes = 64 << 10
-	f.Fuzz(func(t *testing.T, snapshotBytes []byte, segmentBytes []byte) {
-		if len(snapshotBytes) > maxArtifactBytes || len(segmentBytes) > maxArtifactBytes {
+	f.Fuzz(func(t *testing.T, snapshotBytes []byte, segmentBytes []byte, offsetIndexBytes []byte) {
+		if len(snapshotBytes) > maxArtifactBytes || len(segmentBytes) > maxArtifactBytes || len(offsetIndexBytes) > maxArtifactBytes {
 			t.Skip("recovery fuzz input above bounded local limit")
 		}
 
@@ -239,6 +239,11 @@ func FuzzOpenAndRecoverSnapshotSegmentBoundary(f *testing.F) {
 		}
 		if segmentBytes != nil {
 			if err := os.WriteFile(filepath.Join(root, SegmentFileName(1)), segmentBytes, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if offsetIndexBytes != nil {
+			if err := os.WriteFile(filepath.Join(root, OffsetIndexFileName(1)), offsetIndexBytes, 0o644); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -281,8 +286,9 @@ func FuzzOpenAndRecoverSnapshotSegmentBoundary(f *testing.F) {
 }
 
 type recoveryBoundaryFuzzSeed struct {
-	snapshot []byte
-	segment  []byte
+	snapshot    []byte
+	segment     []byte
+	offsetIndex []byte
 }
 
 func recoveryBoundaryFuzzSeeds(t testing.TB) []recoveryBoundaryFuzzSeed {
@@ -305,6 +311,8 @@ func recoveryBoundaryFuzzSeeds(t testing.TB) []recoveryBoundaryFuzzSeed {
 	snapshotBoundaryNonzeroTail := append([]byte(nil), snapshotBoundaryLog...)
 	snapshotBoundaryNonzeroTail = append(snapshotBoundaryNonzeroTail, make([]byte, RecordHeaderSize)...)
 	snapshotBoundaryNonzeroTail = append(snapshotBoundaryNonzeroTail, 1)
+	snapshotBoundaryIndex := recoveryBoundaryOffsetIndexSeed(t, snapshotBoundaryLog)
+	snapshotBoundaryCorruptIndex := appendOffsetIndexSeedEntry(nil, 2, 1)
 	firstTxMismatch := recoveryBoundarySegmentSeed(t,
 		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("first_mismatch")}}},
 	)
@@ -318,12 +326,37 @@ func recoveryBoundaryFuzzSeeds(t testing.TB) []recoveryBoundaryFuzzSeed {
 		{snapshot: nil, segment: validLog},
 		{snapshot: validSnapshot, segment: nil},
 		{snapshot: validSnapshot, segment: snapshotBoundaryLog},
+		{snapshot: validSnapshot, segment: snapshotBoundaryLog, offsetIndex: snapshotBoundaryIndex},
+		{snapshot: validSnapshot, segment: snapshotBoundaryLog, offsetIndex: snapshotBoundaryCorruptIndex},
 		{snapshot: validSnapshot, segment: snapshotBoundaryZeroTail},
+		{snapshot: validSnapshot, segment: snapshotBoundaryZeroTail, offsetIndex: snapshotBoundaryIndex},
 		{snapshot: validSnapshot, segment: snapshotBoundaryNonzeroTail},
 		{snapshot: corruptSnapshot, segment: validLog},
 		{snapshot: validSnapshot, segment: firstTxMismatch},
 		{snapshot: validSnapshot, segment: truncatedBoundary},
 	}
+}
+
+func recoveryBoundaryOffsetIndexSeed(t testing.TB, segment []byte) []byte {
+	t.Helper()
+	var index []byte
+	for offset := uint64(SegmentHeaderSize); offset+RecordHeaderSize <= uint64(len(segment)); {
+		txID := binary.LittleEndian.Uint64(segment[offset : offset+8])
+		if txID == 0 {
+			break
+		}
+		payloadLen := binary.LittleEndian.Uint32(segment[offset+10 : offset+14])
+		next := offset + RecordOverhead + uint64(payloadLen)
+		if next > uint64(len(segment)) {
+			break
+		}
+		index = appendOffsetIndexSeedEntry(index, txID, offset)
+		offset = next
+	}
+	if len(index) == 0 {
+		t.Fatalf("segment produced empty offset-index seed")
+	}
+	return index
 }
 
 func recoveryBoundarySegmentSeed(t testing.TB, records ...replayRecord) []byte {
