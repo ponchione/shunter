@@ -2037,6 +2037,79 @@ func TestRuntimeGauntletProtocolSubscribeChurnShortSoak(t *testing.T) {
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, testLabel+" final")
 }
 
+func TestRuntimeGauntletProtocolSubscribeCycleMetamorphicTrace(t *testing.T) {
+	const (
+		seed          = int64(20260505)
+		steps         = 14
+		runtimeConfig = "data=temp auth=dev protocol=httptest subscribe_cycle=per_op steps=14"
+	)
+
+	rt := buildGauntletRuntime(t, t.TempDir())
+	defer rt.Close()
+
+	srv := httptest.NewServer(rt.HTTPHandler())
+	defer srv.Close()
+	url := strings.Replace(srv.URL, "http://", "ws://", 1) + "/subscribe"
+
+	caller := dialGauntletProtocolURL(t, url, "subscribe-cycle caller")
+	defer caller.Close(websocket.StatusNormalClosure, "")
+	longLived := dialGauntletProtocolURL(t, url, "subscribe-cycle long-lived subscriber")
+	defer longLived.Close(websocket.StatusNormalClosure, "")
+	queryClient := dialGauntletProtocolURL(t, url, "subscribe-cycle query client")
+	defer queryClient.Close(websocket.StatusNormalClosure, "")
+
+	model := gauntletModel{players: map[uint64]string{}}
+	trace := buildGauntletTrace(seed, steps)
+	testLabel := fmt.Sprintf("seed %d runtime_config=%q subscribe-cycle metamorphic", seed, runtimeConfig)
+	const longQueryID = uint32(12502)
+	longInitial := subscribeGauntletProtocolPlayersWithLabel(t, longLived, "SELECT * FROM players", 12501, longQueryID, testLabel+" long-lived subscribe")
+	if diff := diffGauntletPlayers(longInitial, model.players); diff != "" {
+		t.Fatalf("%s long-lived initial mismatch:\n%s", testLabel, diff)
+	}
+
+	for opIndex, op := range trace {
+		opLabel := fmt.Sprintf("%s op %02d operation=%s", testLabel, opIndex, op)
+		cycle := dialGauntletProtocolURL(t, url, opLabel+" cycle dial")
+		cycleQueryID := uint32(12600 + opIndex)
+		cycleInitial := subscribeGauntletProtocolPlayersWithLabel(t, cycle, "SELECT * FROM players", uint32(12700+opIndex*2), cycleQueryID, opLabel+" cycle subscribe")
+		if diff := diffGauntletPlayers(cycleInitial, model.players); diff != "" {
+			_ = cycle.CloseNow()
+			t.Fatalf("%s cycle initial observed-vs-expected mismatch:\n%s", opLabel, diff)
+		}
+
+		wantDelta := gauntletAllRowsDeltaForOp(t, model, op)
+		outcome := callGauntletProtocolReducer(t, caller, op, uint32(12800+opIndex), opLabel+" reducer")
+		advanceGauntletModel(t, &model, op, outcome, opLabel+" reducer")
+		if op.wantStatus == shunter.StatusCommitted && !gauntletDeltaIsEmpty(wantDelta) {
+			gotLongDelta := readGauntletTransactionUpdateLight(t, longLived, longQueryID, opLabel+" long-lived delta")
+			assertGauntletDeltaEqual(t, gotLongDelta, wantDelta, opLabel+" long-lived delta")
+			gotCycleDelta := readGauntletTransactionUpdateLight(t, cycle, cycleQueryID, opLabel+" cycle delta")
+			assertGauntletDeltaEqual(t, gotCycleDelta, wantDelta, opLabel+" cycle delta")
+		}
+
+		cycleFinal := unsubscribeGauntletProtocolPlayersWithLabel(t, cycle, uint32(12700+opIndex*2+1), cycleQueryID, opLabel+" cycle unsubscribe")
+		if diff := diffGauntletPlayers(cycleFinal, model.players); diff != "" {
+			_ = cycle.CloseNow()
+			t.Fatalf("%s cycle final observed-vs-expected mismatch:\n%s", opLabel, diff)
+		}
+		if err := cycle.Close(websocket.StatusNormalClosure, "cycle complete"); err != nil {
+			t.Fatalf("%s cycle close: %v", opLabel, err)
+		}
+
+		assertGauntletReadMatchesModel(t, rt, model, opLabel+" local read")
+		if opIndex%3 == 2 {
+			assertGauntletProtocolQueriesMatchModel(t, queryClient, model, opLabel+" protocol probe")
+		}
+	}
+
+	longFinal := unsubscribeGauntletProtocolPlayersWithLabel(t, longLived, 12503, longQueryID, testLabel+" long-lived unsubscribe")
+	if diff := diffGauntletPlayers(longFinal, model.players); diff != "" {
+		t.Fatalf("%s long-lived final observed-vs-expected mismatch:\n%s", testLabel, diff)
+	}
+	assertGauntletReadMatchesModel(t, rt, model, testLabel+" final")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, testLabel+" final")
+}
+
 func TestRuntimeGauntletProtocolOneOffQueryModel(t *testing.T) {
 	for _, seed := range []int64{1, 17, 20260427} {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
