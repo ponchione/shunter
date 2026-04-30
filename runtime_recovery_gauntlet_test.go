@@ -1,6 +1,9 @@
 package shunter_test
 
 import (
+	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,4 +95,70 @@ func TestRuntimeGauntletRejectedReducerRestartNoGhostRows(t *testing.T) {
 	gotDelta := readGauntletTransactionUpdateLight(t, subscriber, 9942, "restart ghost-row after restart")
 	assertGauntletDeltaEqual(t, gotDelta, wantDelta, "restart ghost-row after restart")
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "restart ghost-row final")
+}
+
+func TestRuntimeGauntletDeterministicConcurrentReadShortSoak(t *testing.T) {
+	const (
+		steps       = 18
+		readerCount = 3
+	)
+
+	for _, seed := range []int64{20260430, 20260501} {
+		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
+			rt := buildGauntletRuntime(t, t.TempDir())
+			defer rt.Close()
+
+			trace := buildGauntletTrace(seed, steps)
+			model := gauntletModel{players: map[uint64]string{}}
+			startReaders := make(chan struct{})
+			readerErrs := make(chan error, readerCount)
+			var readers sync.WaitGroup
+
+			for readerID := 0; readerID < readerCount; readerID++ {
+				readerID := readerID
+				readers.Add(1)
+				go func() {
+					defer readers.Done()
+					<-startReaders
+					for iter := 0; iter < steps*2; iter++ {
+						err := rt.Read(context.Background(), func(view shunter.LocalReadView) error {
+							_, err := collectGauntletPlayersFromReadView(view)
+							return err
+						})
+						if err != nil {
+							readerErrs <- fmt.Errorf("seed %d reader %d iter %02d: %w", seed, readerID, iter, err)
+							return
+						}
+						time.Sleep(time.Duration((readerID+iter)%3) * time.Millisecond)
+					}
+				}()
+			}
+			close(startReaders)
+
+			queryClient := dialGauntletProtocol(t, rt)
+			defer queryClient.Close(websocket.StatusNormalClosure, "")
+
+			for step, op := range trace {
+				select {
+				case err := <-readerErrs:
+					t.Fatal(err)
+				default:
+				}
+
+				label := fmt.Sprintf("seed %d concurrent soak", seed)
+				runGauntletTrace(t, rt, &model, []gauntletOp{op}, step, label)
+				if step%3 == 2 {
+					assertGauntletProtocolQueriesMatchModel(t, queryClient, model, fmt.Sprintf("%s step %02d protocol probe", label, step))
+				}
+			}
+
+			readers.Wait()
+			close(readerErrs)
+			for err := range readerErrs {
+				t.Fatal(err)
+			}
+			assertGauntletReadMatchesModel(t, rt, model, fmt.Sprintf("seed %d concurrent soak final", seed))
+			assertGauntletProtocolQueriesMatchModel(t, queryClient, model, fmt.Sprintf("seed %d concurrent soak final", seed))
+		})
+	}
 }
