@@ -315,6 +315,56 @@ func TestRapidOpenAndRecoverWithAndWithoutOffsetIndexEquivalent(t *testing.T) {
 	})
 }
 
+func TestRapidOpenAndRecoverCorruptOffsetIndexFallsBackToLinearReplay(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		corruptIndexRoot := rapidTempDir(t)
+		defer os.RemoveAll(corruptIndexRoot)
+		noIndexRoot := rapidTempDir(t)
+		defer os.RemoveAll(noIndexRoot)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 3, 24)
+		finalTxID := types.TxID(len(log.records))
+		horizon := rapid.IntRange(1, len(log.records)-1).Draw(t, "snapshotHorizon")
+		badOffset := rapid.SampledFrom([]uint64{0, uint64(SegmentHeaderSize - 1), ^uint64(0)}).Draw(t, "badOffsetIndexByteOffset")
+
+		rapidWriteReplaySnapshot(t, corruptIndexRoot, reg, types.TxID(horizon), log.models[horizon])
+		rapidWriteReplaySnapshot(t, noIndexRoot, reg, types.TxID(horizon), log.models[horizon])
+		corruptSegmentPath := rapidWriteReplaySegment(t, corruptIndexRoot, 1, log.records)
+		noIndexSegmentPath := rapidWriteReplaySegment(t, noIndexRoot, 1, log.records)
+		corruptIndexPath := filepath.Join(corruptIndexRoot, OffsetIndexFileName(1))
+		rapidCreateCorruptOffsetIndexEntry(t, corruptIndexPath, types.TxID(horizon), badOffset)
+
+		corruptIndexRecovered, corruptIndexMaxTxID, corruptIndexPlan, corruptIndexReport, err := OpenAndRecoverWithReport(corruptIndexRoot, reg)
+		if err != nil {
+			t.Fatalf("OpenAndRecoverWithReport with corrupt offset index %s -> %d for segment %s: %v",
+				corruptIndexPath, badOffset, corruptSegmentPath, err)
+		}
+		noIndexRecovered, noIndexMaxTxID, noIndexPlan, noIndexReport, err := OpenAndRecoverWithReport(noIndexRoot, reg)
+		if err != nil {
+			t.Fatalf("OpenAndRecoverWithReport without offset index for segment %s: %v", noIndexSegmentPath, err)
+		}
+
+		if corruptIndexMaxTxID != finalTxID || noIndexMaxTxID != finalTxID {
+			t.Fatalf("max tx mismatch: corruptIndex=%d noIndex=%d want=%d (corruptReport=%+v noIndexReport=%+v)",
+				corruptIndexMaxTxID, noIndexMaxTxID, finalTxID, corruptIndexReport, noIndexReport)
+		}
+		assertRapidReplayStatesEqual(t, corruptIndexRecovered, noIndexRecovered)
+		assertRapidReplayRows(t, corruptIndexRecovered, log.models[len(log.records)])
+		if corruptIndexPlan != noIndexPlan {
+			t.Fatalf("resume plan mismatch: corruptIndex=%+v noIndex=%+v", corruptIndexPlan, noIndexPlan)
+		}
+		wantReplay := RecoveryTxIDRange{Start: types.TxID(horizon + 1), End: finalTxID}
+		if corruptIndexReport.ReplayedTxRange != wantReplay || noIndexReport.ReplayedTxRange != wantReplay {
+			t.Fatalf("replay range mismatch: corruptIndex=%+v noIndex=%+v want=%+v",
+				corruptIndexReport.ReplayedTxRange, noIndexReport.ReplayedTxRange, wantReplay)
+		}
+		if len(corruptIndexReport.DamagedTailSegments) != 0 || len(noIndexReport.DamagedTailSegments) != 0 {
+			t.Fatalf("damaged tail reports: corruptIndex=%+v noIndex=%+v, want none",
+				corruptIndexReport.DamagedTailSegments, noIndexReport.DamagedTailSegments)
+		}
+	})
+}
+
 func TestRapidOpenAndRecoverAfterBoundaryCompactionMatchesUncompacted(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		root := rapidTempDir(t)
@@ -997,6 +1047,25 @@ func rapidCreateOffsetIndexFromEntries(t rapidCommitlogFataler, path string, ent
 	idx := rapidPopulateSparseIndex(t, path, uint64(len(entries)+1), entries)
 	if err := idx.Close(); err != nil {
 		t.Fatalf("close offset index: %v", err)
+	}
+}
+
+func rapidCreateCorruptOffsetIndexEntry(t rapidCommitlogFataler, path string, txID types.TxID, byteOffset uint64) {
+	t.Helper()
+	idx, err := CreateOffsetIndex(path, 2)
+	if err != nil {
+		t.Fatalf("CreateOffsetIndex: %v", err)
+	}
+	if err := idx.Append(txID, byteOffset); err != nil {
+		_ = idx.Close()
+		t.Fatalf("offset index append corrupt entry tx %d offset %d: %v", txID, byteOffset, err)
+	}
+	if err := idx.Sync(); err != nil {
+		_ = idx.Close()
+		t.Fatalf("offset index sync: %v", err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatalf("offset index close: %v", err)
 	}
 }
 
