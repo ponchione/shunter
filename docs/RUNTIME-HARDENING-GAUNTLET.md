@@ -48,7 +48,8 @@ Current status:
   soak that checks concurrent snapshots only observe complete committed
   prefixes with seed/reader/op/runtime-config labels. Store metamorphic
   coverage now also compares different commit orders for independent
-  transactions through public committed snapshots and indexes.
+  transactions through public committed snapshots and indexes, including
+  mixed independent update/delete/insert transactions.
 - A fixed-seed protocol subscription-churn race soak now keeps a stable
   subscriber checking reducer deltas while transient protocol clients
   subscribe and unsubscribe concurrently, validating each observed snapshot
@@ -56,7 +57,8 @@ Current status:
 - Protocol transport race coverage now also sends concurrently through
   `ClientSender` while `ConnManager.CloseAll` tears down multiple connections,
   accepting only delivered sends or post-teardown `ErrConnNotFound` results
-  under fixed seed/worker/op labels.
+  under fixed seed/worker/op labels. `ConnManager` add/get/remove map
+  lifecycle now also has a fixed-seed concurrent short soak.
 - A fixed-seed protocol metamorphic trace now compares one long-lived
   subscription with per-operation subscribe/unsubscribe cycles, requiring
   matching deltas, final unsubscribe rows, and one-off query probes.
