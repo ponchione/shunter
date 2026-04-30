@@ -271,6 +271,72 @@ func TestRuntimeGauntletMalformedProtocolFrameRestartRecovery(t *testing.T) {
 	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "malformed protocol op 6 final")
 }
 
+func TestRuntimeGauntletOversizedProtocolFrameRestartRecovery(t *testing.T) {
+	dataDir := t.TempDir()
+	rt := buildGauntletRuntimeWithConfig(t, shunter.Config{
+		DataDir: dataDir,
+		Protocol: shunter.ProtocolConfig{
+			MaxMessageSize: 512,
+		},
+	}, true)
+
+	oversizedClient := dialGauntletProtocol(t, rt)
+	payload := make([]byte, 1024)
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if err := oversizedClient.Write(writeCtx, websocket.MessageBinary, payload); err != nil {
+		writeCancel()
+		t.Fatalf("oversized protocol op 0 write oversized frame: %v", err)
+	}
+	writeCancel()
+	assertGauntletProtocolClosed(t, oversizedClient, "oversized protocol op 0 oversized frame")
+
+	model := gauntletModel{players: map[uint64]string{}}
+	nextID := uint64(1)
+	caller := dialGauntletProtocol(t, rt)
+	beforeRestart := insertPlayerOp(&nextID, "after_oversized_frame")
+	beforeOutcome := callGauntletProtocolReducer(t, caller, beforeRestart, 9991, "oversized protocol op 1 before restart commit")
+	advanceGauntletModel(t, &model, beforeRestart, beforeOutcome, "oversized protocol op 1 before restart commit")
+	assertGauntletReadMatchesModel(t, rt, model, "oversized protocol op 1 before restart commit")
+	if err := caller.Close(websocket.StatusNormalClosure, "oversized protocol op 2 caller complete"); err != nil {
+		t.Fatalf("oversized protocol op 2 close caller: %v", err)
+	}
+
+	if err := rt.Close(); err != nil {
+		t.Fatalf("oversized protocol op 3 Close before restart returned error: %v", err)
+	}
+
+	rt = buildGauntletRuntimeWithConfig(t, shunter.Config{
+		DataDir: dataDir,
+		Protocol: shunter.ProtocolConfig{
+			MaxMessageSize: 512,
+		},
+	}, true)
+	defer rt.Close()
+	assertGauntletReadMatchesModel(t, rt, model, "oversized protocol op 4 after restart")
+
+	queryClient := dialGauntletProtocol(t, rt)
+	defer queryClient.Close(websocket.StatusNormalClosure, "")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "oversized protocol op 4 after restart")
+
+	subscriber := dialGauntletProtocol(t, rt)
+	defer subscriber.Close(websocket.StatusNormalClosure, "")
+	const subscriberQueryID = uint32(9993)
+	initialRows := subscribeGauntletProtocolPlayers(t, subscriber, "SELECT * FROM players", 9992, subscriberQueryID)
+	if diff := diffGauntletPlayers(initialRows, model.players); diff != "" {
+		t.Fatalf("oversized protocol op 5 restarted subscriber snapshot mismatch:\n%s", diff)
+	}
+
+	restartedCaller := dialGauntletProtocol(t, rt)
+	defer restartedCaller.Close(websocket.StatusNormalClosure, "")
+	afterRestart := insertPlayerOp(&nextID, "after_oversized_frame_restart")
+	afterDelta := gauntletAllRowsDeltaForOp(t, model, afterRestart)
+	afterOutcome := callGauntletProtocolReducer(t, restartedCaller, afterRestart, 9994, "oversized protocol op 6 after restart commit")
+	advanceGauntletModel(t, &model, afterRestart, afterOutcome, "oversized protocol op 6 after restart commit")
+	gotAfterDelta := readGauntletTransactionUpdateLight(t, subscriber, subscriberQueryID, "oversized protocol op 6 after restart commit")
+	assertGauntletDeltaEqual(t, gotAfterDelta, afterDelta, "oversized protocol op 6 after restart commit")
+	assertGauntletProtocolQueriesMatchModel(t, queryClient, model, "oversized protocol op 6 final")
+}
+
 func TestRuntimeGauntletDevTokenReconnectAfterCleanRestart(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := shunter.Config{

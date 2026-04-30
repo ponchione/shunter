@@ -27,6 +27,8 @@ Current status:
 - Malformed protocol frames before restart are checked to close only the
   offending connection while leaving the runtime able to commit, restart, query,
   and fan out subscription deltas.
+- Protocol transport read-limit failures before restart now get the same
+  isolation check through an oversized frame and recovered post-restart fanout.
 - Declared query and declared view protocol paths are checked across clean
   restart over private base tables, including live declared-view delta fanout
   after recovery.
