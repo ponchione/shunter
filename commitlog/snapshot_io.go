@@ -436,6 +436,9 @@ func validateSnapshotHorizon(committed *store.CommittedState, txID types.TxID) e
 			CommittedTxID: committedTxID,
 		}
 	}
+	if txID == ^types.TxID(0) {
+		return fmt.Errorf("%w: snapshot tx_id %d leaves no next tx_id", ErrSnapshot, txID)
+	}
 	return nil
 }
 

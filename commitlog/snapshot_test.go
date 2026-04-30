@@ -120,6 +120,32 @@ func TestCreateSnapshotRejectsBootstrapAdvancedNextID(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshotRejectsTerminalHorizonBeforeArtifacts(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	cs := buildEmptySnapshotCommittedState(t, reg)
+	maxTxID := ^types.TxID(0)
+	cs.SetCommittedTxID(maxTxID)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	err := writer.CreateSnapshot(cs, maxTxID)
+	if err == nil {
+		t.Fatal("expected terminal snapshot horizon to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("CreateSnapshot error = %v, want ErrSnapshot category", err)
+	}
+	for _, want := range []string{"leaves no next tx_id", "18446744073709551615"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("CreateSnapshot error = %v, want detail %q", err, want)
+		}
+	}
+	snapshotDir := filepath.Join(root, "snapshots", strconv.FormatUint(uint64(maxTxID), 10))
+	if _, err := os.Stat(snapshotDir); !os.IsNotExist(err) {
+		t.Fatalf("terminal snapshot dir stat err = %v, want not created", err)
+	}
+}
+
 func TestCreateSnapshotRejectsBootstrapRows(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)

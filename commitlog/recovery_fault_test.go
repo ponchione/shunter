@@ -1048,7 +1048,12 @@ func TestOpenAndRecoverSnapshotAtMaxTxIDFailsWithoutZeroResumePlan(t *testing.T)
 	root := t.TempDir()
 	_, reg := testSchema()
 	maxTxID := types.TxID(^uint64(0))
-	writeFaultSnapshot(t, root, reg, maxTxID, map[uint64]string{1: "alice"})
+	writeFaultSnapshot(t, root, reg, 1, map[uint64]string{1: "alice"})
+	snapshotDir := filepath.Join(root, "snapshots", "1")
+	rewriteSnapshotHeaderTxID(t, snapshotDir, maxTxID)
+	if err := os.Rename(snapshotDir, filepath.Join(root, "snapshots", txIDString(uint64(maxTxID)))); err != nil {
+		t.Fatal(err)
+	}
 
 	recovered, gotTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
 	if err == nil {
