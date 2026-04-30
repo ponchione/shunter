@@ -59,7 +59,8 @@ Current status:
   zero-header/nonzero tails on selected-snapshot replay tails, corrupt sealed
   predecessor segments, and corrupt newest snapshot fallback to an older valid
   snapshot plus log; torn rollover segments are replaced through the recovery
-  resume plan, and corrupt offset indexes fall
+  resume plan, and corrupt offset indexes, including indexes pointing at safe
+  zero-tail sentinels, fall
   back to linear replay. The fuzz corpus now includes combined snapshot plus
   segment recovery-boundary artifacts, selected-snapshot safe and unsafe tail
   padding seeds, valid, partial, and sentinel-corrupt indexed replay boundary
