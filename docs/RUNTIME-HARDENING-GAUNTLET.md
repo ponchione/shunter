@@ -55,7 +55,9 @@ Current status:
   categorization plus accepted-row canonical re-encoding.
 - Subscription query hashing now has a bounded fuzz corpus for same-table
   canonicalization laws, self-join filter alias identity, and client
-  parameterization.
+  parameterization. A short fixed-seed concurrent hash determinism soak also
+  exercises pooled canonical encoders with compact worker/iteration/seed
+  failure labels.
 - SQL parser fuzzing now drives arbitrary bounded query text through the
   public `Parse` surface, checking unsupported-error categorization and
   deterministic accepted parses.
