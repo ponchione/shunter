@@ -29,6 +29,8 @@ Current status:
   and fan out subscription deltas.
 - Protocol transport read-limit failures before restart now get the same
   isolation check through an oversized frame and recovered post-restart fanout.
+- Idle protocol clients are also checked through the same restart recovery path,
+  pinning keepalive timeout isolation before recovered reads and deltas.
 - Declared query and declared view protocol paths are checked across clean
   restart over private base tables, including live declared-view delta fanout
   after recovery.
