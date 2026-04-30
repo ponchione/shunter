@@ -188,7 +188,7 @@ func openSegmentForResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWrit
 		}
 		return seg, seg.lastTx, nil
 	case AppendByFreshNextSegment:
-		if plan.SegmentStartTx == 0 || plan.NextTxID == 0 {
+		if plan.SegmentStartTx == 0 || plan.NextTxID == 0 || plan.SegmentStartTx != plan.NextTxID {
 			return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v", plan)
 		}
 		if err := removeEmptySegmentDirectoryArtifact(dir, uint64(plan.SegmentStartTx)); err != nil {

@@ -834,6 +834,24 @@ func TestDurabilityWorkerResumePlanAppendForbiddenFailsClosed(t *testing.T) {
 	}
 }
 
+func TestDurabilityWorkerFreshResumePlanMismatchedNextTxFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	plan := RecoveryResumePlan{SegmentStartTx: 3, NextTxID: 4, AppendMode: AppendByFreshNextSegment}
+
+	_, err := NewDurabilityWorkerWithResumePlan(dir, plan, DefaultCommitLogOptions())
+	if err == nil {
+		t.Fatal("expected mismatched fresh resume plan to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid recovery resume plan") ||
+		!strings.Contains(err.Error(), "SegmentStartTx:3") ||
+		!strings.Contains(err.Error(), "NextTxID:4") {
+		t.Fatalf("resume plan error = %v, want compact plan context", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, SegmentFileName(3))); !os.IsNotExist(statErr) {
+		t.Fatalf("fresh resume segment stat err = %v, want no segment created", statErr)
+	}
+}
+
 func TestDurabilityWorkerResumePlanAppendInPlaceCorruptFirstRecordFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	path := makeScanTestSegment(t, dir, 1, 1)
