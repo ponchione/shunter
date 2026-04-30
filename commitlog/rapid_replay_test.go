@@ -388,6 +388,67 @@ func TestRapidOpenAndRecoverAfterBoundaryCompactionMatchesUncompacted(t *testing
 	})
 }
 
+func TestRapidOpenAndRecoverCorruptNewestSnapshotFallsBackToOlder(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		fullRoot := rapidTempDir(t)
+		defer os.RemoveAll(fullRoot)
+		fallbackRoot := rapidTempDir(t)
+		defer os.RemoveAll(fallbackRoot)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 3, 24)
+		finalTxID := types.TxID(len(log.records))
+		olderHorizon := rapid.IntRange(1, len(log.records)-1).Draw(t, "olderSnapshotHorizon")
+		corruptHorizon := rapid.IntRange(olderHorizon+1, len(log.records)).Draw(t, "corruptSnapshotHorizon")
+
+		fullSegmentCount := rapid.IntRange(1, min(4, len(log.records))).Draw(t, "fullSegmentCount")
+		rapidWriteReplaySegments(t, fullRoot, log.records, fullSegmentCount)
+		fullRecovered, fullMaxTxID, _, fullReport, err := OpenAndRecoverWithReport(fullRoot, reg)
+		if err != nil {
+			t.Fatalf("full-log OpenAndRecoverWithReport: %v", err)
+		}
+		if fullMaxTxID != finalTxID {
+			t.Fatalf("full-log maxTxID = %d, want %d (report=%+v)", fullMaxTxID, finalTxID, fullReport)
+		}
+
+		rapidWriteReplaySnapshot(t, fallbackRoot, reg, types.TxID(olderHorizon), log.models[olderHorizon])
+		rapidWriteReplaySnapshot(t, fallbackRoot, reg, types.TxID(corruptHorizon), log.models[corruptHorizon])
+		corruptSnapshotPath := rapidCorruptReplaySnapshot(t, fallbackRoot, types.TxID(corruptHorizon))
+		tailRecords := log.records[olderHorizon:]
+		tailSegmentCount := rapid.IntRange(1, min(4, len(tailRecords))).Draw(t, "tailSegmentCount")
+		tailSegments := rapidWriteReplaySegments(t, fallbackRoot, tailRecords, tailSegmentCount)
+
+		fallbackRecovered, fallbackMaxTxID, fallbackPlan, fallbackReport, err := OpenAndRecoverWithReport(fallbackRoot, reg)
+		if err != nil {
+			t.Fatalf("fallback OpenAndRecoverWithReport with corrupt snapshot %s: %v", corruptSnapshotPath, err)
+		}
+		if fallbackMaxTxID != fullMaxTxID {
+			t.Fatalf("fallback maxTxID = %d, want full-log max %d (report=%+v)", fallbackMaxTxID, fullMaxTxID, fallbackReport)
+		}
+		assertRapidReplayStatesEqual(t, fallbackRecovered, fullRecovered)
+		assertRapidReplayRows(t, fallbackRecovered, log.models[len(log.records)])
+		if !fallbackReport.HasSelectedSnapshot || fallbackReport.SelectedSnapshotTxID != types.TxID(olderHorizon) {
+			t.Fatalf("fallback selected snapshot report = (%v, %d), want older tx %d (report=%+v)",
+				fallbackReport.HasSelectedSnapshot, fallbackReport.SelectedSnapshotTxID, olderHorizon, fallbackReport)
+		}
+		if len(fallbackReport.SkippedSnapshots) != 1 {
+			t.Fatalf("fallback skipped snapshots = %+v, want one corrupt newest snapshot tx %d", fallbackReport.SkippedSnapshots, corruptHorizon)
+		}
+		skipped := fallbackReport.SkippedSnapshots[0]
+		if skipped.TxID != types.TxID(corruptHorizon) || skipped.Reason != SnapshotSkipReadFailed || skipped.Detail == "" {
+			t.Fatalf("fallback skipped snapshot = %+v, want tx %d read_failed with detail", skipped, corruptHorizon)
+		}
+		if fallbackReport.ReplayedTxRange != (RecoveryTxIDRange{Start: types.TxID(olderHorizon + 1), End: finalTxID}) {
+			t.Fatalf("fallback replay range = %+v, want %d..%d (report=%+v)",
+				fallbackReport.ReplayedTxRange, olderHorizon+1, finalTxID, fallbackReport)
+		}
+		lastTailSegment := tailSegments[len(tailSegments)-1]
+		if fallbackPlan.AppendMode != AppendInPlace || fallbackPlan.SegmentStartTx != lastTailSegment.StartTx || fallbackPlan.NextTxID != finalTxID+1 {
+			t.Fatalf("fallback resume plan = %+v, want append-in-place on segment %d at tx %d",
+				fallbackPlan, lastTailSegment.StartTx, finalTxID+1)
+		}
+	})
+}
+
 func TestRapidZeroFilledTailMatchesCleanRecovery(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		cleanRoot := rapidTempDir(t)
@@ -678,6 +739,23 @@ func rapidWriteReplaySnapshot(t rapidCommitlogFataler, root string, reg schema.S
 	if err := writer.CreateSnapshot(snapshotState, txID); err != nil {
 		t.Fatalf("CreateSnapshot at horizon %d: %v", txID, err)
 	}
+}
+
+func rapidCorruptReplaySnapshot(t rapidCommitlogFataler, root string, txID types.TxID) string {
+	t.Helper()
+	path := filepath.Join(root, "snapshots", txIDString(uint64(txID)), snapshotFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read snapshot %s: %v", path, err)
+	}
+	if len(data) == 0 {
+		t.Fatalf("snapshot %s is empty", path)
+	}
+	data[len(data)-1] ^= 0xff
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write corrupted snapshot %s: %v", path, err)
+	}
+	return path
 }
 
 func rapidSeedReplayRows(t rapidCommitlogFataler, committed *store.CommittedState, rows map[uint64]string) {
