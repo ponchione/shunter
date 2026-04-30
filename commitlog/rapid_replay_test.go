@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -324,6 +325,65 @@ func TestRapidCompactionRetryRemovesCoveredOrphanIndexAndPreservesRecovery(t *te
 		}
 		if len(afterRetryReport.SegmentCoverage) != 1 || afterRetryReport.SegmentCoverage[0].MinTxID != types.TxID(horizon+1) || afterRetryReport.SegmentCoverage[0].MaxTxID != finalTxID {
 			t.Fatalf("post-retry segment coverage = %+v, want only tail %d..%d", afterRetryReport.SegmentCoverage, horizon+1, finalTxID)
+		}
+	})
+}
+
+func TestRapidRunCompactionRejectsFutureSnapshotPreservesRecovery(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		root := rapidTempDir(t)
+		defer os.RemoveAll(root)
+		_, reg := testSchema()
+		log := drawRapidReplayLog(t, 2, 24)
+		finalTxID := types.TxID(len(log.records))
+		segmentCount := rapid.IntRange(1, min(5, len(log.records))).Draw(t, "segmentCount")
+		futureSnapshotDelta := rapid.IntRange(1, 8).Draw(t, "futureSnapshotDelta")
+
+		segments := rapidWriteReplaySegments(t, root, log.records, segmentCount)
+		indexPaths := make([]string, 0, len(segments))
+		for _, segment := range segments {
+			idxPath := filepath.Join(root, OffsetIndexFileName(uint64(segment.StartTx)))
+			rapidCreateOneEntryOffsetIndex(t, idxPath, segment.StartTx)
+			indexPaths = append(indexPaths, idxPath)
+		}
+
+		before, beforeMaxTxID, beforePlan, beforeReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("pre-rejection OpenAndRecoverWithReport with %d segments: %v", segmentCount, err)
+		}
+		if beforeMaxTxID != finalTxID {
+			t.Fatalf("pre-rejection maxTxID = %d, want %d (report=%+v)", beforeMaxTxID, finalTxID, beforeReport)
+		}
+		assertRapidReplayRows(t, before, log.models[len(log.records)])
+
+		futureSnapshotTxID := finalTxID + types.TxID(futureSnapshotDelta)
+		err = RunCompaction(root, futureSnapshotTxID)
+		if err == nil {
+			t.Fatalf("RunCompaction accepted future snapshot tx %d beyond durable horizon %d with segments=%+v report=%+v",
+				futureSnapshotTxID, finalTxID, segments, beforeReport)
+		}
+		for _, segment := range segments {
+			rapidAssertFileExists(t, segment.Path)
+		}
+		for _, idxPath := range indexPaths {
+			rapidAssertFileExists(t, idxPath)
+		}
+
+		after, afterMaxTxID, afterPlan, afterReport, err := OpenAndRecoverWithReport(root, reg)
+		if err != nil {
+			t.Fatalf("post-rejection OpenAndRecoverWithReport after failed compaction at tx %d: %v", futureSnapshotTxID, err)
+		}
+		if afterMaxTxID != beforeMaxTxID {
+			t.Fatalf("post-rejection maxTxID = %d, want pre-rejection max %d (report=%+v)", afterMaxTxID, beforeMaxTxID, afterReport)
+		}
+		assertRapidReplayStatesEqual(t, after, before)
+		assertRapidReplayRows(t, after, log.models[len(log.records)])
+		if afterPlan != beforePlan {
+			t.Fatalf("post-rejection resume plan = %+v, want pre-rejection plan %+v", afterPlan, beforePlan)
+		}
+		if !reflect.DeepEqual(afterReport, beforeReport) {
+			t.Fatalf("post-rejection report = %+v, want pre-rejection report %+v after failed compaction at tx %d",
+				afterReport, beforeReport, futureSnapshotTxID)
 		}
 	})
 }
