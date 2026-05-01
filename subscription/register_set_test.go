@@ -112,6 +112,25 @@ func TestRegisterSetMultiAtomicOnInvalidPredicate(t *testing.T) {
 	}
 }
 
+func TestRegisterSetRejectsEmptyPredicateSet(t *testing.T) {
+	mgr, _ := newRegisterSetTestManager(t)
+	req := SubscriptionSetRegisterRequest{
+		ConnID:  types.ConnectionID{1},
+		QueryID: 2,
+	}
+
+	_, err := mgr.RegisterSet(req, nil)
+	if !errors.Is(err, ErrInvalidPredicate) {
+		t.Fatalf("RegisterSet empty predicate error = %v, want ErrInvalidPredicate", err)
+	}
+	if _, ok := mgr.querySets[req.ConnID]; ok {
+		t.Fatalf("querySets should be empty after empty predicate rejection, got %+v", mgr.querySets)
+	}
+	if active := mgr.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0", active)
+	}
+}
+
 // TestRegisterSetMultiMergesInitialSnapshot — N predicates produce a
 // merged Update with one SubscriptionUpdate per allocated internal sub.
 func TestRegisterSetMultiMergesInitialSnapshot(t *testing.T) {

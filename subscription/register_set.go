@@ -278,6 +278,9 @@ func (m *Manager) RegisterSet(
 	req SubscriptionSetRegisterRequest,
 	view store.CommittedReadView,
 ) (SubscriptionSetRegisterResult, error) {
+	if len(req.Predicates) == 0 {
+		return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: subscription set requires at least one predicate", ErrInvalidPredicate)
+	}
 	ctx := req.Context
 	if ctx == nil {
 		ctx = context.Background()
