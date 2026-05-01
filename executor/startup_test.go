@@ -568,6 +568,53 @@ func TestStartup_ReplayedScheduleRunsBeforePostStartupExternalSubmit(t *testing.
 	}
 }
 
+func TestStartup_ReplayedScheduleObservesDanglingClientSweep(t *testing.T) {
+	observedClientRows := make(chan int, 1)
+	var sysClients schema.TableID
+
+	seed := startupSeed{
+		clients: []sysClientsSeed{
+			{conn: types.ConnectionID{1}},
+		},
+		schedules: []sysScheduledSeed{
+			{id: 44, reducerName: "check-clients-after-sweep", nextRunAtNs: time.Unix(50, 0).UnixNano()},
+		},
+		reducers: []RegisteredReducer{
+			{
+				Name: "check-clients-after-sweep",
+				Handler: types.ReducerHandler(func(ctx *types.ReducerContext, _ []byte) ([]byte, error) {
+					count := 0
+					for range ctx.DB.ScanTable(uint32(sysClients)) {
+						count++
+					}
+					observedClientRows <- count
+					return nil, nil
+				}),
+			},
+		},
+	}
+	h := newStartupHarness(t, seed)
+	sysClients = h.sysClients
+	if err := h.exec.Startup(context.Background(), h.scheduler); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+	if rows := h.sysClientsRows(); len(rows) != 0 {
+		t.Fatalf("sys_clients rows immediately after Startup=%d, want swept before scheduler execution", len(rows))
+	}
+
+	startHarnessExecutor(t, h)
+	select {
+	case got := <-observedClientRows:
+		if got != 0 {
+			t.Fatalf("replayed schedule observed sys_clients rows=%d, want 0 after dangling-client sweep", got)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("replayed scheduled reducer did not run")
+	}
+	waitExecutorBarrier(t, h.exec, "after replayed schedule observed client sweep")
+	assertScheduleIDs(t, h)
+}
+
 func TestStartup_ReplayOverflowDoesNotBlockDanglingClientSweep(t *testing.T) {
 	seed := startupSeed{
 		clients:       []sysClientsSeed{{conn: types.ConnectionID{1}}},
