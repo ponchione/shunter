@@ -67,6 +67,9 @@ var (
 // dedicated sentinels so the transport layer can produce the right
 // HTTP 401 responses (SPEC-005 §4.3).
 func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
+	if config == nil {
+		return nil, fmt.Errorf("%w: config is required", ErrJWTInvalid)
+	}
 	parsed, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) {
 		// v1 supports HS256 only. Reject unexpected methods so an
 		// attacker can't downgrade to `alg: none` or request a

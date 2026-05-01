@@ -31,6 +31,9 @@ type MintConfig struct {
 // of randomness is ample collision resistance for anonymous-scope
 // identifiers.
 func MintAnonymousToken(config *MintConfig) (string, types.Identity, error) {
+	if config == nil {
+		return "", types.Identity{}, fmt.Errorf("auth: mint config is required")
+	}
 	subject, err := randomSubject()
 	if err != nil {
 		return "", types.Identity{}, fmt.Errorf("auth: mint random subject: %w", err)

@@ -26,6 +26,18 @@ func mintHS256(t *testing.T, claims jwt.MapClaims) string {
 	return s
 }
 
+func TestValidateJWTNilConfigFailsWithoutPanic(t *testing.T) {
+	s := mintHS256(t, jwt.MapClaims{"sub": "alice", "iss": "issuer"})
+
+	claims, err := ValidateJWT(s, nil)
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("ValidateJWT nil config error = %v, want ErrJWTInvalid", err)
+	}
+	if claims != nil {
+		t.Fatalf("ValidateJWT nil config claims = %+v, want nil", claims)
+	}
+}
+
 func TestValidateJWTFullyPopulated(t *testing.T) {
 	cfg := &JWTConfig{SigningKey: testKey, AuthMode: AuthModeStrict}
 	now := time.Now()

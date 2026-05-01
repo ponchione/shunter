@@ -18,6 +18,26 @@ func testMintConfig() *MintConfig {
 	}
 }
 
+func TestMintAnonymousTokenNilConfigFailsBeforeRandomRead(t *testing.T) {
+	originalReadRandom := readRandom
+	readRandom = func([]byte) (int, error) {
+		t.Fatal("MintAnonymousToken read randomness before rejecting nil config")
+		return 0, nil
+	}
+	defer func() { readRandom = originalReadRandom }()
+
+	token, id, err := MintAnonymousToken(nil)
+	if err == nil {
+		t.Fatal("MintAnonymousToken nil config returned nil error")
+	}
+	if token != "" || !id.IsZero() {
+		t.Fatalf("MintAnonymousToken nil config returned token=%q identity=%s, want empty", token, id.Hex())
+	}
+	if !strings.Contains(err.Error(), "config is required") {
+		t.Fatalf("MintAnonymousToken nil config error = %v, want config context", err)
+	}
+}
+
 func TestMintAnonymousTokenValidatesRoundTrip(t *testing.T) {
 	cfg := testMintConfig()
 	token, id, err := MintAnonymousToken(cfg)
