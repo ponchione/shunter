@@ -1087,6 +1087,69 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverZeroFilledTailResumeAppendsAndReplaysNextRecord(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	path := writeReplaySegment(t, root, 1,
+		replayRecord{txID: 1, inserts: []types.ProductValue{{types.NewUint64(1), types.NewString("alice")}}},
+		replayRecord{txID: 2, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+	)
+	appendZeroTail(t, path, RecordOverhead*2)
+
+	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 2 {
+		t.Fatalf("first recovery maxTxID = %d, want 2", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+	if len(report.DamagedTailSegments) != 0 {
+		t.Fatalf("first damaged tail report = %+v, want none for safe zero tail", report.DamagedTailSegments)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 3 {
+		t.Fatalf("first resume plan = %+v, want append-in-place on segment 1 at tx 3", plan)
+	}
+
+	dw, err := NewDurabilityWorkerWithResumePlan(root, plan, DefaultCommitLogOptions())
+	if err != nil {
+		t.Fatalf("resume from zero-tail plan %+v: %v", plan, err)
+	}
+	dw.EnqueueCommitted(3, &store.Changeset{
+		TxID: 3,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts:   []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}},
+			},
+		},
+	})
+	if finalTxID, fatalErr := dw.Close(); fatalErr != nil {
+		t.Fatal(fatalErr)
+	} else if finalTxID != 3 {
+		t.Fatalf("resumed durability final txID = %d, want 3", finalTxID)
+	}
+
+	recovered, maxTxID, plan, report, err = OpenAndRecoverWithReport(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("second recovery maxTxID = %d, want 3", maxTxID)
+	}
+	assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol"})
+	if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 1, End: 3}) {
+		t.Fatalf("second replayed range = %+v, want 1..3", report.ReplayedTxRange)
+	}
+	if len(report.DamagedTailSegments) != 0 {
+		t.Fatalf("second damaged tail report = %+v, want none after zero-tail resume append", report.DamagedTailSegments)
+	}
+	if plan.AppendMode != AppendInPlace || plan.SegmentStartTx != 1 || plan.NextTxID != 4 {
+		t.Fatalf("second recovery plan = %+v, want append-in-place on segment 1 at tx 4", plan)
+	}
+}
+
 func TestOpenAndRecoverBootstrapSegmentFailsLoudly(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
