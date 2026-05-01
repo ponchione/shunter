@@ -8,73 +8,88 @@ import (
 	"testing"
 )
 
+var readPolicyFuzzSeeds = [][]byte{
+	[]byte(`{"access":"private","permissions":[]}`),
+	[]byte(`{"access":"public","permissions":[]}`),
+	[]byte(`{"access":"permissioned","permissions":["messages:read"]}`),
+	[]byte(`{"access":"permissioned","permissions":[]}`),
+	[]byte(`{"access":"public","permissions":["unexpected"]}`),
+	[]byte(`{"access":"permissioned","permissions":["messages:read","messages:read"]}`),
+	[]byte(`{"access":"permissioned","permissions":[" "]}`),
+	[]byte(`{"access":"unknown","permissions":[]}`),
+	[]byte(`{"access":1,"permissions":[]}`),
+	[]byte(`{"permissions":null}`),
+	[]byte(`not-json`),
+}
+
+const maxReadPolicyFuzzBytes = 8 << 10
+
 func FuzzReadPolicyJSONRoundTrip(f *testing.F) {
-	for _, seed := range [][]byte{
-		[]byte(`{"access":"private","permissions":[]}`),
-		[]byte(`{"access":"public","permissions":[]}`),
-		[]byte(`{"access":"permissioned","permissions":["messages:read"]}`),
-		[]byte(`{"access":"permissioned","permissions":[]}`),
-		[]byte(`{"access":"public","permissions":["unexpected"]}`),
-		[]byte(`{"access":"permissioned","permissions":["messages:read","messages:read"]}`),
-		[]byte(`{"access":"permissioned","permissions":[" "]}`),
-		[]byte(`{"access":"unknown","permissions":[]}`),
-		[]byte(`{"access":1,"permissions":[]}`),
-		[]byte(`{"permissions":null}`),
-		[]byte(`not-json`),
-	} {
+	for _, seed := range readPolicyFuzzSeeds {
 		f.Add(seed)
 	}
 
-	const maxReadPolicyFuzzBytes = 8 << 10
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) > maxReadPolicyFuzzBytes {
 			t.Skip("read policy JSON fuzz input above bounded local limit")
 		}
-		label := readPolicyFuzzLabel(data, maxReadPolicyFuzzBytes)
-
-		var policy ReadPolicy
-		if err := json.Unmarshal(data, &policy); err != nil {
-			return
-		}
-		if err := ValidateReadPolicy(policy); err != nil && !errors.Is(err, ErrInvalidTableReadPolicy) {
-			t.Fatalf("%s operation=ValidateReadPolicy observed_error=%v expected_wrapped=%v", label, err, ErrInvalidTableReadPolicy)
-		}
-
-		first, err := json.Marshal(policy)
-		if err != nil {
-			t.Fatalf("%s operation=MarshalReadPolicy observed_error=%v expected=nil", label, err)
-		}
-		second, err := json.Marshal(policy)
-		if err != nil {
-			t.Fatalf("%s operation=MarshalReadPolicyAgain observed_error=%v expected=nil", label, err)
-		}
-		if !bytes.Equal(first, second) {
-			t.Fatalf("%s operation=MarshalDeterminism observed=%s expected=%s", label, second, first)
-		}
-
-		var roundTrip ReadPolicy
-		if err := json.Unmarshal(first, &roundTrip); err != nil {
-			t.Fatalf("%s operation=UnmarshalCanonical observed_error=%v expected=nil canonical=%s", label, err, first)
-		}
-		roundTripCanonical, err := json.Marshal(roundTrip)
-		if err != nil {
-			t.Fatalf("%s operation=MarshalRoundTrip observed_error=%v expected=nil round_trip=%#v", label, err, roundTrip)
-		}
-		if !bytes.Equal(roundTripCanonical, first) {
-			t.Fatalf("%s operation=CanonicalRoundTrip observed=%s expected=%s round_trip=%#v", label, roundTripCanonical, first, roundTrip)
-		}
-		if len(roundTrip.Permissions) == 0 {
-			return
-		}
-		roundTrip.Permissions[0] = "mutated"
-		var again ReadPolicy
-		if err := json.Unmarshal(first, &again); err != nil {
-			t.Fatalf("%s operation=UnmarshalCanonicalAgain observed_error=%v expected=nil", label, err)
-		}
-		if again.Permissions[0] == "mutated" {
-			t.Fatalf("%s operation=PermissionSliceDetachment observed_mutated_permission=true canonical=%s", label, first)
-		}
+		assertReadPolicyJSONInput(t, data)
 	})
+}
+
+func assertReadPolicyJSONInput(tb testing.TB, data []byte) {
+	tb.Helper()
+	if err := checkReadPolicyJSONInput(data); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+func checkReadPolicyJSONInput(data []byte) error {
+	label := readPolicyFuzzLabel(data, maxReadPolicyFuzzBytes)
+
+	var policy ReadPolicy
+	if err := json.Unmarshal(data, &policy); err != nil {
+		return nil
+	}
+	if err := ValidateReadPolicy(policy); err != nil && !errors.Is(err, ErrInvalidTableReadPolicy) {
+		return fmt.Errorf("%s operation=ValidateReadPolicy observed_error=%v expected_wrapped=%v", label, err, ErrInvalidTableReadPolicy)
+	}
+
+	first, err := json.Marshal(policy)
+	if err != nil {
+		return fmt.Errorf("%s operation=MarshalReadPolicy observed_error=%v expected=nil", label, err)
+	}
+	second, err := json.Marshal(policy)
+	if err != nil {
+		return fmt.Errorf("%s operation=MarshalReadPolicyAgain observed_error=%v expected=nil", label, err)
+	}
+	if !bytes.Equal(first, second) {
+		return fmt.Errorf("%s operation=MarshalDeterminism observed=%s expected=%s", label, second, first)
+	}
+
+	var roundTrip ReadPolicy
+	if err := json.Unmarshal(first, &roundTrip); err != nil {
+		return fmt.Errorf("%s operation=UnmarshalCanonical observed_error=%v expected=nil canonical=%s", label, err, first)
+	}
+	roundTripCanonical, err := json.Marshal(roundTrip)
+	if err != nil {
+		return fmt.Errorf("%s operation=MarshalRoundTrip observed_error=%v expected=nil round_trip=%#v", label, err, roundTrip)
+	}
+	if !bytes.Equal(roundTripCanonical, first) {
+		return fmt.Errorf("%s operation=CanonicalRoundTrip observed=%s expected=%s round_trip=%#v", label, roundTripCanonical, first, roundTrip)
+	}
+	if len(roundTrip.Permissions) == 0 {
+		return nil
+	}
+	roundTrip.Permissions[0] = "mutated"
+	var again ReadPolicy
+	if err := json.Unmarshal(first, &again); err != nil {
+		return fmt.Errorf("%s operation=UnmarshalCanonicalAgain observed_error=%v expected=nil", label, err)
+	}
+	if again.Permissions[0] == "mutated" {
+		return fmt.Errorf("%s operation=PermissionSliceDetachment observed_mutated_permission=true canonical=%s", label, first)
+	}
+	return nil
 }
 
 func readPolicyFuzzLabel(data []byte, maxBytes int) string {
