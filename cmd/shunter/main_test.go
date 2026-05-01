@@ -514,6 +514,49 @@ func TestContractCodegenRejectedInputsLeaveOutputUntouched(t *testing.T) {
 	}
 }
 
+func TestContractCodegenMetadataMismatchLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=cli-codegen-metadata-mismatch-output-preservation"
+	dir := t.TempDir()
+	contract := cliContractFixture()
+	contract.Codegen.ContractFormat = "unexpected.format"
+	contract.Codegen.ContractVersion = shunter.ModuleContractVersion + 1
+	contractData, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("%s MarshalCanonicalJSON returned error: %v", trace, err)
+	}
+	contractPath := writeCLIBytes(t, dir, "contract.json", contractData)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "typescript",
+		"--out", outputPath,
+	})
+	if code != 1 {
+		t.Fatalf("%s contract codegen exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
+	}
+	assertContains(t, stderr.String(), "invalid module contract")
+	assertContains(t, stderr.String(), `codegen.contract_format = "unexpected.format"`)
+	assertContains(t, stderr.String(), "codegen.contract_version")
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s metadata mismatch mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestContractCodegenDirectoryOutputFailsWithoutMutationOrTempLeak(t *testing.T) {
 	const trace = "trace=cli-codegen-directory-output-non-mutating"
 	dir := t.TempDir()
