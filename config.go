@@ -31,7 +31,8 @@ type Config struct {
 	AnonymousTokenAudience string
 	AnonymousTokenTTL      time.Duration
 
-	Protocol ProtocolConfig
+	Protocol      ProtocolConfig
+	Observability ObservabilityConfig
 }
 
 // ProtocolConfig exposes narrow top-level WebSocket protocol tuning. Zero

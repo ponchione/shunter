@@ -29,8 +29,13 @@ func normalizeConfig(cfg Config) (Config, string, error) {
 	if cfg.AuthMode != AuthModeDev && cfg.AuthMode != AuthModeStrict {
 		return Config{}, "", fmt.Errorf("auth mode is invalid")
 	}
+	observability, err := normalizeObservabilityConfig(cfg.Observability)
+	if err != nil {
+		return Config{}, "", err
+	}
 
 	normalized := copyConfig(cfg)
+	normalized.Observability = observability
 	dataDir := strings.TrimSpace(cfg.DataDir)
 	if dataDir == "" {
 		dataDir = defaultDataDir

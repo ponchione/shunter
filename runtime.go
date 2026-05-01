@@ -30,6 +30,7 @@ type Runtime struct {
 	recoveredTxID types.TxID
 	resumePlan    commitlog.RecoveryResumePlan
 	reducers      *executor.ReducerRegistry
+	observability *runtimeObservability
 
 	mu              sync.Mutex
 	closeMu         sync.Mutex
@@ -119,6 +120,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		return nil, fmt.Errorf("build hosted runtime reducers: %w", err)
 	}
 
+	observability := newRuntimeObservability(mod.name, normalized.Observability)
 	return &Runtime{
 		module:        newModuleSnapshot(mod, visibilityFilters),
 		config:        copyConfig(cfg),
@@ -131,6 +133,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		recoveredTxID: recoveredTxID,
 		resumePlan:    resumePlan,
 		reducers:      reducers,
+		observability: observability,
 		stateName:     RuntimeStateBuilt,
 	}, nil
 }

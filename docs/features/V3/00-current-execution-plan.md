@@ -1,6 +1,6 @@
 # Hosted Runtime V3 Current Execution Plan
 
-Status: planned
+Status: in progress
 
 Goal: implement SPEC-007 operator-facing observability without changing hosted
 runtime correctness or public protocol compatibility.
@@ -52,6 +52,17 @@ V3 must make these statements true:
 10. Add optional tracing hooks.
 11. Run the SPEC-007 gauntlet and final validation gates.
 
+## Current Baseline Notes
+
+- Task 01 baseline is recorded in `01-stack-prerequisites.md`.
+- No SPEC-007 public API had already landed under alternate names.
+- The task sequence still holds: task 02 can add the no-op observability
+  foundation without changing runtime semantics.
+- Root `Build` currently retains only recovered tx and resume-plan facts; task
+  03 remains the intended slice for switching to retained
+  `commitlog.RecoveryReport` facts before recovery health, logging, or metrics
+  depend on them.
+
 ## Phase Boundaries
 
 Phase A, tasks 01-04, may land without the Prometheus adapter, HTTP endpoints,
@@ -92,4 +103,3 @@ rtk go vet ./commitlog ./executor ./protocol ./subscription ./store ./observabil
 rtk go test ./... -count=1
 rtk go tool staticcheck ./...
 ```
-

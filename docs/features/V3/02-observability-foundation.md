@@ -117,3 +117,65 @@ When complete, update this file with:
 - redaction helper coverage
 - sink isolation behavior and any remaining unsupported sink path
 - validation commands run
+
+### Recorded Completion 2026-05-01
+
+Exported API names added in `observability.go` and `config.go`:
+
+- `Config.Observability`
+- `ObservabilityConfig`
+- `RedactionConfig`
+- `MetricsConfig`
+- `ReducerLabelMode`
+- `DiagnosticsConfig`
+- `TracingConfig`
+- `MetricName`
+- `MetricLabels`
+- `MetricsRecorder`
+- `TraceAttr`
+- `Tracer`
+- `Span`
+
+Normalization and validation:
+
+- `normalizeConfig` now normalizes `ObservabilityConfig` before schema build.
+- `RuntimeLabel` is trimmed, defaults to `"default"`, and rejects invalid
+  UTF-8, ASCII control characters, and values over 128 bytes.
+- `Redaction.ErrorMessageMaxBytes <= 0` defaults to `1024`.
+- `Metrics.ReducerLabelMode == ""` defaults to `ReducerLabelModeName`.
+- invalid reducer label modes reject before runtime construction.
+- disabled metrics/tracing produce no runtime-scoped sink calls even when a
+  recorder or tracer is configured.
+
+Foundation internals:
+
+- `Runtime` now carries a `runtimeObservability` built from normalized config.
+- sink wrappers recover panics from logger, recorder, tracer, span event, and
+  span end calls.
+- sink-failure reporting has a recursion guard and avoids retrying through the
+  sink that just failed.
+- base module/runtime labels and log/trace fields are centralized on the
+  runtime-scoped object.
+- diagnostics handler panic isolation is not wired yet because SPEC-007 HTTP
+  diagnostics are task 09.
+
+Redaction coverage:
+
+- SPEC-007 section 11.1 examples are pinned.
+- token-bounded key matching, JSON-shaped values, quoted values, unquoted
+  delimiter boundaries, bearer token values, invalid UTF-8 normalization, and
+  UTF-8-safe truncation are covered.
+- debug raw SQL normalization and bounding is available only when explicitly
+  enabled.
+
+Validation:
+
+```sh
+rtk go fmt .
+rtk go test . -run 'Test.*(Observability|Config|RuntimeLabel|ReducerLabel|Redaction|Noop|Sink|Tracing|Metrics)' -count=1
+rtk go vet .
+rtk go test . -count=1
+rtk go test ./... -count=1
+```
+
+Results: all commands passed.
