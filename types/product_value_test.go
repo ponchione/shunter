@@ -90,3 +90,49 @@ func TestProductValueCopyNil(t *testing.T) {
 		t.Fatal("Copy of nil ProductValue should be nil")
 	}
 }
+
+func TestCopyProductValuesDetachmentMetamorphic(t *testing.T) {
+	const seed = uint64(0xc0fefeed)
+	rows := []ProductValue{
+		{NewUint64(1), NewString("alice"), NewBytes([]byte{1, 2, 3})},
+		{NewUint64(2), NewString("bob"), NewBytes([]byte{4, 5, 6})},
+	}
+	copied := CopyProductValues(rows)
+	assertProductRowsEqual(t, seed, 0, "copy", copied, rows)
+
+	copied[0][0] = NewUint64(99)
+	copied[0][2].buf[0] = 0xaa
+	if rows[0][0].AsUint64() != 1 || rows[0][2].AsBytes()[0] != 1 {
+		t.Fatalf("seed=%#x op_index=1 runtime_config=rows=%d operation=mutate-copy observed_source=%#v expected_source=%#v",
+			seed, len(rows), rows[0], ProductValue{NewUint64(1), NewString("alice"), NewBytes([]byte{1, 2, 3})})
+	}
+
+	rows[1][1] = NewString("source-mutated")
+	rows[1][2].buf[1] = 0xbb
+	if copied[1][1].AsString() != "bob" || copied[1][2].AsBytes()[1] != 5 {
+		t.Fatalf("seed=%#x op_index=2 runtime_config=rows=%d operation=mutate-source observed_copy=%#v expected_copy=%#v",
+			seed, len(rows), copied[1], ProductValue{NewUint64(2), NewString("bob"), NewBytes([]byte{4, 5, 6})})
+	}
+
+	secondCopy := CopyProductValues(copied)
+	assertProductRowsEqual(t, seed, 3, "copy-mutated-copy", secondCopy, copied)
+	secondCopy[0][2].buf[1] = 0xcc
+	if copied[0][2].AsBytes()[1] != 2 {
+		t.Fatalf("seed=%#x op_index=4 runtime_config=rows=%d operation=mutate-second-copy observed_original_copy=%#v expected_byte=2",
+			seed, len(rows), copied[0])
+	}
+}
+
+func assertProductRowsEqual(t *testing.T, seed uint64, opIndex int, operation string, got, expected []ProductValue) {
+	t.Helper()
+	if len(got) != len(expected) {
+		t.Fatalf("seed=%#x op_index=%d runtime_config=rows=%d operation=%s observed_len=%d expected_len=%d",
+			seed, opIndex, len(expected), operation, len(got), len(expected))
+	}
+	for rowIndex := range expected {
+		if !got[rowIndex].Equal(expected[rowIndex]) {
+			t.Fatalf("seed=%#x op_index=%d runtime_config=rows=%d operation=%s row=%d observed=%#v expected=%#v",
+				seed, opIndex, len(expected), operation, rowIndex, got[rowIndex], expected[rowIndex])
+		}
+	}
+}
