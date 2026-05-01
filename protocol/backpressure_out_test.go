@@ -69,6 +69,117 @@ func TestOutgoingBackpressure_OverflowMessageNotDelivered(t *testing.T) {
 	}
 }
 
+func TestOutgoingBackpressureConcurrentSlowClientShortSoak(t *testing.T) {
+	const (
+		seed        = uint64(0x5100c11e)
+		connections = 5
+		workers     = 8
+		iterations  = 80
+	)
+	opts := DefaultProtocolOptions()
+	opts.OutgoingBufferMessages = 1
+	opts.DisconnectTimeout = 500 * time.Millisecond
+
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	conns := make([]*Conn, 0, connections)
+	for range connections {
+		conn := testConnDirect(&opts)
+		conns = append(conns, conn)
+		mgr.Add(conn)
+	}
+	sender := NewClientSender(mgr, inbox)
+	msg := SubscribeSingleApplied{RequestID: 1, QueryID: 10, TableName: "t", Rows: nil}
+
+	for i, conn := range conns {
+		if err := sender.Send(conn.ID, msg); err != nil {
+			t.Fatalf("seed=%#x op=prefill-%d runtime_config=connections=%d/workers=%d/iterations=%d observed_error=%v expected=nil",
+				seed, i, connections, workers, iterations, err)
+		}
+	}
+
+	start := make(chan struct{})
+	ready := make(chan struct{}, workers)
+	failures := make(chan string, workers)
+	var sent atomic.Int64
+	var bufferFull atomic.Int64
+	var notFound atomic.Int64
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			ready <- struct{}{}
+			<-start
+			for op := range iterations {
+				conn := conns[(int(seed)+worker*13+op*17)%len(conns)]
+				err := sender.Send(conn.ID, msg)
+				switch {
+				case err == nil:
+					sent.Add(1)
+				case errors.Is(err, ErrClientBufferFull):
+					bufferFull.Add(1)
+				case errors.Is(err, ErrConnNotFound):
+					notFound.Add(1)
+				default:
+					select {
+					case failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=connections=%d/workers=%d/iterations=%d operation=Send(%x) observed_error=%v expected=ErrClientBufferFull-or-ErrConnNotFound",
+						seed, worker, op, connections, workers, iterations, conn.ID[:], err):
+					default:
+					}
+					return
+				}
+				if (int(seed)+worker+op)%5 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(worker)
+	}
+	waitForSignals(t, ready, workers, "seed=0x5100c11e slow-client backpressure senders started")
+
+	close(start)
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
+	}
+	if got := sent.Load(); got != 0 {
+		t.Fatalf("seed=%#x op=worker-send-count runtime_config=connections=%d/workers=%d/iterations=%d observed_successes=%d expected=0 buffer_full=%d not_found=%d",
+			seed, connections, workers, iterations, got, bufferFull.Load(), notFound.Load())
+	}
+	if got := bufferFull.Load() + notFound.Load(); got != workers*iterations {
+		t.Fatalf("seed=%#x op=worker-result-count runtime_config=connections=%d/workers=%d/iterations=%d observed=%d expected=%d buffer_full=%d not_found=%d",
+			seed, connections, workers, iterations, got, workers*iterations, bufferFull.Load(), notFound.Load())
+	}
+
+	for i, conn := range conns {
+		select {
+		case <-conn.closed:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("seed=%#x op=closed-%d runtime_config=connections=%d/workers=%d/iterations=%d observed=open expected=closed buffer_full=%d not_found=%d",
+				seed, i, connections, workers, iterations, bufferFull.Load(), notFound.Load())
+		}
+		if got := mgr.Get(conn.ID); got != nil {
+			t.Fatalf("seed=%#x op=manager-remove-%d runtime_config=connections=%d/workers=%d/iterations=%d observed=%p expected=nil",
+				seed, i, connections, workers, iterations, got)
+		}
+		if got := len(conn.OutboundCh); got != 1 {
+			t.Fatalf("seed=%#x op=overflow-not-enqueued-%d runtime_config=connections=%d/workers=%d/iterations=%d observed_len=%d expected_len=1",
+				seed, i, connections, workers, iterations, got)
+		}
+		err := sender.Send(conn.ID, msg)
+		if !errors.Is(err, ErrConnNotFound) {
+			t.Fatalf("seed=%#x op=post-close-send-%d runtime_config=connections=%d/workers=%d/iterations=%d observed_error=%v expected=ErrConnNotFound",
+				seed, i, connections, workers, iterations, err)
+		}
+	}
+	onDis, onSubs, _ := inbox.disconnectSnapshot()
+	if onDis != connections || onSubs != connections {
+		t.Fatalf("seed=%#x op=disconnect-count runtime_config=connections=%d/workers=%d/iterations=%d observed=(on_disconnect=%d subscription_disconnect=%d) expected=(%d,%d)",
+			seed, connections, workers, iterations, onDis, onSubs, connections, connections)
+	}
+}
+
 func TestOutgoingBackpressure_FurtherSendsAfterDisconnect(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.OutgoingBufferMessages = 1
