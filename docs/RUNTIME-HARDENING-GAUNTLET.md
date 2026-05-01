@@ -164,6 +164,9 @@ Current status:
   corpus plus fixed-seed concurrent short-soak coverage that checks
   invalid-contract error categorization plus deterministic and
   canonical-input-equivalent diff/plan output for accepted contracts.
+- Contract workflow file-backed diff, policy, and plan helpers now have a
+  fixed-seed concurrent short-soak that checks stable text and JSON formatting
+  over canonical contract fixtures without touching artifact output paths.
 - Migration-plan validation now checks module and per-declaration migration
   metadata version drift, schema/contract regressions, and codegen metadata
   mismatches; CLI release-candidate coverage pins `contract plan --validate`
