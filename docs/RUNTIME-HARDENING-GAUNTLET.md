@@ -117,6 +117,10 @@ Current status:
 - Module contract JSON validation now has a bounded public-surface fuzz corpus
   that accepts canonical exported contracts, rejects malformed inputs, and
   checks deterministic canonical re-marshalling after JSON round trips.
+- TypeScript client code generation now has bounded public-surface fuzz
+  coverage over contract JSON, including invalid-input categorization,
+  deterministic accepted output, canonical JSON input equivalence, and
+  identifier collision/reserved-word corpus seeds.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
