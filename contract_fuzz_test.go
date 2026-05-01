@@ -7,13 +7,11 @@ import (
 	"testing"
 )
 
-func FuzzModuleContractJSONCanonicalRoundTrip(f *testing.F) {
-	for _, seed := range [][]byte{
-		nil,
-		[]byte("not-json"),
-		[]byte(`{"contract_version":0}`),
-		contractFuzzAcceptedSeed(f),
-		[]byte(`{
+var contractFuzzLiteralSeeds = [][]byte{
+	nil,
+	[]byte("not-json"),
+	[]byte(`{"contract_version":0}`),
+	[]byte(`{
   "contract_version": 1,
   "module": {"name": "chat", "version": "v1.0.0", "metadata": {}},
   "schema": {"version": 1, "tables": [], "reducers": []},
@@ -28,49 +26,72 @@ func FuzzModuleContractJSONCanonicalRoundTrip(f *testing.F) {
     "default_snapshot_filename": "shunter.contract.json"
   }
 }`),
-	} {
+}
+
+const maxContractFuzzBytes = 64 << 10
+
+func FuzzModuleContractJSONCanonicalRoundTrip(f *testing.F) {
+	for _, seed := range contractJSONFuzzSeeds(f) {
 		f.Add(seed)
 	}
 
-	const maxContractFuzzBytes = 64 << 10
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) > maxContractFuzzBytes {
 			t.Skip("module contract fuzz input above bounded local limit")
 		}
-		label := contractFuzzLabel(data, maxContractFuzzBytes)
-
-		var contract ModuleContract
-		if err := json.Unmarshal(data, &contract); err != nil {
-			return
-		}
-		if err := ValidateModuleContract(contract); err != nil {
-			return
-		}
-
-		canonical, err := contract.MarshalCanonicalJSON()
-		if err != nil {
-			t.Fatalf("%s operation=MarshalCanonicalJSON observed_error=%v expected=nil", label, err)
-		}
-		if len(canonical) == 0 || canonical[len(canonical)-1] != '\n' {
-			t.Fatalf("%s operation=MarshalCanonicalJSON observed_trailing_newline=%v expected=true canonical=%q",
-				label, len(canonical) > 0 && canonical[len(canonical)-1] == '\n', canonical)
-		}
-
-		var decoded ModuleContract
-		if err := json.Unmarshal(canonical, &decoded); err != nil {
-			t.Fatalf("%s operation=UnmarshalCanonical observed_error=%v expected=nil canonical=%s", label, err, canonical)
-		}
-		if err := ValidateModuleContract(decoded); err != nil {
-			t.Fatalf("%s operation=ValidateCanonical observed_error=%v expected=nil canonical=%s", label, err, canonical)
-		}
-		again, err := decoded.MarshalCanonicalJSON()
-		if err != nil {
-			t.Fatalf("%s operation=MarshalCanonicalJSONAgain observed_error=%v expected=nil", label, err)
-		}
-		if !bytes.Equal(canonical, again) {
-			t.Fatalf("%s operation=CanonicalDeterminism observed=%s expected=%s", label, again, canonical)
-		}
+		assertModuleContractJSONInput(t, data)
 	})
+}
+
+func contractJSONFuzzSeeds(tb testing.TB) [][]byte {
+	tb.Helper()
+	seeds := append([][]byte(nil), contractFuzzLiteralSeeds...)
+	seeds = append(seeds, contractFuzzAcceptedSeed(tb))
+	return seeds
+}
+
+func assertModuleContractJSONInput(tb testing.TB, data []byte) {
+	tb.Helper()
+	if err := checkModuleContractJSONInput(data); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+func checkModuleContractJSONInput(data []byte) error {
+	label := contractFuzzLabel(data, maxContractFuzzBytes)
+
+	var contract ModuleContract
+	if err := json.Unmarshal(data, &contract); err != nil {
+		return nil
+	}
+	if err := ValidateModuleContract(contract); err != nil {
+		return nil
+	}
+
+	canonical, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		return fmt.Errorf("%s operation=MarshalCanonicalJSON observed_error=%v expected=nil", label, err)
+	}
+	if len(canonical) == 0 || canonical[len(canonical)-1] != '\n' {
+		return fmt.Errorf("%s operation=MarshalCanonicalJSON observed_trailing_newline=%v expected=true canonical=%q",
+			label, len(canonical) > 0 && canonical[len(canonical)-1] == '\n', canonical)
+	}
+
+	var decoded ModuleContract
+	if err := json.Unmarshal(canonical, &decoded); err != nil {
+		return fmt.Errorf("%s operation=UnmarshalCanonical observed_error=%v expected=nil canonical=%s", label, err, canonical)
+	}
+	if err := ValidateModuleContract(decoded); err != nil {
+		return fmt.Errorf("%s operation=ValidateCanonical observed_error=%v expected=nil canonical=%s", label, err, canonical)
+	}
+	again, err := decoded.MarshalCanonicalJSON()
+	if err != nil {
+		return fmt.Errorf("%s operation=MarshalCanonicalJSONAgain observed_error=%v expected=nil", label, err)
+	}
+	if !bytes.Equal(canonical, again) {
+		return fmt.Errorf("%s operation=CanonicalDeterminism observed=%s expected=%s", label, again, canonical)
+	}
+	return nil
 }
 
 func contractFuzzAcceptedSeed(tb testing.TB) []byte {

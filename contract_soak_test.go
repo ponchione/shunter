@@ -1,0 +1,50 @@
+package shunter
+
+import (
+	"fmt"
+	"runtime"
+	"sync"
+	"testing"
+)
+
+func TestModuleContractJSONConcurrentShortSoak(t *testing.T) {
+	const (
+		seed       = uint64(0xc0477ac7)
+		workers    = 6
+		iterations = 128
+	)
+
+	inputs := contractJSONFuzzSeeds(t)
+	start := make(chan struct{})
+	failures := make(chan string, workers)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for op := range iterations {
+				inputIndex := (int(seed) + worker*11 + op*7) % len(inputs)
+				input := inputs[inputIndex]
+				if err := checkModuleContractJSONInput(input); err != nil {
+					select {
+					case failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d corpus_index=%d failure=%v",
+						seed, worker, op, workers, iterations, inputIndex, err):
+					default:
+					}
+					return
+				}
+				if (int(seed)+worker+op)%5 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(worker)
+	}
+
+	close(start)
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
+	}
+}
