@@ -7,7 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the OI-005 CommittedSnapshot.IndexSeek shared-state
+// Tests in this file pin the read-view CommittedSnapshot.IndexSeek shared-state
 // escape route closure. The underlying BTreeIndex.Seek returns a live alias
 // of the index entry's internal []RowID. A caller that retained the returned
 // slice past snapshot.Close() would race any subsequent writer's Insert /

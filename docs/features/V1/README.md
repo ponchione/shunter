@@ -1,8 +1,7 @@
 # Hosted Runtime V1 Feature Docs
 
 This directory is historical implementation context. V1-A through V1-G have
-landed in the root package, and current hosted-runtime status is tracked in
-`docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md`.
+landed in the root package.
 
 Use these files to audit the original V1 contracts only. Do not treat older
 implplan statements such as "root package absent" or "no Go files" as current

@@ -47,4 +47,4 @@ Validation commands:
 - `rtk go test ./... -count=1`
 
 Historical sequencing note: the later hosted-runtime slices have since landed.
-Use `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
+Use the relevant feature plan for current hosted-runtime status.

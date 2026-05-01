@@ -72,4 +72,4 @@ files should not be read as forbidding that completed later work.
 
 Historical sequencing note: later hosted-runtime slices have since landed. Do
 not treat this completed V1.5-D plan as a live handoff; use
-`docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime status.
+the relevant feature plan for current hosted-runtime status.

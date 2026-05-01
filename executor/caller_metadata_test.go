@@ -9,8 +9,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// caller-metadata wiring sub-slice
-// (docs/internal/TECH-DEBT.md reducer-outcome follow-ups). Pins that
+// caller-metadata wiring sub-slice for reducer outcomes. Pins that
 // an external CallReducer populates the caller-bound metadata on
 // subscription.CallerOutcome so the heavy TransactionUpdate envelope
 // carries real values instead of the earlier zero stubs. Reference

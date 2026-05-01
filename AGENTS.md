@@ -2,18 +2,14 @@
 
 Default startup reading:
 1. `RTK.md`
-2. The active internal handoff:
-   - `docs/internal/NEXT_SESSION_HANDOFF.md` for future correctness /
-     TECH-DEBT regressions
-   - `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
-   - `docs/RUNTIME-HARDENING-GAUNTLET.md` for the post-tech-debt runtime
-     hardening test campaign
-3. `docs/internal/TECH-DEBT.md` only for the active issue section named by the
-   handoff or user task
-4. Only the code, package docs, and narrow spec sections named by that handoff
-   or by the slice you are touching
+2. `docs/RUNTIME-HARDENING-GAUNTLET.md` only when running the runtime hardening
+   test campaign
+3. The feature plan, package docs, code, and narrow spec sections named by the
+   user task or by the slice you are touching
 
-Do not read broad roadmap, ledger, or full decomposition specs by default. Open them only when the active handoff says they are required, when a dependency question cannot be answered from code, or when you are editing that document.
+Do not read broad roadmap, ledger, or full decomposition specs by default. Open
+them only when the active task says they are required, when a dependency question
+cannot be answered from code, or when you are editing that document.
 
 ## Repo Reality
 
@@ -53,7 +49,7 @@ Do not read broad roadmap, ledger, or full decomposition specs by default. Open 
   - expand to broader test runs only when needed
   - run `rtk go vet` for touched packages when behavior, exported APIs, or interfaces changed
   - run pinned Staticcheck with `rtk go tool staticcheck ./...` when static
-    analysis is relevant; after OI-008 cleanup it is expected to pass
+    analysis is relevant; pinned Staticcheck is expected to pass
   - run `rtk go fmt` on touched files/packages before finishing
 - Do not claim a Go change is complete until the relevant Go commands pass.
 

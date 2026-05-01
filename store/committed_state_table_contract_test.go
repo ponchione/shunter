@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the OI-005 contract for CommittedState.Table(id) *Table raw-pointer
+// Pins the read-view contract for CommittedState.Table(id) *Table raw-pointer
 // exposure. Table() acquires cs.RLock only for the map lookup and returns the
 // *Table pointer after releasing. Callers must therefore use the pointer
 // within one of three legal envelopes: a held CommittedSnapshot (RLock bound

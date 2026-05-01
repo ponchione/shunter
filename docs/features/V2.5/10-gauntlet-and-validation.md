@@ -100,7 +100,6 @@ When complete, update:
 
 - this file with validation outputs
 - `docs/features/V2.5/00-current-execution-plan.md` with completion proof
-- `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` with the final V2.5 state
 
 V2.5 is not complete until this task's final validation passes or any residual
 failure is explicitly documented as unrelated with concrete evidence.

@@ -7,7 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the OI-005 StateView.SeekIndexRange BTree-alias sub-hazard closure.
+// Pins the read-view StateView.SeekIndexRange BTree-alias sub-hazard closure.
 // BTreeIndex.SeekRange is an iter.Seq that walks b.entries live: the outer
 // loop uses len(b.entries) and indexes b.entries[i] each step, reading the
 // backing array directly. If a yield callback reaches into the entry and

@@ -22,9 +22,8 @@ Audit result:
 Current status note:
 - V1, V1.5, V2, and the V2.5 read-authorization follow-on have landed in
   live code.
-- This file is no longer the active next-slice tracker. Use
-  `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for current hosted-runtime state and
-  open a new feature-specific plan only when a new target is explicitly queued.
+- This file is no longer the active next-slice tracker. Open a new
+  feature-specific plan only when a new target is explicitly queued.
 
 Current repo reality:
 - Shunter already has substantial kernel packages: `schema`, `store`, `commitlog`, `executor`, `subscription`, `protocol`, and `query`.

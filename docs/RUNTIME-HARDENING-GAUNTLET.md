@@ -1,9 +1,8 @@
 # Runtime Hardening Gauntlet
 
-This document defines the post-tech-debt test campaign for proving Shunter is
-ready for serious application testing. It is not a feature roadmap. It is the
-abuse suite Shunter must survive after the known TECH-DEBT items and major
-implementation work are landed.
+This document defines the runtime hardening test campaign for proving Shunter
+is ready for serious application testing. It is not a feature roadmap. It is
+the abuse suite Shunter must survive after major implementation work lands.
 
 The campaign should find unnamed bugs, not only prevent known regressions. That
 means testing Shunter through public surfaces, comparing behavior against a
@@ -12,8 +11,8 @@ workloads with reproducible seeds.
 
 Current status:
 
-- OI-002 and OI-003 are closed for current query/subscription and recovery/store
-  evidence. Reopen them only from a fresh Shunter-visible failing example.
+- Query/subscription and recovery/store known-issue baselines are closed for
+  current evidence. Reopen only from a fresh Shunter-visible failing example.
 - The deterministic root runtime gauntlet in `runtime_gauntlet_test.go` is
   saturated for the current hosted-runtime, protocol, subscription, reducer,
   scheduler, and clean-restart surfaces.
@@ -479,8 +478,8 @@ panic/fatal error.
 Before calling a major build ready, run:
 
 - `rtk go test ./... -count=1`
-- pinned static analysis with `rtk go tool staticcheck ./...`; after OI-008
-  cleanup, this is a required green release-candidate gate
+- pinned static analysis with `rtk go tool staticcheck ./...`; this is a
+  required green release-candidate gate
 - targeted package tests with `-race` for runtime, executor, protocol,
   subscription, store, and commitlog
 - fuzz corpus replay

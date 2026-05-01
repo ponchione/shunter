@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration pins the OI-005
+// TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration pins the read-view
 // hardening invariant: iterators returned by CommittedSnapshot retain the
 // snapshot for the lifetime of range iteration, so the GC finalizer cannot
 // fire between iter construction and iter consumption and release the RLock

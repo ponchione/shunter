@@ -1,7 +1,7 @@
 # V1-D Current Execution Plan
 
 Historical note: V1-D and later hosted-runtime slices have landed. Do not treat
-this file as an active handoff; use `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+this file as an active handoff; use the relevant feature plan for
 current hosted-runtime status.
 
 Parent plan: `docs/features/V1/V1-D/2026-04-23_210537-hosted-runtime-v1d-runtime-lifecycle-ownership-implplan.md`

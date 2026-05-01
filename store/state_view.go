@@ -46,7 +46,7 @@ func (sv *StateView) GetRow(tableID schema.TableID, rowID types.RowID) (types.Pr
 
 // ScanTable yields all rows visible through the merged state.
 //
-// OI-005 sub-hazard pin: the committed-side scan is materialized into an
+// Read-view lifetime pin: the committed-side scan is materialized into an
 // independent (RowID, ProductValue) slice at iter call time. Table.Scan
 // ranges t.rows live — the outer map iteration would otherwise span the
 // full yield loop. Under executor single-writer discipline no concurrent
@@ -93,7 +93,7 @@ func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 
 // SeekIndex returns visible row IDs whose index key exactly matches key.
 //
-// OI-005 sub-hazard pin: the underlying BTreeIndex.Seek(key) returns a
+// Read-view lifetime pin: the underlying BTreeIndex.Seek(key) returns a
 // live alias of the index entry's internal []RowID. Under executor
 // single-writer discipline no writer runs concurrently with this
 // iteration, but the yield callback could still reach into a path that
@@ -133,7 +133,7 @@ func (sv *StateView) SeekIndex(tableID schema.TableID, indexID schema.IndexID, k
 
 // SeekIndexRange returns visible row IDs whose keys fall in [low, high).
 //
-// OI-005 sub-hazard pin: BTreeIndex.SeekRange is an iter.Seq that walks
+// Read-view lifetime pin: BTreeIndex.SeekRange is an iter.Seq that walks
 // b.entries live — the outer loop reads len(b.entries) and indexes into
 // the backing array each step, and each entry's rowIDs slice is read
 // live too. Under executor single-writer discipline no concurrent writer
@@ -179,7 +179,7 @@ func (sv *StateView) SeekIndexRange(tableID schema.TableID, indexID schema.Index
 // string/bytes/float keys require this over SeekIndexRange because
 // "strictly greater than v" cannot be expressed via *IndexKey alone.
 //
-// OI-005 sub-hazard pin: same aliasing hazard as SeekIndexRange —
+// Read-view lifetime pin: same aliasing hazard as SeekIndexRange —
 // BTreeIndex.SeekBounds walks b.entries live. Collecting the range
 // once at the StateView boundary decouples iteration from BTree-
 // internal storage. Pin test:

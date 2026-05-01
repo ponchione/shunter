@@ -7,7 +7,7 @@
 
 **Cross-spec:** SPEC-003 (executor inbox: `UnregisterSubscriptionSetCmd`, `CallReducerCmd`)
 
-> **Updated 2026-04-24 (OI-002 QueryID cleanup).** Unsubscribe is keyed by
+> **Updated 2026-04-24 (QueryID cleanup).** Unsubscribe is keyed by
 > client `QueryID` / wire `query_id`. The protocol layer no longer owns a
 > subscription tracker; manager-internal `SubscriptionID` values stay below
 > the protocol boundary.

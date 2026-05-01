@@ -1,9 +1,8 @@
 # Shunter Design Decisions
 
 This file keeps current implementation-facing Shunter design decisions that
-are still cited by code or tests. It is not a history log. For active status
-and prioritization, use `docs/internal/TECH-DEBT.md` and the active internal
-handoff.
+are still cited by code or tests. It is not a history log. For active status,
+prefer live code, tests, and the feature plan for the slice being touched.
 
 Reference paths are grounding only. Do not copy or port source from
 `reference/SpacetimeDB/`.
@@ -11,6 +10,39 @@ Reference paths are grounding only. Do not copy or port source from
 This document is not a promise of SpacetimeDB client, wire, or business-model
 compatibility. Shunter uses SpacetimeDB as a reference design for runtime
 semantics, then owns the final contract for Shunter APIs and Shunter clients.
+
+## Protocol Surface Ownership
+
+Shunter's client protocol is Shunter-native. SpacetimeDB client/wire
+compatibility is not a product goal.
+
+Current contract:
+
+- `v1.bsatn.shunter` is the only supported WebSocket subprotocol token.
+- Brotli is a reserved compression tag, but Shunter returns a distinct
+  unsupported-brotli protocol error until real Shunter clients need it.
+- Client and server protocol decoders reject trailing bytes after a valid
+  message body.
+- Energy accounting is not part of Shunter's product model. The protocol has no
+  energy field, no out-of-energy status, and no quota/metering abstraction.
+- Message-family and envelope details are Shunter-specific unless the protocol
+  spec explicitly says otherwise.
+
+Deferred unless Shunter clients need it:
+
+- Brotli compression support.
+- More machine-readable reducer failure classes beyond the current
+  `Committed` / `Failed` outcome model.
+- Wrapper-chain reshaping solely for SpacetimeDB wire resemblance.
+
+Authoritative pins:
+
+- `docs/specs/005-protocol/SPEC-005-protocol.md`
+- `protocol/subprotocol_contract_test.go`
+- `protocol/compression_wire_test.go`
+- `protocol/client_messages_test.go`
+- `protocol/server_messages_test.go`
+- `protocol/message_family_contract_test.go`
 
 ## Outcome Model
 
@@ -109,6 +141,39 @@ Authoritative pins:
 - `protocol/outbound_lag_policy_test.go`
 - `protocol/backpressure_out_test.go`
 - `subscription/fanout_worker.go`
+
+## Read-View Lifetime Discipline
+
+Raw committed read views are lower-level expert APIs. Higher-level runtime
+paths own their snapshots internally; direct callers of the raw store APIs own
+the read-view lifetime.
+
+Current contract:
+
+- `store.CommittedState.Snapshot()` / `store.CommittedReadView` callers must
+  call `Close()` promptly when finished.
+- A leaked raw committed snapshot can stall commits until the view is closed or
+  the best-effort finalizer releases an unreachable leak.
+- `Runtime.Read` exposes a callback-scoped read view and closes the underlying
+  snapshot when the callback returns.
+- `Runtime.Read` callbacks should not synchronously wait on reducer/write work
+  while holding the read view.
+- Subscription committed views are borrowed for the duration of the evaluator
+  call and must not escape.
+- `CommittedState.Table` and `StateView` rely on the documented envelope and
+  single-executor discipline rather than becoming a general concurrent raw
+  pointer surface.
+
+Authoritative pins:
+
+- `docs/specs/001-store/SPEC-001-store.md`
+- `store/snapshot.go`
+- `store/committed_state.go`
+- `store/audit_regression_test.go`
+- `store/committed_state_table_contract_test.go`
+- `store/snapshot_iter_useafterclose_test.go`
+- `subscription/eval_view_lifetime_test.go`
+- `executor/pipeline_test.go`
 
 ## Commitlog Record Shape
 

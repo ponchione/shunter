@@ -77,7 +77,7 @@ func (s *CommittedSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, 
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()
 		for rid, row := range inner {
-			// OI-005 mid-iter-close defense-in-depth: if another
+			// Read-view mid-iter-close defense-in-depth: if another
 			// caller has Closed this snapshot after iter body entry,
 			// halt with the same deterministic panic rather than
 			// continuing to yield rows against a released RLock.
@@ -104,7 +104,7 @@ func (s *CommittedSnapshot) IndexSeek(tableID schema.TableID, indexID schema.Ind
 	if !ok {
 		return nil
 	}
-	// OI-005 shared-state escape route closure: the underlying BTreeIndex.Seek
+	// Read-view shared-state escape route closure: the underlying BTreeIndex.Seek
 	// returns a live alias of the index entry's internal []RowID. A caller
 	// that retained that slice past Close() would race any subsequent writer's
 	// Insert/Remove on the same key (slices.Insert / slices.Delete mutate the
@@ -129,7 +129,7 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 	// binary-search start point instead of a full ordered scan with
 	// per-row Bound filter.
 	//
-	// OI-005 sub-hazard pin: BTreeIndex.SeekBounds is an iter.Seq walking
+	// Read-view lifetime pin: BTreeIndex.SeekBounds is an iter.Seq walking
 	// b.entries live. Under single-writer discipline no concurrent writer
 	// runs while a CommittedSnapshot holds RLock, but a yield callback
 	// reaching into a mutating path (future refactor, direct CommittedState
@@ -143,7 +143,7 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()
 		for _, rid := range slices.Collect(idx.BTree().SeekBounds(lower, upper)) {
-			// OI-005 mid-iter-close defense-in-depth: see TableScan.
+			// Read-view mid-iter-close defense-in-depth: see TableScan.
 			s.ensureOpen()
 			row, ok := t.GetRow(rid)
 			if !ok {
@@ -195,7 +195,7 @@ func (s *CommittedSnapshot) rowsFromRowIDs(t *Table, rowIDs []types.RowID) iter.
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()
 		for _, rid := range rowIDs {
-			// OI-005 mid-iter-close defense-in-depth: see TableScan.
+			// Read-view mid-iter-close defense-in-depth: see TableScan.
 			s.ensureOpen()
 			row, ok := t.GetRow(rid)
 			if !ok {

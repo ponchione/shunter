@@ -247,13 +247,9 @@ Do not edit these for V1-A unless a compile error proves a direct need:
 
 ## Historical follow-through note
 
-When this plan was active, implementation follow-through was limited to:
-
-- `docs/internal/NEXT_SESSION_HANDOFF.md`
-  - mark V1-A implemented or report blocker
-  - record any follow-up status without treating this completed plan as the
-    live handoff
-- `docs/internal/TECH-DEBT.md` / hosted-runtime roadmap only if they carried stale V1-A status
+When this plan was active, implementation follow-through was limited to marking
+V1-A implemented, reporting blockers, and updating hosted-runtime roadmap status
+only if it carried stale V1-A state.
 
 Do not churn v1.5/v2 docs during the implementation patch.
 
@@ -273,5 +269,5 @@ V1-A is complete when:
 ## Historical sequencing note
 
 The later hosted-runtime slices have since landed. Do not treat this completed
-V1-A plan as a live handoff; use `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+V1-A plan as a live handoff; use the relevant feature plan for
 current hosted-runtime status.

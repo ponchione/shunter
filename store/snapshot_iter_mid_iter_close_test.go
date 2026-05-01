@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the OI-005 mid-iter-close sub-hazard: the three
+// Tests in this file pin the Read-view mid-iter-close sub-hazard: the three
 // iterator entry points on *CommittedSnapshot (TableScan, IndexScan,
 // IndexRange) previously checked s.ensureOpen() only once at iter-body
 // entry. A caller who partially iterated, then had another goroutine (or

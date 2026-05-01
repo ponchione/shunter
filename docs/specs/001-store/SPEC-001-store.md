@@ -171,7 +171,7 @@ type ColumnSchema struct {
     Index         int
     Name          string
     Type          ValueKind
-    Nullable      bool  // reserved; MUST be false in v1 — SPEC-006 §9 reserves ErrNullableColumn for this rule, but the v1 builder cannot set Nullable=true so explicit rejection is deferred to a Session 12+ drift item (see SPEC-006 §13 / TECH-DEBT). Canonical declaration in SPEC-006 §8.
+    Nullable      bool  // reserved; MUST be false in v1 — SPEC-006 §9 reserves ErrNullableColumn for this rule, but the v1 builder cannot set Nullable=true so explicit rejection is deferred to a Session 12+ drift item (see SPEC-006 §13). Canonical declaration in SPEC-006 §8.
     AutoIncrement bool  // per-column auto-increment; SPEC-006 §9 enforces integer type + PrimaryKey/Unique
 }
 

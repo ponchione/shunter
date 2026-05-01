@@ -14,7 +14,7 @@ import (
 //
 // Called synchronously on the executor goroutine; changeset is read-only.
 //
-// View lifetime (OI-005 subscription-seam): `view` is borrowed
+// View lifetime (read-view subscription-seam): `view` is borrowed
 // for the duration of this call only. The executor calls `view.Close()`
 // immediately after this function returns (`executor/executor.go:540-541`),
 // so no reference to `view` may escape past return — not via the
@@ -142,7 +142,7 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 					//     store-side counterpart is enforced by
 					//     single-writer executor discipline and the
 					//     `CommittedSnapshot` open→Close RLock lifetime
-					//     (OI-005 envelopes).
+					//     (read-view envelopes).
 					//  2. Downstream consumers of the fanout
 					//     `SubscriptionUpdate.Inserts` / `.Deletes`
 					//     slices — `subscription/fanout_worker.go`

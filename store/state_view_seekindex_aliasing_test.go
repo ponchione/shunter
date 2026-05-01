@@ -7,7 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the OI-005 StateView.SeekIndex BTree-alias sub-hazard closure.
+// Pins the read-view StateView.SeekIndex BTree-alias sub-hazard closure.
 // The underlying BTreeIndex.Seek(key) returns a live alias of the entry's
 // []RowID. If that slice is ranged over directly, an in-place mutation
 // of the backing array (slices.Delete of a middle element shifts the

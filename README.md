@@ -136,7 +136,8 @@ For implementation work, inspect the active packages directly:
 For automation or agent-driven work, follow `AGENTS.md` and `RTK.md` before
 running commands or editing files.
 
-Active development handoffs and issue tracking live under `docs/internal/`.
+Current implementation-facing docs live under `docs/`; prefer live code, tests,
+and the feature plan for the slice being touched.
 
 ## Validation
 

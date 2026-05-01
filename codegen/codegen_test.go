@@ -287,6 +287,44 @@ func TestTypeScriptGeneratorEmitsTableReadPolicyMetadata(t *testing.T) {
 	assertContains(t, ts, `messages: { access: "permissioned", permissions: ["messages:read"] },`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesTableReadPolicyMetadataIdentifiers(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables,
+		schema.TableExport{
+			Name: "audit_log",
+			Columns: []schema.ColumnExport{
+				{Name: "id", Type: "uint64"},
+			},
+			Indexes: []schema.IndexExport{{Name: "audit_log_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+			ReadPolicy: schema.ReadPolicy{
+				Access:      schema.TableAccessPermissioned,
+				Permissions: []string{`audit:read"quoted`},
+			},
+		},
+		schema.TableExport{
+			Name: "audit-log",
+			Columns: []schema.ColumnExport{
+				{Name: "id", Type: "uint64"},
+			},
+			Indexes: []schema.IndexExport{{Name: "audit_log_2_pk", Columns: []string{"id"}, Unique: true, Primary: true}},
+			ReadPolicy: schema.ReadPolicy{
+				Access:      schema.TableAccessPermissioned,
+				Permissions: []string{`audit\archive`},
+			},
+		},
+	)
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export const tableReadPolicies = {`)
+	assertContains(t, ts, `auditLog: { access: "permissioned", permissions: ["audit:read\"quoted"] },`)
+	assertContains(t, ts, `auditLog2: { access: "permissioned", permissions: ["audit\\archive"] },`)
+}
+
 func TestTypeScriptGeneratorEmitsVisibilityFilterMetadata(t *testing.T) {
 	contract := contractFixture()
 	contract.VisibilityFilters = []shunter.VisibilityFilterDescription{{

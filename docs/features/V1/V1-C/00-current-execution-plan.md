@@ -1,7 +1,7 @@
 # V1-C Current Execution Plan
 
 Historical note: V1-C and later hosted-runtime slices have landed. Do not treat
-this file as an active handoff; use `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+this file as an active handoff; use the relevant feature plan for
 current hosted-runtime status.
 
 Parent plan: `docs/features/V1/V1-C/2026-04-23_205158-hosted-runtime-v1c-runtime-build-pipeline-implplan.md`

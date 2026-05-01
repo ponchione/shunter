@@ -31,7 +31,7 @@ Validate the structural parts of registered tables before `Build()` proceeds: ta
   - Column name must match `[a-z][a-z0-9_]*` → `ErrInvalidColumnName`
   - Column name must be unique within the table
   - Column type must be a valid `ValueKind`
-  - `Nullable` is reserved and MUST be `false` in v1. The v1 builder API exposes no `Nullable` input, so `Build()` produces nullable-free columns by construction; explicit `ErrNullableColumn` rejection activates once the builder surface is extended (Session 12+ drift — see SPEC-006 §13 and TECH-DEBT). No silent coercion in either case.
+  - `Nullable` is reserved and MUST be `false` in v1. The v1 builder API exposes no `Nullable` input, so `Build()` produces nullable-free columns by construction; explicit `ErrNullableColumn` rejection activates once the builder surface is extended (future nullable-builder drift; see SPEC-006 §13). No silent coercion in either case.
 
   Index-level checks:
   - Index name must be non-empty
@@ -53,7 +53,7 @@ Validate the structural parts of registered tables before `Build()` proceeds: ta
 - [ ] Column name `"123"` → `ErrInvalidColumnName`
 - [ ] Two PK columns on one table → `ErrDuplicatePrimaryKey`
 - [ ] `AutoIncrement` on `String` column or without PK/unique → validation error
-- [ ] Target state: column declared with `Nullable = true` → `ErrNullableColumn` (pending builder-surface extension; see Session 12+ drift note in SPEC-006 §13 / TECH-DEBT)
+- [ ] Target state: column declared with `Nullable = true` → `ErrNullableColumn` (pending builder-surface extension; see SPEC-006 §13)
 - [ ] Index with zero columns or nonexistent column reference → validation error
 - [ ] Explicit index containing the PK column or mixed unique flags on a composite index within one table → validation error
 

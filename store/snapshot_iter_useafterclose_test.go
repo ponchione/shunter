@@ -6,7 +6,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the OI-005 use-after-Close sub-hazard: the three
+// Tests in this file pin the read-view use-after-Close hazard: the three
 // iterator entry points on *CommittedSnapshot (TableScan, IndexScan,
 // IndexRange) check s.ensureOpen() at iter-body entry, so a caller who
 // calls Close() between iter construction and range silently races the

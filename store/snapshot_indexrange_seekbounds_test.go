@@ -16,7 +16,7 @@ import (
 // exclusive-bound predicates hit the binary-search start point.
 // Covers the Bound matrix that story-7.1-committed-read-view.md calls
 // out as "inclusive/exclusive control for subscription range predicates"
-// and the OI-005 aliasing closure for the collect-at-boundary pattern.
+// and the read-view aliasing closure for the collect-at-boundary pattern.
 
 func indexRangeSetup(t *testing.T, n int) (*CommittedState, []types.RowID) {
 	t.Helper()

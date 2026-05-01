@@ -8,7 +8,6 @@ Source docs:
 - `docs/specs/hosted-runtime-v1-contract.md`
 - `docs/specs/hosted-runtime-v1.5-follow-ons.md`
 - `docs/specs/hosted-runtime-version-phases.md`
-- `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md`
 
 Follow-up design authority:
 - `docs/features/V2/READ-AUTHORIZATION-DESIGN.md` for completing raw SQL,
@@ -86,5 +85,5 @@ Each implementation slice should:
 - expand to `rtk go test ./... -count=1` when root/runtime behavior or shared
   contracts change
 
-Pinned Staticcheck is expected to be green after OI-008 cleanup:
+Pinned Staticcheck is expected to be green:
 - `rtk go tool staticcheck ./...`

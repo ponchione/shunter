@@ -105,9 +105,8 @@ Notes:
 - The tool is pinned in `go.mod`; no `tools.go` file is needed with this Go
   toolchain.
 - Use it for cleanup/static-analysis visibility.
-- Until OI-008 cleanup is complete, broad runs may fail on known findings or
-  compile blockers. Record those failures instead of fixing them in unrelated
-  slices.
+- Staticcheck is expected to pass; record unrelated failures instead of fixing
+  them in unrelated slices.
 
 ## Strong Candidates
 
@@ -203,7 +202,7 @@ Consider only if Shunter clients need brotli compression.
 
 Why it may fit:
 
-- OI-001 notes brotli is recognized-but-unsupported.
+- SPEC-005 reserves brotli as recognized-but-unsupported.
 - This package provides Go brotli reader/writer support.
 
 Why to wait:

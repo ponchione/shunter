@@ -9,7 +9,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the OI-005 subscription-seam read-view lifetime
+// Tests in this file pin the read-view subscription-seam read-view lifetime
 //: EvalAndBroadcast receives a borrowed store.CommittedReadView
 // and MUST NOT let any reference to that view escape past its synchronous
 // return. The executor (executor/executor.go:540-541) calls Close on the

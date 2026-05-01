@@ -7,7 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the OI-005 StateView.ScanTable iterator surface sub-hazard closure.
+// Pins the read-view StateView.ScanTable iterator surface sub-hazard closure.
 // Table.Scan ranges t.rows live — its yield loop spans a live map
 // iteration. Under executor single-writer discipline no concurrent writer
 // runs during a reducer's synchronous iteration, so the contract is safe

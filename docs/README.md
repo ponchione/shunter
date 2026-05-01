@@ -8,34 +8,25 @@ logs, or one-off planning prompts.
 Agent startup is intentionally narrow:
 
 1. `RTK.md`
-2. The active internal handoff:
-   - `docs/internal/NEXT_SESSION_HANDOFF.md` for future correctness /
-     TECH-DEBT regressions
-   - `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for hosted-runtime work
-   - `docs/RUNTIME-HARDENING-GAUNTLET.md` for the post-tech-debt runtime
-     hardening test campaign
-3. `docs/internal/TECH-DEBT.md` only for the active issue section named by the
-   handoff or task
-4. Only code, package docs, and narrow spec sections named by that handoff or
-   by the slice being touched
+2. `docs/RUNTIME-HARDENING-GAUNTLET.md` only when running the runtime hardening
+   test campaign
+3. Only the feature plan, code, package docs, and narrow spec sections named by
+   the task or by the slice being touched
 
 Do not read broad roadmap, ledger, or full decomposition specs by default.
 
 ## Current Docs
 
 - `docs/hosted-runtime-implementation-roadmap.md` — historical hosted-runtime
-  phase tracker through completed V2.5; current active state belongs in
-  `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md`.
-- `docs/RUNTIME-HARDENING-GAUNTLET.md` — post-tech-debt test campaign for
-  model-based, fault-injected, fuzzed, and soak-tested runtime confidence.
+  phase tracker through completed V2.5.
+- `docs/RUNTIME-HARDENING-GAUNTLET.md` — test campaign for model-based,
+  fault-injected, fuzzed, and soak-tested runtime confidence.
 - `docs/PERFORMANCE-BENCHMARKS.md` — benchmark run instructions and current
   performance baselines for comparison across optimization work.
 - `docs/dependency-considerations.md` — adopted dependency policy, dependency
   candidates, and explicit dependency rejections.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design
   decisions that code and tests still cite.
-- `docs/internal/` — internal handoffs, issue tracking, and agent-oriented
-  working notes.
 
 ## Legacy Redirects
 

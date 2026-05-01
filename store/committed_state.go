@@ -33,7 +33,7 @@ func (cs *CommittedState) RegisterTable(id schema.TableID, t *Table) {
 
 // Table returns the table for the given ID.
 //
-// OI-005 contract pin — raw-pointer exposure envelope. The RLock is acquired
+// Read-view lifetime contract pin — raw-pointer exposure envelope. The RLock is acquired
 // only for the map lookup, not for the lifetime of the returned *Table. The
 // returned pointer therefore outlives the RLock: callers must hold their own
 // envelope that serializes with CommittedState writers for the entire window
@@ -84,7 +84,7 @@ func (cs *CommittedState) tableLocked(id schema.TableID) (*Table, bool) {
 
 // TableIDs returns all registered table IDs.
 //
-// OI-005 contract pin — same envelope rule as Table(id): the RLock bounds
+// Read-view lifetime contract pin — same envelope rule as Table(id): the RLock bounds
 // only the slice materialization, not any subsequent lookup via the ids.
 // Callers must iterate and resolve each id to a *Table under one of the
 // three legal envelopes documented on Table().

@@ -4966,7 +4966,7 @@ func TestHandleOneOffQuery_ShunterUint128NegativeRejected(t *testing.T) {
 //
 // One-off shares the subscription-shape admission path in Shunter; the
 // intentional divergence from reference's wider parse_and_type_sql path is
-// recorded in docs/internal/TECH-DEBT.md.
+// recorded in docs/shunter-design-decisions.md.
 func TestHandleOneOffQuery_ShunterDMLStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,

@@ -808,5 +808,5 @@ V1-E is complete when all of the following are true:
 ## Historical sequencing note
 
 The later hosted-runtime slices have since landed. Do not treat this completed
-V1-E plan as a live handoff; use `docs/internal/HOSTED_RUNTIME_PLANNING_HANDOFF.md` for
+V1-E plan as a live handoff; use the relevant feature plan for
 current hosted-runtime status.
