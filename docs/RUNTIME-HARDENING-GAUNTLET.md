@@ -210,6 +210,9 @@ Current status:
   strict-auth protocol path drives the same task-board app through WebSocket
   reducer calls, declared query/view reads, live declared-view deltas, rejected
   duplicate mutations before and after restart, and restart recovery.
+- Contract artifact CLI release-candidate coverage now checks a rejected
+  codegen target fails before mutating an existing output file, with a stable
+  trace label for reproduction.
 - Remaining non-runtime campaign work should move to broader crash/recovery,
   fault injection, fuzzing/corpus, metamorphic, race/soak, and
   release-candidate coverage unless a new invariant or failing seed appears.

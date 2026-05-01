@@ -152,6 +152,39 @@ func TestContractCodegenCommandWritesTypeScript(t *testing.T) {
 	assertContains(t, stdout.String(), "wrote "+outputPath)
 }
 
+func TestContractCodegenRejectedLanguageLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=cli-codegen-rejected-language-output-preservation"
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "go",
+		"--out", outputPath,
+	})
+	if code != 1 {
+		t.Fatalf("%s contract codegen exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
+	}
+	assertContains(t, stderr.String(), `unsupported language "go"`)
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s rejected codegen mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+}
+
 func cliContractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,
