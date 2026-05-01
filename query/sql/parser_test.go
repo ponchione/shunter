@@ -2,6 +2,7 @@ package sql
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -72,6 +73,50 @@ func TestParseSelectQualifiedStarWithAsAliasAndQualifiedWhereColumns(t *testing.
 	}
 	if stmt.Filters[1].Column != "active" {
 		t.Fatalf("second column = %q, want active", stmt.Filters[1].Column)
+	}
+}
+
+func TestParseWhereHarmlessParenthesizationMetamorphic(t *testing.T) {
+	const seed = uint64(0x5a17cafe)
+	cases := []struct {
+		name string
+		base string
+		vars []string
+	}{
+		{
+			name: "and",
+			base: "SELECT * FROM users WHERE id = 42 AND active = TRUE",
+			vars: []string{
+				"SELECT * FROM users WHERE (id = 42) AND ((active = TRUE))",
+				"SELECT * FROM users WHERE ((id = 42 AND active = TRUE))",
+			},
+		},
+		{
+			name: "or",
+			base: "SELECT * FROM users WHERE id = 42 OR active = FALSE",
+			vars: []string{
+				"SELECT * FROM users WHERE (id = 42) OR ((active = FALSE))",
+				"SELECT * FROM users WHERE ((id = 42 OR active = FALSE))",
+			},
+		},
+	}
+	for caseIndex, tc := range cases {
+		baseline, err := Parse(tc.base)
+		if err != nil {
+			t.Fatalf("seed=%#x case=%d runtime_config=case=%s operation=Parse(base) observed_error=%v expected=nil",
+				seed, caseIndex, tc.name, err)
+		}
+		for variantIndex, variant := range tc.vars {
+			got, err := Parse(variant)
+			if err != nil {
+				t.Fatalf("seed=%#x case=%d variant=%d runtime_config=case=%s operation=Parse(variant) observed_error=%v expected=nil sql=%q",
+					seed, caseIndex, variantIndex, tc.name, err, variant)
+			}
+			if !reflect.DeepEqual(got, baseline) {
+				t.Fatalf("seed=%#x case=%d variant=%d runtime_config=case=%s operation=compare-parse-tree observed=%#v expected=%#v",
+					seed, caseIndex, variantIndex, tc.name, got, baseline)
+			}
+		}
 	}
 }
 
