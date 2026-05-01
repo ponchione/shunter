@@ -127,6 +127,11 @@ Current status:
 - Contract diff and migration-plan JSON entry points now have a bounded fuzz
   corpus that checks invalid-contract error categorization plus deterministic
   and canonical-input-equivalent diff/plan output for accepted contracts.
+- Migration-plan validation now checks module and per-declaration migration
+  metadata version drift, schema/contract regressions, and codegen metadata
+  mismatches; CLI release-candidate coverage pins `contract plan --validate`
+  surfacing declaration metadata warnings without turning them into strict
+  policy failures.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and

@@ -129,6 +129,64 @@ func TestContractPlanCommandReadsJSONFiles(t *testing.T) {
 	assertContains(t, stdout.String(), `"warnings": [`)
 }
 
+func TestContractPlanValidateSurfacesDeclarationMetadataWarnings(t *testing.T) {
+	const trace = "trace=cli-contract-plan-validate-declaration-metadata"
+	dir := t.TempDir()
+	previousPath := writeCLIContract(t, dir, "previous.json", cliContractFixture())
+	current := cliContractFixture()
+	current.Module.Version = "v1.1.0"
+	current.Migrations.Declarations = []shunter.MigrationContractDeclaration{
+		{
+			Surface: shunter.MigrationSurfaceQuery,
+			Name:    "history",
+			Metadata: shunter.MigrationMetadata{
+				ModuleVersion:   "v2.0.0",
+				SchemaVersion:   99,
+				ContractVersion: 99,
+				PreviousVersion: "v0.9.0",
+			},
+		},
+	}
+	currentPath := writeCLIContract(t, dir, "current.json", current)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "plan",
+		"--previous", previousPath,
+		"--current", currentPath,
+		"--strict",
+		"--validate",
+		"--format", "json",
+	})
+	if code != 0 {
+		t.Fatalf("%s contract plan --validate exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("%s stderr = %s, want empty", trace, stderr.String())
+	}
+	out := stdout.String()
+	assertContains(t, out, `"code": "migration-metadata-module-version-mismatch"`)
+	assertContains(t, out, `"surface": "query"`)
+	assertContains(t, out, `"name": "history"`)
+	assertContains(t, out, `query history migration metadata version`)
+	assertContains(t, out, `"policy_failed": false`)
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run(&stdout, &stderr, []string{
+		"contract", "plan",
+		"--previous", previousPath,
+		"--current", currentPath,
+		"--format", "json",
+	})
+	if code != 0 {
+		t.Fatalf("%s contract plan without --validate exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "migration-metadata-module-version-mismatch") {
+		t.Fatalf("%s validation warning appeared without --validate:\n%s", trace, stdout.String())
+	}
+}
+
 func TestContractReadCommandsRejectUnsupportedFormats(t *testing.T) {
 	const trace = "trace=cli-contract-read-unsupported-format"
 	dir := t.TempDir()
