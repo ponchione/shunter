@@ -448,6 +448,40 @@ func TestContractCodegenDirectoryOutputFailsWithoutMutationOrTempLeak(t *testing
 	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestContractCodegenMissingInputLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=cli-codegen-missing-input-output-preservation"
+	dir := t.TempDir()
+	contractPath := filepath.Join(dir, "missing-contract.json")
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "typescript",
+		"--out", outputPath,
+	})
+	if code != 1 {
+		t.Fatalf("%s contract codegen exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
+	}
+	assertContains(t, stderr.String(), "read contract input")
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s missing input mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func cliContractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,
