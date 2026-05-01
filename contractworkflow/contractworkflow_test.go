@@ -386,6 +386,38 @@ func TestGenerateFileInvalidTableReadPolicyLeavesOutputUntouched(t *testing.T) {
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateFileInvalidSchemaColumnTypeLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=workflow-codegen-invalid-schema-column-type-output-preservation"
+	dir := t.TempDir()
+	invalidContract := workflowContractFixture()
+	invalidContract.Schema.Tables[0].Columns[1].Type = "json"
+	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for invalid schema column type", trace)
+	}
+	if !errors.Is(err, codegen.ErrInvalidContract) {
+		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
+	}
+	if !strings.Contains(err.Error(), `schema.tables.messages.columns.body type "json" is invalid`) {
+		t.Fatalf("%s GenerateFile error = %v, want invalid schema column type context", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s invalid schema column type mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFileUnknownReadModelTargetLeavesOutputUntouched(t *testing.T) {
 	const trace = "trace=workflow-codegen-unknown-read-model-target-output-preservation"
 	dir := t.TempDir()
