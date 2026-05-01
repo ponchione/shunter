@@ -585,6 +585,25 @@ func TestTypeScriptGeneratorDisambiguatesMetadataMapIdentifiers(t *testing.T) {
 	assertContains(t, ts, `liveMessages2: { tables: ["messages"], tags: ["live\\feed"] },`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesReducerPermissionMetadataIdentifiers(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Reducers = append(contract.Schema.Reducers, schema.ReducerExport{Name: "send-message"})
+	contract.Permissions.Reducers = append(contract.Permissions.Reducers, shunter.PermissionContractDeclaration{
+		Name:     "send-message",
+		Required: []string{`messages:send-alt`},
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `reducers: {`)
+	assertContains(t, ts, `sendMessage: { required: ["messages:send"] },`)
+	assertContains(t, ts, `sendMessage2: { required: ["messages:send-alt"] },`)
+}
+
 func contractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,
