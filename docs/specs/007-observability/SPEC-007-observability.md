@@ -46,6 +46,21 @@ host, protocol, executor, commitlog, store, and subscription diagnostics MUST
 flow through a runtime-scoped observability object or a package-scoped no-op
 used only when no runtime exists yet.
 
+Observability has a build-time phase and a runtime phase. `Build` MUST create
+the normalized observability object early enough that build, validation,
+bootstrap, and recovery failures can be logged and counted even when no
+`Runtime` is returned. Build-time observations MUST use the configured runtime
+label after normalization, the module name once a non-empty module name has
+been validated, and module label `"unknown"` only when a module name is not
+available because validation failed before identity was established.
+If runtime label validation itself fails, build-failure observations MUST use
+runtime label `"default"`.
+
+Fresh bootstrap without existing durable files is still an observed recovery
+attempt. It MUST be reported as a successful recovery run with recovered
+transaction ID `0`, no selected durable snapshot, no damaged tail segments, and
+no skipped snapshots.
+
 Observability sinks MUST be isolated from runtime correctness:
 
 - A logging, metrics, tracing, or HTTP diagnostics failure MUST NOT panic past
@@ -179,6 +194,33 @@ not allow mutation of runtime-owned slices, loggers, handlers, metrics
 recorders, or tracers beyond the pointer/interface values explicitly supplied by
 the caller.
 
+### 4.1 Observability Normalization and Validation
+
+`Build` MUST normalize `ObservabilityConfig` deterministically:
+
+- `RuntimeLabel` is `strings.TrimSpace(RuntimeLabel)`, then `"default"` when
+  empty.
+- Non-empty `RuntimeLabel` MUST be valid UTF-8, MUST NOT contain ASCII control
+  characters, and MUST be at most 128 bytes after trimming.
+- `Redaction.ErrorMessageMaxBytes <= 0` normalizes to `1024`.
+- `Metrics.ReducerLabelMode == ""` normalizes to `ReducerLabelModeName`.
+
+`Build` MUST reject invalid observability configuration before constructing a
+runtime. Invalid configuration includes:
+
+- `Metrics.ReducerLabelMode` other than `""`, `"name"`, or `"aggregate"`.
+- Invalid `RuntimeLabel` as defined above.
+
+`Metrics.Enabled == false` MUST make metrics a no-op even when
+`Metrics.Recorder` is non-nil and even when `Diagnostics.MetricsHandler` is
+configured. `Tracing.Enabled == false` MUST make tracing a no-op even when
+`Tracing.Tracer` is non-nil.
+
+Configuration validation failures are build failures for observability
+purposes: when a logger or metrics recorder is configured and usable, Shunter
+MUST emit `runtime.build_failed` and increment
+`runtime_errors_total{reason="build_failed"}` before returning the error.
+
 ## 5. Metrics Recorder API
 
 Shunter owns a small internal metrics model. Prometheus is an adapter, not the
@@ -244,7 +286,9 @@ free-form label map.
 
 The runtime MUST populate `Module` with `Runtime.ModuleName()` and `Runtime`
 with `ObservabilityConfig.RuntimeLabel`, using `"default"` when the configured
-value is empty. Reducer labels MUST be:
+value is empty. Build-time observations before a runtime is returned MUST use
+the validated module name when available and `"unknown"` otherwise. Reducer
+labels MUST be:
 
 - the declared reducer name when `ReducerLabelMode` is empty or `"name"`
 - `"_all"` when `ReducerLabelMode` is `"aggregate"`
@@ -324,6 +368,105 @@ error strings.
 Unknown or newly introduced conditions MUST map to `unknown` until this spec is
 extended.
 
+### 6.2 Metric Emission Timing
+
+Metrics are best-effort observations. Shunter MUST recover panics from
+`MetricsRecorder` calls. A recorder panic MUST NOT change the runtime operation
+that was being observed. Shunter MUST use a recursion guard for
+observability-failure observations so a panicking recorder cannot trigger an
+unbounded loop while recording `observability_sink_failed`.
+
+Gauge updates MUST reflect the latest known value. Counters MUST be incremented
+exactly once per event described below. Histograms MUST be observed only for
+completed operations with a defined duration; submit-time rejections that never
+enter the executor inbox MUST NOT record command duration histograms.
+
+Lifecycle and recovery metrics:
+
+- After successful `Build`, Shunter MUST set `runtime_state` one-hot with
+  `state="built"`, `runtime_ready=0`, and `runtime_degraded` from the recovery
+  facts.
+- On every runtime state transition, Shunter MUST set all `runtime_state`
+  labels for that runtime so exactly one state value is `1` and the others are
+  `0`.
+- `runtime_ready` and `runtime_degraded` MUST be updated synchronously with
+  lifecycle transitions and with any subsystem fatal/degraded condition that
+  changes health.
+- `runtime_errors_total{reason="build_failed"}` increments once for each
+  failed `Build` call when observability config can be normalized far enough to
+  reach a recorder.
+- `runtime_errors_total{reason="start_failed"}` increments once for each
+  failed `Start` call that transitions the runtime to `failed`.
+- `runtime_errors_total{reason="close_failed"}` increments once for each
+  `Close` call that returns a non-nil close error.
+- `recovery_runs_total` increments once per recovery/bootstrap attempt during
+  `Build`, with `result="success"` when a committed state is opened or freshly
+  bootstrapped and `result="failed"` when recovery prevents `Build` from
+  returning a runtime.
+- On successful recovery/bootstrap, `recovery_recovered_tx_id` and
+  `recovery_damaged_tail_segments` MUST be set from the final recovery report.
+- `recovery_skipped_snapshots_total` increments once per skipped snapshot
+  report, using the mapped skip reason. Reports with zero skipped snapshots
+  MUST NOT increment the counter.
+
+Protocol metrics:
+
+- `protocol_connections_total{result="accepted"}` increments after a
+  connection has passed auth/upgrade/admission, has been registered in the
+  connection manager, and the identity token has been written successfully.
+- Rejected connection attempts increment exactly one
+  `protocol_connections_total` result: `rejected_not_ready` before protocol
+  admission is available, `rejected_auth` for authentication/authorization
+  failures, `rejected_upgrade` for invalid upgrade parameters or WebSocket
+  handshake failure, `rejected_executor` for executor admission rejection, and
+  `rejected_internal` for all other internal failures.
+- `protocol_connections` MUST be incremented or set after connection manager
+  add/remove so it equals the active manager count.
+- `protocol_messages_total` increments once per decoded client message after
+  its handler reaches a terminal outcome. Malformed frames that cannot be
+  decoded increment with `kind="unknown"` unless the message kind was known
+  before the error.
+- `protocol_backpressure_total` increments when inbound dispatch pressure or
+  outbound queue pressure causes a close, drop, or rejected enqueue.
+
+Executor and reducer metrics:
+
+- `executor_commands_total` increments once for every executor command terminal
+  outcome, including submit-time rejection. Submit-time rejection uses
+  `result="rejected"` unless the rejection maps more specifically to
+  `permission_denied` or `canceled`.
+- `executor_command_duration_seconds` observes time from executor dequeue to
+  terminal command response for commands that were dequeued. It MUST NOT include
+  time spent waiting in the inbox.
+- `executor_inbox_depth` MUST be updated after successful enqueue and after
+  dequeue. `executor_fatal` MUST be set to `1` when fatal state latches and
+  MUST remain `1` until the runtime is discarded.
+- `reducer_calls_total` increments once per `CallReducer` terminal outcome that
+  reaches reducer command handling.
+- `reducer_duration_seconds` observes only calls where a declared reducer
+  handler was resolved and invoked. Its duration is the wall-clock time spent
+  inside the reducer handler, excluding executor queue time, commit,
+  durability enqueue, subscription evaluation, and fan-out.
+
+Durability and subscription metrics:
+
+- `durability_queue_depth` MUST be updated after enqueue and after durability
+  worker dequeue. `durability_durable_tx_id` MUST be set whenever the durable
+  transaction horizon advances.
+- `durability_failures_total` increments once when a durability failure is
+  classified as fatal or prevents startup/recovery from continuing.
+- `subscription_active` MUST be set after subscription register, unregister,
+  disconnect cleanup, and runtime close.
+- `subscription_eval_duration_seconds` observes once per post-commit
+  subscription evaluation. Evaluation errors use `result="error"`.
+- `subscription_fanout_errors_total` increments once per fan-out delivery
+  failure.
+- `subscription_dropped_clients_total` increments once per client drop signal
+  that Shunter enqueues or performs. If a non-blocking drop-signal channel is
+  already full and the signal is discarded, Shunter MUST increment
+  `subscription_dropped_clients_total{reason="buffer_full"}` before discarding
+  when metrics are enabled.
+
 ## 7. Prometheus Adapter
 
 Prometheus support MUST live outside the root package, in:
@@ -370,6 +513,16 @@ func New(cfg Config) (*Adapter, error)
 func (a *Adapter) Recorder() shunter.MetricsRecorder
 func (a *Adapter) Handler() http.Handler
 ```
+
+`Config.Namespace` MUST normalize empty to `"shunter"`. A non-empty namespace
+MUST be a valid Prometheus metric-name prefix matching
+`[a-zA-Z_:][a-zA-Z0-9_:]*`; otherwise `New` MUST return an error.
+
+`Config.ConstLabels` MUST be copied by `New`. Const label names MUST be valid
+Prometheus label names and MUST NOT duplicate Shunter's reserved labels:
+`module`, `runtime`, `component`, `kind`, `state`, `result`, `reason`,
+`direction`, or `reducer`. Any duplicate or invalid const label name MUST make
+`New` return an error.
 
 `New` MUST register all collectors exactly once with the chosen registerer. If
 a collector registration fails, `New` MUST return an error and the adapter MUST
@@ -419,10 +572,11 @@ Optional common fields:
 | `connection_id` | string | Lowercase hex string; debug/info only. |
 | `kind` | string | Controlled enum matching metric `kind` values. |
 | `result` | string | Controlled enum matching metric `result` values. |
-| `reason` | string | Controlled enum matching metric `reason` values. |
+| `reason` | string | Controlled enum matching metric reason values or health degraded reasons from section 9.3. |
 | `duration_ms` | int64 | `time.Duration.Milliseconds()`. |
 | `error` | string | Redacted and bounded by section 11. |
 | `stack` | string | Panic events only; debug-gated by logger level. |
+| `sink` | string | One of `logger`, `metrics`, `tracer`, or `diagnostics`; observability component only. |
 
 Fields not listed here MAY be added only when they are low-cardinality,
 non-sensitive, and covered by section 11. Free-form maps MUST NOT be logged.
@@ -434,6 +588,7 @@ non-sensitive, and covered by section 11. Free-form maps MUST NOT be logged.
 | `runtime.build_failed` | Error | `runtime` | `error` |
 | `runtime.start_failed` | Error | `runtime` | `error`, `duration_ms` |
 | `runtime.ready` | Info | `runtime` | `state`, `ready`, `degraded`, `duration_ms` |
+| `runtime.close_failed` | Error | `runtime` | `error`, `duration_ms` |
 | `runtime.closed` | Info | `runtime` | `state`, `duration_ms` |
 | `runtime.health_degraded` | Warn | `runtime` | `state`, `reason` |
 | `recovery.completed` | Info or Warn | `commitlog` | `tx_id`, `duration_ms`, `damaged_tail_segments`, `skipped_snapshots` |
@@ -442,6 +597,7 @@ non-sensitive, and covered by section 11. Free-form maps MUST NOT be logged.
 | `executor.fatal` | Error | `executor` | `error`, `reason` |
 | `executor.reducer_panic` | Error | `executor` | `reducer`, `error`, `tx_id` when known, `stack` when enabled |
 | `executor.lifecycle_reducer_failed` | Warn | `executor` | `reducer`, `result`, `error` |
+| `protocol.connection_rejected` | Warn | `protocol` | `result`, `error` when known |
 | `protocol.connection_opened` | Debug | `protocol` | `connection_id` |
 | `protocol.connection_closed` | Debug | `protocol` | `connection_id`, `reason` |
 | `protocol.protocol_error` | Warn | `protocol` | `kind`, `reason`, `error` |
@@ -451,6 +607,7 @@ non-sensitive, and covered by section 11. Free-form maps MUST NOT be logged.
 | `subscription.fanout_error` | Warn | `subscription` | `reason`, `connection_id` when known, `error` |
 | `subscription.client_dropped` | Warn | `subscription` | `reason`, `connection_id` when known |
 | `store.snapshot_leaked` | Error | `store` | `reason` |
+| `observability.sink_failed` | Warn | `observability` | `sink`, `error` |
 
 `recovery.completed` MUST be logged at Warn when either
 `damaged_tail_segments > 0` or `skipped_snapshots > 0`; otherwise it MUST be
@@ -458,6 +615,11 @@ logged at Info.
 
 Stack traces MUST appear only on panic events. Stack capture MAY be skipped
 when `Logger.Enabled(ctx, slog.LevelDebug)` is false.
+
+`observability.sink_failed` MUST be emitted only through a sink that did not
+itself fail for the current event. If every configured sink for the event has
+failed, Shunter MUST drop the observability-failure record rather than retry
+recursively.
 
 ## 9. Health and Diagnostics API
 
@@ -574,6 +736,37 @@ a successful recovery run with zero recovered transaction ID.
 All `LastError` and `FatalError` strings MUST be redacted and bounded by
 section 11.
 
+Capacity fields MUST report the normalized configured capacity even when the
+underlying channel or worker has not been allocated yet or has already been
+torn down. Depth fields MUST report `0` when the underlying queue is absent.
+
+Subsystem `Started` fields MUST be false before `Start` completes and after
+`Close` tears the subsystem down. They MUST also be false when startup failed
+before the subsystem was created. Fatal booleans and fatal error strings are
+latched facts: once a subsystem fatal condition is observed, health snapshots
+MUST continue to report it until the runtime is discarded, even if `Close`
+later tears down subsystem pointers.
+
+`DurabilityHealth.DurableTxID` MUST be the latest known durable horizon. Before
+the durability worker starts, it MUST equal `RecoveryHealth.RecoveredTxID`.
+After a successful `Close`, it MUST equal the final durable transaction ID
+reported by the durability worker close path when known, otherwise the last
+known durable horizon.
+
+`ProtocolHealth.ActiveConnections` MUST be `0` when the connection manager is
+absent. Accepted and rejected connection counters MUST be retained across
+connection close and runtime close. If protocol is disabled,
+`ProtocolHealth.Enabled=false`, `ProtocolHealth.Ready=false`, and
+`ProtocolHealth.ActiveConnections=0`.
+
+`SubscriptionHealth.ActiveSubscriptions` MUST be the number of active
+client-visible subscription sets, not the number of deduplicated internal query
+states. It MUST be `0` before the subscription manager starts and after runtime
+close. `DroppedClients` MUST be a retained cumulative count.
+
+`Host.Health()` on a nil host or a host with zero modules MUST return
+`Ready=false`, `Degraded=true`, and a non-nil empty `Modules` slice.
+
 ### 9.2 Degraded Rules
 
 `RuntimeHealth.Degraded` MUST be true when any of these conditions hold:
@@ -597,6 +790,25 @@ every module health has `Ready == true`.
 `HostHealth.Degraded` MUST be true when any module health has
 `Degraded == true`, or when the host has zero modules.
 
+### 9.3 Degraded Reason Selection
+
+When `RuntimeHealth.Degraded` is true, Shunter MUST classify the primary
+degraded reason using this priority order:
+
+1. `runtime_failed` when `State == RuntimeStateFailed`
+2. `executor_fatal` when `Executor.Fatal == true`
+3. `durability_fatal` when `Durability.Fatal == true`
+4. `fanout_fatal` when `Subscriptions.FanoutFatal == true`
+5. `recovery_damaged_tail` when recovery succeeded with damaged tail segments
+6. `recovery_skipped_snapshot` when recovery succeeded with skipped snapshots
+7. `protocol_not_ready` when ready protocol-enabled runtime health has
+   `Protocol.Ready == false`
+
+`runtime.health_degraded` MUST use this primary reason. If multiple degraded
+conditions hold, lower-priority reasons MAY be recorded as additional
+low-cardinality fields only after this spec defines their field names; v1 logs
+and metrics MUST NOT invent free-form reason lists.
+
 ## 10. HTTP Diagnostics
 
 `Runtime.HTTPHandler()` MUST continue to serve `/subscribe` exactly as defined
@@ -619,9 +831,11 @@ func HostDiagnosticsHandler(h *Host, metrics http.Handler) http.Handler
 ```
 
 `RuntimeDiagnosticsHandler` MUST serve the same runtime endpoints listed above,
-using the runtime's configured metrics handler. `HostDiagnosticsHandler` MUST
-serve `/healthz`, `/readyz`, `/debug/shunter/host`, and `/metrics` when the
-`metrics` argument is non-nil. It MUST NOT serve `/subscribe`.
+using the runtime's configured metrics handler. It MUST serve those diagnostics
+endpoints regardless of the runtime's `Diagnostics.MountHTTP` setting.
+`HostDiagnosticsHandler` MUST serve `/healthz`, `/readyz`,
+`/debug/shunter/host`, and `/metrics` when the `metrics` argument is non-nil.
+It MUST NOT serve `/subscribe`.
 
 ### 10.1 Method and Content Rules
 
@@ -629,8 +843,8 @@ All JSON diagnostics endpoints MUST accept `GET` and `HEAD` only. Other methods
 MUST return `405 Method Not Allowed` and an `Allow: GET, HEAD` header.
 
 JSON diagnostics endpoints MUST return `Content-Type: application/json` for
-`GET`. `HEAD` responses MUST use the same status code as `GET` and MUST NOT
-write a body.
+`GET`. They SHOULD return `Cache-Control: no-store`. `HEAD` responses MUST use
+the same status code and headers as `GET` and MUST NOT write a body.
 
 `/metrics` method and content behavior is delegated to the configured metrics
 handler.
@@ -713,6 +927,34 @@ error strings. Debug payloads MAY include authored declaration SQL that
 MUST NOT include client raw SQL/query strings, reducer args, row payloads,
 tokens, authorization headers, signing keys, or raw unbounded error strings.
 
+### 10.4 Handler Edge Rules
+
+Diagnostics handlers MUST match only the exact paths named in this section.
+Query strings are ignored for routing. Subpaths and trailing-slash variants
+such as `/healthz/`, `/readyz/`, `/debug/shunter/runtime/`, and
+`/debug/shunter/host/` MUST return `404 Not Found` unless a caller wraps the
+handler with its own router that rewrites paths before they reach Shunter.
+
+When `Runtime.HTTPHandler()` is used with `Diagnostics.MountHTTP=false`, the
+SPEC-007 endpoints MUST be absent and MUST return `404 Not Found`; `/subscribe`
+behavior remains governed by SPEC-005.
+
+`RuntimeDiagnosticsHandler(nil)` MUST return runtime health/readiness payloads
+with classification `failed`, status `503` for `/healthz` and `/readyz`, and a
+failed runtime health object whose `LastError` is redacted and bounded. Its
+debug endpoint MUST return a zero runtime description plus the failed health
+object with status `200`, unless JSON encoding fails.
+
+`HostDiagnosticsHandler(nil, metrics)` MUST behave like an empty host:
+`/healthz` and `/readyz` classify as `failed`, host health has `Ready=false`,
+`Degraded=true`, and `Modules=[]`, and `/debug/shunter/host` returns that empty
+host description with status `200`.
+
+Diagnostics JSON encoding MUST be deterministic for tests: structs are encoded
+with Go's standard `encoding/json` field order, nil slices in public payloads
+that represent module lists MUST be emitted as `[]`, and omitted fields MUST
+follow the JSON tags in section 9.
+
 ## 11. Redaction and Cardinality
 
 The following data MUST NOT appear in logs, metrics, traces, or HTTP diagnostic
@@ -749,6 +991,50 @@ Error strings MUST be redacted before output. Redaction MUST:
 3. Truncate the resulting UTF-8 string to `ErrorMessageMaxBytes`, defaulting to
    1024 bytes when the configured value is `<= 0`.
 4. Preserve valid UTF-8 by truncating only at rune boundaries.
+
+### 11.1 Redaction Boundary Rules
+
+Redaction MUST first convert invalid UTF-8 to valid UTF-8 with invalid byte
+sequences removed or replaced. It MUST then apply key/value and bearer-token
+redaction before truncation.
+
+Key matching MUST be case-insensitive and token-bounded. A redacted key must be
+at the beginning of the string or preceded by a byte that is not an ASCII
+letter, digit, or underscore. The key may be followed by ASCII whitespace and
+then by one of:
+
+- `=`
+- `:`
+- a JSON string colon, as in `"token": "value"`
+
+For JSON key matches, the replacement MUST preserve JSON shape when possible by
+replacing the whole JSON value with the JSON string `"[redacted]"`;
+`"token":"abc"` becomes `"token":"[redacted]"` and `"row":{"id":1}` becomes
+`"row":"[redacted]"`. For quoted non-JSON text values, the replacement runs
+through the matching quote. For unquoted values, the replacement runs until the
+first comma, semicolon, newline, carriage return, closing brace/bracket, or end
+of string. This intentionally redacts multi-word SQL fragments such as
+`sql=select * from t`.
+
+Bearer redaction MUST match `Bearer ` case-sensitively and replace the token
+bytes following that prefix through the first ASCII whitespace, comma,
+semicolon, quote, apostrophe, or end of string. The prefix is preserved:
+`Bearer abc` becomes `Bearer [redacted]`.
+
+When raw SQL is allowed in debug logs, Shunter MUST log it in a dedicated
+structured field rather than interpolating it into the message. That field MUST
+be valid UTF-8 and bounded by `ErrorMessageMaxBytes` after normalization,
+defaulting to 1024 bytes.
+
+Examples that MUST hold:
+
+| Input | Output |
+|---|---|
+| `authorization=Bearer abc.def` | `authorization=[redacted]` |
+| `failed: Bearer abc.def` | `failed: Bearer [redacted]` |
+| `{"token":"abc","row":{"id":1}}` | `{"token":"[redacted]","row":"[redacted]"}` |
+| `sql=select * from users where token='abc'; detail` | `sql=[redacted]; detail` |
+| `signing_key: secret` | `signing_key: [redacted]` |
 
 Metrics MUST use only the labels listed in section 6. Logs and traces MAY carry
 high-cardinality IDs such as `request_id`, `query_id`, and `connection_id`, but
@@ -793,11 +1079,45 @@ Required span names:
 - `shunter.subscription.register`
 - `shunter.subscription.unregister`
 
+Every span MUST include these default attributes:
+
+| Attribute | Meaning |
+|---|---|
+| `component` | Component value from section 6. |
+| `module` | Runtime module name, or `"unknown"` during build-time failure before identity exists. |
+| `runtime` | Normalized runtime label. |
+
+Additional required attributes:
+
+| Span | Required additional attributes |
+|---|---|
+| `shunter.runtime.start` | `state` when known |
+| `shunter.recovery.open` | `result`, `tx_id` when successful |
+| `shunter.protocol.message` | `kind`, `result` |
+| `shunter.reducer.call` | `reducer`, `result` |
+| `shunter.store.commit` | `tx_id`, `result` |
+| `shunter.durability.batch` | `tx_id`, `result` |
+| `shunter.subscription.eval` | `tx_id`, `result` |
+| `shunter.subscription.fanout` | `result`, `reason` when failed |
+| `shunter.query.one_off` | `result` |
+| `shunter.subscription.register` | `result` |
+| `shunter.subscription.unregister` | `result` |
+
 Trace attributes MUST follow the same redaction and cardinality rules as logs.
 Raw SQL, reducer args, row payloads, tokens, authorization headers, signing
 keys, request IDs, query IDs, and connection IDs MUST NOT be default trace
 attributes. Connection/request/query IDs MAY be added only by a future explicit
 debug tracing extension.
+
+`StartSpan` panics MUST be recovered and treated as if tracing were disabled for
+that operation. If `StartSpan` returns a nil `Span`, Shunter MUST skip
+`AddEvent` and `End` for that span. Shunter MUST recover panics from
+`Span.AddEvent` and `Span.End`.
+
+When ending a span with an error, Shunter MUST NOT pass an error whose
+`Error()` string contains unredacted or unbounded sensitive data. It MUST pass
+nil on success, and on failure it MUST pass either a redacted bounded wrapper
+error or an error value whose string is known to already satisfy section 11.
 
 ## 13. Implementation Sequencing
 
@@ -825,14 +1145,24 @@ the relevant Go tests before claiming completion.
 | Test | What it verifies |
 |---|---|
 | Zero `ObservabilityConfig` build/start/call/close succeeds with no panics | No-op defaults and sink isolation |
+| Build validation failure emits `runtime.build_failed` and `runtime_errors_total{reason="build_failed"}` when sinks are configured | Build-time observability before a runtime exists |
+| Fresh bootstrap records successful recovery with recovered tx `0` and no damage/skips | Bootstrap is an observed recovery run |
+| Invalid `RuntimeLabel` or `ReducerLabelMode` is rejected before runtime construction | Observability config validation |
 | Non-nil logger receives `runtime.ready` with required base fields and message equal to event | Structured logging schema |
 | Startup failure logs `runtime.start_failed` and increments `runtime_errors_total{reason="start_failed"}` | Lifecycle error observability |
+| Close failure logs `runtime.close_failed` and increments `runtime_errors_total{reason="close_failed"}` | Close-path observability |
 | Recovery success records `RecoveryHealth`, `recovery.completed`, `recovery_runs_total{result="success"}`, and recovered tx gauge | Recovery visibility |
 | Recovery with damaged tail or skipped snapshots sets `Degraded=true` and logs `recovery.completed` at Warn | Degraded recovery rules |
+| Multiple degraded conditions choose the section 9.3 primary reason deterministically | Degraded reason priority |
+| Health before start and after close reports configured capacities, zero absent depths, retained counters, and latched fatal facts | Health edge semantics |
 | Runtime health reports executor fatal and durability fatal state without blocking | Health depth and cheap snapshot |
 | Runtime health reports protocol disabled as not ready but not degraded | Protocol disabled rule |
+| Nil or empty host health returns `Ready=false`, `Degraded=true`, and `Modules=[]` | Host edge semantics |
 | Host health aggregates ready/degraded across modules and returns detached slices | Multi-module diagnostics |
+| Runtime state gauges are one-hot after build, start, failure, closing, and closed transitions | Gauge determinism |
+| Metric recorder panic is recovered and does not recursively emit sink-failure observations | Metrics sink isolation |
 | Protocol connection open/close updates active connection gauge and accepted counter | Protocol gauges/counters |
+| Protocol connection rejection maps exactly one rejection result and logs `protocol.connection_rejected` | Connection rejection classification |
 | Protocol auth failure increments rejected connection counter with `rejected_auth` and logs redacted error | Protocol auth diagnostics |
 | Protocol malformed message increments `protocol_messages_total{result="malformed"}` with kind `unknown` or decoded kind | Message classification |
 | Reducer committed/user error/panic/internal/permission outcomes increment distinct reducer result labels | Reducer result mapping |
@@ -844,20 +1174,27 @@ the relevant Go tests before claiming completion.
 | Fan-out buffer-full logs `protocol.backpressure` or `subscription.client_dropped` and increments drop metric with `buffer_full` | Backpressure visibility |
 | Prometheus adapter with nil registerer uses a private registry and does not pollute globals | No global Prometheus registration |
 | Prometheus adapter with custom registry registers all families with default namespace `shunter` | Metric family contract |
+| Prometheus adapter rejects invalid namespace and invalid const-label names | Adapter validation |
 | Prometheus adapter rejects const labels that duplicate reserved Shunter labels | Label safety |
 | Metric recorder cannot receive labels outside `MetricLabels` by type | No free-form metric labels |
 | Logs redact bearer tokens, reducer args, row payloads, SQL key/value fields, and signing keys | Redaction |
+| JSON-shaped redaction replaces sensitive object/string values with valid `[redacted]` JSON strings | Redaction boundary rules |
 | Redacted error truncation respects UTF-8 boundaries and default 1024-byte limit | Error bound |
 | Raw SQL appears only in debug logs when explicitly enabled | SQL redaction exception |
+| Debug raw SQL field is UTF-8 normalized and bounded by `ErrorMessageMaxBytes` | Debug SQL bound |
 | `/healthz` absent when `MountHTTP=false` | Endpoint opt-in |
+| `RuntimeDiagnosticsHandler` serves diagnostics even when `MountHTTP=false` | Explicit handler behavior |
 | `/healthz` returns 200 for ready, degraded, and not-ready nonfailed runtimes | Liveness status semantics |
 | `/readyz` returns 200 only when ready and not degraded | Readiness status semantics |
 | Failed, closing, and closed runtimes return 503 from `/healthz` and `/readyz` | Failed status semantics |
 | JSON endpoints reject POST with 405 and `Allow: GET, HEAD` | HTTP method contract |
 | HEAD diagnostics use GET status and write no body | HTTP HEAD contract |
+| Diagnostics handlers reject trailing-slash and subpath variants with 404 | Exact path contract |
+| Nil runtime/host diagnostics return deterministic failed/empty payloads | Handler nil-input behavior |
 | `/debug/shunter/runtime` returns `Runtime.Describe()` JSON without raw secrets | Runtime diagnostics payload |
 | `HostDiagnosticsHandler` serves host health/debug endpoints and never serves `/subscribe` | Host handler separation |
 | `/metrics` is mounted only when a metrics handler is configured | Metrics endpoint opt-in |
 | Tracing disabled with a non-nil tracer records no spans | Tracing gate |
-| Tracing enabled records required span names and redacts attributes | Tracing contract |
+| Tracing enabled records required span names, required default attributes, and redacts attributes | Tracing contract |
+| Tracing `StartSpan`, `AddEvent`, and `End` panics are recovered and nil spans are skipped | Tracing sink isolation |
 | Logger/metrics/tracer panics are recovered and do not change reducer results | Sink isolation |
