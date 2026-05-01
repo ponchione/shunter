@@ -348,7 +348,7 @@ func (s observedSpan) End(err error) {
 		return
 	}
 	if err != nil && s.owner != nil {
-		err = errors.New(s.owner.redactErrorString(err.Error()))
+		err = errors.New(s.owner.redactError(err))
 	}
 	defer func() {
 		if r := recover(); r != nil && s.owner != nil {
