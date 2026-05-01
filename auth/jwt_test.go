@@ -38,6 +38,18 @@ func TestValidateJWTNilConfigFailsWithoutPanic(t *testing.T) {
 	}
 }
 
+func TestValidateJWTEmptySigningKeyRejected(t *testing.T) {
+	s := mintHS256(t, jwt.MapClaims{"sub": "alice", "iss": "issuer"})
+
+	claims, err := ValidateJWT(s, &JWTConfig{})
+	if !errors.Is(err, ErrJWTInvalid) {
+		t.Fatalf("ValidateJWT empty signing key error = %v, want ErrJWTInvalid", err)
+	}
+	if claims != nil {
+		t.Fatalf("ValidateJWT empty signing key claims = %+v, want nil", claims)
+	}
+}
+
 func TestValidateJWTFullyPopulated(t *testing.T) {
 	cfg := &JWTConfig{SigningKey: testKey, AuthMode: AuthModeStrict}
 	now := time.Now()
