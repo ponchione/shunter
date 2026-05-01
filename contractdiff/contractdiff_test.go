@@ -638,6 +638,55 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentTableReadPolicyWithContext
 	}
 }
 
+func TestContractDiffJSONRejectsSemanticInvalidPreviousTableReadPolicyWithContext(t *testing.T) {
+	previous := contractFixture()
+	previous.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPublic,
+		Permissions: []string{"messages:read"},
+	}
+	previousData := mustRawContractJSON(t, previous)
+	currentData := mustContractJSON(t, contractFixture())
+
+	for _, tt := range []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "compare",
+			run: func() error {
+				_, err := CompareJSON(previousData, currentData)
+				return err
+			},
+		},
+		{
+			name: "plan",
+			run: func() error {
+				_, err := PlanJSON(previousData, currentData, PlanOptions{ValidateContracts: true})
+				return err
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run()
+			if err == nil {
+				t.Fatal("JSON entry point returned nil error, want invalid contract")
+			}
+			if !errors.Is(err, ErrInvalidContractJSON) {
+				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
+			}
+			if !strings.Contains(err.Error(), "previous contract") {
+				t.Fatalf("JSON entry point error = %v, want previous contract context", err)
+			}
+			if !strings.Contains(err.Error(), "schema.tables.messages.read_policy invalid") {
+				t.Fatalf("JSON entry point error = %v, want table read policy context", err)
+			}
+			if !strings.Contains(err.Error(), "public read policy must not include permissions") {
+				t.Fatalf("JSON entry point error = %v, want public read policy detail", err)
+			}
+		})
+	}
+}
+
 func TestContractDiffJSONRejectsSemanticInvalidPreviousReadModelWithContext(t *testing.T) {
 	previous := contractFixture()
 	previous.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
