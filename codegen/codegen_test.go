@@ -266,6 +266,24 @@ func TestTypeScriptGeneratorAvoidsTableViewSubscribeHelperNameCollisions(t *test
 	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesReducerHelperNameCollisions(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Reducers = append(contract.Schema.Reducers, schema.ReducerExport{Name: "send-message"})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `sendMessage: "send_message",`)
+	assertContains(t, ts, `sendMessage2: "send-message",`)
+	assertContains(t, ts, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return callReducer("send_message", args);`)
+	assertContains(t, ts, `export function callSendMessage2(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return callReducer("send-message", args);`)
+}
+
 func TestTypeScriptGeneratorDisambiguatesFallbackAndReservedTableIdentifiers(t *testing.T) {
 	contract := contractFixture()
 	contract.Schema.Tables = append(contract.Schema.Tables,
