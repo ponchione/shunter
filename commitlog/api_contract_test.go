@@ -1,7 +1,9 @@
 package commitlog
 
 import (
+	"encoding/binary"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,6 +50,45 @@ func TestSegmentReaderNextUsesDefaultMaxPayload(t *testing.T) {
 	defer sr.Close()
 	if _, err := sr.Next(); err == nil {
 		t.Fatal("expected ErrRecordTooLarge from no-arg Next")
+	}
+}
+
+func TestSegmentScanUsesDefaultMaxPayloadBeforeReadingBody(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, SegmentFileName(1))
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := WriteSegmentHeader(f); err != nil {
+		t.Fatal(err)
+	}
+
+	tooLarge := DefaultCommitLogOptions().MaxRecordPayloadBytes + 1
+	var header [RecordHeaderSize]byte
+	binary.LittleEndian.PutUint64(header[:8], 1)
+	header[8] = RecordTypeChangeset
+	binary.LittleEndian.PutUint32(header[10:14], tooLarge)
+	if err := writeFull(f, header[:]); err != nil {
+		t.Fatal(err)
+	}
+	end := int64(SegmentHeaderSize+RecordHeaderSize) + int64(tooLarge) + RecordCRCSize
+	if err := f.Truncate(end); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Seek(SegmentHeaderSize, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+
+	sr := &SegmentReader{file: f, startTx: 1}
+	_, err = scanNextRecord(sr)
+	var tooLargeErr *RecordTooLargeError
+	if !errors.As(err, &tooLargeErr) {
+		t.Fatalf("scanNextRecord err = %v, want RecordTooLargeError", err)
+	}
+	if tooLargeErr.Max != DefaultCommitLogOptions().MaxRecordPayloadBytes {
+		t.Fatalf("max = %d, want %d", tooLargeErr.Max, DefaultCommitLogOptions().MaxRecordPayloadBytes)
 	}
 }
 

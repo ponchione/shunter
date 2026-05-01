@@ -161,6 +161,9 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 	if int64(dataLen)+RecordCRCSize > remaining-RecordHeaderSize {
 		return nil, ErrTruncatedRecord
 	}
+	if maxPayload := DefaultCommitLogOptions().MaxRecordPayloadBytes; maxPayload > 0 && dataLen > maxPayload {
+		return nil, &RecordTooLargeError{Size: dataLen, Max: maxPayload}
+	}
 
 	payload, err := readRecordPayload(sr.file, dataLen)
 	if err != nil {
