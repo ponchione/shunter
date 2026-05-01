@@ -1,16 +1,17 @@
 package protocol
 
 import (
-	"bytes"
 	"context"
-	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/ponchione/shunter/types"
 )
 
 // testConnPair creates a httptest server with websocket.Accept, dials
@@ -184,22 +185,14 @@ func TestDispatchLoop_UnknownTagCloses(t *testing.T) {
 
 func TestDispatchLoop_UnknownTagLogsDetail(t *testing.T) {
 	conn, client := testConnPair(t, nil)
+	observer := &recordingProtocolObserver{}
+	conn.Observer = observer
 
 	handlers := &MessageHandlers{}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := runDispatchAsync(conn, ctx, handlers)
-
-	var logs bytes.Buffer
-	prevWriter := log.Writer()
-	prevFlags := log.Flags()
-	log.SetOutput(&logs)
-	log.SetFlags(0)
-	defer func() {
-		log.SetOutput(prevWriter)
-		log.SetFlags(prevFlags)
-	}()
 
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
 	defer writeCancel()
@@ -213,14 +206,36 @@ func TestDispatchLoop_UnknownTagLogsDetail(t *testing.T) {
 		t.Fatal("dispatch loop did not exit on unknown tag")
 	}
 
-	got := logs.String()
-	if got == "" {
-		t.Fatal("expected protocol error log output, got empty log")
+	if len(observer.protocolErrors) != 1 {
+		t.Fatalf("protocol errors = %+v, want one", observer.protocolErrors)
 	}
-	if !bytes.Contains([]byte(got), []byte("unknown message tag")) {
-		t.Fatalf("log output %q does not mention unknown message tag", got)
+	got := observer.protocolErrors[0]
+	if got.kind != "unknown" || got.reason != "malformed" {
+		t.Fatalf("protocol error = %+v, want unknown/malformed", got)
+	}
+	if got.err == nil || !strings.Contains(got.err.Error(), "unknown message tag") {
+		t.Fatalf("protocol error = %+v, want unknown message tag error", got)
 	}
 }
+
+type protocolErrorRecord struct {
+	kind   string
+	reason string
+	err    error
+}
+
+type recordingProtocolObserver struct {
+	protocolErrors []protocolErrorRecord
+}
+
+func (o *recordingProtocolObserver) LogProtocolConnectionRejected(string, error)            {}
+func (o *recordingProtocolObserver) LogProtocolConnectionOpened(types.ConnectionID)         {}
+func (o *recordingProtocolObserver) LogProtocolConnectionClosed(types.ConnectionID, string) {}
+func (o *recordingProtocolObserver) LogProtocolProtocolError(kind, reason string, err error) {
+	o.protocolErrors = append(o.protocolErrors, protocolErrorRecord{kind: kind, reason: reason, err: err})
+}
+func (o *recordingProtocolObserver) LogProtocolAuthFailed(string, error)    {}
+func (o *recordingProtocolObserver) LogProtocolBackpressure(string, string) {}
 
 func TestDispatchLoop_NilHandlerCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)

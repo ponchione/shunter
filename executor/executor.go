@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +26,8 @@ type ExecutorConfig struct {
 	// Subscriptions evaluates every successful commit synchronously against
 	// a committed read view (SPEC-003 §5.2–§5.3). Nil defaults to a no-op.
 	Subscriptions SubscriptionManager
+	// Observer receives runtime-scoped executor observations. Nil is no-op.
+	Observer Observer
 }
 
 // Executor serializes all write-affecting operations.
@@ -65,6 +65,7 @@ type Executor struct {
 	schedulerAttemptComplete func(ScheduleID, int64) (bool, bool)
 	durability               DurabilityHandle
 	subs                     SubscriptionManager
+	observer                 Observer
 	// snapshotFn acquires the committed read view used by post-commit
 	// subscription evaluation. Defaults to e.committed.Snapshot(); tests
 	// override it to inject a tracking wrapper.
@@ -132,6 +133,7 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 		schedSeq:     schedSeq,
 		durability:   dur,
 		subs:         subs,
+		observer:     cfg.Observer,
 		done:         make(chan struct{}),
 	}
 	e.snapshotFn = func() store.CommittedReadView { return e.committed.Snapshot() }
@@ -339,12 +341,13 @@ func (e *Executor) dispatchSafely(cmd ExecutorCommand) {
 }
 
 func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) {
-	log.Printf("executor: panic during dispatch: %v\n%s", r, debug.Stack())
 	// Send error response if possible.
 	if c, ok := cmd.(CallReducerCmd); ok {
+		err := fmt.Errorf("reducer panicked: %v", r)
+		e.recordReducerPanic(c.Request.ReducerName, err, 0, capturePanicStack(e.observer))
 		e.sendCallReducerResponse(c, ReducerResponse{
 			Status: StatusFailedPanic,
-			Error:  fmt.Errorf("reducer panicked: %v", r),
+			Error:  err,
 		}, nil)
 	}
 }
@@ -374,7 +377,6 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 	case OnDisconnectCmd:
 		e.handleOnDisconnect(c)
 	default:
-		log.Printf("executor: unknown command type %T", cmd)
 	}
 }
 
@@ -395,9 +397,6 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 		durationMicros = 1
 	}
 	res.TotalHostExecutionDurationMicros = durationMicros
-	if err != nil {
-		log.Printf("executor: RegisterSubscriptionSet failed: %v", err)
-	}
 	if cmd.Reply != nil {
 		// Synchronous invocation on the executor goroutine so the
 		// caller's Applied/Error enqueue strictly precedes any
@@ -626,10 +625,12 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	var ret []byte
 	var reducerErr error
 	var panicked any
+	var panicStack string
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
 				panicked = r
+				panicStack = capturePanicStack(e.observer)
 			}
 		}()
 		ret, reducerErr = rr.Handler(rctx, req.Args)
@@ -646,6 +647,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 			}
 			return fmt.Errorf("%v: %w", r, ErrReducerPanic)
 		}(panicked)
+		e.recordReducerPanic(req.ReducerName, panicErr, 0, panicStack)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  panicErr,
@@ -753,7 +755,7 @@ func (e *Executor) postCommit(
 			return
 		}
 		e.fatal.Store(true)
-		log.Printf("executor: post-commit panic (txID=%d): %v\n%s", txID, r, debug.Stack())
+		e.recordExecutorFatal(fmt.Errorf("post-commit panic: %v", r), "panic", txID)
 		if responded {
 			return
 		}
@@ -816,7 +818,7 @@ func (e *Executor) postCommit(
 		select {
 		case connID := <-dropped:
 			if err := e.subs.DisconnectClient(connID); err != nil {
-				log.Printf("executor: DisconnectClient(%v) failed: %v", connID, err)
+				e.recordSubscriptionFanoutError("unknown", connID, err)
 			}
 		default:
 			return

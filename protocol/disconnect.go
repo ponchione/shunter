@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"log"
 
 	"github.com/coder/websocket"
 )
@@ -35,10 +34,10 @@ import (
 func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason string, inbox ExecutorInbox, mgr *ConnManager) {
 	c.closeOnce.Do(func() {
 		if err := inbox.DisconnectClientSubscriptions(ctx, c.ID); err != nil {
-			log.Printf("protocol: DisconnectClientSubscriptions for %x failed: %v", c.ID[:], err)
+			logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
 		}
 		if err := inbox.OnDisconnect(ctx, c.ID, c.Identity); err != nil {
-			log.Printf("protocol: OnDisconnect for %x failed: %v", c.ID[:], err)
+			logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
 		}
 		mgr.Remove(c.ID)
 		if c.cancelRead != nil {
@@ -47,6 +46,9 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 		close(c.closed)
 		if c.ws != nil {
 			go closeWithHandshake(c.ws, code, reason, c.opts.CloseHandshakeTimeout)
+		}
+		if c.Observer != nil {
+			c.Observer.LogProtocolConnectionClosed(c.ID, closeReason(code, reason))
 		}
 	})
 }

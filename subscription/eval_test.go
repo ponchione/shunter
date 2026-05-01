@@ -1,9 +1,7 @@
 package subscription
 
 import (
-	"bytes"
 	"errors"
-	"log"
 	"reflect"
 	"slices"
 	"strings"
@@ -243,20 +241,11 @@ func TestEvalFanoutOrdersUpdatesByRegistrationWithinConnection(t *testing.T) {
 func TestEvalErrorQueuesSubscriptionErrorAndDropsConnection(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 2)
-	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	observer := &recordingSubscriptionObserver{}
+	mgr := NewManager(s, s, WithFanOutInbox(inbox), WithObserver(observer))
 	c := types.ConnectionID{1}
 	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 10, RequestID: 77, Predicates: []Predicate{AllRows{Table: 1}}}, nil)
 	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{ConnID: c, QueryID: 11, Predicates: []Predicate{AllRows{Table: 2}}}, nil)
-
-	var logs bytes.Buffer
-	oldOut := log.Writer()
-	oldFlags := log.Flags()
-	log.SetOutput(&logs)
-	log.SetFlags(0)
-	defer func() {
-		log.SetOutput(oldOut)
-		log.SetFlags(oldFlags)
-	}()
 
 	mgr.schema = nil
 	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(1), types.NewString("x")}}, nil)
@@ -290,12 +279,11 @@ func TestEvalErrorQueuesSubscriptionErrorAndDropsConnection(t *testing.T) {
 	default:
 		t.Fatal("expected dropped connection signal for eval failure")
 	}
-	logText := logs.String()
-	if !strings.Contains(logText, ComputeQueryHash(AllRows{Table: 1}, nil).String()) {
-		t.Fatalf("log output missing query hash: %q", logText)
+	if len(observer.evalErrors) != 1 {
+		t.Fatalf("eval errors = %+v, want one", observer.evalErrors)
 	}
-	if !strings.Contains(logText, "AllRows") {
-		t.Fatalf("log output missing predicate repr: %q", logText)
+	if observer.evalErrors[0].txID != 1 || !errors.Is(observer.evalErrors[0].err, ErrSubscriptionEval) {
+		t.Fatalf("eval error = %+v, want tx 1 wrapped ErrSubscriptionEval", observer.evalErrors[0])
 	}
 
 	mgr.schema = s
@@ -321,6 +309,23 @@ func TestEvalErrorQueuesSubscriptionErrorAndDropsConnection(t *testing.T) {
 	default:
 	}
 }
+
+type subscriptionEvalErrorRecord struct {
+	txID types.TxID
+	err  error
+}
+
+type recordingSubscriptionObserver struct {
+	evalErrors []subscriptionEvalErrorRecord
+}
+
+func (o *recordingSubscriptionObserver) LogSubscriptionEvalError(txID types.TxID, err error) {
+	o.evalErrors = append(o.evalErrors, subscriptionEvalErrorRecord{txID: txID, err: err})
+}
+func (o *recordingSubscriptionObserver) LogSubscriptionFanoutError(string, *types.ConnectionID, error) {
+}
+func (o *recordingSubscriptionObserver) LogSubscriptionClientDropped(string, *types.ConnectionID) {}
+func (o *recordingSubscriptionObserver) LogProtocolBackpressure(string, string)                   {}
 
 func TestEvalBatchedTier1SingleLookup(t *testing.T) {
 	// Many inserts with the same value should be candidate-resolved via

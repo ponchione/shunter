@@ -3,7 +3,6 @@ package subscription
 import (
 	"context"
 	"errors"
-	"log"
 	"sync"
 
 	"github.com/ponchione/shunter/types"
@@ -55,6 +54,7 @@ type FanOutWorker struct {
 	fastReads      map[types.ConnectionID]bool
 	dropped        chan<- types.ConnectionID
 	recordDropped  func()
+	observer       Observer
 }
 
 // NewFanOutWorker creates a worker that reads from inbox and delivers
@@ -67,6 +67,12 @@ func NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropped ch
 // NewFanOutWorkerWithDropRecorder creates a worker and records successfully
 // signaled dropped clients for health snapshots.
 func NewFanOutWorkerWithDropRecorder(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID, recordDropped func()) *FanOutWorker {
+	return NewFanOutWorkerWithObserver(inbox, sender, dropped, recordDropped, nil)
+}
+
+// NewFanOutWorkerWithObserver creates a worker with runtime-scoped
+// observations for fan-out failures and client drops.
+func NewFanOutWorkerWithObserver(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID, recordDropped func(), observer Observer) *FanOutWorker {
 	return &FanOutWorker{
 		inbox:          inbox,
 		sender:         sender,
@@ -74,6 +80,7 @@ func NewFanOutWorkerWithDropRecorder(inbox <-chan FanOutMessage, sender FanOutSe
 		fastReads:      make(map[types.ConnectionID]bool),
 		dropped:        dropped,
 		recordDropped:  recordDropped,
+		observer:       observer,
 	}
 }
 
@@ -226,13 +233,17 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 
 func (w *FanOutWorker) handleSendError(connID types.ConnectionID, err error) {
 	if errors.Is(err, ErrSendBufferFull) {
+		w.recordFanoutError("buffer_full", connID, err)
 		w.markDropped(connID)
-	} else if !errors.Is(err, ErrSendConnGone) {
-		log.Printf("subscription: fanout delivery error for conn %x: %v", connID[:], err)
+	} else if errors.Is(err, ErrSendConnGone) {
+		w.recordFanoutError("connection_closed", connID, err)
+	} else {
+		w.recordFanoutError("send_failed", connID, err)
 	}
 }
 
 func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
+	w.recordClientDropped("buffer_full", connID)
 	w.mu.Lock()
 	delete(w.confirmedReads, connID)
 	w.mu.Unlock()
@@ -242,6 +253,17 @@ func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
 			w.recordDropped()
 		}
 	default:
-		log.Printf("subscription: dropped client channel full, skipping conn %x", connID[:])
+	}
+}
+
+func (w *FanOutWorker) recordFanoutError(reason string, connID types.ConnectionID, err error) {
+	if w != nil && w.observer != nil {
+		w.observer.LogSubscriptionFanoutError(reason, &connID, err)
+	}
+}
+
+func (w *FanOutWorker) recordClientDropped(reason string, connID types.ConnectionID) {
+	if w != nil && w.observer != nil {
+		w.observer.LogSubscriptionClientDropped(reason, &connID)
 	}
 }

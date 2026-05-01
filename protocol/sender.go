@@ -106,6 +106,7 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 	case conn.OutboundCh <- wrapped:
 		return nil
 	default:
+		logProtocolBackpressure(conn.Observer, "outbound", "buffer_full")
 		// contract: the overflow-driven teardown used to spawn
 		// `go conn.Disconnect(context.Background(), ...)`. With a
 		// Background ctx the detached goroutine was unbounded if

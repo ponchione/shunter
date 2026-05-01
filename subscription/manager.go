@@ -109,6 +109,7 @@ type Manager struct {
 	nextSubID     types.SubscriptionID
 	activeSets    atomic.Int64
 	droppedTotal  atomic.Uint64
+	observer      Observer
 
 	// InitialRowLimit caps the initial-query row count returned to the
 	// client. Zero means unlimited.
@@ -128,6 +129,11 @@ func WithInitialRowLimit(n int) ManagerOption {
 // still runs but no message is dispatched — useful for tests.
 func WithFanOutInbox(inbox chan<- FanOutMessage) ManagerOption {
 	return func(m *Manager) { m.inbox = inbox }
+}
+
+// WithObserver wires runtime-scoped subscription observations.
+func WithObserver(observer Observer) ManagerOption {
+	return func(m *Manager) { m.observer = observer }
 }
 
 // NewManager constructs a Manager.

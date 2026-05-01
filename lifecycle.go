@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
@@ -51,6 +52,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	startedAt := time.Now()
 
 	r.mu.Lock()
 	switch r.stateName {
@@ -70,29 +72,30 @@ func (r *Runtime) Start(ctx context.Context) error {
 	r.mu.Unlock()
 
 	if err := ctx.Err(); err != nil {
-		r.recordStartFailure(err)
+		r.recordStartFailure(err, time.Since(startedAt))
 		return err
 	}
 	if err := r.engine.Start(ctx); err != nil {
 		err = fmt.Errorf("start schema engine: %w", err)
-		r.recordStartFailure(err)
+		r.recordStartFailure(err, time.Since(startedAt))
 		return err
 	}
 	if _, _, err := buildAuthConfig(r.config); err != nil {
-		r.recordStartFailure(err)
+		r.recordStartFailure(err, time.Since(startedAt))
 		return err
 	}
 	if _, err := buildProtocolOptions(r.config.Protocol); err != nil {
-		r.recordStartFailure(err)
+		r.recordStartFailure(err, time.Since(startedAt))
 		return err
 	}
 
 	durabilityOptions := commitlog.DefaultCommitLogOptions()
 	durabilityOptions.ChannelCapacity = r.buildConfig.DurabilityQueueCapacity
+	durabilityOptions.Observer = r.observability
 	durability, err := commitlog.NewDurabilityWorkerWithResumePlan(r.dataDir, r.resumePlan, durabilityOptions)
 	if err != nil {
 		err = fmt.Errorf("start durability worker: %w", err)
-		r.recordStartFailure(err)
+		r.recordStartFailure(err, time.Since(startedAt))
 		return err
 	}
 	cleanupDurability := true
@@ -105,40 +108,47 @@ func (r *Runtime) Start(ctx context.Context) error {
 	if runtimeStartAfterDurabilityHook != nil {
 		if err := runtimeStartAfterDurabilityHook(r); err != nil {
 			err = fmt.Errorf("start runtime lifecycle: %w", err)
-			r.recordStartFailure(err)
+			r.recordStartFailure(err, time.Since(startedAt))
 			return err
 		}
 	}
 
 	if err := ctx.Err(); err != nil {
-		r.recordStartFailure(err)
+		r.recordStartFailure(err, time.Since(startedAt))
 		return err
 	}
 
 	fanOutCapacity := r.buildConfig.ExecutorQueueCapacity
 	fanOutInbox := make(chan subscription.FanOutMessage, fanOutCapacity)
-	subscriptions := subscription.NewManager(r.registry, r.registry, subscription.WithFanOutInbox(fanOutInbox))
+	subscriptions := subscription.NewManager(
+		r.registry,
+		r.registry,
+		subscription.WithFanOutInbox(fanOutInbox),
+		subscription.WithObserver(r.observability),
+	)
 	exec := executor.NewExecutor(executor.ExecutorConfig{
 		InboxCapacity: r.buildConfig.ExecutorQueueCapacity,
 		Durability:    durabilityHandle{worker: durability},
 		Subscriptions: subscriptions,
 		RejectOnFull:  false,
+		Observer:      r.observability,
 	}, r.reducers, r.state, r.registry, uint64(r.recoveredTxID))
 	scheduler := exec.SchedulerFor()
 	if err := exec.Startup(ctx, scheduler); err != nil {
 		err = fmt.Errorf("startup executor: %w", err)
-		r.recordStartFailure(err)
+		r.recordStartFailure(err, time.Since(startedAt))
 		return err
 	}
 
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	fanOutCtx, fanOutCancel := context.WithCancel(context.Background())
 	fanOutSender := newSwappableFanOutSender(noopFanOutSender{})
-	fanOutWorker := subscription.NewFanOutWorkerWithDropRecorder(
+	fanOutWorker := subscription.NewFanOutWorkerWithObserver(
 		fanOutInbox,
 		fanOutSender,
 		subscriptions.DroppedChanSend(),
 		subscriptions.RecordDroppedClient,
+		r.observability,
 	)
 
 	r.mu.Lock()
@@ -146,7 +156,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 		r.mu.Unlock()
 		lifecycleCancel()
 		fanOutCancel()
-		r.recordStartFailure(ErrRuntimeClosed)
+		r.recordStartFailure(ErrRuntimeClosed, time.Since(startedAt))
 		return ErrRuntimeClosed
 	}
 	r.lifecycleCancel = lifecycleCancel
@@ -175,7 +185,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 		r.mu.Unlock()
 		lifecycleCancel()
 		fanOutCancel()
-		r.recordStartFailure(err)
+		r.recordStartFailure(err, time.Since(startedAt))
 		return err
 	}
 	r.schedulerWG.Add(1)
@@ -195,11 +205,13 @@ func (r *Runtime) Start(ctx context.Context) error {
 	}()
 
 	cleanupDurability = false
+	r.recordStartReady(time.Since(startedAt))
 	return nil
 }
 
 // Close idempotently shuts down runtime-owned background workers.
 func (r *Runtime) Close() error {
+	startedAt := time.Now()
 	r.closeMu.Lock()
 	defer r.closeMu.Unlock()
 
@@ -212,6 +224,7 @@ func (r *Runtime) Close() error {
 		r.stateName = RuntimeStateClosed
 		r.ready.Store(false)
 		r.mu.Unlock()
+		r.recordClosed(time.Since(startedAt))
 		return nil
 	}
 	r.stateName = RuntimeStateClosing
@@ -293,17 +306,47 @@ func (r *Runtime) Close() error {
 	r.stateName = RuntimeStateClosed
 	r.ready.Store(false)
 	r.mu.Unlock()
+	if closeErr != nil {
+		r.recordCloseFailure(closeErr, time.Since(startedAt))
+	} else {
+		r.recordClosed(time.Since(startedAt))
+	}
 	return closeErr
 }
 
-func (r *Runtime) recordStartFailure(err error) {
+func (r *Runtime) recordStartFailure(err error, duration time.Duration) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.lastErr = err
 	r.ready.Store(false)
 	if r.stateName != RuntimeStateClosed && r.stateName != RuntimeStateClosing {
 		r.stateName = RuntimeStateFailed
 	}
+	r.mu.Unlock()
+	r.observability.recordRuntimeStartFailed(err, duration)
+	r.recordHealthDegraded()
+}
+
+func (r *Runtime) recordStartReady(duration time.Duration) {
+	health := r.Health()
+	r.observability.recordRuntimeReady(health, duration)
+	r.recordHealthDegradedFrom(health)
+}
+
+func (r *Runtime) recordCloseFailure(err error, duration time.Duration) {
+	r.observability.recordRuntimeCloseFailed(err, duration)
+	r.recordHealthDegraded()
+}
+
+func (r *Runtime) recordClosed(duration time.Duration) {
+	r.observability.recordRuntimeClosed(RuntimeStateClosed, duration)
+}
+
+func (r *Runtime) recordHealthDegraded() {
+	r.recordHealthDegradedFrom(r.Health())
+}
+
+func (r *Runtime) recordHealthDegradedFrom(health RuntimeHealth) {
+	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
 }
 
 type durabilityHandle struct {

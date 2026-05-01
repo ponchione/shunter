@@ -2,7 +2,6 @@ package store
 
 import (
 	"iter"
-	"log"
 	"runtime"
 	"slices"
 	"sync"
@@ -31,6 +30,7 @@ type CommittedReadView interface {
 // CommittedSnapshot holds a read lock on CommittedState.
 type CommittedSnapshot struct {
 	cs        *CommittedState
+	observer  Observer
 	closed    atomic.Bool
 	closeOnce sync.Once
 }
@@ -38,7 +38,7 @@ type CommittedSnapshot struct {
 // Snapshot acquires a read lock and returns a point-in-time view.
 func (cs *CommittedState) Snapshot() *CommittedSnapshot {
 	cs.RLock()
-	s := &CommittedSnapshot{cs: cs}
+	s := &CommittedSnapshot{cs: cs, observer: cs.observer}
 	runtime.SetFinalizer(s, finalizeCommittedSnapshot)
 	return s
 }
@@ -50,8 +50,10 @@ func (s *CommittedSnapshot) ensureOpen() {
 }
 
 func finalizeCommittedSnapshot(s *CommittedSnapshot) {
-	log.Printf("store: leaked CommittedSnapshot finalized without Close(); commits may have been blocked until GC")
 	s.close(true)
+	if s.observer != nil {
+		s.observer.LogStoreSnapshotLeaked("finalizer")
+	}
 }
 
 func (s *CommittedSnapshot) close(fromFinalizer bool) {

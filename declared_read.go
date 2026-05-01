@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/ponchione/shunter/executor"
@@ -287,7 +286,7 @@ func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, 
 		}},
 		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
 	}); err != nil {
-		logProtocolDeclaredReadSendError(conn, "query response", err)
+		r.logProtocolDeclaredReadSendError("declared_query", err)
 	}
 }
 
@@ -312,7 +311,7 @@ func (r *Runtime) HandleSubscribeDeclaredView(ctx context.Context, conn *protoco
 		TableName:                        sub.TableName,
 		Rows:                             rows,
 	}); err != nil {
-		logProtocolDeclaredReadSendError(conn, "view response", err)
+		r.logProtocolDeclaredReadSendError("subscribe_declared_view", err)
 	}
 }
 
@@ -343,7 +342,7 @@ func (r *Runtime) sendProtocolDeclaredQueryError(conn *protocol.Conn, messageID 
 		Error:                      &errText,
 		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
 	}); err != nil {
-		logProtocolDeclaredReadSendError(conn, "query error response", err)
+		r.logProtocolDeclaredReadSendError("declared_query", err)
 	}
 }
 
@@ -354,7 +353,7 @@ func (r *Runtime) sendProtocolDeclaredViewError(conn *protocol.Conn, requestID, 
 		QueryID:                          declaredReadOptionalUint32(queryID),
 		Error:                            errText,
 	}); err != nil {
-		logProtocolDeclaredReadSendError(conn, "view error response", err)
+		r.logProtocolDeclaredReadSendError("subscribe_declared_view", err)
 	}
 }
 
@@ -381,12 +380,8 @@ func (r *Runtime) readyProtocolSender() (protocol.ClientSender, error) {
 	return r.protocolSender, nil
 }
 
-func logProtocolDeclaredReadSendError(conn *protocol.Conn, label string, err error) {
-	if conn == nil {
-		log.Printf("runtime: send declared-read %s failed: %v", label, err)
-		return
-	}
-	log.Printf("runtime: send declared-read %s for %x failed: %v", label, conn.ID[:], err)
+func (r *Runtime) logProtocolDeclaredReadSendError(kind string, err error) {
+	r.observability.LogProtocolProtocolError(kind, "send_failed", err)
 }
 
 func encodeDeclaredReadRows(rows []types.ProductValue) ([]byte, error) {

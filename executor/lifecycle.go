@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
-	"runtime/debug"
 	"time"
 
 	"github.com/ponchione/shunter/schema"
@@ -84,13 +82,11 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
 
 	tx := store.NewTransaction(e.committed, e.schemaReg)
 	reducerStatus := StatusCommitted
-	var reducerErr error
 	if rr, hasReducer := e.registry.LookupLifecycle(LifecycleOnDisconnect); hasReducer {
-		reducerStatus, reducerErr = e.runLifecycleReducer(rr, tx, cmd.ConnID, cmd.Identity)
+		reducerStatus, _ = e.runLifecycleReducer(rr, tx, cmd.ConnID, cmd.Identity)
 	}
 
 	if reducerStatus != StatusCommitted {
-		log.Printf("executor: OnDisconnect reducer failed for conn=%x: %v", cmd.ConnID[:], reducerErr)
 		store.Rollback(tx)
 		// Fresh cleanup transaction that only removes the sys_clients row.
 		tx = store.NewTransaction(e.committed, e.schemaReg)
@@ -211,11 +207,12 @@ func (e *Executor) runLifecycleReducer(
 
 	var reducerErr error
 	var panicked any
+	var panicStack string
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
 				panicked = r
-				log.Printf("executor: lifecycle reducer %q panic: %v\n%s", rr.Name, r, debug.Stack())
+				panicStack = capturePanicStack(e.observer)
 			}
 		}()
 		_, reducerErr = rr.Handler(rctx, nil)
@@ -225,8 +222,12 @@ func (e *Executor) runLifecycleReducer(
 
 	switch {
 	case panicked != nil:
-		return StatusFailedPanic, fmt.Errorf("%v: %w", panicked, ErrReducerPanic)
+		err := fmt.Errorf("%v: %w", panicked, ErrReducerPanic)
+		e.recordReducerPanic(rr.Name, err, 0, panicStack)
+		e.recordLifecycleReducerFailed(rr.Name, "panic", err)
+		return StatusFailedPanic, err
 	case reducerErr != nil:
+		e.recordLifecycleReducerFailed(rr.Name, "user_error", reducerErr)
 		return StatusFailedUser, reducerErr
 	default:
 		return StatusCommitted, nil

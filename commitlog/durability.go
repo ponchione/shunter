@@ -3,7 +3,6 @@ package commitlog
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -38,6 +37,9 @@ type CommitLogOptions struct {
 	// file preallocates. The sidecar file occupies OffsetIndexCap*16 bytes.
 	// Zero disables indexing, same as OffsetIndexIntervalBytes == 0.
 	OffsetIndexCap uint64
+	// Observer receives runtime-scoped durability observations. Nil is a
+	// no-op for package-level pre-runtime use.
+	Observer Observer
 }
 
 // DefaultCommitLogOptions returns sensible defaults.
@@ -78,6 +80,7 @@ type DurabilityWorker struct {
 	dir        string
 	seg        *SegmentWriter
 	idx        *OffsetIndexWriter
+	observer   Observer
 }
 
 // NewDurabilityWorker creates and starts the worker.
@@ -85,10 +88,12 @@ type DurabilityWorker struct {
 // Otherwise a new segment is created.
 func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*DurabilityWorker, error) {
 	if err := validateFsyncMode(opts.FsyncMode); err != nil {
+		recordDurabilityFailed(opts.Observer, err, "open_failed", 0)
 		return nil, err
 	}
 	seg, err := openOrCreateSegment(dir, startTxID)
 	if err != nil {
+		recordDurabilityFailed(opts.Observer, err, "open_failed", 0)
 		return nil, err
 	}
 	return newDurabilityWorkerFromSegment(dir, seg, 0, opts), nil
@@ -105,10 +110,12 @@ func validateFsyncMode(mode FsyncMode) error {
 // append strategy chosen during recovery.
 func NewDurabilityWorkerWithResumePlan(dir string, plan RecoveryResumePlan, opts CommitLogOptions) (*DurabilityWorker, error) {
 	if err := validateFsyncMode(opts.FsyncMode); err != nil {
+		recordDurabilityFailed(opts.Observer, err, "open_failed", 0)
 		return nil, err
 	}
 	seg, durableTxID, err := openSegmentForResumePlan(dir, plan)
 	if err != nil {
+		recordDurabilityFailed(opts.Observer, err, "open_failed", uint64(plan.NextTxID))
 		return nil, err
 	}
 	return newDurabilityWorkerFromSegment(dir, seg, durableTxID, opts), nil
@@ -116,13 +123,14 @@ func NewDurabilityWorkerWithResumePlan(dir string, plan RecoveryResumePlan, opts
 
 func newDurabilityWorkerFromSegment(dir string, seg *SegmentWriter, durableTxID uint64, opts CommitLogOptions) *DurabilityWorker {
 	dw := &DurabilityWorker{
-		ch:      make(chan durabilityItem, opts.ChannelCapacity),
-		closeCh: make(chan struct{}),
-		done:    make(chan struct{}),
-		waiters: make(map[uint64][]chan types.TxID),
-		opts:    opts,
-		dir:     dir,
-		seg:     seg,
+		ch:       make(chan durabilityItem, opts.ChannelCapacity),
+		closeCh:  make(chan struct{}),
+		done:     make(chan struct{}),
+		waiters:  make(map[uint64][]chan types.TxID),
+		opts:     opts,
+		dir:      dir,
+		seg:      seg,
+		observer: opts.Observer,
 	}
 	if durableTxID > 0 {
 		dw.durable.Store(durableTxID)
@@ -139,7 +147,7 @@ func newDurabilityWorkerFromSegment(dir string, seg *SegmentWriter, durableTxID 
 // initOffsetIndexForSegment opens or creates the per-segment offset index
 // sidecar next to seg and wraps it as a cadence writer. Indexing is disabled
 // (nil returned) when options disable it or when any construction step fails.
-// The index is advisory — failures are logged and do not bubble up.
+// The index is advisory; failures do not bubble up or emit production logs.
 func initOffsetIndexForSegment(dir string, seg *SegmentWriter, opts CommitLogOptions) *OffsetIndexWriter {
 	if opts.OffsetIndexIntervalBytes == 0 || opts.OffsetIndexCap == 0 {
 		return nil
@@ -152,11 +160,9 @@ func initOffsetIndexForSegment(dir string, seg *SegmentWriter, opts CommitLogOpt
 	if _, err := os.Stat(path); err == nil {
 		m, oerr := OpenOffsetIndexMut(path, opts.OffsetIndexCap)
 		if oerr != nil {
-			log.Printf("commitlog: offset index open failed for segment %d, disabling indexing: %v", seg.startTx, oerr)
 			return nil
 		}
 		if terr := m.Truncate(types.TxID(seg.lastTx + 1)); terr != nil {
-			log.Printf("commitlog: offset index truncate-on-reopen failed for segment %d, disabling indexing: %v", seg.startTx, terr)
 			_ = m.Close()
 			return nil
 		}
@@ -164,12 +170,10 @@ func initOffsetIndexForSegment(dir string, seg *SegmentWriter, opts CommitLogOpt
 	} else if errors.Is(err, os.ErrNotExist) {
 		m, cerr := CreateOffsetIndex(path, opts.OffsetIndexCap)
 		if cerr != nil {
-			log.Printf("commitlog: offset index create failed for segment %d, disabling indexing: %v", seg.startTx, cerr)
 			return nil
 		}
 		head = m
 	} else {
-		log.Printf("commitlog: offset index stat failed for segment %d, disabling indexing: %v", seg.startTx, err)
 		return nil
 	}
 	return NewOffsetIndexWriter(head, opts.OffsetIndexIntervalBytes)
@@ -377,9 +381,7 @@ func (dw *DurabilityWorker) Close() (uint64, error) {
 		} else {
 			_ = dw.seg.Close()
 			if dw.idx != nil {
-				if err := dw.idx.Sync(); err != nil {
-					log.Printf("commitlog: offset index final sync failed: %v", err)
-				}
+				_ = dw.idx.Sync()
 				_ = dw.idx.Close()
 				dw.idx = nil
 			}
@@ -436,6 +438,7 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 	for _, item := range batch {
 		payload, err := EncodeChangeset(item.changeset)
 		if err != nil {
+			recordDurabilityFailed(dw.observer, err, "write_failed", item.txID)
 			return err
 		}
 		rec := &Record{
@@ -444,13 +447,13 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 			Payload:    payload,
 		}
 		if err := dw.seg.Append(rec); err != nil {
+			recordDurabilityFailed(dw.observer, err, "write_failed", item.txID)
 			return err
 		}
 		if dw.idx != nil {
 			if off, ok := dw.seg.LastRecordByteOffset(); ok {
 				recLen := uint64(RecordOverhead + len(rec.Payload))
 				if err := dw.idx.AppendAfterCommit(types.TxID(rec.TxID), uint64(off), recLen); err != nil {
-					log.Printf("commitlog: offset index append failed at tx %d, disabling indexing: %v", rec.TxID, err)
 					_ = dw.idx.Close()
 					dw.idx = nil
 				}
@@ -458,11 +461,11 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		}
 	}
 	if err := dw.seg.Sync(); err != nil {
+		recordDurabilityFailed(dw.observer, err, "sync_failed", batch[len(batch)-1].txID)
 		return err
 	}
 	if dw.idx != nil {
 		if err := dw.idx.Sync(); err != nil {
-			log.Printf("commitlog: offset index sync failed, disabling indexing: %v", err)
 			_ = dw.idx.Close()
 			dw.idx = nil
 		}
@@ -476,6 +479,7 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 	if dw.seg.Size() >= dw.opts.MaxSegmentSize {
 		nextTx := batch[len(batch)-1].txID + 1
 		if err := dw.seg.Close(); err != nil {
+			recordDurabilityFailed(dw.observer, err, "segment_rotate_failed", batch[len(batch)-1].txID)
 			return err
 		}
 		if dw.idx != nil {
@@ -484,6 +488,7 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		}
 		seg, err := CreateSegment(dw.dir, nextTx)
 		if err != nil {
+			recordDurabilityFailed(dw.observer, err, "segment_rotate_failed", nextTx)
 			return err
 		}
 		dw.seg = seg

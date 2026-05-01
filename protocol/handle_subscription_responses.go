@@ -1,7 +1,7 @@
 package protocol
 
 import (
-	"log"
+	"errors"
 	"time"
 )
 
@@ -150,14 +150,14 @@ func makeSetReply[R any](
 				return
 			}
 		}
-		log.Printf("protocol: malformed %s (req=%d query=%d)", delivery.malformedType, requestID, queryID)
+		logProtocolError(conn.Observer, "unknown", "malformed", errors.New("malformed subscription response"))
 	}
 }
 
 func logSubscriptionErrorDeliveryFailure(conn *Conn, label string, resp *SubscriptionError, err error) {
-	log.Printf("protocol: %s delivery failed for conn %x query_id=%s: %v", label, conn.ID[:], subscriptionErrorQueryIDForLog(resp), err)
+	logProtocolError(conn.Observer, "unknown", "send_failed", err)
 }
 
 func logAppliedDeliveryFailure(conn *Conn, label string, queryID uint32, err error) {
-	log.Printf("protocol: %s delivery failed for conn %x query_id=%d: %v", label, conn.ID[:], queryID, err)
+	logProtocolError(conn.Observer, "unknown", "send_failed", err)
 }

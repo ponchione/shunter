@@ -62,6 +62,8 @@ type Server struct {
 	// is the extension point for tests that want to bypass OnConnect
 	// and for advanced hosts that want custom admission semantics.
 	Upgraded func(ctx context.Context, uc *UpgradeContext)
+	// Observer receives runtime-scoped protocol observations.
+	Observer Observer
 }
 
 // DeclaredReadHandler is the protocol/server seam for module-owned declared
@@ -103,7 +105,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	if hasToken {
 		c, err := auth.ValidateJWT(token, s.JWT)
 		if err != nil {
-			s.writeRejected(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
+			s.writeAuthRejected(w, "invalid token: "+err.Error(), http.StatusUnauthorized, "invalid_token", err)
 			return
 		}
 		claims = c
@@ -111,16 +113,18 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		permissions = append([]string(nil), c.Permissions...)
 	} else {
 		if s.JWT.AuthMode != auth.AuthModeAnonymous {
-			s.writeRejected(w, "no token and strict auth enabled", http.StatusUnauthorized)
+			err := errors.New("no token and strict auth enabled")
+			s.writeAuthRejected(w, err.Error(), http.StatusUnauthorized, "missing_token", err)
 			return
 		}
 		if s.Mint == nil {
-			s.writeRejected(w, "server misconfigured: anonymous mode requires Mint config", http.StatusInternalServerError)
+			err := errors.New("server misconfigured: anonymous mode requires Mint config")
+			s.writeAuthRejected(w, err.Error(), http.StatusInternalServerError, "mint_misconfigured", err)
 			return
 		}
 		mt, id, err := auth.MintAnonymousToken(s.Mint)
 		if err != nil {
-			s.writeRejected(w, "mint failed: "+err.Error(), http.StatusInternalServerError)
+			s.writeAuthRejected(w, "mint failed: "+err.Error(), http.StatusInternalServerError, "mint_failed", err)
 			return
 		}
 		mintedToken = mt
@@ -132,17 +136,17 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	connID, err := resolveConnectionID(r.URL.Query().Get("connection_id"))
 	if err != nil {
 		if errors.Is(err, ErrZeroConnectionID) {
-			s.writeRejected(w, err.Error(), http.StatusBadRequest)
+			s.writeRejected(w, err.Error(), http.StatusBadRequest, "rejected_upgrade", err)
 			return
 		}
-		s.writeRejected(w, "invalid connection_id: "+err.Error(), http.StatusBadRequest)
+		s.writeRejected(w, "invalid connection_id: "+err.Error(), http.StatusBadRequest, "rejected_upgrade", err)
 		return
 	}
 
 	// 3. compression mode: default none; reject unknown values.
 	compression, err := parseCompressionParam(r.URL.Query().Get("compression"))
 	if err != nil {
-		s.writeRejected(w, err.Error(), http.StatusBadRequest)
+		s.writeRejected(w, err.Error(), http.StatusBadRequest, "rejected_upgrade", err)
 		return
 	}
 
@@ -151,7 +155,9 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		s.writeRejected(w,
 			"Sec-WebSocket-Protocol must include "+SubprotocolV1,
-			http.StatusBadRequest)
+			http.StatusBadRequest,
+			"rejected_upgrade",
+			errors.New("missing required subprotocol"))
 		return
 	}
 
@@ -162,7 +168,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// websocket.Accept has already written an HTTP response at
 		// this point; nothing further to emit.
-		s.recordRejected()
+		s.recordRejected("rejected_upgrade", err)
 		return
 	}
 	if s.Options.MaxMessageSize > 0 {
@@ -195,14 +201,18 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		)
 		c.Permissions = append([]string(nil), uc.Permissions...)
 		c.AllowAllPermissions = uc.AllowAllPermissions
+		c.Observer = s.Observer
 		// RunLifecycle closes the socket on its own failure paths; on
 		// success it leaves the socket open for the background
 		// goroutines below. Story 3.6 (Disconnect) closes c.closed,
 		// unblocking them all; until 3.6 lands, the goroutines exit
 		// naturally on ws error when the peer closes.
 		if err := c.RunLifecycle(r.Context(), s.Executor, s.Conns); err != nil {
-			s.recordRejected()
+			s.recordRejected("rejected_executor", err)
 			return
+		}
+		if s.Observer != nil {
+			s.Observer.LogProtocolConnectionOpened(c.ID)
 		}
 		// Spawn per-connection lifecycle goroutines. They outlive
 		// this HTTP handler; the supervisor invokes Disconnect when
@@ -232,18 +242,28 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	// No Upgraded hook and no Executor wiring — close the connection
 	// so the client does not hang. Preserves pre-3.4 bring-up behavior
 	// when the embedder is still assembling its executor graph.
-	s.recordRejected()
+	s.recordRejected("rejected_internal", errors.New("protocol server missing executor wiring"))
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 }
 
-func (s *Server) writeRejected(w http.ResponseWriter, message string, status int) {
-	s.recordRejected()
+func (s *Server) writeAuthRejected(w http.ResponseWriter, message string, status int, reason string, err error) {
+	if s != nil && s.Observer != nil {
+		s.Observer.LogProtocolAuthFailed(reason, err)
+	}
+	s.writeRejected(w, message, status, "rejected_auth", err)
+}
+
+func (s *Server) writeRejected(w http.ResponseWriter, message string, status int, result string, err error) {
+	s.recordRejected(result, err)
 	http.Error(w, message, status)
 }
 
-func (s *Server) recordRejected() {
+func (s *Server) recordRejected(result string, err error) {
 	if s != nil && s.Conns != nil {
 		s.Conns.RecordRejected()
+	}
+	if s != nil {
+		logProtocolConnectionRejected(s.Observer, result, err)
 	}
 }
 

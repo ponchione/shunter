@@ -14,6 +14,7 @@ type CommittedState struct {
 	mu            sync.RWMutex
 	tables        map[schema.TableID]*Table
 	committedTxID types.TxID
+	observer      Observer
 }
 
 // NewCommittedState creates an empty committed state.
@@ -113,6 +114,14 @@ func (cs *CommittedState) SetCommittedTxID(txID types.TxID) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	cs.committedTxID = txID
+}
+
+// SetObserver wires runtime-scoped observations for snapshots derived from
+// this state. Nil restores the no-op behavior used before a runtime exists.
+func (cs *CommittedState) SetObserver(observer Observer) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.observer = observer
 }
 
 // CommittedTxIDLocked returns the committed horizon while the caller already

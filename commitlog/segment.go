@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -480,8 +479,6 @@ func (sr *SegmentReader) SeekToTxID(target types.TxID, idx *OffsetIndex) error {
 			if valid {
 				startOff = int64(off)
 			}
-		} else if !errors.Is(err, ErrOffsetIndexKeyNotFound) {
-			log.Printf("commitlog: offset index lookup failed, falling back to linear scan: %v", err)
 		}
 	}
 	if _, err := sr.file.Seek(startOff, io.SeekStart); err != nil {

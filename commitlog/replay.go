@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -36,14 +35,12 @@ func seekReplayReaderToHorizon(reader *SegmentReader, segmentPath string, startT
 	}
 	idx, err := OpenOffsetIndex(idxPath)
 	if err != nil {
-		log.Printf("commitlog: replay: opening offset index %s failed, falling back to linear scan: %v", idxPath, err)
 		return
 	}
 	defer idx.Close()
 	if err := reader.SeekToTxID(fromTxID+1, idx); err != nil {
-		log.Printf("commitlog: replay: seek via offset index %s failed, falling back to linear scan: %v", idxPath, err)
 		if _, seekErr := reader.file.Seek(SegmentHeaderSize, io.SeekStart); seekErr != nil {
-			log.Printf("commitlog: replay: resetting segment reader after index seek failure failed for %s: %v", segmentPath, seekErr)
+			return
 		}
 		reader.lastTx = 0
 	}

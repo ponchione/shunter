@@ -2,7 +2,6 @@ package subscription
 
 import (
 	"fmt"
-	"log"
 	"sort"
 	"time"
 
@@ -87,8 +86,6 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 // evaluate is the inner orchestration: build DeltaView, collect candidates,
 // evaluate each candidate, and assemble the per-connection fanout.
 func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView) (CommitFanout, map[types.ConnectionID][]SubscriptionError) {
-	_ = txID
-
 	activeCols := m.collectActiveColumns()
 	dv := NewDeltaView(view, changeset, activeCols)
 	defer dv.Release()
@@ -106,7 +103,7 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 		}
 		updates, err := m.evalQuerySafe(qs, dv)
 		if err != nil {
-			m.handleEvalError(qs, err, errs)
+			m.handleEvalError(txID, qs, err, errs)
 			continue
 		}
 		if len(updates) == 0 {
@@ -211,10 +208,12 @@ func sortFanoutBySubscription(fanout CommitFanout) {
 	}
 }
 
-func (m *Manager) handleEvalError(qs *queryState, err error, out map[types.ConnectionID][]SubscriptionError) {
+func (m *Manager) handleEvalError(txID types.TxID, qs *queryState, err error, out map[types.ConnectionID][]SubscriptionError) {
 	predRepr := fmt.Sprintf("%#v", qs.predicate)
 	wrapped := fmt.Errorf("%w: %v", ErrSubscriptionEval, err)
-	log.Printf("subscription: evaluation error for query %s predicate=%s: %v", qs.hash, predRepr, wrapped)
+	if m.observer != nil {
+		m.observer.LogSubscriptionEvalError(txID, wrapped)
+	}
 
 	dropped := make(map[types.ConnectionID]struct{})
 	for connID, subIDs := range qs.subscribers {

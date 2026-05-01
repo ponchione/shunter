@@ -280,6 +280,7 @@ func (r *Runtime) ensureProtocolGraphLocked() error {
 		State:             committedStateAccess{state: r.state},
 		DeclaredReads:     r,
 		VisibilityFilters: runtimeProtocolVisibilityFilters(r.module.visibilityFilters),
+		Observer:          r.observability,
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/types"
 )
 
 const (
@@ -362,6 +363,199 @@ func (o *runtimeObservability) recordRecoveryFailed(err error, duration time.Dur
 		Component: "commitlog",
 		Result:    "failed",
 	}, 1)
+}
+
+func (o *runtimeObservability) recordRuntimeStartFailed(err error, duration time.Duration) {
+	if err == nil {
+		return
+	}
+	o.log(context.Background(), slog.LevelError, "runtime.start_failed", "runtime",
+		slog.String("error", o.redactError(err)),
+		slog.Int64("duration_ms", duration.Milliseconds()),
+	)
+}
+
+func (o *runtimeObservability) recordRuntimeReady(health RuntimeHealth, duration time.Duration) {
+	o.log(context.Background(), slog.LevelInfo, "runtime.ready", "runtime",
+		slog.String("state", string(health.State)),
+		slog.Bool("ready", health.Ready),
+		slog.Bool("degraded", health.Degraded),
+		slog.Int64("duration_ms", duration.Milliseconds()),
+	)
+}
+
+func (o *runtimeObservability) recordRuntimeCloseFailed(err error, duration time.Duration) {
+	if err == nil {
+		return
+	}
+	o.log(context.Background(), slog.LevelError, "runtime.close_failed", "runtime",
+		slog.String("error", o.redactError(err)),
+		slog.Int64("duration_ms", duration.Milliseconds()),
+	)
+}
+
+func (o *runtimeObservability) recordRuntimeClosed(state RuntimeState, duration time.Duration) {
+	o.log(context.Background(), slog.LevelInfo, "runtime.closed", "runtime",
+		slog.String("state", string(state)),
+		slog.Int64("duration_ms", duration.Milliseconds()),
+	)
+}
+
+func (o *runtimeObservability) recordRuntimeHealthDegraded(health RuntimeHealth, reason runtimeDegradedReason) {
+	if reason == runtimeDegradedReasonNone {
+		return
+	}
+	o.log(context.Background(), slog.LevelWarn, "runtime.health_degraded", "runtime",
+		slog.String("state", string(health.State)),
+		slog.String("reason", string(reason)),
+	)
+}
+
+func (o *runtimeObservability) LogDurabilityFailed(err error, reason string, txID types.TxID) {
+	if err == nil {
+		return
+	}
+	attrs := []slog.Attr{
+		slog.String("error", o.redactError(err)),
+		slog.String("reason", reason),
+	}
+	if txID != 0 {
+		attrs = append(attrs, slog.Uint64("tx_id", uint64(txID)))
+	}
+	o.log(context.Background(), slog.LevelError, "durability.failed", "commitlog", attrs...)
+}
+
+func (o *runtimeObservability) PanicStackEnabled() bool {
+	return o != nil && o.logger != nil && o.logger.Enabled(context.Background(), slog.LevelDebug)
+}
+
+func (o *runtimeObservability) LogExecutorFatal(err error, reason string, txID types.TxID) {
+	if err == nil {
+		return
+	}
+	attrs := []slog.Attr{
+		slog.String("error", o.redactError(err)),
+		slog.String("reason", reason),
+	}
+	if txID != 0 {
+		attrs = append(attrs, slog.Uint64("tx_id", uint64(txID)))
+	}
+	o.log(context.Background(), slog.LevelError, "executor.fatal", "executor", attrs...)
+}
+
+func (o *runtimeObservability) LogExecutorReducerPanic(reducer string, err error, txID types.TxID, stack string) {
+	if err == nil {
+		return
+	}
+	attrs := []slog.Attr{
+		slog.String("reducer", reducer),
+		slog.String("error", o.redactError(err)),
+	}
+	if txID != 0 {
+		attrs = append(attrs, slog.Uint64("tx_id", uint64(txID)))
+	}
+	if stack != "" {
+		attrs = append(attrs, slog.String("stack", o.redactErrorString(stack)))
+	}
+	o.log(context.Background(), slog.LevelError, "executor.reducer_panic", "executor", attrs...)
+}
+
+func (o *runtimeObservability) LogExecutorLifecycleReducerFailed(reducer, result string, err error) {
+	if err == nil {
+		return
+	}
+	o.log(context.Background(), slog.LevelWarn, "executor.lifecycle_reducer_failed", "executor",
+		slog.String("reducer", reducer),
+		slog.String("result", result),
+		slog.String("error", o.redactError(err)),
+	)
+}
+
+func (o *runtimeObservability) LogProtocolConnectionRejected(result string, err error) {
+	attrs := []slog.Attr{slog.String("result", result)}
+	if err != nil {
+		attrs = append(attrs, slog.String("error", o.redactError(err)))
+	}
+	o.log(context.Background(), slog.LevelWarn, "protocol.connection_rejected", "protocol", attrs...)
+}
+
+func (o *runtimeObservability) LogProtocolConnectionOpened(connID types.ConnectionID) {
+	o.log(context.Background(), slog.LevelDebug, "protocol.connection_opened", "protocol",
+		slog.String("connection_id", connID.Hex()),
+	)
+}
+
+func (o *runtimeObservability) LogProtocolConnectionClosed(connID types.ConnectionID, reason string) {
+	o.log(context.Background(), slog.LevelDebug, "protocol.connection_closed", "protocol",
+		slog.String("connection_id", connID.Hex()),
+		slog.String("reason", reason),
+	)
+}
+
+func (o *runtimeObservability) LogProtocolProtocolError(kind, reason string, err error) {
+	if err == nil {
+		return
+	}
+	o.log(context.Background(), slog.LevelWarn, "protocol.protocol_error", "protocol",
+		slog.String("kind", kind),
+		slog.String("reason", reason),
+		slog.String("error", o.redactError(err)),
+	)
+}
+
+func (o *runtimeObservability) LogProtocolAuthFailed(reason string, err error) {
+	if err == nil {
+		return
+	}
+	o.log(context.Background(), slog.LevelWarn, "protocol.auth_failed", "protocol",
+		slog.String("reason", reason),
+		slog.String("error", o.redactError(err)),
+	)
+}
+
+func (o *runtimeObservability) LogProtocolBackpressure(direction, reason string) {
+	o.log(context.Background(), slog.LevelWarn, "protocol.backpressure", "protocol",
+		slog.String("direction", direction),
+		slog.String("reason", reason),
+	)
+}
+
+func (o *runtimeObservability) LogSubscriptionEvalError(txID types.TxID, err error) {
+	if err == nil {
+		return
+	}
+	o.log(context.Background(), slog.LevelWarn, "subscription.eval_error", "subscription",
+		slog.Uint64("tx_id", uint64(txID)),
+		slog.String("error", o.redactError(err)),
+	)
+}
+
+func (o *runtimeObservability) LogSubscriptionFanoutError(reason string, connID *types.ConnectionID, err error) {
+	if err == nil {
+		return
+	}
+	attrs := []slog.Attr{
+		slog.String("reason", reason),
+		slog.String("error", o.redactError(err)),
+	}
+	if connID != nil {
+		attrs = append(attrs, slog.String("connection_id", connID.Hex()))
+	}
+	o.log(context.Background(), slog.LevelWarn, "subscription.fanout_error", "subscription", attrs...)
+}
+
+func (o *runtimeObservability) LogSubscriptionClientDropped(reason string, connID *types.ConnectionID) {
+	attrs := []slog.Attr{slog.String("reason", reason)}
+	if connID != nil {
+		attrs = append(attrs, slog.String("connection_id", connID.Hex()))
+	}
+	o.log(context.Background(), slog.LevelWarn, "subscription.client_dropped", "subscription", attrs...)
+}
+
+func (o *runtimeObservability) LogStoreSnapshotLeaked(reason string) {
+	o.log(context.Background(), slog.LevelError, "store.snapshot_leaked", "store",
+		slog.String("reason", reason),
+	)
 }
 
 func recoverySkippedSnapshotMetricReason(reason commitlog.SnapshotSkipReason) string {

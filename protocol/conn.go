@@ -32,6 +32,7 @@ type Conn struct {
 	// to the executor on external reducer calls.
 	Permissions         []string
 	AllowAllPermissions bool
+	Observer            Observer
 
 	// OutboundCh is the bounded per-connection outbound queue. The
 	// backpressure design (SPEC-005 §10.1, Epic 6) uses the

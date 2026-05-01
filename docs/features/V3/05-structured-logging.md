@@ -104,3 +104,64 @@ When complete, update this file with:
 - any package-level no-op fallback left in place and why
 - event coverage added
 - validation commands run
+
+### Recorded Completion 2026-05-01
+
+Production logging call sites replaced:
+
+- Runtime lifecycle logging now emits `runtime.start_failed`,
+  `runtime.ready`, `runtime.close_failed`, `runtime.closed`, and
+  `runtime.health_degraded` from the runtime-scoped `runtimeObservability`.
+- `commitlog`, `executor`, `protocol`, `subscription`, and `store` now expose
+  narrow observer interfaces that are wired from `Runtime.Start` or `Build`
+  with the runtime-scoped observability object.
+- Declared-read protocol send failures now use `protocol.protocol_error`
+  instead of package-global logging.
+- Production `log.Printf` imports/call sites were removed from runtime-owned
+  code paths. Existing tests that captured process-global logs were rewritten
+  to use package observers.
+
+No-op fallback / isolation:
+
+- Nil observers in subsystem packages are the package-level no-op fallback for
+  standalone package tests and pre-runtime use.
+- Commitlog offset-index advisory failures remain non-fatal and now disable
+  indexing silently rather than writing process-global logs; durability-fatal
+  failures emit `durability.failed` when a runtime observer is present.
+- Logger, metrics, and tracer sink panics remain isolated by
+  `runtimeObservability`; logger panic coverage now includes runtime lifecycle
+  operations.
+
+Event coverage added:
+
+- Runtime lifecycle/degraded logs: `runtime.ready`, `runtime.start_failed`,
+  `runtime.close_failed`, `runtime.closed`, and `runtime.health_degraded`.
+- Subsystem structured events wired for `durability.failed`,
+  `executor.fatal`, `executor.reducer_panic`,
+  `executor.lifecycle_reducer_failed`, protocol rejection/open/close/error/auth
+  and backpressure events, subscription eval/fanout/drop events, and
+  `store.snapshot_leaked`.
+- New tests cover lifecycle base fields, redacted/bounded errors, primary
+  degraded reason selection, reducer panic stack gating, and logger panic
+  isolation.
+
+Validation:
+
+```sh
+rtk go fmt . ./commitlog ./executor ./protocol ./subscription ./store
+rtk go test . -run 'Test.*(Logging|Runtime|Recovery|Start|Close|Degraded)' -count=1
+rtk go test ./executor ./protocol ./subscription ./commitlog ./store -run 'Test.*(Log|Panic|Error|Recovery|Subscription|Protocol)' -count=1
+rtk go vet . ./commitlog ./executor ./protocol ./subscription ./store
+rtk grep -n 'log\\.Printf|log\\.' *.go commitlog executor protocol subscription store
+rtk go test ./... -count=1
+```
+
+Results: all Go format/test/vet commands passed. The required grep command
+still reports false-positive `commitlog.` and `slog.` substrings; a
+word-bounded process-global check and import check showed no production
+`log.Printf` paths and no production `"log"` imports:
+
+```sh
+rtk grep -n '\\blog\\.Printf|\\blog\\.' *.go commitlog executor protocol subscription store
+rtk grep -n '"log"' *.go commitlog/*.go executor/*.go protocol/*.go subscription/*.go store/*.go
+```

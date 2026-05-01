@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"log"
 
 	"github.com/coder/websocket"
 )
@@ -27,7 +26,7 @@ func (c *Conn) runOutboundWriter(ctx context.Context) {
 			return
 		case frame := <-c.OutboundCh:
 			if err := c.ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
-				log.Printf("protocol: outbound write failed for conn %x: %v", c.ID[:], err)
+				logProtocolError(c.Observer, "unknown", "send_failed", err)
 				return
 			}
 		case <-c.closed:
@@ -35,7 +34,7 @@ func (c *Conn) runOutboundWriter(ctx context.Context) {
 				select {
 				case frame := <-c.OutboundCh:
 					if err := c.ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
-						log.Printf("protocol: outbound write failed for conn %x: %v", c.ID[:], err)
+						logProtocolError(c.Observer, "unknown", "send_failed", err)
 						return
 					}
 				default:

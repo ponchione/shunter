@@ -3,7 +3,6 @@ package protocol
 import (
 	"context"
 	"errors"
-	"log"
 
 	"github.com/coder/websocket"
 )
@@ -29,14 +28,14 @@ type MessageHandlers struct {
 func sendError(conn *Conn, msg any) {
 	frame, err := EncodeServerMessage(msg)
 	if err != nil {
-		log.Printf("protocol: sendError encode failed: %v", err)
+		logProtocolError(conn.Observer, "unknown", "encode_failed", err)
 		return
 	}
 	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, CompressionNone)
 	select {
 	case conn.OutboundCh <- wrapped:
 	default:
-		log.Printf("protocol: sendError dropped (outbound full) for conn %x", conn.ID[:])
+		logProtocolBackpressure(conn.Observer, "outbound", "buffer_full")
 	}
 }
 
@@ -44,7 +43,7 @@ func sendError(conn *Conn, msg any) {
 // (protocol error). Runs in a goroutine because coder/websocket.Close
 // blocks on the close handshake.
 func closeProtocolError(conn *Conn, reason string) {
-	log.Printf("protocol: closing conn %x with protocol error: %s", conn.ID[:], reason)
+	logProtocolError(conn.Observer, "unknown", protocolErrorReason(reason), errorFromText(reason))
 	go closeWithHandshake(conn.ws, CloseProtocol, reason, conn.opts.CloseHandshakeTimeout)
 }
 
@@ -198,6 +197,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		select {
 		case c.inflightSem <- struct{}{}:
 		default:
+			logProtocolBackpressure(c.Observer, "inbound", "buffer_full")
 			go closeWithHandshake(c.ws, ClosePolicy, "too many requests", c.opts.CloseHandshakeTimeout)
 			return
 		}

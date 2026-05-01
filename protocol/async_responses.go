@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -37,6 +36,7 @@ func (s connOnlySender) Send(connID types.ConnectionID, msg any) error {
 	case s.conn.OutboundCh <- wrapped:
 		return nil
 	default:
+		logProtocolBackpressure(s.conn.Observer, "outbound", "buffer_full")
 		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
 	}
 }
@@ -95,5 +95,5 @@ func runReducerResponseWatcher(conn *Conn, respCh <-chan TransactionUpdate) {
 }
 
 func logReducerDeliveryError(conn *Conn, requestID uint32, err error) {
-	log.Printf("protocol: reducer-result delivery failed for conn %x request=%d: %v", conn.ID[:], requestID, err)
+	logProtocolError(conn.Observer, "call_reducer", "send_failed", err)
 }
