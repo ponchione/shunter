@@ -232,30 +232,35 @@ func (e *Executor) Run(ctx context.Context) {
 // Submit sends a command to the executor inbox.
 func (e *Executor) Submit(cmd ExecutorCommand) error {
 	e.submitMu.RLock()
-	defer e.submitMu.RUnlock()
 	if e.fatal.Load() {
+		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
 	}
 	if e.shutdown.Load() {
+		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
 	}
 	if err := validateResponseChannels(cmd); err != nil {
+		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
 	if e.rejectMode {
 		select {
 		case e.inbox <- cmd:
+			e.submitMu.RUnlock()
 			e.recordExecutorInboxDepth()
 			return nil
 		default:
+			e.submitMu.RUnlock()
 			e.recordExecutorCommand(cmd, "rejected")
 			return ErrExecutorBusy
 		}
 	}
 	e.inbox <- cmd
+	e.submitMu.RUnlock()
 	e.recordExecutorInboxDepth()
 	return nil
 }
@@ -269,38 +274,45 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 // is not allowed to race ahead of either.
 func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) error {
 	e.submitMu.RLock()
-	defer e.submitMu.RUnlock()
 	if e.fatal.Load() {
+		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
 	}
 	if e.shutdown.Load() {
+		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
 	}
 	if !e.externalReady.Load() {
+		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorNotStarted
 	}
 	if err := validateResponseChannels(cmd); err != nil {
+		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
 	if e.rejectMode {
 		select {
 		case e.inbox <- cmd:
+			e.submitMu.RUnlock()
 			e.recordExecutorInboxDepth()
 			return nil
 		default:
+			e.submitMu.RUnlock()
 			e.recordExecutorCommand(cmd, "rejected")
 			return ErrExecutorBusy
 		}
 	}
 	select {
 	case e.inbox <- cmd:
+		e.submitMu.RUnlock()
 		e.recordExecutorInboxDepth()
 		return nil
 	case <-ctx.Done():
+		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "canceled")
 		return ctx.Err()
 	}

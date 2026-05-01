@@ -162,6 +162,45 @@ func TestExecutorMetricsSubmitRejectionAndInboxDepth(t *testing.T) {
 	observer.requireInboxDepth(t, 1)
 }
 
+func TestExecutorSubmitObservabilityDoesNotBlockShutdownLock(t *testing.T) {
+	observer := newBlockingCommandObserver("call_reducer", "rejected")
+	exec, _ := setupExecutorWithObserver(observer, ExecutorConfig{InboxCapacity: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go exec.Run(ctx)
+
+	submitDone := make(chan error, 1)
+	go func() {
+		submitDone <- exec.SubmitWithContext(context.Background(), CallReducerCmd{
+			Request:    ReducerRequest{ReducerName: "ok", Source: CallSourceExternal},
+			ResponseCh: make(chan ReducerResponse, 1),
+		})
+	}()
+
+	select {
+	case <-observer.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for blocking observer")
+	}
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		exec.Shutdown()
+		close(shutdownDone)
+	}()
+
+	select {
+	case <-shutdownDone:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Shutdown blocked behind submit-time observability")
+	}
+
+	close(observer.release)
+	if err := <-submitDone; !errors.Is(err, ErrExecutorNotStarted) {
+		t.Fatalf("SubmitWithContext error = %v, want ErrExecutorNotStarted", err)
+	}
+}
+
 func TestExecutorMetricsCommandDurationRecordsOnlyDequeuedCommands(t *testing.T) {
 	observer := &executorMetricObserver{}
 	exec, _ := setupExecutorWithObserver(observer, ExecutorConfig{InboxCapacity: 4})
@@ -307,3 +346,39 @@ func (panicDurability) EnqueueCommitted(types.TxID, *store.Changeset) { panic("d
 func (panicDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
 
 var _ subscription.SubscriptionManager = noopSubs{}
+
+type blockingCommandObserver struct {
+	kind    string
+	result  string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newBlockingCommandObserver(kind, result string) *blockingCommandObserver {
+	return &blockingCommandObserver{
+		kind:    kind,
+		result:  result,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (o *blockingCommandObserver) PanicStackEnabled() bool { return false }
+func (o *blockingCommandObserver) LogExecutorReducerPanic(string, error, types.TxID, string) {
+}
+func (o *blockingCommandObserver) LogExecutorLifecycleReducerFailed(string, string, error) {}
+func (o *blockingCommandObserver) LogSubscriptionFanoutError(string, *types.ConnectionID, error) {
+}
+func (o *blockingCommandObserver) LogExecutorFatal(error, string, types.TxID) {}
+func (o *blockingCommandObserver) RecordExecutorCommand(kind, result string) {
+	if kind != o.kind || result != o.result {
+		return
+	}
+	o.once.Do(func() { close(o.entered) })
+	<-o.release
+}
+func (o *blockingCommandObserver) RecordExecutorCommandDuration(string, string, time.Duration) {}
+func (o *blockingCommandObserver) RecordExecutorInboxDepth(int)                                {}
+func (o *blockingCommandObserver) RecordReducerCall(string, string)                            {}
+func (o *blockingCommandObserver) RecordReducerDuration(string, string, time.Duration)         {}
