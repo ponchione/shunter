@@ -90,8 +90,15 @@ func assertDecodeProductValueFuzzInput(tb testing.TB, data []byte) {
 }
 
 func checkDecodeProductValueFuzzInput(data []byte) error {
+	original := append([]byte(nil), data...)
 	fromBytes, fromBytesErr := DecodeProductValueFromBytes(data, fuzzProductValueSchema)
+	if !bytes.Equal(data, original) {
+		return fmt.Errorf("DecodeProductValueFromBytes mutated input: before=%x after=%x", original, data)
+	}
 	fromReader, fromReaderErr := DecodeProductValue(bytes.NewReader(data), fuzzProductValueSchema)
+	if !bytes.Equal(data, original) {
+		return fmt.Errorf("DecodeProductValue mutated input slice: before=%x after=%x", original, data)
+	}
 	if fromBytesErr != nil {
 		if err := checkClassifiedFuzzBSATNError("DecodeProductValueFromBytes", data, fromBytesErr); err != nil {
 			return err

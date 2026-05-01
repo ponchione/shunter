@@ -232,6 +232,39 @@ func TestDecodeProductValueReaderShapeMismatchPreservesSentinel(t *testing.T) {
 	}
 }
 
+func TestDecodeProductValueFromBytesDetachesBytesColumnFromInput(t *testing.T) {
+	ts := &schema.TableSchema{
+		Name: "files",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "payload", Type: types.KindBytes},
+		},
+	}
+	row := types.ProductValue{
+		types.NewUint64(7),
+		types.NewBytes([]byte{0xde, 0xad, 0xbe, 0xef}),
+	}
+	encoded, err := AppendProductValue(nil, row)
+	if err != nil {
+		t.Fatalf("AppendProductValue: %v", err)
+	}
+
+	decoded, err := DecodeProductValueFromBytes(encoded, ts)
+	if err != nil {
+		t.Fatalf("DecodeProductValueFromBytes: %v", err)
+	}
+	payload := decoded[1].AsBytes()
+	if !bytes.Equal(payload, []byte{0xde, 0xad, 0xbe, 0xef}) {
+		t.Fatalf("decoded payload = %x, want deadbeef", payload)
+	}
+	for i := range encoded {
+		encoded[i] ^= 0xff
+	}
+	if !bytes.Equal(payload, []byte{0xde, 0xad, 0xbe, 0xef}) {
+		t.Fatalf("decoded payload aliases input after mutation: %x", payload)
+	}
+}
+
 func TestEncodedValueSize(t *testing.T) {
 	v := types.NewString("hello")
 	var buf bytes.Buffer
