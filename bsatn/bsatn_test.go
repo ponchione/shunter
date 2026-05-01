@@ -192,6 +192,46 @@ func TestDecodeProductValueFromBytesShortPreservesRowShapeMismatch(t *testing.T)
 	}
 }
 
+func TestDecodeProductValueReaderShapeMismatchPreservesSentinel(t *testing.T) {
+	ts := &schema.TableSchema{
+		Name: "players",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "name", Type: types.KindString},
+		},
+	}
+
+	var short bytes.Buffer
+	EncodeValue(&short, types.NewUint64(1))
+	_, err := DecodeProductValue(bytes.NewReader(short.Bytes()), ts)
+	if !errors.Is(err, ErrRowLengthMismatch) {
+		t.Fatalf("short reader error = %v, want ErrRowLengthMismatch", err)
+	}
+	var shapeErr *RowShapeMismatchError
+	if !errors.As(err, &shapeErr) {
+		t.Fatalf("short reader error = %T, want RowShapeMismatchError details", err)
+	}
+	if shapeErr.TableName != "players" || shapeErr.Expected != 2 || shapeErr.Got != 1 {
+		t.Fatalf("unexpected short reader row shape details: %+v", shapeErr)
+	}
+
+	var trailing bytes.Buffer
+	EncodeValue(&trailing, types.NewUint64(1))
+	EncodeValue(&trailing, types.NewString("alice"))
+	trailing.WriteByte(0xff)
+	shapeErr = nil
+	_, err = DecodeProductValue(bytes.NewReader(trailing.Bytes()), ts)
+	if !errors.Is(err, ErrRowLengthMismatch) {
+		t.Fatalf("trailing reader error = %v, want ErrRowLengthMismatch", err)
+	}
+	if !errors.As(err, &shapeErr) {
+		t.Fatalf("trailing reader error = %T, want RowShapeMismatchError details", err)
+	}
+	if shapeErr.TableName != "players" || shapeErr.Expected != 2 || shapeErr.Got != 3 {
+		t.Fatalf("unexpected trailing reader row shape details: %+v", shapeErr)
+	}
+}
+
 func TestEncodedValueSize(t *testing.T) {
 	v := types.NewString("hello")
 	var buf bytes.Buffer

@@ -193,7 +193,10 @@ func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue
 		v, err := DecodeValueExpecting(br, col.Type, col.Name)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil, &RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: i}
+				return nil, errors.Join(
+					ErrRowLengthMismatch,
+					&RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: i},
+				)
 			}
 			return nil, err
 		}
@@ -201,7 +204,10 @@ func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue
 	}
 
 	if _, err := br.Peek(1); err == nil {
-		return nil, &RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: len(ts.Columns) + 1}
+		return nil, errors.Join(
+			ErrRowLengthMismatch,
+			&RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: len(ts.Columns) + 1},
+		)
 	} else if !errors.Is(err, io.EOF) {
 		return nil, err
 	}
