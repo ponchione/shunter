@@ -1338,6 +1338,48 @@ func TestParseSelectAllWithLimit(t *testing.T) {
 	}
 }
 
+func TestParseLimitUint64Boundary(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users LIMIT 18446744073709551615")
+	if err != nil {
+		t.Fatalf("Parse max uint64 limit error: %v", err)
+	}
+	if !stmt.HasLimit {
+		t.Fatal("HasLimit = false, want true")
+	}
+	if stmt.UnsupportedLimit {
+		t.Fatal("UnsupportedLimit = true, want false")
+	}
+	if stmt.InvalidLimit != nil {
+		t.Fatalf("InvalidLimit = %+v, want nil", *stmt.InvalidLimit)
+	}
+	if stmt.Limit == nil {
+		t.Fatal("Limit = nil, want max uint64")
+	}
+	if *stmt.Limit != ^uint64(0) {
+		t.Fatalf("Limit = %d, want max uint64", *stmt.Limit)
+	}
+
+	stmt, err = Parse("SELECT * FROM users LIMIT 18446744073709551616")
+	if err != nil {
+		t.Fatalf("Parse overflow limit error: %v", err)
+	}
+	if !stmt.HasLimit {
+		t.Fatal("overflow HasLimit = false, want true")
+	}
+	if stmt.UnsupportedLimit {
+		t.Fatal("overflow UnsupportedLimit = true, want false")
+	}
+	if stmt.Limit != nil {
+		t.Fatalf("overflow Limit = %d, want nil", *stmt.Limit)
+	}
+	if stmt.InvalidLimit == nil {
+		t.Fatal("overflow InvalidLimit = nil, want literal metadata")
+	}
+	if stmt.InvalidLimit.Kind != LitBigInt || stmt.InvalidLimit.Text != "18446744073709551616" {
+		t.Fatalf("overflow InvalidLimit = %+v, want LitBigInt with source text", *stmt.InvalidLimit)
+	}
+}
+
 func TestParseSingleTableColumnProjection(t *testing.T) {
 	stmt, err := Parse("SELECT u32 FROM t")
 	if err != nil {
