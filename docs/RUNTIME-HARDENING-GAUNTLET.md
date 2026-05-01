@@ -115,9 +115,9 @@ Current status:
   now also stresses none/gzip round trips through the shared gzip pools with
   seed/worker/op labels.
 - BSATN standalone value and product-value decoding now have bounded
-  public-surface fuzz corpora across scalar and variable-length payloads,
-  checking malformed-input categorization plus accepted-value/row canonical
-  re-encoding.
+  public-surface fuzz corpora and a fixed-seed concurrent short soak across
+  scalar and variable-length payloads, checking malformed-input categorization
+  plus accepted-value/row canonical re-encoding.
 - Runtime type primitives now have fixed-seed metamorphic coverage plus bounded
   fuzz/corpus and concurrent short-soak coverage for identity and connection ID
   hex parsing, including case variants, canonical lowercase output, and
