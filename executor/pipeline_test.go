@@ -494,6 +494,33 @@ func TestPostCommitDrainSurvivesNilChannel(t *testing.T) {
 	}
 }
 
+func TestPostCommitDrainSurvivesClosedChannel(t *testing.T) {
+	h := newPipelineHarness(t)
+	h.subs.dropped = make(chan types.ConnectionID)
+	close(h.subs.dropped)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	resp := submit(t, h.exec, "InsertPlayer")
+	if resp.Status != StatusCommitted {
+		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
+	}
+	// A second command is the serial barrier proving the closed dropped-client
+	// channel did not trap the executor in the post-commit drain loop.
+	resp = submit(t, h.exec, "InsertPlayer")
+	if resp.Status != StatusCommitted {
+		t.Fatalf("barrier status = %d err=%v", resp.Status, resp.Error)
+	}
+
+	h.subs.mu.Lock()
+	got := append([]types.ConnectionID(nil), h.subs.disconns...)
+	h.subs.mu.Unlock()
+	if len(got) != 0 {
+		t.Fatalf("disconnects = %v, want none for closed dropped-client channel", got)
+	}
+}
+
 // Story 5.2 design note: error from DisconnectClient does not halt further
 // drains. All three disconnects must be attempted even if the first errors.
 func TestPostCommitDrainContinuesAfterDisconnectError(t *testing.T) {

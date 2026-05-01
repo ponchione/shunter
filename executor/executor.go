@@ -905,7 +905,10 @@ func (e *Executor) postCommit(
 	dropped := e.subs.DroppedClients()
 	for {
 		select {
-		case connID := <-dropped:
+		case connID, ok := <-dropped:
+			if !ok {
+				return status
+			}
 			if err := e.subs.DisconnectClient(connID); err != nil {
 				e.recordSubscriptionFanoutError("unknown", connID, err)
 			}
