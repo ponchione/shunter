@@ -189,6 +189,71 @@ func TestGenerateFilePreservesExistingOutputPermissionsAcrossAtomicRewrite(t *te
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateFileDirectoryOutputFailsWithoutTempLeak(t *testing.T) {
+	const trace = "trace=workflow-codegen-directory-output-fail-loud"
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+	if err := os.Mkdir(outputPath, 0o755); err != nil {
+		t.Fatalf("%s create output directory: %v", trace, err)
+	}
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for directory output", trace)
+	}
+	if !strings.Contains(err.Error(), "write generated output") {
+		t.Fatalf("%s GenerateFile error = %v, want write generated output context", trace, err)
+	}
+	info, statErr := os.Stat(outputPath)
+	if statErr != nil {
+		t.Fatalf("%s stat output directory: %v", trace, statErr)
+	}
+	if !info.IsDir() {
+		t.Fatalf("%s output path is not still a directory after failed rewrite", trace)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
+func TestGenerateFileSymlinkOutputReplacesLinkWithoutMutatingTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink replacement semantics are not portable on windows")
+	}
+
+	const trace = "trace=workflow-codegen-symlink-output-replaces-link-only"
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+	targetPath := filepath.Join(dir, "outside-target.ts")
+	targetData := []byte("unrelated generated target\n")
+	if err := os.WriteFile(targetPath, targetData, 0o600); err != nil {
+		t.Fatalf("%s write symlink target: %v", trace, err)
+	}
+	outputPath := filepath.Join(dir, "client.ts")
+	if err := os.Symlink(targetPath, outputPath); err != nil {
+		t.Fatalf("%s create output symlink: %v", trace, err)
+	}
+
+	if err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript}); err != nil {
+		t.Fatalf("%s GenerateFile returned error: %v", trace, err)
+	}
+	linkInfo, err := os.Lstat(outputPath)
+	if err != nil {
+		t.Fatalf("%s lstat output: %v", trace, err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("%s output path is still a symlink after atomic rewrite", trace)
+	}
+	assertContains(t, readTextFile(t, outputPath), `export interface MessagesRow {`)
+	gotTarget, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("%s read symlink target: %v", trace, err)
+	}
+	if !bytes.Equal(gotTarget, targetData) {
+		t.Fatalf("%s symlink target mutated:\nobserved=%q\nexpected=%q", trace, gotTarget, targetData)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFileSyncsParentDirectoryAfterAtomicRename(t *testing.T) {
 	const trace = "trace=workflow-codegen-parent-sync-after-rename"
 	dir := t.TempDir()

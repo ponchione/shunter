@@ -235,7 +235,9 @@ Current status:
 - Contract artifact generation now writes through a synced temporary file,
   rename, and parent-directory sync; workflow fault coverage pins injected
   parent-sync failures as fail-loud without leaking temporary artifacts and
-  preserves existing output permissions across atomic rewrites. CLI
+  preserves existing output permissions across atomic rewrites. Output
+  path-boundary coverage also rejects directory targets without temporary
+  artifacts and replaces symlink outputs without mutating symlink targets. CLI
   release-candidate coverage pins unsupported read-output formats plus malformed
   or semantically invalid codegen inputs as non-mutating failures.
 - Remaining non-runtime campaign work should move to broader crash/recovery,
