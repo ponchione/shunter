@@ -171,7 +171,7 @@ func decodeRow(data []byte, ts *schema.TableSchema, maxRowBytes uint32) (types.P
 	if maxRowBytes > 0 && rowLen > maxRowBytes {
 		return nil, 0, &RowTooLargeError{Size: rowLen, Max: maxRowBytes}
 	}
-	if int(rowLen)+4 > len(data) {
+	if uint64(rowLen) > uint64(len(data)-4) {
 		return nil, 0, fmt.Errorf("commitlog: truncated row data")
 	}
 	rowData := data[4 : 4+rowLen]
@@ -179,5 +179,5 @@ func decodeRow(data []byte, ts *schema.TableSchema, maxRowBytes uint32) (types.P
 	if err != nil {
 		return nil, 0, err
 	}
-	return pv, int(4 + rowLen), nil
+	return pv, 4 + int(rowLen), nil
 }

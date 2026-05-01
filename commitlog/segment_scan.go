@@ -136,7 +136,7 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 
 	var header [RecordHeaderSize]byte
 	if _, err := io.ReadFull(sr.file, header[:]); err != nil {
-		if errors.Is(err, io.ErrUnexpectedEOF) {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, ErrTruncatedRecord
 		}
 		return nil, err
@@ -162,17 +162,15 @@ func scanNextRecord(sr *SegmentReader) (*Record, error) {
 		return nil, ErrTruncatedRecord
 	}
 
-	rec.Payload = make([]byte, dataLen)
-	if _, err := io.ReadFull(sr.file, rec.Payload); err != nil {
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, ErrTruncatedRecord
-		}
+	payload, err := readRecordPayload(sr.file, dataLen)
+	if err != nil {
 		return nil, err
 	}
+	rec.Payload = payload
 
 	var crcBuf [RecordCRCSize]byte
 	if _, err := io.ReadFull(sr.file, crcBuf[:]); err != nil {
-		if errors.Is(err, io.ErrUnexpectedEOF) {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, ErrTruncatedRecord
 		}
 		return nil, err

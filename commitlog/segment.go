@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -160,17 +161,15 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 		return nil, &RecordTooLargeError{Size: dataLen, Max: maxPayload}
 	}
 
-	rec.Payload = make([]byte, dataLen)
-	if _, err := io.ReadFull(r, rec.Payload); err != nil {
-		if err == io.ErrUnexpectedEOF {
-			return nil, ErrTruncatedRecord
-		}
+	payload, err := readRecordPayload(r, dataLen)
+	if err != nil {
 		return nil, err
 	}
+	rec.Payload = payload
 
 	var crcBuf [4]byte
 	if _, err := io.ReadFull(r, crcBuf[:]); err != nil {
-		if err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, ErrTruncatedRecord
 		}
 		return nil, err
@@ -189,6 +188,32 @@ func DecodeRecord(r io.Reader, maxPayload uint32) (*Record, error) {
 	}
 
 	return rec, nil
+}
+
+func readRecordPayload(r io.Reader, dataLen uint32) ([]byte, error) {
+	if dataLen == 0 {
+		return []byte{}, nil
+	}
+
+	if dataLen <= DefaultCommitLogOptions().MaxRecordPayloadBytes {
+		payload := make([]byte, dataLen)
+		if _, err := io.ReadFull(r, payload); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, ErrTruncatedRecord
+			}
+			return nil, err
+		}
+		return payload, nil
+	}
+
+	var buf bytes.Buffer
+	if _, err := io.CopyN(&buf, r, int64(dataLen)); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, ErrTruncatedRecord
+		}
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // SegmentFileName returns the log filename for a starting TxID.

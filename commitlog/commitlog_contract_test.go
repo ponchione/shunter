@@ -90,6 +90,7 @@ func TestRecordCRCAndValidationCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := buf.Bytes()
+	originalRecord := append([]byte(nil), data...)
 	if got := binary.LittleEndian.Uint64(data[:8]); got != rec.TxID {
 		t.Fatalf("txid bytes not little-endian: %x", got)
 	}
@@ -142,6 +143,16 @@ func TestRecordCRCAndValidationCoverage(t *testing.T) {
 		t.Fatalf("empty payload record should decode: %v", err)
 	}
 
+	headerOnly := originalRecord[:RecordHeaderSize]
+	if _, err := DecodeRecord(bytes.NewReader(headerOnly), 0); !errors.Is(err, ErrTruncatedRecord) {
+		t.Fatalf("missing payload error = %v, want ErrTruncatedRecord", err)
+	}
+
+	missingCRC := originalRecord[:RecordHeaderSize+len(rec.Payload)]
+	if _, err := DecodeRecord(bytes.NewReader(missingCRC), 0); !errors.Is(err, ErrTruncatedRecord) {
+		t.Fatalf("missing crc error = %v, want ErrTruncatedRecord", err)
+	}
+
 	tooLarge := append([]byte(nil), data[:RecordHeaderSize]...)
 	binary.LittleEndian.PutUint32(tooLarge[10:14], 6)
 	if _, err := DecodeRecord(bytes.NewReader(tooLarge), 5); err == nil {
@@ -158,6 +169,18 @@ func TestDecodeRecordPartialZeroHeaderIsSafeEOF(t *testing.T) {
 	partialNonZero[len(partialNonZero)-1] = 1
 	if _, err := DecodeRecord(bytes.NewReader(partialNonZero), 0); !errors.Is(err, ErrTruncatedRecord) {
 		t.Fatalf("partial non-zero header error = %v, want ErrTruncatedRecord", err)
+	}
+}
+
+func TestDecodeRecordHugeTruncatedPayloadIsSafe(t *testing.T) {
+	var header [RecordHeaderSize]byte
+	binary.LittleEndian.PutUint64(header[:8], 1)
+	header[8] = RecordTypeChangeset
+	binary.LittleEndian.PutUint32(header[10:14], ^uint32(0))
+
+	_, err := DecodeRecord(bytes.NewReader(header[:]), 0)
+	if !errors.Is(err, ErrTruncatedRecord) {
+		t.Fatalf("huge truncated payload error = %v, want ErrTruncatedRecord", err)
 	}
 }
 
