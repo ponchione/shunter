@@ -3,6 +3,7 @@ package contractdiff
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -37,6 +38,36 @@ func TestContractDiffAndPlanDeclarationOrderMetamorphic(t *testing.T) {
 		if !bytes.Equal(gotPlanJSON, wantPlanJSON) {
 			t.Fatalf("seed=%d iteration=%d operation=PlanOrderInvariant\nobserved:\n%s\nexpected:\n%s",
 				seed, iteration, gotPlanJSON, wantPlanJSON)
+		}
+	}
+}
+
+func TestContractPolicyDeclarationOrderMetamorphic(t *testing.T) {
+	old, current := contractOrderMetamorphicFixtures(t)
+	current.Migrations = shunter.MigrationContract{}
+	opts := PolicyOptions{RequirePreviousVersion: true, Strict: true}
+
+	want := CheckPolicy(Compare(old, current), current, opts)
+	if !want.Failed || len(want.Warnings) < 5 {
+		t.Fatalf("policy fixture produced failed=%v warnings=%#v, want strict warnings", want.Failed, want.Warnings)
+	}
+	wantWarnings := policyWarningSignatures(want.Warnings)
+
+	const seed int64 = 0x7011c1e5
+	for iteration := 0; iteration < 32; iteration++ {
+		r := rand.New(rand.NewSource(seed + int64(iteration)*7919))
+		shuffledOld := shuffleContractDeclarationOrder(cloneMetamorphicContract(t, old), r)
+		shuffledCurrent := shuffleContractDeclarationOrder(cloneMetamorphicContract(t, current), r)
+
+		got := CheckPolicy(Compare(shuffledOld, shuffledCurrent), shuffledCurrent, opts)
+		if got.Failed != want.Failed {
+			t.Fatalf("seed=%d iteration=%d operation=PolicyFailedOrderInvariant observed=%v expected=%v warnings=%#v",
+				seed, iteration, got.Failed, want.Failed, got.Warnings)
+		}
+		gotWarnings := policyWarningSignatures(got.Warnings)
+		if !equalStringSlices(gotWarnings, wantWarnings) {
+			t.Fatalf("seed=%d iteration=%d operation=PolicyWarningsOrderInvariant\nobserved=%q\nexpected=%q",
+				seed, iteration, gotWarnings, wantWarnings)
 		}
 	}
 }
@@ -234,4 +265,24 @@ func mustMetamorphicPlanJSON(t *testing.T, plan MigrationPlan) []byte {
 			len(data) > 0 && data[len(data)-1] == '\n', data)
 	}
 	return data
+}
+
+func policyWarningSignatures(warnings []PolicyWarning) []string {
+	signatures := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		signatures = append(signatures, fmt.Sprintf("%s %s %s: %s", warning.Code, warning.Surface, warning.Name, warning.Detail))
+	}
+	return signatures
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

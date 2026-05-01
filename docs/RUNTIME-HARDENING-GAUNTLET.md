@@ -157,9 +157,10 @@ Current status:
   Generated TypeScript metadata maps also pin permission and read-model
   identifier collisions plus escaped string array values for declaration names
   that sanitize to the same client identifier.
-- Contract diff and migration-plan tooling now has fixed-seed metamorphic
-  coverage requiring declaration-order changes to preserve diff text and
-  canonical migration-plan JSON under seed/iteration labels.
+- Contract diff, policy, and migration-plan tooling now has fixed-seed
+  metamorphic coverage requiring declaration-order changes to preserve diff
+  text, sorted policy warnings, and canonical migration-plan JSON under
+  seed/iteration labels.
 - Contract diff and migration-plan JSON entry points now have a bounded fuzz
   corpus plus fixed-seed concurrent short-soak coverage that checks
   invalid-contract error categorization plus deterministic and
