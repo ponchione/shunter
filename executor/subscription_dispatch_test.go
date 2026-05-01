@@ -3,6 +3,7 @@ package executor
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
@@ -69,6 +70,27 @@ func TestDisconnectSubscriptionDispatchDelegates(t *testing.T) {
 	}
 	if fakeSubs.disconnectConnID != (types.ConnectionID{3}) {
 		t.Fatalf("disconnect delegation connID = %v, want 3", fakeSubs.disconnectConnID)
+	}
+}
+
+func TestDisconnectSubscriptionDispatchNilResponseChannelDoesNotBlock(t *testing.T) {
+	exec, _ := setupExecutor()
+	fakeSubs := &registerDispatchSubs{}
+	exec.subs = fakeSubs
+
+	done := make(chan struct{})
+	go func() {
+		exec.dispatch(DisconnectClientSubscriptionsCmd{ConnID: types.ConnectionID{4}})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect subscription dispatch blocked on nil response channel")
+	}
+	if fakeSubs.disconnectConnID != (types.ConnectionID{4}) {
+		t.Fatalf("disconnect delegation connID = %v, want 4", fakeSubs.disconnectConnID)
 	}
 }
 

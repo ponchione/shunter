@@ -489,7 +489,7 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 
 func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) string {
 	err := e.subs.DisconnectClient(cmd.ConnID)
-	cmd.ResponseCh <- err
+	sendErrorResponse(cmd.ResponseCh, err)
 	if err != nil {
 		return "internal_error"
 	}
@@ -596,6 +596,14 @@ func sendProtocolCallReducerResponse(ch chan<- ProtocolCallReducerResponse, resp
 		return true
 	}
 	ch <- resp
+	return true
+}
+
+func sendErrorResponse(ch chan<- error, err error) bool {
+	if ch == nil {
+		return true
+	}
+	ch <- err
 	return true
 }
 
