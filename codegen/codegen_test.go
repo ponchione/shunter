@@ -202,6 +202,31 @@ func TestGeneratorRejectsInvalidTableReadPolicyWithContext(t *testing.T) {
 	}
 }
 
+func TestGeneratorRejectsUnknownReadModelTargetWithContext(t *testing.T) {
+	contract := contractFixture()
+	contract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+		Surface: shunter.ReadModelSurfaceQuery,
+		Name:    "missing_query",
+		Tables:  []string{"messages"},
+		Tags:    []string{"history"},
+	}}
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+
+	_, err = GenerateFromJSON(data, Options{Language: LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid contract error")
+	}
+	if !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON error = %v, want ErrInvalidContract", err)
+	}
+	if !strings.Contains(err.Error(), "read_model.query.missing_query references unknown query") {
+		t.Fatalf("GenerateFromJSON error = %v, want read model query target context", err)
+	}
+}
+
 func TestTypeScriptGeneratorEscapesModuleMetadataInHeaderComment(t *testing.T) {
 	contract := contractFixture()
 	contract.Module.Name = "chat\nexport const injected = true;"
