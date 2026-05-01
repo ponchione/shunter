@@ -123,7 +123,10 @@ Current status:
 - TypeScript client code generation now has bounded public-surface fuzz
   coverage over contract JSON, including invalid-input categorization,
   deterministic accepted output, canonical JSON input equivalence, and
-  identifier collision/reserved-word corpus seeds.
+  identifier collision/reserved-word corpus seeds. Generated TypeScript
+  metadata maps also pin permission and read-model identifier collisions plus
+  escaped string array values for declaration names that sanitize to the same
+  client identifier.
 - Contract diff and migration-plan tooling now has fixed-seed metamorphic
   coverage requiring declaration-order changes to preserve diff text and
   canonical migration-plan JSON under seed/iteration labels.

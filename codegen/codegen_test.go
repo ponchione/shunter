@@ -223,6 +223,49 @@ func TestTypeScriptGeneratorEmitsVisibilityFilterMetadata(t *testing.T) {
 	assertContains(t, ts, `ownMessages: { sql: "SELECT * FROM messages WHERE body = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesMetadataMapIdentifiers(t *testing.T) {
+	contract := contractFixture()
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{Name: "recent-messages", SQL: "SELECT * FROM messages"})
+	contract.Views = append(contract.Views, shunter.ViewDescription{Name: "live messages", SQL: "SELECT * FROM messages"})
+	contract.Permissions.Queries = append(contract.Permissions.Queries, shunter.PermissionContractDeclaration{
+		Name:     "recent-messages",
+		Required: []string{`messages:read"quoted`},
+	})
+	contract.Permissions.Views = append(contract.Permissions.Views, shunter.PermissionContractDeclaration{
+		Name:     "live messages",
+		Required: []string{`messages:subscribe\slash`},
+	})
+	contract.ReadModel.Declarations = append(contract.ReadModel.Declarations,
+		shunter.ReadModelContractDeclaration{
+			Surface: shunter.ReadModelSurfaceQuery,
+			Name:    "recent-messages",
+			Tables:  []string{"messages"},
+			Tags:    []string{`audit"trail`},
+		},
+		shunter.ReadModelContractDeclaration{
+			Surface: shunter.ReadModelSurfaceView,
+			Name:    "live messages",
+			Tables:  []string{"messages"},
+			Tags:    []string{`live\feed`},
+		},
+	)
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `recentMessages: "recent_messages",`)
+	assertContains(t, ts, `recentMessages2: "recent-messages",`)
+	assertContains(t, ts, `liveMessages: "live_messages",`)
+	assertContains(t, ts, `liveMessages2: "live messages",`)
+	assertContains(t, ts, `recentMessages2: { required: ["messages:read\"quoted"] },`)
+	assertContains(t, ts, `liveMessages2: { required: ["messages:subscribe\\slash"] },`)
+	assertContains(t, ts, `recentMessages2: { tables: ["messages"], tags: ["audit\"trail"] },`)
+	assertContains(t, ts, `liveMessages2: { tables: ["messages"], tags: ["live\\feed"] },`)
+}
+
 func contractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,
