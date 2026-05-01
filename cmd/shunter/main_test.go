@@ -320,6 +320,65 @@ func TestContractReadCommandsRejectInvalidContractInputs(t *testing.T) {
 	}
 }
 
+func TestContractReadCommandsRejectMissingFilesWithSideContext(t *testing.T) {
+	const trace = "trace=cli-contract-read-missing-file-context"
+	dir := t.TempDir()
+	validPath := writeCLIContract(t, dir, "valid.json", cliContractFixture())
+	missingPath := filepath.Join(dir, "missing.json")
+
+	for _, command := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "diff",
+			args: []string{"contract", "diff", "--format", "json"},
+		},
+		{
+			name: "policy",
+			args: []string{"contract", "policy", "--strict", "--format", "json"},
+		},
+		{
+			name: "plan",
+			args: []string{"contract", "plan", "--validate", "--format", "json"},
+		},
+	} {
+		for _, input := range []struct {
+			name        string
+			previous    string
+			current     string
+			wantContext string
+		}{
+			{
+				name:        "missing-previous",
+				previous:    missingPath,
+				current:     validPath,
+				wantContext: "read previous contract",
+			},
+			{
+				name:        "missing-current",
+				previous:    validPath,
+				current:     missingPath,
+				wantContext: "read current contract",
+			},
+		} {
+			t.Run(command.name+"/"+input.name, func(t *testing.T) {
+				args := append(append([]string{}, command.args...), "--previous", input.previous, "--current", input.current)
+				var stdout, stderr bytes.Buffer
+				code := run(&stdout, &stderr, args)
+				if code != 1 {
+					t.Fatalf("%s command=%s input=%s exit code = %d, stderr = %s", trace, command.name, input.name, code, stderr.String())
+				}
+				if stdout.Len() != 0 {
+					t.Fatalf("%s command=%s input=%s stdout = %s, want empty", trace, command.name, input.name, stdout.String())
+				}
+				assertContains(t, stderr.String(), input.wantContext)
+				assertContains(t, stderr.String(), missingPath)
+			})
+		}
+	}
+}
+
 func TestContractCodegenCommandWritesTypeScript(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
