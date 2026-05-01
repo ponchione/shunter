@@ -122,9 +122,10 @@ Current status:
 - Module contract JSON validation now has a bounded public-surface fuzz corpus
   that accepts canonical exported contracts, rejects malformed inputs, and
   checks deterministic canonical re-marshalling after JSON round trips.
-- Process-boundary invocation response and contract validation now have a
-  bounded JSON fuzz corpus that checks categorized validation errors plus
-  accepted-input JSON round-trip stability.
+- Process-boundary request envelopes, invocation responses, and contract
+  validation now have a bounded JSON fuzz corpus that checks categorized
+  validation errors, accepted-input JSON round-trip stability, and detached
+  mutable request fields.
 - TypeScript client code generation now has bounded public-surface fuzz
   coverage over contract JSON, including invalid-input categorization,
   deterministic accepted output, canonical JSON input equivalence, and

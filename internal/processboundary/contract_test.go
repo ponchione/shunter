@@ -55,6 +55,92 @@ func TestInvocationRequestAndResponseRepresentReducerCall(t *testing.T) {
 	}
 }
 
+func FuzzInvocationRequestJSON(f *testing.F) {
+	var identity types.Identity
+	identity[0] = 0x42
+	identity[31] = 0x99
+	var connID types.ConnectionID
+	connID[0] = 0x24
+	connID[15] = 0x66
+	for _, req := range []InvocationRequest{
+		{
+			Kind:      InvocationKindReducer,
+			Module:    "chat",
+			Name:      "send_message",
+			Args:      []byte{0x01, 0x02, 0x03},
+			RequestID: 7,
+			Caller: Caller{
+				Identity:            identity,
+				ConnectionID:        connID,
+				Permissions:         []string{"messages:send", "messages:read"},
+				AllowAllPermissions: false,
+			},
+		},
+		{
+			Kind:      InvocationKindLifecycle,
+			Module:    "chat",
+			Name:      string(LifecycleOnConnect),
+			RequestID: 8,
+			Caller: Caller{
+				Identity:            identity,
+				ConnectionID:        connID,
+				AllowAllPermissions: true,
+			},
+		},
+		{
+			Kind:      InvocationKindReducer,
+			Module:    "chat",
+			Name:      "empty_args",
+			Args:      []byte{},
+			RequestID: 9,
+			Caller:    Caller{},
+		},
+	} {
+		f.Add(mustBoundaryJSON(req))
+	}
+	for _, data := range [][]byte{
+		[]byte(`{`),
+		[]byte(`{"kind":"reducer","module":"chat","name":"send_message","args":"not-base64"}`),
+		[]byte(`{"kind":"reducer","module":"chat","name":"send_message","caller":{"identity":[999]}}`),
+	} {
+		f.Add(data)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 4096 {
+			return
+		}
+		var req InvocationRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			return
+		}
+
+		roundTripData := mustBoundaryJSON(req)
+		var roundTrip InvocationRequest
+		if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
+			t.Fatalf("request round-trip unmarshal failed: %v", err)
+		}
+		if !reflect.DeepEqual(roundTrip, req) {
+			t.Fatalf("request JSON round trip changed value:\nobserved=%#v\nexpected=%#v", roundTrip, req)
+		}
+
+		if len(roundTrip.Args) > 0 {
+			before := req.Args[0]
+			roundTrip.Args[0] ^= 0xff
+			if req.Args[0] != before {
+				t.Fatalf("request args were aliased across JSON round trip")
+			}
+		}
+		if len(roundTrip.Caller.Permissions) > 0 {
+			before := req.Caller.Permissions[0]
+			roundTrip.Caller.Permissions[0] += ":mutated"
+			if req.Caller.Permissions[0] != before {
+				t.Fatalf("request permissions were aliased across JSON round trip")
+			}
+		}
+	})
+}
+
 func TestInvocationFailuresDistinguishUserAndBoundaryFailures(t *testing.T) {
 	user := UserFailure("reducer rejected input")
 	if user.Status != InvocationStatusUserError {
