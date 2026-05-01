@@ -46,7 +46,10 @@ Current status:
   public `ValidateJWT` surface, checking stable claims, derived identity,
   audience, and permissions under worker/op labels. Permission enforcement now
   also has a fixed-seed metamorphic matrix for grant ordering, duplicate grants,
-  empty required entries, and first-missing stability.
+  empty required entries, and first-missing stability. JWT validation also has a
+  bounded generated-claim fuzz corpus over malformed tokens, missing claims,
+  audience and identity mismatches, unsupported algorithms, bad signatures, and
+  accepted-claim replay determinism.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit
@@ -186,7 +189,7 @@ Current status:
   labels comparing observed rows against an independent model. A companion
   strict-auth protocol path drives the same task-board app through WebSocket
   reducer calls, declared query/view reads, live declared-view deltas, rejected
-  duplicate mutation, and restart recovery.
+  duplicate mutations before and after restart, and restart recovery.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.
