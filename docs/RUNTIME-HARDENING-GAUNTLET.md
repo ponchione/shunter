@@ -142,8 +142,8 @@ Current status:
   `ValidateReadPolicy` error categorization.
 - Module contract JSON validation now has a bounded public-surface fuzz corpus
   plus fixed-seed concurrent short-soak coverage that accepts canonical exported
-  contracts, rejects malformed inputs, and checks deterministic canonical
-  re-marshalling after JSON round trips.
+  contracts, rejects malformed and semantically invalid contract inputs, and
+  checks deterministic canonical re-marshalling after JSON round trips.
 - Process-boundary request envelopes, invocation responses, and contract
   validation now have a bounded JSON fuzz corpus plus fixed-seed concurrent
   short-soak coverage that checks categorized validation errors, accepted-input

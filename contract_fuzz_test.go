@@ -46,8 +46,54 @@ func FuzzModuleContractJSONCanonicalRoundTrip(f *testing.F) {
 func contractJSONFuzzSeeds(tb testing.TB) [][]byte {
 	tb.Helper()
 	seeds := append([][]byte(nil), contractFuzzLiteralSeeds...)
-	seeds = append(seeds, contractFuzzAcceptedSeed(tb))
+	accepted := contractFuzzAcceptedSeed(tb)
+	seeds = append(seeds, accepted)
+	seeds = append(seeds, contractFuzzSemanticInvalidSeeds(tb, accepted)...)
 	return seeds
+}
+
+func contractFuzzSemanticInvalidSeeds(tb testing.TB, accepted []byte) [][]byte {
+	tb.Helper()
+
+	return [][]byte{
+		mustContractFuzzMutatedJSON(tb, accepted, func(contract *ModuleContract) {
+			contract.Queries[0].SQL = "SELECT * FROM missing_table"
+		}),
+		mustContractFuzzMutatedJSON(tb, accepted, func(contract *ModuleContract) {
+			contract.Views[0].SQL = "SELECT * FROM missing_table"
+		}),
+		mustContractFuzzMutatedJSON(tb, accepted, func(contract *ModuleContract) {
+			contract.Permissions.Queries = append(contract.Permissions.Queries, PermissionContractDeclaration{
+				Name:     "missing_query",
+				Required: []string{"messages:read"},
+			})
+		}),
+		mustContractFuzzMutatedJSON(tb, accepted, func(contract *ModuleContract) {
+			contract.ReadModel.Declarations[0].Tables = []string{"missing_table"}
+		}),
+		mustContractFuzzMutatedJSON(tb, accepted, func(contract *ModuleContract) {
+			contract.VisibilityFilters = append(contract.VisibilityFilters, VisibilityFilterDescription{
+				Name:          "missing_table_filter",
+				SQL:           "SELECT * FROM missing_table",
+				ReturnTable:   "messages",
+				ReturnTableID: 0,
+			})
+		}),
+	}
+}
+
+func mustContractFuzzMutatedJSON(tb testing.TB, accepted []byte, mutate func(*ModuleContract)) []byte {
+	tb.Helper()
+	var contract ModuleContract
+	if err := json.Unmarshal(accepted, &contract); err != nil {
+		tb.Fatalf("unmarshal accepted contract fuzz seed: %v", err)
+	}
+	mutate(&contract)
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		tb.Fatalf("marshal mutated contract fuzz seed: %v", err)
+	}
+	return data
 }
 
 func assertModuleContractJSONInput(tb testing.TB, data []byte) {
