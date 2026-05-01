@@ -230,6 +230,63 @@ func TestRuntimeStructuredLoggingReducerPanic(t *testing.T) {
 	}
 }
 
+func TestRuntimeStructuredLoggingProtocolAndSubscriptionEventsRedact(t *testing.T) {
+	logs := &recordingLogState{}
+	obs := newRuntimeObservability("chat", ObservabilityConfig{
+		RuntimeLabel: "logging-subsystem-a",
+		Logger:       logs.logger(),
+		Redaction:    RedactionConfig{ErrorMessageMaxBytes: 72},
+	})
+
+	obs.LogProtocolConnectionRejected("rejected_executor", errors.New("authorization=Bearer secret row=hidden "+strings.Repeat("x", 200)))
+	obs.LogProtocolAuthFailed("missing_token", errors.New("token=secret signing_key=hidden"))
+	obs.LogSubscriptionEvalError(7, errors.New("sql=select * from users where token='secret'; detail "+strings.Repeat("x", 200)))
+	obs.LogProtocolBackpressure("outbound", "buffer_full")
+	obs.LogSubscriptionClientDropped("buffer_full", nil)
+
+	rejected := requireRecordedLog(t, logs, "protocol.connection_rejected")
+	if rejected.level != slog.LevelWarn {
+		t.Fatalf("protocol.connection_rejected level = %v, want warn", rejected.level)
+	}
+	assertLogAttr(t, rejected, "component", "protocol")
+	assertLogAttr(t, rejected, "event", "protocol.connection_rejected")
+	assertLogAttr(t, rejected, "module", "chat")
+	assertLogAttr(t, rejected, "runtime", "logging-subsystem-a")
+	assertLogAttr(t, rejected, "result", "rejected_executor")
+	assertLogRedactedAndBounded(t, rejected, 72)
+
+	authFailed := requireRecordedLog(t, logs, "protocol.auth_failed")
+	if authFailed.level != slog.LevelWarn {
+		t.Fatalf("protocol.auth_failed level = %v, want warn", authFailed.level)
+	}
+	assertLogAttr(t, authFailed, "component", "protocol")
+	assertLogAttr(t, authFailed, "reason", "missing_token")
+	assertLogRedactedAndBounded(t, authFailed, 72)
+
+	evalError := requireRecordedLog(t, logs, "subscription.eval_error")
+	if evalError.level != slog.LevelWarn {
+		t.Fatalf("subscription.eval_error level = %v, want warn", evalError.level)
+	}
+	assertLogAttr(t, evalError, "component", "subscription")
+	assertLogAttr(t, evalError, "tx_id", uint64(7))
+	assertLogRedactedAndBounded(t, evalError, 72)
+
+	backpressure := requireRecordedLog(t, logs, "protocol.backpressure")
+	if backpressure.level != slog.LevelWarn {
+		t.Fatalf("protocol.backpressure level = %v, want warn", backpressure.level)
+	}
+	assertLogAttr(t, backpressure, "component", "protocol")
+	assertLogAttr(t, backpressure, "direction", "outbound")
+	assertLogAttr(t, backpressure, "reason", "buffer_full")
+
+	dropped := requireRecordedLog(t, logs, "subscription.client_dropped")
+	if dropped.level != slog.LevelWarn {
+		t.Fatalf("subscription.client_dropped level = %v, want warn", dropped.level)
+	}
+	assertLogAttr(t, dropped, "component", "subscription")
+	assertLogAttr(t, dropped, "reason", "buffer_full")
+}
+
 func assertLogDurationMS(t *testing.T, record recordedLog) {
 	t.Helper()
 	got, ok := record.attrs["duration_ms"].(int64)
