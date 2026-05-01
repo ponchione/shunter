@@ -278,6 +278,32 @@ func TestGeneratorRejectsInvalidMigrationSurfaceWithContext(t *testing.T) {
 	}
 }
 
+func TestGeneratorRejectsUnknownMigrationTargetWithContext(t *testing.T) {
+	contract := contractFixture()
+	contract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: shunter.MigrationSurfaceTable,
+		Name:    "missing_table",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityCompatible,
+		},
+	}}
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+
+	_, err = GenerateFromJSON(data, Options{Language: LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid contract error")
+	}
+	if !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON error = %v, want ErrInvalidContract", err)
+	}
+	if !strings.Contains(err.Error(), "migrations.table.missing_table references unknown table") {
+		t.Fatalf("GenerateFromJSON error = %v, want unknown migration target context", err)
+	}
+}
+
 func TestTypeScriptGeneratorEscapesModuleMetadataInHeaderComment(t *testing.T) {
 	contract := contractFixture()
 	contract.Module.Name = "chat\nexport const injected = true;"
