@@ -897,6 +897,8 @@ func TestHashEqualValuesProduceEqualHashes(t *testing.T) {
 		{NewString("hello"), NewString("hello")},
 		{NewBytes([]byte{1, 2, 3}), NewBytes([]byte{1, 2, 3})},
 		{mustFloat64(t, 1.5), mustFloat64(t, 1.5)},
+		{mustFloat32(t, float32(math.Copysign(0, -1))), mustFloat32(t, 0)},
+		{mustFloat64(t, math.Copysign(0, -1)), mustFloat64(t, 0)},
 	}
 	for _, p := range pairs {
 		if p[0].Hash64() != p[1].Hash64() {

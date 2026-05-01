@@ -514,10 +514,18 @@ func (v Value) writePayload(h hash.Hash64) {
 		binary.BigEndian.PutUint64(buf[:], v.u64)
 		h.Write(buf[:])
 	case KindFloat32:
-		binary.BigEndian.PutUint32(buf[:4], math.Float32bits(v.f32))
+		bits := uint32(0)
+		if v.f32 != 0 {
+			bits = math.Float32bits(v.f32)
+		}
+		binary.BigEndian.PutUint32(buf[:4], bits)
 		h.Write(buf[:4])
 	case KindFloat64:
-		binary.BigEndian.PutUint64(buf[:], math.Float64bits(v.f64))
+		bits := uint64(0)
+		if v.f64 != 0 {
+			bits = math.Float64bits(v.f64)
+		}
+		binary.BigEndian.PutUint64(buf[:], bits)
 		h.Write(buf[:])
 	case KindString:
 		h.Write([]byte(v.str))
