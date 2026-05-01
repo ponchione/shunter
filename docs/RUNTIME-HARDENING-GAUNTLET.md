@@ -44,7 +44,9 @@ Current status:
   checking post-restart fanout.
 - Auth validation now has a fixed-seed concurrent JWT validation soak over the
   public `ValidateJWT` surface, checking stable claims, derived identity,
-  audience, and permissions under worker/op labels.
+  audience, and permissions under worker/op labels. Permission enforcement now
+  also has a fixed-seed metamorphic matrix for grant ordering, duplicate grants,
+  empty required entries, and first-missing stability.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit
@@ -88,6 +90,10 @@ Current status:
   failure labels. Subscription fanout worker race coverage now also churns
   confirmed-read policy and client removal concurrently with an in-flight
   delivery using fixed seed/worker/op labels.
+- Schema registry and export surfaces now have a fixed-seed concurrent
+  read/export soak over the documented immutable registry, checking stable
+  lookup results, detached snapshots, reducers, lifecycle hooks, and exported
+  schema equivalence under worker/op labels.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
