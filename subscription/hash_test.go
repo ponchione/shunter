@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"math"
 	"testing"
 
 	"github.com/ponchione/shunter/types"
@@ -20,6 +21,32 @@ func TestQueryHashValueDifferent(t *testing.T) {
 	p2 := ColEq{Table: 1, Column: 0, Value: types.NewUint64(43)}
 	if ComputeQueryHash(p1, nil) == ComputeQueryHash(p2, nil) {
 		t.Fatal("different values should produce different hashes")
+	}
+}
+
+func TestQueryHashCanonicalizesFloatZero(t *testing.T) {
+	neg32, err := types.NewFloat32(float32(math.Copysign(0, -1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pos32, err := types.NewFloat32(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: neg32}, nil) != ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: pos32}, nil) {
+		t.Fatal("Float32 -0 and +0 compare equal and must hash equally")
+	}
+
+	neg64, err := types.NewFloat64(math.Copysign(0, -1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pos64, err := types.NewFloat64(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: neg64}, nil) != ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: pos64}, nil) {
+		t.Fatal("Float64 -0 and +0 compare equal and must hash equally")
 	}
 }
 

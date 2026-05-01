@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"math"
 	"sort"
 	"sync"
 
@@ -566,9 +565,9 @@ func encodeValue(e *canonicalEncoder, v Value) {
 	case types.KindUint64:
 		e.writeU64(v.AsUint64())
 	case types.KindFloat32:
-		e.writeU32(math.Float32bits(v.AsFloat32()))
+		e.writeU32(canonicalFloat32Bits(v.AsFloat32()))
 	case types.KindFloat64:
-		e.writeU64(math.Float64bits(v.AsFloat64()))
+		e.writeU64(canonicalFloat64Bits(v.AsFloat64()))
 	case types.KindString:
 		s := v.AsString()
 		e.writeU32(uint32(len(s)))

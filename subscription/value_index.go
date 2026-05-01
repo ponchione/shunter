@@ -1,10 +1,6 @@
 package subscription
 
-import (
-	"math"
-
-	"github.com/ponchione/shunter/types"
-)
+import "github.com/ponchione/shunter/types"
 
 // ValueIndex is the Tier 1 pruning index (SPEC-004 §5.1).
 //
@@ -201,9 +197,9 @@ func encodeValueKey(v Value) valueKey {
 	case types.KindUint64:
 		k.u64 = v.AsUint64()
 	case types.KindFloat32:
-		k.u64 = uint64(math.Float32bits(v.AsFloat32()))
+		k.u64 = uint64(canonicalFloat32Bits(v.AsFloat32()))
 	case types.KindFloat64:
-		k.u64 = math.Float64bits(v.AsFloat64())
+		k.u64 = canonicalFloat64Bits(v.AsFloat64())
 	case types.KindString:
 		k.str = v.AsString()
 	case types.KindBytes:

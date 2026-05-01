@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"math"
 	"sort"
 	"testing"
 
@@ -58,6 +59,28 @@ func TestValueIndexDifferentValues(t *testing.T) {
 	}
 	if got := v.Lookup(1, 0, types.NewUint64(2)); len(got) != 1 || got[0] != h2 {
 		t.Fatalf("Lookup(2) = %v, want [h2]", got)
+	}
+}
+
+func TestValueIndexCanonicalizesFloatZero(t *testing.T) {
+	v := NewValueIndex()
+	h := hashN(1)
+	neg, err := types.NewFloat64(math.Copysign(0, -1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pos, err := types.NewFloat64(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v.Add(1, 0, neg, h)
+	if got := v.Lookup(1, 0, pos); len(got) != 1 || got[0] != h {
+		t.Fatalf("Lookup(+0) after Add(-0) = %v, want [%v]", got, h)
+	}
+	v.Remove(1, 0, pos, h)
+	if got := v.Lookup(1, 0, neg); len(got) != 0 {
+		t.Fatalf("Lookup(-0) after Remove(+0) = %v, want empty", got)
 	}
 }
 
