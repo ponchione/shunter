@@ -14,4 +14,5 @@ var (
 	ErrPermissionDenied                  = errors.New("executor: permission denied")
 	ErrCommitFailed                      = errors.New("executor: commit failed")
 	ErrInvalidScheduleInterval           = errors.New("executor: schedule repeat interval must be positive")
+	ErrScheduleIDExhausted               = errors.New("executor: schedule id exhausted")
 )

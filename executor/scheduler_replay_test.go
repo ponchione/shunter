@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -434,5 +435,46 @@ func TestNewExecutorResetsSchedSeqFromExistingRows(t *testing.T) {
 	}
 	if got != 6 {
 		t.Errorf("first post-restart Schedule() returned %d, want 6", got)
+	}
+}
+
+func TestNewExecutorExhaustedRecoveredSchedSeqFailsWithoutWrapping(t *testing.T) {
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "noop",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
+		},
+	})
+	eng, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := eng.Registry()
+	cs := store.NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, store.NewTable(ts))
+	}
+	schedTS, _ := SysScheduledTable(reg)
+
+	seedSchedule(t, cs, schedTS.ID, ^uint64(0), "last", nil, time.Unix(100, 0).UnixNano(), 0)
+
+	rr := NewReducerRegistry()
+	rr.Freeze()
+	exec := NewExecutor(ExecutorConfig{InboxCapacity: 4}, rr, cs, reg, 0)
+
+	tx := store.NewTransaction(cs, reg)
+	h := exec.newSchedulerHandle(tx)
+	got, err := h.Schedule("wrapped", nil, time.Unix(200, 0))
+	if !errors.Is(err, ErrScheduleIDExhausted) {
+		t.Fatalf("Schedule after recovered max schedule_id = (%d, %v), want ErrScheduleIDExhausted", got, err)
+	}
+	if got != 0 {
+		t.Fatalf("Schedule after recovered max schedule_id returned id %d, want 0", got)
+	}
+	if inserts := tx.TxState().Inserts(h.tableID); len(inserts) != 0 {
+		t.Fatalf("exhausted schedule sequence inserted rows=%v, want none", inserts)
 	}
 }

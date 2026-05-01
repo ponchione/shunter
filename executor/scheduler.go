@@ -141,6 +141,9 @@ func (h *schedulerHandle) insertRepeatSchedule(reducerName string, args []byte, 
 }
 
 func (h *schedulerHandle) insertScheduleLocked(reducerName string, args []byte, nextRunAtNs, repeatNs int64) (ScheduleID, error) {
+	if h.seq.Peek() == 0 {
+		return 0, ErrScheduleIDExhausted
+	}
 	id := ScheduleID(h.seq.Next())
 	row := types.ProductValue{
 		SysScheduledColScheduleID:  types.NewUint64(uint64(id)),
