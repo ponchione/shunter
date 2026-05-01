@@ -129,6 +129,45 @@ func TestContractPlanCommandReadsJSONFiles(t *testing.T) {
 	assertContains(t, stdout.String(), `"warnings": [`)
 }
 
+func TestContractReadCommandsRejectUnsupportedFormats(t *testing.T) {
+	const trace = "trace=cli-contract-read-unsupported-format"
+	dir := t.TempDir()
+	previousPath := writeCLIContract(t, dir, "previous.json", cliContractFixture())
+	current := cliContractFixture()
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+	currentPath := writeCLIContract(t, dir, "current.json", current)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "diff",
+			args: []string{"contract", "diff", "--previous", previousPath, "--current", currentPath, "--format", "yaml"},
+		},
+		{
+			name: "policy",
+			args: []string{"contract", "policy", "--previous", previousPath, "--current", currentPath, "--format", "yaml"},
+		},
+		{
+			name: "plan",
+			args: []string{"contract", "plan", "--previous", previousPath, "--current", currentPath, "--format", "yaml"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, tc.args)
+			if code != 2 {
+				t.Fatalf("%s command=%s exit code = %d, stderr = %s", trace, tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s command=%s stdout = %s, want empty", trace, tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), `unsupported contract workflow output format "yaml"`)
+		})
+	}
+}
+
 func TestContractCodegenCommandWritesTypeScript(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
@@ -152,36 +191,75 @@ func TestContractCodegenCommandWritesTypeScript(t *testing.T) {
 	assertContains(t, stdout.String(), "wrote "+outputPath)
 }
 
-func TestContractCodegenRejectedLanguageLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=cli-codegen-rejected-language-output-preservation"
-	dir := t.TempDir()
-	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
-	outputPath := filepath.Join(dir, "client.ts")
-	original := []byte("existing generated output\n")
-	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
+func TestContractCodegenRejectedInputsLeaveOutputUntouched(t *testing.T) {
+	validContract, err := cliContractFixture().MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
 	}
 
-	var stdout, stderr bytes.Buffer
-	code := run(&stdout, &stderr, []string{
-		"contract", "codegen",
-		"--contract", contractPath,
-		"--language", "go",
-		"--out", outputPath,
-	})
-	if code != 1 {
-		t.Fatalf("%s contract codegen exit code = %d, stderr = %s", trace, code, stderr.String())
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
-	}
-	assertContains(t, stderr.String(), `unsupported language "go"`)
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
-	}
-	if !bytes.Equal(got, original) {
-		t.Fatalf("%s rejected codegen mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	for _, tc := range []struct {
+		name         string
+		trace        string
+		contractData []byte
+		language     string
+		wantStderr   string
+	}{
+		{
+			name:         "unsupported-language",
+			trace:        "trace=cli-codegen-rejected-language-output-preservation",
+			contractData: validContract,
+			language:     "go",
+			wantStderr:   `unsupported language "go"`,
+		},
+		{
+			name:         "malformed-contract-json",
+			trace:        "trace=cli-codegen-malformed-contract-output-preservation",
+			contractData: []byte(`{`),
+			language:     "typescript",
+			wantStderr:   "invalid module contract",
+		},
+		{
+			name:         "semantic-invalid-contract",
+			trace:        "trace=cli-codegen-invalid-contract-output-preservation",
+			contractData: []byte(`{"contract_version":0}`),
+			language:     "typescript",
+			wantStderr:   "invalid module contract",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			contractPath := filepath.Join(dir, "contract.json")
+			if err := os.WriteFile(contractPath, tc.contractData, 0o666); err != nil {
+				t.Fatalf("%s write contract input: %v", tc.trace, err)
+			}
+			outputPath := filepath.Join(dir, "client.ts")
+			original := []byte("existing generated output\n")
+			if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+				t.Fatalf("%s write existing output: %v", tc.trace, err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, []string{
+				"contract", "codegen",
+				"--contract", contractPath,
+				"--language", tc.language,
+				"--out", outputPath,
+			})
+			if code != 1 {
+				t.Fatalf("%s contract codegen exit code = %d, stderr = %s", tc.trace, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s stdout = %s, want empty", tc.trace, stdout.String())
+			}
+			assertContains(t, stderr.String(), tc.wantStderr)
+			got, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatalf("%s read existing output: %v", tc.trace, err)
+			}
+			if !bytes.Equal(got, original) {
+				t.Fatalf("%s rejected codegen mutated output:\nobserved=%q\nexpected=%q", tc.trace, got, original)
+			}
+		})
 	}
 }
 

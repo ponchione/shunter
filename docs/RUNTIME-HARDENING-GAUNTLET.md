@@ -213,6 +213,9 @@ Current status:
 - Contract artifact CLI release-candidate coverage now checks a rejected
   codegen target fails before mutating an existing output file, with a stable
   trace label for reproduction.
+- Contract artifact generation now writes through a temporary file and rename,
+  and CLI release-candidate coverage pins unsupported read-output formats plus
+  malformed or semantically invalid codegen inputs as non-mutating failures.
 - Remaining non-runtime campaign work should move to broader crash/recovery,
   fault injection, fuzzing/corpus, metamorphic, race/soak, and
   release-candidate coverage unless a new invariant or failing seed appears.
