@@ -557,6 +557,44 @@ func TestContractCodegenMetadataMismatchLeavesOutputUntouched(t *testing.T) {
 	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestContractCodegenRejectsUnexpectedArgBeforeFileIO(t *testing.T) {
+	const trace = "trace=cli-codegen-unexpected-arg-before-file-io"
+	dir := t.TempDir()
+	missingContractPath := filepath.Join(dir, "missing-contract.json")
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", missingContractPath,
+		"--language", "typescript",
+		"--out", outputPath,
+		"unexpected",
+	})
+	if code != 2 {
+		t.Fatalf("%s contract codegen exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
+	}
+	assertContains(t, stderr.String(), `unexpected argument "unexpected"`)
+	if strings.Contains(stderr.String(), "read contract input") {
+		t.Fatalf("%s read contract before rejecting unexpected arg: %s", trace, stderr.String())
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s unexpected arg mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestContractCodegenDirectoryOutputFailsWithoutMutationOrTempLeak(t *testing.T) {
 	const trace = "trace=cli-codegen-directory-output-non-mutating"
 	dir := t.TempDir()
