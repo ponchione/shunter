@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"unicode/utf8"
 )
 
 // SubscribeSingleMsg is the client-side single-envelope Subscribe
@@ -411,7 +412,11 @@ func readString(body []byte, off int) (string, int, error) {
 	if uint64(n) > uint64(len(body)-off) {
 		return "", off, fmt.Errorf("%w: string length %d exceeds remaining %d", ErrMalformedMessage, n, len(body)-off)
 	}
-	s := string(body[off : off+int(n)])
+	raw := body[off : off+int(n)]
+	if !utf8.Valid(raw) {
+		return "", off, fmt.Errorf("%w: invalid UTF-8 string at offset %d", ErrMalformedMessage, off)
+	}
+	s := string(raw)
 	return s, off + int(n), nil
 }
 

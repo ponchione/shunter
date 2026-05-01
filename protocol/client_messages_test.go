@@ -234,6 +234,20 @@ func TestDecodeClientMessageTruncatedBody(t *testing.T) {
 	}
 }
 
+func TestDecodeClientMessageRejectsInvalidUTF8String(t *testing.T) {
+	var frame bytes.Buffer
+	frame.WriteByte(TagSubscribeSingle)
+	writeUint32(&frame, 1)
+	writeUint32(&frame, 2)
+	writeUint32(&frame, 1)
+	frame.WriteByte(0xff)
+
+	_, _, err := DecodeClientMessage(frame.Bytes())
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
 func TestDecodeClientMessageRejectsTrailingBytes(t *testing.T) {
 	cases := []struct {
 		name string

@@ -168,6 +168,21 @@ func TestDecodeServerMessageRejectsInvalidPresenceTags(t *testing.T) {
 	})
 }
 
+func TestDecodeServerMessageRejectsInvalidUTF8String(t *testing.T) {
+	frame := []byte{TagIdentityToken}
+	frame = append(frame, make([]byte, 32)...)
+	var buf bytes.Buffer
+	buf.Write(frame)
+	writeUint32(&buf, 1)
+	buf.WriteByte(0xff)
+	buf.Write(make([]byte, 16))
+
+	_, _, err := DecodeServerMessage(buf.Bytes())
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
 func TestSubscriptionErrorRoundTrip(t *testing.T) {
 	requestID := uint32(10)
 	queryID := uint32(20)
