@@ -109,7 +109,9 @@ Current status:
   seed corpora that check malformed-input categorization and accepted-input
   canonical round trips. Protocol compression envelopes now also have a
   bounded generated-body fuzz corpus that checks none/gzip round trips and
-  brotli/unknown-mode error categorization.
+  brotli/unknown-mode error categorization, plus arbitrary envelope unwrap
+  fuzzing for categorized decode errors, input immutability, and canonical
+  rewrap stability.
 - BSATN standalone value and product-value decoding now have bounded
   public-surface fuzz corpora across scalar and variable-length payloads,
   checking malformed-input categorization plus accepted-value/row canonical
@@ -165,8 +167,8 @@ Current status:
   deterministic accepted results. Caller-identity coercion also pins detached
   bytes output plus stable hex string materialization for `:sender`. Parser
   metamorphic coverage now also checks that harmless predicate parenthesization,
-  whitespace layout changes, and commutative `AND` predicate reordering produce
-  equivalent parsed filter sets.
+  whitespace layout changes, optional `AS`/`INNER` syntax, and commutative
+  `AND` predicate reordering produce equivalent parsed filter sets.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission

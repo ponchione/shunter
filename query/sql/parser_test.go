@@ -134,6 +134,54 @@ func TestParseWhitespaceMetamorphic(t *testing.T) {
 	}
 }
 
+func TestParseOptionalSyntaxMetamorphic(t *testing.T) {
+	const seed = uint64(0xa50f1a5)
+	cases := []struct {
+		name string
+		base string
+		vars []string
+	}{
+		{
+			name: "table-alias-as",
+			base: "SELECT msg.* FROM messages AS msg WHERE msg.id = 7 AND msg.active = TRUE LIMIT 3",
+			vars: []string{
+				"SELECT msg.* FROM messages msg WHERE msg.id = 7 AND msg.active = TRUE LIMIT 3",
+			},
+		},
+		{
+			name: "projection-output-as",
+			base: "SELECT body AS text FROM messages WHERE id = 7",
+			vars: []string{
+				"SELECT body text FROM messages WHERE id = 7",
+			},
+		},
+		{
+			name: "aggregate-output-as",
+			base: "SELECT COUNT(*) AS n FROM messages WHERE active = TRUE LIMIT 9",
+			vars: []string{
+				"SELECT COUNT(*) n FROM messages WHERE active = TRUE LIMIT 9",
+			},
+		},
+		{
+			name: "join-alias-as",
+			base: "SELECT o.id FROM orders AS o JOIN users AS u ON o.user_id = u.id WHERE u.active = TRUE",
+			vars: []string{
+				"SELECT o.id FROM orders o JOIN users u ON o.user_id = u.id WHERE u.active = TRUE",
+			},
+		},
+		{
+			name: "inner-join-keyword",
+			base: "SELECT o.id FROM orders AS o JOIN users AS u ON o.user_id = u.id WHERE u.active = TRUE",
+			vars: []string{
+				"SELECT o.id FROM orders AS o INNER JOIN users AS u ON o.user_id = u.id WHERE u.active = TRUE",
+			},
+		},
+	}
+	for caseIndex, tc := range cases {
+		assertParseVariantsEquivalent(t, seed, caseIndex, tc.name, tc.base, tc.vars)
+	}
+}
+
 func assertParseVariantsEquivalent(t *testing.T, seed uint64, caseIndex int, caseName, base string, variants []string) {
 	t.Helper()
 	baseline, err := Parse(base)

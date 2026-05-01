@@ -119,6 +119,100 @@ func FuzzWrapCompressedRoundTrip(f *testing.F) {
 	})
 }
 
+func FuzzUnwrapCompressedEnvelope(f *testing.F) {
+	validNone, err := WrapCompressed(TagSubscribeSingleApplied, []byte("none-body"), CompressionNone)
+	if err != nil {
+		panic(err)
+	}
+	validGzip, err := WrapCompressed(TagTransactionUpdate, bytes.Repeat([]byte{0x55}, 128), CompressionGzip)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, seed := range [][]byte{
+		nil,
+		{CompressionNone},
+		{CompressionNone, TagSubscribeSingle},
+		{CompressionNone, TagSubscribeSingle, 0x01, 0x02, 0x03},
+		{CompressionBrotli, TagTransactionUpdate, 0x01},
+		{0xff, TagTransactionUpdate, 0x01},
+		{CompressionGzip, TagTransactionUpdate},
+		{CompressionGzip, TagTransactionUpdate, 0x00, 0x01, 0x02},
+		validNone,
+		validGzip,
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, frame []byte) {
+		const maxCompressedEnvelopeFuzzBytes = 16 << 10
+		if len(frame) > maxCompressedEnvelopeFuzzBytes {
+			t.Skip("compressed envelope fuzz input above bounded local limit")
+		}
+		if len(frame) >= 2 && frame[0] == CompressionGzip && len(frame) > 4<<10 {
+			t.Skip("gzip envelope fuzz input above bounded compressed limit")
+		}
+
+		before := append([]byte(nil), frame...)
+		tag, body, err := UnwrapCompressed(frame)
+		if !bytes.Equal(frame, before) {
+			t.Fatalf("UnwrapCompressed mutated input frame: before=%x after=%x", before, frame)
+		}
+		if err != nil {
+			category := compressionFuzzErrorCategory(err)
+			if category == "" {
+				t.Fatalf("UnwrapCompressed(%x) error = %v, want compression/protocol category", frame, err)
+			}
+			_, _, errAgain := UnwrapCompressed(frame)
+			if compressionFuzzErrorCategory(errAgain) != category {
+				t.Fatalf("UnwrapCompressed(%x) error category changed: first=%v second=%v", frame, err, errAgain)
+			}
+			return
+		}
+
+		tagAgain, bodyAgain, err := UnwrapCompressed(frame)
+		if err != nil {
+			t.Fatalf("UnwrapCompressed(%x) accepted once then failed: %v", frame, err)
+		}
+		if tagAgain != tag || !bytes.Equal(bodyAgain, body) {
+			t.Fatalf("UnwrapCompressed(%x) is not deterministic: first=(tag=%d body=%x) second=(tag=%d body=%x)",
+				frame, tag, body, tagAgain, bodyAgain)
+		}
+
+		mode := frame[0]
+		if mode != CompressionNone && mode != CompressionGzip {
+			t.Fatalf("UnwrapCompressed(%x) accepted unsupported mode %d", frame, mode)
+		}
+		canonical, err := WrapCompressed(tag, body, mode)
+		if err != nil {
+			t.Fatalf("WrapCompressed(tag=%d mode=%d body_len=%d) after accepted unwrap: %v", tag, mode, len(body), err)
+		}
+		canonicalTag, canonicalBody, err := UnwrapCompressed(canonical)
+		if err != nil {
+			t.Fatalf("UnwrapCompressed(canonical tag=%d mode=%d body_len=%d): %v", tag, mode, len(body), err)
+		}
+		if canonicalTag != tag || !bytes.Equal(canonicalBody, body) {
+			t.Fatalf("canonical compression round trip mismatch: got=(tag=%d body=%x) want=(tag=%d body=%x)",
+				canonicalTag, canonicalBody, tag, body)
+		}
+	})
+}
+
+func compressionFuzzErrorCategory(err error) string {
+	switch {
+	case errors.Is(err, ErrMalformedMessage):
+		return "malformed"
+	case errors.Is(err, ErrUnknownCompressionTag):
+		return "unknown-compression"
+	case errors.Is(err, ErrBrotliUnsupported):
+		return "brotli"
+	case errors.Is(err, ErrDecompressionFailed):
+		return "decompression"
+	default:
+		return ""
+	}
+}
+
 func fuzzDecodeMessage(t *testing.T, frame []byte, decode func([]byte) (uint8, any, error), encode func(any) ([]byte, error), label string) {
 	t.Helper()
 	const maxMessageFuzzBytes = 64 << 10
