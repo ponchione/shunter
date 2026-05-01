@@ -270,8 +270,14 @@ func TestOpenAndRecoverDetailedSnapshotReplayDoesNotRegressSequenceFromExplicitA
 	if got := row[0].AsUint64(); got != 50 {
 		t.Fatalf("post-recovery autoincrement value = %d, want 50", got)
 	}
+	if seq, has := recoveredJobs.SequenceValue(); !has || seq != 50 {
+		t.Fatalf("SequenceValue before post-recovery commit = (%d, %v), want (50, true)", seq, has)
+	}
+	if _, err := store.Commit(recovered, tx); err != nil {
+		t.Fatal(err)
+	}
 	if seq, has := recoveredJobs.SequenceValue(); !has || seq != 51 {
-		t.Fatalf("SequenceValue after post-recovery insert = (%d, %v), want (51, true)", seq, has)
+		t.Fatalf("SequenceValue after post-recovery commit = (%d, %v), want (51, true)", seq, has)
 	}
 }
 
