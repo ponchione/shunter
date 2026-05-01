@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -158,6 +159,28 @@ func TestSchemaExportJSONRoundTripIncludesTableReadPolicy(t *testing.T) {
 	}
 	if decoded.Tables[0].ReadPolicy.Access != TableAccessPublic {
 		t.Fatalf("decoded read access = %s, want public; json=%s", decoded.Tables[0].ReadPolicy.Access, data)
+	}
+}
+
+func TestReadPolicyJSONRejectsNullPolicyAndPermissions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "policy-null", data: []byte(`null`)},
+		{name: "policy-whitespace-null", data: []byte(" \n null \t")},
+		{name: "empty-object", data: []byte(`{}`)},
+		{name: "access-only", data: []byte(`{"access":"private"}`)},
+		{name: "permissions-only", data: []byte(`{"permissions":[]}`)},
+		{name: "permissions-null", data: []byte(`{"access":"private","permissions":null}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var policy ReadPolicy
+			err := json.Unmarshal(tc.data, &policy)
+			if !errors.Is(err, ErrInvalidTableReadPolicy) {
+				t.Fatalf("Unmarshal ReadPolicy error = %v, want ErrInvalidTableReadPolicy", err)
+			}
+		})
 	}
 }
 

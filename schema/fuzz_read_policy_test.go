@@ -18,6 +18,10 @@ var readPolicyFuzzSeeds = [][]byte{
 	[]byte(`{"access":"permissioned","permissions":[" "]}`),
 	[]byte(`{"access":"unknown","permissions":[]}`),
 	[]byte(`{"access":1,"permissions":[]}`),
+	[]byte(`null`),
+	[]byte(`{}`),
+	[]byte(`{"access":"private"}`),
+	[]byte(`{"permissions":[]}`),
 	[]byte(`{"permissions":null}`),
 	[]byte(`not-json`),
 }
@@ -49,6 +53,13 @@ func checkReadPolicyJSONInput(data []byte) error {
 
 	var policy ReadPolicy
 	if err := json.Unmarshal(data, &policy); err != nil {
+		if !errors.Is(err, ErrInvalidTableReadPolicy) {
+			var syntaxErr *json.SyntaxError
+			var typeErr *json.UnmarshalTypeError
+			if !errors.As(err, &syntaxErr) && !errors.As(err, &typeErr) {
+				return fmt.Errorf("%s operation=UnmarshalReadPolicy observed_error=%v expected_json_or_wrapped=%v", label, err, ErrInvalidTableReadPolicy)
+			}
+		}
 		return nil
 	}
 	if err := ValidateReadPolicy(policy); err != nil && !errors.Is(err, ErrInvalidTableReadPolicy) {

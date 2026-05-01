@@ -52,6 +52,25 @@ func (p ReadPolicy) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON reads a detached policy value from schema exports and module
 // contracts.
 func (p *ReadPolicy) UnmarshalJSON(data []byte) error {
+	if strings.TrimSpace(string(data)) == "null" {
+		return fmt.Errorf("%w: policy must be an object", ErrInvalidTableReadPolicy)
+	}
+	var raw struct {
+		Access      json.RawMessage `json:"access"`
+		Permissions json.RawMessage `json:"permissions"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw.Access) == 0 {
+		return fmt.Errorf("%w: access is required", ErrInvalidTableReadPolicy)
+	}
+	if len(raw.Permissions) == 0 {
+		return fmt.Errorf("%w: permissions is required", ErrInvalidTableReadPolicy)
+	}
+	if string(raw.Permissions) == "null" {
+		return fmt.Errorf("%w: permissions must be an array", ErrInvalidTableReadPolicy)
+	}
 	var in struct {
 		Access      TableAccess `json:"access"`
 		Permissions []string    `json:"permissions"`
