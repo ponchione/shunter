@@ -97,7 +97,10 @@ Current status:
 - Schema registry and export surfaces now have a fixed-seed concurrent
   read/export soak over the documented immutable registry, checking stable
   lookup results, detached snapshots, reducers, lifecycle hooks, and exported
-  schema equivalence under worker/op labels.
+  schema equivalence under worker/op labels. The schema builder public surface
+  also has a bounded fuzz corpus comparing `BuildPreview` and `Build`
+  acceptance/export equivalence while checking registry lookup and export
+  detachment invariants.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
@@ -175,8 +178,9 @@ Current status:
   results over generated TxID ranges.
 - Release-candidate validation now includes a compact public hosted-runtime
   task-board workload under strict auth, with app reducers, private-table
-  declared query/view reads, clean restart recovery, and fixed seed/op labels
-  comparing observed rows against an independent model.
+  declared query/view reads, clean restart recovery, rejected duplicate and
+  permission-denied operations before and after restart, and fixed seed/op
+  labels comparing observed rows against an independent model.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.
