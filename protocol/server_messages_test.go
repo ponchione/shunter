@@ -109,6 +109,65 @@ func TestUnsubscribeSingleAppliedHasRowsTrue(t *testing.T) {
 	}
 }
 
+func TestDecodeServerMessageRejectsInvalidPresenceTags(t *testing.T) {
+	rows := EncodeRowList([][]byte{{0xaa}})
+
+	t.Run("unsubscribe_has_rows", func(t *testing.T) {
+		frame, err := EncodeServerMessage(UnsubscribeSingleApplied{
+			RequestID:                        1,
+			QueryID:                          2,
+			HasRows:                          true,
+			Rows:                             rows,
+			TotalHostExecutionDurationMicros: 44,
+		})
+		if err != nil {
+			t.Fatalf("EncodeServerMessage: %v", err)
+		}
+		frame[1+4+8+4] = 2
+
+		_, _, err = DecodeServerMessage(frame)
+		if !errors.Is(err, ErrMalformedMessage) {
+			t.Fatalf("DecodeServerMessage invalid has_rows err = %v, want ErrMalformedMessage", err)
+		}
+	})
+
+	t.Run("subscription_error_option", func(t *testing.T) {
+		requestID := uint32(10)
+		frame, err := EncodeServerMessage(SubscriptionError{
+			TotalHostExecutionDurationMicros: 99,
+			RequestID:                        &requestID,
+			Error:                            "table not found",
+		})
+		if err != nil {
+			t.Fatalf("EncodeServerMessage: %v", err)
+		}
+		frame[1+8] = 2
+
+		_, _, err = DecodeServerMessage(frame)
+		if !errors.Is(err, ErrMalformedMessage) {
+			t.Fatalf("DecodeServerMessage invalid option tag err = %v, want ErrMalformedMessage", err)
+		}
+	})
+
+	t.Run("one_off_error_option", func(t *testing.T) {
+		errMsg := "bad query"
+		frame, err := EncodeServerMessage(OneOffQueryResponse{
+			MessageID:                  []byte{0x01, 0x02},
+			Error:                      &errMsg,
+			TotalHostExecutionDuration: 7,
+		})
+		if err != nil {
+			t.Fatalf("EncodeServerMessage: %v", err)
+		}
+		frame[1+4+2] = 2
+
+		_, _, err = DecodeServerMessage(frame)
+		if !errors.Is(err, ErrMalformedMessage) {
+			t.Fatalf("DecodeServerMessage invalid optional string tag err = %v, want ErrMalformedMessage", err)
+		}
+	})
+}
+
 func TestSubscriptionErrorRoundTrip(t *testing.T) {
 	requestID := uint32(10)
 	queryID := uint32(20)

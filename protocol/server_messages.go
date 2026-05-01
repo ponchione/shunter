@@ -391,7 +391,14 @@ func decodeUnsubscribeSingleApplied(body []byte) (UnsubscribeSingleApplied, erro
 	if len(body)-off < 1 {
 		return m, fmt.Errorf("%w: UnsubscribeSingleApplied has_rows", ErrMalformedMessage)
 	}
-	m.HasRows = body[off] != 0
+	switch body[off] {
+	case 0:
+		m.HasRows = false
+	case 1:
+		m.HasRows = true
+	default:
+		return m, fmt.Errorf("%w: UnsubscribeSingleApplied has_rows tag=%d", ErrMalformedMessage, body[off])
+	}
 	off++
 	if m.HasRows {
 		if m.Rows, off, err = readBytes(body, off); err != nil {
@@ -540,12 +547,11 @@ func writeOptionalString(buf *bytes.Buffer, v *string) {
 }
 
 func readOptionalString(body []byte, off int) (*string, int, error) {
-	if len(body)-off < 1 {
-		return nil, off, fmt.Errorf("%w: optional string tag truncated at offset %d", ErrMalformedMessage, off)
+	present, off, err := readOptionalPresenceTag(body, off, "optional string")
+	if err != nil {
+		return nil, off, err
 	}
-	present := body[off]
-	off++
-	if present == 0 {
+	if !present {
 		return nil, off, nil
 	}
 	s, off, err := readString(body, off)
@@ -743,12 +749,11 @@ func readUint64(body []byte, off int) (uint64, int, error) {
 }
 
 func readOptionalUint32(body []byte, off int) (*uint32, int, error) {
-	if len(body)-off < 1 {
-		return nil, off, fmt.Errorf("%w: optional uint32 tag truncated at offset %d", ErrMalformedMessage, off)
+	present, off, err := readOptionalPresenceTag(body, off, "optional uint32")
+	if err != nil {
+		return nil, off, err
 	}
-	present := body[off]
-	off++
-	if present == 0 {
+	if !present {
 		return nil, off, nil
 	}
 	v, off, err := readUint32(body, off)
@@ -756,6 +761,22 @@ func readOptionalUint32(body []byte, off int) (*uint32, int, error) {
 		return nil, off, err
 	}
 	return &v, off, nil
+}
+
+func readOptionalPresenceTag(body []byte, off int, label string) (bool, int, error) {
+	if len(body)-off < 1 {
+		return false, off, fmt.Errorf("%w: %s tag truncated at offset %d", ErrMalformedMessage, label, off)
+	}
+	tag := body[off]
+	off++
+	switch tag {
+	case 0:
+		return false, off, nil
+	case 1:
+		return true, off, nil
+	default:
+		return false, off, fmt.Errorf("%w: %s tag=%d", ErrMalformedMessage, label, tag)
+	}
 }
 
 func readOptionalTableID(body []byte, off int) (*schema.TableID, int, error) {
