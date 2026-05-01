@@ -240,6 +240,44 @@ func TestGenerateFileSemanticInvalidContractLeavesOutputUntouched(t *testing.T) 
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateFileInvalidMigrationSurfaceLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=workflow-codegen-invalid-migration-surface-output-preservation"
+	dir := t.TempDir()
+	invalidContract := workflowContractFixture()
+	invalidContract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: "subscription",
+		Name:    "recent_messages",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityCompatible,
+		},
+	}}
+	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for invalid migration surface", trace)
+	}
+	if !errors.Is(err, codegen.ErrInvalidContract) {
+		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
+	}
+	if !strings.Contains(err.Error(), `migrations surface "subscription" is invalid`) {
+		t.Fatalf("%s GenerateFile error = %v, want invalid migration surface context", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s invalid migration surface mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFileUnknownPermissionTargetLeavesOutputUntouched(t *testing.T) {
 	const trace = "trace=workflow-codegen-unknown-permission-target-output-preservation"
 	dir := t.TempDir()
