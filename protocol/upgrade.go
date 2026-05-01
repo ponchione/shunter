@@ -315,9 +315,9 @@ func (s *Server) buildMessageHandlers() *MessageHandlers {
 // Returns the token and whether one was found.
 func extractToken(r *http.Request) (string, bool) {
 	if h := r.Header.Get("Authorization"); h != "" {
-		const prefix = "Bearer "
-		if strings.HasPrefix(h, prefix) {
-			return strings.TrimSpace(h[len(prefix):]), true
+		scheme, token, ok := strings.Cut(strings.TrimSpace(h), " ")
+		if ok && strings.EqualFold(scheme, "Bearer") {
+			return strings.TrimSpace(token), true
 		}
 	}
 	if q := r.URL.Query().Get("token"); q != "" {

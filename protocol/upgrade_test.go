@@ -172,6 +172,32 @@ func TestUpgradeValidTokenHeaderSucceeds(t *testing.T) {
 	}
 }
 
+func TestUpgradeValidTokenHeaderSchemeCaseInsensitive(t *testing.T) {
+	for _, scheme := range []string{"bearer", "BEARER"} {
+		t.Run(scheme, func(t *testing.T) {
+			s, rec := strictServer(t)
+			srv := newTestServer(t, s)
+
+			conn, resp, err := dialWS(t, srv, wsDialOpts{
+				authHeader:   scheme + " " + mintValidToken(t),
+				subprotocols: []string{"v1.bsatn.shunter"},
+			})
+			if err != nil {
+				t.Fatalf("dial failed: %v (resp=%v)", err, resp)
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "")
+			if resp.StatusCode != http.StatusSwitchingProtocols {
+				t.Errorf("status = %d, want 101", resp.StatusCode)
+			}
+
+			uc := rec.waitLast(t)
+			if uc.Identity != auth.DeriveIdentity("test-issuer", "alice") {
+				t.Errorf("Identity mismatch: got %x", uc.Identity)
+			}
+		})
+	}
+}
+
 func TestUpgradeValidTokenCarriesPermissions(t *testing.T) {
 	s, rec := strictServer(t)
 	srv := newTestServer(t, s)
