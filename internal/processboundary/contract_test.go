@@ -148,6 +148,92 @@ func TestValidateInvocationResponseAcceptsExpectedFailureClasses(t *testing.T) {
 	}
 }
 
+func FuzzValidateInvocationResponseJSON(f *testing.F) {
+	for _, resp := range []InvocationResponse{
+		{
+			Status:      InvocationStatusCommitted,
+			Output:      []byte{0x01, 0x02},
+			TxID:        7,
+			Transaction: UnsupportedTransaction("host transaction objects cannot cross the process boundary"),
+		},
+		UserFailure("reducer rejected input"),
+		{
+			Status:      InvocationStatusPanic,
+			Error:       "panic",
+			Failure:     Failure{Class: FailureClassPanic, Message: "panic"},
+			Transaction: UnsupportedTransaction("panic does not commit host state"),
+		},
+		{
+			Status:      InvocationStatusPermission,
+			Error:       "missing permission",
+			Failure:     Failure{Class: FailureClassPermission, Message: "missing permission"},
+			Transaction: UnsupportedTransaction("permission denial does not commit host state"),
+		},
+		{
+			Status:      InvocationStatusInternalFailure,
+			Error:       "internal error",
+			Failure:     Failure{Class: FailureClassInternal, Message: "internal error"},
+			Transaction: UnsupportedTransaction("internal failure does not commit host state"),
+		},
+		BoundaryFailure("transport closed"),
+	} {
+		f.Add(mustBoundaryJSON(resp))
+	}
+	for _, data := range [][]byte{
+		[]byte(`{`),
+		[]byte(`{"status":"unknown","transaction":{"mode":"unsupported","decision":"unsupported"}}`),
+		[]byte(`{"status":"committed","failure":{"class":"user"},"transaction":{"mode":"unsupported","decision":"unsupported"}}`),
+		[]byte(`{"status":"user_error","failure":{"class":"boundary"},"transaction":{"mode":"unsupported","decision":"unsupported"}}`),
+		[]byte(`{"status":"committed","transaction":{"mode":"unsupported","decision":"commit"}}`),
+	} {
+		f.Add(data)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 4096 {
+			return
+		}
+		var resp InvocationResponse
+		if err := json.Unmarshal(data, &resp); err != nil {
+			return
+		}
+
+		err := ValidateInvocationResponse(resp)
+		if err != nil {
+			if !isExpectedInvocationValidationError(err) {
+				t.Fatalf("ValidateInvocationResponse returned uncategorized error: %v", err)
+			}
+			return
+		}
+
+		expectedFailure, ok := failureClassForInvocationStatus(resp.Status)
+		if !ok {
+			t.Fatalf("accepted response with unknown status %q", resp.Status)
+		}
+		if resp.Failure.Class != expectedFailure {
+			t.Fatalf("accepted response failure class = %q, want %q for status %q", resp.Failure.Class, expectedFailure, resp.Status)
+		}
+		if resp.Transaction.Mode == "" || resp.Transaction.Decision == "" {
+			t.Fatalf("accepted response without explicit transaction semantics: %#v", resp.Transaction)
+		}
+		if resp.Transaction.Mode == TransactionModeUnsupported && resp.Transaction.Decision != TransactionDecisionUnsupported {
+			t.Fatalf("accepted unsupported transaction with decision %q", resp.Transaction.Decision)
+		}
+
+		roundTripData := mustBoundaryJSON(resp)
+		var roundTrip InvocationResponse
+		if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
+			t.Fatalf("round-trip unmarshal failed: %v", err)
+		}
+		if !reflect.DeepEqual(roundTrip, resp) {
+			t.Fatalf("response JSON round trip changed value:\nobserved=%#v\nexpected=%#v", roundTrip, resp)
+		}
+		if err := ValidateInvocationResponse(roundTrip); err != nil {
+			t.Fatalf("round-tripped accepted response failed validation: %v", err)
+		}
+	})
+}
+
 func TestValidateInvocationResponseRejectsAmbiguousFailureClassification(t *testing.T) {
 	tests := []struct {
 		name string
@@ -257,9 +343,116 @@ func TestValidateContractRejectsProcessDrivenSubscriptionUpdates(t *testing.T) {
 	}
 }
 
+func FuzzValidateContractJSON(f *testing.F) {
+	valid := DefaultContract()
+	for _, contract := range []Contract{
+		valid,
+		{
+			Decision: DecisionKept,
+			Transactions: TransactionPolicy{
+				Mode:               TransactionModeHostOwned,
+				SupportedDecisions: []TransactionDecision{TransactionDecisionCommit, TransactionDecisionRollback},
+				Reason:             "future host-owned process boundary",
+			},
+			Lifecycle:     valid.Lifecycle,
+			Subscriptions: valid.Subscriptions,
+			Reason:        "future contract shape",
+		},
+	} {
+		f.Add(mustBoundaryJSON(contract))
+	}
+	for _, data := range [][]byte{
+		[]byte(`{`),
+		[]byte(`{}`),
+		[]byte(`{"decision":"deferred","transactions":{"mode":"unsupported","supported_decisions":["commit"]},"subscriptions":{"update_source":"committed_state"},"lifecycle":{"OnConnect":{"ordering":["insert_client"],"failure_behavior":"reject_connection_rollback"},"OnDisconnect":{"ordering":["cleanup_client"],"failure_behavior":"cleanup_still_commits"}}}`),
+		[]byte(`{"decision":"deferred","transactions":{"mode":"unsupported","supported_decisions":["unsupported"]},"subscriptions":{"update_source":"process_message","process_messages_may_broadcast":true},"lifecycle":{"OnConnect":{"ordering":["insert_client"],"failure_behavior":"reject_connection_rollback"},"OnDisconnect":{"ordering":["cleanup_client"],"failure_behavior":"cleanup_still_commits"}}}`),
+	} {
+		f.Add(data)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 8192 {
+			return
+		}
+		var contract Contract
+		if err := json.Unmarshal(data, &contract); err != nil {
+			return
+		}
+
+		err := ValidateContract(contract)
+		if err != nil {
+			if !isExpectedContractValidationError(err) {
+				t.Fatalf("ValidateContract returned uncategorized error: %v", err)
+			}
+			return
+		}
+
+		if contract.Decision == "" {
+			t.Fatal("accepted contract without decision")
+		}
+		if contract.Transactions.Mode == "" {
+			t.Fatal("accepted contract without transaction mode")
+		}
+		if contract.Transactions.Mode == TransactionModeUnsupported &&
+			!hasOnlyUnsupportedTransactionDecision(contract.Transactions.SupportedDecisions) {
+			t.Fatalf("accepted unsupported transaction decisions: %#v", contract.Transactions.SupportedDecisions)
+		}
+		if contract.Subscriptions.UpdateSource != SubscriptionUpdateSourceCommittedState ||
+			contract.Subscriptions.ProcessMessagesMayBroadcast {
+			t.Fatalf("accepted process-driven subscription semantics: %#v", contract.Subscriptions)
+		}
+		for _, hook := range []LifecycleHook{LifecycleOnConnect, LifecycleOnDisconnect} {
+			spec, ok := contract.Lifecycle[hook]
+			if !ok {
+				t.Fatalf("accepted contract missing %s lifecycle", hook)
+			}
+			if len(spec.Ordering) == 0 {
+				t.Fatalf("accepted contract missing %s lifecycle ordering", hook)
+			}
+			if spec.FailureBehavior == "" {
+				t.Fatalf("accepted contract missing %s lifecycle failure behavior", hook)
+			}
+		}
+
+		roundTripData := mustBoundaryJSON(contract)
+		var roundTrip Contract
+		if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
+			t.Fatalf("contract round-trip unmarshal failed: %v", err)
+		}
+		if !reflect.DeepEqual(roundTrip, contract) {
+			t.Fatalf("contract JSON round trip changed value:\nobserved=%#v\nexpected=%#v", roundTrip, contract)
+		}
+		if err := ValidateContract(roundTrip); err != nil {
+			t.Fatalf("round-tripped accepted contract failed validation: %v", err)
+		}
+	})
+}
+
 func assertLifecycleSteps(t *testing.T, hook LifecycleHook, got []LifecycleStep, want ...LifecycleStep) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%s lifecycle steps = %#v, want %#v", hook, got, want)
 	}
+}
+
+func mustBoundaryJSON(value any) []byte {
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
+func isExpectedInvocationValidationError(err error) bool {
+	return errors.Is(err, ErrInvalidInvocationStatus) ||
+		errors.Is(err, ErrInvalidFailureClassification) ||
+		errors.Is(err, ErrMissingTransactionSemantics) ||
+		errors.Is(err, ErrUnsupportedTransactionDecision)
+}
+
+func isExpectedContractValidationError(err error) bool {
+	return errors.Is(err, ErrInvalidContract) ||
+		errors.Is(err, ErrMissingTransactionSemantics) ||
+		errors.Is(err, ErrUnsupportedTransactionDecision) ||
+		errors.Is(err, ErrUnsupportedSubscriptionSemantics)
 }
