@@ -177,6 +177,9 @@ Current status:
 - Contract policy CLI release-candidate coverage now pins strict JSON output
   and failed exit semantics for missing migration metadata plus missing
   previous-version warnings.
+- Contract CLI read-only diff, policy, and plan commands now have a fixed-seed
+  concurrent short-soak that checks stable exit codes, stdout, and stderr over
+  shared canonical contract files.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
