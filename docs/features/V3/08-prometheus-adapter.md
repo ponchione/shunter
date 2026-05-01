@@ -114,3 +114,56 @@ When complete, update this file with:
 - Prometheus dependency behavior
 - registered family coverage
 - validation commands run
+
+### Recorded Completion 2026-05-01
+
+Adapter API and files added:
+
+- `observability/prometheus/adapter.go` adds `Config`, `Adapter`, `New`,
+  `(*Adapter).Recorder`, and `(*Adapter).Handler` for
+  `github.com/ponchione/shunter/observability/prometheus`.
+- `observability/prometheus/adapter_test.go` covers private registries,
+  gatherer selection, namespace and const-label validation, const-label copy
+  behavior, exact histogram buckets, unknown metric-name ignores, recorder
+  output labels, and handler text output.
+- `import_graph_test.go` guards that the root
+  `github.com/ponchione/shunter` import graph does not include Prometheus
+  packages.
+- `go.mod` and `go.sum` add the Prometheus client dependency for the adapter
+  package only.
+
+Prometheus dependency behavior:
+
+- The root package does not import Prometheus packages; only
+  `observability/prometheus` imports `github.com/prometheus/client_golang`.
+- Empty namespace normalizes to `shunter`; invalid non-empty namespaces are
+  rejected.
+- Nil registerer creates a private registry and does not use
+  `prometheus.DefaultRegisterer`.
+- Non-nil registerer uses the supplied gatherer, or the registerer when it also
+  satisfies `prometheus.Gatherer`; otherwise `New` returns an error.
+- Const labels are copied, must use Prometheus-compatible label names, and
+  cannot duplicate Shunter reserved labels.
+
+Registered family coverage:
+
+- All 25 SPEC-007 section 6 metric families are registered once with the exact
+  variable labels from the spec.
+- Counter, gauge, and histogram recorder calls route only to their matching
+  family type; unknown metric names are ignored.
+- Duration histograms use the exact default bucket boundaries from SPEC-007
+  section 6.
+- `Handler()` serves the configured gatherer through Prometheus text format.
+
+Validation:
+
+```sh
+rtk go fmt ./observability/prometheus .
+rtk go test ./observability/prometheus -count=1
+rtk go test . -run 'Test.*(Metrics|Observability|Import)' -count=1
+rtk go vet ./observability/prometheus .
+rtk go list -json . ./observability/prometheus
+rtk go test ./... -count=1
+```
+
+Results: all commands passed.
