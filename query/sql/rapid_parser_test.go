@@ -3,6 +3,8 @@ package sql
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -226,6 +228,41 @@ func TestRapidParseKeywordCaseDoesNotAffectSyntax(t *testing.T) {
 	})
 }
 
+func TestParseAndPredicateReorderingPreservesFilterSet(t *testing.T) {
+	const seed = uint64(0x51a71d)
+	cases := []struct {
+		name      string
+		original  string
+		reordered string
+	}{
+		{
+			name:      "unqualified",
+			original:  "SELECT * FROM messages WHERE sender = 'ada' AND id >= 7 AND payload = 0xDEADBEEF LIMIT 10",
+			reordered: "SELECT * FROM messages WHERE payload = 0xDEADBEEF AND sender = 'ada' AND id >= 7 LIMIT 10",
+		},
+		{
+			name:      "qualified-alias",
+			original:  "SELECT m.* FROM messages AS m WHERE m.id = 1 AND m.active = TRUE AND m.body <> 'done'",
+			reordered: "SELECT m.* FROM messages AS m WHERE m.body <> 'done' AND m.id = 1 AND m.active = TRUE",
+		},
+	}
+
+	for opIndex, tc := range cases {
+		original, err := Parse(tc.original)
+		if err != nil {
+			t.Fatalf("seed=%#x op_index=%d case=%s Parse original: %v", seed, opIndex, tc.name, err)
+		}
+		reordered, err := Parse(tc.reordered)
+		if err != nil {
+			t.Fatalf("seed=%#x op_index=%d case=%s Parse reordered: %v", seed, opIndex, tc.name, err)
+		}
+		if !rapidStatementsEquivalentIgnoringFilterOrder(original, reordered) {
+			t.Fatalf("seed=%#x op_index=%d case=%s reordered AND predicates changed parsed semantics:\noriginal=%#v\nreordered=%#v",
+				seed, opIndex, tc.name, original, reordered)
+		}
+	}
+}
+
 func renderRapidQueryWithKeywordCase(sql string, kw func(string) string) string {
 	var out strings.Builder
 	for i := 0; i < len(sql); {
@@ -384,6 +421,37 @@ func rapidStatementsEquivalent(a, b Statement) bool {
 		}
 	}
 	return true
+}
+
+func rapidStatementsEquivalentIgnoringFilterOrder(a, b Statement) bool {
+	if a.Table != b.Table ||
+		a.TableAlias != b.TableAlias ||
+		a.ProjectedTable != b.ProjectedTable ||
+		a.ProjectedAlias != b.ProjectedAlias ||
+		a.ProjectedAliasUnknown != b.ProjectedAliasUnknown ||
+		a.HasLimit != b.HasLimit ||
+		a.UnsupportedLimit != b.UnsupportedLimit ||
+		!rapidUint64PtrEqual(a.Limit, b.Limit) ||
+		!rapidLiteralPtrEqual(a.InvalidLimit, b.InvalidLimit) ||
+		!reflect.DeepEqual(a.ProjectionColumns, b.ProjectionColumns) ||
+		!reflect.DeepEqual(a.Aggregate, b.Aggregate) ||
+		!reflect.DeepEqual(a.Join, b.Join) ||
+		rapidComparisonLeafCount(a.Predicate) != rapidComparisonLeafCount(b.Predicate) {
+		return false
+	}
+	return reflect.DeepEqual(rapidFilterMultiset(a.Filters), rapidFilterMultiset(b.Filters))
+}
+
+func rapidFilterMultiset(filters []Filter) map[string]int {
+	out := make(map[string]int, len(filters))
+	for _, filter := range filters {
+		out[rapidFilterSignature(filter)]++
+	}
+	return out
+}
+
+func rapidFilterSignature(filter Filter) string {
+	return fmt.Sprintf("%q\x00%q\x00%q\x00%q\x00%#v", filter.Table, filter.Alias, filter.Column, filter.Op, filter.Literal)
 }
 
 func rapidUint64PtrEqual(a, b *uint64) bool {

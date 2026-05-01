@@ -142,8 +142,8 @@ Current status:
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
   deterministic accepted results. Parser metamorphic coverage now also checks
-  that harmless predicate parenthesization and whitespace layout changes
-  produce equivalent parse trees.
+  that harmless predicate parenthesization, whitespace layout changes, and
+  commutative `AND` predicate reordering produce equivalent parsed filter sets.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission
