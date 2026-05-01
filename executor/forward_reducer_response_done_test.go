@@ -70,6 +70,53 @@ func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHan
 	}
 }
 
+// TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenOutboundBlocked
+// pins the second half of the same lifecycle contract: after the executor
+// has produced a reducer response, the forwarding goroutine must still stop
+// if the owning connection is torn down while the protocol response channel
+// is blocked.
+func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenOutboundBlocked(t *testing.T) {
+	respCh := make(chan ProtocolCallReducerResponse, 1)
+	respCh <- ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}}
+
+	done := make(chan struct{})
+	reqDone := make(chan struct{})
+	req := protocol.CallReducerRequest{
+		ConnID:      types.ConnectionID{11},
+		Identity:    types.Identity{12},
+		RequestID:   789,
+		ReducerName: "BlockedOutboundReducer",
+		ResponseCh:  make(chan protocol.TransactionUpdate),
+		Done:        reqDone,
+	}
+	adapter := &ProtocolInboxAdapter{}
+
+	go func() {
+		adapter.forwardReducerResponse(context.Background(), req, respCh)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("forwardReducerResponse returned before req.Done signalled while outbound channel was blocked")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(reqDone)
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("forwardReducerResponse did not exit after req.Done closed while outbound send was blocked")
+	}
+
+	select {
+	case update := <-req.ResponseCh:
+		t.Fatalf("unexpected TransactionUpdate delivered on Done-triggered outbound exit: %+v", update)
+	default:
+	}
+}
+
 // TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneAlreadyClosed
 // pins that a pre-closed req.Done does not wedge the forwarder: the
 // goroutine returns promptly even if no other select arm fires. Guards

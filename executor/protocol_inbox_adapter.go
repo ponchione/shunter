@@ -368,15 +368,16 @@ func encodeProtocolSubscriptionUpdate(update subscription.SubscriptionUpdate) (p
 // ProtocolCallReducerResponse onto the caller's protocol.TransactionUpdate
 // channel.
 //
-// contract: the select additionally watches req.Done so the
-// goroutine exits promptly when the owning connection tears down. Without
+// contract: the receive select and the outbound send both watch req.Done so
+// the goroutine exits promptly when the owning connection tears down. Without
 // this arm, a ctx rooted at context.Background() (the production path from
-// protocol/upgrade.go:201 through runDispatchLoop) combined with an executor
-// that never feeds respCh (crash mid-commit, hung reducer, engine shutdown
-// mid-flight) would leak the goroutine indefinitely and hold the *Conn and
-// its transitive state alive past disconnect. Direct analog to the
-// watchReducerResponse hardening on the protocol-side watcher. The pin tests
-// document that analogous lifecycle contract.
+// protocol/upgrade.go:201 through runDispatchLoop) combined with either an
+// executor that never feeds respCh (crash mid-commit, hung reducer, engine
+// shutdown mid-flight) or a blocked protocol response channel would leak the
+// goroutine indefinitely and hold the *Conn and its transitive state alive
+// past disconnect. Direct analog to the watchReducerResponse hardening on the
+// protocol-side watcher. The pin tests document that analogous lifecycle
+// contract.
 // A nil req.Done disables the arm, matching pre-wire behavior for callers
 // that do not attach a lifecycle signal. Pin test:
 // TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs.
@@ -391,19 +392,19 @@ func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req p
 			}
 			update, err := protocol.BuildTransactionUpdateHeavy(req.ConnID, resp.Committed.Outcome, resp.Committed.Updates, nil)
 			if err != nil {
-				sendTransactionUpdateWithContext(ctx, req.ResponseCh, buildProtocolReducerEnvelope(req, protocol.StatusFailed{Error: fmt.Sprintf("encode caller outcome: %v", err)}))
+				sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, protocol.StatusFailed{Error: fmt.Sprintf("encode caller outcome: %v", err)}))
 				return
 			}
-			sendTransactionUpdateWithContext(ctx, req.ResponseCh, update)
+			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, update)
 			return
 		}
-		sendTransactionUpdateWithContext(ctx, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(resp.Reducer)))
+		sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, reducerStatusToProtocol(resp.Reducer)))
 	case <-ctx.Done():
 	case <-req.Done:
 	}
 }
 
-func sendTransactionUpdateWithContext(ctx context.Context, ch chan<- protocol.TransactionUpdate, update protocol.TransactionUpdate) bool {
+func sendTransactionUpdateWithContext(ctx context.Context, done <-chan struct{}, ch chan<- protocol.TransactionUpdate, update protocol.TransactionUpdate) bool {
 	if ch == nil {
 		return true
 	}
@@ -411,6 +412,8 @@ func sendTransactionUpdateWithContext(ctx context.Context, ch chan<- protocol.Tr
 	case ch <- update:
 		return true
 	case <-ctx.Done():
+		return false
+	case <-done:
 		return false
 	}
 }
