@@ -3,6 +3,9 @@ package protocol
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -126,6 +129,103 @@ func TestUnwrapCompressedTruncated(t *testing.T) {
 	_, _, err = UnwrapCompressed([]byte{CompressionNone})
 	if !errors.Is(err, ErrMalformedMessage) {
 		t.Errorf("tag-less frame: got %v, want ErrMalformedMessage", err)
+	}
+}
+
+func TestCompressionEnvelopeConcurrentRoundTripShortSoak(t *testing.T) {
+	const (
+		seed       = uint64(0xc0ffeed5)
+		workers    = 6
+		iterations = 96
+	)
+	var varied [257]byte
+	for i := range varied {
+		varied[i] = byte((int(seed) + i*31) & 0xff)
+	}
+	bodies := [][]byte{
+		nil,
+		[]byte("short-body"),
+		bytes.Repeat([]byte{0x42}, 128),
+		varied[:],
+	}
+	tags := []uint8{
+		TagSubscribeSingleApplied,
+		TagTransactionUpdate,
+		TagOneOffQueryResponse,
+		TagTransactionUpdateLight,
+	}
+	modes := []uint8{CompressionNone, CompressionGzip}
+
+	start := make(chan struct{})
+	ready := make(chan struct{}, workers)
+	failures := make(chan string, workers*iterations)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			ready <- struct{}{}
+			<-start
+			for op := range iterations {
+				tag := tags[(int(seed)+worker*11+op*7)%len(tags)]
+				mode := modes[(int(seed)+worker*13+op*5)%len(modes)]
+				bodySeed := bodies[(int(seed)+worker*17+op*3)%len(bodies)]
+				body := append([]byte(nil), bodySeed...)
+				bodyBefore := append([]byte(nil), body...)
+
+				frame, err := WrapCompressed(tag, body, mode)
+				if err != nil {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d mode=%d operation=WrapCompressed observed_error=%v expected=nil",
+						seed, worker, op, workers, iterations, mode, err)
+					continue
+				}
+				if !bytes.Equal(body, bodyBefore) {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d mode=%d operation=WrapCompressed observed=mutated-body expected=unchanged",
+						seed, worker, op, workers, iterations, mode)
+					continue
+				}
+
+				frameBefore := append([]byte(nil), frame...)
+				gotTag, gotBody, err := UnwrapCompressed(frame)
+				if err != nil {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d mode=%d operation=UnwrapCompressed observed_error=%v expected=nil",
+						seed, worker, op, workers, iterations, mode, err)
+					continue
+				}
+				if !bytes.Equal(frame, frameBefore) {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d mode=%d operation=UnwrapCompressed observed=mutated-frame expected=unchanged",
+						seed, worker, op, workers, iterations, mode)
+					continue
+				}
+				if gotTag != tag || !bytes.Equal(gotBody, body) {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d mode=%d operation=round-trip observed=(tag=%d body=%x) expected=(tag=%d body=%x)",
+						seed, worker, op, workers, iterations, mode, gotTag, gotBody, tag, body)
+					continue
+				}
+
+				againTag, againBody, err := UnwrapCompressed(frame)
+				if err != nil {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d mode=%d operation=UnwrapCompressedAgain observed_error=%v expected=nil",
+						seed, worker, op, workers, iterations, mode, err)
+					continue
+				}
+				if againTag != tag || !bytes.Equal(againBody, body) {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d mode=%d operation=determinism observed=(tag=%d body=%x) expected=(tag=%d body=%x)",
+						seed, worker, op, workers, iterations, mode, againTag, againBody, tag, body)
+				}
+				if (int(seed)+worker+op)%7 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(worker)
+	}
+
+	waitForSignals(t, ready, workers, "seed=0xc0ffeed5 compression-envelope workers started")
+	close(start)
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
 	}
 }
 

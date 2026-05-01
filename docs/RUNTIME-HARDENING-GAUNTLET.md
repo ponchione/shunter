@@ -111,7 +111,9 @@ Current status:
   bounded generated-body fuzz corpus that checks none/gzip round trips and
   brotli/unknown-mode error categorization, plus arbitrary envelope unwrap
   fuzzing for categorized decode errors, input immutability, and canonical
-  rewrap stability.
+  rewrap stability. A short fixed-seed concurrent compression-envelope soak
+  now also stresses none/gzip round trips through the shared gzip pools with
+  seed/worker/op labels.
 - BSATN standalone value and product-value decoding now have bounded
   public-surface fuzz corpora across scalar and variable-length payloads,
   checking malformed-input categorization plus accepted-value/row canonical
