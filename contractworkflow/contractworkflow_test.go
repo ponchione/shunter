@@ -278,6 +278,44 @@ func TestGenerateFileInvalidMigrationSurfaceLeavesOutputUntouched(t *testing.T) 
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateFileUnknownMigrationTargetLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=workflow-codegen-unknown-migration-target-output-preservation"
+	dir := t.TempDir()
+	invalidContract := workflowContractFixture()
+	invalidContract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: shunter.MigrationSurfaceTable,
+		Name:    "missing_table",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityCompatible,
+		},
+	}}
+	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for unknown migration target", trace)
+	}
+	if !errors.Is(err, codegen.ErrInvalidContract) {
+		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
+	}
+	if !strings.Contains(err.Error(), "migrations.table.missing_table references unknown table") {
+		t.Fatalf("%s GenerateFile error = %v, want unknown migration target context", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s unknown migration target mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFileUnknownPermissionTargetLeavesOutputUntouched(t *testing.T) {
 	const trace = "trace=workflow-codegen-unknown-permission-target-output-preservation"
 	dir := t.TempDir()

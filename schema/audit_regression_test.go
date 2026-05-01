@@ -148,6 +148,23 @@ func TestBuildRejectsExplicitIndexContainingPrimaryKeyColumn(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsExplicitIndexNamedPKWhenPrimaryKeySynthesizesPKIndex(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "players",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+			{Name: "name", Type: KindString},
+		},
+		Indexes: []IndexDefinition{{Name: "pk", Columns: []string{"name"}}},
+	})
+	_, err := b.Build(EngineOptions{})
+	if err == nil || !strings.Contains(err.Error(), `duplicate index name "pk"`) {
+		t.Fatalf("expected duplicate synthetic pk index name validation error, got %v", err)
+	}
+}
+
 func TestBuildRejectsIndexWithMissingColumn(t *testing.T) {
 	b := NewBuilder()
 	b.SchemaVersion(1)

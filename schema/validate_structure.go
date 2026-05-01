@@ -102,6 +102,9 @@ func validateStructure(b *Builder) []error {
 				errs = append(errs, fmt.Errorf("table %q: index name must not be empty", t.Name))
 				continue
 			}
+			if pkColName != "" && idx.Name == "pk" {
+				errs = append(errs, fmt.Errorf("table %q: duplicate index name %q", t.Name, idx.Name))
+			}
 			if idxNames[idx.Name] {
 				errs = append(errs, fmt.Errorf("table %q: duplicate index name %q", t.Name, idx.Name))
 			}
