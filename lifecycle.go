@@ -362,15 +362,6 @@ func (r *Runtime) recordRuntimeMetrics() {
 	r.observability.recordRuntimeHealthMetrics(r.Health())
 }
 
-func (r *Runtime) recordHealthDegraded() {
-	r.recordHealthDegradedFrom(r.Health())
-}
-
-func (r *Runtime) recordHealthDegradedFrom(health RuntimeHealth) {
-	r.observability.recordRuntimeHealthMetrics(health)
-	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
-}
-
 type durabilityHandle struct {
 	worker *commitlog.DurabilityWorker
 }
