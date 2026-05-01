@@ -2,6 +2,7 @@ package bsatn
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -96,8 +97,8 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		n := binary.LittleEndian.Uint32(buf[:4])
-		data := make([]byte, n)
-		if _, err := io.ReadFull(r, data); err != nil {
+		data, err := readLengthPrefixedPayload(r, n)
+		if err != nil {
 			return types.Value{}, err
 		}
 		if !utf8.Valid(data) {
@@ -109,8 +110,8 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		n := binary.LittleEndian.Uint32(buf[:4])
-		data := make([]byte, n)
-		if _, err := io.ReadFull(r, data); err != nil {
+		data, err := readLengthPrefixedPayload(r, n)
+		if err != nil {
 			return types.Value{}, err
 		}
 		return types.NewBytesOwned(data), nil
@@ -160,25 +161,40 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		count := binary.LittleEndian.Uint32(buf[:4])
-		xs := make([]string, count)
-		for i := range count {
+		xs := make([]string, 0)
+		for range count {
 			if _, err := io.ReadFull(r, buf[:4]); err != nil {
 				return types.Value{}, err
 			}
 			n := binary.LittleEndian.Uint32(buf[:4])
-			data := make([]byte, n)
-			if _, err := io.ReadFull(r, data); err != nil {
+			data, err := readLengthPrefixedPayload(r, n)
+			if err != nil {
 				return types.Value{}, err
 			}
 			if !utf8.Valid(data) {
 				return types.Value{}, ErrInvalidUTF8
 			}
-			xs[i] = string(data)
+			xs = append(xs, string(data))
 		}
 		return types.NewArrayStringOwned(xs), nil
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}
+}
+
+func readLengthPrefixedPayload(r io.Reader, n uint32) ([]byte, error) {
+	if n == 0 {
+		return []byte{}, nil
+	}
+	lr := &io.LimitedReader{R: r, N: int64(n)}
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(lr); err != nil {
+		return nil, err
+	}
+	if lr.N != 0 {
+		return nil, io.ErrUnexpectedEOF
+	}
+	return buf.Bytes(), nil
 }
 
 // DecodeProductValue reads a schema-validated row.
@@ -416,8 +432,11 @@ func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {
 		if err != nil {
 			return types.Value{}, err
 		}
-		xs := make([]string, count)
-		for i := range count {
+		if uint64(count) > uint64((len(d.data)-d.pos)/4) {
+			return types.Value{}, io.ErrUnexpectedEOF
+		}
+		xs := make([]string, 0, count)
+		for range count {
 			n, err := d.readU32()
 			if err != nil {
 				return types.Value{}, err
@@ -429,7 +448,7 @@ func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {
 			if !utf8.Valid(data) {
 				return types.Value{}, ErrInvalidUTF8
 			}
-			xs[i] = string(data)
+			xs = append(xs, string(data))
 		}
 		return types.NewArrayStringOwned(xs), nil
 	default:

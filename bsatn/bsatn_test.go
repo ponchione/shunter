@@ -2,7 +2,9 @@ package bsatn
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"io"
 	"math"
 	"testing"
 
@@ -393,6 +395,46 @@ func TestDecodeArrayStringRejectsInvalidUTF8(t *testing.T) {
 	_, err := DecodeValue(bytes.NewReader(raw))
 	if !errors.Is(err, ErrInvalidUTF8) {
 		t.Fatalf("err = %v, want ErrInvalidUTF8", err)
+	}
+}
+
+func TestDecodeValueRejectsHugeTruncatedLengthWithoutAllocation(t *testing.T) {
+	for _, tag := range []byte{TagString, TagBytes} {
+		raw := []byte{tag, 0xff, 0xff, 0xff, 0xff}
+		_, err := DecodeValue(bytes.NewReader(raw))
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("DecodeValue tag %d err = %v, want io.ErrUnexpectedEOF", tag, err)
+		}
+	}
+
+	raw := []byte{TagArrayString, 0xff, 0xff, 0xff, 0xff}
+	_, err := DecodeValue(bytes.NewReader(raw))
+	if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("DecodeValue ArrayString err = %v, want EOF", err)
+	}
+}
+
+func TestDecodeProductValueFromBytesRejectsImpossibleArrayStringCount(t *testing.T) {
+	ts := &schema.TableSchema{
+		Name: "labels",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "tags", Type: types.KindArrayString},
+		},
+	}
+	raw := []byte{TagArrayString, 0xff, 0xff, 0xff, 0xff}
+
+	_, err := DecodeProductValueFromBytes(raw, ts)
+	if !errors.Is(err, ErrRowLengthMismatch) {
+		t.Fatalf("DecodeProductValueFromBytes err = %v, want ErrRowLengthMismatch", err)
+	}
+
+	raw = []byte{TagArrayString, 2, 0, 0, 0}
+	var u32 [4]byte
+	binary.LittleEndian.PutUint32(u32[:], 0)
+	raw = append(raw, u32[:]...)
+	_, err = DecodeProductValueFromBytes(raw, ts)
+	if !errors.Is(err, ErrRowLengthMismatch) {
+		t.Fatalf("DecodeProductValueFromBytes partial array err = %v, want ErrRowLengthMismatch", err)
 	}
 }
 
