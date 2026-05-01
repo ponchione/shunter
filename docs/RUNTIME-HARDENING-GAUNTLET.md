@@ -293,6 +293,9 @@ Current status:
   artifacts and replaces symlink outputs without mutating symlink targets. CLI
   release-candidate coverage pins unsupported read-output formats plus malformed
   or semantically invalid codegen inputs as non-mutating failures.
+- Additional non-runtime gauntlet coverage now pins CLI codegen directory-output
+  failures as non-mutating/no-temp-leak, process-boundary JSON enum rejection,
+  and TypeScript visibility-filter metadata identifier collisions.
 - Remaining non-runtime campaign work should move to broader crash/recovery,
   fault injection, fuzzing/corpus, metamorphic, race/soak, and
   release-candidate coverage unless a new invariant or failing seed appears.
