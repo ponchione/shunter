@@ -3,6 +3,9 @@ package protocol
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,6 +106,68 @@ func TestDisconnectIdempotent(t *testing.T) {
 	}
 	if onSubs != 1 {
 		t.Errorf("DisconnectClientSubscriptions calls = %d, want 1", onSubs)
+	}
+}
+
+func TestDisconnectConcurrentCallersShortSoak(t *testing.T) {
+	const (
+		seed    = uint64(0xd15c0de)
+		callers = 8
+	)
+	opts := DefaultProtocolOptions()
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	conn := testConnDirect(&opts)
+	mgr.Add(conn)
+
+	start := make(chan struct{})
+	failures := make(chan string, callers+3)
+	var wg sync.WaitGroup
+	for caller := range callers {
+		wg.Add(1)
+		go func(caller int) {
+			defer wg.Done()
+			<-start
+			conn.Disconnect(context.Background(), websocket.StatusNormalClosure, fmt.Sprintf("caller-%d", caller), inbox, mgr)
+			if (int(seed)+caller)%3 == 0 {
+				runtime.Gosched()
+			}
+		}(caller)
+	}
+	close(start)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("seed=%#x op=wait runtime_config=callers=%d operation=Disconnect-concurrent observed=timeout expected=all-callers-finished",
+			seed, callers)
+	}
+	select {
+	case <-conn.closed:
+	default:
+		failures <- fmt.Sprintf("seed=%#x op=closed runtime_config=callers=%d operation=Disconnect-concurrent observed=open expected=closed",
+			seed, callers)
+	}
+	if got := mgr.Get(conn.ID); got != nil {
+		failures <- fmt.Sprintf("seed=%#x op=manager-lookup runtime_config=callers=%d operation=Disconnect-concurrent observed=%p expected=nil",
+			seed, callers, got)
+	}
+	onDis, onSubs, events := inbox.disconnectSnapshot()
+	if onDis != 1 || onSubs != 1 || len(events) != 2 {
+		failures <- fmt.Sprintf("seed=%#x op=disconnect-count runtime_config=callers=%d operation=Disconnect-concurrent observed=(on_disconnect=%d subscription_disconnect=%d events=%v) expected=(1,1,[DisconnectClientSubscriptions OnDisconnect])",
+			seed, callers, onDis, onSubs, events)
+	} else if events[0] != "DisconnectClientSubscriptions" || events[1] != "OnDisconnect" {
+		failures <- fmt.Sprintf("seed=%#x op=disconnect-order runtime_config=callers=%d operation=Disconnect-concurrent observed_events=%v expected=[DisconnectClientSubscriptions OnDisconnect]",
+			seed, callers, events)
+	}
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
 	}
 }
 
