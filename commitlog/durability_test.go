@@ -29,6 +29,19 @@ func makeDurabilityTestChangeset(txID uint64) *store.Changeset {
 	}
 }
 
+func TestNewDurabilityWorkerRejectsNegativeChannelCapacity(t *testing.T) {
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = -1
+
+	_, err := NewDurabilityWorker(t.TempDir(), 1, opts)
+	if err == nil {
+		t.Fatal("NewDurabilityWorker accepted negative channel capacity")
+	}
+	if !strings.Contains(err.Error(), "channel capacity must be non-negative") {
+		t.Fatalf("error = %v, want channel capacity validation", err)
+	}
+}
+
 // Pin 19.
 func TestDurabilityWorkerCreatesAndPopulatesIndexPerSegment(t *testing.T) {
 	dir := t.TempDir()

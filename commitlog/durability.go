@@ -87,7 +87,7 @@ type DurabilityWorker struct {
 // If an active segment already exists for startTxID, it is reopened for appending.
 // Otherwise a new segment is created.
 func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*DurabilityWorker, error) {
-	if err := validateFsyncMode(opts.FsyncMode); err != nil {
+	if err := validateCommitLogOptions(opts); err != nil {
 		recordDurabilityFailed(opts.Observer, err, "open_failed", 0)
 		return nil, err
 	}
@@ -106,10 +106,20 @@ func validateFsyncMode(mode FsyncMode) error {
 	return nil
 }
 
+func validateCommitLogOptions(opts CommitLogOptions) error {
+	if err := validateFsyncMode(opts.FsyncMode); err != nil {
+		return err
+	}
+	if opts.ChannelCapacity < 0 {
+		return fmt.Errorf("commitlog: channel capacity must be non-negative: %d", opts.ChannelCapacity)
+	}
+	return nil
+}
+
 // NewDurabilityWorkerWithResumePlan creates and starts the worker using the
 // append strategy chosen during recovery.
 func NewDurabilityWorkerWithResumePlan(dir string, plan RecoveryResumePlan, opts CommitLogOptions) (*DurabilityWorker, error) {
-	if err := validateFsyncMode(opts.FsyncMode); err != nil {
+	if err := validateCommitLogOptions(opts); err != nil {
 		recordDurabilityFailed(opts.Observer, err, "open_failed", 0)
 		return nil, err
 	}
