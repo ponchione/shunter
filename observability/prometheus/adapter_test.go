@@ -1,6 +1,7 @@
 package prometheus
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	client "github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
+
+var errInjectedRegisterFailure = errors.New("injected register failure")
 
 var expectedMetricFamilies = []shunter.MetricName{
 	shunter.MetricRuntimeReady,
@@ -150,6 +153,30 @@ func TestNonNilRegistererWithoutUsableGathererIsRejected(t *testing.T) {
 	}
 	if len(registerer.collectors) != 0 {
 		t.Fatalf("registered collectors before rejecting gatherer: %d", len(registerer.collectors))
+	}
+}
+
+func TestRegisterFailureUnregistersPreviouslyRegisteredCollectors(t *testing.T) {
+	registerer := &failingRegisterer{failAfter: 3}
+
+	adapter, err := New(Config{
+		Registerer: registerer,
+		Gatherer:   client.NewRegistry(),
+	})
+	if err == nil {
+		t.Fatalf("New() error = nil, want injected register failure with adapter %#v", adapter)
+	}
+	if !errors.Is(err, errInjectedRegisterFailure) {
+		t.Fatalf("New() error = %v, want wrapped injected failure", err)
+	}
+	if len(registerer.registered) != registerer.failAfter {
+		t.Fatalf("registered collectors = %d, want %d", len(registerer.registered), registerer.failAfter)
+	}
+	if !reflect.DeepEqual(registerer.unregistered, registerer.registered) {
+		t.Fatalf("unregistered collectors = %#v, want previous registered collectors %#v", registerer.unregistered, registerer.registered)
+	}
+	if !strings.Contains(err.Error(), string(expectedMetricFamilies[registerer.failAfter])) {
+		t.Fatalf("New() error = %v, want failing metric family context %s", err, expectedMetricFamilies[registerer.failAfter])
 	}
 }
 
@@ -530,4 +557,31 @@ func (r *registerOnly) MustRegister(collectors ...client.Collector) {
 
 func (r *registerOnly) Unregister(client.Collector) bool {
 	return false
+}
+
+type failingRegisterer struct {
+	failAfter    int
+	registered   []client.Collector
+	unregistered []client.Collector
+}
+
+func (r *failingRegisterer) Register(collector client.Collector) error {
+	if len(r.registered) == r.failAfter {
+		return errInjectedRegisterFailure
+	}
+	r.registered = append(r.registered, collector)
+	return nil
+}
+
+func (r *failingRegisterer) MustRegister(collectors ...client.Collector) {
+	for _, collector := range collectors {
+		if err := r.Register(collector); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func (r *failingRegisterer) Unregister(collector client.Collector) bool {
+	r.unregistered = append(r.unregistered, collector)
+	return true
 }
