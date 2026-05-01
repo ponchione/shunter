@@ -272,6 +272,7 @@ func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
 	w.recordClientDropped("buffer_full", connID)
 	w.mu.Lock()
 	delete(w.confirmedReads, connID)
+	delete(w.fastReads, connID)
 	w.mu.Unlock()
 	select {
 	case w.dropped <- connID:

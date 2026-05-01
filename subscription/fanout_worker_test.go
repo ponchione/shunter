@@ -531,6 +531,34 @@ func TestFanOutWorker_BufferFull_DropsClient(t *testing.T) {
 	}
 }
 
+func TestFanOutWorker_BufferFullClearsFastReadState(t *testing.T) {
+	conn1 := cid(1)
+	mock := &mockFanOutSender{sendErr: ErrSendBufferFull}
+	dropped := make(chan types.ConnectionID, 1)
+	w := NewFanOutWorker(nil, mock, dropped)
+	w.SetConfirmedReads(conn1, false)
+	if w.requiresConfirmedRead(conn1) {
+		t.Fatal("test setup failed: expected fast-read policy before drop")
+	}
+
+	w.deliver(context.Background(), FanOutMessage{
+		TxID: types.TxID(1),
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 1, TableName: "t1"}},
+		},
+	})
+
+	if _, ok := w.fastReads[conn1]; ok {
+		t.Fatal("buffer-full drop left stale fast-read state")
+	}
+	if _, ok := w.confirmedReads[conn1]; ok {
+		t.Fatal("buffer-full drop left stale confirmed-read state")
+	}
+	if !w.requiresConfirmedRead(conn1) {
+		t.Fatal("dropped client should fall back to default confirmed-read policy if reused")
+	}
+}
+
 func TestFanOutWorker_ConnGone_Silent(t *testing.T) {
 	mock := &mockFanOutSender{sendErr: ErrSendConnGone}
 	inbox := make(chan FanOutMessage, 1)
