@@ -100,3 +100,57 @@ When complete, update this file with:
 - recorder panic behavior
 - validation commands run
 
+### Recorded Completion 2026-05-01
+
+Lifecycle and recovery metric helpers:
+
+- `runtimeObservability` now centralizes recorder-safe `AddCounter`,
+  `SetGauge`, and `ObserveHistogram` calls for fixed `MetricLabels`; lifecycle
+  helpers emit `runtime_ready`, one-hot `runtime_state`,
+  `runtime_degraded`, and `durability_durable_tx_id` from runtime health.
+- `Build` emits the initial built-state lifecycle gauges after successful
+  runtime construction.
+- `Start` emits the starting and ready/failed state gauges; failed starts
+  increment `runtime_errors_total`.
+- `Close` emits closing and closed state gauges; close failures increment
+  `runtime_errors_total`.
+- recovery/bootstrap success continues to increment `recovery_runs_total`,
+  set `recovery_recovered_tx_id`, set `recovery_damaged_tail_segments`,
+  increment skipped-snapshot counters, and now also seeds
+  `durability_durable_tx_id` from the recovered transaction horizon.
+
+Label values and mappings covered:
+
+- lifecycle gauges use `module=<ModuleName()>` and the normalized
+  `runtime=<Observability.RuntimeLabel>` with no free-form labels.
+- `runtime_state` uses bounded `state` values: `built`, `starting`, `ready`,
+  `closing`, `closed`, and `failed`.
+- `runtime_errors_total` uses `component="runtime"` and mapped reasons
+  `build_failed`, `start_failed`, and `close_failed` for this slice; the helper
+  maps unknown runtime reasons to `unknown`.
+- recovery metrics keep `component="commitlog"` and use bounded
+  `result="success"` / `result="failed"`.
+- skipped snapshot reasons map `past_durable_horizon` to `newer_than_log`,
+  `read_failed` to `read_failed`, and unknown reasons to `unknown`, one counter
+  increment per skipped snapshot report.
+
+Recorder panic behavior:
+
+- metric recorder panics are recovered at each metric call site.
+- a panicking recorder does not change build/start/reducer/close outcomes.
+- metrics sink failures do not recursively attempt
+  `runtime_errors_total{reason="observability_sink_failed"}` through the same
+  failed recorder; non-failing logger fallback still records
+  `observability.sink_failed`.
+
+Validation:
+
+```sh
+rtk go fmt . ./commitlog
+rtk go test . -run 'Test.*(Metrics|Gauge|RuntimeState|Recovery|Build|Start|Close|Degraded)' -count=1
+rtk go test ./commitlog -run 'Test.*Recovery' -count=1
+rtk go vet . ./commitlog
+rtk go test ./... -count=1
+```
+
+Results: all commands passed.

@@ -144,7 +144,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		return fail(fmt.Errorf("build hosted runtime reducers: %w", err))
 	}
 
-	return &Runtime{
+	rt := &Runtime{
 		module:        newModuleSnapshot(mod, visibilityFilters),
 		config:        copyConfig(cfg),
 		buildConfig:   normalized,
@@ -160,7 +160,9 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		observability: observability,
 		stateName:     RuntimeStateBuilt,
 		durableTxID:   recoveredTxID,
-	}, nil
+	}
+	rt.recordRuntimeMetrics()
+	return rt, nil
 }
 
 type runtimeRecoveryFacts struct {

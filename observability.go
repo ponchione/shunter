@@ -316,10 +316,7 @@ func (o *runtimeObservability) recordBuildFailed(err error) {
 	o.log(context.Background(), slog.LevelError, "runtime.build_failed", "runtime",
 		slog.String("error", o.redactError(err)),
 	)
-	o.addCounter(MetricRuntimeErrorsTotal, MetricLabels{
-		Component: "runtime",
-		Reason:    "build_failed",
-	}, 1)
+	o.recordRuntimeError("build_failed")
 }
 
 func (o *runtimeObservability) recordRecoveryCompleted(report commitlog.RecoveryReport, duration time.Duration) {
@@ -343,6 +340,7 @@ func (o *runtimeObservability) recordRecoveryCompleted(report commitlog.Recovery
 	o.setGauge(MetricRecoveryDamagedTailSegments, MetricLabels{
 		Component: "commitlog",
 	}, float64(len(report.DamagedTailSegments)))
+	o.setGauge(MetricDurabilityDurableTxID, MetricLabels{}, float64(report.RecoveredTxID))
 	for _, skipped := range report.SkippedSnapshots {
 		o.addCounter(MetricRecoverySkippedSnapshotsTotal, MetricLabels{
 			Component: "commitlog",
@@ -409,6 +407,29 @@ func (o *runtimeObservability) recordRuntimeHealthDegraded(health RuntimeHealth,
 		slog.String("state", string(health.State)),
 		slog.String("reason", string(reason)),
 	)
+}
+
+func (o *runtimeObservability) recordRuntimeHealthMetrics(health RuntimeHealth) {
+	if o == nil {
+		return
+	}
+	o.setGauge(MetricRuntimeReady, MetricLabels{}, boolMetricValue(health.Ready))
+	for _, state := range runtimeMetricStates {
+		value := 0.0
+		if health.State == state {
+			value = 1
+		}
+		o.setGauge(MetricRuntimeState, MetricLabels{State: string(state)}, value)
+	}
+	o.setGauge(MetricRuntimeDegraded, MetricLabels{}, boolMetricValue(health.Degraded))
+	o.setGauge(MetricDurabilityDurableTxID, MetricLabels{}, float64(health.Durability.DurableTxID))
+}
+
+func (o *runtimeObservability) recordRuntimeError(reason string) {
+	o.addCounter(MetricRuntimeErrorsTotal, MetricLabels{
+		Component: "runtime",
+		Reason:    runtimeErrorMetricReason(reason),
+	}, 1)
 }
 
 func (o *runtimeObservability) LogDurabilityFailed(err error, reason string, txID types.TxID) {
@@ -567,6 +588,31 @@ func recoverySkippedSnapshotMetricReason(reason commitlog.SnapshotSkipReason) st
 	default:
 		return "unknown"
 	}
+}
+
+func runtimeErrorMetricReason(reason string) string {
+	switch reason {
+	case "build_failed", "start_failed", "close_failed", "panic", "observability_sink_failed":
+		return reason
+	default:
+		return "unknown"
+	}
+}
+
+func boolMetricValue(v bool) float64 {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+var runtimeMetricStates = [...]RuntimeState{
+	RuntimeStateBuilt,
+	RuntimeStateStarting,
+	RuntimeStateReady,
+	RuntimeStateClosing,
+	RuntimeStateClosed,
+	RuntimeStateFailed,
 }
 
 func (o *runtimeObservability) addCounter(name MetricName, labels MetricLabels, delta uint64) {

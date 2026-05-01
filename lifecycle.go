@@ -70,6 +70,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	r.lastErr = nil
 	r.ready.Store(false)
 	r.mu.Unlock()
+	r.recordRuntimeMetrics()
 
 	if err := ctx.Err(); err != nil {
 		r.recordStartFailure(err, time.Since(startedAt))
@@ -237,6 +238,7 @@ func (r *Runtime) Close() error {
 	protocolConns := r.protocolConns
 	protocolInbox := r.protocolInbox
 	r.mu.Unlock()
+	r.recordRuntimeMetrics()
 
 	r.closeProtocolGraph(protocolConns, protocolInbox)
 	if lifecycleCancel != nil {
@@ -315,30 +317,49 @@ func (r *Runtime) Close() error {
 }
 
 func (r *Runtime) recordStartFailure(err error, duration time.Duration) {
+	transitionedFailed := false
 	r.mu.Lock()
 	r.lastErr = err
 	r.ready.Store(false)
 	if r.stateName != RuntimeStateClosed && r.stateName != RuntimeStateClosing {
 		r.stateName = RuntimeStateFailed
+		transitionedFailed = true
 	}
 	r.mu.Unlock()
+	health := r.Health()
+	r.observability.recordRuntimeHealthMetrics(health)
+	if transitionedFailed {
+		r.observability.recordRuntimeError("start_failed")
+	}
 	r.observability.recordRuntimeStartFailed(err, duration)
-	r.recordHealthDegraded()
+	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
 }
 
 func (r *Runtime) recordStartReady(duration time.Duration) {
 	health := r.Health()
+	r.observability.recordRuntimeHealthMetrics(health)
 	r.observability.recordRuntimeReady(health, duration)
-	r.recordHealthDegradedFrom(health)
+	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
 }
 
 func (r *Runtime) recordCloseFailure(err error, duration time.Duration) {
+	if err == nil {
+		return
+	}
+	health := r.Health()
+	r.observability.recordRuntimeHealthMetrics(health)
+	r.observability.recordRuntimeError("close_failed")
 	r.observability.recordRuntimeCloseFailed(err, duration)
-	r.recordHealthDegraded()
+	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
 }
 
 func (r *Runtime) recordClosed(duration time.Duration) {
+	r.recordRuntimeMetrics()
 	r.observability.recordRuntimeClosed(RuntimeStateClosed, duration)
+}
+
+func (r *Runtime) recordRuntimeMetrics() {
+	r.observability.recordRuntimeHealthMetrics(r.Health())
 }
 
 func (r *Runtime) recordHealthDegraded() {
@@ -346,6 +367,7 @@ func (r *Runtime) recordHealthDegraded() {
 }
 
 func (r *Runtime) recordHealthDegradedFrom(health RuntimeHealth) {
+	r.observability.recordRuntimeHealthMetrics(health)
 	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
 }
 
