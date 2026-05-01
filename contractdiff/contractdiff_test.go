@@ -400,6 +400,52 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentMigrationMetadataWithConte
 	}
 }
 
+func TestContractDiffJSONRejectsSemanticInvalidCurrentPermissionTargetWithContext(t *testing.T) {
+	current := contractFixture()
+	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+		Name:     "missing_query",
+		Required: []string{"messages:read"},
+	}}
+	oldData := mustContractJSON(t, contractFixture())
+	currentData := mustRawContractJSON(t, current)
+
+	for _, tt := range []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "compare",
+			run: func() error {
+				_, err := CompareJSON(oldData, currentData)
+				return err
+			},
+		},
+		{
+			name: "plan",
+			run: func() error {
+				_, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
+				return err
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run()
+			if err == nil {
+				t.Fatal("JSON entry point returned nil error, want invalid contract")
+			}
+			if !errors.Is(err, ErrInvalidContractJSON) {
+				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
+			}
+			if !strings.Contains(err.Error(), "current contract") {
+				t.Fatalf("JSON entry point error = %v, want current contract context", err)
+			}
+			if !strings.Contains(err.Error(), "permissions.query.missing_query references unknown query") {
+				t.Fatalf("JSON entry point error = %v, want permission target context", err)
+			}
+		})
+	}
+}
+
 func TestContractDiffJSONRejectsSemanticInvalidPreviousReadModelWithContext(t *testing.T) {
 	previous := contractFixture()
 	previous.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
