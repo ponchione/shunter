@@ -263,6 +263,7 @@ func checkClassifiedFuzzBSATNError(op string, data []byte, err error) error {
 	var unknownTagErr *UnknownValueTagError
 	if errors.Is(err, ErrRowLengthMismatch) ||
 		errors.Is(err, ErrInvalidUTF8) ||
+		errors.Is(err, ErrInvalidBool) ||
 		errors.Is(err, types.ErrInvalidFloat) ||
 		errors.Is(err, io.EOF) ||
 		errors.Is(err, io.ErrUnexpectedEOF) ||

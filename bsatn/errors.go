@@ -10,6 +10,7 @@ import (
 var (
 	ErrRowLengthMismatch = errors.New("bsatn: row length mismatch")
 	ErrInvalidUTF8       = errors.New("bsatn: invalid UTF-8")
+	ErrInvalidBool       = errors.New("bsatn: invalid bool")
 )
 
 type UnknownValueTagError struct{ Tag byte }

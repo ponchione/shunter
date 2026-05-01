@@ -41,7 +41,7 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 		if _, err := io.ReadFull(r, buf[:1]); err != nil {
 			return types.Value{}, err
 		}
-		return types.NewBool(buf[0] != 0), nil
+		return decodeBoolByte(buf[0])
 	case TagInt8:
 		if _, err := io.ReadFull(r, buf[:1]); err != nil {
 			return types.Value{}, err
@@ -299,7 +299,7 @@ func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {
 		if err != nil {
 			return types.Value{}, err
 		}
-		return types.NewBool(data[0] != 0), nil
+		return decodeBoolByte(data[0])
 	case TagInt8:
 		data, err := d.read(1)
 		if err != nil {
@@ -453,5 +453,16 @@ func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {
 		return types.NewArrayStringOwned(xs), nil
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
+	}
+}
+
+func decodeBoolByte(b byte) (types.Value, error) {
+	switch b {
+	case 0:
+		return types.NewBool(false), nil
+	case 1:
+		return types.NewBool(true), nil
+	default:
+		return types.Value{}, ErrInvalidBool
 	}
 }

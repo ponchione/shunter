@@ -128,6 +128,11 @@ func TestDecodeValueErrorsAndEmptyBytes(t *testing.T) {
 		t.Fatalf("expected ErrInvalidUTF8, got %v", err)
 	}
 
+	_, err = DecodeValue(bytes.NewReader([]byte{TagBool, 2}))
+	if !errors.Is(err, ErrInvalidBool) {
+		t.Fatalf("expected ErrInvalidBool, got %v", err)
+	}
+
 	_, err = DecodeValue(bytes.NewReader([]byte{TagUint64, 1, 2, 3}))
 	if !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
