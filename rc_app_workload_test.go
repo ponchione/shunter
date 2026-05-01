@@ -3,6 +3,7 @@ package shunter_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -34,22 +35,26 @@ func TestReleaseCandidateExampleAppWorkloadPublicRuntime(t *testing.T) {
 	callRCExampleReducer(t, rt, 3, "create_task", rcExampleCreateTaskArgs{ID: 3, Owner: "alice", Title: "publish notes"})
 	model[3] = rcExampleTask{Owner: "alice", Title: "publish notes"}
 
-	assertRCExampleAllTasks(t, rt, model, 4, "before-restart")
-	assertRCExampleOpenTasksQueryAndView(t, rt, model, 5, "before-restart")
+	callRCExampleReducerExpectUserFailure(t, rt, 4, "create_task", rcExampleCreateTaskArgs{ID: 3, Owner: "mallory", Title: "duplicate"})
+	callRCExampleReducerExpectPermissionDenied(t, rt, 5, "create_task", rcExampleCreateTaskArgs{ID: 4, Owner: "mallory", Title: "denied"})
+	assertRCExampleDeclaredReadsDenied(t, rt, 6, "before-restart")
+	assertRCExampleAllTasks(t, rt, model, 7, "before-restart-after-rejections")
+	assertRCExampleOpenTasksQueryAndView(t, rt, model, 8, "before-restart-after-rejections")
 
 	if err := rt.Close(); err != nil {
-		t.Fatalf("seed=%#x op=6 runtime_config=%s operation=Close(before-restart) observed_error=%v expected=nil",
+		t.Fatalf("seed=%#x op=9 runtime_config=%s operation=Close(before-restart) observed_error=%v expected=nil",
 			rcExampleAppSeed, rcExampleAppRuntimeLabel, err)
 	}
 
 	rt = buildRCExampleAppRuntime(t, dataDir)
 	defer rt.Close()
-	assertRCExampleAllTasks(t, rt, model, 7, "after-restart")
+	assertRCExampleAllTasks(t, rt, model, 10, "after-restart")
+	assertRCExampleDeclaredReadsDenied(t, rt, 11, "after-restart")
 
-	callRCExampleReducer(t, rt, 8, "complete_task", rcExampleCompleteTaskArgs{ID: 2})
+	callRCExampleReducer(t, rt, 12, "complete_task", rcExampleCompleteTaskArgs{ID: 2})
 	model[2] = rcExampleTask{Owner: "bob", Title: "review release", Done: true}
-	assertRCExampleAllTasks(t, rt, model, 9, "after-restart-complete")
-	assertRCExampleOpenTasksQueryAndView(t, rt, model, 10, "after-restart-complete")
+	assertRCExampleAllTasks(t, rt, model, 13, "after-restart-complete")
+	assertRCExampleOpenTasksQueryAndView(t, rt, model, 14, "after-restart-complete")
 }
 
 type rcExampleTask struct {
@@ -146,6 +151,33 @@ func rcExampleCompleteTaskReducer(ctx *schema.ReducerContext, args []byte) ([]by
 
 func callRCExampleReducer(t *testing.T, rt *shunter.Runtime, op int, reducerName string, args any) {
 	t.Helper()
+	res := callRCExampleReducerResult(t, rt, op, reducerName, args, shunter.WithPermissions("tasks:write"))
+	if res.Status != shunter.StatusCommitted {
+		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=CallReducer(%s) observed_status=%v observed_error=%v expected_status=%v",
+			rcExampleAppSeed, op, rcExampleAppRuntimeLabel, reducerName, res.Status, res.Error, shunter.StatusCommitted)
+	}
+}
+
+func callRCExampleReducerExpectUserFailure(t *testing.T, rt *shunter.Runtime, op int, reducerName string, args any) {
+	t.Helper()
+	res := callRCExampleReducerResult(t, rt, op, reducerName, args, shunter.WithPermissions("tasks:write"))
+	if res.Status != shunter.StatusFailedUser || res.Error == nil {
+		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=CallReducer(%s) observed_status=%v observed_error=%v expected_status=%v expected_error=non-nil",
+			rcExampleAppSeed, op, rcExampleAppRuntimeLabel, reducerName, res.Status, res.Error, shunter.StatusFailedUser)
+	}
+}
+
+func callRCExampleReducerExpectPermissionDenied(t *testing.T, rt *shunter.Runtime, op int, reducerName string, args any) {
+	t.Helper()
+	res := callRCExampleReducerResult(t, rt, op, reducerName, args)
+	if res.Status != shunter.StatusFailedPermission || !errors.Is(res.Error, shunter.ErrPermissionDenied) {
+		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=CallReducer(%s) observed_status=%v observed_error=%v expected_status=%v expected_error=%v",
+			rcExampleAppSeed, op, rcExampleAppRuntimeLabel, reducerName, res.Status, res.Error, shunter.StatusFailedPermission, shunter.ErrPermissionDenied)
+	}
+}
+
+func callRCExampleReducerResult(t *testing.T, rt *shunter.Runtime, op int, reducerName string, args any, opts ...shunter.ReducerCallOption) shunter.ReducerResult {
+	t.Helper()
 	body, err := json.Marshal(args)
 	if err != nil {
 		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=Marshal(%s) observed_error=%v expected=nil",
@@ -153,17 +185,26 @@ func callRCExampleReducer(t *testing.T, rt *shunter.Runtime, op int, reducerName
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	res, err := rt.CallReducer(ctx, reducerName, body,
-		shunter.WithPermissions("tasks:write"),
-		shunter.WithRequestID(uint32(1000+op)),
-	)
+	callOpts := append([]shunter.ReducerCallOption{shunter.WithRequestID(uint32(1000 + op))}, opts...)
+	res, err := rt.CallReducer(ctx, reducerName, body, callOpts...)
 	if err != nil {
 		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=CallReducer(%s) observed_admission_error=%v expected=nil",
 			rcExampleAppSeed, op, rcExampleAppRuntimeLabel, reducerName, err)
 	}
-	if res.Status != shunter.StatusCommitted {
-		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=CallReducer(%s) observed_status=%v observed_error=%v expected_status=%v",
-			rcExampleAppSeed, op, rcExampleAppRuntimeLabel, reducerName, res.Status, res.Error, shunter.StatusCommitted)
+	return res
+}
+
+func assertRCExampleDeclaredReadsDenied(t *testing.T, rt *shunter.Runtime, op int, label string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := rt.CallQuery(ctx, "open_tasks", shunter.WithDeclaredReadRequestID(uint32(2100+op))); !errors.Is(err, shunter.ErrPermissionDenied) {
+		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=CallQuery(%s) observed_error=%v expected_error=%v",
+			rcExampleAppSeed, op, rcExampleAppRuntimeLabel, label, err, shunter.ErrPermissionDenied)
+	}
+	if _, err := rt.SubscribeView(ctx, "open_tasks_live", uint32(3100+op), shunter.WithDeclaredReadRequestID(uint32(4100+op))); !errors.Is(err, shunter.ErrPermissionDenied) {
+		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=SubscribeView(%s) observed_error=%v expected_error=%v",
+			rcExampleAppSeed, op, rcExampleAppRuntimeLabel, label, err, shunter.ErrPermissionDenied)
 	}
 }
 
