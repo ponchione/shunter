@@ -605,6 +605,39 @@ func TestOpenAndRecoverDurabilityBoundaryFaultMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "snapshot-horizon-covers-valid-prefix-before-truncated-tail",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 4, map[uint64]string{1: "alice", 2: "bob", 3: "carol", 4: "dave"})
+				path := writeReplaySegment(t, root, 3,
+					replayRecord{txID: 3, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("carol")}}},
+					replayRecord{txID: 4, inserts: []types.ProductValue{{types.NewUint64(4), types.NewString("dave")}}},
+					replayRecord{txID: 5, inserts: []types.ProductValue{{types.NewUint64(5), types.NewString("partial-eve")}}},
+				)
+				truncateScanTestFileToOffset(t, path, int64(scanTestRecordOffset(t, path, 2)+RecordHeaderSize-1))
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 4 {
+					t.Fatalf("maxTxID = %d, want 4", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob", 3: "carol", 4: "dave"})
+				if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 4 {
+					t.Fatalf("selected snapshot report = (%v, %d), want (true, 4)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if report.ReplayedTxRange != (RecoveryTxIDRange{}) {
+					t.Fatalf("replayed range = %+v, want none because snapshot covers valid prefix", report.ReplayedTxRange)
+				}
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 3 || report.DamagedTailSegments[0].LastTx != 4 {
+					t.Fatalf("damaged tail report = %+v, want damaged segment 3..4", report.DamagedTailSegments)
+				}
+				if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 5 || plan.NextTxID != 5 {
+					t.Fatalf("resume plan = %+v, want fresh segment at tx 5", plan)
+				}
+			},
+		},
+		{
 			name: "snapshot-covered-header-only-rollover-recovers-snapshot",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				writeFaultSnapshot(t, root, reg, 2, map[uint64]string{1: "alice", 2: "bob"})
