@@ -116,7 +116,9 @@ Current status:
   schema equivalence under worker/op labels. The schema builder public surface
   also has a bounded fuzz corpus comparing `BuildPreview` and `Build`
   acceptance/export equivalence while checking registry lookup and export
-  detachment invariants.
+  detachment invariants. Table read-policy JSON now has a bounded fuzz corpus
+  checking deterministic canonical marshal round trips, detached permission
+  slices, and `ValidateReadPolicy` error categorization.
 - Module contract JSON validation now has a bounded public-surface fuzz corpus
   that accepts canonical exported contracts, rejects malformed inputs, and
   checks deterministic canonical re-marshalling after JSON round trips.
