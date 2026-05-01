@@ -449,6 +449,83 @@ func TestContractDiffJSONRejectsCurrentMigrationUnknownTargetWithContext(t *test
 	}
 }
 
+func TestContractDiffJSONRejectsSemanticInvalidMigrationSurfaceWithContext(t *testing.T) {
+	invalidCurrent := contractFixture()
+	invalidCurrent.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: "subscription",
+		Name:    "recent_messages",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityCompatible,
+		},
+	}}
+	invalidPrevious := contractFixture()
+	invalidPrevious.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: "subscription",
+		Name:    "recent_messages",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityCompatible,
+		},
+	}}
+
+	for _, tc := range []struct {
+		name        string
+		previous    []byte
+		current     []byte
+		wantContext string
+	}{
+		{
+			name:        "current",
+			previous:    mustContractJSON(t, contractFixture()),
+			current:     mustRawContractJSON(t, invalidCurrent),
+			wantContext: "current contract",
+		},
+		{
+			name:        "previous",
+			previous:    mustRawContractJSON(t, invalidPrevious),
+			current:     mustContractJSON(t, contractFixture()),
+			wantContext: "previous contract",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, tt := range []struct {
+				name string
+				run  func() error
+			}{
+				{
+					name: "compare",
+					run: func() error {
+						_, err := CompareJSON(tc.previous, tc.current)
+						return err
+					},
+				},
+				{
+					name: "plan",
+					run: func() error {
+						_, err := PlanJSON(tc.previous, tc.current, PlanOptions{ValidateContracts: true})
+						return err
+					},
+				},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					err := tt.run()
+					if err == nil {
+						t.Fatal("JSON entry point returned nil error, want invalid contract")
+					}
+					if !errors.Is(err, ErrInvalidContractJSON) {
+						t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
+					}
+					if !strings.Contains(err.Error(), tc.wantContext) {
+						t.Fatalf("JSON entry point error = %v, want %s context", err, tc.wantContext)
+					}
+					if !strings.Contains(err.Error(), `migrations surface "subscription" is invalid`) {
+						t.Fatalf("JSON entry point error = %v, want invalid migration surface context", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestContractDiffJSONRejectsSemanticInvalidCurrentPermissionTargetWithContext(t *testing.T) {
 	current := contractFixture()
 	current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
