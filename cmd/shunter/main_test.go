@@ -660,6 +660,48 @@ func TestContractCodegenMetadataMismatchLeavesOutputUntouched(t *testing.T) {
 	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestContractCodegenUnknownMigrationTargetLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=cli-codegen-unknown-migration-target-output-preservation"
+	dir := t.TempDir()
+	contract := cliContractFixture()
+	contract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: shunter.MigrationSurfaceTable,
+		Name:    "missing_table",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityCompatible,
+		},
+	}}
+	contractPath := writeCLIContract(t, dir, "contract.json", contract)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "typescript",
+		"--out", outputPath,
+	})
+	if code != 1 {
+		t.Fatalf("%s contract codegen exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
+	}
+	assertContains(t, stderr.String(), "migrations.table.missing_table references unknown table")
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s unknown migration target mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestContractCodegenRejectsUnexpectedArgBeforeFileIO(t *testing.T) {
 	const trace = "trace=cli-codegen-unexpected-arg-before-file-io"
 	dir := t.TempDir()
