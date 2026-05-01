@@ -101,21 +101,56 @@ func TestParseWhereHarmlessParenthesizationMetamorphic(t *testing.T) {
 		},
 	}
 	for caseIndex, tc := range cases {
-		baseline, err := Parse(tc.base)
+		assertParseVariantsEquivalent(t, seed, caseIndex, tc.name, tc.base, tc.vars)
+	}
+}
+
+func TestParseWhitespaceMetamorphic(t *testing.T) {
+	const seed = uint64(0x571c0de)
+	cases := []struct {
+		name string
+		base string
+		vars []string
+	}{
+		{
+			name: "single-table",
+			base: "SELECT item.* FROM Inventory AS item WHERE item.id = 7 AND item.active = TRUE LIMIT 5",
+			vars: []string{
+				"\tSELECT\nitem.*\r\nFROM\tInventory\nAS item\nWHERE\titem.id\n=\t7\nAND\nitem.active = TRUE\nLIMIT\t5",
+				"SELECT item.* FROM Inventory AS item\nWHERE\n(item.id = 7)\nAND\n(item.active = TRUE)\nLIMIT 5;",
+			},
+		},
+		{
+			name: "join-projection",
+			base: "SELECT o.id, product.quantity FROM Orders o JOIN Inventory product ON o.product_id = product.id",
+			vars: []string{
+				"SELECT\no.id,\nproduct.quantity\nFROM Orders\to\nJOIN\nInventory product\nON\no.product_id\n=\nproduct.id",
+				"SELECT o.id , product.quantity FROM Orders o\tJOIN Inventory product ON o.product_id = product.id;",
+			},
+		},
+	}
+	for caseIndex, tc := range cases {
+		assertParseVariantsEquivalent(t, seed, caseIndex, tc.name, tc.base, tc.vars)
+	}
+}
+
+func assertParseVariantsEquivalent(t *testing.T, seed uint64, caseIndex int, caseName, base string, variants []string) {
+	t.Helper()
+	baseline, err := Parse(base)
+	if err != nil {
+		t.Fatalf("seed=%#x op_index=%d case=%d runtime_config=case=%s operation=Parse(base) observed_error=%v expected=nil sql=%q",
+			seed, caseIndex*10, caseIndex, caseName, err, base)
+	}
+	for variantIndex, variant := range variants {
+		got, err := Parse(variant)
+		opIndex := caseIndex*10 + variantIndex + 1
 		if err != nil {
-			t.Fatalf("seed=%#x case=%d runtime_config=case=%s operation=Parse(base) observed_error=%v expected=nil",
-				seed, caseIndex, tc.name, err)
+			t.Fatalf("seed=%#x op_index=%d case=%d variant=%d runtime_config=case=%s operation=Parse(variant) observed_error=%v expected=nil sql=%q",
+				seed, opIndex, caseIndex, variantIndex, caseName, err, variant)
 		}
-		for variantIndex, variant := range tc.vars {
-			got, err := Parse(variant)
-			if err != nil {
-				t.Fatalf("seed=%#x case=%d variant=%d runtime_config=case=%s operation=Parse(variant) observed_error=%v expected=nil sql=%q",
-					seed, caseIndex, variantIndex, tc.name, err, variant)
-			}
-			if !reflect.DeepEqual(got, baseline) {
-				t.Fatalf("seed=%#x case=%d variant=%d runtime_config=case=%s operation=compare-parse-tree observed=%#v expected=%#v",
-					seed, caseIndex, variantIndex, tc.name, got, baseline)
-			}
+		if !reflect.DeepEqual(got, baseline) {
+			t.Fatalf("seed=%#x op_index=%d case=%d variant=%d runtime_config=case=%s operation=compare-parse-tree observed=%#v expected=%#v",
+				seed, opIndex, caseIndex, variantIndex, caseName, got, baseline)
 		}
 	}
 }
