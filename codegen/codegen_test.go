@@ -252,6 +252,32 @@ func TestGeneratorRejectsInvalidReadModelSurfaceWithContext(t *testing.T) {
 	}
 }
 
+func TestGeneratorRejectsInvalidMigrationSurfaceWithContext(t *testing.T) {
+	contract := contractFixture()
+	contract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: "subscription",
+		Name:    "recent_messages",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityCompatible,
+		},
+	}}
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+
+	_, err = GenerateFromJSON(data, Options{Language: LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid contract error")
+	}
+	if !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON error = %v, want ErrInvalidContract", err)
+	}
+	if !strings.Contains(err.Error(), `migrations surface "subscription" is invalid`) {
+		t.Fatalf("GenerateFromJSON error = %v, want invalid migration surface context", err)
+	}
+}
+
 func TestTypeScriptGeneratorEscapesModuleMetadataInHeaderComment(t *testing.T) {
 	contract := contractFixture()
 	contract.Module.Name = "chat\nexport const injected = true;"
