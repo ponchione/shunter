@@ -106,6 +106,24 @@ func checkContractDiffJSONInput(oldData, currentData []byte) error {
 		return fmt.Errorf("%s operation=CompareCanonicalEquivalence observed=%s expected=%s", label, got, want)
 	}
 
+	policyOpts := contractDiffFuzzPlanOptions().Policy
+	firstPolicy := CheckPolicy(report, currentContract, policyOpts)
+	if err := checkFuzzPolicyResult(label, "PolicyStrictFailure", firstPolicy, policyOpts); err != nil {
+		return err
+	}
+	secondPolicy := CheckPolicy(secondReport, currentContract, policyOpts)
+	if err := checkFuzzPolicyEquivalence(label, "PolicyDeterminism", secondPolicy, firstPolicy); err != nil {
+		return err
+	}
+	modelPolicy := CheckPolicy(Compare(oldContract, currentContract), currentContract, policyOpts)
+	if err := checkFuzzPolicyEquivalence(label, "PolicyModelEquivalence", modelPolicy, firstPolicy); err != nil {
+		return err
+	}
+	canonicalPolicy := CheckPolicy(canonicalReport, currentContract, policyOpts)
+	if err := checkFuzzPolicyEquivalence(label, "PolicyCanonicalEquivalence", canonicalPolicy, firstPolicy); err != nil {
+		return err
+	}
+
 	plan, err := PlanJSON(oldData, currentData, contractDiffFuzzPlanOptions())
 	if err != nil {
 		return fmt.Errorf("%s operation=PlanJSON observed_error=%v expected=nil", label, err)
@@ -135,6 +153,28 @@ func checkContractDiffJSONInput(oldData, currentData []byte) error {
 	}
 	if !bytes.Equal(firstPlanJSON, canonicalPlanJSON) {
 		return fmt.Errorf("%s operation=PlanCanonicalEquivalence observed=%s expected=%s", label, canonicalPlanJSON, firstPlanJSON)
+	}
+	return nil
+}
+
+func checkFuzzPolicyResult(label, operation string, result PolicyResult, opts PolicyOptions) error {
+	if got, want := result.Failed, opts.Strict && len(result.Warnings) > 0; got != want {
+		return fmt.Errorf("%s operation=%s observed_failed=%v expected_failed=%v warnings=%q",
+			label, operation, got, want, policyWarningSignatures(result.Warnings))
+	}
+	return nil
+}
+
+func checkFuzzPolicyEquivalence(label, operation string, got, want PolicyResult) error {
+	if got.Failed != want.Failed {
+		return fmt.Errorf("%s operation=%s observed_failed=%v expected_failed=%v observed_warnings=%q expected_warnings=%q",
+			label, operation, got.Failed, want.Failed, policyWarningSignatures(got.Warnings), policyWarningSignatures(want.Warnings))
+	}
+	gotWarnings := policyWarningSignatures(got.Warnings)
+	wantWarnings := policyWarningSignatures(want.Warnings)
+	if !equalStringSlices(gotWarnings, wantWarnings) {
+		return fmt.Errorf("%s operation=%s observed_warnings=%q expected_warnings=%q",
+			label, operation, gotWarnings, wantWarnings)
 	}
 	return nil
 }

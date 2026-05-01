@@ -163,8 +163,9 @@ Current status:
   seed/iteration labels.
 - Contract diff and migration-plan JSON entry points now have a bounded fuzz
   corpus plus fixed-seed concurrent short-soak coverage that checks
-  invalid-contract error categorization plus deterministic and
-  canonical-input-equivalent diff/plan output for accepted contracts.
+  invalid-contract error categorization, policy result stability, and
+  deterministic canonical-input-equivalent diff/plan output for accepted
+  contracts.
 - Contract workflow file-backed diff, policy, and plan helpers now have a
   fixed-seed concurrent short-soak that checks stable text and JSON formatting
   over canonical contract fixtures without touching artifact output paths.
