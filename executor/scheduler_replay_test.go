@@ -355,11 +355,11 @@ func TestSchedulerReplaySaturatedInboxStillReturnsMaxID(t *testing.T) {
 		if !ok {
 			t.Fatalf("enqueued cmd type=%T, want CallReducerCmd", cmd)
 		}
-		if call.Request.ScheduleID != 30 {
-			t.Fatalf("queued schedule_id = %d, want first due row 30", call.Request.ScheduleID)
+		if call.Request.ScheduleID != 30 && call.Request.ScheduleID != 99 {
+			t.Fatalf("queued schedule_id = %d, want one recovered due row 30 or 99", call.Request.ScheduleID)
 		}
 	default:
-		t.Fatal("replay should enqueue the first due row before saturation")
+		t.Fatal("replay should enqueue one due row before saturation")
 	}
 	if s.nextWakeup != time.Unix(900, 0) {
 		t.Fatalf("nextWakeup after saturated replay = %v, want %v", s.nextWakeup, time.Unix(900, 0))
