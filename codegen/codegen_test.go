@@ -307,6 +307,41 @@ func TestTypeScriptGeneratorEmitsVisibilityFilterMetadata(t *testing.T) {
 	assertContains(t, ts, `ownMessages: { sql: "SELECT * FROM messages WHERE body = :sender", returnTable: "messages", returnTableId: 0, usesCallerIdentity: true },`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesVisibilityFilterMetadataIdentifiers(t *testing.T) {
+	contract := contractFixture()
+	contract.VisibilityFilters = []shunter.VisibilityFilterDescription{
+		{
+			Name:          "own_messages",
+			SQL:           `SELECT * FROM messages WHERE body = 'said "hi"'`,
+			ReturnTable:   "messages",
+			ReturnTableID: 0,
+		},
+		{
+			Name:          "own-messages",
+			SQL:           `SELECT * FROM messages WHERE body = 'archived'`,
+			ReturnTable:   "messages",
+			ReturnTableID: 0,
+		},
+		{
+			Name:          "class",
+			SQL:           `SELECT * FROM messages WHERE body = 'reserved'`,
+			ReturnTable:   "messages",
+			ReturnTableID: 0,
+		},
+	}
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export const visibilityFilters = {`)
+	assertContains(t, ts, `ownMessages: { sql: "SELECT * FROM messages WHERE body = 'said \"hi\"'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },`)
+	assertContains(t, ts, `ownMessages2: { sql: "SELECT * FROM messages WHERE body = 'archived'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },`)
+	assertContains(t, ts, `class_: { sql: "SELECT * FROM messages WHERE body = 'reserved'", returnTable: "messages", returnTableId: 0, usesCallerIdentity: false },`)
+}
+
 func TestTypeScriptGeneratorDisambiguatesMetadataMapIdentifiers(t *testing.T) {
 	contract := contractFixture()
 	contract.Queries = append(contract.Queries, shunter.QueryDescription{Name: "recent-messages", SQL: "SELECT * FROM messages"})
