@@ -791,6 +791,29 @@ func TestTransactionInsertAutoIncrementPreservesExplicitValue(t *testing.T) {
 	}
 }
 
+func TestRollbackDiscardsAutoIncrementSequence(t *testing.T) {
+	cs, reg := buildAutoIncrementState(t)
+	tx := NewTransaction(cs, reg)
+
+	if _, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("rolled-back")}); err != nil {
+		t.Fatal(err)
+	}
+	Rollback(tx)
+
+	next := NewTransaction(cs, reg)
+	id, err := next.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("committed")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := next.GetRow(0, id)
+	if !ok {
+		t.Fatal("post-rollback inserted row should be visible")
+	}
+	if got := row[0].AsUint64(); got != 1 {
+		t.Fatalf("post-rollback autoincrement value = %d, want 1", got)
+	}
+}
+
 func TestTableSequenceStateAccessorsRoundTrip(t *testing.T) {
 	cs, _ := buildAutoIncrementState(t)
 	tbl, ok := cs.Table(0)
@@ -819,8 +842,14 @@ func TestTableSequenceStateAccessorsRoundTrip(t *testing.T) {
 	if got := row[0].AsUint64(); got != 9 {
 		t.Fatalf("post-restore autoincrement value = %d, want 9", got)
 	}
+	if seq, has := tbl.SequenceValue(); !has || seq != 9 {
+		t.Fatalf("next SequenceValue before commit = (%d, %v), want (9, true)", seq, has)
+	}
+	if _, err := Commit(cs, tx); err != nil {
+		t.Fatal(err)
+	}
 	if seq, has := tbl.SequenceValue(); !has || seq != 10 {
-		t.Fatalf("next SequenceValue after insert = (%d, %v), want (10, true)", seq, has)
+		t.Fatalf("next SequenceValue after commit = (%d, %v), want (10, true)", seq, has)
 	}
 }
 

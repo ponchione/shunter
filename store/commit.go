@@ -57,6 +57,14 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		}
 	}
 
+	for tableID, next := range tx.txSequences {
+		table, ok := cs.tableLocked(tableID)
+		if !ok {
+			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
+		}
+		table.SetSequenceValue(next)
+	}
+
 	tx.finishCommitted()
 	return changeset, nil
 }

@@ -22,6 +22,7 @@ type Transaction struct {
 	tx              *TxState
 	registry        schema.SchemaRegistry
 	state           atomic.Uint32
+	txSequences     map[schema.TableID]uint64
 	txUniqueIndexes map[txUniqueRef]map[uint64][]txUniqueEntry
 	txRowIndexes    map[schema.TableID]map[uint64][]txRowEntry
 }
@@ -85,7 +86,7 @@ func (t *Transaction) checkUsable() error {
 	}
 }
 
-func (t *Transaction) applyAutoIncrement(table *Table, row types.ProductValue) (types.ProductValue, error) {
+func (t *Transaction) applyAutoIncrement(tableID schema.TableID, table *Table, row types.ProductValue) (types.ProductValue, error) {
 	if table.sequence == nil || table.sequenceCol < 0 {
 		return row, nil
 	}
@@ -99,7 +100,7 @@ func (t *Transaction) applyAutoIncrement(table *Table, row types.ProductValue) (
 	if !ok {
 		return nil, schema.ErrAutoIncrementType
 	}
-	next := table.sequence.Peek()
+	next := t.nextSequenceValue(tableID, table)
 	// Sequence value 0 is the exhausted sentinel. A uint64 autoincrement
 	// cannot safely consume MaxUint64 because the next sequence value would
 	// wrap to that sentinel and snapshot/recovery cannot represent max+1.
@@ -109,8 +110,24 @@ func (t *Transaction) applyAutoIncrement(table *Table, row types.ProductValue) (
 
 	assigned := row.Copy()
 	assigned[table.sequenceCol] = newAutoIncrementValue(next, col.Type)
-	table.sequence.Next()
+	t.setNextSequenceValue(tableID, next+1)
 	return assigned, nil
+}
+
+func (t *Transaction) nextSequenceValue(tableID schema.TableID, table *Table) uint64 {
+	if t.txSequences != nil {
+		if next, ok := t.txSequences[tableID]; ok {
+			return next
+		}
+	}
+	return table.sequence.Peek()
+}
+
+func (t *Transaction) setNextSequenceValue(tableID schema.TableID, next uint64) {
+	if t.txSequences == nil {
+		t.txSequences = make(map[schema.TableID]uint64)
+	}
+	t.txSequences[tableID] = next
 }
 
 func isZeroAutoIncrementValue(v types.Value, kind schema.ValueKind) bool {
@@ -163,7 +180,7 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 	if err := checkRowIDAvailable(table); err != nil {
 		return 0, err
 	}
-	row, err := t.applyAutoIncrement(table, row)
+	row, err := t.applyAutoIncrement(tableID, table, row)
 	if err != nil {
 		return 0, err
 	}
