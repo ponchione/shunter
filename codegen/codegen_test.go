@@ -284,6 +284,25 @@ func TestTypeScriptGeneratorDisambiguatesReducerHelperNameCollisions(t *testing.
 	assertContains(t, ts, `return callReducer("send-message", args);`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesLifecycleReducerIdentifiers(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Reducers = append(contract.Schema.Reducers,
+		schema.ReducerExport{Name: "on-connect", Lifecycle: true},
+		schema.ReducerExport{Name: "default", Lifecycle: true},
+	)
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export const lifecycleReducers = {`)
+	assertContains(t, ts, `OnConnect: "OnConnect",`)
+	assertContains(t, ts, `OnConnect2: "on-connect",`)
+	assertContains(t, ts, `Default: "default",`)
+}
+
 func TestTypeScriptGeneratorDisambiguatesFallbackAndReservedTableIdentifiers(t *testing.T) {
 	contract := contractFixture()
 	contract.Schema.Tables = append(contract.Schema.Tables,
