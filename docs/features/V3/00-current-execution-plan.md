@@ -1,6 +1,6 @@
 # Hosted Runtime V3 Current Execution Plan
 
-Status: in progress
+Status: complete
 
 Goal: implement SPEC-007 operator-facing observability without changing hosted
 runtime correctness or public protocol compatibility.
