@@ -415,6 +415,39 @@ func TestContractCodegenRejectedInputsLeaveOutputUntouched(t *testing.T) {
 	}
 }
 
+func TestContractCodegenDirectoryOutputFailsWithoutMutationOrTempLeak(t *testing.T) {
+	const trace = "trace=cli-codegen-directory-output-non-mutating"
+	dir := t.TempDir()
+	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+	if err := os.Mkdir(outputPath, 0o755); err != nil {
+		t.Fatalf("%s create output directory: %v", trace, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "typescript",
+		"--out", outputPath,
+	})
+	if code != 1 {
+		t.Fatalf("%s contract codegen exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
+	}
+	assertContains(t, stderr.String(), "write generated output")
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatalf("%s stat output path: %v", trace, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("%s output path is not still a directory after failed codegen", trace)
+	}
+	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func cliContractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,
@@ -479,5 +512,19 @@ func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
 		t.Fatalf("missing %q in:\n%s", needle, haystack)
+	}
+}
+
+func assertNoCLITempFiles(t *testing.T, dir, outputBase string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read output directory %s: %v", dir, err)
+	}
+	prefix := "." + outputBase + ".tmp-"
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			t.Fatalf("temporary artifact %s leaked in %s", entry.Name(), dir)
+		}
 	}
 }
