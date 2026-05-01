@@ -11,6 +11,10 @@ var ErrUnknownMessageTag = errors.New("protocol: unknown message tag")
 // during decode.
 var ErrMalformedMessage = errors.New("protocol: malformed message body")
 
+// ErrMessageTooLarge is returned when a decoded wire message exceeds the
+// configured transport size limit.
+var ErrMessageTooLarge = errors.New("protocol: message too large")
+
 // ErrExecutorAdmissionRejected marks a connection rejected by executor
 // admission during OnConnect.
 var ErrExecutorAdmissionRejected = errors.New("protocol: executor admission rejected")

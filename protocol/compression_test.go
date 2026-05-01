@@ -120,6 +120,42 @@ func TestUnwrapCompressedLargeBody(t *testing.T) {
 	}
 }
 
+func TestUnwrapCompressedWithLimitRejectsOversizeNoneEnvelope(t *testing.T) {
+	body := []byte{0x01, 0x02, 0x03}
+	frame := []byte{CompressionNone, TagTransactionUpdate, 0x01, 0x02, 0x03}
+
+	_, _, err := UnwrapCompressedWithLimit(frame, int64(len(body)))
+	if !errors.Is(err, ErrMessageTooLarge) {
+		t.Fatalf("err = %v, want ErrMessageTooLarge", err)
+	}
+
+	tag, got, err := UnwrapCompressedWithLimit(frame, int64(len(body)+1))
+	if err != nil {
+		t.Fatalf("at-limit unwrap: %v", err)
+	}
+	if tag != TagTransactionUpdate || !bytes.Equal(got, body) {
+		t.Fatalf("unwrap = (%d, %x), want (%d, %x)", tag, got, TagTransactionUpdate, body)
+	}
+}
+
+func TestUnwrapCompressedWithLimitRejectsGzipExpansion(t *testing.T) {
+	body := bytes.Repeat([]byte{0x42}, 256)
+	frame := EncodeFrame(TagTransactionUpdate, body, true, CompressionGzip)
+
+	_, _, err := UnwrapCompressedWithLimit(frame, 64)
+	if !errors.Is(err, ErrMessageTooLarge) {
+		t.Fatalf("err = %v, want ErrMessageTooLarge", err)
+	}
+
+	_, got, err := UnwrapCompressedWithLimit(frame, int64(len(body)+1))
+	if err != nil {
+		t.Fatalf("at-limit unwrap: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("body len = %d, want %d", len(got), len(body))
+	}
+}
+
 func TestUnwrapCompressedTruncated(t *testing.T) {
 	_, _, err := UnwrapCompressed(nil)
 	if !errors.Is(err, ErrMalformedMessage) {

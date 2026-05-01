@@ -122,3 +122,47 @@ func TestShunterBrotliFrameClosesWithReason(t *testing.T) {
 		t.Errorf("close reason = %q, want contains %q", ce.Reason, "brotli")
 	}
 }
+
+func TestShunterGzipExpansionOverLimitCloses1008(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.MaxMessageSize = 64
+	conn, clientWS := testConnPair(t, &opts)
+	conn.Compression = true // enable compression path
+
+	handlers := &MessageHandlers{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, handlers)
+
+	frame, err := WrapCompressed(TagSubscribeSingle, bytes.Repeat([]byte{0x42}, 256), CompressionGzip)
+	if err != nil {
+		t.Fatalf("WrapCompressed gzip: %v", err)
+	}
+	if len(frame) >= int(opts.MaxMessageSize) {
+		t.Fatalf("test frame compressed len = %d, want below raw read limit %d", len(frame), opts.MaxMessageSize)
+	}
+
+	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
+	_ = clientWS.Write(wCtx, websocket.MessageBinary, frame)
+	wCancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch loop did not exit on oversized gzip expansion")
+	}
+
+	readCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer rCancel()
+	_, _, err = clientWS.Read(readCtx)
+	var ce websocket.CloseError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected CloseError, got %v (%T)", err, err)
+	}
+	if ce.Code != websocket.StatusPolicyViolation {
+		t.Errorf("close code = %d, want %d (1008)", ce.Code, websocket.StatusPolicyViolation)
+	}
+	if !strings.Contains(ce.Reason, "message too large") {
+		t.Errorf("close reason = %q, want contains %q", ce.Reason, "message too large")
+	}
+}

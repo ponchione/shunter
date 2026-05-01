@@ -121,10 +121,13 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 			var tag uint8
 			var body []byte
 			var unwrapErr error
-			tag, body, unwrapErr = UnwrapCompressed(frame)
+			tag, body, unwrapErr = UnwrapCompressedWithLimit(frame, c.opts.MaxMessageSize)
 			if unwrapErr != nil {
 				if errors.Is(unwrapErr, ErrBrotliUnsupported) {
 					closeProtocolError(c, "brotli unsupported")
+				} else if errors.Is(unwrapErr, ErrMessageTooLarge) {
+					logProtocolBackpressure(c.Observer, "inbound", "message_too_large")
+					go closeWithHandshake(c.ws, ClosePolicy, "message too large", c.opts.CloseHandshakeTimeout)
 				} else {
 					closeProtocolError(c, "malformed message")
 				}

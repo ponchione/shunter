@@ -108,6 +108,18 @@ func WrapCompressed(tag uint8, body []byte, mode uint8) ([]byte, error) {
 // ErrUnknownCompressionTag; gzip failure maps to
 // ErrDecompressionFailed.
 func UnwrapCompressed(frame []byte) (uint8, []byte, error) {
+	return unwrapCompressed(frame, 0)
+}
+
+// UnwrapCompressedWithLimit reads a compression-envelope frame and returns the
+// tag + uncompressed body. maxMessageSize, when positive, limits the logical
+// uncompressed message size (tag byte plus body), matching the transport read
+// limit applied to uncompressed connections.
+func UnwrapCompressedWithLimit(frame []byte, maxMessageSize int64) (uint8, []byte, error) {
+	return unwrapCompressed(frame, maxMessageSize)
+}
+
+func unwrapCompressed(frame []byte, maxMessageSize int64) (uint8, []byte, error) {
 	if len(frame) < 2 {
 		return 0, nil, fmt.Errorf("%w: frame too short for compression envelope (len=%d)", ErrMalformedMessage, len(frame))
 	}
@@ -116,6 +128,9 @@ func UnwrapCompressed(frame []byte) (uint8, []byte, error) {
 	payload := frame[2:]
 	switch mode {
 	case CompressionNone:
+		if err := checkUncompressedMessageSize(len(payload), maxMessageSize); err != nil {
+			return 0, nil, err
+		}
 		return tag, payload, nil
 	case CompressionBrotli:
 		return 0, nil, ErrBrotliUnsupported
@@ -133,10 +148,14 @@ func UnwrapCompressed(frame []byte) (uint8, []byte, error) {
 		if err != nil {
 			return 0, nil, fmt.Errorf("%w: %v", ErrDecompressionFailed, err)
 		}
-		body, err := io.ReadAll(gr)
+		maxBodySize, limited := bodyLimit(maxMessageSize)
+		body, err := readGzipBody(gr, maxBodySize, limited)
 		closeErr := gr.Close()
 		gzipReaderPool.Put(gr)
 		if err != nil {
+			if errors.Is(err, ErrMessageTooLarge) {
+				return 0, nil, err
+			}
 			return 0, nil, fmt.Errorf("%w: %v", ErrDecompressionFailed, err)
 		}
 		if closeErr != nil {
@@ -146,4 +165,39 @@ func UnwrapCompressed(frame []byte) (uint8, []byte, error) {
 	default:
 		return 0, nil, fmt.Errorf("%w: mode=%d", ErrUnknownCompressionTag, mode)
 	}
+}
+
+func checkUncompressedMessageSize(bodyLen int, maxMessageSize int64) error {
+	if maxMessageSize <= 0 {
+		return nil
+	}
+	if int64(bodyLen)+1 > maxMessageSize {
+		return fmt.Errorf("%w: uncompressed message size %d exceeds limit %d", ErrMessageTooLarge, int64(bodyLen)+1, maxMessageSize)
+	}
+	return nil
+}
+
+func bodyLimit(maxMessageSize int64) (int64, bool) {
+	if maxMessageSize <= 0 {
+		return 0, false
+	}
+	if maxMessageSize == 1 {
+		return 0, true
+	}
+	return maxMessageSize - 1, true
+}
+
+func readGzipBody(gr *gzip.Reader, maxBodySize int64, limited bool) ([]byte, error) {
+	if !limited {
+		return io.ReadAll(gr)
+	}
+	lr := &io.LimitedReader{R: gr, N: maxBodySize + 1}
+	body, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBodySize {
+		return nil, fmt.Errorf("%w: uncompressed message size exceeds limit", ErrMessageTooLarge)
+	}
+	return body, nil
 }
