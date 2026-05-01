@@ -1,6 +1,10 @@
 package auth
 
 import (
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -115,5 +119,125 @@ func TestMintAnonymousTokenCarriesAudience(t *testing.T) {
 	}
 	if len(claims.Audience) != 1 || claims.Audience[0] != cfg.Audience {
 		t.Errorf("Audience = %v, want [%q]", claims.Audience, cfg.Audience)
+	}
+}
+
+func TestMintAnonymousTokenRandomFailureWrapsCause(t *testing.T) {
+	faultErr := errors.New("injected random failure")
+	originalReadRandom := readRandom
+	readRandom = func([]byte) (int, error) {
+		return 0, faultErr
+	}
+	defer func() { readRandom = originalReadRandom }()
+
+	token, id, err := MintAnonymousToken(testMintConfig())
+	if err == nil {
+		t.Fatal("MintAnonymousToken returned nil error, want random fault")
+	}
+	if token != "" || !id.IsZero() {
+		t.Fatalf("failed mint returned token=%q identity=%s, want empty", token, id.Hex())
+	}
+	if !errors.Is(err, faultErr) {
+		t.Fatalf("MintAnonymousToken error = %v, want wrapped injected fault", err)
+	}
+	if !strings.Contains(err.Error(), "mint random subject") {
+		t.Fatalf("MintAnonymousToken error = %v, want random subject context", err)
+	}
+}
+
+func TestMintAnonymousTokenConcurrentValidateSoak(t *testing.T) {
+	const (
+		workers = 6
+		ops     = 16
+	)
+	cfg := testMintConfig()
+	validateCfg := &JWTConfig{
+		SigningKey: cfg.SigningKey,
+		Audiences:  []string{cfg.Audience},
+	}
+	type mintResult struct {
+		worker  int
+		op      int
+		token   string
+		subject string
+		id      string
+	}
+
+	results := make(chan mintResult, workers*ops)
+	errs := make(chan error, workers*ops)
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for op := 0; op < ops; op++ {
+				label := fmt.Sprintf("worker=%d op=%d", worker, op)
+				token, id, err := MintAnonymousToken(cfg)
+				if err != nil {
+					errs <- fmt.Errorf("%s MintAnonymousToken: %w", label, err)
+					continue
+				}
+				if id.IsZero() {
+					errs <- fmt.Errorf("%s minted zero identity", label)
+					continue
+				}
+				claims, err := ValidateJWT(token, validateCfg)
+				if err != nil {
+					errs <- fmt.Errorf("%s ValidateJWT: %w", label, err)
+					continue
+				}
+				if claims.Issuer != cfg.Issuer {
+					errs <- fmt.Errorf("%s issuer = %q, want %q", label, claims.Issuer, cfg.Issuer)
+					continue
+				}
+				if len(claims.Audience) != 1 || claims.Audience[0] != cfg.Audience {
+					errs <- fmt.Errorf("%s audience = %v, want [%q]", label, claims.Audience, cfg.Audience)
+					continue
+				}
+				if got := claims.DeriveIdentity(); got != id {
+					errs <- fmt.Errorf("%s derived identity = %s, want %s", label, got.Hex(), id.Hex())
+					continue
+				}
+				results <- mintResult{
+					worker:  worker,
+					op:      op,
+					token:   token,
+					subject: claims.Subject,
+					id:      id.Hex(),
+				}
+			}
+		}(worker)
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	seenTokens := make(map[string]mintResult, workers*ops)
+	seenSubjects := make(map[string]mintResult, workers*ops)
+	seenIdentities := make(map[string]mintResult, workers*ops)
+	count := 0
+	for result := range results {
+		count++
+		if previous, ok := seenTokens[result.token]; ok {
+			t.Fatalf("duplicate token current=worker=%d op=%d previous=worker=%d op=%d", result.worker, result.op, previous.worker, previous.op)
+		}
+		if previous, ok := seenSubjects[result.subject]; ok {
+			t.Fatalf("duplicate subject %q current=worker=%d op=%d previous=worker=%d op=%d", result.subject, result.worker, result.op, previous.worker, previous.op)
+		}
+		if previous, ok := seenIdentities[result.id]; ok {
+			t.Fatalf("duplicate identity %s current=worker=%d op=%d previous=worker=%d op=%d", result.id, result.worker, result.op, previous.worker, previous.op)
+		}
+		seenTokens[result.token] = result
+		seenSubjects[result.subject] = result
+		seenIdentities[result.id] = result
+	}
+	if count != workers*ops {
+		t.Fatalf("mint results = %d, want %d", count, workers*ops)
 	}
 }

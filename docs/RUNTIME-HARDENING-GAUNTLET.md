@@ -59,7 +59,10 @@ Current status:
   empty required entries, and first-missing stability. JWT validation also has a
   bounded generated-claim fuzz corpus over malformed tokens, missing claims,
   audience and identity mismatches, unsupported algorithms, bad signatures, and
-  accepted-claim replay determinism.
+  accepted-claim replay determinism. Anonymous-token minting now has injected
+  randomness-fault coverage plus a short concurrent mint/validate soak that
+  checks unique tokens, subjects, identities, audience, issuer, and derived
+  identity stability under worker/op labels.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit

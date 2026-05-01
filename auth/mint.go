@@ -11,6 +11,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+var readRandom = rand.Read
+
 // MintConfig is the engine-level configuration for anonymous-mode
 // token minting (SPEC-005 §4.2). Deployment chooses issuer, audience,
 // signing key, and expiry policy; Shunter does not impose defaults.
@@ -57,7 +59,7 @@ func MintAnonymousToken(config *MintConfig) (string, types.Identity, error) {
 // randomSubject returns 16 random bytes hex-encoded (32 chars).
 func randomSubject() (string, error) {
 	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
+	if _, err := readRandom(buf[:]); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(buf[:]), nil
