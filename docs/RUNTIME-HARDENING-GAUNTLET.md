@@ -124,6 +124,9 @@ Current status:
 - Contract diff and migration-plan tooling now has fixed-seed metamorphic
   coverage requiring declaration-order changes to preserve diff text and
   canonical migration-plan JSON under seed/iteration labels.
+- Contract diff and migration-plan JSON entry points now have a bounded fuzz
+  corpus that checks invalid-contract error categorization plus deterministic
+  and canonical-input-equivalent diff/plan output for accepted contracts.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and

@@ -41,8 +41,8 @@ func TestContractDiffAndPlanDeclarationOrderMetamorphic(t *testing.T) {
 	}
 }
 
-func contractOrderMetamorphicFixtures(t *testing.T) (shunter.ModuleContract, shunter.ModuleContract) {
-	t.Helper()
+func contractOrderMetamorphicFixtures(tb testing.TB) (shunter.ModuleContract, shunter.ModuleContract) {
+	tb.Helper()
 
 	old := contractFixture()
 	old.Module.Metadata = map[string]string{
@@ -68,7 +68,7 @@ func contractOrderMetamorphicFixtures(t *testing.T) (shunter.ModuleContract, shu
 		{Surface: shunter.ReadModelSurfaceView, Name: "live", Tables: []string{"messages"}, Tags: []string{"live"}},
 	}
 
-	current := cloneMetamorphicContract(t, old)
+	current := cloneMetamorphicContract(tb, old)
 	current.Module.Version = "v1.1.0"
 	current.Module.Metadata = map[string]string{
 		"region": "use1",
@@ -210,15 +210,15 @@ func shuffleMetamorphicSlice[T any](r *rand.Rand, values []T) {
 	})
 }
 
-func cloneMetamorphicContract(t *testing.T, contract shunter.ModuleContract) shunter.ModuleContract {
-	t.Helper()
+func cloneMetamorphicContract(tb testing.TB, contract shunter.ModuleContract) shunter.ModuleContract {
+	tb.Helper()
 	data, err := json.Marshal(contract)
 	if err != nil {
-		t.Fatalf("marshal metamorphic contract clone: %v", err)
+		tb.Fatalf("marshal metamorphic contract clone: %v", err)
 	}
 	var cloned shunter.ModuleContract
 	if err := json.Unmarshal(data, &cloned); err != nil {
-		t.Fatalf("unmarshal metamorphic contract clone: %v", err)
+		tb.Fatalf("unmarshal metamorphic contract clone: %v", err)
 	}
 	return cloned
 }
