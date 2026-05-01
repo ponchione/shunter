@@ -85,5 +85,8 @@ func DecodeRowList(data []byte) ([][]byte, error) {
 		off += int(rowLen)
 		rows = append(rows, row)
 	}
+	if off != len(data) {
+		return nil, fmt.Errorf("%w: rowlist trailing bytes at offset %d", ErrMalformedMessage, off)
+	}
 	return rows, nil
 }

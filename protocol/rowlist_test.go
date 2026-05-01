@@ -130,3 +130,11 @@ func TestRowListDecodeCountExceedsAvailable(t *testing.T) {
 		t.Errorf("got %v, want ErrMalformedMessage", err)
 	}
 }
+
+func TestRowListDecodeRejectsTrailingBytes(t *testing.T) {
+	data := append(EncodeRowList([][]byte{{0x42}}), 0x99)
+	_, err := DecodeRowList(data)
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("got %v, want ErrMalformedMessage", err)
+	}
+}
