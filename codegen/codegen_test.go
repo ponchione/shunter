@@ -153,6 +153,21 @@ func TestGeneratorRejectsContractWithInvalidDeclarationSQL(t *testing.T) {
 	}
 }
 
+func TestTypeScriptGeneratorEscapesModuleMetadataInHeaderComment(t *testing.T) {
+	contract := contractFixture()
+	contract.Module.Name = "chat\nexport const injected = true;"
+	contract.Module.Version = "v1\r\nmore"
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `// Module: chat\nexport const injected = true; v1\r\nmore`)
+	assertNotContains(t, ts, "\nexport const injected = true;")
+}
+
 func TestTypeScriptGeneratorIsDeterministic(t *testing.T) {
 	first, err := Generate(contractFixture(), Options{Language: LanguageTypeScript})
 	if err != nil {
