@@ -45,6 +45,13 @@ func TestIdentityTokenRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncodeServerMessageRejectsInvalidUTF8String(t *testing.T) {
+	_, err := EncodeServerMessage(IdentityToken{Token: string([]byte{0xff})})
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
 func TestSubscribeSingleAppliedRoundTrip(t *testing.T) {
 	rows := EncodeRowList([][]byte{{0x01}, {0x02, 0x03}})
 	in := SubscribeSingleApplied{

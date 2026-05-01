@@ -231,6 +231,10 @@ const (
 // EncodeServerMessage produces the uncompressed wire frame
 // [tag byte] [BSATN body]. Compression envelope wrapping is Story 1.4.
 func EncodeServerMessage(m any) ([]byte, error) {
+	if err := validateServerMessageForEncode(m); err != nil {
+		return nil, err
+	}
+
 	var buf bytes.Buffer
 	switch msg := m.(type) {
 	case IdentityToken:

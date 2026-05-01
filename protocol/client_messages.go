@@ -132,6 +132,10 @@ type UnsubscribeMultiMsg struct {
 
 // EncodeClientMessage produces a wire frame: [tag byte] [BSATN body].
 func EncodeClientMessage(m any) ([]byte, error) {
+	if err := validateClientMessageForEncode(m); err != nil {
+		return nil, err
+	}
+
 	var buf bytes.Buffer
 	switch msg := m.(type) {
 	case SubscribeSingleMsg:
@@ -268,9 +272,7 @@ func decodeCallReducer(body []byte) (CallReducerMsg, error) {
 	}
 	m.Flags = body[off]
 	off++
-	switch m.Flags {
-	case CallReducerFlagsFullUpdate, CallReducerFlagsNoSuccessNotify:
-	default:
+	if !validCallReducerFlags(m.Flags) {
 		return m, fmt.Errorf("%w: invalid CallReducer flags byte %d", ErrMalformedMessage, m.Flags)
 	}
 	if err := requireFullyConsumed(body, off, "CallReducer"); err != nil {

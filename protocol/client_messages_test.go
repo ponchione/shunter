@@ -248,6 +248,28 @@ func TestDecodeClientMessageRejectsInvalidUTF8String(t *testing.T) {
 	}
 }
 
+func TestEncodeClientMessageRejectsInvalidUTF8String(t *testing.T) {
+	_, err := EncodeClientMessage(SubscribeSingleMsg{
+		RequestID:   1,
+		QueryID:     2,
+		QueryString: string([]byte{0xff}),
+	})
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
+func TestEncodeClientMessageRejectsInvalidCallReducerFlags(t *testing.T) {
+	_, err := EncodeClientMessage(CallReducerMsg{
+		ReducerName: "doit",
+		RequestID:   1,
+		Flags:       99,
+	})
+	if !errors.Is(err, ErrMalformedMessage) {
+		t.Fatalf("err = %v, want ErrMalformedMessage", err)
+	}
+}
+
 func TestDecodeClientMessageRejectsTrailingBytes(t *testing.T) {
 	cases := []struct {
 		name string
