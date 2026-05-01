@@ -2,6 +2,9 @@ package auth
 
 import (
 	"errors"
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -232,6 +235,77 @@ func TestValidateJWTPermissionClaims(t *testing.T) {
 	}
 	if got := claims.Permissions; len(got) != 1 || got[0] != "messages:admin" {
 		t.Fatalf("single-string Permissions = %#v, want admin tag", got)
+	}
+}
+
+func TestValidateJWTConcurrentValidationShortSoak(t *testing.T) {
+	const seed = uint64(0xa17c0de)
+	const workers = 8
+	const iterations = 64
+
+	issuer := "issuer"
+	subject := "alice"
+	audience := "shunter-prod"
+	identity := DeriveIdentity(issuer, subject)
+	now := time.Now()
+	cfg := &JWTConfig{SigningKey: testKey, Audiences: []string{audience}, AuthMode: AuthModeStrict}
+	s := mintHS256(t, jwt.MapClaims{
+		"sub":          subject,
+		"iss":          issuer,
+		"aud":          audience,
+		"iat":          now.Unix(),
+		"exp":          now.Add(time.Hour).Unix(),
+		"hex_identity": identity.Hex(),
+		"permissions":  []string{"messages:send", "messages:read"},
+	})
+
+	start := make(chan struct{})
+	failures := make(chan string, workers*iterations)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for iteration := range iterations {
+				opIndex := worker*iterations + iteration
+				if ((uint64(worker)<<8)^uint64(iteration)^seed)&3 == 0 {
+					runtime.Gosched()
+				}
+				claims, err := ValidateJWT(s, cfg)
+				if err != nil {
+					failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=ValidateJWT observed_error=%v expected=nil",
+						seed, opIndex, worker, workers, iterations, err)
+					return
+				}
+				if claims.Subject != subject || claims.Issuer != issuer {
+					failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=ValidateJWT observed_claims=%+v expected_subject=%q expected_issuer=%q",
+						seed, opIndex, worker, workers, iterations, claims, subject, issuer)
+					return
+				}
+				if got := claims.DeriveIdentity(); got != identity {
+					failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=DeriveIdentity observed=%s expected=%s",
+						seed, opIndex, worker, workers, iterations, got.Hex(), identity.Hex())
+					return
+				}
+				if len(claims.Audience) != 1 || claims.Audience[0] != audience {
+					failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=ValidateJWT audience observed=%v expected=[%s]",
+						seed, opIndex, worker, workers, iterations, claims.Audience, audience)
+					return
+				}
+				if len(claims.Permissions) != 2 || claims.Permissions[0] != "messages:send" || claims.Permissions[1] != "messages:read" {
+					failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=ValidateJWT permissions observed=%v expected=[messages:send messages:read]",
+						seed, opIndex, worker, workers, iterations, claims.Permissions)
+					return
+				}
+			}
+		}(worker)
+	}
+	close(start)
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
 	}
 }
 
