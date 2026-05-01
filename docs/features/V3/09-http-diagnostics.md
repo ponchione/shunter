@@ -119,3 +119,48 @@ When complete, update this file with:
 - runtime handler mounting behavior
 - endpoint/status/payload test coverage
 - validation commands run
+
+### Recorded Completion 2026-05-01
+
+Exported handler helpers added:
+
+- `RuntimeDiagnosticsHandler(r *Runtime) http.Handler` serves runtime
+  diagnostics independent of the runtime `MountHTTP` setting.
+- `HostDiagnosticsHandler(h *Host, metrics http.Handler) http.Handler` serves
+  host diagnostics and never serves `/subscribe`.
+
+Runtime mounting behavior:
+
+- `Runtime.HTTPHandler()` continues to serve `/subscribe`.
+- SPEC-007 runtime diagnostics remain absent from `Runtime.HTTPHandler()` when
+  `Config.Observability.Diagnostics.MountHTTP=false`.
+- When `MountHTTP=true`, the runtime handler serves exact-path `/healthz`,
+  `/readyz`, `/debug/shunter/runtime`, and `/metrics` only when a metrics
+  handler is configured.
+
+Endpoint/status/payload coverage:
+
+- Runtime and host health payloads use the SPEC-007 `{status, runtime}` and
+  `{status, host}` wrappers.
+- Runtime and host status classification covers `ok`, `degraded`,
+  `not_ready`, and `failed`, including fatal subsystem flags, closing, closed,
+  nil runtime, nil host, and empty host behavior.
+- JSON endpoints enforce `GET`/`HEAD`, `Allow: GET, HEAD` on unsupported
+  methods, `Content-Type: application/json`, `Cache-Control: no-store`,
+  no-body `HEAD`, exact paths only, and query-string-insensitive routing.
+- Debug endpoints return `Runtime.Describe()` and `Host.Describe()` JSON, with
+  nil runtime debug output carrying a zero runtime description plus failed
+  health.
+- Metrics mounting is opt-in for runtime and host helpers, and delegated
+  metrics panics are recovered at the diagnostics boundary.
+
+Validation:
+
+```sh
+rtk go fmt .
+rtk go test . -run 'Test.*(Diagnostics|Healthz|Readyz|HTTP|Metrics|Host|Runtime|Describe)' -count=1
+rtk go vet .
+rtk go test ./... -count=1
+```
+
+Results: all commands passed.
