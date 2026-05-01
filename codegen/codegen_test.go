@@ -323,6 +323,29 @@ func TestTypeScriptGeneratorDisambiguatesFallbackAndReservedTableIdentifiers(t *
 	assertContains(t, ts, `export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>): Promise<() => void> {`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesRowFieldIdentifierCollisions(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables[0].Columns = []schema.ColumnExport{
+		{Name: "body_text", Type: "string"},
+		{Name: "body-text", Type: "string"},
+		{Name: "class", Type: "uint64"},
+		{Name: "class!", Type: "uint64"},
+	}
+	contract.Schema.Tables[0].Indexes = nil
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export interface MessagesRow {`)
+	assertContains(t, ts, `bodyText: string;`)
+	assertContains(t, ts, `bodyText2: string;`)
+	assertContains(t, ts, `class_: bigint;`)
+	assertContains(t, ts, `class_2: bigint;`)
+}
+
 func TestTypeScriptGeneratorDeclaredHelpersUseNamedCallbacksNotSQL(t *testing.T) {
 	out, err := Generate(contractFixture(), Options{Language: LanguageTypeScript})
 	if err != nil {
