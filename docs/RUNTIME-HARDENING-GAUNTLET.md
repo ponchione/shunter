@@ -74,6 +74,10 @@ Current status:
 - Observability sink-failure coverage now injects logger and metrics panics to
   verify redacted fallback observations, non-recursive recovery, and continued
   runtime operation.
+- Runtime diagnostics HTTP coverage now pins mounted and helper-only
+  `/healthz`, `/readyz`, `/debug/shunter/runtime`, and `/metrics` behavior,
+  including method/status/header rules, redacted health errors, nil runtime
+  payloads, and delegated metrics panic recovery.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit

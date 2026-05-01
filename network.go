@@ -131,6 +131,9 @@ func stringSliceContains(values []string, want string) bool {
 func (r *Runtime) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/subscribe", r.handleSubscribe)
+	if r != nil && r.buildConfig.Observability.Diagnostics.MountHTTP {
+		mux.Handle("/", RuntimeDiagnosticsHandler(r))
+	}
 	return mux
 }
 
