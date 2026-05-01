@@ -101,6 +101,9 @@ Current status:
   also has a bounded fuzz corpus comparing `BuildPreview` and `Build`
   acceptance/export equivalence while checking registry lookup and export
   detachment invariants.
+- Module contract JSON validation now has a bounded public-surface fuzz corpus
+  that accepts canonical exported contracts, rejects malformed inputs, and
+  checks deterministic canonical re-marshalling after JSON round trips.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
@@ -180,7 +183,10 @@ Current status:
   task-board workload under strict auth, with app reducers, private-table
   declared query/view reads, clean restart recovery, rejected duplicate and
   permission-denied operations before and after restart, and fixed seed/op
-  labels comparing observed rows against an independent model.
+  labels comparing observed rows against an independent model. A companion
+  strict-auth protocol path drives the same task-board app through WebSocket
+  reducer calls, declared query/view reads, live declared-view deltas, rejected
+  duplicate mutation, and restart recovery.
 - Remaining campaign work should move to broader crash/recovery, fault
   injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
   coverage unless a new invariant or failing seed appears.
