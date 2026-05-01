@@ -112,6 +112,30 @@ func TestGeneratorRejectsUnusableContractJSON(t *testing.T) {
 	}
 }
 
+func TestGeneratorRejectsCodegenMetadataMismatchWithContext(t *testing.T) {
+	contract := contractFixture()
+	contract.Codegen.ContractFormat = "unexpected.format"
+	contract.Codegen.ContractVersion = shunter.ModuleContractVersion + 1
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+
+	_, err = GenerateFromJSON(data, Options{Language: LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid contract error")
+	}
+	if !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON error = %v, want ErrInvalidContract", err)
+	}
+	if !strings.Contains(err.Error(), `codegen.contract_format = "unexpected.format"`) {
+		t.Fatalf("GenerateFromJSON error = %v, want codegen format context", err)
+	}
+	if !strings.Contains(err.Error(), "codegen.contract_version") {
+		t.Fatalf("GenerateFromJSON error = %v, want codegen version context", err)
+	}
+}
+
 func TestGeneratorRejectsContractWithInvalidDeclarationSQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Queries[0].SQL = "SELECT * FROM missing"
