@@ -202,6 +202,44 @@ func TestGenerateFileRejectsUnsupportedLanguageBeforeReadingContract(t *testing.
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateFileSemanticInvalidContractLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=workflow-codegen-semantic-invalid-contract-output-preservation"
+	dir := t.TempDir()
+	invalidContract := workflowContractFixture()
+	invalidContract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: shunter.MigrationSurfaceQuery,
+		Name:    "history",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibility("maybe"),
+		},
+	}}
+	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for semantic-invalid contract", trace)
+	}
+	if !errors.Is(err, codegen.ErrInvalidContract) {
+		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
+	}
+	if !strings.Contains(err.Error(), "migrations.query.history.compatibility") {
+		t.Fatalf("%s GenerateFile error = %v, want migration metadata context", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s semantic-invalid contract mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFilePreservesExistingOutputPermissionsAcrossAtomicRewrite(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bit preservation is POSIX-specific")
