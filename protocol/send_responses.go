@@ -8,7 +8,7 @@ import "github.com/ponchione/shunter/types"
 // subscription.Manager.querySets is the single source of truth, and
 // §9.4 ordering is preserved by the synchronous Reply closure invoked
 // inside the executor main-loop goroutine plus per-connection
-// OutboundCh FIFO. See docs/adr/2026-04-19-subscription-admission-model.md.
+// OutboundCh FIFO. See docs/shunter-design-decisions.md.
 func SendSubscribeSingleApplied(sender ClientSender, conn *Conn, msg *SubscribeSingleApplied) error {
 	return sender.Send(conn.ID, *msg)
 }

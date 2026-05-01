@@ -14,9 +14,8 @@ import (
 // key back out of the materialized row; the fix delegates endpoint
 // handling to BTreeIndex.SeekBounds so string / bytes / float
 // exclusive-bound predicates hit the binary-search start point.
-// Covers the Bound matrix that story-7.1-committed-read-view.md calls
-// out as "inclusive/exclusive control for subscription range predicates"
-// and the read-view aliasing closure for the collect-at-boundary pattern.
+// Covers inclusive/exclusive control for subscription range predicates and the
+// read-view aliasing closure for the collect-at-boundary pattern.
 
 func indexRangeSetup(t *testing.T, n int) (*CommittedState, []types.RowID) {
 	t.Helper()

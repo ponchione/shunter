@@ -1,6 +1,6 @@
 # SPEC-006 — Schema Definition
 
-**Status:** Draft  
+**Status:** Baseline implementation contract; verify against live code  
 **Depends on:** SPEC-001 (`ValueKind`, `TableSchema`, column type system), SPEC-002 (`SnapshotSchema` and `schema_version` comparison at recovery — see §6.1), SPEC-003 (`ReducerHandler`, `ReducerContext` canonical declarations in `types/reducer.go`; schema re-exports for builder ergonomics), SPEC-005 (`ConnectionID` consumed by the `sys_clients` system table definition)  
 **Depended on by:** SPEC-001 (store consumes `SchemaRegistry`), SPEC-002 (snapshot stores schema, compares `SchemaRegistry.Version()`), SPEC-003 (executor registers reducers / looks up handlers), SPEC-004 (`SchemaLookup`, `IndexResolver`), SPEC-005 (`SchemaLookup` for predicate validation + subscription registration)
 
@@ -305,7 +305,7 @@ type EngineOptions struct {
     ExecutorQueueCapacity   int    // 0 = default from SPEC-003
     DurabilityQueueCapacity int    // 0 = default from SPEC-002
     EnableProtocol          bool   // false = build core engine only
-    StartupSnapshotSchema   *SnapshotSchema // optional schema-compat preflight input for Start(); see Story 5.6
+    StartupSnapshotSchema   *SnapshotSchema // optional schema-compat preflight input for Start()
 }
 
 // Build validates all registrations and constructs the Engine.
@@ -316,7 +316,7 @@ func (b *Builder) Build(opts EngineOptions) (*Engine, error)
 
 `Build` performs all validation synchronously before returning. If `Build` returns nil error, the engine is structurally valid and has an immutable `SchemaRegistry`, but it has not yet opened files, recovered state, started goroutines, or accepted network traffic.
 
-`schema.Engine.Start(ctx)` is intentionally narrow in SPEC-006 v1: it performs the startup schema-compatibility preflight from §6 / Story 5.6 against `EngineOptions.StartupSnapshotSchema` and returns `ErrSchemaMismatch` if the frozen registry and recovery-time snapshot schema disagree. It is not the app-facing runtime owner. Full runtime bring-up (commit-log open/recovery, store construction, executor/durability start, protocol listen) is owned by the root `shunter.Runtime`, which consumes this schema engine and the dependent subsystems.
+`schema.Engine.Start(ctx)` is intentionally narrow in SPEC-006 v1: it performs the startup schema-compatibility preflight from §6 against `EngineOptions.StartupSnapshotSchema` and returns `ErrSchemaMismatch` if the frozen registry and recovery-time snapshot schema disagree. It is not the app-facing runtime owner. Full runtime bring-up (commit-log open/recovery, store construction, executor/durability start, protocol listen) is owned by the root `shunter.Runtime`, which consumes this schema engine and the dependent subsystems.
 
 ### 5.1 Freeze Semantics
 
@@ -716,9 +716,14 @@ How `schema.json` is produced: the application binary exports its schema via a `
 | `ErrColumnNotFound` | Column reference resolves to a name not present on the named table |
 | `ErrNullableColumn` | Reserved for the v1 Nullable-rejection rule (§9); not yet producible in live code — see Session 12+ drift note below |
 
-`ErrColumnNotFound` is the canonical schema-layer sentinel for column-name lookup misses against the `SchemaRegistry`. SPEC-001 and SPEC-004 re-export or reference it (SPEC-001 §9, SPEC-004 EPICS Epic 1); the declaration here is authoritative. Produced anywhere `SchemaRegistry.TableByName(...)` + column-name lookup fails: SPEC-004 predicate validation (Story 1.2), SPEC-004 subscription registration (Story 4.2), SPEC-001 integrity checks that reach the schema through the registry.
+`ErrColumnNotFound` is the canonical schema-layer sentinel for column-name
+lookup misses against the `SchemaRegistry`. SPEC-001 and SPEC-004 re-export or
+reference it; the declaration here is authoritative. It is produced anywhere
+`SchemaRegistry.TableByName(...)` plus column-name lookup fails, including
+SPEC-004 predicate validation, SPEC-004 subscription registration, and
+SPEC-001 integrity checks that reach the schema through the registry.
 
-`ErrNullableColumn` is the reserved sentinel for the v1 Nullable-rejection rule. Once the builder surface is extended to accept a `Nullable` input, `Build()` MUST return it when any registered column has `Nullable == true` (see §9 column-level validation). In v1 the builder API cannot set `Nullable = true`, so the sentinel is declared for forward stability but is not yet produced by live code. Recovery-layer rejection of snapshots with `nullable = 1` in the per-column trailer flows indirectly today: because registry `Nullable` is always `false` in v1 (§9), the per-column equality check in SPEC-002 §6.1 step 4b / Story 6.2 always fires with `ErrSchemaMismatch` when a snapshot carries `nullable = 1`. The recovery layer returns `ErrSchemaMismatch` with a descriptive detail string; no sentinel is attached to the cause chain. v1 does not silently coerce `Nullable = true` to `false` — the long-term contract is that callers see an error at Build time.
+`ErrNullableColumn` is the reserved sentinel for the v1 Nullable-rejection rule. Once the builder surface is extended to accept a `Nullable` input, `Build()` MUST return it when any registered column has `Nullable == true` (see §9 column-level validation). In v1 the builder API cannot set `Nullable = true`, so the sentinel is declared for forward stability but is not yet produced by live code. Recovery-layer rejection of snapshots with `nullable = 1` in the per-column trailer flows indirectly today: because registry `Nullable` is always `false` in v1 (§9), the per-column equality check in SPEC-002 §6.1 step 4b always fires with `ErrSchemaMismatch` when a snapshot carries `nullable = 1`. The recovery layer returns `ErrSchemaMismatch` with a descriptive detail string; no sentinel is attached to the cause chain. v1 does not silently coerce `Nullable = true` to `false` — the long-term contract is that callers see an error at Build time.
 
 ---
 

@@ -3,16 +3,13 @@
 Status: design baseline; initial v1 hosted-runtime layer now exists
 Scope: additive design document describing the coherent layer above the Shunter engine/kernel so real applications can use Shunter through one hosted runtime model instead of hand-wiring the subsystem graph each time.
 
-This document does not change the existing six core specs. It describes the practical runtime/application surface that would make the current engine actually usable across multiple projects.
+This document does not change the numbered core specs. It describes the practical runtime/application surface that makes the current engine usable across projects.
 
 Companion framing:
-- `BRAIN-EXTENSIONS-LLM-HARNESS.md` describes one important app/product layer that could be built on top of Shunter.
-- `GENERAL-PURPOSE-APP-PLATFORM-NOTES.md` describes the broader reusable platform/product surface Shunter may eventually want.
 - `hosted-runtime-v1-contract.md` captures the concrete v1 public/runtime contract.
 - `hosted-runtime-v1.5-follow-ons.md` captures near-follow-on usability/platform work.
 - `hosted-runtime-v2-directions.md` parks later structural/runtime evolution.
-- `../hosted-runtime-implementation-roadmap.md` turns the hosted-runtime direction into an implementation-facing roadmap.
-- This document sits between the product/platform notes and the core engine specs: it describes the missing runtime/application layer that turns the kernel into something applications define against and clients connect to.
+- This document sits above the core engine specs: it describes the runtime/application layer that turns the kernel into something applications define against and clients connect to.
 
 Owner-operator framing:
 - This document assumes Shunter is primarily being built for the repo owner’s own Go projects.
@@ -44,8 +41,6 @@ It is continued evolution of the runtime/application surface that sits above the
 
 In plain terms:
 - the kernel already explains how Shunter works internally
-- the brain doc explains one thing Shunter could power
-- the general-purpose platform doc explains how Shunter could grow broadly
 - this doc explains how applications actually use Shunter through one hosted runtime shape
 
 ---
@@ -92,9 +87,7 @@ That means Shunter stays trapped in an “engine pieces exist” state instead o
 - a real app foundation
 - a real thing the owner can use across projects
 
-### 2.3 Why this is not the same as the brain doc or platform doc
-
-This document is narrower than `GENERAL-PURPOSE-APP-PLATFORM-NOTES.md` and more general than `BRAIN-EXTENSIONS-LLM-HARNESS.md`.
+### 2.3 What this document is not
 
 It is not about:
 - document graphs

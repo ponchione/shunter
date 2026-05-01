@@ -1,6 +1,6 @@
 # SPEC-001 — In-Memory Relational Store
 
-**Status:** Draft  
+**Status:** Baseline implementation contract; verify against live code  
 **Depends on:** SPEC-006 (Schema Definition) for type and table registration APIs; SPEC-003 (Transaction Executor) for the shared `TxID` type consumed by `Commit` and embedded in `Changeset`  
 **Depended on by:** SPEC-003 (Transaction Executor), SPEC-004 (Subscription Evaluator)
 
@@ -685,7 +685,7 @@ On insert, if the row's sequence column is zero, it is replaced with the next se
 | `ErrTableNotFound` | tableID references unknown table |
 | `ErrColumnNotFound` | re-exported from SPEC-006 §13 — column name lookup miss against the `SchemaRegistry`; SPEC-001 re-exports so store-layer integrity paths can construct and match the sentinel without importing SPEC-006 directly |
 | `ErrTypeMismatch` | column value has wrong type for column schema |
-| `ErrRowShapeMismatch` | row column count does not match `TableSchema.Columns`; raised by Story 2.3 `ValidateRow` |
+| `ErrRowShapeMismatch` | row column count does not match `TableSchema.Columns`; raised by row validation |
 | `ErrPrimaryKeyViolation` | insert would duplicate existing primary key |
 | `ErrUniqueConstraintViolation` | insert would duplicate unique index key (non-PK) |
 | `ErrDuplicateRow` | exact row already exists (set-semantics check, no PK) |
@@ -767,7 +767,7 @@ For snapshot/recovery coupling, the commit log may rely on the store exposing en
 - per-table `nextID`
 - per-table sequence state (`Sequence.next`) for any auto-increment column
 
-Bulk-restore surface (consumed by SPEC-002 Story 6.4 recovery; declared in SPEC-001 Story 8.3):
+Bulk-restore surface consumed by SPEC-002 recovery:
 
 ```go
 func (cs *CommittedState) RegisterTable(schema *TableSchema) error
@@ -776,7 +776,7 @@ func (t *Table) SetNextID(id uint64)
 func (t *Table) SetSequenceValue(val uint64)
 ```
 
-Recovery uses `RegisterTable` once per snapshot table, then loops `InsertRow` over snapshot rows (each call also rebuilds index entries via Story 4.2 `insertIntoIndexes`), then calls `SetNextID` and `SetSequenceValue` from the snapshot's allocation/sequence sections. No dedicated `RestoreRow` or `RebuildIndexes` methods exist — `InsertRow` is the single entry point.
+Recovery uses `RegisterTable` once per snapshot table, then loops `InsertRow` over snapshot rows (each call also rebuilds index entries through the table index-maintenance path), then calls `SetNextID` and `SetSequenceValue` from the snapshot's allocation/sequence sections. No dedicated `RestoreRow` or `RebuildIndexes` methods exist — `InsertRow` is the single entry point.
 
 ---
 
@@ -786,7 +786,7 @@ SpacetimeDB is useful design evidence for storage choices, but Shunter owns its 
 
 ### 12.1 NaN rejected at construction vs total-ordering via `decorum::Total`
 
-SpacetimeDB admits NaN via a total-ordering wrapper (`decorum::Total<f32>` / `decorum::Total<f64>`), assigning it a fixed ordinal position so `AlgebraicValue` derives `Eq`/`Ord`/`Hash` uniformly. Shunter v1 rejects NaN at `NewFloat32` / `NewFloat64` (§2.1 + Story 1.1), returning `ErrInvalidFloat`.
+SpacetimeDB admits NaN via a total-ordering wrapper (`decorum::Total<f32>` / `decorum::Total<f64>`), assigning it a fixed ordinal position so `AlgebraicValue` derives `Eq`/`Ord`/`Hash` uniformly. Shunter v1 rejects NaN at `NewFloat32` / `NewFloat64` (§2.1), returning `ErrInvalidFloat`.
 
 Rationale: v1 wants bit-by-bit determinism without importing a decorum-style wrapper. Legitimate NaN-producing payloads (sensor telemetry, ML outputs) must be sanitized at the boundary. Revisit if workloads demand stored NaN.
 
@@ -812,7 +812,7 @@ Rationale: the store keeps the more general index representation because compoun
 
 ### 12.5 Replay constraint violations are fatal vs SpacetimeDB silent skip
 
-`ApplyChangeset` treats any constraint violation during recovery as fatal (§5.8 + Story 8.2). SpacetimeDB's `replay_insert` silently ignores duplicates for system-meta rows and is generally tolerant during replay.
+`ApplyChangeset` treats any constraint violation during recovery as fatal (§5.8). SpacetimeDB's `replay_insert` silently ignores duplicates for system-meta rows and is generally tolerant during replay.
 
 Rationale: fail-fast during recovery surfaces corrupt-log / schema-mismatch conditions immediately rather than masking them. Paired with §2.7 (ApplyChangeset is not idempotent) and SPEC-002's exactly-once replay guarantee, this is the intended shape. The cost is that idempotent re-replay after a crash-during-replay aborts rather than resumes.
 

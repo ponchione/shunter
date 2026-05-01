@@ -1,6 +1,6 @@
 # Hosted runtime v1.5 follow-ons
 
-Status: draft
+Status: baseline follow-on contract; initial implementation has landed
 Scope: important near-follow-on runtime/platform features that should land after the core v1 hosted runtime is alive.
 
 This document covers the strong v1.5 additions already identified in the hosted-runtime decisions.
@@ -15,8 +15,6 @@ Current framing:
 Related docs:
 - `docs/specs/hosted-runtime-v1-contract.md` defines the base hosted-runtime contract v1.5 extends
 - `docs/specs/hosted-runtime-v2-directions.md` parks larger structural/runtime evolution
-- `docs/hosted-runtime-implementation-roadmap.md` breaks v1 and v1.5 into implementation epics
-- `docs/features/V1.5/` breaks this follow-on contract into implementation slices
 
 ---
 

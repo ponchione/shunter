@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// OI-010 pins for StateView.SeekIndexBounds (SPEC-001 §5.4, Story 5.3).
+// OI-010 pins for StateView.SeekIndexBounds (SPEC-001 §5.4).
 // Committed rows queried via BTreeIndex.SeekBounds and filtered through
 // tx.deletes; tx-local inserts linear-scanned with the same Bound
 // semantics as §4.4.

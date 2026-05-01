@@ -5,14 +5,16 @@ Read `RTK.md` first for command rules.
 ## What to Use
 
 - `README.md` = product and repo orientation
-- `docs/decomposition/EXECUTION-ORDER.md` = implementation sequencing and dependency gates
-- `docs/decomposition/` = executable epic/story breakdown
+- `docs/README.md` = current docs guide
+- `docs/specs/*/SPEC-*.md` = numbered subsystem contracts
+- `docs/shunter-design-decisions.md` = current implementation-facing decisions
 - `reference/SpacetimeDB/` = read-only research input only
 
 ## Rules
 
 - Keep the clean-room boundary: do not copy or port Rust code from `reference/SpacetimeDB/`.
-- Treat `docs/decomposition/EXECUTION-ORDER.md` as the sequencing authority when choosing what lands next.
+- Treat live code and tests as the first authority for current implementation
+  state; use the numbered specs for contract context.
 - Keep the repo lean. Do not invent extra structure before the work actually needs it.
 - When editing docs, keep them tight and operational.
 - For any shell or git command, follow `RTK.md`: use RTK and prefer RTK-native subcommands when available; otherwise prefix the underlying command with `rtk`.

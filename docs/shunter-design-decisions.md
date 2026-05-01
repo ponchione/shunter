@@ -2,7 +2,8 @@
 
 This file keeps current implementation-facing Shunter design decisions that
 are still cited by code or tests. It is not a history log. For active status,
-prefer live code, tests, and the feature plan for the slice being touched.
+prefer live code, tests, and the narrow spec section for the surface being
+touched.
 
 Reference paths are grounding only. Do not copy or port source from
 `reference/SpacetimeDB/`.
@@ -245,3 +246,136 @@ Authoritative pins:
 - `executor/scheduler_firing_test.go`
 - `executor/scheduler_worker_test.go`
 - `executor/sys_scheduled_test.go`
+
+## Protocol Executor Seam
+
+Current contract:
+
+- `protocol` owns a narrow `ExecutorInbox` interface for lifecycle,
+  subscription, reducer-call, and disconnect handoff.
+- `protocol` must not import `executor`; host/runtime wiring translates
+  protocol-owned request structs into executor commands.
+- The concrete adapter lives with executor/runtime wiring, currently
+  `executor.ProtocolInboxAdapter`, because it depends on executor command
+  vocabulary.
+- Protocol tests should use fakes at this seam instead of starting the full
+  executor unless the test is intentionally integration-level.
+
+Rationale:
+
+- The protocol package owns wire metadata such as request IDs, query IDs,
+  connection IDs, and protocol response closures.
+- The executor package owns transaction ordering, lifecycle reducers,
+  subscription registration, and reducer execution.
+- Keeping the seam narrow prevents accidental protocol-to-executor dependency
+  cycles and keeps each package testable.
+
+Authoritative pins:
+
+- `protocol/lifecycle.go`
+- `protocol/upgrade.go`
+- `protocol/dispatch.go`
+- `executor/protocol_inbox_adapter.go`
+- `executor/protocol_inbox_adapter_test.go`
+
+## WebSocket Transport Library
+
+Current contract:
+
+- Shunter uses `github.com/coder/websocket` for WebSocket transport.
+- The dependency is replaced in `go.mod` with the Shunter fork
+  `github.com/ponchione/websocket`.
+- Protocol code relies on the context-first read/write API.
+- App-level compression remains Shunter's protocol-envelope concern; per-frame
+  WebSocket compression is not the default protocol shape.
+
+Rationale:
+
+- Context-aware transport operations fit Shunter's runtime/executor lifecycle.
+- A smaller transport surface keeps protocol configuration narrow while the
+  hosted runtime surface is still settling.
+
+Authoritative pins:
+
+- `go.mod`
+- `protocol/upgrade.go`
+- `protocol/conn.go`
+- `protocol/compression_wire_test.go`
+- `protocol/subprotocol_contract_test.go`
+
+## Subscription Admission
+
+Current contract:
+
+- `subscription.Manager` is the single source of truth for live subscription
+  sets, keyed by connection and wire query ID.
+- `protocol` has no separate `SubscriptionTracker` state machine.
+- Subscribe and unsubscribe executor commands carry a protocol-owned `Reply`
+  closure.
+- The executor invokes the `Reply` closure synchronously in the executor
+  command path after manager admission and before returning to later commands.
+- The `Reply` closure enqueues Applied or Error frames onto the connection's
+  outbound FIFO. Later fan-out updates for the same connection enqueue after
+  the Applied frame.
+- Fan-out delivery does not perform a second wire-ID admission check. It relies
+  on manager state, connection lookup, and sender backpressure/closed-connection
+  errors.
+- Disconnect first removes manager-owned subscriptions for the connection, then
+  runs `OnDisconnect`.
+
+Observable guarantees:
+
+- `SubscribeApplied(query_id)` is enqueued before any later transaction update
+  that references the same wire query ID on that connection.
+- Disconnect between admission and outbound flush discards the result through
+  the normal closed-connection send path.
+- Duplicate wire query IDs are rejected by the subscription manager.
+
+Authoritative pins:
+
+- `protocol/admission_ordering_test.go`
+- `protocol/send_responses.go`
+- `protocol/send_txupdate.go`
+- `protocol/disconnect.go`
+- `executor/protocol_inbox_adapter.go`
+- `subscription/manager.go`
+
+## Read Authorization
+
+Current contract:
+
+- External raw SQL reads are governed by table read policy.
+- Table read policy is default-private unless a table is explicitly public or
+  permissioned.
+- Unauthorized raw SQL table references are hidden during schema lookup and
+  surface as the existing unresolved/private-table SQL errors.
+- Raw SQL authorization applies to every referenced table, including joined or
+  filtered tables that are not projected.
+- Declared queries and declared views are named runtime-owned read surfaces.
+  Generated declaration helpers call declared-read entry points by name rather
+  than sending equivalent raw SQL.
+- Declared read permission checks are separate from base-table raw SQL policy.
+  This lets a module expose a safe declared read over private tables.
+- Row-level visibility filters are applied before query evaluation can leak
+  rows through joins, initial subscription state, or subscription deltas.
+- `AllowAllPermissions` is the explicit admin/dev bypass for table policy,
+  declared-read permissions, and row-level visibility.
+
+Rationale:
+
+- Declaration permissions alone are not sufficient because a client can send
+  raw SQL equivalent to a declaration.
+- Post-filtering only projected rows is not sufficient because joins can reveal
+  whether hidden rows exist.
+- Raw SQL, declared reads, and reducer/internal reads are distinct surfaces and
+  should not share one overloaded permission field.
+
+Authoritative pins:
+
+- `schema/read_policy.go`
+- `declared_read.go`
+- `declared_read_catalog.go`
+- `visibility_filters.go`
+- `protocol/auth_read_admission_test.go`
+- `protocol/visibility_expansion_test.go`
+- `read_auth_gauntlet_test.go`

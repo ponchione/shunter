@@ -1,6 +1,6 @@
 # SPEC-002 — Commit Log
 
-**Status:** Draft  
+**Status:** Baseline implementation contract; verify against live code  
 **Depends on:** SPEC-001 (In-Memory Store) for `Changeset` and `ProductValue` types; SPEC-003 (Transaction Executor) for the `TxID` contract (TxID flows through record framing and `DurabilityHandle.EnqueueCommitted`); SPEC-006 (Schema Definition) for `SchemaRegistry` + `SchemaRegistry.Version()` consumed by snapshot schema compare and recovery  
 **Depended on by:** SPEC-003 (Transaction Executor) calls `DurabilityHandle`; recovery reconstructs state consumed by SPEC-001
 
@@ -355,7 +355,7 @@ Snapshot file (snapshots/{tx_id}/snapshot):
   next_id_count      : uint32 LE
   [ for each table with internal RowID allocation state, sorted by table_id ascending:
       table_id       : uint32 LE
-      next_id        : uint64 LE   — value of Table.NextID() at snapshot time (SPEC-001 Story 8.3)
+      next_id        : uint64 LE   — value of Table.NextID() at snapshot time
   ]
 
   table_count        : uint32 LE
@@ -371,7 +371,7 @@ Snapshot file (snapshots/{tx_id}/snapshot):
 
 Notes:
 - Internal `RowID` values are not stored. SPEC-001 defines them as non-stable internal identifiers; recovery rebuilds them.
-- Per-table `next_id` (RowID allocation cursor) is serialized between sequences and tables so post-recovery `Table.AllocRowID()` resumes without collision. Source: SPEC-001 Story 8.3 `Table.NextID()` / `Table.SetNextID()` accessors. Distinct from the auto-increment sequence section above (which serializes user-visible auto-increment values via SPEC-001 Story 8.3 `Table.SequenceValue()` / `Table.SetSequenceValue()`).
+- Per-table `next_id` (RowID allocation cursor) is serialized between sequences and tables so post-recovery `Table.AllocRowID()` resumes without collision. This is distinct from the auto-increment sequence section above, which serializes user-visible auto-increment values via `Table.SequenceValue()` / `Table.SetSequenceValue()`.
 - Indexes are rebuilt from rows after recovery; they are not serialized into the snapshot.
 - Deterministic ordering is required so that repeated snapshots of the same logical state produce byte-stable contents aside from the outer hash field.
 
@@ -460,7 +460,7 @@ v1 policy: the **recommended default is `SnapshotInterval = 0`** (no automatic i
 
 **When to override:** Applications that require bounded recovery time and cannot guarantee graceful shutdown (e.g., processes that may be killed abruptly) may set `SnapshotInterval > 0` to trigger periodic snapshots, accepting the commit-latency cost. When using periodic mode, the executor MUST quiesce (stop accepting new writes) for the full duration of snapshot creation.
 
-**Graceful-shutdown orchestration owner:** SPEC-002 exposes `CreateSnapshot` and `DurabilityHandle.Close` as the two shutdown-relevant calls, but the engine-level ordering — quiesce executor → flush in-flight commits to durable → final `CreateSnapshot` → `DurabilityHandle.Close` — is owned by SPEC-003 (Transaction Executor shutdown sequence; tracked via SPEC-003 audit §2.5 and Session 9). Story 5.2 implements `CreateSnapshot` correctness; sequencing it relative to executor lifecycle is not a SPEC-002 concern.
+**Graceful-shutdown orchestration owner:** SPEC-002 exposes `CreateSnapshot` and `DurabilityHandle.Close` as the two shutdown-relevant calls, but the engine-level ordering — quiesce executor → flush in-flight commits to durable → final `CreateSnapshot` → `DurabilityHandle.Close` — is owned by SPEC-003. `CreateSnapshot` correctness is a SPEC-002 concern; sequencing it relative to executor lifecycle is not.
 
 **Async snapshot path:** Deferred to v2. Requires explicit copy-on-write or epoch-based read-view semantics so commits can continue during serialization.
 
@@ -496,7 +496,7 @@ func OpenAndRecover(dir string, schema SchemaRegistry) (*CommittedState, TxID, e
 6. **Replay log from `snapshot_tx_id + 1`:**
    a. Skip records with `tx_id <= snapshot_tx_id`
    b. Decode `Changeset` from payload and stamp `cs.TxID = record.tx_id` (payload does not carry TxID; see §3.3)
-   c. Call `store.ApplyChangeset(committed, cs)` (SPEC-001 §5.8). Fatal error if it returns non-nil. `ApplyChangeset` itself advances each table's `Sequence.next` to `max(current, observed+1)` for any auto-increment column value seen on insert (SPEC-001 Story 8.2 algorithm step 2c) — recovery does not need a separate post-replay sweep. Snapshot-restored sequence values are reconciled against replay-advanced values via `SetSequenceValue`'s `max(current, provided)` rule (SPEC-001 Story 8.3).
+   c. Call `store.ApplyChangeset(committed, cs)` (SPEC-001 §5.8). Fatal error if it returns non-nil. `ApplyChangeset` itself advances each table's `Sequence.next` to `max(current, observed+1)` for any auto-increment column value seen on insert — recovery does not need a separate post-replay sweep. Snapshot-restored sequence values are reconciled against replay-advanced values via `SetSequenceValue`'s `max(current, provided)` rule.
    d. Track `max_applied_tx_id`
 7. **Return** `(committed, max_applied_tx_id, nil)`. The executor resumes issuing TX IDs from `max_applied_tx_id + 1`.
 
@@ -525,15 +525,15 @@ Schema evolution is out of scope for v1. Document this clearly.
 
 ### 6.4 Truncated Record and Resume Handling
 
-A truncated tail record (partial write at crash time) is reported by the segment reader as `ErrTruncatedRecord` (§9, Story 2.4) — a sentinel distinct from `ErrChecksumMismatch`. Recovery uses all prior valid records and treats the first `ErrTruncatedRecord` on the active tail segment as the replay horizon. A `ErrChecksumMismatch` in a sealed (non-tail) segment is fatal per §6.5.
+A truncated tail record (partial write at crash time) is reported by the segment reader as `ErrTruncatedRecord` (§9) — a sentinel distinct from `ErrChecksumMismatch`. Recovery uses all prior valid records and treats the first `ErrTruncatedRecord` on the active tail segment as the replay horizon. A `ErrChecksumMismatch` in a sealed (non-tail) segment is fatal per §6.5.
 
-Resume rules — recovery classifies the active tail segment into one of three append modes (`AppendMode` enum, declared in Story 6.1; consumed by Story 4.3 segment rotation):
+Resume rules — recovery classifies the active tail segment into one of three append modes:
 
 - `AppendInPlace` — clean tail (every record valid through end of file). Durability worker opens the tail file for append starting after the last valid record. The implementation MUST locate the last valid contiguous record before resuming writes.
 - `AppendByFreshNextSegment` — damaged tail with a valid prefix (at least one record valid, then `ErrTruncatedRecord` or trailing garbage). Durability worker MUST create a fresh next segment starting at `last_valid_tx_id + 1` rather than appending into the damaged file. The implementation MUST NOT assume it can safely overwrite arbitrary trailing bytes in-place.
 - `AppendForbidden` — first record in the active tail segment is corrupt with no valid prefix. Opening for append is a hard recovery error until operator intervention or explicit reset.
 
-Recovery (Story 6.4) computes the mode via `ScanSegments` (Story 6.1) and hands it to the durability worker startup (Story 4.3) as part of the `RecoveryResumePlan`. The Epic 6 → Epic 4 hand-off is normative.
+Recovery computes the mode via `ScanSegments` and hands it to durability worker startup as part of the `RecoveryResumePlan`.
 
 ### 6.5 History Gap Handling
 
@@ -560,7 +560,7 @@ After a snapshot is successfully created at `snapshot_tx_id`:
 
 **Safety:** Do not delete segments until the snapshot is fully written and fsynced.
 
-**Snapshot retention (deferred v1):** This spec defines no automatic snapshot retention policy. After a snapshot lands and compaction sweeps superseded segments, the snapshot directory itself is never deleted by the engine. Operators are expected to prune `snapshots/{tx_id}/` directories out-of-band. Consequence: with `SnapshotInterval > 0`, snapshot directories accumulate without bound, and each is a full copy (no object dedup in v1). Retention policy choice (count-based / age-based / size-based) is tracked in Open Questions "Multiple snapshot retention"; a Story under Epic 7 will own it once the policy is chosen. Until then, leaving snapshots in place is the documented v1 behavior.
+**Snapshot retention (deferred v1):** This spec defines no automatic snapshot retention policy. After a snapshot lands and compaction sweeps superseded segments, the snapshot directory itself is never deleted by the engine. Operators are expected to prune `snapshots/{tx_id}/` directories out-of-band. Consequence: with `SnapshotInterval > 0`, snapshot directories accumulate without bound, and each is a full copy (no object dedup in v1). Retention policy choice (count-based / age-based / size-based) remains an open question. Until then, leaving snapshots in place is the documented v1 behavior.
 
 ---
 
@@ -624,7 +624,7 @@ type CommitLogOptions struct {
 | `ErrBadFlags` | Record flags are non-zero in v1 |
 | `ErrUnknownRecordType` | Record type is not defined in this format version |
 | `ErrChecksumMismatch` | Record CRC32C does not match |
-| `ErrTruncatedRecord` | Partial record at segment tail (incomplete header, payload, or CRC). Distinguishes recoverable truncated tail from fatal mid-segment corruption. Raised by Story 2.4 SegmentReader.Next; consumed by Story 6.1 ScanSegments. |
+| `ErrTruncatedRecord` | Partial record at segment tail (incomplete header, payload, or CRC). Distinguishes recoverable truncated tail from fatal mid-segment corruption. |
 | `ErrRecordTooLarge` | `data_len` exceeds `MaxRecordPayloadBytes` |
 | `ErrRowTooLarge` | `row_len` exceeds `MaxRowBytes` |
 | `ErrUnknownValueTag` | Row encoding contains an unknown tag |
@@ -633,7 +633,7 @@ type CommitLogOptions struct {
 | `ErrRowLengthMismatch` | Decoder under- or over-consumes bytes within a row frame |
 | `ErrInvalidUTF8` | Encoded string value is not valid UTF-8 |
 | `ErrSnapshotIncomplete` | Snapshot directory has a `.lock` file |
-| `ErrSnapshotInProgress` | `CreateSnapshot` invoked while another snapshot is already running (Story 5.2 / Story 5.4 exclusivity). |
+| `ErrSnapshotInProgress` | `CreateSnapshot` invoked while another snapshot is already running. |
 | `ErrSnapshotHashMismatch` | Snapshot Blake3 hash does not match content |
 | `ErrSchemaMismatch` | Snapshot schema differs from registered schema |
 | `ErrHistoryGap` | Recovery found a missing/overlapping/out-of-order TX range |
@@ -671,7 +671,7 @@ SpacetimeDB is useful design evidence for durability choices, but Shunter owns i
 
 ### 12.1 No offset index file; recovery performs a linear scan
 
-SpacetimeDB maintains a per-segment offset index (`tx_offset → byte_pos`) so replay can seek in O(log) instead of scanning. Shunter has no offset index. Story 6.3 `ReplayLog` skips records by decoding framing and discarding when `tx_id ≤ fromTxID`; cost is O(total records since log origin), not O(records after snapshot).
+SpacetimeDB maintains a per-segment offset index (`tx_offset → byte_pos`) so replay can seek in O(log) instead of scanning. Shunter has no offset index. `ReplayLog` skips records by decoding framing and discarding when `tx_id ≤ fromTxID`; cost is O(total records since log origin), not O(records after snapshot).
 
 Rationale: the recovery-time target in §10 (`< 5 s` for snapshot + 10k log records) is achievable without an index, and v1 prioritizes a single canonical replay path over a second indexed path that would have to be kept in sync. Revisit if recovery latency shows up as a bottleneck under long-history workloads with infrequent snapshots — in that case, an offset-index sidecar file (one per segment) is the cheapest fix.
 
@@ -683,7 +683,7 @@ Rationale: per-record framing overhead (18 bytes) is small relative to per-trans
 
 ### 12.3 Replay strictness — any `ApplyChangeset` error is fatal
 
-Story 6.3 (`ReplayLog`) treats any `ApplyChangeset` error during replay as fatal. SPEC-002 §6.5 is symmetric for log-history conditions (gaps, overlaps, out-of-order). SpacetimeDB's `replay_insert` tolerates idempotent duplicates for system-meta rows.
+`ReplayLog` treats any `ApplyChangeset` error during replay as fatal. SPEC-002 §6.5 is symmetric for log-history conditions (gaps, overlaps, out-of-order). SpacetimeDB's `replay_insert` tolerates idempotent duplicates for system-meta rows.
 
 Rationale: fail-fast during recovery surfaces corrupt-log / schema-mismatch conditions immediately rather than masking them. Shunter's system tables are ordinary runtime tables and do not require duplicate-tolerant replay. The cost is that idempotent re-replay after a crash-during-replay will abort; paired with SPEC-001 §2.7 (`ApplyChangeset` is not idempotent) and SPEC-002's exactly-once replay guarantee, this is the intended shape.
 
@@ -695,7 +695,7 @@ Rationale: keeping `0` as a "no transaction" sentinel makes uninitialized reads 
 
 ### 12.5 Single auto-increment sequence per table (implicit)
 
-§5.2 sequences section stores one `(table_id, next_id)` pair per table; Story 5.3 `Sequences map[TableID]uint64`; SPEC-001 Story 8.1/8.3 models `Table.SequenceValue() (uint64, bool)` as a single counter. SpacetimeDB's `st_sequence` system table supports multiple sequences per table (one per auto-increment column).
+§5.2 sequences section stores one `(table_id, next_id)` pair per table; SPEC-001 models `Table.SequenceValue() (uint64, bool)` as a single counter. SpacetimeDB's `st_sequence` system table supports multiple sequences per table (one per auto-increment column).
 
 Rationale: SPEC-006 §9 declares at most one `AutoIncrement` column per table in v1. Multi-sequence support requires schema changes to expose multiple counters per table and snapshot-format changes to serialize them. Both deferred. When v2 adds either, `(table_id, next_id)` becomes `(table_id, sequence_id, next_id)`.
 
@@ -711,7 +711,7 @@ Rationale: v1 deferred snapshot compression (§13 OQ#5) for the same reason — 
 
 1. **Snapshot creation timing.** v1 permits synchronous snapshot creation. If production latency shows this is too expensive, v2 should introduce an async snapshot path with explicit copy-on-write/read-view rules.
 
-2. **Multiple snapshot retention.** v1 should keep at least the newest two successful snapshots. Whether retention should be count-based, age-based, or size-based is deferred. v1 ships no automatic retention; see §7 "Snapshot retention (deferred v1)" for the documented consequence (operator-managed directory pruning until a policy lands). When chosen, the policy gets a dedicated Story under Epic 7.
+2. **Multiple snapshot retention.** v1 should keep at least the newest two successful snapshots. Whether retention should be count-based, age-based, or size-based is deferred. v1 ships no automatic retention; see §7 "Snapshot retention (deferred v1)" for the documented consequence (operator-managed directory pruning until a policy lands).
 
 3. **Write-ahead guarantee level.** v1 durability is batch-fsync. A strict per-transaction sync mode may be added later if an operator-facing durability/latency tradeoff is required.
 

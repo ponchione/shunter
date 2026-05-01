@@ -16,7 +16,6 @@ Related docs:
 - `docs/specs/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md` explains the high-level hosted-runtime layer
 - `docs/specs/hosted-runtime-v1.5-follow-ons.md` defines the near-follow-on usability/platform surfaces
 - `docs/specs/hosted-runtime-v2-directions.md` parks larger structural/runtime evolution
-- `docs/hosted-runtime-implementation-roadmap.md` breaks the direction into implementation epics
 
 ---
 

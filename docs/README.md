@@ -10,15 +10,13 @@ Agent startup is intentionally narrow:
 1. `RTK.md`
 2. `docs/RUNTIME-HARDENING-GAUNTLET.md` only when running the runtime hardening
    test campaign
-3. Only the feature plan, code, package docs, and narrow spec sections named by
-   the task or by the slice being touched
+3. Only code, package docs, and narrow spec sections named by the task or by
+   the surface being touched
 
-Do not read broad roadmap, ledger, or full decomposition specs by default.
+Do not read broad specs by default.
 
 ## Current Docs
 
-- `docs/hosted-runtime-implementation-roadmap.md` — historical hosted-runtime
-  phase tracker through completed V2.5.
 - `docs/RUNTIME-HARDENING-GAUNTLET.md` — test campaign for model-based,
   fault-injected, fuzzed, and soak-tested runtime confidence.
 - `docs/PERFORMANCE-BENCHMARKS.md` — benchmark run instructions and current
@@ -28,18 +26,12 @@ Do not read broad roadmap, ledger, or full decomposition specs by default.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design
   decisions that code and tests still cite.
 
-## Legacy Redirects
-
-- `docs/parity-decisions.md` — short redirect kept for older links. Do not add
-  new content there; update `docs/shunter-design-decisions.md` instead.
-
 ## Baseline Specs
 
-- `docs/specs/` — broad baseline specs, execution-order docs, and archived
-  hosted-runtime direction notes.
-- `docs/features/` — feature implementation slices, task plans, and completion
-  notes.
-- `docs/adr/` and `docs/decisions/` — durable architecture decisions.
+- `docs/specs/*/SPEC-*.md` — numbered subsystem implementation contracts.
+- `docs/specs/hosted-runtime-*.md` and
+  `docs/specs/APP-RUNTIME-LAYER-AND-USAGE-SURFACE.md` — compact hosted-runtime
+  surface contracts.
 
 ## Cleanup Rule
 

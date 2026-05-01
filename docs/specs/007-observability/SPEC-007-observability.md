@@ -1,6 +1,6 @@
 # SPEC-007 -- Logging and Observability
 
-**Status:** Draft implementation contract  
+**Status:** Baseline implementation contract; verify against live code  
 **Depends on:** SPEC-002 (commitlog recovery/durability diagnostics), SPEC-003
 (executor lifecycle, reducer execution, scheduler), SPEC-004 (subscription
 evaluation and fan-out), SPEC-005 (protocol connections and wire durations),

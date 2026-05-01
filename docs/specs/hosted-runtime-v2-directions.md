@@ -1,6 +1,6 @@
 # Hosted runtime v2 directions
 
-Status: draft decomposition source
+Status: baseline direction note
 Scope: later-version structural/runtime directions after the v1 hosted runtime
 and v1.5 follow-ons are alive.
 
@@ -19,10 +19,6 @@ Related docs:
   shape v2 must not retroactively distort.
 - `docs/specs/hosted-runtime-v1.5-follow-ons.md` defines the
   transitional usability/platform surfaces v2 may later clean up.
-- `docs/specs/hosted-runtime-version-phases.md` keeps phase ordering
-  and parking-lot context.
-- `docs/features/V2/` decomposes this document into
-  implementation-facing slices.
 
 The goal is not to commit to every v2 feature now.
 The goal is to keep later structural pressure out of v1/v1.5 while preserving

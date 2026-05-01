@@ -1,6 +1,6 @@
 # SPEC-004: Subscription Evaluator
 
-**Status:** Draft
+**Status:** Baseline implementation contract; verify against live code
 **Depends on:** SPEC-001 (`CommittedReadView`, `Changeset`, `ProductValue`, `Bound`), SPEC-003 (`TxID`, `ConnectionID`, `Identity`, reducer caller-outcome metadata), SPEC-005 (`ClientSender` / `FanOutSender` delivery surface, backpressure contract), SPEC-006 (`SchemaLookup`, `IndexResolver`)
 **Depended on by:** SPEC-003 (executor hands changesets to the evaluator post-commit), SPEC-005 (protocol layer consumes `FanOutMessage` / `SubscriptionUpdate` / `SubscriptionError` and registers subscriptions via the manager)
 
@@ -772,7 +772,7 @@ The evaluator needs read-only access to committed state. These are provided by `
 
 ### 10.4 From Schema (SPEC-006)
 
-Predicate validation (`ValidatePredicate`, §3.3 / Story 1.2) and Tier-2 candidate collection (`PruningIndexes.CollectCandidatesForTable`, §5 / Story 2.4) consume schema-side surfaces declared in SPEC-006 §7:
+Predicate validation (`ValidatePredicate`, §3.3) and Tier-2 candidate collection (`PruningIndexes.CollectCandidatesForTable`, §5) consume schema-side surfaces declared in SPEC-006 §7:
 
 - `SchemaLookup` — narrow read-only methods (`Table`, `TableByName`, `TableExists`, `TableName`, `ColumnExists`, `ColumnType`, `HasIndex`). Used by `ValidatePredicate`. The `subscription` package may declare its own narrower local interface for testing, but the canonical type is the SPEC-006 declaration; `*SchemaRegistry` satisfies it directly.
 - `IndexResolver` — single method `IndexIDForColumn(table TableID, col ColID) (IndexID, bool)`. Supplied to `Manager` at construction (`NewManager(schema SchemaLookup, resolver IndexResolver, ...)`); `*SchemaRegistry` satisfies it. When the resolver returns `false` for a column that validation confirmed has an index, `Register()` returns `ErrJoinIndexUnresolved`.

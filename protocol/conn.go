@@ -22,7 +22,7 @@ import (
 // for active query IDs, and SPEC-005 §9.4 in-flight ordering is
 // preserved by the synchronous Reply closure invoked inside the
 // executor main-loop goroutine plus per-connection OutboundCh FIFO.
-// See docs/adr/2026-04-19-subscription-admission-model.md.
+// See docs/shunter-design-decisions.md.
 type Conn struct {
 	ID          types.ConnectionID
 	Identity    types.Identity

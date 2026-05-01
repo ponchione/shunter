@@ -23,7 +23,7 @@ type DeliveryError struct {
 // subscription.Manager.querySets, and fan-out enumerates only live
 // client QueryIDs. Transport-level guards in connOnlySender.Send
 // (<-c.closed, ErrConnNotFound, ErrClientBufferFull) handle disconnect races.
-// See docs/adr/2026-04-19-subscription-admission-model.md.
+// See docs/shunter-design-decisions.md.
 func DeliverTransactionUpdateLight(
 	sender ClientSender,
 	mgr *ConnManager,

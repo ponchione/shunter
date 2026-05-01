@@ -7,7 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// OI-010 pins for BTreeIndex.SeekBounds (SPEC-001 §4.6, Story 3.3).
+// OI-010 pins for BTreeIndex.SeekBounds (SPEC-001 §4.6).
 // Covers inclusive / exclusive / mixed / unbounded / empty edges
 // independently per endpoint, plus the half-open-equivalence contract
 // with SeekRange.

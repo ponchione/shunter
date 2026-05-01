@@ -4,24 +4,25 @@ Default startup reading:
 1. `RTK.md`
 2. `docs/RUNTIME-HARDENING-GAUNTLET.md` only when running the runtime hardening
    test campaign
-3. The feature plan, package docs, code, and narrow spec sections named by the
-   user task or by the slice you are touching
+3. Package docs, code, and narrow spec sections named by the user task or by
+   the surface you are touching
 
-Do not read broad roadmap, ledger, or full decomposition specs by default. Open
-them only when the active task says they are required, when a dependency question
-cannot be answered from code, or when you are editing that document.
+Do not read broad specs by default. Open them only when the active task says
+they are required, when a dependency question cannot be answered from code, or
+when you are editing that document.
 
 ## Repo Reality
 
 - This repo is no longer docs-only. It contains substantial Go implementation across the core subsystem packages.
-- The implementation plan still lives in `docs/decomposition/EXECUTION-ORDER.md` and `docs/decomposition/`, but those docs must now be checked against live code.
+- The numbered specs under `docs/specs/*/SPEC-*.md` are baseline contracts, but
+  they must be checked against live code.
 - Do not act like there is no codebase; do not assume the docs are perfectly current either.
 
 ## Agent Rules
 
 - Stay inside the assigned slice.
-- Use `docs/decomposition/EXECUTION-ORDER.md` for cross-subsystem sequencing and dependency checks only when the active slice needs it.
-- Use decomposition stories/epics for concrete scope only when touching the corresponding contract surface.
+- Use numbered specs for cross-subsystem contracts only when the active task
+  needs them.
 - Keep docs concise and implementation-facing.
 - Keep `reference/SpacetimeDB/` read-only and research-only; never copy source from it.
 - Do not add speculative scaffolding or repo structure early.
@@ -71,6 +72,6 @@ Examples:
 
 Resolve in this order:
 1. task-specific user instruction
-2. `docs/decomposition/EXECUTION-ORDER.md` for sequencing
-3. relevant spec/decomposition files for scope and contracts
+2. live code and tests
+3. relevant spec files for scope and contracts
 4. `README.md` for product intent

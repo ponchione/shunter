@@ -12,12 +12,11 @@ import (
 // during registration MUST reach the wire before any TransactionUpdate
 // that references the same subscription.
 //
-// The ADR (docs/adr/2026-04-19-subscription-admission-model.md §9.4)
-// guarantees this by synchronously enqueuing the Applied on the
-// connection's OutboundCh inside the executor main-loop goroutine, then
-// letting fan-out from the next commit enqueue on the same per-conn
-// FIFO. OutboundCh is a per-connection single-writer FIFO, so wire
-// order matches enqueue order.
+// docs/shunter-design-decisions.md records the subscription admission
+// contract: Applied is synchronously enqueued on the connection's
+// OutboundCh inside the executor main-loop goroutine, then fan-out from
+// the next commit enqueues on the same per-conn FIFO. OutboundCh is a
+// per-connection single-writer FIFO, so wire order matches enqueue order.
 //
 // This test asserts the transport-level invariant that is the end-state
 // contract: when an Applied frame is enqueued before a fan-out frame on
@@ -33,9 +32,9 @@ func TestAdmissionOrdering_AppliedPrecedesFanoutOnOutboundCh(t *testing.T) {
 	mgr := NewConnManager()
 	mgr.Add(conn)
 
-	// Step 1: register-success side. Simulate the ADR's synchronous
-	// Reply enqueue by pushing SubscribeMultiApplied through the same
-	// connOnlySender that the executor main loop will use after Task 3.
+	// Step 1: register-success side. Simulate the synchronous Reply enqueue
+	// by pushing SubscribeMultiApplied through the same connOnlySender that
+	// the executor main loop uses.
 	sender := connOnlySender{conn: conn}
 	applied := &SubscribeMultiApplied{
 		RequestID: 1,

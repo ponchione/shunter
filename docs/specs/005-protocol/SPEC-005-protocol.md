@@ -1,6 +1,6 @@
 # SPEC-005 — Client Protocol
 
-**Status:** Draft  
+**Status:** Baseline implementation contract; verify against live code  
 **Depends on:** SPEC-001 (`Identity`, `ConnectionID`, `TxID`, `CommittedReadView`, row encoding), SPEC-002 (BSATN encoding; `TxID(0)` sentinel reservation), SPEC-003 (`ExecutorCommand` set, reducer-call outcome metadata on `CallReducerCmd.ResponseCh`, `TxID` contract), SPEC-004 (`CommitFanout`, `FanOutMessage`, `SubscriptionUpdate`, `SubscriptionError`), SPEC-006 (`SchemaLookup`)  
 **Depended on by:** None (terminal spec)
 
@@ -621,7 +621,7 @@ update:                             []SubscriptionUpdate    — one entry per em
 [not subscribed]
 ```
 
-State rules (see `docs/adr/2026-04-19-subscription-admission-model.md` for the landed manager-authoritative Shape 1 rationale):
+State rules (see `docs/shunter-design-decisions.md` for the manager-authoritative admission rationale):
 - a `query_id` is reserved as soon as `SubscribeSingle` / `SubscribeMulti` is accepted for processing; a second subscribe with the same ID while pending or active MUST fail with `SubscriptionError` (manager-authoritative: rejected by the subscription manager's `(ConnID, QueryID)` registry, not a protocol-layer tracker)
 - `UnsubscribeSingle` / `UnsubscribeMulti` for a `query_id` that is not currently registered under the connection's live `(ConnID, QueryID)` set registry returns `ErrSubscriptionNotFound`
 - if the client disconnects while a subscription is pending, the registration result is discarded and the subscription never becomes active: the executor invokes the registration `Reply` closure synchronously, but the closure's `connOnlySender` short-circuits on a closed `<-conn.closed` channel and returns `ErrConnNotFound`; no Applied envelope ever reaches `OutboundCh`
@@ -806,7 +806,7 @@ type ClientSender interface {
 
 ### SPEC-006 (Schema)
 
-Subscribe and OneOffQuery handlers (Story 4.2 / 4.4) need to resolve table names to IDs and validate column references before forwarding requests to the executor. They consume the `SchemaLookup` interface declared in SPEC-006 §7 — specifically `TableByName(name) (TableID, *TableSchema, bool)` and the column-metadata methods. The protocol package may declare its own narrower local interface for testing, but the canonical type lives in SPEC-006; `*SchemaRegistry` satisfies it directly. The handler receives the schema reference at upgrade time (see Story 3.x `UpgradeContext.Schema`); the registry is immutable for the engine's lifetime per SPEC-006 §5.1 freeze.
+Subscribe and OneOffQuery handlers need to resolve table names to IDs and validate column references before forwarding requests to the executor. They consume the `SchemaLookup` interface declared in SPEC-006 §7 — specifically `TableByName(name) (TableID, *TableSchema, bool)` and the column-metadata methods. The protocol package may declare its own narrower local interface for testing, but the canonical type lives in SPEC-006; `*SchemaRegistry` satisfies it directly. The handler receives the schema reference at upgrade time through `UpgradeContext.Schema`; the registry is immutable for the engine's lifetime per SPEC-006 §5.1 freeze.
 
 ---
 

@@ -105,8 +105,8 @@ early or intentionally narrow:
 
 - developer onboarding material is limited
 - there is no maintained hello-world command or tutorial flow
-- client bindings and code generation are not yet part of the supported
-  workflow
+- client bindings and code generation exist, but onboarding material around
+  them is still limited
 - SQL support is scoped to the current query and subscription paths
 - protocol, recovery, subscription, and reducer semantics are still being
   hardened through focused tests and debt reconciliation
@@ -118,9 +118,8 @@ early or intentionally narrow:
 For human orientation, start with:
 
 1. `README.md` - project overview and current status
-2. `docs/decomposition/hosted-runtime-version-phases.md` - hosted-runtime phase
-   map
-3. `docs/shunter-design-decisions.md` - design notes and tradeoffs
+2. `docs/README.md` - guide to the intentionally small docs tree
+3. `docs/shunter-design-decisions.md` - current design notes and tradeoffs
 
 For implementation work, inspect the active packages directly:
 
@@ -137,7 +136,7 @@ For automation or agent-driven work, follow `AGENTS.md` and `RTK.md` before
 running commands or editing files.
 
 Current implementation-facing docs live under `docs/`; prefer live code, tests,
-and the feature plan for the slice being touched.
+and the narrow spec section for the surface being touched.
 
 ## Validation
 
