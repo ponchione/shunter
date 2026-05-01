@@ -61,7 +61,8 @@ Current status:
   accepting only delivered sends or post-teardown `ErrConnNotFound` results
   under fixed seed/worker/op labels. `ConnManager` add/get/remove map
   lifecycle now also has a fixed-seed concurrent short soak, and concurrent
-  `CloseAll` callers are checked for idempotent teardown.
+  `CloseAll` plus direct `Conn.Disconnect` callers are checked for idempotent
+  teardown and stable disconnect callback ordering.
 - A fixed-seed protocol metamorphic trace now compares one long-lived
   subscription with per-operation subscribe/unsubscribe cycles, requiring
   matching deltas, final unsubscribe rows, and one-off query probes.
@@ -87,7 +88,8 @@ Current status:
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
-  deterministic accepted results.
+  deterministic accepted results. Parser metamorphic coverage now also checks
+  that harmless predicate parenthesization produces equivalent parse trees.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission
