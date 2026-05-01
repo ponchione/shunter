@@ -43,17 +43,20 @@ func (pv ProductValue) Hash64() uint64 {
 	return h.Sum64()
 }
 
-// Copy returns a deep copy. Bytes values get their own slice; strings share
-// underlying memory (Go strings are immutable).
+// Copy returns a deep copy. Slice-backed values get their own slices; strings
+// share underlying memory (Go strings are immutable).
 func (pv ProductValue) Copy() ProductValue {
 	if pv == nil {
 		return nil
 	}
 	cp := make(ProductValue, len(pv))
 	for i, v := range pv {
-		if v.kind == KindBytes {
+		switch v.kind {
+		case KindBytes:
 			cp[i] = NewBytes(v.buf)
-		} else {
+		case KindArrayString:
+			cp[i] = NewArrayString(v.strArr)
+		default:
 			cp[i] = v
 		}
 	}

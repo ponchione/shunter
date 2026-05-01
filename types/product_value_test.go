@@ -69,6 +69,25 @@ func TestProductValueCopyBytesIsolation(t *testing.T) {
 	}
 }
 
+func TestProductValueCopyArrayStringIsolation(t *testing.T) {
+	const seed = uint64(0xa77157)
+	orig := ProductValue{NewUint64(1), NewArrayString([]string{"alpha", "beta"})}
+	cp := orig.Copy()
+	if !cp.Equal(orig) {
+		t.Fatalf("seed=%#x op_index=0 operation=copy observed=%#v expected=%#v", seed, cp, orig)
+	}
+
+	cp[1].strArr[0] = "copy-mutated"
+	if got := orig[1].AsArrayString()[0]; got != "alpha" {
+		t.Fatalf("seed=%#x op_index=1 operation=mutate-copy-array observed_source=%q expected=%q", seed, got, "alpha")
+	}
+
+	orig[1].strArr[1] = "source-mutated"
+	if got := cp[1].AsArrayString()[1]; got != "beta" {
+		t.Fatalf("seed=%#x op_index=2 operation=mutate-source-array observed_copy=%q expected=%q", seed, got, "beta")
+	}
+}
+
 func TestProductValueEmptyEqual(t *testing.T) {
 	a := ProductValue{}
 	b := ProductValue{}
