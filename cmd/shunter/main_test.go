@@ -260,6 +260,66 @@ func TestContractReadCommandsRejectUnsupportedFormats(t *testing.T) {
 	}
 }
 
+func TestContractReadCommandsRejectInvalidContractInputs(t *testing.T) {
+	const trace = "trace=cli-contract-read-invalid-input-rc-gate"
+	dir := t.TempDir()
+	validPath := writeCLIContract(t, dir, "valid.json", cliContractFixture())
+	malformedPath := writeCLIBytes(t, dir, "malformed.json", []byte(`{`))
+	semanticInvalidPath := writeCLIBytes(t, dir, "semantic-invalid.json", []byte(`{"contract_version":0}`))
+
+	for _, command := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "diff",
+			args: []string{"contract", "diff", "--format", "json"},
+		},
+		{
+			name: "policy",
+			args: []string{"contract", "policy", "--strict", "--format", "json"},
+		},
+		{
+			name: "plan",
+			args: []string{"contract", "plan", "--validate", "--format", "json"},
+		},
+	} {
+		for _, input := range []struct {
+			name        string
+			previous    string
+			current     string
+			wantContext string
+		}{
+			{
+				name:        "malformed-previous",
+				previous:    malformedPath,
+				current:     validPath,
+				wantContext: "previous contract",
+			},
+			{
+				name:        "semantic-invalid-current",
+				previous:    validPath,
+				current:     semanticInvalidPath,
+				wantContext: "current contract",
+			},
+		} {
+			t.Run(command.name+"/"+input.name, func(t *testing.T) {
+				args := append(append([]string{}, command.args...), "--previous", input.previous, "--current", input.current)
+				var stdout, stderr bytes.Buffer
+				code := run(&stdout, &stderr, args)
+				if code != 1 {
+					t.Fatalf("%s command=%s input=%s exit code = %d, stderr = %s", trace, command.name, input.name, code, stderr.String())
+				}
+				if stdout.Len() != 0 {
+					t.Fatalf("%s command=%s input=%s stdout = %s, want empty", trace, command.name, input.name, stdout.String())
+				}
+				assertContains(t, stderr.String(), "invalid module contract JSON")
+				assertContains(t, stderr.String(), input.wantContext)
+			})
+		}
+	}
+}
+
 func TestContractCodegenCommandWritesTypeScript(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeCLIContract(t, dir, "contract.json", cliContractFixture())
@@ -403,9 +463,14 @@ func writeCLIContract(t *testing.T, dir, name string, contract shunter.ModuleCon
 	if err != nil {
 		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
 	}
+	return writeCLIBytes(t, dir, name, data)
+}
+
+func writeCLIBytes(t *testing.T, dir, name string, data []byte) string {
+	t.Helper()
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, data, 0o666); err != nil {
-		t.Fatalf("write contract fixture: %v", err)
+		t.Fatalf("write CLI fixture: %v", err)
 	}
 	return path
 }
