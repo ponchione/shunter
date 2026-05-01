@@ -310,6 +310,43 @@ func TestGenerateFileInvalidTableReadPolicyLeavesOutputUntouched(t *testing.T) {
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateFileUnknownReadModelTargetLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=workflow-codegen-unknown-read-model-target-output-preservation"
+	dir := t.TempDir()
+	invalidContract := workflowContractFixture()
+	invalidContract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+		Surface: shunter.ReadModelSurfaceQuery,
+		Name:    "missing_query",
+		Tables:  []string{"messages"},
+		Tags:    []string{"history"},
+	}}
+	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for unknown read model target", trace)
+	}
+	if !errors.Is(err, codegen.ErrInvalidContract) {
+		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
+	}
+	if !strings.Contains(err.Error(), "read_model.query.missing_query references unknown query") {
+		t.Fatalf("%s GenerateFile error = %v, want read model query target context", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s unknown read model target mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFilePreservesExistingOutputPermissionsAcrossAtomicRewrite(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bit preservation is POSIX-specific")
