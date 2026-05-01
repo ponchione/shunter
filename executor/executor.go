@@ -365,6 +365,7 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
 		err := fmt.Errorf("reducer panicked: %v", r)
 		e.recordReducerPanic(c.Request.ReducerName, err, 0, capturePanicStack(e.observer))
 		e.recordReducerMetric(c.Request.ReducerName, "failed_panic", 0, false)
+		e.traceReducerCall(c.Request.ReducerName, "failed_panic", err)
 		e.sendCallReducerResponse(c, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  err,
@@ -427,8 +428,10 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 		cmd.Reply(res, err)
 	}
 	if err != nil {
+		e.traceSubscriptionRegister("internal_error", err)
 		return "internal_error"
 	}
+	e.traceSubscriptionRegister("ok", nil)
 	return "ok"
 }
 
@@ -465,8 +468,10 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 		cmd.Reply(res, err)
 	}
 	if err != nil {
+		e.traceSubscriptionUnregister("internal_error", err)
 		return "internal_error"
 	}
+	e.traceSubscriptionUnregister("ok", nil)
 	return "ok"
 }
 
@@ -612,10 +617,12 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	start := time.Now()
 	if req.Source != CallSourceLifecycle {
 		if _, reserved := lifecycleNames[req.ReducerName]; reserved {
+			err := ErrLifecycleReducer
 			e.recordReducerMetric("unknown", "failed_internal", 0, false)
+			e.traceReducerCall("unknown", "failed_internal", err)
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
-				Error:  ErrLifecycleReducer,
+				Error:  err,
 			}, nil)
 			return "internal_error"
 		}
@@ -624,19 +631,23 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	// Lookup reducer.
 	rr, ok := e.registry.Lookup(req.ReducerName)
 	if !ok {
+		err := fmt.Errorf("%w: %s", ErrReducerNotFound, req.ReducerName)
 		e.recordReducerMetric("unknown", "failed_internal", 0, false)
+		e.traceReducerCall("unknown", "failed_internal", err)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
-			Error:  fmt.Errorf("%w: %s", ErrReducerNotFound, req.ReducerName),
+			Error:  err,
 		}, nil)
 		return "internal_error"
 	}
 	if req.Source == CallSourceExternal {
 		if missing, denied := types.MissingRequiredPermission(req.Caller, rr.RequiredPermissions); denied {
+			err := fmt.Errorf("%w: reducer %q missing permission %q", ErrPermissionDenied, req.ReducerName, missing)
 			e.recordReducerMetric(rr.Name, "failed_permission", 0, false)
+			e.traceReducerCall(rr.Name, "failed_permission", err)
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedPermission,
-				Error:  fmt.Errorf("%w: reducer %q missing permission %q", ErrPermissionDenied, req.ReducerName, missing),
+				Error:  err,
 			}, nil)
 			return "permission_denied"
 		}
@@ -690,6 +701,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		}(panicked)
 		e.recordReducerPanic(req.ReducerName, panicErr, 0, panicStack)
 		e.recordReducerMetric(rr.Name, "failed_panic", handlerDuration, true)
+		e.traceReducerCall(rr.Name, "failed_panic", panicErr)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  panicErr,
@@ -700,6 +712,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	if reducerErr != nil {
 		store.Rollback(tx)
 		e.recordReducerMetric(rr.Name, "failed_user", handlerDuration, true)
+		e.traceReducerCall(rr.Name, "failed_user", reducerErr)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedUser,
 			Error:  reducerErr,
@@ -716,10 +729,12 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	if req.Source == CallSourceScheduled {
 		if err := e.advanceOrDeleteSchedule(tx, req.ScheduleID, req.IntendedFireAt); err != nil {
 			store.Rollback(tx)
+			err = fmt.Errorf("schedule advance: %w", err)
 			e.recordReducerMetric(rr.Name, "failed_internal", handlerDuration, true)
+			e.traceReducerCall(rr.Name, "failed_internal", err)
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
-				Error:  fmt.Errorf("schedule advance: %w", err),
+				Error:  err,
 			}, nil)
 			return "internal_error"
 		}
@@ -734,10 +749,13 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		if isUserCommitError(err) {
 			status = StatusFailedUser
 		}
+		commitErr := fmt.Errorf("commit: %w", err)
+		e.traceStoreCommit(0, "error", commitErr)
 		e.recordReducerMetric(rr.Name, reducerMetricResultFromStatus(status), handlerDuration, true)
+		e.traceReducerCall(rr.Name, reducerMetricResultFromStatus(status), commitErr)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: status,
-			Error:  fmt.Errorf("commit: %w", err),
+			Error:  commitErr,
 		}, nil)
 		return executorCommandResultFromStatus(status)
 	}
@@ -745,6 +763,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	e.nextTxID++
 	changeset.TxID = txID
 	e.committed.SetCommittedTxID(txID)
+	e.traceStoreCommit(txID, "ok", nil)
 	if e.schedulerNotify != nil {
 		if tc := changeset.TableChanges(e.schedTableID); tc != nil && (len(tc.Inserts) > 0 || len(tc.Deletes) > 0) {
 			e.schedulerNotify()
@@ -766,6 +785,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	}
 	status := e.postCommit(txID, changeset, ret, cmd, opts)
 	e.recordReducerMetric(rr.Name, reducerMetricResultFromStatus(status), handlerDuration, true)
+	e.traceReducerCall(rr.Name, reducerMetricResultFromStatus(status), reducerTraceErrorFromStatus(status))
 	return executorCommandResultFromStatus(status)
 }
 

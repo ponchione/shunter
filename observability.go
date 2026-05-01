@@ -20,6 +20,20 @@ const (
 	defaultObservabilityErrorMessageMaxBytes = 1024
 )
 
+const (
+	traceSpanRuntimeStart           = "shunter.runtime.start"
+	traceSpanRecoveryOpen           = "shunter.recovery.open"
+	traceSpanProtocolMessage        = "shunter.protocol.message"
+	traceSpanReducerCall            = "shunter.reducer.call"
+	traceSpanStoreCommit            = "shunter.store.commit"
+	traceSpanDurabilityBatch        = "shunter.durability.batch"
+	traceSpanSubscriptionEval       = "shunter.subscription.eval"
+	traceSpanSubscriptionFanout     = "shunter.subscription.fanout"
+	traceSpanQueryOneOff            = "shunter.query.one_off"
+	traceSpanSubscriptionRegister   = "shunter.subscription.register"
+	traceSpanSubscriptionUnregister = "shunter.subscription.unregister"
+)
+
 // ObservabilityConfig configures runtime-scoped logs, metrics, diagnostics,
 // and tracing. The zero value is a no-op for all external observations.
 type ObservabilityConfig struct {
@@ -320,6 +334,10 @@ func (o *runtimeObservability) recordBuildFailed(err error) {
 }
 
 func (o *runtimeObservability) recordRecoveryCompleted(report commitlog.RecoveryReport, duration time.Duration) {
+	o.traceSpan(traceSpanRecoveryOpen, "commitlog", nil,
+		TraceAttr{Key: "result", Value: "success"},
+		TraceAttr{Key: "tx_id", Value: uint64(report.RecoveredTxID)},
+	)
 	level := slog.LevelInfo
 	if len(report.DamagedTailSegments) > 0 || len(report.SkippedSnapshots) > 0 {
 		level = slog.LevelWarn
@@ -353,6 +371,9 @@ func (o *runtimeObservability) recordRecoveryFailed(err error, duration time.Dur
 	if err == nil {
 		return
 	}
+	o.traceSpan(traceSpanRecoveryOpen, "commitlog", err,
+		TraceAttr{Key: "result", Value: "failed"},
+	)
 	o.log(context.Background(), slog.LevelError, "recovery.failed", "commitlog",
 		slog.String("error", o.redactError(err)),
 		slog.Int64("duration_ms", duration.Milliseconds()),
@@ -367,6 +388,9 @@ func (o *runtimeObservability) recordRuntimeStartFailed(err error, duration time
 	if err == nil {
 		return
 	}
+	o.traceSpan(traceSpanRuntimeStart, "runtime", err,
+		TraceAttr{Key: "state", Value: string(RuntimeStateFailed)},
+	)
 	o.log(context.Background(), slog.LevelError, "runtime.start_failed", "runtime",
 		slog.String("error", o.redactError(err)),
 		slog.Int64("duration_ms", duration.Milliseconds()),
@@ -374,6 +398,9 @@ func (o *runtimeObservability) recordRuntimeStartFailed(err error, duration time
 }
 
 func (o *runtimeObservability) recordRuntimeReady(health RuntimeHealth, duration time.Duration) {
+	o.traceSpan(traceSpanRuntimeStart, "runtime", nil,
+		TraceAttr{Key: "state", Value: string(health.State)},
+	)
 	o.log(context.Background(), slog.LevelInfo, "runtime.ready", "runtime",
 		slog.String("state", string(health.State)),
 		slog.Bool("ready", health.Ready),
@@ -597,9 +624,20 @@ func (o *runtimeObservability) RecordProtocolConnections(active int) {
 }
 
 func (o *runtimeObservability) RecordProtocolMessage(kind, result string) {
+	kind = protocolMessageMetricKind(kind)
+	result = protocolMessageMetricResult(result)
+	o.traceSpan(traceSpanProtocolMessage, "protocol", safeTraceError(result, nil),
+		TraceAttr{Key: "kind", Value: kind},
+		TraceAttr{Key: "result", Value: result},
+	)
+	if kind == "one_off_query" {
+		o.traceSpan(traceSpanQueryOneOff, "protocol", safeTraceError(result, nil),
+			TraceAttr{Key: "result", Value: result},
+		)
+	}
 	o.addCounter(MetricProtocolMessagesTotal, MetricLabels{
-		Kind:   protocolMessageMetricKind(kind),
-		Result: protocolMessageMetricResult(result),
+		Kind:   kind,
+		Result: result,
 	}, 1)
 }
 
@@ -633,6 +671,61 @@ func (o *runtimeObservability) RecordReducerDuration(reducer, result string, dur
 		Reducer: o.reducerMetricLabel(reducer),
 		Result:  reducerMetricResult(result),
 	}, duration.Seconds())
+}
+
+func (o *runtimeObservability) TraceReducerCall(reducer, result string, err error) {
+	result = reducerMetricResult(result)
+	o.traceSpan(traceSpanReducerCall, "executor", safeTraceError(result, err),
+		TraceAttr{Key: "reducer", Value: reducerTraceName(reducer)},
+		TraceAttr{Key: "result", Value: result},
+	)
+}
+
+func (o *runtimeObservability) TraceStoreCommit(txID types.TxID, result string, err error) {
+	result = okErrorTraceResult(result)
+	o.traceSpan(traceSpanStoreCommit, "store", safeTraceError(result, err),
+		TraceAttr{Key: "tx_id", Value: uint64(txID)},
+		TraceAttr{Key: "result", Value: result},
+	)
+}
+
+func (o *runtimeObservability) TraceDurabilityBatch(txID types.TxID, result string, err error) {
+	result = okErrorTraceResult(result)
+	o.traceSpan(traceSpanDurabilityBatch, "commitlog", safeTraceError(result, err),
+		TraceAttr{Key: "tx_id", Value: uint64(txID)},
+		TraceAttr{Key: "result", Value: result},
+	)
+}
+
+func (o *runtimeObservability) TraceSubscriptionEval(txID types.TxID, result string, err error) {
+	result = subscriptionEvalMetricResult(result)
+	o.traceSpan(traceSpanSubscriptionEval, "subscription", safeTraceError(result, err),
+		TraceAttr{Key: "tx_id", Value: uint64(txID)},
+		TraceAttr{Key: "result", Value: result},
+	)
+}
+
+func (o *runtimeObservability) TraceSubscriptionFanout(result, reason string, err error) {
+	result = okErrorTraceResult(result)
+	attrs := []TraceAttr{{Key: "result", Value: result}}
+	if result != "ok" {
+		attrs = append(attrs, TraceAttr{Key: "reason", Value: subscriptionFanoutMetricReason(reason)})
+	}
+	o.traceSpan(traceSpanSubscriptionFanout, "subscription", safeTraceError(result, err), attrs...)
+}
+
+func (o *runtimeObservability) TraceSubscriptionRegister(result string, err error) {
+	result = executorCommandMetricResult(result)
+	o.traceSpan(traceSpanSubscriptionRegister, "subscription", safeTraceError(result, err),
+		TraceAttr{Key: "result", Value: result},
+	)
+}
+
+func (o *runtimeObservability) TraceSubscriptionUnregister(result string, err error) {
+	result = executorCommandMetricResult(result)
+	o.traceSpan(traceSpanSubscriptionUnregister, "subscription", safeTraceError(result, err),
+		TraceAttr{Key: "result", Value: result},
+	)
 }
 
 func (o *runtimeObservability) RecordDurabilityQueueDepth(depth int) {
@@ -840,6 +933,18 @@ func (o *runtimeObservability) observeHistogram(name MetricName, labels MetricLa
 	o.metrics.ObserveHistogram(name, o.metricLabels(labels), value)
 }
 
+func (o *runtimeObservability) traceSpan(name, component string, err error, attrs ...TraceAttr) {
+	if o == nil || o.tracer == nil {
+		return
+	}
+	_, span := o.startSpan(context.Background(), name, component, attrs...)
+	if span == nil {
+		return
+	}
+	span.AddEvent("shunter.span.complete", attrs...)
+	span.End(err)
+}
+
 func (o *runtimeObservability) startSpan(ctx context.Context, name, component string, attrs ...TraceAttr) (context.Context, Span) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -970,6 +1075,32 @@ func boundUTF8(s string, maxBytes int) string {
 		n--
 	}
 	return s[:n]
+}
+
+func safeTraceError(result string, err error) error {
+	if err != nil {
+		return err
+	}
+	switch result {
+	case "", "ok", "success", "committed":
+		return nil
+	default:
+		return errors.New(result)
+	}
+}
+
+func okErrorTraceResult(result string) string {
+	if result == "ok" {
+		return "ok"
+	}
+	return "error"
+}
+
+func reducerTraceName(reducer string) string {
+	if strings.TrimSpace(reducer) == "" {
+		return "unknown"
+	}
+	return reducer
 }
 
 var sensitiveRedactionKeys = [...]string{

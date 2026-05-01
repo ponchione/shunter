@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"errors"
 	"runtime/debug"
 	"time"
 
@@ -20,6 +21,22 @@ type Observer interface {
 	RecordExecutorInboxDepth(depth int)
 	RecordReducerCall(reducer, result string)
 	RecordReducerDuration(reducer, result string, duration time.Duration)
+}
+
+type reducerTraceObserver interface {
+	TraceReducerCall(reducer, result string, err error)
+}
+
+type storeCommitTraceObserver interface {
+	TraceStoreCommit(txID types.TxID, result string, err error)
+}
+
+type subscriptionRegisterTraceObserver interface {
+	TraceSubscriptionRegister(result string, err error)
+}
+
+type subscriptionUnregisterTraceObserver interface {
+	TraceSubscriptionUnregister(result string, err error)
 }
 
 func observerPanicStackEnabled(observer Observer) bool {
@@ -84,6 +101,42 @@ func (e *Executor) recordReducerMetric(reducer, result string, duration time.Dur
 	e.observer.RecordReducerCall(reducer, result)
 	if observedDuration {
 		e.observer.RecordReducerDuration(reducer, result, duration)
+	}
+}
+
+func (e *Executor) traceReducerCall(reducer, result string, err error) {
+	if e == nil || e.observer == nil {
+		return
+	}
+	if observer, ok := e.observer.(reducerTraceObserver); ok {
+		observer.TraceReducerCall(reducerMetricName(reducer), reducerMetricResult(result), err)
+	}
+}
+
+func (e *Executor) traceStoreCommit(txID types.TxID, result string, err error) {
+	if e == nil || e.observer == nil {
+		return
+	}
+	if observer, ok := e.observer.(storeCommitTraceObserver); ok {
+		observer.TraceStoreCommit(txID, result, err)
+	}
+}
+
+func (e *Executor) traceSubscriptionRegister(result string, err error) {
+	if e == nil || e.observer == nil {
+		return
+	}
+	if observer, ok := e.observer.(subscriptionRegisterTraceObserver); ok {
+		observer.TraceSubscriptionRegister(executorCommandResult(result), err)
+	}
+}
+
+func (e *Executor) traceSubscriptionUnregister(result string, err error) {
+	if e == nil || e.observer == nil {
+		return
+	}
+	if observer, ok := e.observer.(subscriptionUnregisterTraceObserver); ok {
+		observer.TraceSubscriptionUnregister(executorCommandResult(result), err)
 	}
 }
 
@@ -162,4 +215,11 @@ func reducerMetricName(reducer string) string {
 		return "unknown"
 	}
 	return reducer
+}
+
+func reducerTraceErrorFromStatus(status ReducerStatus) error {
+	if status == StatusCommitted {
+		return nil
+	}
+	return errors.New(reducerMetricResultFromStatus(status))
 }

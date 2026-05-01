@@ -17,6 +17,14 @@ type Observer interface {
 	RecordSubscriptionEvalDuration(result string, duration time.Duration)
 }
 
+type subscriptionEvalTraceObserver interface {
+	TraceSubscriptionEval(txID types.TxID, result string, err error)
+}
+
+type subscriptionFanoutTraceObserver interface {
+	TraceSubscriptionFanout(result, reason string, err error)
+}
+
 func recordSubscriptionActive(observer Observer, active int) {
 	if observer != nil {
 		observer.RecordSubscriptionActive(active)
@@ -26,5 +34,23 @@ func recordSubscriptionActive(observer Observer, active int) {
 func recordSubscriptionEvalDuration(observer Observer, result string, duration time.Duration) {
 	if observer != nil {
 		observer.RecordSubscriptionEvalDuration(result, duration)
+	}
+}
+
+func traceSubscriptionEval(observer Observer, txID types.TxID, result string, err error) {
+	if observer == nil {
+		return
+	}
+	if tracer, ok := observer.(subscriptionEvalTraceObserver); ok {
+		tracer.TraceSubscriptionEval(txID, result, err)
+	}
+}
+
+func traceSubscriptionFanout(observer Observer, result, reason string, err error) {
+	if observer == nil {
+		return
+	}
+	if tracer, ok := observer.(subscriptionFanoutTraceObserver); ok {
+		tracer.TraceSubscriptionFanout(result, reason, err)
 	}
 }

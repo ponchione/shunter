@@ -10,6 +10,10 @@ type Observer interface {
 	RecordDurabilityDurableTxID(txID types.TxID)
 }
 
+type durabilityBatchTraceObserver interface {
+	TraceDurabilityBatch(txID types.TxID, result string, err error)
+}
+
 func recordDurabilityFailed(observer Observer, err error, reason string, txID uint64) {
 	if observer == nil || err == nil {
 		return
@@ -26,5 +30,14 @@ func recordDurabilityQueueDepth(observer Observer, depth int) {
 func recordDurabilityDurableTxID(observer Observer, txID uint64) {
 	if observer != nil {
 		observer.RecordDurabilityDurableTxID(types.TxID(txID))
+	}
+}
+
+func traceDurabilityBatch(observer Observer, txID uint64, result string, err error) {
+	if observer == nil {
+		return
+	}
+	if tracer, ok := observer.(durabilityBatchTraceObserver); ok {
+		tracer.TraceDurabilityBatch(types.TxID(txID), result, err)
 	}
 }

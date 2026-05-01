@@ -107,3 +107,61 @@ When complete, update this file with:
 - panic isolation behavior
 - validation commands run
 
+### Recorded Completion 2026-05-01
+
+Span insertion points:
+
+- `shunter.runtime.start`: recorded from runtime start ready/failure paths.
+- `shunter.recovery.open`: recorded from build-time recovery/bootstrap
+  success and failure observations.
+- `shunter.protocol.message`: recorded with protocol message metric
+  classification at terminal message outcomes.
+- `shunter.query.one_off`: recorded from terminal `one_off_query` protocol
+  outcomes.
+- `shunter.reducer.call`: recorded from executor reducer terminal outcomes,
+  including permission, user error, panic, commit failure, and post-commit
+  fatal outcomes.
+- `shunter.store.commit`: recorded around executor-owned `store.Commit`
+  success/failure.
+- `shunter.durability.batch`: recorded from durability worker batch
+  success/failure.
+- `shunter.subscription.eval`: recorded after post-commit subscription
+  evaluation.
+- `shunter.subscription.fanout`: recorded after fan-out delivery attempts,
+  with failed reason classification when delivery fails.
+- `shunter.subscription.register` and `shunter.subscription.unregister`:
+  recorded from executor-owned set register/unregister terminal outcomes.
+
+Attribute coverage:
+
+- Every span starts through runtime observability and includes `component`,
+  `module`, and `runtime`.
+- Required additional attributes are covered with low-cardinality values:
+  `state`, `result`, `kind`, `reducer`, `tx_id`, and fan-out `reason` on
+  failure.
+- Trace attributes intentionally exclude raw SQL, reducer args, row payloads,
+  tokens, authorization headers, signing keys, request IDs, query IDs, and
+  connection IDs.
+- Failure span endings pass either known-safe classified errors or
+  runtime-redacted bounded errors.
+
+Panic isolation:
+
+- Existing runtime tracing wrappers recover `StartSpan`, `AddEvent`, and
+  `End` panics.
+- `StartSpan` panic is treated as a disabled span for that operation.
+- Nil spans skip `AddEvent` and `End`.
+- Tracer and span panics do not alter reducer, protocol, or subscription
+  operation results.
+
+Validation:
+
+```sh
+rtk go fmt . ./commitlog ./executor ./protocol ./subscription ./store
+rtk go test . -run 'Test.*(Tracing|Span|Reducer|Query|Subscription|Runtime|Recovery)' -count=1
+rtk go test ./executor ./protocol ./subscription ./commitlog ./store -run 'Test.*(Tracing|Span|Reducer|Durability|Protocol|Subscription)' -count=1
+rtk go vet . ./commitlog ./executor ./protocol ./subscription ./store
+rtk go test ./... -count=1
+```
+
+Results: all commands passed.

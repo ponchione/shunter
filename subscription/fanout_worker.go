@@ -149,6 +149,20 @@ func waitForDurable(ctx context.Context, durable <-chan types.TxID, waited *bool
 
 func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	memo := NewEncodingMemo()
+	traceResult := "ok"
+	traceReason := ""
+	var traceErr error
+	defer func() {
+		traceSubscriptionFanout(w.observer, traceResult, traceReason, traceErr)
+	}()
+	recordTraceFailure := func(reason string, err error) {
+		if traceResult != "ok" {
+			return
+		}
+		traceResult = "error"
+		traceReason = reason
+		traceErr = err
+	}
 
 	// CallReducerFlags::NoSuccessNotify: when the caller opted
 	// out of the success echo and the outcome committed, suppress the
@@ -178,11 +192,12 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// for the same durability signal as normal transaction updates.
 	for connID, errs := range msg.Errors {
 		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+			recordTraceFailure("context_canceled", ctx.Err())
 			return
 		}
 		for _, se := range errs {
 			if err := w.sender.SendSubscriptionError(connID, se); err != nil {
-				w.handleSendError(connID, err)
+				recordTraceFailure(w.handleSendError(connID, err), err)
 			}
 		}
 	}
@@ -207,10 +222,11 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 			continue
 		}
 		if w.requiresConfirmedRead(connID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+			recordTraceFailure("context_canceled", ctx.Err())
 			return
 		}
 		if err := w.sender.SendTransactionUpdateLight(connID, lightRequestID, updates, memo); err != nil {
-			w.handleSendError(connID, err)
+			recordTraceFailure(w.handleSendError(connID, err), err)
 		}
 	}
 
@@ -223,26 +239,32 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 	// effCallerOutcome are nil in that case.
 	if effCallerConnID != nil && effCallerOutcome != nil {
 		if w.requiresConfirmedRead(*effCallerConnID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
+			recordTraceFailure("context_canceled", ctx.Err())
 			return
 		}
 		if err := w.sender.SendTransactionUpdateHeavy(*effCallerConnID, *effCallerOutcome, callerUpdates, memo); err != nil {
-			w.handleSendError(*effCallerConnID, err)
+			recordTraceFailure(w.handleSendError(*effCallerConnID, err), err)
 		}
 	}
 }
 
-func (w *FanOutWorker) handleSendError(connID types.ConnectionID, err error) {
+func (w *FanOutWorker) handleSendError(connID types.ConnectionID, err error) string {
 	if errors.Is(err, ErrSendBufferFull) {
 		w.recordFanoutError("buffer_full", connID, err)
 		w.markDropped(connID)
+		return "buffer_full"
 	} else if errors.Is(err, ErrSendConnGone) {
 		w.recordFanoutError("connection_closed", connID, err)
+		return "connection_closed"
 	} else if errors.Is(err, ErrSendEncodeFailed) {
 		w.recordFanoutError("encode_failed", connID, err)
+		return "encode_failed"
 	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		w.recordFanoutError("context_canceled", connID, err)
+		return "context_canceled"
 	} else {
 		w.recordFanoutError("send_failed", connID, err)
+		return "send_failed"
 	}
 }
 

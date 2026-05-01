@@ -442,6 +442,7 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		payload, err := EncodeChangeset(item.changeset)
 		if err != nil {
 			recordDurabilityFailed(dw.observer, err, "write_failed", item.txID)
+			traceDurabilityBatch(dw.observer, item.txID, "error", err)
 			return err
 		}
 		rec := &Record{
@@ -451,6 +452,7 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		}
 		if err := dw.seg.Append(rec); err != nil {
 			recordDurabilityFailed(dw.observer, err, "write_failed", item.txID)
+			traceDurabilityBatch(dw.observer, item.txID, "error", err)
 			return err
 		}
 		if dw.idx != nil {
@@ -465,6 +467,7 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 	}
 	if err := dw.seg.Sync(); err != nil {
 		recordDurabilityFailed(dw.observer, err, "sync_failed", batch[len(batch)-1].txID)
+		traceDurabilityBatch(dw.observer, batch[len(batch)-1].txID, "error", err)
 		return err
 	}
 	if dw.idx != nil {
@@ -484,6 +487,7 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		nextTx := batch[len(batch)-1].txID + 1
 		if err := dw.seg.Close(); err != nil {
 			recordDurabilityFailed(dw.observer, err, "segment_rotate_failed", batch[len(batch)-1].txID)
+			traceDurabilityBatch(dw.observer, batch[len(batch)-1].txID, "error", err)
 			return err
 		}
 		if dw.idx != nil {
@@ -493,11 +497,13 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 		seg, err := CreateSegment(dw.dir, nextTx)
 		if err != nil {
 			recordDurabilityFailed(dw.observer, err, "segment_rotate_failed", nextTx)
+			traceDurabilityBatch(dw.observer, nextTx, "error", err)
 			return err
 		}
 		dw.seg = seg
 		dw.idx = initOffsetIndexForSegment(dw.dir, seg, dw.opts)
 	}
+	traceDurabilityBatch(dw.observer, lastDurable, "ok", nil)
 	return nil
 }
 
