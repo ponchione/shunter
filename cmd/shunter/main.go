@@ -26,7 +26,7 @@ func run(stdout, stderr io.Writer, args []string) int {
 	case "contract":
 		return runContract(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\n\n", args[0])
+		writeCLIErrorf(stderr, "unknown command %q\n\n", args[0])
 		printRootHelp(stderr)
 		return 2
 	}
@@ -48,7 +48,7 @@ func runContract(stdout, stderr io.Writer, args []string) int {
 	case "codegen":
 		return runContractCodegen(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "unknown contract command %q\n\n", args[0])
+		writeCLIErrorf(stderr, "unknown contract command %q\n\n", args[0])
 		printContractHelp(stderr)
 		return 2
 	}
@@ -72,22 +72,22 @@ func runContractDiff(stdout, stderr io.Writer, args []string) int {
 		return code
 	}
 	if err := contractworkflow.ValidateFormat(*format); err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 2
 	}
 
 	report, err := contractworkflow.CompareFiles(*previousPath, *currentPath)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 1
 	}
 	out, err := contractworkflow.FormatDiff(report, *format)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 2
 	}
 	if _, err := stdout.Write(out); err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 1
 	}
 	return 0
@@ -113,7 +113,7 @@ func runContractPolicy(stdout, stderr io.Writer, args []string) int {
 		return code
 	}
 	if err := contractworkflow.ValidateFormat(*format); err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 2
 	}
 
@@ -122,16 +122,16 @@ func runContractPolicy(stdout, stderr io.Writer, args []string) int {
 		Strict:                 *strict,
 	})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 1
 	}
 	out, err := contractworkflow.FormatPolicy(result, *format)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 2
 	}
 	if _, err := stdout.Write(out); err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 1
 	}
 	if result.Failed {
@@ -161,7 +161,7 @@ func runContractPlan(stdout, stderr io.Writer, args []string) int {
 		return code
 	}
 	if err := contractworkflow.ValidateFormat(*format); err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 2
 	}
 
@@ -173,16 +173,16 @@ func runContractPlan(stdout, stderr io.Writer, args []string) int {
 		ValidateContracts: *validateContracts,
 	})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 1
 	}
 	out, err := contractworkflow.FormatPlan(plan, *format)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 2
 	}
 	if _, err := stdout.Write(out); err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 1
 	}
 	if plan.Summary.PolicyFailed {
@@ -210,10 +210,10 @@ func runContractCodegen(stdout, stderr io.Writer, args []string) int {
 	}
 
 	if err := contractworkflow.GenerateFile(*contractPath, *outputPath, codegen.Options{Language: *language}); err != nil {
-		fmt.Fprintln(stderr, err)
+		writeCLIError(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "wrote %s\n", *outputPath)
+	writeCLIStatusf(stdout, "wrote %s\n", *outputPath)
 	return 0
 }
 
@@ -237,7 +237,7 @@ func requireNoArgs(stderr io.Writer, fs *flag.FlagSet) int {
 	if fs.NArg() == 0 {
 		return 0
 	}
-	fmt.Fprintf(stderr, "%s: unexpected argument %q\n", fs.Name(), fs.Arg(0))
+	writeCLIErrorf(stderr, "%s: unexpected argument %q\n", fs.Name(), fs.Arg(0))
 	return 2
 }
 
@@ -245,8 +245,26 @@ func requirePath(stderr io.Writer, name, value string) int {
 	if value != "" {
 		return 0
 	}
-	fmt.Fprintf(stderr, "--%s is required\n", name)
+	writeCLIErrorf(stderr, "--%s is required\n", name)
 	return 2
+}
+
+func writeCLIError(stderr io.Writer, err error) {
+	if err == nil {
+		return
+	}
+	writeCLIErrorf(stderr, "%v\n", err)
+}
+
+// writeCLIErrorf and writeCLIStatusf are user-facing command output helpers.
+// They use injected writers only; runtime diagnostics must go through
+// ObservabilityConfig.Logger and runtimeObservability instead.
+func writeCLIErrorf(stderr io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(stderr, format, args...)
+}
+
+func writeCLIStatusf(stdout io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(stdout, format, args...)
 }
 
 func isHelpArg(arg string) bool {

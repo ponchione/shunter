@@ -58,6 +58,40 @@ func TestRuntimeStructuredLoggingReadyAndClosed(t *testing.T) {
 	assertLogDurationMS(t, closed)
 }
 
+func TestRuntimeStructuredLoggingReadyUsesStartContext(t *testing.T) {
+	type startContextKey struct{}
+	key := startContextKey{}
+	values := make(chan any, 1)
+	rt, err := Build(validChatModule(), Config{
+		DataDir: t.TempDir(),
+		Observability: ObservabilityConfig{
+			Logger: slog.New(contextCaptureSlogHandler{
+				event:  "runtime.ready",
+				key:    key,
+				values: values,
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	ctx := context.WithValue(context.Background(), key, "start-context")
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	select {
+	case got := <-values:
+		if got != "start-context" {
+			t.Fatalf("runtime.ready context value = %#v, want start-context", got)
+		}
+	default:
+		t.Fatal("runtime.ready log was not handled")
+	}
+}
+
 func TestRuntimeStructuredLoggingStartFailedRedactsAndBoundsError(t *testing.T) {
 	logs := &recordingLogState{}
 	rt, err := Build(validChatModule(), Config{
@@ -186,6 +220,25 @@ func TestRuntimeStructuredLoggingLoggerPanicIsolation(t *testing.T) {
 		t.Fatalf("Close returned error with panicking logger: %v", err)
 	}
 }
+
+type contextCaptureSlogHandler struct {
+	event  string
+	key    any
+	values chan<- any
+}
+
+func (h contextCaptureSlogHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h contextCaptureSlogHandler) Handle(ctx context.Context, record slog.Record) error {
+	if record.Message == h.event {
+		h.values <- ctx.Value(h.key)
+	}
+	return nil
+}
+
+func (h contextCaptureSlogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+
+func (h contextCaptureSlogHandler) WithGroup(string) slog.Handler { return h }
 
 func TestRuntimeStructuredLoggingReducerPanic(t *testing.T) {
 	logs := &recordingLogState{}

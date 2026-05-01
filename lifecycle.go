@@ -73,20 +73,20 @@ func (r *Runtime) Start(ctx context.Context) error {
 	r.recordRuntimeMetrics()
 
 	if err := ctx.Err(); err != nil {
-		r.recordStartFailure(err, time.Since(startedAt))
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	if err := r.engine.Start(ctx); err != nil {
 		err = fmt.Errorf("start schema engine: %w", err)
-		r.recordStartFailure(err, time.Since(startedAt))
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	if _, _, err := buildAuthConfig(r.config); err != nil {
-		r.recordStartFailure(err, time.Since(startedAt))
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	if _, err := buildProtocolOptions(r.config.Protocol); err != nil {
-		r.recordStartFailure(err, time.Since(startedAt))
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 
@@ -96,7 +96,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	durability, err := commitlog.NewDurabilityWorkerWithResumePlan(r.dataDir, r.resumePlan, durabilityOptions)
 	if err != nil {
 		err = fmt.Errorf("start durability worker: %w", err)
-		r.recordStartFailure(err, time.Since(startedAt))
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	cleanupDurability := true
@@ -109,13 +109,13 @@ func (r *Runtime) Start(ctx context.Context) error {
 	if runtimeStartAfterDurabilityHook != nil {
 		if err := runtimeStartAfterDurabilityHook(r); err != nil {
 			err = fmt.Errorf("start runtime lifecycle: %w", err)
-			r.recordStartFailure(err, time.Since(startedAt))
+			r.recordStartFailure(ctx, err, time.Since(startedAt))
 			return err
 		}
 	}
 
 	if err := ctx.Err(); err != nil {
-		r.recordStartFailure(err, time.Since(startedAt))
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 
@@ -137,7 +137,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	scheduler := exec.SchedulerFor()
 	if err := exec.Startup(ctx, scheduler); err != nil {
 		err = fmt.Errorf("startup executor: %w", err)
-		r.recordStartFailure(err, time.Since(startedAt))
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 
@@ -157,7 +157,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 		r.mu.Unlock()
 		lifecycleCancel()
 		fanOutCancel()
-		r.recordStartFailure(ErrRuntimeClosed, time.Since(startedAt))
+		r.recordStartFailure(ctx, ErrRuntimeClosed, time.Since(startedAt))
 		return ErrRuntimeClosed
 	}
 	r.lifecycleCancel = lifecycleCancel
@@ -186,7 +186,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 		r.mu.Unlock()
 		lifecycleCancel()
 		fanOutCancel()
-		r.recordStartFailure(err, time.Since(startedAt))
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
 	r.schedulerWG.Add(1)
@@ -206,7 +206,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	}()
 
 	cleanupDurability = false
-	r.recordStartReady(time.Since(startedAt))
+	r.recordStartReady(ctx, time.Since(startedAt))
 	return nil
 }
 
@@ -317,7 +317,7 @@ func (r *Runtime) Close() error {
 	return closeErr
 }
 
-func (r *Runtime) recordStartFailure(err error, duration time.Duration) {
+func (r *Runtime) recordStartFailure(ctx context.Context, err error, duration time.Duration) {
 	transitionedFailed := false
 	r.mu.Lock()
 	r.lastErr = err
@@ -332,14 +332,14 @@ func (r *Runtime) recordStartFailure(err error, duration time.Duration) {
 	if transitionedFailed {
 		r.observability.recordRuntimeError("start_failed")
 	}
-	r.observability.recordRuntimeStartFailed(err, duration)
+	r.observability.recordRuntimeStartFailed(ctx, err, duration)
 	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
 }
 
-func (r *Runtime) recordStartReady(duration time.Duration) {
+func (r *Runtime) recordStartReady(ctx context.Context, duration time.Duration) {
 	health := r.Health()
 	r.observability.recordRuntimeHealthMetrics(health)
-	r.observability.recordRuntimeReady(health, duration)
+	r.observability.recordRuntimeReady(ctx, health, duration)
 	r.observability.recordRuntimeHealthDegraded(health, runtimePrimaryDegradedReason(health))
 }
 

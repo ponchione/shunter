@@ -46,6 +46,11 @@ host, protocol, executor, commitlog, store, and subscription diagnostics MUST
 flow through a runtime-scoped observability object or a package-scoped no-op
 used only when no runtime exists yet.
 
+Command-line user output is not runtime diagnostics. CLI commands MAY write
+human-facing status, help, and error text to injected stdout/stderr writers,
+but MUST NOT use the standard `log` package, process-global loggers, or global
+stdout/stderr outside the CLI entry point.
+
 Observability has a build-time phase and a runtime phase. `Build` MUST create
 the normalized observability object early enough that build, validation,
 bootstrap, and recovery failures can be logged and counted even when no
@@ -548,6 +553,11 @@ Shunter logging MUST use `log/slog` through `ObservabilityConfig.Logger`.
 `nil` logger means no-op. The log record message MUST equal the stable event
 name. Human-readable details belong in structured attributes, not in a varying
 message string.
+
+Production packages MUST NOT import the standard `log` package. Production
+`log/slog` imports are reserved for the runtime observability owner; subsystem
+packages emit observations through narrow observer interfaces so required
+fields, redaction, level selection, and sink isolation remain centralized.
 
 Every Shunter log record MUST include:
 

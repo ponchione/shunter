@@ -384,24 +384,24 @@ func (o *runtimeObservability) recordRecoveryFailed(err error, duration time.Dur
 	}, 1)
 }
 
-func (o *runtimeObservability) recordRuntimeStartFailed(err error, duration time.Duration) {
+func (o *runtimeObservability) recordRuntimeStartFailed(ctx context.Context, err error, duration time.Duration) {
 	if err == nil {
 		return
 	}
 	o.traceSpan(traceSpanRuntimeStart, "runtime", err,
 		TraceAttr{Key: "state", Value: string(RuntimeStateFailed)},
 	)
-	o.log(context.Background(), slog.LevelError, "runtime.start_failed", "runtime",
+	o.log(ctx, slog.LevelError, "runtime.start_failed", "runtime",
 		slog.String("error", o.redactError(err)),
 		slog.Int64("duration_ms", duration.Milliseconds()),
 	)
 }
 
-func (o *runtimeObservability) recordRuntimeReady(health RuntimeHealth, duration time.Duration) {
+func (o *runtimeObservability) recordRuntimeReady(ctx context.Context, health RuntimeHealth, duration time.Duration) {
 	o.traceSpan(traceSpanRuntimeStart, "runtime", nil,
 		TraceAttr{Key: "state", Value: string(health.State)},
 	)
-	o.log(context.Background(), slog.LevelInfo, "runtime.ready", "runtime",
+	o.log(ctx, slog.LevelInfo, "runtime.ready", "runtime",
 		slog.String("state", string(health.State)),
 		slog.Bool("ready", health.Ready),
 		slog.Bool("degraded", health.Degraded),

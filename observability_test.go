@@ -519,10 +519,10 @@ func TestRuntimeObservationMethodsRecoverPanickingSinks(t *testing.T) {
 			o.recordRecoveryFailed(observerErr, time.Millisecond)
 		}},
 		{name: "record_runtime_start_failed", call: func(o *runtimeObservability) {
-			o.recordRuntimeStartFailed(observerErr, time.Millisecond)
+			o.recordRuntimeStartFailed(context.Background(), observerErr, time.Millisecond)
 		}},
 		{name: "record_runtime_ready", call: func(o *runtimeObservability) {
-			o.recordRuntimeReady(health, time.Millisecond)
+			o.recordRuntimeReady(context.Background(), health, time.Millisecond)
 		}},
 		{name: "record_runtime_close_failed", call: func(o *runtimeObservability) {
 			o.recordRuntimeCloseFailed(observerErr, time.Millisecond)

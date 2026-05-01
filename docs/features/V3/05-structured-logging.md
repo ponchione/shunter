@@ -125,6 +125,9 @@ No-op fallback / isolation:
 
 - Nil observers in subsystem packages are the package-level no-op fallback for
   standalone package tests and pre-runtime use.
+- CLI command output is explicit user-facing stdout/stderr text through
+  injected writers, not runtime diagnostics; it remains outside process-global
+  logging and must not use the standard `log` package.
 - Commitlog offset-index advisory failures remain non-fatal and now disable
   indexing silently rather than writing process-global logs; durability-fatal
   failures emit `durability.failed` when a runtime observer is present.
@@ -165,3 +168,7 @@ word-bounded process-global check and import check showed no production
 rtk grep -n '\\blog\\.Printf|\\blog\\.' *.go commitlog executor protocol subscription store
 rtk grep -n '"log"' *.go commitlog/*.go executor/*.go protocol/*.go subscription/*.go store/*.go
 ```
+
+Post-completion hardening added a root regression test that parses production
+Go files and fails on standard `log` imports, process-global `log.*` calls, or
+direct production `log/slog` imports outside the runtime observability owner.
