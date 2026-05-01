@@ -344,6 +344,31 @@ func TestTypeScriptGeneratorDeclaredHelpersUseNamedCallbacksNotSQL(t *testing.T)
 	assertNotContains(t, ts, `return subscribeView("SELECT * FROM messages");`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesDeclaredReadHelperNameCollisions(t *testing.T) {
+	contract := contractFixture()
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{Name: "recent-messages", SQL: "SELECT * FROM messages"})
+	contract.Views = append(contract.Views, shunter.ViewDescription{Name: "live messages", SQL: "SELECT * FROM messages"})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `recentMessages: "recent_messages",`)
+	assertContains(t, ts, `recentMessages2: "recent-messages",`)
+	assertContains(t, ts, `export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("recent_messages");`)
+	assertContains(t, ts, `export function queryRecentMessages2(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("recent-messages");`)
+	assertContains(t, ts, `liveMessages: "live_messages",`)
+	assertContains(t, ts, `liveMessages2: "live messages",`)
+	assertContains(t, ts, `export function subscribeLiveMessages(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live_messages");`)
+	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("live messages");`)
+}
+
 func TestTypeScriptGeneratorDoesNotEmitExecutableHelpersForMetadataOnlyDeclarations(t *testing.T) {
 	contract := contractFixture()
 	contract.Queries[0].SQL = ""
