@@ -143,9 +143,11 @@ Current status:
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
-  deterministic accepted results. Parser metamorphic coverage now also checks
-  that harmless predicate parenthesization, whitespace layout changes, and
-  commutative `AND` predicate reordering produce equivalent parsed filter sets.
+  deterministic accepted results. Caller-identity coercion also pins detached
+  bytes output plus stable hex string materialization for `:sender`. Parser
+  metamorphic coverage now also checks that harmless predicate parenthesization,
+  whitespace layout changes, and commutative `AND` predicate reordering produce
+  equivalent parsed filter sets.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission

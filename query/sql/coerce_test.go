@@ -1,6 +1,8 @@
 package sql
 
 import (
+	"bytes"
+	"encoding/hex"
 	"errors"
 	"math"
 	"math/big"
@@ -260,6 +262,43 @@ func TestCoerceSenderWithCallerToBytes(t *testing.T) {
 	got := v.AsBytes()
 	if len(got) != 32 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
 		t.Fatalf("AsBytes = %x, want caller identity bytes", got)
+	}
+}
+
+func TestCoerceSenderCallerIdentityDetachmentMetamorphic(t *testing.T) {
+	const seed = uint64(0x5e7d3a)
+	callers := [][32]byte{
+		{0},
+		{1, 2, 3, 4},
+		{0xab, 0xcd, 0xef, 0x10},
+	}
+	for opIndex, caller := range callers {
+		original := caller
+		value, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindBytes, &caller)
+		if err != nil {
+			t.Fatalf("seed=%#x op_index=%d operation=CoerceSenderBytes: %v", seed, opIndex, err)
+		}
+		if got := value.AsBytes(); !bytes.Equal(got, original[:]) {
+			t.Fatalf("seed=%#x op_index=%d operation=CoerceSenderBytes observed=%x expected=%x", seed, opIndex, got, original)
+		}
+
+		got := value.AsBytes()
+		got[0] ^= 0xff
+		if after := value.AsBytes(); !bytes.Equal(after, original[:]) {
+			t.Fatalf("seed=%#x op_index=%d operation=MutateAccessorResult observed=%x expected=%x", seed, opIndex, after, original)
+		}
+		caller[1] ^= 0xff
+		if after := value.AsBytes(); !bytes.Equal(after, original[:]) {
+			t.Fatalf("seed=%#x op_index=%d operation=MutateCallerAfterCoerce observed=%x expected=%x", seed, opIndex, after, original)
+		}
+
+		stringValue, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindString, &caller)
+		if err != nil {
+			t.Fatalf("seed=%#x op_index=%d operation=CoerceSenderString: %v", seed, opIndex, err)
+		}
+		if got, want := stringValue.AsString(), hex.EncodeToString(caller[:]); got != want {
+			t.Fatalf("seed=%#x op_index=%d operation=CoerceSenderString observed=%q expected=%q", seed, opIndex, got, want)
+		}
 	}
 }
 
