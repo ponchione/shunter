@@ -702,6 +702,42 @@ func TestContractCodegenUnknownMigrationTargetLeavesOutputUntouched(t *testing.T
 	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestContractCodegenInvalidSchemaColumnTypeLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=cli-codegen-invalid-schema-column-type-output-preservation"
+	dir := t.TempDir()
+	contract := cliContractFixture()
+	contract.Schema.Tables[0].Columns[1].Type = "json"
+	contractPath := writeCLIContract(t, dir, "contract.json", contract)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "codegen",
+		"--contract", contractPath,
+		"--language", "typescript",
+		"--out", outputPath,
+	})
+	if code != 1 {
+		t.Fatalf("%s contract codegen exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
+	}
+	assertContains(t, stderr.String(), `schema.tables.messages.columns.body type "json" is invalid`)
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s invalid schema column type mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoCLITempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestContractCodegenRejectsUnexpectedArgBeforeFileIO(t *testing.T) {
 	const trace = "trace=cli-codegen-unexpected-arg-before-file-io"
 	dir := t.TempDir()
