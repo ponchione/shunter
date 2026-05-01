@@ -2,6 +2,9 @@ package protocol
 
 import (
 	"context"
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -165,6 +168,74 @@ func TestCloseAll_EmptyManagerNoOp(t *testing.T) {
 	onDis, _, _ := inbox.disconnectSnapshot()
 	if onDis != 0 {
 		t.Errorf("OnDisconnect calls = %d, want 0", onDis)
+	}
+}
+
+func TestCloseAllConcurrentCallersShortSoak(t *testing.T) {
+	const (
+		seed        = uint64(0xc105ea11)
+		connections = 5
+		closers     = 6
+	)
+	opts := DefaultProtocolOptions()
+	opts.DisconnectTimeout = 500 * time.Millisecond
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	conns := make([]*Conn, connections)
+	for i := range conns {
+		conn := testConnDirect(&opts)
+		conns[i] = conn
+		mgr.Add(conn)
+	}
+
+	start := make(chan struct{})
+	failures := make(chan string, closers+connections)
+	var wg sync.WaitGroup
+	for closer := range closers {
+		wg.Add(1)
+		go func(closer int) {
+			defer wg.Done()
+			<-start
+			mgr.CloseAll(context.Background(), inbox)
+			if (int(seed)+closer)%2 == 0 {
+				runtime.Gosched()
+			}
+		}(closer)
+	}
+	close(start)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("seed=%#x op=wait runtime_config=connections=%d/closers=%d operation=CloseAll-concurrent observed=timeout expected=all-callers-finished",
+			seed, connections, closers)
+	}
+
+	for i, conn := range conns {
+		select {
+		case <-conn.closed:
+		default:
+			failures <- fmt.Sprintf("seed=%#x conn=%d runtime_config=connections=%d/closers=%d operation=closed-signal observed=open expected=closed",
+				seed, i, connections, closers)
+		}
+		if got := mgr.Get(conn.ID); got != nil {
+			failures <- fmt.Sprintf("seed=%#x conn=%d runtime_config=connections=%d/closers=%d operation=manager-lookup observed=%p expected=nil",
+				seed, i, connections, closers, got)
+		}
+	}
+	onDis, onSubs, _ := inbox.disconnectSnapshot()
+	if onDis != connections || onSubs != connections {
+		failures <- fmt.Sprintf("seed=%#x op=disconnect-count runtime_config=connections=%d/closers=%d operation=CloseAll-concurrent observed=(on_disconnect=%d subscription_disconnect=%d) expected=(%d,%d)",
+			seed, connections, closers, onDis, onSubs, connections, connections)
+	}
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
 	}
 }
 
