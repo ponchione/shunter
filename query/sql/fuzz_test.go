@@ -10,62 +10,49 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+var parseFuzzSeeds = []string{
+	"",
+	"SELECT * FROM players",
+	"select * from players where id = 1",
+	`SELECT "users".* FROM "users" WHERE "users"."name" = 'ada'`,
+	"SELECT COUNT(*) AS n FROM players WHERE active = TRUE LIMIT 10",
+	"SELECT p.id, team.name FROM players AS p JOIN teams AS team ON p.team_id = team.id WHERE team.active = TRUE",
+	"SELECT * FROM t WHERE bytes = 0xDEADBEEF",
+	"SELECT * FROM t WHERE id = :sender",
+	"SELECT * FROM t WHERE id = 12abc",
+	"SELECT * FROM t WHERE name = 'unterminated",
+	"SELECT * FROM t WHERE c = 1e999999999",
+	"SELECT * FROM t INNER",
+	"SELECT * FROM t LEFT JOIN s ON t.id = s.id",
+}
+
+var coerceFuzzSeeds = [][]byte{
+	{},
+	{0, 0, 0, 0, 0},
+	{1, 2, 3, 4, 5, 6, 7, 8},
+	[]byte("1e40"),
+	[]byte("0xDEADBEEF"),
+	[]byte(":sender"),
+	{0xff, 0, 0x7f, 0x80, 0x40, 0x20, 0x10},
+}
+
+const maxSQLFuzzBytes = 8 << 10
+
 func FuzzParse(f *testing.F) {
-	for _, seed := range []string{
-		"",
-		"SELECT * FROM players",
-		"select * from players where id = 1",
-		`SELECT "users".* FROM "users" WHERE "users"."name" = 'ada'`,
-		"SELECT COUNT(*) AS n FROM players WHERE active = TRUE LIMIT 10",
-		"SELECT p.id, team.name FROM players AS p JOIN teams AS team ON p.team_id = team.id WHERE team.active = TRUE",
-		"SELECT * FROM t WHERE bytes = 0xDEADBEEF",
-		"SELECT * FROM t WHERE id = :sender",
-		"SELECT * FROM t WHERE id = 12abc",
-		"SELECT * FROM t WHERE name = 'unterminated",
-		"SELECT * FROM t WHERE c = 1e999999999",
-		"SELECT * FROM t INNER",
-		"SELECT * FROM t LEFT JOIN s ON t.id = s.id",
-	} {
+	for _, seed := range parseFuzzSeeds {
 		f.Add(seed)
 	}
 
-	const maxSQLFuzzBytes = 8 << 10
 	f.Fuzz(func(t *testing.T, input string) {
 		if len(input) > maxSQLFuzzBytes {
 			t.Skip("SQL fuzz input above bounded local limit")
 		}
-
-		stmt, err := Parse(input)
-		if err != nil {
-			if !errors.Is(err, ErrUnsupportedSQL) {
-				t.Fatalf("Parse(%q) error = %v, want ErrUnsupportedSQL category", input, err)
-			}
-			return
-		}
-		if stmt.Table == "" {
-			t.Fatalf("Parse(%q) accepted empty table statement: %+v", input, stmt)
-		}
-
-		again, err := Parse(input)
-		if err != nil {
-			t.Fatalf("Parse(%q) accepted once then failed: %v", input, err)
-		}
-		if !reflect.DeepEqual(again, stmt) {
-			t.Fatalf("Parse(%q) is not deterministic: first=%#v second=%#v", input, stmt, again)
-		}
+		assertParseFuzzInput(t, input)
 	})
 }
 
 func FuzzCoerce(f *testing.F) {
-	for _, seed := range [][]byte{
-		{},
-		{0, 0, 0, 0, 0},
-		{1, 2, 3, 4, 5, 6, 7, 8},
-		[]byte("1e40"),
-		[]byte("0xDEADBEEF"),
-		[]byte(":sender"),
-		{0xff, 0, 0x7f, 0x80, 0x40, 0x20, 0x10},
-	} {
+	for _, seed := range coerceFuzzSeeds {
 		f.Add(seed)
 	}
 
@@ -73,43 +60,7 @@ func FuzzCoerce(f *testing.F) {
 		if len(data) > 512 {
 			return
 		}
-		r := newCoerceFuzzReader(data)
-		lit := r.literal()
-		kind := coerceFuzzKinds[int(r.byte())%len(coerceFuzzKinds)]
-		caller := r.caller()
-		label := coerceFuzzLabel(data, lit, kind)
-
-		if lit.Kind == LitSender {
-			if _, err := Coerce(lit, kind); !errors.Is(err, ErrUnsupportedSQL) {
-				t.Fatalf("Coerce(:sender without caller) err=%v, want ErrUnsupportedSQL %s", err, label)
-			}
-		}
-
-		got, err := CoerceWithCaller(lit, kind, &caller)
-		if err != nil {
-			assertCoerceFuzzError(t, err, label)
-			return
-		}
-		if got.Kind() != kind {
-			t.Fatalf("CoerceWithCaller returned kind %s, want %s %s", got.Kind(), kind, label)
-		}
-		again, err := CoerceWithCaller(lit, kind, &caller)
-		if err != nil {
-			t.Fatalf("CoerceWithCaller accepted once then failed: %v %s", err, label)
-		}
-		if !got.Equal(again) {
-			t.Fatalf("CoerceWithCaller is not deterministic: first=%+v second=%+v %s", got, again, label)
-		}
-
-		if lit.Kind != LitSender {
-			withoutCaller, err := Coerce(lit, kind)
-			if err != nil {
-				t.Fatalf("CoerceWithCaller accepted but Coerce failed: %v %s", err, label)
-			}
-			if !got.Equal(withoutCaller) {
-				t.Fatalf("Coerce and CoerceWithCaller differ without :sender: caller=%+v direct=%+v %s", got, withoutCaller, label)
-			}
-		}
+		assertCoerceFuzzInput(t, data)
 	})
 }
 
@@ -254,16 +205,94 @@ func (r *coerceFuzzReader) bigInt() *big.Int {
 	return out
 }
 
-func assertCoerceFuzzError(t *testing.T, err error, label string) {
-	t.Helper()
+func assertParseFuzzInput(tb testing.TB, input string) {
+	tb.Helper()
+	if err := checkParseFuzzInput(input); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+func checkParseFuzzInput(input string) error {
+	stmt, err := Parse(input)
+	if err != nil {
+		if !errors.Is(err, ErrUnsupportedSQL) {
+			return fmt.Errorf("Parse(%q) error = %v, want ErrUnsupportedSQL category", input, err)
+		}
+		return nil
+	}
+	if stmt.Table == "" {
+		return fmt.Errorf("Parse(%q) accepted empty table statement: %+v", input, stmt)
+	}
+
+	again, err := Parse(input)
+	if err != nil {
+		return fmt.Errorf("Parse(%q) accepted once then failed: %v", input, err)
+	}
+	if !reflect.DeepEqual(again, stmt) {
+		return fmt.Errorf("Parse(%q) is not deterministic: first=%#v second=%#v", input, stmt, again)
+	}
+	return nil
+}
+
+func assertCoerceFuzzInput(tb testing.TB, data []byte) {
+	tb.Helper()
+	if err := checkCoerceFuzzInput(data); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+func checkCoerceFuzzInput(data []byte) error {
+	r := newCoerceFuzzReader(data)
+	lit := r.literal()
+	kind := coerceFuzzKinds[int(r.byte())%len(coerceFuzzKinds)]
+	caller := r.caller()
+	label := coerceFuzzLabel(data, lit, kind)
+
+	if lit.Kind == LitSender {
+		if _, err := Coerce(lit, kind); !errors.Is(err, ErrUnsupportedSQL) {
+			return fmt.Errorf("Coerce(:sender without caller) err=%v, want ErrUnsupportedSQL %s", err, label)
+		}
+	}
+
+	got, err := CoerceWithCaller(lit, kind, &caller)
+	if err != nil {
+		if err := checkCoerceFuzzError(err); err != nil {
+			return fmt.Errorf("%w %s", err, label)
+		}
+		return nil
+	}
+	if got.Kind() != kind {
+		return fmt.Errorf("CoerceWithCaller returned kind %s, want %s %s", got.Kind(), kind, label)
+	}
+	again, err := CoerceWithCaller(lit, kind, &caller)
+	if err != nil {
+		return fmt.Errorf("CoerceWithCaller accepted once then failed: %v %s", err, label)
+	}
+	if !got.Equal(again) {
+		return fmt.Errorf("CoerceWithCaller is not deterministic: first=%+v second=%+v %s", got, again, label)
+	}
+
+	if lit.Kind != LitSender {
+		withoutCaller, err := Coerce(lit, kind)
+		if err != nil {
+			return fmt.Errorf("CoerceWithCaller accepted but Coerce failed: %v %s", err, label)
+		}
+		if !got.Equal(withoutCaller) {
+			return fmt.Errorf("Coerce and CoerceWithCaller differ without :sender: caller=%+v direct=%+v %s", got, withoutCaller, label)
+		}
+	}
+	return nil
+}
+
+func checkCoerceFuzzError(err error) error {
 	var invalid InvalidLiteralError
 	var unexpected UnexpectedTypeError
 	if errors.Is(err, ErrUnsupportedSQL) ||
 		errors.As(err, &invalid) ||
 		errors.As(err, &unexpected) {
-		return
+		return nil
 	}
-	t.Fatalf("CoerceWithCaller returned unclassified error %T: %v %s", err, err, label)
+	return fmt.Errorf("CoerceWithCaller returned unclassified error %T: %v", err, err)
 }
 
 func coerceFuzzLabel(data []byte, lit Literal, kind types.ValueKind) string {
