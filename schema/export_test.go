@@ -2,6 +2,10 @@ package schema
 
 import (
 	"encoding/json"
+	"fmt"
+	"reflect"
+	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/ponchione/shunter/types"
@@ -178,6 +182,139 @@ func TestExportSchemaReturnsDetachedSnapshot(t *testing.T) {
 	}
 	if again.Tables[0].Indexes[0].Columns[0] != "id" {
 		t.Fatalf("detached index columns = %v, want [id]", again.Tables[0].Indexes[0].Columns)
+	}
+}
+
+func TestSchemaRegistryConcurrentReadExportShortSoak(t *testing.T) {
+	const seed = uint64(0x5c4e6a)
+	const workers = 8
+	const iterations = 64
+
+	b := NewBuilder()
+	b.SchemaVersion(7)
+	b.TableDef(TableDefinition{
+		Name: "players",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+			{Name: "name", Type: KindString},
+		},
+	}, WithPublicRead())
+	b.TableDef(TableDefinition{
+		Name: "messages",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+			{Name: "player_id", Type: KindUint64},
+			{Name: "body", Type: KindString},
+		},
+	}, WithReadPermissions("messages:read"))
+	b.Reducer("CreateMessage", func(*ReducerContext, []byte) ([]byte, error) { return nil, nil })
+	b.OnConnect(func(*ReducerContext) error { return nil })
+
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	reg := e.Registry()
+	baseline := e.ExportSchema()
+
+	start := make(chan struct{})
+	failures := make(chan string, workers*iterations)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for iteration := range iterations {
+				opIndex := worker*iterations + iteration
+				if ((uint64(opIndex) ^ seed) & 3) == 0 {
+					runtime.Gosched()
+				}
+				switch (uint64(opIndex) ^ seed) % 6 {
+				case 0:
+					ids := reg.Tables()
+					if len(ids) != 4 || ids[0] != 0 || ids[1] != 1 {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=Tables observed=%v expected_prefix=[0 1] expected_len=4",
+							seed, opIndex, worker, workers, iterations, ids)
+						return
+					}
+					ids[0] = 99
+					if again := reg.Tables(); again[0] != 0 {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=Tables-detached observed=%v expected_first=0",
+							seed, opIndex, worker, workers, iterations, again)
+						return
+					}
+				case 1:
+					id, table, ok := reg.TableByName("Players")
+					if !ok || id != 0 || table.Name != "players" || len(table.Columns) != 2 {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=TableByName observed=(%d,%+v,%v) expected=(0,players,true)",
+							seed, opIndex, worker, workers, iterations, id, table, ok)
+						return
+					}
+					table.Columns[0].Name = "mutated"
+					_, again, ok := reg.TableByName("players")
+					if !ok || again.Columns[0].Name != "id" {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=TableByName-detached observed=(%+v,%v) expected_first_column=id",
+							seed, opIndex, worker, workers, iterations, again, ok)
+						return
+					}
+				case 2:
+					table, ok := reg.Table(1)
+					if !ok || table.Name != "messages" || table.ReadPolicy.Access != TableAccessPermissioned || len(table.ReadPolicy.Permissions) != 1 {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=Table observed=(%+v,%v) expected=messages permissioned",
+							seed, opIndex, worker, workers, iterations, table, ok)
+						return
+					}
+					table.ReadPolicy.Permissions[0] = "mutated"
+					again, ok := reg.Table(1)
+					if !ok || again.ReadPolicy.Permissions[0] != "messages:read" {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=Table-detached observed=(%+v,%v) expected_permission=messages:read",
+							seed, opIndex, worker, workers, iterations, again, ok)
+						return
+					}
+				case 3:
+					names := reg.Reducers()
+					if len(names) != 1 || names[0] != "CreateMessage" || reg.OnConnect() == nil || reg.OnDisconnect() != nil {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=Reducers observed_names=%v on_connect_nil=%v on_disconnect_nil=%v expected=[CreateMessage],false,true",
+							seed, opIndex, worker, workers, iterations, names, reg.OnConnect() == nil, reg.OnDisconnect() == nil)
+						return
+					}
+					names[0] = "mutated"
+					if again := reg.Reducers(); again[0] != "CreateMessage" {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=Reducers-detached observed=%v expected=[CreateMessage]",
+							seed, opIndex, worker, workers, iterations, again)
+						return
+					}
+				case 4:
+					got := e.ExportSchema()
+					if !reflect.DeepEqual(got, baseline) {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=ExportSchema observed=%#v expected=%#v",
+							seed, opIndex, worker, workers, iterations, got, baseline)
+						return
+					}
+					got.Tables[0].Name = "mutated"
+					got.Tables[0].Columns[0].Name = "mutated"
+					got.Tables[1].ReadPolicy.Permissions[0] = "mutated"
+					if again := e.ExportSchema(); !reflect.DeepEqual(again, baseline) {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=ExportSchema-detached observed=%#v expected=%#v",
+							seed, opIndex, worker, workers, iterations, again, baseline)
+						return
+					}
+				case 5:
+					if reg.TableName(1) != "messages" || !reg.ColumnExists(1, 2) || reg.ColumnType(1, 2) != KindString || !reg.HasIndex(1, 0) {
+						failures <- fmt.Sprintf("seed=%#x op_index=%d worker=%d runtime_config=workers=%d,iterations=%d operation=lookup-primitives observed_table=%q column_exists=%v column_type=%v has_index=%v expected=messages,true,string,true",
+							seed, opIndex, worker, workers, iterations, reg.TableName(1), reg.ColumnExists(1, 2), reg.ColumnType(1, 2), reg.HasIndex(1, 0))
+						return
+					}
+				}
+			}
+		}(worker)
+	}
+	close(start)
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
 	}
 }
 
