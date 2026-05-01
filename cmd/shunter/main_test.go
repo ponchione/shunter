@@ -300,6 +300,46 @@ func TestContractReadCommandsRejectUnsupportedFormatBeforeReadingFiles(t *testin
 	}
 }
 
+func TestContractReadCommandsRejectUnexpectedArgBeforeFileIO(t *testing.T) {
+	const trace = "trace=cli-contract-read-unexpected-arg-before-file-io"
+	dir := t.TempDir()
+	missingPrevious := filepath.Join(dir, "missing-previous.json")
+	missingCurrent := filepath.Join(dir, "missing-current.json")
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "diff",
+			args: []string{"contract", "diff", "--previous", missingPrevious, "--current", missingCurrent, "unexpected"},
+		},
+		{
+			name: "policy",
+			args: []string{"contract", "policy", "--previous", missingPrevious, "--current", missingCurrent, "unexpected"},
+		},
+		{
+			name: "plan",
+			args: []string{"contract", "plan", "--previous", missingPrevious, "--current", missingCurrent, "unexpected"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, tc.args)
+			if code != 2 {
+				t.Fatalf("%s command=%s exit code = %d, stderr = %s", trace, tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s command=%s stdout = %s, want empty", trace, tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), `unexpected argument "unexpected"`)
+			if strings.Contains(stderr.String(), "read previous contract") || strings.Contains(stderr.String(), "read current contract") {
+				t.Fatalf("%s command=%s read contract before rejecting unexpected arg: %s", trace, tc.name, stderr.String())
+			}
+		})
+	}
+}
+
 func TestContractReadCommandsRejectInvalidContractInputs(t *testing.T) {
 	const trace = "trace=cli-contract-read-invalid-input-rc-gate"
 	dir := t.TempDir()
