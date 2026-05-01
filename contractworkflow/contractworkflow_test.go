@@ -347,6 +347,43 @@ func TestGenerateFileUnknownReadModelTargetLeavesOutputUntouched(t *testing.T) {
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
+func TestGenerateFileInvalidReadModelSurfaceLeavesOutputUntouched(t *testing.T) {
+	const trace = "trace=workflow-codegen-invalid-read-model-surface-output-preservation"
+	dir := t.TempDir()
+	invalidContract := workflowContractFixture()
+	invalidContract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+		Surface: "subscription",
+		Name:    "recent_messages",
+		Tables:  []string{"messages"},
+		Tags:    []string{"history"},
+	}}
+	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for invalid read model surface", trace)
+	}
+	if !errors.Is(err, codegen.ErrInvalidContract) {
+		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
+	}
+	if !strings.Contains(err.Error(), `read_model surface "subscription" is invalid`) {
+		t.Fatalf("%s GenerateFile error = %v, want invalid read model surface context", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s invalid read model surface mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFilePreservesExistingOutputPermissionsAcrossAtomicRewrite(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bit preservation is POSIX-specific")
