@@ -335,6 +335,37 @@ func TestSchedulerReplayOverflowStillArmsEarliestFutureWakeup(t *testing.T) {
 	}
 }
 
+func TestSchedulerReplaySaturatedInboxStillReturnsMaxID(t *testing.T) {
+	_, cs, tid, _ := schedulerWorkerFixture(t)
+	inbox := make(chan ExecutorCommand, 1)
+	s := NewScheduler(inbox, cs, tid)
+	s.now = func() time.Time { return time.Unix(100, 0) }
+	seedSchedule(t, cs, tid, 30, "queued-due", nil, time.Unix(50, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 99, "skipped-due-high-id", nil, time.Unix(60, 0).UnixNano(), 0)
+	seedSchedule(t, cs, tid, 45, "future-after-saturation", nil, time.Unix(900, 0).UnixNano(), 0)
+
+	maxID := s.ReplayFromCommitted()
+
+	if maxID != 99 {
+		t.Fatalf("ReplayFromCommitted maxID with saturated inbox = %d, want 99", maxID)
+	}
+	select {
+	case cmd := <-inbox:
+		call, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("enqueued cmd type=%T, want CallReducerCmd", cmd)
+		}
+		if call.Request.ScheduleID != 30 {
+			t.Fatalf("queued schedule_id = %d, want first due row 30", call.Request.ScheduleID)
+		}
+	default:
+		t.Fatal("replay should enqueue the first due row before saturation")
+	}
+	if s.nextWakeup != time.Unix(900, 0) {
+		t.Fatalf("nextWakeup after saturated replay = %v, want %v", s.nextWakeup, time.Unix(900, 0))
+	}
+}
+
 // TestSchedulerReplayPreservesScanOrderWithoutSorting pins the
 // intentional divergence from reference scheduler.rs:118-130 that the
 // scheduler does not sort past-due rows by next_run_at_ns during replay;
