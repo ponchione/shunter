@@ -42,6 +42,9 @@ Current status:
   explicit connection ID across clean restart, verifies that disconnected
   subscriptions do not recover as ghost subscribers, and resubscribes before
   checking post-restart fanout.
+- Auth validation now has a fixed-seed concurrent JWT validation soak over the
+  public `ValidateJWT` surface, checking stable claims, derived identity,
+  audience, and permissions under worker/op labels.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit
@@ -89,7 +92,8 @@ Current status:
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
   deterministic accepted results. Parser metamorphic coverage now also checks
-  that harmless predicate parenthesization produces equivalent parse trees.
+  that harmless predicate parenthesization and whitespace layout changes
+  produce equivalent parse trees.
 - The scheduler restart campaign has pinned replay overflow, duplicate replay,
   retry ordering, fixed-rate repeating catch-up, recovered future wakeups,
   cancellation/rearm behavior, startup idempotence, and external admission
