@@ -345,6 +345,54 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentContractWithContext(t *tes
 	}
 }
 
+func TestContractDiffJSONRejectsSemanticInvalidPreviousReadModelWithContext(t *testing.T) {
+	previous := contractFixture()
+	previous.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+		Surface: shunter.ReadModelSurfaceQuery,
+		Name:    "history",
+		Tables:  []string{"missing_table"},
+		Tags:    []string{"history"},
+	}}
+	previousData := mustRawContractJSON(t, previous)
+	currentData := mustContractJSON(t, contractFixture())
+
+	for _, tt := range []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "compare",
+			run: func() error {
+				_, err := CompareJSON(previousData, currentData)
+				return err
+			},
+		},
+		{
+			name: "plan",
+			run: func() error {
+				_, err := PlanJSON(previousData, currentData, PlanOptions{ValidateContracts: true})
+				return err
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run()
+			if err == nil {
+				t.Fatal("JSON entry point returned nil error, want invalid contract")
+			}
+			if !errors.Is(err, ErrInvalidContractJSON) {
+				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
+			}
+			if !strings.Contains(err.Error(), "previous contract") {
+				t.Fatalf("JSON entry point error = %v, want previous contract context", err)
+			}
+			if !strings.Contains(err.Error(), `read_model.query.history references unknown table "missing_table"`) {
+				t.Fatalf("JSON entry point error = %v, want read_model table context", err)
+			}
+		})
+	}
+}
+
 func contractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,
