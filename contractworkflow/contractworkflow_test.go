@@ -154,6 +154,76 @@ func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T)
 	assertContains(t, first, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
 }
 
+func TestGenerateFileSyncsParentDirectoryAfterAtomicRename(t *testing.T) {
+	const trace = "trace=workflow-codegen-parent-sync-after-rename"
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+
+	originalSyncDir := syncDir
+	var synced []string
+	syncDir = func(path string) error {
+		synced = append(synced, path)
+		data, err := os.ReadFile(outputPath)
+		if err != nil {
+			t.Fatalf("%s syncDir called before output publish: %v", trace, err)
+		}
+		if !bytes.Contains(data, []byte(`export interface MessagesRow {`)) {
+			t.Fatalf("%s output at syncDir = %q, want generated TypeScript", trace, data)
+		}
+		return nil
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	if err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript}); err != nil {
+		t.Fatalf("%s GenerateFile returned error: %v", trace, err)
+	}
+	if len(synced) != 1 || synced[0] != dir {
+		t.Fatalf("%s syncDir calls = %v, want [%s]", trace, synced, dir)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
+func TestGenerateFileParentSyncFailureFailsLoudlyWithoutTempLeak(t *testing.T) {
+	const trace = "trace=workflow-codegen-parent-sync-failure-fail-loud"
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("previous generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	syncErr := errors.New("parent directory sync failed")
+	originalSyncDir := syncDir
+	syncDir = func(path string) error {
+		if path != dir {
+			t.Fatalf("%s syncDir path = %q, want %q", trace, path, dir)
+		}
+		data, err := os.ReadFile(outputPath)
+		if err != nil {
+			t.Fatalf("%s read output during syncDir: %v", trace, err)
+		}
+		if bytes.Equal(data, original) || !bytes.Contains(data, []byte(`export interface MessagesRow {`)) {
+			t.Fatalf("%s output at syncDir = %q, want generated TypeScript published before parent sync", trace, data)
+		}
+		return syncErr
+	}
+	defer func() { syncDir = originalSyncDir }()
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error, want parent sync failure", trace)
+	}
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("%s GenerateFile error = %v, want wrapped parent sync failure", trace, err)
+	}
+	if !strings.Contains(err.Error(), "write generated output") {
+		t.Fatalf("%s GenerateFile error = %v, want write generated output context", trace, err)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFileWriteFailureLeavesExistingOutputUntouched(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("directory chmod write denial is not portable on windows")
@@ -315,5 +385,19 @@ func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
 		t.Fatalf("missing %q in:\n%s", needle, haystack)
+	}
+}
+
+func assertNoWorkflowTempFiles(t *testing.T, dir, outputBase string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read output directory %s: %v", dir, err)
+	}
+	prefix := "." + outputBase + ".tmp-"
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			t.Fatalf("temporary artifact %s leaked in %s", entry.Name(), dir)
+		}
 	}
 }

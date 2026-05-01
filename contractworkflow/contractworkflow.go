@@ -20,7 +20,11 @@ const (
 	FormatJSON = "json"
 )
 
-var ErrUnsupportedFormat = errors.New("unsupported contract workflow output format")
+var (
+	ErrUnsupportedFormat = errors.New("unsupported contract workflow output format")
+
+	syncDir = syncDirPath
+)
 
 // CompareFiles diffs two canonical ModuleContract JSON files.
 func CompareFiles(previousPath, currentPath string) (contractdiff.Report, error) {
@@ -268,5 +272,17 @@ func writeFile(path string, data []byte) error {
 		return err
 	}
 	removeTemp = false
+	if err := syncDir(dir); err != nil {
+		return err
+	}
 	return nil
+}
+
+func syncDirPath(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
