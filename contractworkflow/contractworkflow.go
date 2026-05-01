@@ -89,12 +89,12 @@ func GenerateFromFile(contractPath string, opts codegen.Options) ([]byte, error)
 
 // GenerateFile generates client bindings from contractPath and writes them to outputPath.
 func GenerateFile(contractPath, outputPath string, opts codegen.Options) error {
+	if strings.TrimSpace(outputPath) == "" {
+		return fmt.Errorf("generated output path is required")
+	}
 	out, err := GenerateFromFile(contractPath, opts)
 	if err != nil {
 		return err
-	}
-	if strings.TrimSpace(outputPath) == "" {
-		return fmt.Errorf("generated output path is required")
 	}
 	if err := writeFile(outputPath, out); err != nil {
 		return fmt.Errorf("write generated output %q: %w", outputPath, err)

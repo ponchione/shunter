@@ -154,6 +154,24 @@ func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T)
 	assertContains(t, first, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
 }
 
+func TestGenerateFileRejectsEmptyOutputPathBeforeReadingContract(t *testing.T) {
+	const trace = "trace=workflow-codegen-empty-output-path-before-input-read"
+	dir := t.TempDir()
+	missingContractPath := filepath.Join(dir, "missing-contract.json")
+
+	err := GenerateFile(missingContractPath, " \t", codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for empty output path", trace)
+	}
+	if !strings.Contains(err.Error(), "generated output path is required") {
+		t.Fatalf("%s GenerateFile error = %v, want output path error", trace, err)
+	}
+	if strings.Contains(err.Error(), "read contract input") {
+		t.Fatalf("%s GenerateFile read contract before rejecting empty output path: %v", trace, err)
+	}
+	assertNoWorkflowTempFiles(t, dir, "client.ts")
+}
+
 func TestGenerateFilePreservesExistingOutputPermissionsAcrossAtomicRewrite(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bit preservation is POSIX-specific")
