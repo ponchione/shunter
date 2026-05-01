@@ -237,6 +237,10 @@ func (w *FanOutWorker) handleSendError(connID types.ConnectionID, err error) {
 		w.markDropped(connID)
 	} else if errors.Is(err, ErrSendConnGone) {
 		w.recordFanoutError("connection_closed", connID, err)
+	} else if errors.Is(err, ErrSendEncodeFailed) {
+		w.recordFanoutError("encode_failed", connID, err)
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		w.recordFanoutError("context_canceled", connID, err)
 	} else {
 		w.recordFanoutError("send_failed", connID, err)
 	}

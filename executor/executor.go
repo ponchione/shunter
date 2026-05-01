@@ -220,7 +220,11 @@ func (e *Executor) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			e.dispatchSafely(cmd)
+			e.recordExecutorInboxDepth()
+			start := time.Now()
+			result := e.dispatchSafely(cmd)
+			e.recordExecutorCommand(cmd, result)
+			e.recordExecutorCommandDuration(cmd, result, time.Since(start))
 		}
 	}
 }
@@ -230,23 +234,29 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 	e.submitMu.RLock()
 	defer e.submitMu.RUnlock()
 	if e.fatal.Load() {
+		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
 	}
 	if e.shutdown.Load() {
+		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
 	}
 	if err := validateResponseChannels(cmd); err != nil {
+		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
 	if e.rejectMode {
 		select {
 		case e.inbox <- cmd:
+			e.recordExecutorInboxDepth()
 			return nil
 		default:
+			e.recordExecutorCommand(cmd, "rejected")
 			return ErrExecutorBusy
 		}
 	}
 	e.inbox <- cmd
+	e.recordExecutorInboxDepth()
 	return nil
 }
 
@@ -261,29 +271,37 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 	e.submitMu.RLock()
 	defer e.submitMu.RUnlock()
 	if e.fatal.Load() {
+		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
 	}
 	if e.shutdown.Load() {
+		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
 	}
 	if !e.externalReady.Load() {
+		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorNotStarted
 	}
 	if err := validateResponseChannels(cmd); err != nil {
+		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
 	if e.rejectMode {
 		select {
 		case e.inbox <- cmd:
+			e.recordExecutorInboxDepth()
 			return nil
 		default:
+			e.recordExecutorCommand(cmd, "rejected")
 			return ErrExecutorBusy
 		}
 	}
 	select {
 	case e.inbox <- cmd:
+		e.recordExecutorInboxDepth()
 		return nil
 	case <-ctx.Done():
+		e.recordExecutorCommand(cmd, "canceled")
 		return ctx.Err()
 	}
 }
@@ -331,28 +349,32 @@ func (e *Executor) Shutdown() {
 	<-e.done
 }
 
-func (e *Executor) dispatchSafely(cmd ExecutorCommand) {
+func (e *Executor) dispatchSafely(cmd ExecutorCommand) (result string) {
+	result = "internal_error"
 	defer func() {
 		if r := recover(); r != nil {
-			e.handleDispatchPanic(cmd, r)
+			result = e.handleDispatchPanic(cmd, r)
 		}
 	}()
-	e.dispatch(cmd)
+	return e.dispatch(cmd)
 }
 
-func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) {
+func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
 	// Send error response if possible.
 	if c, ok := cmd.(CallReducerCmd); ok {
 		err := fmt.Errorf("reducer panicked: %v", r)
 		e.recordReducerPanic(c.Request.ReducerName, err, 0, capturePanicStack(e.observer))
+		e.recordReducerMetric(c.Request.ReducerName, "failed_panic", 0, false)
 		e.sendCallReducerResponse(c, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  err,
 		}, nil)
+		return "panic"
 	}
+	return "panic"
 }
 
-func (e *Executor) dispatch(cmd ExecutorCommand) {
+func (e *Executor) dispatch(cmd ExecutorCommand) string {
 	// Story 5.3: short-circuit write-affecting commands that were already in
 	// the inbox when the executor latched into the fatal state. Submit
 	// catches the common case; this catch covers the race window.
@@ -361,26 +383,27 @@ func (e *Executor) dispatch(cmd ExecutorCommand) {
 		case CallReducerCmd:
 			e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal}, nil)
 		}
-		return
+		return "internal_error"
 	}
 	switch c := cmd.(type) {
 	case CallReducerCmd:
-		e.handleCallReducer(c)
+		return e.handleCallReducer(c)
 	case RegisterSubscriptionSetCmd:
-		e.handleRegisterSubscriptionSet(c)
+		return e.handleRegisterSubscriptionSet(c)
 	case UnregisterSubscriptionSetCmd:
-		e.handleUnregisterSubscriptionSet(c)
+		return e.handleUnregisterSubscriptionSet(c)
 	case DisconnectClientSubscriptionsCmd:
-		e.handleDisconnectClientSubscriptions(c)
+		return e.handleDisconnectClientSubscriptions(c)
 	case OnConnectCmd:
-		e.handleOnConnect(c)
+		return e.handleOnConnect(c)
 	case OnDisconnectCmd:
-		e.handleOnDisconnect(c)
+		return e.handleOnDisconnect(c)
 	default:
+		return "internal_error"
 	}
 }
 
-func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd) {
+func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd) string {
 	view := e.snapshotFn()
 	defer view.Close()
 	start := cmd.Receipt
@@ -403,9 +426,13 @@ func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd)
 		// subsequent fan-out for the same connection (ADR §9.4).
 		cmd.Reply(res, err)
 	}
+	if err != nil {
+		return "internal_error"
+	}
+	return "ok"
 }
 
-func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSetCmd) {
+func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSetCmd) string {
 	view := e.snapshotFn()
 	defer view.Close()
 	start := cmd.Receipt
@@ -437,10 +464,19 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 		// subsequent fan-out for the same connection (ADR §9.4).
 		cmd.Reply(res, err)
 	}
+	if err != nil {
+		return "internal_error"
+	}
+	return "ok"
 }
 
-func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) {
-	cmd.ResponseCh <- e.subs.DisconnectClient(cmd.ConnID)
+func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) string {
+	err := e.subs.DisconnectClient(cmd.ConnID)
+	cmd.ResponseCh <- err
+	if err != nil {
+		return "internal_error"
+	}
+	return "ok"
 }
 
 type reducerDBAdapter struct {
@@ -571,35 +607,38 @@ func (e *Executor) afterCallReducerResponse(req ReducerRequest, resp ReducerResp
 	}
 }
 
-func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
+func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	req := cmd.Request
 	start := time.Now()
 	if req.Source != CallSourceLifecycle {
 		if _, reserved := lifecycleNames[req.ReducerName]; reserved {
+			e.recordReducerMetric("unknown", "failed_internal", 0, false)
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  ErrLifecycleReducer,
 			}, nil)
-			return
+			return "internal_error"
 		}
 	}
 
 	// Lookup reducer.
 	rr, ok := e.registry.Lookup(req.ReducerName)
 	if !ok {
+		e.recordReducerMetric("unknown", "failed_internal", 0, false)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedInternal,
 			Error:  fmt.Errorf("%w: %s", ErrReducerNotFound, req.ReducerName),
 		}, nil)
-		return
+		return "internal_error"
 	}
 	if req.Source == CallSourceExternal {
 		if missing, denied := types.MissingRequiredPermission(req.Caller, rr.RequiredPermissions); denied {
+			e.recordReducerMetric(rr.Name, "failed_permission", 0, false)
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedPermission,
 				Error:  fmt.Errorf("%w: reducer %q missing permission %q", ErrPermissionDenied, req.ReducerName, missing),
 			}, nil)
-			return
+			return "permission_denied"
 		}
 	}
 
@@ -626,6 +665,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	var reducerErr error
 	var panicked any
 	var panicStack string
+	handlerStart := time.Now()
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -635,6 +675,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		}()
 		ret, reducerErr = rr.Handler(rctx, req.Args)
 	}()
+	handlerDuration := time.Since(handlerStart)
 	db.close()
 	scheduler.close()
 
@@ -648,20 +689,22 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 			return fmt.Errorf("%v: %w", r, ErrReducerPanic)
 		}(panicked)
 		e.recordReducerPanic(req.ReducerName, panicErr, 0, panicStack)
+		e.recordReducerMetric(rr.Name, "failed_panic", handlerDuration, true)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedPanic,
 			Error:  panicErr,
 		}, nil)
-		return
+		return "panic"
 	}
 
 	if reducerErr != nil {
 		store.Rollback(tx)
+		e.recordReducerMetric(rr.Name, "failed_user", handlerDuration, true)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: StatusFailedUser,
 			Error:  reducerErr,
 		}, nil)
-		return
+		return "user_error"
 	}
 
 	// Scheduled-reducer firing semantics (Story 6.4, SPEC-003 §9.4).
@@ -673,11 +716,12 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 	if req.Source == CallSourceScheduled {
 		if err := e.advanceOrDeleteSchedule(tx, req.ScheduleID, req.IntendedFireAt); err != nil {
 			store.Rollback(tx)
+			e.recordReducerMetric(rr.Name, "failed_internal", handlerDuration, true)
 			e.sendCallReducerResponse(cmd, ReducerResponse{
 				Status: StatusFailedInternal,
 				Error:  fmt.Errorf("schedule advance: %w", err),
 			}, nil)
-			return
+			return "internal_error"
 		}
 	}
 
@@ -690,11 +734,12 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		if isUserCommitError(err) {
 			status = StatusFailedUser
 		}
+		e.recordReducerMetric(rr.Name, reducerMetricResultFromStatus(status), handlerDuration, true)
 		e.sendCallReducerResponse(cmd, ReducerResponse{
 			Status: status,
 			Error:  fmt.Errorf("commit: %w", err),
 		}, nil)
-		return
+		return executorCommandResultFromStatus(status)
 	}
 	txID := types.TxID(e.nextTxID)
 	e.nextTxID++
@@ -719,7 +764,9 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) {
 		opts.args = req.Args
 		opts.startTime = start
 	}
-	e.postCommit(txID, changeset, ret, cmd, opts)
+	status := e.postCommit(txID, changeset, ret, cmd, opts)
+	e.recordReducerMetric(rr.Name, reducerMetricResultFromStatus(status), handlerDuration, true)
+	return executorCommandResultFromStatus(status)
 }
 
 // postCommit runs the ordered post-commit pipeline (SPEC-003 §5.1–§5.4,
@@ -746,7 +793,8 @@ func (e *Executor) postCommit(
 	ret []byte,
 	cmd CallReducerCmd,
 	opts postCommitOptions,
-) {
+) (status ReducerStatus) {
+	status = StatusCommitted
 	responded := cmd.ResponseCh == nil && cmd.ProtocolResponseCh == nil
 	var committedPayload *CommittedCallerPayload
 	defer func() {
@@ -756,6 +804,7 @@ func (e *Executor) postCommit(
 		}
 		e.fatal.Store(true)
 		e.recordExecutorFatal(fmt.Errorf("post-commit panic: %v", r), "panic", txID)
+		status = StatusFailedInternal
 		if responded {
 			return
 		}
@@ -821,7 +870,7 @@ func (e *Executor) postCommit(
 				e.recordSubscriptionFanoutError("unknown", connID, err)
 			}
 		default:
-			return
+			return status
 		}
 	}
 }

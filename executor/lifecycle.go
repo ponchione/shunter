@@ -20,11 +20,11 @@ import (
 //  5. on success: commit + post-commit pipeline
 //
 // Connection is rejected (status != StatusCommitted) on any failure.
-func (e *Executor) handleOnConnect(cmd OnConnectCmd) {
+func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 	sysID, ok := e.sysClientsTableID()
 	if !ok {
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("sys_clients table missing"))
-		return
+		return "internal_error"
 	}
 
 	tx := store.NewTransaction(e.committed, e.schemaReg)
@@ -36,7 +36,7 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) {
 	if _, err := tx.Insert(sysID, row); err != nil {
 		store.Rollback(tx)
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("sys_clients insert: %w", err))
-		return
+		return "internal_error"
 	}
 
 	if rr, hasReducer := e.registry.LookupLifecycle(LifecycleOnConnect); hasReducer {
@@ -44,7 +44,7 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) {
 		if status != StatusCommitted {
 			store.Rollback(tx)
 			respondLifecycle(cmd.ResponseCh, status, 0, err)
-			return
+			return executorCommandResultFromStatus(status)
 		}
 	}
 
@@ -53,14 +53,14 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) {
 	if err != nil {
 		store.Rollback(tx)
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("commit: %w", err))
-		return
+		return "internal_error"
 	}
 	txID := types.TxID(e.nextTxID)
 	e.nextTxID++
 	changeset.TxID = txID
 	e.committed.SetCommittedTxID(txID)
 
-	e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle})
+	return executorCommandResultFromStatus(e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle}))
 }
 
 // handleOnDisconnect runs the OnDisconnect pipeline (SPEC-003 §10.4, Story 7.3):
@@ -73,11 +73,11 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) {
 //  5. commit + post-commit pipeline
 //
 // The sys_clients row is always removed (disconnect cannot be vetoed).
-func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
+func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 	sysID, ok := e.sysClientsTableID()
 	if !ok {
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("sys_clients table missing"))
-		return
+		return "internal_error"
 	}
 
 	tx := store.NewTransaction(e.committed, e.schemaReg)
@@ -95,7 +95,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
 	if err := deleteSysClientsRow(tx, sysID, cmd.ConnID); err != nil {
 		store.Rollback(tx)
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("sys_clients delete: %w", err))
-		return
+		return "internal_error"
 	}
 
 	tx.Seal()
@@ -103,7 +103,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
 	if err != nil {
 		store.Rollback(tx)
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("commit: %w", err))
-		return
+		return "internal_error"
 	}
 	txID := types.TxID(e.nextTxID)
 	e.nextTxID++
@@ -112,7 +112,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) {
 
 	// Even when the reducer failed, the cleanup commit still runs the
 	// post-commit pipeline so subscribers see the sys_clients delete.
-	e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle})
+	return executorCommandResultFromStatus(e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle}))
 }
 
 // sweepDanglingClients is the Story 7.5 startup sweep (SPEC-003 §10.6). For
@@ -208,6 +208,7 @@ func (e *Executor) runLifecycleReducer(
 	var reducerErr error
 	var panicked any
 	var panicStack string
+	handlerStart := time.Now()
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -217,6 +218,7 @@ func (e *Executor) runLifecycleReducer(
 		}()
 		_, reducerErr = rr.Handler(rctx, nil)
 	}()
+	handlerDuration := time.Since(handlerStart)
 	db.close()
 	scheduler.close()
 
@@ -225,11 +227,14 @@ func (e *Executor) runLifecycleReducer(
 		err := fmt.Errorf("%v: %w", panicked, ErrReducerPanic)
 		e.recordReducerPanic(rr.Name, err, 0, panicStack)
 		e.recordLifecycleReducerFailed(rr.Name, "panic", err)
+		e.recordReducerMetric(rr.Name, "failed_panic", handlerDuration, true)
 		return StatusFailedPanic, err
 	case reducerErr != nil:
 		e.recordLifecycleReducerFailed(rr.Name, "user_error", reducerErr)
+		e.recordReducerMetric(rr.Name, "failed_user", handlerDuration, true)
 		return StatusFailedUser, reducerErr
 	default:
+		e.recordReducerMetric(rr.Name, "committed", handlerDuration, true)
 		return StatusCommitted, nil
 	}
 }

@@ -267,6 +267,7 @@ func (r *Runtime) Close() error {
 	}
 	if subscriptions != nil {
 		droppedClients = subscriptions.DroppedClientCount()
+		r.observability.RecordSubscriptionActive(0)
 	}
 	if durability != nil {
 		finalDurableTxID, closeErr = durability.Close()

@@ -106,6 +106,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 
 		// Reject text frames per SPEC-005 S3.2.
 		if typ == websocket.MessageText {
+			recordProtocolMessage(c.Observer, "unknown", "malformed")
 			closeProtocolError(c, "text frames not supported")
 			return
 		}
@@ -114,6 +115,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		var (
 			msg       any
 			decodeErr error
+			kind      = "unknown"
 		)
 		if c.Compression {
 			var tag uint8
@@ -126,64 +128,79 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 				} else {
 					closeProtocolError(c, "malformed message")
 				}
+				recordProtocolMessage(c.Observer, kind, "malformed")
 				return
 			}
+			kind = protocolKindFromTag(tag)
 			msg, decodeErr = decodeClientMessageParts(tag, body)
 		} else {
+			if len(frame) > 0 {
+				kind = protocolKindFromTag(frame[0])
+			}
 			_, msg, decodeErr = DecodeClientMessage(frame)
 		}
 		if decodeErr != nil {
 			reason := decodeErr.Error()
+			recordProtocolMessage(c.Observer, kind, "malformed")
 			closeProtocolError(c, reason)
 			return
 		}
+		kind = protocolKindFromMessage(msg)
 
 		var run func()
 		switch m := msg.(type) {
 		case SubscribeSingleMsg:
 			if handlers.OnSubscribeSingle == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
 			run = func() { handlers.OnSubscribeSingle(handlerCtx, c, &m) }
 		case SubscribeMultiMsg:
 			if handlers.OnSubscribeMulti == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
 			run = func() { handlers.OnSubscribeMulti(handlerCtx, c, &m) }
 		case UnsubscribeSingleMsg:
 			if handlers.OnUnsubscribeSingle == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
 			run = func() { handlers.OnUnsubscribeSingle(handlerCtx, c, &m) }
 		case UnsubscribeMultiMsg:
 			if handlers.OnUnsubscribeMulti == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
 			run = func() { handlers.OnUnsubscribeMulti(handlerCtx, c, &m) }
 		case CallReducerMsg:
 			if handlers.OnCallReducer == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
 			run = func() { handlers.OnCallReducer(handlerCtx, c, &m) }
 		case OneOffQueryMsg:
 			if handlers.OnOneOffQuery == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
 			run = func() { handlers.OnOneOffQuery(handlerCtx, c, &m) }
 		case DeclaredQueryMsg:
 			if handlers.OnDeclaredQuery == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
 				closeProtocolError(c, "unsupported message type")
 				return
 			}
 			run = func() { handlers.OnDeclaredQuery(handlerCtx, c, &m) }
 		case SubscribeDeclaredViewMsg:
 			if handlers.OnSubscribeDeclaredView == nil {
+				recordProtocolMessage(c.Observer, kind, "internal_error")
 				closeProtocolError(c, "unsupported message type")
 				return
 			}

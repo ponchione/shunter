@@ -208,11 +208,12 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		// unblocking them all; until 3.6 lands, the goroutines exit
 		// naturally on ws error when the peer closes.
 		if err := c.RunLifecycle(r.Context(), s.Executor, s.Conns); err != nil {
-			s.recordRejected("rejected_executor", err)
+			result := "rejected_internal"
+			if errors.Is(err, ErrExecutorAdmissionRejected) {
+				result = "rejected_executor"
+			}
+			s.recordRejected(result, err)
 			return
-		}
-		if s.Observer != nil {
-			s.Observer.LogProtocolConnectionOpened(c.ID)
 		}
 		// Spawn per-connection lifecycle goroutines. They outlive
 		// this HTTP handler; the supervisor invokes Disconnect when

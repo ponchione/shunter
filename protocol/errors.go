@@ -10,3 +10,7 @@ var ErrUnknownMessageTag = errors.New("protocol: unknown message tag")
 // truncation, length-prefix/payload mismatch, or schema violation
 // during decode.
 var ErrMalformedMessage = errors.New("protocol: malformed message body")
+
+// ErrExecutorAdmissionRejected marks a connection rejected by executor
+// admission during OnConnect.
+var ErrExecutorAdmissionRejected = errors.New("protocol: executor admission rejected")

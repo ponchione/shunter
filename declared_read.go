@@ -271,11 +271,13 @@ func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, 
 	result, err := r.CallQuery(ctx, msg.Name, protocolDeclaredReadOptions(conn, nil)...)
 	if err != nil {
 		r.sendProtocolDeclaredQueryError(conn, msg.MessageID, err.Error(), receipt)
+		r.observability.RecordProtocolMessage("declared_query", protocolDeclaredReadMetricResult(err))
 		return
 	}
 	rows, err := encodeDeclaredReadRows(result.Rows)
 	if err != nil {
 		r.sendProtocolDeclaredQueryError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
+		r.observability.RecordProtocolMessage("declared_query", "internal_error")
 		return
 	}
 	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.OneOffQueryResponse{
@@ -287,7 +289,10 @@ func (r *Runtime) HandleDeclaredQuery(ctx context.Context, conn *protocol.Conn, 
 		TotalHostExecutionDuration: declaredReadElapsedMicrosI64(receipt),
 	}); err != nil {
 		r.logProtocolDeclaredReadSendError("declared_query", err)
+		r.observability.RecordProtocolMessage("declared_query", "connection_closed")
+		return
 	}
+	r.observability.RecordProtocolMessage("declared_query", "ok")
 }
 
 // HandleSubscribeDeclaredView handles the protocol named-view subscription
@@ -297,11 +302,13 @@ func (r *Runtime) HandleSubscribeDeclaredView(ctx context.Context, conn *protoco
 	sub, err := r.SubscribeView(ctx, msg.Name, msg.QueryID, protocolDeclaredReadOptions(conn, &msg.RequestID)...)
 	if err != nil {
 		r.sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, err.Error(), receipt)
+		r.observability.RecordProtocolMessage("subscribe_declared_view", protocolDeclaredReadMetricResult(err))
 		return
 	}
 	rows, err := encodeDeclaredReadRows(sub.InitialRows)
 	if err != nil {
 		r.sendProtocolDeclaredViewError(conn, msg.RequestID, msg.QueryID, "encode error: "+err.Error(), receipt)
+		r.observability.RecordProtocolMessage("subscribe_declared_view", "internal_error")
 		return
 	}
 	if err := r.sendProtocolDeclaredReadMessage(conn, protocol.SubscribeSingleApplied{
@@ -312,7 +319,10 @@ func (r *Runtime) HandleSubscribeDeclaredView(ctx context.Context, conn *protoco
 		Rows:                             rows,
 	}); err != nil {
 		r.logProtocolDeclaredReadSendError("subscribe_declared_view", err)
+		r.observability.RecordProtocolMessage("subscribe_declared_view", "connection_closed")
+		return
 	}
+	r.observability.RecordProtocolMessage("subscribe_declared_view", "ok")
 }
 
 func protocolDeclaredReadOptions(conn *protocol.Conn, requestID *uint32) []DeclaredReadOption {
@@ -406,4 +416,14 @@ func declaredReadElapsedMicrosU64(receipt time.Time) uint64 {
 
 func declaredReadOptionalUint32(v uint32) *uint32 {
 	return &v
+}
+
+func protocolDeclaredReadMetricResult(err error) string {
+	if errors.Is(err, ErrPermissionDenied) {
+		return "permission_denied"
+	}
+	if errors.Is(err, ErrUnknownDeclaredRead) || errors.Is(err, ErrDeclaredReadNotExecutable) {
+		return "validation_error"
+	}
+	return "internal_error"
 }

@@ -40,6 +40,7 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 			logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
 		}
 		mgr.Remove(c.ID)
+		recordProtocolConnections(c.Observer, mgr.ActiveCount())
 		if c.cancelRead != nil {
 			c.cancelRead()
 		}

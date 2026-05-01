@@ -47,7 +47,9 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 		fanout = CommitFanout{}
 		errs = make(map[types.ConnectionID][]SubscriptionError)
 	}
+	evalResult := "ok"
 	if len(errs) > 0 {
+		evalResult = "error"
 		durationMicros := uint64(time.Since(start).Microseconds())
 		if durationMicros == 0 {
 			durationMicros = 1
@@ -59,6 +61,7 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 			errs[connID] = list
 		}
 	}
+	recordSubscriptionEvalDuration(m.observer, evalResult, time.Since(start))
 	if meta.CaptureCallerUpdates != nil {
 		var callerUpdates []SubscriptionUpdate
 		if meta.CallerConnID != nil {

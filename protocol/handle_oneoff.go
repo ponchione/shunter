@@ -60,18 +60,21 @@ func handleOneOffQueryWithVisibility(
 	}, visibilityFilters, caller.AllowAllPermissions)
 	if err != nil {
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
+		recordProtocolMessage(conn.Observer, "one_off_query", "validation_error")
 		return
 	}
 
 	result, err := ExecuteCompiledSQLQuery(ctx, compiled, stateAccess, readSL)
 	if err != nil {
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
+		recordProtocolMessage(conn.Observer, "one_off_query", "internal_error")
 		return
 	}
 
 	encoded, err := EncodeProductRows(result.Rows)
 	if err != nil {
 		sendOneOffError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
+		recordProtocolMessage(conn.Observer, "one_off_query", "internal_error")
 		return
 	}
 	sendError(conn, OneOffQueryResponse{
@@ -82,6 +85,7 @@ func handleOneOffQueryWithVisibility(
 		}},
 		TotalHostExecutionDuration: elapsedMicrosI64(receipt),
 	})
+	recordProtocolMessage(conn.Observer, "one_off_query", "ok")
 }
 
 // ExecuteCompiledSQLQuery evaluates a precompiled one-off SQL query against a

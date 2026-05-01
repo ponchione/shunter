@@ -289,6 +289,7 @@ func (dw *DurabilityWorker) EnqueueCommitted(txID uint64, cs *store.Changeset) {
 	item := durabilityItem{txID: txID, changeset: cs}
 	select {
 	case dw.ch <- item:
+		recordDurabilityQueueDepth(dw.observer, dw.QueueDepth())
 		return
 	case <-dw.closeCh:
 		dw.stateMu.Lock()
@@ -400,6 +401,7 @@ func (dw *DurabilityWorker) run() {
 		if !ok {
 			return
 		}
+		recordDurabilityQueueDepth(dw.observer, dw.QueueDepth())
 		batchCap := min(dw.opts.DrainBatchSize, 1024)
 		if batchCap < 1 {
 			batchCap = 1
@@ -414,6 +416,7 @@ func (dw *DurabilityWorker) run() {
 					break drain
 				}
 				batch = append(batch, it)
+				recordDurabilityQueueDepth(dw.observer, dw.QueueDepth())
 			default:
 				break drain
 			}
@@ -473,6 +476,7 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 	// Update durable TxID to last in batch.
 	lastDurable := batch[len(batch)-1].txID
 	dw.durable.Store(lastDurable)
+	recordDurabilityDurableTxID(dw.observer, lastDurable)
 	dw.releaseWaitersUpTo(lastDurable)
 
 	// Check rotation.

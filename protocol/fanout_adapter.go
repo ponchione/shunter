@@ -40,7 +40,7 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateHeavy(
 ) error {
 	msg, err := BuildTransactionUpdateHeavy(connID, outcome, callerUpdates, memo)
 	if err != nil {
-		return fmt.Errorf("encode caller outcome: %w", err)
+		return fmt.Errorf("%w: encode caller outcome: %v", subscription.ErrSendEncodeFailed, err)
 	}
 	return mapDeliveryError(a.sender.SendTransactionUpdate(connID, &msg))
 }
@@ -79,7 +79,7 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateLight(
 ) error {
 	encoded, err := encodeSubscriptionUpdatesMemoized(updates, memo)
 	if err != nil {
-		return fmt.Errorf("encode updates: %w", err)
+		return fmt.Errorf("%w: encode updates: %v", subscription.ErrSendEncodeFailed, err)
 	}
 	msg := &TransactionUpdateLight{RequestID: requestID, Update: encoded}
 	return mapDeliveryError(a.sender.SendTransactionUpdateLight(connID, msg))

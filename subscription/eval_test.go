@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -326,6 +327,8 @@ func (o *recordingSubscriptionObserver) LogSubscriptionFanoutError(string, *type
 }
 func (o *recordingSubscriptionObserver) LogSubscriptionClientDropped(string, *types.ConnectionID) {}
 func (o *recordingSubscriptionObserver) LogProtocolBackpressure(string, string)                   {}
+func (o *recordingSubscriptionObserver) RecordSubscriptionActive(int)                             {}
+func (o *recordingSubscriptionObserver) RecordSubscriptionEvalDuration(string, time.Duration)     {}
 
 func TestEvalBatchedTier1SingleLookup(t *testing.T) {
 	// Many inserts with the same value should be candidate-resolved via

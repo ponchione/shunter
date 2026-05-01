@@ -228,6 +228,8 @@ type recordingProtocolObserver struct {
 	protocolErrors []protocolErrorRecord
 }
 
+func (o *recordingProtocolObserver) RecordProtocolConnections(int)                          {}
+func (o *recordingProtocolObserver) RecordProtocolMessage(string, string)                   {}
 func (o *recordingProtocolObserver) LogProtocolConnectionRejected(string, error)            {}
 func (o *recordingProtocolObserver) LogProtocolConnectionOpened(types.ConnectionID)         {}
 func (o *recordingProtocolObserver) LogProtocolConnectionClosed(types.ConnectionID, string) {}

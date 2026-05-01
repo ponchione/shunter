@@ -66,4 +66,7 @@ var (
 	ErrSendBufferFull = errors.New("subscription: client send buffer full")
 	// ErrSendConnGone — connection not found, client already disconnected.
 	ErrSendConnGone = errors.New("subscription: connection not found for delivery")
+	// ErrSendEncodeFailed — delivery failed before send while encoding a
+	// protocol payload.
+	ErrSendEncodeFailed = errors.New("subscription: encode failed for delivery")
 )

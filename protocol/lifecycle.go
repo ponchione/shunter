@@ -205,7 +205,7 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 	if err := inbox.OnConnect(ctx, c.ID, c.Identity); err != nil {
 		reason := truncateCloseReason("onconnect rejected: " + err.Error())
 		_ = c.ws.Close(websocket.StatusPolicyViolation, reason)
-		return fmt.Errorf("onconnect rejected: %w", err)
+		return fmt.Errorf("%w: onconnect rejected: %v", ErrExecutorAdmissionRejected, err)
 	}
 
 	// Register before first send: the fan-out worker (fan-out integration) resolves
@@ -214,6 +214,7 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 	// safe because RunLifecycle is synchronous and IdentityToken is
 	// the very next thing emitted on this socket.
 	mgr.Add(c)
+	recordProtocolConnections(c.Observer, mgr.ActiveCount())
 
 	frame, err := encodeIdentityTokenFrame(IdentityToken{
 		Identity:     c.Identity,
@@ -227,9 +228,11 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 	}
 	if err := c.ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
 		mgr.Remove(c.ID)
+		recordProtocolConnections(c.Observer, mgr.ActiveCount())
 		_ = c.ws.Close(websocket.StatusInternalError, "write IdentityToken")
 		return fmt.Errorf("write IdentityToken: %w", err)
 	}
+	logProtocolConnectionOpened(c.Observer, c.ID)
 	return nil
 }
 

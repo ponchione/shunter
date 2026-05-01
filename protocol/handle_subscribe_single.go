@@ -49,6 +49,7 @@ func handleSubscribeSingleWithVisibility(
 	}, visibilityFilters, caller.AllowAllPermissions)
 	if err != nil {
 		sendSubscribeCompileError(conn, receipt, msg.RequestID, msg.QueryID, err, msg.QueryString)
+		recordProtocolMessage(conn.Observer, "subscribe_single", "validation_error")
 		return
 	}
 	pred := compiled.Predicate()
@@ -65,8 +66,10 @@ func handleSubscribeSingleWithVisibility(
 		SQLText:                 msg.QueryString,
 	}); submitErr != nil {
 		sendExecutorUnavailableError(conn, receipt, msg.RequestID, msg.QueryID, submitErr)
+		recordProtocolMessage(conn.Observer, "subscribe_single", "executor_rejected")
 		return
 	}
+	recordProtocolMessage(conn.Observer, "subscribe_single", "ok")
 }
 
 // elapsedMicros reports the non-zero microsecond delta since receipt.

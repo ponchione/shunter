@@ -24,6 +24,7 @@ func handleCallReducer(
 ) {
 	if lifecycleReducerNames[msg.ReducerName] {
 		sendSyntheticFailure(conn, msg, "lifecycle reducer cannot be called externally")
+		recordProtocolMessage(conn.Observer, "call_reducer", "executor_rejected")
 		return
 	}
 
@@ -41,8 +42,10 @@ func handleCallReducer(
 		Done:                conn.closed,
 	}); err != nil {
 		sendSyntheticFailure(conn, msg, "executor unavailable: "+err.Error())
+		recordProtocolMessage(conn.Observer, "call_reducer", "executor_rejected")
 		return
 	}
+	recordProtocolMessage(conn.Observer, "call_reducer", "ok")
 	watchReducerResponse(conn, respCh)
 }
 

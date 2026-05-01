@@ -196,7 +196,13 @@ func (m *Manager) signalDropped(id types.ConnectionID) {
 	select {
 	case m.dropped <- id:
 		m.RecordDroppedClient()
+		if m.observer != nil {
+			m.observer.LogSubscriptionClientDropped("fanout_failed", &id)
+		}
 	default:
+		if m.observer != nil {
+			m.observer.LogSubscriptionClientDropped("buffer_full", &id)
+		}
 	}
 }
 

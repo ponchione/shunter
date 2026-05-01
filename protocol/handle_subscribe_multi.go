@@ -49,6 +49,7 @@ func handleSubscribeMultiWithVisibility(
 		}, visibilityFilters, caller.AllowAllPermissions)
 		if err != nil {
 			sendSubscribeCompileError(conn, receipt, msg.RequestID, msg.QueryID, err, qs)
+			recordProtocolMessage(conn.Observer, "subscribe_multi", "validation_error")
 			return
 		}
 		preds = append(preds, compiled.Predicate())
@@ -66,6 +67,8 @@ func handleSubscribeMultiWithVisibility(
 		Receipt:                 receipt,
 	}); submitErr != nil {
 		sendExecutorUnavailableError(conn, receipt, msg.RequestID, msg.QueryID, submitErr)
+		recordProtocolMessage(conn.Observer, "subscribe_multi", "executor_rejected")
 		return
 	}
+	recordProtocolMessage(conn.Observer, "subscribe_multi", "ok")
 }

@@ -444,6 +444,9 @@ func (o *runtimeObservability) LogDurabilityFailed(err error, reason string, txI
 		attrs = append(attrs, slog.Uint64("tx_id", uint64(txID)))
 	}
 	o.log(context.Background(), slog.LevelError, "durability.failed", "commitlog", attrs...)
+	o.addCounter(MetricDurabilityFailuresTotal, MetricLabels{
+		Reason: durabilityFailureMetricReason(reason),
+	}, 1)
 }
 
 func (o *runtimeObservability) PanicStackEnabled() bool {
@@ -462,6 +465,7 @@ func (o *runtimeObservability) LogExecutorFatal(err error, reason string, txID t
 		attrs = append(attrs, slog.Uint64("tx_id", uint64(txID)))
 	}
 	o.log(context.Background(), slog.LevelError, "executor.fatal", "executor", attrs...)
+	o.setGauge(MetricExecutorFatal, MetricLabels{}, 1)
 }
 
 func (o *runtimeObservability) LogExecutorReducerPanic(reducer string, err error, txID types.TxID, stack string) {
@@ -498,12 +502,18 @@ func (o *runtimeObservability) LogProtocolConnectionRejected(result string, err 
 		attrs = append(attrs, slog.String("error", o.redactError(err)))
 	}
 	o.log(context.Background(), slog.LevelWarn, "protocol.connection_rejected", "protocol", attrs...)
+	o.addCounter(MetricProtocolConnectionsTotal, MetricLabels{
+		Result: protocolConnectionMetricResult(result),
+	}, 1)
 }
 
 func (o *runtimeObservability) LogProtocolConnectionOpened(connID types.ConnectionID) {
 	o.log(context.Background(), slog.LevelDebug, "protocol.connection_opened", "protocol",
 		slog.String("connection_id", connID.Hex()),
 	)
+	o.addCounter(MetricProtocolConnectionsTotal, MetricLabels{
+		Result: "accepted",
+	}, 1)
 }
 
 func (o *runtimeObservability) LogProtocolConnectionClosed(connID types.ConnectionID, reason string) {
@@ -539,6 +549,9 @@ func (o *runtimeObservability) LogProtocolBackpressure(direction, reason string)
 		slog.String("direction", direction),
 		slog.String("reason", reason),
 	)
+	o.addCounter(MetricProtocolBackpressureTotal, MetricLabels{
+		Direction: protocolBackpressureMetricDirection(direction),
+	}, 1)
 }
 
 func (o *runtimeObservability) LogSubscriptionEvalError(txID types.TxID, err error) {
@@ -563,6 +576,9 @@ func (o *runtimeObservability) LogSubscriptionFanoutError(reason string, connID 
 		attrs = append(attrs, slog.String("connection_id", connID.Hex()))
 	}
 	o.log(context.Background(), slog.LevelWarn, "subscription.fanout_error", "subscription", attrs...)
+	o.addCounter(MetricSubscriptionFanoutErrorsTotal, MetricLabels{
+		Reason: subscriptionFanoutMetricReason(reason),
+	}, 1)
 }
 
 func (o *runtimeObservability) LogSubscriptionClientDropped(reason string, connID *types.ConnectionID) {
@@ -571,6 +587,70 @@ func (o *runtimeObservability) LogSubscriptionClientDropped(reason string, connI
 		attrs = append(attrs, slog.String("connection_id", connID.Hex()))
 	}
 	o.log(context.Background(), slog.LevelWarn, "subscription.client_dropped", "subscription", attrs...)
+	o.addCounter(MetricSubscriptionDroppedClientsTotal, MetricLabels{
+		Reason: subscriptionDroppedMetricReason(reason),
+	}, 1)
+}
+
+func (o *runtimeObservability) RecordProtocolConnections(active int) {
+	o.setGauge(MetricProtocolConnections, MetricLabels{}, float64(active))
+}
+
+func (o *runtimeObservability) RecordProtocolMessage(kind, result string) {
+	o.addCounter(MetricProtocolMessagesTotal, MetricLabels{
+		Kind:   protocolMessageMetricKind(kind),
+		Result: protocolMessageMetricResult(result),
+	}, 1)
+}
+
+func (o *runtimeObservability) RecordExecutorCommand(kind, result string) {
+	o.addCounter(MetricExecutorCommandsTotal, MetricLabels{
+		Kind:   executorCommandMetricKind(kind),
+		Result: executorCommandMetricResult(result),
+	}, 1)
+}
+
+func (o *runtimeObservability) RecordExecutorCommandDuration(kind, result string, duration time.Duration) {
+	o.observeHistogram(MetricExecutorCommandDurationSeconds, MetricLabels{
+		Kind:   executorCommandMetricKind(kind),
+		Result: executorCommandMetricResult(result),
+	}, duration.Seconds())
+}
+
+func (o *runtimeObservability) RecordExecutorInboxDepth(depth int) {
+	o.setGauge(MetricExecutorInboxDepth, MetricLabels{}, float64(depth))
+}
+
+func (o *runtimeObservability) RecordReducerCall(reducer, result string) {
+	o.addCounter(MetricReducerCallsTotal, MetricLabels{
+		Reducer: o.reducerMetricLabel(reducer),
+		Result:  reducerMetricResult(result),
+	}, 1)
+}
+
+func (o *runtimeObservability) RecordReducerDuration(reducer, result string, duration time.Duration) {
+	o.observeHistogram(MetricReducerDurationSeconds, MetricLabels{
+		Reducer: o.reducerMetricLabel(reducer),
+		Result:  reducerMetricResult(result),
+	}, duration.Seconds())
+}
+
+func (o *runtimeObservability) RecordDurabilityQueueDepth(depth int) {
+	o.setGauge(MetricDurabilityQueueDepth, MetricLabels{}, float64(depth))
+}
+
+func (o *runtimeObservability) RecordDurabilityDurableTxID(txID types.TxID) {
+	o.setGauge(MetricDurabilityDurableTxID, MetricLabels{}, float64(txID))
+}
+
+func (o *runtimeObservability) RecordSubscriptionActive(active int) {
+	o.setGauge(MetricSubscriptionActive, MetricLabels{}, float64(active))
+}
+
+func (o *runtimeObservability) RecordSubscriptionEvalDuration(result string, duration time.Duration) {
+	o.observeHistogram(MetricSubscriptionEvalDurationSeconds, MetricLabels{
+		Result: subscriptionEvalMetricResult(result),
+	}, duration.Seconds())
 }
 
 func (o *runtimeObservability) LogStoreSnapshotLeaked(reason string) {
@@ -597,6 +677,115 @@ func runtimeErrorMetricReason(reason string) string {
 	default:
 		return "unknown"
 	}
+}
+
+func durabilityFailureMetricReason(reason string) string {
+	switch reason {
+	case "open_failed", "write_failed", "sync_failed", "segment_rotate_failed", "close_failed", "replay_failed", "corrupt_segment", "context_canceled":
+		return reason
+	default:
+		return "unknown"
+	}
+}
+
+func protocolConnectionMetricResult(result string) string {
+	switch result {
+	case "accepted", "rejected_not_ready", "rejected_auth", "rejected_upgrade", "rejected_executor", "rejected_internal":
+		return result
+	default:
+		return "rejected_internal"
+	}
+}
+
+func protocolMessageMetricKind(kind string) string {
+	switch kind {
+	case "subscribe_single", "subscribe_multi", "subscribe_declared_view", "unsubscribe_single", "unsubscribe_multi", "call_reducer", "one_off_query", "declared_query", "unknown":
+		return kind
+	default:
+		return "unknown"
+	}
+}
+
+func protocolMessageMetricResult(result string) string {
+	switch result {
+	case "ok", "malformed", "permission_denied", "validation_error", "executor_rejected", "internal_error", "connection_closed":
+		return result
+	default:
+		return "internal_error"
+	}
+}
+
+func protocolBackpressureMetricDirection(direction string) string {
+	switch direction {
+	case "inbound", "outbound":
+		return direction
+	default:
+		return "inbound"
+	}
+}
+
+func executorCommandMetricKind(kind string) string {
+	switch kind {
+	case "call_reducer", "register_subscription_set", "unregister_subscription_set", "disconnect_client_subscriptions", "on_connect", "on_disconnect", "scheduler_fire", "unknown":
+		return kind
+	default:
+		return "unknown"
+	}
+}
+
+func executorCommandMetricResult(result string) string {
+	switch result {
+	case "ok", "user_error", "panic", "internal_error", "permission_denied", "rejected", "canceled":
+		return result
+	default:
+		return "internal_error"
+	}
+}
+
+func reducerMetricResult(result string) string {
+	switch result {
+	case "committed", "failed_user", "failed_panic", "failed_internal", "failed_permission":
+		return result
+	default:
+		return "failed_internal"
+	}
+}
+
+func subscriptionEvalMetricResult(result string) string {
+	switch result {
+	case "ok", "error":
+		return result
+	default:
+		return "error"
+	}
+}
+
+func subscriptionFanoutMetricReason(reason string) string {
+	switch reason {
+	case "buffer_full", "connection_closed", "encode_failed", "send_failed", "context_canceled", "unknown":
+		return reason
+	default:
+		return "unknown"
+	}
+}
+
+func subscriptionDroppedMetricReason(reason string) string {
+	switch reason {
+	case "buffer_full", "connection_closed", "fanout_failed", "unknown":
+		return reason
+	default:
+		return "unknown"
+	}
+}
+
+func (o *runtimeObservability) reducerMetricLabel(reducer string) string {
+	if o != nil && o.config.Metrics.ReducerLabelMode == ReducerLabelModeAggregate {
+		return "_all"
+	}
+	if strings.TrimSpace(reducer) == "" {
+		return "unknown"
+	}
+	return reducer
 }
 
 func boolMetricValue(v bool) float64 {

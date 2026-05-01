@@ -40,6 +40,15 @@ func handleUnsubscribeSet(
 		Receipt:   receipt,
 	}); err != nil {
 		sendExecutorUnavailableError(conn, receipt, requestID, queryID, err)
+		recordProtocolMessage(conn.Observer, protocolUnsubscribeMetricKind(variant), "executor_rejected")
 		return
 	}
+	recordProtocolMessage(conn.Observer, protocolUnsubscribeMetricKind(variant), "ok")
+}
+
+func protocolUnsubscribeMetricKind(variant SubscriptionSetVariant) string {
+	if variant == SubscriptionSetVariantMulti {
+		return "unsubscribe_multi"
+	}
+	return "unsubscribe_single"
 }

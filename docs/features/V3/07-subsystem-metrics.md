@@ -128,3 +128,56 @@ When complete, update this file with:
 - label/result/reason mappings covered by tests
 - any metric intentionally deferred with reason
 - validation commands run
+
+### Recorded Completion 2026-05-01
+
+Metric families implemented by subsystem:
+
+- protocol: `protocol_connections`, `protocol_connections_total`,
+  `protocol_messages_total`, and `protocol_backpressure_total`.
+- executor/reducer: `executor_commands_total`,
+  `executor_command_duration_seconds`, `executor_inbox_depth`,
+  `executor_fatal`, `reducer_calls_total`, and
+  `reducer_duration_seconds`.
+- durability: `durability_durable_tx_id`, `durability_queue_depth`, and
+  `durability_failures_total`.
+- subscription/fan-out: `subscription_active`,
+  `subscription_eval_duration_seconds`,
+  `subscription_fanout_errors_total`, and
+  `subscription_dropped_clients_total`.
+
+Label/result/reason mappings covered:
+
+- protocol connection results cover accepted, executor rejection, and
+  auth rejection; malformed messages cover decoded-kind classification; inbound
+  and outbound backpressure use fixed direction labels.
+- executor command metrics cover submit rejection, dequeued command duration,
+  inbox depth, and fatal gauge latching; reducer metrics cover committed,
+  user-error, panic, internal, and permission outcomes with declared reducer
+  labels and aggregate `"_all"` mode.
+- durability queue and durable-tx gauges update at enqueue/dequeue and durable
+  horizon advance; fatal startup/write-path failure observations map through
+  fixed durability reasons.
+- subscription active gauges cover register, unregister, disconnect cleanup,
+  and runtime close; eval duration records `ok`/`error`; fan-out and dropped
+  client metrics cover buffer-full, connection-closed, encode-failed,
+  send-failed, context-canceled, fanout-failed, and unknown mappings where
+  applicable.
+
+Deferred:
+
+- No Prometheus adapter, tracing hooks, HTTP diagnostics, or task 08+
+  behavior was added.
+
+Validation:
+
+```sh
+rtk go fmt . ./commitlog ./executor ./protocol ./subscription
+rtk go test ./protocol -run 'Test.*(Metrics|Connection|Protocol|Backpressure|Auth|Message)' -count=1
+rtk go test ./executor -run 'Test.*(Metrics|Reducer|Command|Inbox|Fatal)' -count=1
+rtk go test ./subscription -run 'Test.*(Metrics|Subscription|Fanout|Dropped|Eval)' -count=1
+rtk go test ./commitlog -run 'Test.*(Durability|Metrics|Failure|Queue)' -count=1
+rtk go test . -run 'Test.*(Metrics|Reducer|Protocol|Subscription|Durability)' -count=1
+rtk go vet . ./commitlog ./executor ./protocol ./subscription
+rtk go test ./... -count=1
+```
