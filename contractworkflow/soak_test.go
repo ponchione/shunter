@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	shunter "github.com/ponchione/shunter"
+	"github.com/ponchione/shunter/codegen"
 	"github.com/ponchione/shunter/contractdiff"
 	"github.com/ponchione/shunter/schema"
 )
@@ -60,6 +61,7 @@ type contractWorkflowSoakFixture struct {
 	wantDiff     workflowFormatOutputs
 	wantPolicy   workflowFormatOutputs
 	wantPlan     workflowFormatOutputs
+	wantCodegen  []byte
 }
 
 type workflowFormatOutputs struct {
@@ -87,11 +89,16 @@ func newContractWorkflowSoakFixture(t *testing.T) contractWorkflowSoakFixture {
 	planOpts := contractdiff.PlanOptions{
 		Policy: contractdiff.PolicyOptions{RequirePreviousVersion: true},
 	}
+	wantCodegen, err := codegen.Generate(current, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
 	fixture := contractWorkflowSoakFixture{
 		previousPath: previousPath,
 		currentPath:  currentPath,
 		policyOpts:   policyOpts,
 		planOpts:     planOpts,
+		wantCodegen:  wantCodegen,
 	}
 
 	report, err := CompareFiles(previousPath, currentPath)
@@ -150,6 +157,14 @@ func checkContractWorkflowSoakFixture(fixture contractWorkflowSoakFixture) error
 		return FormatPlan(plan, format)
 	}); err != nil {
 		return err
+	}
+
+	generated, err := GenerateFromFile(fixture.currentPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err != nil {
+		return fmt.Errorf("operation=GenerateFromFile observed_error=%v expected=nil", err)
+	}
+	if !bytes.Equal(generated, fixture.wantCodegen) {
+		return fmt.Errorf("operation=GenerateFromFileDeterminism observed_len=%d expected_len=%d", len(generated), len(fixture.wantCodegen))
 	}
 
 	return nil
