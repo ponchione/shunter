@@ -810,3 +810,66 @@ func TestTransactionInsertAutoIncrementUint64ExhaustedSequenceFails(t *testing.T
 		t.Fatalf("SequenceValue after failed insert = (%d, %v), want max uint64 and true", seq, has)
 	}
 }
+
+func TestTransactionInsertExhaustedRowIDFails(t *testing.T) {
+	cs, reg := buildNoPKState(t)
+	tbl, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("expected logs table")
+	}
+	tbl.SetNextID(^types.RowID(0))
+
+	tx := NewTransaction(cs, reg)
+	if _, err := tx.Insert(0, types.ProductValue{types.NewString("exhausted")}); !errors.Is(err, ErrRowIDOverflow) {
+		t.Fatalf("Insert at exhausted RowID error = %v, want ErrRowIDOverflow", err)
+	}
+
+	if next := tbl.NextID(); next != ^types.RowID(0) {
+		t.Fatalf("NextID after failed insert = %d, want max RowID", next)
+	}
+}
+
+func TestTransactionInsertExhaustedRowIDDoesNotAdvanceAutoIncrement(t *testing.T) {
+	cs, reg := buildAutoIncrementState(t)
+	tbl, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("expected autoincrement table")
+	}
+	tbl.SetNextID(^types.RowID(0))
+	tbl.SetSequenceValue(7)
+
+	tx := NewTransaction(cs, reg)
+	if _, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("exhausted")}); !errors.Is(err, ErrRowIDOverflow) {
+		t.Fatalf("Insert at exhausted RowID error = %v, want ErrRowIDOverflow", err)
+	}
+
+	if seq, has := tbl.SequenceValue(); !has || seq != 7 {
+		t.Fatalf("SequenceValue after failed insert = (%d, %v), want (7, true)", seq, has)
+	}
+}
+
+func TestApplyChangesetExhaustedRowIDFails(t *testing.T) {
+	cs, _ := buildNoPKState(t)
+	tbl, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("expected logs table")
+	}
+	tbl.SetNextID(^types.RowID(0))
+
+	err := ApplyChangeset(cs, &Changeset{
+		Tables: map[schema.TableID]*TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "logs",
+				Inserts:   []types.ProductValue{{types.NewString("replay")}},
+			},
+		},
+	})
+	if !errors.Is(err, ErrRowIDOverflow) {
+		t.Fatalf("ApplyChangeset at exhausted RowID error = %v, want ErrRowIDOverflow", err)
+	}
+
+	if next := tbl.NextID(); next != ^types.RowID(0) {
+		t.Fatalf("NextID after failed replay = %d, want max RowID", next)
+	}
+}

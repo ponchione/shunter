@@ -22,6 +22,7 @@ var (
 	ErrNullNotAllowed            = errors.New("null not allowed")
 	ErrInvalidFloat              = types.ErrInvalidFloat
 	ErrRowShapeMismatch          = errors.New("row shape mismatch")
+	ErrRowIDOverflow             = errors.New("row id overflow")
 	ErrTransactionRolledBack     = errors.New("transaction rolled back")
 	ErrTransactionClosed         = errors.New("transaction closed")
 )

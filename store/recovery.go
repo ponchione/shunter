@@ -33,8 +33,14 @@ func ApplyChangeset(cs *CommittedState, changeset *Changeset) error {
 			if err := ValidateRow(table.schema, row); err != nil {
 				return err
 			}
+			if err := checkRowIDAvailable(table); err != nil {
+				return err
+			}
 			advanceReplaySequenceForInsert(table, row)
-			freshID := table.AllocRowID()
+			freshID, err := allocRowIDForInsert(table)
+			if err != nil {
+				return err
+			}
 			if err := table.InsertRow(freshID, row); err != nil {
 				return err
 			}

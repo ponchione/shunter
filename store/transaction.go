@@ -160,6 +160,9 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 	if err := ValidateRow(table.Schema(), row); err != nil {
 		return 0, err
 	}
+	if err := checkRowIDAvailable(table); err != nil {
+		return 0, err
+	}
 	row, err := t.applyAutoIncrement(table, row)
 	if err != nil {
 		return 0, err
@@ -199,9 +202,29 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 		}
 	}
 
-	id := table.AllocRowID()
+	id, err := allocRowIDForInsert(table)
+	if err != nil {
+		return 0, err
+	}
 	t.addInsert(tableID, id, row, table)
 	return id, nil
+}
+
+func allocRowIDForInsert(table *Table) (types.RowID, error) {
+	if err := checkRowIDAvailable(table); err != nil {
+		return 0, err
+	}
+	return table.AllocRowID(), nil
+}
+
+func checkRowIDAvailable(table *Table) error {
+	next := table.NextID()
+	// RowID 0 is outside the allocator range. Consuming MaxUint64 would
+	// wrap the next counter to 0, which snapshots reject as an invalid next_id.
+	if next == 0 || next == ^types.RowID(0) {
+		return ErrRowIDOverflow
+	}
+	return nil
 }
 
 func (t *Transaction) checkCommittedUnique(tableID schema.TableID, table *Table, idx *Index, key IndexKey) error {
