@@ -96,6 +96,12 @@ type UpgradeContext struct {
 // endpoint (SPEC-005 §2.3). It authenticates, validates request
 // parameters, upgrades the connection, and hands control to s.Upgraded.
 func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
+	if s == nil || s.JWT == nil {
+		err := errors.New("server misconfigured: JWT config is required")
+		s.writeAuthRejected(w, err.Error(), http.StatusInternalServerError, "jwt_misconfigured", err)
+		return
+	}
+
 	// 1. Auth — strict requires a token, anonymous mints on absence.
 	token, hasToken := extractToken(r)
 	var claims *auth.Claims

@@ -258,6 +258,21 @@ func TestUpgradeInvalidTokenRejected(t *testing.T) {
 	}
 }
 
+func TestUpgradeMissingJWTConfigRejected(t *testing.T) {
+	s := &Server{Options: DefaultProtocolOptions()}
+	srv := newTestServer(t, s)
+
+	_, resp, err := dialWS(t, srv, wsDialOpts{
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err == nil {
+		t.Fatal("dial should fail when JWT config is missing")
+	}
+	if resp == nil || resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %v, want 500", resp)
+	}
+}
+
 func TestUpgradeAnonymousNoTokenMints(t *testing.T) {
 	s, rec := anonymousServer(t)
 	srv := newTestServer(t, s)
