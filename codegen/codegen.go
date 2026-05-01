@@ -29,6 +29,9 @@ type Options struct {
 
 // GenerateFromJSON decodes canonical ModuleContract JSON and generates bindings.
 func GenerateFromJSON(data []byte, opts Options) ([]byte, error) {
+	if err := validateOptions(opts); err != nil {
+		return nil, err
+	}
 	var contract shunter.ModuleContract
 	if err := json.Unmarshal(data, &contract); err != nil {
 		return nil, fmt.Errorf("%w: decode JSON: %v", ErrInvalidContract, err)
@@ -38,13 +41,25 @@ func GenerateFromJSON(data []byte, opts Options) ([]byte, error) {
 
 // Generate emits client bindings from a detached ModuleContract.
 func Generate(contract shunter.ModuleContract, opts Options) ([]byte, error) {
-	lang := strings.ToLower(strings.TrimSpace(opts.Language))
-	switch lang {
+	switch normalizedLanguage(opts) {
 	case LanguageTypeScript:
 		return GenerateTypeScript(contract)
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupportedLanguage, opts.Language)
 	}
+}
+
+func validateOptions(opts Options) error {
+	switch normalizedLanguage(opts) {
+	case LanguageTypeScript:
+		return nil
+	default:
+		return fmt.Errorf("%w %q", ErrUnsupportedLanguage, opts.Language)
+	}
+}
+
+func normalizedLanguage(opts Options) string {
+	return strings.ToLower(strings.TrimSpace(opts.Language))
 }
 
 // GenerateTypeScript emits deterministic TypeScript bindings from a ModuleContract.

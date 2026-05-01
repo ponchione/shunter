@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -85,6 +86,19 @@ func TestGeneratorRejectsUnsupportedLanguage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `unsupported language "go"`) {
 		t.Fatalf("Generate error = %v, want unsupported language", err)
+	}
+}
+
+func TestGeneratorRejectsUnsupportedLanguageBeforeDecodingContractJSON(t *testing.T) {
+	_, err := GenerateFromJSON([]byte(`{`), Options{Language: "go"})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want unsupported language error")
+	}
+	if !errors.Is(err, ErrUnsupportedLanguage) {
+		t.Fatalf("GenerateFromJSON error = %v, want ErrUnsupportedLanguage", err)
+	}
+	if errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON decoded contract before rejecting language: %v", err)
 	}
 }
 
