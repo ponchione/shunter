@@ -112,6 +112,50 @@ func TestSchedulerScanEnqueuesDueRow(t *testing.T) {
 	}
 }
 
+func TestSchedulerScanArgsDetachedAcrossRetry(t *testing.T) {
+	s, cs, tid, inbox := schedulerWorkerFixture(t)
+	fireAt := time.Unix(50, 0).UnixNano()
+	seedSchedule(t, cs, tid, 41, "retry-with-args", []byte{0x01, 0x02}, fireAt, 0)
+
+	s.scan()
+	var first CallReducerCmd
+	select {
+	case cmd := <-inbox:
+		var ok bool
+		first, ok = cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("expected CallReducerCmd, got %T", cmd)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("first scan did not enqueue due schedule")
+	}
+	if string(first.Request.Args) != string([]byte{0x01, 0x02}) {
+		t.Fatalf("first args = %x, want 0102", first.Request.Args)
+	}
+	first.Request.Args[0] = 0xff
+	wasInFlight, _ := s.completeInFlight(first.Request.ScheduleID, first.Request.IntendedFireAt)
+	if !wasInFlight {
+		t.Fatal("first due schedule was not marked in-flight")
+	}
+
+	s.scan()
+	select {
+	case cmd := <-inbox:
+		retry, ok := cmd.(CallReducerCmd)
+		if !ok {
+			t.Fatalf("expected retry CallReducerCmd, got %T", cmd)
+		}
+		if retry.Request.ScheduleID != 41 || retry.Request.IntendedFireAt != fireAt {
+			t.Fatalf("retry schedule = (%d, %d), want (41, %d)", retry.Request.ScheduleID, retry.Request.IntendedFireAt, fireAt)
+		}
+		if string(retry.Request.Args) != string([]byte{0x01, 0x02}) {
+			t.Fatalf("retry args = %x, want original durable args 0102", retry.Request.Args)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("retry scan did not enqueue due schedule")
+	}
+}
+
 func TestSchedulerMarksInFlightBeforeDueCommandCanComplete(t *testing.T) {
 	oldProcs := runtime.GOMAXPROCS(1)
 	t.Cleanup(func() { runtime.GOMAXPROCS(oldProcs) })
