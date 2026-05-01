@@ -419,6 +419,37 @@ func TestTableInsertDetachesFromCaller(t *testing.T) {
 	}
 }
 
+func TestTableInsertRejectsDuplicateRowIDBeforeIndexMutation(t *testing.T) {
+	tbl := NewTable(pkSchema())
+	id := tbl.AllocRowID()
+	if err := tbl.InsertRow(id, mkRow(1, "alice")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := tbl.InsertRow(id, mkRow(2, "bob"))
+	if !errors.Is(err, ErrDuplicateRowID) {
+		t.Fatalf("duplicate row id insert err = %v, want ErrDuplicateRowID", err)
+	}
+	got, ok := tbl.GetRow(id)
+	if !ok {
+		t.Fatal("original row should still exist")
+	}
+	if got[0].AsUint64() != 1 || got[1].AsString() != "alice" {
+		t.Fatalf("duplicate row id insert mutated row: got %#v", got)
+	}
+
+	pk := tbl.PrimaryIndex()
+	if pk == nil {
+		t.Fatal("primary index missing")
+	}
+	if gotIDs := pk.Seek(NewIndexKey(types.NewUint64(1))); len(gotIDs) != 1 || gotIDs[0] != id {
+		t.Fatalf("original primary index entry = %v, want [%d]", gotIDs, id)
+	}
+	if gotIDs := pk.Seek(NewIndexKey(types.NewUint64(2))); len(gotIDs) != 0 {
+		t.Fatalf("duplicate row id insert left stale primary index entry for new key: %v", gotIDs)
+	}
+}
+
 func TestTableGetRowReturnsDetachedCopy(t *testing.T) {
 	tbl := NewTable(pkSchema())
 	id := tbl.AllocRowID()

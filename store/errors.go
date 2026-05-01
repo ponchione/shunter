@@ -18,6 +18,7 @@ var (
 	ErrPrimaryKeyViolation       = errors.New("primary key violation")
 	ErrUniqueConstraintViolation = errors.New("unique constraint violation")
 	ErrDuplicateRow              = errors.New("duplicate row")
+	ErrDuplicateRowID            = errors.New("duplicate row id")
 	ErrRowNotFound               = errors.New("row not found")
 	ErrNullNotAllowed            = errors.New("null not allowed")
 	ErrInvalidFloat              = types.ErrInvalidFloat

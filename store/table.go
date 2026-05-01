@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"iter"
 
 	"github.com/ponchione/shunter/schema"
@@ -61,6 +62,10 @@ func (t *Table) AllocRowID() types.RowID {
 // InsertRow stores a row. Does not validate — caller must validate first.
 // Returns error on index constraint violations.
 func (t *Table) InsertRow(id types.RowID, row types.ProductValue) error {
+	if _, exists := t.rows[id]; exists {
+		return fmt.Errorf("%w: %d", ErrDuplicateRowID, id)
+	}
+
 	// Unique/PK constraint check + index insertion.
 	if err := t.insertIntoIndexes(id, row); err != nil {
 		return err
