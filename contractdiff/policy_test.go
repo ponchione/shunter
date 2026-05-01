@@ -92,6 +92,28 @@ func TestPolicyRequiresMigrationMetadataForDeclaredReadPermissionChanges(t *test
 	}
 }
 
+func TestPolicyRequiresMigrationMetadataForAdditiveTableReadPolicyChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{Access: schema.TableAccessPublic}
+
+	result := CheckPolicy(Compare(old, current), current, PolicyOptions{})
+	assertWarning(t, result.Warnings, WarningMissingMigrationMetadata, SurfaceTableReadPolicy, "messages")
+
+	current.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+		Surface: shunter.MigrationSurfaceTable,
+		Name:    "messages",
+		Metadata: shunter.MigrationMetadata{
+			Compatibility: shunter.MigrationCompatibilityCompatible,
+			Notes:         "loosen read policy",
+		},
+	}}
+	result = CheckPolicy(Compare(old, current), current, PolicyOptions{Strict: true})
+	if result.Failed {
+		t.Fatalf("strict policy failed despite table read-policy migration metadata: %#v", result.Warnings)
+	}
+}
+
 func TestPolicyAllowsModuleMigrationMetadataForVisibilityFilterChanges(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
