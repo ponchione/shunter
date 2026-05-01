@@ -104,7 +104,10 @@ Current status:
   under fixed seed/worker/op labels. `ConnManager` add/get/remove map
   lifecycle now also has a fixed-seed concurrent short soak, and concurrent
   `CloseAll` plus direct `Conn.Disconnect` callers are checked for idempotent
-  teardown and stable disconnect callback ordering.
+  teardown and stable disconnect callback ordering. Outbound slow-client
+  backpressure now has a fixed-seed concurrent short soak over one-message
+  queues, checking buffer-full/not-found outcomes, non-enqueue of overflow
+  frames, and disconnect cleanup.
 - A fixed-seed protocol metamorphic trace now compares one long-lived
   subscription with per-operation subscribe/unsubscribe cycles, requiring
   matching deltas, final unsubscribe rows, and one-off query probes.
@@ -189,7 +192,9 @@ Current status:
   previous-version warnings.
 - Contract CLI read-only diff, policy, and plan commands now have a fixed-seed
   concurrent short-soak that checks stable exit codes, stdout, and stderr over
-  shared canonical contract files.
+  shared canonical contract files. CLI release-candidate coverage also pins
+  malformed previous inputs and semantically invalid current inputs as read-only
+  failures with empty stdout and side-specific contract context.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
