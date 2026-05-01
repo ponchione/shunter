@@ -202,6 +202,26 @@ func TestGeneratorRejectsInvalidTableReadPolicyWithContext(t *testing.T) {
 	}
 }
 
+func TestGeneratorRejectsInvalidSchemaColumnTypeWithContext(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables[0].Columns[1].Type = "json"
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+
+	_, err = GenerateFromJSON(data, Options{Language: LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid contract error")
+	}
+	if !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON error = %v, want ErrInvalidContract", err)
+	}
+	if !strings.Contains(err.Error(), `schema.tables.messages.columns.body type "json" is invalid`) {
+		t.Fatalf("GenerateFromJSON error = %v, want invalid schema column type context", err)
+	}
+}
+
 func TestGeneratorRejectsUnknownReadModelTargetWithContext(t *testing.T) {
 	contract := contractFixture()
 	contract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
