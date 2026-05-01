@@ -81,6 +81,9 @@ Current status:
 - Prometheus adapter fault coverage now injects collector registration failure
   and checks previously registered collectors are unregistered before `New`
   returns the wrapped metric-family error.
+- Prometheus adapter race/soak coverage now records every metric family while
+  registry gathers and HTTP scrapes run concurrently, then rechecks exact
+  family/type/label exposure.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit

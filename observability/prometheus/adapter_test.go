@@ -2,12 +2,15 @@ package prometheus
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	shunter "github.com/ponchione/shunter"
@@ -398,18 +401,106 @@ func TestHandlerExposesGatheredMetricsInPrometheusTextFormat(t *testing.T) {
 	}
 }
 
+func TestRecorderGatherAndHandlerConcurrentShortSoak(t *testing.T) {
+	const (
+		seed             = uint64(0x91e7100d)
+		workers          = 6
+		iterations       = 128
+		scrapers         = 3
+		scrapeIterations = 64
+	)
+
+	registry := client.NewRegistry()
+	adapter, err := New(Config{Registerer: registry})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recorder := adapter.Recorder()
+	recordAllFamilies(recorder)
+	handler := adapter.Handler()
+
+	start := make(chan struct{})
+	failures := make(chan string, workers+scrapers)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for op := range iterations {
+				familyIndex := (int(seed) + worker*11 + op*7) % len(expectedMetricFamilies)
+				name := expectedMetricFamilies[familyIndex]
+				recordMetricFamily(recorder, name, worker+op+1)
+				if (int(seed)+worker+op)%5 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(worker)
+	}
+	for scraper := range scrapers {
+		wg.Add(1)
+		go func(scraper int) {
+			defer wg.Done()
+			<-start
+			for op := range scrapeIterations {
+				if err := gatherAndScrapePrometheus(registry, handler); err != nil {
+					select {
+					case failures <- fmt.Sprintf("seed=%#x scraper=%d op=%d runtime_config=workers=%d/iterations=%d/scrapers=%d/scrape_iterations=%d failure=%v",
+						seed, scraper, op, workers, iterations, scrapers, scrapeIterations, err):
+					default:
+					}
+					return
+				}
+				if (int(seed)+scraper+op)%3 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(scraper)
+	}
+
+	close(start)
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
+	}
+
+	families := gatherFamilies(t, registry)
+	requireExactFamilySet(t, families, "shunter")
+}
+
 func recordAllFamilies(recorder shunter.MetricsRecorder) {
 	for _, name := range expectedMetricFamilies {
-		labels := sampleLabelsFor(name)
-		switch expectedMetricTypes[name] {
-		case "COUNTER":
-			recorder.AddCounter(name, labels, 1)
-		case "GAUGE":
-			recorder.SetGauge(name, labels, 1)
-		case "HISTOGRAM":
-			recorder.ObserveHistogram(name, labels, 0.002)
-		}
+		recordMetricFamily(recorder, name, 1)
 	}
+}
+
+func recordMetricFamily(recorder shunter.MetricsRecorder, name shunter.MetricName, value int) {
+	labels := sampleLabelsFor(name)
+	switch expectedMetricTypes[name] {
+	case "COUNTER":
+		recorder.AddCounter(name, labels, 1)
+	case "GAUGE":
+		recorder.SetGauge(name, labels, float64(value))
+	case "HISTOGRAM":
+		recorder.ObserveHistogram(name, labels, 0.001+float64(value%5)*0.001)
+	}
+}
+
+func gatherAndScrapePrometheus(gatherer client.Gatherer, handler http.Handler) error {
+	if _, err := gatherer.Gather(); err != nil {
+		return fmt.Errorf("Gather: %w", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		return fmt.Errorf("handler status=%d body=%s", res.Code, res.Body.String())
+	}
+	if contentType := res.Header().Get("Content-Type"); !strings.Contains(contentType, "text/plain") {
+		return fmt.Errorf("handler content_type=%q want text/plain", contentType)
+	}
+	return nil
 }
 
 func sampleLabelsFor(name shunter.MetricName) shunter.MetricLabels {
