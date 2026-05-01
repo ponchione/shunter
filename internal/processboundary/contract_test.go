@@ -562,6 +562,16 @@ func TestValidateContractJSONRejectsUnknownEnumValues(t *testing.T) {
 			},
 			want: ErrInvalidContract,
 		},
+		{
+			name: "unknown lifecycle hook",
+			mutate: func(contract *Contract) {
+				contract.Lifecycle[LifecycleHook("OnUpgrade")] = LifecycleContract{
+					Ordering:        []LifecycleStep{LifecycleStepInvokeReducer},
+					FailureBehavior: LifecycleFailureCleanupStillCommits,
+				}
+			},
+			want: ErrInvalidContract,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			contract := DefaultContract()

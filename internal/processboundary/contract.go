@@ -294,6 +294,11 @@ func ValidateContract(contract Contract) error {
 }
 
 func validateLifecycle(lifecycle map[LifecycleHook]LifecycleContract) error {
+	for hook := range lifecycle {
+		if hook != LifecycleOnConnect && hook != LifecycleOnDisconnect {
+			return fmt.Errorf("%w: lifecycle hook %q", ErrInvalidContract, hook)
+		}
+	}
 	for _, hook := range []LifecycleHook{LifecycleOnConnect, LifecycleOnDisconnect} {
 		spec, ok := lifecycle[hook]
 		if !ok {
