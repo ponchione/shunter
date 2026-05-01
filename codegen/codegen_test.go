@@ -176,6 +176,32 @@ func TestGeneratorRejectsUnknownPermissionTargetWithContext(t *testing.T) {
 	}
 }
 
+func TestGeneratorRejectsInvalidTableReadPolicyWithContext(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+		Access:      schema.TableAccessPublic,
+		Permissions: []string{"messages:read"},
+	}
+	data, err := contract.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+
+	_, err = GenerateFromJSON(data, Options{Language: LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromJSON returned nil error, want invalid contract error")
+	}
+	if !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("GenerateFromJSON error = %v, want ErrInvalidContract", err)
+	}
+	if !strings.Contains(err.Error(), "schema.tables.messages.read_policy invalid") {
+		t.Fatalf("GenerateFromJSON error = %v, want table read policy context", err)
+	}
+	if !strings.Contains(err.Error(), "public read policy must not include permissions") {
+		t.Fatalf("GenerateFromJSON error = %v, want public read policy detail", err)
+	}
+}
+
 func TestTypeScriptGeneratorEscapesModuleMetadataInHeaderComment(t *testing.T) {
 	contract := contractFixture()
 	contract.Module.Name = "chat\nexport const injected = true;"
