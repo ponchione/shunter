@@ -495,6 +495,52 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentPermissionTargetWithContex
 	}
 }
 
+func TestContractDiffJSONRejectsSemanticInvalidPreviousPermissionTargetWithContext(t *testing.T) {
+	previous := contractFixture()
+	previous.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+		Name:     "missing_reducer",
+		Required: []string{"messages:send"},
+	}}
+	previousData := mustRawContractJSON(t, previous)
+	currentData := mustContractJSON(t, contractFixture())
+
+	for _, tt := range []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "compare",
+			run: func() error {
+				_, err := CompareJSON(previousData, currentData)
+				return err
+			},
+		},
+		{
+			name: "plan",
+			run: func() error {
+				_, err := PlanJSON(previousData, currentData, PlanOptions{ValidateContracts: true})
+				return err
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run()
+			if err == nil {
+				t.Fatal("JSON entry point returned nil error, want invalid contract")
+			}
+			if !errors.Is(err, ErrInvalidContractJSON) {
+				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
+			}
+			if !strings.Contains(err.Error(), "previous contract") {
+				t.Fatalf("JSON entry point error = %v, want previous contract context", err)
+			}
+			if !strings.Contains(err.Error(), "permissions.reducer.missing_reducer references unknown reducer") {
+				t.Fatalf("JSON entry point error = %v, want permission reducer target context", err)
+			}
+		})
+	}
+}
+
 func TestContractDiffJSONRejectsSemanticInvalidPreviousReadModelWithContext(t *testing.T) {
 	previous := contractFixture()
 	previous.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
