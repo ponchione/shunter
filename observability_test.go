@@ -122,6 +122,79 @@ func TestObservabilityReducerLabelModeNormalizationAndValidation(t *testing.T) {
 	assertNotSchemaValidationError(t, err)
 }
 
+func FuzzObservabilityConfigNormalization(f *testing.F) {
+	for _, seed := range []struct {
+		label    string
+		mode     string
+		maxBytes int
+	}{
+		{label: "", mode: "", maxBytes: 0},
+		{label: "  runtime-a  ", mode: string(ReducerLabelModeName), maxBytes: -1},
+		{label: "runtime-b", mode: string(ReducerLabelModeAggregate), maxBytes: 1},
+		{label: "bad\nlabel", mode: "", maxBytes: 1024},
+		{label: strings.Repeat("a", 129), mode: "", maxBytes: 1024},
+		{label: string([]byte{'o', 'k', 0xff}), mode: "", maxBytes: 1024},
+		{label: "runtime-c", mode: "per_request", maxBytes: 1024},
+	} {
+		f.Add(seed.label, seed.mode, seed.maxBytes)
+	}
+
+	f.Fuzz(func(t *testing.T, label, mode string, maxBytes int) {
+		if len(label) > 512 || len(mode) > 128 {
+			return
+		}
+		cfg := ObservabilityConfig{
+			RuntimeLabel: label,
+			Redaction:    RedactionConfig{ErrorMessageMaxBytes: maxBytes},
+			Metrics:      MetricsConfig{ReducerLabelMode: ReducerLabelMode(mode)},
+		}
+
+		normalized, err := normalizeObservabilityConfig(cfg)
+		buildObs, buildErr := newBuildObservability("chat", cfg)
+		if buildObs == nil {
+			t.Fatal("newBuildObservability returned nil observability")
+		}
+		if (err == nil) != (buildErr == nil) {
+			t.Fatalf("normalize error = %v, build observability error = %v", err, buildErr)
+		}
+		if err != nil {
+			if !strings.Contains(err.Error(), "runtime label") && !strings.Contains(err.Error(), "reducer label") {
+				t.Fatalf("normalization error = %v, want categorized observability error", err)
+			}
+			if !validObservabilityRuntimeLabel(buildObs.runtimeLabel) {
+				t.Fatalf("build failure runtime label = %q, want valid fallback label", buildObs.runtimeLabel)
+			}
+			if maxBytes <= 0 && buildObs.redaction.ErrorMessageMaxBytes != defaultObservabilityErrorMessageMaxBytes {
+				t.Fatalf("build failure max error bytes = %d, want default %d",
+					buildObs.redaction.ErrorMessageMaxBytes, defaultObservabilityErrorMessageMaxBytes)
+			}
+			return
+		}
+
+		if !validObservabilityRuntimeLabel(normalized.RuntimeLabel) {
+			t.Fatalf("accepted invalid runtime label %q", normalized.RuntimeLabel)
+		}
+		if buildObs.runtimeLabel != normalized.RuntimeLabel {
+			t.Fatalf("build runtime label = %q, want normalized %q", buildObs.runtimeLabel, normalized.RuntimeLabel)
+		}
+		wantMaxBytes := maxBytes
+		if wantMaxBytes <= 0 {
+			wantMaxBytes = defaultObservabilityErrorMessageMaxBytes
+		}
+		if normalized.Redaction.ErrorMessageMaxBytes != wantMaxBytes {
+			t.Fatalf("normalized max error bytes = %d, want %d", normalized.Redaction.ErrorMessageMaxBytes, wantMaxBytes)
+		}
+		if buildObs.redaction.ErrorMessageMaxBytes != wantMaxBytes {
+			t.Fatalf("build max error bytes = %d, want %d", buildObs.redaction.ErrorMessageMaxBytes, wantMaxBytes)
+		}
+		switch normalized.Metrics.ReducerLabelMode {
+		case ReducerLabelModeName, ReducerLabelModeAggregate:
+		default:
+			t.Fatalf("accepted invalid reducer label mode %q", normalized.Metrics.ReducerLabelMode)
+		}
+	})
+}
+
 func TestObservabilityRedactionExamples(t *testing.T) {
 	obs := newRuntimeObservability("chat", ObservabilityConfig{
 		RuntimeLabel: "default",
@@ -456,4 +529,16 @@ func containsSeededSensitiveSecret(raw string) bool {
 		strings.Contains(raw, "payload='secret'") ||
 		strings.Contains(raw, "query=select * from users where token='secret'") ||
 		strings.Contains(raw, "Bearer secret")
+}
+
+func validObservabilityRuntimeLabel(label string) bool {
+	if label == "" || !utf8.ValidString(label) || len(label) > 128 {
+		return false
+	}
+	for i := 0; i < len(label); i++ {
+		if label[i] < 0x20 || label[i] == 0x7f {
+			return false
+		}
+	}
+	return true
 }

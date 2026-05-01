@@ -63,10 +63,11 @@ Current status:
   randomness-fault coverage plus a short concurrent mint/validate soak that
   checks unique tokens, subjects, identities, audience, issuer, and derived
   identity stability under worker/op labels.
-- Observability redaction now has a bounded fuzz corpus checking deterministic
-  output, valid UTF-8, configured byte bounds, and seeded sensitive-field
-  scrubbing; the release-candidate staticcheck gate is restored for the
-  observability baseline.
+- Observability redaction and config normalization now have bounded fuzz
+  corpora checking deterministic output, valid UTF-8, configured byte bounds,
+  seeded sensitive-field scrubbing, normalized runtime labels, reducer label
+  mode categorization, and build-failure fallback labels; the release-candidate
+  staticcheck gate is restored for the observability baseline.
 - Build and recovery observability now records build failures, successful
   bootstrap/recovery reports, failed recovery, skipped-snapshot degradation,
   and recovery metrics through fixed public `Build` scenarios.
