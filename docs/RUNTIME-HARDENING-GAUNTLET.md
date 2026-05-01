@@ -71,6 +71,9 @@ Current status:
 - Build and recovery observability now records build failures, successful
   bootstrap/recovery reports, failed recovery, skipped-snapshot degradation,
   and recovery metrics through fixed public `Build` scenarios.
+- Observability sink-failure coverage now injects logger and metrics panics to
+  verify redacted fallback observations, non-recursive recovery, and continued
+  runtime operation.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit

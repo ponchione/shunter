@@ -410,6 +410,68 @@ func TestObservabilitySinkPanicsRecoveredBeforeRuntimeOperation(t *testing.T) {
 	}
 }
 
+func TestObservabilitySinkFailureFallbacksAreBoundedAndNonRecursive(t *testing.T) {
+	t.Run("metrics panic records warning log", func(t *testing.T) {
+		logs := &recordingLogState{}
+		obs := newRuntimeObservability("chat", ObservabilityConfig{
+			RuntimeLabel: "runtime-a",
+			Logger:       logs.logger(),
+			Metrics: MetricsConfig{
+				Enabled:  true,
+				Recorder: secretPanicMetricsRecorder{},
+			},
+		})
+
+		obs.addCounter(MetricRuntimeErrorsTotal, MetricLabels{Component: "runtime"}, 1)
+
+		record := requireRecordedLog(t, logs, "observability.sink_failed")
+		if record.level != slog.LevelWarn {
+			t.Fatalf("sink failure level = %v, want warn", record.level)
+		}
+		assertLogAttr(t, record, "component", "observability")
+		assertLogAttr(t, record, "module", "chat")
+		assertLogAttr(t, record, "runtime", "runtime-a")
+		assertLogAttr(t, record, "sink", "metrics")
+		if got, ok := record.attrs["error"].(string); !ok || strings.Contains(got, "secret") || !strings.Contains(got, "[redacted]") {
+			t.Fatalf("sink failure error attr = %#v, want redacted secret", record.attrs["error"])
+		}
+	})
+
+	t.Run("logger panic records metric", func(t *testing.T) {
+		metrics := &recordingMetricsRecorder{}
+		obs := newRuntimeObservability("chat", ObservabilityConfig{
+			RuntimeLabel: "runtime-b",
+			Logger:       slog.New(secretPanicSlogHandler{}),
+			Metrics: MetricsConfig{
+				Enabled:  true,
+				Recorder: metrics,
+			},
+		})
+
+		obs.log(context.Background(), slog.LevelInfo, "runtime.ready", "runtime")
+
+		metrics.requireCounter(t, MetricRuntimeErrorsTotal, MetricLabels{
+			Module:    "chat",
+			Runtime:   "runtime-b",
+			Component: "observability",
+			Reason:    "observability_sink_failed",
+		}, 1)
+	})
+
+	t.Run("all sinks panic without escaping", func(t *testing.T) {
+		obs := newRuntimeObservability("chat", ObservabilityConfig{
+			RuntimeLabel: "runtime-c",
+			Logger:       slog.New(secretPanicSlogHandler{}),
+			Metrics: MetricsConfig{
+				Enabled:  true,
+				Recorder: secretPanicMetricsRecorder{},
+			},
+		})
+		obs.log(context.Background(), slog.LevelInfo, "runtime.ready", "runtime")
+		obs.addCounter(MetricRuntimeErrorsTotal, MetricLabels{Component: "runtime"}, 1)
+	})
+}
+
 func TestRuntimeConfigObservabilityCopyKeepsOwnedSlicesDetached(t *testing.T) {
 	logger := slog.Default()
 	handler := noopHTTPHandler{}
@@ -492,6 +554,20 @@ func (panicMetricsRecorder) ObserveHistogram(MetricName, MetricLabels, float64) 
 	panic("metrics failed")
 }
 
+type secretPanicMetricsRecorder struct{}
+
+func (secretPanicMetricsRecorder) AddCounter(MetricName, MetricLabels, uint64) {
+	panic("token=secret")
+}
+
+func (secretPanicMetricsRecorder) SetGauge(MetricName, MetricLabels, float64) {
+	panic("token=secret")
+}
+
+func (secretPanicMetricsRecorder) ObserveHistogram(MetricName, MetricLabels, float64) {
+	panic("token=secret")
+}
+
 type countingTracer struct {
 	starts atomic.Uint64
 }
@@ -519,6 +595,18 @@ func (h panicSlogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 
 func (h panicSlogHandler) WithGroup(string) slog.Handler { return h }
 
+type secretPanicSlogHandler struct{}
+
+func (secretPanicSlogHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (secretPanicSlogHandler) Handle(context.Context, slog.Record) error {
+	panic("authorization=Bearer secret")
+}
+
+func (h secretPanicSlogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+
+func (h secretPanicSlogHandler) WithGroup(string) slog.Handler { return h }
+
 type noopHTTPHandler struct{}
 
 func (noopHTTPHandler) ServeHTTP(http.ResponseWriter, *http.Request) {}
@@ -541,4 +629,15 @@ func validObservabilityRuntimeLabel(label string) bool {
 		}
 	}
 	return true
+}
+
+func requireRecordedLog(t *testing.T, logs *recordingLogState, event string) recordedLog {
+	t.Helper()
+	for _, record := range logs.records() {
+		if record.message == event {
+			return record
+		}
+	}
+	t.Fatalf("missing log event %q in %+v", event, logs.records())
+	return recordedLog{}
 }
