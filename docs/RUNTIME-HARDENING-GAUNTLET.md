@@ -121,6 +121,9 @@ Current status:
   coverage over contract JSON, including invalid-input categorization,
   deterministic accepted output, canonical JSON input equivalence, and
   identifier collision/reserved-word corpus seeds.
+- Contract diff and migration-plan tooling now has fixed-seed metamorphic
+  coverage requiring declaration-order changes to preserve diff text and
+  canonical migration-plan JSON under seed/iteration labels.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
