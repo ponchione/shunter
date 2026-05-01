@@ -170,7 +170,9 @@ Current status:
 - Contract workflow file-backed diff, policy, plan, and `GenerateFromFile`
   helpers now have a fixed-seed concurrent short-soak that checks stable text,
   JSON, and direct-codegen-equivalent TypeScript output over canonical contract
-  fixtures without touching artifact output paths.
+  fixtures without touching artifact output paths. `GenerateFromFile` error
+  coverage also pins malformed and semantically invalid contract inputs as
+  categorized codegen failures with workflow context.
 - Migration-plan validation now checks module and per-declaration migration
   metadata version drift, schema/contract regressions, and codegen metadata
   mismatches; CLI release-candidate coverage pins `contract plan --validate`

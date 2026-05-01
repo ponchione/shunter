@@ -370,11 +370,17 @@ func TestWorkflowErrorsRemainClear(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := filepath.Join(dir, "contract.json")
 	malformedPath := filepath.Join(dir, "malformed.json")
+	invalidCodegenPath := filepath.Join(dir, "invalid-codegen.json")
 	if err := writeFile(contractPath, mustContractJSON(t, workflowContractFixture())); err != nil {
 		t.Fatalf("write contract fixture: %v", err)
 	}
 	if err := writeFile(malformedPath, []byte(`{`)); err != nil {
 		t.Fatalf("write malformed fixture: %v", err)
+	}
+	invalidCodegen := workflowContractFixture()
+	invalidCodegen.Queries[0].SQL = "SELECT * FROM missing_table"
+	if err := writeFile(invalidCodegenPath, mustContractJSON(t, invalidCodegen)); err != nil {
+		t.Fatalf("write invalid codegen fixture: %v", err)
 	}
 
 	_, err := CompareFiles(malformedPath, contractPath)
@@ -399,6 +405,22 @@ func TestWorkflowErrorsRemainClear(t *testing.T) {
 	}
 	if !errors.Is(err, codegen.ErrUnsupportedLanguage) {
 		t.Fatalf("GenerateFromFile error = %v, want ErrUnsupportedLanguage", err)
+	}
+
+	_, err = GenerateFromFile(malformedPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromFile returned nil error for malformed contract")
+	}
+	if !errors.Is(err, codegen.ErrInvalidContract) || !strings.Contains(err.Error(), "generate bindings from") {
+		t.Fatalf("GenerateFromFile malformed error = %v, want wrapped ErrInvalidContract with workflow context", err)
+	}
+
+	_, err = GenerateFromFile(invalidCodegenPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatal("GenerateFromFile returned nil error for invalid contract")
+	}
+	if !errors.Is(err, codegen.ErrInvalidContract) || !strings.Contains(err.Error(), "queries.history.sql") {
+		t.Fatalf("GenerateFromFile invalid contract error = %v, want wrapped ErrInvalidContract with query SQL context", err)
 	}
 
 	_, err = GenerateFromFile(filepath.Join(dir, "missing.json"), codegen.Options{Language: codegen.LanguageTypeScript})
