@@ -792,3 +792,21 @@ func TestTableSequenceStateAccessorsRoundTrip(t *testing.T) {
 		t.Fatalf("next SequenceValue after insert = (%d, %v), want (10, true)", seq, has)
 	}
 }
+
+func TestTransactionInsertAutoIncrementUint64ExhaustedSequenceFails(t *testing.T) {
+	cs, reg := buildAutoIncrementState(t)
+	tbl, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("expected autoincrement table")
+	}
+	tbl.SetSequenceValue(^uint64(0))
+
+	tx := NewTransaction(cs, reg)
+	if _, err := tx.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("exhausted")}); !errors.Is(err, schema.ErrSequenceOverflow) {
+		t.Fatalf("Insert at exhausted sequence error = %v, want ErrSequenceOverflow", err)
+	}
+
+	if seq, has := tbl.SequenceValue(); !has || seq != ^uint64(0) {
+		t.Fatalf("SequenceValue after failed insert = (%d, %v), want max uint64 and true", seq, has)
+	}
+}

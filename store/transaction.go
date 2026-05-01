@@ -100,7 +100,10 @@ func (t *Transaction) applyAutoIncrement(table *Table, row types.ProductValue) (
 		return nil, schema.ErrAutoIncrementType
 	}
 	next := table.sequence.Peek()
-	if next > max {
+	// Sequence value 0 is the exhausted sentinel. A uint64 autoincrement
+	// cannot safely consume MaxUint64 because the next sequence value would
+	// wrap to that sentinel and snapshot/recovery cannot represent max+1.
+	if next == 0 || next > max || (next == max && max == ^uint64(0)) {
 		return nil, schema.ErrSequenceOverflow
 	}
 
