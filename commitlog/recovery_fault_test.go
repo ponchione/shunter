@@ -1546,6 +1546,43 @@ func TestOpenAndRecoverSnapshotPastDurableHorizonMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "newest-snapshot-past-horizon-falls-back-to-older-snapshot-and-damaged-tail-prefix",
+			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
+				writeFaultSnapshot(t, root, reg, 5, map[uint64]string{1: "alice"})
+				writeFaultSnapshot(t, root, reg, 10, map[uint64]string{99: "too-new"})
+				path := writeReplaySegment(t, root, 6,
+					replayRecord{txID: 6, inserts: []types.ProductValue{{types.NewUint64(2), types.NewString("bob")}}},
+					replayRecord{txID: 7, inserts: []types.ProductValue{{types.NewUint64(3), types.NewString("partial-carol")}}},
+				)
+				truncateScanTestFileToOffset(t, path, int64(scanTestRecordOffset(t, path, 1)+RecordHeaderSize-1))
+			},
+			assert: func(t *testing.T, recovered *store.CommittedState, maxTxID types.TxID, plan RecoveryResumePlan, report RecoveryReport, err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if maxTxID != 6 {
+					t.Fatalf("maxTxID = %d, want 6", maxTxID)
+				}
+				assertReplayPlayerRows(t, recovered, map[uint64]string{1: "alice", 2: "bob"})
+				assertSkippedSnapshot(t, report, 10, SnapshotSkipPastDurableHorizon)
+				if !report.HasSelectedSnapshot || report.SelectedSnapshotTxID != 5 {
+					t.Fatalf("selected snapshot report = (%v, %d), want (true, 5)", report.HasSelectedSnapshot, report.SelectedSnapshotTxID)
+				}
+				if !report.HasDurableLog || report.DurableLogHorizon != 6 {
+					t.Fatalf("durable log report = (%v, %d), want (true, 6)", report.HasDurableLog, report.DurableLogHorizon)
+				}
+				if report.ReplayedTxRange != (RecoveryTxIDRange{Start: 6, End: 6}) {
+					t.Fatalf("replayed range = %+v, want 6..6", report.ReplayedTxRange)
+				}
+				if len(report.DamagedTailSegments) != 1 || report.DamagedTailSegments[0].StartTx != 6 || report.DamagedTailSegments[0].LastTx != 6 {
+					t.Fatalf("damaged tail report = %+v, want damaged replay tail prefix 6..6", report.DamagedTailSegments)
+				}
+				if plan.AppendMode != AppendByFreshNextSegment || plan.SegmentStartTx != 7 || plan.NextTxID != 7 {
+					t.Fatalf("resume plan = %+v, want fresh segment at tx 7", plan)
+				}
+			},
+		},
+		{
 			name: "only-snapshot-past-horizon-recovers-complete-base-log",
 			setup: func(t *testing.T, root string, reg schema.SchemaRegistry) {
 				writeFaultSnapshot(t, root, reg, 5, map[uint64]string{99: "too-new"})
