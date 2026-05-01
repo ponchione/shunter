@@ -589,6 +589,81 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentReadModelTargetWithContext
 	}
 }
 
+func TestContractDiffJSONRejectsSemanticInvalidReadModelSurfaceWithContext(t *testing.T) {
+	invalidCurrent := contractFixture()
+	invalidCurrent.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+		Surface: "subscription",
+		Name:    "recent_messages",
+		Tables:  []string{"messages"},
+		Tags:    []string{"history"},
+	}}
+	invalidPrevious := contractFixture()
+	invalidPrevious.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+		Surface: "subscription",
+		Name:    "recent_messages",
+		Tables:  []string{"messages"},
+		Tags:    []string{"history"},
+	}}
+
+	for _, tc := range []struct {
+		name        string
+		previous    []byte
+		current     []byte
+		wantContext string
+	}{
+		{
+			name:        "current",
+			previous:    mustContractJSON(t, contractFixture()),
+			current:     mustRawContractJSON(t, invalidCurrent),
+			wantContext: "current contract",
+		},
+		{
+			name:        "previous",
+			previous:    mustRawContractJSON(t, invalidPrevious),
+			current:     mustContractJSON(t, contractFixture()),
+			wantContext: "previous contract",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, tt := range []struct {
+				name string
+				run  func() error
+			}{
+				{
+					name: "compare",
+					run: func() error {
+						_, err := CompareJSON(tc.previous, tc.current)
+						return err
+					},
+				},
+				{
+					name: "plan",
+					run: func() error {
+						_, err := PlanJSON(tc.previous, tc.current, PlanOptions{ValidateContracts: true})
+						return err
+					},
+				},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					err := tt.run()
+					if err == nil {
+						t.Fatal("JSON entry point returned nil error, want invalid contract")
+					}
+					if !errors.Is(err, ErrInvalidContractJSON) {
+						t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
+					}
+					if !strings.Contains(err.Error(), tc.wantContext) {
+						t.Fatalf("JSON entry point error = %v, want %s context", err, tc.wantContext)
+					}
+					if !strings.Contains(err.Error(), `read_model surface "subscription" is invalid`) {
+						t.Fatalf("JSON entry point error = %v, want invalid read_model surface context", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestContractDiffJSONRejectsSemanticInvalidCurrentTableReadPolicyWithContext(t *testing.T) {
 	current := contractFixture()
 	current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
