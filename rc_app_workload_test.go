@@ -57,10 +57,15 @@ func TestReleaseCandidateExampleAppWorkloadPublicRuntime(t *testing.T) {
 	assertRCExampleAllTasks(t, rt, model, 10, "after-restart")
 	assertRCExampleDeclaredReadsDenied(t, rt, 11, "after-restart")
 
-	callRCExampleReducer(t, rt, 12, "complete_task", rcExampleCompleteTaskArgs{ID: 2})
+	callRCExampleReducerExpectUserFailure(t, rt, 12, "create_task", rcExampleCreateTaskArgs{ID: 3, Owner: "mallory", Title: "duplicate after restart"})
+	callRCExampleReducerExpectPermissionDenied(t, rt, 13, "create_task", rcExampleCreateTaskArgs{ID: 4, Owner: "mallory", Title: "denied after restart"})
+	assertRCExampleAllTasks(t, rt, model, 14, "after-restart-after-rejections")
+	assertRCExampleOpenTasksQueryAndView(t, rt, model, 15, "after-restart-after-rejections")
+
+	callRCExampleReducer(t, rt, 16, "complete_task", rcExampleCompleteTaskArgs{ID: 2})
 	model[2] = rcExampleTask{Owner: "bob", Title: "review release", Done: true}
-	assertRCExampleAllTasks(t, rt, model, 13, "after-restart-complete")
-	assertRCExampleOpenTasksQueryAndView(t, rt, model, 14, "after-restart-complete")
+	assertRCExampleAllTasks(t, rt, model, 17, "after-restart-complete")
+	assertRCExampleOpenTasksQueryAndView(t, rt, model, 18, "after-restart-complete")
 }
 
 func TestReleaseCandidateExampleAppProtocolWorkloadStrictAuth(t *testing.T) {
@@ -140,14 +145,17 @@ func TestReleaseCandidateExampleAppProtocolWorkloadStrictAuth(t *testing.T) {
 			rcExampleAppSeed, rcExampleAppRuntimeLabel, restartedInitial, openRCExampleTasks(model))
 	}
 
-	callRCExampleProtocolReducer(t, restartedCaller, 16, "create_task", rcExampleCreateTaskArgs{ID: 3, Owner: "alice", Title: "protocol after restart"}, true)
-	insertDelta := readRCExampleProtocolTaskDelta(t, restartedSubscriber, restartedQueryID, "protocol op 16 create after restart")
+	callRCExampleProtocolReducer(t, restartedCaller, 16, "create_task", rcExampleCreateTaskArgs{ID: 2, Owner: "mallory", Title: "duplicate after restart"}, false)
+	assertRCExampleAllTasks(t, rt, model, 17, "protocol after-restart duplicate rejection")
+
+	callRCExampleProtocolReducer(t, restartedCaller, 18, "create_task", rcExampleCreateTaskArgs{ID: 3, Owner: "alice", Title: "protocol after restart"}, true)
+	insertDelta := readRCExampleProtocolTaskDelta(t, restartedSubscriber, restartedQueryID, "protocol op 18 create after restart")
 	if !maps.Equal(insertDelta.inserts, map[uint64]rcExampleTask{3: {Owner: "alice", Title: "protocol after restart"}}) || len(insertDelta.deletes) != 0 {
-		t.Fatalf("seed=%#x op=16 runtime_config=%s operation=ReadDeclaredViewDelta(create_task) observed_delta=%+v expected_inserts=task-3",
+		t.Fatalf("seed=%#x op=18 runtime_config=%s operation=ReadDeclaredViewDelta(create_task) observed_delta=%+v expected_inserts=task-3",
 			rcExampleAppSeed, rcExampleAppRuntimeLabel, insertDelta)
 	}
 	model[3] = rcExampleTask{Owner: "alice", Title: "protocol after restart"}
-	assertRCExampleAllTasks(t, rt, model, 17, "protocol final")
+	assertRCExampleAllTasks(t, rt, model, 19, "protocol final")
 }
 
 type rcExampleTask struct {
@@ -488,9 +496,11 @@ func assertRCExampleAllTasks(t *testing.T, rt *shunter.Runtime, want map[uint64]
 func assertRCExampleOpenTasksQueryAndView(t *testing.T, rt *shunter.Runtime, model map[uint64]rcExampleTask, op int, label string) {
 	t.Helper()
 	want := openRCExampleTasks(model)
+	connID := rcExampleDeclaredReadConnectionID(op)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	query, err := rt.CallQuery(ctx, "open_tasks",
+		shunter.WithDeclaredReadConnectionID(connID),
 		shunter.WithDeclaredReadPermissions("tasks:read"),
 		shunter.WithDeclaredReadRequestID(uint32(2000+op)),
 	)
@@ -513,6 +523,7 @@ func assertRCExampleOpenTasksQueryAndView(t *testing.T, rt *shunter.Runtime, mod
 	}
 
 	sub, err := rt.SubscribeView(ctx, "open_tasks_live", uint32(3000+op),
+		shunter.WithDeclaredReadConnectionID(connID),
 		shunter.WithDeclaredReadPermissions("tasks:read"),
 		shunter.WithDeclaredReadRequestID(uint32(4000+op)),
 	)
@@ -533,6 +544,10 @@ func assertRCExampleOpenTasksQueryAndView(t *testing.T, rt *shunter.Runtime, mod
 		t.Fatalf("seed=%#x op=%d runtime_config=%s operation=SubscribeView(%s) observed_rows=%v expected_rows=%v",
 			rcExampleAppSeed, op, rcExampleAppRuntimeLabel, label, gotView, want)
 	}
+}
+
+func rcExampleDeclaredReadConnectionID(op int) types.ConnectionID {
+	return types.ConnectionID{0x72, 0x63, byte(op >> 8), byte(op)}
 }
 
 func openRCExampleTasks(model map[uint64]rcExampleTask) map[uint64]rcExampleTask {

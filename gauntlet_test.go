@@ -26,7 +26,11 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-const gauntletPlayersTableID schema.TableID = 0
+const (
+	gauntletPlayersTableID     schema.TableID = 0
+	gauntletRuntimeConfigLabel                = "data=temp auth=dev protocol=in-process"
+	gauntletSchemaLabel                       = "players(id:uint64 primary_key,name:string)"
+)
 
 func TestRuntimeGauntletSeededReducerReadModel(t *testing.T) {
 	for _, seed := range []int64{1, 17, 20260427} {
@@ -4412,9 +4416,9 @@ func runGauntletTrace(t *testing.T, rt *shunter.Runtime, model *gauntletModel, t
 	t.Helper()
 	for i, op := range trace {
 		step := startStep + i
-		stepLabel := fmt.Sprintf("%s step %d %s", label, step, op)
+		stepLabel := gauntletTraceStepLabel(label, step, op)
 		advanceGauntletModel(t, model, op, callGauntletRuntimeReducer(t, rt, op, stepLabel), stepLabel)
-		assertGauntletReadMatchesModel(t, rt, *model, fmt.Sprintf("%s after step %d %s", label, step, op))
+		assertGauntletReadMatchesModel(t, rt, *model, stepLabel+" post-read")
 	}
 }
 
@@ -4422,11 +4426,21 @@ func runGauntletProtocolTrace(t *testing.T, rt *shunter.Runtime, client *websock
 	t.Helper()
 	for i, op := range trace {
 		step := startStep + i
-		stepLabel := fmt.Sprintf("%s step %d %s", label, step, op)
+		stepLabel := gauntletTraceStepLabel(label, step, op)
 		outcome := callGauntletProtocolReducer(t, client, op, requestIDBase+uint32(step), stepLabel)
 		advanceGauntletModel(t, model, op, outcome, stepLabel)
 		assertGauntletReadMatchesModel(t, rt, *model, stepLabel)
 	}
+}
+
+func gauntletTraceStepLabel(label string, step int, op gauntletOp) string {
+	return fmt.Sprintf("%s runtime_config=%q schema=%q op=%02d operation=%s",
+		label,
+		gauntletRuntimeConfigLabel,
+		gauntletSchemaLabel,
+		step,
+		op,
+	)
 }
 
 func nextGauntletOp(rng *rand.Rand, model gauntletModel, nextID *uint64) gauntletOp {
@@ -5789,6 +5803,8 @@ func decodeGauntletSubscriptionUpdatesByQuery(t *testing.T, updates []protocol.S
 
 func assertNoGauntletProtocolMessageBeforeClose(t *testing.T, client *websocket.Conn, wait time.Duration, label string) {
 	t.Helper()
+	// Terminal-use only: the timeout path leaves the read goroutine blocked on
+	// this connection, so callers close the client after this check.
 	type readResult struct {
 		messageType websocket.MessageType
 		data        []byte
@@ -5803,7 +5819,7 @@ func assertNoGauntletProtocolMessageBeforeClose(t *testing.T, client *websocket.
 	select {
 	case result := <-resultCh:
 		if result.err != nil {
-			return
+			t.Fatalf("%s protocol connection closed while waiting for no message: %v", label, result.err)
 		}
 		tag, msg, err := protocol.DecodeServerMessage(result.data)
 		if err != nil {
