@@ -242,6 +242,45 @@ func TestTypeScriptGeneratorAvoidsTableViewSubscribeHelperNameCollisions(t *test
 	assertContains(t, ts, `export function subscribeLiveMessages2(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesFallbackAndReservedTableIdentifiers(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables,
+		schema.TableExport{
+			Name:    "!!!",
+			Columns: []schema.ColumnExport{{Name: "id", Type: "uint64"}},
+		},
+		schema.TableExport{
+			Name:    "_",
+			Columns: []schema.ColumnExport{{Name: "id", Type: "uint64"}},
+		},
+		schema.TableExport{
+			Name:    "class",
+			Columns: []schema.ColumnExport{{Name: "id", Type: "uint64"}},
+		},
+		schema.TableExport{
+			Name:    "class!",
+			Columns: []schema.ColumnExport{{Name: "id", Type: "uint64"}},
+		},
+	)
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export interface _Row {`)
+	assertContains(t, ts, `export interface _2Row {`)
+	assertContains(t, ts, `_: "!!!",`)
+	assertContains(t, ts, `_2: "_",`)
+	assertContains(t, ts, `class_: "class",`)
+	assertContains(t, ts, `class_2: "class!",`)
+	assertContains(t, ts, `export function subscribe_(subscribeTable: TableSubscriber<_Row>): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribe_2(subscribeTable: TableSubscriber<_2Row>): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeClass(subscribeTable: TableSubscriber<ClassRow>): Promise<() => void> {`)
+	assertContains(t, ts, `export function subscribeClass2(subscribeTable: TableSubscriber<Class2Row>): Promise<() => void> {`)
+}
+
 func TestTypeScriptGeneratorDeclaredHelpersUseNamedCallbacksNotSQL(t *testing.T) {
 	out, err := Generate(contractFixture(), Options{Language: LanguageTypeScript})
 	if err != nil {
