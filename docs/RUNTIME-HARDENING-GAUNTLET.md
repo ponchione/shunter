@@ -160,8 +160,9 @@ Current status:
   coverage requiring declaration-order changes to preserve diff text and
   canonical migration-plan JSON under seed/iteration labels.
 - Contract diff and migration-plan JSON entry points now have a bounded fuzz
-  corpus that checks invalid-contract error categorization plus deterministic
-  and canonical-input-equivalent diff/plan output for accepted contracts.
+  corpus plus fixed-seed concurrent short-soak coverage that checks
+  invalid-contract error categorization plus deterministic and
+  canonical-input-equivalent diff/plan output for accepted contracts.
 - Migration-plan validation now checks module and per-declaration migration
   metadata version drift, schema/contract regressions, and codegen metadata
   mismatches; CLI release-candidate coverage pins `contract plan --validate`
