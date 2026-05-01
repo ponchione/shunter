@@ -1,8 +1,11 @@
 package contractworkflow
 
 import (
+	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -149,6 +152,48 @@ func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T)
 	}
 	assertContains(t, first, `export interface MessagesRow {`)
 	assertContains(t, first, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
+}
+
+func TestGenerateFileWriteFailureLeavesExistingOutputUntouched(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory chmod write denial is not portable on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can write through read-only test directories")
+	}
+
+	const trace = "trace=workflow-codegen-output-write-failure-preserves-existing-artifact"
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("previous generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("%s chmod temp dir read-only: %v", trace, err)
+	}
+	defer func() {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatalf("%s restore temp dir mode: %v", trace, err)
+		}
+	}()
+
+	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error, want write failure", trace)
+	}
+	if !strings.Contains(err.Error(), "write generated output") {
+		t.Fatalf("%s GenerateFile error = %v, want write generated output context", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s failed write mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
 }
 
 func TestWorkflowErrorsRemainClear(t *testing.T) {
