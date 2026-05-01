@@ -340,6 +340,69 @@ func TestContractReadCommandsRejectUnexpectedArgBeforeFileIO(t *testing.T) {
 	}
 }
 
+func TestContractReadCommandsRejectMissingRequiredPathBeforeFileIO(t *testing.T) {
+	const trace = "trace=cli-contract-read-missing-required-path-before-file-io"
+	dir := t.TempDir()
+	missingPrevious := filepath.Join(dir, "missing-previous.json")
+	missingCurrent := filepath.Join(dir, "missing-current.json")
+
+	for _, command := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "diff",
+			args: []string{"contract", "diff", "--format", "json"},
+		},
+		{
+			name: "policy",
+			args: []string{"contract", "policy", "--strict", "--format", "json"},
+		},
+		{
+			name: "plan",
+			args: []string{"contract", "plan", "--validate", "--format", "json"},
+		},
+	} {
+		for _, input := range []struct {
+			name           string
+			args           []string
+			wantStderr     string
+			forbiddenReads []string
+		}{
+			{
+				name:           "missing-previous",
+				args:           []string{"--current", missingCurrent},
+				wantStderr:     "--previous is required",
+				forbiddenReads: []string{"read current contract", missingCurrent},
+			},
+			{
+				name:           "missing-current",
+				args:           []string{"--previous", missingPrevious},
+				wantStderr:     "--current is required",
+				forbiddenReads: []string{"read previous contract", missingPrevious},
+			},
+		} {
+			t.Run(command.name+"/"+input.name, func(t *testing.T) {
+				args := append(append([]string{}, command.args...), input.args...)
+				var stdout, stderr bytes.Buffer
+				code := run(&stdout, &stderr, args)
+				if code != 2 {
+					t.Fatalf("%s command=%s input=%s exit code = %d, stderr = %s", trace, command.name, input.name, code, stderr.String())
+				}
+				if stdout.Len() != 0 {
+					t.Fatalf("%s command=%s input=%s stdout = %s, want empty", trace, command.name, input.name, stdout.String())
+				}
+				assertContains(t, stderr.String(), input.wantStderr)
+				for _, forbidden := range input.forbiddenReads {
+					if strings.Contains(stderr.String(), forbidden) {
+						t.Fatalf("%s command=%s input=%s read file before rejecting required path: %s", trace, command.name, input.name, stderr.String())
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestContractReadCommandsRejectInvalidContractInputs(t *testing.T) {
 	const trace = "trace=cli-contract-read-invalid-input-rc-gate"
 	dir := t.TempDir()
