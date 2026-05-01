@@ -426,6 +426,39 @@ func TestTypeScriptGeneratorDisambiguatesDeclaredReadHelperNameCollisions(t *tes
 	assertContains(t, ts, `return subscribeDeclaredView("live messages");`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesDeclaredReadFallbackAndReservedIdentifiers(t *testing.T) {
+	contract := contractFixture()
+	contract.Queries = append(contract.Queries,
+		shunter.QueryDescription{Name: "!!!", SQL: "SELECT * FROM messages"},
+		shunter.QueryDescription{Name: "_", SQL: "SELECT * FROM messages"},
+		shunter.QueryDescription{Name: "class", SQL: "SELECT * FROM messages"},
+	)
+	contract.Views = append(contract.Views,
+		shunter.ViewDescription{Name: "???", SQL: "SELECT * FROM messages"},
+		shunter.ViewDescription{Name: "default", SQL: "SELECT * FROM messages"},
+	)
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `_: "!!!",`)
+	assertContains(t, ts, `_2: "_",`)
+	assertContains(t, ts, `class_: "class",`)
+	assertContains(t, ts, `export function query_(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("!!!");`)
+	assertContains(t, ts, `export function query_2(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("_");`)
+	assertContains(t, ts, `export function queryClass_(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("class");`)
+	assertContains(t, ts, `export function subscribe_(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("???");`)
+	assertContains(t, ts, `export function subscribeDefault_(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {`)
+	assertContains(t, ts, `return subscribeDeclaredView("default");`)
+}
+
 func TestTypeScriptGeneratorDoesNotEmitExecutableHelpersForMetadataOnlyDeclarations(t *testing.T) {
 	contract := contractFixture()
 	contract.Queries[0].SQL = ""
