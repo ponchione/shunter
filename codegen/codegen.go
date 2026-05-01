@@ -29,7 +29,7 @@ type Options struct {
 
 // GenerateFromJSON decodes canonical ModuleContract JSON and generates bindings.
 func GenerateFromJSON(data []byte, opts Options) ([]byte, error) {
-	if err := validateOptions(opts); err != nil {
+	if err := ValidateOptions(opts); err != nil {
 		return nil, err
 	}
 	var contract shunter.ModuleContract
@@ -41,6 +41,9 @@ func GenerateFromJSON(data []byte, opts Options) ([]byte, error) {
 
 // Generate emits client bindings from a detached ModuleContract.
 func Generate(contract shunter.ModuleContract, opts Options) ([]byte, error) {
+	if err := ValidateOptions(opts); err != nil {
+		return nil, err
+	}
 	switch normalizedLanguage(opts) {
 	case LanguageTypeScript:
 		return GenerateTypeScript(contract)
@@ -49,7 +52,8 @@ func Generate(contract shunter.ModuleContract, opts Options) ([]byte, error) {
 	}
 }
 
-func validateOptions(opts Options) error {
+// ValidateOptions rejects unsupported generator options before input decoding or file I/O.
+func ValidateOptions(opts Options) error {
 	switch normalizedLanguage(opts) {
 	case LanguageTypeScript:
 		return nil

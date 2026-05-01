@@ -172,6 +172,36 @@ func TestGenerateFileRejectsEmptyOutputPathBeforeReadingContract(t *testing.T) {
 	assertNoWorkflowTempFiles(t, dir, "client.ts")
 }
 
+func TestGenerateFileRejectsUnsupportedLanguageBeforeReadingContract(t *testing.T) {
+	const trace = "trace=workflow-codegen-unsupported-language-before-input-read"
+	dir := t.TempDir()
+	missingContractPath := filepath.Join(dir, "missing-contract.json")
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	err := GenerateFile(missingContractPath, outputPath, codegen.Options{Language: "go"})
+	if err == nil {
+		t.Fatalf("%s GenerateFile returned nil error for unsupported language", trace)
+	}
+	if !errors.Is(err, codegen.ErrUnsupportedLanguage) {
+		t.Fatalf("%s GenerateFile error = %v, want ErrUnsupportedLanguage", trace, err)
+	}
+	if strings.Contains(err.Error(), "read contract input") {
+		t.Fatalf("%s GenerateFile read contract before rejecting language: %v", trace, err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("%s read existing output: %v", trace, err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("%s unsupported language mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFilePreservesExistingOutputPermissionsAcrossAtomicRewrite(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bit preservation is POSIX-specific")

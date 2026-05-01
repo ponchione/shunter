@@ -76,6 +76,9 @@ func PlanFiles(previousPath, currentPath string, opts contractdiff.PlanOptions) 
 
 // GenerateFromFile generates client bindings from a canonical ModuleContract JSON file.
 func GenerateFromFile(contractPath string, opts codegen.Options) ([]byte, error) {
+	if err := codegen.ValidateOptions(opts); err != nil {
+		return nil, err
+	}
 	data, err := readRequiredFile("contract input", contractPath)
 	if err != nil {
 		return nil, err
