@@ -154,6 +154,41 @@ func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T)
 	assertContains(t, first, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
 }
 
+func TestGenerateFilePreservesExistingOutputPermissionsAcrossAtomicRewrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bit preservation is POSIX-specific")
+	}
+
+	const trace = "trace=workflow-codegen-preserve-existing-output-permissions"
+	dir := t.TempDir()
+	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())
+	outputPath := filepath.Join(dir, "client.ts")
+	originalMode := os.FileMode(0o640)
+	if err := os.WriteFile(outputPath, []byte("previous generated output\n"), 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+	if err := os.Chmod(outputPath, originalMode); err != nil {
+		t.Fatalf("%s chmod existing output: %v", trace, err)
+	}
+
+	if err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript}); err != nil {
+		t.Fatalf("%s GenerateFile returned error: %v", trace, err)
+	}
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatalf("%s stat output: %v", trace, err)
+	}
+	if got := info.Mode().Perm(); got != originalMode {
+		t.Fatalf("%s output mode = %v, want %v", trace, got, originalMode)
+	}
+	got := readTextFile(t, outputPath)
+	assertContains(t, got, `export interface MessagesRow {`)
+	if strings.Contains(got, "previous generated output") {
+		t.Fatalf("%s old output survived atomic rewrite:\n%s", trace, got)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFileSyncsParentDirectoryAfterAtomicRename(t *testing.T) {
 	const trace = "trace=workflow-codegen-parent-sync-after-rename"
 	dir := t.TempDir()

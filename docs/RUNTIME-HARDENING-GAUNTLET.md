@@ -233,7 +233,8 @@ Current status:
   trace label for reproduction.
 - Contract artifact generation now writes through a synced temporary file,
   rename, and parent-directory sync; workflow fault coverage pins injected
-  parent-sync failures as fail-loud without leaking temporary artifacts. CLI
+  parent-sync failures as fail-loud without leaking temporary artifacts and
+  preserves existing output permissions across atomic rewrites. CLI
   release-candidate coverage pins unsupported read-output formats plus malformed
   or semantically invalid codegen inputs as non-mutating failures.
 - Remaining non-runtime campaign work should move to broader crash/recovery,
