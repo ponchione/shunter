@@ -1,10 +1,6 @@
 package protocol
 
-import (
-	"fmt"
-
-	"github.com/ponchione/shunter/types"
-)
+import "github.com/ponchione/shunter/types"
 
 // SendSubscribeSingleApplied delivers a SubscribeSingleApplied message.
 // single/multi variant admission-model slice (TD-140): wire-id admission
@@ -52,13 +48,6 @@ func SendSubscriptionError(sender ClientSender, conn *Conn, msg *SubscriptionErr
 
 func optionalUint32(v uint32) *uint32 {
 	return &v
-}
-
-func subscriptionErrorQueryIDForLog(msg *SubscriptionError) string {
-	if msg == nil || msg.QueryID == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("%d", *msg.QueryID)
 }
 
 // SendOneOffQueryResponse delivers a OneOffQueryResponse. No subscription
