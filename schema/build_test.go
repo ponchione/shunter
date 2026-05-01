@@ -220,6 +220,54 @@ func TestBuildWithReadPermissionsCopiesPermissionSlicesDefensively(t *testing.T)
 	}
 }
 
+func TestBuilderTableDefCopiesDefinitionSlicesDefensively(t *testing.T) {
+	columns := []ColumnDefinition{
+		{Name: "id", Type: KindUint64, PrimaryKey: true},
+		{Name: "name", Type: KindString},
+	}
+	indexColumns := []string{"name"}
+	indexes := []IndexDefinition{
+		{Name: "by_name", Columns: indexColumns},
+	}
+
+	b := NewBuilder().SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name:    "messages",
+		Columns: columns,
+		Indexes: indexes,
+	})
+
+	columns[0].Name = "mutated_id"
+	columns[1].Type = KindBool
+	indexColumns[0] = "id"
+	indexes[0].Name = "mutated_index"
+
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed after caller mutation: %v", err)
+	}
+	_, ts, ok := e.Registry().TableByName("messages")
+	if !ok {
+		t.Fatal("messages table missing")
+	}
+	if ts.Columns[0].Name != "id" {
+		t.Fatalf("first column name = %q, want id", ts.Columns[0].Name)
+	}
+	if ts.Columns[1].Type != KindString {
+		t.Fatalf("second column type = %v, want %v", ts.Columns[1].Type, KindString)
+	}
+	if len(ts.Indexes) != 2 {
+		t.Fatalf("index count = %d, want primary plus secondary", len(ts.Indexes))
+	}
+	secondary := ts.Indexes[1]
+	if secondary.Name != "by_name" {
+		t.Fatalf("secondary index name = %q, want by_name", secondary.Name)
+	}
+	if len(secondary.Columns) != 1 || secondary.Columns[0] != 1 {
+		t.Fatalf("secondary index columns = %#v, want column 1", secondary.Columns)
+	}
+}
+
 func TestBuildInvalidTableReadPermissionTagsFail(t *testing.T) {
 	tests := []struct {
 		name string

@@ -110,8 +110,20 @@ func (b *Builder) TableDef(def TableDefinition, opts ...TableOption) *Builder {
 	} else {
 		def.ReadPolicy = copyReadPolicy(def.ReadPolicy)
 	}
-	b.tables = append(b.tables, def)
+	b.tables = append(b.tables, copyTableDefinition(def))
 	return b
+}
+
+func copyTableDefinition(def TableDefinition) TableDefinition {
+	out := def
+	out.Columns = append([]ColumnDefinition(nil), def.Columns...)
+	out.Indexes = make([]IndexDefinition, len(def.Indexes))
+	for i, idx := range def.Indexes {
+		idx.Columns = append([]string(nil), idx.Columns...)
+		out.Indexes[i] = idx
+	}
+	out.ReadPolicy = copyReadPolicy(def.ReadPolicy)
+	return out
 }
 
 // SchemaVersion sets the schema version used for compatibility checking.
