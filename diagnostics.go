@@ -55,49 +55,25 @@ func runtimeDebugHandler(r *Runtime) http.HandlerFunc {
 	}
 }
 
-type runtimeDiagnosticsHealthPayload struct {
-	State     RuntimeState `json:"state"`
-	Ready     bool         `json:"ready"`
-	Degraded  bool         `json:"degraded"`
-	LastError string       `json:"last_error,omitempty"`
-}
+type runtimeDiagnosticsHealthPayload = RuntimeHealth
 
 type runtimeDiagnosticsDescriptionPayload struct {
-	Module ModuleDescription               `json:"module"`
-	Health runtimeDiagnosticsHealthPayload `json:"health"`
+	Module ModuleDescription `json:"module"`
+	Health RuntimeHealth     `json:"health"`
 }
 
-func runtimeDiagnosticsHealth(r *Runtime) runtimeDiagnosticsHealthPayload {
+func runtimeDiagnosticsHealth(r *Runtime) RuntimeHealth {
 	if r == nil {
-		return runtimeDiagnosticsHealthPayload{
-			State:     RuntimeStateFailed,
-			Ready:     false,
-			Degraded:  true,
-			LastError: "runtime is not configured",
-		}
+		return runtimeNotConfiguredHealth()
 	}
-	health := r.Health()
-	out := runtimeDiagnosticsHealthPayload{
-		State:    health.State,
-		Ready:    health.Ready,
-		Degraded: r.recovery.degraded(),
-	}
-	if health.LastError != nil {
-		out.LastError = r.observability.redactError(health.LastError)
-	}
-	return out
+	return r.Health()
 }
 
 func runtimeDiagnosticsDescription(r *Runtime) runtimeDiagnosticsDescriptionPayload {
 	if r == nil {
 		return runtimeDiagnosticsDescriptionPayload{
 			Module: ModuleDescription{Metadata: map[string]string{}},
-			Health: runtimeDiagnosticsHealthPayload{
-				State:     RuntimeStateFailed,
-				Ready:     false,
-				Degraded:  true,
-				LastError: "runtime is not configured",
-			},
+			Health: runtimeNotConfiguredHealth(),
 		}
 	}
 	desc := r.Describe()

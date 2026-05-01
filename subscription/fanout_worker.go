@@ -54,18 +54,26 @@ type FanOutWorker struct {
 	confirmedReads map[types.ConnectionID]bool
 	fastReads      map[types.ConnectionID]bool
 	dropped        chan<- types.ConnectionID
+	recordDropped  func()
 }
 
 // NewFanOutWorker creates a worker that reads from inbox and delivers
 // via sender. Dropped client IDs are signaled on dropped (shared with
 // the Manager's dropped channel so the executor drains one channel).
 func NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID) *FanOutWorker {
+	return NewFanOutWorkerWithDropRecorder(inbox, sender, dropped, nil)
+}
+
+// NewFanOutWorkerWithDropRecorder creates a worker and records successfully
+// signaled dropped clients for health snapshots.
+func NewFanOutWorkerWithDropRecorder(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID, recordDropped func()) *FanOutWorker {
 	return &FanOutWorker{
 		inbox:          inbox,
 		sender:         sender,
 		confirmedReads: make(map[types.ConnectionID]bool),
 		fastReads:      make(map[types.ConnectionID]bool),
 		dropped:        dropped,
+		recordDropped:  recordDropped,
 	}
 }
 
@@ -230,6 +238,9 @@ func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
 	w.mu.Unlock()
 	select {
 	case w.dropped <- connID:
+		if w.recordDropped != nil {
+			w.recordDropped()
+		}
 	default:
 		log.Printf("subscription: dropped client channel full, skipping conn %x", connID[:])
 	}

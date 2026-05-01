@@ -306,6 +306,32 @@ func (dw *DurabilityWorker) DurableTxID() uint64 {
 	return dw.durable.Load()
 }
 
+// QueueDepth returns the current durability queue depth.
+func (dw *DurabilityWorker) QueueDepth() int {
+	if dw == nil {
+		return 0
+	}
+	return len(dw.ch)
+}
+
+// QueueCapacity returns the configured durability queue capacity.
+func (dw *DurabilityWorker) QueueCapacity() int {
+	if dw == nil {
+		return 0
+	}
+	return cap(dw.ch)
+}
+
+// FatalError returns the latched fatal worker error, if any.
+func (dw *DurabilityWorker) FatalError() error {
+	if dw == nil {
+		return nil
+	}
+	dw.stateMu.Lock()
+	defer dw.stateMu.Unlock()
+	return dw.fatalErr
+}
+
 // WaitUntilDurable returns a readiness channel for txID. Already-durable txIDs
 // return an already-ready channel.
 func (dw *DurabilityWorker) WaitUntilDurable(txID types.TxID) <-chan types.TxID {

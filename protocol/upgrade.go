@@ -103,7 +103,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	if hasToken {
 		c, err := auth.ValidateJWT(token, s.JWT)
 		if err != nil {
-			http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
+			s.writeRejected(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
 			return
 		}
 		claims = c
@@ -111,16 +111,16 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		permissions = append([]string(nil), c.Permissions...)
 	} else {
 		if s.JWT.AuthMode != auth.AuthModeAnonymous {
-			http.Error(w, "no token and strict auth enabled", http.StatusUnauthorized)
+			s.writeRejected(w, "no token and strict auth enabled", http.StatusUnauthorized)
 			return
 		}
 		if s.Mint == nil {
-			http.Error(w, "server misconfigured: anonymous mode requires Mint config", http.StatusInternalServerError)
+			s.writeRejected(w, "server misconfigured: anonymous mode requires Mint config", http.StatusInternalServerError)
 			return
 		}
 		mt, id, err := auth.MintAnonymousToken(s.Mint)
 		if err != nil {
-			http.Error(w, "mint failed: "+err.Error(), http.StatusInternalServerError)
+			s.writeRejected(w, "mint failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		mintedToken = mt
@@ -132,24 +132,24 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	connID, err := resolveConnectionID(r.URL.Query().Get("connection_id"))
 	if err != nil {
 		if errors.Is(err, ErrZeroConnectionID) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			s.writeRejected(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		http.Error(w, "invalid connection_id: "+err.Error(), http.StatusBadRequest)
+		s.writeRejected(w, "invalid connection_id: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// 3. compression mode: default none; reject unknown values.
 	compression, err := parseCompressionParam(r.URL.Query().Get("compression"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.writeRejected(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// 4. subprotocol check — client MUST offer the Shunter-native token.
 	selected, ok := negotiateSubprotocol(r, acceptedSubprotocols)
 	if !ok {
-		http.Error(w,
+		s.writeRejected(w,
 			"Sec-WebSocket-Protocol must include "+SubprotocolV1,
 			http.StatusBadRequest)
 		return
@@ -162,6 +162,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// websocket.Accept has already written an HTTP response at
 		// this point; nothing further to emit.
+		s.recordRejected()
 		return
 	}
 	if s.Options.MaxMessageSize > 0 {
@@ -200,6 +201,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		// unblocking them all; until 3.6 lands, the goroutines exit
 		// naturally on ws error when the peer closes.
 		if err := c.RunLifecycle(r.Context(), s.Executor, s.Conns); err != nil {
+			s.recordRejected()
 			return
 		}
 		// Spawn per-connection lifecycle goroutines. They outlive
@@ -230,7 +232,19 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	// No Upgraded hook and no Executor wiring — close the connection
 	// so the client does not hang. Preserves pre-3.4 bring-up behavior
 	// when the embedder is still assembling its executor graph.
+	s.recordRejected()
 	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func (s *Server) writeRejected(w http.ResponseWriter, message string, status int) {
+	s.recordRejected()
+	http.Error(w, message, status)
+}
+
+func (s *Server) recordRejected() {
+	if s != nil && s.Conns != nil {
+		s.Conns.RecordRejected()
+	}
 }
 
 // buildMessageHandlers constructs the MessageHandlers that wire each

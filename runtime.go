@@ -34,22 +34,31 @@ type Runtime struct {
 	reducers      *executor.ReducerRegistry
 	observability *runtimeObservability
 
-	mu              sync.Mutex
-	closeMu         sync.Mutex
-	stateName       RuntimeState
-	ready           atomic.Bool
-	lastErr         error
-	lifecycleCancel context.CancelFunc
-	fanOutCancel    context.CancelFunc
-	schedulerWG     sync.WaitGroup
-	fanOutWG        sync.WaitGroup
-	durability      *commitlog.DurabilityWorker
-	subscriptions   *subscription.Manager
-	fanOutInbox     chan subscription.FanOutMessage
-	fanOutWorker    *subscription.FanOutWorker
-	fanOutSender    subscription.FanOutSender
-	executor        *executor.Executor
-	scheduler       *executor.Scheduler
+	mu                          sync.Mutex
+	closeMu                     sync.Mutex
+	stateName                   RuntimeState
+	ready                       atomic.Bool
+	lastErr                     error
+	durableTxID                 types.TxID
+	executorFatal               bool
+	executorFatalErr            error
+	durabilityFatalErr          error
+	protocolLastErr             error
+	fanoutFatalErr              error
+	protocolAcceptedConnections uint64
+	protocolRejectedConnections uint64
+	subscriptionDroppedClients  uint64
+	lifecycleCancel             context.CancelFunc
+	fanOutCancel                context.CancelFunc
+	schedulerWG                 sync.WaitGroup
+	fanOutWG                    sync.WaitGroup
+	durability                  *commitlog.DurabilityWorker
+	subscriptions               *subscription.Manager
+	fanOutInbox                 chan subscription.FanOutMessage
+	fanOutWorker                *subscription.FanOutWorker
+	fanOutSender                subscription.FanOutSender
+	executor                    *executor.Executor
+	scheduler                   *executor.Scheduler
 
 	protocolConns  *protocol.ConnManager
 	protocolInbox  *executor.ProtocolInboxAdapter
@@ -149,6 +158,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		reducers:      reducers,
 		observability: observability,
 		stateName:     RuntimeStateBuilt,
+		durableTxID:   recoveredTxID,
 	}, nil
 }
 
@@ -156,6 +166,7 @@ type runtimeRecoveryFacts struct {
 	ran       bool
 	succeeded bool
 	report    commitlog.RecoveryReport
+	lastErr   error
 }
 
 func newSuccessfulRuntimeRecoveryFacts(report commitlog.RecoveryReport) runtimeRecoveryFacts {

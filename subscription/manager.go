@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -106,6 +107,8 @@ type Manager struct {
 	activeColumns map[TableID]map[ColID]int
 	querySets     map[types.ConnectionID]map[uint32][]types.SubscriptionID
 	nextSubID     types.SubscriptionID
+	activeSets    atomic.Int64
+	droppedTotal  atomic.Uint64
 
 	// InitialRowLimit caps the initial-query row count returned to the
 	// client. Zero means unlimited.
@@ -153,12 +156,40 @@ func (m *Manager) DroppedClients() <-chan types.ConnectionID { return m.dropped 
 // eval-error path writes to, so the executor drains one channel.
 func (m *Manager) DroppedChanSend() chan<- types.ConnectionID { return m.dropped }
 
+// ActiveSubscriptionSets returns the active client-visible subscription sets.
+func (m *Manager) ActiveSubscriptionSets() int {
+	if m == nil {
+		return 0
+	}
+	n := m.activeSets.Load()
+	if n < 0 {
+		return 0
+	}
+	return int(n)
+}
+
+// DroppedClientCount returns the cumulative number of dropped clients signaled.
+func (m *Manager) DroppedClientCount() uint64 {
+	if m == nil {
+		return 0
+	}
+	return m.droppedTotal.Load()
+}
+
+// RecordDroppedClient records one successfully signaled dropped client.
+func (m *Manager) RecordDroppedClient() {
+	if m != nil {
+		m.droppedTotal.Add(1)
+	}
+}
+
 // signalDropped is used by the fan-out worker (or equivalents in tests) to
 // mark a connection as dropped. Non-blocking: if the channel is full the
 // drop is discarded — the executor is responsible for draining frequently.
 func (m *Manager) signalDropped(id types.ConnectionID) {
 	select {
 	case m.dropped <- id:
+		m.RecordDroppedClient()
 	default:
 	}
 }

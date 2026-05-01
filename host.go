@@ -50,14 +50,16 @@ type HostModuleDescription struct {
 
 // HostHealth is a detached per-module lifecycle/readiness snapshot.
 type HostHealth struct {
-	Modules []HostModuleHealth
+	Ready    bool               `json:"ready"`
+	Degraded bool               `json:"degraded"`
+	Modules  []HostModuleHealth `json:"modules"`
 }
 
 // HostModuleHealth reports health for one runtime mounted in a Host.
 type HostModuleHealth struct {
-	Name        string
-	RoutePrefix string
-	Health      RuntimeHealth
+	Name        string        `json:"name"`
+	RoutePrefix string        `json:"route_prefix"`
+	Health      RuntimeHealth `json:"health"`
 }
 
 // NewHost validates and builds a multi-module host from already-built runtimes.
@@ -178,15 +180,24 @@ func (h *Host) HTTPHandler() http.Handler {
 func (h *Host) Health() HostHealth {
 	modules := h.snapshotModules()
 	out := HostHealth{Modules: make([]HostModuleHealth, len(modules))}
+	if len(modules) == 0 {
+		out.Degraded = true
+		return out
+	}
+	out.Ready = true
 	for i, module := range modules {
+		health := module.runtime.Health()
 		out.Modules[i] = HostModuleHealth{
 			Name:        module.name,
 			RoutePrefix: module.routePrefix,
-			Health:      module.runtime.Health(),
+			Health:      health,
 		}
-	}
-	if out.Modules == nil {
-		out.Modules = []HostModuleHealth{}
+		if !health.Ready {
+			out.Ready = false
+		}
+		if health.Degraded {
+			out.Degraded = true
+		}
 	}
 	return out
 }

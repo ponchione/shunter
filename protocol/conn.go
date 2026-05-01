@@ -103,8 +103,10 @@ func (c *Conn) MarkActivity() {
 // ConnectionID. Used by cross-connection operations such as the
 // subscription fan-out delivery worker (fan-out integration).
 type ConnManager struct {
-	mu    sync.RWMutex
-	conns map[types.ConnectionID]*Conn
+	mu       sync.RWMutex
+	conns    map[types.ConnectionID]*Conn
+	accepted atomic.Uint64
+	rejected atomic.Uint64
 }
 
 // NewConnManager returns an empty ConnManager.
@@ -118,6 +120,7 @@ func (m *ConnManager) Add(conn *Conn) {
 	m.mu.Lock()
 	m.conns[conn.ID] = conn
 	m.mu.Unlock()
+	m.accepted.Add(1)
 }
 
 // Remove drops the entry for id. Safe to call on a missing id.
@@ -132,6 +135,39 @@ func (m *ConnManager) Get(id types.ConnectionID) *Conn {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.conns[id]
+}
+
+// ActiveCount returns the number of currently tracked connections.
+func (m *ConnManager) ActiveCount() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.conns)
+}
+
+// AcceptedCount returns the cumulative accepted connection count.
+func (m *ConnManager) AcceptedCount() uint64 {
+	if m == nil {
+		return 0
+	}
+	return m.accepted.Load()
+}
+
+// RejectedCount returns the cumulative rejected connection count.
+func (m *ConnManager) RejectedCount() uint64 {
+	if m == nil {
+		return 0
+	}
+	return m.rejected.Load()
+}
+
+// RecordRejected records one rejected connection attempt.
+func (m *ConnManager) RecordRejected() {
+	if m != nil {
+		m.rejected.Add(1)
+	}
 }
 
 // CloseAll sends a Close frame to every connected client and runs

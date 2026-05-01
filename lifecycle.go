@@ -30,13 +30,6 @@ const (
 	RuntimeStateFailed RuntimeState = "failed"
 )
 
-// RuntimeHealth is a detached lifecycle/readiness snapshot.
-type RuntimeHealth struct {
-	State     RuntimeState
-	Ready     bool
-	LastError error
-}
-
 var (
 	// ErrRuntimeStarting reports that another goroutine is already starting the runtime.
 	ErrRuntimeStarting = errors.New("shunter: runtime is starting")
@@ -49,17 +42,6 @@ var runtimeStartAfterDurabilityHook func(*Runtime) error
 // Ready reports whether Start has completed and runtime-owned workers are running.
 func (r *Runtime) Ready() bool {
 	return r.ready.Load()
-}
-
-// Health returns a detached lifecycle/readiness snapshot.
-func (r *Runtime) Health() RuntimeHealth {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return RuntimeHealth{
-		State:     r.stateName,
-		Ready:     r.ready.Load(),
-		LastError: r.lastErr,
-	}
 }
 
 // Start performs runtime startup and returns once background ownership is ready.
@@ -152,7 +134,12 @@ func (r *Runtime) Start(ctx context.Context) error {
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	fanOutCtx, fanOutCancel := context.WithCancel(context.Background())
 	fanOutSender := newSwappableFanOutSender(noopFanOutSender{})
-	fanOutWorker := subscription.NewFanOutWorker(fanOutInbox, fanOutSender, subscriptions.DroppedChanSend())
+	fanOutWorker := subscription.NewFanOutWorkerWithDropRecorder(
+		fanOutInbox,
+		fanOutSender,
+		subscriptions.DroppedChanSend(),
+		subscriptions.RecordDroppedClient,
+	)
 
 	r.mu.Lock()
 	if r.stateName == RuntimeStateClosed || r.stateName == RuntimeStateClosing {
@@ -233,6 +220,7 @@ func (r *Runtime) Close() error {
 	fanOutCancel := r.fanOutCancel
 	exec := r.executor
 	durability := r.durability
+	subscriptions := r.subscriptions
 	protocolConns := r.protocolConns
 	protocolInbox := r.protocolInbox
 	r.mu.Unlock()
@@ -246,15 +234,48 @@ func (r *Runtime) Close() error {
 	}
 	r.schedulerWG.Wait()
 	r.fanOutWG.Wait()
+	executorFatal := false
 	if exec != nil {
 		exec.Shutdown()
+		executorFatal = exec.Fatal()
 	}
-	var closeErr error
+	var (
+		closeErr            error
+		finalDurableTxID    uint64
+		acceptedConnections uint64
+		rejectedConnections uint64
+		droppedClients      uint64
+	)
+	if protocolConns != nil {
+		acceptedConnections = protocolConns.AcceptedCount()
+		rejectedConnections = protocolConns.RejectedCount()
+	}
+	if subscriptions != nil {
+		droppedClients = subscriptions.DroppedClientCount()
+	}
 	if durability != nil {
-		_, closeErr = durability.Close()
+		finalDurableTxID, closeErr = durability.Close()
 	}
 
 	r.mu.Lock()
+	if finalDurableTxID > 0 || durability != nil {
+		r.durableTxID = types.TxID(finalDurableTxID)
+	}
+	if closeErr != nil {
+		r.durabilityFatalErr = closeErr
+	}
+	if executorFatal {
+		r.executorFatal = true
+	}
+	if acceptedConnections > r.protocolAcceptedConnections {
+		r.protocolAcceptedConnections = acceptedConnections
+	}
+	if rejectedConnections > r.protocolRejectedConnections {
+		r.protocolRejectedConnections = rejectedConnections
+	}
+	if droppedClients > r.subscriptionDroppedClients {
+		r.subscriptionDroppedClients = droppedClients
+	}
 	r.lifecycleCancel = nil
 	r.fanOutCancel = nil
 	r.durability = nil

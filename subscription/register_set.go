@@ -392,6 +392,7 @@ func (m *Manager) RegisterSet(
 		m.querySets[req.ConnID] = make(map[uint32][]types.SubscriptionID)
 	}
 	m.querySets[req.ConnID][req.QueryID] = allocated
+	m.activeSets.Add(1)
 	return SubscriptionSetRegisterResult{QueryID: req.QueryID, Update: updates}, nil
 }
 
@@ -473,6 +474,7 @@ func (m *Manager) UnregisterSetContext(
 	if len(byQ) == 0 {
 		delete(m.querySets, connID)
 	}
+	m.activeSets.Add(-1)
 	if evalErr != nil {
 		return SubscriptionSetUnregisterResult{QueryID: queryID, SQLText: evalSQL}, evalErr
 	}

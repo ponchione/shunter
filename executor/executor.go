@@ -176,6 +176,37 @@ func (e *Executor) Startup(ctx context.Context, scheduler *Scheduler) error {
 	return e.startupErr
 }
 
+// InboxDepth returns the current executor command queue depth.
+func (e *Executor) InboxDepth() int {
+	if e == nil {
+		return 0
+	}
+	return len(e.inbox)
+}
+
+// InboxCapacity returns the configured executor command queue capacity.
+func (e *Executor) InboxCapacity() int {
+	if e == nil {
+		return 0
+	}
+	return cap(e.inbox)
+}
+
+// Fatal reports whether the executor has latched a fatal post-commit state.
+func (e *Executor) Fatal() bool {
+	return e != nil && e.fatal.Load()
+}
+
+// ExternalReady reports whether external protocol admission is enabled.
+func (e *Executor) ExternalReady() bool {
+	return e != nil && e.externalReady.Load()
+}
+
+// ShutdownStarted reports whether the executor has begun shutdown.
+func (e *Executor) ShutdownStarted() bool {
+	return e == nil || e.shutdown.Load()
+}
+
 // Run processes commands until context is cancelled or inbox is closed.
 func (e *Executor) Run(ctx context.Context) {
 	defer close(e.done)

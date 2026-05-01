@@ -20,7 +20,7 @@ func TestRuntimeInitialHealthIsBuiltAndNotReady(t *testing.T) {
 	if health.Ready {
 		t.Fatal("health reports ready before Start")
 	}
-	if health.LastError != nil {
+	if health.LastError != "" {
 		t.Fatalf("unexpected last error: %v", health.LastError)
 	}
 }
@@ -198,7 +198,7 @@ func TestRuntimeStartWithCanceledContextFailsWithoutReadiness(t *testing.T) {
 	if health.State == RuntimeStateReady {
 		t.Fatalf("state after canceled Start = ready")
 	}
-	if health.LastError == nil {
+	if health.LastError == "" {
 		t.Fatal("LastError not recorded after canceled Start")
 	}
 
@@ -227,7 +227,7 @@ func TestRuntimeStartFailureCleansPartialResources(t *testing.T) {
 	if rt.durability != nil || rt.executor != nil || rt.scheduler != nil || rt.fanOutWorker != nil || rt.subscriptions != nil {
 		t.Fatalf("partial resources not cleaned up: health=%+v", rt.Health())
 	}
-	if rt.Health().LastError == nil {
+	if rt.Health().LastError == "" {
 		t.Fatal("LastError not recorded after failed Start")
 	}
 

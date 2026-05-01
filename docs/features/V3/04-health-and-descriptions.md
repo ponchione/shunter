@@ -101,10 +101,28 @@ changes affect contracts, codegen, or protocol tests.
 
 ## Completion Notes
 
-When complete, update this file with:
-
-- exported health type changes
-- degraded reason helper behavior
-- description payload changes
-- compatibility concerns for existing tests or users
-- validation commands run
+- Expanded `RuntimeHealth` to the SPEC-007 section 9 shape and added
+  `ExecutorHealth`, `DurabilityHealth`, `ProtocolHealth`,
+  `SubscriptionHealth`, and `RecoveryHealth` with normative JSON tags.
+- Expanded `HostHealth` with aggregate `Ready` and `Degraded` fields while
+  keeping per-module health detached and non-nil.
+- Added cheap subsystem snapshot accessors for executor queue/fatal/admission
+  state, durability queue/fatal state, protocol connection counters, and
+  subscription active/dropped counters. Runtime health reports normalized
+  capacities before start and after close, zero absent depths, retained
+  counters, and latched fatal errors.
+- Added `runtimePrimaryDegradedReason` with SPEC-007 section 9.3 priority:
+  `runtime_failed`, `executor_fatal`, `durability_fatal`, `fanout_fatal`,
+  `recovery_damaged_tail`, `recovery_skipped_snapshot`, then
+  `protocol_not_ready`.
+- `Runtime.Describe()` and `Host.Describe()` now carry the expanded health
+  model through their existing description shapes without aliasing mutable
+  runtime state. Runtime diagnostics reuse the expanded health payload.
+- Compatibility note: `RuntimeHealth.LastError` changed from `error` to the
+  redacted/bounded `string` required by SPEC-007; tests and diagnostics were
+  updated for that public shape.
+- Validation run:
+  - `rtk go fmt .`
+  - `rtk go test . -run 'Test.*(Health|Describe|Host|Runtime|Recovery|Degraded|Protocol)' -count=1`
+  - `rtk go vet .`
+  - `rtk go test ./... -count=1`
