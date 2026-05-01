@@ -1,8 +1,13 @@
 package codegen
 
 import (
+	"bytes"
+	"fmt"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/schema"
@@ -121,6 +126,85 @@ func TestTypeScriptGeneratorIsDeterministic(t *testing.T) {
 	}
 	if string(first) != string(second) {
 		t.Fatalf("Generate was not deterministic:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestTypeScriptGeneratorConcurrentDeterminismShortSoak(t *testing.T) {
+	const (
+		seed       = uint64(0xc0de6e17)
+		workers    = 6
+		iterations = 64
+	)
+	fixtures := []struct {
+		name     string
+		contract shunter.ModuleContract
+	}{
+		{name: "canonical", contract: contractFixture()},
+		{name: "collision", contract: codegenIdentifierCollisionFixture()},
+	}
+	for i := range fixtures {
+		fixtures[i].contract.Module.Metadata["soak"] = fixtures[i].name
+	}
+
+	expected := make([][]byte, len(fixtures))
+	canonicalJSON := make([][]byte, len(fixtures))
+	for i, fixture := range fixtures {
+		out, err := Generate(fixture.contract, Options{Language: LanguageTypeScript})
+		if err != nil {
+			t.Fatalf("seed=%#x fixture=%s operation=GenerateExpected observed_error=%v expected=nil", seed, fixture.name, err)
+		}
+		expected[i] = out
+		data, err := fixture.contract.MarshalCanonicalJSON()
+		if err != nil {
+			t.Fatalf("seed=%#x fixture=%s operation=MarshalCanonicalJSON observed_error=%v expected=nil", seed, fixture.name, err)
+		}
+		canonicalJSON[i] = data
+	}
+
+	start := make(chan struct{})
+	ready := make(chan struct{}, workers)
+	failures := make(chan string, workers*iterations)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			ready <- struct{}{}
+			<-start
+			for op := range iterations {
+				fixtureIndex := (int(seed) + worker*11 + op*7) % len(fixtures)
+				fixture := fixtures[fixtureIndex]
+				var (
+					out []byte
+					err error
+				)
+				if (int(seed)+worker+op)%2 == 0 {
+					out, err = Generate(fixture.contract, Options{Language: LanguageTypeScript})
+				} else {
+					out, err = GenerateFromJSON(canonicalJSON[fixtureIndex], Options{Language: LanguageTypeScript})
+				}
+				if err != nil {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d fixture=%s operation=Generate observed_error=%v expected=nil",
+						seed, worker, op, workers, iterations, fixture.name, err)
+					continue
+				}
+				if !bytes.Equal(out, expected[fixtureIndex]) {
+					failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d fixture=%s operation=GenerateDeterminism observed_len=%d expected_len=%d",
+						seed, worker, op, workers, iterations, fixture.name, len(out), len(expected[fixtureIndex]))
+				}
+				if (int(seed)+worker+op)%5 == 0 {
+					runtime.Gosched()
+				}
+			}
+		}(worker)
+	}
+
+	waitForCodegenSoakWorkers(t, ready, workers, "seed=0xc0de6e17 codegen workers started")
+	close(start)
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Fatal(failure)
 	}
 }
 
@@ -351,5 +435,16 @@ func assertNotContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if strings.Contains(haystack, needle) {
 		t.Fatalf("generated TypeScript unexpectedly contains %q:\n%s", needle, haystack)
+	}
+}
+
+func waitForCodegenSoakWorkers(t *testing.T, ch <-chan struct{}, want int, label string) {
+	t.Helper()
+	for i := 0; i < want; i++ {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s: observed %d/%d workers", label, i, want)
+		}
 	}
 }
