@@ -8,7 +8,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
+
+	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/schema"
+	"github.com/ponchione/shunter/types"
 )
 
 func TestZeroObservabilityConfigBuildStartCallCloseNoop(t *testing.T) {
@@ -472,6 +477,264 @@ func TestObservabilitySinkFailureFallbacksAreBoundedAndNonRecursive(t *testing.T
 	})
 }
 
+func TestRuntimeObservationMethodsRecoverPanickingSinks(t *testing.T) {
+	observerErr := errors.New("authorization=Bearer secret args=raw row=hidden sql=select * from users where token='secret'")
+	health := RuntimeHealth{
+		State:    RuntimeStateReady,
+		Ready:    true,
+		Degraded: true,
+		Durability: DurabilityHealth{
+			DurableTxID: types.TxID(42),
+		},
+	}
+	report := commitlog.RecoveryReport{
+		RecoveredTxID: types.TxID(42),
+		DamagedTailSegments: []commitlog.SegmentInfo{{
+			Path:    "segment-a",
+			StartTx: types.TxID(40),
+			LastTx:  types.TxID(41),
+		}},
+		SkippedSnapshots: []commitlog.SkippedSnapshotReport{{
+			TxID:   types.TxID(39),
+			Reason: commitlog.SnapshotSkipPastDurableHorizon,
+		}},
+	}
+	var connID types.ConnectionID
+	connID[0] = 1
+
+	methods := []struct {
+		name string
+		call func(*runtimeObservability)
+	}{
+		{name: "log", call: func(o *runtimeObservability) {
+			o.log(context.Background(), slog.LevelInfo, "runtime.ready", "runtime", slog.String("state", string(RuntimeStateReady)))
+		}},
+		{name: "record_build_failed", call: func(o *runtimeObservability) {
+			o.recordBuildFailed(observerErr)
+		}},
+		{name: "record_recovery_completed", call: func(o *runtimeObservability) {
+			o.recordRecoveryCompleted(report, time.Millisecond)
+		}},
+		{name: "record_recovery_failed", call: func(o *runtimeObservability) {
+			o.recordRecoveryFailed(observerErr, time.Millisecond)
+		}},
+		{name: "record_runtime_start_failed", call: func(o *runtimeObservability) {
+			o.recordRuntimeStartFailed(observerErr, time.Millisecond)
+		}},
+		{name: "record_runtime_ready", call: func(o *runtimeObservability) {
+			o.recordRuntimeReady(health, time.Millisecond)
+		}},
+		{name: "record_runtime_close_failed", call: func(o *runtimeObservability) {
+			o.recordRuntimeCloseFailed(observerErr, time.Millisecond)
+		}},
+		{name: "record_runtime_closed", call: func(o *runtimeObservability) {
+			o.recordRuntimeClosed(RuntimeStateClosed, time.Millisecond)
+		}},
+		{name: "record_runtime_health_degraded", call: func(o *runtimeObservability) {
+			o.recordRuntimeHealthDegraded(health, runtimeDegradedReasonRecoverySkipped)
+		}},
+		{name: "record_runtime_health_metrics", call: func(o *runtimeObservability) {
+			o.recordRuntimeHealthMetrics(health)
+		}},
+		{name: "record_runtime_error", call: func(o *runtimeObservability) {
+			o.recordRuntimeError("panic")
+		}},
+		{name: "log_durability_failed", call: func(o *runtimeObservability) {
+			o.LogDurabilityFailed(observerErr, "sync_failed", types.TxID(42))
+		}},
+		{name: "panic_stack_enabled", call: func(o *runtimeObservability) {
+			_ = o.PanicStackEnabled()
+		}},
+		{name: "log_executor_fatal", call: func(o *runtimeObservability) {
+			o.LogExecutorFatal(observerErr, "post_commit", types.TxID(42))
+		}},
+		{name: "log_executor_reducer_panic", call: func(o *runtimeObservability) {
+			o.LogExecutorReducerPanic("send_message", observerErr, types.TxID(42), "token=secret")
+		}},
+		{name: "log_executor_lifecycle_reducer_failed", call: func(o *runtimeObservability) {
+			o.LogExecutorLifecycleReducerFailed("on_connect", "panic", observerErr)
+		}},
+		{name: "log_protocol_connection_rejected", call: func(o *runtimeObservability) {
+			o.LogProtocolConnectionRejected("rejected_auth", observerErr)
+		}},
+		{name: "log_protocol_connection_opened", call: func(o *runtimeObservability) {
+			o.LogProtocolConnectionOpened(connID)
+		}},
+		{name: "log_protocol_connection_closed", call: func(o *runtimeObservability) {
+			o.LogProtocolConnectionClosed(connID, "server_shutdown")
+		}},
+		{name: "log_protocol_protocol_error", call: func(o *runtimeObservability) {
+			o.LogProtocolProtocolError("one_off_query", "malformed", observerErr)
+		}},
+		{name: "log_protocol_auth_failed", call: func(o *runtimeObservability) {
+			o.LogProtocolAuthFailed("invalid_token", observerErr)
+		}},
+		{name: "log_protocol_backpressure", call: func(o *runtimeObservability) {
+			o.LogProtocolBackpressure("outbound", "buffer_full")
+		}},
+		{name: "log_subscription_eval_error", call: func(o *runtimeObservability) {
+			o.LogSubscriptionEvalError(types.TxID(42), observerErr)
+		}},
+		{name: "log_subscription_fanout_error", call: func(o *runtimeObservability) {
+			o.LogSubscriptionFanoutError("send_failed", &connID, observerErr)
+		}},
+		{name: "log_subscription_client_dropped", call: func(o *runtimeObservability) {
+			o.LogSubscriptionClientDropped("buffer_full", &connID)
+		}},
+		{name: "record_protocol_connections", call: func(o *runtimeObservability) {
+			o.RecordProtocolConnections(3)
+		}},
+		{name: "record_protocol_message", call: func(o *runtimeObservability) {
+			o.RecordProtocolMessage("one_off_query", "validation_error")
+		}},
+		{name: "record_executor_command", call: func(o *runtimeObservability) {
+			o.RecordExecutorCommand("call_reducer", "ok")
+		}},
+		{name: "record_executor_command_duration", call: func(o *runtimeObservability) {
+			o.RecordExecutorCommandDuration("call_reducer", "ok", time.Millisecond)
+		}},
+		{name: "record_executor_inbox_depth", call: func(o *runtimeObservability) {
+			o.RecordExecutorInboxDepth(2)
+		}},
+		{name: "record_reducer_call", call: func(o *runtimeObservability) {
+			o.RecordReducerCall("send_message", "committed")
+		}},
+		{name: "record_reducer_duration", call: func(o *runtimeObservability) {
+			o.RecordReducerDuration("send_message", "committed", time.Millisecond)
+		}},
+		{name: "trace_reducer_call", call: func(o *runtimeObservability) {
+			o.TraceReducerCall("send_message", "failed_user", observerErr)
+		}},
+		{name: "trace_store_commit", call: func(o *runtimeObservability) {
+			o.TraceStoreCommit(types.TxID(42), "error", observerErr)
+		}},
+		{name: "trace_durability_batch", call: func(o *runtimeObservability) {
+			o.TraceDurabilityBatch(types.TxID(42), "error", observerErr)
+		}},
+		{name: "trace_subscription_eval", call: func(o *runtimeObservability) {
+			o.TraceSubscriptionEval(types.TxID(42), "error", observerErr)
+		}},
+		{name: "trace_subscription_fanout", call: func(o *runtimeObservability) {
+			o.TraceSubscriptionFanout("error", "send_failed", observerErr)
+		}},
+		{name: "trace_subscription_register", call: func(o *runtimeObservability) {
+			o.TraceSubscriptionRegister("internal_error", observerErr)
+		}},
+		{name: "trace_subscription_unregister", call: func(o *runtimeObservability) {
+			o.TraceSubscriptionUnregister("internal_error", observerErr)
+		}},
+		{name: "record_durability_queue_depth", call: func(o *runtimeObservability) {
+			o.RecordDurabilityQueueDepth(4)
+		}},
+		{name: "record_durability_durable_tx_id", call: func(o *runtimeObservability) {
+			o.RecordDurabilityDurableTxID(types.TxID(42))
+		}},
+		{name: "record_subscription_active", call: func(o *runtimeObservability) {
+			o.RecordSubscriptionActive(5)
+		}},
+		{name: "record_subscription_eval_duration", call: func(o *runtimeObservability) {
+			o.RecordSubscriptionEvalDuration("error", time.Millisecond)
+		}},
+		{name: "log_store_snapshot_leaked", call: func(o *runtimeObservability) {
+			o.LogStoreSnapshotLeaked("test")
+		}},
+		{name: "metric_helpers", call: func(o *runtimeObservability) {
+			o.addCounter(MetricRuntimeErrorsTotal, MetricLabels{Component: "runtime"}, 1)
+			o.setGauge(MetricRuntimeReady, MetricLabels{}, 1)
+			o.observeHistogram(MetricReducerDurationSeconds, MetricLabels{Reducer: "send_message"}, 0.1)
+		}},
+		{name: "start_span", call: func(o *runtimeObservability) {
+			_, span := o.startSpan(context.Background(), "shunter.runtime.start", "runtime")
+			if span != nil {
+				span.AddEvent("event", TraceAttr{Key: "token", Value: "secret"})
+				span.End(observerErr)
+			}
+		}},
+	}
+
+	tracers := []struct {
+		name   string
+		tracer Tracer
+	}{
+		{name: "start_span_panic", tracer: panicStartTracer{}},
+		{name: "span_add_event_panic", tracer: addEventPanicTracer{}},
+		{name: "span_end_panic", tracer: endPanicTracer{}},
+	}
+
+	for _, tracerCase := range tracers {
+		t.Run(tracerCase.name, func(t *testing.T) {
+			for _, method := range methods {
+				t.Run(method.name, func(t *testing.T) {
+					obs := newRuntimeObservability("chat", ObservabilityConfig{
+						RuntimeLabel: "panic-sinks-a",
+						Logger:       slog.New(panicSlogHandler{}),
+						Redaction:    RedactionConfig{ErrorMessageMaxBytes: 96},
+						Metrics: MetricsConfig{
+							Enabled:  true,
+							Recorder: panicMetricsRecorder{},
+						},
+						Tracing: TracingConfig{
+							Enabled: true,
+							Tracer:  tracerCase.tracer,
+						},
+					})
+					requireNoPanic(t, func() { method.call(obs) })
+				})
+			}
+		})
+	}
+}
+
+func TestRuntimePanicStackEnabledRecoversLoggerEnabledPanic(t *testing.T) {
+	metrics := &recordingMetricsRecorder{}
+	obs := newRuntimeObservability("chat", ObservabilityConfig{
+		RuntimeLabel: "enabled-panic-a",
+		Logger:       slog.New(enabledPanicSlogHandler{}),
+		Metrics: MetricsConfig{
+			Enabled:  true,
+			Recorder: metrics,
+		},
+	})
+
+	if obs.PanicStackEnabled() {
+		t.Fatal("PanicStackEnabled returned true after logger Enabled panic")
+	}
+	metrics.requireCounter(t, MetricRuntimeErrorsTotal, MetricLabels{
+		Module:    "chat",
+		Runtime:   "enabled-panic-a",
+		Component: "observability",
+		Reason:    "observability_sink_failed",
+	}, 1)
+}
+
+func TestRuntimeReducerPanicResultSurvivesLoggerEnabledPanic(t *testing.T) {
+	rt, err := Build(validChatModule().Reducer("explode", func(*schema.ReducerContext, []byte) ([]byte, error) {
+		panic("token=secret")
+	}), Config{
+		DataDir: t.TempDir(),
+		Observability: ObservabilityConfig{
+			Logger: slog.New(enabledPanicSlogHandler{}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error with panicking logger Enabled: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := rt.CallReducer(ctx, "explode", nil)
+	if err != nil {
+		t.Fatalf("CallReducer returned error with panicking logger Enabled: %v", err)
+	}
+	if res.Status != StatusFailedPanic {
+		t.Fatalf("CallReducer status = %v, want panic; response=%+v", res.Status, res)
+	}
+}
+
 func TestRuntimeConfigObservabilityCopyKeepsOwnedSlicesDetached(t *testing.T) {
 	logger := slog.Default()
 	handler := noopHTTPHandler{}
@@ -594,6 +857,30 @@ func (panicSlogHandler) Handle(context.Context, slog.Record) error {
 func (h panicSlogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 
 func (h panicSlogHandler) WithGroup(string) slog.Handler { return h }
+
+type enabledPanicSlogHandler struct{}
+
+func (enabledPanicSlogHandler) Enabled(context.Context, slog.Level) bool {
+	panic("logger enabled failed token=secret")
+}
+
+func (enabledPanicSlogHandler) Handle(context.Context, slog.Record) error {
+	panic("logger handle should not be called")
+}
+
+func (h enabledPanicSlogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+
+func (h enabledPanicSlogHandler) WithGroup(string) slog.Handler { return h }
+
+func requireNoPanic(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("unexpected panic: %v", r)
+		}
+	}()
+	fn()
+}
 
 type secretPanicSlogHandler struct{}
 

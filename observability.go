@@ -476,8 +476,17 @@ func (o *runtimeObservability) LogDurabilityFailed(err error, reason string, txI
 	}, 1)
 }
 
-func (o *runtimeObservability) PanicStackEnabled() bool {
-	return o != nil && o.logger != nil && o.logger.Enabled(context.Background(), slog.LevelDebug)
+func (o *runtimeObservability) PanicStackEnabled() (enabled bool) {
+	if o == nil || o.logger == nil {
+		return false
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			enabled = false
+			o.recordSinkFailure("logger", r)
+		}
+	}()
+	return o.logger.Enabled(context.Background(), slog.LevelDebug)
 }
 
 func (o *runtimeObservability) LogExecutorFatal(err error, reason string, txID types.TxID) {
