@@ -441,6 +441,26 @@ func TestDecodeSchemaSnapshotRejectsOversizedStringLength(t *testing.T) {
 	}
 }
 
+func TestDecodeSchemaSnapshotRejectsInvalidUTF8String(t *testing.T) {
+	var buf bytes.Buffer
+	writeUint32(t, &buf, 1) // schema snapshot version
+	writeUint32(t, &buf, 1) // table count
+	writeUint32(t, &buf, 0) // table ID
+	writeUint32(t, &buf, 1) // table name length
+	buf.WriteByte(0xff)
+
+	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(buf.Bytes()))
+	if err == nil {
+		t.Fatal("expected invalid UTF-8 schema string to fail")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("invalid UTF-8 schema string error = %v, want ErrSnapshot category", err)
+	}
+	if !strings.Contains(err.Error(), "invalid UTF-8 schema string") {
+		t.Fatalf("invalid UTF-8 schema string error = %v, want invalid UTF-8 detail", err)
+	}
+}
+
 func TestDecodeSchemaSnapshotRejectsInvalidBoolFlags(t *testing.T) {
 	validColumnFlags := [3]byte{byte(schema.KindUint64), 0, 0}
 	validIndexFlags := [2]byte{1, 1}

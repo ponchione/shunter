@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"unicode/utf8"
 
 	"lukechampine.com/blake3"
 
@@ -1141,6 +1142,9 @@ func readString(r io.Reader) (string, error) {
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return "", err
+	}
+	if !utf8.Valid(buf) {
+		return "", fmt.Errorf("%w: invalid UTF-8 schema string", ErrSnapshot)
 	}
 	return string(buf), nil
 }
