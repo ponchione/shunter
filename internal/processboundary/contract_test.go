@@ -3,6 +3,7 @@ package processboundary
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -56,12 +57,26 @@ func TestInvocationRequestAndResponseRepresentReducerCall(t *testing.T) {
 }
 
 func FuzzInvocationRequestJSON(f *testing.F) {
+	for _, data := range invocationRequestJSONFuzzSeeds() {
+		f.Add(data)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 4096 {
+			return
+		}
+		assertInvocationRequestJSONInput(t, data)
+	})
+}
+
+func invocationRequestJSONFuzzSeeds() [][]byte {
 	var identity types.Identity
 	identity[0] = 0x42
 	identity[31] = 0x99
 	var connID types.ConnectionID
 	connID[0] = 0x24
 	connID[15] = 0x66
+	var seeds [][]byte
 	for _, req := range []InvocationRequest{
 		{
 			Kind:      InvocationKindReducer,
@@ -96,49 +111,53 @@ func FuzzInvocationRequestJSON(f *testing.F) {
 			Caller:    Caller{},
 		},
 	} {
-		f.Add(mustBoundaryJSON(req))
+		seeds = append(seeds, mustBoundaryJSON(req))
 	}
-	for _, data := range [][]byte{
+	seeds = append(seeds, [][]byte{
 		[]byte(`{`),
 		[]byte(`{"kind":"reducer","module":"chat","name":"send_message","args":"not-base64"}`),
 		[]byte(`{"kind":"reducer","module":"chat","name":"send_message","caller":{"identity":[999]}}`),
-	} {
-		f.Add(data)
+	}...)
+	return seeds
+}
+
+func assertInvocationRequestJSONInput(tb testing.TB, data []byte) {
+	tb.Helper()
+	if err := checkInvocationRequestJSONInput(data); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+func checkInvocationRequestJSONInput(data []byte) error {
+	var req InvocationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return nil
 	}
 
-	f.Fuzz(func(t *testing.T, data []byte) {
-		if len(data) > 4096 {
-			return
-		}
-		var req InvocationRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			return
-		}
+	roundTripData := mustBoundaryJSON(req)
+	var roundTrip InvocationRequest
+	if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
+		return fmt.Errorf("request round-trip unmarshal failed: %v", err)
+	}
+	if !reflect.DeepEqual(roundTrip, req) {
+		return fmt.Errorf("request JSON round trip changed value: observed=%#v expected=%#v", roundTrip, req)
+	}
 
-		roundTripData := mustBoundaryJSON(req)
-		var roundTrip InvocationRequest
-		if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
-			t.Fatalf("request round-trip unmarshal failed: %v", err)
+	if len(roundTrip.Args) > 0 {
+		before := req.Args[0]
+		roundTrip.Args[0] ^= 0xff
+		if req.Args[0] != before {
+			return fmt.Errorf("request args were aliased across JSON round trip")
 		}
-		if !reflect.DeepEqual(roundTrip, req) {
-			t.Fatalf("request JSON round trip changed value:\nobserved=%#v\nexpected=%#v", roundTrip, req)
+	}
+	if len(roundTrip.Caller.Permissions) > 0 {
+		before := req.Caller.Permissions[0]
+		roundTrip.Caller.Permissions[0] += ":mutated"
+		if req.Caller.Permissions[0] != before {
+			return fmt.Errorf("request permissions were aliased across JSON round trip")
 		}
-
-		if len(roundTrip.Args) > 0 {
-			before := req.Args[0]
-			roundTrip.Args[0] ^= 0xff
-			if req.Args[0] != before {
-				t.Fatalf("request args were aliased across JSON round trip")
-			}
-		}
-		if len(roundTrip.Caller.Permissions) > 0 {
-			before := req.Caller.Permissions[0]
-			roundTrip.Caller.Permissions[0] += ":mutated"
-			if req.Caller.Permissions[0] != before {
-				t.Fatalf("request permissions were aliased across JSON round trip")
-			}
-		}
-	})
+	}
+	return nil
 }
 
 func TestInvocationFailuresDistinguishUserAndBoundaryFailures(t *testing.T) {
@@ -235,6 +254,20 @@ func TestValidateInvocationResponseAcceptsExpectedFailureClasses(t *testing.T) {
 }
 
 func FuzzValidateInvocationResponseJSON(f *testing.F) {
+	for _, data := range invocationResponseJSONFuzzSeeds() {
+		f.Add(data)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 4096 {
+			return
+		}
+		assertInvocationResponseJSONInput(t, data)
+	})
+}
+
+func invocationResponseJSONFuzzSeeds() [][]byte {
+	var seeds [][]byte
 	for _, resp := range []InvocationResponse{
 		{
 			Status:      InvocationStatusCommitted,
@@ -263,61 +296,65 @@ func FuzzValidateInvocationResponseJSON(f *testing.F) {
 		},
 		BoundaryFailure("transport closed"),
 	} {
-		f.Add(mustBoundaryJSON(resp))
+		seeds = append(seeds, mustBoundaryJSON(resp))
 	}
-	for _, data := range [][]byte{
+	seeds = append(seeds, [][]byte{
 		[]byte(`{`),
 		[]byte(`{"status":"unknown","transaction":{"mode":"unsupported","decision":"unsupported"}}`),
 		[]byte(`{"status":"committed","failure":{"class":"user"},"transaction":{"mode":"unsupported","decision":"unsupported"}}`),
 		[]byte(`{"status":"user_error","failure":{"class":"boundary"},"transaction":{"mode":"unsupported","decision":"unsupported"}}`),
 		[]byte(`{"status":"committed","transaction":{"mode":"unsupported","decision":"commit"}}`),
-	} {
-		f.Add(data)
+	}...)
+	return seeds
+}
+
+func assertInvocationResponseJSONInput(tb testing.TB, data []byte) {
+	tb.Helper()
+	if err := checkInvocationResponseJSONInput(data); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+func checkInvocationResponseJSONInput(data []byte) error {
+	var resp InvocationResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil
 	}
 
-	f.Fuzz(func(t *testing.T, data []byte) {
-		if len(data) > 4096 {
-			return
+	err := ValidateInvocationResponse(resp)
+	if err != nil {
+		if !isExpectedInvocationValidationError(err) {
+			return fmt.Errorf("ValidateInvocationResponse returned uncategorized error: %v", err)
 		}
-		var resp InvocationResponse
-		if err := json.Unmarshal(data, &resp); err != nil {
-			return
-		}
+		return nil
+	}
 
-		err := ValidateInvocationResponse(resp)
-		if err != nil {
-			if !isExpectedInvocationValidationError(err) {
-				t.Fatalf("ValidateInvocationResponse returned uncategorized error: %v", err)
-			}
-			return
-		}
+	expectedFailure, ok := failureClassForInvocationStatus(resp.Status)
+	if !ok {
+		return fmt.Errorf("accepted response with unknown status %q", resp.Status)
+	}
+	if resp.Failure.Class != expectedFailure {
+		return fmt.Errorf("accepted response failure class = %q, want %q for status %q", resp.Failure.Class, expectedFailure, resp.Status)
+	}
+	if resp.Transaction.Mode == "" || resp.Transaction.Decision == "" {
+		return fmt.Errorf("accepted response without explicit transaction semantics: %#v", resp.Transaction)
+	}
+	if resp.Transaction.Mode == TransactionModeUnsupported && resp.Transaction.Decision != TransactionDecisionUnsupported {
+		return fmt.Errorf("accepted unsupported transaction with decision %q", resp.Transaction.Decision)
+	}
 
-		expectedFailure, ok := failureClassForInvocationStatus(resp.Status)
-		if !ok {
-			t.Fatalf("accepted response with unknown status %q", resp.Status)
-		}
-		if resp.Failure.Class != expectedFailure {
-			t.Fatalf("accepted response failure class = %q, want %q for status %q", resp.Failure.Class, expectedFailure, resp.Status)
-		}
-		if resp.Transaction.Mode == "" || resp.Transaction.Decision == "" {
-			t.Fatalf("accepted response without explicit transaction semantics: %#v", resp.Transaction)
-		}
-		if resp.Transaction.Mode == TransactionModeUnsupported && resp.Transaction.Decision != TransactionDecisionUnsupported {
-			t.Fatalf("accepted unsupported transaction with decision %q", resp.Transaction.Decision)
-		}
-
-		roundTripData := mustBoundaryJSON(resp)
-		var roundTrip InvocationResponse
-		if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
-			t.Fatalf("round-trip unmarshal failed: %v", err)
-		}
-		if !reflect.DeepEqual(roundTrip, resp) {
-			t.Fatalf("response JSON round trip changed value:\nobserved=%#v\nexpected=%#v", roundTrip, resp)
-		}
-		if err := ValidateInvocationResponse(roundTrip); err != nil {
-			t.Fatalf("round-tripped accepted response failed validation: %v", err)
-		}
-	})
+	roundTripData := mustBoundaryJSON(resp)
+	var roundTrip InvocationResponse
+	if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
+		return fmt.Errorf("round-trip unmarshal failed: %v", err)
+	}
+	if !reflect.DeepEqual(roundTrip, resp) {
+		return fmt.Errorf("response JSON round trip changed value: observed=%#v expected=%#v", roundTrip, resp)
+	}
+	if err := ValidateInvocationResponse(roundTrip); err != nil {
+		return fmt.Errorf("round-tripped accepted response failed validation: %v", err)
+	}
+	return nil
 }
 
 func TestValidateInvocationResponseRejectsAmbiguousFailureClassification(t *testing.T) {
@@ -430,7 +467,21 @@ func TestValidateContractRejectsProcessDrivenSubscriptionUpdates(t *testing.T) {
 }
 
 func FuzzValidateContractJSON(f *testing.F) {
+	for _, data := range contractJSONFuzzSeeds() {
+		f.Add(data)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 8192 {
+			return
+		}
+		assertContractJSONInput(t, data)
+	})
+}
+
+func contractJSONFuzzSeeds() [][]byte {
 	valid := DefaultContract()
+	var seeds [][]byte
 	for _, contract := range []Contract{
 		valid,
 		{
@@ -445,73 +496,77 @@ func FuzzValidateContractJSON(f *testing.F) {
 			Reason:        "future contract shape",
 		},
 	} {
-		f.Add(mustBoundaryJSON(contract))
+		seeds = append(seeds, mustBoundaryJSON(contract))
 	}
-	for _, data := range [][]byte{
+	seeds = append(seeds, [][]byte{
 		[]byte(`{`),
 		[]byte(`{}`),
 		[]byte(`{"decision":"deferred","transactions":{"mode":"unsupported","supported_decisions":["commit"]},"subscriptions":{"update_source":"committed_state"},"lifecycle":{"OnConnect":{"ordering":["insert_client"],"failure_behavior":"reject_connection_rollback"},"OnDisconnect":{"ordering":["cleanup_client"],"failure_behavior":"cleanup_still_commits"}}}`),
 		[]byte(`{"decision":"deferred","transactions":{"mode":"unsupported","supported_decisions":["unsupported"]},"subscriptions":{"update_source":"process_message","process_messages_may_broadcast":true},"lifecycle":{"OnConnect":{"ordering":["insert_client"],"failure_behavior":"reject_connection_rollback"},"OnDisconnect":{"ordering":["cleanup_client"],"failure_behavior":"cleanup_still_commits"}}}`),
-	} {
-		f.Add(data)
+	}...)
+	return seeds
+}
+
+func assertContractJSONInput(tb testing.TB, data []byte) {
+	tb.Helper()
+	if err := checkContractJSONInput(data); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+func checkContractJSONInput(data []byte) error {
+	var contract Contract
+	if err := json.Unmarshal(data, &contract); err != nil {
+		return nil
 	}
 
-	f.Fuzz(func(t *testing.T, data []byte) {
-		if len(data) > 8192 {
-			return
+	err := ValidateContract(contract)
+	if err != nil {
+		if !isExpectedContractValidationError(err) {
+			return fmt.Errorf("ValidateContract returned uncategorized error: %v", err)
 		}
-		var contract Contract
-		if err := json.Unmarshal(data, &contract); err != nil {
-			return
-		}
+		return nil
+	}
 
-		err := ValidateContract(contract)
-		if err != nil {
-			if !isExpectedContractValidationError(err) {
-				t.Fatalf("ValidateContract returned uncategorized error: %v", err)
-			}
-			return
+	if contract.Decision == "" {
+		return fmt.Errorf("accepted contract without decision")
+	}
+	if contract.Transactions.Mode == "" {
+		return fmt.Errorf("accepted contract without transaction mode")
+	}
+	if contract.Transactions.Mode == TransactionModeUnsupported &&
+		!hasOnlyUnsupportedTransactionDecision(contract.Transactions.SupportedDecisions) {
+		return fmt.Errorf("accepted unsupported transaction decisions: %#v", contract.Transactions.SupportedDecisions)
+	}
+	if contract.Subscriptions.UpdateSource != SubscriptionUpdateSourceCommittedState ||
+		contract.Subscriptions.ProcessMessagesMayBroadcast {
+		return fmt.Errorf("accepted process-driven subscription semantics: %#v", contract.Subscriptions)
+	}
+	for _, hook := range []LifecycleHook{LifecycleOnConnect, LifecycleOnDisconnect} {
+		spec, ok := contract.Lifecycle[hook]
+		if !ok {
+			return fmt.Errorf("accepted contract missing %s lifecycle", hook)
 		}
+		if len(spec.Ordering) == 0 {
+			return fmt.Errorf("accepted contract missing %s lifecycle ordering", hook)
+		}
+		if spec.FailureBehavior == "" {
+			return fmt.Errorf("accepted contract missing %s lifecycle failure behavior", hook)
+		}
+	}
 
-		if contract.Decision == "" {
-			t.Fatal("accepted contract without decision")
-		}
-		if contract.Transactions.Mode == "" {
-			t.Fatal("accepted contract without transaction mode")
-		}
-		if contract.Transactions.Mode == TransactionModeUnsupported &&
-			!hasOnlyUnsupportedTransactionDecision(contract.Transactions.SupportedDecisions) {
-			t.Fatalf("accepted unsupported transaction decisions: %#v", contract.Transactions.SupportedDecisions)
-		}
-		if contract.Subscriptions.UpdateSource != SubscriptionUpdateSourceCommittedState ||
-			contract.Subscriptions.ProcessMessagesMayBroadcast {
-			t.Fatalf("accepted process-driven subscription semantics: %#v", contract.Subscriptions)
-		}
-		for _, hook := range []LifecycleHook{LifecycleOnConnect, LifecycleOnDisconnect} {
-			spec, ok := contract.Lifecycle[hook]
-			if !ok {
-				t.Fatalf("accepted contract missing %s lifecycle", hook)
-			}
-			if len(spec.Ordering) == 0 {
-				t.Fatalf("accepted contract missing %s lifecycle ordering", hook)
-			}
-			if spec.FailureBehavior == "" {
-				t.Fatalf("accepted contract missing %s lifecycle failure behavior", hook)
-			}
-		}
-
-		roundTripData := mustBoundaryJSON(contract)
-		var roundTrip Contract
-		if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
-			t.Fatalf("contract round-trip unmarshal failed: %v", err)
-		}
-		if !reflect.DeepEqual(roundTrip, contract) {
-			t.Fatalf("contract JSON round trip changed value:\nobserved=%#v\nexpected=%#v", roundTrip, contract)
-		}
-		if err := ValidateContract(roundTrip); err != nil {
-			t.Fatalf("round-tripped accepted contract failed validation: %v", err)
-		}
-	})
+	roundTripData := mustBoundaryJSON(contract)
+	var roundTrip Contract
+	if err := json.Unmarshal(roundTripData, &roundTrip); err != nil {
+		return fmt.Errorf("contract round-trip unmarshal failed: %v", err)
+	}
+	if !reflect.DeepEqual(roundTrip, contract) {
+		return fmt.Errorf("contract JSON round trip changed value: observed=%#v expected=%#v", roundTrip, contract)
+	}
+	if err := ValidateContract(roundTrip); err != nil {
+		return fmt.Errorf("round-tripped accepted contract failed validation: %v", err)
+	}
+	return nil
 }
 
 func assertLifecycleSteps(t *testing.T, hook LifecycleHook, got []LifecycleStep, want ...LifecycleStep) {
