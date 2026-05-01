@@ -339,8 +339,17 @@ func checkInvocationResponseJSONInput(data []byte) error {
 	if resp.Transaction.Mode == "" || resp.Transaction.Decision == "" {
 		return fmt.Errorf("accepted response without explicit transaction semantics: %#v", resp.Transaction)
 	}
-	if resp.Transaction.Mode == TransactionModeUnsupported && resp.Transaction.Decision != TransactionDecisionUnsupported {
-		return fmt.Errorf("accepted unsupported transaction with decision %q", resp.Transaction.Decision)
+	switch resp.Transaction.Mode {
+	case TransactionModeUnsupported:
+		if resp.Transaction.Decision != TransactionDecisionUnsupported {
+			return fmt.Errorf("accepted unsupported transaction with decision %q", resp.Transaction.Decision)
+		}
+	case TransactionModeHostOwned:
+		if resp.Transaction.Decision != TransactionDecisionCommit && resp.Transaction.Decision != TransactionDecisionRollback {
+			return fmt.Errorf("accepted host-owned transaction with decision %q", resp.Transaction.Decision)
+		}
+	default:
+		return fmt.Errorf("accepted response with transaction mode %q", resp.Transaction.Mode)
 	}
 
 	roundTripData := mustBoundaryJSON(resp)
@@ -408,6 +417,47 @@ func TestValidateInvocationResponseRejectsAmbiguousFailureClassification(t *test
 	}
 }
 
+func TestValidateInvocationResponseJSONRejectsUnknownTransactionEnums(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		resp InvocationResponse
+		want error
+	}{
+		{
+			name: "unknown transaction mode",
+			resp: InvocationResponse{
+				Status: InvocationStatusCommitted,
+				Transaction: TransactionOutcome{
+					Mode:     TransactionMode("remote_owned"),
+					Decision: TransactionDecisionCommit,
+				},
+			},
+			want: ErrUnsupportedTransactionMode,
+		},
+		{
+			name: "host owned response with unsupported decision",
+			resp: InvocationResponse{
+				Status: InvocationStatusCommitted,
+				Transaction: TransactionOutcome{
+					Mode:     TransactionModeHostOwned,
+					Decision: TransactionDecisionUnsupported,
+				},
+			},
+			want: ErrUnsupportedTransactionDecision,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var decoded InvocationResponse
+			if err := json.Unmarshal(mustBoundaryJSON(tt.resp), &decoded); err != nil {
+				t.Fatalf("unmarshal response JSON: %v", err)
+			}
+			if err := ValidateInvocationResponse(decoded); !errors.Is(err, tt.want) {
+				t.Fatalf("ValidateInvocationResponse error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestDefaultContractDeclaresLifecycleAndSubscriptionSemantics(t *testing.T) {
 	contract := DefaultContract()
 
@@ -463,6 +513,67 @@ func TestValidateContractRejectsProcessDrivenSubscriptionUpdates(t *testing.T) {
 	err := ValidateContract(contract)
 	if !errors.Is(err, ErrUnsupportedSubscriptionSemantics) {
 		t.Fatalf("ValidateContract error = %v, want ErrUnsupportedSubscriptionSemantics", err)
+	}
+}
+
+func TestValidateContractJSONRejectsUnknownEnumValues(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(*Contract)
+		want   error
+	}{
+		{
+			name: "unknown decision",
+			mutate: func(contract *Contract) {
+				contract.Decision = Decision("maybe")
+			},
+			want: ErrInvalidContract,
+		},
+		{
+			name: "unknown transaction mode",
+			mutate: func(contract *Contract) {
+				contract.Transactions.Mode = TransactionMode("remote_owned")
+			},
+			want: ErrUnsupportedTransactionMode,
+		},
+		{
+			name: "host owned unsupported decision",
+			mutate: func(contract *Contract) {
+				contract.Transactions.Mode = TransactionModeHostOwned
+				contract.Transactions.SupportedDecisions = []TransactionDecision{TransactionDecisionUnsupported}
+			},
+			want: ErrUnsupportedTransactionDecision,
+		},
+		{
+			name: "unknown lifecycle step",
+			mutate: func(contract *Contract) {
+				spec := contract.Lifecycle[LifecycleOnConnect]
+				spec.Ordering = []LifecycleStep{LifecycleStep("spawn_process")}
+				contract.Lifecycle[LifecycleOnConnect] = spec
+			},
+			want: ErrInvalidContract,
+		},
+		{
+			name: "unknown lifecycle failure behavior",
+			mutate: func(contract *Contract) {
+				spec := contract.Lifecycle[LifecycleOnDisconnect]
+				spec.FailureBehavior = LifecycleFailureBehavior("ignore")
+				contract.Lifecycle[LifecycleOnDisconnect] = spec
+			},
+			want: ErrInvalidContract,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			contract := DefaultContract()
+			tt.mutate(&contract)
+			var decoded Contract
+			if err := json.Unmarshal(mustBoundaryJSON(contract), &decoded); err != nil {
+				t.Fatalf("unmarshal contract JSON: %v", err)
+			}
+			if err := ValidateContract(decoded); !errors.Is(err, tt.want) {
+				t.Fatalf("ValidateContract error = %v, want %v", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -531,12 +642,28 @@ func checkContractJSONInput(data []byte) error {
 	if contract.Decision == "" {
 		return fmt.Errorf("accepted contract without decision")
 	}
+	if !isKnownDecision(contract.Decision) {
+		return fmt.Errorf("accepted contract with decision %q", contract.Decision)
+	}
 	if contract.Transactions.Mode == "" {
 		return fmt.Errorf("accepted contract without transaction mode")
 	}
-	if contract.Transactions.Mode == TransactionModeUnsupported &&
-		!hasOnlyUnsupportedTransactionDecision(contract.Transactions.SupportedDecisions) {
-		return fmt.Errorf("accepted unsupported transaction decisions: %#v", contract.Transactions.SupportedDecisions)
+	switch contract.Transactions.Mode {
+	case TransactionModeUnsupported:
+		if !hasOnlyUnsupportedTransactionDecision(contract.Transactions.SupportedDecisions) {
+			return fmt.Errorf("accepted unsupported transaction decisions: %#v", contract.Transactions.SupportedDecisions)
+		}
+	case TransactionModeHostOwned:
+		if len(contract.Transactions.SupportedDecisions) == 0 {
+			return fmt.Errorf("accepted host-owned transaction without supported decisions")
+		}
+		for _, decision := range contract.Transactions.SupportedDecisions {
+			if decision != TransactionDecisionCommit && decision != TransactionDecisionRollback {
+				return fmt.Errorf("accepted host-owned transaction decision %q", decision)
+			}
+		}
+	default:
+		return fmt.Errorf("accepted contract with transaction mode %q", contract.Transactions.Mode)
 	}
 	if contract.Subscriptions.UpdateSource != SubscriptionUpdateSourceCommittedState ||
 		contract.Subscriptions.ProcessMessagesMayBroadcast {
@@ -550,8 +677,16 @@ func checkContractJSONInput(data []byte) error {
 		if len(spec.Ordering) == 0 {
 			return fmt.Errorf("accepted contract missing %s lifecycle ordering", hook)
 		}
+		for _, step := range spec.Ordering {
+			if !isKnownLifecycleStep(step) {
+				return fmt.Errorf("accepted contract with %s lifecycle step %q", hook, step)
+			}
+		}
 		if spec.FailureBehavior == "" {
 			return fmt.Errorf("accepted contract missing %s lifecycle failure behavior", hook)
+		}
+		if !isKnownLifecycleFailureBehavior(spec.FailureBehavior) {
+			return fmt.Errorf("accepted contract with %s lifecycle failure behavior %q", hook, spec.FailureBehavior)
 		}
 	}
 
@@ -588,12 +723,14 @@ func isExpectedInvocationValidationError(err error) bool {
 	return errors.Is(err, ErrInvalidInvocationStatus) ||
 		errors.Is(err, ErrInvalidFailureClassification) ||
 		errors.Is(err, ErrMissingTransactionSemantics) ||
+		errors.Is(err, ErrUnsupportedTransactionMode) ||
 		errors.Is(err, ErrUnsupportedTransactionDecision)
 }
 
 func isExpectedContractValidationError(err error) bool {
 	return errors.Is(err, ErrInvalidContract) ||
 		errors.Is(err, ErrMissingTransactionSemantics) ||
+		errors.Is(err, ErrUnsupportedTransactionMode) ||
 		errors.Is(err, ErrUnsupportedTransactionDecision) ||
 		errors.Is(err, ErrUnsupportedSubscriptionSemantics)
 }

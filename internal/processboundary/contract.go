@@ -9,6 +9,7 @@ import (
 
 var (
 	ErrMissingTransactionSemantics      = errors.New("processboundary: missing transaction semantics")
+	ErrUnsupportedTransactionMode       = errors.New("processboundary: unsupported transaction mode")
 	ErrUnsupportedTransactionDecision   = errors.New("processboundary: unsupported transaction decision")
 	ErrUnsupportedSubscriptionSemantics = errors.New("processboundary: unsupported subscription semantics")
 	ErrInvalidContract                  = errors.New("processboundary: invalid contract")
@@ -158,12 +159,8 @@ func ValidateInvocationResponse(resp InvocationResponse) error {
 			expectedFailure,
 		)
 	}
-	if resp.Transaction.Mode == "" || resp.Transaction.Decision == "" {
-		return ErrMissingTransactionSemantics
-	}
-	if resp.Transaction.Mode == TransactionModeUnsupported &&
-		resp.Transaction.Decision != TransactionDecisionUnsupported {
-		return ErrUnsupportedTransactionDecision
+	if err := validateTransactionOutcome(resp.Transaction); err != nil {
+		return err
 	}
 	return nil
 }
@@ -280,12 +277,11 @@ func ValidateContract(contract Contract) error {
 	if contract.Decision == "" {
 		return fmt.Errorf("%w: decision is required", ErrInvalidContract)
 	}
-	if contract.Transactions.Mode == "" {
-		return ErrMissingTransactionSemantics
+	if !isKnownDecision(contract.Decision) {
+		return fmt.Errorf("%w: decision %q", ErrInvalidContract, contract.Decision)
 	}
-	if contract.Transactions.Mode == TransactionModeUnsupported &&
-		!hasOnlyUnsupportedTransactionDecision(contract.Transactions.SupportedDecisions) {
-		return ErrUnsupportedTransactionDecision
+	if err := validateTransactionPolicy(contract.Transactions); err != nil {
+		return err
 	}
 	if contract.Subscriptions.UpdateSource != SubscriptionUpdateSourceCommittedState ||
 		contract.Subscriptions.ProcessMessagesMayBroadcast {
@@ -297,10 +293,6 @@ func ValidateContract(contract Contract) error {
 	return nil
 }
 
-func hasOnlyUnsupportedTransactionDecision(decisions []TransactionDecision) bool {
-	return len(decisions) == 1 && decisions[0] == TransactionDecisionUnsupported
-}
-
 func validateLifecycle(lifecycle map[LifecycleHook]LifecycleContract) error {
 	for _, hook := range []LifecycleHook{LifecycleOnConnect, LifecycleOnDisconnect} {
 		spec, ok := lifecycle[hook]
@@ -310,9 +302,95 @@ func validateLifecycle(lifecycle map[LifecycleHook]LifecycleContract) error {
 		if len(spec.Ordering) == 0 {
 			return fmt.Errorf("%w: %s lifecycle ordering missing", ErrInvalidContract, hook)
 		}
+		for _, step := range spec.Ordering {
+			if !isKnownLifecycleStep(step) {
+				return fmt.Errorf("%w: %s lifecycle step %q", ErrInvalidContract, hook, step)
+			}
+		}
 		if spec.FailureBehavior == "" {
 			return fmt.Errorf("%w: %s lifecycle failure behavior missing", ErrInvalidContract, hook)
 		}
+		if !isKnownLifecycleFailureBehavior(spec.FailureBehavior) {
+			return fmt.Errorf("%w: %s lifecycle failure behavior %q", ErrInvalidContract, hook, spec.FailureBehavior)
+		}
 	}
 	return nil
+}
+
+func validateTransactionOutcome(outcome TransactionOutcome) error {
+	if outcome.Mode == "" || outcome.Decision == "" {
+		return ErrMissingTransactionSemantics
+	}
+	switch outcome.Mode {
+	case TransactionModeUnsupported:
+		if outcome.Decision != TransactionDecisionUnsupported {
+			return ErrUnsupportedTransactionDecision
+		}
+	case TransactionModeHostOwned:
+		if outcome.Decision != TransactionDecisionCommit && outcome.Decision != TransactionDecisionRollback {
+			return ErrUnsupportedTransactionDecision
+		}
+	default:
+		return fmt.Errorf("%w: %q", ErrUnsupportedTransactionMode, outcome.Mode)
+	}
+	return nil
+}
+
+func validateTransactionPolicy(policy TransactionPolicy) error {
+	if policy.Mode == "" {
+		return ErrMissingTransactionSemantics
+	}
+	switch policy.Mode {
+	case TransactionModeUnsupported:
+		if !hasOnlyUnsupportedTransactionDecision(policy.SupportedDecisions) {
+			return ErrUnsupportedTransactionDecision
+		}
+	case TransactionModeHostOwned:
+		if len(policy.SupportedDecisions) == 0 {
+			return ErrMissingTransactionSemantics
+		}
+		for _, decision := range policy.SupportedDecisions {
+			if decision != TransactionDecisionCommit && decision != TransactionDecisionRollback {
+				return ErrUnsupportedTransactionDecision
+			}
+		}
+	default:
+		return fmt.Errorf("%w: %q", ErrUnsupportedTransactionMode, policy.Mode)
+	}
+	return nil
+}
+
+func hasOnlyUnsupportedTransactionDecision(decisions []TransactionDecision) bool {
+	return len(decisions) == 1 && decisions[0] == TransactionDecisionUnsupported
+}
+
+func isKnownDecision(decision Decision) bool {
+	switch decision {
+	case DecisionDeferred, DecisionKept, DecisionRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+func isKnownLifecycleStep(step LifecycleStep) bool {
+	switch step {
+	case LifecycleStepInsertClient,
+		LifecycleStepInvokeReducer,
+		LifecycleStepCommitOrRollback,
+		LifecycleStepCleanupClient,
+		LifecycleStepCommitCleanup:
+		return true
+	default:
+		return false
+	}
+}
+
+func isKnownLifecycleFailureBehavior(behavior LifecycleFailureBehavior) bool {
+	switch behavior {
+	case LifecycleFailureRejectConnectionRollback, LifecycleFailureCleanupStillCommits:
+		return true
+	default:
+		return false
+	}
 }
