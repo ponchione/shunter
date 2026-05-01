@@ -151,7 +151,8 @@ Current status:
 - TypeScript client code generation now has bounded public-surface fuzz
   coverage over contract JSON, including invalid-input categorization,
   deterministic accepted output, canonical JSON input equivalence, and
-  identifier collision/reserved-word corpus seeds. A fixed-seed concurrent
+  identifier collision/reserved-word plus semantically invalid contract corpus
+  seeds for declared SQL and unsupported column types. A fixed-seed concurrent
   codegen soak now compares `Generate` and `GenerateFromJSON` output stability
   for canonical and identifier-collision contracts under worker/op labels.
   Generated TypeScript metadata maps also pin permission and read-model

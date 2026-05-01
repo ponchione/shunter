@@ -19,6 +19,8 @@ func FuzzGenerateTypeScriptFromContractJSON(f *testing.F) {
 		[]byte(`{"contract_version":0}`),
 		mustCodegenFuzzContractJSON(f, contractFixture()),
 		mustCodegenFuzzContractJSON(f, codegenIdentifierCollisionFixture()),
+		mustCodegenFuzzContractJSON(f, codegenInvalidQuerySQLFixture()),
+		mustCodegenFuzzContractJSON(f, codegenUnsupportedColumnTypeFixture()),
 	} {
 		f.Add(seed)
 	}
@@ -88,6 +90,18 @@ func codegenIdentifierCollisionFixture() shunter.ModuleContract {
 	contract.Schema.Reducers[3].Name = "default"
 	contract.Queries = append(contract.Queries, shunter.QueryDescription{Name: "recent-messages"})
 	contract.Views = append(contract.Views, shunter.ViewDescription{Name: "live messages"})
+	return contract
+}
+
+func codegenInvalidQuerySQLFixture() shunter.ModuleContract {
+	contract := contractFixture()
+	contract.Queries[0].SQL = "SELECT * FROM missing_table"
+	return contract
+}
+
+func codegenUnsupportedColumnTypeFixture() shunter.ModuleContract {
+	contract := contractFixture()
+	contract.Schema.Tables[0].Columns[0].Type = "definitely-not-a-shunter-type"
 	return contract
 }
 
