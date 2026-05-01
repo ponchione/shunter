@@ -17,7 +17,7 @@ func TestFixedHexParsersMetamorphicCorpus(t *testing.T) {
 	}{
 		{
 			name:      "identity",
-			canonical: "00112233445566778899aabbccddeeffffeeddccbbaa99887766554433221100",
+			canonical: fixedHexIdentitySeed,
 			parse: func(s string) (string, error) {
 				id, err := ParseIdentityHex(s)
 				if err != nil {
@@ -35,7 +35,7 @@ func TestFixedHexParsersMetamorphicCorpus(t *testing.T) {
 		},
 		{
 			name:      "connection_id",
-			canonical: "00112233445566778899aabbccddeeff",
+			canonical: fixedHexConnectionIDSeed,
 			parse: func(s string) (string, error) {
 				connID, err := ParseConnectionIDHex(s)
 				if err != nil {
