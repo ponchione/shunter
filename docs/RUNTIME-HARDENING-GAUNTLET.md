@@ -83,6 +83,10 @@ Current status:
   public-surface fuzz corpora across scalar and variable-length payloads,
   checking malformed-input categorization plus accepted-value/row canonical
   re-encoding.
+- Runtime type primitives now have fixed-seed metamorphic coverage for
+  identity and connection ID hex parsing, including case variants and
+  invalid-input categorization. `ProductValue` batch copy coverage now checks
+  source/copy detachment across row and nested bytes mutations.
 - Subscription query hashing now has a bounded fuzz corpus for same-table
   canonicalization laws, self-join filter alias identity, and client
   parameterization. A short fixed-seed concurrent hash determinism soak also
