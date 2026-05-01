@@ -75,6 +75,44 @@ func TestCommitIndependentMixedTransactionsOrderMetamorphicEquivalence(t *testin
 	}
 }
 
+func TestApplyChangesetIndependentOrderMetamorphicEquivalence(t *testing.T) {
+	const seed = uint64(0xa9911ed)
+	initial := []commitMetamorphicRow{
+		{pk: 1, name: "alice"},
+		{pk: 2, name: "bob"},
+		{pk: 3, name: "carol"},
+		{pk: 4, name: "dave"},
+		{pk: 5, name: "eve"},
+	}
+	ops := []independentMixedCommitOp{
+		{label: "alpha", updates: []commitMetamorphicRow{{pk: 1, name: "alice-applied"}}, deletes: []uint64{2}},
+		{label: "beta", updates: []commitMetamorphicRow{{pk: 3, name: "carol-applied"}}, inserts: []commitMetamorphicRow{{pk: 6, name: "frank"}}},
+		{label: "gamma", updates: []commitMetamorphicRow{{pk: 5, name: "eve-applied"}}, deletes: []uint64{4}},
+	}
+	changesets := buildIndependentApplyChangesets(t, seed, initial, ops)
+	orders := []struct {
+		name  string
+		order []int
+	}{
+		{name: "forward", order: []int{0, 1, 2}},
+		{name: "reverse", order: []int{2, 1, 0}},
+		{name: "interleaved", order: []int{1, 0, 2}},
+	}
+
+	var baseline map[uint64]string
+	for orderIndex, order := range orders {
+		got := runApplyChangesetOrder(t, seed, orderIndex, initial, changesets, order.order)
+		if orderIndex == 0 {
+			baseline = got
+			continue
+		}
+		if !maps.Equal(got, baseline) {
+			t.Fatalf("seed=%#x order_index=%d runtime_config=initial_rows=%d/changesets=%d/order=%s operation=compare-applied-rows observed=%v expected=%v",
+				seed, orderIndex, len(initial), len(changesets), order.name, got, baseline)
+		}
+	}
+}
+
 type independentCommitOp struct {
 	label string
 	rows  []commitMetamorphicRow
@@ -142,6 +180,56 @@ func runIndependentMixedCommitOrder(t *testing.T, seed uint64, orderIndex int, i
 		if _, err := Commit(cs, tx); err != nil {
 			t.Fatalf("seed=%#x order_index=%d op=%d runtime_config=initial_rows=%d/ops=%d operation=%s.Commit observed_error=%v expected=nil",
 				seed, orderIndex, opIndex, len(initial), len(ops), op.label, err)
+		}
+	}
+	return collectCommittedPlayerRowsByPK(t, cs)
+}
+
+func buildIndependentApplyChangesets(t *testing.T, seed uint64, initial []commitMetamorphicRow, ops []independentMixedCommitOp) []*Changeset {
+	t.Helper()
+	changesets := make([]*Changeset, 0, len(ops))
+	for opIndex, op := range ops {
+		cs, reg := buildTestState()
+		seedCommitMetamorphicRows(t, cs, reg, seed, opIndex, initial)
+		tx := NewTransaction(cs, reg)
+		for _, row := range op.updates {
+			rowID := requireCommitMetamorphicRowID(t, tx, seed, opIndex, opIndex, op.label, row.pk)
+			if _, err := tx.Update(0, rowID, mkRow(row.pk, row.name)); err != nil {
+				t.Fatalf("seed=%#x op=%d runtime_config=initial_rows=%d/changesets=%d operation=%s.Update(%d,%q) observed_error=%v expected=nil",
+					seed, opIndex, len(initial), len(ops), op.label, row.pk, row.name, err)
+			}
+		}
+		for _, pk := range op.deletes {
+			rowID := requireCommitMetamorphicRowID(t, tx, seed, opIndex, opIndex, op.label, pk)
+			if err := tx.Delete(0, rowID); err != nil {
+				t.Fatalf("seed=%#x op=%d runtime_config=initial_rows=%d/changesets=%d operation=%s.Delete(%d) observed_error=%v expected=nil",
+					seed, opIndex, len(initial), len(ops), op.label, pk, err)
+			}
+		}
+		for _, row := range op.inserts {
+			if _, err := tx.Insert(0, mkRow(row.pk, row.name)); err != nil {
+				t.Fatalf("seed=%#x op=%d runtime_config=initial_rows=%d/changesets=%d operation=%s.Insert(%d,%q) observed_error=%v expected=nil",
+					seed, opIndex, len(initial), len(ops), op.label, row.pk, row.name, err)
+			}
+		}
+		changeset, err := Commit(cs, tx)
+		if err != nil {
+			t.Fatalf("seed=%#x op=%d runtime_config=initial_rows=%d/changesets=%d operation=%s.Commit observed_error=%v expected=nil",
+				seed, opIndex, len(initial), len(ops), op.label, err)
+		}
+		changesets = append(changesets, changeset)
+	}
+	return changesets
+}
+
+func runApplyChangesetOrder(t *testing.T, seed uint64, orderIndex int, initial []commitMetamorphicRow, changesets []*Changeset, order []int) map[uint64]string {
+	t.Helper()
+	cs, reg := buildTestState()
+	seedCommitMetamorphicRows(t, cs, reg, seed, orderIndex, initial)
+	for opIndex, changesetID := range order {
+		if err := ApplyChangeset(cs, changesets[changesetID]); err != nil {
+			t.Fatalf("seed=%#x order_index=%d op=%d runtime_config=initial_rows=%d/changesets=%d operation=ApplyChangeset(%d) observed_error=%v expected=nil",
+				seed, orderIndex, opIndex, len(initial), len(changesets), changesetID, err)
 		}
 	}
 	return collectCommittedPlayerRowsByPK(t, cs)
