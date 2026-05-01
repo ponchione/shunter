@@ -67,6 +67,9 @@ Current status:
   output, valid UTF-8, configured byte bounds, and seeded sensitive-field
   scrubbing; the release-candidate staticcheck gate is restored for the
   observability baseline.
+- Build and recovery observability now records build failures, successful
+  bootstrap/recovery reports, failed recovery, skipped-snapshot degradation,
+  and recovery metrics through fixed public `Build` scenarios.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit

@@ -101,3 +101,70 @@ When complete, update this file with:
 - tests added or updated
 - validation commands run
 
+### Recorded Completion 2026-05-01
+
+Recovery facts:
+
+- `Runtime` now stores `runtimeRecoveryFacts` with `ran`, `succeeded`, and a
+  detached copy of the final `commitlog.RecoveryReport`.
+- `Runtime.recoveredTxID` and `Runtime.resumePlan` still carry the executor and
+  durability startup facts, while `Runtime.recovery.report` keeps the broader
+  operator-facing report for later health, logging, and metrics slices.
+- recovery facts include helper classification for later health degradation
+  when recovery succeeded with damaged tail segments or skipped snapshots.
+
+Fresh bootstrap:
+
+- `openOrBootstrapState` now uses `commitlog.OpenAndRecoverWithReport`.
+- when no durable files exist, Shunter still creates the initial snapshot needed
+  for restart compatibility, but the retained and emitted recovery report is
+  the deterministic fresh-bootstrap shape: recovered tx `0`, no selected
+  durable snapshot, no durable log, no damaged tail segments, and no skipped
+  snapshots.
+
+Build-failure labels and observations:
+
+- build-time observability is created before module validation.
+- pre-module validation failures use module label `"unknown"`.
+- once a non-empty module name is validated, subsequent build failures use that
+  module name.
+- invalid runtime label failures still emit through configured logger/metrics
+  with runtime label `"default"`.
+- observable build failures emit `runtime.build_failed` and increment
+  `runtime_errors_total{component="runtime", reason="build_failed"}` once.
+
+Recovery observations:
+
+- successful recovery/bootstrap emits `recovery.completed`; it is Info for
+  clean recovery and Warn when damaged tail segments or skipped snapshots are
+  present.
+- recovery failures that prevent `Build` from returning emit `recovery.failed`
+  and increment `recovery_runs_total{component="commitlog", result="failed"}`.
+- successful recovery/bootstrap increments
+  `recovery_runs_total{component="commitlog", result="success"}` and sets
+  `recovery_recovered_tx_id` plus `recovery_damaged_tail_segments`.
+- each skipped snapshot increments `recovery_skipped_snapshots_total` using the
+  fixed SPEC-007 reason mapping; current commitlog reasons map
+  `past_durable_horizon` to `newer_than_log` and `read_failed` to
+  `read_failed`.
+
+Tests added:
+
+- build validation failure observations for pre-module, invalid runtime-label,
+  and post-module failure labels.
+- fresh bootstrap recovery facts, log event, and metrics.
+- existing-snapshot recovery facts and metrics.
+- recovery failure observations and build-failure coupling.
+- skipped-snapshot degraded facts, Warn-level `recovery.completed`, and skipped
+  snapshot metric reason mapping.
+
+Validation:
+
+```sh
+rtk go fmt . ./commitlog
+rtk go test . -run 'TestBuild.*(Observability|Recovery|Bootstrap)' -count=1
+rtk go test ./commitlog -run 'Test.*Recovery' -count=1
+rtk go test . -run 'Test.*(Build|Recovery|Observability|Bootstrap|RuntimeLabel)' -count=1
+rtk go vet . ./commitlog
+rtk go test ./... -count=1
+```

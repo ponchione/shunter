@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
+
+	"github.com/ponchione/shunter/commitlog"
 )
 
 const (
@@ -158,20 +161,9 @@ type Span interface {
 
 func normalizeObservabilityConfig(cfg ObservabilityConfig) (ObservabilityConfig, error) {
 	out := cfg
-	label := strings.TrimSpace(cfg.RuntimeLabel)
-	if label == "" {
-		label = defaultObservabilityRuntimeLabel
-	}
-	if !utf8.ValidString(label) {
-		return ObservabilityConfig{}, fmt.Errorf("observability runtime label must be valid UTF-8")
-	}
-	if len(label) > 128 {
-		return ObservabilityConfig{}, fmt.Errorf("observability runtime label must be at most 128 bytes")
-	}
-	for i := 0; i < len(label); i++ {
-		if label[i] < 0x20 || label[i] == 0x7f {
-			return ObservabilityConfig{}, fmt.Errorf("observability runtime label must not contain ASCII control characters")
-		}
+	label, err := normalizeObservabilityRuntimeLabel(cfg.RuntimeLabel)
+	if err != nil {
+		return ObservabilityConfig{}, err
 	}
 	out.RuntimeLabel = label
 	if out.Redaction.ErrorMessageMaxBytes <= 0 {
@@ -185,6 +177,33 @@ func normalizeObservabilityConfig(cfg ObservabilityConfig) (ObservabilityConfig,
 		return ObservabilityConfig{}, fmt.Errorf("observability reducer label mode is invalid")
 	}
 	return out, nil
+}
+
+func normalizeObservabilityRuntimeLabel(raw string) (string, error) {
+	label := strings.TrimSpace(raw)
+	if label == "" {
+		label = defaultObservabilityRuntimeLabel
+	}
+	if !utf8.ValidString(label) {
+		return "", fmt.Errorf("observability runtime label must be valid UTF-8")
+	}
+	if len(label) > 128 {
+		return "", fmt.Errorf("observability runtime label must be at most 128 bytes")
+	}
+	for i := 0; i < len(label); i++ {
+		if label[i] < 0x20 || label[i] == 0x7f {
+			return "", fmt.Errorf("observability runtime label must not contain ASCII control characters")
+		}
+	}
+	return label, nil
+}
+
+func buildFailureObservabilityRuntimeLabel(raw string) string {
+	label, err := normalizeObservabilityRuntimeLabel(raw)
+	if err != nil {
+		return defaultObservabilityRuntimeLabel
+	}
+	return label
 }
 
 type runtimeObservability struct {
@@ -208,6 +227,26 @@ func newRuntimeObservability(moduleName string, cfg ObservabilityConfig) *runtim
 			},
 		}
 	}
+	return newRuntimeObservabilityFromNormalized(moduleName, normalized)
+}
+
+func newBuildObservability(moduleName string, cfg ObservabilityConfig) (*runtimeObservability, error) {
+	normalized, err := normalizeObservabilityConfig(cfg)
+	if err != nil {
+		normalized = cfg
+		normalized.RuntimeLabel = buildFailureObservabilityRuntimeLabel(cfg.RuntimeLabel)
+		if normalized.Redaction.ErrorMessageMaxBytes <= 0 {
+			normalized.Redaction.ErrorMessageMaxBytes = defaultObservabilityErrorMessageMaxBytes
+		}
+		if normalized.Metrics.ReducerLabelMode == "" {
+			normalized.Metrics.ReducerLabelMode = ReducerLabelModeName
+		}
+		return newRuntimeObservabilityFromNormalized(moduleName, normalized), err
+	}
+	return newRuntimeObservabilityFromNormalized(moduleName, normalized), nil
+}
+
+func newRuntimeObservabilityFromNormalized(moduleName string, normalized ObservabilityConfig) *runtimeObservability {
 	o := &runtimeObservability{
 		config:       normalized,
 		moduleName:   moduleName,
@@ -222,6 +261,16 @@ func newRuntimeObservability(moduleName string, cfg ObservabilityConfig) *runtim
 		o.tracer = normalized.Tracing.Tracer
 	}
 	return o
+}
+
+func (o *runtimeObservability) setModuleName(moduleName string) {
+	if o == nil {
+		return
+	}
+	if strings.TrimSpace(moduleName) == "" {
+		moduleName = "unknown"
+	}
+	o.moduleName = moduleName
 }
 
 func (o *runtimeObservability) metricLabels(labels MetricLabels) MetricLabels {
@@ -257,6 +306,73 @@ func (o *runtimeObservability) log(ctx context.Context, level slog.Level, event,
 		}
 	}()
 	o.logger.LogAttrs(ctx, level, event, recordAttrs...)
+}
+
+func (o *runtimeObservability) recordBuildFailed(err error) {
+	if err == nil {
+		return
+	}
+	o.log(context.Background(), slog.LevelError, "runtime.build_failed", "runtime",
+		slog.String("error", o.redactError(err)),
+	)
+	o.addCounter(MetricRuntimeErrorsTotal, MetricLabels{
+		Component: "runtime",
+		Reason:    "build_failed",
+	}, 1)
+}
+
+func (o *runtimeObservability) recordRecoveryCompleted(report commitlog.RecoveryReport, duration time.Duration) {
+	level := slog.LevelInfo
+	if len(report.DamagedTailSegments) > 0 || len(report.SkippedSnapshots) > 0 {
+		level = slog.LevelWarn
+	}
+	o.log(context.Background(), level, "recovery.completed", "commitlog",
+		slog.Uint64("tx_id", uint64(report.RecoveredTxID)),
+		slog.Int64("duration_ms", duration.Milliseconds()),
+		slog.Int("damaged_tail_segments", len(report.DamagedTailSegments)),
+		slog.Int("skipped_snapshots", len(report.SkippedSnapshots)),
+	)
+	o.addCounter(MetricRecoveryRunsTotal, MetricLabels{
+		Component: "commitlog",
+		Result:    "success",
+	}, 1)
+	o.setGauge(MetricRecoveryRecoveredTxID, MetricLabels{
+		Component: "commitlog",
+	}, float64(report.RecoveredTxID))
+	o.setGauge(MetricRecoveryDamagedTailSegments, MetricLabels{
+		Component: "commitlog",
+	}, float64(len(report.DamagedTailSegments)))
+	for _, skipped := range report.SkippedSnapshots {
+		o.addCounter(MetricRecoverySkippedSnapshotsTotal, MetricLabels{
+			Component: "commitlog",
+			Reason:    recoverySkippedSnapshotMetricReason(skipped.Reason),
+		}, 1)
+	}
+}
+
+func (o *runtimeObservability) recordRecoveryFailed(err error, duration time.Duration) {
+	if err == nil {
+		return
+	}
+	o.log(context.Background(), slog.LevelError, "recovery.failed", "commitlog",
+		slog.String("error", o.redactError(err)),
+		slog.Int64("duration_ms", duration.Milliseconds()),
+	)
+	o.addCounter(MetricRecoveryRunsTotal, MetricLabels{
+		Component: "commitlog",
+		Result:    "failed",
+	}, 1)
+}
+
+func recoverySkippedSnapshotMetricReason(reason commitlog.SnapshotSkipReason) string {
+	switch reason {
+	case commitlog.SnapshotSkipPastDurableHorizon:
+		return "newer_than_log"
+	case commitlog.SnapshotSkipReadFailed:
+		return "read_failed"
+	default:
+		return "unknown"
+	}
 }
 
 func (o *runtimeObservability) addCounter(name MetricName, labels MetricLabels, delta uint64) {

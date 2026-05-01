@@ -56,31 +56,39 @@ func copyConfig(cfg Config) Config {
 	return out
 }
 
-func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, commitlog.RecoveryResumePlan, error) {
+func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, commitlog.RecoveryResumePlan, commitlog.RecoveryReport, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, 0, commitlog.RecoveryResumePlan{}, fmt.Errorf("mkdir data dir: %w", err)
+		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, fmt.Errorf("mkdir data dir: %w", err)
 	}
 
-	committed, recoveredTxID, plan, err := commitlog.OpenAndRecoverDetailed(dataDir, reg)
+	committed, recoveredTxID, plan, report, err := commitlog.OpenAndRecoverWithReport(dataDir, reg)
 	if err == nil {
-		return committed, recoveredTxID, plan, nil
+		return committed, recoveredTxID, plan, report, nil
 	}
 	if !errors.Is(err, commitlog.ErrNoData) {
-		return nil, 0, commitlog.RecoveryResumePlan{}, err
+		return nil, 0, commitlog.RecoveryResumePlan{}, report, err
 	}
 
 	fresh := store.NewCommittedState()
 	for _, tid := range reg.Tables() {
 		tableSchema, ok := reg.Table(tid)
 		if !ok {
-			return nil, 0, commitlog.RecoveryResumePlan{}, fmt.Errorf("registry missing table %d", tid)
+			return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, fmt.Errorf("registry missing table %d", tid)
 		}
 		fresh.RegisterTable(tid, store.NewTable(tableSchema))
 	}
 	if err := commitlog.NewSnapshotWriter(dataDir, reg).CreateSnapshot(fresh, 0); err != nil {
-		return nil, 0, commitlog.RecoveryResumePlan{}, fmt.Errorf("initial snapshot: %w", err)
+		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, fmt.Errorf("initial snapshot: %w", err)
 	}
-	return commitlog.OpenAndRecoverDetailed(dataDir, reg)
+	committed, recoveredTxID, plan, _, err = commitlog.OpenAndRecoverWithReport(dataDir, reg)
+	if err != nil {
+		return nil, 0, commitlog.RecoveryResumePlan{}, commitlog.RecoveryReport{}, err
+	}
+	report = commitlog.RecoveryReport{
+		RecoveredTxID: recoveredTxID,
+		ResumePlan:    plan,
+	}
+	return committed, recoveredTxID, plan, report, nil
 }
 
 func buildExecutorReducerRegistry(reg schema.SchemaRegistry, declarations []ReducerDeclaration) (*executor.ReducerRegistry, error) {

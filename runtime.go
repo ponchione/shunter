@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
@@ -29,6 +30,7 @@ type Runtime struct {
 	state         *store.CommittedState
 	recoveredTxID types.TxID
 	resumePlan    commitlog.RecoveryResumePlan
+	recovery      runtimeRecoveryFacts
 	reducers      *executor.ReducerRegistry
 	observability *runtimeObservability
 
@@ -60,19 +62,27 @@ type Runtime struct {
 // schema, durable-state foundation, and reducer registry without starting
 // runtime services.
 func Build(mod *Module, cfg Config) (*Runtime, error) {
+	observability, _ := newBuildObservability("unknown", cfg.Observability)
+	fail := func(err error) (*Runtime, error) {
+		observability.recordBuildFailed(err)
+		return nil, err
+	}
+
 	if mod == nil {
-		return nil, fmt.Errorf("module must not be nil")
+		return fail(fmt.Errorf("module must not be nil"))
 	}
 	if strings.TrimSpace(mod.name) == "" {
-		return nil, fmt.Errorf("module name must not be empty")
+		return fail(fmt.Errorf("module name must not be empty"))
 	}
+	observability.setModuleName(mod.name)
 
 	normalized, dataDir, err := normalizeConfig(cfg)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
+	observability = newRuntimeObservability(mod.name, normalized.Observability)
 	if err := validateModuleDeclarations(mod); err != nil {
-		return nil, err
+		return fail(err)
 	}
 
 	schemaOpts := schema.EngineOptions{
@@ -83,44 +93,47 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	}
 	preview, err := mod.builder.BuildPreview(schemaOpts)
 	if err != nil {
-		return nil, fmt.Errorf("build hosted runtime schema: %w", err)
+		return fail(fmt.Errorf("build hosted runtime schema: %w", err))
 	}
 	previewRegistry := preview.Registry()
 	if err := validateModuleDeclarationSQL(mod, previewRegistry); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	visibilityFilters, err := validateModuleVisibilityFilters(mod, previewRegistry)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if err := validateModuleTableMigrations(mod, previewRegistry); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if err := validateModuleMetadata(mod, previewRegistry); err != nil {
-		return nil, err
+		return fail(err)
 	}
 
 	engine, err := mod.builder.Build(schemaOpts)
 	if err != nil {
-		return nil, fmt.Errorf("build hosted runtime schema: %w", err)
+		return fail(fmt.Errorf("build hosted runtime schema: %w", err))
 	}
 	registry := engine.Registry()
 	readCatalog, err := newDeclaredReadCatalog(mod.queries, mod.views, registry)
 	if err != nil {
-		return nil, fmt.Errorf("build hosted runtime declared reads: %w", err)
+		return fail(fmt.Errorf("build hosted runtime declared reads: %w", err))
 	}
 
-	state, recoveredTxID, resumePlan, err := openOrBootstrapState(dataDir, registry)
+	recoveryStart := time.Now()
+	state, recoveredTxID, resumePlan, recoveryReport, err := openOrBootstrapState(dataDir, registry)
 	if err != nil {
-		return nil, fmt.Errorf("build hosted runtime state: %w", err)
+		err = fmt.Errorf("build hosted runtime state: %w", err)
+		observability.recordRecoveryFailed(err, time.Since(recoveryStart))
+		return fail(err)
 	}
+	observability.recordRecoveryCompleted(recoveryReport, time.Since(recoveryStart))
 
 	reducers, err := buildExecutorReducerRegistry(registry, mod.reducers)
 	if err != nil {
-		return nil, fmt.Errorf("build hosted runtime reducers: %w", err)
+		return fail(fmt.Errorf("build hosted runtime reducers: %w", err))
 	}
 
-	observability := newRuntimeObservability(mod.name, normalized.Observability)
 	return &Runtime{
 		module:        newModuleSnapshot(mod, visibilityFilters),
 		config:        copyConfig(cfg),
@@ -132,10 +145,37 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 		state:         state,
 		recoveredTxID: recoveredTxID,
 		resumePlan:    resumePlan,
+		recovery:      newSuccessfulRuntimeRecoveryFacts(recoveryReport),
 		reducers:      reducers,
 		observability: observability,
 		stateName:     RuntimeStateBuilt,
 	}, nil
+}
+
+type runtimeRecoveryFacts struct {
+	ran       bool
+	succeeded bool
+	report    commitlog.RecoveryReport
+}
+
+func newSuccessfulRuntimeRecoveryFacts(report commitlog.RecoveryReport) runtimeRecoveryFacts {
+	return runtimeRecoveryFacts{
+		ran:       true,
+		succeeded: true,
+		report:    copyRecoveryReport(report),
+	}
+}
+
+func (f runtimeRecoveryFacts) degraded() bool {
+	return f.succeeded && (len(f.report.DamagedTailSegments) > 0 || len(f.report.SkippedSnapshots) > 0)
+}
+
+func copyRecoveryReport(report commitlog.RecoveryReport) commitlog.RecoveryReport {
+	out := report
+	out.SkippedSnapshots = append([]commitlog.SkippedSnapshotReport(nil), report.SkippedSnapshots...)
+	out.DamagedTailSegments = append([]commitlog.SegmentInfo(nil), report.DamagedTailSegments...)
+	out.SegmentCoverage = append([]commitlog.SegmentRange(nil), report.SegmentCoverage...)
+	return out
 }
 
 // ModuleName returns the name of the module used to build the runtime.
