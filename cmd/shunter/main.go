@@ -71,6 +71,10 @@ func runContractDiff(stdout, stderr io.Writer, args []string) int {
 	if code := requirePath(stderr, "current", *currentPath); code != 0 {
 		return code
 	}
+	if err := contractworkflow.ValidateFormat(*format); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
 
 	report, err := contractworkflow.CompareFiles(*previousPath, *currentPath)
 	if err != nil {
@@ -107,6 +111,10 @@ func runContractPolicy(stdout, stderr io.Writer, args []string) int {
 	}
 	if code := requirePath(stderr, "current", *currentPath); code != 0 {
 		return code
+	}
+	if err := contractworkflow.ValidateFormat(*format); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
 	}
 
 	result, err := contractworkflow.CheckPolicyFiles(*previousPath, *currentPath, contractdiff.PolicyOptions{
@@ -151,6 +159,10 @@ func runContractPlan(stdout, stderr io.Writer, args []string) int {
 	}
 	if code := requirePath(stderr, "current", *currentPath); code != 0 {
 		return code
+	}
+	if err := contractworkflow.ValidateFormat(*format); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
 	}
 
 	plan, err := contractworkflow.PlanFiles(*previousPath, *currentPath, contractdiff.PlanOptions{

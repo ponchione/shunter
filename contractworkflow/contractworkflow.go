@@ -102,6 +102,16 @@ func GenerateFile(contractPath, outputPath string, opts codegen.Options) error {
 	return nil
 }
 
+// ValidateFormat rejects unsupported workflow output formats before work starts.
+func ValidateFormat(format string) error {
+	switch normalizedFormat(format) {
+	case FormatText, FormatJSON:
+		return nil
+	default:
+		return unsupportedFormatError(format)
+	}
+}
+
 // FormatDiff renders a contract diff report in text or JSON form.
 func FormatDiff(report contractdiff.Report, format string) ([]byte, error) {
 	switch normalizedFormat(format) {
@@ -119,7 +129,7 @@ func FormatDiff(report contractdiff.Report, format string) ([]byte, error) {
 		}
 		return marshalWorkflowJSON(out)
 	default:
-		return nil, fmt.Errorf("%w %q", ErrUnsupportedFormat, format)
+		return nil, unsupportedFormatError(format)
 	}
 }
 
@@ -150,7 +160,7 @@ func FormatPolicy(result contractdiff.PolicyResult, format string) ([]byte, erro
 		}
 		return marshalWorkflowJSON(out)
 	default:
-		return nil, fmt.Errorf("%w %q", ErrUnsupportedFormat, format)
+		return nil, unsupportedFormatError(format)
 	}
 }
 
@@ -162,7 +172,7 @@ func FormatPlan(plan contractdiff.MigrationPlan, format string) ([]byte, error) 
 	case FormatJSON:
 		return plan.MarshalCanonicalJSON()
 	default:
-		return nil, fmt.Errorf("%w %q", ErrUnsupportedFormat, format)
+		return nil, unsupportedFormatError(format)
 	}
 }
 
@@ -195,6 +205,10 @@ func normalizedFormat(format string) string {
 		return FormatText
 	}
 	return format
+}
+
+func unsupportedFormatError(format string) error {
+	return fmt.Errorf("%w %q", ErrUnsupportedFormat, format)
 }
 
 func marshalWorkflowJSON(value any) ([]byte, error) {
