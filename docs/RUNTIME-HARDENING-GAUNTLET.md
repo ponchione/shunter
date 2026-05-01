@@ -17,6 +17,16 @@ Current status:
 - The deterministic root runtime gauntlet in `runtime_gauntlet_test.go` is
   saturated for the current hosted-runtime, protocol, subscription, reducer,
   scheduler, and clean-restart surfaces.
+- Public hosted-runtime crash coverage now exercises real subprocess exits
+  without `Runtime.Close`, including confirmed-durable protocol recovery,
+  caller-acknowledged-before-confirmed durability restart coherence, and
+  scheduled wakeup recovery after unclean process exit.
+- Public hosted-runtime storage-fault coverage now restarts through safe
+  zero-filled active-segment tails, damaged snapshot fallback to a complete log,
+  and corrupt segment fail-loud behavior through the `shunter.Build` boundary.
+- The current runtime-owned public surface is complete for this campaign. Treat
+  new runtime gauntlet work as regression-driven unless a new public invariant,
+  feature surface, or failing seed appears.
 - Public hosted-runtime/protocol restart coverage also pins rejected reducer
   attempts immediately before restart so failed/panicking reducers cannot
   recover ghost rows or block reuse of the rejected primary key after restart.
@@ -190,9 +200,9 @@ Current status:
   strict-auth protocol path drives the same task-board app through WebSocket
   reducer calls, declared query/view reads, live declared-view deltas, rejected
   duplicate mutations before and after restart, and restart recovery.
-- Remaining campaign work should move to broader crash/recovery, fault
-  injection, fuzzing/corpus, metamorphic, race/soak, and release-candidate
-  coverage unless a new invariant or failing seed appears.
+- Remaining non-runtime campaign work should move to broader crash/recovery,
+  fault injection, fuzzing/corpus, metamorphic, race/soak, and
+  release-candidate coverage unless a new invariant or failing seed appears.
 
 ## Goals
 
