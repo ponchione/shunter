@@ -285,6 +285,53 @@ func TestMigrationPlanValidationWarningsAreReadOnlyContractChecks(t *testing.T) 
 	}
 }
 
+func TestMigrationPlanValidationWarningsCoverDeclarationMetadata(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Module.Version = "v1.1.0"
+	current.Migrations.Declarations = []shunter.MigrationContractDeclaration{
+		{
+			Surface: shunter.MigrationSurfaceQuery,
+			Name:    "history",
+			Metadata: shunter.MigrationMetadata{
+				ModuleVersion:   "v2.0.0",
+				SchemaVersion:   99,
+				ContractVersion: 99,
+				PreviousVersion: "v0.9.0",
+			},
+		},
+	}
+
+	plan := Plan(old, current, PlanOptions{ValidateContracts: true})
+
+	assertPlanWarning(t, plan.Warnings, WarningMigrationMetadataModuleVersionMismatch, SurfaceQuery, "history")
+	assertPlanWarning(t, plan.Warnings, WarningMigrationMetadataSchemaVersionMismatch, SurfaceQuery, "history")
+	assertPlanWarning(t, plan.Warnings, WarningMigrationMetadataContractVersionMismatch, SurfaceQuery, "history")
+	assertPlanWarning(t, plan.Warnings, WarningMigrationMetadataPreviousVersionMismatch, SurfaceQuery, "history")
+	if !strings.Contains(plan.Text(), "query history migration metadata version") {
+		t.Fatalf("plan text missing declaration validation context:\n%s", plan.Text())
+	}
+}
+
+func TestMigrationPlanValidationWarningsCoverRegressionsAndCodegenMetadata(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Version = old.Schema.Version - 1
+	current.ContractVersion = old.ContractVersion - 1
+	current.Codegen.ContractFormat = "unexpected.format"
+	current.Codegen.ContractVersion = current.ContractVersion + 1
+
+	plan := Plan(old, current, PlanOptions{ValidateContracts: true})
+
+	assertPlanWarning(t, plan.Warnings, WarningSchemaVersionRegressed, SurfaceSchema, "schema")
+	assertPlanWarning(t, plan.Warnings, WarningContractVersionRegressed, SurfaceContract, "contract")
+	assertPlanWarning(t, plan.Warnings, WarningContractFormatMismatch, SurfaceContract, "contract")
+	assertPlanWarning(t, plan.Warnings, WarningCodegenContractVersionMismatch, SurfaceContract, "contract")
+	if plan.Summary.Warnings != len(plan.Warnings) {
+		t.Fatalf("summary warnings = %d, want %d", plan.Summary.Warnings, len(plan.Warnings))
+	}
+}
+
 func requirePlanEntry(t *testing.T, plan MigrationPlan, kind ChangeKind, surface Surface, name string) PlanEntry {
 	t.Helper()
 	for _, entry := range plan.Entries {

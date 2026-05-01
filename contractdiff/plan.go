@@ -255,37 +255,32 @@ func planWarningFromPolicy(warning PolicyWarning) PlanWarning {
 func validatePlanContracts(old, current shunter.ModuleContract) []PlanWarning {
 	var warnings []PlanWarning
 	moduleName := nonEmptyName(current.Module.Name, old.Module.Name)
-	metadata := current.Migrations.Module
-	if metadata.ModuleVersion != "" && current.Module.Version != "" && metadata.ModuleVersion != current.Module.Version {
-		warnings = append(warnings, PlanWarning{
-			Code:    WarningMigrationMetadataModuleVersionMismatch,
-			Surface: SurfaceModule,
-			Name:    moduleName,
-			Detail:  fmt.Sprintf("module migration metadata version %q does not match current module version %q", metadata.ModuleVersion, current.Module.Version),
-		})
-	}
-	if metadata.SchemaVersion != 0 && metadata.SchemaVersion != current.Schema.Version {
-		warnings = append(warnings, PlanWarning{
-			Code:    WarningMigrationMetadataSchemaVersionMismatch,
-			Surface: SurfaceSchema,
-			Name:    "schema",
-			Detail:  fmt.Sprintf("module migration metadata schema version %d does not match current schema version %d", metadata.SchemaVersion, current.Schema.Version),
-		})
-	}
-	if metadata.ContractVersion != 0 && metadata.ContractVersion != current.ContractVersion {
-		warnings = append(warnings, PlanWarning{
-			Code:    WarningMigrationMetadataContractVersionMismatch,
-			Surface: SurfaceContract,
-			Name:    "contract",
-			Detail:  fmt.Sprintf("module migration metadata contract version %d does not match current contract version %d", metadata.ContractVersion, current.ContractVersion),
-		})
-	}
-	if metadata.PreviousVersion != "" && old.Module.Version != "" && metadata.PreviousVersion != old.Module.Version {
-		warnings = append(warnings, PlanWarning{
-			Code:    WarningMigrationMetadataPreviousVersionMismatch,
-			Surface: SurfaceModule,
-			Name:    moduleName,
-			Detail:  fmt.Sprintf("module migration metadata previous_version %q does not match previous module version %q", metadata.PreviousVersion, old.Module.Version),
+	warnings = appendMigrationMetadataConsistencyWarnings(warnings, old, current, current.Migrations.Module, migrationMetadataWarningScope{
+		Label:           "module",
+		ModuleSurface:   SurfaceModule,
+		ModuleName:      moduleName,
+		SchemaSurface:   SurfaceSchema,
+		SchemaName:      "schema",
+		ContractSurface: SurfaceContract,
+		ContractName:    "contract",
+		PreviousSurface: SurfaceModule,
+		PreviousName:    moduleName,
+	})
+	for _, declaration := range current.Migrations.Declarations {
+		surface, ok := migrationDeclarationPlanSurface(declaration.Surface)
+		if !ok {
+			continue
+		}
+		warnings = appendMigrationMetadataConsistencyWarnings(warnings, old, current, declaration.Metadata, migrationMetadataWarningScope{
+			Label:           declaration.Surface + " " + declaration.Name,
+			ModuleSurface:   surface,
+			ModuleName:      declaration.Name,
+			SchemaSurface:   surface,
+			SchemaName:      declaration.Name,
+			ContractSurface: surface,
+			ContractName:    declaration.Name,
+			PreviousSurface: surface,
+			PreviousName:    declaration.Name,
 		})
 	}
 	if current.Schema.Version < old.Schema.Version {
@@ -321,6 +316,67 @@ func validatePlanContracts(old, current shunter.ModuleContract) []PlanWarning {
 		})
 	}
 	return warnings
+}
+
+type migrationMetadataWarningScope struct {
+	Label           string
+	ModuleSurface   Surface
+	ModuleName      string
+	SchemaSurface   Surface
+	SchemaName      string
+	ContractSurface Surface
+	ContractName    string
+	PreviousSurface Surface
+	PreviousName    string
+}
+
+func appendMigrationMetadataConsistencyWarnings(warnings []PlanWarning, old, current shunter.ModuleContract, metadata shunter.MigrationMetadata, scope migrationMetadataWarningScope) []PlanWarning {
+	if metadata.ModuleVersion != "" && current.Module.Version != "" && metadata.ModuleVersion != current.Module.Version {
+		warnings = append(warnings, PlanWarning{
+			Code:    WarningMigrationMetadataModuleVersionMismatch,
+			Surface: scope.ModuleSurface,
+			Name:    scope.ModuleName,
+			Detail:  fmt.Sprintf("%s migration metadata version %q does not match current module version %q", scope.Label, metadata.ModuleVersion, current.Module.Version),
+		})
+	}
+	if metadata.SchemaVersion != 0 && metadata.SchemaVersion != current.Schema.Version {
+		warnings = append(warnings, PlanWarning{
+			Code:    WarningMigrationMetadataSchemaVersionMismatch,
+			Surface: scope.SchemaSurface,
+			Name:    scope.SchemaName,
+			Detail:  fmt.Sprintf("%s migration metadata schema version %d does not match current schema version %d", scope.Label, metadata.SchemaVersion, current.Schema.Version),
+		})
+	}
+	if metadata.ContractVersion != 0 && metadata.ContractVersion != current.ContractVersion {
+		warnings = append(warnings, PlanWarning{
+			Code:    WarningMigrationMetadataContractVersionMismatch,
+			Surface: scope.ContractSurface,
+			Name:    scope.ContractName,
+			Detail:  fmt.Sprintf("%s migration metadata contract version %d does not match current contract version %d", scope.Label, metadata.ContractVersion, current.ContractVersion),
+		})
+	}
+	if metadata.PreviousVersion != "" && old.Module.Version != "" && metadata.PreviousVersion != old.Module.Version {
+		warnings = append(warnings, PlanWarning{
+			Code:    WarningMigrationMetadataPreviousVersionMismatch,
+			Surface: scope.PreviousSurface,
+			Name:    scope.PreviousName,
+			Detail:  fmt.Sprintf("%s migration metadata previous_version %q does not match previous module version %q", scope.Label, metadata.PreviousVersion, old.Module.Version),
+		})
+	}
+	return warnings
+}
+
+func migrationDeclarationPlanSurface(surface string) (Surface, bool) {
+	switch surface {
+	case shunter.MigrationSurfaceTable:
+		return SurfaceTable, true
+	case shunter.MigrationSurfaceQuery:
+		return SurfaceQuery, true
+	case shunter.MigrationSurfaceView:
+		return SurfaceView, true
+	default:
+		return "", false
+	}
 }
 
 func normalizeMigrationPlan(plan MigrationPlan) MigrationPlan {
