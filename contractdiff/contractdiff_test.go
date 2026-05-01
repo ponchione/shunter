@@ -1,6 +1,7 @@
 package contractdiff
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -295,6 +296,55 @@ func TestContractDiffJSONFailsClearlyForSemanticInvalidContract(t *testing.T) {
 	}
 }
 
+func TestContractDiffJSONRejectsSemanticInvalidCurrentContractWithContext(t *testing.T) {
+	current := contractFixture()
+	current.VisibilityFilters = []shunter.VisibilityFilterDescription{{
+		Name:               "own_messages",
+		SQL:                "SELECT * FROM messages WHERE body = :sender",
+		ReturnTable:        "messages",
+		ReturnTableID:      99,
+		UsesCallerIdentity: true,
+	}}
+	oldData := mustContractJSON(t, contractFixture())
+	currentData := mustRawContractJSON(t, current)
+
+	for _, tt := range []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "compare",
+			run: func() error {
+				_, err := CompareJSON(oldData, currentData)
+				return err
+			},
+		},
+		{
+			name: "plan",
+			run: func() error {
+				_, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
+				return err
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run()
+			if err == nil {
+				t.Fatal("JSON entry point returned nil error, want invalid contract")
+			}
+			if !errors.Is(err, ErrInvalidContractJSON) {
+				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
+			}
+			if !strings.Contains(err.Error(), "current contract") {
+				t.Fatalf("JSON entry point error = %v, want current contract context", err)
+			}
+			if !strings.Contains(err.Error(), "visibility_filters.own_messages return_table_id") {
+				t.Fatalf("JSON entry point error = %v, want visibility filter metadata context", err)
+			}
+		})
+	}
+}
+
 func contractFixture() shunter.ModuleContract {
 	return shunter.ModuleContract{
 		ContractVersion: shunter.ModuleContractVersion,
@@ -342,6 +392,15 @@ func mustContractJSON(t *testing.T, contract shunter.ModuleContract) []byte {
 	data, err := contract.MarshalCanonicalJSON()
 	if err != nil {
 		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	return data
+}
+
+func mustRawContractJSON(t *testing.T, contract shunter.ModuleContract) []byte {
+	t.Helper()
+	data, err := json.Marshal(contract)
+	if err != nil {
+		t.Fatalf("Marshal returned error: %v", err)
 	}
 	return data
 }

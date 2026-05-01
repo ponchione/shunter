@@ -36,12 +36,21 @@ func contractDiffJSONFuzzSeeds(tb testing.TB) []contractDiffJSONSeed {
 	validOld := mustFuzzContractJSON(tb, contractFixture())
 	validCurrent := mustFuzzContractJSON(tb, metamorphicCurrent)
 	validMetamorphicOld := mustFuzzContractJSON(tb, metamorphicOld)
+	invalidVisibilityMetadata := contractFixture()
+	invalidVisibilityMetadata.VisibilityFilters = []shunter.VisibilityFilterDescription{{
+		Name:               "own_messages",
+		SQL:                "SELECT * FROM messages WHERE body = :sender",
+		ReturnTable:        "messages",
+		ReturnTableID:      99,
+		UsesCallerIdentity: true,
+	}}
 
 	return []contractDiffJSONSeed{
 		{old: nil, current: validOld},
 		{old: []byte("not-json"), current: validOld},
 		{old: validOld, current: []byte(`{`)},
 		{old: validOld, current: []byte(`{"contract_version":0}`)},
+		{old: validOld, current: mustFuzzRawContractJSON(tb, invalidVisibilityMetadata)},
 		{old: validOld, current: validOld},
 		{old: validMetamorphicOld, current: validCurrent},
 	}
@@ -214,6 +223,15 @@ func mustFuzzContractJSON(tb testing.TB, contract shunter.ModuleContract) []byte
 	data, err := contract.MarshalCanonicalJSON()
 	if err != nil {
 		tb.Fatalf("marshal contractdiff fuzz seed: %v", err)
+	}
+	return data
+}
+
+func mustFuzzRawContractJSON(tb testing.TB, contract shunter.ModuleContract) []byte {
+	tb.Helper()
+	data, err := json.Marshal(contract)
+	if err != nil {
+		tb.Fatalf("marshal raw contractdiff fuzz seed: %v", err)
 	}
 	return data
 }
