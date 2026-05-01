@@ -104,6 +104,40 @@ func TestContractPolicyCommandFailsInStrictMode(t *testing.T) {
 	assertContains(t, stdout.String(), "missing-migration-metadata query recent_messages")
 }
 
+func TestContractPolicyCommandStrictJSONPinsRCGate(t *testing.T) {
+	const trace = "trace=cli-contract-policy-strict-json-rc-gate"
+	dir := t.TempDir()
+	previousPath := writeCLIContract(t, dir, "previous.json", cliContractFixture())
+	current := cliContractFixture()
+	current.Module.Version = "v1.1.0"
+	current.Queries = append(current.Queries, shunter.QueryDescription{Name: "recent_messages"})
+	currentPath := writeCLIContract(t, dir, "current.json", current)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"contract", "policy",
+		"--previous", previousPath,
+		"--current", currentPath,
+		"--strict",
+		"--require-previous-version",
+		"--format", "json",
+	})
+	if code != 1 {
+		t.Fatalf("%s contract policy exit code = %d, stderr = %s", trace, code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("%s stderr = %s, want empty", trace, stderr.String())
+	}
+	out := stdout.String()
+	assertContains(t, out, `"failed": true`)
+	assertContains(t, out, `"code": "missing-migration-metadata"`)
+	assertContains(t, out, `"surface": "query"`)
+	assertContains(t, out, `"name": "recent_messages"`)
+	assertContains(t, out, `"code": "missing-previous-version"`)
+	assertContains(t, out, `"surface": "module"`)
+	assertContains(t, out, `"name": "chat"`)
+}
+
 func TestContractPlanCommandReadsJSONFiles(t *testing.T) {
 	dir := t.TempDir()
 	previousPath := writeCLIContract(t, dir, "previous.json", cliContractFixture())

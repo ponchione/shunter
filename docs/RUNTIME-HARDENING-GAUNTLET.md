@@ -173,6 +173,9 @@ Current status:
   mismatches; CLI release-candidate coverage pins `contract plan --validate`
   surfacing declaration metadata warnings without turning them into strict
   policy failures.
+- Contract policy CLI release-candidate coverage now pins strict JSON output
+  and failed exit semantics for missing migration metadata plus missing
+  previous-version warnings.
 - SQL parser and literal coercion fuzzing now drive arbitrary bounded query
   text through the public `Parse` surface and generated literal/kind pairs
   through `CoerceWithCaller`, checking unsupported-error categorization and
