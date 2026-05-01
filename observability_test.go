@@ -199,6 +199,49 @@ func TestObservabilityRedactionInvalidUTF8AndTruncation(t *testing.T) {
 	}
 }
 
+func FuzzObservabilityRedactErrorString(f *testing.F) {
+	for _, seed := range []struct {
+		raw      string
+		maxBytes int
+	}{
+		{raw: "authorization=Bearer secret", maxBytes: 1024},
+		{raw: `{"token":"secret","row":{"id":1}}`, maxBytes: 1024},
+		{raw: "payload='secret' keep", maxBytes: 1024},
+		{raw: "query=select * from users where token='secret'; keep", maxBytes: 1024},
+		{raw: "failed: Bearer secret, keep", maxBytes: 1024},
+		{raw: string([]byte{'a', 0xff, 'b', 0xe2, 0x82, 0xac, 'c'}), maxBytes: 4},
+		{raw: strings.Repeat("x", 2048), maxBytes: 128},
+	} {
+		f.Add(seed.raw, seed.maxBytes)
+	}
+
+	f.Fuzz(func(t *testing.T, raw string, maxBytes int) {
+		maxBytes = maxBytes % 2048
+		if maxBytes < 1 {
+			maxBytes = 1 - maxBytes
+		}
+		obs := newRuntimeObservability("chat", ObservabilityConfig{
+			RuntimeLabel: "default",
+			Redaction:    RedactionConfig{ErrorMessageMaxBytes: maxBytes},
+		})
+
+		got := obs.redactErrorString(raw)
+		again := obs.redactErrorString(raw)
+		if got != again {
+			t.Fatalf("redaction is not deterministic:\nfirst=%q\nsecond=%q", got, again)
+		}
+		if !utf8.ValidString(got) {
+			t.Fatalf("redacted string is invalid UTF-8: %q", got)
+		}
+		if len(got) > maxBytes {
+			t.Fatalf("redacted length = %d, want <= %d", len(got), maxBytes)
+		}
+		if containsSeededSensitiveSecret(raw) && strings.Contains(got, "secret") {
+			t.Fatalf("redacted output leaked seeded secret:\nraw=%q\nredacted=%q", raw, got)
+		}
+	})
+}
+
 func TestObservabilityDebugSQLBoundedWhenAllowed(t *testing.T) {
 	obs := newRuntimeObservability("chat", ObservabilityConfig{
 		RuntimeLabel: "default",
@@ -406,3 +449,11 @@ func (h panicSlogHandler) WithGroup(string) slog.Handler { return h }
 type noopHTTPHandler struct{}
 
 func (noopHTTPHandler) ServeHTTP(http.ResponseWriter, *http.Request) {}
+
+func containsSeededSensitiveSecret(raw string) bool {
+	return strings.Contains(raw, "authorization=Bearer secret") ||
+		strings.Contains(raw, `"token":"secret"`) ||
+		strings.Contains(raw, "payload='secret'") ||
+		strings.Contains(raw, "query=select * from users where token='secret'") ||
+		strings.Contains(raw, "Bearer secret")
+}

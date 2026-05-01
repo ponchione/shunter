@@ -63,6 +63,10 @@ Current status:
   randomness-fault coverage plus a short concurrent mint/validate soak that
   checks unique tokens, subjects, identities, audience, issuer, and derived
   identity stability under worker/op labels.
+- Observability redaction now has a bounded fuzz corpus checking deterministic
+  output, valid UTF-8, configured byte bounds, and seeded sensitive-field
+  scrubbing; the release-candidate staticcheck gate is restored for the
+  observability baseline.
 - The root gauntlet also includes a short fixed-seed concurrent read/reducer
   soak with protocol query probes and compact seed/reader/operation labels.
 - Store read-view race coverage now includes a fixed-seed snapshot/commit
