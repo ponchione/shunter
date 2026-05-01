@@ -383,7 +383,11 @@ func encodeProtocolSubscriptionUpdate(update subscription.SubscriptionUpdate) (p
 // TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs.
 func (a *ProtocolInboxAdapter) forwardReducerResponse(ctx context.Context, req protocol.CallReducerRequest, respCh <-chan ProtocolCallReducerResponse) {
 	select {
-	case resp := <-respCh:
+	case resp, ok := <-respCh:
+		if !ok {
+			sendTransactionUpdateWithContext(ctx, req.Done, req.ResponseCh, buildProtocolReducerEnvelope(req, protocol.StatusFailed{Error: "executor reducer response channel closed"}))
+			return
+		}
 		if resp.Committed != nil {
 			if resp.Committed.Outcome.Kind == subscription.CallerOutcomeCommitted &&
 				resp.Committed.Outcome.Flags == subscription.CallerOutcomeFlagNoSuccessNotify {

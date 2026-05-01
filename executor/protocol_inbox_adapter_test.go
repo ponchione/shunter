@@ -1193,6 +1193,34 @@ func TestProtocolInboxAdapter_CallReducer_DeliversFailureEvenWhenNoSuccessNotify
 	}
 }
 
+func TestProtocolInboxAdapter_ForwardReducerResponse_ClosedInternalChannelFails(t *testing.T) {
+	respCh := make(chan ProtocolCallReducerResponse)
+	close(respCh)
+	req := protocol.CallReducerRequest{
+		ConnID:      types.ConnectionID{17},
+		Identity:    types.Identity{18},
+		RequestID:   91,
+		ReducerName: "ClosedInternalResponse",
+		ResponseCh:  make(chan protocol.TransactionUpdate, 1),
+	}
+	adapter := &ProtocolInboxAdapter{}
+
+	adapter.forwardReducerResponse(context.Background(), req, respCh)
+
+	select {
+	case update := <-req.ResponseCh:
+		failed, ok := update.Status.(protocol.StatusFailed)
+		if !ok {
+			t.Fatalf("status = %T, want protocol.StatusFailed", update.Status)
+		}
+		if failed.Error != "executor reducer response channel closed" {
+			t.Fatalf("failed.Error = %q, want closed-channel error", failed.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for closed-channel failure")
+	}
+}
+
 func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnContextCancelWhenOutboundBlocked(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
