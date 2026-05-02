@@ -55,6 +55,30 @@ func buildAutoIncrementState(t *testing.T) (*CommittedState, schema.SchemaRegist
 	return cs, reg
 }
 
+func buildUint8AutoIncrementState(t *testing.T) (*CommittedState, schema.SchemaRegistry) {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "jobs",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint8, PrimaryKey: true, AutoIncrement: true},
+			{Name: "name", Type: types.KindString},
+		},
+	})
+	e, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := e.Registry()
+	cs := NewCommittedState()
+	for _, tid := range reg.Tables() {
+		ts, _ := reg.Table(tid)
+		cs.RegisterTable(tid, NewTable(ts))
+	}
+	return cs, reg
+}
+
 func TestValidateRowTypeMismatchMatchesCatalog(t *testing.T) {
 	ts := pkSchema()
 	err := ValidateRow(ts, types.ProductValue{types.NewString("bad"), types.NewString("alice")})
@@ -774,6 +798,30 @@ func TestTransactionInsertAutoIncrementAssignsSequentialValues(t *testing.T) {
 	}
 }
 
+func TestTransactionInsertAutoIncrementUint8AssignsValue(t *testing.T) {
+	cs, reg := buildUint8AutoIncrementState(t)
+	tx := NewTransaction(cs, reg)
+
+	id, err := tx.Insert(0, types.ProductValue{types.NewUint8(0), types.NewString("job-a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := tx.GetRow(0, id)
+	if !ok {
+		t.Fatal("inserted row should be visible")
+	}
+	if got := row[0].AsUint8(); got != 1 {
+		t.Fatalf("uint8 autoincrement value = %d, want 1", got)
+	}
+	if _, err := Commit(cs, tx); err != nil {
+		t.Fatal(err)
+	}
+	tbl, _ := cs.Table(0)
+	if seq, has := tbl.SequenceValue(); !has || seq != 2 {
+		t.Fatalf("SequenceValue after commit = (%d, %v), want (2, true)", seq, has)
+	}
+}
+
 func TestTransactionInsertAutoIncrementPreservesExplicitValue(t *testing.T) {
 	cs, reg := buildAutoIncrementState(t)
 	tx := NewTransaction(cs, reg)
@@ -931,5 +979,29 @@ func TestApplyChangesetExhaustedRowIDFails(t *testing.T) {
 
 	if next := tbl.NextID(); next != ^types.RowID(0) {
 		t.Fatalf("NextID after failed replay = %d, want max RowID", next)
+	}
+}
+
+func TestApplyChangesetAutoIncrementUint8AdvancesSequence(t *testing.T) {
+	cs, _ := buildUint8AutoIncrementState(t)
+
+	err := ApplyChangeset(cs, &Changeset{
+		Tables: map[schema.TableID]*TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "jobs",
+				Inserts: []types.ProductValue{
+					{types.NewUint8(1), types.NewString("replay")},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tbl, _ := cs.Table(0)
+	if seq, has := tbl.SequenceValue(); !has || seq != 2 {
+		t.Fatalf("SequenceValue after replay = (%d, %v), want (2, true)", seq, has)
 	}
 }

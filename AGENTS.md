@@ -2,9 +2,7 @@
 
 Default startup reading:
 1. `RTK.md`
-2. `docs/RUNTIME-HARDENING-GAUNTLET.md` only when running the runtime hardening
-   test campaign
-3. Package docs, code, and narrow spec sections named by the user task or by
+2. Package docs, code, and narrow spec sections named by the user task or by
    the surface you are touching
 
 Do not read broad specs by default. Open them only when the active task says

@@ -295,6 +295,29 @@ func TestReadSnapshotRejectsSequenceBelowRows(t *testing.T) {
 	}
 }
 
+func TestReadSnapshotUint8AutoIncrementSequenceBounds(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoveryUint8AutoIncrementRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+	jobs, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("jobs table missing")
+	}
+	if err := jobs.InsertRow(jobs.AllocRowID(), types.ProductValue{types.NewUint8(1), types.NewString("seed")}); err != nil {
+		t.Fatal(err)
+	}
+	jobs.SetSequenceValue(2)
+	createSnapshotAt(t, NewSnapshotWriter(filepath.Join(root, "snapshots"), reg), committed, 1)
+
+	data, err := ReadSnapshot(filepath.Join(root, "snapshots", "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq := data.Sequences[0]; seq != 2 {
+		t.Fatalf("snapshot sequence = %d, want 2", seq)
+	}
+}
+
 func TestReadSnapshotRejectsBootstrapRows(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)
