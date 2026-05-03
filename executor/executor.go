@@ -232,6 +232,12 @@ func (e *Executor) Run(ctx context.Context) {
 				return
 			}
 			e.recordExecutorInboxDepth()
+			if e.shutdown.Load() {
+				e.rejectCommandOnShutdown(cmd)
+				e.recordExecutorCommand(cmd, "rejected")
+				e.rejectPendingCommandsOnShutdown()
+				return
+			}
 			start := time.Now()
 			result := e.dispatchSafely(cmd)
 			e.recordExecutorCommand(cmd, result)
