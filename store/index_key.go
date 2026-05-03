@@ -13,7 +13,7 @@ type IndexKey struct {
 
 // NewIndexKey constructs an IndexKey from parts.
 func NewIndexKey(parts ...types.Value) IndexKey {
-	return IndexKey{parts: parts}
+	return IndexKey{parts: append([]types.Value(nil), parts...)}
 }
 
 // Len returns the number of parts.

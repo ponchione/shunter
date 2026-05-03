@@ -81,6 +81,16 @@ func TestIndexKeyCompare(t *testing.T) {
 	}
 }
 
+func TestIndexKeyConstructorCopiesParts(t *testing.T) {
+	parts := []types.Value{types.NewString("a")}
+	key := NewIndexKey(parts...)
+	parts[0] = types.NewString("b")
+
+	if got := key.Part(0).AsString(); got != "a" {
+		t.Fatalf("IndexKey aliased constructor input: got %q, want a", got)
+	}
+}
+
 func TestIndexKeyMultiColumn(t *testing.T) {
 	a1 := NewIndexKey(types.NewString("a"), types.NewInt64(1))
 	a2 := NewIndexKey(types.NewString("a"), types.NewInt64(2))
