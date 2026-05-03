@@ -972,6 +972,24 @@ func buildRecoverySignedAutoIncrementRegistry(t *testing.T) schema.SchemaRegistr
 	return engine.Registry()
 }
 
+func buildRecoveryUint8AutoIncrementRegistry(t *testing.T) schema.SchemaRegistry {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "jobs",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint8, PrimaryKey: true, AutoIncrement: true},
+			{Name: "name", Type: schema.KindString},
+		},
+	})
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return engine.Registry()
+}
+
 func buildRecoveryCommittedState(t *testing.T, reg schema.SchemaRegistry) *store.CommittedState {
 	t.Helper()
 	committed := store.NewCommittedState()

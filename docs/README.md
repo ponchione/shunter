@@ -8,17 +8,13 @@ logs, or one-off planning prompts.
 Agent startup is intentionally narrow:
 
 1. `RTK.md`
-2. `docs/RUNTIME-HARDENING-GAUNTLET.md` only when running the runtime hardening
-   test campaign
-3. Only code, package docs, and narrow spec sections named by the task or by
+2. Only code, package docs, and narrow spec sections named by the task or by
    the surface being touched
 
 Do not read broad specs by default.
 
 ## Current Docs
 
-- `docs/RUNTIME-HARDENING-GAUNTLET.md` — test campaign for model-based,
-  fault-injected, fuzzed, and soak-tested runtime confidence.
 - `docs/PERFORMANCE-BENCHMARKS.md` — benchmark run instructions and current
   performance baselines for comparison across optimization work.
 - `docs/dependency-considerations.md` — adopted dependency policy, dependency

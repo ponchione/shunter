@@ -131,13 +131,46 @@ func (t *Transaction) setNextSequenceValue(tableID schema.TableID, next uint64) 
 }
 
 func isZeroAutoIncrementValue(v types.Value, kind schema.ValueKind) bool {
+	n, ok := autoIncrementValueAsUint64(v, kind)
+	return ok && n == 0
+}
+
+func autoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, bool) {
 	switch kind {
-	case schema.KindInt8, schema.KindInt16, schema.KindInt32, schema.KindInt64:
-		return v.AsInt64() == 0
-	case schema.KindUint8, schema.KindUint16, schema.KindUint32, schema.KindUint64:
-		return v.AsUint64() == 0
+	case schema.KindInt8:
+		n := int64(v.AsInt8())
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case schema.KindInt16:
+		n := int64(v.AsInt16())
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case schema.KindInt32:
+		n := int64(v.AsInt32())
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case schema.KindInt64:
+		n := v.AsInt64()
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case schema.KindUint8:
+		return uint64(v.AsUint8()), true
+	case schema.KindUint16:
+		return uint64(v.AsUint16()), true
+	case schema.KindUint32:
+		return uint64(v.AsUint32()), true
+	case schema.KindUint64:
+		return v.AsUint64(), true
 	default:
-		return false
+		return 0, false
 	}
 }
 
