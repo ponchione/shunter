@@ -135,12 +135,11 @@ func copyConstLabels(labels prometheus.Labels) (prometheus.Labels, error) {
 
 func selectRegistererAndGatherer(cfg Config) (prometheus.Registerer, prometheus.Gatherer, error) {
 	if cfg.Registerer == nil {
-		registry := prometheus.NewRegistry()
-		gatherer := cfg.Gatherer
-		if gatherer == nil {
-			gatherer = registry
+		if cfg.Gatherer != nil {
+			return nil, nil, fmt.Errorf("prometheus registerer is required when gatherer is supplied")
 		}
-		return registry, gatherer, nil
+		registry := prometheus.NewRegistry()
+		return registry, registry, nil
 	}
 	if cfg.Gatherer != nil {
 		return cfg.Registerer, cfg.Gatherer, nil

@@ -159,6 +159,13 @@ func TestNonNilRegistererWithoutUsableGathererIsRejected(t *testing.T) {
 	}
 }
 
+func TestGathererWithoutRegistererIsRejected(t *testing.T) {
+	adapter, err := New(Config{Gatherer: client.NewRegistry()})
+	if err == nil {
+		t.Fatalf("New() error = nil, want gatherer-only rejection with adapter %#v", adapter)
+	}
+}
+
 func TestRegisterFailureUnregistersPreviouslyRegisteredCollectors(t *testing.T) {
 	registerer := &failingRegisterer{failAfter: 3}
 
