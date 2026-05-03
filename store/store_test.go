@@ -162,6 +162,21 @@ func TestBTreeInsertSeek(t *testing.T) {
 	}
 }
 
+func TestBTreeSeekReturnsDetachedRowIDs(t *testing.T) {
+	bt := NewBTreeIndex()
+	k := NewIndexKey(types.NewUint64(1))
+	bt.Insert(k, 10)
+	bt.Insert(k, 20)
+
+	got := bt.Seek(k)
+	got[0] = 99
+
+	again := bt.Seek(k)
+	if !slices.Equal(again, []types.RowID{10, 20}) {
+		t.Fatalf("Seek result aliased index storage: got %v, want [10 20]", again)
+	}
+}
+
 func TestBTreeRemove(t *testing.T) {
 	bt := NewBTreeIndex()
 	k := NewIndexKey(types.NewUint64(1))

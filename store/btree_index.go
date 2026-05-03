@@ -157,7 +157,7 @@ func (b *BTreeIndex) Seek(key IndexKey) []types.RowID {
 	if !found {
 		return nil
 	}
-	return b.pages[pageIdx].entries[entryIdx].rowIDs
+	return append([]types.RowID(nil), b.pages[pageIdx].entries[entryIdx].rowIDs...)
 }
 
 // Len returns the total number of key->RowID mappings.
