@@ -19,6 +19,8 @@ Do not read broad specs by default.
   performance baselines for comparison across optimization work.
 - `docs/dependency-considerations.md` — adopted dependency policy, dependency
   candidates, and explicit dependency rejections.
+- `docs/future-features.md` — working list of Shunter-native feature tracks to
+  revisit as real applications put pressure on the runtime.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design
   decisions that code and tests still cite.
 
