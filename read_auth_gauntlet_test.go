@@ -199,6 +199,7 @@ func TestRuntimeGauntletReadAuthorizationAllowAllBypassesPolicyAndVisibility(t *
 
 func buildReadAuthGauntletRuntime(t *testing.T, cfg shunter.Config) *shunter.Runtime {
 	t.Helper()
+	cfg.EnableProtocol = true
 	mod := shunter.NewModule("read_auth_gauntlet").
 		SchemaVersion(1).
 		TableDef(readAuthMessagesTableDef(), schema.WithPublicRead()).

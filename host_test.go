@@ -254,7 +254,7 @@ func TestHostPreservesPerModuleContractsAndDetachedDescription(t *testing.T) {
 
 func buildHostTestRuntime(t *testing.T, name, dataDir string) *Runtime {
 	t.Helper()
-	rt, err := Build(NewModule(name).SchemaVersion(1).TableDef(messagesTableDef()), Config{DataDir: dataDir})
+	rt, err := Build(NewModule(name).SchemaVersion(1).TableDef(messagesTableDef()), Config{DataDir: dataDir, EnableProtocol: true})
 	if err != nil {
 		t.Fatalf("Build(%q) returned error: %v", name, err)
 	}

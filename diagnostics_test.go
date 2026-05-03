@@ -31,7 +31,8 @@ func TestRuntimeDiagnosticsMountedEndpointsAndProtocolRoute(t *testing.T) {
 		_, _ = w.Write([]byte("metrics\n"))
 	})
 	rt, err := Build(validChatModule(), Config{
-		DataDir: t.TempDir(),
+		DataDir:        t.TempDir(),
+		EnableProtocol: true,
 		Observability: ObservabilityConfig{
 			Diagnostics: DiagnosticsConfig{
 				MountHTTP:      true,

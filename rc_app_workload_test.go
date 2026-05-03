@@ -194,6 +194,7 @@ func buildRCExampleAppRuntime(t *testing.T, dataDir string) *shunter.Runtime {
 
 	rt, err := shunter.Build(mod, shunter.Config{
 		DataDir:        dataDir,
+		EnableProtocol: true,
 		AuthMode:       shunter.AuthModeStrict,
 		AuthSigningKey: []byte(rcExampleAppSigningKey),
 	})

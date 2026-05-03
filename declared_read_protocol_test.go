@@ -306,6 +306,7 @@ func declaredReadProtocolConfig(t *testing.T) Config {
 	t.Helper()
 	return Config{
 		DataDir:        t.TempDir(),
+		EnableProtocol: true,
 		AuthMode:       AuthModeStrict,
 		AuthSigningKey: []byte(declaredReadProtocolSigningKey),
 	}

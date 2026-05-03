@@ -81,13 +81,15 @@ func (r *Runtime) Start(ctx context.Context) error {
 		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
-	if _, _, err := buildAuthConfig(r.config); err != nil {
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
-		return err
-	}
-	if _, err := buildProtocolOptions(r.config.Protocol); err != nil {
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
-		return err
+	if r.buildConfig.EnableProtocol {
+		if _, _, err := buildAuthConfig(r.config); err != nil {
+			r.recordStartFailure(ctx, err, time.Since(startedAt))
+			return err
+		}
+		if _, err := buildProtocolOptions(r.config.Protocol); err != nil {
+			r.recordStartFailure(ctx, err, time.Since(startedAt))
+			return err
+		}
 	}
 
 	durabilityOptions := commitlog.DefaultCommitLogOptions()
@@ -169,25 +171,27 @@ func (r *Runtime) Start(ctx context.Context) error {
 	r.fanOutSender = fanOutSender
 	r.executor = exec
 	r.scheduler = scheduler
-	if err := r.ensureProtocolGraphLocked(); err != nil {
-		r.lifecycleCancel = nil
-		r.fanOutCancel = nil
-		r.durability = nil
-		r.subscriptions = nil
-		r.fanOutInbox = nil
-		r.fanOutWorker = nil
-		r.fanOutSender = nil
-		r.executor = nil
-		r.scheduler = nil
-		r.protocolConns = nil
-		r.protocolInbox = nil
-		r.protocolSender = nil
-		r.protocolServer = nil
-		r.mu.Unlock()
-		lifecycleCancel()
-		fanOutCancel()
-		r.recordStartFailure(ctx, err, time.Since(startedAt))
-		return err
+	if r.buildConfig.EnableProtocol {
+		if err := r.ensureProtocolGraphLocked(); err != nil {
+			r.lifecycleCancel = nil
+			r.fanOutCancel = nil
+			r.durability = nil
+			r.subscriptions = nil
+			r.fanOutInbox = nil
+			r.fanOutWorker = nil
+			r.fanOutSender = nil
+			r.executor = nil
+			r.scheduler = nil
+			r.protocolConns = nil
+			r.protocolInbox = nil
+			r.protocolSender = nil
+			r.protocolServer = nil
+			r.mu.Unlock()
+			lifecycleCancel()
+			fanOutCancel()
+			r.recordStartFailure(ctx, err, time.Since(startedAt))
+			return err
+		}
 	}
 	r.schedulerWG.Add(1)
 	r.fanOutWG.Add(1)

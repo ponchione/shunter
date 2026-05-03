@@ -130,7 +130,9 @@ func stringSliceContains(values []string, want string) bool {
 // call Start before serving traffic.
 func (r *Runtime) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/subscribe", r.handleSubscribe)
+	if r != nil && r.buildConfig.EnableProtocol {
+		mux.HandleFunc("/subscribe", r.handleSubscribe)
+	}
 	if r != nil && r.buildConfig.Observability.Diagnostics.MountHTTP {
 		mux.Handle("/", RuntimeDiagnosticsHandler(r))
 	}
@@ -138,6 +140,10 @@ func (r *Runtime) HTTPHandler() http.Handler {
 }
 
 func (r *Runtime) handleSubscribe(w http.ResponseWriter, req *http.Request) {
+	if r == nil || !r.buildConfig.EnableProtocol {
+		http.NotFound(w, req)
+		return
+	}
 	r.mu.Lock()
 	if r.stateName != RuntimeStateReady || !r.ready.Load() || r.protocolServer == nil {
 		r.mu.Unlock()
@@ -244,6 +250,9 @@ func (r *Runtime) serveStarted(ctx context.Context, ln net.Listener) error {
 }
 
 func (r *Runtime) ensureProtocolGraphLocked() error {
+	if !r.buildConfig.EnableProtocol {
+		return nil
+	}
 	if r.protocolServer != nil {
 		return nil
 	}

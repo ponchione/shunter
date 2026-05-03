@@ -4563,6 +4563,7 @@ func buildGauntletRuntime(t *testing.T, dataDir string) *shunter.Runtime {
 
 func buildGauntletRuntimeWithConfig(t *testing.T, cfg shunter.Config, start bool) *shunter.Runtime {
 	t.Helper()
+	cfg.EnableProtocol = true
 	mod := shunter.NewModule("gauntlet").
 		SchemaVersion(1).
 		TableDef(schema.TableDefinition{

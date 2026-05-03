@@ -214,7 +214,7 @@ func TestRuntimeListenAddrKeepsExplicitValue(t *testing.T) {
 }
 
 func TestRuntimeStartStrictAuthWithoutSigningKeyFails(t *testing.T) {
-	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), AuthMode: AuthModeStrict})
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true, AuthMode: AuthModeStrict})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
@@ -227,8 +227,25 @@ func TestRuntimeStartStrictAuthWithoutSigningKeyFails(t *testing.T) {
 	}
 }
 
+func TestRuntimeStartProtocolDisabledStrictAuthWithoutSigningKeySucceeds(t *testing.T) {
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), AuthMode: AuthModeStrict})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start with protocol disabled returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	if rt.protocolServer != nil || rt.protocolConns != nil || rt.protocolInbox != nil {
+		t.Fatal("protocol graph was initialized with EnableProtocol=false")
+	}
+}
+
 func TestHTTPHandlerReturnsServiceUnavailableBeforeStart(t *testing.T) {
-	rt := buildValidTestRuntime(t)
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/subscribe", nil)
 	rec := httptest.NewRecorder()
 
@@ -242,8 +259,30 @@ func TestHTTPHandlerReturnsServiceUnavailableBeforeStart(t *testing.T) {
 	}
 }
 
-func TestHTTPHandlerRoutesSubscribeAfterStart(t *testing.T) {
+func TestHTTPHandlerDoesNotRouteSubscribeWhenProtocolDisabled(t *testing.T) {
 	rt := buildValidTestRuntime(t)
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	req := httptest.NewRequest(http.MethodGet, "/subscribe", nil)
+	rec := httptest.NewRecorder()
+	rt.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for protocol-disabled runtime", rec.Code)
+	}
+	if rt.protocolServer != nil || rt.protocolConns != nil || rt.protocolInbox != nil {
+		t.Fatal("protocol graph was initialized with EnableProtocol=false")
+	}
+}
+
+func TestHTTPHandlerRoutesSubscribeAfterStart(t *testing.T) {
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
 	if err := rt.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -265,7 +304,10 @@ func TestHTTPHandlerRoutesSubscribeAfterStart(t *testing.T) {
 }
 
 func TestHTTPHandlerReturnsServiceUnavailableAfterClose(t *testing.T) {
-	rt := buildValidTestRuntime(t)
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
 	if err := rt.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -361,7 +403,10 @@ func TestListenAndServeAfterClosePreservesClosedError(t *testing.T) {
 }
 
 func TestRuntimeNetworkReplacesNoopFanOutSender(t *testing.T) {
-	rt := buildValidTestRuntime(t)
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
 	if err := rt.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -379,8 +424,27 @@ func TestRuntimeNetworkReplacesNoopFanOutSender(t *testing.T) {
 	}
 }
 
-func TestRuntimeCloseClearsProtocolGraphBeforeExecutorResources(t *testing.T) {
+func TestRuntimeProtocolDisabledKeepsNoopFanOutSender(t *testing.T) {
 	rt := buildValidTestRuntime(t)
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	sender, ok := rt.fanOutSender.(*swappableFanOutSender)
+	if !ok {
+		t.Fatalf("fanOutSender = %T, want *swappableFanOutSender", rt.fanOutSender)
+	}
+	if _, ok := sender.Target().(noopFanOutSender); !ok {
+		t.Fatalf("fan-out sender target = %T, want noop when protocol is disabled", sender.Target())
+	}
+}
+
+func TestRuntimeCloseClearsProtocolGraphBeforeExecutorResources(t *testing.T) {
+	rt, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
 	if err := rt.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
