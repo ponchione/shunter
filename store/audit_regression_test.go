@@ -264,8 +264,8 @@ func TestCommitAtomicityFailureLeavesCommittedStateUnchanged(t *testing.T) {
 	if err := tx.Delete(0, deletedID); err != nil {
 		t.Fatal(err)
 	}
-	// Bypass transaction-time validation so commit reaches delete application
-	// and then fails during insert on the second duplicate key.
+	// Bypass transaction-time validation so commit revalidation catches the
+	// duplicate key before mutating committed state.
 	tx.TxState().AddInsert(0, 999, mkRow(77, "first-duplicate"))
 	tx.TxState().AddInsert(0, 1000, mkRow(77, "second-duplicate"))
 
@@ -291,6 +291,42 @@ func TestCommitAtomicityFailureLeavesCommittedStateUnchanged(t *testing.T) {
 	}
 	if _, ok := tbl.GetRow(1000); ok {
 		t.Fatal("failed commit must not leave second staged insert behind")
+	}
+}
+
+func TestCommitDuplicateRowIDRevalidationLeavesCommittedStateUnchanged(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	keptID := tbl.AllocRowID()
+	deletedID := tbl.AllocRowID()
+	keptRow := mkRow(1, "kept")
+	deletedRow := mkRow(2, "to-delete")
+	if err := tbl.InsertRow(keptID, keptRow); err != nil {
+		t.Fatal(err)
+	}
+	if err := tbl.InsertRow(deletedID, deletedRow); err != nil {
+		t.Fatal(err)
+	}
+
+	tx := NewTransaction(cs, reg)
+	if err := tx.Delete(0, deletedID); err != nil {
+		t.Fatal(err)
+	}
+	tx.TxState().AddInsert(0, keptID, mkRow(3, "duplicate-row-id"))
+
+	_, err := Commit(cs, tx)
+	if !errors.Is(err, ErrDuplicateRowID) {
+		t.Fatalf("commit error = %v, want ErrDuplicateRowID", err)
+	}
+
+	if tbl.RowCount() != 2 {
+		t.Fatalf("row count after failed duplicate-row-id commit = %d, want 2", tbl.RowCount())
+	}
+	if row, ok := tbl.GetRow(keptID); !ok || !row.Equal(keptRow) {
+		t.Fatalf("kept row changed after failed duplicate-row-id commit: ok=%v row=%v", ok, row)
+	}
+	if row, ok := tbl.GetRow(deletedID); !ok || !row.Equal(deletedRow) {
+		t.Fatalf("deleted row missing after failed duplicate-row-id commit: ok=%v row=%v", ok, row)
 	}
 }
 

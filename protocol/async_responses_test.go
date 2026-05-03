@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -106,5 +107,70 @@ func TestWatchReducerResponseExitsOnRespChClose(t *testing.T) {
 	case frame := <-conn.OutboundCh:
 		t.Fatalf("unexpected outbound frame after respCh close: %x", frame)
 	default:
+	}
+}
+
+func TestConnOnlySenderBufferFullDisconnectsLifecycleConn(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.OutgoingBufferMessages = 1
+	opts.DisconnectTimeout = 500 * time.Millisecond
+	conn := testConnDirect(&opts)
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	mgr.Add(conn)
+	conn.bindDisconnect(inbox, mgr)
+
+	conn.OutboundCh <- []byte{0xff}
+	sender := connOnlySender{conn: conn}
+	err := sender.Send(conn.ID, SubscriptionError{Error: "overflow"})
+	if !errors.Is(err, ErrClientBufferFull) {
+		t.Fatalf("Send error = %v, want ErrClientBufferFull", err)
+	}
+
+	waitForConnClosed(t, conn, "connOnlySender overflow")
+	if got := mgr.Get(conn.ID); got != nil {
+		t.Fatalf("connection still registered after overflow disconnect: %p", got)
+	}
+	onDisconnect, onSubs, _ := inbox.disconnectSnapshot()
+	if onDisconnect != 1 || onSubs != 1 {
+		t.Fatalf("disconnect calls = (%d, %d), want (1, 1)", onDisconnect, onSubs)
+	}
+	if got := len(conn.OutboundCh); got != 1 {
+		t.Fatalf("overflow frame was enqueued; OutboundCh len = %d, want 1", got)
+	}
+}
+
+func TestSendErrorBufferFullDisconnectsLifecycleConn(t *testing.T) {
+	opts := DefaultProtocolOptions()
+	opts.OutgoingBufferMessages = 1
+	opts.DisconnectTimeout = 500 * time.Millisecond
+	conn := testConnDirect(&opts)
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	mgr.Add(conn)
+	conn.bindDisconnect(inbox, mgr)
+
+	conn.OutboundCh <- []byte{0xff}
+	sendError(conn, SubscriptionError{Error: "overflow"})
+
+	waitForConnClosed(t, conn, "sendError overflow")
+	if got := mgr.Get(conn.ID); got != nil {
+		t.Fatalf("connection still registered after sendError overflow disconnect: %p", got)
+	}
+	onDisconnect, onSubs, _ := inbox.disconnectSnapshot()
+	if onDisconnect != 1 || onSubs != 1 {
+		t.Fatalf("disconnect calls = (%d, %d), want (1, 1)", onDisconnect, onSubs)
+	}
+	if got := len(conn.OutboundCh); got != 1 {
+		t.Fatalf("overflow error frame was enqueued; OutboundCh len = %d, want 1", got)
+	}
+}
+
+func waitForConnClosed(t *testing.T, conn *Conn, label string) {
+	t.Helper()
+	select {
+	case <-conn.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s: connection did not close", label)
 	}
 }

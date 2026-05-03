@@ -1,11 +1,8 @@
 package protocol
 
 import (
-	"context"
 	"errors"
 	"fmt"
-
-	"github.com/coder/websocket"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -107,22 +104,7 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 		return nil
 	default:
 		logProtocolBackpressure(conn.Observer, "outbound", "buffer_full")
-		// contract: the overflow-driven teardown used to spawn
-		// `go conn.Disconnect(context.Background(), ...)`. With a
-		// Background ctx the detached goroutine was unbounded if
-		// inbox.DisconnectClientSubscriptions or inbox.OnDisconnect
-		// hung — executor crash, dispatch deadlock, inbox-drain stall.
-		// The bounded ctx (opts.DisconnectTimeout, default 5s) caps
-		// the hang; after the timeout the inbox calls return
-		// ctx.Err() and Disconnect proceeds to mgr.Remove +
-		// close(c.closed) so the *Conn and its transitive state
-		// become collectible. Pin test:
-		// TestEnqueueOnConnOverflowDisconnectBoundsOnInboxHang.
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), conn.opts.DisconnectTimeout)
-			defer cancel()
-			conn.Disconnect(ctx, websocket.StatusPolicyViolation, "send buffer full", s.inbox, s.mgr)
-		}()
+		conn.startOutboundOverflowDisconnect(s.inbox, s.mgr)
 		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
 	}
 }

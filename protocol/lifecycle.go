@@ -202,6 +202,7 @@ type CallReducerRequest struct {
 // sequence. The caller (default Upgraded handler) either returns to
 // let the hijacked WebSocket persist or spawns those goroutines.
 func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnManager) error {
+	c.bindDisconnect(inbox, mgr)
 	if err := mgr.reserve(c); err != nil {
 		_ = c.ws.Close(websocket.StatusPolicyViolation, "connection_id already in use")
 		return err

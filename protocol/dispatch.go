@@ -22,20 +22,15 @@ type MessageHandlers struct {
 }
 
 // sendError encodes a server message, wraps it in the connection's
-// compression envelope, and pushes it to the outbound queue. If encoding
-// fails or the queue is full it logs and drops -- the caller is already
-// in an error path and cannot retry.
+// compression envelope, and pushes it to the outbound queue. On outbound
+// overflow it uses the same lifecycle-bound disconnect policy as the other
+// local response paths.
 func sendError(conn *Conn, msg any) {
-	frame, err := EncodeServerMessage(msg)
-	if err != nil {
+	if err := (connOnlySender{conn: conn}).Send(conn.ID, msg); err != nil {
+		if errors.Is(err, ErrClientBufferFull) || errors.Is(err, ErrConnNotFound) {
+			return
+		}
 		logProtocolError(conn.Observer, "unknown", "encode_failed", err)
-		return
-	}
-	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, CompressionNone)
-	select {
-	case conn.OutboundCh <- wrapped:
-	default:
-		logProtocolBackpressure(conn.Observer, "outbound", "buffer_full")
 	}
 }
 

@@ -53,6 +53,10 @@ type Conn struct {
 	closeOnce sync.Once
 	closed    chan struct{}
 
+	disconnectStarted atomic.Bool
+	disconnectInbox   ExecutorInbox
+	disconnectMgr     *ConnManager
+
 	// lastActivity is the unix-nanos timestamp of the most recent
 	// inbound signal observed on this connection: a Pong reply to
 	// the keep-alive Ping (Story 3.5) or any application-level frame
@@ -89,6 +93,47 @@ func NewConn(
 	}
 	c.MarkActivity()
 	return c
+}
+
+func (c *Conn) bindDisconnect(inbox ExecutorInbox, mgr *ConnManager) {
+	c.disconnectInbox = inbox
+	c.disconnectMgr = mgr
+}
+
+func (c *Conn) startOutboundOverflowDisconnect(inbox ExecutorInbox, mgr *ConnManager) bool {
+	if c == nil {
+		return false
+	}
+	if inbox == nil {
+		inbox = c.disconnectInbox
+	}
+	if mgr == nil {
+		mgr = c.disconnectMgr
+	}
+	if inbox == nil || mgr == nil {
+		return false
+	}
+	select {
+	case <-c.closed:
+		return true
+	default:
+	}
+	if !c.disconnectStarted.CompareAndSwap(false, true) {
+		return true
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), c.disconnectTimeout())
+		defer cancel()
+		c.Disconnect(ctx, websocket.StatusPolicyViolation, "send buffer full", inbox, mgr)
+	}()
+	return true
+}
+
+func (c *Conn) disconnectTimeout() time.Duration {
+	if c != nil && c.opts != nil && c.opts.DisconnectTimeout > 0 {
+		return c.opts.DisconnectTimeout
+	}
+	return DefaultProtocolOptions().DisconnectTimeout
 }
 
 // MarkActivity records that an inbound signal was observed on this

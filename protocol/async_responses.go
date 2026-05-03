@@ -37,6 +37,7 @@ func (s connOnlySender) Send(connID types.ConnectionID, msg any) error {
 		return nil
 	default:
 		logProtocolBackpressure(s.conn.Observer, "outbound", "buffer_full")
+		s.conn.startOutboundOverflowDisconnect(nil, nil)
 		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
 	}
 }

@@ -104,7 +104,10 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
-		for _, row := range inserts {
+		for rowID, row := range inserts {
+			if err := revalidateInsertRowID(tableID, table, rowID, txState); err != nil {
+				return err
+			}
 			if err := revalidateInsertAgainstCommitted(tableID, table, row, txState); err != nil {
 				return err
 			}
@@ -112,6 +115,16 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func revalidateInsertRowID(tableID schema.TableID, table *Table, rowID types.RowID, txState *TxState) error {
+	if txState.IsDeleted(tableID, rowID) {
+		return nil
+	}
+	if _, exists := table.GetRow(rowID); exists {
+		return fmt.Errorf("%w: %d", ErrDuplicateRowID, rowID)
 	}
 	return nil
 }

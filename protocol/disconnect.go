@@ -32,6 +32,7 @@ import (
 // DisconnectClientSubscriptions and OnDisconnect are dispatched with
 // the caller's ctx so engine shutdown can bound the teardown window.
 func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason string, inbox ExecutorInbox, mgr *ConnManager) {
+	c.disconnectStarted.Store(true)
 	c.closeOnce.Do(func() {
 		if err := inbox.DisconnectClientSubscriptions(ctx, c.ID); err != nil {
 			logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
