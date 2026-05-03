@@ -285,6 +285,55 @@ func TestHandleSubscribeSingle_QualifiedColumnsSameTable(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_UUIDLiteralBuildsUUIDPredicate(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("entities", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUUID},
+		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
+	)
+	const uuidText = "00112233-4455-6677-8899-aabbccddeeff"
+	want, err := types.ParseUUID(uuidText)
+	if err != nil {
+		t.Fatalf("ParseUUID(%q): %v", uuidText, err)
+	}
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   12,
+		QueryID:     9,
+		QueryString: "SELECT * FROM entities WHERE id = '" + uuidText + "'",
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Table != 1 || colEq.Column != 0 {
+		t.Fatalf("predicate target = table %d col %d, want table 1 col 0", colEq.Table, colEq.Column)
+	}
+	if colEq.Value.Kind() != schema.KindUUID {
+		t.Fatalf("predicate kind = %v, want UUID", colEq.Value.Kind())
+	}
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("predicate value = %v, want %v", colEq.Value, want)
+	}
+}
+
 func TestHandleSubscribeSingle_MixedCaseTableRejectedByExactSQLPolicy(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{

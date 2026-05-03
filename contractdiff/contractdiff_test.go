@@ -66,6 +66,31 @@ func TestContractDiffDetectsBreakingSurfaceChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceView, "live")
 }
 
+func TestContractDiffReportsUUIDColumnType(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{
+		Name: "external_id",
+		Type: "uuid",
+	})
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceColumn, "messages.external_id")
+	if got := report.Text(); !strings.Contains(got, "additive column messages.external_id: column added with type uuid") {
+		t.Fatalf("Text() = %q, want additive uuid column detail", got)
+	}
+
+	old = contractFixture()
+	old.Schema.Tables[0].Columns[0].Type = "uuid"
+	current = contractFixture()
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceColumn, "messages.id")
+	if got := report.Text(); !strings.Contains(got, "breaking column messages.id: column type changed from uuid to uint64") {
+		t.Fatalf("Text() = %q, want breaking uuid column detail", got)
+	}
+}
+
 func TestContractDiffReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()
