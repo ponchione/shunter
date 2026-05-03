@@ -114,7 +114,12 @@ func validateStructure(b *Builder) []error {
 				errs = append(errs, fmt.Errorf("table %q index %q: must reference at least one column", t.Name, idx.Name))
 				continue
 			}
+			idxColNames := make(map[string]bool, len(idx.Columns))
 			for _, cn := range idx.Columns {
+				if idxColNames[cn] {
+					errs = append(errs, fmt.Errorf("table %q index %q: duplicate index column %q", t.Name, idx.Name, cn))
+				}
+				idxColNames[cn] = true
 				if !colNames[cn] {
 					errs = append(errs, fmt.Errorf("table %q index %q: %w: %q", t.Name, idx.Name, ErrColumnNotFound, cn))
 				}

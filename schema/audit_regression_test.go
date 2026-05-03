@@ -179,6 +179,23 @@ func TestBuildRejectsIndexWithMissingColumn(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsIndexWithDuplicateColumn(t *testing.T) {
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(TableDefinition{
+		Name: "players",
+		Columns: []ColumnDefinition{
+			{Name: "id", Type: KindUint64, PrimaryKey: true},
+			{Name: "name", Type: KindString},
+		},
+		Indexes: []IndexDefinition{{Name: "by_name_twice", Columns: []string{"name", "name"}}},
+	})
+	_, err := b.Build(EngineOptions{})
+	if err == nil || !strings.Contains(err.Error(), `duplicate index column "name"`) {
+		t.Fatalf("expected duplicate index column validation error, got %v", err)
+	}
+}
+
 func TestBuildRejectsInvalidValueKind(t *testing.T) {
 	b := NewBuilder()
 	b.SchemaVersion(1)
