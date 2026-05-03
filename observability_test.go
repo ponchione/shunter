@@ -212,6 +212,8 @@ func TestObservabilityRedactionExamples(t *testing.T) {
 	}{
 		{in: "authorization=Bearer abc.def", want: "authorization=[redacted]"},
 		{in: "failed: Bearer abc.def", want: "failed: Bearer [redacted]"},
+		{in: "failed: bearer abc.def", want: "failed: bearer [redacted]"},
+		{in: "failed: BEARER abc.def", want: "failed: BEARER [redacted]"},
 		{in: `{"token":"abc","row":{"id":1}}`, want: `{"token":"[redacted]","row":"[redacted]"}`},
 		{in: "sql=select * from users where token='abc'; detail", want: "sql=[redacted]; detail"},
 		{in: "signing_key: secret", want: "signing_key: [redacted]"},

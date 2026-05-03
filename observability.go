@@ -1213,7 +1213,7 @@ func matchPlainKeyValue(s string, i int) (int, int, bool) {
 
 func matchBearerToken(s string, i int) (int, int, bool) {
 	const prefix = "Bearer "
-	if !strings.HasPrefix(s[i:], prefix) {
+	if !hasASCIIFoldPrefix(s[i:], prefix) {
 		return 0, 0, false
 	}
 	start := i + len(prefix)
