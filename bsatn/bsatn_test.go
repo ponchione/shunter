@@ -149,6 +149,34 @@ func TestAppendProductValueMatchesWriterEncoding(t *testing.T) {
 	}
 }
 
+func TestEncodeValueDetectsShortWrites(t *testing.T) {
+	cases := []types.Value{
+		types.NewUint64(42),
+		types.NewString("alice"),
+		types.NewBytes([]byte{1, 2, 3}),
+		types.NewArrayString([]string{"red", "blue"}),
+		types.NewUUID([16]byte{1, 2, 3}),
+	}
+	for _, v := range cases {
+		w := shortWriter{max: 1}
+		err := EncodeValue(&w, v)
+		if !errors.Is(err, io.ErrShortWrite) {
+			t.Fatalf("EncodeValue(%s) error = %v, want io.ErrShortWrite", v.Kind(), err)
+		}
+	}
+}
+
+type shortWriter struct {
+	max int
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	if len(p) <= w.max {
+		return len(p), nil
+	}
+	return w.max, nil
+}
+
 func TestDecodeProductValueFromBytesTrailing(t *testing.T) {
 	ts := &schema.TableSchema{
 		Name: "players",

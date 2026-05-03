@@ -135,7 +135,7 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 // EncodeValue writes a Value in BSATN format: tag byte + LE payload.
 func EncodeValue(w io.Writer, v types.Value) error {
 	tag := byte(v.Kind())
-	if _, err := w.Write([]byte{tag}); err != nil {
+	if err := writeAll(w, []byte{tag}); err != nil {
 		return err
 	}
 	var buf [8]byte
@@ -144,78 +144,63 @@ func EncodeValue(w io.Writer, v types.Value) error {
 		if v.AsBool() {
 			buf[0] = 1
 		}
-		_, err := w.Write(buf[:1])
-		return err
+		return writeAll(w, buf[:1])
 	case types.KindInt8:
 		buf[0] = byte(v.AsInt8())
-		_, err := w.Write(buf[:1])
-		return err
+		return writeAll(w, buf[:1])
 	case types.KindUint8:
 		buf[0] = v.AsUint8()
-		_, err := w.Write(buf[:1])
-		return err
+		return writeAll(w, buf[:1])
 	case types.KindInt16:
 		binary.LittleEndian.PutUint16(buf[:2], uint16(v.AsInt16()))
-		_, err := w.Write(buf[:2])
-		return err
+		return writeAll(w, buf[:2])
 	case types.KindUint16:
 		binary.LittleEndian.PutUint16(buf[:2], v.AsUint16())
-		_, err := w.Write(buf[:2])
-		return err
+		return writeAll(w, buf[:2])
 	case types.KindInt32:
 		binary.LittleEndian.PutUint32(buf[:4], uint32(v.AsInt32()))
-		_, err := w.Write(buf[:4])
-		return err
+		return writeAll(w, buf[:4])
 	case types.KindUint32:
 		binary.LittleEndian.PutUint32(buf[:4], v.AsUint32())
-		_, err := w.Write(buf[:4])
-		return err
+		return writeAll(w, buf[:4])
 	case types.KindInt64:
 		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsInt64()))
-		_, err := w.Write(buf[:8])
-		return err
+		return writeAll(w, buf[:8])
 	case types.KindUint64:
 		binary.LittleEndian.PutUint64(buf[:8], v.AsUint64())
-		_, err := w.Write(buf[:8])
-		return err
+		return writeAll(w, buf[:8])
 	case types.KindFloat32:
 		binary.LittleEndian.PutUint32(buf[:4], math.Float32bits(v.AsFloat32()))
-		_, err := w.Write(buf[:4])
-		return err
+		return writeAll(w, buf[:4])
 	case types.KindFloat64:
 		binary.LittleEndian.PutUint64(buf[:8], math.Float64bits(v.AsFloat64()))
-		_, err := w.Write(buf[:8])
-		return err
+		return writeAll(w, buf[:8])
 	case types.KindString:
 		s := v.AsString()
 		binary.LittleEndian.PutUint32(buf[:4], uint32(len(s)))
-		if _, err := w.Write(buf[:4]); err != nil {
+		if err := writeAll(w, buf[:4]); err != nil {
 			return err
 		}
-		_, err := io.WriteString(w, s)
-		return err
+		return writeStringAll(w, s)
 	case types.KindBytes:
 		b := v.BytesView()
 		binary.LittleEndian.PutUint32(buf[:4], uint32(len(b)))
-		if _, err := w.Write(buf[:4]); err != nil {
+		if err := writeAll(w, buf[:4]); err != nil {
 			return err
 		}
-		_, err := w.Write(b)
-		return err
+		return writeAll(w, b)
 	case types.KindInt128:
 		hi, lo := v.AsInt128()
 		var wide [16]byte
 		binary.LittleEndian.PutUint64(wide[0:8], lo)
 		binary.LittleEndian.PutUint64(wide[8:16], uint64(hi))
-		_, err := w.Write(wide[:])
-		return err
+		return writeAll(w, wide[:])
 	case types.KindUint128:
 		hi, lo := v.AsUint128()
 		var wide [16]byte
 		binary.LittleEndian.PutUint64(wide[0:8], lo)
 		binary.LittleEndian.PutUint64(wide[8:16], hi)
-		_, err := w.Write(wide[:])
-		return err
+		return writeAll(w, wide[:])
 	case types.KindInt256:
 		w0, w1, w2, w3 := v.AsInt256()
 		var wide [32]byte
@@ -223,8 +208,7 @@ func EncodeValue(w io.Writer, v types.Value) error {
 		binary.LittleEndian.PutUint64(wide[8:16], w2)
 		binary.LittleEndian.PutUint64(wide[16:24], w1)
 		binary.LittleEndian.PutUint64(wide[24:32], uint64(w0))
-		_, err := w.Write(wide[:])
-		return err
+		return writeAll(w, wide[:])
 	case types.KindUint256:
 		w0, w1, w2, w3 := v.AsUint256()
 		var wide [32]byte
@@ -232,35 +216,60 @@ func EncodeValue(w io.Writer, v types.Value) error {
 		binary.LittleEndian.PutUint64(wide[8:16], w2)
 		binary.LittleEndian.PutUint64(wide[16:24], w1)
 		binary.LittleEndian.PutUint64(wide[24:32], w0)
-		_, err := w.Write(wide[:])
-		return err
+		return writeAll(w, wide[:])
 	case types.KindTimestamp:
 		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsTimestamp()))
-		_, err := w.Write(buf[:8])
-		return err
+		return writeAll(w, buf[:8])
 	case types.KindArrayString:
 		xs := v.ArrayStringView()
 		binary.LittleEndian.PutUint32(buf[:4], uint32(len(xs)))
-		if _, err := w.Write(buf[:4]); err != nil {
+		if err := writeAll(w, buf[:4]); err != nil {
 			return err
 		}
 		for _, s := range xs {
 			binary.LittleEndian.PutUint32(buf[:4], uint32(len(s)))
-			if _, err := w.Write(buf[:4]); err != nil {
+			if err := writeAll(w, buf[:4]); err != nil {
 				return err
 			}
-			if _, err := io.WriteString(w, s); err != nil {
+			if err := writeStringAll(w, s); err != nil {
 				return err
 			}
 		}
 		return nil
 	case types.KindUUID:
 		u := v.AsUUID()
-		_, err := w.Write(u[:])
-		return err
+		return writeAll(w, u[:])
 	default:
 		return &UnknownValueTagError{Tag: tag}
 	}
+}
+
+func writeAll(w io.Writer, p []byte) error {
+	if len(p) == 0 {
+		return nil
+	}
+	n, err := w.Write(p)
+	if err != nil {
+		return err
+	}
+	if n != len(p) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func writeStringAll(w io.Writer, s string) error {
+	if len(s) == 0 {
+		return nil
+	}
+	n, err := io.WriteString(w, s)
+	if err != nil {
+		return err
+	}
+	if n != len(s) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // EncodedValueSize returns the encoded size of a Value.
