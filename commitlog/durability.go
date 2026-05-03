@@ -379,29 +379,31 @@ func (dw *DurabilityWorker) Close() (uint64, error) {
 	dw.closeOnce.Do(func() { close(dw.ch) })
 	<-dw.done
 
+	var closeErr error
 	if dw.seg != nil {
 		dw.stateMu.Lock()
 		fatal := dw.fatalErr
 		dw.stateMu.Unlock()
 		if fatal != nil {
-			_ = dw.seg.file.Close()
+			closeErr = errors.Join(closeErr, dw.seg.file.Close())
 			if dw.idx != nil {
-				_ = dw.idx.Close()
+				closeErr = errors.Join(closeErr, dw.idx.Close())
 				dw.idx = nil
 			}
 		} else {
-			_ = dw.seg.Close()
+			closeErr = errors.Join(closeErr, dw.seg.Close())
 			if dw.idx != nil {
-				_ = dw.idx.Sync()
-				_ = dw.idx.Close()
+				closeErr = errors.Join(closeErr, dw.idx.Sync())
+				closeErr = errors.Join(closeErr, dw.idx.Close())
 				dw.idx = nil
 			}
 		}
+		dw.seg = nil
 	}
 
 	dw.stateMu.Lock()
 	defer dw.stateMu.Unlock()
-	return dw.durable.Load(), dw.fatalErr
+	return dw.durable.Load(), errors.Join(dw.fatalErr, closeErr)
 }
 
 func (dw *DurabilityWorker) run() {
@@ -449,7 +451,7 @@ func (dw *DurabilityWorker) signalClose() {
 
 func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 	for _, item := range batch {
-		payload, err := EncodeChangeset(item.changeset)
+		payload, err := encodeChangesetWithLimits(item.changeset, dw.opts.MaxRowBytes, dw.opts.MaxRecordPayloadBytes)
 		if err != nil {
 			recordDurabilityFailed(dw.observer, err, "write_failed", item.txID)
 			traceDurabilityBatch(dw.observer, item.txID, "error", err)

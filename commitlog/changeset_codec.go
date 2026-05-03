@@ -3,6 +3,7 @@ package commitlog
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/ponchione/shunter/bsatn"
@@ -15,6 +16,11 @@ const changesetVersion byte = 1
 
 // EncodeChangeset serializes a Changeset to bytes.
 func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
+	opts := DefaultCommitLogOptions()
+	return encodeChangesetWithLimits(cs, opts.MaxRowBytes, opts.MaxRecordPayloadBytes)
+}
+
+func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecordPayloadBytes uint32) ([]byte, error) {
 	// Sort table IDs for deterministic output.
 	tableIDs := make([]schema.TableID, 0, len(cs.Tables))
 	for id := range cs.Tables {
@@ -22,14 +28,28 @@ func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
 	}
 	slices.Sort(tableIDs)
 
-	size := 1 + 4
+	size := uint64(1 + 4)
 	for _, id := range tableIDs {
 		tc := cs.Tables[id]
 		size += 4
-		size += encodedChangesetRowsSize(tc.Inserts)
-		size += encodedChangesetRowsSize(tc.Deletes)
+		insertSize, err := encodedChangesetRowsSize(tc.Inserts, maxRowBytes)
+		if err != nil {
+			return nil, err
+		}
+		deleteSize, err := encodedChangesetRowsSize(tc.Deletes, maxRowBytes)
+		if err != nil {
+			return nil, err
+		}
+		size += insertSize + deleteSize
+		if err := validateRecordPayloadLen(size, maxRecordPayloadBytes); err != nil {
+			return nil, err
+		}
 	}
-	out := make([]byte, 0, size)
+	maxAlloc := uint64(int(^uint(0) >> 1))
+	if size > maxAlloc {
+		return nil, fmt.Errorf("%w: changeset payload %d exceeds max allocation %d", ErrTraversal, size, maxAlloc)
+	}
+	out := make([]byte, 0, int(size))
 	out = append(out, changesetVersion)
 	out = appendUint32LE(out, uint32(len(tableIDs)))
 
@@ -39,14 +59,20 @@ func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
 
 		// Inserts.
 		var err error
-		out, err = appendChangesetRows(out, tc.Inserts)
+		out, err = appendChangesetRows(out, tc.Inserts, maxRowBytes)
 		if err != nil {
+			return nil, err
+		}
+		if err := validateRecordPayloadLen(uint64(len(out)), maxRecordPayloadBytes); err != nil {
 			return nil, err
 		}
 
 		// Deletes.
-		out, err = appendChangesetRows(out, tc.Deletes)
+		out, err = appendChangesetRows(out, tc.Deletes, maxRowBytes)
 		if err != nil {
+			return nil, err
+		}
+		if err := validateRecordPayloadLen(uint64(len(out)), maxRecordPayloadBytes); err != nil {
 			return nil, err
 		}
 	}
@@ -54,18 +80,25 @@ func EncodeChangeset(cs *store.Changeset) ([]byte, error) {
 	return out, nil
 }
 
-func encodedChangesetRowsSize(rows []types.ProductValue) int {
-	size := 4
+func encodedChangesetRowsSize(rows []types.ProductValue, maxRowBytes uint32) (uint64, error) {
+	size := uint64(4)
 	for _, row := range rows {
-		size += 4 + bsatn.EncodedProductValueSize(row)
+		rowLen := bsatn.EncodedProductValueSize(row)
+		if err := validateRowPayloadLen(rowLen, maxRowBytes); err != nil {
+			return 0, err
+		}
+		size += 4 + uint64(rowLen)
 	}
-	return size
+	return size, nil
 }
 
-func appendChangesetRows(out []byte, rows []types.ProductValue) ([]byte, error) {
+func appendChangesetRows(out []byte, rows []types.ProductValue, maxRowBytes uint32) ([]byte, error) {
 	out = appendUint32LE(out, uint32(len(rows)))
 	for _, row := range rows {
 		rowLen := bsatn.EncodedProductValueSize(row)
+		if err := validateRowPayloadLen(rowLen, maxRowBytes); err != nil {
+			return out, err
+		}
 		out = appendUint32LE(out, uint32(rowLen))
 		before := len(out)
 		var err error
@@ -78,6 +111,29 @@ func appendChangesetRows(out []byte, rows []types.ProductValue) ([]byte, error) 
 		}
 	}
 	return out, nil
+}
+
+func validateRowPayloadLen(rowLen int, maxRowBytes uint32) error {
+	if rowLen < 0 {
+		return fmt.Errorf("%w: negative encoded row size %d", ErrTraversal, rowLen)
+	}
+	if uint64(rowLen) > math.MaxUint32 {
+		return fmt.Errorf("%w: row payload %d exceeds uint32 length", ErrTraversal, rowLen)
+	}
+	if maxRowBytes > 0 && uint64(rowLen) > uint64(maxRowBytes) {
+		return &RowTooLargeError{Size: uint32(rowLen), Max: maxRowBytes}
+	}
+	return nil
+}
+
+func validateRecordPayloadLen(payloadLen uint64, maxRecordPayloadBytes uint32) error {
+	if payloadLen > math.MaxUint32 {
+		return fmt.Errorf("%w: record payload %d exceeds uint32 length", ErrTraversal, payloadLen)
+	}
+	if maxRecordPayloadBytes > 0 && payloadLen > uint64(maxRecordPayloadBytes) {
+		return &RecordTooLargeError{Size: uint32(payloadLen), Max: maxRecordPayloadBytes}
+	}
+	return nil
 }
 
 func appendUint32LE(out []byte, v uint32) []byte {

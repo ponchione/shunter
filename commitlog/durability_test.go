@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -39,6 +40,135 @@ func TestNewDurabilityWorkerRejectsNegativeChannelCapacity(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "channel capacity must be non-negative") {
 		t.Fatalf("error = %v, want channel capacity validation", err)
+	}
+}
+
+func TestDurabilityWorkerRejectsRowsLargerThanRecoveryLimitBeforeAppend(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.MaxRowBytes = 16
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(1, &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts: []types.ProductValue{
+					{types.NewUint64(1), types.NewString(strings.Repeat("x", int(opts.MaxRowBytes)+1))},
+				},
+			},
+		},
+	})
+
+	finalTx, err := dw.Close()
+	if finalTx != 0 {
+		t.Fatalf("final durable tx = %d, want 0", finalTx)
+	}
+	var rowErr *RowTooLargeError
+	if !errors.As(err, &rowErr) {
+		t.Fatalf("Close error = %v, want RowTooLargeError", err)
+	}
+	if rowErr.Max != opts.MaxRowBytes {
+		t.Fatalf("row max = %d, want %d", rowErr.Max, opts.MaxRowBytes)
+	}
+	info, statErr := os.Stat(filepath.Join(dir, SegmentFileName(1)))
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if info.Size() > SegmentHeaderSize {
+		t.Fatalf("segment size after rejected row = %d, want no appended record beyond header %d", info.Size(), SegmentHeaderSize)
+	}
+}
+
+func TestDurabilityWorkerRejectsRecordPayloadLargerThanRecoveryLimitBeforeAppend(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.MaxRecordPayloadBytes = 32
+	opts.MaxRowBytes = 1024
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(1, &store.Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*store.TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "players",
+				Inserts: []types.ProductValue{
+					{types.NewUint64(1), types.NewString("payload-a")},
+					{types.NewUint64(2), types.NewString("payload-b")},
+					{types.NewUint64(3), types.NewString("payload-c")},
+				},
+			},
+		},
+	})
+
+	finalTx, err := dw.Close()
+	if finalTx != 0 {
+		t.Fatalf("final durable tx = %d, want 0", finalTx)
+	}
+	var recordErr *RecordTooLargeError
+	if !errors.As(err, &recordErr) {
+		t.Fatalf("Close error = %v, want RecordTooLargeError", err)
+	}
+	if recordErr.Max != opts.MaxRecordPayloadBytes {
+		t.Fatalf("record max = %d, want %d", recordErr.Max, opts.MaxRecordPayloadBytes)
+	}
+	info, statErr := os.Stat(filepath.Join(dir, SegmentFileName(1)))
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if info.Size() > SegmentHeaderSize {
+		t.Fatalf("segment size after rejected payload = %d, want no appended record beyond header %d", info.Size(), SegmentHeaderSize)
+	}
+}
+
+func TestDurabilityWorkerCloseReturnsFinalSegmentCloseError(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultCommitLogOptions()
+	opts.ChannelCapacity = 1
+	opts.DrainBatchSize = 1
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+	dw, err := NewDurabilityWorker(dir, 1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := dw.WaitUntilDurable(1)
+	dw.EnqueueCommitted(1, makeDurabilityTestChangeset(1))
+	select {
+	case txID := <-wait:
+		if txID != 1 {
+			t.Fatalf("waiter tx = %d, want 1", txID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for durable tx 1")
+	}
+	if err := dw.seg.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	finalTx, err := dw.Close()
+	if finalTx != 1 {
+		t.Fatalf("final durable tx = %d, want 1", finalTx)
+	}
+	if err == nil {
+		t.Fatal("Close error = nil, want final segment close/sync error")
 	}
 }
 
