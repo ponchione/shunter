@@ -13,37 +13,74 @@ func ApplyChangeset(cs *CommittedState, changeset *Changeset) error {
 	cs.Lock()
 	defer cs.Unlock()
 
+	staged := make(map[schema.TableID]*Table, len(changeset.Tables))
 	for tableID, tc := range changeset.Tables {
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
-
-		for _, row := range tc.Deletes {
-			rowID, ok := findReplayDeleteRowID(table, row)
-			if !ok {
-				return fmt.Errorf("%w: replay delete row not found in table %q", ErrRowNotFound, table.schema.Name)
-			}
-			if _, ok := table.DeleteRow(rowID); !ok {
-				return fmt.Errorf("%w: replay delete row not found in table %q", ErrRowNotFound, table.schema.Name)
-			}
+		stagedTable, err := cloneReplayTable(table)
+		if err != nil {
+			return err
 		}
+		if err := applyChangesetToTable(stagedTable, tc); err != nil {
+			return err
+		}
+		staged[tableID] = stagedTable
+	}
 
-		for _, row := range tc.Inserts {
-			if err := ValidateRow(table.schema, row); err != nil {
-				return err
-			}
-			if err := checkRowIDAvailable(table); err != nil {
-				return err
-			}
-			advanceReplaySequenceForInsert(table, row)
-			freshID, err := allocRowIDForInsert(table)
-			if err != nil {
-				return err
-			}
-			if err := table.InsertRow(freshID, row); err != nil {
-				return err
-			}
+	for tableID, stagedTable := range staged {
+		table, ok := cs.tableLocked(tableID)
+		if !ok {
+			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
+		}
+		*table = *stagedTable
+	}
+	return nil
+}
+
+func cloneReplayTable(table *Table) (*Table, error) {
+	clone := NewTable(table.schema)
+	for rowID, row := range table.rows {
+		if err := clone.InsertRow(rowID, row); err != nil {
+			return nil, fmt.Errorf("clone replay table %q: %w", table.schema.Name, err)
+		}
+	}
+	clone.SetNextID(table.NextID())
+	if seq, ok := table.SequenceValue(); ok {
+		clone.SetSequenceValue(seq)
+	}
+	return clone, nil
+}
+
+func applyChangesetToTable(table *Table, tc *TableChangeset) error {
+	if tc == nil {
+		return nil
+	}
+	for _, row := range tc.Deletes {
+		rowID, ok := findReplayDeleteRowID(table, row)
+		if !ok {
+			return fmt.Errorf("%w: replay delete row not found in table %q", ErrRowNotFound, table.schema.Name)
+		}
+		if _, ok := table.DeleteRow(rowID); !ok {
+			return fmt.Errorf("%w: replay delete row not found in table %q", ErrRowNotFound, table.schema.Name)
+		}
+	}
+
+	for _, row := range tc.Inserts {
+		if err := ValidateRow(table.schema, row); err != nil {
+			return err
+		}
+		if err := checkRowIDAvailable(table); err != nil {
+			return err
+		}
+		advanceReplaySequenceForInsert(table, row)
+		freshID, err := allocRowIDForInsert(table)
+		if err != nil {
+			return err
+		}
+		if err := table.InsertRow(freshID, row); err != nil {
+			return err
 		}
 	}
 	return nil

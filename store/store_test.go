@@ -561,3 +561,77 @@ func TestApplyChangeset(t *testing.T) {
 		t.Fatal("ApplyChangeset should insert 1 row")
 	}
 }
+
+func TestApplyChangesetErrorLeavesCommittedStateUnchanged(t *testing.T) {
+	cs, _ := buildTestState()
+	tbl, _ := cs.Table(0)
+	seedID := tbl.AllocRowID()
+	seedRow := mkRow(1, "seed")
+	if err := tbl.InsertRow(seedID, seedRow); err != nil {
+		t.Fatal(err)
+	}
+	beforeNextID := tbl.NextID()
+
+	err := ApplyChangeset(cs, &Changeset{
+		TxID: 2,
+		Tables: map[schema.TableID]*TableChangeset{
+			0: {
+				Deletes: []types.ProductValue{seedRow},
+				Inserts: []types.ProductValue{
+					mkRow(2, "first"),
+					mkRow(2, "duplicate"),
+				},
+			},
+		},
+	})
+	if !errors.Is(err, ErrPrimaryKeyViolation) {
+		t.Fatalf("ApplyChangeset error = %v, want ErrPrimaryKeyViolation", err)
+	}
+	if tbl.RowCount() != 1 {
+		t.Fatalf("row count after failed apply = %d, want 1", tbl.RowCount())
+	}
+	if got, ok := tbl.GetRow(seedID); !ok || !got.Equal(seedRow) {
+		t.Fatalf("seed row after failed apply = %v, %v; want unchanged", got, ok)
+	}
+	if tbl.NextID() != beforeNextID {
+		t.Fatalf("NextID after failed apply = %d, want %d", tbl.NextID(), beforeNextID)
+	}
+	pk := tbl.PrimaryIndex()
+	if got := pk.Seek(NewIndexKey(types.NewUint64(2))); len(got) != 0 {
+		t.Fatalf("failed apply left duplicate insert in primary index: %v", got)
+	}
+}
+
+func TestApplyChangesetErrorLeavesAutoIncrementSequenceUnchanged(t *testing.T) {
+	cs, _ := buildAutoIncrementState(t)
+	tbl, _ := cs.Table(0)
+	beforeSeq, ok := tbl.SequenceValue()
+	if !ok {
+		t.Fatal("expected autoincrement sequence")
+	}
+	beforeNextID := tbl.NextID()
+
+	err := ApplyChangeset(cs, &Changeset{
+		TxID: 1,
+		Tables: map[schema.TableID]*TableChangeset{
+			0: {
+				Inserts: []types.ProductValue{
+					{types.NewUint64(beforeSeq), types.NewString("first")},
+					{types.NewUint64(beforeSeq), types.NewString("duplicate")},
+				},
+			},
+		},
+	})
+	if !errors.Is(err, ErrPrimaryKeyViolation) {
+		t.Fatalf("ApplyChangeset error = %v, want ErrPrimaryKeyViolation", err)
+	}
+	if tbl.RowCount() != 0 {
+		t.Fatalf("row count after failed replay = %d, want 0", tbl.RowCount())
+	}
+	if got, _ := tbl.SequenceValue(); got != beforeSeq {
+		t.Fatalf("SequenceValue after failed replay = %d, want %d", got, beforeSeq)
+	}
+	if tbl.NextID() != beforeNextID {
+		t.Fatalf("NextID after failed replay = %d, want %d", tbl.NextID(), beforeNextID)
+	}
+}
