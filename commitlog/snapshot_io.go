@@ -578,23 +578,23 @@ func (w *FileSnapshotWriter) captureSnapshotBody(committed *store.CommittedState
 		}
 	}
 
-	ids := committed.TableIDs()
+	ids := committed.TableIDsLocked()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, tableID := range ids {
-		table, _ := committed.Table(tableID)
+		table, _ := committed.TableLocked(tableID)
 		if seq, ok := table.SequenceValue(); ok {
 			body.sequences = append(body.sequences, snapshotSequenceCapture{tableID: tableID, value: seq})
 		}
 	}
 	for _, tableID := range ids {
-		table, _ := committed.Table(tableID)
+		table, _ := committed.TableLocked(tableID)
 		body.nextIDs = append(body.nextIDs, snapshotNextIDCapture{
 			tableID: tableID,
 			value:   uint64(table.NextID()),
 		})
 	}
 	for _, tableID := range ids {
-		table, _ := committed.Table(tableID)
+		table, _ := committed.TableLocked(tableID)
 		rows, err := deterministicRows(table)
 		if err != nil {
 			return body, err

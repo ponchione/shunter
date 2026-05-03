@@ -69,11 +69,20 @@ func (cs *CommittedState) RegisterTable(id schema.TableID, t *Table) {
 //     without holding cs.RLock() races any in-progress reducer write.
 //
 // All current callers (store/snapshot.go, store/transaction.go,
-// store/state_view.go, commitlog/recovery.go) stay inside one of the three
-// envelopes. Pinned by store/committed_state_table_contract_test.go.
+// store/state_view.go, commitlog/recovery.go, commitlog/snapshot_io.go) stay
+// inside one of the three envelopes. Pinned by
+// store/committed_state_table_contract_test.go.
 func (cs *CommittedState) Table(id schema.TableID) (*Table, bool) {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
+	return cs.tableLocked(id)
+}
+
+// TableLocked returns the table for id while the caller already holds RLock or
+// Lock. It exists for callers that must perform several committed-state reads
+// under one lock envelope; using Table in that window can self-deadlock behind
+// a pending writer because sync.RWMutex blocks new readers once a writer waits.
+func (cs *CommittedState) TableLocked(id schema.TableID) (*Table, bool) {
 	return cs.tableLocked(id)
 }
 
@@ -91,6 +100,12 @@ func (cs *CommittedState) tableLocked(id schema.TableID) (*Table, bool) {
 func (cs *CommittedState) TableIDs() []schema.TableID {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
+	return cs.tableIDsLocked()
+}
+
+// TableIDsLocked returns all registered table IDs while the caller already
+// holds RLock or Lock.
+func (cs *CommittedState) TableIDsLocked() []schema.TableID {
 	return cs.tableIDsLocked()
 }
 

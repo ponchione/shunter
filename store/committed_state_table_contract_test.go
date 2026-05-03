@@ -141,3 +141,61 @@ func TestCommittedStateTableSnapshotEnvelopeHoldsRLockUntilClose(t *testing.T) {
 		t.Fatal("writer never acquired cs.Lock() after snapshot Close — RLock leaked past Close")
 	}
 }
+
+func TestCommittedStateLockedAccessDoesNotReenterRWMutexBehindPendingWriter(t *testing.T) {
+	ts := &schema.TableSchema{
+		ID:   0,
+		Name: "rows",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+		},
+	}
+	cs := NewCommittedState()
+	table := NewTable(ts)
+	cs.RegisterTable(0, table)
+
+	cs.RLock()
+	writerStarted := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		cs.Lock()
+		_ = cs.committedTxID
+		cs.Unlock()
+		close(writerDone)
+	}()
+	<-writerStarted
+	time.Sleep(25 * time.Millisecond)
+
+	accessDone := make(chan string, 1)
+	go func() {
+		ids := cs.TableIDsLocked()
+		if len(ids) != 1 || ids[0] != 0 {
+			accessDone <- "locked table IDs did not return registered table"
+			return
+		}
+		got, ok := cs.TableLocked(0)
+		if !ok || got != table {
+			accessDone <- "locked table lookup did not return registered table"
+			return
+		}
+		accessDone <- ""
+	}()
+
+	select {
+	case msg := <-accessDone:
+		cs.RUnlock()
+		if msg != "" {
+			t.Fatal(msg)
+		}
+	case <-time.After(250 * time.Millisecond):
+		cs.RUnlock()
+		t.Fatal("locked committed-state access blocked behind pending writer")
+	}
+
+	select {
+	case <-writerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer never acquired lock after read lock released")
+	}
+}
