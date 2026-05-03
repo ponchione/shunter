@@ -261,6 +261,97 @@ func TestExecutorShutdown(t *testing.T) {
 	}
 }
 
+func TestExecutorShutdownWithoutRunUnblocksBlockedSubmit(t *testing.T) {
+	exec, _ := setupExecutorWithObserver(nil, ExecutorConfig{InboxCapacity: 1})
+	if err := exec.Submit(CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+		ResponseCh: make(chan ReducerResponse, 1),
+	}); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+
+	blockedSubmit := make(chan error, 1)
+	go func() {
+		blockedSubmit <- exec.Submit(CallReducerCmd{
+			Request:    ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+			ResponseCh: make(chan ReducerResponse, 1),
+		})
+	}()
+
+	select {
+	case err := <-blockedSubmit:
+		t.Fatalf("second submit returned before shutdown: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		exec.Shutdown()
+		close(shutdownDone)
+	}()
+
+	select {
+	case <-shutdownDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown did not complete without Run")
+	}
+	select {
+	case err := <-blockedSubmit:
+		if !errors.Is(err, ErrExecutorShutdown) {
+			t.Fatalf("blocked Submit error = %v, want ErrExecutorShutdown", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked Submit did not unblock after Shutdown")
+	}
+}
+
+func TestExecutorShutdownWithoutRunUnblocksBlockedSubmitWithContext(t *testing.T) {
+	exec, _ := setupExecutorWithObserver(nil, ExecutorConfig{InboxCapacity: 1})
+	if err := exec.Startup(context.Background(), nil); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+	if err := exec.SubmitWithContext(context.Background(), CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+		ResponseCh: make(chan ReducerResponse, 1),
+	}); err != nil {
+		t.Fatalf("first SubmitWithContext: %v", err)
+	}
+
+	blockedSubmit := make(chan error, 1)
+	go func() {
+		blockedSubmit <- exec.SubmitWithContext(context.Background(), CallReducerCmd{
+			Request:    ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+			ResponseCh: make(chan ReducerResponse, 1),
+		})
+	}()
+
+	select {
+	case err := <-blockedSubmit:
+		t.Fatalf("second SubmitWithContext returned before shutdown: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		exec.Shutdown()
+		close(shutdownDone)
+	}()
+
+	select {
+	case <-shutdownDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown did not complete without Run")
+	}
+	select {
+	case err := <-blockedSubmit:
+		if !errors.Is(err, ErrExecutorShutdown) {
+			t.Fatalf("blocked SubmitWithContext error = %v, want ErrExecutorShutdown", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked SubmitWithContext did not unblock after Shutdown")
+	}
+}
+
 func waitForExecutorSignals(t *testing.T, ch <-chan struct{}, want int, label string) {
 	t.Helper()
 	for i := 0; i < want; i++ {

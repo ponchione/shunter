@@ -51,7 +51,6 @@ type Executor struct {
 	// Subsequent calls return the first result without re-entering the sweep.
 	startupOnce sync.Once
 	startupErr  error
-	submitMu    sync.RWMutex
 	// schedTableID is the cached schema.TableID for sys_scheduled,
 	// resolved once at NewExecutor so per-reducer handle construction
 	// avoids a registry lookup on every dispatch.
@@ -71,6 +70,9 @@ type Executor struct {
 	// override it to inject a tracking wrapper.
 	snapshotFn func() store.CommittedReadView
 	done       chan struct{}
+	doneOnce   sync.Once
+	runStarted atomic.Bool
+	shutdownCh chan struct{}
 	closeOnce  sync.Once
 }
 
@@ -135,6 +137,7 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 		subs:         subs,
 		observer:     cfg.Observer,
 		done:         make(chan struct{}),
+		shutdownCh:   make(chan struct{}),
 	}
 	e.snapshotFn = func() store.CommittedReadView { return e.committed.Snapshot() }
 	return e
@@ -211,10 +214,15 @@ func (e *Executor) ShutdownStarted() bool {
 
 // Run processes commands until context is cancelled or inbox is closed.
 func (e *Executor) Run(ctx context.Context) {
-	defer close(e.done)
+	if !e.runStarted.CompareAndSwap(false, true) {
+		return
+	}
+	defer e.doneOnce.Do(func() { close(e.done) })
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-e.shutdownCh:
 			return
 		case cmd, ok := <-e.inbox:
 			if !ok {
@@ -231,38 +239,43 @@ func (e *Executor) Run(ctx context.Context) {
 
 // Submit sends a command to the executor inbox.
 func (e *Executor) Submit(cmd ExecutorCommand) error {
-	e.submitMu.RLock()
 	if e.fatal.Load() {
-		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
 	}
 	if e.shutdown.Load() {
-		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
 	}
 	if err := validateResponseChannels(cmd); err != nil {
-		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
 	if e.rejectMode {
 		select {
+		case <-e.shutdownCh:
+			e.recordExecutorCommand(cmd, "rejected")
+			return ErrExecutorShutdown
 		case e.inbox <- cmd:
-			e.submitMu.RUnlock()
 			e.recordExecutorInboxDepth()
 			return nil
 		default:
-			e.submitMu.RUnlock()
 			e.recordExecutorCommand(cmd, "rejected")
 			return ErrExecutorBusy
 		}
 	}
-	e.inbox <- cmd
-	e.submitMu.RUnlock()
-	e.recordExecutorInboxDepth()
-	return nil
+	select {
+	case <-e.shutdownCh:
+		e.recordExecutorCommand(cmd, "rejected")
+		return ErrExecutorShutdown
+	case e.inbox <- cmd:
+		if e.shutdown.Load() {
+			e.recordExecutorCommand(cmd, "rejected")
+			return ErrExecutorShutdown
+		}
+		e.recordExecutorInboxDepth()
+		return nil
+	}
 }
 
 // SubmitWithContext sends a command respecting a caller context.
@@ -273,46 +286,50 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 // dangling-client sweep — external reducer / subscription-registration work
 // is not allowed to race ahead of either.
 func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) error {
-	e.submitMu.RLock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if e.fatal.Load() {
-		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
 	}
 	if e.shutdown.Load() {
-		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
 	}
 	if !e.externalReady.Load() {
-		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorNotStarted
 	}
 	if err := validateResponseChannels(cmd); err != nil {
-		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
 	if e.rejectMode {
 		select {
+		case <-e.shutdownCh:
+			e.recordExecutorCommand(cmd, "rejected")
+			return ErrExecutorShutdown
 		case e.inbox <- cmd:
-			e.submitMu.RUnlock()
 			e.recordExecutorInboxDepth()
 			return nil
 		default:
-			e.submitMu.RUnlock()
 			e.recordExecutorCommand(cmd, "rejected")
 			return ErrExecutorBusy
 		}
 	}
 	select {
+	case <-e.shutdownCh:
+		e.recordExecutorCommand(cmd, "rejected")
+		return ErrExecutorShutdown
 	case e.inbox <- cmd:
-		e.submitMu.RUnlock()
+		if e.shutdown.Load() {
+			e.recordExecutorCommand(cmd, "rejected")
+			return ErrExecutorShutdown
+		}
 		e.recordExecutorInboxDepth()
 		return nil
 	case <-ctx.Done():
-		e.submitMu.RUnlock()
 		e.recordExecutorCommand(cmd, "canceled")
 		return ctx.Err()
 	}
@@ -354,10 +371,12 @@ func isUnbufferedErrorChannel(ch chan<- error) bool {
 
 // Shutdown stops accepting new commands and waits for Run to finish.
 func (e *Executor) Shutdown() {
-	e.shutdown.Store(true)
-	e.submitMu.Lock()
-	e.closeOnce.Do(func() { close(e.inbox) })
-	e.submitMu.Unlock()
+	if e.shutdown.CompareAndSwap(false, true) {
+		e.closeOnce.Do(func() { close(e.shutdownCh) })
+	}
+	if !e.runStarted.Load() {
+		e.doneOnce.Do(func() { close(e.done) })
+	}
 	<-e.done
 }
 
