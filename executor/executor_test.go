@@ -399,6 +399,48 @@ func TestExecutorRunDrainsInFlightSubmitOnShutdown(t *testing.T) {
 	}
 }
 
+func TestExecutorRunContextCancelStartsShutdownAndDrainsQueuedWork(t *testing.T) {
+	exec, _ := setupExecutorWithObserver(nil, ExecutorConfig{InboxCapacity: 1})
+	respCh := make(chan ReducerResponse, 1)
+	if err := exec.Submit(CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "ok", Source: CallSourceExternal},
+		ResponseCh: respCh,
+	}); err != nil {
+		t.Fatalf("pre-run submit: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		exec.Run(ctx)
+		close(done)
+	}()
+
+	select {
+	case resp := <-respCh:
+		if !errors.Is(resp.Error, ErrExecutorShutdown) {
+			t.Fatalf("context-cancel-drained response error = %v, want ErrExecutorShutdown", resp.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for context-cancel-drained response")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not exit after context cancellation")
+	}
+	if !exec.ShutdownStarted() {
+		t.Fatal("context cancellation should mark executor shutdown started")
+	}
+	if err := exec.Submit(CallReducerCmd{
+		Request:    ReducerRequest{ReducerName: "ok", Source: CallSourceExternal},
+		ResponseCh: make(chan ReducerResponse, 1),
+	}); !errors.Is(err, ErrExecutorShutdown) {
+		t.Fatalf("post-context-cancel Submit error = %v, want ErrExecutorShutdown", err)
+	}
+}
+
 func TestExecutorShutdownConcurrentSubmittersDoNotPanic(t *testing.T) {
 	exec, _ := setupExecutor()
 	ctx, cancel := context.WithCancel(context.Background())

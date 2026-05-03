@@ -223,6 +223,8 @@ func (e *Executor) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			e.startShutdown()
+			e.rejectPendingCommandsOnShutdown()
 			return
 		case <-e.shutdownCh:
 			e.rejectPendingCommandsOnShutdown()
@@ -232,6 +234,15 @@ func (e *Executor) Run(ctx context.Context) {
 				return
 			}
 			e.recordExecutorInboxDepth()
+			select {
+			case <-ctx.Done():
+				e.startShutdown()
+				e.rejectCommandOnShutdown(cmd)
+				e.recordExecutorCommand(cmd, "rejected")
+				e.rejectPendingCommandsOnShutdown()
+				return
+			default:
+			}
 			if e.shutdown.Load() {
 				e.rejectCommandOnShutdown(cmd)
 				e.recordExecutorCommand(cmd, "rejected")
@@ -446,13 +457,20 @@ func isUnbufferedErrorChannel(ch chan<- error) bool {
 
 // Shutdown stops accepting new commands and waits for Run to finish.
 func (e *Executor) Shutdown() {
-	if e.shutdown.CompareAndSwap(false, true) {
-		e.closeOnce.Do(func() { close(e.shutdownCh) })
-	}
+	e.startShutdown()
 	if !e.runStarted.Load() {
 		e.doneOnce.Do(func() { close(e.done) })
 	}
 	<-e.done
+}
+
+func (e *Executor) startShutdown() {
+	if e.shutdown.CompareAndSwap(false, true) {
+		if e.shutdownCh == nil {
+			return
+		}
+		e.closeOnce.Do(func() { close(e.shutdownCh) })
+	}
 }
 
 func (e *Executor) dispatchSafely(cmd ExecutorCommand) (result string) {
