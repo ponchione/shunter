@@ -141,7 +141,10 @@ func waitForDurable(ctx context.Context, durable <-chan types.TxID, waited *bool
 	select {
 	case <-ctx.Done():
 		return false
-	case <-durable:
+	case txID, ok := <-durable:
+		if !ok || txID == 0 {
+			return false
+		}
 		*ready = true
 		return true
 	}

@@ -215,6 +215,44 @@ func TestFanOutWorker_ContextCancelWhileWaitingOnTxDurable(t *testing.T) {
 	}
 }
 
+func TestFanOutWorker_ClosedTxDurableSkipsBlockedMessageAndContinues(t *testing.T) {
+	mock := &mockFanOutSender{}
+	inbox := make(chan FanOutMessage, 2)
+	dropped := make(chan types.ConnectionID, 64)
+	w := NewFanOutWorker(inbox, mock, dropped)
+	conn1 := cid(1)
+	w.SetConfirmedReads(conn1, true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	failedDurable := make(chan types.TxID)
+	close(failedDurable)
+	inbox <- FanOutMessage{
+		TxID:      types.TxID(1),
+		TxDurable: failedDurable,
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 1, TableName: "blocked"}},
+		},
+	}
+	inbox <- FanOutMessage{
+		TxID: types.TxID(2),
+		Fanout: CommitFanout{
+			conn1: {{SubscriptionID: 2, TableName: "after"}},
+		},
+	}
+
+	waitForMockCounts(t, mock, "post-failed-durable delivery", 1, 0, 0)
+	cancel()
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if mock.lightCalls[0].Updates[0].TableName != "after" {
+		t.Fatalf("delivered table = %q, want after", mock.lightCalls[0].Updates[0].TableName)
+	}
+}
+
 func TestFanOutWorker_ClosedInbox(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage)
@@ -998,7 +1036,7 @@ func TestFanOutWorker_ConfirmedReadPolicyConcurrentToggle(t *testing.T) {
 	w := NewFanOutWorker(nil, mock, make(chan types.ConnectionID, 16))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ready := make(chan types.TxID)
+	ready := make(chan types.TxID, 1)
 	go func() {
 		w.deliver(ctx, FanOutMessage{
 			TxID:      2,
@@ -1011,6 +1049,7 @@ func TestFanOutWorker_ConfirmedReadPolicyConcurrentToggle(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		w.SetConfirmedReads(cid(1), i%2 == 0)
 	}
+	ready <- 2
 	close(ready)
 }
 
@@ -1027,7 +1066,7 @@ func TestFanOutWorker_ConcurrentPolicyChurnShortSoak(t *testing.T) {
 
 	connIDs := []types.ConnectionID{cid(1), cid(2), cid(3), cid(4)}
 	caller := cid(9)
-	ready := make(chan types.TxID)
+	ready := make(chan types.TxID, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -1062,6 +1101,7 @@ func TestFanOutWorker_ConcurrentPolicyChurnShortSoak(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	ready <- 7
 	close(ready)
 
 	select {

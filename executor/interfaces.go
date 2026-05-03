@@ -19,6 +19,7 @@ type SchedulerHandle = types.ReducerScheduler
 type DurabilityHandle interface {
 	EnqueueCommitted(txID types.TxID, changeset *store.Changeset)
 	WaitUntilDurable(txID types.TxID) <-chan types.TxID
+	FatalError() error
 }
 
 // SubscriptionManager is the post-commit subscription-evaluation surface used

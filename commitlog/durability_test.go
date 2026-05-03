@@ -392,9 +392,12 @@ func TestDurabilityWorkerSegmentWriteFailureFailsClosedWithoutAdvancingDurable(t
 		t.Fatalf("DurableTxID = %d, want 0 after failed write", got)
 	}
 	select {
-	case txID := <-wait:
-		t.Fatalf("waiter released for tx %d despite failed write", txID)
-	default:
+	case txID, ok := <-wait:
+		if ok {
+			t.Fatalf("waiter released successful tx %d despite failed write", txID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not close after failed write")
 	}
 
 	defer func() {
@@ -455,9 +458,12 @@ func TestDurabilityWorkerResumeSyncFailureLeavesRecoverableDurablePrefix(t *test
 		t.Fatalf("durable tx after resumed sync failure = (%d, %d), want (2, 2)", finalTx, dw.DurableTxID())
 	}
 	select {
-	case txID := <-wait:
-		t.Fatalf("waiter released for tx %d despite sync failure", txID)
-	default:
+	case txID, ok := <-wait:
+		if ok {
+			t.Fatalf("waiter released successful tx %d despite sync failure", txID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not close after sync failure")
 	}
 
 	recovered, maxTxID, plan, report, err := OpenAndRecoverWithReport(dir, reg)

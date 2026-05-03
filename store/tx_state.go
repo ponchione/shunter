@@ -65,20 +65,50 @@ func (tx *TxState) IsDeleted(tableID schema.TableID, id types.RowID) bool {
 
 // Inserts returns all tx-local inserts for a table.
 func (tx *TxState) Inserts(tableID schema.TableID) map[types.RowID]types.ProductValue {
-	return tx.inserts[tableID]
+	return copyInsertMap(tx.inserts[tableID])
 }
 
 // Deletes returns all pending deletes for a table.
 func (tx *TxState) Deletes(tableID schema.TableID) map[types.RowID]struct{} {
-	return tx.deletes[tableID]
+	return copyDeleteMap(tx.deletes[tableID])
 }
 
 // AllInserts returns all tables' inserts.
 func (tx *TxState) AllInserts() map[schema.TableID]map[types.RowID]types.ProductValue {
-	return tx.inserts
+	out := make(map[schema.TableID]map[types.RowID]types.ProductValue, len(tx.inserts))
+	for tableID, rows := range tx.inserts {
+		out[tableID] = copyInsertMap(rows)
+	}
+	return out
 }
 
 // AllDeletes returns all tables' deletes.
 func (tx *TxState) AllDeletes() map[schema.TableID]map[types.RowID]struct{} {
-	return tx.deletes
+	out := make(map[schema.TableID]map[types.RowID]struct{}, len(tx.deletes))
+	for tableID, rows := range tx.deletes {
+		out[tableID] = copyDeleteMap(rows)
+	}
+	return out
+}
+
+func copyInsertMap(in map[types.RowID]types.ProductValue) map[types.RowID]types.ProductValue {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[types.RowID]types.ProductValue, len(in))
+	for rowID, row := range in {
+		out[rowID] = row.Copy()
+	}
+	return out
+}
+
+func copyDeleteMap(in map[types.RowID]struct{}) map[types.RowID]struct{} {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[types.RowID]struct{}, len(in))
+	for rowID := range in {
+		out[rowID] = struct{}{}
+	}
+	return out
 }

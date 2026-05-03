@@ -145,7 +145,7 @@ func (r *Runtime) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	r.mu.Lock()
-	if r.stateName != RuntimeStateReady || !r.ready.Load() || r.protocolServer == nil {
+	if err := r.readyLocked(); err != nil || r.protocolServer == nil {
 		r.mu.Unlock()
 		http.Error(w, ErrRuntimeNotReady.Error(), http.StatusServiceUnavailable)
 		return

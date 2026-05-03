@@ -48,6 +48,11 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 		}
 	}
 
+	if err := e.latchDurabilityFatal(0); err != nil {
+		store.Rollback(tx)
+		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, err)
+		return "internal_error"
+	}
 	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {
@@ -98,6 +103,11 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 		return "internal_error"
 	}
 
+	if err := e.latchDurabilityFatal(0); err != nil {
+		store.Rollback(tx)
+		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, err)
+		return "internal_error"
+	}
 	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {

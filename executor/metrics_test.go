@@ -344,6 +344,7 @@ type panicDurability struct{}
 
 func (panicDurability) EnqueueCommitted(types.TxID, *store.Changeset) { panic("durability failed") }
 func (panicDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
+func (panicDurability) FatalError() error                             { return nil }
 
 var _ subscription.SubscriptionManager = noopSubs{}
 

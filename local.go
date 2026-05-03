@@ -195,6 +195,18 @@ func (r *Runtime) readyLocked() error {
 	if r.stateName == RuntimeStateClosing || r.stateName == RuntimeStateClosed {
 		return ErrRuntimeClosed
 	}
+	if r.durabilityFatalErr != nil {
+		return ErrRuntimeNotReady
+	}
+	if r.durability != nil {
+		if err := r.durability.FatalError(); err != nil {
+			r.durabilityFatalErr = err
+			return ErrRuntimeNotReady
+		}
+	}
+	if r.executorFatal || r.executorFatalErr != nil || (r.executor != nil && r.executor.Fatal()) {
+		return ErrRuntimeNotReady
+	}
 	if r.stateName != RuntimeStateReady || !r.ready.Load() {
 		return ErrRuntimeNotReady
 	}

@@ -100,7 +100,7 @@ func NewDurabilityWorker(dir string, startTxID uint64, opts CommitLogOptions) (*
 }
 
 func validateFsyncMode(mode FsyncMode) error {
-	if mode != FsyncBatch {
+	if mode != FsyncBatch && mode != FsyncPerTx {
 		return fmt.Errorf("%w: %d", ErrUnknownFsyncMode, mode)
 	}
 	return nil
@@ -348,11 +348,17 @@ func (dw *DurabilityWorker) FatalError() error {
 }
 
 // WaitUntilDurable returns a readiness channel for txID. Already-durable txIDs
-// return an already-ready channel.
+// return an already-ready channel. Fatal worker failure or worker close closes
+// pending waiter channels without a value.
 func (dw *DurabilityWorker) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
 	ready := func(id types.TxID) <-chan types.TxID {
 		ch := make(chan types.TxID, 1)
 		ch <- id
+		close(ch)
+		return ch
+	}
+	failed := func() <-chan types.TxID {
+		ch := make(chan types.TxID)
 		close(ch)
 		return ch
 	}
@@ -363,6 +369,9 @@ func (dw *DurabilityWorker) WaitUntilDurable(txID types.TxID) <-chan types.TxID 
 	defer dw.stateMu.Unlock()
 	if dw.durable.Load() >= uint64(txID) {
 		return ready(txID)
+	}
+	if dw.fatalErr != nil || dw.closing {
+		return failed()
 	}
 	ch := make(chan types.TxID, 1)
 	dw.waiters[uint64(txID)] = append(dw.waiters[uint64(txID)], ch)
@@ -403,6 +412,7 @@ func (dw *DurabilityWorker) Close() (uint64, error) {
 
 	dw.stateMu.Lock()
 	defer dw.stateMu.Unlock()
+	dw.closeWaitersLocked()
 	return dw.durable.Load(), errors.Join(dw.fatalErr, closeErr)
 }
 
@@ -438,6 +448,7 @@ func (dw *DurabilityWorker) run() {
 			if dw.fatalErr == nil {
 				dw.fatalErr = err
 			}
+			dw.closeWaitersLocked()
 			dw.stateMu.Unlock()
 			dw.signalClose()
 			return
@@ -476,23 +487,18 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 				}
 			}
 		}
-	}
-	if err := dw.seg.Sync(); err != nil {
-		recordDurabilityFailed(dw.observer, err, "sync_failed", batch[len(batch)-1].txID)
-		traceDurabilityBatch(dw.observer, batch[len(batch)-1].txID, "error", err)
-		return err
-	}
-	if dw.idx != nil {
-		if err := dw.idx.Sync(); err != nil {
-			_ = dw.idx.Close()
-			dw.idx = nil
+		if dw.opts.FsyncMode == FsyncPerTx {
+			if err := dw.syncBatchTail(item.txID); err != nil {
+				return err
+			}
 		}
 	}
-	// Update durable TxID to last in batch.
 	lastDurable := batch[len(batch)-1].txID
-	dw.durable.Store(lastDurable)
-	recordDurabilityDurableTxID(dw.observer, lastDurable)
-	dw.releaseWaitersUpTo(lastDurable)
+	if dw.opts.FsyncMode == FsyncBatch {
+		if err := dw.syncBatchTail(lastDurable); err != nil {
+			return err
+		}
+	}
 
 	// Check rotation.
 	if dw.seg.Size() >= dw.opts.MaxSegmentSize {
@@ -519,6 +525,24 @@ func (dw *DurabilityWorker) processBatch(batch []durabilityItem) error {
 	return nil
 }
 
+func (dw *DurabilityWorker) syncBatchTail(lastDurable uint64) error {
+	if err := dw.seg.Sync(); err != nil {
+		recordDurabilityFailed(dw.observer, err, "sync_failed", lastDurable)
+		traceDurabilityBatch(dw.observer, lastDurable, "error", err)
+		return err
+	}
+	if dw.idx != nil {
+		if err := dw.idx.Sync(); err != nil {
+			_ = dw.idx.Close()
+			dw.idx = nil
+		}
+	}
+	dw.durable.Store(lastDurable)
+	recordDurabilityDurableTxID(dw.observer, lastDurable)
+	dw.releaseWaitersUpTo(lastDurable)
+	return nil
+}
+
 func (dw *DurabilityWorker) releaseWaitersUpTo(lastDurable uint64) {
 	dw.stateMu.Lock()
 	defer dw.stateMu.Unlock()
@@ -529,6 +553,15 @@ func (dw *DurabilityWorker) releaseWaitersUpTo(lastDurable uint64) {
 		delete(dw.waiters, txID)
 		for _, ch := range waiters {
 			ch <- types.TxID(txID)
+			close(ch)
+		}
+	}
+}
+
+func (dw *DurabilityWorker) closeWaitersLocked() {
+	for txID, waiters := range dw.waiters {
+		delete(dw.waiters, txID)
+		for _, ch := range waiters {
 			close(ch)
 		}
 	}

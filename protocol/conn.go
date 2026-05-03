@@ -77,16 +77,24 @@ func NewConn(
 	ws *websocket.Conn,
 	opts *ProtocolOptions,
 ) *Conn {
+	normalized := DefaultProtocolOptions()
+	if opts != nil {
+		var err error
+		normalized, err = normalizeProtocolOptions(*opts)
+		if err != nil {
+			panic("protocol: invalid options: " + err.Error())
+		}
+	}
 	readCtx, cancelRead := context.WithCancel(context.Background())
 	c := &Conn{
 		ID:          id,
 		Identity:    identity,
 		Token:       token,
 		Compression: compression,
-		OutboundCh:  make(chan []byte, opts.OutgoingBufferMessages),
-		inflightSem: make(chan struct{}, opts.IncomingQueueMessages),
+		OutboundCh:  make(chan []byte, normalized.OutgoingBufferMessages),
+		inflightSem: make(chan struct{}, normalized.IncomingQueueMessages),
 		ws:          ws,
-		opts:        opts,
+		opts:        &normalized,
 		readCtx:     readCtx,
 		cancelRead:  cancelRead,
 		closed:      make(chan struct{}),

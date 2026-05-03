@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -68,12 +69,13 @@ type Executor struct {
 	// snapshotFn acquires the committed read view used by post-commit
 	// subscription evaluation. Defaults to e.committed.Snapshot(); tests
 	// override it to inject a tracking wrapper.
-	snapshotFn func() store.CommittedReadView
-	done       chan struct{}
-	doneOnce   sync.Once
-	runStarted atomic.Bool
-	shutdownCh chan struct{}
-	closeOnce  sync.Once
+	snapshotFn      func() store.CommittedReadView
+	done            chan struct{}
+	doneOnce        sync.Once
+	runStarted      atomic.Bool
+	shutdownCh      chan struct{}
+	closeOnce       sync.Once
+	inflightSubmits atomic.Int64
 }
 
 type postCommitOptions struct {
@@ -223,6 +225,7 @@ func (e *Executor) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-e.shutdownCh:
+			e.rejectPendingCommandsOnShutdown()
 			return
 		case cmd, ok := <-e.inbox:
 			if !ok {
@@ -237,9 +240,53 @@ func (e *Executor) Run(ctx context.Context) {
 	}
 }
 
+func (e *Executor) rejectPendingCommandsOnShutdown() {
+	for {
+		select {
+		case cmd, ok := <-e.inbox:
+			if !ok {
+				return
+			}
+			e.recordExecutorInboxDepth()
+			e.rejectCommandOnShutdown(cmd)
+			e.recordExecutorCommand(cmd, "rejected")
+		default:
+			if e.inflightSubmits.Load() == 0 {
+				return
+			}
+			runtime.Gosched()
+		}
+	}
+}
+
+func (e *Executor) rejectCommandOnShutdown(cmd ExecutorCommand) {
+	switch c := cmd.(type) {
+	case CallReducerCmd:
+		e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorShutdown}, nil)
+	case RegisterSubscriptionSetCmd:
+		if c.Reply != nil {
+			c.Reply(subscription.SubscriptionSetRegisterResult{}, ErrExecutorShutdown)
+		}
+	case UnregisterSubscriptionSetCmd:
+		if c.Reply != nil {
+			c.Reply(subscription.SubscriptionSetUnregisterResult{}, ErrExecutorShutdown)
+		}
+	case DisconnectClientSubscriptionsCmd:
+		sendErrorResponse(c.ResponseCh, ErrExecutorShutdown)
+	case OnConnectCmd:
+		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, ErrExecutorShutdown)
+	case OnDisconnectCmd:
+		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, ErrExecutorShutdown)
+	}
+}
+
 // Submit sends a command to the executor inbox.
 func (e *Executor) Submit(cmd ExecutorCommand) error {
 	if e.fatal.Load() {
+		e.recordExecutorCommand(cmd, "rejected")
+		return ErrExecutorFatal
+	}
+	if err := e.latchDurabilityFatal(0); err != nil {
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
 	}
@@ -251,6 +298,11 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
+	if !e.beginSubmit() {
+		e.recordExecutorCommand(cmd, "rejected")
+		return ErrExecutorShutdown
+	}
+	defer e.finishSubmit()
 	if e.rejectMode {
 		select {
 		case <-e.shutdownCh:
@@ -269,10 +321,6 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
 	case e.inbox <- cmd:
-		if e.shutdown.Load() {
-			e.recordExecutorCommand(cmd, "rejected")
-			return ErrExecutorShutdown
-		}
 		e.recordExecutorInboxDepth()
 		return nil
 	}
@@ -293,6 +341,10 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
 	}
+	if err := e.latchDurabilityFatal(0); err != nil {
+		e.recordExecutorCommand(cmd, "rejected")
+		return ErrExecutorFatal
+	}
 	if e.shutdown.Load() {
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
@@ -305,6 +357,11 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 		e.recordExecutorCommand(cmd, "rejected")
 		return err
 	}
+	if !e.beginSubmit() {
+		e.recordExecutorCommand(cmd, "rejected")
+		return ErrExecutorShutdown
+	}
+	defer e.finishSubmit()
 	if e.rejectMode {
 		select {
 		case <-e.shutdownCh:
@@ -323,16 +380,28 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorShutdown
 	case e.inbox <- cmd:
-		if e.shutdown.Load() {
-			e.recordExecutorCommand(cmd, "rejected")
-			return ErrExecutorShutdown
-		}
 		e.recordExecutorInboxDepth()
 		return nil
 	case <-ctx.Done():
 		e.recordExecutorCommand(cmd, "canceled")
 		return ctx.Err()
 	}
+}
+
+func (e *Executor) beginSubmit() bool {
+	if e.shutdown.Load() {
+		return false
+	}
+	e.inflightSubmits.Add(1)
+	if e.shutdown.Load() {
+		e.inflightSubmits.Add(-1)
+		return false
+	}
+	return true
+}
+
+func (e *Executor) finishSubmit() {
+	e.inflightSubmits.Add(-1)
 }
 
 func validateResponseChannels(cmd ExecutorCommand) error {
@@ -410,10 +479,14 @@ func (e *Executor) dispatch(cmd ExecutorCommand) string {
 	// Story 5.3: short-circuit write-affecting commands that were already in
 	// the inbox when the executor latched into the fatal state. Submit
 	// catches the common case; this catch covers the race window.
-	if e.fatal.Load() {
+	if e.fatal.Load() || e.latchDurabilityFatal(0) != nil {
 		switch c := cmd.(type) {
 		case CallReducerCmd:
 			e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal}, nil)
+		case OnConnectCmd:
+			respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, ErrExecutorFatal)
+		case OnDisconnectCmd:
+			respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, ErrExecutorFatal)
 		}
 		return "internal_error"
 	}
@@ -433,6 +506,21 @@ func (e *Executor) dispatch(cmd ExecutorCommand) string {
 	default:
 		return "internal_error"
 	}
+}
+
+func (e *Executor) latchDurabilityFatal(txID types.TxID) error {
+	if e == nil || e.durability == nil {
+		return nil
+	}
+	err := e.durability.FatalError()
+	if err == nil {
+		return nil
+	}
+	wrapped := fmt.Errorf("%w: durability failed: %w", ErrExecutorFatal, err)
+	if e.fatal.CompareAndSwap(false, true) {
+		e.recordExecutorFatal(wrapped, "durability_failed", txID)
+	}
+	return wrapped
 }
 
 func (e *Executor) handleRegisterSubscriptionSet(cmd RegisterSubscriptionSetCmd) string {
@@ -780,6 +868,16 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	}
 
 	// Commit.
+	if err := e.latchDurabilityFatal(0); err != nil {
+		store.Rollback(tx)
+		e.recordReducerMetric(rr.Name, "failed_internal", handlerDuration, true)
+		e.traceReducerCall(rr.Name, "failed_internal", err)
+		e.sendCallReducerResponse(cmd, ReducerResponse{
+			Status: StatusFailedInternal,
+			Error:  err,
+		}, nil)
+		return "internal_error"
+	}
 	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {
@@ -947,6 +1045,7 @@ type noopDurability struct{}
 
 func (noopDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
 func (noopDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
+func (noopDurability) FatalError() error                             { return nil }
 
 type noopSubs struct{}
 

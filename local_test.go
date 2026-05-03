@@ -35,6 +35,23 @@ func TestCallReducerPreservesStartingState(t *testing.T) {
 	}
 }
 
+func TestCallReducerRejectsWhenDurabilityFatalLatched(t *testing.T) {
+	rt := buildStartedRuntimeWithReducer(t, "send_message", func(_ *schema.ReducerContext, _ []byte) ([]byte, error) {
+		t.Fatal("reducer should not run after durability fatal")
+		return nil, nil
+	})
+	defer rt.Close()
+
+	rt.mu.Lock()
+	rt.durabilityFatalErr = errors.New("durability failed")
+	rt.mu.Unlock()
+
+	_, err := rt.CallReducer(context.Background(), "send_message", nil)
+	if !errors.Is(err, ErrRuntimeNotReady) {
+		t.Fatalf("CallReducer error = %v, want ErrRuntimeNotReady", err)
+	}
+}
+
 func TestCallReducerAfterCloseReturnsRuntimeClosed(t *testing.T) {
 	rt := buildValidTestRuntime(t)
 	if err := rt.Start(context.Background()); err != nil {

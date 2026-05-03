@@ -251,6 +251,7 @@ type stubDurability struct{}
 
 func (stubDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
 func (stubDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
+func (stubDurability) FatalError() error                             { return nil }
 
 type stubSubscriptionManager struct{}
 

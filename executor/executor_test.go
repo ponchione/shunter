@@ -363,6 +363,42 @@ func waitForExecutorSignals(t *testing.T, ch <-chan struct{}, want int, label st
 	}
 }
 
+func TestExecutorRunDrainsInFlightSubmitOnShutdown(t *testing.T) {
+	exec, _ := setupExecutorWithObserver(nil, ExecutorConfig{InboxCapacity: 1})
+	exec.inbox = make(chan ExecutorCommand)
+	respCh := make(chan ReducerResponse, 1)
+	exec.inflightSubmits.Add(1)
+	exec.shutdown.Store(true)
+	close(exec.shutdownCh)
+
+	done := make(chan struct{})
+	go func() {
+		exec.Run(context.Background())
+		close(done)
+	}()
+	go func() {
+		exec.inbox <- CallReducerCmd{
+			Request:    ReducerRequest{ReducerName: "ok", Source: CallSourceExternal},
+			ResponseCh: respCh,
+		}
+		exec.inflightSubmits.Add(-1)
+	}()
+
+	select {
+	case resp := <-respCh:
+		if !errors.Is(resp.Error, ErrExecutorShutdown) {
+			t.Fatalf("shutdown-drained response error = %v, want ErrExecutorShutdown", resp.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for shutdown-drained response")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not exit after draining in-flight submit")
+	}
+}
+
 func TestExecutorShutdownConcurrentSubmittersDoNotPanic(t *testing.T) {
 	exec, _ := setupExecutor()
 	ctx, cancel := context.WithCancel(context.Background())

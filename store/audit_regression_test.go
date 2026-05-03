@@ -357,6 +357,36 @@ func TestCommitMissingDeleteTargetReturnsErrorWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestCommitRevalidatesMalformedTxStateInsertWithoutMutation(t *testing.T) {
+	cs, reg := buildTestState()
+	tx := NewTransaction(cs, reg)
+	tx.TxState().AddInsert(0, 1, types.ProductValue{types.NewUint64(1)})
+
+	_, err := Commit(cs, tx)
+	if !errors.Is(err, ErrRowShapeMismatch) {
+		t.Fatalf("commit error = %v, want ErrRowShapeMismatch", err)
+	}
+	tbl, _ := cs.Table(0)
+	if got := tbl.RowCount(); got != 0 {
+		t.Fatalf("row count after failed malformed commit = %d, want 0", got)
+	}
+}
+
+func TestCommitRevalidatesMalformedNoPKTxStateInsertWithoutMutation(t *testing.T) {
+	cs, reg := buildNoPKState(t)
+	tx := NewTransaction(cs, reg)
+	tx.TxState().AddInsert(0, 1, types.ProductValue{})
+
+	_, err := Commit(cs, tx)
+	if !errors.Is(err, ErrRowShapeMismatch) {
+		t.Fatalf("commit error = %v, want ErrRowShapeMismatch", err)
+	}
+	tbl, _ := cs.Table(0)
+	if got := tbl.RowCount(); got != 0 {
+		t.Fatalf("row count after failed malformed no-PK commit = %d, want 0", got)
+	}
+}
+
 func TestCommittedStateRegisterAndLookupAreRaceFree(t *testing.T) {
 	cs := NewCommittedState()
 	tables := []*Table{NewTable(pkSchema()), NewTable(noPKSchema())}
@@ -539,6 +569,30 @@ func TestTxStateAddInsertDetachesFromCaller(t *testing.T) {
 	stored := tx.Inserts(0)[1]
 	if stored[1].AsString() != "alice" {
 		t.Fatalf("tx insert mutated by caller: got %q, want %q", stored[1].AsString(), "alice")
+	}
+}
+
+func TestTxStateAccessorsReturnDetachedMaps(t *testing.T) {
+	tx := NewTxState()
+	tx.AddInsert(0, 1, mkRow(1, "alice"))
+	tx.AddDelete(0, 2)
+
+	inserts := tx.Inserts(0)
+	inserts[1][1] = types.NewString("mutated")
+	delete(inserts, 1)
+	allInserts := tx.AllInserts()
+	delete(allInserts, 0)
+	deletes := tx.Deletes(0)
+	delete(deletes, 2)
+	allDeletes := tx.AllDeletes()
+	delete(allDeletes, 0)
+
+	stored := tx.Inserts(0)[1]
+	if stored[1].AsString() != "alice" {
+		t.Fatalf("tx insert mutated through accessor: got %q, want alice", stored[1].AsString())
+	}
+	if !tx.IsDeleted(0, 2) {
+		t.Fatal("tx delete removed through accessor")
 	}
 }
 

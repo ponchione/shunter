@@ -42,7 +42,8 @@ type fakeDurability struct {
 	block    chan struct{}     // if set, EnqueueCommitted waits on it
 	entered  chan struct{}     // optional test signal before blocking
 	waitCh   <-chan types.TxID // optional readiness channel returned by WaitUntilDurable
-	panicOn  bool              // panic when EnqueueCommitted is called
+	fatalErr error
+	panicOn  bool // panic when EnqueueCommitted is called
 	mu       sync.Mutex
 }
 
@@ -73,6 +74,8 @@ func (f *fakeDurability) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
 	close(ch)
 	return ch
 }
+
+func (f *fakeDurability) FatalError() error { return f.fatalErr }
 
 // fakeSubs records every EvalAndBroadcast call. It optionally inspects the
 // view it is handed to prove the view was still live.
@@ -257,6 +260,36 @@ func TestPostCommitDurabilityBeforeEvalBeforeResponse(t *testing.T) {
 		if events[i] != w {
 			t.Fatalf("events[%d] = %s, want %s (full=%v)", i, events[i], w, events)
 		}
+	}
+}
+
+func TestExecutorRejectsReducerWithoutCommitWhenDurabilityFatal(t *testing.T) {
+	h := newPipelineHarness(t)
+	h.dur.fatalErr = errors.New("disk failed")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	ch := make(chan ReducerResponse, 1)
+	err := h.exec.Submit(CallReducerCmd{
+		Request: ReducerRequest{
+			ReducerName: "InsertPlayer",
+			Source:      CallSourceExternal,
+		},
+		ResponseCh: ch,
+	})
+	if !errors.Is(err, ErrExecutorFatal) {
+		t.Fatalf("Submit error = %v, want ErrExecutorFatal", err)
+	}
+	if got := h.cs.CommittedTxID(); got != 0 {
+		t.Fatalf("committed tx id = %d, want 0", got)
+	}
+	table, ok := h.cs.Table(0)
+	if !ok {
+		t.Fatal("missing players table")
+	}
+	if got := table.RowCount(); got != 0 {
+		t.Fatalf("row count = %d, want 0", got)
 	}
 }
 

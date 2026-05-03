@@ -19,6 +19,29 @@ func TestConnOutboundChCapacity(t *testing.T) {
 	}
 }
 
+func TestNewConnNilOptionsUsesDefaults(t *testing.T) {
+	c := NewConn(types.ConnectionID{}, types.Identity{}, "", false, nil, nil)
+	defaults := DefaultProtocolOptions()
+	if cap(c.OutboundCh) != defaults.OutgoingBufferMessages {
+		t.Fatalf("OutboundCh cap = %d, want %d", cap(c.OutboundCh), defaults.OutgoingBufferMessages)
+	}
+	if cap(c.inflightSem) != defaults.IncomingQueueMessages {
+		t.Fatalf("inflightSem cap = %d, want %d", cap(c.inflightSem), defaults.IncomingQueueMessages)
+	}
+	if c.opts == nil {
+		t.Fatal("Conn opts is nil")
+	}
+}
+
+func TestNewConnZeroOptionsNormalizeToDefaults(t *testing.T) {
+	opts := ProtocolOptions{}
+	c := NewConn(types.ConnectionID{}, types.Identity{}, "", false, nil, &opts)
+	defaults := DefaultProtocolOptions()
+	if cap(c.OutboundCh) != defaults.OutgoingBufferMessages {
+		t.Fatalf("OutboundCh cap = %d, want %d", cap(c.OutboundCh), defaults.OutgoingBufferMessages)
+	}
+}
+
 func TestConnManagerAddGetRemove(t *testing.T) {
 	m := NewConnManager()
 	var id types.ConnectionID

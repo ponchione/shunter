@@ -105,6 +105,9 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
 		for rowID, row := range inserts {
+			if err := ValidateRow(table.Schema(), row); err != nil {
+				return err
+			}
 			if err := revalidateInsertRowID(tableID, table, rowID, txState); err != nil {
 				return err
 			}

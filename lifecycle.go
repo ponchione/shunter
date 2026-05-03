@@ -379,6 +379,10 @@ func (h durabilityHandle) WaitUntilDurable(txID types.TxID) <-chan types.TxID {
 	return h.worker.WaitUntilDurable(txID)
 }
 
+func (h durabilityHandle) FatalError() error {
+	return h.worker.FatalError()
+}
+
 // noopFanOutSender is V1-D-only internal delivery plumbing. V1-E replaces or
 // wraps this with protocol-backed fan-out delivery when network serving exists.
 type noopFanOutSender struct{}
