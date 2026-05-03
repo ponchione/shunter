@@ -7,21 +7,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// handleSubscribeSingle processes an incoming SubscribeSingleMsg. It
-// resolves and validates the wire query against the schema, normalizes
-// predicates, and submits the subscription to the executor via the
-// set-based seam (len(Predicates)==1). The executor invokes the Reply
-// closure synchronously on its own goroutine; the closure enqueues
-// either a SubscribeSingleApplied or a SubscriptionError onto the
-// connection's outbound channel. Synchronous dispatch here is what
-// enforces ADR §9.4 FIFO between Applied and any subsequent fan-out.
-//
-// Receipt-timestamp seam: `receipt` is captured at handler entry so
-// every `TotalHostExecutionDurationMicros` field emitted on this path
-// reflects the full admission duration. The receipt is passed to the
-// executor via RegisterSubscriptionSetRequest.Receipt for the
-// success/executor-error path, and used locally for handler-short-circuit
-// paths (compile failure, executor-submit failure).
+// handleSubscribeSingle validates one SQL query and submits it to the executor.
+// The receipt timestamp covers local validation and executor admission.
 func handleSubscribeSingle(
 	ctx context.Context,
 	conn *Conn,

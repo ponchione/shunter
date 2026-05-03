@@ -8,21 +8,8 @@ import (
 	"github.com/coder/websocket"
 )
 
-// TestDispatchLoop_HandlerCtxCancelsOnConnClose pins the dispatch-
-// handler ctx fix. Before the fix, handler closures captured
-// the outer ctx from runDispatchLoop, which production threading roots at
-// context.Background() (protocol/upgrade.go:201). A wedged executor
-// (inbox full on a hung reducer) would leave the handler goroutine
-// parked inside executor.SubmitWithContext on the e.inbox <- cmd arm
-// indefinitely, holding its inflightSem slot and the captured *Conn past
-// disconnect. The fix derives a handlerCtx from the outer ctx that also
-// cancels when c.closed fires (SPEC-005 §5.3 step 4); the handler goroutine
-// exits promptly on conn teardown.
-//
-// This test pins the contract by installing a handler that blocks on its
-// ctx.Done(), confirms it is actually parked (not returning spontaneously
-// during a 25 ms window while both arms are open), closes c.closed to
-// simulate teardown, and asserts the handler returns within 1 s.
+// TestDispatchLoop_HandlerCtxCancelsOnConnClose pins handler context
+// cancellation when the owning Conn closes.
 func TestDispatchLoop_HandlerCtxCancelsOnConnClose(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 

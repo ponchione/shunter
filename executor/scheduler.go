@@ -25,15 +25,8 @@ func maxScheduleID(cs *store.CommittedState, tableID schema.TableID) ScheduleID 
 	return maxID
 }
 
-// advanceOrDeleteSchedule mutates sys_scheduled atomically with a
-// scheduled reducer's writes (Story 6.4, SPEC-003 §9.4):
-//   - one-shot (repeat_ns == 0): delete the row
-//   - repeating (repeat_ns > 0): advance next_run_at_ns to
-//     intended+repeat for fixed-rate semantics (§9.5), independent of
-//     how late the firing actually ran
-//
-// A missing row returns nil: a concurrent Cancel between enqueue and
-// firing is acceptable; the reducer still commits (at-least-once).
+// advanceOrDeleteSchedule updates the due schedule row in the reducer commit.
+// A missing row is allowed when Cancel races an already-queued firing.
 func (e *Executor) advanceOrDeleteSchedule(tx *store.Transaction, id ScheduleID, intendedNs int64) error {
 	target := uint64(id)
 	for rowID, row := range tx.ScanTable(e.schedTableID) {
@@ -52,13 +45,8 @@ func (e *Executor) advanceOrDeleteSchedule(tx *store.Transaction, id ScheduleID,
 	return nil
 }
 
-// SchedulerFor returns a *Scheduler wired to this executor's inbox,
-// committed state, and sys_scheduled table. Pass the result to
-// Executor.Startup so scheduler replay enqueues past-due rows into the
-// inbox before external admission opens. Callers own Scheduler.Run's
-// goroutine lifecycle and must stop it before Executor.Shutdown closes
-// the inbox — otherwise a late scheduled-reducer send can race a
-// closed channel.
+// SchedulerFor returns a Scheduler wired to this executor.
+// Callers own Scheduler.Run and must stop it before Executor.Shutdown.
 func (e *Executor) SchedulerFor() *Scheduler {
 	scheduler := NewScheduler(e.inbox, e.committed, e.schedTableID)
 	e.attachScheduler(scheduler)
@@ -81,10 +69,7 @@ func (e *Executor) newSchedulerHandle(tx *store.Transaction) *schedulerHandle {
 	}
 }
 
-// schedulerHandle is the per-reducer SchedulerHandle implementation
-// (SPEC-003 §9.3). It mutates sys_scheduled through the active
-// transaction so that Schedule/ScheduleRepeat/Cancel roll back with
-// the surrounding reducer (Story 6.2).
+// schedulerHandle mutates sys_scheduled through the active reducer transaction.
 type schedulerHandle struct {
 	mu      sync.Mutex
 	closed  bool

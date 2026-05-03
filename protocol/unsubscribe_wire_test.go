@@ -7,20 +7,7 @@ import (
 	"testing"
 )
 
-// TestShunterUnsubscribeSingleWireShape pins the byte-level wire shape
-// of UnsubscribeSingleMsg against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218`
-// (`pub struct Unsubscribe { request_id: u32, query_id: QueryId }`).
-// Reference field order and byte layout:
-//
-//	request_id: u32 (LE)
-//	query_id:   u32 (LE)
-//
-// Prior Shunter wire carried an extra `send_dropped: u8` byte smuggled
-// onto the v1 envelope; the reference carries that concept only on v2
-// via `UnsubscribeFlags::SendDroppedRows`. This test pins the v1 match
-// by constructing the reference byte shape by hand and round-tripping
-// through the encoder/decoder.
+// TestShunterUnsubscribeSingleWireShape pins UnsubscribeSingle field order.
 func TestShunterUnsubscribeSingleWireShape(t *testing.T) {
 	in := UnsubscribeSingleMsg{RequestID: 0x11223344, QueryID: 0xAABBCCDD}
 

@@ -9,27 +9,10 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// EvalAndBroadcast runs the post-commit evaluation loop (SPEC-004 §7.2).
-// Fills a CommitFanout and hands it to the fan-out worker inbox.
-//
-// Called synchronously on the executor goroutine; changeset is read-only.
-//
-// View lifetime (read-view subscription-seam): `view` is borrowed
-// for the duration of this call only. The executor calls `view.Close()`
-// immediately after this function returns (`executor/executor.go:540-541`),
-// so no reference to `view` may escape past return — not via the
-// `FanOutMessage` published on `m.inbox`, not via a goroutine spawned
-// from this call, not stashed in any per-subscriber state. Materialize
-// rows into `SubscriptionUpdate.Inserts`/`Deletes` before handoff.
-// Pinned by
-// `eval_view_lifetime_test.go::TestEvalAndBroadcastDoesNotUseViewAfterReturn_{Join,SingleTable}`.
-//
-// Outcome-model decision (`docs/shunter-design-decisions.md#outcome-model`):
-// a caller-addressable commit MUST NOT short-circuit on "no active
-// subscriptions" or "empty changeset" — the caller still needs its
-// heavy `TransactionUpdate` envelope to observe the reducer outcome.
-// The function therefore only skips when there is neither caller
-// metadata nor any non-caller recipient work to do.
+// EvalAndBroadcast evaluates subscriptions for a committed transaction and
+// enqueues fan-out. The read view is borrowed only for this call, and
+// caller-bound commits still produce their heavy response when there is no
+// subscription work.
 func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView, meta PostCommitMeta) {
 	hasCaller := meta.CallerConnID != nil && (meta.CallerOutcome != nil || meta.CaptureCallerUpdates != nil)
 	nothingToEvaluate := !m.registry.hasActive() || changeset == nil || changeset.IsEmpty()
@@ -121,61 +104,8 @@ func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view sto
 					cloned := u
 					cloned.SubscriptionID = subID
 					cloned.QueryID = delivery.QueryID
-					// fanout aliasing: give each subscriber an
-					// independent outer slice header for Inserts/Deletes
-					// so downstream replace/append on one subscriber's
-					// updates cannot leak into another's view.
-					//
-					// Row payloads (`types.ProductValue`, itself
-					// `[]Value`) remain shared across subscribers by
-					// design. The `append([]types.ProductValue(nil),
-					// cloned.Inserts...)` below copies ProductValue
-					// slice-header values into the new outer backing
-					// array, but each copied header still references
-					// the original `[]Value` backing array:
-					// `&updA[0].Inserts[0][0] == &updB[0].Inserts[0][0]`
-					// holds across subscribers. Sharing is governed by
-					// the post-commit row-immutability contract:
-					//
-					//  1. Rows produced by the store after commit
-					//     completion are not mutated in place. The
-					//     store-side counterpart is enforced by
-					//     single-writer executor discipline and the
-					//     `CommittedSnapshot` open→Close RLock lifetime
-					//     (read-view envelopes).
-					//  2. Downstream consumers of the fanout
-					//     `SubscriptionUpdate.Inserts` / `.Deletes`
-					//     slices — `subscription/fanout_worker.go`
-					//     delivery and `protocol/fanout_adapter.go`
-					//     encoding — must only read row payloads,
-					//     never mutate `Value` elements in place.
-					//
-					// Three hazards the contract prevents but that this
-					// boundary cannot block mechanically:
-					//  - in-place `Value` mutation on any downstream
-					//    path (e.g., rewriting a column during encoding)
-					//    leaks into every other subscriber's view of
-					//    the same commit;
-					//  - ProductValue append within shared cap followed
-					//    by mutation on the newly-visible tail corrupts
-					//    peer ProductValues that still alias the same
-					//    `[]Value`;
-					//  - a store-side change that mutated
-					//    already-committed rows in place (lazy
-					//    normalization on read) is externally
-					//    indistinguishable from an in-place fanout
-					//    mutation and reopens the same hazard shape.
-					//
-					// Deepening the copy to independent `[]Value`
-					// backing arrays per subscriber would cost work
-					// proportional to row width × row count ×
-					// subscriber count for no client-visible benefit
-					// under the contract, and is not the fix. Pinned
-					// by
-					// `eval_fanout_row_payload_sharing_test.go::TestEvalFanoutRowPayloadsSharedAcrossSubscribersFor{Inserts,Deletes}`
-					// and (for the outer-slice independence
-					// complement)
-					// `eval_fanout_aliasing_test.go::TestEvalFanout{Inserts,Deletes}HeaderIsolatedAcrossSubscribers`.
+					// Copy the outer update slices per subscriber; row payloads are
+					// shared and must remain read-only downstream.
 					if len(cloned.Inserts) > 0 {
 						cloned.Inserts = append([]types.ProductValue(nil), cloned.Inserts...)
 					}

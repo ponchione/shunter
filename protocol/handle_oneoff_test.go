@@ -3074,16 +3074,8 @@ func TestHandleOneOffQuery_SenderParameterOnIdentityColumn(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterSenderResolvesToHexOnStringColumn pins the
-// reference behavior at sql-parser/src/ast/mod.rs:159 (resolve_sender) →
-// expr/src/lib.rs:353: `:sender` on a String column substitutes the caller
-// identity hex literal and the String arm wraps it as
-// `String(identity.to_hex())`. The OneOff admission surface routes the
-// value through the existing single-relation predicate path so the snapshot
-// row whose `name` equals the caller hex string survives the filter. Earlier
-// versions of this test asserted a rejection on the assumption that
-// `:sender` was bytes-only; the rejection at check.rs:487-488 is for
-// `Array<String>` (the array-kind catch-all in `parse`), not String.
+// TestHandleOneOffQuery_ShunterSenderResolvesToHexOnStringColumn pins :sender
+// matching on String columns as caller identity hex text.
 func TestHandleOneOffQuery_ShunterSenderResolvesToHexOnStringColumn(t *testing.T) {
 	conn := testConnDirect(nil)
 	conn.Identity = types.Identity{1, 2, 3}
@@ -5055,16 +5047,8 @@ func TestHandleOneOffQuery_ShunterUint128NegativeRejected(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterDMLStatementRejected pins the reference
-// subscription-parser rejection at
-// reference/SpacetimeDB/crates/sql-parser/src/parser/sub.rs lines 157-168
-// (`delete from t` / "DML not allowed in subscriptions") onto the OneOff
-// admission surface. Enforced incidentally at parseStatement's
-// expectKeyword("SELECT").
-//
-// One-off shares the subscription-shape admission path in Shunter; the
-// intentional divergence from reference's wider parse_and_type_sql path is
-// recorded in docs/shunter-design-decisions.md.
+// TestHandleOneOffQuery_ShunterDMLStatementRejected pins DML rejection on
+// OneOff admission.
 func TestHandleOneOffQuery_ShunterDMLStatementRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -6393,16 +6377,8 @@ func TestHandleOneOffQuery_ShunterUnknownFieldRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText pins the
-// reference type-check rejection literal at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:100
-// (`UnexpectedType` = "Unexpected type: (expected) {expected} != {inferred}
-// (inferred)") via the emit site at
-// reference/SpacetimeDB/crates/expr/src/lib.rs:94
-// (`(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty)) =>
-// Err(UnexpectedType::new(&AlgebraicType::Bool, ty).into())`) — a bool
-// literal in a non-bool column. OneOff admission emits the raw error text
-// with no `DBError::WithSql` wrap.
+// TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText pins
+// UnexpectedType text for Bool literals on integer columns.
 func TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -6427,19 +6403,8 @@ func TestHandleOneOffQuery_ShunterBoolLiteralOnIntegerColumnRejectText(t *testin
 	}
 }
 
-// TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText pins the reference
-// `InvalidLiteral` literal from
-// reference/SpacetimeDB/crates/expr/src/errors.rs:108
-// ("The literal expression `{literal}` cannot be parsed as type `{ty}`"),
-// emitted at lib.rs:99 when `parse(v, ty)` fails. On U8, the reference path
-// `parse_int` → `BigDecimal::to_u8` returns None for values > 255 and the
-// outer `.map_err(|_| InvalidLiteral::new(...))` folds the anyhow overflow
-// into the reference literal. OneOff admission emits the raw text with no
-// `DBError::WithSql` wrap. Scope: plain integer literal (`1000`) whose
-// reconstructed decimal text matches the original SQL token. Scientific
-// notation (`1e3`) collapses to LitInt(1000) at the Shunter parser, which
-// loses the original token; the contract slice for that shape requires
-// preserving the source text on Literal and is deferred.
+// TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText pins
+// InvalidLiteral text for integer overflow on narrow unsigned columns.
 func TestHandleOneOffQuery_ShunterIntOverflowOnUint8RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -6644,18 +6609,8 @@ func TestHandleOneOffQuery_ShunterNegativeIntOnUint256RejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText pins the
-// reference `InvalidLiteral` literal for a fractional LitFloat targeted at
-// an integer column. Reference path: `parse_int(BigDecimal, U32)` where
-// `BigDecimal::to_u32` returns None for 1.3 and the outer `.map_err` at
-// lib.rs:99 folds the anyhow into `InvalidLiteral::new(...)` (errors.rs:84).
-// Shunter previously routed LitFloat→integer through the generic
-// `mismatch` path ("float literal cannot be coerced to uint32"); this slice
-// extends `sql.mismatch` to emit `InvalidLiteralError` with the literal
-// rendered via `strconv.FormatFloat('g', -1, 64)` so `1.3` carries verbatim.
-// Source-text preservation for formats that round-trip differently (e.g.
-// `1.10` → "1.1") is a separate slice — this pin uses `1.3` whose canonical
-// text matches the original token.
+// TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText pins
+// InvalidLiteral text for float literals on integer columns.
 func TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -6680,16 +6635,8 @@ func TestHandleOneOffQuery_ShunterFloatLiteralOnUint32RejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterNonBoolLiteralOnBoolRejectText pins the
-// reference `InvalidLiteral` literal for non-Bool primitive literals
-// targeted at a Bool column. Reference path: `parse(value, Bool)` at
-// lib.rs:99 has no Bool arm in its type-match and falls to the catch-all
-// `bail!("Literal values for type Bool are not supported")`, which the
-// outer `.map_err` folds into `InvalidLiteral::new(v.into_string(), Bool)`.
-// OneOff admission emits the raw text with no `DBError::WithSql` wrap.
-// Covers LitInt, LitFloat, LitString in one table; LitBigInt is exercised
-// by the coerce-layer unit test and LitBytes is deferred pending a
-// canonical-hex / Text-field decision on `sql.Literal`.
+// TestHandleOneOffQuery_ShunterNonBoolLiteralOnBoolRejectText pins
+// InvalidLiteral text for non-bool literals on Bool columns.
 func TestHandleOneOffQuery_ShunterNonBoolLiteralOnBoolRejectText(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -6869,16 +6816,8 @@ func TestHandleOneOffQuery_ShunterDuplicateSelfJoinRejectText(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText pins the
-// reference `UnexpectedType` literal for an ON binop whose two field
-// references resolve to different algebraic kinds. Reference path:
-// `type_expr` (lib.rs:134-140) types the LEFT side with no expectation
-// (`None`), then types the RIGHT side with the LEFT type as expected; a
-// kind mismatch raises `UnexpectedType{expected: <left>, inferred:
-// <right>}`. Mirror at the Shunter compile boundary so both surfaces
-// carry the reference text instead of the late `subscription:
-// invalid predicate: join column kinds differ` from
-// `subscription/validate.go::validateJoin`.
+// TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText pins
+// UnexpectedType text for JOIN ON type mismatches.
 func TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	b := schema.NewBuilder().SchemaVersion(1)
@@ -6914,16 +6853,8 @@ func TestHandleOneOffQuery_ShunterJoinColumnKindMismatchRejectText(t *testing.T)
 	}
 }
 
-// TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText pins the
-// reference `InvalidOp` literal for an ON binop comparing two Array<…>
-// columns. Reference path: `type_expr` (lib.rs:138) routes equality
-// against a non-primitive type through `op_supports_type` (lib.rs:155),
-// which rejects Array kinds and emits `InvalidOp{op: "=", ty:
-// "Array<String>"}`. The previous Shunter literal embedded contextual
-// `join ON t.arr = s.arr: ...` which does not match the reference shape.
-//
-// Schema is wired through a hand-built `mockSchemaLookup` so the test stays
-// focused on protocol-layer compile checks and does not need a full engine.
+// TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText pins
+// InvalidOp text for array equality in JOIN ON.
 func TestHandleOneOffQuery_ShunterJoinArrayColumnInvalidOpRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "arr", Type: schema.KindArrayString}}}

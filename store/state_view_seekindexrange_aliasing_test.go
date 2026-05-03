@@ -7,22 +7,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the read-view StateView.SeekIndexRange BTree-alias sub-hazard closure.
-// BTreeIndex.SeekRange is an iter.Seq that walks b.entries live: the outer
-// loop uses len(b.entries) and indexes b.entries[i] each step, reading the
-// backing array directly. If a yield callback reaches into the entry and
-// drops a key (e.g. removes the last rowID of an entry that sits behind
-// the current cursor), slices.Delete(b.entries, idx, idx+1) shifts the
-// tail of b.entries down in place. The outer loop's i++ then skips over
-// an entry that would otherwise have been yielded. Materializing the
-// range at the StateView boundary decouples iteration from BTree-internal
-// storage. Mirrors the SeekIndex and CommittedSnapshot IndexSeek
-// regression contracts.
-//
-// Under executor single-writer discipline no concurrent writer runs
-// during a reducer's synchronous iteration, so this test drives the
-// contract-violating mutation directly via the BTree handle to simulate
-// a future path in which a yield callback reaches into committed state.
+// Pins that StateView.SeekIndexRange materializes committed index rows before
+// yielding.
 
 func TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation(t *testing.T) {
 	ts := &schema.TableSchema{

@@ -3,12 +3,6 @@ package protocol
 import "github.com/ponchione/shunter/types"
 
 // SendSubscribeSingleApplied delivers a SubscribeSingleApplied message.
-// single/multi variant admission-model slice (TD-140): wire-id admission
-// bookkeeping is no longer maintained on the protocol connection —
-// subscription.Manager.querySets is the single source of truth, and
-// §9.4 ordering is preserved by the synchronous Reply closure invoked
-// inside the executor main-loop goroutine plus per-connection
-// OutboundCh FIFO. See docs/shunter-design-decisions.md.
 func SendSubscribeSingleApplied(sender ClientSender, conn *Conn, msg *SubscribeSingleApplied) error {
 	return sender.Send(conn.ID, *msg)
 }

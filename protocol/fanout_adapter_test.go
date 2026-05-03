@@ -310,17 +310,7 @@ func TestFanOutSenderAdapter_SendTransactionUpdateHeavyFailed(t *testing.T) {
 }
 
 // TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs
-// pins the reference-informed behavior for post-commit evaluation errors.
-// The fan-out adapter is only invoked for errors routed through
-// FanOutMessage.Errors, which originate from
-// `subscription/eval.go::handleEvalError` during a TransactionUpdate
-// re-eval. Reference
-// `core/src/subscription/module_subscription_manager.rs:1998-2010`
-// emits `SubscriptionError { request_id: None, query_id: None, ... }`
-// in this exact case, and `core/src/client/messages.rs:622-629`
-// propagates the Options straight through. Per-connection diagnostics
-// (`subscription.SubscriptionError.RequestID`/`QueryID`) are
-// internal logging state; they must not appear on the wire.
+// pins that eval-origin SubscriptionError diagnostics stay off the wire.
 func TestFanOutSenderAdapter_SendSubscriptionErrorTransactionOriginClearsIDs(t *testing.T) {
 	mock := &mockClientSender{}
 	adapter := NewFanOutSenderAdapter(mock)

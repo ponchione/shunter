@@ -12,23 +12,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestShunterOneOffQueryResponseWireShapeSuccess pins the byte-level wire
-// shape of OneOffQueryResponse against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:654`
-// (`pub struct OneOffQueryResponse<F>`). Reference field order:
-//
-//	message_id: Box<[u8]>
-//	error:      Option<Box<str>>
-//	tables:     Box<[OneOffTable]>
-//	total_host_execution_duration: TimeDuration (i64 micros)
-//
-// OneOffTable (v1.rs:669):
-//
-//	table_name: RawIdentifier (Box<str>)
-//	rows:       F::List (Box<[u8]> for BsatnFormat)
-//
-// Success emission matches module_host.rs:2290 (`error: None, results:
-// vec![OneOffTable { table_name, rows }]`).
+// TestShunterOneOffQueryResponseWireShapeSuccess pins the success wire shape
+// for OneOffQueryResponse.
 func TestShunterOneOffQueryResponseWireShapeSuccess(t *testing.T) {
 	messageID := []byte{0xAA, 0xBB, 0xCC}
 	tableName := "users"

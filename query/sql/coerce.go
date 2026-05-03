@@ -24,14 +24,8 @@ var (
 	int256Min  = new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 255))
 )
 
-// Coerce turns a parsed Literal into a types.Value matching the target
-// column kind. Mismatched categories (string-literal into an integer
-// column, negative literal into an unsigned column, integer out of range
-// for a narrower signed kind) return ErrUnsupportedSQL.
-//
-// Float and bytes kinds are reachable from the current SQL literal grammar.
-// A LitSender marker cannot be resolved without a caller identity; the
-// caller must route through CoerceWithCaller instead.
+// Coerce converts a parsed literal into a value for the target column kind.
+// Use CoerceWithCaller for :sender literals.
 func Coerce(lit Literal, kind types.ValueKind) (types.Value, error) {
 	if lit.Kind == LitSender {
 		return types.Value{}, fmt.Errorf("%w: :sender requires caller identity", ErrUnsupportedSQL)
@@ -39,14 +33,8 @@ func Coerce(lit Literal, kind types.ValueKind) (types.Value, error) {
 	return coerceValue(lit, kind, nil)
 }
 
-// CoerceWithCaller is Coerce with an out-of-band caller identity supplied
-// for :sender parameter resolution. `caller` materializes as the 32-byte
-// identity payload on KindBytes columns (the Shunter representation of
-// both reference `identity()` and `bytes()` columns used on the
-// `select * from s where id = :sender` / `bytes = :sender` surface).
-// Passing a nil caller while the literal is LitSender returns
-// ErrUnsupportedSQL; non-bytes column kinds reject the marker in the
-// same way the reference typechecker rejects `arr = :sender`.
+// CoerceWithCaller resolves :sender using the supplied caller identity.
+// A nil caller or non-bytes target rejects :sender with ErrUnsupportedSQL.
 func CoerceWithCaller(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Value, error) {
 	return coerceValue(lit, kind, caller)
 }
@@ -56,39 +44,15 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		if caller == nil {
 			return types.Value{}, fmt.Errorf("%w: :sender requires caller identity", ErrUnsupportedSQL)
 		}
-		// Mirror reference `resolve_sender` at sql-parser/src/ast/mod.rs:159 —
-		// the AST step replaces `Param(Sender)` with `Lit(SqlLiteral::Hex(
-		// identity.to_hex()))` BEFORE type-checking, so every downstream
-		// `parse(value, ty)` arm consumes the 64-char identity hex as a
-		// source-text literal. Shunter materializes the same shape here:
-		// LitBytes carries the 32-byte payload (so KindBytes returns the raw
-		// caller bytes as today) AND the hex source text (so KindString,
-		// KindBool, and numeric kinds route through the existing source-text
-		// seams to produce the reference renderings — String(hex),
-		// InvalidLiteral{hex, "Bool"}, InvalidLiteral{hex, "U32"}, etc.).
-		// caller=nil on recursion is defensive; the recursive Literal is no
-		// longer LitSender so the entry-point check would not re-trigger.
+		// Preserve both raw bytes and hex source text so :sender follows the
+		// same coercion paths as a parsed hex literal.
 		buf := make([]byte, len(caller))
 		copy(buf, caller[:])
 		resolved := Literal{Kind: LitBytes, Bytes: buf, Text: hex.EncodeToString(caller[:])}
 		return coerceValue(resolved, kind, nil)
 	}
-	// LitString / LitBytes (with preserved source text) → numeric column:
-	// route through `parseNumericLiteral` and recurse with the parsed numeric
-	// Literal so the existing LitInt / LitBigInt / LitFloat coerce arms apply.
-	// Mirrors reference parse_int / parse_float at expr/src/lib.rs:168-208 —
-	// `BigDecimal::from_str(value)` either succeeds (driving range and
-	// is_integer checks downstream) or fails, with the lib.rs:99 .map_err
-	// folding any failure into `InvalidLiteral::new(v.into_string(), ty)`.
-	// LitBytes routing covers parser-produced hex literals (`u32 = 0x01` → hex
-	// text rejects through BigDecimal) and `:sender`-resolved hex (caller hex
-	// also rejects, since BigDecimal does not accept the a-f digits). For
-	// all-decimal hex (e.g. caller bytes that happen to decode as a digit
-	// string), parseNumericLiteral succeeds and produces a LitBigInt that the
-	// integer-column branches reject as out-of-range — same shape as the
-	// reference path. KindString is excluded because that case widens through
-	// `renderLiteralSourceText`; KindBool / KindBytes / KindTimestamp etc.
-	// route through their own type-specific branches.
+	// Numeric columns parse string/hex source text first, then reuse the normal
+	// integer and float coercion paths.
 	if lit.Kind == LitString && isNumericKind(kind) {
 		parsed, err := parseNumericLiteral(lit.Str)
 		if err != nil {
@@ -110,36 +74,14 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		}
 		return types.NewBool(lit.Bool), nil
 	case types.KindString:
-		// Reference `parse(value, AlgebraicType::String)` at
-		// expr/src/lib.rs:353 wraps the SqlLiteral source text as
-		// `AlgebraicValue::String(value.into())` for any of `Str | Num | Hex`
-		// literal categories. Shunter widens LitString / LitInt / LitFloat /
-		// LitBigInt onto KindString through `renderLiteralSourceText`
-		// (FormatInt / FormatFloat / lit.Str / Big.String). LitBytes is
-		// deferred — Shunter's parser decodes the hex source token into bytes
-		// at `parseHexLiteral`, so the original `0x...` / `X'...'` form is
-		// not recoverable; it falls through to `mismatch` until the
-		// source-text-preservation slice lands. LitBool falls through to
-		// `mismatch` and emits `UnexpectedType{Bool, String}` matching
-		// reference lib.rs:94 (only `Str | Num | Hex` reach the lib.rs:353
-		// String arm). LitSender is short-circuited above for non-Bytes
-		// columns.
+		// Strings preserve source text for string and numeric literals.
 		if text, ok := renderLiteralSourceText(lit); ok {
 			return types.NewString(text), nil
 		}
 		return types.Value{}, mismatch(lit, kind)
 	case types.KindBytes:
-		// Reference `parse(value, AlgebraicType::Bytes)` at expr/src/lib.rs:218
-		// routes the SqlLiteral source text through `from_hex_pad`, which
-		// strips an optional `0x` prefix and decodes the remaining even-length
-		// hex digit pairs. Shunter parser-produced LitBytes already carries
-		// the decoded `Bytes` payload, so it binds directly. LitString /
-		// LitInt / LitFloat / LitBigInt with preserved source text route
-		// through the same hex-decode helper to mirror reference shapes such
-		// as `bytes = '0x0102'` (Str), `bytes = 42` (Num — decoded as the
-		// single byte 0x42), and `:sender`-resolved hex on a bytes column.
-		// Decode failure folds to InvalidLiteral with the source text and
-		// type `Array<U8>`, matching the reference outer `.map_err`.
+		// Bytes literals bind directly; other source-text literals are decoded
+		// as hex and reject as InvalidLiteral on decode failure.
 		if lit.Kind == LitBytes {
 			return types.NewBytes(lit.Bytes), nil
 		}
@@ -200,15 +142,8 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 	case types.KindUint256:
 		return coerceWideUnsigned(lit, kind, types.NewUint256FromUint64, coerceBigIntToUint256)
 	case types.KindTimestamp:
-		// Reference `parse(value, Timestamp)` at expr/src/lib.rs:359 has no
-		// Timestamp arm in the type-match and falls to the catch-all
-		// `bail!("Literal values for type {} are not supported")`. The outer
-		// `.map_err` at lib.rs:99 folds the anyhow into
-		// `InvalidLiteral::new(v.into_string(), ty)` for non-Bool literals;
-		// LitBool routes through `mismatch` → `UnexpectedTypeError` matching
-		// the lib.rs:94 Bool arm. The Shunter parser still drives the happy
-		// path (RFC3339-shaped LitString → Timestamp micros); only the reject
-		// branch is reference-informed.
+		// RFC3339 strings are accepted; other source-text literals reject as
+		// InvalidLiteral for the timestamp algebraic type.
 		if lit.Kind == LitString {
 			if micros, ok := parseTimestampLiteral(lit.Str); ok {
 				return types.NewTimestamp(micros), nil
@@ -223,13 +158,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 		}
 		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	case types.KindArrayString:
-		// Reference `parse(value, Array<String>)` at expr/src/lib.rs:359
-		// hits the array-kind catch-all `bail!("Literal values for type {}
-		// are not supported")`, folded by lib.rs:99 `.map_err` into
-		// `InvalidLiteral::new(v.into_string(), ty)`. LitBool stays on the
-		// lib.rs:94 `UnexpectedType` arm via `mismatch`. There is no array
-		// literal in the Shunter grammar today, so every literal kind is a
-		// reject; the source-text seam carries the literal verbatim.
+		// Shunter SQL has no array literal grammar; source-text literals reject.
 		if lit.Kind == LitBool {
 			return types.Value{}, mismatch(lit, kind)
 		}
@@ -260,15 +189,8 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 }
 
 func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64) types.Value) (types.Value, error) {
-	// `parseNumericLiteral` only produces LitBigInt when the source decimal
-	// overflows int64, so the value always overflows any 32/64-bit signed
-	// kind. Reference parse_int → BigDecimal::to_iN returns None →
-	// InvalidLiteral (lib.rs:99). Mirrors the 128/256-bit emit shape in
-	// `coerceBigIntToInt{128,256}`. Source-text seam: prefer the preserved
-	// numeric token (e.g. `1e40` → "1e40", `+1000` → "+1000") so the literal
-	// rendering survives parser collapses; falls back to the canonical
-	// decimal `Big.String()` when no Text was preserved (test-constructed
-	// Literals).
+	// LitBigInt always overflows narrow signed kinds; preserve source text in
+	// the InvalidLiteral error when available.
 	if lit.Kind == LitBigInt {
 		text, _ := renderLiteralSourceText(lit)
 		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
@@ -284,11 +206,8 @@ func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64
 }
 
 func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64) types.Value) (types.Value, error) {
-	// LitBigInt overflow on 32/64-bit unsigned columns: same reference-informed shape
-	// as `coerceSigned`. Negative LitBigInt also overflows the unsigned
-	// range; the same emit shape covers both reject directions. Source-text
-	// seam preserved through `renderLiteralSourceText` so collapsed forms
-	// (`1e3` → 1000 → "1e3") render the original token.
+	// LitBigInt always overflows narrow unsigned kinds; preserve source text in
+	// the InvalidLiteral error when available.
 	if lit.Kind == LitBigInt {
 		text, _ := renderLiteralSourceText(lit)
 		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
@@ -345,34 +264,16 @@ func coerceWideUnsigned(
 }
 
 func mismatch(lit Literal, kind types.ValueKind) error {
-	// Bool literal into a non-bool column: emit the reference
-	// `UnexpectedType` text verbatim (expr/src/errors.rs:100, emitted at
-	// expr/src/lib.rs:94 for `(SqlExpr::Lit(SqlLiteral::Bool(_)), Some(ty))`).
-	// Other mismatch categories keep the current coerce-level text; their
-	// reference counterparts (`InvalidLiteral` for Str/Hex) are
-	// separate contract slices.
+	// Bool mismatches use the reference UnexpectedType shape.
 	if lit.Kind == LitBool && kind != types.KindBool {
 		return UnexpectedTypeError{Expected: "Bool", Inferred: algebraicName(kind)}
 	}
-	// Float literal into a non-float numeric (integer) column: reference
-	// `parse_int(BigDecimal, ty)` (expr/src/lib.rs:99) rejects fractional
-	// BigDecimals via `BigDecimal::to_{i,u}{8..256}` returning None, and
-	// the outer `.map_err` folds the anyhow into `InvalidLiteral::new`
-	// (expr/src/errors.rs:84). Source-text seam: prefer the preserved
-	// numeric token (e.g. `1.10` → "1.10") and fall back to
-	// `strconv.FormatFloat('g', -1, 64)` for test-constructed literals
-	// without a Text field.
+	// Float-to-integer mismatches report InvalidLiteral with preserved text.
 	if lit.Kind == LitFloat && isIntegerKind(kind) {
 		text, _ := renderLiteralSourceText(lit)
 		return InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	}
-	// Non-Bool primitive literal into a Bool column: reference
-	// `parse(value, AlgebraicType::Bool)` has no Bool arm in the type-match
-	// and falls through to the catch-all `bail!("Literal values for type
-	// {} are not supported")`, which the outer `.map_err` at lib.rs:99
-	// folds into `InvalidLiteral::new(v.into_string(), Bool)`. Shunter's
-	// LitBytes has no preserved source text and is skipped here (separate
-	// slice once `Literal` carries a canonical hex or `Text` field).
+	// Non-bool source-text literals into Bool report InvalidLiteral.
 	if kind == types.KindBool {
 		if text, ok := renderLiteralSourceText(lit); ok {
 			return InvalidLiteralError{Literal: text, Type: "Bool"}
@@ -381,21 +282,8 @@ func mismatch(lit Literal, kind types.ValueKind) error {
 	return fmt.Errorf("%w: %s literal cannot be coerced to %s", ErrUnsupportedSQL, lit.Kind, kind)
 }
 
-// renderLiteralSourceText reconstructs the reference source text for a
-// Literal for use in `InvalidLiteralError.Literal` and `KindString`
-// widening. Matches the reference `SqlLiteral::Str(v) | SqlLiteral::Num(v) |
-// SqlLiteral::Hex(v)` → `v.into_string()` renderings (expr/src/lib.rs:94).
-//
-// Prefers `lit.Text` when populated by the parser — that path preserves
-// scientific-notation tokens (`1e40`), leading-sign / leading-zero tokens
-// (`+1000`, `001`), round-trip-lossy float tokens (`1.10`), and hex tokens
-// (`0xDEADBEEF`, `X'01'`) verbatim through coerce-time renderings.
-// Test-constructed Literals with empty Text fall back to canonical
-// reconstructions (`strconv.FormatInt`, `strconv.FormatFloat('g', -1, 64)`,
-// `Big.String()`). LitBool returns false (Bool literals route through the
-// dedicated `UnexpectedType` shape, not InvalidLiteral). LitSender returns
-// false (the entry-point :sender resolver swaps it for a LitBytes-with-Text
-// before any source-text rendering).
+// renderLiteralSourceText returns preserved parser text when available, then
+// falls back to canonical text for numeric and string literals.
 func renderLiteralSourceText(lit Literal) (string, bool) {
 	if lit.Text != "" {
 		return lit.Text, true
@@ -414,12 +302,8 @@ func renderLiteralSourceText(lit Literal) (string, bool) {
 	}
 }
 
-// decodeReferenceHex mirrors the Shunter SQL-source-text routing onto
-// `KindBytes`. Strips an optional `0x` prefix or supported uppercase `X'`
-// bytes-literal prefix, then decodes the remaining even-length hex digit
-// pairs via `encoding/hex`. Empty body decodes to a zero-length slice
-// (matching `hex::FromHex` on empty input). Decode failure returns the
-// underlying `encoding/hex` error so the caller can fold to InvalidLiteral.
+// decodeReferenceHex decodes the SQL source-text forms accepted for bytes
+// columns. Decode errors are returned for the caller to wrap.
 func decodeReferenceHex(text string) ([]byte, error) {
 	body := text
 	if strings.HasPrefix(body, "0x") {
@@ -430,10 +314,7 @@ func decodeReferenceHex(text string) ([]byte, error) {
 	return hex.DecodeString(body)
 }
 
-// isIntegerKind reports whether a ValueKind is one of the signed or
-// unsigned integer primitives (I8..I256, U8..U256). Used by `mismatch` to
-// route LitFloat→integer-column failures onto the reference
-// `InvalidLiteral` text path.
+// isIntegerKind reports whether k is any signed or unsigned integer kind.
 func isIntegerKind(k types.ValueKind) bool {
 	switch k {
 	case types.KindInt8, types.KindInt16, types.KindInt32, types.KindInt64,
@@ -446,21 +327,12 @@ func isIntegerKind(k types.ValueKind) bool {
 	}
 }
 
-// isNumericKind reports whether a ValueKind is reachable through reference
-// `parse_int` / `parse_float` (expr/src/lib.rs:255-352) — every signed /
-// unsigned integer primitive plus the two float primitives. The
-// LitString-on-numeric routing in `coerceValue` uses this to decide
-// whether to drive a LitString through `parseNumericLiteral` (mirrors
-// reference `BigDecimal::from_str`).
+// isNumericKind reports whether k is an integer or float kind.
 func isNumericKind(k types.ValueKind) bool {
 	return isIntegerKind(k) || k == types.KindFloat32 || k == types.KindFloat64
 }
 
-// UnexpectedTypeError mirrors reference `expr::errors::UnexpectedType`
-// (reference/SpacetimeDB/crates/expr/src/errors.rs:99-114). Emitted by the
-// coerce boundary when a literal's algebraic type cannot bind to the
-// column's algebraic type. Unwrap()s to ErrUnsupportedSQL so callers that
-// classify by sentinel still match.
+// UnexpectedTypeError reports a literal algebraic type mismatch.
 type UnexpectedTypeError struct {
 	Expected string
 	Inferred string
@@ -472,16 +344,7 @@ func (e UnexpectedTypeError) Error() string {
 
 func (e UnexpectedTypeError) Unwrap() error { return ErrUnsupportedSQL }
 
-// InvalidLiteralError mirrors reference `expr::errors::InvalidLiteral`
-// (reference/SpacetimeDB/crates/expr/src/errors.rs:83-97). Emitted by the
-// coerce boundary when an integer literal is out of range for the target
-// column kind (reference emits this via `lib.rs:99` when `parse(v, ty)`
-// rejects the source text). Unwrap()s to ErrUnsupportedSQL so callers that
-// classify by sentinel still match. `Literal` carries the reconstructed
-// decimal text of the integer value; scientific-notation literals collapse
-// to LitInt at the Shunter parser and so render via `strconv.FormatInt`
-// rather than the original source token. Surfaces that need exact source text
-// preserve it on Literal before calling the coerce boundary.
+// InvalidLiteralError reports a literal that cannot parse as the target type.
 type InvalidLiteralError struct {
 	Literal string
 	Type    string
@@ -493,16 +356,7 @@ func (e InvalidLiteralError) Error() string {
 
 func (e InvalidLiteralError) Unwrap() error { return ErrUnsupportedSQL }
 
-// DuplicateNameError mirrors reference `expr::errors::DuplicateName`
-// (reference/SpacetimeDB/crates/expr/src/errors.rs:119-121). Emitted at
-// compile-stage validation when a projection alias or join alias collides
-// with another in the same scope. Reference emit sites:
-//
-//   - lib.rs:88-89 (join alias collision in `type_from`)
-//   - check.rs:67-72 (duplicate projection alias in `type_proj::Exprs`)
-//
-// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel still
-// match.
+// DuplicateNameError reports a duplicate projection or join alias.
 type DuplicateNameError struct {
 	Name string
 }
@@ -513,20 +367,7 @@ func (e DuplicateNameError) Error() string {
 
 func (e DuplicateNameError) Unwrap() error { return ErrUnsupportedSQL }
 
-// UnresolvedVarError mirrors reference `expr::errors::Unresolved::Var`
-// (reference/SpacetimeDB/crates/expr/src/errors.rs:11-13). Emitted at
-// compile-stage validation when a SQL expression references an
-// identifier that does not resolve to a known table relvar or column.
-// Reference emit sites:
-//
-//   - lib.rs:103 (relvar lookup miss in `_type_expr` field branch)
-//   - lib.rs:107 (column lookup miss inside an existing relvar)
-//
-// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
-// still match. Replaces the older `Unresolved::Field`-shape text
-// (“ `{table}` does not have a field `{field}` “); reference does not
-// reach `Unresolved::Field` from any subscription/one-off SELECT path
-// (statement.rs DML emit sites are out of scope here).
+// UnresolvedVarError reports an identifier that is not in SQL scope.
 type UnresolvedVarError struct {
 	Name string
 }
@@ -537,14 +378,7 @@ func (e UnresolvedVarError) Error() string {
 
 func (e UnresolvedVarError) Unwrap() error { return ErrUnsupportedSQL }
 
-// InvalidOpError mirrors reference `expr::errors::InvalidOp`
-// (reference/SpacetimeDB/crates/expr/src/errors.rs:71-85). Emitted at
-// compile-stage validation when a binary operator targets a type that
-// `op_supports_type` (lib.rs:155) rejects — practically reachable for
-// Array<…> and Product columns when an equi-join ON expression compares
-// such columns. Reference emit sites: lib.rs:130, lib.rs:138 (both routed
-// through `type_expr` on the ON binop). Unwrap()s to ErrUnsupportedSQL so
-// callers that classify by sentinel still match.
+// InvalidOpError reports an unsupported binary operator/type combination.
 type InvalidOpError struct {
 	Op   string
 	Type string
@@ -556,75 +390,27 @@ func (e InvalidOpError) Error() string {
 
 func (e InvalidOpError) Unwrap() error { return ErrUnsupportedSQL }
 
-// UnsupportedSelectError mirrors the reference SQL/subscription parsers'
-// rejection arm at `sql.rs:362-394` (OneOff) and `sub.rs:120-149`
-// (subscription) when `parse_select` encounters a `Select` whose
-// `distinct` field is non-None (i.e. `SELECT ALL ...` / `SELECT DISTINCT
-// ...`). Reference renders two distinct prefixes per surface, both
-// wrapping the offending SQL text:
-//
-//   - OneOff path: `SqlUnsupported::feature(select)` ->
-//     `Unsupported: {select}` via `parser/errors.rs:38-39` /
-//     `parser/errors.rs:25-26`.
-//   - Subscription path: `SubscriptionUnsupported::Select(select)` ->
-//     `Unsupported SELECT: {select}` via `parser/errors.rs:15-17`.
-//
-// Both surfaces operate on the same parsed-and-redisplayed SQL string,
-// which round-trips through the `sqlparser` crate's `Display` impl.
-// Shunter stores the original input verbatim instead, since our test
-// shapes match the reference's normalized output for the unmodified
-// SELECT.
-//
-// HasLimit records whether the parser saw a LIMIT clause token in the same
-// statement before rejecting the set quantifier. Reference subscription
-// parsing rejects Query.limit through SubscriptionUnsupported::Feature before
-// parse_select reaches the set-quantifier branch; compile callers use this bit
-// to mirror that ordering without changing the OneOff/raw render.
-//
-// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
-// still match.
+// UnsupportedSelectError reports unsupported SELECT set quantifiers.
+// HasLimit preserves subscription reject ordering for LIMIT plus quantifier.
 type UnsupportedSelectError struct {
 	SQL      string
 	HasLimit bool
 }
 
-// Error renders the OneOff/raw form. Callers wrapping for the
-// subscription surface should call SubscribeError() instead before
-// applying the `DBError::WithSql` wrap.
+// Error renders the OneOff/raw form.
 func (e UnsupportedSelectError) Error() string {
 	return "Unsupported: " + e.SQL
 }
 
-// SubscribeError renders the subscription-surface form, which carries
-// the `Unsupported SELECT:` prefix from `SubscriptionUnsupported::Select`
-// rather than the OneOff `Unsupported:` prefix from
-// `SqlUnsupported::feature`.
+// SubscribeError renders the subscription-surface form.
 func (e UnsupportedSelectError) SubscribeError() string {
 	return "Unsupported SELECT: " + e.SQL
 }
 
 func (e UnsupportedSelectError) Unwrap() error { return ErrUnsupportedSQL }
 
-// UnqualifiedNamesError mirrors reference
-// `parser::errors::SqlUnsupported::UnqualifiedNames`
-// (reference/SpacetimeDB/crates/sql-parser/src/parser/errors.rs:78-79).
-// Reference `SqlSelect::find_unqualified_vars` (ast/sql.rs:84-95) emits
-// this variant when any FROM/projection/filter expression contains an
-// unqualified `Var` while a JOIN is in scope. The variant carries no
-// payload; both surfaces render the literal text
-// `Names must be qualified when using joins`.
-//
-// Shunter has three local rejection sites that route here:
-//
-//   - `resolveProjectionColumns` when a join projection column is bare
-//   - `parseQualifiedColumnRef` when the JOIN ON token sequence is
-//     `ident` without a following `.` (a bare identifier in ON scope)
-//   - `parseColumnRefForPredicate` / `parseComparisonPredicate` when a
-//     join WHERE comparison column is bare
-//   - `parseColumnRefForOrderBy` when a join ORDER BY column is bare
-//
-// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
-// still match.
+// UnqualifiedNamesError reports a bare identifier where a join requires
+// qualified names.
 type UnqualifiedNamesError struct{}
 
 func (e UnqualifiedNamesError) Error() string {
@@ -633,15 +419,7 @@ func (e UnqualifiedNamesError) Error() string {
 
 func (e UnqualifiedNamesError) Unwrap() error { return ErrUnsupportedSQL }
 
-// UnsupportedJoinTypeError mirrors reference
-// `parser::errors::SqlUnsupported::JoinType`
-// (reference/SpacetimeDB/crates/sql-parser/src/parser/errors.rs:66).
-// Reference `parse_join` routes every join operator/constraint other
-// than cross join and pure `qualified_identifier = qualified_identifier`
-// inner-join ON equality through this literal.
-//
-// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
-// still match.
+// UnsupportedJoinTypeError reports a join shape outside Shunter's SQL subset.
 type UnsupportedJoinTypeError struct{}
 
 func (e UnsupportedJoinTypeError) Error() string {
@@ -650,24 +428,7 @@ func (e UnsupportedJoinTypeError) Error() string {
 
 func (e UnsupportedJoinTypeError) Unwrap() error { return ErrUnsupportedSQL }
 
-// UnsupportedExprError mirrors reference
-// `parser::errors::SqlUnsupported::Expr`
-// (reference/SpacetimeDB/crates/sql-parser/src/parser/errors.rs:38-39).
-// Reference `parse_expr`
-// (reference/SpacetimeDB/crates/sql-parser/src/parser/mod.rs:219-271)
-// routes any expression shape outside the supported grammar through
-// this variant — including placeholders other than the exact
-// `:sender` byte-equal string (line 223). The variant carries the
-// rendered expression text; both surfaces render
-// `Unsupported expression: {expr}`.
-//
-// Shunter's local reroute covers `parseLiteral`'s `tokParam` branch:
-// any parameter placeholder whose body is not exactly `sender`
-// (byte-equal) emits this typed error with the full `:{text}`
-// rendering.
-//
-// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
-// still match.
+// UnsupportedExprError reports an expression outside the supported grammar.
 type UnsupportedExprError struct {
 	Expr string
 }
@@ -678,27 +439,7 @@ func (e UnsupportedExprError) Error() string {
 
 func (e UnsupportedExprError) Unwrap() error { return ErrUnsupportedSQL }
 
-// UnsupportedFeatureError mirrors reference
-// `SubscriptionUnsupported::Feature` (parser/errors.rs:18-19) and the
-// sibling `SqlUnsupported::Feature` (parser/errors.rs:64-65). Both
-// variants carry a stringified expression and render as
-// `Unsupported: {expr}` — the same prefix on both surfaces, unlike
-// `SubscriptionUnsupported::Select` which uses `Unsupported SELECT: `.
-//
-// Reference subscription routing for LIMIT: `SubParser::parse_query`
-// (sql-parser/src/parser/sub.rs:94-107) rejects any subscription Query
-// with `limit: Some(...)` (or any non-None for `offset`/`fetch`) through
-// `SubscriptionUnsupported::feature(query)`, formatting the offending
-// Query through its Display impl.
-//
-// Shunter's local reroute covers the `compileSQLQueryString` LIMIT
-// guard on the subscribe surfaces (allowLimit=false), including
-// set-quantifier shapes where the parser reports UnsupportedSelectError
-// with HasLimit=true so the compile path can preserve the subscription
-// parser's query-level ordering.
-//
-// Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
-// still match.
+// UnsupportedFeatureError reports a SQL feature outside the active surface.
 type UnsupportedFeatureError struct {
 	SQL string
 }
@@ -709,22 +450,12 @@ func (e UnsupportedFeatureError) Error() string {
 
 func (e UnsupportedFeatureError) Unwrap() error { return ErrUnsupportedSQL }
 
-// AlgebraicName exports the reference `fmt_algebraic_type` short-name
-// renderer for a ValueKind so cross-package compile-stage checks (in
-// `protocol`) can produce reference-shape `UnexpectedType` / `InvalidOp`
-// strings without duplicating the table.
+// AlgebraicName returns the wire/error short name for a ValueKind.
 func AlgebraicName(k types.ValueKind) string {
 	return algebraicName(k)
 }
 
-// algebraicName returns the reference `fmt_algebraic_type` short name for a
-// ValueKind (reference/SpacetimeDB/crates/sats/src/algebraic_type/fmt.rs
-// lines 15-40). Primitives use capitalized short tokens (`Bool`, `U32`,
-// `F32`, etc.); `KindBytes` renders as `Array<U8>` and `KindArrayString` as
-// `Array<String>` via the parameterized array form. `KindTimestamp` is a
-// Product type in reference SATS (sats/src/timestamp.rs:11-13) and renders
-// as `(__timestamp_micros_since_unix_epoch__: I64)` through
-// `fmt_algebraic_type`'s product arm.
+// algebraicName returns the protocol/error short name for a ValueKind.
 func algebraicName(k types.ValueKind) string {
 	switch k {
 	case types.KindBool:

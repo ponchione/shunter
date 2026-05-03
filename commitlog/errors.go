@@ -23,13 +23,7 @@ var (
 	ErrOffsetIndexCorrupt     error = offsetIndexCorruptError{}
 )
 
-// Category sentinels group the errors above by admission seam. A caller can
-// test category membership via errors.Is(err, ErrTraversal) etc. without
-// enumerating every leaf. Converted singleton sentinels now carry their own
-// category via Is. For the two historically split leaves (ErrBadFlags and
-// ErrTruncatedRecord), the singleton category is ErrTraversal; open-time sites
-// still return the same leaf text/identity, but callers wanting the old split
-// must check the leaf directly.
+// Category sentinels let callers classify commitlog errors with errors.Is.
 var (
 	// ErrTraversal categorizes iterator-time errors (record decode, segment
 	// scan mid-record, changeset decode).

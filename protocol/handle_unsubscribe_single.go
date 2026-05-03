@@ -5,15 +5,7 @@ import (
 	"time"
 )
 
-// handleUnsubscribeSingle processes an incoming UnsubscribeSingleMsg.
-// The wire QueryID is forwarded to the executor via the set-based
-// unsubscribe seam; the executor is responsible for producing the
-// final UnsubscribeSingleApplied (or SubscriptionError) once the drop
-// has been applied. The executor invokes the Reply closure
-// synchronously on its own goroutine; the closure enqueues the result
-// onto the connection's outbound channel.
-//
-// Receipt-timestamp seam: see handleSubscribeSingle.
+// handleUnsubscribeSingle removes one subscription for the client QueryID.
 func handleUnsubscribeSingle(
 	ctx context.Context,
 	conn *Conn,

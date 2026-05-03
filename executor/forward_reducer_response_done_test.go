@@ -10,23 +10,7 @@ import (
 )
 
 // TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs
-// pins the connection-lifecycle hardening fix for the `forwardReducerResponse`
-// goroutine leak. This test is the regression record for that contract.
-//
-// Sharp edge: the production dispatch ctx is rooted at
-// context.Background() (protocol/upgrade.go:201 through
-// Conn.runDispatchLoop). If the executor accepts a CallReducer but then
-// never sends on its internal ProtocolCallReducerResponse channel — e.g.
-// crash mid-commit, hung reducer on a shutting-down engine, executor
-// never reaching the reply seam — the forwarder goroutine would select
-// only on respCh and ctx.Done and leak forever, holding the owning
-// *Conn and its transitive state alive past disconnect.
-//
-// Contract: forwardReducerResponse must exit promptly when
-// req.Done closes (wired from Conn.closed at the handleCallReducer
-// site, fired as step 4 of the SPEC-005 §5.3 teardown) even if
-// respCh never fires. Direct analog to the watchReducerResponse
-// hardening (2026-04-20) on the protocol-side watcher.
+// pins that reducer response forwarding exits when the owning request is done.
 func TestProtocolInboxAdapter_ForwardReducerResponse_ExitsOnReqDoneWhenRespChHangs(t *testing.T) {
 	respCh := make(chan ProtocolCallReducerResponse) // never sends, never closes
 

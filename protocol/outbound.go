@@ -6,13 +6,8 @@ import (
 	"github.com/coder/websocket"
 )
 
-// runOutboundWriter drains OutboundCh and writes each frame to the
-// WebSocket as a binary message. Exits when ctx is cancelled, c.closed
-// is signaled and any queued frames have been drained best-effort, or a
-// write error occurs.
-//
-// FIFO order is guaranteed by the channel: frames enqueued first are
-// dequeued and written first.
+// runOutboundWriter drains OutboundCh to the WebSocket in FIFO order.
+// It exits on context cancellation, connection close, or write error.
 func (c *Conn) runOutboundWriter(ctx context.Context) {
 	for {
 		select {

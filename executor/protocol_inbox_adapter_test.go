@@ -229,17 +229,7 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorReply(t *tes
 }
 
 // TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID
-// pins that subscribe-request-origin SubscriptionError carries
-// table_id: None even when every referenced predicate points at the
-// same table. Reference v1 emit sites always populate
-// SubscriptionError.table_id with None in the request-origin error
-// paths — module_subscription_actor.rs:625 (add_single_subscription
-// send_err_msg), :731 (remove_single_subscription send_err_msg), :805
-// (remove_multi_subscription send_err_msg), :1308
-// (add_multi_subscription_inner send_err_msg); the post-commit
-// TransactionUpdate-origin emit at module_subscription_manager.rs:2014
-// is the same. Shunter must match that by never narrowing the drop
-// scope opportunistically from the error-path predicate surface.
+// pins that request-origin SubscriptionError leaves table_id unset.
 func TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleTableErrorEmitsNilTableID(t *testing.T) {
 	conn, _, _ := newAdapterTestConn(t)
 	var captured *protocol.SubscriptionError
@@ -362,15 +352,7 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorIsNotWrapped
 }
 
 // TestProtocolInboxAdapter_RegisterSubscriptionSet_MultiInitialEvalErrorEmitsCannedMessage
-// pins the reference SubscribeMulti initial-eval error shape
-// (`module_subscription_actor.rs:1383`): on any
-// `evaluate_queries` failure during a Multi admission, reference
-// substitutes the underlying error text with the canned
-// `"Internal error evaluating queries"` and then rolls back the
-// subscription. The adapter must emit the same canned text for
-// Variant=Multi ErrInitialQuery replies — clients coded against
-// reference expect that literal string, and per-query detail must not
-// leak out on Multi the way it does on Single's WithSql-wrapped path.
+// pins the canned SubscribeMulti initial-eval error text.
 func TestProtocolInboxAdapter_RegisterSubscriptionSet_MultiInitialEvalErrorEmitsCannedMessage(t *testing.T) {
 	conn, _, _ := newAdapterTestConn(t)
 	initialEvalErr := fmt.Errorf("%w: %w", subscription.ErrInitialQuery, subscription.ErrInitialRowLimit)

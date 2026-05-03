@@ -23,13 +23,7 @@ type MintConfig struct {
 	Expiry     time.Duration // 0 = no exp claim
 }
 
-// MintAnonymousToken generates a fresh anonymous Identity, builds the
-// matching JWT, signs it with config.SigningKey, and returns both the
-// signed token and the derived Identity (SPEC-005 §4.2).
-//
-// Subject entropy: 16 bytes from crypto/rand, hex-encoded. 128 bits
-// of randomness is ample collision resistance for anonymous-scope
-// identifiers.
+// MintAnonymousToken creates and signs a JWT for a fresh anonymous identity.
 func MintAnonymousToken(config *MintConfig) (string, types.Identity, error) {
 	if config == nil {
 		return "", types.Identity{}, fmt.Errorf("auth: mint config is required")

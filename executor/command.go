@@ -14,13 +14,7 @@ type ExecutorCommand interface {
 }
 
 // CallReducerCmd requests a reducer invocation.
-//
-// ResponseCh and ProtocolResponseCh are executor-owned reply paths: when they
-// are non-nil, the executor sends exactly one response before it dequeues the
-// next command. Public callers should submit buffered channels (the protocol
-// adapter uses cap 1): Submit/SubmitWithContext reject unbuffered response
-// channels up front, while commands admitted to the inbox still use blocking
-// reply sends to preserve delivery and ordering.
+// Non-nil reply channels receive exactly one response before the next command.
 type CallReducerCmd struct {
 	Request            ReducerRequest
 	ResponseCh         chan<- ReducerResponse
@@ -46,16 +40,8 @@ type ProtocolCallReducerResponse struct {
 	Committed *CommittedCallerPayload
 }
 
-// RegisterSubscriptionSetCmd requests atomic set-scoped subscription
-// registration. Part of the single/multi variant variant split.
-//
-// Reply is invoked synchronously on the executor goroutine (before the
-// dispatch loop pulls the next command) with the register outcome. Err
-// is non-nil only on register failure; on success Result carries the
-// populated result. Callers supply a closure that enqueues the
-// appropriate wire frame onto the target connection's OutboundCh — per
-// ADR §9.4 this enqueue strictly precedes any subsequent fan-out for
-// the same connection on the executor goroutine.
+// RegisterSubscriptionSetCmd atomically registers a subscription set.
+// Reply runs synchronously on the executor goroutine before the next command.
 type RegisterSubscriptionSetCmd struct {
 	Request subscription.SubscriptionSetRegisterRequest
 	Reply   func(subscription.SubscriptionSetRegisterResult, error)
@@ -68,14 +54,8 @@ type RegisterSubscriptionSetCmd struct {
 
 func (RegisterSubscriptionSetCmd) isExecutorCommand() {}
 
-// UnregisterSubscriptionSetCmd removes every subscription registered
-// under one (ConnID, QueryID) key.
-// Part of the single/multi variant variant split.
-//
-// Reply is invoked synchronously on the executor goroutine with the
-// unregister outcome. Err is non-nil on failure; on success Result
-// carries the populated result. See RegisterSubscriptionSetCmd for the
-// ordering contract.
+// UnregisterSubscriptionSetCmd removes every subscription under one
+// (ConnID, QueryID) key.
 type UnregisterSubscriptionSetCmd struct {
 	ConnID  types.ConnectionID
 	QueryID uint32

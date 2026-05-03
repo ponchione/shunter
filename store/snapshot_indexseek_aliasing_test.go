@@ -7,16 +7,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the read-view CommittedSnapshot.IndexSeek shared-state
-// escape route closure. The underlying BTreeIndex.Seek returns a live alias
-// of the index entry's internal []RowID. A caller that retained the returned
-// slice past snapshot.Close() would race any subsequent writer's Insert /
-// Remove on the same key — slices.Insert / slices.Delete mutate the backing
-// array in place (or replace it, leaving the aliased header stale). The fix
-// clones the slice at the public read-view boundary so callers cannot alias
-// BTree-internal storage. These tests exercise both Insert (append at key)
-// and Remove (delete at key) post-Close writer mutations and assert the
-// returned slice stays stable.
+// Tests in this file pin that CommittedSnapshot.IndexSeek returns stable
+// RowID slices after Close.
 
 func buildAliasingIndexState(t *testing.T) (*CommittedState, schema.IndexID) {
 	t.Helper()

@@ -1,11 +1,5 @@
-// Package subscription implements the subscription evaluator (SPEC-004).
-//
-// The evaluator answers one question after every committed transaction:
-// which clients care about this change, and what exactly changed in their
-// view of the data?
-//
-// This file provides the structured predicate tree consumed by every
-// downstream subsystem (pruning, delta computation, validation).
+// Package subscription evaluates registered predicates after commits and
+// produces per-connection row deltas.
 package subscription
 
 import (
@@ -22,10 +16,7 @@ type IndexID = schema.IndexID
 // ColID is a zero-based column index within a table schema.
 type ColID = types.ColID
 
-// IndexResolver is the canonical schema-layer surface for resolving a
-// single-column index ID; re-exported here for subscription callers so
-// they do not need to import schema directly. SPEC-006 §7 declares the
-// canonical interface in schema/registry.go.
+// IndexResolver re-exports the schema-layer single-column index resolver.
 type IndexResolver = schema.IndexResolver
 
 // Value is the tagged-union column value used in predicates.
@@ -46,16 +37,7 @@ type Predicate interface {
 }
 
 // ColEq matches rows where a column equals a literal value.
-//
-//	Example: messages.channel_id = 42
-//
-// Alias is the relation-instance tag that disambiguates which side of a
-// self-join the leaf applies to. For distinct-table joins and single-table
-// predicates it is left at its zero default — the Table check in MatchRow is
-// sufficient to route the leaf to the correct side. For self-join filters
-// (Join.Left == Join.Right) compile stamps 0 when the leaf names the left
-// alias and 1 when it names the right alias, mirroring Join.LeftAlias /
-// Join.RightAlias.
+// Alias disambiguates self-join sides.
 type ColEq struct {
 	Table  TableID
 	Column ColID
@@ -172,19 +154,7 @@ func (p NoRows) Tables() []TableID { return []TableID{p.Table} }
 
 // Join matches rows from two tables joined on a column pair,
 // with an optional filter on either side.
-//
-// LeftAlias and RightAlias are opaque relation-instance tags that distinguish
-// the two sides when Left == Right (aliased self-join). For distinct-table
-// joins they are left at their zero default — Left != Right is sufficient to
-// disambiguate the sides. Validation rejects Left == Right with equal
-// aliases, since that would describe a degenerate single-relation join.
-//
-// ProjectRight selects which side of the joined pair survives at row
-// emission time. False (the zero value) projects the Left side (the classical
-// `SELECT lhs.*` shape); true projects the Right side (`SELECT rhs.*`).
-// Reference: SubscriptionPlan::subscribed_table_id at
-// reference/SpacetimeDB/crates/subscription/src/lib.rs:367 — each plan
-// returns rows shaped like one concrete table.
+// Aliases distinguish self-join sides; ProjectRight selects the emitted side.
 type Join struct {
 	Left         TableID
 	Right        TableID

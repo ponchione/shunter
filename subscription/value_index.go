@@ -2,13 +2,8 @@ package subscription
 
 import "github.com/ponchione/shunter/types"
 
-// ValueIndex is the Tier 1 pruning index (SPEC-004 §5.1).
-//
-// Maps (table, column, value) → set of query hashes for subscriptions with
-// a ColEq predicate on that column.
-//
-// The `cols` map tracks which columns have active entries for each table,
-// used during candidate collection so we don't scan the whole value map.
+// ValueIndex maps (table, column, value) to candidate query hashes.
+// cols records active columns so candidate collection can avoid full scans.
 type ValueIndex struct {
 	cols map[TableID]map[ColID]int
 	// args: table → column → encoded(value) → set of query hashes.

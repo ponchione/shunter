@@ -9,20 +9,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the read-view subscription-seam read-view lifetime
-//: EvalAndBroadcast receives a borrowed store.CommittedReadView
-// and MUST NOT let any reference to that view escape past its synchronous
-// return. The executor (executor/executor.go:540-541) calls Close on the
-// view immediately after EvalAndBroadcast returns, so any post-return use
-// would read against a released snapshot RLock.
-//
-// trackingView wraps a real CommittedReadView and records every method
-// invocation that arrives after Close has been called. The test invokes
-// EvalAndBroadcast, closes the tracking view on the same goroutine the
-// instant the call returns, drains the fan-out inbox, and asserts that no
-// tracked method fired against the closed wrapper. Evaluation paths
-// covered: join Tier-2 candidate probing (IndexSeek + GetRow on the view)
-// and join delta evaluation (IndexSeek via delta_join.go).
+// Tests in this file pin that EvalAndBroadcast does not retain the borrowed
+// committed view after returning.
 
 type trackingView struct {
 	inner      store.CommittedReadView

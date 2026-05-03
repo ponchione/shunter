@@ -7,18 +7,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// handleSubscribeMulti processes an incoming SubscribeMultiMsg. Every
-// wire query is compiled against the schema; the first compile error
-// aborts the entire batch and emits a SubscriptionError (atomic
-// admission per SPEC-005 §7.1b). On success the N predicates are
-// forwarded to the executor under a single QueryID via the set-based
-// seam. The executor invokes the Reply closure synchronously on its
-// own goroutine; the closure enqueues either a SubscribeMultiApplied
-// or a SubscriptionError onto the connection's outbound channel.
-// Synchronous dispatch here is what enforces ADR §9.4 FIFO between
-// Applied and any subsequent fan-out.
-//
-// Receipt-timestamp seam: see handleSubscribeSingle.
+// handleSubscribeMulti validates all SQL queries and submits them atomically.
+// The receipt timestamp covers local validation and executor admission.
 func handleSubscribeMulti(
 	ctx context.Context,
 	conn *Conn,

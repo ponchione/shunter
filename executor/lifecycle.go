@@ -11,15 +11,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// handleOnConnect runs the OnConnect pipeline (SPEC-003 §10.3, Story 7.2):
-//
-//  1. begin transaction
-//  2. insert the sys_clients row
-//  3. run the OnConnect lifecycle reducer if registered
-//  4. on reducer error/panic: roll back the entire transaction, reject
-//  5. on success: commit + post-commit pipeline
-//
-// Connection is rejected (status != StatusCommitted) on any failure.
+// handleOnConnect inserts sys_clients, runs OnConnect when registered, and
+// commits only on success.
 func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 	sysID, ok := e.sysClientsTableID()
 	if !ok {
@@ -68,16 +61,8 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 	return executorCommandResultFromStatus(e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle}))
 }
 
-// handleOnDisconnect runs the OnDisconnect pipeline (SPEC-003 §10.4, Story 7.3):
-//
-//  1. begin transaction
-//  2. run the OnDisconnect lifecycle reducer if registered
-//  3. on reducer error/panic: roll back reducer writes, log, and run a
-//     separate cleanup transaction that only deletes the sys_clients row
-//  4. otherwise: delete the sys_clients row in the same transaction
-//  5. commit + post-commit pipeline
-//
-// The sys_clients row is always removed (disconnect cannot be vetoed).
+// handleOnDisconnect runs OnDisconnect when registered and always removes the
+// sys_clients row.
 func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 	sysID, ok := e.sysClientsTableID()
 	if !ok {
@@ -125,20 +110,8 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 	return executorCommandResultFromStatus(e.postCommit(txID, changeset, nil, CallReducerCmd{ResponseCh: cmd.ResponseCh}, postCommitOptions{source: CallSourceLifecycle}))
 }
 
-// sweepDanglingClients is the Story 7.5 startup sweep (SPEC-003 §10.6). For
-// every sys_clients row surviving recovery, it runs a fresh cleanup
-// transaction that only deletes the row — the same cleanup-only path used in
-// handleOnDisconnect's reducer-failure branch (this file: Story 7.3). No
-// OnDisconnect reducer is invoked; the cleanup commit still runs the
-// post-commit pipeline with source=CallSourceLifecycle so subscribers see
-// the sys_clients delete. A missing sys_clients table is treated as a
-// harness error (same contract as handleOnConnect). An empty table is a
-// no-op.
-//
-// If the post-commit pipeline latches executor-fatal mid-sweep the sweep
-// stops and returns ErrExecutorFatal; remaining rows stay in sys_clients
-// and Startup declines to flip externalReady, leaving external admission
-// closed.
+// sweepDanglingClients deletes recovered sys_clients rows without running
+// OnDisconnect. A fatal post-commit error stops the sweep.
 func (e *Executor) sweepDanglingClients(ctx context.Context) error {
 	sysID, ok := e.sysClientsTableID()
 	if !ok {

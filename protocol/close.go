@@ -15,13 +15,8 @@ const (
 	CloseInternal = websocket.StatusInternalError   // 1011: unexpected server error
 )
 
-// closeWithHandshake drives the WebSocket Close handshake under a bounded
-// context. When the context deadline fires the underlying transport is
-// forcibly torn down, so on return the ws is guaranteed unusable — not
-// merely that this helper returned.
-//
-// Backed by the Shunter fork of coder/websocket (see SPEC-WS-FORK-001).
-// Callers that do not want to block continue to invoke via `go`.
+// closeWithHandshake runs a bounded WebSocket close handshake.
+// On return the connection is no longer usable.
 func closeWithHandshake(ws *websocket.Conn, code websocket.StatusCode, reason string, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

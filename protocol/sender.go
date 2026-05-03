@@ -16,15 +16,8 @@ var ErrClientBufferFull = errors.New("protocol: client outbound buffer full")
 // the ConnManager (client disconnected between evaluation and delivery).
 var ErrConnNotFound = errors.New("protocol: connection not found")
 
-// ClientSender is the cross-subsystem contract for delivering server
-// messages to connected clients (SPEC-005 §13). The fan-out worker
-// (SPEC-004 E6) and executor response paths call these methods.
-//
-// Outcome-model split (`docs/shunter-design-decisions.md#outcome-model`):
-// callers receive the heavy `TransactionUpdate` via SendTransactionUpdate;
-// non-caller subscribers receive `TransactionUpdateLight` via
-// SendTransactionUpdateLight. The removed `SendReducerResult` is
-// replaced by the heavy-envelope path.
+// ClientSender delivers server messages to connected clients.
+// Callers receive TransactionUpdate; non-callers receive TransactionUpdateLight.
 type ClientSender interface {
 	// Send encodes msg and enqueues the frame on the connection's
 	// outbound channel. Used for direct response messages

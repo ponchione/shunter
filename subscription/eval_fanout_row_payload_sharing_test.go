@@ -6,25 +6,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the row-payload sharing contract:
-// `types.ProductValue` (itself `[]Value`) backing arrays are shared
-// across subscribers of the same query for both
-// `SubscriptionUpdate.Inserts` and `.Deletes`. Sharing is
-// intentional under the post-commit row-immutability contract — a
-// deep copy per subscriber would cost work proportional to row
-// width × row count × subscriber count for no client-visible benefit
-// under the contract.
-//
-// The slice-header (closed 2026-04-20 in
-// `eval_fanout_aliasing_test.go`) asserts the outer `[]ProductValue`
-// is independent per subscriber so replace/append on one
-// subscriber's outer slice does not leak. These tests assert the
-// complement: the INNER `[]Value` backing array remains shared, so
-// in-place `Value` mutation on one subscriber IS visible to peers.
-// That is the hazard the post-commit row-immutability contract
-// prevents — this file documents the hazard shape so a future
-// change that claimed to make row-payload mutation safe would have
-// to update these tests.
+// Tests in this file pin that fan-out copies outer update slices but shares
+// immutable row payload backing arrays across subscribers.
 
 func TestEvalFanoutRowPayloadsSharedAcrossSubscribersForInserts(t *testing.T) {
 	s := testSchema()

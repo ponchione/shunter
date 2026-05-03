@@ -12,11 +12,7 @@ import (
 )
 
 // CommittedReadView is a read-only point-in-time snapshot.
-// Close() must be called promptly when done to release the read lock.
-// While a snapshot remains open, commits block on the CommittedState write
-// lock. A leaked snapshot can therefore stall all commits until it is closed.
-// v1 installs a best-effort finalizer to mitigate unreachable leaks, but that
-// is only a last resort after GC runs — callers must still close explicitly.
+// Call Close promptly; open snapshots hold a read lock that blocks commits.
 type CommittedReadView interface {
 	TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue]
 	IndexScan(tableID schema.TableID, indexID schema.IndexID, value types.Value) iter.Seq2[types.RowID, types.ProductValue]
@@ -77,10 +73,7 @@ func (s *CommittedSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, 
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()
 		for rid, row := range inner {
-			// Read-view mid-iter-close defense-in-depth: if another
-			// caller has Closed this snapshot after iter body entry,
-			// halt with the same deterministic panic rather than
-			// continuing to yield rows against a released RLock.
+			// Panic promptly if another caller closes the snapshot mid-iteration.
 			s.ensureOpen()
 			if !yield(rid, row) {
 				return
@@ -104,13 +97,7 @@ func (s *CommittedSnapshot) IndexSeek(tableID schema.TableID, indexID schema.Ind
 	if !ok {
 		return nil
 	}
-	// Read-view shared-state escape route closure: the underlying BTreeIndex.Seek
-	// returns a live alias of the index entry's internal []RowID. A caller
-	// that retained that slice past Close() would race any subsequent writer's
-	// Insert/Remove on the same key (slices.Insert / slices.Delete mutate the
-	// backing array). Clone at this public read-view boundary so callers
-	// cannot alias BTree-internal storage. Pinned by
-	// snapshot_indexseek_aliasing_test.go.
+	// Clone so callers cannot retain BTree-internal RowID storage.
 	ids := idx.Seek(key)
 	if len(ids) == 0 {
 		return nil
@@ -124,21 +111,7 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 	if !ok {
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
-	// SPEC-001 §7.2: IndexRange delegates to Index.SeekBounds so
-	// string/bytes/float exclusive-bound predicates hit the BTree's
-	// binary-search start point instead of a full ordered scan with
-	// per-row Bound filter.
-	//
-	// Read-view lifetime pin: BTreeIndex.SeekBounds is an iter.Seq walking
-	// b.entries live. Under single-writer discipline no concurrent writer
-	// runs while a CommittedSnapshot holds RLock, but a yield callback
-	// reaching into a mutating path (future refactor, direct CommittedState
-	// access from within a reducer) could shift b.entries in place
-	// (slices.Delete when a key's last RowID is removed) and drift the
-	// outer iteration. Collecting the range once at the CommittedReadView
-	// boundary decouples iteration from BTree-internal storage, mirroring
-	// the StateView.SeekIndexBounds precedent
-	// (state_view_seekindexbounds_test.go aliasing pin).
+	// Collect bounds before yielding so callbacks cannot observe BTree mutation.
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		defer runtime.KeepAlive(s)
 		s.ensureOpen()

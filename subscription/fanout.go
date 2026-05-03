@@ -2,17 +2,9 @@ package subscription
 
 import "github.com/ponchione/shunter/types"
 
-// FanOutMessage is the handoff payload between the executor's evaluation
-// loop and the fan-out worker (SPEC-004 §8.1 / Story 6.1).
-//
-// When the commit originated from a caller-addressable reducer call,
-// `CallerConnID` identifies the caller so the fan-out worker can keep that
-// connection out of non-caller light delivery. `CallerOutcome` is populated
-// only when the fan-out worker itself owns the caller's heavy
-// `TransactionUpdate` envelope; protocol-originated reducer replies may carry
-// `CallerConnID` with a nil `CallerOutcome` because the protocol inbox adapter
-// owns the heavy reply directly while still reusing evaluator-derived caller
-// updates.
+// FanOutMessage is the handoff payload from evaluation to the fan-out worker.
+// CallerConnID suppresses the caller's light delivery; CallerOutcome is set
+// only when fan-out owns the heavy caller response.
 type FanOutMessage struct {
 	// TxID identifies the transaction this payload came from. Zero for
 	// synthetic caller-outcome deliveries with no underlying commit.
@@ -61,14 +53,8 @@ type PostCommitMeta struct {
 	CaptureCallerUpdates func([]SubscriptionUpdate)
 }
 
-// SubscriptionError is the protocol-facing evaluation-failure payload queued
-// for clients affected by a broken subscription. SPEC-005 owns wire encoding;
-// this package only carries the semantic content across the fan-out seam.
-//
-// TotalHostExecutionDurationMicros carries the measured evaluation duration
-// in microseconds so the adapter can populate the reference wire field of
-// the same name (v1.rs:350). The evaluator sets it once per evaluation pass;
-// every error produced for a given commit shares the same measured value.
+// SubscriptionError is the evaluation-failure payload queued for clients.
+// TotalHostExecutionDurationMicros is shared by all errors from one eval pass.
 type SubscriptionError struct {
 	RequestID                        uint32
 	SubscriptionID                   types.SubscriptionID
@@ -87,13 +73,8 @@ const (
 	CallerOutcomeFailed
 )
 
-// CallerOutcome carries the caller-visible reducer outcome plus the
-// metadata required by the protocol layer to assemble the heavy
-// `TransactionUpdate` envelope. The `Kind` field selects the
-// `UpdateStatus` arm on the wire. `Error` is only read when Kind is
-// `CallerOutcomeFailed`. Row deltas are not carried here — they are
-// produced by the evaluator and delivered alongside the outcome by the
-// fan-out worker / adapter.
+// CallerOutcome carries reducer outcome metadata for the heavy caller envelope.
+// Row deltas are produced separately by the evaluator.
 type CallerOutcome struct {
 	Kind                       CallerOutcomeKind
 	Error                      string

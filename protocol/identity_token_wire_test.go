@@ -6,20 +6,7 @@ import (
 	"testing"
 )
 
-// TestShunterIdentityTokenWireShape pins the byte-level wire shape of
-// IdentityToken against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:445`
-// (`pub struct IdentityToken`). Reference field order:
-//
-//	identity:      Identity     (32 bytes)
-//	token:         Box<str>     (LE u32 length + UTF-8)
-//	connection_id: ConnectionId (16 bytes)
-//
-// The test constructs the reference byte shape by hand and compares
-// against the encoder output; it also round-trips the frame through
-// the decoder to prove the rename + field-order change is symmetric.
-// Prior Shunter wire (pre-rename) used `identity, connection_id, token`
-// under the type name `InitialConnection`.
+// TestShunterIdentityTokenWireShape pins IdentityToken field order.
 func TestShunterIdentityTokenWireShape(t *testing.T) {
 	var identity [32]byte
 	for i := range identity {

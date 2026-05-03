@@ -32,46 +32,8 @@ func (cs *CommittedState) RegisterTable(id schema.TableID, t *Table) {
 }
 
 // Table returns the table for the given ID.
-//
-// Read-view lifetime contract pin — raw-pointer exposure envelope. The RLock is acquired
-// only for the map lookup, not for the lifetime of the returned *Table. The
-// returned pointer therefore outlives the RLock: callers must hold their own
-// envelope that serializes with CommittedState writers for the entire window
-// they use the pointer. Three legal envelopes exist in this codebase:
-//
-//  1. CommittedSnapshot — snapshot methods resolve tables through tableLocked
-//     while the snapshot holds cs.RLock() (acquired in Snapshot(), released in
-//     Close()); the snapshot's open→Close lifetime bounds every method call on
-//     the returned *Table. Iterator surfaces additionally runtime.KeepAlive the
-//     snapshot so the RLock is not released mid-iteration.
-//  2. Transaction / StateView — the reducer runs on the single executor
-//     goroutine under single-writer discipline (executor.executor.go). No
-//     concurrent writer can run during a reducer's synchronous window, and
-//     the executor does not release the goroutine until the transaction
-//     commits or rolls back. Inside that window writes on the returned
-//     *Table (AllocRowID, sequence.Next via applyAutoIncrement, etc.) are
-//     safe without cs.Lock().
-//  3. Commitlog recovery bootstrap — commitlog/recovery.go runs on a single
-//     goroutine before any reader attaches; writes on the returned *Table
-//     precede the first reducer dispatch.
-//
-// Hazards the envelope rule prevents:
-//   - A caller that retains *Table past the envelope (stashes it into a
-//     goroutine that runs after snapshot Close, or past reducer return)
-//     races future writers on t.rows / t.indexes / t.sequence.
-//   - A caller that retains *Table across a subsequent
-//     RegisterTable(id, replacement) holds a stale pointer: the map entry
-//     points at `replacement`, but the retained pointer still points at
-//     the original and does not observe writes committed via `replacement`.
-//     The stale-after-re-register property is pinned by
-//     store/committed_state_table_contract_test.go.
-//   - A caller on a non-executor goroutine that reads via the pointer
-//     without holding cs.RLock() races any in-progress reducer write.
-//
-// All current callers (store/snapshot.go, store/transaction.go,
-// store/state_view.go, commitlog/recovery.go, commitlog/snapshot_io.go) stay
-// inside one of the three envelopes. Pinned by
-// store/committed_state_table_contract_test.go.
+// The returned pointer is protected only during lookup; callers must use it
+// inside a snapshot, executor transaction, or recovery bootstrap window.
 func (cs *CommittedState) Table(id schema.TableID) (*Table, bool) {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
@@ -92,11 +54,7 @@ func (cs *CommittedState) tableLocked(id schema.TableID) (*Table, bool) {
 }
 
 // TableIDs returns all registered table IDs.
-//
-// Read-view lifetime contract pin — same envelope rule as Table(id): the RLock bounds
-// only the slice materialization, not any subsequent lookup via the ids.
-// Callers must iterate and resolve each id to a *Table under one of the
-// three legal envelopes documented on Table().
+// Resolve and use them inside the same safety windows as Table.
 func (cs *CommittedState) TableIDs() []schema.TableID {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()

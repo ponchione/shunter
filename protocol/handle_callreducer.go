@@ -9,13 +9,8 @@ var lifecycleReducerNames = map[string]bool{
 	"OnDisconnect": true,
 }
 
-// handleCallReducer admits an externally-issued CallReducer, hands it
-// to the executor through the inbox seam, and waits for the resulting
-// heavy `TransactionUpdate` before returning it to the caller's
-// outbound channel. Pre-acceptance rejections (lifecycle-reducer-name
-// collision, executor-unavailable) are synthesized as heavy
-// `TransactionUpdate` envelopes with `StatusFailed` — see the outcome-model
-// outcome-model decision doc.
+// handleCallReducer submits an external reducer call and sends the resulting
+// TransactionUpdate to the caller.
 func handleCallReducer(
 	ctx context.Context,
 	conn *Conn,

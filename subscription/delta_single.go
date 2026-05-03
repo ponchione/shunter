@@ -20,26 +20,14 @@ func EvalSingleTableDelta(dv *DeltaView, pred Predicate, table TableID) (inserts
 	return inserts, deletes
 }
 
-// MatchRow reports whether pred matches the given row from the given table.
-//
-// Predicate leaves that reference a different table are treated as "no
-// constraint on this row" (return true). This lets callers reuse MatchRow
-// to evaluate a join's Filter against each side of a joined pair.
-//
-// Callers outside a self-join context use this form: side alias defaults to
-// zero and filter leaves default to zero, so the alias comparison in
-// MatchRowSide is trivially true.
+// MatchRow reports whether pred matches a row from the given table.
+// Leaves for other tables are treated as no constraint.
 func MatchRow(pred Predicate, table TableID, row types.ProductValue) bool {
 	return MatchRowSide(pred, table, 0, row)
 }
 
-// MatchRowSide evaluates pred against a row coming from (table, sideAlias).
-// The sideAlias distinguishes two relation instances that share the same
-// TableID in a self-join: tryJoinFilter passes Join.LeftAlias for the
-// left-side row and Join.RightAlias for the right-side row. Filter leaves
-// whose Alias field does not match sideAlias are treated as "no constraint
-// on this row", mirroring the existing cross-table pass-through for the
-// Table field.
+// MatchRowSide evaluates pred against one side of a possible self-join.
+// Leaves for other tables or aliases are treated as no constraint.
 func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.ProductValue) bool {
 	if pred == nil {
 		return true

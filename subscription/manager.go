@@ -9,10 +9,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// ErrQueryIDAlreadyLive is returned by RegisterSet when the given
-// (ConnID, QueryID) pair already names a live set. Reference behavior:
-// add_subscription_multi try_insert at
-// reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1050.
+// ErrQueryIDAlreadyLive is returned when (ConnID, QueryID) already names a set.
 var ErrQueryIDAlreadyLive = errors.New("subscription: query id already live on connection")
 
 // SubscriptionSetRegisterRequest is the set-based register request.
@@ -25,13 +22,7 @@ type SubscriptionSetRegisterRequest struct {
 	PredicateHashIdentities []*types.Identity
 	ClientIdentity          *types.Identity
 	RequestID               uint32
-	// SQLText is the original subscribe-query SQL string used for the
-	// Single admission path. RegisterSet persists it on each newly
-	// created queryState so UnregisterSet can surface it when wrapping a
-	// final-eval failure with `ErrFinalQuery`. Empty on Multi paths and
-	// callers that do not originate from a single SQL string; the Multi
-	// UnsubscribeSingle WithSql wrap does not apply there
-	// (`module_subscription_actor.rs:836` uses raw `return_on_err!`).
+	// SQLText is the original Single-subscribe SQL used for final-eval errors.
 	SQLText string
 }
 
@@ -45,16 +36,8 @@ type SubscriptionSetRegisterResult struct {
 	TotalHostExecutionDurationMicros uint64
 }
 
-// SubscriptionSetUnregisterResult carries the final-delta rows that
-// were still live at unsubscribe time. Update entries have Deletes
-// populated and Inserts empty.
-//
-// SQLText is populated only when UnregisterSet returns an `ErrFinalQuery`
-// wrap — it carries the stored queryState.sqlText of the first query
-// whose final-delta evaluation failed, so the protocol-side adapter can
-// apply the reference `DBError::WithSql` suffix on the UnsubscribeSingle
-// path (`module_subscription_actor.rs:756`). On success or non-eval
-// errors the field remains empty.
+// SubscriptionSetUnregisterResult carries final-delta rows still live at
+// unsubscribe time. SQLText is populated only for final-eval failures.
 type SubscriptionSetUnregisterResult struct {
 	QueryID                          uint32
 	Update                           []SubscriptionUpdate

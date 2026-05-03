@@ -302,17 +302,8 @@ func TestCoerceSenderCallerIdentityDetachmentMetamorphic(t *testing.T) {
 	}
 }
 
-// TestCoerceSenderResolvesToHexOnStringColumn pins the reference behavior at
-// sql-parser/src/ast/mod.rs:159 (resolve_sender) → expr/src/lib.rs:353 — the
-// Param(Sender) AST node becomes `Lit(SqlLiteral::Hex(identity.to_hex()))`
-// before type-checking, and the String arm of `parse(value, ty)` wraps the
-// 64-char identity hex as `String(value)`. Shunter materializes the same
-// shape via the LitSender→LitBytes-with-Text resolver at the top of
-// coerceValue so the existing KindString widening picks up the hex source
-// text and binds. Earlier versions of this test asserted ErrUnsupportedSQL
-// on the assumption that `:sender` rejected on non-bytes columns; reference
-// accepts on String (the `arr = :sender` rejection at check.rs:487-488 is
-// for the Array<String> kind, not String).
+// TestCoerceSenderResolvesToHexOnStringColumn pins :sender widening to String
+// as caller identity hex text.
 func TestCoerceSenderResolvesToHexOnStringColumn(t *testing.T) {
 	caller := [32]byte{1, 2, 3}
 	v, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindString, &caller)
@@ -1037,18 +1028,8 @@ func TestCoerceLitBoolOnStringColumnEmitsUnexpectedType(t *testing.T) {
 	}
 }
 
-// TestCoerceLitStringNumericTokenWidensOntoNumericKinds pins the reference
-// widening at expr/src/lib.rs:255-352 (parse_int / parse_float route the
-// SqlLiteral source text through `BigDecimal::from_str` and into
-// `to_iN/uN/fN`). Shunter routes a LitString hitting an integer or float
-// kind through `parseNumericLiteral(lit.Str)` and recurses with the parsed
-// numeric Literal so the existing LitInt / LitBigInt / LitFloat coerce
-// arms apply. Digit-only and scientific-notation source text widens to
-// the target kind value when in range; out-of-range, fractional, or
-// non-numeric source text emits `InvalidLiteralError` carrying the
-// original `lit.Str` (or, for forms that collapse at parseNumericLiteral,
-// the canonicalized rendering — same documented divergence as prior
-// InvalidLiteral 128/256-bit slice).
+// TestCoerceLitStringNumericTokenWidensOntoNumericKinds pins string numeric
+// literal widening onto integer and float kinds.
 func TestCoerceLitStringNumericTokenWidensOntoNumericKinds(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1113,20 +1094,8 @@ func TestCoerceLitStringNumericTokenWidensOntoNumericKinds(t *testing.T) {
 	}
 }
 
-// TestCoerceLitStringFailingNumericEmitsInvalidLiteral pins the reject
-// shape on the LitString → numeric path. Reference parse_int / parse_float
-// fold any anyhow error from BigDecimal/to_iN into `InvalidLiteral::new(
-// v.into_string(), ty)` at lib.rs:99; Shunter mirrors via the LitString-
-// routing branch (parse failure) and via the recursive arms (LitInt range
-// overflow, LitFloat-on-integer fractional rejection, LitBigInt overflow on
-// 32/64-bit kinds). `lit.Str` carries verbatim for non-numeric inputs and
-// digit-only inputs that overflow the target. The 2026-04-25 source-text
-// seam preserves scientific-notation tokens through `parseNumericLiteral`'s
-// `Text` field, so `'1e40'` now reports the original token rather than the
-// canonical decimal expansion. Test-constructed LitFloat with empty Text
-// still falls back to `strconv.FormatFloat`, which is why
-// `fractional_on_U32` here drives `1.3` → "1.3" through the fallback
-// rather than the preserved-text path.
+// TestCoerceLitStringFailingNumericEmitsInvalidLiteral pins InvalidLiteral
+// errors for string literals coerced onto numeric kinds.
 func TestCoerceLitStringFailingNumericEmitsInvalidLiteral(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1163,16 +1132,8 @@ func TestCoerceLitStringFailingNumericEmitsInvalidLiteral(t *testing.T) {
 	}
 }
 
-// TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral pins the previously
-// missing reference-informed behavior on direct LitBigInt input against 32/64-bit integer
-// kinds. The parser only produces LitBigInt when a numeric token
-// overflows int64 (e.g. `1e40` → LitBigInt(10^40)), so the value always
-// overflows U32/I32/U64/I64. Reference parse_int → BigDecimal::to_uN/iN
-// returns None → folds to InvalidLiteral at lib.rs:99. Pre-2026-04-24
-// Shunter emitted a generic mismatch error here — only the 128/256-bit
-// LitBigInt path was wired through `coerceBigIntTo*`. The slice extends
-// `coerceUnsigned` / `coerceSigned` to emit InvalidLiteral via
-// `Big.String()`, mirroring the 128/256-bit emit shape.
+// TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral pins InvalidLiteral
+// errors for bigint literals on narrow integer kinds.
 func TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral(t *testing.T) {
 	x := bigIntFromStr(t, "10000000000000000000000000000000000000000") // 10^40
 	cases := []struct {

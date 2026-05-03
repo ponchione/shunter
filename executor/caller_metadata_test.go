@@ -9,18 +9,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// caller-metadata wiring sub-slice for reducer outcomes. Pins that
-// an external CallReducer populates the caller-bound metadata on
-// subscription.CallerOutcome so the heavy TransactionUpdate envelope
-// carries real values instead of the earlier zero stubs. Reference
-// fields being matched:
-//
-//	TransactionUpdate.CallerIdentity            (Identity)
-//	TransactionUpdate.ReducerCall.ReducerName   (Box<str>)
-//	TransactionUpdate.ReducerCall.ReducerID     (ReducerId u32)
-//	TransactionUpdate.ReducerCall.Args          (Bytes)
-//	TransactionUpdate.Timestamp                 (Timestamp i64 µs)
-//	TransactionUpdate.TotalHostExecutionDuration (TimeDuration i64 µs)
+// These tests pin caller metadata in external reducer TransactionUpdate
+// envelopes.
 
 func submitWithMetadata(
 	t *testing.T,

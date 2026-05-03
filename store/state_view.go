@@ -45,22 +45,8 @@ func (sv *StateView) GetRow(tableID schema.TableID, rowID types.RowID) (types.Pr
 }
 
 // ScanTable yields all rows visible through the merged state.
-//
-// Read-view lifetime pin: the committed-side scan is materialized into an
-// independent (RowID, ProductValue) slice at iter call time. Table.Scan
-// ranges t.rows live — the outer map iteration would otherwise span the
-// full yield loop. Under executor single-writer discipline no concurrent
-// writer runs during a reducer's synchronous iteration, but the contract
-// is unpinned at the StateView boundary: a yield callback that reaches
-// into a future path mutating t.rows (direct CommittedState access from a
-// reducer refactor), or a caller that retained the iterator past the
-// single-writer window, would race the live map iteration — Go spec §6.3
-// says an unreached-entry deletion during map iteration does not produce
-// the entry, so the observable drift is the iteration silently skipping
-// rows present at iter-construction time. Collecting (RowID, rowCopy)
-// pairs once at iter call time decouples the yield loop from t.rows,
-// mirroring the SeekIndex / SeekIndexRange precedents. Pin test:
-// TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete.
+// Committed rows are materialized before yielding so callbacks cannot observe
+// mid-iteration committed-table mutation.
 func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
 		if sv.committed != nil {
@@ -92,17 +78,7 @@ func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 }
 
 // SeekIndex returns visible row IDs whose index key exactly matches key.
-//
-// Read-view lifetime pin: the underlying BTreeIndex.Seek(key) returns a
-// live alias of the index entry's internal []RowID. Under executor
-// single-writer discipline no writer runs concurrently with this
-// iteration, but the yield callback could still reach into a path that
-// mutates the BTree entry (future refactor, direct CommittedState
-// access from within a reducer). slices.Insert / slices.Delete mutate
-// the backing array in place when capacity allows — iteration over the
-// aliased slice would observe the shift. Cloning at the seek boundary
-// decouples the iteration from BTree-internal storage, mirroring the
-// CommittedSnapshot.IndexSeek precedent. Pin test: TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation.
+// The committed index result is cloned before yielding to avoid BTree aliasing.
 func (sv *StateView) SeekIndex(tableID schema.TableID, indexID schema.IndexID, key IndexKey) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {
 		if sv.committed != nil {
@@ -132,18 +108,7 @@ func (sv *StateView) SeekIndex(tableID schema.TableID, indexID schema.IndexID, k
 }
 
 // SeekIndexRange returns visible row IDs whose keys fall in [low, high).
-//
-// Read-view lifetime pin: BTreeIndex.SeekRange is an iter.Seq that walks
-// b.entries live — the outer loop reads len(b.entries) and indexes into
-// the backing array each step, and each entry's rowIDs slice is read
-// live too. Under executor single-writer discipline no concurrent writer
-// runs during this iteration, but a yield callback that reaches into a
-// path mutating the BTree (future refactor, direct CommittedState access
-// from a reducer) could shift b.entries in place (slices.Delete when an
-// entry's last RowID is removed) and drift the outer iteration. Collecting
-// the range once at the StateView boundary decouples iteration from
-// BTree-internal storage, mirroring the StateView.SeekIndex precedent. Pin test:
-// TestStateViewSeekIndexRangeIteratesIndependentRowIDsAfterBTreeMutation.
+// The committed index range is collected before yielding to avoid BTree aliasing.
 func (sv *StateView) SeekIndexRange(tableID schema.TableID, indexID schema.IndexID, low, high *IndexKey) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {
 		if sv.committed != nil {
@@ -173,17 +138,8 @@ func (sv *StateView) SeekIndexRange(tableID schema.TableID, indexID schema.Index
 	}
 }
 
-// SeekIndexBounds returns visible row IDs whose keys satisfy both
-// Bound endpoints per SPEC-001 §4.4 / §5.4. Exclusive / inclusive /
-// unbounded endpoints independently. SPEC-004 predicate scans on
-// string/bytes/float keys require this over SeekIndexRange because
-// "strictly greater than v" cannot be expressed via *IndexKey alone.
-//
-// Read-view lifetime pin: same aliasing hazard as SeekIndexRange —
-// BTreeIndex.SeekBounds walks b.entries live. Collecting the range
-// once at the StateView boundary decouples iteration from BTree-
-// internal storage. Pin test:
-// TestStateViewSeekIndexBoundsIteratesIndependentRowIDsAfterBTreeMutation.
+// SeekIndexBounds returns visible row IDs whose keys satisfy both Bound
+// endpoints. The committed range is collected before yielding.
 func (sv *StateView) SeekIndexBounds(tableID schema.TableID, indexID schema.IndexID, low, high Bound) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {
 		if sv.committed != nil {

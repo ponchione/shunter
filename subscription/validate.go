@@ -20,15 +20,8 @@ type SchemaLookup interface {
 	ColumnCount(TableID) int
 }
 
-// ValidatePredicate checks the structural and schema-level constraints
-// defined in SPEC-004 §3.3 for subscription registration:
-//
-//  1. At most two tables
-//  2. Every referenced table exists
-//  3. Every referenced column exists
-//  4. Literal column values match the column type
-//  5. Join predicates require an index on at least one side of the join
-//  6. Predicates use literal values (no cross-column references outside joins)
+// ValidatePredicate checks the structural and schema-level constraints for
+// subscription registration.
 func ValidatePredicate(pred Predicate, schema SchemaLookup) error {
 	if err := validateRootPredicate(pred); err != nil {
 		return err

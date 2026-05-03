@@ -12,18 +12,8 @@ type DeliveryError struct {
 	Err    error
 }
 
-// DeliverTransactionUpdateLight sends a non-caller TransactionUpdateLight
-// to every connection in fanout (outcome-model). Connections not found in
-// the ConnManager are skipped (disconnected since evaluation). Empty
-// update slices are skipped. Buffer-full errors are collected so the
-// caller can trigger disconnects.
-//
-// single/multi variant admission-model slice (TD-140): the former per-update
-// active-subscription gate is gone — admission is owned by
-// subscription.Manager.querySets, and fan-out enumerates only live
-// client QueryIDs. Transport-level guards in connOnlySender.Send
-// (<-c.closed, ErrConnNotFound, ErrClientBufferFull) handle disconnect races.
-// See docs/shunter-design-decisions.md.
+// DeliverTransactionUpdateLight sends non-caller updates and collects
+// buffer-full delivery errors. Missing connections and empty updates are skipped.
 func DeliverTransactionUpdateLight(
 	sender ClientSender,
 	mgr *ConnManager,

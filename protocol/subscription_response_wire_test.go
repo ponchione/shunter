@@ -6,20 +6,8 @@ import (
 	"testing"
 )
 
-// TestShunterSubscribeSingleAppliedWireShape pins the byte-level wire
-// shape of SubscribeSingleApplied against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317`
-// (`pub struct SubscribeApplied<F>`). Reference field order:
-//
-//	request_id:                        u32
-//	total_host_execution_duration_micros: u64
-//	query_id:                          QueryId (u32)
-//	rows:                              SubscribeRows<F>
-//
-// Shunter flattens `SubscribeRows { table_id, table_name, table_rows }`
-// to `TableName (Box<str>) + Rows (Bytes)`. That rows-shape divergence is
-// accepted as documented per `docs/shunter-design-decisions.md#protocol-rows-shape`
-// (row-shape). This test pins the field order.
+// TestShunterSubscribeSingleAppliedWireShape pins SubscribeSingleApplied field
+// order and flat row payload encoding.
 func TestShunterSubscribeSingleAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x11223344
 	const queryID uint32 = 0xAABBCCDD
@@ -80,19 +68,8 @@ func TestShunterSubscribeSingleAppliedWireShape(t *testing.T) {
 	}
 }
 
-// TestShunterUnsubscribeSingleAppliedWireShape pins the byte-level wire
-// shape of UnsubscribeSingleApplied against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331`
-// (`pub struct UnsubscribeApplied<F>`). Reference field order:
-//
-//	request_id:                        u32
-//	total_host_execution_duration_micros: u64
-//	query_id:                          QueryId (u32)
-//	rows:                              SubscribeRows<F>
-//
-// Shunter models `rows` as `HasRows (u8) + optional Rows (Bytes)`; the
-// reference required-rows shape is accepted as documented per
-// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
+// TestShunterUnsubscribeSingleAppliedWireShape pins optional rows encoding for
+// UnsubscribeSingleApplied.
 func TestShunterUnsubscribeSingleAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x44332211
 	const queryID uint32 = 0xDDCCBBAA
@@ -188,19 +165,8 @@ func TestShunterUnsubscribeSingleAppliedWireShapeNoRows(t *testing.T) {
 	}
 }
 
-// TestShunterSubscribeMultiAppliedWireShape pins the byte-level wire
-// shape of SubscribeMultiApplied against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380`
-// (`pub struct SubscribeMultiApplied<F>`). Reference field order:
-//
-//	request_id:                        u32
-//	total_host_execution_duration_micros: u64
-//	query_id:                          QueryId (u32)
-//	update:                            DatabaseUpdate<F>
-//
-// Shunter flattens `DatabaseUpdate { tables: Vec<TableUpdate> }` to
-// `[]SubscriptionUpdate`; that rows-shape divergence is accepted as
-// documented per `docs/shunter-design-decisions.md#protocol-rows-shape`.
+// TestShunterSubscribeMultiAppliedWireShape pins SubscribeMultiApplied field
+// order and flat update encoding.
 func TestShunterSubscribeMultiAppliedWireShape(t *testing.T) {
 	const requestID uint32 = 0x01020304
 	const queryID uint32 = 0x05060708

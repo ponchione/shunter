@@ -74,14 +74,8 @@ func (k ValueKind) String() string {
 	return fmt.Sprintf("ValueKind(%d)", int(k))
 }
 
-// Value is a tagged union of all v1 column types.
-// Fields not used by the current kind are zero values.
-//
-// 128-bit kinds use hi128/lo128 (two's complement; hi is the signed high word
-// for Int128, unsigned for Uint128). 256-bit kinds use w256 with index 0 as
-// the most-significant word and index 3 as the least-significant word (the
-// high word is signed for Int256). Existing primitive slots are untouched so
-// the blast radius on unrelated code paths stays zero.
+// Value is a tagged union of supported column types.
+// Wide integers store fixed-width words in big-endian order.
 type Value struct {
 	kind   ValueKind
 	b      bool

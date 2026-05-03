@@ -7,55 +7,20 @@ import (
 	"unicode/utf8"
 )
 
-// SubscribeSingleMsg is the client-side single-envelope Subscribe
-// message (SPEC-005 §7.1). QueryID mirrors reference
-// `SubscribeSingle.query_id: QueryId` — a client-allocated identifier
-// used to correlate the subscribe with its later Unsubscribe.
-//
-// Part of the single/multi variant variant split. SubscribeMultiMsg
-// carries a list of queries under one QueryID; this type carries
-// exactly one. Reference: SubscribeSingle at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:189
-// (`query: Box<str>`). SQL-string flipped the wire from a
-// structured Query to a SQL string; the handler parses with
-// query/sql.Parse.
+// SubscribeSingleMsg subscribes one SQL query under a client QueryID.
 type SubscribeSingleMsg struct {
 	RequestID   uint32
 	QueryID     uint32
 	QueryString string
 }
 
-// UnsubscribeSingleMsg is the client-side single-envelope Unsubscribe
-// message (SPEC-005 §7.2). QueryID mirrors reference
-// `Unsubscribe.query_id: QueryId`.
-//
-// Part of the single/multi variant variant split. UnsubscribeMultiMsg
-// drops every query under a given QueryID; this type drops exactly
-// one. Field order and wire shape match reference `Unsubscribe`
-// at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:218
-// (`{ request_id: u32, query_id: QueryId }`) — pinned by
-// unsubscribe_wire_test.go against the reference byte shape. Prior
-// Shunter wire carried an extra `send_dropped: u8` byte smuggled onto
-// v1; that concept lives on v2 `UnsubscribeFlags::SendDroppedRows`
-// and is out of scope for Shunter v1.
+// UnsubscribeSingleMsg removes one query from a client QueryID.
 type UnsubscribeSingleMsg struct {
 	RequestID uint32
 	QueryID   uint32
 }
 
-// CallReducerMsg is the client-side CallReducer message (SPEC-005 §7.3).
-// Args is the raw BSATN-encoded ProductValue; protocol does not
-// validate argument types — that's the executor's job (SPEC-003).
-//
-// Flags is a single-byte discriminant matching the reference
-// `CallReducerFlags` behavior.
-// Only two values are defined today; see the constants below.
-//
-// Field order matches reference `CallReducer<Args>` at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:110
-// (`reducer, args, request_id, flags`) — pinned by
-// call_reducer_wire_test.go against the reference byte shape.
+// CallReducerMsg invokes a reducer with raw BSATN-encoded arguments.
 type CallReducerMsg struct {
 	ReducerName string
 	Args        []byte
@@ -63,32 +28,15 @@ type CallReducerMsg struct {
 	Flags       byte
 }
 
-// CallReducer flags (reference `CallReducerFlags`). The wire byte is a
-// single u8 trailing `Args`. Values outside the defined set are
-// rejected as malformed.
+// CallReducer flags. Unknown wire values are rejected as malformed.
 const (
-	// CallReducerFlagsFullUpdate is the default: the caller is notified of
-	// a successful reducer completion via the heavy `TransactionUpdate`
-	// envelope regardless of whether the caller subscribed to any
-	// relevant query.
+	// CallReducerFlagsFullUpdate sends the normal success TransactionUpdate.
 	CallReducerFlagsFullUpdate byte = 0
-	// CallReducerFlagsNoSuccessNotify opts the caller out of the success
-	// caller-echo. On `StatusCommitted` the fan-out worker skips the
-	// caller's heavy delivery entirely. Failure envelopes
-	// (`StatusFailed`) are still delivered so the caller observes
-	// non-success outcomes.
+	// CallReducerFlagsNoSuccessNotify suppresses committed success echoes only.
 	CallReducerFlagsNoSuccessNotify byte = 1
 )
 
-// OneOffQueryMsg is the client-side OneOffQuery message (SPEC-005 §7.4).
-// Reference: OneOffQuery at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:247
-// (`{ message_id: Box<[u8]>, query_string: Box<str> }`).
-//
-// SQL-string flipped `TableName + Predicates` → `QueryString`.
-// one-off message-id closes the remaining wire-shape divergence by using
-// the reference-style opaque `message_id: Box<[u8]>` rather than a
-// numeric request id.
+// OneOffQueryMsg executes one raw SQL query with an opaque message ID.
 type OneOffQueryMsg struct {
 	MessageID   []byte
 	QueryString string
@@ -102,12 +50,7 @@ type DeclaredQueryMsg struct {
 	Name      string
 }
 
-// SubscribeMultiMsg is the client-side SubscribeMulti message
-// (SPEC-005 §7.1b). Reference: SubscribeMulti at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:203
-// (`query_strings: Box<[Box<str>]>`). SQL-string flipped the
-// structured predicate list to a SQL string list on the wire; handlers
-// parse each string with query/sql.Parse.
+// SubscribeMultiMsg subscribes multiple SQL query strings under one QueryID.
 type SubscribeMultiMsg struct {
 	RequestID    uint32
 	QueryID      uint32

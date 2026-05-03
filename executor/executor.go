@@ -83,13 +83,7 @@ type postCommitOptions struct {
 	callerConnID    *types.ConnectionID
 	callerRequestID uint32
 	callerFlags     byte
-	// Caller metadata populated for CallSourceExternal so the heavy
-	// TransactionUpdate envelope can carry the reference
-	// CallerIdentity / ReducerCallInfo fields. startTime captures the
-	// reducer-dispatch instant — postCommit derives both the µs-since-Unix
-	// `Timestamp` (reference `Timestamp` at sats/timestamp.rs:11-13) and
-	// the wall-clock µs `TotalHostExecutionDuration` (reference
-	// `TimeDuration` at sats/time_duration.rs:17-19) from it.
+	// Caller metadata used to build the external TransactionUpdate envelope.
 	callerIdentity types.Identity
 	reducerName    string
 	reducerID      uint32
@@ -145,29 +139,8 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 	return e
 }
 
-// Startup runs the executor-side startup sequence after recovery (SPEC-003
-// §10.6, §13.5; Story 3.6 owner / Story 7.5 sweep):
-//
-//  1. scheduler.ReplayFromCommitted — repopulates the in-memory wakeup cache
-//     from sys_scheduled and enqueues any past-due rows into the executor
-//     inbox so they fire promptly once Run begins consuming it. Pass a nil
-//     scheduler in tests / deployments that skip sys_scheduled replay.
-//  2. dangling-client sweep — every surviving sys_clients row left by a
-//     previous crash is deleted via a fresh cleanup transaction, reusing
-//     Story 7.3's cleanup-only semantics (no OnDisconnect reducer is run;
-//     the cleanup commit still fans out via the post-commit pipeline so
-//     subscribers observe the sys_clients delete).
-//  3. flip externalReady so SubmitWithContext starts admitting external
-//     reducer / subscription-registration traffic from the protocol layer.
-//
-// Startup MUST complete before the caller starts Scheduler.Run / Executor.Run
-// and before the protocol layer begins accepting connections. The full engine
-// boot ordering is: recovery → NewExecutor → Startup → go Scheduler.Run →
-// go Executor.Run → first protocol accept.
-//
-// Startup is idempotent: later calls are no-ops that return the first
-// call's result. If the sweep's post-commit pipeline latches executor-fatal
-// mid-sequence, Startup returns the error and leaves externalReady false.
+// Startup replays recovered scheduled work, sweeps dangling clients, and opens
+// external admission. Later calls return the first result.
 func (e *Executor) Startup(ctx context.Context, scheduler *Scheduler) error {
 	e.startupOnce.Do(func() {
 		if scheduler != nil {
@@ -344,12 +317,7 @@ func (e *Executor) Submit(cmd ExecutorCommand) error {
 }
 
 // SubmitWithContext sends a command respecting a caller context.
-//
-// This is the external admission entrypoint used by the protocol adapter
-// (SPEC-003 §10.6, §13.5, Story 3.6 / Story 7.5). The call is rejected with
-// ErrExecutorNotStarted until Startup has finished scheduler replay and the
-// dangling-client sweep — external reducer / subscription-registration work
-// is not allowed to race ahead of either.
+// External admission remains closed until Startup succeeds.
 func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -950,24 +918,9 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	return executorCommandResultFromStatus(status)
 }
 
-// postCommit runs the ordered post-commit pipeline (SPEC-003 §5.1–§5.4,
-// Stories 5.1–5.3):
-//
-//  1. hand the committed changeset to durability (queue admission, not fsync)
-//  2. acquire a stable committed read view and defer its release
-//  3. evaluate subscriptions synchronously against that view
-//  4. deliver the reducer response to the caller
-//  5. non-blocking drain of dropped-client signals
-//
-// Crash-loss semantics: the response is acknowledged before fsync, so a crash
-// after response delivery but before durability persistence may lose the
-// transaction on restart. This is an allowed state per SPEC-003 §5.1.
-//
-// Fatal-state semantics (Story 5.3, SPEC-003 §5.4): the transaction is
-// already visible in memory once commit returns. Any panic in the post-commit
-// pipeline leaves committed state that may not have been durably handed off or
-// evaluated for subscribers. The executor therefore latches a fatal flag
-// and rejects future write-affecting commands until restart.
+// postCommit runs durability enqueue, subscription evaluation, caller response,
+// and dropped-client cleanup. Panics latch executor fatal because the
+// transaction is already visible in memory.
 func (e *Executor) postCommit(
 	txID types.TxID,
 	changeset *store.Changeset,

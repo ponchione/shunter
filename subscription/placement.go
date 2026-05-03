@@ -40,15 +40,8 @@ func (p *PruningIndexes) TestOnlyIsEmpty() bool {
 	return true
 }
 
-// PlaceSubscription routes each (query, table) pair to exactly one tier
-// following the §5.4 invariant. A two-table subscription may land in
-// different tiers for each table.
-//
-// Self-joins (Join.Left == Join.Right) always fall through to Tier 3 for
-// their shared table: filter leaves are alias-tagged and apply to only one
-// side of a joined pair, so Tier 1 / Tier 2 lookups keyed on the leaf value
-// would prune out legitimate candidates whose insertion plays the other
-// (unconstrained) side.
+// PlaceSubscription routes each (query, table) pair to one pruning tier.
+// Self-joins use table-level placement because leaves apply to one side only.
 func PlaceSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
 	mutateSubscriptionPlacement(idx, pred, hash, true)
 }

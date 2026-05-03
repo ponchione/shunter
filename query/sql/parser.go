@@ -1,36 +1,6 @@
-// Package sql implements the minimum-viable SQL surface the Shunter
-// protocol layer accepts on OneOffQuery / SubscribeSingle / SubscribeMulti.
-//
-// Grammar:
-//
-//	stmt   = "SELECT" projection "FROM" ident [ [ "AS" ] ident ] [ [ "INNER" ] "JOIN" ident [ [ "AS" ] ident ] "ON" qcol "=" qcol ] [ where ] [ order ] [ limit ] [ ";" ]
-//	projection = "*" | ident "." "*" | projcol ( "," projcol )* | aggregate
-//	projcol = ident | ident "." ident
-//	aggregate = "COUNT" "(" "*" ")" [ "AS" ] ident
-//	where  = "WHERE" pred
-//	order  = "ORDER" "BY" colref [ "ASC" | "DESC" ]
-//	limit  = "LIMIT" unsigned-integer
-//	pred   = conj ( "OR" conj )*
-//	conj   = term ( "AND" term )*
-//	term   = cmp | "(" pred ")"
-//	cmp    = colref op literal
-//	colref = ident | ident "." ident
-//	qcol   = ident "." ident
-//	op     = "=" | "<" | ">" | "<=" | ">=" | "!=" | "<>"
-//	literal = integer | float | bool | string | hex-bytes
-//	ident   = [A-Za-z_][A-Za-z0-9_]* | quoted-ident
-//	quoted-ident = '"' ( '""' | any-char-except-quote )+ '"'
-//
-// SQL identifiers are byte-exact after quoted-identifier unescaping. Quoting
-// preserves the written spelling and does not enable case-folded table,
-// column, alias, or qualifier lookup.
-//
-// Anything outside this grammar (unsupported JOIN forms, multiple ORDER BY
-// expressions, aggregates other than `COUNT(*) [AS] alias`, subqueries,
-// mismatched qualified columns, etc.) is rejected with ErrUnsupportedSQL.
-//
-// Literals carry their lexical category only. Callers coerce them to a
-// concrete types.Value against a column kind via Coerce.
+// Package sql parses the SQL subset accepted by the protocol query surfaces.
+// Unsupported joins, projections, predicates, and literals reject with
+// ErrUnsupportedSQL. Identifiers are byte-exact after quoted unescaping.
 package sql
 
 import (
@@ -57,34 +27,14 @@ const (
 	LitBool
 	LitString
 	LitBytes
-	// LitSender is the parameter marker for `:sender`, the caller identity
-	// placeholder accepted on identity / bytes columns. The parser preserves
-	// it as a distinct lexical kind so the coercion path resolves it against
-	// the caller identity supplied at compile time rather than a literal
-	// value from the SQL text. See reference/SpacetimeDB/crates/expr/src/
-	// check.rs lines 434-440 for accepted shapes and lines 487-488 for the
-	// rejection on non-identity columns.
+	// LitSender is the :sender caller-identity placeholder.
 	LitSender
-	// LitBigInt carries an arbitrary-precision integer literal — the branch
-	// used when a numeric literal parses as integer-valued (via big.Rat) but
-	// does not fit int64. Reference target is `u256 = 1e40` at
-	// reference/SpacetimeDB/crates/expr/src/check.rs:330-332, where the
-	// reference BigDecimal path treats `1e40` as the exact integer 10^40.
+	// LitBigInt carries an integer literal that does not fit int64.
 	LitBigInt
 )
 
 // Literal is a parsed SQL literal in raw lexical form.
-//
-// Text preserves the source text of the literal token for the categories that
-// the reference parser carries through `parse(value, ty)` at expr/src/lib.rs:
-// numeric tokens (raw `tokNumber` body, including leading `+`, leading zeros,
-// trailing fractional zeros, and scientific-notation exponents that collapse
-// at parseNumericLiteral), hex literals (`0x...` / `X'...'` token text), and
-// string bodies (the unquoted contents). Bool / :sender literals do not use
-// Text. Coerce paths that emit reference `InvalidLiteral` text or widen onto
-// `KindString` consume Text via `renderLiteralSourceText` so the source token
-// survives parser collapses (e.g. `1e40` → `LitBigInt(10^40)` keeps the
-// `1e40` token, `1.10` → `LitFloat(1.1)` keeps the `1.10` token).
+// Text preserves the original token text when coercion needs exact rendering.
 type Literal struct {
 	Kind  LitKind
 	Int   int64
@@ -97,12 +47,7 @@ type Literal struct {
 }
 
 // Filter is a single column comparison against a literal value.
-//
-// Alias preserves the exact qualifier token the user wrote (e.g. "a", "b",
-// or the base table name in an unaliased single-table query). Compile paths
-// map it to a relation-instance tag so self-join WHERE filters can be routed
-// to the side the user named. Empty means the column reference was bare and
-// the caller may fall back to the default relation.
+// Alias preserves the qualifier token for self-join routing.
 type Filter struct {
 	Table   string
 	Column  string
@@ -122,19 +67,9 @@ type ColumnRef struct {
 	Alias  string
 }
 
-// JoinClause is the parsed two-table join metadata for a narrow join-backed SQL slice.
-// LeftAlias / RightAlias carry the relation-instance identity separately from the
-// physical table name so callers can detect aliased self-joins.
-//
-// AliasCollision marks a parser-detected `LeftAlias == RightAlias` shape whose
-// `DuplicateName` rejection has been deferred to the compile stage. Reference
-// `type_from` (`expr/src/check.rs:79-89`) resolves the left relvar through
-// `type_relvar` BEFORE entering the join loop's HashSet duplicate-alias check,
-// so a missing left table must precede the dup-alias error. The right-side
-// duplicate-alias check precedes right-table resolution, so the compile stage
-// emits `DuplicateNameError{Name: LeftAlias}` after the left schema lookup
-// succeeds; ON-clause / WHERE / projection-column resolution is skipped on the
-// parser side because the qualifier map collapses when both aliases match.
+// JoinClause is the parsed two-table join metadata.
+// AliasCollision defers duplicate-alias rejection until compile-time ordering
+// can account for missing left tables.
 type JoinClause struct {
 	LeftTable      string
 	RightTable     string
@@ -215,8 +150,8 @@ type AggregateProjection struct {
 }
 
 // OrderByColumn is the bounded query-only ORDER BY surface. It is limited to a
-// single resolved column reference; callers decide which protocol surfaces may
-// execute it.
+// single column reference or unqualified projection output name; callers decide
+// which protocol surfaces may execute it.
 type OrderByColumn struct {
 	Table           string
 	Column          string
@@ -225,19 +160,8 @@ type OrderByColumn struct {
 }
 
 // Statement is the parsed output.
-//
-// ProjectedAlias preserves the qualifier token the user wrote for the
-// SELECT target (`a` in `SELECT a.*`, `Orders` in `SELECT Orders.*`,
-// or empty when the projection was bare `*`). Compile paths consult it to
-// distinguish `SELECT a.*` from `SELECT b.*` on aliased self-joins, where
-// ProjectedTable alone is insufficient because both aliases resolve to the
-// same base table.
-//
-// ProjectionColumns is populated for explicit column-list projections (for
-// example `SELECT u32, name FROM t`, `SELECT o.id, o.product_id FROM Orders o
-// JOIN Inventory product ...`, or one-off mixed-relation join projections such
-// as `SELECT o.id, product.quantity ...`). Wildcard/full-row projections keep
-// this empty and continue using ProjectedTable / ProjectedAlias.
+// ProjectedAlias and ProjectionColumns preserve projection identity for joins
+// and explicit column lists.
 type Statement struct {
 	Table                 string
 	TableAlias            string
@@ -758,16 +682,7 @@ func (p *parser) trailingJoinKeywordError(keyword string) (string, bool) {
 
 func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjection, error) {
 	t := p.peek()
-	// Reference SQL/subscription parsers reject any SELECT carrying a
-	// non-None set quantifier (`SELECT ALL ...` / `SELECT DISTINCT ...`)
-	// at `parse_select`'s `_ => ...feature(select)` arm
-	// (`sql-parser/src/parser/sql.rs:362-394` and
-	// `sql-parser/src/parser/sub.rs:120-149`). Detect the modifier here
-	// instead of letting `parseProjectionItem` reinterpret the keyword
-	// as a column reference (which masks the rejection when a column
-	// happens to share the keyword's name). On the subscribe surface,
-	// query-level LIMIT rejection precedes parse_select's set-quantifier
-	// rejection, so preserve that ordering when both clauses are present.
+	// Reject SELECT ALL/DISTINCT before treating the keyword as a column name.
 	if !t.quoted && t.kind == tokIdent && p.peekNext().kind != tokDot && (strings.EqualFold(t.text, "ALL") || strings.EqualFold(t.text, "DISTINCT")) {
 		return "", nil, nil, UnsupportedSelectError{SQL: p.sql, HasLimit: p.hasLimitClauseAhead()}
 	}
@@ -966,25 +881,8 @@ func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*Jo
 	leftAlias := leftQualifiers[0]
 	rightAlias := rightQualifiers[0]
 	if leftAlias == rightAlias {
-		// Reference `type_from` (expr/src/lib.rs:88-89) rejects a join whose
-		// right-side alias collides with the left side using
-		// `DuplicateName(alias)`. Same reference text covers both the
-		// explicitly-aliased shape (`FROM t AS dup JOIN s AS dup`) and the
-		// unaliased self-join shape (`FROM t JOIN t`) because the parser
-		// derives each side's alias from its base table when no `AS` is
-		// written. `Relvars` is byte-equal `SqlIdent`, so case-distinct
-		// aliases (e.g. `"R"` and `r`) do NOT collide.
-		//
-		// Defer the rejection to the compile stage so reference
-		// `type_relvar` ordering holds: if the LEFT base table is
-		// missing, the schema lookup at `compileSQLQueryString` emits
-		// the missing-table text BEFORE the dup-alias check fires. The
-		// RIGHT duplicate-alias check precedes right-table resolution.
-		// Skip ON-clause resolution because the qualifier map collapses
-		// when both aliases are byte-equal — we don't need it; the
-		// compile-stage dup rejection subsumes any ON-clause findings.
-		// Drain remaining tokens up to the statement terminator so the
-		// outer parseStatement EOF guard sees a clean tail.
+		// Defer duplicate-alias rejection so compile-time table lookup ordering
+		// can report a missing left table first.
 		p.consumeUntilStatementEnd()
 		return &JoinClause{
 			LeftTable:      leftTable,
@@ -1401,17 +1299,8 @@ func (p *parser) parseLiteral() (Literal, error) {
 	}
 }
 
-// parseNumericLiteral turns a tokenized numeric body into a typed Literal.
-// Plain integer bodies attempt strconv.ParseInt; on int64 overflow they
-// promote to LitBigInt. Bodies with a fractional or exponent part first go
-// through big.Rat so scientific shapes like `1e40` preserve exact-integer
-// semantics (the reference BigDecimal is_integer path in
-// crates/expr/src/lib.rs::parse_int collapses integer-valued decimals into
-// big integers). Integer-valued rationals collapse to LitInt when they fit
-// int64, else LitBigInt. Non-integer rationals fall back to LitFloat via
-// strconv.ParseFloat so `1e-3` / `0.1` stay float-kinded for the coerce
-// boundary to either bind to a float column or reject as a float-on-integer
-// mismatch.
+// parseNumericLiteral converts a numeric token into int, bigint, or float form.
+// Integer-valued scientific notation stays exact when possible.
 func parseNumericLiteral(text string) (Literal, error) {
 	if strings.ContainsAny(text, ".eE") {
 		r, ok := new(big.Rat).SetString(text)

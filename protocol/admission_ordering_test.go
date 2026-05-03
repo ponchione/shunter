@@ -7,24 +7,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestAdmissionOrdering_AppliedPrecedesFanoutOnOutboundCh pins SPEC-005
-// §9.4: on a single connection, a SubscribeApplied envelope enqueued
-// during registration MUST reach the wire before any TransactionUpdate
-// that references the same subscription.
-//
-// docs/shunter-design-decisions.md records the subscription admission
-// contract: Applied is synchronously enqueued on the connection's
-// OutboundCh inside the executor main-loop goroutine, then fan-out from
-// the next commit enqueues on the same per-conn FIFO. OutboundCh is a
-// per-connection single-writer FIFO, so wire order matches enqueue order.
-//
-// This test asserts the transport-level invariant that is the end-state
-// contract: when an Applied frame is enqueued before a fan-out frame on
-// a single connection's outbound channel, the wire observes them in
-// that order. It works on today's code (any path that enqueues Applied
-// first will deliver it first) and continues to work after Tasks 3-4
-// wire the synchronous Reply seam, because the invariant is the
-// property those tasks will rely on.
+// TestAdmissionOrdering_AppliedPrecedesFanoutOnOutboundCh pins per-connection
+// FIFO ordering between Applied and later fan-out frames.
 func TestAdmissionOrdering_AppliedPrecedesFanoutOnOutboundCh(t *testing.T) {
 	t.Parallel()
 
@@ -89,19 +73,8 @@ func TestAdmissionOrdering_AppliedPrecedesFanoutOnOutboundCh(t *testing.T) {
 	}
 }
 
-// TestDisconnectBetweenRegisterAndReplyDoesNotSend pins SPEC-005 §9.1
-// rule 3 and the ADR §9.1 disconnect-discard guarantee: when the
-// connection closes between the executor-side register call and the
-// Reply-closure invocation, no Applied frame reaches the connection's
-// OutboundCh and no stale admission state resurrects.
-//
-// Mechanism: the ADR routes every Reply through a connOnlySender, whose
-// Send observes conn.closed as its first guard (see async_responses.go).
-// Closing conn.closed before the Reply path runs must cause the Reply
-// to return ErrConnNotFound with zero frames enqueued. This test uses
-// SendSubscribeSingleApplied as the Reply-side delivery primitive; the
-// same connOnlySender guard applies to SendSubscribeMultiApplied and
-// SendSubscriptionError.
+// TestDisconnectBetweenRegisterAndReplyDoesNotSend pins disconnect discard
+// for Reply-side delivery.
 func TestDisconnectBetweenRegisterAndReplyDoesNotSend(t *testing.T) {
 	t.Parallel()
 

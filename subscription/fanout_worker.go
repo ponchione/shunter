@@ -8,32 +8,10 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// FanOutSender is the delivery contract used by the FanOutWorker to
-// push encoded messages to connected clients. Implemented by a
-// protocol-backed adapter wired at server startup (SPEC-004 §8 /
-// Story 6.1).
-//
-// Outcome-model split (`docs/shunter-design-decisions.md#outcome-model`):
-//   - `SendTransactionUpdateHeavy` delivers the caller-bound envelope
-//     with caller metadata and, for `CallerOutcomeCommitted`, the
-//     caller's visible row delta.
-//   - `SendTransactionUpdateLight` delivers the delta-only envelope to
-//     non-callers whose rows were touched.
-//
-// row-payload sharing contract: `callerUpdates` (heavy) and
-// `updates` (light) are READ-ONLY. Each SubscriptionUpdate's
-// `Inserts` / `Deletes` slice is independent per subscriber
-// (slice-header closed 2026-04-20), but the
-// contained `types.ProductValue` row payloads share `[]Value`
-// backing arrays across subscribers under the post-commit
-// row-immutability contract. Implementations must only read row
-// payloads; in-place mutation of `Value` elements corrupts every
-// other subscriber's view of the same commit. Pinned by the row-payload
-// sharing regression tests.
-//
-// Errors: implementations must return ErrSendBufferFull when the
-// client's outbound buffer is full, and ErrSendConnGone when the
-// target connection has already disconnected.
+// FanOutSender pushes encoded fan-out messages to connected clients.
+// Update row payloads are read-only and may be shared across subscribers.
+// Full buffers return ErrSendBufferFull; missing connections return
+// ErrSendConnGone.
 type FanOutSender interface {
 	// SendTransactionUpdateHeavy delivers the caller-bound heavy envelope.
 	SendTransactionUpdateHeavy(connID types.ConnectionID, outcome CallerOutcome, callerUpdates []SubscriptionUpdate, memo *EncodingMemo) error
@@ -233,13 +211,7 @@ func (w *FanOutWorker) deliver(ctx context.Context, msg FanOutMessage) {
 		}
 	}
 
-	// Deliver heavy TransactionUpdate to caller:
-	// when CallerConnID is set the caller ALWAYS receives a heavy
-	// envelope — success with possibly-empty update or failure — so the
-	// caller never silently loses its outcome even on empty changesets
-	// or no-active-subscription paths. The NoSuccessNotify caller-echo
-	// opt-out (above) is the one exception: effCallerConnID /
-	// effCallerOutcome are nil in that case.
+	// Deliver the caller's heavy envelope unless NoSuccessNotify suppressed it.
 	if effCallerConnID != nil && effCallerOutcome != nil {
 		if w.requiresConfirmedRead(*effCallerConnID) && !waitForDurable(ctx, msg.TxDurable, &durableWaited, &durableReady) {
 			recordTraceFailure("context_canceled", ctx.Err())

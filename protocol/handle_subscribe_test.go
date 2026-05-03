@@ -1050,15 +1050,7 @@ func TestHandleSubscribeSingle_CrossJoinWhereColumnEqualityAndLiteralFilterStill
 }
 
 // TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected
-// pins that even after one-off admits the bounded combination of cross-join
-// WHERE column-equality (+ optional one-column-literal filter) with
-// COUNT(*) [AS] alias aggregate, subscriptions still deliberately reject
-// both the cross-join WHERE shape and the aggregate projection before
-// executor registration. Reference subscription SQL grammar allows only
-// STAR / ident.STAR projection and has no cross-join WHERE form; the
-// subscribe-side rejection is the outer guard. The rejection message is
-// "cross join WHERE not supported" because the cross-join guard fires
-// before the aggregate-projection guard on subscribe.
+// pins subscribe rejection for cross-join WHERE plus COUNT.
 func TestHandleSubscribeSingle_JoinCountAggregateOnCrossJoinWhereStillRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -3354,16 +3346,8 @@ func TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected(t *
 	}
 }
 
-// TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText pins the
-// reference type-check rejection text at
-// reference/SpacetimeDB/crates/expr/src/errors.rs:41 (`InvalidWildcard::Join`
-// = "SELECT * is not supported for joins"), emitted at
-// reference/SpacetimeDB/crates/expr/src/lib.rs:56 when `type_proj` sees
-// `ast::Project::Star(None)` against an input with `nfields() > 1`. The
-// SubscribeSingle compile-origin error path wraps the inner text with
-// `DBError::WithSql` (reference error.rs:140) → `"{error}, executing:
-// `{sql}`"`. This pin is the exact-text companion to the shape-only
-// rejection pin at TestHandleSubscribeSingle_ShunterJoinWithoutQualifiedProjectionRejected.
+// TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText pins SELECT *
+// join rejection text on SubscribeSingle.
 func TestHandleSubscribeSingle_ShunterJoinStarProjectionRejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -3435,16 +3419,8 @@ func TestHandleSubscribeSingle_ShunterSelfJoinWithoutAliasesRejected(t *testing.
 	}
 }
 
-// TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected pins the
-// reference type-check rejection at reference/SpacetimeDB/crates/expr/src/
-// check.rs lines 526-528 (`select t.* from t join s on t.u32 = r.u32 join s
-// as r` / "Alias r is not in scope when it is referenced") onto the
-// SubscribeSingle admission surface. Shunter's parser rejects the forward
-// alias reference incidentally in parseQualifiedColumnRef via resolveQualifier
-// returning !ok against the first join's lookup table (query/sql/parser.go:629
-// -631); the multi-way-join rejection at parseStatement (query/sql/parser.go:
-// 482-489) would otherwise also fire, but the forward reference fails first.
-// The pin names the shape as a Shunter rejection contract.
+// TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected pins forward
+// alias rejection on SubscribeSingle.
 func TestHandleSubscribeSingle_ShunterForwardAliasReferenceRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
@@ -3980,17 +3956,8 @@ func TestHandleSubscribeSingle_ShunterInvalidLiteralNegativeExponentOnSignedReje
 	}
 }
 
-// TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth pins
-// reference/SpacetimeDB/crates/expr/src/check.rs:360-370
-// (`valid_literals_for_type`) at the SubscribeSingle admission surface.
-// The reference test iterates every numeric column kind and asserts that
-// `{ty} = 127` parses and type-checks; Shunter realizes the full
-// i8/u8/i16/u16/i32/u32/i64/u64/f32/f64/i128/u128/i256/u256 set
-// (128-bit added 2026-04-21 slice 1, 256-bit added 2026-04-21 slice 2).
-// Each subtest builds a single-column table, sends
-// `SELECT * FROM t WHERE {colname} = 127`, and asserts the executor
-// receives a ColEq predicate with the width-native value. The reference
-// `u256 = 1e40` row stays deferred until BigDecimal literal widening.
+// TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth pins integer
+// literal coercion across numeric column widths.
 func TestHandleSubscribeSingle_ShunterValidLiteralOnEachIntegerWidth(t *testing.T) {
 	f32Want, err := types.NewFloat32(127)
 	if err != nil {
@@ -5796,16 +5763,8 @@ func TestHandleSubscribeSingle_ShunterIntOverflowOnUint8RejectText(t *testing.T)
 	}
 }
 
-// TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText pins the
-// reference `InvalidLiteral` literal for a fractional LitFloat against an
-// integer column on the SubscribeSingle admission surface. SubscribeSingle
-// wraps compile errors with `DBError::WithSql`
-// (module_subscription_actor.rs:643 via `return_on_err_with_sql_bool!`), so
-// the pinned text carries the `, executing: ` suffix on top of the reference
-// `"The literal expression `{literal}` cannot be parsed as type `{ty}`"`
-// from errors.rs:84 / lib.rs:99. Scope mirrors the OneOff pin: plain `1.3`
-// whose canonical FormatFloat rendering matches the original token — source-
-// text preservation for round-trip-lossy forms is a separate slice.
+// TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText pins
+// InvalidLiteral text for float literals on integer columns.
 func TestHandleSubscribeSingle_ShunterFloatLiteralOnUint32RejectText(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

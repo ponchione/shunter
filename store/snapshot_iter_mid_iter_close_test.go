@@ -8,21 +8,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the Read-view mid-iter-close sub-hazard: the three
-// iterator entry points on *CommittedSnapshot (TableScan, IndexScan,
-// IndexRange) previously checked s.ensureOpen() only once at iter-body
-// entry. A caller who partially iterated, then had another goroutine (or
-// the same goroutine) call Close(), would continue yielding rows against
-// a released RLock — data-racing any concurrent writer that acquired the
-// write lock in the meantime. Each iter-body for-loop now re-calls
-// s.ensureOpen() per-iteration, converting the mis-use into a
-// deterministic "store: CommittedSnapshot used after Close" panic matching
-// the construction-time contract.
-//
-// This is defense-in-depth, not a full race fix: the check happens before
-// each yield, so a Close that races between the check and an in-flight
-// read of the underlying table state still has a window — but the iter
-// halts promptly on the next iteration rather than continuing indefinitely.
+// Tests in this file pin deterministic panic behavior when snapshots close
+// during iteration.
 
 func expectMidIterClosePanic(t *testing.T, body func()) {
 	t.Helper()

@@ -25,15 +25,7 @@ type ProtocolOptions struct {
 	// the peer's acknowledgement before the socket is forcibly torn
 	// down.
 	CloseHandshakeTimeout time.Duration
-	// DisconnectTimeout bounds the detached teardown goroutine the
-	// outbound-overflow path spawns in
-	// connManagerSender.enqueueOnConn. It is the ceiling for how long
-	// inbox.DisconnectClientSubscriptions + inbox.OnDisconnect may
-	// run before the teardown proceeds to close(c.closed) anyway.
-	// contract: with a
-	// Background ctx the detached goroutine was unbounded if either
-	// inbox call hung; the bounded ctx makes the leak observable
-	// and collectible.
+	// DisconnectTimeout bounds detached teardown work before local close proceeds.
 	DisconnectTimeout time.Duration
 	// OutgoingBufferMessages caps the per-connection outbound queue.
 	// Overflow triggers a 1008 close per SPEC-005 §10.1.
@@ -46,13 +38,7 @@ type ProtocolOptions struct {
 	MaxMessageSize int64
 }
 
-// DefaultOutgoingBufferMessages matches the reference SpacetimeDB
-// per-client outbound channel capacity (`CLIENT_CHANNEL_CAPACITY = 16 *
-// KB`) at
-// `reference/SpacetimeDB/crates/core/src/client/client_connection.rs:657`.
-// outbound-lag (`docs/shunter-design-decisions.md#outbound-lag-policy`) aligned
-// the default so realistic bursty workloads tolerate the same lag before
-// the connection is torn down.
+// DefaultOutgoingBufferMessages is the per-client outbound queue capacity.
 const DefaultOutgoingBufferMessages = 16 * 1024
 
 // DefaultProtocolOptions returns SPEC-005 §12 default values.

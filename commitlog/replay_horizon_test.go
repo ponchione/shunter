@@ -7,25 +7,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestReplaySkipsExhaustedSegmentsWithoutOpeningThem pins
-// Shunter's intentional divergence from reference replay-horizon skip
-// granularity.
-//
-// Reference (SpacetimeDB commitlog): per-commit skip via
-// `CommitInfo::adjust_initial_offset` in
-// `reference/SpacetimeDB/crates/commitlog/src/commitlog.rs:834-845`.
-// Every segment in the range is opened; individual commits below the
-// resume offset are filtered as they stream.
-//
-// Shunter: segment-level short-circuit in
-// `commitlog/replay.go:21-23`. When `segment.LastTx <= fromTxID`, the
-// segment file is never opened. This is safe because `ScanSegments`
-// already observed the segment's `LastTx`, so no commit inside can
-// contribute above the horizon. Same externally visible outcome; the
-// mechanism difference is pinned here as intentional.
-//
-// This test is the direct Shunter contract anchor for the segment-level
-// short-circuit divergence.
+// TestReplaySkipsExhaustedSegmentsWithoutOpeningThem pins Shunter's
+// segment-level replay-horizon short-circuit.
 func TestReplaySkipsExhaustedSegmentsWithoutOpeningThem(t *testing.T) {
 	root := t.TempDir()
 	committed, reg := buildReplayCommittedState(t)

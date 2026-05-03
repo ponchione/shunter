@@ -11,18 +11,9 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Conn is per-connection server-side state for one WebSocket client
-// (SPEC-005 §5.1). Outbound queue, keep-alive bookkeeping, and
-// transport references all live here; the read loop, write loop, and
-// keep-alive goroutine share ownership.
-//
-// single/multi variant admission-model slice (TD-140): per-connection
-// subscription-id admission bookkeeping has been retired. The
-// subscription.Manager's querySets map is the single source of truth
-// for active query IDs, and SPEC-005 §9.4 in-flight ordering is
-// preserved by the synchronous Reply closure invoked inside the
-// executor main-loop goroutine plus per-connection OutboundCh FIFO.
-// See docs/shunter-design-decisions.md.
+// Conn is server-side state for one WebSocket client.
+// Subscription ownership lives in the subscription manager; Conn owns transport,
+// keep-alive, and outbound queue state.
 type Conn struct {
 	ID          types.ConnectionID
 	Identity    types.Identity
@@ -281,23 +272,9 @@ func (m *ConnManager) RecordRejected() {
 	}
 }
 
-// CloseAll sends a Close frame to every connected client and runs
-// the disconnect sequence for each. Used for graceful server shutdown
-// (SPEC-005 §11.1, close code 1000). Connections are closed
-// concurrently with a bounded wait for all teardowns to complete.
-//
-// contract: the caller-supplied ctx is forwarded into each Conn.Disconnect, which threads it
-// into inbox.DisconnectClientSubscriptions and inbox.OnDisconnect (steps
-// 1-2 of the SPEC-005 §5.3 teardown). Every caller-supplied ctx is
-// additionally wrapped per-conn by context.WithTimeout(ctx,
-// DisconnectTimeout) so a single hung inbox call cannot pin a *Conn
-// past the shutdown window, matching the bounded-ctx contract already
-// enforced at the supervisor and sender overflow sites. The outer ctx
-// is still honored — cancellation propagates through the per-conn
-// derived ctx immediately — but a Background-rooted caller can no
-// longer stall shutdown indefinitely. Pin tests:
-// TestCloseAllBoundsDisconnectOnInboxHang,
-// TestCloseAllDeliversOnInboxOK.
+// CloseAll disconnects every connected client concurrently.
+// Each teardown gets a bounded context so one hung inbox call cannot stall
+// server shutdown indefinitely.
 func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 	m.mu.RLock()
 	conns := make([]*Conn, 0, len(m.conns))

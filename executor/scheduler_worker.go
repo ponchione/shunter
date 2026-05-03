@@ -10,13 +10,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Scheduler is the background worker that reads sys_scheduled and
-// enqueues due scheduled-reducer calls into the executor inbox
-// (SPEC-003 §9.4, Story 6.3).
-//
-// sys_scheduled is the durable source of truth; the scheduler only
-// caches the next wakeup time in memory. On restart, Story 6.5
-// replays the table to repopulate the wakeup state.
+// Scheduler reads sys_scheduled and enqueues due scheduled-reducer calls.
+// sys_scheduled remains the durable source of truth.
 type Scheduler struct {
 	// inbox is the executor's command channel. Due rows are enqueued
 	// here as CallReducerCmd with Source = CallSourceScheduled.
@@ -137,17 +132,8 @@ func (s *Scheduler) scanWithContext(ctx context.Context) bool {
 	return ok
 }
 
-// ReplayFromCommitted is the startup entry point for SPEC-003 §9.2
-// persistence: rebuilds the in-memory wakeup cache from sys_scheduled
-// and enqueues any rows that are already past due so they fire
-// promptly after recovery (Story 6.5). Startup runs before Executor.Run, so
-// replay enqueue is bounded by the current inbox capacity; any due rows that do
-// not fit remain in sys_scheduled and are picked up by Scheduler.Run's first
-// post-startup scan.
-//
-// Returned: the largest observed schedule_id. Callers reset their
-// ScheduleID sequence to maxID+1 so post-replay Schedule() calls don't
-// collide with replayed rows.
+// ReplayFromCommitted rebuilds scheduler wakeup state from sys_scheduled and
+// enqueues currently due rows. It returns the largest observed schedule_id.
 func (s *Scheduler) ReplayFromCommitted() ScheduleID {
 	nowNs := s.now().UnixNano()
 	rows := s.snapshotScheduleRows()

@@ -342,14 +342,8 @@ func (m *Manager) RegisterSet(
 		m.nextSubID++
 		subID := m.nextSubID
 		hash := ComputeQueryHash(p, dedupedHashIdentities[i])
-		// Same-connection reused-hash elision: if this connection already
-		// has a subscriber attached to the query hash under a different
-		// client QueryID, skip the initial snapshot for the new attachment
-		// (reference add_subscription_multi lines 1083-1094). The new
-		// internal SubscriptionID is still allocated and bookkept so future
-		// post-commit fanout stamps both client QueryIDs. The elision is
-		// same-connection only; a different connection reusing the hash
-		// still receives its own initial snapshot.
+		// Reusing this hash on the same connection skips a duplicate initial
+		// snapshot but still allocates an internal subscription ID.
 		existing := m.registry.getQuery(hash)
 		sameConnReuse := existing != nil && len(existing.subscribers[req.ConnID]) > 0
 		var rows []types.ProductValue
@@ -400,21 +394,9 @@ func (m *Manager) RegisterSet(
 	return SubscriptionSetRegisterResult{QueryID: req.QueryID, Update: updates}, nil
 }
 
-// UnregisterSet drops every internal subscription registered under
-// (ConnID, QueryID). Reference: remove_subscription at
-// reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:841,
-// invoked from `module_subscription_actor.rs:741` (Single) and `:826`
-// (Multi). The reference drops the queries from the manager *before*
-// evaluating `evaluate_initial_subscription` / `evaluate_queries` against
-// committed state, so an eval failure still leaves the subscriptions
-// removed. On eval failure the reference bails via `return_on_err_with_sql!`
-// (Single, `:756`) or `return_on_err!` (Multi, `:836`) and emits a
-// SubscriptionError; we mirror that by returning an `ErrFinalQuery` wrap
-// (plus the first-errored queryState's SQLText so the protocol-side
-// adapter can apply the `DBError::WithSql` suffix on the Single path).
-// If view is nil, no final-delta rows are computed and Update is empty —
-// suitable for disconnect-time cleanup; in that case no eval error can
-// be raised.
+// UnregisterSet drops every internal subscription for (ConnID, QueryID).
+// Subscriptions are removed before final-delta evaluation; a nil view skips
+// final-delta computation for disconnect cleanup.
 func (m *Manager) UnregisterSet(
 	connID types.ConnectionID,
 	queryID uint32,

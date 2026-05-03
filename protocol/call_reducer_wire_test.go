@@ -6,20 +6,7 @@ import (
 	"testing"
 )
 
-// TestShunterCallReducerWireShape pins the byte-level wire shape of
-// CallReducer against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:110`
-// (`pub struct CallReducer<Args>`). Reference field order:
-//
-//	reducer:    Box<str>       (RawIdentifier)
-//	args:       Args           (Bytes in wire form)
-//	request_id: u32
-//	flags:      CallReducerFlags (serialized as u8)
-//
-// Box<str> / Bytes are a LE u32 length prefix followed by the payload.
-// The test constructs the reference byte shape by hand and compares
-// against the protocol encoder output; it also round-trips the frame
-// through the decoder to prove the field-order change is symmetric.
+// TestShunterCallReducerWireShape pins CallReducer field order and flags.
 func TestShunterCallReducerWireShape(t *testing.T) {
 	const reducerName = "transfer"
 	args := []byte{0xde, 0xad, 0xbe, 0xef}

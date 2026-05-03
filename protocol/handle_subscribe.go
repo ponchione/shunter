@@ -258,23 +258,9 @@ func sqlPredicateUsesCallerIdentity(pred sql.Predicate) bool {
 	}
 }
 
-// wrapSubscribeCompileErrorSQL mirrors reference `DBError::WithSql`
-// (reference/SpacetimeDB/crates/core/src/error.rs:140,
-// `"{error}, executing: `{sql}`"`). SubscribeSingle/SubscribeMulti
-// admission surfaces emit this suffixed shape so clients can correlate
-// the rejection with the exact offending query string. Reference emit
-// sites: module_subscription_actor.rs:643 (SubscribeSingle
-// `compile_query_with_hashes`), :1068 (SubscribeMulti per-SQL
-// `compile_query_with_hashes`) — both go through the
-// `return_on_err_with_sql_bool!` macro that wraps the inner error via
-// `DBError::WithSql`.
+// wrapSubscribeCompileErrorSQL appends the offending SQL to a compile error.
 func wrapSubscribeCompileErrorSQL(err error, sqlText string) string {
-	// Reference subscription parser routes the `SELECT ALL ...` /
-	// `SELECT DISTINCT ...` rejection through
-	// `SubscriptionUnsupported::Select`, which renders with the
-	// `Unsupported SELECT:` prefix instead of OneOff's `Unsupported:`.
-	// Detect the typed error and switch the inner rendering before
-	// applying the `DBError::WithSql` `, executing: ...` wrap.
+	// Subscribe surfaces use a distinct unsupported-SELECT prefix.
 	var unsupSelectErr sql.UnsupportedSelectError
 	if errors.As(err, &unsupSelectErr) {
 		return fmt.Sprintf("%s, executing: `%s`", unsupSelectErr.SubscribeError(), sqlText)
@@ -454,14 +440,7 @@ func orSubscriptionPredicates(left, right subscription.Predicate) subscription.P
 func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool, allowOrderBy bool) (compiledSQLQuery, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
-		// Reference compile-stage typed errors (DuplicateName for join
-		// alias collisions, UnresolvedVar for qualifier-not-in-scope)
-		// carry the literal text verbatim. The generic `parse:` prefix
-		// would obscure the reference shape on both OneOff (raw) and
-		// SubscribeSingle/Multi (WithSql-wrapped) surfaces, so let
-		// typed errors flow through unwrapped — same pattern as the
-		// `normalizeSQLFilterForRelations` bypass for
-		// `InvalidLiteralError` / `UnexpectedTypeError`.
+		// Typed compile errors already carry the final user-facing text.
 		var dupErr sql.DuplicateNameError
 		if errors.As(err, &dupErr) {
 			return compiledSQLQuery{}, err
@@ -528,14 +507,8 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.LeftTable)
 		}
-		// Reference `type_from` (`expr/src/check.rs:79-89`) resolves the
-		// left relvar through `type_relvar` BEFORE entering the join
-		// loop's HashSet duplicate-alias check, and the duplicate-alias
-		// check happens BEFORE resolving the right relvar. Parser stage
-		// detects `LeftAlias == RightAlias` and defers the rejection here
-		// so a missing left table emits no-such-table while a present left
-		// plus colliding right alias emits DuplicateName before right-table
-		// resolution.
+		// Duplicate aliases are rejected after left-table lookup and before
+		// right-table lookup.
 		if stmt.Join.AliasCollision {
 			return compiledSQLQuery{}, sql.DuplicateNameError{Name: stmt.Join.LeftAlias}
 		}
@@ -544,17 +517,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.Join.RightTable)
 		}
-		// Reference `type_from` (check.rs:99-104) types the JOIN ON
-		// expression through `type_expr` (lib.rs:101-102) BEFORE the
-		// resulting `RelExpr` is handed to `type_proj` for projection
-		// typing or to `type_select` for WHERE folding. Resolve ON
-		// columns + their type/array checks here so:
-		//   - `SELECT * FROM t JOIN s ON t.missing = s.id` raises
-		//     `Unresolved::Var{missing}` BEFORE the bare-wildcard
-		//     `InvalidWildcard::Join` rejection below.
-		//   - `... ON t.missing = s.id WHERE FALSE` raises
-		//     `Unresolved::Var{missing}` BEFORE the FalsePredicate
-		//     short-circuit later in this branch returns NoRows.
+		// Resolve JOIN ON before projection and WHERE folding errors.
 		var leftCol, rightCol *schema.ColumnSchema
 		if stmt.Join.HasOn {
 			leftSide, resolvedLeftCol, err := resolveJoinOnColumn(stmt.Join.LeftOn, stmt, leftTS, rightTS)
@@ -576,31 +539,14 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				return compiledSQLQuery{}, fmt.Errorf("JOIN ON must compare left relation to right relation")
 			}
 			leftCol, rightCol = resolvedLeftCol, resolvedRightCol
-			// Reference `type_expr` (expr/src/lib.rs:134-140) types the ON
-			// binop's LEFT side first with no expectation, then types the
-			// RIGHT side with the LEFT type as the expected. The mismatch
-			// arm at lib.rs:111-112 calls `UnexpectedType::new(col_type,
-			// ty)` — `col_type` is the RIGHT side's column type (renders in
-			// the `(expected)` slot per errors.rs:104) and `ty` is the LEFT
-			// side's column type that was passed as expected (renders in
-			// the `(inferred)` slot). Mirror the slot ordering so both
-			// surfaces (OneOff raw, SubscribeSingle WithSql-wrapped) carry
-			// the reference text instead of the late `subscription:
-			// invalid predicate: join column kinds differ` from
-			// `subscription/validate.go::validateJoin`.
+			// Match the public UnexpectedType slot ordering for ON mismatches.
 			if leftCol.Type != rightCol.Type {
 				return compiledSQLQuery{}, sql.UnexpectedTypeError{
 					Expected: sql.AlgebraicName(rightCol.Type),
 					Inferred: sql.AlgebraicName(leftCol.Type),
 				}
 			}
-			// Reference `type_expr` (expr/src/lib.rs:138) routes equality
-			// against an Array/Product column through `op_supports_type`
-			// (lib.rs:155), which rejects non-primitive types and emits
-			// `InvalidOp{op, ty}`. The ON binop reaches lib.rs:134-140
-			// (neither side a Lit) so the type comes from the LEFT field
-			// after the `leftCol.Type != rightCol.Type` mismatch arm above
-			// has already returned.
+			// Array equality in JOIN ON is rejected as an invalid operator.
 			if isArrayKind(leftCol.Type) {
 				return compiledSQLQuery{}, sql.InvalidOpError{
 					Op:   "=",
@@ -622,15 +568,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				return compiledSQLQuery{}, sql.UnresolvedVarError{Name: stmt.ProjectedAlias}
 			}
 		}
-		// Reference `InvalidWildcard::Join` at
-		// reference/SpacetimeDB/crates/expr/src/errors.rs:41 emits
-		// "SELECT * is not supported for joins" via `type_proj` at
-		// reference/SpacetimeDB/crates/expr/src/lib.rs:56 when
-		// `ast::Project::Star(None)` meets `input.nfields() > 1`. Match
-		// the raw text so SubscribeSingle/Multi WithSql-wrap and OneOff's
-		// unwrapped emit both carry the reference literal. ON-column and
-		// WHERE resolution above run first so type errors are not masked
-		// by this guard.
+		// Bare SELECT * is not supported for joins after ON/WHERE resolution.
 		if stmt.ProjectedAlias == "" && len(stmt.ProjectionColumns) == 0 && stmt.Aggregate == nil {
 			return compiledSQLQuery{}, fmt.Errorf("SELECT * is not supported for joins")
 		}
@@ -730,13 +668,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 		return compiledSQLQuery{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", stmt.ProjectedTable)
 	}
-	// Reference type-checker order: `type_select` (WHERE) precedes
-	// `type_proj` (projection columns). Reference path:
-	// `SubChecker::type_set` (check.rs:139-146) wraps the projection in
-	// `type_proj(type_select(input, expr, vars)?, project, vars)`, so a
-	// missing WHERE column raises `Unresolved::Var` before the
-	// projection list is walked. The WHERE pass also captures the
-	// resolved predicate for the final compiledSQLQuery.
+	// Resolve WHERE before projection columns so predicate errors win.
 	if _, err := compileSQLPredicateForSingleRelation(stmt.Predicate, relationSchema{id: projectedID, ts: ts}, stmt.TableAlias, caller); err != nil {
 		return compiledSQLQuery{}, err
 	}
@@ -1113,15 +1045,7 @@ func compileJoinProjectionColumns(columns []sql.ProjectionColumn, relations map[
 	return resolved, nil
 }
 
-// checkDuplicateProjectionName mirrors the duplicate-alias guard inside
-// reference `type_proj::Exprs` (expr/src/check.rs:67-72): each projection
-// element's effective output name (its `AS` alias, or the column name when
-// no alias was written) must be unique across the SELECT list. Reference
-// emits `DuplicateName(alias)` from `lib.rs:67` which renders as
-// `Duplicate name `{alias}“. The check is interleaved with the column
-// resolution loop so iteration order matches reference: a duplicate alias
-// is reported on the SECOND occurrence, after the FIRST has already been
-// type-checked.
+// checkDuplicateProjectionName rejects duplicate output names in SELECT lists.
 func checkDuplicateProjectionName(col sql.ProjectionColumn, seen map[string]struct{}) error {
 	name := col.OutputAlias
 	if name == "" {

@@ -6,22 +6,8 @@ import (
 	"time"
 )
 
-// TestWatchReducerResponseExitsOnConnClose pins the Tier-B
-// hardening fix for the `watchReducerResponse` goroutine leak.
-//
-// Sharp edge: before 2026-04-20, the watcher goroutine blocked
-// unconditionally on `<-respCh`. If the executor accepted the
-// CallReducer but never sent on or closed the response channel (hung
-// reducer, executor crash mid-commit, engine shutdown mid-flight), the
-// watcher goroutine would leak for the lifetime of the process and
-// hold its `*Conn` alive past disconnect.
-//
-// Contract: after `conn.closed` is closed by `Conn.Disconnect` (step 4
-// of the SPEC-005 §5.3 teardown), the watcher must exit promptly even
-// if `respCh` never fires. Asserted by running the watcher body
-// synchronously through `runReducerResponseWatcher` in a test-owned
-// goroutine, closing `conn.closed`, and waiting for the body to
-// return within a bounded deadline.
+// TestWatchReducerResponseExitsOnConnClose pins that response watchers exit
+// when the owning connection closes.
 func TestWatchReducerResponseExitsOnConnClose(t *testing.T) {
 	conn := testConnDirect(nil)
 	respCh := make(chan TransactionUpdate) // never sends, never closes

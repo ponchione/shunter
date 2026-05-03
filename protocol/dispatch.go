@@ -42,25 +42,9 @@ func closeProtocolError(conn *Conn, reason string) {
 	go closeWithHandshake(conn.ws, CloseProtocol, reason, conn.opts.CloseHandshakeTimeout)
 }
 
-// runDispatchLoop replaces runReadPump (Story 3.5) with the full
-// message-dispatching read loop (Epic 4, Story 4.1). Every successful
-// read marks activity per SPEC-005 S5.4.
-//
-// Exit conditions: ctx cancelled, c.closed closed, or ws.Read error.
-//
-// contract: handlerCtx is
-// derived from the outer ctx and additionally cancels when c.closed
-// fires (SPEC-005 §5.3 step 4 teardown signal). Handler closures
-// spawned below forward handlerCtx into inbox.CallReducer /
-// inbox.RegisterSubscriptionSet / inbox.UnregisterSubscriptionSet,
-// which route through executor.SubmitWithContext — in default
-// (non-reject) mode that seam blocks on e.inbox <- cmd until ctx
-// cancels. The production root is context.Background() at
-// protocol/upgrade.go:201, so without the c.closed wire a wedged
-// executor (inbox full from a hung reducer or engine stall) would
-// leak handler goroutines indefinitely and pin their inflightSem
-// slot and captured *Conn past disconnect. Pin test:
-// TestDispatchLoop_HandlerCtxCancelsOnConnClose.
+// runDispatchLoop reads frames, decodes messages, and dispatches handlers.
+// Handler contexts also cancel when the Conn closes so blocked executor sends
+// cannot leak past disconnect.
 func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 	readCtx := ctx
 	if c.readCtx != nil {

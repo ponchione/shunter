@@ -7,23 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the read-view StateView.ScanTable iterator surface sub-hazard closure.
-// Table.Scan ranges t.rows live — its yield loop spans a live map
-// iteration. Under executor single-writer discipline no concurrent writer
-// runs during a reducer's synchronous iteration, so the contract is safe
-// today, but the invariant is unpinned at the StateView boundary. A yield
-// callback that reaches into committed state (future refactor, direct
-// CommittedState access from a reducer), or a caller that retained the
-// iterator past the single-writer window, would race the live map
-// iteration: per Go spec §6.3 an unreached-entry deletion during map
-// iteration does not produce the entry, so the observable drift is the
-// iteration silently skipping rows present at iter-construction time.
-// StateView.ScanTable now materializes the committed scan at iter call
-// time, mirroring the SeekIndex and SeekIndexRange regression contracts.
-//
-// This test drives the contract-violating mutation directly via
-// Table.DeleteRow to simulate a future path in which an iteration reaches
-// into committed state mid-yield.
+// Pins that StateView.ScanTable materializes committed rows before yielding.
 
 func TestStateViewScanTableIteratesIndependentOfMidIterCommittedDelete(t *testing.T) {
 	ts := &schema.TableSchema{

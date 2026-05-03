@@ -6,15 +6,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// ReconcileJoinDelta resolves the 8 join fragments using bag semantics
-// (SPEC-004 §6.3). Rows appearing in both insert and delete fragments cancel
-// one-for-one; remaining positive counts become inserts, remaining delete
-// counts become deletes. Multiplicity is preserved.
-//
-// Keyed by a canonical byte encoding of the row so structurally identical
-// rows from different fragments match without any interface{} comparison.
-// Internal scratch state is pooled (see dedupPool) so repeated evaluation
-// on the hot path does not churn allocations (SPEC-004 §9.2).
+// ReconcileJoinDelta cancels insert/delete join fragments with bag semantics.
+// Scratch state is pooled to avoid hot-path allocation churn.
 func ReconcileJoinDelta(insertFragments, deleteFragments [][]types.ProductValue) (inserts, deletes []types.ProductValue) {
 	st := dedupPool.Get().(*dedupState)
 	defer func() {

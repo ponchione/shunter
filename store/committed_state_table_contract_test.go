@@ -8,26 +8,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the read-view contract for CommittedState.Table(id) *Table raw-pointer
-// exposure. Table() acquires cs.RLock only for the map lookup and returns the
-// *Table pointer after releasing. Callers must therefore use the pointer
-// within one of three legal envelopes: a held CommittedSnapshot (RLock bound
-// via Snapshot()→Close()), the single executor goroutine under single-writer
-// discipline, or single-threaded commitlog recovery bootstrap. The contract
-// is documented on CommittedState.Table in store/committed_state.go.
-//
-// These tests pin the two observable invariants that make the contract
-// auditable:
-//
-//   - stale-after-re-register: a pointer retained across
-//     RegisterTable(id, replacement) does not track subsequent writes
-//     committed via the replacement; future callers who believe retention
-//     is safe will observe divergence and the test will fail.
-//   - snapshot-envelope-holds-rlock: while a CommittedSnapshot is open a
-//     writer attempting cs.Lock() blocks; after Close the writer proceeds.
-//     This pins the first of the three envelopes at the lock level.
-//
-// No production-code behavior change — contract documentation only.
+// These tests pin the pointer-lifetime constraints documented on
+// CommittedState.Table.
 
 func TestCommittedStateTableSameEnvelopeReturnsSamePointer(t *testing.T) {
 	ts := &schema.TableSchema{

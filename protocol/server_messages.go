@@ -8,23 +8,11 @@ import (
 	"github.com/ponchione/shunter/schema"
 )
 
-// Server→client message types (SPEC-005 §8).
-//
-// Outcome-model decision:
-//   - `TransactionUpdate` is the heavy caller-bound envelope.
-//   - `TransactionUpdateLight` is the delta-only envelope delivered to
-//     non-callers whose subscribed rows were touched.
-//   - `ReducerCallResult` is removed from the wire surface; `TagReducerCallResult`
-//     stays reserved (unused) so the byte cannot silently be reallocated.
-//   - `UpdateStatus` is a two-arm tagged union: committed or failed.
+// Server-to-client message types. TransactionUpdate is caller-bound;
+// TransactionUpdateLight is the delta-only non-caller envelope.
 
 // IdentityToken is the first server→client frame on every connection.
-// Field order matches reference `IdentityToken` at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:445
-// (`identity, token, connection_id`) — pinned by
-// identity_token_wire_test.go against the reference byte shape.
-// Renamed from `InitialConnection`; the prior type name and field
-// order (`identity, connection_id, token`) were Shunter-local.
+// Field order is identity, token, connection_id.
 type IdentityToken struct {
 	Identity     [32]byte
 	Token        string
@@ -32,16 +20,7 @@ type IdentityToken struct {
 }
 
 // SubscribeSingleApplied is the server response to a SubscribeSingle.
-// Part of the single/multi variant variant split — SubscribeMultiApplied
-// carries the merged delta for a multi-query set. Reference:
-// SubscribeApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:317
-// (`request_id, total_host_execution_duration_micros, query_id, rows`).
-// Duration sits at position 2 to match the reference byte shape — pinned
-// by subscription_response_wire_test.go. TableName + Rows flatten the
-// reference `SubscribeRows` wrapper; that rows-shape divergence is
-// accepted as documented per
-// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
+// Rows is an encoded RowList for the subscribed table.
 type SubscribeSingleApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -51,17 +30,7 @@ type SubscribeSingleApplied struct {
 }
 
 // UnsubscribeSingleApplied is the server response to an UnsubscribeSingle.
-// Part of the single/multi variant variant split — UnsubscribeMultiApplied
-// carries the merged delta for a multi-query set. Reference:
-// UnsubscribeApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:331
-// (`request_id, total_host_execution_duration_micros, query_id, rows`).
-// Duration sits at position 2 to match the reference byte shape — pinned
-// by subscription_response_wire_test.go. HasRows + Rows diverges from the
-// reference required `SubscribeRows` wrapper; that rows-shape
-// divergence (including the Shunter-local `HasRows` optionality) is
-// accepted as documented per
-// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
+// Rows is present only when HasRows is true.
 type UnsubscribeSingleApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -70,19 +39,8 @@ type UnsubscribeSingleApplied struct {
 	Rows                             []byte // encoded RowList; only present if HasRows
 }
 
-// SubscriptionError is the server-emitted failure envelope for any
-// subscription-lifecycle error. RequestID / QueryID now model the
-// reference optional-field shape explicitly: subscribe/unsubscribe
-// request paths populate them, while other producers may leave them nil.
-// TableID mirrors the reference optional `table_id`; when present it
-// narrows the drop scope to one return-table family rather than the
-// entire subscription set.
-//
-// TotalHostExecutionDurationMicros mirrors the reference field of the
-// same name (v1.rs:350) and is the first wire field for byte-shape
-// Shunter contract. Live emit sites now populate a measured non-zero microsecond
-// duration from the admission / evaluation receipt seam; the wire shape
-// and the value semantics are both closed.
+// SubscriptionError is the server-emitted failure envelope for subscription
+// admission, evaluation, and removal paths.
 type SubscriptionError struct {
 	TotalHostExecutionDurationMicros uint64
 	RequestID                        *uint32
@@ -92,16 +50,7 @@ type SubscriptionError struct {
 }
 
 // SubscribeMultiApplied is the server response to a SubscribeMulti.
-// Update is a merged initial snapshot, one SubscriptionUpdate per emitted
-// query/table family carrying the client QueryID, with Inserts populated and
-// Deletes empty. Reference: SubscribeMultiApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:380
-// (`request_id, total_host_execution_duration_micros, query_id, update`).
-// Duration sits at position 2 to match the reference byte shape — pinned
-// by subscription_response_wire_test.go. Update flattens the reference
-// `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
-// divergence is accepted as documented per
-// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
+// Update is the merged initial snapshot for the query set.
 type SubscribeMultiApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -110,15 +59,7 @@ type SubscribeMultiApplied struct {
 }
 
 // UnsubscribeMultiApplied is the server response to an UnsubscribeMulti.
-// Update carries Deletes-populated entries for rows that were still
-// live at unsubscribe time. Reference: UnsubscribeMultiApplied at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:394
-// (`request_id, total_host_execution_duration_micros, query_id, update`).
-// Duration sits at position 2 to match the reference byte shape — pinned
-// by subscription_response_wire_test.go. Update flattens the reference
-// `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
-// divergence is accepted as documented per
-// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
+// Update carries rows that were live at unsubscribe time.
 type UnsubscribeMultiApplied struct {
 	RequestID                        uint32
 	TotalHostExecutionDurationMicros uint64
@@ -141,15 +82,7 @@ type TransactionUpdate struct {
 	TotalHostExecutionDuration int64
 }
 
-// TransactionUpdateLight is the delta-only envelope delivered to
-// non-caller subscribers whose rows were touched (outcome-model). Reference:
-// `pub struct TransactionUpdateLight<F>` at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:493
-// (`request_id: u32, update: DatabaseUpdate<F>`). Byte-shape pin in
-// rows_shape_contract_test.go. Update flattens the reference
-// `DatabaseUpdate` wrapper to `[]SubscriptionUpdate`; that rows-shape
-// divergence is accepted as documented per
-// `docs/shunter-design-decisions.md#protocol-rows-shape` (row-shape).
+// TransactionUpdateLight is the delta-only envelope for non-caller subscribers.
 type TransactionUpdateLight struct {
 	RequestID uint32
 	Update    []SubscriptionUpdate
@@ -162,14 +95,7 @@ type UpdateStatus interface {
 	isUpdateStatus()
 }
 
-// StatusCommitted signals reducer success and carries the caller's
-// visible row-delta slice (may be empty). Reference: `Committed(DatabaseUpdate<F>)`
-// variant of `UpdateStatus<F>` at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:526.
-// Update flattens the reference `DatabaseUpdate` wrapper to
-// `[]SubscriptionUpdate`; that rows-shape divergence is accepted as
-// documented per `docs/shunter-design-decisions.md#protocol-rows-shape`.
-// Byte-shape pin lives in transaction_update_wire_test.go.
+// StatusCommitted signals reducer success and carries the caller-visible delta.
 type StatusCommitted struct {
 	Update []SubscriptionUpdate
 }
@@ -193,21 +119,8 @@ type ReducerCallInfo struct {
 	RequestID   uint32
 }
 
-// OneOffQueryResponse is the server reply to a OneOffQuery. Field order
-// matches reference `OneOffQueryResponse<F>` at
-// reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:654
-// (`message_id, error: Option<Box<str>>, tables: Box<[OneOffTable]>,
-// total_host_execution_duration: TimeDuration`) — pinned by
-// one_off_query_response_wire_test.go against the reference byte shape.
-// Renamed from `OneOffQueryResult`; the prior Status-byte + single-Rows
-// + Error layout was Shunter-local. `nil Error` signals success and
-// `Tables` carries the matched rows; on failure `Error` is non-nil and
-// `Tables` is empty — matching module_host.rs:2290-2308.
-//
-// TotalHostExecutionDuration is the wire field from reference
-// `TimeDuration` (i64 microseconds). Live emit sites populate a measured
-// non-zero microsecond duration from the one-off receipt seam, matching
-// the reference unit semantics.
+// OneOffQueryResponse is the server reply to a OneOffQuery.
+// nil Error signals success; TotalHostExecutionDuration is in microseconds.
 type OneOffQueryResponse struct {
 	MessageID                  []byte
 	Error                      *string
@@ -297,14 +210,8 @@ func EncodeServerMessage(m any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// DecodeServerMessage parses a server frame back into the concrete
-// message type. Provided for symmetry and client-side / test use.
-// The returned any is one of IdentityToken, SubscribeSingleApplied,
-// UnsubscribeSingleApplied, SubscriptionError, TransactionUpdate,
-// OneOffQueryResponse, TransactionUpdateLight, SubscribeMultiApplied,
-// UnsubscribeMultiApplied — matching the tag byte.
-// TagReducerCallResult is reserved and rejected here — see
-// `docs/shunter-design-decisions.md#outcome-model`.
+// DecodeServerMessage parses a server frame into its concrete message type.
+// Reserved tags are rejected.
 func DecodeServerMessage(frame []byte) (uint8, any, error) {
 	if len(frame) < 1 {
 		return 0, nil, fmt.Errorf("%w: empty frame", ErrMalformedMessage)

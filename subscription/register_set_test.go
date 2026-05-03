@@ -215,16 +215,8 @@ func TestRegisterSetDedupsIdenticalPredicates(t *testing.T) {
 	}
 }
 
-// TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate — second
-// RegisterSet from the same connection under a different client QueryID
-// referencing the same predicate hash attaches a new internal subscription
-// but does not re-emit the initial snapshot. Reference:
-// reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs::add_subscription_multi
-// lines 1083-1094 (already-attached (ConnID, query-hash) paths skip
-// new_queries) and module_subscription_actor.rs lines 1357-1369 (empty
-// new_queries becomes empty applied update data). The cross-connection
-// case is covered by TestRegisterSetCrossConnectionReusedHashStillEmitsInitialSnapshot
-// below.
+// TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate pins same-connection
+// query-hash reuse without another initial snapshot.
 func TestRegisterSetSameConnectionReusedHashEmitsEmptyUpdate(t *testing.T) {
 	mgr, view := newRegisterSetTestManagerWithRows(t)
 	connID := types.ConnectionID{1}
@@ -320,19 +312,8 @@ func TestUnregisterSetDropsAllInSet(t *testing.T) {
 	}
 }
 
-// TestUnregisterSetFinalEvalErrorWrapsErrFinalQueryAndDropsAll — when
-// final-delta evaluation fails during UnregisterSet, every internal
-// subscription in the set is still dropped, and the returned error
-// wraps `ErrFinalQuery` (so the protocol-side adapter can apply the
-// reference `DBError::WithSql` suffix on the Single path). The result
-// carries `SQLText` = the first-errored queryState's stored SQL so the
-// adapter has what it needs to build the suffix without re-querying
-// subscription internals. Reference anchors:
-// `module_subscription_actor.rs:756` (Single, `return_on_err_with_sql!`)
-// and `:826..:830` (query-set drop happens before eval; eval failure
-// does not un-drop). The Single subscribe admission path is the only
-// one that persists SQLText into queryState today, so this test uses
-// length-1 predicates and a non-empty register-time SQLText.
+// TestUnregisterSetFinalEvalErrorWrapsErrFinalQueryAndDropsAll pins that
+// final-eval failure still drops the set and returns SQLText for Single errors.
 func TestUnregisterSetFinalEvalErrorWrapsErrFinalQueryAndDropsAll(t *testing.T) {
 	mgr, view := newRegisterSetTestManagerWithRows(t)
 	connID := types.ConnectionID{1}

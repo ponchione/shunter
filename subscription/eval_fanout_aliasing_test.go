@@ -6,16 +6,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Tests in this file pin the fanout-aliasing: the
-// per-query update slices produced by evaluate() are distributed to N
-// subscribers in subscription/eval.go::evaluate. Before this slice each
-// subscriber's SubscriptionUpdate carried the SAME backing slice for
-// Inserts/Deletes, so a downstream consumer that mutated one
-// subscriber's slice (replace/append) would silently corrupt every
-// other subscriber's view of the same commit. The fix gives each
-// subscriber an independent slice header for Inserts/Deletes; row
-// payloads remain shared under the post-commit row-immutability
-// contract.
+// Tests in this file pin per-subscriber update slice headers while row
+// payloads remain shared.
 
 func TestEvalFanoutInsertsHeaderIsolatedAcrossSubscribers(t *testing.T) {
 	s := testSchema()

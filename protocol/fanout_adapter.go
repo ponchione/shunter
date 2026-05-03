@@ -10,16 +10,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// FanOutSenderAdapter wraps a ClientSender to implement
-// subscription.FanOutSender. Converts subscription-domain types to
-// protocol wire format before delivery.
-//
-// Outcome-model split:
-//   - Caller receives the heavy `TransactionUpdate` via
-//     SendTransactionUpdateHeavy. Caller's visible row delta is carried
-//     inside `StatusCommitted.Update` (or omitted for `StatusFailed`).
-//   - Non-callers whose rows were touched receive
-//     `TransactionUpdateLight` via SendTransactionUpdateLight.
+// FanOutSenderAdapter converts subscription fan-out payloads to protocol wire
+// messages before delivery.
 type FanOutSenderAdapter struct {
 	sender ClientSender
 }
@@ -85,21 +77,8 @@ func (a *FanOutSenderAdapter) SendTransactionUpdateLight(
 	return mapDeliveryError(a.sender.SendTransactionUpdateLight(connID, msg))
 }
 
-// SendSubscriptionError delivers a post-commit evaluation-origin
-// SubscriptionError. The evaluator routes here only via the fan-out
-// worker after a TransactionUpdate-driven re-eval (see
-// `subscription/eval.go::handleEvalError` and
-// `subscription/fanout_worker.go::run`), so the error is never tied to
-// a client Subscribe/Unsubscribe request.
-//
-// Reference `SubscriptionError` (v1.rs:350) sets both `request_id` and
-// `query_id` to `None` in exactly this case — see
-// `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1998-2010`
-// (v1) and `messages.rs:622-629` (Option propagates through
-// `SubscriptionMessage`). Any per-connection diagnostic fields on
-// `subscription.SubscriptionError` (`RequestID`, `SubscriptionID`,
-// `QueryHash`, `Predicate`) are intentionally not on the wire; they
-// stay for internal logging only.
+// SendSubscriptionError delivers a post-commit evaluation error.
+// Diagnostic fields stay internal and are not projected onto the wire.
 func (a *FanOutSenderAdapter) SendSubscriptionError(connID types.ConnectionID, subErr subscription.SubscriptionError) error {
 	return mapDeliveryError(a.sender.Send(connID, SubscriptionError{
 		TotalHostExecutionDurationMicros: subErr.TotalHostExecutionDurationMicros,

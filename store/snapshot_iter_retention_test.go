@@ -6,17 +6,8 @@ import (
 	"time"
 )
 
-// TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration pins the read-view
-// hardening invariant: iterators returned by CommittedSnapshot retain the
-// snapshot for the lifetime of range iteration, so the GC finalizer cannot
-// fire between iter construction and iter consumption and release the RLock
-// out from under a range body.
-//
-// Before the fix, TableScan returned t.Scan() directly, so the returned
-// closure captured only *Table and not *CommittedSnapshot. A snapshot held
-// only via an iter variable could be finalized between construction and
-// range body execution, releasing the RLock and allowing a concurrent writer
-// to mutate the table while the range was still in flight.
+// TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration pins that
+// iterators keep the snapshot alive while ranging.
 func TestCommittedSnapshotIteratorKeepsSnapshotAliveMidIteration(t *testing.T) {
 	cs, _ := buildTestState()
 	tbl, _ := cs.Table(0)

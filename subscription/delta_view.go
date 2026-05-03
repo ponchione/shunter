@@ -8,13 +8,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// DeltaView wraps committed state and per-transaction deltas into a unified
-// data source (SPEC-004 §6.4). Delta indexes are built eagerly for the
-// columns flagged as active — one pass per transaction, not per subscription.
-//
-// Lifecycle: the committed view is borrowed, not owned. Callers respect the
-// SPEC-001 snapshot contract — materialize needed rows promptly, never hold
-// the view across blocking work.
+// DeltaView merges committed state with one transaction's inserted/deleted rows.
+// The committed view is borrowed; callers must not retain it across blocking work.
 type DeltaView struct {
 	committed store.CommittedReadView
 	inserts   map[TableID][]types.ProductValue

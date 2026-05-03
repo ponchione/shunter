@@ -484,15 +484,8 @@ func (sr *SegmentReader) nextWithMax(maxPayload uint32) (*Record, error) {
 	return rec, nil
 }
 
-// SeekToTxID positions the reader so that the next Next() call returns the
-// smallest record whose TxID is >= target, or io.EOF if no such record
-// remains in the segment.
-//
-// If idx is non-nil, KeyLookup(target) is used to jump to the largest
-// indexed record with TxID <= target; any index error (including
-// ErrOffsetIndexKeyNotFound) falls back to a linear scan from the segment
-// header. Index errors are never propagated to the caller — the index is
-// advisory.
+// SeekToTxID positions the next read at the smallest record with TxID >= target.
+// Index lookup is advisory; failures fall back to a linear scan.
 func (sr *SegmentReader) SeekToTxID(target types.TxID, idx *OffsetIndex) error {
 	startOff := int64(SegmentHeaderSize)
 	if idx != nil {

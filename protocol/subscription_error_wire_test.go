@@ -10,24 +10,8 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// TestShunterSubscriptionErrorWireShape pins the byte-level wire shape
-// of SubscriptionError against the reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs`
-// (`pub struct SubscriptionError`). Reference field order:
-//
-//	total_host_execution_duration_micros: u64
-//	request_id: Option<u32>
-//	query_id:   Option<u32>
-//	table_id:   Option<TableId>   // TableId = u32
-//	error:      Box<str>
-//
-// Option<T> is encoded as a one-byte presence tag followed by the
-// value when present (matches writeOptionalUint32 / writeOptionalTableID
-// here). Box<str> is a LE u32 length prefix followed by the UTF-8
-// payload. The test constructs the reference byte shape by hand and
-// compares against the protocol encoder output; it also round-trips
-// the frame through the decoder to prove the field-order change is
-// symmetric.
+// TestShunterSubscriptionErrorWireShape pins SubscriptionError field order and
+// option encoding.
 func TestShunterSubscriptionErrorWireShape(t *testing.T) {
 	requestID := uint32(0x11223344)
 	queryID := uint32(0x55667788)
@@ -149,26 +133,8 @@ func TestShunterSubscriptionErrorWireShapeAllNoneOptions(t *testing.T) {
 	}
 }
 
-// TestShunterSubscriptionErrorTransactionOriginWire pins the wire shape
-// produced by the fan-out adapter for a post-commit evaluation error.
-// Reference emit path at
-// `reference/SpacetimeDB/crates/core/src/subscription/module_subscription_manager.rs:1998-2010`
-// constructs `SubscriptionMessage { request_id: None, query_id: None,
-// timer: None, result: SubscriptionResult::Error(SubscriptionError {
-// table_id: None, message }) }` for exactly this case, and
-// `core/src/client/messages.rs:622-629` propagates the Options straight
-// through to the ws_v1 envelope. This test round-trips through the
-// adapter seam (subscription.SubscriptionError in → protocol
-// SubscriptionError bytes out) to prove the emit site matches the
-// reference None-all layout regardless of the diagnostic RequestID /
-// SubscriptionID carried by the subscription layer.
-//
-// Duration measurement is now wired at the evaluator
-// (`subscription/eval.go::EvalAndBroadcast`); this test uses a specific
-// non-zero input to prove the adapter forwards the measured value onto
-// the wire. A zero-duration adapter call would still encode cleanly (0
-// is a legal reference-side value), but the evaluator no longer hands
-// zero to the adapter for a live eval-origin error.
+// TestShunterSubscriptionErrorTransactionOriginWire pins eval-origin
+// SubscriptionError encoding with request/query/table IDs absent.
 func TestShunterSubscriptionErrorTransactionOriginWire(t *testing.T) {
 	capture := &captureSender{}
 	adapter := NewFanOutSenderAdapter(capture)

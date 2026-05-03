@@ -6,16 +6,8 @@ import (
 	"time"
 )
 
-// TestCloseAllBoundsDisconnectOnInboxHang is the primary pin for the
-// CloseAll disconnect-context. CloseAll
-// forwards the caller's ctx into each per-conn Conn.Disconnect, which
-// threads it into inbox.DisconnectClientSubscriptions and
-// inbox.OnDisconnect. Without a per-conn bounded ctx, a
-// Background-rooted caller can stall shutdown indefinitely when the
-// inbox hangs (executor crash mid-commit, dispatch deadlock,
-// scheduler-held lock). Fails if CloseAll reverts to forwarding the
-// caller's ctx directly, which would let a single hung *Conn pin the
-// shutdown wait group for the process lifetime.
+// TestCloseAllBoundsDisconnectOnInboxHang pins per-connection disconnect
+// timeouts during CloseAll.
 func TestCloseAllBoundsDisconnectOnInboxHang(t *testing.T) {
 	opts := DefaultProtocolOptions()
 	opts.DisconnectTimeout = 150 * time.Millisecond

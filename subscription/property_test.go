@@ -9,15 +9,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Property tests from Story 5.4 §13.2:
-//   - IVM invariant: incremental deltas on top of a committed snapshot must
-//     equal a fresh full evaluation after the transaction is applied.
-//   - Pruning safety: pruned evaluation produces the same per-query deltas as
-//     a baseline that ignores the pruning indexes and evaluates every query.
-//   - Registration/deregistration symmetry: register+unregister leaves the
-//     manager's query registry and pruning indexes empty.
-//
-// Each test runs a fixed number of seeds with math/rand/v2 for reproducibility.
+// Property tests cover IVM equivalence, pruning safety, and registration cleanup.
 
 // ---------- shared helpers ----------
 
@@ -286,26 +278,8 @@ type deltaBag struct {
 	deletes []types.ProductValue
 }
 
-// groupPerQueryDeltas groups SubscriptionUpdate records by query hash. The
-// fanout path duplicates the same delta to every subscriber of a query, so
-// summing across all subscribers would multiply the counts. We instead group
-// by subscription ID and then pick one canonical subscription per hash —
-// every subscriber of a shared query sees identical deltas, so choosing the
-// lowest subID gives a deterministic bag comparable against the baseline
-// (which evaluates exactly once per hash).
-//
-// Invariant this helper relies on: in Manager.evaluate (subscription/eval.go),
-// after a query's updates are computed once, the fanout loop copies the same
-// SubscriptionUpdate value to every subscriber of that hash. The slice headers
-// in Inserts / Deletes therefore share backing arrays across subscribers of
-// the same query, and picking any single subscriber's bag reconstructs the
-// canonical per-hash delta exactly.
-//
-// If that contract ever changes — e.g. if per-subscriber filters, redactions,
-// or ACLs are applied post-evaluation — this dedup will silently hide real
-// divergence. In that world, either turn this into a runtime assertion that
-// all subscribers of a hash produced equal bags, or change the test to
-// compare per-subscription rather than per-hash.
+// groupPerQueryDeltas picks one subscriber delta per query hash so fan-out
+// duplication does not inflate the baseline comparison.
 func groupPerQueryDeltas(mgr *Manager, updates []SubscriptionUpdate) map[QueryHash]deltaBag {
 	bySub := map[types.SubscriptionID]deltaBag{}
 	for _, u := range updates {

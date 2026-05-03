@@ -24,13 +24,7 @@ type SQLQueryResult struct {
 	Rows      []types.ProductValue
 }
 
-// handleOneOffQuery executes a one-off table scan with optional
-// comparison predicates against committed state and sends the result
-// back to the client (SPEC-005 §7.4).
-//
-// The wire carries a SQL string (SQL-string) which is parsed and
-// coerced against the schema before the existing snapshot-scan path
-// runs.
+// handleOneOffQuery parses and executes one SQL read against committed state.
 func handleOneOffQuery(
 	ctx context.Context,
 	conn *Conn,
@@ -130,10 +124,9 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 	var encodedRows []types.ProductValue
 	rowsAlreadyProjected := false
 	if query.Aggregate != nil {
-		// Aggregate shape happens over the full matched input; LIMIT then
-		// constrains the one-row aggregate output (reference ProjectList::Limit
-		// wraps ProjectList::Agg). LIMIT 0 drops the aggregate row entirely;
-		// LIMIT >= 1 keeps the single count row.
+		// Aggregate shape happens over the full matched input; OFFSET/LIMIT then
+		// slice the one-row aggregate output (reference ProjectList::Limit wraps
+		// ProjectList::Agg). LIMIT 0 or OFFSET >= 1 drops the aggregate row.
 		matchedCount, err := countOneOffMatches(ctx, view, tableID, pred, resolver)
 		if err != nil {
 			return SQLQueryResult{}, err

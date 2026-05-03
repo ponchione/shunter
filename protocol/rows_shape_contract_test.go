@@ -8,22 +8,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// The pins in this file are the rolled-up canonical-contract layer for
-// the rows-shape cluster decided in
-// `docs/shunter-design-decisions.md#protocol-rows-shape`. Individual byte-shape
-// pins continue to live in `subscription_response_wire_test.go` and
-// `transaction_update_wire_test.go`; this file adds:
-//
-//   - a cross-envelope field-order table with the decision-doc
-//     rationale inlined,
-//   - the missing byte-shape pin for `TransactionUpdateLight`,
-//   - an explicit `writeSubscriptionUpdates` inner-layout pin, and
-//   - a rowlist-format pin referencing SPEC-005 §3.4.
-//
-// If a future slice closes the reference wrapper chain (SubscribeRows /
-// DatabaseUpdate / TableUpdate / CompressableQueryUpdate / BsatnRowList
-// together), every pin in this file will need to flip together, by
-// design.
+// This file pins the current flat rows shape across subscription envelopes.
 
 // TestShunterRowsShapeEnvelopesFlatShape pins the current Shunter flat-
 // rows shape across every envelope that carries subscription row data.
@@ -75,18 +60,8 @@ func TestShunterRowsShapeEnvelopesFlatShape(t *testing.T) {
 	}
 }
 
-// TestShunterTransactionUpdateLightWireShape pins the byte-level wire
-// shape of TransactionUpdateLight. Reference envelope at
-// `reference/SpacetimeDB/crates/client-api-messages/src/websocket/v1.rs:493`:
-//
-//	request_id : u32
-//	update     : DatabaseUpdate<F>
-//
-// Shunter flattens `DatabaseUpdate { tables: Vec<TableUpdate> }` to
-// `[]SubscriptionUpdate`. That inner divergence is delta #5 / #10 in
-// `docs/shunter-design-decisions.md#protocol-rows-shape` and is accepted as a
-// documented divergence. This pin locks the current flat shape so
-// accidental wire drift is loudly visible.
+// TestShunterTransactionUpdateLightWireShape pins TransactionUpdateLight
+// field order and flat update encoding.
 func TestShunterTransactionUpdateLightWireShape(t *testing.T) {
 	const requestID uint32 = 0x01020304
 	rl := EncodeRowList([][]byte{{0xAA, 0xBB}})
@@ -147,16 +122,8 @@ func TestShunterTransactionUpdateLightWireShape(t *testing.T) {
 	}
 }
 
-// TestShunterSubscriptionUpdateInnerLayout pins the SubscriptionUpdate
-// inner wire layout as a canonical contract. Locks:
-//   - the flattened per-entry `QueryID` field (delta #3 in
-//     `docs/shunter-design-decisions.md#protocol-rows-shape`; reference carries query
-//     correlation through the fuller wrapper chain rather than this flat slot), and
-//   - the inserts-before-deletes field order (delta #7; reference
-//     QueryUpdate is deletes-first).
-//
-// Both are intentional Shunter divergences carried forward by the
-// decision doc until the wrapper-chain close lands as its own slice.
+// TestShunterSubscriptionUpdateInnerLayout pins flat QueryID plus
+// inserts-before-deletes field order.
 func TestShunterSubscriptionUpdateInnerLayout(t *testing.T) {
 	fields := msgFieldNames(SubscriptionUpdate{})
 	want := []string{"QueryID", "TableName", "Inserts", "Deletes"}

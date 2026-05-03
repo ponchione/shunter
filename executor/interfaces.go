@@ -11,26 +11,16 @@ import (
 // reducer fails. Implemented in SPEC-003 Epic 6.
 type SchedulerHandle = types.ReducerScheduler
 
-// DurabilityHandle is the narrow surface the executor uses to hand committed
-// changesets to the commit-log durability subsystem (SPEC-003 §7).
-// EnqueueCommitted blocks only for bounded-queue backpressure; it MUST NOT
-// drop accepted commits silently. The executor invokes it first in the
-// post-commit pipeline (SPEC-003 §5.1).
+// DurabilityHandle receives committed changesets from the executor.
+// EnqueueCommitted must not silently drop accepted commits.
 type DurabilityHandle interface {
 	EnqueueCommitted(txID types.TxID, changeset *store.Changeset)
 	WaitUntilDurable(txID types.TxID) <-chan types.TxID
 	FatalError() error
 }
 
-// SubscriptionManager is the post-commit subscription-evaluation surface used
-// by the executor. EvalAndBroadcast runs synchronously against the supplied
-// committed read view and must return before the next executor command is
-// dequeued (SPEC-003 §5.3).
-//
-// After response delivery, the executor drains `DroppedClients()` and calls
-// `DisconnectClient` on each signaled connection (SPEC-003 §5 step 5,
-// Story 5.2). The drain is non-blocking: a nil channel or empty channel
-// exits immediately.
+// SubscriptionManager evaluates subscriptions and reports dropped clients after
+// each commit.
 type SubscriptionManager interface {
 	RegisterSet(req subscription.SubscriptionSetRegisterRequest, view store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error)
 	UnregisterSet(connID types.ConnectionID, queryID uint32, view store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error)

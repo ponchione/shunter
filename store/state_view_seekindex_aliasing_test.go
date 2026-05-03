@@ -7,19 +7,7 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the read-view StateView.SeekIndex BTree-alias sub-hazard closure.
-// The underlying BTreeIndex.Seek(key) returns a live alias of the entry's
-// []RowID. If that slice is ranged over directly, an in-place mutation
-// of the backing array (slices.Delete of a middle element shifts the
-// tail down inside the same backing) is visible to the iteration even
-// though the iteration's captured len/cap are stale. Cloning at the
-// seek boundary decouples iteration from BTree-internal storage.
-// This test pins that regression contract.
-//
-// Under executor single-writer discipline no writer runs during a real
-// iteration, so this test drives the mutation directly via the BTree
-// handle to simulate a contract-violating path (e.g. a future refactor
-// letting a yield callback reach into committed state).
+// Pins that StateView.SeekIndex clones committed index row IDs before yielding.
 
 func TestStateViewSeekIndexIteratesIndependentSliceAfterBTreeMutation(t *testing.T) {
 	ts := &schema.TableSchema{

@@ -6,19 +6,7 @@ import (
 	"testing"
 )
 
-// TestShunterTransactionUpdateWireShape pins the byte-level Shunter-native
-// wire shape of TransactionUpdate:
-//
-//	status:                     UpdateStatus     (tagged union)
-//	timestamp:                  i64 µs since Unix epoch
-//	caller_identity:            Identity         (32 bytes)
-//	caller_connection_id:       ConnectionId     (16 bytes)
-//	reducer_call:               ReducerCallInfo
-//	total_host_execution_duration: i64 µs
-//
-// The test constructs the expected byte shape by hand and compares
-// against EncodeServerMessage, then round-trips through
-// DecodeServerMessage to prove the field-order change is symmetric.
+// TestShunterTransactionUpdateWireShape pins TransactionUpdate field order.
 func TestShunterTransactionUpdateWireShape(t *testing.T) {
 	var identity [32]byte
 	for i := range identity {

@@ -1,7 +1,5 @@
-// Package protocol implements the SPEC-005 wire protocol: message type
-// tags, codecs, RowList row-batch encoding, compression envelope,
-// transport lifecycle, and the ClientSender contract used by
-// subscription fan-out delivery.
+// Package protocol implements wire messages, codecs, transport lifecycle, and
+// fan-out delivery adapters.
 package protocol
 
 // Client→server message tags (SPEC-005 §6).
@@ -16,15 +14,7 @@ const (
 	TagSubscribeDeclaredView uint8 = 8
 )
 
-// Server→client message tags (SPEC-005 §6).
-//
-// Outcome-model decision (`docs/shunter-design-decisions.md#outcome-model`):
-//   - `TagTransactionUpdate` carries the heavy caller-bound envelope.
-//   - `TagTransactionUpdateLight` carries the non-caller delta-only envelope.
-//   - `TagReducerCallResult` is reserved. The former `ReducerCallResult` wire
-//     type was removed when caller outcome moved into heavy `TransactionUpdate`.
-//     The tag byte is intentionally not reused so a future reintroduction
-//     cannot silently collide with the removed shape.
+// Server→client message tags. TagReducerCallResult is reserved.
 const (
 	TagIdentityToken            uint8 = 1 // matches reference `IdentityToken` (v1.rs:445); renamed from TagInitialConnection
 	TagSubscribeSingleApplied   uint8 = 2 // renamed from TagSubscribeApplied (single/multi variant variant split)
