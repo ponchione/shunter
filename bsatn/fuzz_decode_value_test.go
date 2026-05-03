@@ -39,6 +39,7 @@ func decodeValueFuzzSeeds(tb testing.TB) [][]byte {
 		types.NewInt256(-1, ^uint64(0), ^uint64(0), ^uint64(0)),
 		types.NewUint256(1, 2, 3, 4),
 		types.NewTimestamp(1_739_201_130_000_000),
+		types.NewUUID([16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}),
 	} {
 		encoded := mustAppendFuzzValue(tb, v)
 		seeds = append(seeds, encoded)

@@ -667,6 +667,56 @@ func TestCoerceSenderRejectsTimestampColumn(t *testing.T) {
 	}
 }
 
+func TestCoerceStringLiteralToUUID(t *testing.T) {
+	const text = "00112233-4455-6677-8899-aabbccddeeff"
+	v, err := Coerce(Literal{Kind: LitString, Str: text}, types.KindUUID)
+	if err != nil {
+		t.Fatalf("Coerce(%q -> UUID) error: %v", text, err)
+	}
+	if v.Kind() != types.KindUUID {
+		t.Fatalf("Kind = %v, want KindUUID", v.Kind())
+	}
+	if got := v.UUIDString(); got != text {
+		t.Fatalf("UUIDString = %q, want %q", got, text)
+	}
+}
+
+func TestCoerceMalformedUUIDRejected(t *testing.T) {
+	for _, s := range []string{
+		"",
+		"00112233445566778899aabbccddeeff",
+		"00112233-4455-6677-8899-AABBCCDDEEFF",
+		"00112233-4455-6677-8899-aabbccddeefg",
+		"00112233-4455-6677-8899-aabbccddeeff00",
+	} {
+		_, err := Coerce(Literal{Kind: LitString, Str: s}, types.KindUUID)
+		var ilErr InvalidLiteralError
+		if !errors.As(err, &ilErr) {
+			t.Fatalf("Coerce(%q) err = %v, want InvalidLiteralError", s, err)
+		}
+		if ilErr.Literal != s || ilErr.Type != "UUID" {
+			t.Fatalf("Coerce(%q) got {%q, %q}, want {%q, \"UUID\"}", s, ilErr.Literal, ilErr.Type, s)
+		}
+		if !errors.Is(err, ErrUnsupportedSQL) {
+			t.Fatalf("Coerce(%q) err does not unwrap to ErrUnsupportedSQL: %v", s, err)
+		}
+	}
+}
+
+func TestCoerceNonStringLiteralOnUUIDRejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitInt, Int: 42}, types.KindUUID)
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	if ilErr.Literal != "42" || ilErr.Type != "UUID" {
+		t.Fatalf("got {%q, %q}, want {\"42\", \"UUID\"}", ilErr.Literal, ilErr.Type)
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+	}
+}
+
 // TestCoerceSenderRejectsArrayStringColumn pins the reference-informed shape
 // `SELECT * FROM t WHERE arr = :sender` at check.rs:487-489. The :sender
 // parameter materializes as a 32-byte identity; an array-of-string column

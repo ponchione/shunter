@@ -24,6 +24,19 @@ func TestQueryHashValueDifferent(t *testing.T) {
 	}
 }
 
+func TestQueryHashUUIDUsesCanonicalBytes(t *testing.T) {
+	u, err := types.ParseUUID("00112233-4455-6677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := u.AsUUID()
+	uHash := ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: u}, nil)
+	bytesHash := ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: types.NewBytes(raw[:])}, nil)
+	if uHash == bytesHash {
+		t.Fatal("UUID hash should include kind tag and not collapse to raw bytes")
+	}
+}
+
 func TestQueryHashCanonicalizesFloatZero(t *testing.T) {
 	neg32, err := types.NewFloat32(float32(math.Copysign(0, -1)))
 	if err != nil {

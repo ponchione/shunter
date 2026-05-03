@@ -291,7 +291,7 @@ func DecodeSchemaSnapshot(r io.Reader) ([]schema.TableSchema, uint32, error) {
 }
 
 func validSchemaSnapshotValueKind(kind schema.ValueKind) bool {
-	return kind >= schema.KindBool && kind <= schema.KindArrayString
+	return kind >= schema.KindBool && kind <= schema.KindUUID
 }
 
 func snapshotSchemaHasUniqueSingleColumnIndex(indexes []schema.IndexSchema, columnIndex int) bool {

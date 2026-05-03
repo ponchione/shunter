@@ -23,6 +23,7 @@ var fuzzProductValueSchema = &schema.TableSchema{
 		{Index: 5, Name: "signed_wide", Type: types.KindInt128},
 		{Index: 6, Name: "stamp", Type: types.KindTimestamp},
 		{Index: 7, Name: "wide", Type: types.KindUint256},
+		{Index: 8, Name: "uuid", Type: types.KindUUID},
 	},
 }
 
@@ -52,6 +53,7 @@ func decodeProductValueFuzzSeeds(tb testing.TB) [][]byte {
 			types.NewInt128(-1, ^uint64(0)),
 			types.NewTimestamp(1_739_201_130_000_000),
 			types.NewUint256(1, 2, 3, 4),
+			types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
 		},
 		{
 			types.NewUint64(0),
@@ -62,6 +64,7 @@ func decodeProductValueFuzzSeeds(tb testing.TB) [][]byte {
 			types.NewInt128(0, 0),
 			types.NewTimestamp(0),
 			types.NewUint256(0, 0, 0, 0),
+			types.NewUUID([16]byte{}),
 		},
 	} {
 		encoded := mustAppendFuzzProductValue(tb, row)
@@ -167,6 +170,7 @@ func fuzzProductValueWithInvalidNameUTF8() []byte {
 		types.NewInt128(0, 1),
 		types.NewTimestamp(1),
 		types.NewUint256(0, 0, 0, 1),
+		types.NewUUID([16]byte{1}),
 	}
 	encoded, err := AppendProductValue(nil, row)
 	if err != nil {
@@ -207,7 +211,7 @@ func boundedFuzzProductValueInput(data []byte, ts *schema.TableSchema) bool {
 			pos += 4
 		case types.KindInt64, types.KindUint64, types.KindFloat64, types.KindTimestamp:
 			pos += 8
-		case types.KindInt128, types.KindUint128:
+		case types.KindInt128, types.KindUint128, types.KindUUID:
 			pos += 16
 		case types.KindInt256, types.KindUint256:
 			pos += 32

@@ -170,6 +170,7 @@ type valueKey struct {
 	hi    uint64
 	lo    uint64
 	w256  [4]uint64
+	uuid  [16]byte
 }
 
 // encodeValueKey produces a stable comparable key for a Value.
@@ -228,6 +229,8 @@ func encodeValueKey(v Value) valueKey {
 		}
 		k.str = string(enc.buf)
 		releaseCanonicalEncoder(enc)
+	case types.KindUUID:
+		k.uuid = v.AsUUID()
 	}
 	return k
 }

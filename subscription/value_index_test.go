@@ -62,6 +62,27 @@ func TestValueIndexDifferentValues(t *testing.T) {
 	}
 }
 
+func TestValueIndexDifferentUUIDValues(t *testing.T) {
+	v := NewValueIndex()
+	h1, h2 := hashN(1), hashN(2)
+	u1, err := types.ParseUUID("00112233-4455-6677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u2, err := types.ParseUUID("00112233-4455-6677-8899-aabbccddee00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.Add(1, 0, u1, h1)
+	v.Add(1, 0, u2, h2)
+	if got := v.Lookup(1, 0, u1); len(got) != 1 || got[0] != h1 {
+		t.Fatalf("Lookup(u1) = %v, want [h1]", got)
+	}
+	if got := v.Lookup(1, 0, u2); len(got) != 1 || got[0] != h2 {
+		t.Fatalf("Lookup(u2) = %v, want [h2]", got)
+	}
+}
+
 func TestValueIndexCanonicalizesFloatZero(t *testing.T) {
 	v := NewValueIndex()
 	h := hashN(1)

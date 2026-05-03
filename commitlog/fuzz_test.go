@@ -280,7 +280,7 @@ func assertDecodedSchemaSnapshotInvariants(t *testing.T, data []byte, tables []s
 				t.Fatalf("accepted duplicate column name %q: table=%+v %s", col.Name, table, schemaSnapshotFuzzLabel(data))
 			}
 			seenColumnNames[col.Name] = struct{}{}
-			if col.Type < schema.KindBool || col.Type > schema.KindArrayString {
+			if col.Type < schema.KindBool || col.Type > schema.KindUUID {
 				t.Fatalf("accepted invalid column type %d: table=%+v col=%+v %s", col.Type, table, col, schemaSnapshotFuzzLabel(data))
 			}
 		}

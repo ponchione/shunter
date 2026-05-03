@@ -24,6 +24,9 @@ func GoTypeToValueKind(t reflect.Type) (ValueKind, error) {
 	if t == byteSliceType || (t.Kind() == reflect.Slice && t.Elem() == byteElemType) {
 		return KindBytes, nil
 	}
+	if t.Kind() == reflect.Array && t.Len() == 16 && t.Elem() == byteElemType {
+		return KindUUID, nil
+	}
 
 	switch t.Kind() {
 	case reflect.Bool:

@@ -25,6 +25,7 @@ func TestGoTypeToValueKindScalars(t *testing.T) {
 		{reflect.TypeFor[float64](), KindFloat64},
 		{reflect.TypeFor[string](), KindString},
 		{reflect.TypeFor[[]byte](), KindBytes},
+		{reflect.TypeFor[[16]byte](), KindUUID},
 	}
 	for _, c := range cases {
 		got, err := GoTypeToValueKind(c.goType)
@@ -41,6 +42,7 @@ func TestGoTypeToValueKindScalars(t *testing.T) {
 type Score int64
 type ID uint64
 type Blob []byte
+type UUIDBytes [16]byte
 type NamedByte uint8
 type NotBlob []NamedByte
 
@@ -52,6 +54,7 @@ func TestGoTypeToValueKindNamedTypes(t *testing.T) {
 		{reflect.TypeFor[Score](), KindInt64},
 		{reflect.TypeFor[ID](), KindUint64},
 		{reflect.TypeFor[Blob](), KindBytes},
+		{reflect.TypeFor[UUIDBytes](), KindUUID},
 	}
 	for _, c := range cases {
 		got, err := GoTypeToValueKind(c.goType)

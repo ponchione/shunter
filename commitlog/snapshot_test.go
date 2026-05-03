@@ -532,7 +532,7 @@ func TestDecodeSchemaSnapshotRejectsInvalidBoolFlags(t *testing.T) {
 }
 
 func TestDecodeSchemaSnapshotRejectsInvalidColumnType(t *testing.T) {
-	data := encodeSchemaSnapshotWithFlags(t, [3]byte{byte(schema.KindArrayString) + 1, 0, 0}, [2]byte{1, 1})
+	data := encodeSchemaSnapshotWithFlags(t, [3]byte{byte(schema.KindUUID) + 1, 0, 0}, [2]byte{1, 1})
 	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(data))
 	if !errors.Is(err, ErrSnapshot) {
 		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)

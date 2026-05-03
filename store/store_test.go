@@ -39,6 +39,35 @@ func mkRow(id uint64, name string) types.ProductValue {
 	return types.ProductValue{types.NewUint64(id), types.NewString(name)}
 }
 
+func mustUUID(t *testing.T, s string) types.Value {
+	t.Helper()
+	v, err := types.ParseUUID(s)
+	if err != nil {
+		t.Fatalf("ParseUUID(%q): %v", s, err)
+	}
+	return v
+}
+
+func uuidIndexedSchema() *schema.TableSchema {
+	return &schema.TableSchema{
+		ID:   2,
+		Name: "entities",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUUID},
+			{Index: 1, Name: "owner_id", Type: schema.KindUUID},
+			{Index: 2, Name: "name", Type: schema.KindString},
+		},
+		Indexes: []schema.IndexSchema{
+			{ID: 0, Name: "entities_pk", Columns: []int{0}, Unique: true, Primary: true},
+			{ID: 1, Name: "entities_owner", Columns: []int{1}},
+		},
+	}
+}
+
+func uuidRow(id, owner types.Value, name string) types.ProductValue {
+	return types.ProductValue{id, owner, types.NewString(name)}
+}
+
 // --- IndexKey tests (E3 Story 3.1) ---
 
 func TestIndexKeyCompare(t *testing.T) {
@@ -70,6 +99,14 @@ func TestIndexKeyPrefixOrdering(t *testing.T) {
 	long := NewIndexKey(types.NewString("a"), types.NewInt64(1))
 	if short.Compare(long) != -1 {
 		t.Fatal("shorter prefix < longer")
+	}
+}
+
+func TestIndexKeyUUIDLexicographicByteOrdering(t *testing.T) {
+	low := NewIndexKey(mustUUID(t, "00112233-4455-6677-8899-aabbccddee00"))
+	high := NewIndexKey(mustUUID(t, "00112233-4455-6677-8899-aabbccddeeff"))
+	if low.Compare(high) != -1 {
+		t.Fatalf("UUID index key ordering = %d, want low < high", low.Compare(high))
 	}
 }
 
@@ -317,6 +354,43 @@ func TestTableDeleteReinsert(t *testing.T) {
 	}
 }
 
+func TestTableUUIDPrimaryAndSecondaryIndexes(t *testing.T) {
+	tbl := NewTable(uuidIndexedSchema())
+	id1 := mustUUID(t, "00112233-4455-6677-8899-aabbccddeeff")
+	id2 := mustUUID(t, "00112233-4455-6677-8899-aabbccddee00")
+	owner := mustUUID(t, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	row1 := uuidRow(id1, owner, "one")
+	row2 := uuidRow(id2, owner, "two")
+
+	rid1 := tbl.AllocRowID()
+	if err := tbl.InsertRow(rid1, row1); err != nil {
+		t.Fatal(err)
+	}
+	rid2 := tbl.AllocRowID()
+	if err := tbl.InsertRow(rid2, row2); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := tbl.PrimaryIndex().Seek(NewIndexKey(id1)); !slices.Equal(got, []types.RowID{rid1}) {
+		t.Fatalf("primary Seek(id1) = %v, want [%d]", got, rid1)
+	}
+	ownerIndex := tbl.IndexByID(1)
+	if got := ownerIndex.Seek(NewIndexKey(owner)); !slices.Equal(got, []types.RowID{rid1, rid2}) {
+		t.Fatalf("secondary Seek(owner) = %v, want [%d %d]", got, rid1, rid2)
+	}
+
+	deleted, ok := tbl.DeleteRow(rid1)
+	if !ok || !deleted.Equal(row1) {
+		t.Fatalf("DeleteRow = %v, %v; want row1,true", deleted, ok)
+	}
+	if got := tbl.PrimaryIndex().Seek(NewIndexKey(id1)); len(got) != 0 {
+		t.Fatalf("primary Seek(id1) after delete = %v, want empty", got)
+	}
+	if got := ownerIndex.Seek(NewIndexKey(owner)); !slices.Equal(got, []types.RowID{rid2}) {
+		t.Fatalf("secondary Seek(owner) after delete = %v, want [%d]", got, rid2)
+	}
+}
+
 func TestTableScan(t *testing.T) {
 	tbl := NewTable(pkSchema())
 	for i := range 5 {
@@ -429,6 +503,45 @@ func TestTransactionUpdate(t *testing.T) {
 	_, ok = tx.GetRow(0, rid)
 	if ok {
 		t.Fatal("old row should not be visible")
+	}
+}
+
+func TestTransactionUpdateMaintainsUUIDIndexesOnCommit(t *testing.T) {
+	cs := NewCommittedState()
+	ts := uuidIndexedSchema()
+	tbl := NewTable(ts)
+	cs.RegisterTable(2, tbl)
+
+	id1 := mustUUID(t, "00112233-4455-6677-8899-aabbccddeeff")
+	id2 := mustUUID(t, "00112233-4455-6677-8899-aabbccddee00")
+	owner1 := mustUUID(t, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	owner2 := mustUUID(t, "bbbbbbbb-cccc-dddd-eeee-ffffffffffff")
+	rid := tbl.AllocRowID()
+	if err := tbl.InsertRow(rid, uuidRow(id1, owner1, "old")); err != nil {
+		t.Fatal(err)
+	}
+
+	tx := NewTransaction(cs, nil)
+	newRID, err := tx.Update(2, rid, uuidRow(id2, owner2, "new"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Commit(cs, tx); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := tbl.PrimaryIndex().Seek(NewIndexKey(id1)); len(got) != 0 {
+		t.Fatalf("primary old UUID after commit = %v, want empty", got)
+	}
+	if got := tbl.PrimaryIndex().Seek(NewIndexKey(id2)); !slices.Equal(got, []types.RowID{newRID}) {
+		t.Fatalf("primary new UUID after commit = %v, want [%d]", got, newRID)
+	}
+	ownerIndex := tbl.IndexByID(1)
+	if got := ownerIndex.Seek(NewIndexKey(owner1)); len(got) != 0 {
+		t.Fatalf("secondary old owner after commit = %v, want empty", got)
+	}
+	if got := ownerIndex.Seek(NewIndexKey(owner2)); !slices.Equal(got, []types.RowID{newRID}) {
+		t.Fatalf("secondary new owner after commit = %v, want [%d]", got, newRID)
 	}
 }
 

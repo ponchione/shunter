@@ -88,6 +88,19 @@ func TestProductValueCopyArrayStringIsolation(t *testing.T) {
 	}
 }
 
+func TestProductValueCopyUUIDValue(t *testing.T) {
+	u := [16]byte{0: 1, 15: 2}
+	orig := ProductValue{NewUUID(u)}
+	cp := orig.Copy()
+	if !cp.Equal(orig) {
+		t.Fatalf("copied UUID row = %#v, want %#v", cp, orig)
+	}
+	cp[0] = NewUUID([16]byte{0: 9})
+	if got := orig[0].AsUUID(); got != u {
+		t.Fatalf("mutating copied UUID value affected original: got %x want %x", got, u)
+	}
+}
+
 func TestProductValueEmptyEqual(t *testing.T) {
 	a := ProductValue{}
 	b := ProductValue{}

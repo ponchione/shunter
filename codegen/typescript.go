@@ -32,6 +32,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type DeclaredQueryRunner = (name: string) => Promise<Uint8Array>;\n")
 	b.WriteString("export type DeclaredViewSubscriber = (name: string) => Promise<() => void>;\n")
 	b.WriteString("export type TableSubscriber<Row> = (table: string, onRows?: (rows: Row[]) => void) => Promise<() => void>;\n")
+	b.WriteString("export type UUID = string;\n")
 	b.WriteString("\n")
 
 	tableNames := make([]string, len(contract.Schema.Tables))
@@ -310,6 +311,8 @@ func typeScriptColumnType(kind string) (string, error) {
 		return "bigint", nil
 	case "string":
 		return "string", nil
+	case "uuid":
+		return "UUID", nil
 	case "bytes":
 		return "Uint8Array", nil
 	case "arrayString":

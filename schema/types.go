@@ -32,6 +32,7 @@ const (
 	KindUint256     = types.KindUint256
 	KindTimestamp   = types.KindTimestamp
 	KindArrayString = types.KindArrayString
+	KindUUID        = types.KindUUID
 )
 
 // TableID is a stable identifier for a table, assigned by the builder.

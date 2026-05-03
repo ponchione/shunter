@@ -177,6 +177,12 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			xs = append(xs, string(data))
 		}
 		return types.NewArrayStringOwned(xs), nil
+	case TagUUID:
+		var u [16]byte
+		if _, err := io.ReadFull(r, u[:]); err != nil {
+			return types.Value{}, err
+		}
+		return types.NewUUID(u), nil
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}
@@ -451,6 +457,14 @@ func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {
 			xs = append(xs, string(data))
 		}
 		return types.NewArrayStringOwned(xs), nil
+	case TagUUID:
+		data, err := d.read(16)
+		if err != nil {
+			return types.Value{}, err
+		}
+		var u [16]byte
+		copy(u[:], data)
+		return types.NewUUID(u), nil
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}

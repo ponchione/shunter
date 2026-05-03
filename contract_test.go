@@ -214,6 +214,18 @@ func TestModuleContractValidationAllowsMigrationMetadataNamesAcrossSurfaces(t *t
 	}
 }
 
+func TestModuleContractValidationAcceptsUUIDColumnType(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
+		Name: "external_id",
+		Type: "uuid",
+	})
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected uuid column type: %v", err)
+	}
+}
+
 func TestModuleContractValidationRejectsInvalidDeclarationSQL(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Queries = []QueryDescription{{Name: "recent_messages", SQL: "SELECT * FROM missing"}}

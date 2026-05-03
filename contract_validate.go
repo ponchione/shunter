@@ -475,6 +475,8 @@ func valueKindFromExportString(value string) (schema.ValueKind, bool) {
 		return schema.KindTimestamp, true
 	case "arrayString":
 		return schema.KindArrayString, true
+	case "uuid":
+		return schema.KindUUID, true
 	default:
 		return 0, false
 	}

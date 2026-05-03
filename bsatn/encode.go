@@ -29,6 +29,7 @@ const (
 	TagUint256     byte = 16
 	TagTimestamp   byte = 17
 	TagArrayString byte = 18
+	TagUUID        byte = 19
 )
 
 // AppendValue appends v in BSATN format to dst and returns the extended slice.
@@ -122,6 +123,9 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 			dst = append(dst, buf[:4]...)
 			dst = append(dst, s...)
 		}
+	case types.KindUUID:
+		u := v.AsUUID()
+		dst = append(dst, u[:]...)
 	default:
 		return dst[:start], &UnknownValueTagError{Tag: tag}
 	}
@@ -250,6 +254,10 @@ func EncodeValue(w io.Writer, v types.Value) error {
 			}
 		}
 		return nil
+	case types.KindUUID:
+		u := v.AsUUID()
+		_, err := w.Write(u[:])
+		return err
 	default:
 		return &UnknownValueTagError{Tag: tag}
 	}
@@ -283,6 +291,8 @@ func EncodedValueSize(v types.Value) int {
 			n += 4 + len(s)
 		}
 		return n
+	case types.KindUUID:
+		return 17
 	default:
 		return 0
 	}

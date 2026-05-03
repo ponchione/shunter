@@ -165,6 +165,15 @@ func assertProductRowsEqual(t *testing.T, got, want []types.ProductValue) {
 	}
 }
 
+func mustUUIDValue(t *testing.T, s string) types.Value {
+	t.Helper()
+	v, err := types.ParseUUID(s)
+	if err != nil {
+		t.Fatalf("ParseUUID(%q): %v", s, err)
+	}
+	return v
+}
+
 // --- Tests ---
 
 func TestHandleOneOffQuery_Valid(t *testing.T) {
@@ -214,6 +223,50 @@ func TestHandleOneOffQuery_Valid(t *testing.T) {
 	}
 	if !pvs[0][1].Equal(types.NewString("bob")) {
 		t.Errorf("row[0].name = %v, want String(bob)", pvs[0][1])
+	}
+}
+
+func TestHandleOneOffQuery_UUIDLiteralFiltersRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "entities",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUUID},
+			{Index: 1, Name: "name", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("entities", 1, ts.Columns...)
+	matchingID := mustUUIDValue(t, "00112233-4455-6677-8899-aabbccddeeff")
+	otherID := mustUUIDValue(t, "00112233-4455-6677-8899-aabbccddee00")
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{matchingID, types.NewString("match")},
+				{otherID, types.NewString("other")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x12},
+		QueryString: "SELECT * FROM entities WHERE id = '00112233-4455-6677-8899-aabbccddeeff'",
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(matchingID) || !pvs[0][1].Equal(types.NewString("match")) {
+		t.Fatalf("row = %v, want matching UUID row", pvs[0])
 	}
 }
 

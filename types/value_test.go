@@ -24,6 +24,15 @@ func mustFloat64(t *testing.T, x float64) Value {
 	return v
 }
 
+func mustParseUUID(t *testing.T, s string) Value {
+	t.Helper()
+	v, err := ParseUUID(s)
+	if err != nil {
+		t.Fatalf("ParseUUID(%q): %v", s, err)
+	}
+	return v
+}
+
 // --- Round-trip tests for all 13 kinds ---
 
 func TestRoundTripBool(t *testing.T) {
@@ -575,6 +584,88 @@ func TestAccessorArrayStringPanicsOnWrongKind(t *testing.T) {
 	v.AsArrayString()
 }
 
+func TestUUIDParseAndCanonicalString(t *testing.T) {
+	v, err := ParseUUID("00112233-4455-6677-8899-aabbccddeeff")
+	if err != nil {
+		t.Fatalf("ParseUUID returned error: %v", err)
+	}
+	if v.Kind() != KindUUID {
+		t.Fatalf("Kind = %v, want UUID", v.Kind())
+	}
+	want := [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+	if got := v.AsUUID(); got != want {
+		t.Fatalf("AsUUID = %x, want %x", got, want)
+	}
+	if got := v.UUIDString(); got != "00112233-4455-6677-8899-aabbccddeeff" {
+		t.Fatalf("UUIDString = %q, want canonical lowercase text", got)
+	}
+}
+
+func TestParseUUIDRejectsMalformed(t *testing.T) {
+	for _, s := range []string{
+		"",
+		"00112233445566778899aabbccddeeff",
+		"00112233-4455-6677-8899-aabbccddeef",
+		"00112233-4455-6677-8899-aabbccddeeff00",
+		"00112233_4455-6677-8899-aabbccddeeff",
+		"00112233-4455-6677-8899-AABBCCDDEEFF",
+		"00112233-4455-6677-8899-aabbccddeegf",
+	} {
+		if _, err := ParseUUID(s); !errors.Is(err, ErrInvalidUUID) {
+			t.Fatalf("ParseUUID(%q) err = %v, want ErrInvalidUUID", s, err)
+		}
+	}
+}
+
+func TestUUIDAccessorsDoNotExposeMutableAliases(t *testing.T) {
+	u := [16]byte{0: 1, 15: 2}
+	v := NewUUID(u)
+	u[0] = 9
+	if got := v.AsUUID(); got[0] != 1 {
+		t.Fatalf("constructor input mutation leaked into Value: got[0] = %d", got[0])
+	}
+	got := v.AsUUID()
+	got[15] = 9
+	if again := v.AsUUID(); again[15] != 2 {
+		t.Fatalf("AsUUID mutation leaked into Value: got[15] = %d", again[15])
+	}
+}
+
+func TestUUIDEqualCompareAndHash(t *testing.T) {
+	a := mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff")
+	a2 := NewUUID(a.AsUUID())
+	b := mustParseUUID(t, "00112233-4455-6677-8899-aabbccddef00")
+	if !a.Equal(a2) {
+		t.Fatal("identical UUID values not Equal")
+	}
+	if a.Equal(b) {
+		t.Fatal("different UUID values reported Equal")
+	}
+	if a.Compare(b) >= 0 {
+		t.Fatal("UUID Compare should use lexicographic byte order")
+	}
+	if a.Hash64() != a2.Hash64() {
+		t.Fatal("equal UUID values should hash identically")
+	}
+	if a.Hash64() == b.Hash64() {
+		t.Fatal("different UUID payloads should hash differently")
+	}
+	raw := a.AsUUID()
+	if a.Hash64() == NewBytes(raw[:]).Hash64() {
+		t.Fatal("UUID and Bytes with same 16 bytes should hash differently")
+	}
+}
+
+func TestAccessorUUIDPanicsOnWrongKind(t *testing.T) {
+	v := NewBool(true)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("AsUUID on Bool did not panic")
+		}
+	}()
+	v.AsUUID()
+}
+
 // --- NaN rejection ---
 
 func TestFloat32RejectsNaN(t *testing.T) {
@@ -645,6 +736,7 @@ func TestAccessorPanicsOnKindMismatch(t *testing.T) {
 		{"AsFloat64", func() { v.AsFloat64() }},
 		{"AsString", func() { v.AsString() }},
 		{"AsBytes", func() { v.AsBytes() }},
+		{"AsUUID", func() { v.AsUUID() }},
 	}
 	for _, a := range accessors {
 		t.Run(a.name, func(t *testing.T) {
@@ -684,8 +776,9 @@ func TestValueKindString(t *testing.T) {
 		{KindUint256, "Uint256"},
 		{KindTimestamp, "Timestamp"},
 		{KindArrayString, "ArrayString"},
+		{KindUUID, "UUID"},
 		{ValueKind(-1), "ValueKind(-1)"},
-		{ValueKind(len(kindNames)), "ValueKind(19)"},
+		{ValueKind(len(kindNames)), "ValueKind(20)"},
 	}
 	for _, c := range cases {
 		if got := c.k.String(); got != c.want {
@@ -754,6 +847,7 @@ func TestEqualSameKindSameValue(t *testing.T) {
 		{mustFloat64(t, 2.718), mustFloat64(t, 2.718)},
 		{NewString("hello"), NewString("hello")},
 		{NewBytes([]byte{1, 2}), NewBytes([]byte{1, 2})},
+		{mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff"), mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff")},
 	}
 	for _, p := range pairs {
 		if !p[0].Equal(p[1]) {
@@ -770,6 +864,7 @@ func TestEqualSameKindDifferentValue(t *testing.T) {
 		{mustFloat64(t, 1.0), mustFloat64(t, 2.0)},
 		{NewString("a"), NewString("b")},
 		{NewBytes([]byte{1}), NewBytes([]byte{2})},
+		{mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff"), mustParseUUID(t, "00112233-4455-6677-8899-aabbccddef00")},
 	}
 	for _, p := range pairs {
 		if p[0].Equal(p[1]) {
@@ -899,6 +994,7 @@ func TestHashEqualValuesProduceEqualHashes(t *testing.T) {
 		{mustFloat64(t, 1.5), mustFloat64(t, 1.5)},
 		{mustFloat32(t, float32(math.Copysign(0, -1))), mustFloat32(t, 0)},
 		{mustFloat64(t, math.Copysign(0, -1)), mustFloat64(t, 0)},
+		{mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff"), mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff")},
 	}
 	for _, p := range pairs {
 		if p[0].Hash64() != p[1].Hash64() {

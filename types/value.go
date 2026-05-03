@@ -14,6 +14,10 @@ import (
 
 var ErrInvalidFloat = errors.New("invalid float value")
 
+// ErrInvalidUUID identifies UUID text that is not canonical lowercase
+// RFC 4122 hyphenated form.
+var ErrInvalidUUID = errors.New("invalid UUID")
+
 // ValueKind identifies the type of a column value.
 type ValueKind int
 
@@ -37,6 +41,7 @@ const (
 	KindUint256
 	KindTimestamp
 	KindArrayString
+	KindUUID
 )
 
 var kindNames = [...]string{
@@ -59,6 +64,7 @@ var kindNames = [...]string{
 	KindUint256:     "Uint256",
 	KindTimestamp:   "Timestamp",
 	KindArrayString: "ArrayString",
+	KindUUID:        "UUID",
 }
 
 func (k ValueKind) String() string {
@@ -89,6 +95,7 @@ type Value struct {
 	lo128  uint64
 	w256   [4]uint64
 	strArr []string
+	uuid   [16]byte
 }
 
 // Kind returns the ValueKind of this Value.
@@ -236,6 +243,50 @@ func NewArrayStringOwned(xs []string) Value {
 	return Value{kind: KindArrayString, strArr: xs}
 }
 
+// NewUUID builds a UUID value from its canonical 16-byte representation.
+func NewUUID(x [16]byte) Value {
+	return Value{kind: KindUUID, uuid: x}
+}
+
+// ParseUUID parses canonical lowercase RFC 4122 hyphenated UUID text.
+func ParseUUID(s string) (Value, error) {
+	var out [16]byte
+	if len(s) != 36 {
+		return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
+	}
+	j := 0
+	for i := 0; i < len(s); {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if s[i] != '-' {
+				return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
+			}
+			i++
+			continue
+		}
+		if i+1 >= len(s) {
+			return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
+		}
+		hi, ok := lowerHexValue(s[i])
+		if !ok {
+			return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
+		}
+		lo, ok := lowerHexValue(s[i+1])
+		if !ok {
+			return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
+		}
+		if j >= len(out) {
+			return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
+		}
+		out[j] = hi<<4 | lo
+		j++
+		i += 2
+	}
+	if j != len(out) {
+		return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
+	}
+	return NewUUID(out), nil
+}
+
 // --- Accessors ---
 
 func (v Value) AsBool() bool {
@@ -310,6 +361,29 @@ func (v Value) AsBytes() []byte {
 func (v Value) BytesView() []byte {
 	v.mustKind(KindBytes)
 	return v.buf
+}
+
+// AsUUID returns the canonical 16-byte UUID payload.
+func (v Value) AsUUID() [16]byte {
+	v.mustKind(KindUUID)
+	return v.uuid
+}
+
+// UUIDString returns canonical lowercase RFC 4122 hyphenated UUID text.
+func (v Value) UUIDString() string {
+	u := v.AsUUID()
+	var out [36]byte
+	j := 0
+	for i, b := range u {
+		if i == 4 || i == 6 || i == 8 || i == 10 {
+			out[j] = '-'
+			j++
+		}
+		out[j] = lowerHexDigits[b>>4]
+		out[j+1] = lowerHexDigits[b&0x0f]
+		j += 2
+	}
+	return string(out[:])
 }
 
 // AsInt128 returns the signed high word and unsigned low word of an Int128.
@@ -404,6 +478,8 @@ func (v Value) Equal(other Value) bool {
 			}
 		}
 		return true
+	case KindUUID:
+		return v.uuid == other.uuid
 	default:
 		panic(fmt.Sprintf("shunter: unhandled ValueKind %d", int(v.kind)))
 	}
@@ -477,6 +553,8 @@ func (v Value) Compare(other Value) int {
 			}
 		}
 		return cmp.Compare(len(v.strArr), len(other.strArr))
+	case KindUUID:
+		return bytes.Compare(v.uuid[:], other.uuid[:])
 	default:
 		panic(fmt.Sprintf("shunter: unhandled ValueKind %d", int(v.kind)))
 	}
@@ -552,6 +630,8 @@ func (v Value) writePayload(h hash.Hash64) {
 			h.Write(buf[:4])
 			h.Write([]byte(s))
 		}
+	case KindUUID:
+		h.Write(v.uuid[:])
 	}
 }
 
@@ -584,7 +664,22 @@ func (v Value) payloadLen() uint32 {
 			n += 4 + uint32(len(s))
 		}
 		return n
+	case KindUUID:
+		return 16
 	default:
 		return 0
+	}
+}
+
+var lowerHexDigits = [...]byte{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'}
+
+func lowerHexValue(b byte) (byte, bool) {
+	switch {
+	case b >= '0' && b <= '9':
+		return b - '0', true
+	case b >= 'a' && b <= 'f':
+		return b - 'a' + 10, true
+	default:
+		return 0, false
 	}
 }

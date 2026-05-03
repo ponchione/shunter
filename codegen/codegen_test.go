@@ -79,6 +79,23 @@ func TestGeneratorAcceptsModuleContractWithoutRuntime(t *testing.T) {
 	assertContains(t, string(out), `export function subscribeMessages(subscribeTable: TableSubscriber<MessagesRow>): Promise<() => void> {`)
 }
 
+func TestTypeScriptGeneratorMapsUUIDColumns(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
+		Name: "external_id",
+		Type: "uuid",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export type UUID = string;`)
+	assertContains(t, ts, `externalId: UUID;`)
+}
+
 func TestGeneratorRejectsUnsupportedLanguage(t *testing.T) {
 	_, err := Generate(contractFixture(), Options{Language: "go"})
 	if err == nil {
