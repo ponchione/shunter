@@ -30,6 +30,22 @@ func TestDefaultProtocolOptions(t *testing.T) {
 	}
 }
 
+func TestNormalizeProtocolOptionsFillsDefaults(t *testing.T) {
+	opts, err := normalizeProtocolOptions(ProtocolOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts != DefaultProtocolOptions() {
+		t.Fatalf("zero ProtocolOptions normalized to %#v, want %#v", opts, DefaultProtocolOptions())
+	}
+}
+
+func TestNormalizeProtocolOptionsRejectsNegativeValues(t *testing.T) {
+	if _, err := normalizeProtocolOptions(ProtocolOptions{IncomingQueueMessages: -1}); err == nil {
+		t.Fatal("expected negative IncomingQueueMessages to be rejected")
+	}
+}
+
 func TestGenerateConnectionIDNonZero(t *testing.T) {
 	c := GenerateConnectionID()
 	if c.IsZero() {

@@ -3,6 +3,7 @@ package protocol
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/ponchione/shunter/types"
@@ -65,6 +66,54 @@ func DefaultProtocolOptions() ProtocolOptions {
 		IncomingQueueMessages:  64,
 		MaxMessageSize:         4 * 1024 * 1024,
 	}
+}
+
+func normalizeProtocolOptions(opts ProtocolOptions) (ProtocolOptions, error) {
+	if opts.PingInterval < 0 {
+		return ProtocolOptions{}, fmt.Errorf("ping interval must not be negative")
+	}
+	if opts.IdleTimeout < 0 {
+		return ProtocolOptions{}, fmt.Errorf("idle timeout must not be negative")
+	}
+	if opts.CloseHandshakeTimeout < 0 {
+		return ProtocolOptions{}, fmt.Errorf("close handshake timeout must not be negative")
+	}
+	if opts.DisconnectTimeout < 0 {
+		return ProtocolOptions{}, fmt.Errorf("disconnect timeout must not be negative")
+	}
+	if opts.OutgoingBufferMessages < 0 {
+		return ProtocolOptions{}, fmt.Errorf("outgoing buffer messages must not be negative")
+	}
+	if opts.IncomingQueueMessages < 0 {
+		return ProtocolOptions{}, fmt.Errorf("incoming queue messages must not be negative")
+	}
+	if opts.MaxMessageSize < 0 {
+		return ProtocolOptions{}, fmt.Errorf("max message size must not be negative")
+	}
+
+	defaults := DefaultProtocolOptions()
+	if opts.PingInterval == 0 {
+		opts.PingInterval = defaults.PingInterval
+	}
+	if opts.IdleTimeout == 0 {
+		opts.IdleTimeout = defaults.IdleTimeout
+	}
+	if opts.CloseHandshakeTimeout == 0 {
+		opts.CloseHandshakeTimeout = defaults.CloseHandshakeTimeout
+	}
+	if opts.DisconnectTimeout == 0 {
+		opts.DisconnectTimeout = defaults.DisconnectTimeout
+	}
+	if opts.OutgoingBufferMessages == 0 {
+		opts.OutgoingBufferMessages = defaults.OutgoingBufferMessages
+	}
+	if opts.IncomingQueueMessages == 0 {
+		opts.IncomingQueueMessages = defaults.IncomingQueueMessages
+	}
+	if opts.MaxMessageSize == 0 {
+		opts.MaxMessageSize = defaults.MaxMessageSize
+	}
+	return opts, nil
 }
 
 // ErrZeroConnectionID is returned by the upgrade handler when a

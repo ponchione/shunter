@@ -219,6 +219,76 @@ func TestRunLifecycleSuccessSendsIdentityToken(t *testing.T) {
 	}
 }
 
+func TestRunLifecycleRejectsLiveDuplicateConnectionIDBeforeOnConnect(t *testing.T) {
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	opts := DefaultProtocolOptions()
+
+	c1, _, cleanup1 := loopbackConn(t, opts)
+	defer cleanup1()
+	if err := c1.RunLifecycle(context.Background(), inbox, mgr); err != nil {
+		t.Fatalf("first RunLifecycle: %v", err)
+	}
+
+	c2, _, cleanup2 := loopbackConn(t, opts)
+	defer cleanup2()
+	c2.ID = c1.ID
+	err := c2.RunLifecycle(context.Background(), inbox, mgr)
+	if !errors.Is(err, ErrConnectionIDInUse) {
+		t.Fatalf("duplicate RunLifecycle error = %v, want ErrConnectionIDInUse", err)
+	}
+	if got := mgr.Get(c1.ID); got != c1 {
+		t.Fatalf("manager entry = %p, want first conn %p", got, c1)
+	}
+	calls, _, _ := inbox.snapshot()
+	if calls != 1 {
+		t.Fatalf("OnConnect calls = %d, want only the first connection admitted", calls)
+	}
+}
+
+func TestRunLifecycleZeroServerOptionsUseDefaults(t *testing.T) {
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	s := &Server{
+		JWT: &auth.JWTConfig{
+			SigningKey: testSigningKey,
+			AuthMode:   auth.AuthModeStrict,
+		},
+		Executor: inbox,
+		Conns:    mgr,
+	}
+	srv := newTestServer(t, s)
+
+	c, resp, err := dialSubscribe(t, srv)
+	if err != nil {
+		t.Fatalf("dial: %v (resp=%v)", err, resp)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+	data, err := readOneBinary(t, c, 2*time.Second)
+	if err != nil {
+		t.Fatalf("read IdentityToken: %v", err)
+	}
+	_, msg, err := DecodeServerMessage(data)
+	if err != nil {
+		t.Fatalf("decode IdentityToken: %v", err)
+	}
+	ic := msg.(IdentityToken)
+	serverConn := mgr.Get(ic.ConnectionID)
+	if serverConn == nil {
+		t.Fatal("admitted connection missing from manager")
+	}
+	defaults := DefaultProtocolOptions()
+	if serverConn.opts.PingInterval != defaults.PingInterval {
+		t.Fatalf("PingInterval = %v, want default %v", serverConn.opts.PingInterval, defaults.PingInterval)
+	}
+	if cap(serverConn.OutboundCh) != defaults.OutgoingBufferMessages {
+		t.Fatalf("OutboundCh cap = %d, want default %d", cap(serverConn.OutboundCh), defaults.OutgoingBufferMessages)
+	}
+	if cap(serverConn.inflightSem) != defaults.IncomingQueueMessages {
+		t.Fatalf("inflightSem cap = %d, want default %d", cap(serverConn.inflightSem), defaults.IncomingQueueMessages)
+	}
+}
+
 func TestRunLifecycleOnConnectRejectClosesWith1008(t *testing.T) {
 	rejectErr := errors.New("admission denied by policy")
 	inbox := &fakeInbox{onConnectErr: rejectErr}

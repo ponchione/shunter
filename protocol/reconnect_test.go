@@ -272,3 +272,36 @@ func TestReconnectSameConnectionIDAcceptedViaUpgradeQuery(t *testing.T) {
 		t.Fatalf("ConnectionID = %x, want %x", ic.ConnectionID, wantID)
 	}
 }
+
+func TestLiveDuplicateConnectionIDRejectedViaUpgradeQuery(t *testing.T) {
+	inbox := &fakeInbox{}
+	s, _ := lifecycleServer(t, inbox)
+	srv := newTestServer(t, s)
+	token := mintValidToken(t)
+	wantID := types.ConnectionID{0xAA, 0xBB, 0xCC, 0xDD}
+	query := "connection_id=" + wantID.Hex()
+
+	c1, resp1, err := dialSubscribeWithTokenAndQuery(t, srv, token, query)
+	if err != nil {
+		t.Fatalf("first dial: %v (resp=%v)", err, resp1)
+	}
+	defer c1.Close(websocket.StatusNormalClosure, "")
+	if _, err := readOneBinary(t, c1, 2*time.Second); err != nil {
+		t.Fatalf("read first IdentityToken: %v", err)
+	}
+
+	c2, resp2, err := dialSubscribeWithTokenAndQuery(t, srv, token, query)
+	if err != nil {
+		t.Fatalf("second dial should complete handshake before policy close: %v (resp=%v)", err, resp2)
+	}
+	defer c2.Close(websocket.StatusNormalClosure, "")
+	if _, err := readOneBinary(t, c2, 2*time.Second); err == nil {
+		t.Fatal("duplicate connection_id should close before IdentityToken")
+	} else if got := websocket.CloseStatus(err); got != websocket.StatusPolicyViolation {
+		t.Fatalf("duplicate close status = %d, want %d", got, websocket.StatusPolicyViolation)
+	}
+	calls, _, _ := inbox.snapshot()
+	if calls != 1 {
+		t.Fatalf("OnConnect calls = %d, want duplicate rejected before OnConnect", calls)
+	}
+}

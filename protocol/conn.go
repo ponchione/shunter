@@ -106,22 +106,79 @@ func (c *Conn) MarkActivity() {
 type ConnManager struct {
 	mu       sync.RWMutex
 	conns    map[types.ConnectionID]*Conn
+	reserved map[types.ConnectionID]*Conn
 	accepted atomic.Uint64
 	rejected atomic.Uint64
 }
 
 // NewConnManager returns an empty ConnManager.
 func NewConnManager() *ConnManager {
-	return &ConnManager{conns: make(map[types.ConnectionID]*Conn)}
+	return &ConnManager{
+		conns:    make(map[types.ConnectionID]*Conn),
+		reserved: make(map[types.ConnectionID]*Conn),
+	}
 }
 
-// Add registers conn in the manager. Last-write-wins for duplicate
-// IDs; upstream layers should not create colliding ConnectionIDs.
-func (m *ConnManager) Add(conn *Conn) {
+func connIsClosed(conn *Conn) bool {
+	if conn == nil || conn.closed == nil {
+		return false
+	}
+	select {
+	case <-conn.closed:
+		return true
+	default:
+		return false
+	}
+}
+
+// reserve claims conn.ID while the connection is passing admission. A reserved
+// ID is not visible to delivery lookups, but it blocks duplicate live upgrades
+// from running OnConnect side effects for the same ConnectionID.
+func (m *ConnManager) reserve(conn *Conn) error {
+	if m == nil || conn == nil {
+		return nil
+	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing := m.conns[conn.ID]; existing != nil && existing != conn && !connIsClosed(existing) {
+		return ErrConnectionIDInUse
+	}
+	if reserved := m.reserved[conn.ID]; reserved != nil && reserved != conn {
+		return ErrConnectionIDInUse
+	}
+	m.reserved[conn.ID] = conn
+	return nil
+}
+
+func (m *ConnManager) releaseReservation(conn *Conn) {
+	if m == nil || conn == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reserved[conn.ID] == conn {
+		delete(m.reserved, conn.ID)
+	}
+}
+
+// Add registers conn in the manager. A duplicate live or admitting
+// ConnectionID is rejected so fan-out, subscription, and disconnect state remain
+// bound to a single connection owner.
+func (m *ConnManager) Add(conn *Conn) error {
+	m.mu.Lock()
+	if existing := m.conns[conn.ID]; existing != nil && existing != conn && !connIsClosed(existing) {
+		m.mu.Unlock()
+		return ErrConnectionIDInUse
+	}
+	if reserved := m.reserved[conn.ID]; reserved != nil && reserved != conn {
+		m.mu.Unlock()
+		return ErrConnectionIDInUse
+	}
+	delete(m.reserved, conn.ID)
 	m.conns[conn.ID] = conn
 	m.mu.Unlock()
 	m.accepted.Add(1)
+	return nil
 }
 
 // Remove drops the entry for id. Safe to call on a missing id.

@@ -299,6 +299,23 @@ func TestUpgradeMissingJWTConfigRejected(t *testing.T) {
 	}
 }
 
+func TestUpgradeInvalidProtocolOptionsRejected(t *testing.T) {
+	s, _ := strictServer(t)
+	s.Options.OutgoingBufferMessages = -1
+	srv := newTestServer(t, s)
+
+	_, resp, err := dialWS(t, srv, wsDialOpts{
+		authHeader:   "Bearer " + mintValidToken(t),
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err == nil {
+		t.Fatal("dial should fail when protocol options are invalid")
+	}
+	if resp == nil || resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %v, want 500", resp)
+	}
+}
+
 func TestUpgradeAnonymousNoTokenMints(t *testing.T) {
 	s, rec := anonymousServer(t)
 	srv := newTestServer(t, s)

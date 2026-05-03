@@ -202,6 +202,16 @@ type CallReducerRequest struct {
 // sequence. The caller (default Upgraded handler) either returns to
 // let the hijacked WebSocket persist or spawns those goroutines.
 func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnManager) error {
+	if err := mgr.reserve(c); err != nil {
+		_ = c.ws.Close(websocket.StatusPolicyViolation, "connection_id already in use")
+		return err
+	}
+	reserved := true
+	defer func() {
+		if reserved {
+			mgr.releaseReservation(c)
+		}
+	}()
 	if err := inbox.OnConnect(ctx, c.ID, c.Identity); err != nil {
 		reason := truncateCloseReason("onconnect rejected: " + err.Error())
 		_ = c.ws.Close(websocket.StatusPolicyViolation, reason)
@@ -213,7 +223,11 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 	// that is not yet visible would drop its first delta. Order is
 	// safe because RunLifecycle is synchronous and IdentityToken is
 	// the very next thing emitted on this socket.
-	mgr.Add(c)
+	if err := mgr.Add(c); err != nil {
+		_ = c.ws.Close(websocket.StatusPolicyViolation, "connection_id already in use")
+		return err
+	}
+	reserved = false
 	recordProtocolConnections(c.Observer, mgr.ActiveCount())
 
 	frame, err := encodeIdentityTokenFrame(IdentityToken{

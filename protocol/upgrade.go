@@ -101,6 +101,11 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthRejected(w, err.Error(), http.StatusInternalServerError, "jwt_misconfigured", err)
 		return
 	}
+	options, err := normalizeProtocolOptions(s.Options)
+	if err != nil {
+		s.writeRejected(w, "invalid protocol options: "+err.Error(), http.StatusInternalServerError, "rejected_internal", err)
+		return
+	}
 
 	// 1. Auth — strict requires a token, anonymous mints on absence.
 	token, hasToken := extractToken(r)
@@ -177,8 +182,8 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		s.recordRejected("rejected_upgrade", err)
 		return
 	}
-	if s.Options.MaxMessageSize > 0 {
-		conn.SetReadLimit(s.Options.MaxMessageSize)
+	if options.MaxMessageSize > 0 {
+		conn.SetReadLimit(options.MaxMessageSize)
 	}
 
 	// 6. Hand off.
@@ -203,7 +208,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 			uc.Token,
 			uc.Compression == CompressionGzip,
 			uc.Conn,
-			&s.Options,
+			&options,
 		)
 		c.Permissions = append([]string(nil), uc.Permissions...)
 		c.AllowAllPermissions = uc.AllowAllPermissions
@@ -217,6 +222,8 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 			result := "rejected_internal"
 			if errors.Is(err, ErrExecutorAdmissionRejected) {
 				result = "rejected_executor"
+			} else if errors.Is(err, ErrConnectionIDInUse) {
+				result = "rejected_connection_id"
 			}
 			s.recordRejected(result, err)
 			return
