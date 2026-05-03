@@ -37,6 +37,9 @@ func MintAnonymousToken(config *MintConfig) (string, types.Identity, error) {
 	if len(config.SigningKey) == 0 {
 		return "", types.Identity{}, fmt.Errorf("auth: mint signing key is required")
 	}
+	if config.Issuer == "" {
+		return "", types.Identity{}, fmt.Errorf("auth: mint issuer is required")
+	}
 	subject, err := randomSubject()
 	if err != nil {
 		return "", types.Identity{}, fmt.Errorf("auth: mint random subject: %w", err)

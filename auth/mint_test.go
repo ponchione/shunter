@@ -60,6 +60,28 @@ func TestMintAnonymousTokenEmptySigningKeyFailsBeforeRandomRead(t *testing.T) {
 	}
 }
 
+func TestMintAnonymousTokenEmptyIssuerFailsBeforeRandomRead(t *testing.T) {
+	originalReadRandom := readRandom
+	readRandom = func([]byte) (int, error) {
+		t.Fatal("MintAnonymousToken read randomness before rejecting empty issuer")
+		return 0, nil
+	}
+	defer func() { readRandom = originalReadRandom }()
+
+	cfg := testMintConfig()
+	cfg.Issuer = ""
+	token, id, err := MintAnonymousToken(cfg)
+	if err == nil {
+		t.Fatal("MintAnonymousToken empty issuer returned nil error")
+	}
+	if token != "" || !id.IsZero() {
+		t.Fatalf("MintAnonymousToken empty issuer returned token=%q identity=%s, want empty", token, id.Hex())
+	}
+	if !strings.Contains(err.Error(), "issuer is required") {
+		t.Fatalf("MintAnonymousToken empty issuer error = %v, want issuer context", err)
+	}
+}
+
 func TestMintAnonymousTokenValidatesRoundTrip(t *testing.T) {
 	cfg := testMintConfig()
 	token, id, err := MintAnonymousToken(cfg)
