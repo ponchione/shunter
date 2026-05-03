@@ -3,11 +3,12 @@
 //
 // Grammar:
 //
-//	stmt   = "SELECT" projection "FROM" ident [ [ "AS" ] ident ] [ [ "INNER" ] "JOIN" ident [ [ "AS" ] ident ] "ON" qcol "=" qcol ] [ where ] [ limit ] [ ";" ]
+//	stmt   = "SELECT" projection "FROM" ident [ [ "AS" ] ident ] [ [ "INNER" ] "JOIN" ident [ [ "AS" ] ident ] "ON" qcol "=" qcol ] [ where ] [ order ] [ limit ] [ ";" ]
 //	projection = "*" | ident "." "*" | projcol ( "," projcol )* | aggregate
 //	projcol = ident | ident "." ident
 //	aggregate = "COUNT" "(" "*" ")" [ "AS" ] ident
 //	where  = "WHERE" pred
+//	order  = "ORDER" "BY" colref [ "ASC" | "DESC" ]
 //	limit  = "LIMIT" unsigned-integer
 //	pred   = conj ( "OR" conj )*
 //	conj   = term ( "AND" term )*
@@ -24,10 +25,9 @@
 // preserves the written spelling and does not enable case-folded table,
 // column, alias, or qualifier lookup.
 //
-// Anything outside this grammar (projection other than "*", unsupported JOIN forms,
-// ORDER BY, aggregates other than `COUNT(*) [AS] alias`,
-// subqueries, mismatched qualified columns, etc.) is rejected with
-// ErrUnsupportedSQL.
+// Anything outside this grammar (unsupported JOIN forms, multiple ORDER BY
+// expressions, aggregates other than `COUNT(*) [AS] alias`, subqueries,
+// mismatched qualified columns, etc.) is rejected with ErrUnsupportedSQL.
 //
 // Literals carry their lexical category only. Callers coerce them to a
 // concrete types.Value against a column kind via Coerce.
@@ -214,6 +214,16 @@ type AggregateProjection struct {
 	Alias string
 }
 
+// OrderByColumn is the bounded query-only ORDER BY surface. It is limited to a
+// single resolved column reference; callers decide which protocol surfaces may
+// execute it.
+type OrderByColumn struct {
+	Table           string
+	Column          string
+	SourceQualifier string
+	Desc            bool
+}
+
 // Statement is the parsed output.
 //
 // ProjectedAlias preserves the qualifier token the user wrote for the
@@ -236,6 +246,7 @@ type Statement struct {
 	ProjectedAliasUnknown bool
 	ProjectionColumns     []ProjectionColumn
 	Aggregate             *AggregateProjection
+	OrderBy               *OrderByColumn
 	Join                  *JoinClause
 	Predicate             Predicate
 	Filters               []Filter
@@ -713,6 +724,11 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		stmt.Filters, _ = flattenAndFilters(stmt.Predicate)
 	}
+	orderBy, err := p.parseOrderBy(bindings)
+	if err != nil {
+		return Statement{}, err
+	}
+	stmt.OrderBy = orderBy
 	limit, invalidLimit, hasLimit, unsupportedLimit, err := p.parseLimit()
 	if err != nil {
 		return Statement{}, err
@@ -1056,12 +1072,75 @@ func (p *parser) parseWhere(bindings relationBindings) (Predicate, []Filter, err
 	}
 	if !p.peek().quoted && p.peek().kind == tokIdent {
 		kw := strings.ToUpper(p.peek().text)
-		if kw == "ORDER" || kw == "GROUP" || kw == "HAVING" || kw == "JOIN" {
+		if kw == "GROUP" || kw == "HAVING" || kw == "JOIN" {
 			return nil, nil, p.unsupported(fmt.Sprintf("%s not supported", kw))
 		}
 	}
 	filters, _ := flattenAndFilters(pred)
 	return pred, filters, nil
+}
+
+func (p *parser) parseOrderBy(bindings relationBindings) (*OrderByColumn, error) {
+	if !isKeywordToken(p.peek(), "ORDER") {
+		return nil, nil
+	}
+	p.advance()
+	if err := p.expectKeyword("BY"); err != nil {
+		return nil, err
+	}
+	ref, err := p.parseColumnRefForOrderBy(bindings)
+	if err != nil {
+		return nil, err
+	}
+	desc := false
+	if isKeywordToken(p.peek(), "ASC") {
+		p.advance()
+	} else if isKeywordToken(p.peek(), "DESC") {
+		p.advance()
+		desc = true
+	}
+	if p.peek().kind == tokComma {
+		return nil, p.unsupported("ORDER BY supports a single column")
+	}
+	return &OrderByColumn{
+		Table:           ref.Table,
+		Column:          ref.Column,
+		SourceQualifier: ref.Alias,
+		Desc:            desc,
+	}, nil
+}
+
+func (p *parser) parseColumnRefForOrderBy(bindings relationBindings) (ColumnRef, error) {
+	t := p.peek()
+	if !isIdentifierToken(t) {
+		return ColumnRef{}, p.unsupported(fmt.Sprintf("expected ORDER BY column name, got %q", t.text))
+	}
+	p.advance()
+	columnName := t.text
+	tableName := bindings.defaultTable
+	alias := ""
+	if p.peek().kind == tokDot {
+		qualifier := columnName
+		p.advance()
+		t = p.peek()
+		if !isIdentifierToken(t) {
+			return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
+		}
+		resolved, ok := resolveQualifier(qualifier, bindings.byQualifier)
+		if !ok {
+			resolved = qualifier
+		}
+		tableName = resolved
+		columnName = t.text
+		alias = qualifier
+		p.advance()
+		if p.peek().kind == tokDot {
+			return ColumnRef{}, p.unsupported("qualified column names not supported")
+		}
+	} else if bindings.requireQualify {
+		return ColumnRef{}, UnqualifiedNamesError{}
+	}
+	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
 }
 
 func (p *parser) parseLimit() (*uint64, *Literal, bool, bool, error) {

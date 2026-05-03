@@ -113,6 +113,27 @@ early or intentionally narrow:
 - public API stability should be expected to evolve while the hosted-runtime
   surface settles
 
+## Versioning
+
+Shunter's source version lives in `VERSION` and uses v-prefixed SemVer. The
+root package exposes that value through `shunter.CurrentBuildInfo()`, and the
+CLI reports it with:
+
+```bash
+rtk go run ./cmd/shunter --version
+rtk go run ./cmd/shunter version
+```
+
+Release builds can stamp exact build metadata without changing source files:
+
+```bash
+rtk go build -ldflags "-X github.com/ponchione/shunter.Version=v0.1.0 -X github.com/ponchione/shunter.Commit=<git-sha> -X github.com/ponchione/shunter.Date=<utc-rfc3339>" ./cmd/shunter
+```
+
+Use `vX.Y.Z` git tags for releases. `Module.Version(...)` is separate: it is
+application module metadata exported into `ModuleContract` artifacts, not the
+Shunter tool/runtime release version.
+
 ## Repository Guide
 
 For human orientation, start with:

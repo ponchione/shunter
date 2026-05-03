@@ -386,7 +386,7 @@ query_string: string    — SQL query per §7.1.1
 
 The executor runs a read-only query against `CommittedState.Snapshot()` directly. This read is not atomic with subscription registration because it does not register subscription state; it only returns a point-in-time result from committed state.
 
-Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset. Current query-only widenings include `LIMIT`, column projections, `COUNT(*) [AS] alias`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject cross-join `WHERE` before executor registration. Inner-join `WHERE` field-vs-field comparisons and broader cross-join boolean expressions are rejected at compile time.
+Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset. Current query-only widenings include `LIMIT`, column projections, `COUNT(*) [AS] alias`, single-column `ORDER BY` over a resolved projected-table column with optional `ASC` / `DESC`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject `ORDER BY` and cross-join `WHERE` before executor registration. Inner-join `WHERE` field-vs-field comparisons and broader cross-join boolean expressions are rejected at compile time.
 
 ---
 

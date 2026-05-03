@@ -621,6 +621,7 @@ func (e UnsupportedSelectError) Unwrap() error { return ErrUnsupportedSQL }
 //     `ident` without a following `.` (a bare identifier in ON scope)
 //   - `parseColumnRefForPredicate` / `parseComparisonPredicate` when a
 //     join WHERE comparison column is bare
+//   - `parseColumnRefForOrderBy` when a join ORDER BY column is bare
 //
 // Unwrap()s to ErrUnsupportedSQL so callers that classify by sentinel
 // still match.

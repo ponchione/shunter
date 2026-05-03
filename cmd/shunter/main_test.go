@@ -23,6 +23,54 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	assertContains(t, out, "No dynamic module loading")
 }
 
+func TestVersionCommandPrintsBuildInfo(t *testing.T) {
+	oldVersion := shunter.Version
+	oldCommit := shunter.Commit
+	oldDate := shunter.Date
+	shunter.Version = "v9.8.7"
+	shunter.Commit = "abc123"
+	shunter.Date = "2026-05-03T12:34:56Z"
+	defer func() {
+		shunter.Version = oldVersion
+		shunter.Commit = oldCommit
+		shunter.Date = oldDate
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{"version"})
+	if code != 0 {
+		t.Fatalf("run version exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("version stderr = %s, want empty", stderr.String())
+	}
+	out := stdout.String()
+	assertContains(t, out, "shunter v9.8.7\n")
+	assertContains(t, out, "commit abc123\n")
+	assertContains(t, out, "date 2026-05-03T12:34:56Z\n")
+	assertContains(t, out, "go ")
+}
+
+func TestVersionFlagPrintsBuildInfo(t *testing.T) {
+	oldVersion := shunter.Version
+	shunter.Version = "v9.8.7"
+	defer func() {
+		shunter.Version = oldVersion
+	}()
+
+	for _, arg := range []string{"--version", "-version"} {
+		var stdout, stderr bytes.Buffer
+		code := run(&stdout, &stderr, []string{arg})
+		if code != 0 {
+			t.Fatalf("run %s exit code = %d, stderr = %s", arg, code, stderr.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("%s stderr = %s, want empty", arg, stderr.String())
+		}
+		assertContains(t, stdout.String(), "shunter v9.8.7\n")
+	}
+}
+
 func TestContractDiffCommandReadsJSONFiles(t *testing.T) {
 	dir := t.TempDir()
 	previousPath := writeCLIContract(t, dir, "previous.json", cliContractFixture())

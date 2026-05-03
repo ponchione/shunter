@@ -76,6 +76,35 @@ func TestVisibilityExpansionRawOneOffReturnsOnlyCallerVisibleRows(t *testing.T) 
 	})
 }
 
+func TestVisibilityExpansionRawOneOffOrderByAppliesAfterVisibility(t *testing.T) {
+	alice := visibilityIdentity(0x10)
+	bob := visibilityIdentity(0x11)
+	conn := testConnDirect(nil)
+	conn.AllowAllPermissions = false
+	conn.Identity = alice
+	sl, ts := visibilityMessagesSchema()
+
+	handleOneOffQueryWithVisibility(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte("visible-ordered-one-off"),
+		QueryString: "SELECT * FROM messages ORDER BY id DESC LIMIT 1",
+	}, &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(9), types.NewString(bob.Hex()), types.NewUint64(1)},
+			{types.NewUint64(2), types.NewString(alice.Hex()), types.NewUint64(1)},
+			{types.NewUint64(3), types.NewString(alice.Hex()), types.NewUint64(2)},
+		},
+	}}}, sl, ownerVisibilityFilters("SELECT * FROM messages WHERE owner = :sender"))
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("one-off visibility error = %q", *result.Error)
+	}
+	rows := decodeRows(t, firstTableRows(result), ts)
+	assertProductRowsEqual(t, rows, []types.ProductValue{
+		{types.NewUint64(3), types.NewString(alice.Hex()), types.NewUint64(2)},
+	})
+}
+
 func TestVisibilityExpansionRawSubscriptionInitialAndDeltasAreCallerVisible(t *testing.T) {
 	alice := visibilityIdentity(0x0c)
 	bob := visibilityIdentity(0x0d)

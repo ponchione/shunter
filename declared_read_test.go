@@ -165,6 +165,51 @@ func TestCallQueryOverPrivateBaseTableUsesDeclarationPermission(t *testing.T) {
 	}
 }
 
+func TestDeclaredQueryOrderByDescLimit(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		Query(QueryDeclaration{
+			Name:        "recent_messages",
+			SQL:         "SELECT * FROM messages ORDER BY body DESC LIMIT 2",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessage(t, rt, "bravo")
+	insertMessage(t, rt, "alpha")
+	insertMessage(t, rt, "charlie")
+
+	result, err := rt.CallQuery(context.Background(), "recent_messages", WithDeclaredReadPermissions("messages:read"))
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if result.Name != "recent_messages" || result.TableName != "messages" {
+		t.Fatalf("result identity = (%q, %q), want recent_messages/messages", result.Name, result.TableName)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("rows = %#v, want two ordered rows", result.Rows)
+	}
+	if result.Rows[0][1].AsString() != "charlie" || result.Rows[1][1].AsString() != "bravo" {
+		t.Fatalf("rows = %#v, want body order charlie, bravo", result.Rows)
+	}
+}
+
+func TestDeclaredViewRejectsOrderBy(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT * FROM messages ORDER BY body",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want ORDER BY rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages ORDER BY body") {
+		t.Fatalf("Build error = %v, want ORDER BY unsupported text", err)
+	}
+}
+
 func TestSubscribeViewOverPrivateBaseTableUsesDeclarationPermission(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
@@ -372,6 +417,7 @@ func TestRawSQLEquivalentDoesNotInheritDeclarationPermission(t *testing.T) {
 	err := protocol.ValidateSQLQueryString("SELECT * FROM messages", rawLookup, protocol.SQLQueryValidationOptions{
 		AllowLimit:      true,
 		AllowProjection: true,
+		AllowOrderBy:    true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "no such table: `messages`. If the table exists, it may be marked private.") {
 		t.Fatalf("raw SQL validation error = %v, want private table rejection", err)

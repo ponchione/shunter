@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/codegen"
 	"github.com/ponchione/shunter/contractdiff"
 	"github.com/ponchione/shunter/contractworkflow"
@@ -21,8 +22,15 @@ func run(stdout, stderr io.Writer, args []string) int {
 		printRootHelp(stdout)
 		return 0
 	}
+	if isVersionArg(args[0]) {
+		printVersion(stdout)
+		return 0
+	}
 
 	switch args[0] {
+	case "version":
+		printVersion(stdout)
+		return 0
 	case "contract":
 		return runContract(stdout, stderr, args[1:])
 	default:
@@ -271,10 +279,32 @@ func isHelpArg(arg string) bool {
 	return arg == "-h" || arg == "--help" || arg == "help"
 }
 
+func isVersionArg(arg string) bool {
+	return arg == "-version" || arg == "--version"
+}
+
+func printVersion(w io.Writer) {
+	info := shunter.CurrentBuildInfo()
+	fmt.Fprintf(w, "shunter %s\n", info.Version)
+	if info.Commit != "" {
+		fmt.Fprintf(w, "commit %s\n", info.Commit)
+	}
+	if info.Date != "" {
+		fmt.Fprintf(w, "date %s\n", info.Date)
+	}
+	if info.Dirty {
+		fmt.Fprintln(w, "dirty true")
+	}
+	if info.GoVersion != "" {
+		fmt.Fprintf(w, "go %s\n", info.GoVersion)
+	}
+}
+
 func printRootHelp(w io.Writer) {
 	fmt.Fprint(w, `Shunter contract artifact workflows.
 
 Usage:
+  shunter version
   shunter contract diff --previous old.json --current current.json [--format text|json]
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]

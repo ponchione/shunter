@@ -25,6 +25,25 @@ when you are editing that document.
 - Keep `reference/SpacetimeDB/` read-only and research-only; never copy source from it.
 - Do not add speculative scaffolding or repo structure early.
 
+## Versioning Standard
+
+- Shunter's repo/tool/runtime version lives in `VERSION` and uses v-prefixed
+  SemVer, such as `v0.1.0-dev` during development and `v0.1.0` for a release.
+- Use `vX.Y.Z` git tags for released versions. Keep normal development on a
+  `-dev` version unless the task is explicitly cutting a release.
+- Stamp release binaries with linker variables rather than editing generated
+  build metadata:
+  - `github.com/ponchione/shunter.Version`
+  - `github.com/ponchione/shunter.Commit`
+  - `github.com/ponchione/shunter.Date`
+- The root `shunter.CurrentBuildInfo()` API and `shunter version` CLI output
+  are the supported places to expose Shunter build metadata.
+- Do not confuse Shunter's release version with application module versions:
+  `Module.Version(...)` is app-owned metadata exported into `ModuleContract`
+  artifacts, not the Shunter runtime/tool version.
+- Update `CHANGELOG.md` when changing release-facing behavior or preparing a
+  release.
+
 ## Go Workflow
 
 - When working in Go code, prefer Go-native tooling over generic text search.

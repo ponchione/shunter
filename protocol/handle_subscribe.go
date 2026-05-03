@@ -17,6 +17,7 @@ type compiledSQLQuery struct {
 	UsesCallerIdentity bool
 	ProjectionColumns  []compiledSQLProjectionColumn
 	Aggregate          *compiledSQLAggregate
+	OrderBy            *compiledSQLOrderBy
 	Limit              *uint64
 }
 
@@ -29,6 +30,11 @@ type compiledSQLProjectionColumn struct {
 type compiledSQLAggregate struct {
 	Func         string
 	ResultColumn schema.ColumnSchema
+}
+
+type compiledSQLOrderBy struct {
+	Column compiledSQLProjectionColumn
+	Desc   bool
 }
 
 // VisibilityFilter is validated row-level visibility metadata supplied by the
@@ -102,6 +108,10 @@ func copyCompiledSQLQuery(query compiledSQLQuery) compiledSQLQuery {
 		aggregate := *query.Aggregate
 		out.Aggregate = &aggregate
 	}
+	if query.OrderBy != nil {
+		orderBy := *query.OrderBy
+		out.OrderBy = &orderBy
+	}
 	if query.Limit != nil {
 		limit := *query.Limit
 		out.Limit = &limit
@@ -114,6 +124,7 @@ func copyCompiledSQLQuery(query compiledSQLQuery) compiledSQLQuery {
 type SQLQueryValidationOptions struct {
 	AllowLimit      bool
 	AllowProjection bool
+	AllowOrderBy    bool
 }
 
 type relationSchema struct {
@@ -289,7 +300,7 @@ func CompileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, o
 	if sl == nil {
 		return CompiledSQLQuery{}, fmt.Errorf("schema lookup must not be nil")
 	}
-	compiled, err := compileSQLQueryString(qs, sl, caller, opts.AllowLimit, opts.AllowProjection)
+	compiled, err := compileSQLQueryString(qs, sl, caller, opts.AllowLimit, opts.AllowProjection, opts.AllowOrderBy)
 	if err != nil {
 		return CompiledSQLQuery{}, err
 	}
@@ -440,7 +451,7 @@ func orSubscriptionPredicates(left, right subscription.Predicate) subscription.P
 	}
 }
 
-func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool) (compiledSQLQuery, error) {
+func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool, allowOrderBy bool) (compiledSQLQuery, error) {
 	stmt, err := sql.Parse(qs)
 	if err != nil {
 		// Reference compile-stage typed errors (DuplicateName for join
@@ -481,6 +492,9 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
 	}
 	if stmt.UnsupportedLimit {
+		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
+	}
+	if !allowOrderBy && stmt.OrderBy != nil {
 		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
 	}
 	if !allowLimit && stmt.HasLimit {
@@ -646,6 +660,13 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 		}
+		orderBy, err := compileJoinOrderBy(stmt.OrderBy, stmt, relations, projectedID, aliasTag, leftID == rightID)
+		if err != nil {
+			return compiledSQLQuery{}, err
+		}
+		if stmt.OrderBy != nil && stmt.Aggregate != nil {
+			return compiledSQLQuery{}, fmt.Errorf("ORDER BY is not supported with aggregate projections")
+		}
 		limit, err := compileStatementLimit(stmt, qs)
 		if err != nil {
 			return compiledSQLQuery{}, err
@@ -659,7 +680,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				if err != nil {
 					return compiledSQLQuery{}, err
 				}
-				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: limit}, nil
+				return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: join, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit}, nil
 			}
 			cross := subscription.CrossJoin{Left: leftID, Right: rightID}
 			if leftID == rightID {
@@ -667,10 +688,10 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 				cross.RightAlias = 1
 			}
 			cross.ProjectRight = joinProjectsRight(stmt, leftID == rightID)
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: limit}, nil
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: cross, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit}, nil
 		}
 		if _, ok := normalizedPredicate.(sql.FalsePredicate); ok {
-			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: limit}, nil
+			return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: subscription.NoRows{Table: projectedID}, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit}, nil
 		}
 		var filter subscription.Predicate
 		if stmt.Join.HasOn && normalizedPredicate != nil {
@@ -700,6 +721,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			UsesCallerIdentity: usesCallerIdentity,
 			ProjectionColumns:  projectionColumns,
 			Aggregate:          aggregate,
+			OrderBy:            orderBy,
 			Limit:              limit,
 		}, nil
 	}
@@ -745,11 +767,18 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
+	orderBy, err := compileSingleRelationOrderBy(stmt.OrderBy, stmt.ProjectedTable, stmt.TableAlias, projectedID, ts)
+	if err != nil {
+		return compiledSQLQuery{}, err
+	}
+	if stmt.OrderBy != nil && stmt.Aggregate != nil {
+		return compiledSQLQuery{}, fmt.Errorf("ORDER BY is not supported with aggregate projections")
+	}
 	limit, err := compileStatementLimit(stmt, qs)
 	if err != nil {
 		return compiledSQLQuery{}, err
 	}
-	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, Limit: limit}, nil
+	return compiledSQLQuery{TableName: stmt.ProjectedTable, Predicate: pred, UsesCallerIdentity: usesCallerIdentity, ProjectionColumns: projectionColumns, Aggregate: aggregate, OrderBy: orderBy, Limit: limit}, nil
 }
 
 func aliasTagForJoin(stmt sql.Statement, selfJoin bool) func(string) uint8 {
@@ -1122,6 +1151,51 @@ func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, t
 		compiledCol.Name = col.OutputAlias
 	}
 	return compiledSQLProjectionColumn{Schema: compiledCol, Table: tableID, Alias: alias}, nil
+}
+
+func compileSingleRelationOrderBy(orderBy *sql.OrderByColumn, projectedTable string, tableAlias string, tableID schema.TableID, ts *schema.TableSchema) (*compiledSQLOrderBy, error) {
+	if orderBy == nil {
+		return nil, nil
+	}
+	if orderBy.SourceQualifier != "" && orderBy.SourceQualifier != tableAlias {
+		return nil, sql.UnresolvedVarError{Name: orderBy.SourceQualifier}
+	}
+	if orderBy.SourceQualifier == "" && orderBy.Table != projectedTable {
+		return nil, sql.UnresolvedVarError{Name: orderBy.Table}
+	}
+	col, ok := lookupSQLColumnExact(ts, orderBy.Column)
+	if !ok {
+		return nil, sql.UnresolvedVarError{Name: orderBy.Column}
+	}
+	return &compiledSQLOrderBy{
+		Column: compiledSQLProjectionColumn{Schema: *col, Table: tableID, Alias: 0},
+		Desc:   orderBy.Desc,
+	}, nil
+}
+
+func compileJoinOrderBy(orderBy *sql.OrderByColumn, stmt sql.Statement, relations map[string]relationSchema, projectedID schema.TableID, aliasTag func(string) uint8, selfJoin bool) (*compiledSQLOrderBy, error) {
+	if orderBy == nil {
+		return nil, nil
+	}
+	qualifier := orderBy.SourceQualifier
+	if qualifier == "" {
+		qualifier = orderBy.Table
+	}
+	rel, ok := relations[qualifier]
+	if !ok {
+		return nil, sql.UnresolvedVarError{Name: qualifier}
+	}
+	if rel.id != projectedID || (selfJoin && aliasTag(qualifier) != aliasTag(stmt.ProjectedAlias)) {
+		return nil, fmt.Errorf("ORDER BY only supports columns from the projected table")
+	}
+	col, ok := lookupSQLColumnExact(rel.ts, orderBy.Column)
+	if !ok {
+		return nil, sql.UnresolvedVarError{Name: orderBy.Column}
+	}
+	return &compiledSQLOrderBy{
+		Column: compiledSQLProjectionColumn{Schema: *col, Table: rel.id, Alias: aliasTag(qualifier)},
+		Desc:   orderBy.Desc,
+	}, nil
 }
 
 // isArrayKind reports whether a column kind is an array/product kind that

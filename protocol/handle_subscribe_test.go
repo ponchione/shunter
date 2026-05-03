@@ -3508,6 +3508,36 @@ func TestHandleSubscribeSingle_ShunterLimitClauseRejected(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_OrderByRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT * FROM t ORDER BY u32 DESC"
+	msg := &SubscribeSingleMsg{
+		RequestID:   102,
+		QueryID:     103,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 103, "QueryID")
+	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when ORDER BY appears on a subscription")
+	}
+}
+
 // TestHandleSubscribeSingle_ShunterLimitPrecedesSetQuantifierRejectText pins
 // reference `SubParser::parse_query` ordering: subscription LIMIT rejection
 // fires before `parse_select` can route SELECT ALL / DISTINCT to the
@@ -4685,9 +4715,9 @@ func TestHandleSubscribeSingle_ShunterSqlUnsupportedWildcardWithBareColumnsRejec
 // pins the reference parse_sql rejection at
 // reference/SpacetimeDB/crates/sql-parser/src/parser/sql.rs lines 411-436
 // (`select * from t order by a limit b` / "Limit expression") onto the
-// SubscribeSingle admission surface. The standalone ORDER BY clause already
-// trips Shunter's EOF guard at parseStatement (query/sql/parser.go:547-549)
-// with "unexpected token \"ORDER\"" before reaching the LIMIT identifier.
+// SubscribeSingle admission surface. ORDER BY now parses for one-off reads,
+// but the subscription compile gate still rejects the statement before
+// executor registration.
 func TestHandleSubscribeSingle_ShunterSqlUnsupportedOrderByWithLimitExpressionRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

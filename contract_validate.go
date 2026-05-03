@@ -131,6 +131,7 @@ func validateContractDeclarationSQL(schemaExport schema.SchemaExport, queries []
 		err := protocol.ValidateSQLQueryString(query.SQL, lookup, protocol.SQLQueryValidationOptions{
 			AllowLimit:      true,
 			AllowProjection: true,
+			AllowOrderBy:    true,
 		})
 		if err != nil {
 			*errs = append(*errs, fmt.Errorf("queries.%s.sql invalid: %v", query.Name, err))

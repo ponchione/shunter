@@ -1338,6 +1338,62 @@ func TestParseSelectAllWithLimit(t *testing.T) {
 	}
 }
 
+func TestParseSelectAllWithOrderByAndLimit(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users WHERE active = TRUE ORDER BY name DESC LIMIT 5")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.OrderBy == nil {
+		t.Fatal("OrderBy = nil, want name DESC")
+	}
+	if stmt.OrderBy.Table != "users" || stmt.OrderBy.Column != "name" || stmt.OrderBy.SourceQualifier != "" || !stmt.OrderBy.Desc {
+		t.Fatalf("OrderBy = %+v, want users.name DESC", *stmt.OrderBy)
+	}
+	if stmt.Limit == nil || *stmt.Limit != 5 {
+		t.Fatalf("Limit = %v, want 5", stmt.Limit)
+	}
+}
+
+func TestParseOrderByQualifiedAliasAsc(t *testing.T) {
+	stmt, err := Parse("SELECT item.* FROM users AS item ORDER BY item.id ASC")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.OrderBy == nil {
+		t.Fatal("OrderBy = nil, want item.id ASC")
+	}
+	if stmt.OrderBy.Table != "users" || stmt.OrderBy.Column != "id" || stmt.OrderBy.SourceQualifier != "item" || stmt.OrderBy.Desc {
+		t.Fatalf("OrderBy = %+v, want users.id qualified by item ASC", *stmt.OrderBy)
+	}
+}
+
+func TestParseJoinOrderByQualifiedProjectedTableColumn(t *testing.T) {
+	stmt, err := Parse("SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id ORDER BY o.id DESC")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.OrderBy == nil {
+		t.Fatal("OrderBy = nil, want o.id DESC")
+	}
+	if stmt.OrderBy.Table != "Orders" || stmt.OrderBy.Column != "id" || stmt.OrderBy.SourceQualifier != "o" || !stmt.OrderBy.Desc {
+		t.Fatalf("OrderBy = %+v, want Orders.id qualified by o DESC", *stmt.OrderBy)
+	}
+}
+
+func TestParseRejectsMultiColumnOrderBy(t *testing.T) {
+	_, err := Parse("SELECT * FROM users ORDER BY name, id")
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseRejectsUnqualifiedJoinOrderBy(t *testing.T) {
+	_, err := Parse("SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id ORDER BY id")
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
 func TestParseLimitUint64Boundary(t *testing.T) {
 	stmt, err := Parse("SELECT * FROM users LIMIT 18446744073709551615")
 	if err != nil {
@@ -1987,7 +2043,6 @@ func TestParseRejectsUnsupported(t *testing.T) {
 		{"aggregate_projection_with_group_by", "SELECT u32, COUNT(*) FROM t GROUP BY u32"},
 		{"aggregate_projection_with_group_by_alias", "SELECT COUNT(*) AS n FROM t GROUP BY u32"},
 		{"aggregate_multi_way_join", "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.id JOIN r ON s.id = r.id"},
-		{"order_by", "SELECT * FROM users ORDER BY id"},
 		{"trailing_garbage", "SELECT * FROM users foo bar"},
 		{"missing_from", "SELECT *"},
 		{"missing_table", "SELECT * FROM"},

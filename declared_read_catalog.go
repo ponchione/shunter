@@ -68,6 +68,7 @@ func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []de
 			Validation: protocol.SQLQueryValidationOptions{
 				AllowLimit:      true,
 				AllowProjection: true,
+				AllowOrderBy:    true,
 			},
 		})
 	}

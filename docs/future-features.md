@@ -107,7 +107,8 @@ Likely feature slices:
 - stronger parser/planner boundary
 - richer projections and aliases
 - multi-join support
-- `ORDER BY`
+- broader `ORDER BY` beyond the current one-off/declared-query
+  projected-table column slice
 - additional aggregates
 - `LIMIT` and possibly `OFFSET`
 - index-aware planning
@@ -178,4 +179,3 @@ Near-term work:
 
 Storage architecture changes should be driven by measured bottlenecks from
 Shunter workloads.
-

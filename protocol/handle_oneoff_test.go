@@ -304,6 +304,51 @@ func TestHandleOneOffQueryLimitZeroDoesNotScan(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQueryOrderByDescSortsBeforeLimitAndProjection(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "metrics",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "score", Type: schema.KindUint32},
+			{Index: 2, Name: "label", Type: schema.KindString},
+		},
+	}
+	projectedTS := &schema.TableSchema{
+		ID:   1,
+		Name: "metrics",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "label", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("metrics", 1, ts.Columns...)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewUint32(10), types.NewString("low")},
+			{types.NewUint32(2), types.NewUint32(30), types.NewString("high")},
+			{types.NewUint32(3), types.NewUint32(20), types.NewString("mid")},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x13},
+		QueryString: "SELECT id, label FROM metrics ORDER BY score DESC LIMIT 2",
+	}, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), projectedTS)
+	assertProductRowsEqual(t, pvs, []types.ProductValue{
+		{types.NewUint32(2), types.NewString("high")},
+		{types.NewUint32(3), types.NewString("mid")},
+	})
+}
+
 func TestHandleOneOffQueryCancelsDuringSnapshotScanAndClosesView(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("users", 1,
