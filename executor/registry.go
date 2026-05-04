@@ -53,6 +53,9 @@ func (rr *ReducerRegistry) Register(r RegisteredReducer) error {
 		}
 		return fmt.Errorf("executor: duplicate reducer %q", r.Name)
 	}
+	if rr.nextID == ^uint32(0) {
+		return ErrReducerIDExhausted
+	}
 
 	r.RequiredPermissions = append([]string(nil), r.RequiredPermissions...)
 	r.ID = rr.nextID

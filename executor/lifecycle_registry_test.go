@@ -1,6 +1,9 @@
 package executor
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestRegisterCachesLifecycleSlots(t *testing.T) {
 	rr := NewReducerRegistry()
@@ -23,5 +26,21 @@ func TestRegisterCachesLifecycleSlots(t *testing.T) {
 	}
 	if got, ok := rr.LookupLifecycle(LifecycleOnDisconnect); !ok || got.Name != "OnDisconnect" {
 		t.Fatalf("LookupLifecycle(OnDisconnect) = (%v, %v), want OnDisconnect", got, ok)
+	}
+}
+
+func TestRegisterRejectsReducerIDOverflowAtomically(t *testing.T) {
+	rr := NewReducerRegistry()
+	rr.nextID = ^uint32(0)
+
+	err := rr.Register(RegisteredReducer{Name: "overflow"})
+	if !errors.Is(err, ErrReducerIDExhausted) {
+		t.Fatalf("Register error = %v, want ErrReducerIDExhausted", err)
+	}
+	if got := rr.nextID; got != ^uint32(0) {
+		t.Fatalf("nextID = %d, want unchanged max uint32", got)
+	}
+	if _, ok := rr.Lookup("overflow"); ok {
+		t.Fatal("overflow reducer was registered")
 	}
 }
