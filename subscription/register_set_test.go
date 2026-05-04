@@ -185,6 +185,108 @@ func TestRegisterSetMultiMergesInitialSnapshot(t *testing.T) {
 	}
 }
 
+func TestRegisterSetTwoTablePredicateBootstrapsEachTable(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	req := SubscriptionSetRegisterRequest{
+		ConnID:  types.ConnectionID{1},
+		QueryID: 9,
+		Predicates: []Predicate{
+			And{
+				Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},
+				Right: ColEq{Table: 2, Column: 1, Value: types.NewInt32(1)},
+			},
+		},
+	}
+
+	res, err := mgr.RegisterSet(req, view)
+	if err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+	sids := mgr.querySets[req.ConnID][req.QueryID]
+	if len(sids) != 1 {
+		t.Fatalf("querySets ids = %v, want one internal subscription", sids)
+	}
+	if len(res.Update) != 2 {
+		t.Fatalf("initial update count = %d, want 2: %+v", len(res.Update), res.Update)
+	}
+	want := map[TableID]types.ProductValue{
+		1: {types.NewUint64(1), types.NewString("a")},
+		2: {types.NewUint64(10), types.NewInt32(1)},
+	}
+	for _, update := range res.Update {
+		if update.SubscriptionID != sids[0] {
+			t.Fatalf("SubscriptionID = %d, want %d", update.SubscriptionID, sids[0])
+		}
+		if update.QueryID != req.QueryID {
+			t.Fatalf("QueryID = %d, want %d", update.QueryID, req.QueryID)
+		}
+		wantRow, ok := want[update.TableID]
+		if !ok {
+			t.Fatalf("unexpected table %d in update %+v", update.TableID, update)
+		}
+		if len(update.Inserts) != 1 {
+			t.Fatalf("table %d inserts = %v, want one row", update.TableID, update.Inserts)
+		}
+		if !update.Inserts[0][0].Equal(wantRow[0]) || !update.Inserts[0][1].Equal(wantRow[1]) {
+			t.Fatalf("table %d initial row = %v, want %v", update.TableID, update.Inserts[0], wantRow)
+		}
+		delete(want, update.TableID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing initial updates for tables %v", want)
+	}
+}
+
+func TestUnregisterSetTwoTablePredicateFinalDeltaCoversEachTable(t *testing.T) {
+	mgr, view := newRegisterSetTestManagerWithRows(t)
+	connID := types.ConnectionID{1}
+	queryID := uint32(10)
+	req := SubscriptionSetRegisterRequest{
+		ConnID:  connID,
+		QueryID: queryID,
+		Predicates: []Predicate{
+			And{
+				Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},
+				Right: ColEq{Table: 2, Column: 1, Value: types.NewInt32(1)},
+			},
+		},
+	}
+	if _, err := mgr.RegisterSet(req, view); err != nil {
+		t.Fatalf("RegisterSet: %v", err)
+	}
+
+	res, err := mgr.UnregisterSet(connID, queryID, view)
+	if err != nil {
+		t.Fatalf("UnregisterSet: %v", err)
+	}
+	if len(res.Update) != 2 {
+		t.Fatalf("final update count = %d, want 2: %+v", len(res.Update), res.Update)
+	}
+	want := map[TableID]types.ProductValue{
+		1: {types.NewUint64(1), types.NewString("a")},
+		2: {types.NewUint64(10), types.NewInt32(1)},
+	}
+	for _, update := range res.Update {
+		wantRow, ok := want[update.TableID]
+		if !ok {
+			t.Fatalf("unexpected table %d in update %+v", update.TableID, update)
+		}
+		if len(update.Deletes) != 1 {
+			t.Fatalf("table %d deletes = %v, want one row", update.TableID, update.Deletes)
+		}
+		if len(update.Inserts) != 0 {
+			t.Fatalf("table %d inserts = %v, want none on final delta", update.TableID, update.Inserts)
+		}
+		if !update.Deletes[0][0].Equal(wantRow[0]) || !update.Deletes[0][1].Equal(wantRow[1]) {
+			t.Fatalf("table %d final row = %v, want %v", update.TableID, update.Deletes[0], wantRow)
+		}
+		delete(want, update.TableID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing final updates for tables %v", want)
+	}
+}
+
 func TestRegisterSetInitialQueryStopsOnContextCancel(t *testing.T) {
 	mgr, base := newRegisterSetTestManagerWithRows(t)
 	ctx, cancel := context.WithCancel(context.Background())

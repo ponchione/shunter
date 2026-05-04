@@ -26,6 +26,38 @@ func (m *Manager) dropSub(connID types.ConnectionID, subID types.SubscriptionID)
 	}
 }
 
+type initialRowCollector struct {
+	ctx   context.Context
+	limit int
+	count int
+}
+
+func newInitialRowCollector(ctx context.Context, limit int) *initialRowCollector {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &initialRowCollector{ctx: ctx, limit: limit}
+}
+
+func (c *initialRowCollector) err() error {
+	if c == nil || c.ctx == nil {
+		return nil
+	}
+	return c.ctx.Err()
+}
+
+func (c *initialRowCollector) add(out *[]types.ProductValue, row types.ProductValue) error {
+	if err := c.err(); err != nil {
+		return err
+	}
+	if c.limit > 0 && c.count >= c.limit {
+		return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, c.limit)
+	}
+	*out = append(*out, row)
+	c.count++
+	return nil
+}
+
 // initialQuery scans committed state and returns rows matching the
 // predicate. Single-table predicates use a filtered table scan. Join
 // predicates re-evaluate the full join against committed state and project
@@ -41,16 +73,6 @@ func (m *Manager) initialQuery(ctx context.Context, pred Predicate, view store.C
 		return nil, err
 	}
 	var out []types.ProductValue
-	add := func(row types.ProductValue) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if m.InitialRowLimit > 0 && len(out) >= m.InitialRowLimit {
-			return fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
-		}
-		out = append(out, row)
-		return nil
-	}
 
 	switch p := pred.(type) {
 	case Join:
@@ -70,35 +92,94 @@ func (m *Manager) initialQuery(ctx context.Context, pred Predicate, view store.C
 		if len(tables) == 0 {
 			return nil, nil
 		}
-		t := tables[0]
-		// SPEC-001 §7.2 / SPEC-004: bare ColRange on an indexed column hits
-		// view.IndexRange directly; the BTree binary-search start + ordered
-		// range walk replaces the full TableScan + per-row bound recheck.
-		// Compound shapes (And/Or), ColEq/ColNe/AllRows, or ranges on an
-		// unindexed column stay on the TableScan+MatchRow fallback.
-		if r, ok := pred.(ColRange); ok && m.resolver != nil {
-			if idxID, ok := m.resolver.IndexIDForColumn(r.Table, r.Column); ok {
-				lower := store.Bound{Value: r.Lower.Value, Inclusive: r.Lower.Inclusive, Unbounded: r.Lower.Unbounded}
-				upper := store.Bound{Value: r.Upper.Value, Inclusive: r.Upper.Inclusive, Unbounded: r.Upper.Unbounded}
-				for _, row := range view.IndexRange(t, idxID, lower, upper) {
-					if err := ctx.Err(); err != nil {
-						return nil, err
-					}
-					if err := add(row); err != nil {
-						return nil, err
-					}
-				}
-				break
-			}
+		return m.initialRowsForTable(newInitialRowCollector(ctx, m.InitialRowLimit), pred, view, tables[0])
+	}
+	return out, nil
+}
+
+func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32) ([]SubscriptionUpdate, error) {
+	if view == nil {
+		return nil, nil
+	}
+	switch pred.(type) {
+	case Join, CrossJoin:
+		rows, err := m.initialQuery(ctx, pred, view)
+		if err != nil {
+			return nil, err
 		}
-		for _, row := range view.TableScan(t) {
-			if err := ctx.Err(); err != nil {
+		if len(rows) == 0 {
+			return nil, nil
+		}
+		tableID := emittedTableID(pred)
+		return []SubscriptionUpdate{{
+			SubscriptionID: subID,
+			QueryID:        queryID,
+			TableID:        tableID,
+			TableName:      m.schema.TableName(tableID),
+			Inserts:        rows,
+		}}, nil
+	default:
+		tables := pred.Tables()
+		if len(tables) == 0 {
+			return nil, nil
+		}
+		collector := newInitialRowCollector(ctx, m.InitialRowLimit)
+		if err := collector.err(); err != nil {
+			return nil, err
+		}
+		updates := make([]SubscriptionUpdate, 0, len(tables))
+		for _, tableID := range tables {
+			rows, err := m.initialRowsForTable(collector, pred, view, tableID)
+			if err != nil {
 				return nil, err
 			}
-			if MatchRow(pred, t, row) {
-				if err := add(row); err != nil {
+			if len(rows) == 0 {
+				continue
+			}
+			updates = append(updates, SubscriptionUpdate{
+				SubscriptionID: subID,
+				QueryID:        queryID,
+				TableID:        tableID,
+				TableName:      m.schema.TableName(tableID),
+				Inserts:        rows,
+			})
+		}
+		return updates, nil
+	}
+}
+
+func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predicate, view store.CommittedReadView, table TableID) ([]types.ProductValue, error) {
+	if view == nil {
+		return nil, nil
+	}
+	if err := collector.err(); err != nil {
+		return nil, err
+	}
+	var out []types.ProductValue
+	// SPEC-001 §7.2 / SPEC-004: bare ColRange on an indexed column hits
+	// view.IndexRange directly; the BTree binary-search start + ordered
+	// range walk replaces the full TableScan + per-row bound recheck.
+	// Compound shapes (And/Or), ColEq/ColNe/AllRows, or ranges on an
+	// unindexed column stay on the TableScan+MatchRow fallback.
+	if r, ok := pred.(ColRange); ok && r.Table == table && m.resolver != nil {
+		if idxID, ok := m.resolver.IndexIDForColumn(r.Table, r.Column); ok {
+			lower := store.Bound{Value: r.Lower.Value, Inclusive: r.Lower.Inclusive, Unbounded: r.Lower.Unbounded}
+			upper := store.Bound{Value: r.Upper.Value, Inclusive: r.Upper.Inclusive, Unbounded: r.Upper.Unbounded}
+			for _, row := range view.IndexRange(table, idxID, lower, upper) {
+				if err := collector.add(&out, row); err != nil {
 					return nil, err
 				}
+			}
+			return out, nil
+		}
+	}
+	for _, row := range view.TableScan(table) {
+		if err := collector.err(); err != nil {
+			return nil, err
+		}
+		if MatchRow(pred, table, row) {
+			if err := collector.add(&out, row); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -349,10 +430,10 @@ func (m *Manager) RegisterSet(
 		// snapshot but still allocates an internal subscription ID.
 		existing := m.registry.getQuery(hash)
 		sameConnReuse := existing != nil && len(existing.subscribers[req.ConnID]) > 0
-		var rows []types.ProductValue
+		var initial []SubscriptionUpdate
 		if !sameConnReuse {
 			var err error
-			rows, err = m.initialQuery(ctx, p, view)
+			initial, err = m.initialUpdates(ctx, p, view, subID, req.QueryID)
 			if err != nil {
 				// Unwind any partial state. dropSub handles registry maps + PruningIndexes
 				// eviction on last-ref; each allocated sub is dropped independently.
@@ -377,16 +458,7 @@ func (m *Manager) RegisterSet(
 		m.registry.addSubscriber(hash, req.ConnID, subID, req.RequestID, req.QueryID)
 		allocated = append(allocated, subID)
 		_ = qs
-		if len(rows) > 0 {
-			tableID := emittedTableID(p)
-			updates = append(updates, SubscriptionUpdate{
-				SubscriptionID: subID,
-				QueryID:        req.QueryID,
-				TableID:        tableID,
-				TableName:      m.schema.TableName(tableID),
-				Inserts:        rows,
-			})
-		}
+		updates = append(updates, initial...)
 	}
 	if m.querySets[req.ConnID] == nil {
 		m.querySets[req.ConnID] = make(map[uint32][]types.SubscriptionID)
@@ -439,21 +511,16 @@ func (m *Manager) UnregisterSetContext(
 		if view == nil || evalErr != nil {
 			continue
 		}
-		rows, err := m.initialQuery(ctx, qs.predicate, view)
+		initial, err := m.initialUpdates(ctx, qs.predicate, view, sid, queryID)
 		if err != nil {
 			evalErr = fmt.Errorf("%w: %w", ErrFinalQuery, err)
 			evalSQL = qs.sqlText
 			continue
 		}
-		if len(rows) > 0 {
-			tableID := emittedTableID(qs.predicate)
-			deletes = append(deletes, SubscriptionUpdate{
-				SubscriptionID: sid,
-				QueryID:        queryID,
-				TableID:        tableID,
-				TableName:      m.schema.TableName(tableID),
-				Deletes:        rows,
-			})
+		for _, update := range initial {
+			update.Deletes = update.Inserts
+			update.Inserts = nil
+			deletes = append(deletes, update)
 		}
 	}
 	for _, sid := range sids {
