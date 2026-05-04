@@ -959,6 +959,8 @@ func (e *Executor) commitTransaction(tx *store.Transaction) (*store.Changeset, e
 	result := "ok"
 	if err != nil {
 		result = "error"
+	} else {
+		e.committed.RecordMemoryUsage()
 	}
 	e.recordStoreCommitDuration(result, time.Since(start))
 	return changeset, err

@@ -49,6 +49,7 @@ var expectedMetricFamilies = []shunter.MetricName{
 	shunter.MetricRecoverySkippedSnapshotsTotal,
 	shunter.MetricRecoveryReplayDurationSeconds,
 	shunter.MetricStoreCommitDurationSeconds,
+	shunter.MetricStoreMemoryBytes,
 	shunter.MetricStoreReadRowsTotal,
 }
 
@@ -81,6 +82,7 @@ var expectedMetricTypes = map[shunter.MetricName]string{
 	shunter.MetricRecoverySkippedSnapshotsTotal:   "COUNTER",
 	shunter.MetricRecoveryReplayDurationSeconds:   "HISTOGRAM",
 	shunter.MetricStoreCommitDurationSeconds:      "HISTOGRAM",
+	shunter.MetricStoreMemoryBytes:                "GAUGE",
 	shunter.MetricStoreReadRowsTotal:              "COUNTER",
 }
 
@@ -113,6 +115,7 @@ var expectedMetricLabels = map[shunter.MetricName][]string{
 	shunter.MetricRecoverySkippedSnapshotsTotal:   {"module", "runtime", "reason"},
 	shunter.MetricRecoveryReplayDurationSeconds:   {"module", "runtime", "result"},
 	shunter.MetricStoreCommitDurationSeconds:      {"module", "runtime", "result"},
+	shunter.MetricStoreMemoryBytes:                {"module", "runtime", "kind", "table", "index"},
 	shunter.MetricStoreReadRowsTotal:              {"module", "runtime", "kind"},
 }
 
@@ -242,7 +245,7 @@ func TestInvalidConstLabelNamesAreRejected(t *testing.T) {
 }
 
 func TestConstLabelsDuplicatingReservedShunterLabelsAreRejected(t *testing.T) {
-	for _, label := range []string{"module", "runtime", "component", "kind", "state", "result", "reason", "direction", "reducer"} {
+	for _, label := range []string{"module", "runtime", "component", "kind", "state", "result", "reason", "direction", "reducer", "table", "index"} {
 		t.Run(label, func(t *testing.T) {
 			adapter, err := New(Config{ConstLabels: client.Labels{label: "x"}})
 			if err == nil {
@@ -570,6 +573,9 @@ func sampleLabelsFor(name shunter.MetricName) shunter.MetricLabels {
 		labels.Result = "ok"
 	case shunter.MetricStoreCommitDurationSeconds:
 		labels.Result = "ok"
+	case shunter.MetricStoreMemoryBytes:
+		labels.Kind = "table_rows"
+		labels.Table = "players"
 	case shunter.MetricStoreReadRowsTotal:
 		labels.Kind = "table_scan"
 	}

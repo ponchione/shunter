@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -26,6 +27,10 @@ func TestSubsystemMetricsUseExactFamiliesAndLabels(t *testing.T) {
 	obs.RecordReducerCall("send_message", "committed")
 	obs.RecordReducerDuration("send_message", "committed", 3*time.Millisecond)
 	obs.RecordStoreCommitDuration("ok", 5*time.Millisecond)
+	obs.RecordStoreMemoryUsage([]store.MemoryUsage{
+		{Kind: store.StoreMemoryKindTableRows, TableName: "players", Bytes: 128},
+		{Kind: store.StoreMemoryKindIndex, TableName: "players", IndexName: "pk", Bytes: 64},
+	})
 	obs.RecordDurabilityQueueDepth(4)
 	obs.RecordDurabilityDurableTxID(types.TxID(9))
 	obs.LogDurabilityFailed(assertErr("disk"), "sync_failed", types.TxID(9))
@@ -44,6 +49,8 @@ func TestSubsystemMetricsUseExactFamiliesAndLabels(t *testing.T) {
 	metrics.requireCounter(t, MetricReducerCallsTotal, MetricLabels{Module: "chat", Runtime: "rt-a", Reducer: "send_message", Result: "committed"}, 1)
 	requireHistogram(t, metrics, MetricReducerDurationSeconds, MetricLabels{Module: "chat", Runtime: "rt-a", Reducer: "send_message", Result: "committed"})
 	requireHistogram(t, metrics, MetricStoreCommitDurationSeconds, MetricLabels{Module: "chat", Runtime: "rt-a", Result: "ok"})
+	metrics.requireGauge(t, MetricStoreMemoryBytes, MetricLabels{Module: "chat", Runtime: "rt-a", Kind: "table_rows", Table: "players"}, 128)
+	metrics.requireGauge(t, MetricStoreMemoryBytes, MetricLabels{Module: "chat", Runtime: "rt-a", Kind: "index", Table: "players", Index: "pk"}, 64)
 	metrics.requireGauge(t, MetricDurabilityQueueDepth, MetricLabels{Module: "chat", Runtime: "rt-a"}, 4)
 	metrics.requireGauge(t, MetricDurabilityDurableTxID, MetricLabels{Module: "chat", Runtime: "rt-a"}, 9)
 	metrics.requireCounter(t, MetricDurabilityFailuresTotal, MetricLabels{Module: "chat", Runtime: "rt-a", Reason: "sync_failed"}, 1)

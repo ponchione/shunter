@@ -263,6 +263,7 @@ const (
     MetricRecoverySkippedSnapshotsTotal   MetricName = "recovery_skipped_snapshots_total"
     MetricRecoveryReplayDurationSeconds   MetricName = "recovery_replay_duration_seconds"
     MetricStoreCommitDurationSeconds      MetricName = "store_commit_duration_seconds"
+    MetricStoreMemoryBytes                MetricName = "store_memory_bytes"
     MetricStoreReadRowsTotal              MetricName = "store_read_rows_total"
 )
 
@@ -276,6 +277,8 @@ type MetricLabels struct {
     Reason    string
     Direction string
     Reducer   string
+    Table     string
+    Index     string
 }
 
 type MetricsRecorder interface {
@@ -346,6 +349,7 @@ Duration histograms MUST use these bucket boundaries in seconds:
 | `shunter_recovery_skipped_snapshots_total` | Counter | `module`, `runtime`, `reason` | n/a | Skipped recovery snapshots. |
 | `shunter_recovery_replay_duration_seconds` | Histogram | `module`, `runtime`, `result` | default duration buckets | Time spent replaying commitlog records during recovery. |
 | `shunter_store_commit_duration_seconds` | Histogram | `module`, `runtime`, `result` | default duration buckets | Time spent applying store commits to committed state. |
+| `shunter_store_memory_bytes` | Gauge | `module`, `runtime`, `kind`, `table`, `index` | n/a | Approximate bytes held by store table rows and indexes. |
 | `shunter_store_read_rows_total` | Counter | `module`, `runtime`, `kind` | n/a | Rows matched or delivered by committed store read paths. |
 
 Allowed label values:
@@ -358,6 +362,7 @@ Allowed label values:
 | protocol `kind` | `subscribe_single`, `subscribe_multi`, `subscribe_declared_view`, `unsubscribe_single`, `unsubscribe_multi`, `call_reducer`, `one_off_query`, `declared_query`, `unknown` |
 | executor `kind` | `call_reducer`, `register_subscription_set`, `unregister_subscription_set`, `disconnect_client_subscriptions`, `on_connect`, `on_disconnect`, `scheduler_fire`, `unknown` |
 | store read `kind` | `table_scan`, `index_scan`, `index_seek`, `index_range`, `unknown` |
+| store memory `kind` | `table_rows`, `index`, `unknown` |
 | connection `result` | `accepted`, `rejected_not_ready`, `rejected_auth`, `rejected_upgrade`, `rejected_executor`, `rejected_internal` |
 | protocol message `result` | `ok`, `malformed`, `permission_denied`, `validation_error`, `executor_rejected`, `internal_error`, `connection_closed` |
 | executor command `result` | `ok`, `user_error`, `panic`, `internal_error`, `permission_denied`, `rejected`, `canceled` |
@@ -488,6 +493,9 @@ Store metrics:
 
 - `store_commit_duration_seconds` observes once per attempted committed-state
   mutation. Commit errors use `result="error"`.
+- `store_memory_bytes` is an approximate gauge emitted for table rows and
+  schema indexes when store memory metrics are enabled. `table` and `index`
+  values come from schema names; table-row samples use an empty `index` label.
 - `store_read_rows_total` increments by the number of rows matched or delivered
   through committed snapshot read paths. `kind="table_scan"` covers table
   iteration; `kind="index_scan"`, `kind="index_seek"`, and
@@ -553,7 +561,7 @@ MUST be a valid Prometheus metric-name prefix matching
 `Config.ConstLabels` MUST be copied by `New`. Const label names MUST be valid
 Prometheus label names and MUST NOT duplicate Shunter's reserved labels:
 `module`, `runtime`, `component`, `kind`, `state`, `result`, `reason`,
-`direction`, or `reducer`. Any duplicate or invalid const label name MUST make
+`direction`, `reducer`, `table`, or `index`. Any duplicate or invalid const label name MUST make
 `New` return an error.
 
 `New` MUST register all collectors exactly once with the chosen registerer. If

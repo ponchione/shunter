@@ -138,6 +138,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	}
 	observability.recordRecoveryCompleted(recoveryReport, time.Since(recoveryStart))
 	state.SetObserver(observability)
+	state.RecordMemoryUsage()
 
 	reducers, err := buildExecutorReducerRegistry(registry, mod.reducers)
 	if err != nil {

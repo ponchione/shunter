@@ -160,7 +160,6 @@ hardening work.
 Near-term work:
 
 - benchmark common reducer/query/subscription workloads
-- track memory by table and index
 - stress large tables, large rows, many clients, many subscriptions, and restart
   recovery
 - document backup/restore and compaction workflows

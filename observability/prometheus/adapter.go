@@ -262,6 +262,10 @@ func labelValues(labels shunter.MetricLabels, names []string) []string {
 			values = append(values, labels.Direction)
 		case "reducer":
 			values = append(values, labels.Reducer)
+		case "table":
+			values = append(values, labels.Table)
+		case "index":
+			values = append(values, labels.Index)
 		default:
 			values = append(values, "")
 		}
@@ -294,6 +298,8 @@ var reservedShunterLabels = map[string]bool{
 	"reason":    true,
 	"direction": true,
 	"reducer":   true,
+	"table":     true,
+	"index":     true,
 }
 
 var metricFamilies = []metricFamily{
@@ -464,6 +470,12 @@ var metricFamilies = []metricFamily{
 		kind:   metricKindHistogram,
 		labels: []string{"module", "runtime", "result"},
 		help:   "Time spent applying store commits to committed state.",
+	},
+	{
+		name:   shunter.MetricStoreMemoryBytes,
+		kind:   metricKindGauge,
+		labels: []string{"module", "runtime", "kind", "table", "index"},
+		help:   "Approximate bytes held by store table rows and indexes.",
 	},
 	{
 		name:   shunter.MetricStoreReadRowsTotal,

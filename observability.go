@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ponchione/shunter/commitlog"
+	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -137,6 +138,7 @@ const (
 	MetricRecoverySkippedSnapshotsTotal   MetricName = "recovery_skipped_snapshots_total"
 	MetricRecoveryReplayDurationSeconds   MetricName = "recovery_replay_duration_seconds"
 	MetricStoreCommitDurationSeconds      MetricName = "store_commit_duration_seconds"
+	MetricStoreMemoryBytes                MetricName = "store_memory_bytes"
 	MetricStoreReadRowsTotal              MetricName = "store_read_rows_total"
 )
 
@@ -152,6 +154,8 @@ type MetricLabels struct {
 	Reason    string
 	Direction string
 	Reducer   string
+	Table     string
+	Index     string
 }
 
 // MetricsRecorder receives Shunter metric observations.
@@ -697,6 +701,20 @@ func (o *runtimeObservability) RecordStoreCommitDuration(result string, duration
 	}, duration.Seconds())
 }
 
+func (o *runtimeObservability) StoreMemoryUsageEnabled() bool {
+	return o != nil && o.metrics != nil
+}
+
+func (o *runtimeObservability) RecordStoreMemoryUsage(usage []store.MemoryUsage) {
+	for _, item := range usage {
+		o.setGauge(MetricStoreMemoryBytes, MetricLabels{
+			Kind:  storeMemoryMetricKind(item.Kind),
+			Table: storeMemoryTableMetricLabel(item),
+			Index: storeMemoryIndexMetricLabel(item),
+		}, float64(item.Bytes))
+	}
+}
+
 func (o *runtimeObservability) TraceReducerCall(reducer, result string, err error) {
 	result = reducerMetricResult(result)
 	o.traceSpan(traceSpanReducerCall, "executor", safeTraceError(result, err),
@@ -799,6 +817,32 @@ func storeReadMetricKind(kind string) string {
 	default:
 		return "unknown"
 	}
+}
+
+func storeMemoryMetricKind(kind string) string {
+	switch kind {
+	case store.StoreMemoryKindTableRows, store.StoreMemoryKindIndex:
+		return kind
+	default:
+		return "unknown"
+	}
+}
+
+func storeMemoryTableMetricLabel(usage store.MemoryUsage) string {
+	if strings.TrimSpace(usage.TableName) != "" {
+		return usage.TableName
+	}
+	return fmt.Sprintf("id:%d", usage.TableID)
+}
+
+func storeMemoryIndexMetricLabel(usage store.MemoryUsage) string {
+	if usage.Kind != store.StoreMemoryKindIndex {
+		return ""
+	}
+	if strings.TrimSpace(usage.IndexName) != "" {
+		return usage.IndexName
+	}
+	return fmt.Sprintf("id:%d", usage.IndexID)
 }
 
 func recoverySkippedSnapshotMetricReason(reason commitlog.SnapshotSkipReason) string {
