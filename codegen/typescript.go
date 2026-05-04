@@ -67,10 +67,10 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type TableName = (typeof tables)[keyof typeof tables];\n\n")
 	writeTypeScriptTableReadPolicies(&b, contract.Schema.Tables, tableConstants)
 	writeTypeScriptVisibilityFilters(&b, contract.VisibilityFilters)
-	subscribeFunctionNames := make(map[string]int, len(contract.Schema.Tables)+len(contract.Views))
+	topLevelValueNames := typeScriptTopLevelValueNames()
 	for i, table := range contract.Schema.Tables {
 		rowType := tableTypes[i].identifier + "Row"
-		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, subscribeFunctionNames)
+		functionName := uniqueTypeScriptIdentifier("subscribe"+tableTypes[i].identifier, topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(subscribeTable: TableSubscriber<%s>): Promise<() => void> {\n", functionName, rowType)
 		fmt.Fprintf(&b, "  return subscribeTable(%s);\n", strconv.Quote(table.Name))
 		b.WriteString("}\n\n")
@@ -89,7 +89,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptConstMap(&b, "reducers", reducerIdentifiers)
 	b.WriteString("export type ReducerName = (typeof reducers)[keyof typeof reducers];\n\n")
 	for _, reducer := range reducerIdentifiers {
-		functionName := "call" + upperFirst(reducer.identifier)
+		functionName := uniqueTypeScriptIdentifier("call"+upperFirst(reducer.identifier), topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {\n", functionName)
 		fmt.Fprintf(&b, "  return callReducer(%s, args);\n", strconv.Quote(reducer.name))
 		b.WriteString("}\n\n")
@@ -109,7 +109,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptSQLConstMap(&b, "querySQL", executableQueries)
 	b.WriteString("export type ExecutableQueryName = keyof typeof querySQL;\n\n")
 	for _, query := range executableQueries {
-		functionName := "query" + upperFirst(query.identifier)
+		functionName := uniqueTypeScriptIdentifier("query"+upperFirst(query.identifier), topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {\n", functionName)
 		fmt.Fprintf(&b, "  return runDeclaredQuery(%s);\n", strconv.Quote(query.name))
 		b.WriteString("}\n\n")
@@ -126,7 +126,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptSQLConstMap(&b, "viewSQL", executableViews)
 	b.WriteString("export type ExecutableViewName = keyof typeof viewSQL;\n\n")
 	for _, view := range executableViews {
-		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), subscribeFunctionNames)
+		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {\n", functionName)
 		fmt.Fprintf(&b, "  return subscribeDeclaredView(%s);\n", strconv.Quote(view.name))
 		b.WriteString("}\n\n")
@@ -136,6 +136,28 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptReadModels(&b, contract.ReadModel.Declarations)
 
 	return b.Bytes(), nil
+}
+
+func typeScriptTopLevelValueNames() map[string]int {
+	names := []string{
+		"shunterProtocol",
+		"tables",
+		"tableReadPolicies",
+		"visibilityFilters",
+		"reducers",
+		"lifecycleReducers",
+		"queries",
+		"querySQL",
+		"views",
+		"viewSQL",
+		"permissions",
+		"readModels",
+	}
+	seen := make(map[string]int, len(names))
+	for _, name := range names {
+		seen[name] = 1
+	}
+	return seen
 }
 
 func writeTypeScriptProtocolMetadata(b *bytes.Buffer) error {

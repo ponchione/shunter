@@ -541,6 +541,35 @@ func TestTypeScriptGeneratorDisambiguatesReducerHelperNameCollisions(t *testing.
 	assertContains(t, ts, `return callReducer("send-message", args);`)
 }
 
+func TestTypeScriptGeneratorDisambiguatesTopLevelHelperNameCollisions(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Reducers = append(contract.Schema.Reducers, schema.ReducerExport{Name: "SendMessage"})
+	contract.Queries = append(contract.Queries,
+		shunter.QueryDescription{Name: "RecentMessages", SQL: "SELECT * FROM messages"},
+		shunter.QueryDescription{Name: "sQL", SQL: "SELECT * FROM messages"},
+	)
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return callReducer("send_message", args);`)
+	assertContains(t, ts, `export function callSendMessage2(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return callReducer("SendMessage", args);`)
+	assertContains(t, ts, `export function queryRecentMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("recent_messages");`)
+	assertContains(t, ts, `export function queryRecentMessages2(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("RecentMessages");`)
+	assertContains(t, ts, `sQL: "sQL",`)
+	assertContains(t, ts, `export const querySQL = {`)
+	assertContains(t, ts, `export function querySQL2(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("sQL");`)
+	assertNotContains(t, ts, `export function querySQL(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+}
+
 func TestTypeScriptGeneratorDisambiguatesLifecycleReducerIdentifiers(t *testing.T) {
 	contract := contractFixture()
 	contract.Schema.Reducers = append(contract.Schema.Reducers,
