@@ -28,7 +28,7 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		Tables: make(map[schema.TableID]*TableChangeset),
 	}
 
-	for tableID, dels := range txState.AllDeletes() {
+	for tableID, dels := range txState.allTableDeletes() {
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
@@ -43,7 +43,7 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		}
 	}
 
-	for tableID, ins := range txState.AllInserts() {
+	for tableID, ins := range txState.allTableInserts() {
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
@@ -53,7 +53,7 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 			if err := table.InsertRow(rowID, row); err != nil {
 				return nil, err
 			}
-			tc.Inserts = append(tc.Inserts, row)
+			tc.Inserts = append(tc.Inserts, row.Copy())
 		}
 	}
 
@@ -85,7 +85,7 @@ func ensureTableChangeset(cs *Changeset, id schema.TableID, tableName string) *T
 }
 
 func revalidateCommit(cs *CommittedState, txState *TxState) error {
-	for tableID, deletes := range txState.AllDeletes() {
+	for tableID, deletes := range txState.allTableDeletes() {
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
@@ -99,7 +99,7 @@ func revalidateCommit(cs *CommittedState, txState *TxState) error {
 
 	pendingUnique := make(map[txUniqueRef]map[uint64][]IndexKey)
 	pendingRows := make(map[schema.TableID]map[uint64][]types.ProductValue)
-	for tableID, inserts := range txState.AllInserts() {
+	for tableID, inserts := range txState.allTableInserts() {
 		table, ok := cs.tableLocked(tableID)
 		if !ok {
 			return fmt.Errorf("%w: %d", ErrTableNotFound, tableID)

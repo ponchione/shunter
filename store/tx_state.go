@@ -76,6 +76,14 @@ func (tx *TxState) tableInserts(tableID schema.TableID) map[types.RowID]types.Pr
 	return tx.inserts[tableID]
 }
 
+func (tx *TxState) allTableInserts() map[schema.TableID]map[types.RowID]types.ProductValue {
+	return tx.inserts
+}
+
+func (tx *TxState) allTableDeletes() map[schema.TableID]map[types.RowID]struct{} {
+	return tx.deletes
+}
+
 // Inserts returns all tx-local inserts for a table.
 func (tx *TxState) Inserts(tableID schema.TableID) map[types.RowID]types.ProductValue {
 	return copyInsertMap(tx.inserts[tableID])
