@@ -87,7 +87,7 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 		f.Close()
 		return nil, err
 	}
-	if info.Size() < want {
+	if info.Size() != want {
 		if err := f.Truncate(want); err != nil {
 			f.Close()
 			return nil, err

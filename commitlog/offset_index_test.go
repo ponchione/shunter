@@ -511,6 +511,71 @@ func TestOffsetIndexReopenRecoversNumEntries(t *testing.T) {
 	}
 }
 
+func TestOpenOffsetIndexMutShrinksOversizedFileToRequestedCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "00000000000000000001.idx")
+
+	idx, err := CreateOffsetIndex(path, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []OffsetIndexEntry{
+		{TxID: 1, ByteOffset: 100},
+		{TxID: 2, ByteOffset: 200},
+		{TxID: 3, ByteOffset: 300},
+		{TxID: 4, ByteOffset: 400},
+	} {
+		if err := idx.Append(e.TxID, e.ByteOffset); err != nil {
+			t.Fatalf("Append(%d): %v", e.TxID, err)
+		}
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenOffsetIndexMut(path, 2)
+	if err != nil {
+		t.Fatalf("OpenOffsetIndexMut with smaller cap: %v", err)
+	}
+	if got := reopened.NumEntries(); got != 2 {
+		t.Fatalf("NumEntries after shrink = %d, want 2", got)
+	}
+	if got := reopened.Cap(); got != 2 {
+		t.Fatalf("Cap after shrink = %d, want 2", got)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := int64(2 * OffsetIndexEntrySize); info.Size() != want {
+		t.Fatalf("index file size after shrink = %d, want %d", info.Size(), want)
+	}
+
+	ro, err := OpenOffsetIndex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	entries, err := ro.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].TxID != 1 || entries[1].TxID != 2 {
+		t.Fatalf("read-only entries after shrink = %+v, want txIDs [1 2]", entries)
+	}
+	gotKey, gotVal, err := ro.KeyLookup(4)
+	if err != nil {
+		t.Fatalf("KeyLookup(4) after shrink: %v", err)
+	}
+	if gotKey != 2 || gotVal != 200 {
+		t.Fatalf("KeyLookup(4) after shrink = (%d,%d), want (2,200)", gotKey, gotVal)
+	}
+}
+
 // Pin 10. A partial trailing entry — key bytes zero, value bytes possibly
 // non-zero — must stop the scan and leave the valid prefix intact.
 func TestOffsetIndexPartialTailIsIgnored(t *testing.T) {
