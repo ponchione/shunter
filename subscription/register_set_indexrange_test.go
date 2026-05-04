@@ -74,6 +74,57 @@ func collectInserts(upd []SubscriptionUpdate) []types.ProductValue {
 	return out
 }
 
+func TestInitialJoinProjectedSideIndexAvoidsNestedTableScans(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewUint64(7)},
+			{types.NewUint64(2), types.NewUint64(7)},
+			{types.NewUint64(3), types.NewUint64(7)},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(7)},
+			{types.NewUint64(11), types.NewUint64(7)},
+		},
+	})
+	view := newCountingCommitted(inner)
+	mgr := NewManager(s, s)
+	pred := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1}
+
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	rows := collectInserts(res.Update)
+	wantRows := []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+		{types.NewUint64(3), types.NewUint64(7)},
+		{types.NewUint64(3), types.NewUint64(7)},
+	}
+	if len(rows) != len(wantRows) {
+		t.Fatalf("rows len = %d, want %d", len(rows), len(wantRows))
+	}
+	for i := range wantRows {
+		if !rows[i].Equal(wantRows[i]) {
+			t.Fatalf("rows[%d] = %v, want %v", i, rows[i], wantRows[i])
+		}
+	}
+	if view.indexSeekCalls != 2 {
+		t.Fatalf("IndexSeek calls = %d, want 2 (one per non-indexed side row)", view.indexSeekCalls)
+	}
+	if view.tableScanCalls != 2 {
+		t.Fatalf("TableScan calls = %d, want 2 (one scan per table, no nested fallback)", view.tableScanCalls)
+	}
+}
+
 // 1: Indexed ColRange uses IndexRange, not TableScan.
 func TestInitialQueryIndexedColRangeUsesIndexRange(t *testing.T) {
 	s := testSchema() // table 1 col 0 indexed

@@ -184,11 +184,15 @@ func joinDriveDelta(
 // preserved when an OR spans the left and right relation. Relation-instance
 // aliases still disambiguate self-join leaves.
 func tryJoinFilter(lrow types.ProductValue, ltable TableID, rrow types.ProductValue, rtable TableID, join *Join) types.ProductValue {
-	if join.Filter != nil && !MatchJoinPair(join.Filter, ltable, join.LeftAlias, lrow, rtable, join.RightAlias, rrow) {
+	if !joinPairMatches(lrow, ltable, rrow, rtable, join) {
 		return nil
 	}
 	joined := make(types.ProductValue, 0, len(lrow)+len(rrow))
 	joined = append(joined, lrow...)
 	joined = append(joined, rrow...)
 	return joined
+}
+
+func joinPairMatches(lrow types.ProductValue, ltable TableID, rrow types.ProductValue, rtable TableID, join *Join) bool {
+	return join.Filter == nil || MatchJoinPair(join.Filter, ltable, join.LeftAlias, lrow, rtable, join.RightAlias, rrow)
 }

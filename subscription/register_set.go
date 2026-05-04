@@ -273,10 +273,12 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 		projectedJoinCol, otherJoinCol = p.RightCol, p.LeftCol
 	}
 	otherIdx, hasOtherIdx := m.resolver.IndexIDForColumn(otherTable, otherJoinCol)
+	projectedIdx, hasProjectedIdx := m.resolver.IndexIDForColumn(projectedTable, projectedJoinCol)
 	if !hasOtherIdx {
-		if _, ok := m.resolver.IndexIDForColumn(projectedTable, projectedJoinCol); !ok {
+		if !hasProjectedIdx {
 			return nil, fmt.Errorf("%w: join=%d.%d=%d.%d", ErrJoinIndexUnresolved, p.Left, p.LeftCol, p.Right, p.RightCol)
 		}
+		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows)
 	}
 	add := func(row types.ProductValue) error {
 		if err := ctx.Err(); err != nil {
@@ -313,22 +315,61 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 					return nil, err
 				}
 			}
+		}
+	}
+	return out, nil
+}
+
+func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
+	ctx context.Context,
+	out []types.ProductValue,
+	view store.CommittedReadView,
+	p Join,
+	projectedTable TableID,
+	projectedJoinCol ColID,
+	projectedIdx IndexID,
+	otherTable TableID,
+	otherJoinCol ColID,
+	orientedRows func(types.ProductValue, types.ProductValue) (types.ProductValue, types.ProductValue),
+) ([]types.ProductValue, error) {
+	matchesByProjectedRow := make(map[types.RowID][]types.ProductValue)
+	pending := 0
+	for _, otherRow := range view.TableScan(otherTable) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if int(otherJoinCol) >= len(otherRow) {
 			continue
 		}
-		for _, otherRow := range view.TableScan(otherTable) {
+		key := store.NewIndexKey(otherRow[otherJoinCol])
+		for _, projectedRID := range view.IndexSeek(projectedTable, projectedIdx, key) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			if int(otherJoinCol) >= len(otherRow) || !projectedRow[projectedJoinCol].Equal(otherRow[otherJoinCol]) {
+			projectedRow, ok := view.GetRow(projectedTable, projectedRID)
+			if !ok || int(projectedJoinCol) >= len(projectedRow) {
 				continue
 			}
 			leftRow, rightRow := orientedRows(projectedRow, otherRow)
-			if tryJoinFilter(leftRow, p.Left, rightRow, p.Right, &p) == nil {
+			if !joinPairMatches(leftRow, p.Left, rightRow, p.Right, &p) {
 				continue
 			}
-			if err := add(projectedRow); err != nil {
-				return nil, err
+			if m.InitialRowLimit > 0 && len(out)+pending >= m.InitialRowLimit {
+				return nil, fmt.Errorf("%w: cap=%d", ErrInitialRowLimit, m.InitialRowLimit)
 			}
+			matchesByProjectedRow[projectedRID] = append(matchesByProjectedRow[projectedRID], projectedRow)
+			pending++
+		}
+	}
+	if pending == 0 {
+		return out, nil
+	}
+	for projectedRID := range view.TableScan(projectedTable) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		for _, projectedRow := range matchesByProjectedRow[projectedRID] {
+			out = append(out, projectedRow)
 		}
 	}
 	return out, nil
