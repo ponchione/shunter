@@ -61,17 +61,45 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 		}
 	}
 	if m.inbox != nil {
-		msg := FanOutMessage{
+		m.sendFanOut(FanOutMessage{
 			TxID:          txID,
 			TxDurable:     meta.TxDurable,
 			Fanout:        fanout,
 			Errors:        errs,
 			CallerConnID:  meta.CallerConnID,
 			CallerOutcome: meta.CallerOutcome,
+		})
+	}
+}
+
+func (m *Manager) sendFanOut(msg FanOutMessage) {
+	const retryDelay = time.Millisecond
+	for {
+		m.fanoutMu.Lock()
+		if m.fanoutClosed {
+			m.fanoutMu.Unlock()
+			return
 		}
 		select {
 		case m.inbox <- msg:
-		case <-m.fanoutClosed:
+			m.fanoutMu.Unlock()
+			return
+		default:
+		}
+		closed := m.fanoutClosedCh
+		m.fanoutMu.Unlock()
+
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-closed:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		case <-timer.C:
 		}
 	}
 }

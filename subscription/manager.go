@@ -97,7 +97,9 @@ type Manager struct {
 	activeSets      atomic.Int64
 	droppedTotal    atomic.Uint64
 	observer        Observer
-	fanoutClosed    chan struct{}
+	fanoutMu        sync.Mutex
+	fanoutClosed    bool
+	fanoutClosedCh  chan struct{}
 	fanoutCloseOnce sync.Once
 
 	// InitialRowLimit caps the initial-query row count returned to the
@@ -136,7 +138,7 @@ func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOpti
 		droppedPending: make(map[types.ConnectionID]struct{}),
 		activeColumns:  make(map[TableID]map[ColID]int),
 		querySets:      make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
-		fanoutClosed:   make(chan struct{}),
+		fanoutClosedCh: make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -156,7 +158,10 @@ func (m *Manager) CloseFanOut() {
 		return
 	}
 	m.fanoutCloseOnce.Do(func() {
-		close(m.fanoutClosed)
+		m.fanoutMu.Lock()
+		m.fanoutClosed = true
+		close(m.fanoutClosedCh)
+		m.fanoutMu.Unlock()
 	})
 }
 

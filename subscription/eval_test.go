@@ -50,6 +50,25 @@ func TestEvalAndBroadcastUnblocksWhenFanOutClosed(t *testing.T) {
 	}
 }
 
+func TestEvalAndBroadcastSkipsFanOutAfterClosedEvenWhenInboxReady(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{9}
+
+	mgr.CloseFanOut()
+	mgr.EvalAndBroadcast(types.TxID(1), nil, nil, PostCommitMeta{
+		CallerConnID:  &connID,
+		CallerOutcome: &CallerOutcome{Kind: CallerOutcomeCommitted},
+	})
+
+	select {
+	case msg := <-inbox:
+		t.Fatalf("EvalAndBroadcast sent after CloseFanOut: %+v", msg)
+	default:
+	}
+}
+
 func TestEvalCapturesCallerUpdatesFromFanoutEntry(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)
