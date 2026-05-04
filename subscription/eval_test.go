@@ -767,6 +767,62 @@ func TestEvalJoinSubscriptionRightInsertWhenOnlyRightJoinColumnIndexed(t *testin
 	}
 }
 
+func TestEvalJoinOppositeSideOrFilterCandidateThroughSecondBranch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString})
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindString,
+		3: types.KindString,
+	}, 1)
+
+	rhs := types.ProductValue{
+		types.NewUint64(100),
+		types.NewUint64(7),
+		types.NewString("blue"),
+		types.NewString("large"),
+	}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{2: {rhs}})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left:  ColEq{Table: 2, Column: 2, Value: types.NewString("red")},
+			Right: ColEq{Table: 2, Column: 3, Value: types.NewString("large")},
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 26, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+
+	lhs := types.ProductValue{types.NewUint64(7), types.NewString("lhs")}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "lhs",
+			Inserts:   []types.ProductValue{lhs},
+		},
+	}}
+	committed.addRow(1, 1, lhs)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Inserts) != 1 || !updates[0].Inserts[0].Equal(lhs) {
+		t.Fatalf("inserts = %v, want projected LHS row %v", updates[0].Inserts, lhs)
+	}
+	if len(updates[0].Deletes) != 0 {
+		t.Fatalf("deletes = %v, want none", updates[0].Deletes)
+	}
+}
+
 func TestEvalJoinSubscriptionProjectedLeftCancelsJoinedPairChurn(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)

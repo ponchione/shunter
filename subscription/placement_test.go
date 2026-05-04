@@ -78,6 +78,32 @@ func TestPlaceJoinWithFilterOnRHS(t *testing.T) {
 	}
 }
 
+func TestPlaceJoinWithOppositeSideOrFilterAddsEveryJoinEdge(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left:  ColEq{Table: 2, Column: 2, Value: types.NewString("red")},
+			Right: ColEq{Table: 2, Column: 3, Value: types.NewString("large")},
+		},
+	}
+	h := hashN(1)
+	PlaceSubscription(idx, p, h)
+
+	edges := idx.JoinEdge.EdgesForTable(1)
+	if len(edges) != 2 {
+		t.Fatalf("JoinEdgeIndex edges for LHS = %v, want 2", edges)
+	}
+	first := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	second := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 3}
+	if got := idx.JoinEdge.Lookup(first, types.NewString("red")); len(got) != 1 || got[0] != h {
+		t.Fatalf("first OR branch lookup = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinEdge.Lookup(second, types.NewString("large")); len(got) != 1 || got[0] != h {
+		t.Fatalf("second OR branch lookup = %v, want [%v]", got, h)
+	}
+}
+
 func TestPlaceJoinWithFilterOnLHSStillTracksRHSChangesViaJoinEdge(t *testing.T) {
 	idx := NewPruningIndexes()
 	p := Join{

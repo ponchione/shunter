@@ -66,8 +66,10 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 			continue
 		}
 		if join != nil {
-			if edge, val, ok := joinEdgeFor(pred, join, t); ok {
-				mutateJoinEdgePlacement(idx, edge, val, hash, add)
+			if placements := joinEdgesFor(pred, join, t); len(placements) > 0 {
+				for _, placement := range placements {
+					mutateJoinEdgePlacement(idx, placement.edge, placement.value, hash, add)
+				}
 				continue
 			}
 		}
@@ -248,10 +250,15 @@ func findJoin(pred Predicate) *Join {
 	return nil
 }
 
-// joinEdgeFor computes the JoinEdge and filter value for Tier 2 placement
-// for the given table. Returns ok=false when no filterable edge exists for
-// this table (callers then fall through to Tier 3).
-func joinEdgeFor(pred Predicate, join *Join, t TableID) (JoinEdge, Value, bool) {
+type joinEdgePlacement struct {
+	edge  JoinEdge
+	value Value
+}
+
+// joinEdgesFor computes the JoinEdge/filter-value placements for Tier 2 for the
+// given table. Returns nil when no filterable edge exists for this table
+// (callers then fall through to Tier 3).
+func joinEdgesFor(pred Predicate, join *Join, t TableID) []joinEdgePlacement {
 	var other TableID
 	var myJoinCol, otherJoinCol ColID
 	switch t {
@@ -264,18 +271,24 @@ func joinEdgeFor(pred Predicate, join *Join, t TableID) (JoinEdge, Value, bool) 
 		myJoinCol = join.RightCol
 		otherJoinCol = join.LeftCol
 	default:
-		return JoinEdge{}, Value{}, false
+		return nil
 	}
 	otherColEqs := findColEqs(pred, other)
 	if len(otherColEqs) == 0 {
-		return JoinEdge{}, Value{}, false
+		return nil
 	}
-	ce := otherColEqs[0]
-	return JoinEdge{
-		LHSTable:     t,
-		RHSTable:     other,
-		LHSJoinCol:   myJoinCol,
-		RHSJoinCol:   otherJoinCol,
-		RHSFilterCol: ce.Column,
-	}, ce.Value, true
+	placements := make([]joinEdgePlacement, 0, len(otherColEqs))
+	for _, ce := range otherColEqs {
+		placements = append(placements, joinEdgePlacement{
+			edge: JoinEdge{
+				LHSTable:     t,
+				RHSTable:     other,
+				LHSJoinCol:   myJoinCol,
+				RHSJoinCol:   otherJoinCol,
+				RHSFilterCol: ce.Column,
+			},
+			value: ce.Value,
+		})
+	}
+	return placements
 }
