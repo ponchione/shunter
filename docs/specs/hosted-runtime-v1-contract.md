@@ -156,6 +156,7 @@ Concrete intended surface:
 - `HTTPHandler()` for composition into a larger host app
 - `CallReducer(...)`
 - `Query(...)` and/or `ReadView()`
+- `CreateSnapshot()` / `CompactCommitLog(...)`
 - `ExportSchema()`
 
 The exact method names can still move slightly.

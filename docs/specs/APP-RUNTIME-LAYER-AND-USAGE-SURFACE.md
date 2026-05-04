@@ -338,6 +338,7 @@ A practical runtime handle may expose logical sub-surfaces such as:
 - `Host.ListenAndServe(...)` for multi-module hosts
 - `Runtime.DB()` or `Runtime.ReadView()`
 - `Runtime.CallReducer(...)`
+- `Runtime.CreateSnapshot()` / `Runtime.CompactCommitLog(...)`
 - `Runtime.ExportSchema()`
 - `Runtime.Close()`
 
@@ -619,6 +620,7 @@ Proposed v1 runtime surface:
 - `Host.ListenAndServe(...)` for the same lifecycle-owned serving behavior
   across multiple mounted runtimes
 - local reducer/query calls for tests, tools, and in-process integrations
+- operational snapshot and compaction helpers for app-owned maintenance flows
 - schema/module export/introspection hooks
 
 This is intentionally a hosted-runtime API, not a subsystem assembly guide.

@@ -63,7 +63,6 @@ Current generic CLI boundary:
 Useful future helpers:
 
 - backup/restore commands after storage semantics are explicit
-- snapshot/compaction commands after operational contracts are stable
 
 The generic `shunter` CLI should not pretend it can load arbitrary app modules
 unless Shunter gains a real module loading boundary.
@@ -143,7 +142,7 @@ Near-term work:
 - benchmark common reducer/query/subscription workloads
 - stress large tables, large rows, many clients, many subscriptions, and restart
   recovery
-- document backup/restore and compaction workflows
+- document backup/restore workflows
 - test storage faults around runtime startup and shutdown
 
 Storage architecture changes should be driven by measured bottlenecks from

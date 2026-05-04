@@ -177,6 +177,27 @@ if err := rt.ListenAndServe(ctx); err != nil && !errors.Is(err, context.Canceled
 `ListenAndServe` starts the runtime if needed, serves `Runtime.HTTPHandler()`,
 and closes runtime ownership when the context is canceled.
 
+## Snapshot And Compact
+
+Use `CreateSnapshot` when your process wants to write a full durable snapshot
+at the runtime's current committed transaction horizon. The call is
+synchronous and can block commits while state is serialized, so service
+processes should stop admitting writes first.
+
+```go
+snapshotTxID, err := rt.CreateSnapshot()
+if err != nil {
+	return err
+}
+if err := rt.CompactCommitLog(snapshotTxID); err != nil {
+	return err
+}
+```
+
+Use this flow for app-owned maintenance jobs or graceful shutdown hooks after
+traffic has been quiesced. `CompactCommitLog` only deletes sealed commit log
+segments that are fully covered by the completed snapshot TX ID you pass.
+
 ## Call Reducers Locally
 
 Use `CallReducer` when your process wants to invoke a reducer without going

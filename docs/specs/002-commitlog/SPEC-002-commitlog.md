@@ -464,6 +464,11 @@ v1 policy: the **recommended default is `SnapshotInterval = 0`** (no automatic i
 
 **Graceful-shutdown orchestration owner:** SPEC-002 exposes `CreateSnapshot` and `DurabilityHandle.Close` as the two shutdown-relevant calls, but the engine-level ordering — quiesce executor → flush in-flight commits to durable → final `CreateSnapshot` → `DurabilityHandle.Close` — is owned by SPEC-003. `CreateSnapshot` correctness is a SPEC-002 concern; sequencing it relative to executor lifecycle is not.
 
+**Root runtime wrapper:** `Runtime.CreateSnapshot()` is the app-facing wrapper
+around `SnapshotWriter.CreateSnapshot`. It returns the snapshot TX ID that was
+written and does not choose a trigger policy; applications still own write
+quiescence for graceful maintenance points.
+
 **Async snapshot path:** Deferred to v2. Requires explicit copy-on-write or epoch-based read-view semantics so commits can continue during serialization.
 
 ---
@@ -561,6 +566,9 @@ After a snapshot is successfully created at `snapshot_tx_id`:
 **Reader safety:** v1 does not support long-lived concurrent commitlog readers while the engine is online. Recovery is the only commitlog traversal path. Compaction therefore runs only after snapshot completion and only against sealed segments not currently opened by recovery.
 
 **Safety:** Do not delete segments until the snapshot is fully written and fsynced.
+
+The root runtime `CompactCommitLog(snapshot_tx_id)` wrapper MUST verify that
+`snapshot_tx_id` names a completed snapshot before invoking compaction.
 
 **Snapshot retention (deferred v1):** This spec defines no automatic snapshot retention policy. After a snapshot lands and compaction sweeps superseded segments, the snapshot directory itself is never deleted by the engine. Operators are expected to prune `snapshots/{tx_id}/` directories out-of-band. Consequence: with `SnapshotInterval > 0`, snapshot directories accumulate without bound, and each is a full copy (no object dedup in v1). Retention policy choice (count-based / age-based / size-based) remains an open question. Until then, leaving snapshots in place is the documented v1 behavior.
 

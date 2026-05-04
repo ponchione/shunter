@@ -19,7 +19,8 @@ The supported app-facing entrypoint is the root `shunter` package:
   settings, and serving behavior.
 - `Build` validates and constructs a runtime from a module definition.
 - `Runtime` owns lifecycle, local reads, reducer calls, declared reads,
-  contract/schema export, HTTP serving, and graceful shutdown.
+  contract/schema export, HTTP serving, snapshots, compaction, and graceful
+  shutdown.
 
 Shunter is not currently positioned as a production-ready database or managed
 service. It is best understood as an implementation-focused runtime project
@@ -90,6 +91,8 @@ Important public APIs include:
 - `Runtime.CallReducer`
 - `Runtime.CallQuery`
 - `Runtime.SubscribeView`
+- `Runtime.CreateSnapshot`
+- `Runtime.CompactCommitLog`
 - `Runtime.HTTPHandler`
 - `Runtime.ListenAndServe`
 - `Runtime.ExportSchema`
