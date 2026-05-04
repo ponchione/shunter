@@ -106,6 +106,11 @@ Behavior on unknown tags:
 - **Client → server:** the server MUST close the connection with a protocol error (`1002`) and log the offending tag. Silently ignoring an unknown request would leave the client hanging without a response.
 - **Server → client:** the client MUST treat an unknown tag as a protocol error for this protocol version and close or surface a fatal decode error. Forward compatibility for additive message types requires negotiating a newer protocol version, not silently skipping frames in v1.
 
+Tag `0` is reserved and never identifies a message. Tags `128`–`255` are
+reserved for future negotiated protocol versions; in v1 they are handled the
+same way as any other unknown tag. Server tag `7` is separately reserved in v1
+for the retired `ReducerCallResult` envelope (§6).
+
 ### 3.3 Compression
 
 Compression is **server → client only** in v1. Client → server messages are never compressed.
@@ -236,6 +241,8 @@ The server sends a WebSocket Ping frame every `PingInterval` (default: 15 second
 | 4 | OneOffQuery |
 | 5 | SubscribeMulti |
 | 6 | UnsubscribeMulti |
+| 7 | DeclaredQuery |
+| 8 | SubscribeDeclaredView |
 
 The `SubscribeSingle` / `UnsubscribeSingle` tags are the current v1 names for the former `Subscribe` / `Unsubscribe` byte values (1 and 2), which remain stable. `SubscribeMulti` / `UnsubscribeMulti` carry a query-set under one `query_id`. Canonical source is `protocol/tags.go`.
 
@@ -254,7 +261,12 @@ The `SubscribeSingle` / `UnsubscribeSingle` tags are the current v1 names for th
 | 9 | SubscribeMultiApplied |
 | 10 | UnsubscribeMultiApplied |
 
-Tag 7 is reserved and MUST NOT be reallocated. The current v1 outcome model removed the standalone `ReducerCallResult` envelope, merging the caller outcome into the heavy `TransactionUpdate` (tag 5) and adding `TransactionUpdateLight` (tag 8) for non-callers. Holding tag 7 reserved prevents silent re-allocation if a future contributor reintroduces a separate caller envelope. Canonical source is `protocol/tags.go`.
+Protocol-wide tag `0` and tags `128`–`255` are reserved and MUST remain fatal
+in v1. Unassigned low tags are also fatal in v1. New message families require a
+new negotiated subprotocol token unless the current protocol version explicitly
+documents the new tag before release.
+
+Server tag 7 is reserved and MUST NOT be reallocated. The current v1 outcome model removed the standalone `ReducerCallResult` envelope, merging the caller outcome into the heavy `TransactionUpdate` (tag 5) and adding `TransactionUpdateLight` (tag 8) for non-callers. Holding tag 7 reserved prevents silent re-allocation if a future contributor reintroduces a separate caller envelope. Canonical source is `protocol/tags.go`.
 
 ---
 

@@ -27,6 +27,9 @@ Current contract:
   unsupported-brotli protocol error until real Shunter clients need it.
 - Client and server protocol decoders reject trailing bytes after a valid
   message body.
+- Message tag `0` and tags `128`-`255` are reserved across v1. Server tag `7`
+  remains reserved for the retired `ReducerCallResult` envelope. Reserved and
+  unassigned tags are fatal in v1.
 - Energy accounting is not part of Shunter's product model. The protocol has no
   energy field, no out-of-energy status, and no quota/metering abstraction.
 - Message-family and envelope details are Shunter-specific unless the protocol
@@ -44,6 +47,7 @@ Authoritative pins:
 - `docs/specs/005-protocol/SPEC-005-protocol.md`
 - `protocol/version_test.go`
 - `protocol/golden_wire_test.go`
+- `protocol/tags_test.go`
 - `protocol/subprotocol_contract_test.go`
 - `protocol/compression_wire_test.go`
 - `protocol/close_codes_contract_test.go`
