@@ -281,6 +281,27 @@ func (e *Executor) rejectCommandOnShutdown(cmd ExecutorCommand) {
 	}
 }
 
+func (e *Executor) rejectCommandOnFatal(cmd ExecutorCommand) {
+	switch c := cmd.(type) {
+	case CallReducerCmd:
+		e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal}, nil)
+	case RegisterSubscriptionSetCmd:
+		if c.Reply != nil {
+			c.Reply(subscription.SubscriptionSetRegisterResult{}, ErrExecutorFatal)
+		}
+	case UnregisterSubscriptionSetCmd:
+		if c.Reply != nil {
+			c.Reply(subscription.SubscriptionSetUnregisterResult{}, ErrExecutorFatal)
+		}
+	case DisconnectClientSubscriptionsCmd:
+		sendErrorResponse(c.ResponseCh, ErrExecutorFatal)
+	case OnConnectCmd:
+		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, ErrExecutorFatal)
+	case OnDisconnectCmd:
+		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, ErrExecutorFatal)
+	}
+}
+
 // Submit sends a command to the executor inbox.
 func (e *Executor) Submit(cmd ExecutorCommand) error {
 	if e.fatal.Load() {
@@ -483,14 +504,7 @@ func (e *Executor) dispatch(cmd ExecutorCommand) string {
 	// the inbox when the executor latched into the fatal state. Submit
 	// catches the common case; this catch covers the race window.
 	if e.fatal.Load() || e.latchDurabilityFatal(0) != nil {
-		switch c := cmd.(type) {
-		case CallReducerCmd:
-			e.sendCallReducerResponse(c, ReducerResponse{Status: StatusFailedInternal, Error: ErrExecutorFatal}, nil)
-		case OnConnectCmd:
-			respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, ErrExecutorFatal)
-		case OnDisconnectCmd:
-			respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, ErrExecutorFatal)
-		}
+		e.rejectCommandOnFatal(cmd)
 		return "internal_error"
 	}
 	switch c := cmd.(type) {

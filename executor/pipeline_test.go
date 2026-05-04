@@ -940,6 +940,36 @@ func TestPostCommitInFlightCommandGetsFatalResponse(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	registerErr := make(chan error, 1)
+	if err := h.exec.Submit(RegisterSubscriptionSetCmd{
+		Request: subscription.SubscriptionSetRegisterRequest{
+			ConnID:     types.ConnectionID{1},
+			QueryID:    10,
+			Predicates: []subscription.Predicate{subscription.AllRows{Table: 0}},
+		},
+		Reply: func(_ subscription.SubscriptionSetRegisterResult, err error) {
+			registerErr <- err
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unregisterErr := make(chan error, 1)
+	if err := h.exec.Submit(UnregisterSubscriptionSetCmd{
+		ConnID:  types.ConnectionID{1},
+		QueryID: 10,
+		Reply: func(_ subscription.SubscriptionSetUnregisterResult, err error) {
+			unregisterErr <- err
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	disconnectErr := make(chan error, 1)
+	if err := h.exec.Submit(DisconnectClientSubscriptionsCmd{
+		ConnID:     types.ConnectionID{1},
+		ResponseCh: disconnectErr,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	go h.exec.Run(ctx)
 	select {
@@ -964,6 +994,21 @@ func TestPostCommitInFlightCommandGetsFatalResponse(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("ch2 timeout")
+	}
+	expectFatalError(t, "register", registerErr)
+	expectFatalError(t, "unregister", unregisterErr)
+	expectFatalError(t, "disconnect", disconnectErr)
+}
+
+func expectFatalError(t *testing.T, label string, ch <-chan error) {
+	t.Helper()
+	select {
+	case err := <-ch:
+		if !errors.Is(err, ErrExecutorFatal) {
+			t.Fatalf("%s err=%v, want ErrExecutorFatal", label, err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s timeout", label)
 	}
 }
 
