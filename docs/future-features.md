@@ -146,7 +146,7 @@ Near-term work:
 - keep reducer/query/subscription benchmarks current as workloads evolve
 - stress large tables, large rows, many clients, many subscriptions, and restart
   recovery
-- test storage faults around runtime startup and shutdown
+- extend storage fault coverage around runtime shutdown
 
 Storage architecture changes should be driven by measured bottlenecks from
 Shunter workloads.
