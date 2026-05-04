@@ -46,6 +46,12 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, err)
 		return "internal_error"
 	}
+	txID, err := e.nextCommitTxID()
+	if err != nil {
+		store.Rollback(tx)
+		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, err)
+		return "internal_error"
+	}
 	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {
@@ -53,8 +59,7 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("commit: %w", err))
 		return "internal_error"
 	}
-	txID := types.TxID(e.nextTxID)
-	e.nextTxID++
+	e.consumeCommitTxID()
 	changeset.TxID = txID
 	e.committed.SetCommittedTxID(txID)
 
@@ -93,6 +98,12 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, err)
 		return "internal_error"
 	}
+	txID, err := e.nextCommitTxID()
+	if err != nil {
+		store.Rollback(tx)
+		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, err)
+		return "internal_error"
+	}
 	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {
@@ -100,8 +111,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("commit: %w", err))
 		return "internal_error"
 	}
-	txID := types.TxID(e.nextTxID)
-	e.nextTxID++
+	e.consumeCommitTxID()
 	changeset.TxID = txID
 	e.committed.SetCommittedTxID(txID)
 
@@ -147,14 +157,18 @@ func (e *Executor) sweepDanglingClients(ctx context.Context) error {
 			store.Rollback(tx)
 			return fmt.Errorf("sweep sys_clients delete conn=%x: %w", t.conn[:], err)
 		}
+		txID, err := e.nextCommitTxID()
+		if err != nil {
+			store.Rollback(tx)
+			return err
+		}
 		tx.Seal()
 		changeset, err := store.Commit(e.committed, tx)
 		if err != nil {
 			store.Rollback(tx)
 			return fmt.Errorf("sweep commit conn=%x: %w", t.conn[:], err)
 		}
-		txID := types.TxID(e.nextTxID)
-		e.nextTxID++
+		e.consumeCommitTxID()
 		changeset.TxID = txID
 		e.committed.SetCommittedTxID(txID)
 		e.postCommit(txID, changeset, nil, CallReducerCmd{}, postCommitOptions{source: CallSourceLifecycle})

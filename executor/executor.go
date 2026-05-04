@@ -139,6 +139,17 @@ func NewExecutor(cfg ExecutorConfig, reg *ReducerRegistry, cs *store.CommittedSt
 	return e
 }
 
+func (e *Executor) nextCommitTxID() (types.TxID, error) {
+	if e.nextTxID == 0 {
+		return 0, ErrTxIDExhausted
+	}
+	return types.TxID(e.nextTxID), nil
+}
+
+func (e *Executor) consumeCommitTxID() {
+	e.nextTxID++
+}
+
 // Startup replays recovered scheduled work, sweeps dangling clients, and opens
 // external admission. Later calls return the first result.
 func (e *Executor) Startup(ctx context.Context, scheduler *Scheduler) error {
@@ -870,6 +881,17 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		}, nil)
 		return "internal_error"
 	}
+	txID, err := e.nextCommitTxID()
+	if err != nil {
+		store.Rollback(tx)
+		e.recordReducerMetric(rr.Name, "failed_internal", handlerDuration, true)
+		e.traceReducerCall(rr.Name, "failed_internal", err)
+		e.sendCallReducerResponse(cmd, ReducerResponse{
+			Status: StatusFailedInternal,
+			Error:  err,
+		}, nil)
+		return "internal_error"
+	}
 	tx.Seal()
 	changeset, err := store.Commit(e.committed, tx)
 	if err != nil {
@@ -888,8 +910,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		}, nil)
 		return executorCommandResultFromStatus(status)
 	}
-	txID := types.TxID(e.nextTxID)
-	e.nextTxID++
+	e.consumeCommitTxID()
 	changeset.TxID = txID
 	e.committed.SetCommittedTxID(txID)
 	e.traceStoreCommit(txID, "ok", nil)

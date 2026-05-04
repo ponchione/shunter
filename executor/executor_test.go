@@ -14,6 +14,10 @@ import (
 )
 
 func setupExecutor() (*Executor, schema.SchemaRegistry) {
+	return setupExecutorWithRecovered(0)
+}
+
+func setupExecutorWithRecovered(recoveredTxID uint64) (*Executor, schema.SchemaRegistry) {
 	b := schema.NewBuilder()
 	b.SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{
@@ -42,7 +46,7 @@ func setupExecutor() (*Executor, schema.SchemaRegistry) {
 	})
 	rr.Freeze()
 
-	exec := NewExecutor(ExecutorConfig{InboxCapacity: 16}, rr, cs, reg, 0)
+	exec := NewExecutor(ExecutorConfig{InboxCapacity: 16}, rr, cs, reg, recoveredTxID)
 	return exec, reg
 }
 
@@ -77,6 +81,58 @@ func TestExecutorRunAndSubmit(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for response")
+	}
+}
+
+func TestExecutorRejectsReducerCommitWhenTxIDExhausted(t *testing.T) {
+	exec, reg := setupExecutorWithRecovered(^uint64(0))
+	tableID, _, ok := reg.TableByName("players")
+	if !ok {
+		t.Fatal("players table missing")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go exec.Run(ctx)
+
+	respCh := make(chan ReducerResponse, 1)
+	err := exec.Submit(CallReducerCmd{
+		Request: ReducerRequest{
+			ReducerName: "InsertPlayer",
+			Source:      CallSourceExternal,
+		},
+		ResponseCh: respCh,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case resp := <-respCh:
+		if resp.Status != StatusFailedInternal {
+			t.Fatalf("status=%d err=%v, want StatusFailedInternal", resp.Status, resp.Error)
+		}
+		if !errors.Is(resp.Error, ErrTxIDExhausted) {
+			t.Fatalf("error=%v, want ErrTxIDExhausted", resp.Error)
+		}
+		if resp.TxID != 0 {
+			t.Fatalf("response txID=%d, want 0", resp.TxID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for response")
+	}
+
+	if got := exec.committed.CommittedTxID(); got != types.TxID(^uint64(0)) {
+		t.Fatalf("committed horizon=%d, want recovered max txID", got)
+	}
+	view := exec.committed.Snapshot()
+	defer view.Close()
+	rows := 0
+	for range view.TableScan(tableID) {
+		rows++
+	}
+	if rows != 0 {
+		t.Fatalf("players rows=%d, want rollback before commit", rows)
 	}
 }
 

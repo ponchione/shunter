@@ -2253,6 +2253,39 @@ func TestStartup_CtxCancelMidSweepLeavesGateClosed(t *testing.T) {
 	}
 }
 
+func TestStartup_SweepRejectsTxIDExhaustionBeforeCommit(t *testing.T) {
+	conn := types.ConnectionID{1}
+	identity := types.Identity{2}
+	h := newStartupHarness(t, startupSeed{
+		clients: []sysClientsSeed{
+			{conn: conn, identity: identity},
+		},
+	})
+	h.exec.nextTxID = 0
+	h.cs.SetCommittedTxID(types.TxID(^uint64(0)))
+
+	err := h.exec.Startup(context.Background(), nil)
+	if !errors.Is(err, ErrTxIDExhausted) {
+		t.Fatalf("Startup err=%v, want ErrTxIDExhausted", err)
+	}
+	if h.exec.externalReady.Load() {
+		t.Fatal("externalReady must stay false when Startup fails")
+	}
+	rows := h.sysClientsRows()
+	if len(rows) != 1 {
+		t.Fatalf("sys_clients rows=%d, want 1", len(rows))
+	}
+	if got, want := rows[0].ConnID, conn[:]; len(got) != len(want) || string(got) != string(want) {
+		t.Fatalf("remaining conn bytes=%x, want %x", got, conn[:])
+	}
+	if got := h.cs.CommittedTxID(); got != types.TxID(^uint64(0)) {
+		t.Fatalf("committed horizon=%d, want recovered max txID", got)
+	}
+	if events := h.rec.snapshot(); len(events) != 0 {
+		t.Fatalf("post-commit events=%v, want none", events)
+	}
+}
+
 func TestStartup_FailedFirstCallReturnsSameErrorOnLaterCalls(t *testing.T) {
 	seed := startupSeed{
 		clients: []sysClientsSeed{
