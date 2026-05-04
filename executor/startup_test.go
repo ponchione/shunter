@@ -298,6 +298,30 @@ func TestStartup_EmptySysClientsIsNoOp(t *testing.T) {
 	}
 }
 
+func TestStartup_DurabilityFatalFailsClosedBeforeSweep(t *testing.T) {
+	h := newStartupHarness(t, startupSeed{
+		clients: []sysClientsSeed{{conn: types.ConnectionID{1}, identity: types.Identity{2}}},
+	})
+	h.dur.fatalErr = errors.New("disk full")
+
+	err := h.exec.Startup(context.Background(), nil)
+	if !errors.Is(err, ErrExecutorFatal) {
+		t.Fatalf("Startup error = %v, want %v", err, ErrExecutorFatal)
+	}
+	if !h.exec.fatal.Load() {
+		t.Fatal("executor fatal latch was not set")
+	}
+	if h.exec.externalReady.Load() {
+		t.Fatal("externalReady should remain false after startup durability fatal")
+	}
+	if got := len(h.sysClientsRows()); got != 1 {
+		t.Fatalf("sys_clients rows after failed Startup = %d, want 1", got)
+	}
+	if got := len(h.dur.txIDs); got != 0 {
+		t.Fatalf("durability calls after failed Startup = %d, want 0", got)
+	}
+}
+
 // Pin 6: every surviving sys_clients row is deleted and the table is
 // empty when Startup returns. Multi-row sweep is the realistic post-crash
 // shape (SPEC-003 §10.6).

@@ -154,11 +154,19 @@ func (e *Executor) consumeCommitTxID() {
 // external admission. Later calls return the first result.
 func (e *Executor) Startup(ctx context.Context, scheduler *Scheduler) error {
 	e.startupOnce.Do(func() {
+		if err := e.latchDurabilityFatal(0); err != nil {
+			e.startupErr = err
+			return
+		}
 		if scheduler != nil {
 			e.attachScheduler(scheduler)
 			scheduler.ReplayFromCommitted()
 		}
 		if err := e.sweepDanglingClients(ctx); err != nil {
+			e.startupErr = err
+			return
+		}
+		if err := e.latchDurabilityFatal(0); err != nil {
 			e.startupErr = err
 			return
 		}

@@ -152,6 +152,9 @@ func (e *Executor) sweepDanglingClients(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := e.latchDurabilityFatal(0); err != nil {
+			return err
+		}
 		tx := store.NewTransaction(e.committed, e.schemaReg)
 		if err := deleteSysClientsRow(tx, sysID, t.conn); err != nil {
 			store.Rollback(tx)
