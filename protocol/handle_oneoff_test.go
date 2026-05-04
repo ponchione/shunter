@@ -1056,6 +1056,68 @@ func TestExecuteCompiledSQLQueryIndexedOrderByAscUsesIndexRange(t *testing.T) {
 	}
 }
 
+func TestExecuteCompiledSQLQueryIndexedOrderByDescUsesIndexRange(t *testing.T) {
+	baseSL := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "owner", Type: schema.KindString},
+		schema.ColumnSchema{Index: 2, Name: "points", Type: schema.KindUint32},
+	)
+	sl := &indexedOneOffSchemaLookup{
+		mockSchemaLookup: baseSL,
+		table:            1,
+		column:           2,
+		index:            8,
+	}
+	snap := &indexedCountingSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+			{types.NewUint64(1), types.NewString("alice"), types.NewUint32(30)},
+			{types.NewUint64(2), types.NewString("bob"), types.NewUint32(10)},
+			{types.NewUint64(3), types.NewString("alice"), types.NewUint32(20)},
+			{types.NewUint64(4), types.NewString("alice"), types.NewUint32(40)},
+			{types.NewUint64(5), types.NewString("alice"), types.NewUint32(30)},
+		}}},
+		table:  1,
+		column: 2,
+		index:  8,
+	}
+
+	compiled, err := CompileSQLQueryStringWithVisibility(
+		"SELECT id, points FROM tasks ORDER BY points DESC LIMIT 3 OFFSET 1",
+		sl,
+		nil,
+		SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true},
+		[]VisibilityFilter{{
+			SQL:           "SELECT * FROM tasks WHERE owner = 'alice'",
+			ReturnTableID: 1,
+		}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("CompileSQLQueryStringWithVisibility: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint64(1), types.NewUint32(30)},
+		{types.NewUint64(5), types.NewUint32(30)},
+		{types.NewUint64(3), types.NewUint32(20)},
+	})
+	if snap.indexRanges != 1 {
+		t.Fatalf("IndexRange calls = %d, want 1 for indexed DESC ORDER BY", snap.indexRanges)
+	}
+	if snap.indexSeeks != 0 {
+		t.Fatalf("IndexSeek calls = %d, want 0 for indexed DESC ORDER BY", snap.indexSeeks)
+	}
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 for indexed DESC ORDER BY", snap.tableScans)
+	}
+	if snap.indexGetRow != 0 {
+		t.Fatalf("GetRow calls = %d, want 0 for indexed DESC ORDER BY range rows", snap.indexGetRow)
+	}
+}
+
 func TestHandleOneOffQueryMultiColumnOrderByProjectionAliasOffsetLimit(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{

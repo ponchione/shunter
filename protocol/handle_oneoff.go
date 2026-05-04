@@ -299,25 +299,45 @@ func oneOffIndexableRange(pred subscription.Predicate, tableID schema.TableID) (
 	return subscription.ColRange{}, false
 }
 
-func oneOffSingleTableOrderIndex(orderBy []compiledSQLOrderBy, tableID schema.TableID, resolver schema.IndexResolver) (schema.IndexID, bool) {
-	if resolver == nil || len(orderBy) != 1 {
-		return 0, false
-	}
-	term := orderBy[0]
-	if term.Desc || term.Column.Table != tableID || term.Column.Alias != 0 || term.Column.Schema.Index < 0 {
-		return 0, false
-	}
-	return resolver.IndexIDForColumn(tableID, types.ColID(term.Column.Schema.Index))
+type oneOffOrderIndex struct {
+	indexID     schema.IndexID
+	desc        bool
+	columnIndex int
+	columnName  string
 }
 
-func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, indexID schema.IndexID, offset int, limit int) ([]types.ProductValue, error) {
+func oneOffSingleTableOrderIndex(orderBy []compiledSQLOrderBy, tableID schema.TableID, resolver schema.IndexResolver) (oneOffOrderIndex, bool) {
+	if resolver == nil || len(orderBy) != 1 {
+		return oneOffOrderIndex{}, false
+	}
+	term := orderBy[0]
+	if term.Column.Table != tableID || term.Column.Alias != 0 || term.Column.Schema.Index < 0 {
+		return oneOffOrderIndex{}, false
+	}
+	indexID, ok := resolver.IndexIDForColumn(tableID, types.ColID(term.Column.Schema.Index))
+	if !ok {
+		return oneOffOrderIndex{}, false
+	}
+	return oneOffOrderIndex{
+		indexID:     indexID,
+		desc:        term.Desc,
+		columnIndex: term.Column.Schema.Index,
+		columnName:  term.Column.Schema.Name,
+	}, true
+}
+
+func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, orderIndex oneOffOrderIndex, offset int, limit int) ([]types.ProductValue, error) {
 	var rows []types.ProductValue
 	seen := 0
-	for _, row := range view.IndexRange(tableID, indexID, store.UnboundedLow(), store.UnboundedHigh()) {
+	for _, row := range view.IndexRange(tableID, orderIndex.indexID, store.UnboundedLow(), store.UnboundedHigh()) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if !subscription.MatchRow(pred, tableID, row) {
+			continue
+		}
+		if orderIndex.desc {
+			rows = append(rows, row)
 			continue
 		}
 		if seen < offset {
@@ -330,7 +350,48 @@ func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.Com
 			return rows, nil
 		}
 	}
+	if orderIndex.desc {
+		return materializeDescendingIndexedOneOffRows(rows, orderIndex.columnIndex, orderIndex.columnName, offset, limit)
+	}
 	return rows, nil
+}
+
+func materializeDescendingIndexedOneOffRows(rows []types.ProductValue, columnIndex int, columnName string, offset int, limit int) ([]types.ProductValue, error) {
+	if limit == 0 || len(rows) == 0 {
+		return nil, nil
+	}
+	var out []types.ProductValue
+	seen := 0
+	for end := len(rows); end > 0; {
+		start := end - 1
+		if columnIndex < 0 || columnIndex >= len(rows[start]) {
+			return nil, fmt.Errorf("ORDER BY column %q is missing from row", columnName)
+		}
+		key := rows[start][columnIndex]
+		for start > 0 {
+			prev := rows[start-1]
+			if columnIndex < 0 || columnIndex >= len(prev) {
+				return nil, fmt.Errorf("ORDER BY column %q is missing from row", columnName)
+			}
+			if prev[columnIndex].Compare(key) != 0 {
+				break
+			}
+			start--
+		}
+		for i := start; i < end; i++ {
+			if seen < offset {
+				seen++
+				continue
+			}
+			out = append(out, rows[i])
+			seen++
+			if oneOffLimitReached(len(out), limit) {
+				return out, nil
+			}
+		}
+		end = start
+	}
+	return out, nil
 }
 
 func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, visit func(types.ProductValue) bool) (bool, error) {

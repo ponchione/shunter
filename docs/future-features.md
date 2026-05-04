@@ -73,6 +73,9 @@ This is the next major capability track.
 Direction:
 
 - Make one-off reads richer first.
+- Keep one-off single-table `ORDER BY <column> ASC/DESC` eligible for matching
+  single-column indexes while rechecking filters and visibility before
+  `OFFSET`/`LIMIT`/projection.
 - Make declared queries richer after the execution model is clear.
 - Grow live views/subscriptions more carefully because incremental deltas over
   joins, aggregates, ordering, and limits carry higher correctness risk.
@@ -85,8 +88,8 @@ Likely feature slices:
 - nullable-value semantics for aggregates once nullable types exist
 - `OFFSET` for additional result shapes where snapshot/live-view semantics are
   explicit
-- broader index-aware planning for joins, descending/multi-column ordering,
-  and live paths
+- broader index-aware planning for joins, multi-column ordering, reverse-cursor
+  descending scans, and live paths
 - clear interaction with read policy and visibility filters
 
 Any query expansion must include tests for authorization, visibility filtering,
