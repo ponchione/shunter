@@ -19,6 +19,64 @@ const (
 	defaultDurabilityQueueCapacity = 256
 )
 
+type runtimeBuildPreview struct {
+	normalized        Config
+	dataDir           string
+	schemaOpts        schema.EngineOptions
+	registry          schema.SchemaRegistry
+	visibilityFilters []VisibilityFilterDescription
+}
+
+func previewRuntimeBuild(mod *Module, cfg Config) (runtimeBuildPreview, error) {
+	if mod == nil {
+		return runtimeBuildPreview{}, fmt.Errorf("module must not be nil")
+	}
+	if strings.TrimSpace(mod.name) == "" {
+		return runtimeBuildPreview{}, fmt.Errorf("module name must not be empty")
+	}
+
+	normalized, dataDir, err := normalizeConfig(cfg)
+	if err != nil {
+		return runtimeBuildPreview{}, err
+	}
+	if err := validateModuleDeclarations(mod); err != nil {
+		return runtimeBuildPreview{}, err
+	}
+
+	schemaOpts := schema.EngineOptions{
+		DataDir:                 dataDir,
+		ExecutorQueueCapacity:   normalized.ExecutorQueueCapacity,
+		DurabilityQueueCapacity: normalized.DurabilityQueueCapacity,
+		EnableProtocol:          normalized.EnableProtocol,
+	}
+	preview, err := mod.builder.BuildPreview(schemaOpts)
+	if err != nil {
+		return runtimeBuildPreview{}, fmt.Errorf("build hosted runtime schema: %w", err)
+	}
+	previewRegistry := preview.Registry()
+	if err := validateModuleDeclarationSQL(mod, previewRegistry); err != nil {
+		return runtimeBuildPreview{}, err
+	}
+	visibilityFilters, err := validateModuleVisibilityFilters(mod, previewRegistry)
+	if err != nil {
+		return runtimeBuildPreview{}, err
+	}
+	if err := validateModuleTableMigrations(mod, previewRegistry); err != nil {
+		return runtimeBuildPreview{}, err
+	}
+	if err := validateModuleMetadata(mod, previewRegistry); err != nil {
+		return runtimeBuildPreview{}, err
+	}
+
+	return runtimeBuildPreview{
+		normalized:        normalized,
+		dataDir:           dataDir,
+		schemaOpts:        schemaOpts,
+		registry:          previewRegistry,
+		visibilityFilters: visibilityFilters,
+	}, nil
+}
+
 func normalizeConfig(cfg Config) (Config, string, error) {
 	if cfg.ExecutorQueueCapacity < 0 {
 		return Config{}, "", fmt.Errorf("executor queue capacity must not be negative")
@@ -54,6 +112,35 @@ func copyConfig(cfg Config) Config {
 	out.AuthSigningKey = append([]byte(nil), cfg.AuthSigningKey...)
 	out.AuthAudiences = append([]string(nil), cfg.AuthAudiences...)
 	return out
+}
+
+// CheckDataDirCompatibility validates that mod can recover cfg.DataDir without
+// starting runtime services or bootstrapping missing state. A missing or empty
+// DataDir is compatible because Build can create a fresh runtime state there.
+func CheckDataDirCompatibility(mod *Module, cfg Config) error {
+	preview, err := previewRuntimeBuild(mod, cfg)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(preview.dataDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect data dir %s: %w", preview.dataDir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("data dir %s is not a directory", preview.dataDir)
+	}
+
+	_, _, _, _, err = commitlog.OpenAndRecoverWithReport(preview.dataDir, preview.registry)
+	if errors.Is(err, commitlog.ErrNoData) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check data dir compatibility: %w", err)
+	}
+	return nil
 }
 
 func openOrBootstrapState(dataDir string, reg schema.SchemaRegistry) (*store.CommittedState, types.TxID, commitlog.RecoveryResumePlan, commitlog.RecoveryReport, error) {

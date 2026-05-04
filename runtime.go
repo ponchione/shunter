@@ -85,41 +85,13 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	}
 	observability.setModuleName(mod.name)
 
-	normalized, dataDir, err := normalizeConfig(cfg)
+	preview, err := previewRuntimeBuild(mod, cfg)
 	if err != nil {
 		return fail(err)
 	}
-	observability = newRuntimeObservability(mod.name, normalized.Observability)
-	if err := validateModuleDeclarations(mod); err != nil {
-		return fail(err)
-	}
+	observability = newRuntimeObservability(mod.name, preview.normalized.Observability)
 
-	schemaOpts := schema.EngineOptions{
-		DataDir:                 dataDir,
-		ExecutorQueueCapacity:   normalized.ExecutorQueueCapacity,
-		DurabilityQueueCapacity: normalized.DurabilityQueueCapacity,
-		EnableProtocol:          normalized.EnableProtocol,
-	}
-	preview, err := mod.builder.BuildPreview(schemaOpts)
-	if err != nil {
-		return fail(fmt.Errorf("build hosted runtime schema: %w", err))
-	}
-	previewRegistry := preview.Registry()
-	if err := validateModuleDeclarationSQL(mod, previewRegistry); err != nil {
-		return fail(err)
-	}
-	visibilityFilters, err := validateModuleVisibilityFilters(mod, previewRegistry)
-	if err != nil {
-		return fail(err)
-	}
-	if err := validateModuleTableMigrations(mod, previewRegistry); err != nil {
-		return fail(err)
-	}
-	if err := validateModuleMetadata(mod, previewRegistry); err != nil {
-		return fail(err)
-	}
-
-	engine, err := mod.builder.Build(schemaOpts)
+	engine, err := mod.builder.Build(preview.schemaOpts)
 	if err != nil {
 		return fail(fmt.Errorf("build hosted runtime schema: %w", err))
 	}
@@ -130,7 +102,7 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	}
 
 	recoveryStart := time.Now()
-	state, recoveredTxID, resumePlan, recoveryReport, err := openOrBootstrapState(dataDir, registry)
+	state, recoveredTxID, resumePlan, recoveryReport, err := openOrBootstrapState(preview.dataDir, registry)
 	if err != nil {
 		err = fmt.Errorf("build hosted runtime state: %w", err)
 		observability.recordRecoveryFailed(err, time.Since(recoveryStart))
@@ -146,13 +118,13 @@ func Build(mod *Module, cfg Config) (*Runtime, error) {
 	}
 
 	rt := &Runtime{
-		module:        newModuleSnapshot(mod, visibilityFilters),
+		module:        newModuleSnapshot(mod, preview.visibilityFilters),
 		config:        copyConfig(cfg),
-		buildConfig:   normalized,
+		buildConfig:   preview.normalized,
 		engine:        engine,
 		registry:      registry,
 		readCatalog:   readCatalog,
-		dataDir:       dataDir,
+		dataDir:       preview.dataDir,
 		state:         state,
 		recoveredTxID: recoveredTxID,
 		resumePlan:    resumePlan,

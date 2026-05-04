@@ -1,9 +1,12 @@
 package shunter
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/ponchione/shunter/commitlog"
 	"github.com/ponchione/shunter/executor"
 	"github.com/ponchione/shunter/schema"
 )
@@ -121,6 +124,50 @@ func TestBuildCreatesReducerRegistryFromModule(t *testing.T) {
 	if _, ok := rt.reducers.LookupLifecycle(executor.LifecycleOnDisconnect); !ok {
 		t.Fatal("on-disconnect lifecycle reducer missing")
 	}
+}
+
+func TestCheckDataDirCompatibilityAcceptsMissingAndMatchingDataDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing")
+	mod := validChatModule()
+	if err := CheckDataDirCompatibility(mod, Config{DataDir: path}); err != nil {
+		t.Fatalf("CheckDataDirCompatibility missing DataDir returned error: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("preflight stat = %v, want missing DataDir left uncreated", err)
+	}
+	if _, err := Build(mod, Config{DataDir: path}); err != nil {
+		t.Fatalf("Build after preflight returned error: %v", err)
+	}
+
+	dir := t.TempDir()
+	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+		t.Fatalf("initial Build returned error: %v", err)
+	}
+	if err := CheckDataDirCompatibility(validChatModule(), Config{DataDir: dir}); err != nil {
+		t.Fatalf("CheckDataDirCompatibility matching DataDir returned error: %v", err)
+	}
+}
+
+func TestCheckDataDirCompatibilityReportsSchemaMismatch(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Build(validChatModule(), Config{DataDir: dir}); err != nil {
+		t.Fatalf("initial Build returned error: %v", err)
+	}
+	mismatch := messagesTableDef()
+	mismatch.Columns[1].Name = "text"
+
+	err := CheckDataDirCompatibility(NewModule("chat").SchemaVersion(1).TableDef(mismatch), Config{DataDir: dir})
+	if err == nil {
+		t.Fatal("CheckDataDirCompatibility returned nil, want schema mismatch")
+	}
+	var schemaErr *commitlog.SchemaMismatchError
+	if !errors.As(err, &schemaErr) {
+		t.Fatalf("CheckDataDirCompatibility error = %v, want SchemaMismatchError", err)
+	}
+	assertErrorContains(t, err, "check data dir compatibility")
+	assertErrorContains(t, err, "name mismatch")
+	assertErrorContains(t, err, "body")
+	assertErrorContains(t, err, "text")
 }
 
 func validChatModule() *Module {

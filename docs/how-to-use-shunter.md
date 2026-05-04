@@ -223,6 +223,17 @@ Recovery validates the registered schema version and embedded snapshot schema
 against the restored data. If the module schema is incompatible, `Build`
 fails instead of rewriting durable state.
 
+App-owned migration or maintenance binaries can run the same offline schema
+preflight before starting the runtime. Missing or empty data directories are
+treated as compatible fresh starts, and existing incompatible directories return
+the same schema mismatch category as startup recovery:
+
+```go
+if err := shunter.CheckDataDirCompatibility(mod, shunter.Config{DataDir: "./data/chat"}); err != nil {
+	return err
+}
+```
+
 App-owned binaries can perform the offline directory copy after runtime
 ownership has stopped:
 

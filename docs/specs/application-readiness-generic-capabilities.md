@@ -382,6 +382,8 @@ Exact names can change to match existing module APIs.
 
 - Contract dry-run planning emits backup/restore guidance for blocking or
   data-rewrite changes before destructive migrations touch a durable `DataDir`.
+- App-owned CLIs can call `shunter.CheckDataDirCompatibility` to validate a
+  stopped or missing `DataDir` against the module schema before startup.
 - Rollback semantics are out of scope until locking and crash-recovery behavior
   is fully specified.
 

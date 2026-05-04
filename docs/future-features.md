@@ -59,6 +59,7 @@ Current generic CLI and helper boundary:
 - contract policy
 - contract plan, including backup/restore guidance for blocking or data-rewrite changes
 - contract codegen from existing JSON
+- offline `DataDir` compatibility preflight through `shunter.CheckDataDirCompatibility`
 - offline `DataDir` backup through `shunter.BackupDataDir` and the generic CLI
 - offline `DataDir` restore through `shunter.RestoreDataDir` and the generic CLI
 
@@ -122,12 +123,13 @@ Current dry-run contract planning emits backup/restore guidance when blocking
 or data-rewrite changes should be reviewed before touching a durable `DataDir`.
 Startup snapshot selection now reports every detected table/column/index schema
 mismatch from the selected snapshot in one strict startup failure.
+App-owned binaries can preflight a stopped or missing `DataDir` against a
+module schema with `shunter.CheckDataDirCompatibility`.
 
 Recommended sequence:
 
-1. Broaden strict startup compatibility checks across runtime entry points.
-2. App-owned migration hooks run under runtime ownership before normal start.
-3. Executable migration runner once locking, crash recovery, and rollback
+1. App-owned migration hooks run under runtime ownership before normal start.
+2. Executable migration runner once locking, crash recovery, and rollback
    semantics are explicit.
 
 Migration behavior should be explicit and reviewable. Normal runtime startup
