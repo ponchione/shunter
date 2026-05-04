@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
@@ -321,6 +322,57 @@ func TestReplayLogCorruptRecordReturnsTraversalCategory(t *testing.T) {
 	}
 	if !errors.Is(err, ErrTraversal) {
 		t.Fatalf("errors.Is(err, ErrTraversal) = false: %v", err)
+	}
+}
+
+func TestDecodeChangesetMalformedBSATNRowReturnsTraversalCategory(t *testing.T) {
+	_, reg := testSchema()
+	_, err := DecodeChangeset(malformedBSATNChangesetPayload(), reg)
+	assertMalformedBSATNRowTraversal(t, err)
+}
+
+func TestReplayLogMalformedBSATNRowReturnsTraversalCategory(t *testing.T) {
+	root := t.TempDir()
+	committed, reg := buildReplayCommittedState(t)
+	path := writeReplaySegment(t, root, 1, replayRecord{
+		txID:       1,
+		rawPayload: malformedBSATNChangesetPayload(),
+	})
+	segments := []SegmentInfo{{
+		Path:       path,
+		StartTx:    1,
+		LastTx:     1,
+		Valid:      true,
+		AppendMode: AppendInPlace,
+	}}
+
+	_, err := ReplayLog(committed, segments, 0, reg)
+	assertMalformedBSATNRowTraversal(t, err)
+}
+
+func malformedBSATNChangesetPayload() []byte {
+	rowData := []byte{bsatn.TagString, 0, 0, 0, 0}
+	payload := []byte{changesetVersion}
+	payload = appendUint32LE(payload, 1) // table_count
+	payload = appendUint32LE(payload, 0) // table_id
+	payload = appendUint32LE(payload, 1) // insert_count
+	payload = appendUint32LE(payload, uint32(len(rowData)))
+	payload = append(payload, rowData...)
+	payload = appendUint32LE(payload, 0) // delete_count
+	return payload
+}
+
+func assertMalformedBSATNRowTraversal(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected malformed BSATN row error")
+	}
+	if !errors.Is(err, ErrTraversal) {
+		t.Fatalf("errors.Is(err, ErrTraversal) = false: %v", err)
+	}
+	var mismatch *bsatn.TypeTagMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("errors.As(*bsatn.TypeTagMismatchError) = false: %v", err)
 	}
 }
 

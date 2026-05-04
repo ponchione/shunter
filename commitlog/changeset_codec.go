@@ -149,10 +149,10 @@ func DecodeChangeset(data []byte, reg schema.SchemaRegistry) (*store.Changeset, 
 
 func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes uint32) (*store.Changeset, error) {
 	if len(data) < 5 {
-		return nil, fmt.Errorf("commitlog: changeset too short")
+		return nil, changesetDecodeErrorf("commitlog: changeset too short")
 	}
 	if data[0] != changesetVersion {
-		return nil, fmt.Errorf("commitlog: unsupported changeset version %d", data[0])
+		return nil, changesetDecodeErrorf("commitlog: unsupported changeset version %d", data[0])
 	}
 
 	pos := 1
@@ -165,31 +165,31 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 
 	for range tableCount {
 		if pos+4 > len(data) {
-			return nil, fmt.Errorf("commitlog: truncated changeset")
+			return nil, changesetDecodeErrorf("commitlog: truncated changeset")
 		}
 		tableID := schema.TableID(binary.LittleEndian.Uint32(data[pos:]))
 		pos += 4
 
 		if _, exists := cs.Tables[tableID]; exists {
-			return nil, fmt.Errorf("commitlog: duplicate table ID %d", tableID)
+			return nil, changesetDecodeErrorf("commitlog: duplicate table ID %d", tableID)
 		}
 		ts, ok := reg.Table(tableID)
 		if !ok {
-			return nil, fmt.Errorf("commitlog: unknown table ID %d", tableID)
+			return nil, changesetDecodeErrorf("commitlog: unknown table ID %d", tableID)
 		}
 
 		tc := &store.TableChangeset{TableID: tableID, TableName: ts.Name}
 
 		// Inserts.
 		if pos+4 > len(data) {
-			return nil, fmt.Errorf("commitlog: truncated changeset")
+			return nil, changesetDecodeErrorf("commitlog: truncated changeset")
 		}
 		insertCount := binary.LittleEndian.Uint32(data[pos:])
 		pos += 4
 		for range insertCount {
 			row, n, err := decodeRow(data[pos:], ts, maxRowBytes)
 			if err != nil {
-				return nil, err
+				return nil, changesetDecodeErrorf("commitlog: decode insert row for table %d: %w", tableID, err)
 			}
 			tc.Inserts = append(tc.Inserts, row)
 			pos += n
@@ -197,14 +197,14 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 
 		// Deletes.
 		if pos+4 > len(data) {
-			return nil, fmt.Errorf("commitlog: truncated changeset")
+			return nil, changesetDecodeErrorf("commitlog: truncated changeset")
 		}
 		deleteCount := binary.LittleEndian.Uint32(data[pos:])
 		pos += 4
 		for range deleteCount {
 			row, n, err := decodeRow(data[pos:], ts, maxRowBytes)
 			if err != nil {
-				return nil, err
+				return nil, changesetDecodeErrorf("commitlog: decode delete row for table %d: %w", tableID, err)
 			}
 			tc.Deletes = append(tc.Deletes, row)
 			pos += n
@@ -214,9 +214,13 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 	}
 
 	if pos != len(data) {
-		return nil, fmt.Errorf("commitlog: trailing changeset bytes")
+		return nil, changesetDecodeErrorf("commitlog: trailing changeset bytes")
 	}
 	return cs, nil
+}
+
+func changesetDecodeErrorf(format string, args ...any) error {
+	return fmt.Errorf("%w: "+format, append([]any{ErrTraversal}, args...)...)
 }
 
 func decodeRow(data []byte, ts *schema.TableSchema, maxRowBytes uint32) (types.ProductValue, int, error) {
