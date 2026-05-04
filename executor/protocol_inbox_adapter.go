@@ -290,14 +290,28 @@ func (a *ProtocolInboxAdapter) singleTableName(preds []subscription.Predicate, u
 	if len(preds) == 0 {
 		return ""
 	}
-	tables := preds[0].Tables()
-	if len(tables) == 0 {
+	tableID, ok := singleEmittedTableID(preds[0])
+	if !ok {
 		return ""
 	}
-	if ts, ok := a.schemaReg.Table(schema.TableID(tables[0])); ok {
+	if ts, ok := a.schemaReg.Table(tableID); ok {
 		return ts.Name
 	}
 	return ""
+}
+
+func singleEmittedTableID(pred subscription.Predicate) (schema.TableID, bool) {
+	switch p := pred.(type) {
+	case subscription.Join:
+		return schema.TableID(p.ProjectedTable()), true
+	case subscription.CrossJoin:
+		return schema.TableID(p.ProjectedTable()), true
+	}
+	tables := pred.Tables()
+	if len(tables) == 0 {
+		return 0, false
+	}
+	return schema.TableID(tables[0]), true
 }
 
 func newProtocolSubscriptionError(durationMicros uint64, requestID, queryID uint32, errText string) *protocol.SubscriptionError {

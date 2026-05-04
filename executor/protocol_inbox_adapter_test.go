@@ -180,6 +180,59 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_SingleSuccessReply(t *test
 	}
 }
 
+func TestProtocolInboxAdapter_RegisterSubscriptionSet_EmptyProjectedJoinUsesProjectedTableName(t *testing.T) {
+	tests := []struct {
+		name string
+		pred subscription.Predicate
+	}{
+		{
+			name: "join",
+			pred: subscription.Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0, ProjectRight: true},
+		},
+		{
+			name: "cross join",
+			pred: subscription.CrossJoin{Left: 1, Right: 2, ProjectRight: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, _, _ := newAdapterTestConn(t)
+			var captured *protocol.SubscribeSingleApplied
+			adapter := newProtocolInboxAdapter(
+				stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
+					reg := cmd.(RegisterSubscriptionSetCmd)
+					reg.Reply(subscription.SubscriptionSetRegisterResult{
+						QueryID:                          7,
+						TotalHostExecutionDurationMicros: 111,
+					}, nil)
+					return nil
+				}},
+				stubProtocolSchemaRegistry{tables: map[schema.TableID]string{1: "lhs", 2: "rhs"}},
+			)
+
+			err := adapter.RegisterSubscriptionSet(context.Background(), protocol.RegisterSubscriptionSetRequest{
+				ConnID:     conn.ID,
+				QueryID:    7,
+				RequestID:  10,
+				Variant:    protocol.SubscriptionSetVariantSingle,
+				Predicates: []any{tt.pred},
+				Reply: func(resp protocol.SubscriptionSetCommandResponse) {
+					captured = resp.SingleApplied
+				},
+			})
+			if err != nil {
+				t.Fatalf("RegisterSubscriptionSet: %v", err)
+			}
+			if captured == nil {
+				t.Fatalf("response missing SingleApplied")
+			}
+			if captured.TableName != "rhs" {
+				t.Fatalf("TableName = %q, want projected table rhs", captured.TableName)
+			}
+		})
+	}
+}
+
 func TestProtocolInboxAdapter_RegisterSubscriptionSet_DuplicateErrorReply(t *testing.T) {
 	conn, _, sender := newAdapterTestConn(t)
 	adapter := newProtocolInboxAdapter(
