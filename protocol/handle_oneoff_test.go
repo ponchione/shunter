@@ -814,6 +814,69 @@ func TestExecuteCompiledSQLQueryIndexedEqualityAggregateUsesIndexSeek(t *testing
 	}
 }
 
+func TestExecuteCompiledSQLQueryAggregateEmptyInputSemantics(t *testing.T) {
+	sl := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "points", Type: schema.KindUint32},
+	)
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: nil}}}
+	opts := SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	}
+	tests := []struct {
+		name string
+		sql  string
+		want []types.ProductValue
+	}{
+		{
+			name: "count star empty input",
+			sql:  "SELECT COUNT(*) AS n FROM tasks",
+			want: []types.ProductValue{{types.NewUint64(0)}},
+		},
+		{
+			name: "count column empty input",
+			sql:  "SELECT COUNT(points) AS n FROM tasks",
+			want: []types.ProductValue{{types.NewUint64(0)}},
+		},
+		{
+			name: "count distinct empty input",
+			sql:  "SELECT COUNT(DISTINCT points) AS n FROM tasks",
+			want: []types.ProductValue{{types.NewUint64(0)}},
+		},
+		{
+			name: "sum empty input",
+			sql:  "SELECT SUM(points) AS total FROM tasks",
+			want: []types.ProductValue{{types.NewUint64(0)}},
+		},
+		{
+			name: "limit zero drops aggregate row",
+			sql:  "SELECT COUNT(*) AS n FROM tasks LIMIT 0",
+			want: nil,
+		},
+		{
+			name: "offset drops aggregate row",
+			sql:  "SELECT SUM(points) AS total FROM tasks OFFSET 1",
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := CompileSQLQueryString(tt.sql, sl, nil, opts)
+			if err != nil {
+				t.Fatalf("CompileSQLQueryString: %v", err)
+			}
+			result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, state, sl)
+			if err != nil {
+				t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+			}
+			assertProductRowsEqual(t, result.Rows, tt.want)
+		})
+	}
+}
+
 func TestExecuteCompiledSQLQueryIndexedRangePredicateUsesIndexRange(t *testing.T) {
 	baseSL := newMockSchema("tasks", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},

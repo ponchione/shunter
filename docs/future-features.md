@@ -82,7 +82,7 @@ Likely feature slices:
 - stronger parser/planner boundary
 - richer projections and aliases
 - multi-join support
-- aggregate functions with explicit empty-result and nullable-value semantics
+- nullable-value semantics for aggregates once nullable types exist
 - `OFFSET` for additional result shapes where snapshot/live-view semantics are
   explicit
 - index-aware planning for joins, ordering, and live paths
