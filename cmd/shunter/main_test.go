@@ -20,6 +20,9 @@ func TestHelpDocumentsAppOwnedContractExport(t *testing.T) {
 	out := stdout.String()
 	assertContains(t, out, "Runtime.ExportContractJSON")
 	assertContains(t, out, "app-owned binary")
+	assertContains(t, out, "shunter backup --data-dir ./data --out ./backup")
+	assertContains(t, out, "shunter restore --backup ./backup --data-dir ./data")
+	assertContains(t, out, "offline DataDir")
 	assertContains(t, out, "No dynamic module loading")
 }
 
@@ -68,6 +71,183 @@ func TestVersionFlagPrintsBuildInfo(t *testing.T) {
 			t.Fatalf("%s stderr = %s, want empty", arg, stderr.String())
 		}
 		assertContains(t, stdout.String(), "shunter v9.8.7\n")
+	}
+}
+
+func TestBackupAndRestoreCommandsCopyDataDir(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(filepath.Join(dataDir, "7"), 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	writeCLIBytes(t, dataDir, "00000000000000000001.log", []byte("segment-1"))
+	writeCLIBytes(t, filepath.Join(dataDir, "7"), "snapshot", []byte("snapshot-7"))
+
+	backupDir := filepath.Join(dir, "backup")
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"backup",
+		"--data-dir", dataDir,
+		"--out", backupDir,
+	})
+	if code != 0 {
+		t.Fatalf("backup exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("backup stderr = %s, want empty", stderr.String())
+	}
+	assertContains(t, stdout.String(), "backed up "+dataDir+" to "+backupDir)
+	assertFileBytes(t, filepath.Join(backupDir, "00000000000000000001.log"), []byte("segment-1"))
+	assertFileBytes(t, filepath.Join(backupDir, "7", "snapshot"), []byte("snapshot-7"))
+
+	restoreDir := filepath.Join(dir, "restored")
+	stdout.Reset()
+	stderr.Reset()
+	code = run(&stdout, &stderr, []string{
+		"restore",
+		"--backup", backupDir,
+		"--data-dir", restoreDir,
+	})
+	if code != 0 {
+		t.Fatalf("restore exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("restore stderr = %s, want empty", stderr.String())
+	}
+	assertContains(t, stdout.String(), "restored "+backupDir+" to "+restoreDir)
+	assertFileBytes(t, filepath.Join(restoreDir, "00000000000000000001.log"), []byte("segment-1"))
+	assertFileBytes(t, filepath.Join(restoreDir, "7", "snapshot"), []byte("snapshot-7"))
+}
+
+func TestBackupRejectsExistingOutputWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	outputDir := filepath.Join(dir, "backup")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("create output dir: %v", err)
+	}
+	original := []byte("existing backup data")
+	writeCLIBytes(t, outputDir, "existing", original)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"backup",
+		"--data-dir", dataDir,
+		"--out", outputDir,
+	})
+	if code != 1 {
+		t.Fatalf("backup exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("backup stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "backup output "+outputDir+" already exists")
+	assertFileBytes(t, filepath.Join(outputDir, "existing"), original)
+}
+
+func TestRestoreRejectsNonEmptyDestinationWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backup")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("create backup dir: %v", err)
+	}
+	writeCLIBytes(t, backupDir, "00000000000000000001.log", []byte("segment-1"))
+	restoreDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(restoreDir, 0o755); err != nil {
+		t.Fatalf("create restore dir: %v", err)
+	}
+	original := []byte("existing runtime data")
+	writeCLIBytes(t, restoreDir, "existing", original)
+
+	var stdout, stderr bytes.Buffer
+	code := run(&stdout, &stderr, []string{
+		"restore",
+		"--backup", backupDir,
+		"--data-dir", restoreDir,
+	})
+	if code != 1 {
+		t.Fatalf("restore exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("restore stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "restore destination "+restoreDir+" is not empty")
+	assertFileBytes(t, filepath.Join(restoreDir, "existing"), original)
+}
+
+func TestBackupRestoreRejectBlankPathsBeforeFileIO(t *testing.T) {
+	dir := t.TempDir()
+	nearby := filepath.Join(dir, "nearby")
+	original := []byte("nearby data")
+	writeCLIBytes(t, dir, "nearby", original)
+
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "backup-data-dir",
+			args:       []string{"backup", "--data-dir", " \t", "--out", filepath.Join(dir, "backup")},
+			wantStderr: "--data-dir is required",
+		},
+		{
+			name:       "backup-out",
+			args:       []string{"backup", "--data-dir", dir, "--out", "\n"},
+			wantStderr: "--out is required",
+		},
+		{
+			name:       "restore-backup",
+			args:       []string{"restore", "--backup", " \t", "--data-dir", filepath.Join(dir, "restore")},
+			wantStderr: "--backup is required",
+		},
+		{
+			name:       "restore-data-dir",
+			args:       []string{"restore", "--backup", dir, "--data-dir", "\n"},
+			wantStderr: "--data-dir is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, tc.args)
+			if code != 2 {
+				t.Fatalf("%s exit code = %d, stderr = %s", tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s stdout = %s, want empty", tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), tc.wantStderr)
+			assertFileBytes(t, nearby, original)
+		})
+	}
+}
+
+func TestBackupRejectsDestinationInsideSource(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	outputDir := filepath.Join(dataDir, "backup")
+	code := run(&stdout, &stderr, []string{
+		"backup",
+		"--data-dir", dataDir,
+		"--out", outputDir,
+	})
+	if code != 1 {
+		t.Fatalf("backup exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("backup stdout = %s, want empty", stdout.String())
+	}
+	assertContains(t, stderr.String(), "must not be inside source data dir")
+	if _, err := os.Stat(outputDir); !os.IsNotExist(err) {
+		t.Fatalf("nested output stat err = %v, want not exist", err)
 	}
 }
 
@@ -1089,6 +1269,17 @@ func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
 		t.Fatalf("missing %q in:\n%s", needle, haystack)
+	}
+}
+
+func assertFileBytes(t *testing.T, path string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s bytes = %q, want %q", path, got, want)
 	}
 }
 

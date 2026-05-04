@@ -223,6 +223,16 @@ Recovery validates the registered schema version and embedded snapshot schema
 against the restored data. If the module schema is incompatible, `Build`
 fails instead of rewriting durable state.
 
+The generic CLI can perform the offline directory copy after your app has
+stopped runtime ownership:
+
+```bash
+rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026-05-04
+rtk go run ./cmd/shunter restore --backup ./backups/chat-2026-05-04 --data-dir ./data/chat
+```
+
+The restore command refuses to merge into a non-empty destination.
+
 ## Call Reducers Locally
 
 Use `CallReducer` when your process wants to invoke a reducer without going
@@ -409,10 +419,12 @@ The generic CLI operates on existing contract JSON files:
 rtk go run ./cmd/shunter contract diff --previous old.json --current shunter.contract.json
 rtk go run ./cmd/shunter contract policy --previous old.json --current shunter.contract.json --strict
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
+rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026-05-04
 ```
 
 The CLI does not dynamically load app modules. Export contracts from an
-app-owned binary that links the module.
+app-owned binary that links the module. Backup and restore commands operate on
+offline `DataDir` directories.
 
 ## Versioning
 

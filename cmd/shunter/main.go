@@ -34,6 +34,10 @@ func run(stdout, stderr io.Writer, args []string) int {
 		return 0
 	case "contract":
 		return runContract(stdout, stderr, args[1:])
+	case "backup":
+		return runBackup(stdout, stderr, args[1:])
+	case "restore":
+		return runRestore(stdout, stderr, args[1:])
 	default:
 		writeCLIErrorf(stderr, "unknown command %q\n\n", args[0])
 		printRootHelp(stderr)
@@ -310,10 +314,13 @@ Usage:
   shunter contract policy --previous old.json --current current.json [--strict] [--require-previous-version] [--format text|json]
   shunter contract plan --previous old.json --current current.json [--strict] [--require-previous-version] [--validate] [--format text|json]
   shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
+  shunter backup --data-dir ./data --out ./backup
+  shunter restore --backup ./backup --data-dir ./data
 
 This generic CLI operates only on existing ModuleContract JSON files. It does
 not export an app module contract; export from an app-owned binary with
-Runtime.ExportContractJSON so the binary links the module. No dynamic module loading is provided.
+Runtime.ExportContractJSON so the binary links the module. Backup and restore
+commands operate on offline DataDir directories. No dynamic module loading is provided.
 `)
 }
 

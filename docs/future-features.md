@@ -59,10 +59,8 @@ Current generic CLI boundary:
 - contract policy
 - contract plan
 - contract codegen from existing JSON
-
-Useful future helpers:
-
-- backup/restore commands after storage semantics are explicit
+- offline `DataDir` backup
+- offline `DataDir` restore
 
 The generic `shunter` CLI should not pretend it can load arbitrary app modules
 unless Shunter gains a real module loading boundary.
