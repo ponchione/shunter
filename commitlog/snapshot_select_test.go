@@ -178,6 +178,33 @@ func TestSelectSnapshotSchemaMismatchColumnType(t *testing.T) {
 	assertSchemaMismatchDetail(t, err, "type")
 }
 
+func TestSelectSnapshotSchemaMismatchReportsMultipleDetails(t *testing.T) {
+	root := t.TempDir()
+	cs, reg := buildSnapshotCommittedState(t)
+	writeSelectionSnapshot(t, root, reg, cs, 5)
+	mismatchReg := cloneSelectionRegistry(reg, func(tables map[schema.TableID]schema.TableSchema) {
+		players := tables[0]
+		players.Name = "users"
+		players.Columns[1].Type = schema.KindUint64
+		players.Indexes[0].Unique = false
+		tables[0] = players
+	})
+
+	_, err := SelectSnapshot(root, 5, mismatchReg)
+	var mismatch *SchemaMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected SchemaMismatchError, got %v", err)
+	}
+	for _, want := range []string{"name mismatch", "type mismatch", "unique mismatch"} {
+		if !strings.Contains(strings.ToLower(mismatch.Detail), want) {
+			t.Fatalf("schema mismatch detail %q does not contain %q", mismatch.Detail, want)
+		}
+	}
+	if strings.Count(mismatch.Detail, ";") < 2 {
+		t.Fatalf("schema mismatch detail %q should include multiple separated diagnostics", mismatch.Detail)
+	}
+}
+
 func TestSelectSnapshotSchemaMismatchNewestDoesNotFallBackToOlderSnapshot(t *testing.T) {
 	root := t.TempDir()
 	cs, reg := buildSnapshotCommittedState(t)

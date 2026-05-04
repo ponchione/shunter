@@ -120,10 +120,12 @@ runtime migration execution is a separate feature track.
 
 Current dry-run contract planning emits backup/restore guidance when blocking
 or data-rewrite changes should be reviewed before touching a durable `DataDir`.
+Startup snapshot selection now reports every detected table/column/index schema
+mismatch from the selected snapshot in one strict startup failure.
 
 Recommended sequence:
 
-1. Strict startup compatibility checks and better schema-change diagnostics.
+1. Broaden strict startup compatibility checks across runtime entry points.
 2. App-owned migration hooks run under runtime ownership before normal start.
 3. Executable migration runner once locking, crash recovery, and rollback
    semantics are explicit.

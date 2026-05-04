@@ -366,7 +366,10 @@ The version is a `uint32` chosen by the application developer. It is stored in e
 1. the registered schema version (i.e. `SchemaRegistry.Version()`) equals the snapshot schema version stored in the snapshot header
 2. the embedded snapshot schema matches the registered schema exactly (table IDs, table names, column names/types/order, and index definitions)
 
-If either check fails, startup returns `ErrSchemaMismatch` with structural diff details.
+If either check fails, startup returns `ErrSchemaMismatch` with structural diff
+details. Snapshot schema drift diagnostics should include every
+table/column/index mismatch detected while comparing the selected snapshot, so
+one startup failure can identify a complete incompatible change set.
 
 ### 6.2 Monotonicity
 

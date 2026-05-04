@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
@@ -82,11 +83,20 @@ func resolveSnapshotAndLogDirs(baseDir string) (string, string) {
 }
 
 func compareSnapshotSchema(snapshot *SnapshotData, reg schema.SchemaRegistry) error {
+	var diffs []string
+	var cause error
+	add := func(detail string, err error) {
+		diffs = append(diffs, detail)
+		if cause == nil && err != nil {
+			cause = err
+		}
+	}
+
 	if snapshot.SchemaVersion != reg.Version() {
-		return &SchemaMismatchError{Detail: fmt.Sprintf("schema version mismatch: snapshot=%d registry=%d", snapshot.SchemaVersion, reg.Version())}
+		add(fmt.Sprintf("schema version mismatch: snapshot=%d registry=%d", snapshot.SchemaVersion, reg.Version()), nil)
 	}
 	if snapshot.SchemaSnapshotVersion != reg.Version() {
-		return &SchemaMismatchError{Detail: fmt.Sprintf("schema snapshot version mismatch: snapshot=%d registry=%d", snapshot.SchemaSnapshotVersion, reg.Version())}
+		add(fmt.Sprintf("schema snapshot version mismatch: snapshot=%d registry=%d", snapshot.SchemaSnapshotVersion, reg.Version()), nil)
 	}
 
 	snapshotByID := make(map[schema.TableID]schema.TableSchema, len(snapshot.Schema))
@@ -97,23 +107,26 @@ func compareSnapshotSchema(snapshot *SnapshotData, reg schema.SchemaRegistry) er
 	for _, tableID := range reg.Tables() {
 		registered, ok := reg.Table(tableID)
 		if !ok {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("registry missing table %d", tableID)}
+			add(fmt.Sprintf("registry missing table %d", tableID), nil)
+			continue
 		}
 		stored, ok := snapshotByID[tableID]
 		if !ok {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q (id=%d) missing from snapshot", registered.Name, tableID)}
-		}
-		if err := compareTableSchema(*registered, stored); err != nil {
-			return err
+			add(fmt.Sprintf("table %q (id=%d) missing from snapshot", registered.Name, tableID), nil)
+		} else {
+			compareTableSchema(*registered, stored, add)
 		}
 		delete(snapshotByID, tableID)
 	}
 
 	for _, extra := range snapshotByID {
-		return &SchemaMismatchError{Detail: fmt.Sprintf("snapshot has extra table %q (id=%d)", extra.Name, extra.ID)}
+		add(fmt.Sprintf("snapshot has extra table %q (id=%d)", extra.Name, extra.ID), nil)
 	}
 
-	return nil
+	if len(diffs) == 0 {
+		return nil
+	}
+	return &SchemaMismatchError{Detail: strings.Join(diffs, "; "), Cause: cause}
 }
 
 func isUnsafeSnapshotSelectionError(err error) bool {
@@ -125,53 +138,51 @@ func isUnsafeSnapshotSelectionError(err error) bool {
 	return errors.As(err, &sequenceErr)
 }
 
-func compareTableSchema(registered schema.TableSchema, snapshot schema.TableSchema) error {
+func compareTableSchema(registered schema.TableSchema, snapshot schema.TableSchema, add func(string, error)) {
 	if registered.Name != snapshot.Name {
-		return &SchemaMismatchError{Detail: fmt.Sprintf("table id %d name mismatch: snapshot=%q registry=%q", registered.ID, snapshot.Name, registered.Name)}
+		add(fmt.Sprintf("table id %d name mismatch: snapshot=%q registry=%q", registered.ID, snapshot.Name, registered.Name), nil)
 	}
 	if len(registered.Columns) != len(snapshot.Columns) {
-		return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column count mismatch: snapshot=%d registry=%d", registered.Name, len(snapshot.Columns), len(registered.Columns))}
+		add(fmt.Sprintf("table %q column count mismatch: snapshot=%d registry=%d", registered.Name, len(snapshot.Columns), len(registered.Columns)), nil)
 	}
-	for i := range registered.Columns {
+	for i := range min(len(registered.Columns), len(snapshot.Columns)) {
 		regCol := registered.Columns[i]
 		snapCol := snapshot.Columns[i]
 		if regCol.Index != snapCol.Index {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %d index mismatch: snapshot=%d registry=%d", registered.Name, i, snapCol.Index, regCol.Index)}
+			add(fmt.Sprintf("table %q column %d index mismatch: snapshot=%d registry=%d", registered.Name, i, snapCol.Index, regCol.Index), nil)
 		}
 		if regCol.Name != snapCol.Name {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %d name mismatch: snapshot=%q registry=%q", registered.Name, i, snapCol.Name, regCol.Name)}
+			add(fmt.Sprintf("table %q column %d name mismatch: snapshot=%q registry=%q", registered.Name, i, snapCol.Name, regCol.Name), nil)
 		}
 		if regCol.Type != snapCol.Type {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %q type mismatch: snapshot=%v registry=%v", registered.Name, regCol.Name, snapCol.Type, regCol.Type)}
+			add(fmt.Sprintf("table %q column %q type mismatch: snapshot=%v registry=%v", registered.Name, regCol.Name, snapCol.Type, regCol.Type), nil)
 		}
 		if snapCol.Nullable {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %q nullable must be false in v1 snapshots", registered.Name, regCol.Name), Cause: schema.ErrNullableColumn}
-		}
-		if regCol.Nullable != snapCol.Nullable {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %q nullable mismatch: snapshot=%t registry=%t", registered.Name, regCol.Name, snapCol.Nullable, regCol.Nullable)}
+			add(fmt.Sprintf("table %q column %q nullable must be false in v1 snapshots", registered.Name, regCol.Name), schema.ErrNullableColumn)
+		} else if regCol.Nullable != snapCol.Nullable {
+			add(fmt.Sprintf("table %q column %q nullable mismatch: snapshot=%t registry=%t", registered.Name, regCol.Name, snapCol.Nullable, regCol.Nullable), nil)
 		}
 		if regCol.AutoIncrement != snapCol.AutoIncrement {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q column %q auto_increment mismatch: snapshot=%t registry=%t", registered.Name, regCol.Name, snapCol.AutoIncrement, regCol.AutoIncrement)}
+			add(fmt.Sprintf("table %q column %q auto_increment mismatch: snapshot=%t registry=%t", registered.Name, regCol.Name, snapCol.AutoIncrement, regCol.AutoIncrement), nil)
 		}
 	}
 	if len(registered.Indexes) != len(snapshot.Indexes) {
-		return &SchemaMismatchError{Detail: fmt.Sprintf("table %q index count mismatch: snapshot=%d registry=%d", registered.Name, len(snapshot.Indexes), len(registered.Indexes))}
+		add(fmt.Sprintf("table %q index count mismatch: snapshot=%d registry=%d", registered.Name, len(snapshot.Indexes), len(registered.Indexes)), nil)
 	}
-	for i := range registered.Indexes {
+	for i := range min(len(registered.Indexes), len(snapshot.Indexes)) {
 		regIdx := registered.Indexes[i]
 		snapIdx := snapshot.Indexes[i]
 		if regIdx.Name != snapIdx.Name {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q index %d name mismatch: snapshot=%q registry=%q", registered.Name, i, snapIdx.Name, regIdx.Name)}
+			add(fmt.Sprintf("table %q index %d name mismatch: snapshot=%q registry=%q", registered.Name, i, snapIdx.Name, regIdx.Name), nil)
 		}
 		if !slices.Equal(regIdx.Columns, snapIdx.Columns) {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q index %q columns mismatch: snapshot=%v registry=%v", registered.Name, regIdx.Name, snapIdx.Columns, regIdx.Columns)}
+			add(fmt.Sprintf("table %q index %q columns mismatch: snapshot=%v registry=%v", registered.Name, regIdx.Name, snapIdx.Columns, regIdx.Columns), nil)
 		}
 		if regIdx.Unique != snapIdx.Unique {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q index %q unique mismatch: snapshot=%t registry=%t", registered.Name, regIdx.Name, snapIdx.Unique, regIdx.Unique)}
+			add(fmt.Sprintf("table %q index %q unique mismatch: snapshot=%t registry=%t", registered.Name, regIdx.Name, snapIdx.Unique, regIdx.Unique), nil)
 		}
 		if regIdx.Primary != snapIdx.Primary {
-			return &SchemaMismatchError{Detail: fmt.Sprintf("table %q index %q primary mismatch: snapshot=%t registry=%t", registered.Name, regIdx.Name, snapIdx.Primary, regIdx.Primary)}
+			add(fmt.Sprintf("table %q index %q primary mismatch: snapshot=%t registry=%t", registered.Name, regIdx.Name, snapIdx.Primary, regIdx.Primary), nil)
 		}
 	}
-	return nil
 }
