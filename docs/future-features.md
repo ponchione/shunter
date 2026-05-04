@@ -107,7 +107,7 @@ Likely feature slices:
 - stronger parser/planner boundary
 - richer projections and aliases
 - multi-join support
-- broader `ORDER BY` beyond the current one-off/declared-query
+- broader `ORDER BY` beyond the current one-off/declared-query multi-column
   projected-table column and unique projection-output-name slice
 - additional aggregates beyond the current `COUNT(*)` / `COUNT(column)` slice
 - broader `OFFSET` support beyond the current one-off/declared-query slice

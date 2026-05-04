@@ -250,6 +250,37 @@ func TestModuleContractValidationRejectsInvalidDeclarationSQL(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationAllowsMultiColumnOrderByQuerySQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Queries = []QueryDescription{{
+		Name: "ranked_messages",
+		SQL:  "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected multi-column ORDER BY query SQL: %v", err)
+	}
+}
+
+func TestModuleContractValidationRejectsMultiColumnOrderByViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_messages",
+		SQL:  "SELECT * FROM messages ORDER BY body DESC, id ASC",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted multi-column ORDER BY view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_messages.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages ORDER BY body DESC, id ASC") {
+		t.Fatalf("ValidateModuleContract error = %v, want ORDER BY unsupported text", err)
+	}
+}
+
 func TestModuleContractValidationRejectsInvalidTableReadPolicyMetadata(t *testing.T) {
 	tests := []struct {
 		name   string

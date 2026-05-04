@@ -152,9 +152,9 @@ type AggregateProjection struct {
 	Alias  string
 }
 
-// OrderByColumn is the bounded query-only ORDER BY surface. It is limited to a
-// single column reference or unqualified projection output name; callers decide
-// which protocol surfaces may execute it.
+// OrderByColumn is one bounded query-only ORDER BY term. It is limited to a
+// column reference or unqualified projection output name; callers decide which
+// protocol surfaces may execute it.
 type OrderByColumn struct {
 	Table           string
 	Column          string
@@ -173,18 +173,21 @@ type Statement struct {
 	ProjectedAliasUnknown bool
 	ProjectionColumns     []ProjectionColumn
 	Aggregate             *AggregateProjection
-	OrderBy               *OrderByColumn
-	Join                  *JoinClause
-	Predicate             Predicate
-	Filters               []Filter
-	Limit                 *uint64
-	HasLimit              bool
-	InvalidLimit          *Literal
-	UnsupportedLimit      bool
-	Offset                *uint64
-	HasOffset             bool
-	InvalidOffset         *Literal
-	UnsupportedOffset     bool
+	// OrderBy is the first parsed ORDER BY term, retained for compatibility.
+	// OrderByColumns preserves the complete ordered term list.
+	OrderBy           *OrderByColumn
+	OrderByColumns    []OrderByColumn
+	Join              *JoinClause
+	Predicate         Predicate
+	Filters           []Filter
+	Limit             *uint64
+	HasLimit          bool
+	InvalidLimit      *Literal
+	UnsupportedLimit  bool
+	Offset            *uint64
+	HasOffset         bool
+	InvalidOffset     *Literal
+	UnsupportedOffset bool
 }
 
 type relationBindings struct {
@@ -661,11 +664,14 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		stmt.Filters, _ = flattenAndFilters(stmt.Predicate)
 	}
-	orderBy, err := p.parseOrderBy(bindings, len(stmt.ProjectionColumns) != 0)
+	orderByColumns, err := p.parseOrderBy(bindings, len(stmt.ProjectionColumns) != 0)
 	if err != nil {
 		return Statement{}, err
 	}
-	stmt.OrderBy = orderBy
+	stmt.OrderByColumns = orderByColumns
+	if len(stmt.OrderByColumns) != 0 {
+		stmt.OrderBy = &stmt.OrderByColumns[0]
+	}
 	limit, invalidLimit, hasLimit, unsupportedLimit, err := p.parseLimit()
 	if err != nil {
 		return Statement{}, err
@@ -1051,7 +1057,7 @@ func (p *parser) parseWhere(bindings relationBindings) (Predicate, []Filter, err
 	return pred, filters, nil
 }
 
-func (p *parser) parseOrderBy(bindings relationBindings, allowUnqualifiedOutputName bool) (*OrderByColumn, error) {
+func (p *parser) parseOrderBy(bindings relationBindings, allowUnqualifiedOutputName bool) ([]OrderByColumn, error) {
 	if !isKeywordToken(p.peek(), "ORDER") {
 		return nil, nil
 	}
@@ -1059,26 +1065,31 @@ func (p *parser) parseOrderBy(bindings relationBindings, allowUnqualifiedOutputN
 	if err := p.expectKeyword("BY"); err != nil {
 		return nil, err
 	}
-	ref, err := p.parseColumnRefForOrderBy(bindings, allowUnqualifiedOutputName)
-	if err != nil {
-		return nil, err
-	}
-	desc := false
-	if isKeywordToken(p.peek(), "ASC") {
+	var columns []OrderByColumn
+	for {
+		ref, err := p.parseColumnRefForOrderBy(bindings, allowUnqualifiedOutputName)
+		if err != nil {
+			return nil, err
+		}
+		desc := false
+		if isKeywordToken(p.peek(), "ASC") {
+			p.advance()
+		} else if isKeywordToken(p.peek(), "DESC") {
+			p.advance()
+			desc = true
+		}
+		columns = append(columns, OrderByColumn{
+			Table:           ref.Table,
+			Column:          ref.Column,
+			SourceQualifier: ref.Alias,
+			Desc:            desc,
+		})
+		if p.peek().kind != tokComma {
+			break
+		}
 		p.advance()
-	} else if isKeywordToken(p.peek(), "DESC") {
-		p.advance()
-		desc = true
 	}
-	if p.peek().kind == tokComma {
-		return nil, p.unsupported("ORDER BY supports a single column")
-	}
-	return &OrderByColumn{
-		Table:           ref.Table,
-		Column:          ref.Column,
-		SourceQualifier: ref.Alias,
-		Desc:            desc,
-	}, nil
+	return columns, nil
 }
 
 func (p *parser) parseColumnRefForOrderBy(bindings relationBindings, allowUnqualifiedOutputName bool) (ColumnRef, error) {

@@ -221,6 +221,36 @@ func TestDeclaredQueryOrderByProjectionAlias(t *testing.T) {
 	}
 }
 
+func TestDeclaredQueryMultiColumnOrderByProjectionAlias(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Query(QueryDeclaration{
+			Name:        "ranked_messages",
+			SQL:         "SELECT id, body AS text FROM messages ORDER BY text DESC, id ASC LIMIT 2 OFFSET 1",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 3, "bravo")
+	insertMessageWithBody(t, rt, 1, "charlie")
+	insertMessageWithBody(t, rt, 2, "charlie")
+	insertMessageWithBody(t, rt, 4, "alpha")
+
+	result, err := rt.CallQuery(context.Background(), "ranked_messages", WithDeclaredReadPermissions("messages:read"))
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if result.Name != "ranked_messages" || result.TableName != "messages" {
+		t.Fatalf("result identity = (%q, %q), want ranked_messages/messages", result.Name, result.TableName)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("rows = %#v, want two ordered projected rows", result.Rows)
+	}
+	if result.Rows[0][0].AsUint64() != 2 || result.Rows[0][1].AsString() != "charlie" ||
+		result.Rows[1][0].AsUint64() != 3 || result.Rows[1][1].AsString() != "bravo" {
+		t.Fatalf("rows = %#v, want offset rows (2, charlie), (3, bravo)", result.Rows)
+	}
+}
+
 func TestDeclaredViewRejectsOrderBy(t *testing.T) {
 	_, err := Build(validChatModule().
 		View(ViewDeclaration{
@@ -251,6 +281,23 @@ func TestDeclaredViewRejectsOrderByProjectionAlias(t *testing.T) {
 		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
 	}
 	if !strings.Contains(err.Error(), "Unsupported: SELECT body AS text FROM messages ORDER BY text") {
+		t.Fatalf("Build error = %v, want ORDER BY unsupported text", err)
+	}
+}
+
+func TestDeclaredViewRejectsMultiColumnOrderBy(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT * FROM messages ORDER BY body DESC, id ASC",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want ORDER BY rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages ORDER BY body DESC, id ASC") {
 		t.Fatalf("Build error = %v, want ORDER BY unsupported text", err)
 	}
 }

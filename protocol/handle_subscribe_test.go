@@ -3514,6 +3514,37 @@ func TestHandleSubscribeSingle_OrderByRejected(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_MultiColumnOrderByRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "label", Type: schema.KindString},
+	)
+
+	const sqlText = "SELECT * FROM t ORDER BY label ASC, u32 DESC"
+	msg := &SubscribeSingleMsg{
+		RequestID:   106,
+		QueryID:     107,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 107, "QueryID")
+	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when multi-column ORDER BY appears on a subscription")
+	}
+}
+
 func TestHandleSubscribeSingle_OrderByProjectionAliasRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}

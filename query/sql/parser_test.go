@@ -1356,6 +1356,11 @@ func TestParseSelectAllWithOrderByAndLimit(t *testing.T) {
 	if stmt.OrderBy.Table != "users" || stmt.OrderBy.Column != "name" || stmt.OrderBy.SourceQualifier != "" || !stmt.OrderBy.Desc {
 		t.Fatalf("OrderBy = %+v, want users.name DESC", *stmt.OrderBy)
 	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+		Table:  "users",
+		Column: "name",
+		Desc:   true,
+	}})
 	if stmt.Limit == nil || *stmt.Limit != 5 {
 		t.Fatalf("Limit = %v, want 5", stmt.Limit)
 	}
@@ -1398,6 +1403,11 @@ func TestParseOrderByQualifiedAliasAsc(t *testing.T) {
 	if stmt.OrderBy.Table != "users" || stmt.OrderBy.Column != "id" || stmt.OrderBy.SourceQualifier != "item" || stmt.OrderBy.Desc {
 		t.Fatalf("OrderBy = %+v, want users.id qualified by item ASC", *stmt.OrderBy)
 	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+		Table:           "users",
+		Column:          "id",
+		SourceQualifier: "item",
+	}})
 }
 
 func TestParseJoinOrderByQualifiedProjectedTableColumn(t *testing.T) {
@@ -1411,6 +1421,12 @@ func TestParseJoinOrderByQualifiedProjectedTableColumn(t *testing.T) {
 	if stmt.OrderBy.Table != "Orders" || stmt.OrderBy.Column != "id" || stmt.OrderBy.SourceQualifier != "o" || !stmt.OrderBy.Desc {
 		t.Fatalf("OrderBy = %+v, want Orders.id qualified by o DESC", *stmt.OrderBy)
 	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+		Table:           "Orders",
+		Column:          "id",
+		SourceQualifier: "o",
+		Desc:            true,
+	}})
 }
 
 func TestParseOrderByProjectionAlias(t *testing.T) {
@@ -1430,6 +1446,10 @@ func TestParseOrderByProjectionAlias(t *testing.T) {
 	if stmt.OrderBy.Table != "metrics" || stmt.OrderBy.Column != "rank" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
 		t.Fatalf("OrderBy = %+v, want unqualified metrics.rank ASC token", *stmt.OrderBy)
 	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+		Table:  "metrics",
+		Column: "rank",
+	}})
 }
 
 func TestParseOrderByProjectionImplicitName(t *testing.T) {
@@ -1449,6 +1469,10 @@ func TestParseOrderByProjectionImplicitName(t *testing.T) {
 	if stmt.OrderBy.Table != "metrics" || stmt.OrderBy.Column != "score" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
 		t.Fatalf("OrderBy = %+v, want unqualified metrics.score ASC token", *stmt.OrderBy)
 	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+		Table:  "metrics",
+		Column: "score",
+	}})
 }
 
 func TestParseJoinOrderByProjectionOutputName(t *testing.T) {
@@ -1468,10 +1492,71 @@ func TestParseJoinOrderByProjectionOutputName(t *testing.T) {
 	if stmt.OrderBy.Table != "" || stmt.OrderBy.Column != "order_id" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
 		t.Fatalf("OrderBy = %+v, want unqualified projection output name order_id", *stmt.OrderBy)
 	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+		Column: "order_id",
+	}})
 }
 
-func TestParseRejectsMultiColumnOrderBy(t *testing.T) {
-	_, err := Parse("SELECT * FROM users ORDER BY name, id")
+func TestParseMultiColumnOrderBy(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users ORDER BY active DESC, name ASC, id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.OrderBy == nil {
+		t.Fatal("OrderBy = nil, want first term")
+	}
+	if stmt.OrderBy.Column != "active" || !stmt.OrderBy.Desc {
+		t.Fatalf("OrderBy = %+v, want active DESC first term", *stmt.OrderBy)
+	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{
+		{Table: "users", Column: "active", Desc: true},
+		{Table: "users", Column: "name"},
+		{Table: "users", Column: "id"},
+	})
+}
+
+func TestParseMultiColumnOrderByQualifiedTerms(t *testing.T) {
+	stmt, err := Parse("SELECT item.* FROM users AS item ORDER BY item.active DESC, item.name ASC")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{
+		{Table: "users", Column: "active", SourceQualifier: "item", Desc: true},
+		{Table: "users", Column: "name", SourceQualifier: "item"},
+	})
+}
+
+func TestParseMultiColumnOrderByProjectionAliases(t *testing.T) {
+	stmt, err := Parse("SELECT id, score AS rank FROM metrics ORDER BY rank DESC, id ASC")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{
+		{Table: "metrics", Column: "rank", Desc: true},
+		{Table: "metrics", Column: "id"},
+	})
+}
+
+func TestParseMultiColumnJoinOrderByProjectionOutputNames(t *testing.T) {
+	stmt, err := Parse("SELECT o.id AS order_id, product.quantity AS q FROM Orders o JOIN Inventory product ON o.product_id = product.id ORDER BY q DESC, order_id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{
+		{Column: "q", Desc: true},
+		{Column: "order_id"},
+	})
+}
+
+func TestParseRejectsOrderByTrailingComma(t *testing.T) {
+	_, err := Parse("SELECT * FROM users ORDER BY name,")
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseRejectsOrderByCommaBeforeLimit(t *testing.T) {
+	_, err := Parse("SELECT * FROM users ORDER BY name, LIMIT 1")
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
 	}
@@ -1481,6 +1566,13 @@ func TestParseRejectsUnqualifiedJoinOrderBy(t *testing.T) {
 	_, err := Parse("SELECT o.* FROM Orders o JOIN Inventory product ON o.product_id = product.id ORDER BY id")
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func assertOrderByColumns(t *testing.T, got []OrderByColumn, want []OrderByColumn) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("OrderByColumns = %+v, want %+v", got, want)
 	}
 }
 

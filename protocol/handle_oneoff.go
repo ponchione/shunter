@@ -119,7 +119,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 	rowLimit := oneOffRowLimit(query.Limit)
 	rowOffset := oneOffRowOffset(query.Offset)
 	scanLimit := rowLimit
-	if query.OrderBy != nil {
+	if len(query.OrderBy) != 0 {
 		scanLimit = -1
 	} else {
 		scanLimit = oneOffScanLimit(rowOffset, rowLimit)
@@ -141,7 +141,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 			if len(query.ProjectionColumns) != 0 {
 				var rows []types.ProductValue
 				var err error
-				if query.OrderBy != nil {
+				if len(query.OrderBy) != 0 {
 					rows, err = evaluateOneOffJoinProjectionOrdered(ctx, view, joinPred, query.ProjectionColumns, query.OrderBy, resolver, rowOffset, rowLimit)
 				} else {
 					rows, err = evaluateOneOffJoinProjection(ctx, view, joinPred, query.ProjectionColumns, resolver, scanLimit)
@@ -162,7 +162,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 			if len(query.ProjectionColumns) != 0 {
 				var rows []types.ProductValue
 				var err error
-				if query.OrderBy != nil {
+				if len(query.OrderBy) != 0 {
 					rows, err = evaluateOneOffCrossJoinProjectionOrdered(ctx, view, crossPred, query.ProjectionColumns, query.OrderBy, rowOffset, rowLimit)
 				} else {
 					rows, err = evaluateOneOffCrossJoinProjection(ctx, view, crossPred, query.ProjectionColumns, scanLimit)
@@ -192,13 +192,13 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 				}
 			}
 		}
-		if query.OrderBy != nil && !rowsAlreadyProjected {
+		if len(query.OrderBy) != 0 && !rowsAlreadyProjected {
 			var err error
 			matchedRows, err = orderAndLimitOneOffRows(matchedRows, query.OrderBy, rowOffset, rowLimit)
 			if err != nil {
 				return SQLQueryResult{}, err
 			}
-		} else if query.OrderBy == nil {
+		} else if len(query.OrderBy) == 0 {
 			matchedRows = sliceOneOffRows(matchedRows, rowOffset, rowLimit)
 		}
 		if len(query.ProjectionColumns) != 0 && !rowsAlreadyProjected {
@@ -290,31 +290,41 @@ func oneOffLimitReached(count int, limit int) bool {
 
 type orderedOneOffRow struct {
 	row types.ProductValue
-	key types.Value
+	key []types.Value
 }
 
-func orderAndLimitOneOffRows(rows []types.ProductValue, orderBy *compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
-	if orderBy == nil {
+func orderAndLimitOneOffRows(rows []types.ProductValue, orderBy []compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
+	if len(orderBy) == 0 {
 		return sliceOneOffRows(rows, offset, limit), nil
 	}
-	idx := orderBy.Column.Schema.Index
 	ordered := make([]orderedOneOffRow, 0, len(rows))
 	for _, row := range rows {
-		if idx < 0 || idx >= len(row) {
-			return nil, fmt.Errorf("ORDER BY column %q is missing from row", orderBy.Column.Schema.Name)
+		keys := make([]types.Value, len(orderBy))
+		for i, term := range orderBy {
+			idx := term.Column.Schema.Index
+			if idx < 0 || idx >= len(row) {
+				return nil, fmt.Errorf("ORDER BY column %q is missing from row", term.Column.Schema.Name)
+			}
+			keys[i] = row[idx]
 		}
-		ordered = append(ordered, orderedOneOffRow{row: row, key: row[idx]})
+		ordered = append(ordered, orderedOneOffRow{row: row, key: keys})
 	}
-	return materializeOrderedOneOffRows(ordered, orderBy.Desc, offset, limit), nil
+	return materializeOrderedOneOffRows(ordered, orderBy, offset, limit), nil
 }
 
-func materializeOrderedOneOffRows(rows []orderedOneOffRow, desc bool, offset int, limit int) []types.ProductValue {
+func materializeOrderedOneOffRows(rows []orderedOneOffRow, orderBy []compiledSQLOrderBy, offset int, limit int) []types.ProductValue {
 	slices.SortStableFunc(rows, func(a, b orderedOneOffRow) int {
-		cmp := a.key.Compare(b.key)
-		if desc {
-			return -cmp
+		for i, term := range orderBy {
+			cmp := a.key[i].Compare(b.key[i])
+			if cmp == 0 {
+				continue
+			}
+			if term.Desc {
+				return -cmp
+			}
+			return cmp
 		}
-		return cmp
+		return 0
 	})
 	start := offset
 	if start > len(rows) {
@@ -441,11 +451,11 @@ func evaluateOneOffJoinProjection(ctx context.Context, view store.CommittedReadV
 	return rows, err
 }
 
-func evaluateOneOffJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn, orderBy *compiledSQLOrderBy, resolver schema.IndexResolver, offset int, limit int) ([]types.ProductValue, error) {
+func evaluateOneOffJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, resolver schema.IndexResolver, offset int, limit int) ([]types.ProductValue, error) {
 	var rows []orderedOneOffRow
 	var orderErr error
 	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
-		key, err := orderKeyFromJoinPair(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, orderBy)
+		key, err := orderKeysFromJoinPair(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, orderBy)
 		if err != nil {
 			orderErr = err
 			return false
@@ -462,7 +472,7 @@ func evaluateOneOffJoinProjectionOrdered(ctx context.Context, view store.Committ
 	if orderErr != nil {
 		return nil, orderErr
 	}
-	return materializeOrderedOneOffRows(rows, orderBy.Desc, offset, limit), nil
+	return materializeOrderedOneOffRows(rows, orderBy, offset, limit), nil
 }
 
 func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, join subscription.Join, resolver schema.IndexResolver, visit func(leftRow, rightRow types.ProductValue) bool) error {
@@ -586,11 +596,11 @@ func evaluateOneOffCrossJoinProjection(ctx context.Context, view store.Committed
 	return rows, err
 }
 
-func evaluateOneOffCrossJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, orderBy *compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
+func evaluateOneOffCrossJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
 	var rows []orderedOneOffRow
 	var orderErr error
 	err := visitOneOffCrossJoinPairs(ctx, view, cross, true, func(leftRow, rightRow types.ProductValue) bool {
-		key, err := orderKeyFromJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, orderBy)
+		key, err := orderKeysFromJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, orderBy)
 		if err != nil {
 			orderErr = err
 			return false
@@ -607,7 +617,7 @@ func evaluateOneOffCrossJoinProjectionOrdered(ctx context.Context, view store.Co
 	if orderErr != nil {
 		return nil, orderErr
 	}
-	return materializeOrderedOneOffRows(rows, orderBy.Desc, offset, limit), nil
+	return materializeOrderedOneOffRows(rows, orderBy, offset, limit), nil
 }
 
 func projectOneOffJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn) types.ProductValue {
@@ -656,16 +666,20 @@ func oneOffAggregateJoinColumnPresent(leftRow, rightRow types.ProductValue, left
 	return idx >= 0 && idx < len(source)
 }
 
-func orderKeyFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy *compiledSQLOrderBy) (types.Value, error) {
-	source, ok := projectedJoinColumnSource(orderBy.Column, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
-	if !ok {
-		return types.Value{}, fmt.Errorf("ORDER BY column %q is not from the projected table", orderBy.Column.Schema.Name)
+func orderKeysFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy []compiledSQLOrderBy) ([]types.Value, error) {
+	keys := make([]types.Value, len(orderBy))
+	for i, term := range orderBy {
+		source, ok := projectedJoinColumnSource(term.Column, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
+		if !ok {
+			return nil, fmt.Errorf("ORDER BY column %q is not from the projected table", term.Column.Schema.Name)
+		}
+		idx := term.Column.Schema.Index
+		if idx < 0 || idx >= len(source) {
+			return nil, fmt.Errorf("ORDER BY column %q is missing from row", term.Column.Schema.Name)
+		}
+		keys[i] = source[idx]
 	}
-	idx := orderBy.Column.Schema.Index
-	if idx < 0 || idx >= len(source) {
-		return types.Value{}, fmt.Errorf("ORDER BY column %q is missing from row", orderBy.Column.Schema.Name)
-	}
-	return source[idx], nil
+	return keys, nil
 }
 
 func evaluateOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, projectedTable schema.TableID, cross subscription.CrossJoin, limit int) ([]types.ProductValue, error) {

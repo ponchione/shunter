@@ -405,6 +405,9 @@ func assertRapidQueryStatement(t rapidTestFataler, stmt Statement, q rapidSQLQue
 	if stmt.OrderBy != nil {
 		t.Fatalf("OrderBy = %+v, want nil for %q", *stmt.OrderBy, q.SQL)
 	}
+	if len(stmt.OrderByColumns) != 0 {
+		t.Fatalf("OrderByColumns = %+v, want nil for %q", stmt.OrderByColumns, q.SQL)
+	}
 	if !rapidUint64PtrEqual(stmt.Limit, q.Limit) {
 		t.Fatalf("Limit = %v, want %v for %q", stmt.Limit, q.Limit, q.SQL)
 	}
@@ -450,6 +453,7 @@ func rapidStatementsEquivalent(a, b Statement) bool {
 		a.ProjectedAlias != b.ProjectedAlias ||
 		a.ProjectedAliasUnknown != b.ProjectedAliasUnknown ||
 		!reflect.DeepEqual(a.OrderBy, b.OrderBy) ||
+		!reflect.DeepEqual(a.OrderByColumns, b.OrderByColumns) ||
 		a.HasLimit != b.HasLimit ||
 		a.UnsupportedLimit != b.UnsupportedLimit ||
 		!rapidUint64PtrEqual(a.Limit, b.Limit) ||
@@ -480,6 +484,7 @@ func rapidStatementsEquivalentIgnoringFilterOrder(a, b Statement) bool {
 		a.ProjectedAlias != b.ProjectedAlias ||
 		a.ProjectedAliasUnknown != b.ProjectedAliasUnknown ||
 		!reflect.DeepEqual(a.OrderBy, b.OrderBy) ||
+		!reflect.DeepEqual(a.OrderByColumns, b.OrderByColumns) ||
 		a.HasLimit != b.HasLimit ||
 		a.UnsupportedLimit != b.UnsupportedLimit ||
 		!rapidUint64PtrEqual(a.Limit, b.Limit) ||
