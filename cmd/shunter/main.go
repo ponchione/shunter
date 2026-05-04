@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/codegen"
@@ -250,7 +251,7 @@ func requireNoArgs(stderr io.Writer, fs *flag.FlagSet) int {
 }
 
 func requirePath(stderr io.Writer, name, value string) int {
-	if value != "" {
+	if strings.TrimSpace(value) != "" {
 		return 0
 	}
 	writeCLIErrorf(stderr, "--%s is required\n", name)

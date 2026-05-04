@@ -451,6 +451,69 @@ func TestContractReadCommandsRejectMissingRequiredPathBeforeFileIO(t *testing.T)
 	}
 }
 
+func TestContractCommandsRejectWhitespaceRequiredPathsBeforeFileIO(t *testing.T) {
+	const trace = "trace=cli-contract-whitespace-required-path-before-file-io"
+	dir := t.TempDir()
+	missingPath := filepath.Join(dir, "missing.json")
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("%s write existing output: %v", trace, err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "diff-previous",
+			args:       []string{"contract", "diff", "--previous", " \t", "--current", missingPath},
+			wantStderr: "--previous is required",
+		},
+		{
+			name:       "diff-current",
+			args:       []string{"contract", "diff", "--previous", missingPath, "--current", "\n"},
+			wantStderr: "--current is required",
+		},
+		{
+			name:       "codegen-contract",
+			args:       []string{"contract", "codegen", "--contract", " \t", "--out", outputPath},
+			wantStderr: "--contract is required",
+		},
+		{
+			name:       "codegen-out",
+			args:       []string{"contract", "codegen", "--contract", missingPath, "--out", "\n"},
+			wantStderr: "--out is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(&stdout, &stderr, tc.args)
+			if code != 2 {
+				t.Fatalf("%s case=%s exit code = %d, stderr = %s", trace, tc.name, code, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s case=%s stdout = %s, want empty", trace, tc.name, stdout.String())
+			}
+			assertContains(t, stderr.String(), tc.wantStderr)
+			if strings.Contains(stderr.String(), "read previous contract") ||
+				strings.Contains(stderr.String(), "read current contract") ||
+				strings.Contains(stderr.String(), "read contract input") ||
+				strings.Contains(stderr.String(), missingPath) {
+				t.Fatalf("%s case=%s performed file I/O before rejecting blank path: %s", trace, tc.name, stderr.String())
+			}
+			got, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatalf("%s case=%s read existing output: %v", trace, tc.name, err)
+			}
+			if !bytes.Equal(got, original) {
+				t.Fatalf("%s case=%s blank path mutated output:\nobserved=%q\nexpected=%q", trace, tc.name, got, original)
+			}
+		})
+	}
+}
+
 func TestContractReadCommandsRejectInvalidContractInputs(t *testing.T) {
 	const trace = "trace=cli-contract-read-invalid-input-rc-gate"
 	dir := t.TempDir()
