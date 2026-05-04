@@ -156,6 +156,11 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		return types.NewTimestamp(int64(binary.LittleEndian.Uint64(buf[:8]))), nil
+	case TagDuration:
+		if _, err := io.ReadFull(r, buf[:8]); err != nil {
+			return types.Value{}, err
+		}
+		return types.NewDuration(int64(binary.LittleEndian.Uint64(buf[:8]))), nil
 	case TagArrayString:
 		if _, err := io.ReadFull(r, buf[:4]); err != nil {
 			return types.Value{}, err
@@ -433,6 +438,12 @@ func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		return types.NewTimestamp(int64(binary.LittleEndian.Uint64(data))), nil
+	case TagDuration:
+		data, err := d.read(8)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewDuration(int64(binary.LittleEndian.Uint64(data))), nil
 	case TagArrayString:
 		count, err := d.readU32()
 		if err != nil {

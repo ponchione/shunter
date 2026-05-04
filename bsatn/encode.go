@@ -30,6 +30,7 @@ const (
 	TagTimestamp   byte = 17
 	TagArrayString byte = 18
 	TagUUID        byte = 19
+	TagDuration    byte = 20
 )
 
 // AppendValue appends v in BSATN format to dst and returns the extended slice.
@@ -113,6 +114,9 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 		dst = append(dst, wide[:]...)
 	case types.KindTimestamp:
 		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsTimestamp()))
+		dst = append(dst, buf[:8]...)
+	case types.KindDuration:
+		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsDurationMicros()))
 		dst = append(dst, buf[:8]...)
 	case types.KindArrayString:
 		xs := v.ArrayStringView()
@@ -220,6 +224,9 @@ func EncodeValue(w io.Writer, v types.Value) error {
 	case types.KindTimestamp:
 		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsTimestamp()))
 		return writeAll(w, buf[:8])
+	case types.KindDuration:
+		binary.LittleEndian.PutUint64(buf[:8], uint64(v.AsDurationMicros()))
+		return writeAll(w, buf[:8])
 	case types.KindArrayString:
 		xs := v.ArrayStringView()
 		binary.LittleEndian.PutUint32(buf[:4], uint32(len(xs)))
@@ -291,7 +298,7 @@ func EncodedValueSize(v types.Value) int {
 		return 17
 	case types.KindInt256, types.KindUint256:
 		return 33
-	case types.KindTimestamp:
+	case types.KindTimestamp, types.KindDuration:
 		return 9
 	case types.KindArrayString:
 		xs := v.ArrayStringView()

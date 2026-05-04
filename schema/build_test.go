@@ -3,6 +3,7 @@ package schema
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/ponchione/shunter/types"
 )
@@ -379,6 +380,41 @@ func TestBuildReflectionPathIntegration(t *testing.T) {
 	}
 	if pk.ID != 0 {
 		t.Fatal("PK index should be IndexID 0")
+	}
+}
+
+func TestBuildReflectionPathTimestampColumn(t *testing.T) {
+	type Event struct {
+		ID        uint64 `shunter:"primarykey"`
+		CreatedAt time.Time
+		TTL       time.Duration
+	}
+	b := NewBuilder()
+	b.SchemaVersion(1)
+	if err := RegisterTable[Event](b); err != nil {
+		t.Fatal(err)
+	}
+	e, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	_, ts, ok := e.Registry().TableByName("event")
+	if !ok {
+		t.Fatal("event table should exist")
+	}
+	col, ok := ts.Column("created_at")
+	if !ok {
+		t.Fatal("created_at column should exist")
+	}
+	if col.Type != KindTimestamp {
+		t.Fatalf("created_at type = %v, want KindTimestamp", col.Type)
+	}
+	col, ok = ts.Column("ttl")
+	if !ok {
+		t.Fatal("ttl column should exist")
+	}
+	if col.Type != KindDuration {
+		t.Fatalf("ttl type = %v, want KindDuration", col.Type)
 	}
 }
 

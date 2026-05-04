@@ -99,6 +99,7 @@ func TestValueEncodingTagsAndLittleEndianPayloads(t *testing.T) {
 		{"string", types.NewString("go"), []byte{TagString, 0x02, 0x00, 0x00, 0x00, 'g', 'o'}},
 		{"bytes", types.NewBytes([]byte{0xde, 0xad}), []byte{TagBytes, 0x02, 0x00, 0x00, 0x00, 0xde, 0xad}},
 		{"uuid", types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}), []byte{TagUUID, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}},
+		{"duration", types.NewDuration(0x0102030405060708), []byte{TagDuration, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01}},
 	}
 	for _, tc := range cases {
 		var buf bytes.Buffer

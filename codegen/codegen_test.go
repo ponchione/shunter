@@ -96,6 +96,22 @@ func TestTypeScriptGeneratorMapsUUIDColumns(t *testing.T) {
 	assertContains(t, ts, `externalId: UUID;`)
 }
 
+func TestTypeScriptGeneratorMapsDurationColumns(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
+		Name: "ttl",
+		Type: "duration",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `ttl: bigint;`)
+}
+
 func TestTypeScriptGeneratorExportsCountDistinctDeclaredQuerySQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Queries = append(contract.Queries, shunter.QueryDescription{

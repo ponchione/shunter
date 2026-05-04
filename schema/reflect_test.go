@@ -3,6 +3,7 @@ package schema
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 type AllTypes struct {
@@ -28,6 +29,27 @@ func TestDiscoverFieldsAllTypes(t *testing.T) {
 	}
 	if len(fields) != 13 {
 		t.Fatalf("expected 13 fields, got %d", len(fields))
+	}
+}
+
+func TestDiscoverFieldsTimestamp(t *testing.T) {
+	type WithTimestamp struct {
+		ID        uint64 `shunter:"primarykey"`
+		CreatedAt time.Time
+		TTL       time.Duration
+	}
+	fields, err := discoverFields(reflect.TypeFor[WithTimestamp](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(fields))
+	}
+	if fields[1].ColumnName != "created_at" || fields[1].Type != KindTimestamp {
+		t.Fatalf("timestamp field = %+v, want created_at KindTimestamp", fields[1])
+	}
+	if fields[2].ColumnName != "ttl" || fields[2].Type != KindDuration {
+		t.Fatalf("duration field = %+v, want ttl KindDuration", fields[2])
 	}
 }
 

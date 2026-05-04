@@ -163,12 +163,14 @@ Each `ProductValue` (a row) is encoded as its column values in schema-defined co
 | Uint128 | 14 | 16 bytes LE (low 8 bytes first, then high 8 bytes; both unsigned) |
 | Int256 | 15 | 32 bytes LE two's-complement (four 8-byte LE words, least-significant word first; highest word is signed) |
 | Uint256 | 16 | 32 bytes LE (four 8-byte LE words, least-significant word first; all words unsigned) |
-| Timestamp | 17 | 8 bytes LE signed (Unix epoch nanoseconds, int64) |
+| Timestamp | 17 | 8 bytes LE signed (Unix epoch microseconds, int64) |
 | ArrayString | 18 | uint32 LE element count, followed by each element as uint32 LE byte count + UTF-8 bytes |
+| UUID | 19 | 16 canonical UUID bytes |
+| Duration | 20 | 8 bytes LE signed (microseconds, int64) |
 
 Tags are stable. Adding new column types requires a new tag value and a payload encoding increment.
 
-**Widening history (informational).** v1 shipped with 13 scalar kinds (tags 0–12). Tags 13–18 were added incrementally by the column-kind-widening slices to keep Go structs honest about real application shapes (128/256-bit ID-like values, epoch-nanosecond timestamps, string arrays for tag sets). The direction of drift is widening-only: tags never get renumbered, and no existing tag's payload has changed. Canonical source is `types/value.go` (`KindBool` … `KindArrayString`) and `bsatn/encode.go` (`TagBool` … `TagArrayString`). Any future widening MUST append above the current max tag.
+**Widening history (informational).** v1 shipped with 13 scalar kinds (tags 0–12). Tags 13–20 were added incrementally by the column-kind-widening slices to keep Go structs honest about real application shapes (128/256-bit ID-like values, epoch-microsecond timestamps, string arrays for tag sets, UUIDs, and durations). The direction of drift is widening-only: tags never get renumbered, and no existing tag's payload has changed. Canonical source is `types/value.go` (`KindBool` … `KindDuration`) and `bsatn/encode.go` (`TagBool` … `TagDuration`). Any future widening MUST append above the current max tag.
 
 Decoder rules:
 - The decoder MAY parse bytes value-by-value without schema, but schema is still required to validate the expected column count, expected value kinds, and table identity.

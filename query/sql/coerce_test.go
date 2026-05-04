@@ -658,6 +658,77 @@ func TestCoerceSenderRejectsTimestampColumn(t *testing.T) {
 	}
 }
 
+func TestCoerceStringLiteralToDuration(t *testing.T) {
+	cases := []struct {
+		sql    string
+		micros int64
+	}{
+		{"1s", 1_000_000},
+		{"1.5s", 1_500_000},
+		{"2h45m", 9_900_000_000},
+		{"-3ms", -3_000},
+	}
+	for _, c := range cases {
+		v, err := Coerce(Literal{Kind: LitString, Str: c.sql}, types.KindDuration)
+		if err != nil {
+			t.Fatalf("Coerce(%q -> Duration) error: %v", c.sql, err)
+		}
+		if v.Kind() != types.KindDuration {
+			t.Fatalf("Kind = %v, want KindDuration", v.Kind())
+		}
+		if got := v.AsDurationMicros(); got != c.micros {
+			t.Fatalf("Coerce(%q) micros = %d, want %d", c.sql, got, c.micros)
+		}
+	}
+}
+
+func TestCoerceMalformedDurationRejected(t *testing.T) {
+	const durationType = "(__duration_micros__: I64)"
+	for _, s := range []string{"", "not-a-duration", "5fortnights"} {
+		_, err := Coerce(Literal{Kind: LitString, Str: s}, types.KindDuration)
+		var ilErr InvalidLiteralError
+		if !errors.As(err, &ilErr) {
+			t.Fatalf("Coerce(%q) err = %v, want InvalidLiteralError", s, err)
+		}
+		if ilErr.Literal != s || ilErr.Type != durationType {
+			t.Fatalf("Coerce(%q) got {%q, %q}, want {%q, %q}", s, ilErr.Literal, ilErr.Type, s, durationType)
+		}
+		if !errors.Is(err, ErrUnsupportedSQL) {
+			t.Fatalf("Coerce(%q) err does not unwrap to ErrUnsupportedSQL: %v", s, err)
+		}
+	}
+}
+
+func TestCoerceNonStringLiteralOnDurationRejected(t *testing.T) {
+	const durationType = "(__duration_micros__: I64)"
+	_, err := Coerce(Literal{Kind: LitInt, Int: 42}, types.KindDuration)
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	if ilErr.Literal != "42" || ilErr.Type != durationType {
+		t.Fatalf("got {%q, %q}, want {\"42\", %q}", ilErr.Literal, ilErr.Type, durationType)
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+	}
+}
+
+func TestCoerceBoolLiteralOnDurationRejected(t *testing.T) {
+	const durationType = "(__duration_micros__: I64)"
+	_, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindDuration)
+	var utErr UnexpectedTypeError
+	if !errors.As(err, &utErr) {
+		t.Fatalf("err = %v, want UnexpectedTypeError", err)
+	}
+	if utErr.Expected != "Bool" || utErr.Inferred != durationType {
+		t.Fatalf("got {%q, %q}, want {Bool, %q}", utErr.Expected, utErr.Inferred, durationType)
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+	}
+}
+
 func TestCoerceStringLiteralToUUID(t *testing.T) {
 	const text = "00112233-4455-6677-8899-aabbccddeeff"
 	v, err := Coerce(Literal{Kind: LitString, Str: text}, types.KindUUID)

@@ -94,8 +94,8 @@ func newSchemaBuildFuzzSpec(data []byte) schemaBuildFuzzSpec {
 
 func schemaBuildFuzzTable(r *schemaBuildFuzzReader, tableIdx int) TableDefinition {
 	tableNames := []string{"players", "tasks", "messages", "files", "Events"}
-	columnNames := []string{"id", "owner", "name", "score", "done", "payload", "created_at", "tags"}
-	kinds := []ValueKind{KindBool, KindUint64, KindString, KindBytes, KindInt64, KindTimestamp, KindArrayString, KindUUID}
+	columnNames := []string{"id", "owner", "name", "score", "done", "payload", "created_at", "tags", "ttl"}
+	kinds := []ValueKind{KindBool, KindUint64, KindString, KindBytes, KindInt64, KindTimestamp, KindArrayString, KindUUID, KindDuration}
 
 	name := tableNames[(int(r.byte())+tableIdx)%len(tableNames)]
 	switch r.byte() % 53 {

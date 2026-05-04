@@ -598,6 +598,8 @@ func encodeValue(e *canonicalEncoder, v Value) {
 		e.writeU64(w3)
 	case types.KindTimestamp:
 		e.writeU64(uint64(v.AsTimestamp()))
+	case types.KindDuration:
+		e.writeU64(uint64(v.AsDurationMicros()))
 	case types.KindArrayString:
 		xs := v.ArrayStringView()
 		e.writeU32(uint32(len(xs)))

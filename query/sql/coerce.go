@@ -157,6 +157,22 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 			return types.Value{}, mismatch(lit, kind)
 		}
 		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+	case types.KindDuration:
+		// Duration string literals use Go's duration grammar and store signed
+		// microseconds, matching the runtime duration unit.
+		if lit.Kind == LitString {
+			if micros, ok := parseDurationLiteral(lit.Str); ok {
+				return types.NewDuration(micros), nil
+			}
+		}
+		if lit.Kind == LitBool {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		text, ok := renderLiteralSourceText(lit)
+		if !ok {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	case types.KindArrayString:
 		// Shunter SQL has no array literal grammar; source-text literals reject.
 		if lit.Kind == LitBool {
@@ -494,6 +510,8 @@ func algebraicName(k types.ValueKind) string {
 		return "Array<U8>"
 	case types.KindTimestamp:
 		return "(__timestamp_micros_since_unix_epoch__: I64)"
+	case types.KindDuration:
+		return "(__duration_micros__: I64)"
 	case types.KindArrayString:
 		return "Array<String>"
 	case types.KindUUID:
@@ -546,6 +564,14 @@ func parseTimestampLiteral(s string) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func parseDurationLiteral(s string) (int64, bool) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, false
+	}
+	return d.Microseconds(), true
 }
 
 // coerceBigIntToInt128 binds a big.Int literal to a 128-bit signed column.

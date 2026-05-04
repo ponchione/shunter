@@ -37,6 +37,14 @@ func TestQueryHashUUIDUsesCanonicalBytes(t *testing.T) {
 	}
 }
 
+func TestQueryHashDurationUsesDistinctKind(t *testing.T) {
+	durationHash := ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: types.NewDuration(42)}, nil)
+	intHash := ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: types.NewInt64(42)}, nil)
+	if durationHash == intHash {
+		t.Fatal("Duration hash should include kind tag and not collapse to Int64")
+	}
+}
+
 func TestQueryHashCanonicalizesFloatZero(t *testing.T) {
 	neg32, err := types.NewFloat32(float32(math.Copysign(0, -1)))
 	if err != nil {

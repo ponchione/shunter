@@ -214,6 +214,8 @@ func encodeValueKey(v Value) valueKey {
 		k.w256 = [4]uint64{w0, w1, w2, w3}
 	case types.KindTimestamp:
 		k.i64 = v.AsTimestamp()
+	case types.KindDuration:
+		k.i64 = v.AsDurationMicros()
 	case types.KindArrayString:
 		enc := acquireCanonicalEncoder()
 		xs := v.ArrayStringView()

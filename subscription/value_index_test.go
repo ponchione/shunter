@@ -83,6 +83,19 @@ func TestValueIndexDifferentUUIDValues(t *testing.T) {
 	}
 }
 
+func TestValueIndexDurationDoesNotCollideWithInt64(t *testing.T) {
+	v := NewValueIndex()
+	hDuration, hInt := hashN(1), hashN(2)
+	v.Add(1, 0, types.NewDuration(42), hDuration)
+	v.Add(1, 0, types.NewInt64(42), hInt)
+	if got := v.Lookup(1, 0, types.NewDuration(42)); len(got) != 1 || got[0] != hDuration {
+		t.Fatalf("Lookup(duration) = %v, want [hDuration]", got)
+	}
+	if got := v.Lookup(1, 0, types.NewInt64(42)); len(got) != 1 || got[0] != hInt {
+		t.Fatalf("Lookup(int64) = %v, want [hInt]", got)
+	}
+}
+
 func TestValueIndexCanonicalizesFloatZero(t *testing.T) {
 	v := NewValueIndex()
 	h := hashN(1)

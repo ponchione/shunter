@@ -10,6 +10,7 @@ import (
 	"hash/fnv"
 	"math"
 	"strings"
+	"time"
 )
 
 var ErrInvalidFloat = errors.New("invalid float value")
@@ -42,6 +43,7 @@ const (
 	KindTimestamp
 	KindArrayString
 	KindUUID
+	KindDuration
 )
 
 var kindNames = [...]string{
@@ -65,6 +67,7 @@ var kindNames = [...]string{
 	KindTimestamp:   "Timestamp",
 	KindArrayString: "ArrayString",
 	KindUUID:        "UUID",
+	KindDuration:    "Duration",
 }
 
 func (k ValueKind) String() string {
@@ -220,6 +223,24 @@ func NewUint256FromUint64(x uint64) Value {
 // the i64 slot.
 func NewTimestamp(micros int64) Value {
 	return Value{kind: KindTimestamp, i64: micros}
+}
+
+// NewTimestampFromTime builds a Timestamp value from a Go time.Time. Precision
+// is truncated to microseconds to match Shunter's timestamp storage.
+func NewTimestampFromTime(t time.Time) Value {
+	return NewTimestamp(t.UTC().UnixMicro())
+}
+
+// NewDuration builds a Duration value. micros is signed microseconds; storage
+// reuses the i64 slot.
+func NewDuration(micros int64) Value {
+	return Value{kind: KindDuration, i64: micros}
+}
+
+// NewDurationFromTime builds a Duration value from a Go time.Duration.
+// Precision is truncated to microseconds to match Shunter's duration storage.
+func NewDurationFromTime(d time.Duration) Value {
+	return NewDuration(d.Microseconds())
 }
 
 // NewArrayString builds an ArrayString value from a slice of strings.
@@ -412,6 +433,22 @@ func (v Value) AsTimestamp() int64 {
 	return v.i64
 }
 
+// AsTime returns the Timestamp as a UTC Go time.Time.
+func (v Value) AsTime() time.Time {
+	return time.UnixMicro(v.AsTimestamp()).UTC()
+}
+
+// AsDurationMicros returns the Duration in signed microseconds.
+func (v Value) AsDurationMicros() int64 {
+	v.mustKind(KindDuration)
+	return v.i64
+}
+
+// AsDuration returns the Duration as a Go time.Duration.
+func (v Value) AsDuration() time.Duration {
+	return time.Duration(v.AsDurationMicros()) * time.Microsecond
+}
+
 // AsArrayString returns a defensive copy of the string-array payload.
 func (v Value) AsArrayString() []string {
 	v.mustKind(KindArrayString)
@@ -460,7 +497,7 @@ func (v Value) Equal(other Value) bool {
 		return v.hi128 == other.hi128 && v.lo128 == other.lo128
 	case KindInt256, KindUint256:
 		return v.w256 == other.w256
-	case KindTimestamp:
+	case KindTimestamp, KindDuration:
 		return v.i64 == other.i64
 	case KindArrayString:
 		if len(v.strArr) != len(other.strArr) {
@@ -534,7 +571,7 @@ func (v Value) Compare(other Value) int {
 			}
 		}
 		return 0
-	case KindTimestamp:
+	case KindTimestamp, KindDuration:
 		return cmp.Compare(v.i64, other.i64)
 	case KindArrayString:
 		n := len(v.strArr)
@@ -613,7 +650,7 @@ func (v Value) writePayload(h hash.Hash64) {
 			binary.BigEndian.PutUint64(buf[:], v.w256[i])
 			h.Write(buf[:])
 		}
-	case KindTimestamp:
+	case KindTimestamp, KindDuration:
 		binary.BigEndian.PutUint64(buf[:], uint64(v.i64))
 		h.Write(buf[:])
 	case KindArrayString:
@@ -650,7 +687,7 @@ func (v Value) payloadLen() uint32 {
 		return 16
 	case KindInt256, KindUint256:
 		return 32
-	case KindTimestamp:
+	case KindTimestamp, KindDuration:
 		return 8
 	case KindArrayString:
 		n := uint32(4)

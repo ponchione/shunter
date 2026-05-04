@@ -72,6 +72,7 @@ func TestExportSchemaIncludesExtendedColumnKinds(t *testing.T) {
 			{Name: "created_at", Type: KindTimestamp},
 			{Name: "tags", Type: KindArrayString},
 			{Name: "uuid", Type: KindUUID},
+			{Name: "ttl", Type: KindDuration},
 		},
 	})
 
@@ -94,6 +95,7 @@ func TestExportSchemaIncludesExtendedColumnKinds(t *testing.T) {
 		"created_at": "timestamp",
 		"tags":       "arrayString",
 		"uuid":       "uuid",
+		"ttl":        "duration",
 	}
 	for name, wantType := range want {
 		if got[name] != wantType {

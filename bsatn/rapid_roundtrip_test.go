@@ -33,6 +33,7 @@ var rapidValueKinds = []types.ValueKind{
 	types.KindTimestamp,
 	types.KindArrayString,
 	types.KindUUID,
+	types.KindDuration,
 }
 
 func rapidValue() *rapid.Generator[types.Value] {
@@ -116,6 +117,8 @@ func rapidValueOfKind(kind types.ValueKind) *rapid.Generator[types.Value] {
 		})
 	case types.KindTimestamp:
 		return rapid.Map(rapid.Int64(), types.NewTimestamp)
+	case types.KindDuration:
+		return rapid.Map(rapid.Int64(), types.NewDuration)
 	case types.KindArrayString:
 		return rapid.Map(rapid.SliceOfN(rapid.StringN(0, 16, 32), 0, 8), types.NewArrayString)
 	case types.KindUUID:

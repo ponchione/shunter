@@ -134,5 +134,5 @@ func validateStructure(b *Builder) []error {
 }
 
 func isValidValueKind(kind ValueKind) bool {
-	return kind >= KindBool && kind <= KindUUID
+	return kind >= KindBool && kind <= KindDuration
 }

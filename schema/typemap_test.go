@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGoTypeToValueKindScalars(t *testing.T) {
@@ -24,6 +25,8 @@ func TestGoTypeToValueKindScalars(t *testing.T) {
 		{reflect.TypeFor[float32](), KindFloat32},
 		{reflect.TypeFor[float64](), KindFloat64},
 		{reflect.TypeFor[string](), KindString},
+		{reflect.TypeFor[time.Time](), KindTimestamp},
+		{reflect.TypeFor[time.Duration](), KindDuration},
 		{reflect.TypeFor[[]byte](), KindBytes},
 		{reflect.TypeFor[[16]byte](), KindUUID},
 	}
@@ -43,6 +46,7 @@ type Score int64
 type ID uint64
 type Blob []byte
 type UUIDBytes [16]byte
+type EventTime time.Time
 type NamedByte uint8
 type NotBlob []NamedByte
 
@@ -55,6 +59,7 @@ func TestGoTypeToValueKindNamedTypes(t *testing.T) {
 		{reflect.TypeFor[ID](), KindUint64},
 		{reflect.TypeFor[Blob](), KindBytes},
 		{reflect.TypeFor[UUIDBytes](), KindUUID},
+		{reflect.TypeFor[EventTime](), KindTimestamp},
 	}
 	for _, c := range cases {
 		got, err := GoTypeToValueKind(c.goType)

@@ -131,9 +131,6 @@ Each new type should cover:
 
 Likely useful types:
 
-- UUID
-- duration
-- stronger `time.Time` / timestamp mapping
 - nullable/optional values with explicit wire semantics
 - arrays beyond `[]string` when an app needs them
 - app-level enums with a simple exported representation

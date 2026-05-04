@@ -326,7 +326,7 @@ func typeScriptColumnType(kind string) (string, error) {
 		return "boolean", nil
 	case "int8", "uint8", "int16", "uint16", "int32", "uint32", "float32", "float64":
 		return "number", nil
-	case "int64", "uint64", "int128", "uint128", "int256", "uint256", "timestamp":
+	case "int64", "uint64", "int128", "uint128", "int256", "uint256", "timestamp", "duration":
 		return "bigint", nil
 	case "string":
 		return "string", nil

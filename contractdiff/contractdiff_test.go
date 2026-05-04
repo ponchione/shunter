@@ -91,6 +91,31 @@ func TestContractDiffReportsUUIDColumnType(t *testing.T) {
 	}
 }
 
+func TestContractDiffReportsDurationColumnType(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{
+		Name: "ttl",
+		Type: "duration",
+	})
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceColumn, "messages.ttl")
+	if got := report.Text(); !strings.Contains(got, "additive column messages.ttl: column added with type duration") {
+		t.Fatalf("Text() = %q, want additive duration column detail", got)
+	}
+
+	old = contractFixture()
+	old.Schema.Tables[0].Columns[0].Type = "duration"
+	current = contractFixture()
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceColumn, "messages.id")
+	if got := report.Text(); !strings.Contains(got, "breaking column messages.id: column type changed from duration to uint64") {
+		t.Fatalf("Text() = %q, want breaking duration column detail", got)
+	}
+}
+
 func TestContractDiffReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()

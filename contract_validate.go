@@ -479,6 +479,8 @@ func valueKindFromExportString(value string) (schema.ValueKind, bool) {
 		return schema.KindArrayString, true
 	case "uuid":
 		return schema.KindUUID, true
+	case "duration":
+		return schema.KindDuration, true
 	default:
 		return 0, false
 	}

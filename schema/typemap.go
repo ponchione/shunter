@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"time"
 )
 
 // ErrUnsupportedFieldType is returned when a Go type cannot be mapped to a ValueKind.
@@ -11,6 +12,8 @@ var ErrUnsupportedFieldType = errors.New("unsupported field type")
 
 var byteSliceType = reflect.TypeFor[[]byte]()
 var byteElemType = reflect.TypeFor[byte]()
+var timeTimeType = reflect.TypeFor[time.Time]()
+var timeDurationType = reflect.TypeFor[time.Duration]()
 
 // GoTypeToValueKind maps a Go reflect.Type to the corresponding ValueKind.
 // Named types are resolved through their underlying kind.
@@ -23,6 +26,12 @@ func GoTypeToValueKind(t reflect.Type) (ValueKind, error) {
 	// Check []byte before generic slice rejection.
 	if t == byteSliceType || (t.Kind() == reflect.Slice && t.Elem() == byteElemType) {
 		return KindBytes, nil
+	}
+	if t == timeTimeType || (t.Kind() == reflect.Struct && t.ConvertibleTo(timeTimeType)) {
+		return KindTimestamp, nil
+	}
+	if t == timeDurationType {
+		return KindDuration, nil
 	}
 	if t.Kind() == reflect.Array && t.Len() == 16 && t.Elem() == byteElemType {
 		return KindUUID, nil

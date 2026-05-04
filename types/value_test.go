@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 )
 
 func mustFloat32(t *testing.T, x float32) Value {
@@ -457,6 +458,22 @@ func TestRoundTripTimestamp(t *testing.T) {
 	}
 }
 
+func TestTimestampTimeHelpersUseUTCMicroseconds(t *testing.T) {
+	in := time.Date(2026, time.May, 4, 12, 34, 56, 789_123_456, time.FixedZone("app", -5*60*60))
+	v := NewTimestampFromTime(in)
+	if v.Kind() != KindTimestamp {
+		t.Fatalf("Kind = %v, want Timestamp", v.Kind())
+	}
+	wantMicros := in.UTC().UnixMicro()
+	if got := v.AsTimestamp(); got != wantMicros {
+		t.Fatalf("AsTimestamp = %d, want %d", got, wantMicros)
+	}
+	wantTime := time.UnixMicro(wantMicros).UTC()
+	if got := v.AsTime(); !got.Equal(wantTime) || got.Location() != time.UTC {
+		t.Fatalf("AsTime = %v (%v), want %v UTC", got, got.Location(), wantTime)
+	}
+}
+
 func TestEqualTimestamp(t *testing.T) {
 	if !NewTimestamp(1).Equal(NewTimestamp(1)) {
 		t.Fatal("identical timestamps not equal")
@@ -489,6 +506,47 @@ func TestAccessorTimestampPanicsOnWrongKind(t *testing.T) {
 		}
 	}()
 	v.AsTimestamp()
+}
+
+func TestRoundTripDuration(t *testing.T) {
+	for _, micros := range []int64{math.MinInt64, -1, 0, 1, 12_345_678, math.MaxInt64} {
+		v := NewDuration(micros)
+		if v.Kind() != KindDuration {
+			t.Fatalf("Kind = %v, want Duration", v.Kind())
+		}
+		if got := v.AsDurationMicros(); got != micros {
+			t.Fatalf("AsDurationMicros = %d, want %d", got, micros)
+		}
+	}
+}
+
+func TestDurationTimeHelperTruncatesToMicroseconds(t *testing.T) {
+	in := 5*time.Second + 123_456*time.Microsecond + 789*time.Nanosecond
+	v := NewDurationFromTime(in)
+	if v.Kind() != KindDuration {
+		t.Fatalf("Kind = %v, want Duration", v.Kind())
+	}
+	if got, want := v.AsDurationMicros(), int64(5_123_456); got != want {
+		t.Fatalf("AsDurationMicros = %d, want %d", got, want)
+	}
+	if got, want := v.AsDuration(), 5*time.Second+123_456*time.Microsecond; got != want {
+		t.Fatalf("AsDuration = %v, want %v", got, want)
+	}
+}
+
+func TestEqualAndCompareDuration(t *testing.T) {
+	if !NewDuration(1).Equal(NewDuration(1)) {
+		t.Fatal("identical durations not equal")
+	}
+	if NewDuration(1).Equal(NewDuration(2)) {
+		t.Fatal("differing durations reported equal")
+	}
+	if NewDuration(1).Equal(NewTimestamp(1)) {
+		t.Fatal("Duration and Timestamp with same payload should not be Equal")
+	}
+	if NewDuration(-5).Compare(NewDuration(1)) >= 0 {
+		t.Fatal("Duration Compare: -5 should be < 1")
+	}
 }
 
 func TestRoundTripArrayString(t *testing.T) {
@@ -737,6 +795,7 @@ func TestAccessorPanicsOnKindMismatch(t *testing.T) {
 		{"AsString", func() { v.AsString() }},
 		{"AsBytes", func() { v.AsBytes() }},
 		{"AsUUID", func() { v.AsUUID() }},
+		{"AsDurationMicros", func() { v.AsDurationMicros() }},
 	}
 	for _, a := range accessors {
 		t.Run(a.name, func(t *testing.T) {
@@ -777,8 +836,9 @@ func TestValueKindString(t *testing.T) {
 		{KindTimestamp, "Timestamp"},
 		{KindArrayString, "ArrayString"},
 		{KindUUID, "UUID"},
+		{KindDuration, "Duration"},
 		{ValueKind(-1), "ValueKind(-1)"},
-		{ValueKind(len(kindNames)), "ValueKind(20)"},
+		{ValueKind(len(kindNames)), "ValueKind(21)"},
 	}
 	for _, c := range cases {
 		if got := c.k.String(); got != c.want {

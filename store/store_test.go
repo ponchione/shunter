@@ -120,6 +120,14 @@ func TestIndexKeyUUIDLexicographicByteOrdering(t *testing.T) {
 	}
 }
 
+func TestIndexKeyDurationOrdering(t *testing.T) {
+	low := NewIndexKey(types.NewDuration(-1))
+	high := NewIndexKey(types.NewDuration(1))
+	if low.Compare(high) != -1 {
+		t.Fatalf("Duration index key ordering = %d, want -1 < 1", low.Compare(high))
+	}
+}
+
 func TestBoundConstructors(t *testing.T) {
 	var _ Bound
 

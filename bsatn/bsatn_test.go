@@ -67,6 +67,11 @@ func TestValueRoundTrip(t *testing.T) {
 		types.NewTimestamp(math.MinInt64),
 		types.NewTimestamp(math.MaxInt64),
 		types.NewTimestamp(1_739_201_130_000_000),
+		types.NewDuration(0),
+		types.NewDuration(-1),
+		types.NewDuration(math.MinInt64),
+		types.NewDuration(math.MaxInt64),
+		types.NewDuration(12_345_678),
 		types.NewArrayString(nil),
 		types.NewArrayString([]string{}),
 		types.NewArrayString([]string{""}),
@@ -107,6 +112,7 @@ func TestProductValueRoundTrip(t *testing.T) {
 			{Index: 1, Name: "name", Type: types.KindString},
 			{Index: 2, Name: "score", Type: types.KindInt64},
 			{Index: 3, Name: "uuid", Type: types.KindUUID},
+			{Index: 4, Name: "ttl", Type: types.KindDuration},
 		},
 	}
 	pv := types.ProductValue{
@@ -114,6 +120,7 @@ func TestProductValueRoundTrip(t *testing.T) {
 		types.NewString("alice"),
 		types.NewInt64(-100),
 		types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
+		types.NewDuration(90_000_000),
 	}
 
 	var buf bytes.Buffer

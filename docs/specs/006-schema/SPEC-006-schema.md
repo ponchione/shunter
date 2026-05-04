@@ -76,19 +76,19 @@ The following Go types may be used as struct field types in registered table str
 | `float64` | Float64 | NaN rejected on insert |
 | `string` | String | UTF-8 |
 | `[]byte` | Bytes | |
+| `[16]byte` | UUID | canonical 16-byte UUID |
+| `time.Time` | Timestamp | stored as UTC Unix microseconds |
+| `time.Duration` | Duration | stored as signed microseconds |
 
-Named Go types whose underlying type is one of the scalar types above are also supported. Example: `type UnixNanos int64` is accepted and maps to `Int64`.
+Named Go types whose underlying type is one of the scalar types above are also supported. Example: `type Score int64` is accepted and maps to `Int64`. Defined `time.Time`-shaped struct types map to `Timestamp`; `time.Duration` is supported exactly.
 
-**Excluded in v1:** pointers, interfaces, maps, slices other than `[]byte`, non-embedded nested structs, arrays, time.Time (use `int64` Unix nanos), nullable/optional fields, `int` / `uint` (platform-width; use explicit widths).
+**Excluded in v1:** pointers, interfaces, maps, slices other than `[]byte`, non-embedded nested structs, arrays other than `[16]byte`, nullable/optional fields, `int` / `uint` (platform-width; use explicit widths).
 
 **Recommended practice:** Define a named type or alias if semantic clarity is useful. The engine stores only the underlying scalar representation.
 
-**`UnixNanos` helper (recommended):** All timestamps in Shunter are stored as `int64` Unix nanoseconds. Reducers that handle time SHOULD declare `type UnixNanos int64` in their schema package. This keeps the engine representation deterministic and timezone-neutral. The client codegen tool (§12) SHOULD emit a `UnixNanos` type with the following conversion helpers in generated client code:
+**Timestamp helper:** Timestamps in Shunter are stored as `int64` Unix microseconds. Go schemas can use `time.Time` directly; lower-level code can use `types.NewTimestampFromTime` / `Value.AsTime` to convert explicitly.
 
-```go
-func (n UnixNanos) Time() time.Time          { return time.Unix(0, int64(n)).UTC() }
-func FromTime(t time.Time) UnixNanos         { return UnixNanos(t.UnixNano()) }
-```
+**Duration helper:** Durations in Shunter are stored as signed microseconds. Go schemas can use `time.Duration` directly; lower-level code can use `types.NewDurationFromTime` / `Value.AsDuration` to convert explicitly.
 
 **Auto-increment overflow:** `autoincrement` is allowed on any integer column type, but inserts fail with `ErrSequenceOverflow` once the next generated value would exceed the column's representable range.
 

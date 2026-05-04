@@ -24,6 +24,7 @@ var fuzzProductValueSchema = &schema.TableSchema{
 		{Index: 6, Name: "stamp", Type: types.KindTimestamp},
 		{Index: 7, Name: "wide", Type: types.KindUint256},
 		{Index: 8, Name: "uuid", Type: types.KindUUID},
+		{Index: 9, Name: "ttl", Type: types.KindDuration},
 	},
 }
 
@@ -54,6 +55,7 @@ func decodeProductValueFuzzSeeds(tb testing.TB) [][]byte {
 			types.NewTimestamp(1_739_201_130_000_000),
 			types.NewUint256(1, 2, 3, 4),
 			types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
+			types.NewDuration(12_345_678),
 		},
 		{
 			types.NewUint64(0),
@@ -65,6 +67,7 @@ func decodeProductValueFuzzSeeds(tb testing.TB) [][]byte {
 			types.NewTimestamp(0),
 			types.NewUint256(0, 0, 0, 0),
 			types.NewUUID([16]byte{}),
+			types.NewDuration(0),
 		},
 	} {
 		encoded := mustAppendFuzzProductValue(tb, row)
@@ -209,7 +212,7 @@ func boundedFuzzProductValueInput(data []byte, ts *schema.TableSchema) bool {
 			pos += 2
 		case types.KindInt32, types.KindUint32, types.KindFloat32:
 			pos += 4
-		case types.KindInt64, types.KindUint64, types.KindFloat64, types.KindTimestamp:
+		case types.KindInt64, types.KindUint64, types.KindFloat64, types.KindTimestamp, types.KindDuration:
 			pos += 8
 		case types.KindInt128, types.KindUint128, types.KindUUID:
 			pos += 16
