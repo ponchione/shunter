@@ -665,7 +665,7 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		stmt.Filters, _ = flattenAndFilters(stmt.Predicate)
 	}
-	orderByColumns, err := p.parseOrderBy(bindings, len(stmt.ProjectionColumns) != 0)
+	orderByColumns, err := p.parseOrderBy(bindings, len(stmt.ProjectionColumns) != 0 || stmt.Aggregate != nil)
 	if err != nil {
 		return Statement{}, err
 	}

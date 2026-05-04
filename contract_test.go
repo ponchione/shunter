@@ -305,6 +305,18 @@ func TestModuleContractValidationAllowsSumAggregateQuerySQL(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationAllowsAggregateOrderByAliasQuerySQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Queries = []QueryDescription{{
+		Name: "message_count",
+		SQL:  "SELECT COUNT(*) AS n FROM messages ORDER BY n",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected aggregate ORDER BY query SQL: %v", err)
+	}
+}
+
 func TestModuleContractValidationAllowsCountDistinctAggregateQuerySQL(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Queries = []QueryDescription{{

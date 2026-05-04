@@ -479,7 +479,7 @@ func TestDeclaredQuerySumColumnExecutesThroughRuntimePath(t *testing.T) {
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
 		Query(QueryDeclaration{
 			Name:        "message_id_total",
-			SQL:         "SELECT SUM(id) AS total FROM messages LIMIT 1",
+			SQL:         "SELECT SUM(id) AS total FROM messages ORDER BY total DESC LIMIT 1",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
 		}))
 	defer rt.Close()

@@ -2183,6 +2183,22 @@ func TestParseCountStarAliasProjectionWithLimit(t *testing.T) {
 	}
 }
 
+func TestParseAggregateOrderByAlias(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) AS n FROM t ORDER BY n DESC LIMIT 1")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want alias n", stmt.Aggregate)
+	}
+	if len(stmt.OrderByColumns) != 1 {
+		t.Fatalf("OrderByColumns len = %d, want 1", len(stmt.OrderByColumns))
+	}
+	if got, want := stmt.OrderByColumns[0], (OrderByColumn{Table: "t", Column: "n", Desc: true}); got != want {
+		t.Fatalf("OrderByColumns[0] = %+v, want %+v", got, want)
+	}
+}
+
 func TestParseCountStarBareAliasProjectionWithWhereAndLimitZero(t *testing.T) {
 	stmt, err := Parse("SELECT COUNT(*) n FROM t WHERE active = TRUE LIMIT 0")
 	if err != nil {
@@ -2234,6 +2250,22 @@ func TestParseJoinCountStarAliasProjection(t *testing.T) {
 	}
 	if len(stmt.ProjectionColumns) != 0 {
 		t.Fatalf("len(ProjectionColumns) = %d, want 0", len(stmt.ProjectionColumns))
+	}
+}
+
+func TestParseJoinAggregateOrderByAlias(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.t_id ORDER BY n")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want alias n", stmt.Aggregate)
+	}
+	if len(stmt.OrderByColumns) != 1 {
+		t.Fatalf("OrderByColumns len = %d, want 1", len(stmt.OrderByColumns))
+	}
+	if got, want := stmt.OrderByColumns[0], (OrderByColumn{Column: "n"}); got != want {
+		t.Fatalf("OrderByColumns[0] = %+v, want %+v", got, want)
 	}
 }
 

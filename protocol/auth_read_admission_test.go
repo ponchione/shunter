@@ -100,6 +100,18 @@ func TestAuthReadAdmissionOneOffDefaultPrivateRejected(t *testing.T) {
 	requireOneOffAuthError(t, conn, authReadNoSuchMessages)
 }
 
+func TestAuthReadAdmissionAggregateOrderByPrivateRejected(t *testing.T) {
+	conn := strictReadAdmissionConn()
+	sl := authReadOneTableLookup(schema.ReadPolicy{})
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte("private-aggregate-order"),
+		QueryString: "SELECT COUNT(*) AS n FROM messages ORDER BY n",
+	}, authReadState(nil), sl)
+
+	requireOneOffAuthError(t, conn, authReadNoSuchMessages)
+}
+
 func TestAuthReadAdmissionSubscribeDefaultPrivateRejected(t *testing.T) {
 	conn := strictReadAdmissionConn()
 	executor := &mockSubExecutor{}

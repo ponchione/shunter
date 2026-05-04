@@ -88,7 +88,6 @@ Likely feature slices:
 - stronger parser/planner boundary
 - richer projections and aliases
 - multi-join support
-- `ORDER BY` for additional result shapes where ordering remains deterministic
 - aggregate functions with explicit empty-result and nullable-value semantics
 - `OFFSET` for additional result shapes where snapshot/live-view semantics are
   explicit

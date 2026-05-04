@@ -6526,7 +6526,41 @@ func TestHandleOneOffQuery_ShunterSumNonNumericColumnRejected(t *testing.T) {
 	}
 }
 
-func TestHandleOneOffQuery_ShunterCountColumnOrderByRejected(t *testing.T) {
+func TestHandleOneOffQuery_ShunterCountColumnOrderByAliasAccepted(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	stateAccess := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewBool(true)},
+			{types.NewUint32(2), types.NewBool(false)},
+			{types.NewUint32(3), types.NewBool(true)},
+		},
+	}}}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCF},
+		QueryString: "SELECT COUNT(u32) AS n FROM t WHERE active = TRUE ORDER BY n DESC",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ShunterCountColumnOrderByInputColumnRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
 		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
@@ -6543,7 +6577,7 @@ func TestHandleOneOffQuery_ShunterCountColumnOrderByRejected(t *testing.T) {
 	if result.Error == nil {
 		t.Fatal("expected ORDER BY aggregate rejection, got nil error")
 	}
-	if got, want := *result.Error, "ORDER BY is not supported with aggregate projections"; got != want {
+	if got, want := *result.Error, "ORDER BY with aggregate projections only supports the aggregate output alias"; got != want {
 		t.Fatalf("Error = %q, want %q", got, want)
 	}
 }
@@ -6610,7 +6644,7 @@ func TestHandleOneOffQuery_ShunterJoinCountAliasReturnsSingleAggregateRow(t *tes
 
 	msg := &OneOffQueryMsg{
 		MessageID:   []byte{0xC5},
-		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.t_id",
+		QueryString: "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.t_id ORDER BY n",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 

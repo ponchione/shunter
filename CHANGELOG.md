@@ -9,6 +9,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added narrow `OFFSET <unsigned-integer>` support for one-off SQL and declared queries.
 - Added narrow `ORDER BY` support for unique projection output names in one-off SQL and declared queries.
 - Added multi-column `ORDER BY` support for one-off SQL and executable declared queries.
+- Added aggregate output alias `ORDER BY` support for one-off SQL and executable declared queries.
 - Added narrow `COUNT(<column>)` support for one-off SQL and declared queries.
 - Added narrow `SUM(<numeric-column>)` support for one-off SQL and declared queries.
 - Reject commits before state mutation when the executor TxID allocator is exhausted.

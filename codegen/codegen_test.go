@@ -131,6 +131,25 @@ func TestTypeScriptGeneratorExportsCountDistinctDeclaredQuerySQL(t *testing.T) {
 	assertContains(t, ts, `return runDeclaredQuery("distinct_message_bodies");`)
 }
 
+func TestTypeScriptGeneratorExportsAggregateOrderByDeclaredQuerySQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{
+		Name: "message_count",
+		SQL:  "SELECT COUNT(*) AS n FROM messages ORDER BY n",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `messageCount: "message_count",`)
+	assertContains(t, ts, `messageCount: "SELECT COUNT(*) AS n FROM messages ORDER BY n",`)
+	assertContains(t, ts, `export function queryMessageCount(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("message_count");`)
+}
+
 func TestGeneratorRejectsUnsupportedLanguage(t *testing.T) {
 	_, err := Generate(contractFixture(), Options{Language: "go"})
 	if err == nil {

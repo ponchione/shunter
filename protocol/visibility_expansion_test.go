@@ -361,7 +361,7 @@ func TestVisibilityExpansionAggregateLimitAndOffsetUseVisibleRows(t *testing.T) 
 	countConn.Identity = alice
 	handleOneOffQueryWithVisibility(context.Background(), countConn, &OneOffQueryMsg{
 		MessageID:   []byte("count-visible"),
-		QueryString: "SELECT COUNT(*) AS count FROM messages",
+		QueryString: "SELECT COUNT(*) AS count FROM messages ORDER BY count DESC",
 	}, &mockStateAccess{snap: &mockSnapshot{rows: rowsByTable}}, sl, filters)
 	countRows := decodeRows(t, firstTableRows(drainOneOff(t, countConn)), &schema.TableSchema{
 		Columns: []schema.ColumnSchema{{Index: 0, Name: "count", Type: schema.KindUint64}},

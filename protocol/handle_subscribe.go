@@ -605,12 +605,14 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 			return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 		}
-		orderBy, err := compileJoinOrderBy(stmtOrderBy, stmt, relations, projectionColumns, projectedID, aliasTag, leftID == rightID)
+		var orderBy []compiledSQLOrderBy
+		if stmt.Aggregate != nil {
+			orderBy, err = compileAggregateOrderBy(stmtOrderBy, aggregate, stmt.ProjectedTable)
+		} else {
+			orderBy, err = compileJoinOrderBy(stmtOrderBy, stmt, relations, projectionColumns, projectedID, aliasTag, leftID == rightID)
+		}
 		if err != nil {
 			return compiledSQLQuery{}, err
-		}
-		if len(stmtOrderBy) != 0 && stmt.Aggregate != nil {
-			return compiledSQLQuery{}, fmt.Errorf("ORDER BY is not supported with aggregate projections")
 		}
 		limit, err := compileStatementLimit(stmt, qs)
 		if err != nil {
@@ -711,12 +713,14 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		//lint:ignore ST1005 Pinned SQL contract tests assert this user-visible diagnostic.
 		return compiledSQLQuery{}, fmt.Errorf("Column projections are not supported in subscriptions; Subscriptions must return a table type")
 	}
-	orderBy, err := compileSingleRelationOrderBy(stmtOrderBy, stmt.ProjectedTable, stmt.TableAlias, projectedID, ts, projectionColumns)
+	var orderBy []compiledSQLOrderBy
+	if stmt.Aggregate != nil {
+		orderBy, err = compileAggregateOrderBy(stmtOrderBy, aggregate, stmt.ProjectedTable)
+	} else {
+		orderBy, err = compileSingleRelationOrderBy(stmtOrderBy, stmt.ProjectedTable, stmt.TableAlias, projectedID, ts, projectionColumns)
+	}
 	if err != nil {
 		return compiledSQLQuery{}, err
-	}
-	if len(stmtOrderBy) != 0 && stmt.Aggregate != nil {
-		return compiledSQLQuery{}, fmt.Errorf("ORDER BY is not supported with aggregate projections")
 	}
 	limit, err := compileStatementLimit(stmt, qs)
 	if err != nil {
@@ -1184,6 +1188,21 @@ func statementOrderByColumns(stmt sql.Statement) []sql.OrderByColumn {
 		return []sql.OrderByColumn{*stmt.OrderBy}
 	}
 	return nil
+}
+
+func compileAggregateOrderBy(orderBy []sql.OrderByColumn, aggregate *compiledSQLAggregate, projectedTable string) ([]compiledSQLOrderBy, error) {
+	if len(orderBy) == 0 {
+		return nil, nil
+	}
+	if aggregate == nil {
+		return nil, fmt.Errorf("aggregate metadata must not be nil")
+	}
+	for _, term := range orderBy {
+		if term.SourceQualifier != "" || term.Column != aggregate.ResultColumn.Name || (term.Table != "" && term.Table != projectedTable) {
+			return nil, fmt.Errorf("ORDER BY with aggregate projections only supports the aggregate output alias")
+		}
+	}
+	return nil, nil
 }
 
 func compileSingleRelationOrderBy(orderBy []sql.OrderByColumn, projectedTable string, tableAlias string, tableID schema.TableID, ts *schema.TableSchema, projectionColumns []compiledSQLProjectionColumn) ([]compiledSQLOrderBy, error) {
