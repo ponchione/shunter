@@ -23,6 +23,9 @@ Current contract:
 - Protocol version policy is explicit in `protocol/version.go`: v1 is the
   minimum, current, and only supported version. A future v2 must add a new
   subprotocol token and negotiation pins rather than widening v1 semantics.
+- Generated TypeScript clients expose protocol metadata from the same runtime
+  constants: minimum version, current version, default subprotocol, and
+  supported subprotocols.
 - Brotli is a reserved compression tag, but Shunter returns a distinct
   unsupported-brotli protocol error until real Shunter clients need it.
 - Client and server protocol decoders reject trailing bytes after a valid
@@ -46,6 +49,7 @@ Authoritative pins:
 
 - `docs/specs/005-protocol/SPEC-005-protocol.md`
 - `protocol/version_test.go`
+- `codegen/protocol_compat_test.go`
 - `protocol/golden_wire_test.go`
 - `protocol/tags_test.go`
 - `protocol/subprotocol_contract_test.go`
@@ -102,6 +106,8 @@ Current contract:
 - The flat per-entry `QueryID` is client-facing correlation data.
 - Row batches use Shunter's per-row length prefix format from
   `protocol/rowlist.go`, not reference `BsatnRowList` / `RowSizeHint`.
+- Row and update encoding is deterministic and treats caller-owned row/update
+  buffers as read-only. Decoded row payloads are detached from the source frame.
 - The remaining wrapper-chain differences are consequences of that inner
   row-list divergence.
 
@@ -122,6 +128,7 @@ trigger. Do not reopen solely to match SpacetimeDB's client wire shape.
 Authoritative pins:
 
 - `protocol/rows_shape_contract_test.go`
+- `protocol/row_encoding_contract_test.go`
 - `protocol/subscription_response_wire_test.go`
 - `protocol/message_family_contract_test.go`
 - `protocol/rowlist.go`

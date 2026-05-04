@@ -2052,6 +2052,32 @@ func TestParseCountColumnAliasProjection(t *testing.T) {
 	}
 }
 
+func TestParseCountDistinctColumnAliasProjection(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(DISTINCT u32) AS n FROM t WHERE active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(DISTINCT u32) AS n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" || !stmt.Aggregate.Distinct {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Distinct=true Alias=n", *stmt.Aggregate)
+	}
+	if stmt.Aggregate.Column == nil {
+		t.Fatal("Aggregate.Column = nil, want t.u32")
+	}
+	if got, want := *stmt.Aggregate.Column, (ColumnRef{Table: "t", Column: "u32"}); got != want {
+		t.Fatalf("Aggregate.Column = %+v, want %+v", got, want)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "t" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want t.active = TRUE", pred.Filter)
+	}
+}
+
 func TestParseSumColumnAliasProjection(t *testing.T) {
 	stmt, err := Parse("SELECT SUM(u32) AS total FROM t WHERE active = TRUE")
 	if err != nil {
@@ -2080,6 +2106,13 @@ func TestParseSumColumnAliasProjection(t *testing.T) {
 
 func TestParseRejectsSumStarProjection(t *testing.T) {
 	_, err := Parse("SELECT SUM(*) AS total FROM t")
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func TestParseRejectsCountDistinctStarProjection(t *testing.T) {
+	_, err := Parse("SELECT COUNT(DISTINCT *) AS n FROM t")
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
 	}

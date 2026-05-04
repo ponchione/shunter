@@ -293,6 +293,37 @@ func TestModuleContractValidationAllowsSumAggregateQuerySQL(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationAllowsCountDistinctAggregateQuerySQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Queries = []QueryDescription{{
+		Name: "distinct_message_bodies",
+		SQL:  "SELECT COUNT(DISTINCT body) AS n FROM messages",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected COUNT DISTINCT aggregate query SQL: %v", err)
+	}
+}
+
+func TestModuleContractValidationRejectsCountDistinctAggregateViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_messages",
+		SQL:  "SELECT COUNT(DISTINCT body) AS n FROM messages",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted COUNT DISTINCT aggregate view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_messages.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+		t.Fatalf("ValidateModuleContract error = %v, want aggregate unsupported text", err)
+	}
+}
+
 func TestModuleContractValidationRejectsSumAggregateViewSQL(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Views = []ViewDescription{{

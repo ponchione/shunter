@@ -180,16 +180,12 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 				matchedRows = rows
 			}
 		} else {
-			for _, pv := range view.TableScan(tableID) {
-				if err := ctx.Err(); err != nil {
-					return SQLQueryResult{}, err
-				}
-				if subscription.MatchRow(pred, tableID, pv) {
-					matchedRows = append(matchedRows, pv)
-					if oneOffLimitReached(len(matchedRows), scanLimit) {
-						break
-					}
-				}
+			_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
+				matchedRows = append(matchedRows, pv)
+				return !oneOffLimitReached(len(matchedRows), scanLimit)
+			})
+			if err != nil {
+				return SQLQueryResult{}, err
 			}
 		}
 		if len(query.OrderBy) != 0 && !rowsAlreadyProjected {
@@ -257,6 +253,55 @@ func oneOffRowLimit(limit *uint64) int {
 		return maxInt
 	}
 	return int(*limit)
+}
+
+func oneOffIndexableEquality(pred subscription.Predicate, tableID schema.TableID) (subscription.ColEq, bool) {
+	switch p := pred.(type) {
+	case subscription.ColEq:
+		if p.Table == tableID && p.Alias == 0 {
+			return p, true
+		}
+	case subscription.And:
+		if eq, ok := oneOffIndexableEquality(p.Left, tableID); ok {
+			return eq, true
+		}
+		if eq, ok := oneOffIndexableEquality(p.Right, tableID); ok {
+			return eq, true
+		}
+	}
+	return subscription.ColEq{}, false
+}
+
+func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, visit func(types.ProductValue) bool) (bool, error) {
+	if resolver != nil {
+		if eq, ok := oneOffIndexableEquality(pred, tableID); ok {
+			if idx, ok := resolver.IndexIDForColumn(eq.Table, eq.Column); ok {
+				key := store.NewIndexKey(eq.Value)
+				for _, rid := range view.IndexSeek(eq.Table, idx, key) {
+					if err := ctx.Err(); err != nil {
+						return true, err
+					}
+					row, ok := view.GetRow(eq.Table, rid)
+					if !ok {
+						continue
+					}
+					if subscription.MatchRow(pred, tableID, row) && !visit(row) {
+						return true, nil
+					}
+				}
+				return true, nil
+			}
+		}
+	}
+	for _, pv := range view.TableScan(tableID) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if subscription.MatchRow(pred, tableID, pv) && !visit(pv) {
+			return false, nil
+		}
+	}
+	return false, nil
 }
 
 func oneOffRowOffset(offset *uint64) int {
@@ -362,15 +407,11 @@ func countOneOffMatches(ctx context.Context, view store.CommittedReadView, table
 		return countOneOffCrossJoin(ctx, view, tableID, crossPred)
 	}
 	var count uint64
-	for _, pv := range view.TableScan(tableID) {
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
-		if subscription.MatchRow(pred, tableID, pv) {
-			count++
-		}
-	}
-	return count, nil
+	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(types.ProductValue) bool {
+		count++
+		return true
+	})
+	return count, err
 }
 
 func evaluateOneOffAggregate(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, aggregate *compiledSQLAggregate) (types.Value, error) {
@@ -396,6 +437,9 @@ func countOneOffAggregate(ctx context.Context, view store.CommittedReadView, tab
 		return countOneOffMatches(ctx, view, tableID, pred, resolver)
 	}
 	argument := *aggregate.Argument
+	if aggregate.Distinct {
+		return countDistinctOneOffAggregate(ctx, view, tableID, pred, resolver, argument)
+	}
 	if joinPred, ok := pred.(subscription.Join); ok {
 		return countOneOffJoinColumn(ctx, view, joinPred, resolver, argument)
 	}
@@ -403,15 +447,45 @@ func countOneOffAggregate(ctx context.Context, view store.CommittedReadView, tab
 		return countOneOffCrossJoinColumn(ctx, view, crossPred, argument)
 	}
 	var count uint64
-	for _, pv := range view.TableScan(tableID) {
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
-		if subscription.MatchRow(pred, tableID, pv) && oneOffAggregateRowColumnPresent(pv, tableID, argument) {
+	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
+		if oneOffAggregateRowColumnPresent(pv, tableID, argument) {
 			count++
 		}
+		return true
+	})
+	return count, err
+}
+
+func countDistinctOneOffAggregate(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, column compiledSQLProjectionColumn) (uint64, error) {
+	seen := newOneOffDistinctValueSet()
+	if joinPred, ok := pred.(subscription.Join); ok {
+		err := visitOneOffJoinPairs(ctx, view, joinPred, resolver, func(leftRow, rightRow types.ProductValue) bool {
+			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, joinPred.Left, joinPred.LeftAlias, joinPred.Right, joinPred.RightAlias, column)
+			if ok {
+				seen.add(value)
+			}
+			return true
+		})
+		return seen.count(), err
 	}
-	return count, nil
+	if crossPred, ok := pred.(subscription.CrossJoin); ok {
+		err := visitOneOffCrossJoinPairs(ctx, view, crossPred, false, func(leftRow, rightRow types.ProductValue) bool {
+			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, crossPred.Left, crossPred.LeftAlias, crossPred.Right, crossPred.RightAlias, column)
+			if ok {
+				seen.add(value)
+			}
+			return true
+		})
+		return seen.count(), err
+	}
+	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
+		value, ok := oneOffAggregateRowColumnValue(pv, tableID, column)
+		if ok {
+			seen.add(value)
+		}
+		return true
+	})
+	return seen.count(), err
 }
 
 func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, aggregate *compiledSQLAggregate) (types.Value, error) {
@@ -454,19 +528,23 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 		}
 		return acc.value()
 	}
-	for _, pv := range view.TableScan(tableID) {
-		if err := ctx.Err(); err != nil {
-			return types.Value{}, err
-		}
+	var addErr error
+	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
 		value, ok := oneOffAggregateRowColumnValue(pv, tableID, argument)
 		if !ok {
-			continue
+			return true
 		}
-		if subscription.MatchRow(pred, tableID, pv) {
-			if err := acc.add(value); err != nil {
-				return types.Value{}, err
-			}
+		if err := acc.add(value); err != nil {
+			addErr = err
+			return false
 		}
+		return true
+	})
+	if err != nil {
+		return types.Value{}, err
+	}
+	if addErr != nil {
+		return types.Value{}, addErr
 	}
 	return acc.value()
 }
@@ -485,6 +563,30 @@ func oneOffAggregateRowColumnValue(row types.ProductValue, tableID schema.TableI
 		return types.Value{}, false
 	}
 	return row[idx], true
+}
+
+type oneOffDistinctValueSet struct {
+	buckets map[uint64][]types.Value
+	n       uint64
+}
+
+func newOneOffDistinctValueSet() *oneOffDistinctValueSet {
+	return &oneOffDistinctValueSet{buckets: make(map[uint64][]types.Value)}
+}
+
+func (s *oneOffDistinctValueSet) add(value types.Value) {
+	hash := value.Hash64()
+	for _, existing := range s.buckets[hash] {
+		if value.Equal(existing) {
+			return
+		}
+	}
+	s.buckets[hash] = append(s.buckets[hash], value)
+	s.n++
+}
+
+func (s *oneOffDistinctValueSet) count() uint64 {
+	return s.n
 }
 
 type oneOffSumAccumulator struct {

@@ -31,6 +31,7 @@ type compiledSQLProjectionColumn struct {
 type compiledSQLAggregate struct {
 	Func         string
 	Argument     *compiledSQLProjectionColumn
+	Distinct     bool
 	ResultColumn schema.ColumnSchema
 }
 
@@ -820,9 +821,13 @@ func compileAggregateProjection(agg *sql.AggregateProjection, argument *compiled
 	}
 	switch {
 	case strings.EqualFold(agg.Func, "COUNT"):
+		if agg.Distinct && argument == nil {
+			return nil, fmt.Errorf("COUNT(DISTINCT ...) aggregate requires a column argument")
+		}
 		return &compiledSQLAggregate{
 			Func:         "COUNT",
 			Argument:     argument,
+			Distinct:     agg.Distinct,
 			ResultColumn: schema.ColumnSchema{Index: 0, Name: agg.Alias, Type: schema.KindUint64},
 		}, nil
 	case strings.EqualFold(agg.Func, "SUM"):

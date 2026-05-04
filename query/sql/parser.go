@@ -148,8 +148,9 @@ type AggregateProjection struct {
 	Func string
 	// Column is nil for COUNT(*). Non-nil aggregate arguments are resolved
 	// after FROM/JOIN relation bindings are known.
-	Column *ColumnRef
-	Alias  string
+	Column   *ColumnRef
+	Distinct bool
+	Alias    string
 }
 
 // OrderByColumn is one bounded query-only ORDER BY term. It is limited to a
@@ -776,8 +777,19 @@ func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 		return nil, p.unsupported("aggregate projections not supported")
 	}
 	p.advance()
+	distinct := false
+	if isKeywordToken(p.peek(), "DISTINCT") {
+		if funcName != "COUNT" {
+			return nil, p.unsupported("only COUNT(DISTINCT column) aggregate projections supported")
+		}
+		distinct = true
+		p.advance()
+	}
 	var column *ColumnRef
 	if p.peek().kind == tokStar {
+		if distinct {
+			return nil, p.unsupported("COUNT(DISTINCT *) aggregate projections not supported")
+		}
 		if funcName != "COUNT" {
 			return nil, p.unsupported("SUM(*) aggregate projections not supported")
 		}
@@ -789,10 +801,10 @@ func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 		}
 		column = &ref
 	} else {
-		return nil, p.unsupported("only COUNT(*), COUNT(column), or SUM(column) aggregate projections supported")
+		return nil, p.unsupported("only COUNT(*), COUNT(column), COUNT(DISTINCT column), or SUM(column) aggregate projections supported")
 	}
 	if p.peek().kind != tokRParen {
-		return nil, p.unsupported("only COUNT(*), COUNT(column), or SUM(column) aggregate projections supported")
+		return nil, p.unsupported("only COUNT(*), COUNT(column), COUNT(DISTINCT column), or SUM(column) aggregate projections supported")
 	}
 	p.advance()
 	if isKeywordToken(p.peek(), "AS") {
@@ -805,7 +817,7 @@ func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &AggregateProjection{Func: funcName, Column: column, Alias: alias}, nil
+	return &AggregateProjection{Func: funcName, Column: column, Distinct: distinct, Alias: alias}, nil
 }
 
 func (p *parser) parseAggregateColumnRef() (ColumnRef, error) {

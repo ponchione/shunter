@@ -80,13 +80,8 @@ SpacetimeDB SDKs are not expected to connect to Shunter.
 
 The important protocol work is Shunter protocol stability:
 
-- explicit protocol version policy beyond the current v1 token
-- golden wire fixtures for every client and server message
-- compatibility tests between generated clients and runtime versions
-- reserved tag ranges and documented upgrade rules
-- clear treatment of compression when bandwidth pressure justifies it
-- stable error and close-code taxonomy
-- deterministic row/update encoding contracts
+The remaining item is clear treatment of compression when bandwidth pressure
+justifies it.
 
 Do not add SpacetimeDB energy fields, row wrapper chains, or legacy protocol
 variants unless a Shunter client has a concrete need for equivalent behavior.
@@ -107,13 +102,11 @@ Likely feature slices:
 - stronger parser/planner boundary
 - richer projections and aliases
 - multi-join support
-- broader `ORDER BY` beyond the current one-off/declared-query multi-column
-  projected-table column and unique projection-output-name slice
-- additional aggregates beyond the current `COUNT(*)` / `COUNT(column)` /
-  `SUM(column)` slice
-- broader `OFFSET` support beyond the current one-off/declared-query slice
-- index-aware planning
-- named declared query execution over the same runtime path as protocol reads
+- `ORDER BY` for additional result shapes where ordering remains deterministic
+- aggregate functions with explicit empty-result and nullable-value semantics
+- `OFFSET` for additional result shapes where snapshot/live-view semantics are
+  explicit
+- broader index-aware planning for ranges, joins, ordering, and live paths
 - clear interaction with read policy and visibility filters
 
 Any query expansion must include tests for authorization, visibility filtering,

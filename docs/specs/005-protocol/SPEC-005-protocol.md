@@ -68,6 +68,12 @@ that requires v1 clients to skip unknown frames MUST be introduced under a new
 subprotocol token and pinned by negotiation and wire tests. Unknown tags remain
 fatal within a negotiated version.
 
+Generated Shunter client artifacts MUST expose protocol metadata sourced from
+the runtime constants in `protocol/version.go`: minimum supported version,
+current version, default subprotocol, and supported subprotocol list. This keeps
+generated-client/runtime compatibility drift visible when a protocol version or
+subprotocol token changes.
+
 ### 2.3 Endpoint
 
 ```
@@ -157,6 +163,12 @@ RowList:
 ```
 
 Each row is prefixed with its length. This is simpler than SpacetimeDB's `BsatnRowList` (which uses a `RowSizeHint` union to avoid per-row headers for fixed-size rows). The length-per-row approach adds 4 bytes overhead per row but is unambiguous to decode without schema information.
+
+Row and update encoding is deterministic for a fixed input. Encoders treat
+caller-owned row/update slices as read-only, and decoders return detached row
+payload slices so later mutation of the source frame cannot mutate decoded row
+data. These ownership rules are part of the v1 wire contract, not only an
+implementation detail.
 
 **When to revisit:** If profiling shows that row delivery bandwidth is a bottleneck for fixed-schema tables, add a `FixedSizeRowList` variant (row count + row size, no per-row length prefix). Defer to v2.
 
@@ -407,7 +419,13 @@ query_string: string    — SQL query per §7.1.1
 
 The executor runs a read-only query against `CommittedState.Snapshot()` directly. This read is not atomic with subscription registration because it does not register subscription state; it only returns a point-in-time result from committed state.
 
-Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset. Current query-only widenings include `LIMIT`, `OFFSET` after optional `LIMIT`, column projections, `COUNT(*) [AS] alias`, `COUNT(<column>) [AS] alias`, single-column `ORDER BY` over a resolved projected-table column or unique output name from an explicit column projection with optional `ASC` / `DESC`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject `ORDER BY`, `OFFSET`, aggregates, and cross-join `WHERE` before executor registration. Inner-join `WHERE` field-vs-field comparisons and broader cross-join boolean expressions are rejected at compile time.
+Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset. Current query-only widenings include `LIMIT`, `OFFSET` after optional `LIMIT`, column projections, `COUNT(*) [AS] alias`, `COUNT(<column>) [AS] alias`, `COUNT(DISTINCT <column>) [AS] alias`, `SUM(<column>) [AS] alias`, single-column `ORDER BY` over a resolved projected-table column or unique output name from an explicit column projection with optional `ASC` / `DESC`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject `ORDER BY`, `OFFSET`, aggregates, and cross-join `WHERE` before executor registration. Inner-join `WHERE` field-vs-field comparisons and broader cross-join boolean expressions are rejected at compile time.
+
+One-off execution may use a single-column index for a same-table equality
+predicate, including an equality term nested under `AND`, for returned rows and
+single-table aggregate inputs. The executor still rechecks the full predicate
+after the index lookup so visibility filters and additional filters remain
+authoritative.
 
 ---
 

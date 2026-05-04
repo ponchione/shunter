@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	shunter "github.com/ponchione/shunter"
+	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 )
 
@@ -26,6 +27,9 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 		fmt.Fprintf(&b, "// Module: %s %s\n", typeScriptLineCommentText(contract.Module.Name), typeScriptLineCommentText(contract.Module.Version))
 	}
 	b.WriteString("\n")
+	if err := writeTypeScriptProtocolMetadata(&b); err != nil {
+		return nil, err
+	}
 	b.WriteString("export type ReducerCaller = (name: string, args: Uint8Array) => Promise<Uint8Array>;\n")
 	b.WriteString("export type QueryRunner = (sql: string) => Promise<Uint8Array>;\n")
 	b.WriteString("export type ViewSubscriber = (sql: string) => Promise<() => void>;\n")
@@ -132,6 +136,21 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	writeTypeScriptReadModels(&b, contract.ReadModel.Declarations)
 
 	return b.Bytes(), nil
+}
+
+func writeTypeScriptProtocolMetadata(b *bytes.Buffer) error {
+	defaultSubprotocol, ok := protocol.SubprotocolForVersion(protocol.CurrentProtocolVersion)
+	if !ok {
+		return fmt.Errorf("missing subprotocol for current protocol version %s", protocol.CurrentProtocolVersion)
+	}
+	b.WriteString("export const shunterProtocol = {\n")
+	fmt.Fprintf(b, "  minSupportedVersion: %d,\n", protocol.MinSupportedProtocolVersion)
+	fmt.Fprintf(b, "  currentVersion: %d,\n", protocol.CurrentProtocolVersion)
+	fmt.Fprintf(b, "  defaultSubprotocol: %s,\n", strconv.Quote(defaultSubprotocol))
+	fmt.Fprintf(b, "  supportedSubprotocols: %s,\n", typeScriptStringArray(protocol.SupportedSubprotocols()))
+	b.WriteString("} as const;\n\n")
+	b.WriteString("export type ShunterSubprotocol = (typeof shunterProtocol.supportedSubprotocols)[number];\n\n")
+	return nil
 }
 
 func writeTypeScriptConstMap(b *bytes.Buffer, name string, identifiers []namedTypeScriptIdentifier) {

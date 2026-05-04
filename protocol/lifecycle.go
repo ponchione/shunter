@@ -154,6 +154,12 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 		c.disconnectAfterAdmittedFailure(inbox, mgr, websocket.StatusInternalError, "encode IdentityToken")
 		return fmt.Errorf("encode IdentityToken: %w", err)
 	}
+	select {
+	case <-ctx.Done():
+		c.disconnectAfterAdmittedFailure(inbox, mgr, websocket.StatusInternalError, "write IdentityToken")
+		return fmt.Errorf("write IdentityToken: %w", ctx.Err())
+	default:
+	}
 	if err := c.ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
 		c.disconnectAfterAdmittedFailure(inbox, mgr, websocket.StatusInternalError, "write IdentityToken")
 		return fmt.Errorf("write IdentityToken: %w", err)

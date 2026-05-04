@@ -440,6 +440,40 @@ func TestDeclaredQueryCountColumnAppliesVisibilityAfterPermissionSucceeds(t *tes
 	}
 }
 
+func TestDeclaredQueryCountDistinctColumnAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x27)
+	bob := visibilityRuntimeIdentity(0x28)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		Query(QueryDeclaration{
+			Name:        "visible_distinct_bodies",
+			SQL:         "SELECT COUNT(DISTINCT body) AS n FROM messages LIMIT 1",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+
+	result, err := rt.CallQuery(context.Background(), "visible_distinct_bodies",
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:read"),
+	)
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if result.Name != "visible_distinct_bodies" || result.TableName != "messages" {
+		t.Fatalf("result identity = (%q, %q), want visible_distinct_bodies/messages", result.Name, result.TableName)
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0].AsUint64() != 1 {
+		t.Fatalf("visible count distinct rows = %#v, want one count row with 1", result.Rows)
+	}
+}
+
 func TestDeclaredQuerySumColumnExecutesThroughRuntimePath(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message_with_body", insertMessageWithBodyReducer).

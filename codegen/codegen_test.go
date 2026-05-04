@@ -96,6 +96,25 @@ func TestTypeScriptGeneratorMapsUUIDColumns(t *testing.T) {
 	assertContains(t, ts, `externalId: UUID;`)
 }
 
+func TestTypeScriptGeneratorExportsCountDistinctDeclaredQuerySQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{
+		Name: "distinct_message_bodies",
+		SQL:  "SELECT COUNT(DISTINCT body) AS n FROM messages",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `distinctMessageBodies: "distinct_message_bodies",`)
+	assertContains(t, ts, `distinctMessageBodies: "SELECT COUNT(DISTINCT body) AS n FROM messages",`)
+	assertContains(t, ts, `export function queryDistinctMessageBodies(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("distinct_message_bodies");`)
+}
+
 func TestGeneratorRejectsUnsupportedLanguage(t *testing.T) {
 	_, err := Generate(contractFixture(), Options{Language: "go"})
 	if err == nil {

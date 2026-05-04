@@ -70,6 +70,61 @@ func (s *countingSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, t
 	return s.mockSnapshot.TableScan(id)
 }
 
+type indexedOneOffSchemaLookup struct {
+	*mockSchemaLookup
+	table  schema.TableID
+	column types.ColID
+	index  schema.IndexID
+}
+
+func (s *indexedOneOffSchemaLookup) IndexIDForColumn(table schema.TableID, col types.ColID) (schema.IndexID, bool) {
+	if table == s.table && col == s.column {
+		return s.index, true
+	}
+	return 0, false
+}
+
+type indexedCountingSnapshot struct {
+	*mockSnapshot
+	table       schema.TableID
+	column      types.ColID
+	index       schema.IndexID
+	tableScans  int
+	indexSeeks  int
+	indexGetRow int
+}
+
+func (s *indexedCountingSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue] {
+	s.tableScans++
+	return s.mockSnapshot.TableScan(id)
+}
+
+func (s *indexedCountingSnapshot) IndexSeek(table schema.TableID, index schema.IndexID, key store.IndexKey) []types.RowID {
+	s.indexSeeks++
+	if table != s.table || index != s.index {
+		return nil
+	}
+	var out []types.RowID
+	for rid, row := range s.rows[table] {
+		if int(s.column) >= len(row) {
+			continue
+		}
+		if store.NewIndexKey(row[s.column]).Equal(key) {
+			out = append(out, types.RowID(rid))
+		}
+	}
+	return out
+}
+
+func (s *indexedCountingSnapshot) GetRow(table schema.TableID, rowID types.RowID) (types.ProductValue, bool) {
+	s.indexGetRow++
+	rows := s.rows[table]
+	if int(rowID) >= len(rows) {
+		return nil, false
+	}
+	return rows[int(rowID)], true
+}
+
 type cancelingSnapshot struct {
 	*mockSnapshot
 	cancel  func()
@@ -534,6 +589,195 @@ func TestHandleOneOffQueryMultiColumnOrderByTableScan(t *testing.T) {
 		{types.NewUint32(4), types.NewBool(false), types.NewString("alpha")},
 		{types.NewUint32(3), types.NewBool(false), types.NewString("charlie")},
 	})
+}
+
+func TestExecuteCompiledSQLQueryIndexedEqualityPredicateUsesIndexSeek(t *testing.T) {
+	baseSL := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "status", Type: schema.KindString},
+		schema.ColumnSchema{Index: 2, Name: "owner", Type: schema.KindString},
+	)
+	sl := &indexedOneOffSchemaLookup{
+		mockSchemaLookup: baseSL,
+		table:            1,
+		column:           1,
+		index:            7,
+	}
+	snap := &indexedCountingSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+			{types.NewUint64(1), types.NewString("open"), types.NewString("alice")},
+			{types.NewUint64(2), types.NewString("closed"), types.NewString("alice")},
+			{types.NewUint64(3), types.NewString("open"), types.NewString("bob")},
+		}}},
+		table:  1,
+		column: 1,
+		index:  7,
+	}
+
+	compiled, err := CompileSQLQueryString("SELECT * FROM tasks WHERE status = 'open' LIMIT 1", sl, nil, SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	})
+	if err != nil {
+		t.Fatalf("CompileSQLQueryString: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint64(1), types.NewString("open"), types.NewString("alice")},
+	})
+	if snap.indexSeeks != 1 {
+		t.Fatalf("IndexSeek calls = %d, want 1", snap.indexSeeks)
+	}
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 for indexed equality", snap.tableScans)
+	}
+}
+
+func TestExecuteCompiledSQLQueryIndexedEqualityRechecksVisibilityPredicate(t *testing.T) {
+	baseSL := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "status", Type: schema.KindString},
+		schema.ColumnSchema{Index: 2, Name: "owner", Type: schema.KindString},
+	)
+	sl := &indexedOneOffSchemaLookup{
+		mockSchemaLookup: baseSL,
+		table:            1,
+		column:           1,
+		index:            7,
+	}
+	snap := &indexedCountingSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+			{types.NewUint64(1), types.NewString("open"), types.NewString("bob")},
+			{types.NewUint64(2), types.NewString("open"), types.NewString("alice")},
+			{types.NewUint64(3), types.NewString("closed"), types.NewString("alice")},
+		}}},
+		table:  1,
+		column: 1,
+		index:  7,
+	}
+
+	compiled, err := CompileSQLQueryStringWithVisibility(
+		"SELECT * FROM tasks WHERE status = 'open'",
+		sl,
+		nil,
+		SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true},
+		[]VisibilityFilter{{
+			SQL:           "SELECT * FROM tasks WHERE owner = 'alice'",
+			ReturnTableID: 1,
+		}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("CompileSQLQueryStringWithVisibility: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint64(2), types.NewString("open"), types.NewString("alice")},
+	})
+	if snap.indexSeeks != 1 {
+		t.Fatalf("IndexSeek calls = %d, want 1", snap.indexSeeks)
+	}
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 for indexed equality with visibility recheck", snap.tableScans)
+	}
+	if snap.indexGetRow != 2 {
+		t.Fatalf("GetRow calls = %d, want 2 indexed candidates rechecked", snap.indexGetRow)
+	}
+}
+
+func TestExecuteCompiledSQLQueryIndexedEqualityAggregateUsesIndexSeek(t *testing.T) {
+	baseSL := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "status", Type: schema.KindString},
+		schema.ColumnSchema{Index: 2, Name: "owner", Type: schema.KindString},
+		schema.ColumnSchema{Index: 3, Name: "points", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 4, Name: "kind", Type: schema.KindString},
+	)
+	sl := &indexedOneOffSchemaLookup{
+		mockSchemaLookup: baseSL,
+		table:            1,
+		column:           1,
+		index:            7,
+	}
+	rows := []types.ProductValue{
+		{types.NewUint64(1), types.NewString("open"), types.NewString("bob"), types.NewUint32(5), types.NewString("bug")},
+		{types.NewUint64(2), types.NewString("open"), types.NewString("alice"), types.NewUint32(7), types.NewString("bug")},
+		{types.NewUint64(3), types.NewString("open"), types.NewString("alice"), types.NewUint32(11), types.NewString("chore")},
+		{types.NewUint64(4), types.NewString("closed"), types.NewString("alice"), types.NewUint32(13), types.NewString("bug")},
+	}
+	tests := []struct {
+		name       string
+		sql        string
+		filters    []VisibilityFilter
+		want       types.Value
+		wantGetRow int
+	}{
+		{
+			name:       "count star",
+			sql:        "SELECT COUNT(*) AS n FROM tasks WHERE status = 'open'",
+			want:       types.NewUint64(3),
+			wantGetRow: 3,
+		},
+		{
+			name:       "count distinct",
+			sql:        "SELECT COUNT(DISTINCT kind) AS n FROM tasks WHERE status = 'open'",
+			want:       types.NewUint64(2),
+			wantGetRow: 3,
+		},
+		{
+			name: "sum visibility recheck",
+			sql:  "SELECT SUM(points) AS total FROM tasks WHERE status = 'open'",
+			filters: []VisibilityFilter{{
+				SQL:           "SELECT * FROM tasks WHERE owner = 'alice'",
+				ReturnTableID: 1,
+			}},
+			want:       types.NewUint64(18),
+			wantGetRow: 3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snap := &indexedCountingSnapshot{
+				mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: rows}},
+				table:        1,
+				column:       1,
+				index:        7,
+			}
+			compiled, err := CompileSQLQueryStringWithVisibility(
+				tt.sql,
+				sl,
+				nil,
+				SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true},
+				tt.filters,
+				false,
+			)
+			if err != nil {
+				t.Fatalf("CompileSQLQueryStringWithVisibility: %v", err)
+			}
+			result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+			if err != nil {
+				t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+			}
+			assertProductRowsEqual(t, result.Rows, []types.ProductValue{{tt.want}})
+			if snap.indexSeeks != 1 {
+				t.Fatalf("IndexSeek calls = %d, want 1", snap.indexSeeks)
+			}
+			if snap.tableScans != 0 {
+				t.Fatalf("TableScan calls = %d, want 0 for indexed aggregate", snap.tableScans)
+			}
+			if snap.indexGetRow != tt.wantGetRow {
+				t.Fatalf("GetRow calls = %d, want %d indexed candidates rechecked", snap.indexGetRow, tt.wantGetRow)
+			}
+		})
+	}
 }
 
 func TestHandleOneOffQueryMultiColumnOrderByProjectionAliasOffsetLimit(t *testing.T) {
@@ -5966,6 +6210,41 @@ func TestHandleOneOffQuery_ShunterCountColumnAliasWithWhereLimitReturnsFullAggre
 	msg := &OneOffQueryMsg{
 		MessageID:   []byte{0xCD},
 		QueryString: "SELECT COUNT(u32) AS n FROM t WHERE active = TRUE LIMIT 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ShunterCountDistinctColumnAliasWithWhereReturnsAggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(false)},
+		{types.NewUint32(3), types.NewBool(true)},
+		{types.NewUint32(3), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCE},
+		QueryString: "SELECT COUNT(DISTINCT u32) AS n FROM t WHERE active = TRUE",
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
