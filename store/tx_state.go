@@ -63,6 +63,19 @@ func (tx *TxState) IsDeleted(tableID schema.TableID, id types.RowID) bool {
 	return mapContainsKey(tx.deletes[tableID], id)
 }
 
+func (tx *TxState) insert(tableID schema.TableID, id types.RowID) (types.ProductValue, bool) {
+	rows := tx.inserts[tableID]
+	if rows == nil {
+		return nil, false
+	}
+	row, ok := rows[id]
+	return row, ok
+}
+
+func (tx *TxState) tableInserts(tableID schema.TableID) map[types.RowID]types.ProductValue {
+	return tx.inserts[tableID]
+}
+
 // Inserts returns all tx-local inserts for a table.
 func (tx *TxState) Inserts(tableID schema.TableID) map[types.RowID]types.ProductValue {
 	return copyInsertMap(tx.inserts[tableID])

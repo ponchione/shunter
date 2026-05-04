@@ -28,7 +28,7 @@ func NewStateView(committed *CommittedState, tx *TxState) *StateView {
 
 // GetRow returns the visible row for rowID, if any.
 func (sv *StateView) GetRow(tableID schema.TableID, rowID types.RowID) (types.ProductValue, bool) {
-	if row, ok := sv.tx.Inserts(tableID)[rowID]; ok {
+	if row, ok := sv.tx.insert(tableID, rowID); ok {
 		return row.Copy(), true
 	}
 	if sv.tx.IsDeleted(tableID, rowID) {
@@ -69,7 +69,7 @@ func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 				}
 			}
 		}
-		for id, row := range sv.tx.Inserts(tableID) {
+		for id, row := range sv.tx.tableInserts(tableID) {
 			if !yield(id, row.Copy()) {
 				return
 			}
@@ -94,7 +94,7 @@ func (sv *StateView) SeekIndex(tableID schema.TableID, indexID schema.IndexID, k
 						return
 					}
 				}
-				for rid, row := range sv.tx.Inserts(tableID) {
+				for rid, row := range sv.tx.tableInserts(tableID) {
 					if idx.ExtractKey(row).Equal(key) {
 						if !yield(rid) {
 							return
@@ -124,7 +124,7 @@ func (sv *StateView) SeekIndexRange(tableID schema.TableID, indexID schema.Index
 						return
 					}
 				}
-				for rid, row := range sv.tx.Inserts(tableID) {
+				for rid, row := range sv.tx.tableInserts(tableID) {
 					key := idx.ExtractKey(row)
 					if indexKeyInRange(key, low, high) {
 						if !yield(rid) {
@@ -155,7 +155,7 @@ func (sv *StateView) SeekIndexBounds(tableID schema.TableID, indexID schema.Inde
 						return
 					}
 				}
-				for rid, row := range sv.tx.Inserts(tableID) {
+				for rid, row := range sv.tx.tableInserts(tableID) {
 					key := idx.ExtractKey(row)
 					if matchesLowerBound(key, low) && matchesUpperBound(key, high) {
 						if !yield(rid) {

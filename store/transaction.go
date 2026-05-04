@@ -311,8 +311,9 @@ func (t *Transaction) ensureTxUniqueIndex(tableID schema.TableID, idxOrdinal int
 	if entries, ok := t.txUniqueIndexes[ref]; ok {
 		return entries
 	}
-	entries := make(map[uint64][]txUniqueEntry, len(t.tx.Inserts(tableID)))
-	for rowID, row := range t.tx.Inserts(tableID) {
+	rows := t.tx.tableInserts(tableID)
+	entries := make(map[uint64][]txUniqueEntry, len(rows))
+	for rowID, row := range rows {
 		key := idx.ExtractKey(row)
 		entries[key.hash64()] = append(entries[key.hash64()], txUniqueEntry{rowID: rowID, key: key})
 	}
@@ -337,8 +338,9 @@ func (t *Transaction) ensureTxRowIndex(tableID schema.TableID) map[uint64][]txRo
 	if entries, ok := t.txRowIndexes[tableID]; ok {
 		return entries
 	}
-	entries := make(map[uint64][]txRowEntry, len(t.tx.Inserts(tableID)))
-	for rowID, row := range t.tx.Inserts(tableID) {
+	rows := t.tx.tableInserts(tableID)
+	entries := make(map[uint64][]txRowEntry, len(rows))
+	for rowID, row := range rows {
 		entries[row.Hash64()] = append(entries[row.Hash64()], txRowEntry{rowID: rowID, row: row})
 	}
 	t.txRowIndexes[tableID] = entries
@@ -347,12 +349,12 @@ func (t *Transaction) ensureTxRowIndex(tableID schema.TableID) map[uint64][]txRo
 
 func (t *Transaction) addInsert(tableID schema.TableID, rowID types.RowID, row types.ProductValue, table *Table) {
 	t.tx.AddInsert(tableID, rowID, row)
-	stored := t.tx.Inserts(tableID)[rowID]
+	stored, _ := t.tx.insert(tableID, rowID)
 	t.trackTxInsert(tableID, rowID, stored, table)
 }
 
 func (t *Transaction) removeInsert(tableID schema.TableID, rowID types.RowID, table *Table) {
-	row, ok := t.tx.Inserts(tableID)[rowID]
+	row, ok := t.tx.insert(tableID, rowID)
 	if ok {
 		t.untrackTxInsert(tableID, rowID, row, table)
 	}
@@ -513,7 +515,7 @@ func (t *Transaction) Update(tableID schema.TableID, rowID types.RowID, newRow t
 	var oldRow types.ProductValue
 
 	if wasTxInsert {
-		oldRow = t.tx.Inserts(tableID)[rowID]
+		oldRow, _ = t.tx.insert(tableID, rowID)
 	} else {
 		table, ok := t.committed.Table(tableID)
 		if !ok {
