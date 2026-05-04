@@ -335,6 +335,7 @@ A practical runtime handle may expose logical sub-surfaces such as:
 - `Runtime`
 - `Runtime.ListenAndServe(...)`
 - `Runtime.HTTPHandler()`
+- `Host.ListenAndServe(...)` for multi-module hosts
 - `Runtime.DB()` or `Runtime.ReadView()`
 - `Runtime.CallReducer(...)`
 - `Runtime.ExportSchema()`
@@ -615,6 +616,8 @@ Proposed v1 runtime surface:
 - `Start(ctx)` / `Close()`
 - `ListenAndServe(...)` as the easy default serving path
 - `HTTPHandler()` for composition into a larger host app
+- `Host.ListenAndServe(...)` for the same lifecycle-owned serving behavior
+  across multiple mounted runtimes
 - local reducer/query calls for tests, tools, and in-process integrations
 - schema/module export/introspection hooks
 

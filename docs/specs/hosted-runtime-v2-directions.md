@@ -39,6 +39,8 @@ The current root package imports as `github.com/ponchione/shunter` and exposes:
 - `Runtime.Start`, `Close`, `Ready`, `Health`, `HTTPHandler`,
   `ListenAndServe`, `CallReducer`, `Read`, `Describe`, `ExportSchema`,
   `ExportContract`, and `ExportContractJSON`.
+- `Host.ListenAndServe` for lifecycle-owned HTTP serving of multi-module
+  hosts.
 - one canonical full module contract artifact with deterministic JSON,
   default snapshot filename `shunter.contract.json`, passive
   permissions/read-model metadata, and descriptive migration metadata.

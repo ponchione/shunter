@@ -6,6 +6,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 - Current development line.
 - Gzip-negotiated protocol connections now gzip-compress post-handshake server messages while keeping client messages uncompressed.
+- Added `Host.ListenAndServe` for app-owned serving of multi-module hosts.
 - Added app-owned contract export and runtime-to-codegen file helpers in `contractworkflow`.
 - Added narrow `OFFSET <unsigned-integer>` support for one-off SQL and declared queries.
 - Added narrow `ORDER BY` support for unique projection output names in one-off SQL and declared queries.

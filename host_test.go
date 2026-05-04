@@ -3,10 +3,12 @@ package shunter
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestHostRegistersMultipleRuntimesWithDistinctModuleNames(t *testing.T) {
@@ -187,6 +189,76 @@ func TestHostHTTPHandlerRoutesByModulePrefix(t *testing.T) {
 	host.HTTPHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("/ops/subscribe status = %d, want runtime-not-ready 503", rec.Code)
+	}
+}
+
+func TestHostListenAndServeStartsHostAndStopsOnContextCancel(t *testing.T) {
+	chat := buildHostTestRuntime(t, "chat", t.TempDir())
+	ops := buildHostTestRuntime(t, "ops", t.TempDir())
+	host, err := NewHost(
+		HostRuntime{Name: "chat", RoutePrefix: "/chat", Runtime: chat},
+		HostRuntime{Name: "ops", RoutePrefix: "/ops", Runtime: ops},
+	)
+	if err != nil {
+		t.Fatalf("NewHost returned error: %v", err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- host.serve(ctx, ln) }()
+
+	eventually(t, func() bool { return host.Health().Ready })
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("host serve returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("host serve did not exit after context cancellation")
+	}
+	if host.Health().Ready {
+		t.Fatal("host still ready after serve cancellation")
+	}
+}
+
+func TestHostListenAndServeDuplicateCallReturnsHostServing(t *testing.T) {
+	addr := reserveRuntimeListenAddr(t)
+	chat := buildHostTestRuntime(t, "chat", t.TempDir())
+	host, err := NewHost(HostRuntime{Name: "chat", RoutePrefix: "/chat", Runtime: chat})
+	if err != nil {
+		t.Fatalf("NewHost returned error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- host.ListenAndServe(ctx, addr) }()
+
+	eventually(t, func() bool {
+		host.lifecycleMu.Lock()
+		serving := host.serving
+		host.lifecycleMu.Unlock()
+		return serving
+	})
+
+	err = host.ListenAndServe(context.Background(), addr)
+	if !errors.Is(err, ErrHostServing) {
+		t.Fatalf("duplicate Host.ListenAndServe error = %v, want ErrHostServing", err)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("first Host.ListenAndServe returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first Host.ListenAndServe did not exit after cancellation")
 	}
 }
 

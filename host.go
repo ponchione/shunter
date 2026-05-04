@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"path"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
+
+// ErrHostServing reports that a host serving loop is already active.
+var ErrHostServing = errors.New("shunter: host is already serving")
 
 // HostRuntime binds one built Runtime to the explicit module identity and HTTP
 // route prefix used by a multi-module Host.
@@ -26,6 +31,7 @@ type Host struct {
 	lifecycleMu sync.Mutex
 	modules     []hostRuntimeMount
 	byName      map[string]*Runtime
+	serving     bool
 }
 
 type hostRuntimeMount struct {
@@ -174,6 +180,97 @@ func (h *Host) HTTPHandler() http.Handler {
 		}
 		http.NotFound(w, req)
 	})
+}
+
+// ListenAndServe starts hosted runtimes if needed, serves Host.HTTPHandler on
+// addr, and shuts serving plus hosted runtimes down when ctx is canceled.
+func (h *Host) ListenAndServe(ctx context.Context, addr string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !h.tryBeginServing() {
+		return ErrHostServing
+	}
+	if strings.TrimSpace(addr) == "" {
+		addr = defaultListenAddr
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		h.endServing()
+		return fmt.Errorf("listen %s: %w", addr, err)
+	}
+	return h.serveStarted(ctx, ln)
+}
+
+func (h *Host) serve(ctx context.Context, ln net.Listener) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !h.tryBeginServing() {
+		_ = ln.Close()
+		return ErrHostServing
+	}
+	return h.serveStarted(ctx, ln)
+}
+
+func (h *Host) tryBeginServing() bool {
+	if h == nil {
+		return true
+	}
+	h.lifecycleMu.Lock()
+	defer h.lifecycleMu.Unlock()
+	if h.serving {
+		return false
+	}
+	h.serving = true
+	return true
+}
+
+func (h *Host) endServing() {
+	if h == nil {
+		return
+	}
+	h.lifecycleMu.Lock()
+	h.serving = false
+	h.lifecycleMu.Unlock()
+}
+
+func (h *Host) serveStarted(ctx context.Context, ln net.Listener) error {
+	defer h.endServing()
+
+	if err := h.Start(ctx); err != nil {
+		_ = ln.Close()
+		return err
+	}
+
+	httpServer := &http.Server{Handler: h.HTTPHandler()}
+	errCh := make(chan error, 1)
+	go func() { errCh <- httpServer.Serve(ln) }()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownErr := httpServer.Shutdown(shutdownCtx)
+		closeErr := h.Close()
+		serveErr := <-errCh
+		if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
+			return shutdownErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			return serveErr
+		}
+		return ctx.Err()
+	case err := <-errCh:
+		closeErr := h.Close()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return closeErr
+	}
 }
 
 // Health returns detached health for every hosted runtime in registration order.

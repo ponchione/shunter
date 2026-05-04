@@ -294,6 +294,10 @@ If `Observability.Diagnostics.MountHTTP` is enabled, `HTTPHandler` also mounts
 runtime diagnostics endpoints such as health, readiness, and optional metrics
 handlers.
 
+For multi-module hosts, `Host.ListenAndServe(ctx, addr)` starts every hosted
+runtime, serves `Host.HTTPHandler()`, and closes the hosted runtimes when the
+context is canceled.
+
 ## Permissions And Visibility
 
 Permission metadata is passive until a runtime path checks it. The main places
