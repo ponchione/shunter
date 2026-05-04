@@ -154,6 +154,102 @@ func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T)
 	assertContains(t, first, `export function callSendMessage(callReducer: ReducerCaller, args: Uint8Array): Promise<Uint8Array> {`)
 }
 
+func TestExportRuntimeFileWritesCanonicalContractJSON(t *testing.T) {
+	dir := t.TempDir()
+	rt := buildWorkflowRuntime(t)
+	outputPath := filepath.Join(dir, shunter.DefaultContractSnapshotFilename)
+
+	if err := ExportRuntimeFile(rt, outputPath); err != nil {
+		t.Fatalf("ExportRuntimeFile returned error: %v", err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read exported contract: %v", err)
+	}
+	want, err := rt.ExportContractJSON()
+	if err != nil {
+		t.Fatalf("ExportContractJSON returned error: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("exported contract mismatch:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	assertContains(t, string(got), `"contract_format": "shunter.module_contract"`)
+	assertNoWorkflowTempFiles(t, dir, shunter.DefaultContractSnapshotFilename)
+}
+
+func TestExportRuntimeFileRejectsEmptyOutputPathBeforeRuntimeUse(t *testing.T) {
+	err := ExportRuntimeFile(nil, " \t")
+	if err == nil {
+		t.Fatal("ExportRuntimeFile returned nil error for empty output path")
+	}
+	if !strings.Contains(err.Error(), "contract output path is required") {
+		t.Fatalf("ExportRuntimeFile error = %v, want output path error", err)
+	}
+}
+
+func TestGenerateRuntimeFileWritesDeterministicTypeScriptFromRuntime(t *testing.T) {
+	dir := t.TempDir()
+	rt := buildWorkflowRuntime(t)
+	outputPath := filepath.Join(dir, "client.ts")
+
+	direct, err := GenerateRuntime(rt, codegen.Options{Language: codegen.LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("GenerateRuntime returned error: %v", err)
+	}
+	assertContains(t, string(direct), `export interface MessagesRow {`)
+	assertContains(t, string(direct), `history: "history",`)
+
+	if err := GenerateRuntimeFile(rt, outputPath, codegen.Options{Language: codegen.LanguageTypeScript}); err != nil {
+		t.Fatalf("GenerateRuntimeFile returned error: %v", err)
+	}
+	first := readTextFile(t, outputPath)
+	if first != string(direct) {
+		t.Fatalf("runtime file output differs from direct output:\nfile:\n%s\ndirect:\n%s", first, direct)
+	}
+
+	if err := GenerateRuntimeFile(rt, outputPath, codegen.Options{Language: codegen.LanguageTypeScript}); err != nil {
+		t.Fatalf("second GenerateRuntimeFile returned error: %v", err)
+	}
+	second := readTextFile(t, outputPath)
+	if first != second {
+		t.Fatalf("generated runtime TypeScript was not deterministic:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
+func TestGenerateRuntimeRejectsUnsupportedLanguageBeforeRuntimeUse(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("write existing output: %v", err)
+	}
+
+	_, err := GenerateRuntime(nil, codegen.Options{Language: "go"})
+	if err == nil {
+		t.Fatal("GenerateRuntime returned nil error for unsupported language")
+	}
+	if !errors.Is(err, codegen.ErrUnsupportedLanguage) {
+		t.Fatalf("GenerateRuntime error = %v, want ErrUnsupportedLanguage", err)
+	}
+
+	err = GenerateRuntimeFile(nil, outputPath, codegen.Options{Language: "go"})
+	if err == nil {
+		t.Fatal("GenerateRuntimeFile returned nil error for unsupported language")
+	}
+	if !errors.Is(err, codegen.ErrUnsupportedLanguage) {
+		t.Fatalf("GenerateRuntimeFile error = %v, want ErrUnsupportedLanguage", err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read existing output: %v", err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("unsupported runtime language mutated output:\nobserved=%q\nexpected=%q", got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateFileRejectsEmptyOutputPathBeforeReadingContract(t *testing.T) {
 	const trace = "trace=workflow-codegen-empty-output-path-before-input-read"
 	dir := t.TempDir()
@@ -812,6 +908,30 @@ func workflowContractFixture() shunter.ModuleContract {
 			DefaultSnapshotFilename: shunter.DefaultContractSnapshotFilename,
 		},
 	}
+}
+
+func buildWorkflowRuntime(t *testing.T) *shunter.Runtime {
+	t.Helper()
+	mod := shunter.NewModule("workflow").
+		Version("v1.0.0").
+		SchemaVersion(1).
+		TableDef(schema.TableDefinition{
+			Name: "messages",
+			Columns: []schema.ColumnDefinition{
+				{Name: "id", Type: schema.KindUint64, PrimaryKey: true, AutoIncrement: true},
+				{Name: "body", Type: schema.KindString},
+			},
+		}).
+		Query(shunter.QueryDeclaration{
+			Name: "history",
+			SQL:  "SELECT * FROM messages",
+		})
+	rt, err := shunter.Build(mod, shunter.Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build workflow runtime returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
 }
 
 func writeContractFixture(t *testing.T, dir, name string, contract shunter.ModuleContract) string {

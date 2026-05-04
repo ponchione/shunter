@@ -74,6 +74,48 @@ func PlanFiles(previousPath, currentPath string, opts contractdiff.PlanOptions) 
 	return contractdiff.PlanJSON(previousData, currentData, opts)
 }
 
+// ExportRuntimeFile exports runtime's canonical ModuleContract JSON to outputPath.
+func ExportRuntimeFile(runtime *shunter.Runtime, outputPath string) error {
+	if strings.TrimSpace(outputPath) == "" {
+		return fmt.Errorf("contract output path is required")
+	}
+	data, err := runtime.ExportContractJSON()
+	if err != nil {
+		return fmt.Errorf("export runtime contract: %w", err)
+	}
+	if err := writeFile(outputPath, data); err != nil {
+		return fmt.Errorf("write contract output %q: %w", outputPath, err)
+	}
+	return nil
+}
+
+// GenerateRuntime generates client bindings directly from runtime's contract.
+func GenerateRuntime(runtime *shunter.Runtime, opts codegen.Options) ([]byte, error) {
+	if err := codegen.ValidateOptions(opts); err != nil {
+		return nil, err
+	}
+	out, err := codegen.Generate(runtime.ExportContract(), opts)
+	if err != nil {
+		return nil, fmt.Errorf("generate bindings from runtime contract: %w", err)
+	}
+	return out, nil
+}
+
+// GenerateRuntimeFile generates client bindings from runtime and writes outputPath.
+func GenerateRuntimeFile(runtime *shunter.Runtime, outputPath string, opts codegen.Options) error {
+	if strings.TrimSpace(outputPath) == "" {
+		return fmt.Errorf("generated output path is required")
+	}
+	out, err := GenerateRuntime(runtime, opts)
+	if err != nil {
+		return err
+	}
+	if err := writeFile(outputPath, out); err != nil {
+		return fmt.Errorf("write generated output %q: %w", outputPath, err)
+	}
+	return nil
+}
+
 // GenerateFromFile generates client bindings from a canonical ModuleContract JSON file.
 func GenerateFromFile(contractPath string, opts codegen.Options) ([]byte, error) {
 	if err := codegen.ValidateOptions(opts); err != nil {

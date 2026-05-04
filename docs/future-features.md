@@ -63,8 +63,6 @@ Current generic CLI boundary:
 Useful future helpers:
 
 - app-owned `serve`
-- app-owned `contract export`
-- app-owned `codegen`
 - health/readiness inspection
 - backup/restore commands after storage semantics are explicit
 - snapshot/compaction commands after operational contracts are stable

@@ -337,11 +337,10 @@ Use contract export when another project, generated client, or review workflow
 needs the runtime's app-facing shape.
 
 ```go
-contractJSON, err := rt.ExportContractJSON()
-if err != nil {
+if err := contractworkflow.ExportRuntimeFile(rt, shunter.DefaultContractSnapshotFilename); err != nil {
 	return err
 }
-if err := os.WriteFile(shunter.DefaultContractSnapshotFilename, contractJSON, 0o666); err != nil {
+if err := contractworkflow.GenerateRuntimeFile(rt, "client.ts", codegen.Options{Language: codegen.LanguageTypeScript}); err != nil {
 	return err
 }
 ```
