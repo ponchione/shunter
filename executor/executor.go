@@ -1017,19 +1017,42 @@ func (e *Executor) postCommit(
 	// response delivery, before the next command is dequeued. A failing
 	// DisconnectClient is logged and drain continues — one failed cleanup
 	// must not block the others.
+	e.drainDroppedClients()
+	return status
+}
+
+type droppedClientDrainer interface {
+	DrainDroppedClients() []types.ConnectionID
+}
+
+func (e *Executor) drainDroppedClients() {
+	if drainer, ok := e.subs.(droppedClientDrainer); ok {
+		e.disconnectDroppedClients(drainer.DrainDroppedClients())
+		return
+	}
 	dropped := e.subs.DroppedClients()
 	for {
 		select {
 		case connID, ok := <-dropped:
 			if !ok {
-				return status
+				return
 			}
-			if err := e.subs.DisconnectClient(connID); err != nil {
-				e.recordSubscriptionFanoutError("unknown", connID, err)
-			}
+			e.disconnectDroppedClient(connID)
 		default:
-			return status
+			return
 		}
+	}
+}
+
+func (e *Executor) disconnectDroppedClients(connIDs []types.ConnectionID) {
+	for _, connID := range connIDs {
+		e.disconnectDroppedClient(connID)
+	}
+}
+
+func (e *Executor) disconnectDroppedClient(connID types.ConnectionID) {
+	if err := e.subs.DisconnectClient(connID); err != nil {
+		e.recordSubscriptionFanoutError("unknown", connID, err)
 	}
 }
 

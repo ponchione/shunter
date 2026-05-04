@@ -133,6 +133,17 @@ func (f *fakeSubs) DisconnectClient(connID types.ConnectionID) error {
 	return nil
 }
 
+type fakeDrainingSubs struct {
+	*fakeSubs
+	pending []types.ConnectionID
+}
+
+func (f *fakeDrainingSubs) DrainDroppedClients() []types.ConnectionID {
+	out := append([]types.ConnectionID(nil), f.pending...)
+	f.pending = nil
+	return out
+}
+
 // trackedView wraps a CommittedReadView so tests can assert when Close ran.
 type trackedView struct {
 	store.CommittedReadView
@@ -490,6 +501,38 @@ func TestPostCommitDrainsDroppedClients(t *testing.T) {
 	}
 	if disconnCount != 3 {
 		t.Fatalf("disconnects between first and second commit = %d, want 3 (events=%v)", disconnCount, events)
+	}
+}
+
+func TestPostCommitDrainsDroppedClientsFromManagerDrainer(t *testing.T) {
+	h := newPipelineHarness(t)
+	drainingSubs := &fakeDrainingSubs{
+		fakeSubs: h.subs,
+		pending:  []types.ConnectionID{{1}, {2}, {3}},
+	}
+	h.exec.subs = drainingSubs
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.exec.Run(ctx)
+
+	resp := submit(t, h.exec, "InsertPlayer")
+	if resp.Status != StatusCommitted {
+		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
+	}
+	_ = submit(t, h.exec, "InsertPlayer")
+
+	h.subs.mu.Lock()
+	got := append([]types.ConnectionID(nil), h.subs.disconns...)
+	h.subs.mu.Unlock()
+	want := []types.ConnectionID{{1}, {2}, {3}}
+	if len(got) != len(want) {
+		t.Fatalf("disconns=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("disconns[%d]=%v want=%v", i, got[i], want[i])
+		}
 	}
 }
 

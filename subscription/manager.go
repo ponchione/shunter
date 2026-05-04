@@ -88,6 +88,9 @@ type Manager struct {
 	indexes         *PruningIndexes
 	inbox           chan<- FanOutMessage
 	dropped         chan types.ConnectionID
+	droppedMu       sync.Mutex
+	droppedPending  map[types.ConnectionID]struct{}
+	droppedOrder    []types.ConnectionID
 	activeColumns   map[TableID]map[ColID]int
 	querySets       map[types.ConnectionID]map[uint32][]types.SubscriptionID
 	nextSubID       types.SubscriptionID
@@ -125,14 +128,15 @@ func WithObserver(observer Observer) ManagerOption {
 // NewManager constructs a Manager.
 func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOption) *Manager {
 	m := &Manager{
-		schema:        schema,
-		resolver:      resolver,
-		registry:      newQueryRegistry(),
-		indexes:       NewPruningIndexes(),
-		dropped:       make(chan types.ConnectionID, 64),
-		activeColumns: make(map[TableID]map[ColID]int),
-		querySets:     make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
-		fanoutClosed:  make(chan struct{}),
+		schema:         schema,
+		resolver:       resolver,
+		registry:       newQueryRegistry(),
+		indexes:        NewPruningIndexes(),
+		dropped:        make(chan types.ConnectionID, 64),
+		droppedPending: make(map[types.ConnectionID]struct{}),
+		activeColumns:  make(map[TableID]map[ColID]int),
+		querySets:      make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
+		fanoutClosed:   make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -188,13 +192,71 @@ func (m *Manager) RecordDroppedClient() {
 	}
 }
 
-// signalDropped is used by the fan-out worker (or equivalents in tests) to
-// mark a connection as dropped. Non-blocking: if the channel is full the
-// drop is discarded — the executor is responsible for draining frequently.
+// SignalDroppedClient records a dropped client for the next executor cleanup
+// pass. Repeated signals for the same connection coalesce until drained.
+func (m *Manager) SignalDroppedClient(id types.ConnectionID) {
+	if m == nil {
+		return
+	}
+	m.queueDroppedClient(id)
+}
+
+// DrainDroppedClients returns every dropped client signal retained since the
+// previous drain, including legacy channel signals. IDs are coalesced so
+// cleanup runs once per connection per drain window.
+func (m *Manager) DrainDroppedClients() []types.ConnectionID {
+	if m == nil {
+		return nil
+	}
+	m.droppedMu.Lock()
+	out := append([]types.ConnectionID(nil), m.droppedOrder...)
+	clear(m.droppedPending)
+	m.droppedOrder = nil
+	m.droppedMu.Unlock()
+
+	seen := make(map[types.ConnectionID]struct{}, len(out))
+	for _, id := range out {
+		seen[id] = struct{}{}
+	}
+	for {
+		select {
+		case id, ok := <-m.dropped:
+			if !ok {
+				return out
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		default:
+			return out
+		}
+	}
+}
+
+func (m *Manager) queueDroppedClient(id types.ConnectionID) bool {
+	m.droppedMu.Lock()
+	defer m.droppedMu.Unlock()
+	if _, exists := m.droppedPending[id]; exists {
+		return false
+	}
+	m.droppedPending[id] = struct{}{}
+	m.droppedOrder = append(m.droppedOrder, id)
+	m.RecordDroppedClient()
+	return true
+}
+
+// signalDropped is used by eval-error paths to mark a connection as dropped.
+// It retains the signal losslessly and mirrors it to the legacy channel when
+// possible so older tests and channel-based managers keep their behavior.
 func (m *Manager) signalDropped(id types.ConnectionID) {
+	if m == nil {
+		return
+	}
+	m.queueDroppedClient(id)
 	select {
 	case m.dropped <- id:
-		m.RecordDroppedClient()
 		if m.observer != nil {
 			m.observer.LogSubscriptionClientDropped("fanout_failed", &id)
 		}

@@ -1031,6 +1031,27 @@ func TestFanOutWorker_DroppedChannelFullDoesNotBlock(t *testing.T) {
 	}
 }
 
+func TestFanOutWorker_DropHandlerReceivesEveryDroppedClient(t *testing.T) {
+	var got []types.ConnectionID
+	w := NewFanOutWorkerWithDropHandler(nil, &mockFanOutSender{}, func(connID types.ConnectionID) {
+		got = append(got, connID)
+	}, nil)
+
+	for i := 0; i < 80; i++ {
+		w.markDropped(cid(byte(i + 1)))
+	}
+	if len(got) != 80 {
+		t.Fatalf("drop handler calls = %d, want 80", len(got))
+	}
+	seen := make(map[types.ConnectionID]struct{}, len(got))
+	for _, connID := range got {
+		if _, duplicate := seen[connID]; duplicate {
+			t.Fatalf("duplicate drop handler call for %v", connID)
+		}
+		seen[connID] = struct{}{}
+	}
+}
+
 func TestFanOutWorker_ConfirmedReadPolicyConcurrentToggle(t *testing.T) {
 	mock := &mockFanOutSender{}
 	w := NewFanOutWorker(nil, mock, make(chan types.ConnectionID, 16))

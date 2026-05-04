@@ -1431,6 +1431,42 @@ func TestDroppedClientsChannel(t *testing.T) {
 	}
 }
 
+func TestDrainDroppedClientsRetainsOverflowAndCoalesces(t *testing.T) {
+	s := testSchema()
+	mgr := NewManager(s, s)
+	want := make(map[types.ConnectionID]struct{})
+	for i := 0; i < cap(mgr.dropped)+16; i++ {
+		id := types.ConnectionID{byte(i + 1)}
+		mgr.signalDropped(id)
+		want[id] = struct{}{}
+	}
+	handlerOnlyID := types.ConnectionID{200}
+	mgr.SignalDroppedClient(handlerOnlyID)
+	want[handlerOnlyID] = struct{}{}
+	mgr.signalDropped(types.ConnectionID{1})
+
+	got := mgr.DrainDroppedClients()
+	if len(got) != len(want) {
+		t.Fatalf("drained %d dropped clients, want %d: %v", len(got), len(want), got)
+	}
+	seen := make(map[types.ConnectionID]struct{}, len(got))
+	for _, id := range got {
+		if _, duplicate := seen[id]; duplicate {
+			t.Fatalf("duplicate dropped client in drain: %v from %v", id, got)
+		}
+		seen[id] = struct{}{}
+		if _, ok := want[id]; !ok {
+			t.Fatalf("unexpected dropped client %v from %v", id, got)
+		}
+	}
+	if gotCount := mgr.DroppedClientCount(); gotCount != uint64(len(want)) {
+		t.Fatalf("DroppedClientCount = %d, want %d", gotCount, len(want))
+	}
+	if got := mgr.DrainDroppedClients(); len(got) != 0 {
+		t.Fatalf("second drain = %v, want empty", got)
+	}
+}
+
 func TestManagerErrorsAreDistinct(t *testing.T) {
 	errs := []error{
 		ErrTooManyTables,

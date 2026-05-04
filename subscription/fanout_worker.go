@@ -32,6 +32,7 @@ type FanOutWorker struct {
 	fastReads      map[types.ConnectionID]bool
 	dropped        chan<- types.ConnectionID
 	recordDropped  func()
+	dropClient     func(types.ConnectionID)
 	observer       Observer
 }
 
@@ -58,6 +59,19 @@ func NewFanOutWorkerWithObserver(inbox <-chan FanOutMessage, sender FanOutSender
 		fastReads:      make(map[types.ConnectionID]bool),
 		dropped:        dropped,
 		recordDropped:  recordDropped,
+		observer:       observer,
+	}
+}
+
+// NewFanOutWorkerWithDropHandler creates a worker that reports dropped clients
+// through a lossless manager-owned handler instead of a bounded channel.
+func NewFanOutWorkerWithDropHandler(inbox <-chan FanOutMessage, sender FanOutSender, dropClient func(types.ConnectionID), observer Observer) *FanOutWorker {
+	return &FanOutWorker{
+		inbox:          inbox,
+		sender:         sender,
+		confirmedReads: make(map[types.ConnectionID]bool),
+		fastReads:      make(map[types.ConnectionID]bool),
+		dropClient:     dropClient,
 		observer:       observer,
 	}
 }
@@ -249,6 +263,10 @@ func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
 	delete(w.confirmedReads, connID)
 	delete(w.fastReads, connID)
 	w.mu.Unlock()
+	if w.dropClient != nil {
+		w.dropClient(connID)
+		return
+	}
 	select {
 	case w.dropped <- connID:
 		if w.recordDropped != nil {

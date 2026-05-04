@@ -146,11 +146,10 @@ func (r *Runtime) Start(ctx context.Context) error {
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	fanOutCtx, fanOutCancel := context.WithCancel(context.Background())
 	fanOutSender := newSwappableFanOutSender(noopFanOutSender{})
-	fanOutWorker := subscription.NewFanOutWorkerWithObserver(
+	fanOutWorker := subscription.NewFanOutWorkerWithDropHandler(
 		fanOutInbox,
 		fanOutSender,
-		subscriptions.DroppedChanSend(),
-		subscriptions.RecordDroppedClient,
+		subscriptions.SignalDroppedClient,
 		r.observability,
 	)
 
