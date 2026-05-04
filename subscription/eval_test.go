@@ -21,6 +21,35 @@ func TestEvalNoActiveSubsReturnsImmediately(t *testing.T) {
 	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
 }
 
+func TestEvalAndBroadcastUnblocksWhenFanOutClosed(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	connID := types.ConnectionID{9}
+	done := make(chan struct{})
+
+	go func() {
+		mgr.EvalAndBroadcast(types.TxID(1), nil, nil, PostCommitMeta{
+			CallerConnID:  &connID,
+			CallerOutcome: &CallerOutcome{Kind: CallerOutcomeCommitted},
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("EvalAndBroadcast returned before fan-out was closed despite no receiver")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	mgr.CloseFanOut()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("EvalAndBroadcast stayed blocked after CloseFanOut")
+	}
+}
+
 func TestEvalCapturesCallerUpdatesFromFanoutEntry(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)

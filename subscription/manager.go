@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ponchione/shunter/store"
@@ -81,18 +82,20 @@ type SubscriptionManager interface {
 // Manager is the default SubscriptionManager implementation.
 // It is single-goroutine safe (the executor drives it).
 type Manager struct {
-	schema        SchemaLookup
-	resolver      IndexResolver
-	registry      *queryRegistry
-	indexes       *PruningIndexes
-	inbox         chan<- FanOutMessage
-	dropped       chan types.ConnectionID
-	activeColumns map[TableID]map[ColID]int
-	querySets     map[types.ConnectionID]map[uint32][]types.SubscriptionID
-	nextSubID     types.SubscriptionID
-	activeSets    atomic.Int64
-	droppedTotal  atomic.Uint64
-	observer      Observer
+	schema          SchemaLookup
+	resolver        IndexResolver
+	registry        *queryRegistry
+	indexes         *PruningIndexes
+	inbox           chan<- FanOutMessage
+	dropped         chan types.ConnectionID
+	activeColumns   map[TableID]map[ColID]int
+	querySets       map[types.ConnectionID]map[uint32][]types.SubscriptionID
+	nextSubID       types.SubscriptionID
+	activeSets      atomic.Int64
+	droppedTotal    atomic.Uint64
+	observer        Observer
+	fanoutClosed    chan struct{}
+	fanoutCloseOnce sync.Once
 
 	// InitialRowLimit caps the initial-query row count returned to the
 	// client. Zero means unlimited.
@@ -129,6 +132,7 @@ func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOpti
 		dropped:       make(chan types.ConnectionID, 64),
 		activeColumns: make(map[TableID]map[ColID]int),
 		querySets:     make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
+		fanoutClosed:  make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -139,6 +143,18 @@ func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOpti
 // DroppedClients returns the channel the fan-out worker uses to signal
 // disconnected ConnectionIDs. The executor drains it after each commit.
 func (m *Manager) DroppedClients() <-chan types.ConnectionID { return m.dropped }
+
+// CloseFanOut unblocks post-commit fan-out enqueue attempts during shutdown.
+// It is idempotent; after it fires, EvalAndBroadcast skips handing new
+// FanOutMessages to the worker while still completing reducer response paths.
+func (m *Manager) CloseFanOut() {
+	if m == nil {
+		return
+	}
+	m.fanoutCloseOnce.Do(func() {
+		close(m.fanoutClosed)
+	})
+}
 
 // DroppedChanSend returns the write end of the dropped-client channel.
 // Used to wire the FanOutWorker to the same channel the Manager's

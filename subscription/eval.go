@@ -61,13 +61,17 @@ func (m *Manager) EvalAndBroadcast(txID types.TxID, changeset *store.Changeset, 
 		}
 	}
 	if m.inbox != nil {
-		m.inbox <- FanOutMessage{
+		msg := FanOutMessage{
 			TxID:          txID,
 			TxDurable:     meta.TxDurable,
 			Fanout:        fanout,
 			Errors:        errs,
 			CallerConnID:  meta.CallerConnID,
 			CallerOutcome: meta.CallerOutcome,
+		}
+		select {
+		case m.inbox <- msg:
+		case <-m.fanoutClosed:
 		}
 	}
 }

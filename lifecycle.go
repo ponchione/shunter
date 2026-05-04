@@ -244,20 +244,23 @@ func (r *Runtime) Close() error {
 	r.mu.Unlock()
 	r.recordRuntimeMetrics()
 
-	r.closeProtocolGraph(protocolConns, protocolInbox)
+	if subscriptions != nil {
+		subscriptions.CloseFanOut()
+	}
 	if lifecycleCancel != nil {
 		lifecycleCancel()
 	}
-	if fanOutCancel != nil {
-		fanOutCancel()
-	}
+	r.closeProtocolGraph(protocolConns, protocolInbox)
 	r.schedulerWG.Wait()
-	r.fanOutWG.Wait()
 	executorFatal := false
 	if exec != nil {
 		exec.Shutdown()
 		executorFatal = exec.Fatal()
 	}
+	if fanOutCancel != nil {
+		fanOutCancel()
+	}
+	r.fanOutWG.Wait()
 	var (
 		closeErr            error
 		finalDurableTxID    uint64
