@@ -278,7 +278,7 @@ func removeFreshSegmentArtifact(dir string, startTxID uint64) error {
 	if err != nil {
 		return err
 	}
-	if segment.AppendMode != AppendByFreshNextSegment || segment.LastTx >= segment.StartTx {
+	if segment.LastTx >= segment.StartTx {
 		return fmt.Errorf("%w: segment file %s already exists", ErrOpen, path)
 	}
 	if err := os.Remove(path); err != nil {

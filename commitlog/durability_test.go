@@ -705,6 +705,35 @@ func TestDurabilityWorkerResumeFreshSegmentRejectsExistingValidSegment(t *testin
 	}
 }
 
+func TestDurabilityWorkerResumeFreshSegmentReplacesEmptySegmentArtifact(t *testing.T) {
+	dir := t.TempDir()
+	sw, err := CreateSegment(dir, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultCommitLogOptions()
+	opts.OffsetIndexIntervalBytes = 0
+	opts.OffsetIndexCap = 0
+	dw, err := NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{
+		SegmentStartTx: 3,
+		NextTxID:       3,
+		AppendMode:     AppendByFreshNextSegment,
+	}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dw.EnqueueCommitted(3, makeDurabilityTestChangeset(3))
+	if finalTx, fatalErr := dw.Close(); fatalErr != nil {
+		t.Fatal(fatalErr)
+	} else if finalTx != 3 {
+		t.Fatalf("final durable tx = %d, want 3", finalTx)
+	}
+}
+
 func TestDurabilityWorkerResumeFreshSegmentRejectsNonEmptyRolloverDirectoryArtifact(t *testing.T) {
 	dir := t.TempDir()
 	_, reg := testSchema()
