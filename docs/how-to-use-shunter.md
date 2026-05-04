@@ -198,6 +198,31 @@ Use this flow for app-owned maintenance jobs or graceful shutdown hooks after
 traffic has been quiesced. `CompactCommitLog` only deletes sealed commit log
 segments that are fully covered by the completed snapshot TX ID you pass.
 
+## Backup And Restore
+
+Shunter does not currently expose an online backup API. Treat backups as an
+app-owned offline operation over the complete `DataDir`.
+
+For a backup:
+
+1. Stop accepting reducer calls and protocol traffic.
+2. Optionally call `CreateSnapshot` and `CompactCommitLog` to shorten the
+   replay suffix that will be copied.
+3. Call `Close` and wait for it to return without error.
+4. Copy the entire `DataDir` as one unit, preserving file contents and
+   directory structure.
+
+For a restore:
+
+1. Stop the runtime process that owns the destination `DataDir`.
+2. Restore the complete backup into an empty data directory; do not merge a
+   backup over an existing Shunter data directory.
+3. Start the same application module schema line against that directory.
+
+Recovery validates the registered schema version and embedded snapshot schema
+against the restored data. If the module schema is incompatible, `Build`
+fails instead of rewriting durable state.
+
 ## Call Reducers Locally
 
 Use `CallReducer` when your process wants to invoke a reducer without going

@@ -142,7 +142,6 @@ Near-term work:
 - benchmark common reducer/query/subscription workloads
 - stress large tables, large rows, many clients, many subscriptions, and restart
   recovery
-- document backup/restore workflows
 - test storage faults around runtime startup and shutdown
 
 Storage architecture changes should be driven by measured bottlenecks from
