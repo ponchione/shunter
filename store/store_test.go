@@ -91,6 +91,32 @@ func TestIndexKeyConstructorCopiesParts(t *testing.T) {
 	}
 }
 
+func TestIndexKeyConstructorDetachesSliceBackedValues(t *testing.T) {
+	buf := []byte{1, 2, 3}
+	tags := []string{"red", "blue"}
+	key := NewIndexKey(types.NewBytesOwned(buf), types.NewArrayStringOwned(tags))
+
+	buf[0] = 9
+	tags[0] = "green"
+
+	if got := key.Part(0).AsBytes(); !slices.Equal(got, []byte{1, 2, 3}) {
+		t.Fatalf("bytes index key part = %v, want [1 2 3]", got)
+	}
+	if got := key.Part(1).AsArrayString(); !slices.Equal(got, []string{"red", "blue"}) {
+		t.Fatalf("array-string index key part = %v, want [red blue]", got)
+	}
+}
+
+func TestIndexKeyPartReturnsDetachedSliceBackedValue(t *testing.T) {
+	key := NewIndexKey(types.NewBytes([]byte{1, 2, 3}))
+	part := key.Part(0)
+	part.BytesView()[0] = 9
+
+	if got := key.Part(0).AsBytes(); !slices.Equal(got, []byte{1, 2, 3}) {
+		t.Fatalf("index key mutated through Part result: got %v, want [1 2 3]", got)
+	}
+}
+
 func TestIndexKeyMultiColumn(t *testing.T) {
 	a1 := NewIndexKey(types.NewString("a"), types.NewInt64(1))
 	a2 := NewIndexKey(types.NewString("a"), types.NewInt64(2))

@@ -12,3 +12,4 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added narrow `SUM(<numeric-column>)` support for one-off SQL and declared queries.
 - Reject commits before state mutation when the executor TxID allocator is exhausted.
 - Reject reducer registration before reducer ID allocation can wrap.
+- Fixed store index keys so caller-owned `bytes` and `arrayString` values cannot mutate committed index entries after insert.

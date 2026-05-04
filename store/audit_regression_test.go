@@ -79,6 +79,35 @@ func buildUint8AutoIncrementState(t *testing.T) (*CommittedState, schema.SchemaR
 	return cs, reg
 }
 
+func bytesPrimaryKeySchema() *schema.TableSchema {
+	return &schema.TableSchema{
+		ID:   10,
+		Name: "blobs",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindBytes},
+			{Index: 1, Name: "name", Type: types.KindString},
+		},
+		Indexes: []schema.IndexSchema{
+			{ID: 0, Name: "blobs_pk", Columns: []int{0}, Unique: true, Primary: true},
+		},
+	}
+}
+
+func arrayStringUniqueSchema() *schema.TableSchema {
+	return &schema.TableSchema{
+		ID:   11,
+		Name: "tagged",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "tags", Type: types.KindArrayString},
+		},
+		Indexes: []schema.IndexSchema{
+			{ID: 0, Name: "tagged_pk", Columns: []int{0}, Unique: true, Primary: true},
+			{ID: 1, Name: "tagged_tags", Columns: []int{1}, Unique: true},
+		},
+	}
+}
+
 func TestValidateRowTypeMismatchMatchesCatalog(t *testing.T) {
 	ts := pkSchema()
 	err := ValidateRow(ts, types.ProductValue{types.NewString("bad"), types.NewString("alice")})
@@ -506,6 +535,68 @@ func TestTableInsertDetachesFromCaller(t *testing.T) {
 	}
 	if got[1].AsString() != "alice" {
 		t.Fatalf("stored row mutated by caller: got %q, want %q", got[1].AsString(), "alice")
+	}
+}
+
+func TestTableInsertDetachesBytesIndexKeyFromCallerOwnedValue(t *testing.T) {
+	tbl := NewTable(bytesPrimaryKeySchema())
+	payload := []byte{1, 2, 3}
+	id := tbl.AllocRowID()
+	if err := tbl.InsertRow(id, types.ProductValue{
+		types.NewBytesOwned(payload),
+		types.NewString("first"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	payload[0] = 9
+
+	pk := tbl.PrimaryIndex()
+	if pk == nil {
+		t.Fatal("primary index missing")
+	}
+	originalKey := NewIndexKey(types.NewBytes([]byte{1, 2, 3}))
+	if got := pk.Seek(originalKey); len(got) != 1 || got[0] != id {
+		t.Fatalf("primary index after caller mutation = %v, want [%d]", got, id)
+	}
+
+	err := tbl.InsertRow(tbl.AllocRowID(), types.ProductValue{
+		types.NewBytes([]byte{1, 2, 3}),
+		types.NewString("duplicate"),
+	})
+	if !errors.Is(err, ErrPrimaryKeyViolation) {
+		t.Fatalf("duplicate bytes primary key insert err = %v, want ErrPrimaryKeyViolation", err)
+	}
+}
+
+func TestTableInsertDetachesArrayStringIndexKeyFromCallerOwnedValue(t *testing.T) {
+	tbl := NewTable(arrayStringUniqueSchema())
+	tags := []string{"red", "blue"}
+	id := tbl.AllocRowID()
+	if err := tbl.InsertRow(id, types.ProductValue{
+		types.NewUint64(1),
+		types.NewArrayStringOwned(tags),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tags[0] = "green"
+
+	unique := tbl.IndexByID(schema.IndexID(1))
+	if unique == nil {
+		t.Fatal("unique index missing")
+	}
+	originalKey := NewIndexKey(types.NewArrayString([]string{"red", "blue"}))
+	if got := unique.Seek(originalKey); len(got) != 1 || got[0] != id {
+		t.Fatalf("array-string unique index after caller mutation = %v, want [%d]", got, id)
+	}
+
+	err := tbl.InsertRow(tbl.AllocRowID(), types.ProductValue{
+		types.NewUint64(2),
+		types.NewArrayString([]string{"red", "blue"}),
+	})
+	if !errors.Is(err, ErrUniqueConstraintViolation) {
+		t.Fatalf("duplicate array-string unique insert err = %v, want ErrUniqueConstraintViolation", err)
 	}
 }
 
