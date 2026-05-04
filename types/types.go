@@ -18,6 +18,7 @@ type ConnectionID [16]byte
 // TxID(0) means "no committed transaction" / bootstrap.
 type TxID uint64
 
-// SubscriptionID is a client-chosen uint32 that uniquely identifies one
-// subscription within an active connection. Matches SPEC-005 wire format.
+// SubscriptionID is the server-internal uint32 allocated for one predicate
+// registered inside a client-chosen query set. QueryID carries the client
+// handle at protocol boundaries.
 type SubscriptionID uint32

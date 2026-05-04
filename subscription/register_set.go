@@ -335,6 +335,9 @@ func (m *Manager) RegisterSet(
 		deduped = append(deduped, p)
 		dedupedHashIdentities = append(dedupedHashIdentities, hashIdentities[i])
 	}
+	if uint64(len(deduped)) > uint64(^types.SubscriptionID(0))-uint64(m.nextSubID) {
+		return SubscriptionSetRegisterResult{}, fmt.Errorf("%w: next=%d requested=%d", ErrSubscriptionIDOverflow, m.nextSubID, len(deduped))
+	}
 	// Allocate internal IDs + run initial snapshot per predicate.
 	allocated := make([]types.SubscriptionID, 0, len(deduped))
 	updates := make([]SubscriptionUpdate, 0, len(deduped))

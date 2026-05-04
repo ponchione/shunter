@@ -131,6 +131,36 @@ func TestRegisterSetRejectsEmptyPredicateSet(t *testing.T) {
 	}
 }
 
+func TestRegisterSetRejectsSubscriptionIDOverflowAtomically(t *testing.T) {
+	mgr, _ := newRegisterSetTestManager(t)
+	mgr.nextSubID = ^types.SubscriptionID(0) - 1
+	req := SubscriptionSetRegisterRequest{
+		ConnID:  types.ConnectionID{1},
+		QueryID: 7,
+		Predicates: []Predicate{
+			AllRows{Table: 1},
+			AllRows{Table: 2},
+		},
+	}
+
+	_, err := mgr.RegisterSet(req, nil)
+	if !errors.Is(err, ErrSubscriptionIDOverflow) {
+		t.Fatalf("RegisterSet overflow error = %v, want ErrSubscriptionIDOverflow", err)
+	}
+	if mgr.nextSubID != ^types.SubscriptionID(0)-1 {
+		t.Fatalf("nextSubID changed after overflow rejection: got %d", mgr.nextSubID)
+	}
+	if _, ok := mgr.querySets[req.ConnID]; ok {
+		t.Fatalf("querySets should be empty after overflow rejection, got %+v", mgr.querySets)
+	}
+	if m := mgr.registry.bySub; len(m) != 0 {
+		t.Fatalf("registry bySub should be empty after overflow rejection, got %+v", m)
+	}
+	if active := mgr.ActiveSubscriptionSets(); active != 0 {
+		t.Fatalf("ActiveSubscriptionSets = %d, want 0", active)
+	}
+}
+
 // TestRegisterSetMultiMergesInitialSnapshot — N predicates produce a
 // merged Update with one SubscriptionUpdate per allocated internal sub.
 func TestRegisterSetMultiMergesInitialSnapshot(t *testing.T) {

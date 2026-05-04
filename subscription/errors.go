@@ -32,6 +32,9 @@ var (
 	ErrFinalQuery = errors.New("final query")
 	// ErrSubscriptionNotFound — unknown query ID/subscription set for unregister.
 	ErrSubscriptionNotFound = errors.New("subscription: subscription not found")
+	// ErrSubscriptionIDOverflow — the manager exhausted its internal
+	// per-process SubscriptionID space.
+	ErrSubscriptionIDOverflow = errors.New("subscription: subscription id overflow")
 	// ErrJoinIndexUnresolved — validation confirmed a join-side index exists
 	// but the runtime IndexResolver could not produce an IndexID for it (or
 	// the manager was constructed without a resolver). This is a contract
