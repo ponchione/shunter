@@ -294,6 +294,10 @@ If `Observability.Diagnostics.MountHTTP` is enabled, `HTTPHandler` also mounts
 runtime diagnostics endpoints such as health, readiness, and optional metrics
 handlers.
 
+For in-process app-owned health checks, use `InspectRuntimeHealth(rt)` or
+`InspectHostHealth(host)` and map their `Status` through `HealthzStatusCode`
+or `ReadyzStatusCode` when an HTTP-style status is useful.
+
 For multi-module hosts, `Host.ListenAndServe(ctx, addr)` starts every hosted
 runtime, serves `Host.HTTPHandler()`, and closes the hosted runtimes when the
 context is canceled.
@@ -394,8 +398,9 @@ Before relying on a Shunter-backed app:
   reducers, queries, views, permissions, or visibility filters.
 - Run targeted package tests for changed app code and Shunter integration
   tests that cover reducer, read, protocol, and recovery paths.
-- Check `rt.Health()` and diagnostics endpoints for readiness and degraded
-  recovery information in service environments.
+- Check `InspectRuntimeHealth(rt)`, `InspectHostHealth(host)`, or diagnostics
+  endpoints for readiness and degraded recovery information in service
+  environments.
 
 ## Useful Go Doc Entrypoints
 

@@ -25,6 +25,101 @@ func TestRuntimeDiagnosticsMountingAndHelperBehavior(t *testing.T) {
 	assertRuntimeDiagnosticsHealthPayload(t, rec, http.StatusOK, diagnosticsStatusNotReady, RuntimeStateBuilt)
 }
 
+func TestHealthInspectionHelpersClassifyRuntimeAndHost(t *testing.T) {
+	nilRuntime := InspectRuntimeHealth(nil)
+	if nilRuntime.Status != HealthStatusFailed || nilRuntime.Runtime.State != RuntimeStateFailed {
+		t.Fatalf("nil runtime inspection = %+v, want failed runtime", nilRuntime)
+	}
+	if ClassifyRuntimeHealth(nilRuntime.Runtime) != nilRuntime.Status {
+		t.Fatalf("runtime classifier did not match inspection: %+v", nilRuntime)
+	}
+
+	notReady := InspectRuntimeHealth(buildValidTestRuntime(t))
+	if notReady.Status != HealthStatusNotReady || notReady.Runtime.State != RuntimeStateBuilt {
+		t.Fatalf("built runtime inspection = %+v, want not_ready built", notReady)
+	}
+
+	readyRuntime := buildValidTestRuntime(t)
+	if err := readyRuntime.Start(context.Background()); err != nil {
+		t.Fatalf("Start ready runtime returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = readyRuntime.Close() })
+	ready := InspectRuntimeHealth(readyRuntime)
+	if ready.Status != HealthStatusOK || !ready.Runtime.Ready {
+		t.Fatalf("ready runtime inspection = %+v, want ok ready", ready)
+	}
+
+	degradedRuntime, err := Build(validChatModule(), Config{DataDir: t.TempDir(), EnableProtocol: true})
+	if err != nil {
+		t.Fatalf("Build degraded runtime returned error: %v", err)
+	}
+	if err := degradedRuntime.Start(context.Background()); err != nil {
+		t.Fatalf("Start degraded runtime returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = degradedRuntime.Close() })
+	degradedRuntime.mu.Lock()
+	degradedRuntime.protocolServer = nil
+	degradedRuntime.mu.Unlock()
+	degraded := InspectRuntimeHealth(degradedRuntime)
+	if degraded.Status != HealthStatusDegraded || !degraded.Runtime.Degraded {
+		t.Fatalf("degraded runtime inspection = %+v, want degraded", degraded)
+	}
+
+	failedRuntime := buildValidTestRuntime(t)
+	failedRuntime.mu.Lock()
+	failedRuntime.stateName = RuntimeStateFailed
+	failedRuntime.mu.Unlock()
+	failed := InspectRuntimeHealth(failedRuntime)
+	if failed.Status != HealthStatusFailed {
+		t.Fatalf("failed runtime inspection = %+v, want failed", failed)
+	}
+
+	emptyHost := InspectHostHealth(nil)
+	if emptyHost.Status != HealthStatusFailed || len(emptyHost.Host.Modules) != 0 {
+		t.Fatalf("empty host inspection = %+v, want failed empty host", emptyHost)
+	}
+
+	hostRuntime := buildHostTestRuntime(t, "hosted", t.TempDir())
+	host, err := NewHost(HostRuntime{Name: "hosted", RoutePrefix: "/hosted", Runtime: hostRuntime})
+	if err != nil {
+		t.Fatalf("NewHost returned error: %v", err)
+	}
+	builtHost := InspectHostHealth(host)
+	if builtHost.Status != HealthStatusNotReady {
+		t.Fatalf("built host inspection = %+v, want not_ready", builtHost)
+	}
+	if err := host.Start(context.Background()); err != nil {
+		t.Fatalf("Host Start returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	readyHost := InspectHostHealth(host)
+	if readyHost.Status != HealthStatusOK || !readyHost.Host.Ready {
+		t.Fatalf("ready host inspection = %+v, want ok ready", readyHost)
+	}
+}
+
+func TestHealthStatusCodeHelpersMatchDiagnosticsEndpoints(t *testing.T) {
+	cases := []struct {
+		status HealthStatus
+		health int
+		ready  int
+	}{
+		{HealthStatusOK, http.StatusOK, http.StatusOK},
+		{HealthStatusDegraded, http.StatusOK, http.StatusServiceUnavailable},
+		{HealthStatusNotReady, http.StatusOK, http.StatusServiceUnavailable},
+		{HealthStatusFailed, http.StatusServiceUnavailable, http.StatusServiceUnavailable},
+		{HealthStatus("unknown"), http.StatusServiceUnavailable, http.StatusServiceUnavailable},
+	}
+	for _, tc := range cases {
+		if got := HealthzStatusCode(tc.status); got != tc.health {
+			t.Fatalf("HealthzStatusCode(%q) = %d, want %d", tc.status, got, tc.health)
+		}
+		if got := ReadyzStatusCode(tc.status); got != tc.ready {
+			t.Fatalf("ReadyzStatusCode(%q) = %d, want %d", tc.status, got, tc.ready)
+		}
+	}
+}
+
 func TestRuntimeDiagnosticsMountedEndpointsAndProtocolRoute(t *testing.T) {
 	metrics := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)

@@ -5,13 +5,28 @@ import (
 	"net/http"
 )
 
-type diagnosticsStatus string
+// HealthStatus is the stable health/readiness classification used by
+// in-process inspection helpers and HTTP diagnostics payloads.
+type HealthStatus string
 
 const (
-	diagnosticsStatusFailed   diagnosticsStatus = "failed"
-	diagnosticsStatusDegraded diagnosticsStatus = "degraded"
-	diagnosticsStatusOK       diagnosticsStatus = "ok"
-	diagnosticsStatusNotReady diagnosticsStatus = "not_ready"
+	// HealthStatusFailed reports a failed, closing, closed, or fatally degraded runtime.
+	HealthStatusFailed HealthStatus = "failed"
+	// HealthStatusDegraded reports a running but degraded runtime or host.
+	HealthStatusDegraded HealthStatus = "degraded"
+	// HealthStatusOK reports a ready, non-degraded runtime or host.
+	HealthStatusOK HealthStatus = "ok"
+	// HealthStatusNotReady reports a nonfailed runtime or host that is not ready.
+	HealthStatusNotReady HealthStatus = "not_ready"
+)
+
+type diagnosticsStatus = HealthStatus
+
+const (
+	diagnosticsStatusFailed   = HealthStatusFailed
+	diagnosticsStatusDegraded = HealthStatusDegraded
+	diagnosticsStatusOK       = HealthStatusOK
+	diagnosticsStatusNotReady = HealthStatusNotReady
 )
 
 // RuntimeDiagnosticsHandler returns an HTTP handler for runtime diagnostics.
@@ -47,12 +62,8 @@ func runtimeHealthzHandler(r *Runtime) http.HandlerFunc {
 		if !diagnosticsMethodAllowed(w, req) {
 			return
 		}
-		health := runtimeDiagnosticsHealth(r)
-		classification := classifyRuntimeDiagnostics(health)
-		writeDiagnosticsJSON(w, req, diagnosticsHTTPStatus("/healthz", classification), runtimeDiagnosticsHealthPayload{
-			Status:  classification,
-			Runtime: health,
-		})
+		inspection := InspectRuntimeHealth(r)
+		writeDiagnosticsJSON(w, req, diagnosticsHTTPStatus("/healthz", inspection.Status), inspection)
 	}
 }
 
@@ -61,12 +72,8 @@ func runtimeReadyzHandler(r *Runtime) http.HandlerFunc {
 		if !diagnosticsMethodAllowed(w, req) {
 			return
 		}
-		health := runtimeDiagnosticsHealth(r)
-		classification := classifyRuntimeDiagnostics(health)
-		writeDiagnosticsJSON(w, req, diagnosticsHTTPStatus("/readyz", classification), runtimeDiagnosticsHealthPayload{
-			Status:  classification,
-			Runtime: health,
-		})
+		inspection := InspectRuntimeHealth(r)
+		writeDiagnosticsJSON(w, req, diagnosticsHTTPStatus("/readyz", inspection.Status), inspection)
 	}
 }
 
@@ -84,12 +91,8 @@ func hostHealthzHandler(h *Host) http.HandlerFunc {
 		if !diagnosticsMethodAllowed(w, req) {
 			return
 		}
-		health := hostDiagnosticsHealth(h)
-		classification := classifyHostDiagnostics(health)
-		writeDiagnosticsJSON(w, req, diagnosticsHTTPStatus("/healthz", classification), hostDiagnosticsHealthPayload{
-			Status: classification,
-			Host:   health,
-		})
+		inspection := InspectHostHealth(h)
+		writeDiagnosticsJSON(w, req, diagnosticsHTTPStatus("/healthz", inspection.Status), inspection)
 	}
 }
 
@@ -98,12 +101,8 @@ func hostReadyzHandler(h *Host) http.HandlerFunc {
 		if !diagnosticsMethodAllowed(w, req) {
 			return
 		}
-		health := hostDiagnosticsHealth(h)
-		classification := classifyHostDiagnostics(health)
-		writeDiagnosticsJSON(w, req, diagnosticsHTTPStatus("/readyz", classification), hostDiagnosticsHealthPayload{
-			Status: classification,
-			Host:   health,
-		})
+		inspection := InspectHostHealth(h)
+		writeDiagnosticsJSON(w, req, diagnosticsHTTPStatus("/readyz", inspection.Status), inspection)
 	}
 }
 
@@ -116,14 +115,37 @@ func hostDebugHandler(h *Host) http.HandlerFunc {
 	}
 }
 
-type runtimeDiagnosticsHealthPayload struct {
-	Status  diagnosticsStatus `json:"status"`
-	Runtime RuntimeHealth     `json:"runtime"`
+// RuntimeHealthInspection is a classified runtime health snapshot.
+type RuntimeHealthInspection struct {
+	Status  HealthStatus  `json:"status"`
+	Runtime RuntimeHealth `json:"runtime"`
 }
 
-type hostDiagnosticsHealthPayload struct {
-	Status diagnosticsStatus `json:"status"`
-	Host   HostHealth        `json:"host"`
+// HostHealthInspection is a classified host health snapshot.
+type HostHealthInspection struct {
+	Status HealthStatus `json:"status"`
+	Host   HostHealth   `json:"host"`
+}
+
+type runtimeDiagnosticsHealthPayload = RuntimeHealthInspection
+type hostDiagnosticsHealthPayload = HostHealthInspection
+
+// InspectRuntimeHealth returns runtime health with the stable diagnostics status.
+func InspectRuntimeHealth(r *Runtime) RuntimeHealthInspection {
+	health := runtimeDiagnosticsHealth(r)
+	return RuntimeHealthInspection{
+		Status:  ClassifyRuntimeHealth(health),
+		Runtime: health,
+	}
+}
+
+// InspectHostHealth returns host health with the stable diagnostics status.
+func InspectHostHealth(h *Host) HostHealthInspection {
+	health := hostDiagnosticsHealth(h)
+	return HostHealthInspection{
+		Status: ClassifyHostHealth(health),
+		Host:   health,
+	}
 }
 
 func runtimeDiagnosticsHealth(r *Runtime) RuntimeHealth {
@@ -151,17 +173,18 @@ func hostDiagnosticsDescription(h *Host) HostDescription {
 	return h.Describe()
 }
 
-func classifyRuntimeDiagnostics(health RuntimeHealth) diagnosticsStatus {
+// ClassifyRuntimeHealth maps a runtime health snapshot to its stable status.
+func ClassifyRuntimeHealth(health RuntimeHealth) HealthStatus {
 	if runtimeDiagnosticsFailed(health) {
-		return diagnosticsStatusFailed
+		return HealthStatusFailed
 	}
 	if health.Degraded {
-		return diagnosticsStatusDegraded
+		return HealthStatusDegraded
 	}
 	if health.Ready {
-		return diagnosticsStatusOK
+		return HealthStatusOK
 	}
-	return diagnosticsStatusNotReady
+	return HealthStatusNotReady
 }
 
 func runtimeDiagnosticsFailed(health RuntimeHealth) bool {
@@ -173,30 +196,49 @@ func runtimeDiagnosticsFailed(health RuntimeHealth) bool {
 	}
 }
 
-func classifyHostDiagnostics(health HostHealth) diagnosticsStatus {
+// ClassifyHostHealth maps a host health snapshot to its stable status.
+func ClassifyHostHealth(health HostHealth) HealthStatus {
 	if len(health.Modules) == 0 {
-		return diagnosticsStatusFailed
+		return HealthStatusFailed
 	}
 	for _, module := range health.Modules {
-		if classifyRuntimeDiagnostics(module.Health) == diagnosticsStatusFailed {
-			return diagnosticsStatusFailed
+		if ClassifyRuntimeHealth(module.Health) == HealthStatusFailed {
+			return HealthStatusFailed
 		}
 	}
 	if health.Degraded {
-		return diagnosticsStatusDegraded
+		return HealthStatusDegraded
 	}
 	if health.Ready {
-		return diagnosticsStatusOK
+		return HealthStatusOK
 	}
-	return diagnosticsStatusNotReady
+	return HealthStatusNotReady
 }
 
-func diagnosticsHTTPStatus(path string, classification diagnosticsStatus) int {
-	if path == "/healthz" && classification != diagnosticsStatusFailed {
+// HealthzStatusCode maps a health status to the /healthz HTTP status code.
+func HealthzStatusCode(status HealthStatus) int {
+	switch status {
+	case HealthStatusOK, HealthStatusDegraded, HealthStatusNotReady:
+		return http.StatusOK
+	default:
+		return http.StatusServiceUnavailable
+	}
+}
+
+// ReadyzStatusCode maps a health status to the /readyz HTTP status code.
+func ReadyzStatusCode(status HealthStatus) int {
+	if status == HealthStatusOK {
 		return http.StatusOK
 	}
-	if path == "/readyz" && classification == diagnosticsStatusOK {
-		return http.StatusOK
+	return http.StatusServiceUnavailable
+}
+
+func diagnosticsHTTPStatus(path string, classification HealthStatus) int {
+	if path == "/healthz" {
+		return HealthzStatusCode(classification)
+	}
+	if path == "/readyz" {
+		return ReadyzStatusCode(classification)
 	}
 	return http.StatusServiceUnavailable
 }

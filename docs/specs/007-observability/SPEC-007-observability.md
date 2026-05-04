@@ -871,9 +871,37 @@ Host-level diagnostics are explicit to avoid ambiguity with module route
 prefixes:
 
 ```go
+type HealthStatus string
+
+const (
+    HealthStatusFailed   HealthStatus = "failed"
+    HealthStatusDegraded HealthStatus = "degraded"
+    HealthStatusOK       HealthStatus = "ok"
+    HealthStatusNotReady HealthStatus = "not_ready"
+)
+
+type RuntimeHealthInspection struct {
+    Status  HealthStatus  `json:"status"`
+    Runtime RuntimeHealth `json:"runtime"`
+}
+
+type HostHealthInspection struct {
+    Status HealthStatus `json:"status"`
+    Host   HostHealth   `json:"host"`
+}
+
+func InspectRuntimeHealth(r *Runtime) RuntimeHealthInspection
+func InspectHostHealth(h *Host) HostHealthInspection
+func ClassifyRuntimeHealth(health RuntimeHealth) HealthStatus
+func ClassifyHostHealth(health HostHealth) HealthStatus
+func HealthzStatusCode(status HealthStatus) int
+func ReadyzStatusCode(status HealthStatus) int
 func RuntimeDiagnosticsHandler(r *Runtime) http.Handler
 func HostDiagnosticsHandler(h *Host, metrics http.Handler) http.Handler
 ```
+
+The in-process inspection helpers MUST use the same classification and status
+code mapping as `/healthz` and `/readyz`.
 
 `RuntimeDiagnosticsHandler` MUST serve the same runtime endpoints listed above,
 using the runtime's configured metrics handler. It MUST serve those diagnostics

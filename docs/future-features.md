@@ -62,7 +62,6 @@ Current generic CLI boundary:
 
 Useful future helpers:
 
-- health/readiness inspection
 - backup/restore commands after storage semantics are explicit
 - snapshot/compaction commands after operational contracts are stable
 
