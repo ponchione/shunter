@@ -677,6 +677,34 @@ func TestDurabilityWorkerResumeFreshSegmentTruncatesStaleOffsetIndexSidecar(t *t
 	}
 }
 
+func TestDurabilityWorkerResumeFreshSegmentRejectsExistingValidSegment(t *testing.T) {
+	dir := t.TempDir()
+	path := makeScanTestSegment(t, dir, 3, 3)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = NewDurabilityWorkerWithResumePlan(dir, RecoveryResumePlan{
+		SegmentStartTx: 3,
+		NextTxID:       3,
+		AppendMode:     AppendByFreshNextSegment,
+	}, DefaultCommitLogOptions())
+	if err == nil {
+		t.Fatal("expected valid existing segment to block fresh resume")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("resume error = %v, want ErrOpen category", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("valid segment changed: got %x want %x", after, before)
+	}
+}
+
 func TestDurabilityWorkerResumeFreshSegmentRejectsNonEmptyRolloverDirectoryArtifact(t *testing.T) {
 	dir := t.TempDir()
 	_, reg := testSchema()

@@ -208,7 +208,7 @@ func openSegmentForResumePlan(dir string, plan RecoveryResumePlan) (*SegmentWrit
 		if plan.SegmentStartTx == 0 || plan.NextTxID == 0 || plan.SegmentStartTx != plan.NextTxID {
 			return nil, 0, fmt.Errorf("commitlog: invalid recovery resume plan: %+v", plan)
 		}
-		if err := removeEmptySegmentDirectoryArtifact(dir, uint64(plan.SegmentStartTx)); err != nil {
+		if err := removeFreshSegmentArtifact(dir, uint64(plan.SegmentStartTx)); err != nil {
 			return nil, 0, err
 		}
 		seg, err := CreateSegment(dir, uint64(plan.SegmentStartTx))
@@ -256,7 +256,7 @@ func openSegmentForAppendInPlaceResumePlan(dir string, plan RecoveryResumePlan) 
 	return seg, seg.lastTx, nil
 }
 
-func removeEmptySegmentDirectoryArtifact(dir string, startTxID uint64) error {
+func removeFreshSegmentArtifact(dir string, startTxID uint64) error {
 	path := filepath.Join(dir, SegmentFileName(startTxID))
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -265,11 +265,24 @@ func removeEmptySegmentDirectoryArtifact(dir string, startTxID uint64) error {
 		}
 		return err
 	}
-	if !info.IsDir() {
+	if info.IsDir() {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("commitlog: remove rollover segment directory artifact %s: %w", path, err)
+		}
 		return nil
 	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: segment file %s is not a regular file", ErrOpen, path)
+	}
+	segment, err := scanOneSegment(path, true)
+	if err != nil {
+		return err
+	}
+	if segment.AppendMode != AppendByFreshNextSegment || segment.LastTx >= segment.StartTx {
+		return fmt.Errorf("%w: segment file %s already exists", ErrOpen, path)
+	}
 	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("commitlog: remove rollover segment directory artifact %s: %w", path, err)
+		return fmt.Errorf("commitlog: remove torn rollover segment artifact %s: %w", path, err)
 	}
 	return nil
 }

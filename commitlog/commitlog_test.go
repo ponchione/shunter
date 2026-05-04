@@ -210,6 +210,31 @@ func TestCreateSegmentRejectsSymlinkWithoutTruncatingTarget(t *testing.T) {
 	}
 }
 
+func TestCreateSegmentRejectsExistingRegularFileWithoutTruncating(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, SegmentFileName(1))
+	before := []byte("existing segment bytes")
+	if err := os.WriteFile(path, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sw, err := CreateSegment(dir, 1)
+	if err == nil {
+		_ = sw.Close()
+		t.Fatal("expected existing segment path to fail creation")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("CreateSegment error = %v, want ErrOpen category", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("existing segment changed: got %q want %q", after, before)
+	}
+}
+
 func TestCreateSegmentRejectsDirectoryArtifactWithoutRemoving(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, SegmentFileName(1))
