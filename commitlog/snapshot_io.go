@@ -513,6 +513,7 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 		return err
 	}
 	rowBuf := make([]byte, 0, 1024)
+	maxRowBytes := DefaultCommitLogOptions().MaxRowBytes
 	for _, table := range body.tables {
 		if err := writeUint32Full(dst, uint32(table.tableID)); err != nil {
 			return err
@@ -527,13 +528,30 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 			if err != nil {
 				return err
 			}
-			if err := writeUint32Full(dst, uint32(len(rowBuf))); err != nil {
+			rowLen := len(rowBuf)
+			if err := validateSnapshotRowPayloadLen(rowLen, maxRowBytes); err != nil {
+				return err
+			}
+			if err := writeUint32Full(dst, uint32(rowLen)); err != nil {
 				return err
 			}
 			if err := writeFull(dst, rowBuf); err != nil {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func validateSnapshotRowPayloadLen(rowLen int, maxRowBytes uint32) error {
+	if rowLen < 0 {
+		return fmt.Errorf("%w: negative snapshot row payload size %d", ErrSnapshot, rowLen)
+	}
+	if uint64(rowLen) > math.MaxUint32 {
+		return fmt.Errorf("%w: snapshot row payload %d exceeds uint32 length", ErrSnapshot, rowLen)
+	}
+	if maxRowBytes > 0 && uint64(rowLen) > uint64(maxRowBytes) {
+		return snapshotSectionTooLarge("row", uint32(rowLen), maxRowBytes)
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
@@ -92,6 +93,47 @@ func TestCreateAndReadSnapshotAllowsEmptyBootstrapState(t *testing.T) {
 		if nextID := data.NextIDs[table.TableID]; nextID != 1 {
 			t.Fatalf("bootstrap snapshot table %d next_id = %d, want 1", table.TableID, nextID)
 		}
+	}
+}
+
+func TestCreateSnapshotRejectsOversizedRowBeforePublish(t *testing.T) {
+	root := t.TempDir()
+	_, reg := testSchema()
+	cs := buildEmptySnapshotCommittedState(t, reg)
+	players, ok := cs.Table(0)
+	if !ok {
+		t.Fatal("players table missing")
+	}
+
+	maxRowBytes := DefaultCommitLogOptions().MaxRowBytes
+	emptyRowSize := bsatn.EncodedProductValueSize(types.ProductValue{types.NewUint64(1), types.NewString("")})
+	nameLen := int(maxRowBytes) - emptyRowSize + 1
+	if nameLen <= 0 {
+		t.Fatalf("invalid oversized row test setup: maxRowBytes=%d emptyRowSize=%d", maxRowBytes, emptyRowSize)
+	}
+	row := types.ProductValue{types.NewUint64(1), types.NewString(strings.Repeat("x", nameLen))}
+	if err := players.InsertRow(players.AllocRowID(), row); err != nil {
+		t.Fatal(err)
+	}
+	cs.SetCommittedTxID(1)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	err := writer.CreateSnapshot(cs, 1)
+	if err == nil {
+		t.Fatal("expected oversized snapshot row error")
+	}
+	if !errors.Is(err, ErrSnapshot) {
+		t.Fatalf("errors.Is(err, ErrSnapshot) = false: %v", err)
+	}
+	if errors.Is(err, ErrTraversal) {
+		t.Fatalf("oversized snapshot row error was traversal-classified: %v", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot row section") {
+		t.Fatalf("oversized snapshot row error = %v, want row section detail", err)
+	}
+	finalPath := filepath.Join(root, "snapshots", "1", snapshotFileName)
+	if _, statErr := os.Stat(finalPath); !os.IsNotExist(statErr) {
+		t.Fatalf("final snapshot file stat error = %v, want not exist", statErr)
 	}
 }
 
