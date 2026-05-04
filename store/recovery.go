@@ -112,12 +112,15 @@ func advanceReplaySequenceForInsert(table *Table, row types.ProductValue) {
 	if table.sequence == nil || table.sequenceCol < 0 {
 		return
 	}
-	current := table.sequence.Peek()
 	value, ok := replayAutoIncrementValueAsUint64(row[table.sequenceCol], table.schema.Columns[table.sequenceCol].Type)
-	if !ok || value != current {
+	if !ok {
 		return
 	}
-	table.sequence.Next()
+	current := table.sequence.Peek()
+	next := nextAutoIncrementSequenceValue(value)
+	if current != 0 && next > current {
+		table.sequence.Reset(next)
+	}
 }
 
 func replayAutoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, bool) {

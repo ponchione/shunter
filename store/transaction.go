@@ -86,32 +86,32 @@ func (t *Transaction) checkUsable() error {
 	}
 }
 
-func (t *Transaction) applyAutoIncrement(tableID schema.TableID, table *Table, row types.ProductValue) (types.ProductValue, error) {
+func (t *Transaction) applyAutoIncrement(tableID schema.TableID, table *Table, row types.ProductValue) (types.ProductValue, uint64, bool, error) {
 	if table.sequence == nil || table.sequenceCol < 0 {
-		return row, nil
+		return row, 0, false, nil
 	}
 
 	col := table.schema.Columns[table.sequenceCol]
 	if !isZeroAutoIncrementValue(row[table.sequenceCol], col.Type) {
-		return row, nil
+		value, ok := autoIncrementValueAsUint64(row[table.sequenceCol], col.Type)
+		return row, value, ok, nil
 	}
 
 	_, max, ok := schema.AutoIncrementBounds(col.Type)
 	if !ok {
-		return nil, schema.ErrAutoIncrementType
+		return nil, 0, false, schema.ErrAutoIncrementType
 	}
 	next := t.nextSequenceValue(tableID, table)
 	// Sequence value 0 is the exhausted sentinel. A uint64 autoincrement
 	// cannot safely consume MaxUint64 because the next sequence value would
 	// wrap to that sentinel and snapshot/recovery cannot represent max+1.
 	if next == 0 || next > max || (next == max && max == ^uint64(0)) {
-		return nil, schema.ErrSequenceOverflow
+		return nil, 0, false, schema.ErrSequenceOverflow
 	}
 
 	assigned := row.Copy()
 	assigned[table.sequenceCol] = newAutoIncrementValue(next, col.Type)
-	t.setNextSequenceValue(tableID, next+1)
-	return assigned, nil
+	return assigned, next, true, nil
 }
 
 func (t *Transaction) nextSequenceValue(tableID schema.TableID, table *Table) uint64 {
@@ -128,6 +128,21 @@ func (t *Transaction) setNextSequenceValue(tableID schema.TableID, next uint64) 
 		t.txSequences = make(map[schema.TableID]uint64)
 	}
 	t.txSequences[tableID] = next
+}
+
+func (t *Transaction) advanceTxSequencePastValue(tableID schema.TableID, table *Table, observed uint64) {
+	current := t.nextSequenceValue(tableID, table)
+	next := nextAutoIncrementSequenceValue(observed)
+	if current != 0 && next > current {
+		t.setNextSequenceValue(tableID, next)
+	}
+}
+
+func nextAutoIncrementSequenceValue(observed uint64) uint64 {
+	if observed == ^uint64(0) {
+		return observed
+	}
+	return observed + 1
 }
 
 func isZeroAutoIncrementValue(v types.Value, kind schema.ValueKind) bool {
@@ -213,7 +228,7 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 	if err := checkRowIDAvailable(table); err != nil {
 		return 0, err
 	}
-	row, err := t.applyAutoIncrement(tableID, table, row)
+	row, sequenceValue, advanceSequence, err := t.applyAutoIncrement(tableID, table, row)
 	if err != nil {
 		return 0, err
 	}
@@ -255,6 +270,9 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 	id, err := allocRowIDForInsert(table)
 	if err != nil {
 		return 0, err
+	}
+	if advanceSequence {
+		t.advanceTxSequencePastValue(tableID, table, sequenceValue)
 	}
 	t.addInsert(tableID, id, row, table)
 	return id, nil

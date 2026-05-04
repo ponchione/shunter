@@ -1020,6 +1020,35 @@ func TestTransactionInsertAutoIncrementPreservesExplicitValue(t *testing.T) {
 	}
 }
 
+func TestTransactionInsertAutoIncrementExplicitValueAdvancesSequence(t *testing.T) {
+	cs, reg := buildAutoIncrementState(t)
+	tx := NewTransaction(cs, reg)
+
+	if _, err := tx.Insert(0, types.ProductValue{types.NewUint64(42), types.NewString("job-explicit")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Commit(cs, tx); err != nil {
+		t.Fatal(err)
+	}
+	tbl, _ := cs.Table(0)
+	if seq, has := tbl.SequenceValue(); !has || seq != 43 {
+		t.Fatalf("SequenceValue after explicit commit = (%d, %v), want (43, true)", seq, has)
+	}
+
+	next := NewTransaction(cs, reg)
+	id, err := next.Insert(0, types.ProductValue{types.NewUint64(0), types.NewString("job-generated")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := next.GetRow(0, id)
+	if !ok {
+		t.Fatal("generated row should be visible")
+	}
+	if got := row[0].AsUint64(); got != 43 {
+		t.Fatalf("generated autoincrement value after explicit insert = %d, want 43", got)
+	}
+}
+
 func TestRollbackDiscardsAutoIncrementSequence(t *testing.T) {
 	cs, reg := buildAutoIncrementState(t)
 	tx := NewTransaction(cs, reg)
@@ -1184,5 +1213,29 @@ func TestApplyChangesetAutoIncrementUint8AdvancesSequence(t *testing.T) {
 	tbl, _ := cs.Table(0)
 	if seq, has := tbl.SequenceValue(); !has || seq != 2 {
 		t.Fatalf("SequenceValue after replay = (%d, %v), want (2, true)", seq, has)
+	}
+}
+
+func TestApplyChangesetAutoIncrementExplicitValueAdvancesSequence(t *testing.T) {
+	cs, _ := buildAutoIncrementState(t)
+
+	err := ApplyChangeset(cs, &Changeset{
+		Tables: map[schema.TableID]*TableChangeset{
+			0: {
+				TableID:   0,
+				TableName: "jobs",
+				Inserts: []types.ProductValue{
+					{types.NewUint64(42), types.NewString("replay-explicit")},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tbl, _ := cs.Table(0)
+	if seq, has := tbl.SequenceValue(); !has || seq != 43 {
+		t.Fatalf("SequenceValue after explicit replay = (%d, %v), want (43, true)", seq, has)
 	}
 }
