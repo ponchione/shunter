@@ -495,8 +495,9 @@ func (e *Executor) dispatchSafely(cmd ExecutorCommand) (result string) {
 }
 
 func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
-	// Send error response if possible.
-	if c, ok := cmd.(CallReducerCmd); ok {
+	err := fmt.Errorf("executor dispatch panic: %v", r)
+	switch c := cmd.(type) {
+	case CallReducerCmd:
 		err := fmt.Errorf("reducer panicked: %v", r)
 		e.recordReducerPanic(c.Request.ReducerName, err, 0, capturePanicStack(e.observer))
 		e.recordReducerMetric(c.Request.ReducerName, "failed_panic", 0, false)
@@ -505,7 +506,22 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
 			Status: StatusFailedPanic,
 			Error:  err,
 		}, nil)
-		return "panic"
+	case RegisterSubscriptionSetCmd:
+		if c.Reply != nil {
+			c.Reply(subscription.SubscriptionSetRegisterResult{}, err)
+		}
+		e.traceSubscriptionRegister("internal_error", err)
+	case UnregisterSubscriptionSetCmd:
+		if c.Reply != nil {
+			c.Reply(subscription.SubscriptionSetUnregisterResult{}, err)
+		}
+		e.traceSubscriptionUnregister("internal_error", err)
+	case DisconnectClientSubscriptionsCmd:
+		sendErrorResponse(c.ResponseCh, err)
+	case OnConnectCmd:
+		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, err)
+	case OnDisconnectCmd:
+		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, err)
 	}
 	return "panic"
 }
