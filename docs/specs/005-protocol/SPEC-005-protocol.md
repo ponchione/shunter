@@ -46,9 +46,12 @@ type ConnectionID [16]byte
 
 Shunter uses WebSocket (RFC 6455) over HTTP/1.1 or HTTP/2. All application messages use **binary frames** (opcode 0x2). Text frames are rejected with a Close frame.
 
-### 2.2 Protocol Identifier
+### 2.2 Protocol Identifier And Version Policy
 
-Shunter accepts exactly one subprotocol token:
+Shunter negotiates protocol versions through the WebSocket subprotocol token.
+The server-owned preference order is defined in `protocol/version.go`.
+
+Shunter v1 accepts exactly one subprotocol token:
 
 - `v1.bsatn.shunter` — Shunter-native token; this is the product protocol identifier Shunter clients must use.
 
@@ -58,6 +61,12 @@ The client includes this token in the `Sec-WebSocket-Protocol` request header. T
 Client: Sec-WebSocket-Protocol: v1.bsatn.shunter
 Server: Sec-WebSocket-Protocol: v1.bsatn.shunter
 ```
+
+The token fixes both the major protocol version and the BSATN message encoding.
+Additive message families, tag reuse, incompatible field shapes, or any change
+that requires v1 clients to skip unknown frames MUST be introduced under a new
+subprotocol token and pinned by negotiation and wire tests. Unknown tags remain
+fatal within a negotiated version.
 
 ### 2.3 Endpoint
 
@@ -681,9 +690,14 @@ The server maintains a per-connection incoming message queue with capacity `Inco
 Either side may send a WebSocket Close frame. The receiver echoes a Close frame. The connection is then closed. Close codes follow RFC 6455.
 
 Server-initiated closes:
-- `1000` (Normal Closure): graceful engine shutdown
-- `1008` (Policy Violation): authentication failure, buffer overflow (`"send buffer full"`), too many requests (`"too many requests"`), OnConnect rejection
+- `1000` (Normal Closure): graceful engine shutdown (`"server shutdown"`) or normal peer close
+- `1002` (Protocol Error): text frames (`"text frames not supported"`), unsupported brotli (`"brotli unsupported"`), malformed messages (`"malformed message"` or decoder detail), unsupported message families (`"unsupported message type"`)
+- `1008` (Policy Violation): outbound buffer overflow (`"send buffer full"`), incoming flood (`"too many requests"`), message-size violation (`"message too large"`), idle timeout (`"idle timeout"`), OnConnect rejection
 - `1011` (Internal Error): unexpected server error
+
+Canonical close reason strings live in `protocol/close.go` and are pinned by
+`protocol/close_codes_contract_test.go`. New v1 close reasons should be added
+there first, then documented here.
 
 `Conn.OutboundCh` MUST NOT be closed as part of disconnect. Shutdown is signaled through `Conn.closed`; senders check that signal before enqueueing. This avoids the send-on-closed-channel race between concurrent `Send(...)` and disconnect. The writer goroutine exits on `Conn.closed` and may best-effort flush already queued frames before the underlying WebSocket closes.
 
@@ -901,3 +915,4 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 | Reconnect with same token → same Identity in IdentityToken | Identity preservation |
 | OnConnect reducer returns error → connection closed before IdentityToken | OnConnect rejection |
 | Applied envelope for `query_id` always arrives before any delta envelope referencing that ID | Per-connection ordering guarantee |
+| Every v1 client and server message fixture encodes to checked-in golden bytes | Wire fixture stability |

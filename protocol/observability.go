@@ -105,13 +105,13 @@ func protocolKindFromMessage(msg any) string {
 
 func protocolErrorReason(message string) string {
 	switch message {
-	case "text frames not supported":
+	case CloseReasonTextFrameUnsupported:
 		return "text_frame"
-	case "brotli unsupported":
+	case CloseReasonBrotliUnsupported:
 		return "brotli_unsupported"
-	case "unsupported message type":
+	case CloseReasonUnsupportedMessage:
 		return "unsupported_message"
-	case "too many requests":
+	case CloseReasonTooManyRequests:
 		return "buffer_full"
 	default:
 		return "malformed"
@@ -120,16 +120,20 @@ func protocolErrorReason(message string) string {
 
 func closeReason(code websocket.StatusCode, reason string) string {
 	switch {
-	case reason == "send buffer full":
+	case reason == CloseReasonSendBufferFull:
 		return "buffer_full"
-	case reason == "server shutdown":
+	case reason == CloseReasonServerShutdown:
 		return "server_shutdown"
+	case reason == CloseReasonIdleTimeout:
+		return "idle_timeout"
 	case reason == "":
 		return "normal"
 	case code == CloseProtocol:
 		return "protocol_error"
 	case code == ClosePolicy:
 		return "policy_violation"
+	case code == CloseInternal:
+		return "internal_error"
 	case code == CloseNormal:
 		return "normal"
 	default:

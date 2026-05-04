@@ -86,7 +86,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		// Reject text frames per SPEC-005 S3.2.
 		if typ == websocket.MessageText {
 			recordProtocolMessage(c.Observer, "unknown", "malformed")
-			closeProtocolError(c, "text frames not supported")
+			closeProtocolError(c, CloseReasonTextFrameUnsupported)
 			return
 		}
 		c.MarkActivity()
@@ -103,12 +103,12 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 			tag, body, unwrapErr = UnwrapCompressedWithLimit(frame, c.opts.MaxMessageSize)
 			if unwrapErr != nil {
 				if errors.Is(unwrapErr, ErrBrotliUnsupported) {
-					closeProtocolError(c, "brotli unsupported")
+					closeProtocolError(c, CloseReasonBrotliUnsupported)
 				} else if errors.Is(unwrapErr, ErrMessageTooLarge) {
 					logProtocolBackpressure(c.Observer, "inbound", "message_too_large")
-					go closeWithHandshake(c.ws, ClosePolicy, "message too large", c.opts.CloseHandshakeTimeout)
+					go closeWithHandshake(c.ws, ClosePolicy, CloseReasonMessageTooLarge, c.opts.CloseHandshakeTimeout)
 				} else {
-					closeProtocolError(c, "malformed message")
+					closeProtocolError(c, CloseReasonMalformedMessage)
 				}
 				recordProtocolMessage(c.Observer, kind, "malformed")
 				return
@@ -134,56 +134,56 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		case SubscribeSingleMsg:
 			if handlers.OnSubscribeSingle == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, "unsupported message type")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
 				return
 			}
 			run = func() { handlers.OnSubscribeSingle(handlerCtx, c, &m) }
 		case SubscribeMultiMsg:
 			if handlers.OnSubscribeMulti == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, "unsupported message type")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
 				return
 			}
 			run = func() { handlers.OnSubscribeMulti(handlerCtx, c, &m) }
 		case UnsubscribeSingleMsg:
 			if handlers.OnUnsubscribeSingle == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, "unsupported message type")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
 				return
 			}
 			run = func() { handlers.OnUnsubscribeSingle(handlerCtx, c, &m) }
 		case UnsubscribeMultiMsg:
 			if handlers.OnUnsubscribeMulti == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, "unsupported message type")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
 				return
 			}
 			run = func() { handlers.OnUnsubscribeMulti(handlerCtx, c, &m) }
 		case CallReducerMsg:
 			if handlers.OnCallReducer == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, "unsupported message type")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
 				return
 			}
 			run = func() { handlers.OnCallReducer(handlerCtx, c, &m) }
 		case OneOffQueryMsg:
 			if handlers.OnOneOffQuery == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, "unsupported message type")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
 				return
 			}
 			run = func() { handlers.OnOneOffQuery(handlerCtx, c, &m) }
 		case DeclaredQueryMsg:
 			if handlers.OnDeclaredQuery == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, "unsupported message type")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
 				return
 			}
 			run = func() { handlers.OnDeclaredQuery(handlerCtx, c, &m) }
 		case SubscribeDeclaredViewMsg:
 			if handlers.OnSubscribeDeclaredView == nil {
 				recordProtocolMessage(c.Observer, kind, "internal_error")
-				closeProtocolError(c, "unsupported message type")
+				closeProtocolError(c, CloseReasonUnsupportedMessage)
 				return
 			}
 			run = func() { handlers.OnSubscribeDeclaredView(handlerCtx, c, &m) }
@@ -197,7 +197,7 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 		case c.inflightSem <- struct{}{}:
 		default:
 			logProtocolBackpressure(c.Observer, "inbound", "buffer_full")
-			go closeWithHandshake(c.ws, ClosePolicy, "too many requests", c.opts.CloseHandshakeTimeout)
+			go closeWithHandshake(c.ws, ClosePolicy, CloseReasonTooManyRequests, c.opts.CloseHandshakeTimeout)
 			return
 		}
 

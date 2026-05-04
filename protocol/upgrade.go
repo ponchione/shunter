@@ -12,14 +12,6 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// SubprotocolV1 is the Shunter-native WebSocket subprotocol token,
-// and is the product protocol identifier Shunter-owned clients should use.
-const SubprotocolV1 = "v1.bsatn.shunter"
-
-// acceptedSubprotocols lists every token the server admits, in the
-// order selected when multiple are offered.
-var acceptedSubprotocols = []string{SubprotocolV1}
-
 // Server is the HTTP-level entry point for WebSocket upgrades. One
 // Server serves many concurrent connections; HandleSubscribe is
 // routed from `/subscribe` by the host application.
@@ -78,6 +70,7 @@ type DeclaredReadHandler interface {
 // the Identity + ConnectionID + Token + Compression mode.
 type UpgradeContext struct {
 	Conn                *websocket.Conn
+	ProtocolVersion     ProtocolVersion
 	Identity            types.Identity
 	ConnectionID        types.ConnectionID
 	Permissions         []string
@@ -161,8 +154,8 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. subprotocol check — client MUST offer the Shunter-native token.
-	selected, ok := negotiateSubprotocol(r, acceptedSubprotocols)
+	// 4. subprotocol check — client MUST offer a supported Shunter token.
+	selected, version, ok := negotiateSubprotocol(r, SupportedSubprotocols())
 	if !ok {
 		s.writeRejected(w,
 			"Sec-WebSocket-Protocol must include "+SubprotocolV1,
@@ -189,6 +182,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	// 6. Hand off.
 	uc := &UpgradeContext{
 		Conn:                conn,
+		ProtocolVersion:     version,
 		Identity:            identity,
 		ConnectionID:        connID,
 		Permissions:         append([]string(nil), permissions...),
@@ -210,6 +204,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 			uc.Conn,
 			&options,
 		)
+		c.ProtocolVersion = uc.ProtocolVersion
 		c.Permissions = append([]string(nil), uc.Permissions...)
 		c.AllowAllPermissions = uc.AllowAllPermissions
 		c.Observer = s.Observer
@@ -365,9 +360,9 @@ func parseCompressionParam(raw string) (uint8, error) {
 }
 
 // negotiateSubprotocol inspects Sec-WebSocket-Protocol and returns the
-// first token from preferred that the client also offered. Falls back
-// to false when no overlap exists.
-func negotiateSubprotocol(r *http.Request, preferred []string) (string, bool) {
+// first supported token from preferred that the client also offered. Falls
+// back to false when no overlap exists.
+func negotiateSubprotocol(r *http.Request, preferred []string) (string, ProtocolVersion, bool) {
 	header := r.Header.Values("Sec-WebSocket-Protocol")
 	offered := make(map[string]struct{}, len(header))
 	for _, line := range header {
@@ -379,9 +374,13 @@ func negotiateSubprotocol(r *http.Request, preferred []string) (string, bool) {
 		}
 	}
 	for _, want := range preferred {
-		if _, ok := offered[want]; ok {
-			return want, true
+		if _, ok := offered[want]; !ok {
+			continue
+		}
+		version, ok := ProtocolVersionForSubprotocol(want)
+		if ok {
+			return want, version, true
 		}
 	}
-	return "", false
+	return "", ProtocolVersionUnknown, false
 }

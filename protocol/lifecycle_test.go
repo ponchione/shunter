@@ -246,6 +246,44 @@ func TestRunLifecycleRejectsLiveDuplicateConnectionIDBeforeOnConnect(t *testing.
 	}
 }
 
+func TestRunLifecycleIdentityTokenWriteFailureRunsDisconnect(t *testing.T) {
+	inbox := &fakeInbox{}
+	mgr := NewConnManager()
+	opts := DefaultProtocolOptions()
+	conn, _, cleanup := loopbackConn(t, opts)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := conn.RunLifecycle(ctx, inbox, mgr)
+	if err == nil || !strings.Contains(err.Error(), "write IdentityToken") {
+		t.Fatalf("RunLifecycle error = %v, want write IdentityToken failure", err)
+	}
+	calls, gotConnID, _ := inbox.snapshot()
+	if calls != 1 {
+		t.Fatalf("OnConnect calls = %d, want 1", calls)
+	}
+	if gotConnID != conn.ID {
+		t.Fatalf("OnConnect connID = %x, want %x", gotConnID, conn.ID)
+	}
+	onDisconnect, disconnectSubs, events := inbox.disconnectSnapshot()
+	if disconnectSubs != 1 || onDisconnect != 1 {
+		t.Fatalf("disconnect calls = (subs=%d,onDisconnect=%d), want (1,1)", disconnectSubs, onDisconnect)
+	}
+	wantEvents := []string{"DisconnectClientSubscriptions", "OnDisconnect"}
+	if fmt.Sprint(events) != fmt.Sprint(wantEvents) {
+		t.Fatalf("disconnect event order = %v, want %v", events, wantEvents)
+	}
+	if got := mgr.Get(conn.ID); got != nil {
+		t.Fatalf("manager entry after write failure = %p, want nil", got)
+	}
+	select {
+	case <-conn.closed:
+	case <-time.After(time.Second):
+		t.Fatal("conn.closed was not signaled after write failure cleanup")
+	}
+}
+
 func TestRunLifecycleZeroServerOptionsUseDefaults(t *testing.T) {
 	inbox := &fakeInbox{}
 	mgr := NewConnManager()

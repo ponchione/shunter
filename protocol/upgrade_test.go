@@ -170,6 +170,9 @@ func TestUpgradeValidTokenHeaderSucceeds(t *testing.T) {
 	if uc.Identity != auth.DeriveIdentity("test-issuer", "alice") {
 		t.Errorf("Identity mismatch: got %x", uc.Identity)
 	}
+	if uc.ProtocolVersion != ProtocolVersionV1 {
+		t.Errorf("ProtocolVersion = %s, want v1", uc.ProtocolVersion)
+	}
 }
 
 func TestUpgradeValidTokenHeaderSchemeCaseInsensitive(t *testing.T) {

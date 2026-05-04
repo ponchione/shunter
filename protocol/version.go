@@ -1,0 +1,78 @@
+package protocol
+
+import "fmt"
+
+// ProtocolVersion identifies a negotiated Shunter client protocol version.
+type ProtocolVersion uint16
+
+const (
+	// ProtocolVersionUnknown is never negotiated; it is the zero value for
+	// missing or invalid version data.
+	ProtocolVersionUnknown ProtocolVersion = 0
+	// ProtocolVersionV1 is the current Shunter-native BSATN protocol.
+	ProtocolVersionV1 ProtocolVersion = 1
+)
+
+const (
+	// MinSupportedProtocolVersion is the oldest protocol version this server
+	// accepts.
+	MinSupportedProtocolVersion = ProtocolVersionV1
+	// CurrentProtocolVersion is the newest protocol version this server emits.
+	CurrentProtocolVersion = ProtocolVersionV1
+)
+
+// SubprotocolV1 is the Shunter-native WebSocket subprotocol token,
+// and is the product protocol identifier Shunter-owned clients should use.
+const SubprotocolV1 = "v1.bsatn.shunter"
+
+var protocolSubprotocols = map[ProtocolVersion]string{
+	ProtocolVersionV1: SubprotocolV1,
+}
+
+var protocolVersionsBySubprotocol = map[string]ProtocolVersion{
+	SubprotocolV1: ProtocolVersionV1,
+}
+
+// SupportedProtocolVersions returns the supported protocol versions in server
+// preference order.
+func SupportedProtocolVersions() []ProtocolVersion {
+	return []ProtocolVersion{ProtocolVersionV1}
+}
+
+// SupportedSubprotocols returns the WebSocket subprotocol tokens accepted by
+// the server, in the order used for negotiation.
+func SupportedSubprotocols() []string {
+	versions := SupportedProtocolVersions()
+	out := make([]string, 0, len(versions))
+	for _, version := range versions {
+		if token, ok := SubprotocolForVersion(version); ok {
+			out = append(out, token)
+		}
+	}
+	return out
+}
+
+// SubprotocolForVersion returns the WebSocket token for a supported protocol
+// version.
+func SubprotocolForVersion(version ProtocolVersion) (string, bool) {
+	token, ok := protocolSubprotocols[version]
+	return token, ok
+}
+
+// ProtocolVersionForSubprotocol returns the protocol version represented by a
+// supported WebSocket subprotocol token.
+func ProtocolVersionForSubprotocol(token string) (ProtocolVersion, bool) {
+	version, ok := protocolVersionsBySubprotocol[token]
+	return version, ok
+}
+
+func (v ProtocolVersion) String() string {
+	switch v {
+	case ProtocolVersionUnknown:
+		return "unknown"
+	case ProtocolVersionV1:
+		return "v1"
+	default:
+		return fmt.Sprintf("v%d", uint16(v))
+	}
+}

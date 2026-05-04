@@ -28,6 +28,76 @@ func TestShunterCloseCodeConstants(t *testing.T) {
 	}
 }
 
+func TestShunterCloseReasonConstants(t *testing.T) {
+	reasons := []string{
+		CloseReasonTextFrameUnsupported,
+		CloseReasonBrotliUnsupported,
+		CloseReasonMalformedMessage,
+		CloseReasonUnsupportedMessage,
+		CloseReasonMessageTooLarge,
+		CloseReasonTooManyRequests,
+		CloseReasonSendBufferFull,
+		CloseReasonIdleTimeout,
+		CloseReasonServerShutdown,
+	}
+	seen := map[string]bool{}
+	for _, reason := range reasons {
+		if reason == "" {
+			t.Fatal("close reason must not be empty")
+		}
+		if truncateCloseReason(reason) != reason {
+			t.Fatalf("close reason %q exceeds close-frame budget", reason)
+		}
+		if seen[reason] {
+			t.Fatalf("duplicate close reason %q", reason)
+		}
+		seen[reason] = true
+	}
+}
+
+func TestShunterCloseReasonTelemetryTaxonomy(t *testing.T) {
+	cases := []struct {
+		name       string
+		code       websocket.StatusCode
+		wireReason string
+		want       string
+	}{
+		{"normal_empty", CloseNormal, "", "normal"},
+		{"server_shutdown", CloseNormal, CloseReasonServerShutdown, "server_shutdown"},
+		{"send_buffer_full", ClosePolicy, CloseReasonSendBufferFull, "buffer_full"},
+		{"idle_timeout", ClosePolicy, CloseReasonIdleTimeout, "idle_timeout"},
+		{"generic_protocol", CloseProtocol, "unknown tag", "protocol_error"},
+		{"generic_policy", ClosePolicy, "policy", "policy_violation"},
+		{"generic_internal", CloseInternal, "panic", "internal_error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := closeReason(tc.code, tc.wireReason); got != tc.want {
+				t.Fatalf("closeReason(%d, %q) = %q, want %q", tc.code, tc.wireReason, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShunterProtocolErrorReasonTaxonomy(t *testing.T) {
+	cases := []struct {
+		wireReason string
+		want       string
+	}{
+		{CloseReasonTextFrameUnsupported, "text_frame"},
+		{CloseReasonBrotliUnsupported, "brotli_unsupported"},
+		{CloseReasonUnsupportedMessage, "unsupported_message"},
+		{CloseReasonTooManyRequests, "buffer_full"},
+		{CloseReasonMalformedMessage, "malformed"},
+		{"protocol: unknown message tag: tag=255", "malformed"},
+	}
+	for _, tc := range cases {
+		if got := protocolErrorReason(tc.wireReason); got != tc.want {
+			t.Fatalf("protocolErrorReason(%q) = %q, want %q", tc.wireReason, got, tc.want)
+		}
+	}
+}
+
 // TestShunterHandshakeRejectionStatuses pins the HTTP status codes
 // the server returns before the WebSocket upgrade for each rejection
 // class. These sub-tests exercise the upgrade.go guard sequence in order

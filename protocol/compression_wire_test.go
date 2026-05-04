@@ -118,8 +118,8 @@ func TestShunterBrotliFrameClosesWithReason(t *testing.T) {
 	if ce.Code != websocket.StatusProtocolError {
 		t.Errorf("close code = %d, want %d (1002)", ce.Code, websocket.StatusProtocolError)
 	}
-	if !strings.Contains(ce.Reason, "brotli") {
-		t.Errorf("close reason = %q, want contains %q", ce.Reason, "brotli")
+	if !strings.Contains(ce.Reason, CloseReasonBrotliUnsupported) {
+		t.Errorf("close reason = %q, want contains %q", ce.Reason, CloseReasonBrotliUnsupported)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestShunterGzipExpansionOverLimitCloses1008(t *testing.T) {
 	if ce.Code != websocket.StatusPolicyViolation {
 		t.Errorf("close code = %d, want %d (1008)", ce.Code, websocket.StatusPolicyViolation)
 	}
-	if !strings.Contains(ce.Reason, "message too large") {
-		t.Errorf("close reason = %q, want contains %q", ce.Reason, "message too large")
+	if !strings.Contains(ce.Reason, CloseReasonMessageTooLarge) {
+		t.Errorf("close reason = %q, want contains %q", ce.Reason, CloseReasonMessageTooLarge)
 	}
 }

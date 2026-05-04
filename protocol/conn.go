@@ -15,10 +15,11 @@ import (
 // Subscription ownership lives in the subscription manager; Conn owns transport,
 // keep-alive, and outbound queue state.
 type Conn struct {
-	ID          types.ConnectionID
-	Identity    types.Identity
-	Token       string // validated or minted JWT for this connection
-	Compression bool   // true when gzip was negotiated at upgrade
+	ID              types.ConnectionID
+	Identity        types.Identity
+	Token           string // validated or minted JWT for this connection
+	ProtocolVersion ProtocolVersion
+	Compression     bool // true when gzip was negotiated at upgrade
 	// Permissions are copied from authenticated upgrade claims and forwarded
 	// to the executor on external reducer calls.
 	Permissions         []string
@@ -78,17 +79,18 @@ func NewConn(
 	}
 	readCtx, cancelRead := context.WithCancel(context.Background())
 	c := &Conn{
-		ID:          id,
-		Identity:    identity,
-		Token:       token,
-		Compression: compression,
-		OutboundCh:  make(chan []byte, normalized.OutgoingBufferMessages),
-		inflightSem: make(chan struct{}, normalized.IncomingQueueMessages),
-		ws:          ws,
-		opts:        &normalized,
-		readCtx:     readCtx,
-		cancelRead:  cancelRead,
-		closed:      make(chan struct{}),
+		ID:              id,
+		Identity:        identity,
+		Token:           token,
+		ProtocolVersion: CurrentProtocolVersion,
+		Compression:     compression,
+		OutboundCh:      make(chan []byte, normalized.OutgoingBufferMessages),
+		inflightSem:     make(chan struct{}, normalized.IncomingQueueMessages),
+		ws:              ws,
+		opts:            &normalized,
+		readCtx:         readCtx,
+		cancelRead:      cancelRead,
+		closed:          make(chan struct{}),
 	}
 	c.MarkActivity()
 	return c
@@ -123,7 +125,7 @@ func (c *Conn) startOutboundOverflowDisconnect(inbox ExecutorInbox, mgr *ConnMan
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), c.disconnectTimeout())
 		defer cancel()
-		c.Disconnect(ctx, websocket.StatusPolicyViolation, "send buffer full", inbox, mgr)
+		c.Disconnect(ctx, websocket.StatusPolicyViolation, CloseReasonSendBufferFull, inbox, mgr)
 	}()
 	return true
 }
@@ -290,7 +292,7 @@ func (m *ConnManager) CloseAll(ctx context.Context, inbox ExecutorInbox) {
 			defer wg.Done()
 			disconnectCtx, cancel := context.WithTimeout(ctx, c.opts.DisconnectTimeout)
 			defer cancel()
-			c.Disconnect(disconnectCtx, CloseNormal, "server shutdown", inbox, m)
+			c.Disconnect(disconnectCtx, CloseNormal, CloseReasonServerShutdown, inbox, m)
 		}(c)
 	}
 	wg.Wait()

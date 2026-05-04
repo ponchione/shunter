@@ -20,6 +20,9 @@ compatibility is not a product goal.
 Current contract:
 
 - `v1.bsatn.shunter` is the only supported WebSocket subprotocol token.
+- Protocol version policy is explicit in `protocol/version.go`: v1 is the
+  minimum, current, and only supported version. A future v2 must add a new
+  subprotocol token and negotiation pins rather than widening v1 semantics.
 - Brotli is a reserved compression tag, but Shunter returns a distinct
   unsupported-brotli protocol error until real Shunter clients need it.
 - Client and server protocol decoders reject trailing bytes after a valid
@@ -39,8 +42,11 @@ Deferred unless Shunter clients need it:
 Authoritative pins:
 
 - `docs/specs/005-protocol/SPEC-005-protocol.md`
+- `protocol/version_test.go`
+- `protocol/golden_wire_test.go`
 - `protocol/subprotocol_contract_test.go`
 - `protocol/compression_wire_test.go`
+- `protocol/close_codes_contract_test.go`
 - `protocol/client_messages_test.go`
 - `protocol/server_messages_test.go`
 - `protocol/message_family_contract_test.go`

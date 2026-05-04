@@ -28,7 +28,8 @@ func TestServerTagsDistinct(t *testing.T) {
 	tags := []uint8{
 		TagIdentityToken, TagSubscribeSingleApplied, TagUnsubscribeSingleApplied,
 		TagSubscriptionError, TagTransactionUpdate, TagOneOffQueryResponse,
-		TagReducerCallResult,
+		TagReducerCallResult, TagTransactionUpdateLight,
+		TagSubscribeMultiApplied, TagUnsubscribeMultiApplied,
 	}
 	seen := map[uint8]bool{}
 	for _, tag := range tags {
@@ -40,7 +41,8 @@ func TestServerTagsDistinct(t *testing.T) {
 	// Spec-pinned values.
 	if TagIdentityToken != 1 || TagSubscribeSingleApplied != 2 || TagUnsubscribeSingleApplied != 3 ||
 		TagSubscriptionError != 4 || TagTransactionUpdate != 5 || TagOneOffQueryResponse != 6 ||
-		TagReducerCallResult != 7 {
-		t.Errorf("S2C tag values drifted from SPEC-005 §6")
+		TagReducerCallResult != 7 || TagTransactionUpdateLight != 8 ||
+		TagSubscribeMultiApplied != 9 || TagUnsubscribeMultiApplied != 10 {
+		t.Errorf("Shunter-owned S2C tag values drifted")
 	}
 }

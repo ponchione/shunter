@@ -39,7 +39,7 @@ func (c *Conn) runKeepalive(ctx context.Context) {
 			last := c.lastActivity.Load()
 			if time.Now().UnixNano()-last >= int64(c.opts.IdleTimeout) {
 				// Run the close handshake in the background; idle peers may not answer.
-				go closeWithHandshake(c.ws, ClosePolicy, "idle timeout", c.opts.CloseHandshakeTimeout)
+				go closeWithHandshake(c.ws, ClosePolicy, CloseReasonIdleTimeout, c.opts.CloseHandshakeTimeout)
 				return
 			}
 		}

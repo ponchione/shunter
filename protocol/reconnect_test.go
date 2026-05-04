@@ -100,7 +100,7 @@ func TestReconnectAfterBufferOverflow(t *testing.T) {
 	defer cleanup1()
 	mgr.Add(c1)
 
-	c1.Disconnect(context.Background(), ClosePolicy, "send buffer full", inbox, mgr)
+	c1.Disconnect(context.Background(), ClosePolicy, CloseReasonSendBufferFull, inbox, mgr)
 
 	c2, _, cleanup2 := loopbackConn(t, opts)
 	defer cleanup2()

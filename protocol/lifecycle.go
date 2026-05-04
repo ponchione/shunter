@@ -151,18 +151,21 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 		Token:        c.Token,
 	}, c.Compression)
 	if err != nil {
-		mgr.Remove(c.ID)
-		_ = c.ws.Close(websocket.StatusInternalError, "encode IdentityToken")
+		c.disconnectAfterAdmittedFailure(inbox, mgr, websocket.StatusInternalError, "encode IdentityToken")
 		return fmt.Errorf("encode IdentityToken: %w", err)
 	}
 	if err := c.ws.Write(ctx, websocket.MessageBinary, frame); err != nil {
-		mgr.Remove(c.ID)
-		recordProtocolConnections(c.Observer, mgr.ActiveCount())
-		_ = c.ws.Close(websocket.StatusInternalError, "write IdentityToken")
+		c.disconnectAfterAdmittedFailure(inbox, mgr, websocket.StatusInternalError, "write IdentityToken")
 		return fmt.Errorf("write IdentityToken: %w", err)
 	}
 	logProtocolConnectionOpened(c.Observer, c.ID)
 	return nil
+}
+
+func (c *Conn) disconnectAfterAdmittedFailure(inbox ExecutorInbox, mgr *ConnManager, code websocket.StatusCode, reason string) {
+	disconnectCtx, cancel := context.WithTimeout(context.Background(), c.disconnectTimeout())
+	defer cancel()
+	c.Disconnect(disconnectCtx, code, reason, inbox, mgr)
 }
 
 // encodeIdentityTokenFrame serializes the IdentityToken server

@@ -31,6 +31,9 @@ func TestNewConnNilOptionsUsesDefaults(t *testing.T) {
 	if c.opts == nil {
 		t.Fatal("Conn opts is nil")
 	}
+	if c.ProtocolVersion != CurrentProtocolVersion {
+		t.Fatalf("ProtocolVersion = %s, want %s", c.ProtocolVersion, CurrentProtocolVersion)
+	}
 }
 
 func TestNewConnZeroOptionsNormalizeToDefaults(t *testing.T) {
