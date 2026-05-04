@@ -383,6 +383,17 @@ func TestBuildReflectionPathIntegration(t *testing.T) {
 	}
 }
 
+func TestRegisterTableRejectsUniqueWithPlainIndex(t *testing.T) {
+	type Player struct {
+		Email string `shunter:"unique,index"`
+	}
+
+	b := NewBuilder().SchemaVersion(1)
+	if err := RegisterTable[Player](b); err == nil {
+		t.Fatal("expected unique + plain index tag to be rejected")
+	}
+}
+
 func TestBuildReflectionPathTimestampColumn(t *testing.T) {
 	type Event struct {
 		ID        uint64 `shunter:"primarykey"`

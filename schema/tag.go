@@ -79,6 +79,11 @@ func ParseTag(raw string) (*TagDirectives, error) {
 		return nil, fmt.Errorf("shunter: plain index and index:<name> cannot both appear in tag %q", raw)
 	}
 
+	// Validation: unique already creates a single-column unique index.
+	if td.Unique && td.Index {
+		return nil, fmt.Errorf("shunter: unique cannot combine with plain index in tag %q", raw)
+	}
+
 	return td, nil
 }
 

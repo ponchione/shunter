@@ -150,6 +150,13 @@ func TestParseTagPlainAndNamedIndex(t *testing.T) {
 	}
 }
 
+func TestParseTagUniqueWithPlainIndex(t *testing.T) {
+	_, err := ParseTag("unique,index")
+	if err == nil {
+		t.Fatal("unique + plain index should fail")
+	}
+}
+
 func TestParseTagPrimaryKeyAutoIncrementValid(t *testing.T) {
 	_, err := ParseTag("primarykey,autoincrement")
 	if err != nil {

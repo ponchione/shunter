@@ -75,6 +75,17 @@ func TestDiscoverFieldsPlatformInt(t *testing.T) {
 	}
 }
 
+func TestDiscoverFieldsRejectsUniqueWithPlainIndex(t *testing.T) {
+	type T struct {
+		Email string `shunter:"unique,index"`
+	}
+
+	_, err := discoverFields(reflect.TypeFor[T](), "")
+	if err == nil {
+		t.Fatal("expected unique + plain index tag to be rejected")
+	}
+}
+
 type WithUnexported struct {
 	Exported string
 	_        string
