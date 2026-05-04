@@ -111,7 +111,7 @@ func TestCommittedSnapshotRowsFromRowIDsPanicsOnMidIterClose(t *testing.T) {
 		t.Fatalf("expected at least 2 rowIDs to exercise mid-iter-close, got %d", len(rowIDs))
 	}
 	tbl, _ := cs.Table(0)
-	it := snap.rowsFromRowIDs(tbl, rowIDs)
+	it := snap.rowsFromRowIDs(tbl, rowIDs, StoreReadKindIndexScan)
 
 	expectMidIterClosePanic(t, func() {
 		first := true

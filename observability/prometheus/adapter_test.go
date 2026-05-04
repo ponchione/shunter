@@ -46,6 +46,7 @@ var expectedMetricFamilies = []shunter.MetricName{
 	shunter.MetricRecoveryRecoveredTxID,
 	shunter.MetricRecoveryDamagedTailSegments,
 	shunter.MetricRecoverySkippedSnapshotsTotal,
+	shunter.MetricStoreReadRowsTotal,
 }
 
 var expectedMetricTypes = map[shunter.MetricName]string{
@@ -74,6 +75,7 @@ var expectedMetricTypes = map[shunter.MetricName]string{
 	shunter.MetricRecoveryRecoveredTxID:           "GAUGE",
 	shunter.MetricRecoveryDamagedTailSegments:     "GAUGE",
 	shunter.MetricRecoverySkippedSnapshotsTotal:   "COUNTER",
+	shunter.MetricStoreReadRowsTotal:              "COUNTER",
 }
 
 var expectedMetricLabels = map[shunter.MetricName][]string{
@@ -102,6 +104,7 @@ var expectedMetricLabels = map[shunter.MetricName][]string{
 	shunter.MetricRecoveryRecoveredTxID:           {"module", "runtime"},
 	shunter.MetricRecoveryDamagedTailSegments:     {"module", "runtime"},
 	shunter.MetricRecoverySkippedSnapshotsTotal:   {"module", "runtime", "reason"},
+	shunter.MetricStoreReadRowsTotal:              {"module", "runtime", "kind"},
 }
 
 var specDurationBuckets = []float64{
@@ -546,6 +549,8 @@ func sampleLabelsFor(name shunter.MetricName) shunter.MetricLabels {
 		labels.Result = "success"
 	case shunter.MetricRecoverySkippedSnapshotsTotal:
 		labels.Reason = "read_failed"
+	case shunter.MetricStoreReadRowsTotal:
+		labels.Kind = "table_scan"
 	}
 	return labels
 }

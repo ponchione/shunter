@@ -134,6 +134,7 @@ const (
 	MetricRecoveryRecoveredTxID           MetricName = "recovery_recovered_tx_id"
 	MetricRecoveryDamagedTailSegments     MetricName = "recovery_damaged_tail_segments"
 	MetricRecoverySkippedSnapshotsTotal   MetricName = "recovery_skipped_snapshots_total"
+	MetricStoreReadRowsTotal              MetricName = "store_read_rows_total"
 )
 
 // MetricLabels is intentionally fixed so Shunter code cannot create free-form
@@ -759,6 +760,25 @@ func (o *runtimeObservability) LogStoreSnapshotLeaked(reason string) {
 	o.log(context.Background(), slog.LevelError, "store.snapshot_leaked", "store",
 		slog.String("reason", reason),
 	)
+}
+
+func (o *runtimeObservability) RecordStoreReadRows(kind string, rows uint64) {
+	if rows == 0 {
+		return
+	}
+	o.addCounter(MetricStoreReadRowsTotal, MetricLabels{
+		Component: "store",
+		Kind:      storeReadMetricKind(kind),
+	}, rows)
+}
+
+func storeReadMetricKind(kind string) string {
+	switch kind {
+	case "table_scan", "index_scan", "index_seek", "index_range":
+		return kind
+	default:
+		return "unknown"
+	}
 }
 
 func recoverySkippedSnapshotMetricReason(reason commitlog.SnapshotSkipReason) string {

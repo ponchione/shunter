@@ -260,6 +260,7 @@ const (
     MetricRecoveryRecoveredTxID           MetricName = "recovery_recovered_tx_id"
     MetricRecoveryDamagedTailSegments     MetricName = "recovery_damaged_tail_segments"
     MetricRecoverySkippedSnapshotsTotal   MetricName = "recovery_skipped_snapshots_total"
+    MetricStoreReadRowsTotal              MetricName = "store_read_rows_total"
 )
 
 type MetricLabels struct {
@@ -339,6 +340,7 @@ Duration histograms MUST use these bucket boundaries in seconds:
 | `shunter_recovery_recovered_tx_id` | Gauge | `module`, `runtime` | n/a | Recovered transaction horizon from the latest recovery. |
 | `shunter_recovery_damaged_tail_segments` | Gauge | `module`, `runtime` | n/a | Damaged tail segment count from the latest recovery. |
 | `shunter_recovery_skipped_snapshots_total` | Counter | `module`, `runtime`, `reason` | n/a | Skipped recovery snapshots. |
+| `shunter_store_read_rows_total` | Counter | `module`, `runtime`, `kind` | n/a | Rows matched or delivered by committed store read paths. |
 
 Allowed label values:
 
@@ -349,6 +351,7 @@ Allowed label values:
 | `direction` | `inbound`, `outbound` |
 | protocol `kind` | `subscribe_single`, `subscribe_multi`, `subscribe_declared_view`, `unsubscribe_single`, `unsubscribe_multi`, `call_reducer`, `one_off_query`, `declared_query`, `unknown` |
 | executor `kind` | `call_reducer`, `register_subscription_set`, `unregister_subscription_set`, `disconnect_client_subscriptions`, `on_connect`, `on_disconnect`, `scheduler_fire`, `unknown` |
+| store read `kind` | `table_scan`, `index_scan`, `index_seek`, `index_range`, `unknown` |
 | connection `result` | `accepted`, `rejected_not_ready`, `rejected_auth`, `rejected_upgrade`, `rejected_executor`, `rejected_internal` |
 | protocol message `result` | `ok`, `malformed`, `permission_denied`, `validation_error`, `executor_rejected`, `internal_error`, `connection_closed` |
 | executor command `result` | `ok`, `user_error`, `panic`, `internal_error`, `permission_denied`, `rejected`, `canceled` |
@@ -471,6 +474,14 @@ Durability and subscription metrics:
   already full and the signal is discarded, Shunter MUST increment
   `subscription_dropped_clients_total{reason="buffer_full"}` before discarding
   when metrics are enabled.
+
+Store metrics:
+
+- `store_read_rows_total` increments by the number of rows matched or delivered
+  through committed snapshot read paths. `kind="table_scan"` covers table
+  iteration; `kind="index_scan"`, `kind="index_seek"`, and
+  `kind="index_range"` cover index-backed reads. Empty reads MUST NOT
+  increment the counter.
 
 ## 7. Prometheus Adapter
 

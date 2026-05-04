@@ -447,4 +447,10 @@ var metricFamilies = []metricFamily{
 		labels: []string{"module", "runtime", "reason"},
 		help:   "Skipped recovery snapshots.",
 	},
+	{
+		name:   shunter.MetricStoreReadRowsTotal,
+		kind:   metricKindCounter,
+		labels: []string{"module", "runtime", "kind"},
+		help:   "Rows matched or delivered by committed store read paths.",
+	},
 }

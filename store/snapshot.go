@@ -70,11 +70,16 @@ func (s *CommittedSnapshot) TableScan(id schema.TableID) iter.Seq2[types.RowID, 
 	}
 	inner := t.Scan()
 	return func(yield func(types.RowID, types.ProductValue) bool) {
-		defer runtime.KeepAlive(s)
+		var rows uint64
+		defer func() {
+			recordStoreReadRows(s.observer, StoreReadKindTableScan, rows)
+			runtime.KeepAlive(s)
+		}()
 		s.ensureOpen()
 		for rid, row := range inner {
 			// Panic promptly if another caller closes the snapshot mid-iteration.
 			s.ensureOpen()
+			rows++
 			if !yield(rid, row) {
 				return
 			}
@@ -88,7 +93,7 @@ func (s *CommittedSnapshot) IndexScan(tableID schema.TableID, indexID schema.Ind
 	if !ok {
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
-	return s.rowsFromRowIDs(t, idx.Seek(NewIndexKey(value)))
+	return s.rowsFromRowIDs(t, idx.Seek(NewIndexKey(value)), StoreReadKindIndexScan)
 }
 
 func (s *CommittedSnapshot) IndexSeek(tableID schema.TableID, indexID schema.IndexID, key IndexKey) []types.RowID {
@@ -99,6 +104,7 @@ func (s *CommittedSnapshot) IndexSeek(tableID schema.TableID, indexID schema.Ind
 	}
 	// Clone so callers cannot retain BTree-internal RowID storage.
 	ids := idx.Seek(key)
+	recordStoreReadRows(s.observer, StoreReadKindIndexSeek, uint64(len(ids)))
 	if len(ids) == 0 {
 		return nil
 	}
@@ -113,7 +119,11 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 	}
 	// Collect bounds before yielding so callbacks cannot observe BTree mutation.
 	return func(yield func(types.RowID, types.ProductValue) bool) {
-		defer runtime.KeepAlive(s)
+		var rows uint64
+		defer func() {
+			recordStoreReadRows(s.observer, StoreReadKindIndexRange, rows)
+			runtime.KeepAlive(s)
+		}()
 		s.ensureOpen()
 		for _, rid := range slices.Collect(idx.BTree().SeekBounds(lower, upper)) {
 			// Read-view mid-iter-close defense-in-depth: see TableScan.
@@ -122,6 +132,7 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 			if !ok {
 				continue
 			}
+			rows++
 			if !yield(rid, row) {
 				return
 			}
@@ -163,9 +174,13 @@ func (s *CommittedSnapshot) lookupIndex(tableID schema.TableID, indexID schema.I
 	return t, idx, true
 }
 
-func (s *CommittedSnapshot) rowsFromRowIDs(t *Table, rowIDs []types.RowID) iter.Seq2[types.RowID, types.ProductValue] {
+func (s *CommittedSnapshot) rowsFromRowIDs(t *Table, rowIDs []types.RowID, readKind string) iter.Seq2[types.RowID, types.ProductValue] {
 	return func(yield func(types.RowID, types.ProductValue) bool) {
-		defer runtime.KeepAlive(s)
+		var rows uint64
+		defer func() {
+			recordStoreReadRows(s.observer, readKind, rows)
+			runtime.KeepAlive(s)
+		}()
 		s.ensureOpen()
 		for _, rid := range rowIDs {
 			// Read-view mid-iter-close defense-in-depth: see TableScan.
@@ -174,11 +189,19 @@ func (s *CommittedSnapshot) rowsFromRowIDs(t *Table, rowIDs []types.RowID) iter.
 			if !ok {
 				continue
 			}
+			rows++
 			if !yield(rid, row) {
 				return
 			}
 		}
 	}
+}
+
+func recordStoreReadRows(observer Observer, kind string, rows uint64) {
+	if observer == nil || rows == 0 {
+		return
+	}
+	observer.RecordStoreReadRows(kind, rows)
 }
 
 func (s *CommittedSnapshot) GetRow(tableID schema.TableID, rowID types.RowID) (types.ProductValue, bool) {

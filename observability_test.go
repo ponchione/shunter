@@ -378,6 +378,46 @@ func TestObservabilityDisabledMetricsAndTracingIgnoreSinks(t *testing.T) {
 	}
 }
 
+func TestRuntimeObservabilityRecordsStoreReadRows(t *testing.T) {
+	metrics := &recordingMetricsRecorder{}
+	obs := newRuntimeObservability("chat", ObservabilityConfig{
+		RuntimeLabel: "store-reads-a",
+		Metrics: MetricsConfig{
+			Enabled:  true,
+			Recorder: metrics,
+		},
+	})
+
+	obs.RecordStoreReadRows("table_scan", 3)
+	obs.RecordStoreReadRows("index_scan", 2)
+	obs.RecordStoreReadRows("not-a-kind", 1)
+	obs.RecordStoreReadRows("index_seek", 0)
+
+	metrics.requireCounter(t, MetricStoreReadRowsTotal, MetricLabels{
+		Module:    "chat",
+		Runtime:   "store-reads-a",
+		Component: "store",
+		Kind:      "table_scan",
+	}, 3)
+	metrics.requireCounter(t, MetricStoreReadRowsTotal, MetricLabels{
+		Module:    "chat",
+		Runtime:   "store-reads-a",
+		Component: "store",
+		Kind:      "index_scan",
+	}, 2)
+	metrics.requireCounter(t, MetricStoreReadRowsTotal, MetricLabels{
+		Module:    "chat",
+		Runtime:   "store-reads-a",
+		Component: "store",
+		Kind:      "unknown",
+	}, 1)
+	for _, observation := range metrics.snapshot() {
+		if observation.name == MetricStoreReadRowsTotal && observation.labels.Kind == "index_seek" {
+			t.Fatalf("zero-row store read recorded a counter: %+v", observation)
+		}
+	}
+}
+
 func TestObservabilitySinkPanicsRecoveredBeforeRuntimeOperation(t *testing.T) {
 	logger := slog.New(panicSlogHandler{})
 	rec := panicMetricsRecorder{}
@@ -639,6 +679,9 @@ func TestRuntimeObservationMethodsRecoverPanickingSinks(t *testing.T) {
 		}},
 		{name: "log_store_snapshot_leaked", call: func(o *runtimeObservability) {
 			o.LogStoreSnapshotLeaked("test")
+		}},
+		{name: "record_store_read_rows", call: func(o *runtimeObservability) {
+			o.RecordStoreReadRows("table_scan", 1)
 		}},
 		{name: "metric_helpers", call: func(o *runtimeObservability) {
 			o.addCounter(MetricRuntimeErrorsTotal, MetricLabels{Component: "runtime"}, 1)
