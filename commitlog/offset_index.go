@@ -46,7 +46,8 @@ type OffsetIndexMut struct {
 }
 
 // CreateOffsetIndex creates a new index file preallocated to cap entries.
-// Every slot is zero-initialised, which the sentinel rule treats as absent.
+// It fails if path already exists. Every slot is zero-initialised, which the
+// sentinel rule treats as absent.
 func CreateOffsetIndex(path string, cap uint64) (*OffsetIndexMut, error) {
 	size, err := offsetIndexFileSize(cap)
 	if err != nil {
@@ -55,7 +56,7 @@ func CreateOffsetIndex(path string, cap uint64) (*OffsetIndexMut, error) {
 	if err := requireCreatableOffsetIndexPath(path); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +123,7 @@ func requireCreatableOffsetIndexPath(path string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%w: offset index file %s is not a regular file", ErrOpen, path)
 	}
-	return nil
+	return fmt.Errorf("%w: offset index file %s already exists", ErrOpen, path)
 }
 
 func requireRegularOffsetIndexPath(path string) error {

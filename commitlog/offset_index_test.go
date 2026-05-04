@@ -109,6 +109,31 @@ func TestCreateOffsetIndexRejectsDirectoryArtifactWithoutRemoving(t *testing.T) 
 	assertDirectoryArtifactExists(t, path)
 }
 
+func TestCreateOffsetIndexRejectsExistingRegularFileWithoutTruncating(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, OffsetIndexFileName(1))
+	before := []byte("existing offset index bytes")
+	if err := os.WriteFile(path, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := CreateOffsetIndex(path, 4)
+	if err == nil {
+		_ = idx.Close()
+		t.Fatal("expected existing regular offset index path to fail creation")
+	}
+	if !errors.Is(err, ErrOpen) {
+		t.Fatalf("CreateOffsetIndex error = %v, want ErrOpen category", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("existing offset index file changed: got %q want %q", after, before)
+	}
+}
+
 func TestOpenOffsetIndexRejectsSymlink(t *testing.T) {
 	targetDir := t.TempDir()
 	targetPath := filepath.Join(targetDir, "external.idx")
