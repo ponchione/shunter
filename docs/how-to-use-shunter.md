@@ -223,15 +223,26 @@ Recovery validates the registered schema version and embedded snapshot schema
 against the restored data. If the module schema is incompatible, `Build`
 fails instead of rewriting durable state.
 
-The generic CLI can perform the offline directory copy after your app has
-stopped runtime ownership:
+App-owned binaries can perform the offline directory copy after runtime
+ownership has stopped:
+
+```go
+if err := shunter.BackupDataDir("./data/chat", "./backups/chat-2026-05-04"); err != nil {
+	return err
+}
+if err := shunter.RestoreDataDir("./backups/chat-2026-05-04", "./data/chat"); err != nil {
+	return err
+}
+```
+
+The generic CLI uses the same helpers:
 
 ```bash
 rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026-05-04
 rtk go run ./cmd/shunter restore --backup ./backups/chat-2026-05-04 --data-dir ./data/chat
 ```
 
-The restore command refuses to merge into a non-empty destination.
+Restore refuses to merge into a non-empty destination.
 
 ## Call Reducers Locally
 
@@ -423,8 +434,9 @@ rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026
 ```
 
 The CLI does not dynamically load app modules. Export contracts from an
-app-owned binary that links the module. Backup and restore commands operate on
-offline `DataDir` directories.
+app-owned binary that links the module. Backup and restore operate on offline
+`DataDir` directories through `shunter.BackupDataDir` and
+`shunter.RestoreDataDir`.
 
 ## Versioning
 

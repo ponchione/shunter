@@ -53,14 +53,14 @@ runtime isolation problem, not as a SpacetimeDB compatibility goal.
 
 Expand workflow support through app-owned binaries and reusable library helpers.
 
-Current generic CLI boundary:
+Current generic CLI and helper boundary:
 
 - contract diff
 - contract policy
 - contract plan
 - contract codegen from existing JSON
-- offline `DataDir` backup
-- offline `DataDir` restore
+- offline `DataDir` backup through `shunter.BackupDataDir` and the generic CLI
+- offline `DataDir` restore through `shunter.RestoreDataDir` and the generic CLI
 
 The generic `shunter` CLI should not pretend it can load arbitrary app modules
 unless Shunter gains a real module loading boundary.
