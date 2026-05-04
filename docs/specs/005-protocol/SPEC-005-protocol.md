@@ -421,11 +421,11 @@ The executor runs a read-only query against `CommittedState.Snapshot()` directly
 
 Implementation status: the one-off SELECT surface is intentionally broader than the subscription SQL subset. Current query-only widenings include `LIMIT`, `OFFSET` after optional `LIMIT`, column projections, `COUNT(*) [AS] alias`, `COUNT(<column>) [AS] alias`, `COUNT(DISTINCT <column>) [AS] alias`, `SUM(<column>) [AS] alias`, single-column `ORDER BY` over a resolved projected-table column or unique output name from an explicit column projection with optional `ASC` / `DESC`, unindexed two-table joins, cross-join `WHERE` column equality, and the bounded cross-join `WHERE` equality-plus-one-column-literal-filter shape; subscriptions still reject `ORDER BY`, `OFFSET`, aggregates, and cross-join `WHERE` before executor registration. Inner-join `WHERE` field-vs-field comparisons and broader cross-join boolean expressions are rejected at compile time.
 
-One-off execution may use a single-column index for a same-table equality
-predicate, including an equality term nested under `AND`, for returned rows and
-single-table aggregate inputs. The executor still rechecks the full predicate
-after the index lookup so visibility filters and additional filters remain
-authoritative.
+One-off execution may use a single-column index for a same-table equality or
+range predicate, including a matching term nested under `AND`, for returned
+rows and single-table aggregate inputs. The executor still rechecks the full
+predicate after the index lookup so visibility filters and additional filters
+remain authoritative.
 
 ---
 

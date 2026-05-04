@@ -272,6 +272,23 @@ func oneOffIndexableEquality(pred subscription.Predicate, tableID schema.TableID
 	return subscription.ColEq{}, false
 }
 
+func oneOffIndexableRange(pred subscription.Predicate, tableID schema.TableID) (subscription.ColRange, bool) {
+	switch p := pred.(type) {
+	case subscription.ColRange:
+		if p.Table == tableID && p.Alias == 0 {
+			return p, true
+		}
+	case subscription.And:
+		if r, ok := oneOffIndexableRange(p.Left, tableID); ok {
+			return r, true
+		}
+		if r, ok := oneOffIndexableRange(p.Right, tableID); ok {
+			return r, true
+		}
+	}
+	return subscription.ColRange{}, false
+}
+
 func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, visit func(types.ProductValue) bool) (bool, error) {
 	if resolver != nil {
 		if eq, ok := oneOffIndexableEquality(pred, tableID); ok {
@@ -292,6 +309,21 @@ func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadVie
 				return true, nil
 			}
 		}
+		if r, ok := oneOffIndexableRange(pred, tableID); ok {
+			if idx, ok := resolver.IndexIDForColumn(r.Table, r.Column); ok {
+				lower := storeBoundFromSubscriptionBound(r.Lower)
+				upper := storeBoundFromSubscriptionBound(r.Upper)
+				for _, row := range view.IndexRange(r.Table, idx, lower, upper) {
+					if err := ctx.Err(); err != nil {
+						return true, err
+					}
+					if subscription.MatchRow(pred, tableID, row) && !visit(row) {
+						return true, nil
+					}
+				}
+				return true, nil
+			}
+		}
 	}
 	for _, pv := range view.TableScan(tableID) {
 		if err := ctx.Err(); err != nil {
@@ -302,6 +334,10 @@ func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadVie
 		}
 	}
 	return false, nil
+}
+
+func storeBoundFromSubscriptionBound(b subscription.Bound) store.Bound {
+	return store.Bound{Value: b.Value, Inclusive: b.Inclusive, Unbounded: b.Unbounded}
 }
 
 func oneOffRowOffset(offset *uint64) int {

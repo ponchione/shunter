@@ -106,7 +106,7 @@ Likely feature slices:
 - aggregate functions with explicit empty-result and nullable-value semantics
 - `OFFSET` for additional result shapes where snapshot/live-view semantics are
   explicit
-- broader index-aware planning for ranges, joins, ordering, and live paths
+- index-aware planning for joins, ordering, and live paths
 - clear interaction with read policy and visibility filters
 
 Any query expansion must include tests for authorization, visibility filtering,

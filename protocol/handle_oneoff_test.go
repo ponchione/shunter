@@ -91,6 +91,7 @@ type indexedCountingSnapshot struct {
 	index       schema.IndexID
 	tableScans  int
 	indexSeeks  int
+	indexRanges int
 	indexGetRow int
 }
 
@@ -114,6 +115,39 @@ func (s *indexedCountingSnapshot) IndexSeek(table schema.TableID, index schema.I
 		}
 	}
 	return out
+}
+
+func (s *indexedCountingSnapshot) IndexRange(table schema.TableID, index schema.IndexID, lower, upper store.Bound) iter.Seq2[types.RowID, types.ProductValue] {
+	s.indexRanges++
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		if table != s.table || index != s.index {
+			return
+		}
+		for rid, row := range s.rows[table] {
+			if int(s.column) >= len(row) {
+				continue
+			}
+			if valueWithinStoreBounds(row[s.column], lower, upper) && !yield(types.RowID(rid), row) {
+				return
+			}
+		}
+	}
+}
+
+func valueWithinStoreBounds(v types.Value, lower, upper store.Bound) bool {
+	if !lower.Unbounded {
+		cmp := v.Compare(lower.Value)
+		if cmp < 0 || (cmp == 0 && !lower.Inclusive) {
+			return false
+		}
+	}
+	if !upper.Unbounded {
+		cmp := v.Compare(upper.Value)
+		if cmp > 0 || (cmp == 0 && !upper.Inclusive) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *indexedCountingSnapshot) GetRow(table schema.TableID, rowID types.RowID) (types.ProductValue, bool) {
@@ -777,6 +811,111 @@ func TestExecuteCompiledSQLQueryIndexedEqualityAggregateUsesIndexSeek(t *testing
 				t.Fatalf("GetRow calls = %d, want %d indexed candidates rechecked", snap.indexGetRow, tt.wantGetRow)
 			}
 		})
+	}
+}
+
+func TestExecuteCompiledSQLQueryIndexedRangePredicateUsesIndexRange(t *testing.T) {
+	baseSL := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "owner", Type: schema.KindString},
+		schema.ColumnSchema{Index: 2, Name: "points", Type: schema.KindUint32},
+	)
+	sl := &indexedOneOffSchemaLookup{
+		mockSchemaLookup: baseSL,
+		table:            1,
+		column:           2,
+		index:            8,
+	}
+	snap := &indexedCountingSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+			{types.NewUint64(1), types.NewString("alice"), types.NewUint32(5)},
+			{types.NewUint64(2), types.NewString("bob"), types.NewUint32(7)},
+			{types.NewUint64(3), types.NewString("alice"), types.NewUint32(11)},
+			{types.NewUint64(4), types.NewString("alice"), types.NewUint32(13)},
+		}}},
+		table:  1,
+		column: 2,
+		index:  8,
+	}
+
+	compiled, err := CompileSQLQueryString("SELECT * FROM tasks WHERE points >= 7 AND points < 13 AND owner = 'alice'", sl, nil, SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	})
+	if err != nil {
+		t.Fatalf("CompileSQLQueryString: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint64(3), types.NewString("alice"), types.NewUint32(11)},
+	})
+	if snap.indexRanges != 1 {
+		t.Fatalf("IndexRange calls = %d, want 1", snap.indexRanges)
+	}
+	if snap.indexSeeks != 0 {
+		t.Fatalf("IndexSeek calls = %d, want 0 for indexed range", snap.indexSeeks)
+	}
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 for indexed range", snap.tableScans)
+	}
+}
+
+func TestExecuteCompiledSQLQueryIndexedRangeAggregateUsesIndexRange(t *testing.T) {
+	baseSL := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "owner", Type: schema.KindString},
+		schema.ColumnSchema{Index: 2, Name: "points", Type: schema.KindUint32},
+	)
+	sl := &indexedOneOffSchemaLookup{
+		mockSchemaLookup: baseSL,
+		table:            1,
+		column:           2,
+		index:            8,
+	}
+	snap := &indexedCountingSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+			{types.NewUint64(1), types.NewString("alice"), types.NewUint32(5)},
+			{types.NewUint64(2), types.NewString("bob"), types.NewUint32(7)},
+			{types.NewUint64(3), types.NewString("alice"), types.NewUint32(11)},
+			{types.NewUint64(4), types.NewString("alice"), types.NewUint32(13)},
+		}}},
+		table:  1,
+		column: 2,
+		index:  8,
+	}
+
+	compiled, err := CompileSQLQueryStringWithVisibility(
+		"SELECT SUM(points) AS total FROM tasks WHERE points >= 7",
+		sl,
+		nil,
+		SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true},
+		[]VisibilityFilter{{
+			SQL:           "SELECT * FROM tasks WHERE owner = 'alice'",
+			ReturnTableID: 1,
+		}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("CompileSQLQueryStringWithVisibility: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{{types.NewUint64(24)}})
+	if snap.indexRanges != 1 {
+		t.Fatalf("IndexRange calls = %d, want 1", snap.indexRanges)
+	}
+	if snap.indexSeeks != 0 {
+		t.Fatalf("IndexSeek calls = %d, want 0 for indexed range aggregate", snap.indexSeeks)
+	}
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 for indexed range aggregate", snap.tableScans)
 	}
 }
 
