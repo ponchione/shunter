@@ -215,6 +215,28 @@ func TestExportRuntimeFileRejectsEmptyOutputPathBeforeRuntimeUse(t *testing.T) {
 	}
 }
 
+func TestExportRuntimeFileRejectsNilRuntimeWithoutMutatingOutput(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, shunter.DefaultContractSnapshotFilename)
+	original := []byte("existing contract output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("write existing output: %v", err)
+	}
+
+	err := ExportRuntimeFile(nil, outputPath)
+	if !errors.Is(err, ErrRuntimeRequired) {
+		t.Fatalf("ExportRuntimeFile nil runtime error = %v, want ErrRuntimeRequired", err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read existing output: %v", err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("nil runtime mutated output:\nobserved=%q\nexpected=%q", got, original)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
 func TestGenerateRuntimeFileWritesDeterministicTypeScriptFromRuntime(t *testing.T) {
 	dir := t.TempDir()
 	rt := buildWorkflowRuntime(t)
@@ -241,6 +263,33 @@ func TestGenerateRuntimeFileWritesDeterministicTypeScriptFromRuntime(t *testing.
 	second := readTextFile(t, outputPath)
 	if first != second {
 		t.Fatalf("generated runtime TypeScript was not deterministic:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
+}
+
+func TestGenerateRuntimeRejectsNilRuntimeWithoutMutatingOutput(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "client.ts")
+	original := []byte("existing generated output\n")
+	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
+		t.Fatalf("write existing output: %v", err)
+	}
+
+	_, err := GenerateRuntime(nil, codegen.Options{Language: codegen.LanguageTypeScript})
+	if !errors.Is(err, ErrRuntimeRequired) {
+		t.Fatalf("GenerateRuntime nil runtime error = %v, want ErrRuntimeRequired", err)
+	}
+
+	err = GenerateRuntimeFile(nil, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
+	if !errors.Is(err, ErrRuntimeRequired) {
+		t.Fatalf("GenerateRuntimeFile nil runtime error = %v, want ErrRuntimeRequired", err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read existing output: %v", err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("nil runtime mutated output:\nobserved=%q\nexpected=%q", got, original)
 	}
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }

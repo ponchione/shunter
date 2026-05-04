@@ -22,6 +22,7 @@ const (
 
 var (
 	ErrUnsupportedFormat = errors.New("unsupported contract workflow output format")
+	ErrRuntimeRequired   = errors.New("contract workflow runtime is required")
 
 	syncDir = syncDirPath
 )
@@ -79,6 +80,9 @@ func ExportRuntimeFile(runtime *shunter.Runtime, outputPath string) error {
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("contract output path is required")
 	}
+	if runtime == nil {
+		return ErrRuntimeRequired
+	}
 	data, err := runtime.ExportContractJSON()
 	if err != nil {
 		return fmt.Errorf("export runtime contract: %w", err)
@@ -93,6 +97,9 @@ func ExportRuntimeFile(runtime *shunter.Runtime, outputPath string) error {
 func GenerateRuntime(runtime *shunter.Runtime, opts codegen.Options) ([]byte, error) {
 	if err := codegen.ValidateOptions(opts); err != nil {
 		return nil, err
+	}
+	if runtime == nil {
+		return nil, ErrRuntimeRequired
 	}
 	out, err := codegen.Generate(runtime.ExportContract(), opts)
 	if err != nil {
