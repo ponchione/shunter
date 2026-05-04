@@ -408,6 +408,25 @@ func TestExecutorShutdownWithoutRunUnblocksBlockedSubmitWithContext(t *testing.T
 	}
 }
 
+func TestSubmitWithContextCanceledContextDoesNotEnqueue(t *testing.T) {
+	exec, _ := setupExecutor()
+	if err := exec.Startup(context.Background(), nil); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := exec.SubmitWithContext(ctx, CallReducerCmd{
+		Request: ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SubmitWithContext canceled context = %v, want %v", err, context.Canceled)
+	}
+	if got := len(exec.inbox); got != 0 {
+		t.Fatalf("canceled SubmitWithContext enqueued %d command(s), want 0", got)
+	}
+}
+
 func waitForExecutorSignals(t *testing.T, ch <-chan struct{}, want int, label string) {
 	t.Helper()
 	for i := 0; i < want; i++ {
@@ -610,6 +629,26 @@ func TestSubmitWithContextRejectOnFullReturnsBusy(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
 		t.Fatalf("SubmitWithContext should reject immediately, took %v", elapsed)
+	}
+}
+
+func TestSubmitWithContextRejectModeCanceledContextDoesNotEnqueue(t *testing.T) {
+	exec, _ := setupExecutor()
+	exec = NewExecutor(ExecutorConfig{InboxCapacity: 1, RejectOnFull: true}, exec.registry, exec.committed, exec.schemaReg, 0)
+	if err := exec.Startup(context.Background(), nil); err != nil {
+		t.Fatalf("Startup: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := exec.SubmitWithContext(ctx, CallReducerCmd{
+		Request: ReducerRequest{ReducerName: "InsertPlayer", Source: CallSourceExternal},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SubmitWithContext canceled context in reject mode = %v, want %v", err, context.Canceled)
+	}
+	if got := len(exec.inbox); got != 0 {
+		t.Fatalf("canceled reject-mode SubmitWithContext enqueued %d command(s), want 0", got)
 	}
 }
 

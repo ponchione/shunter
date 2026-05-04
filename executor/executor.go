@@ -354,6 +354,10 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		e.recordExecutorCommand(cmd, "canceled")
+		return err
+	}
 	if e.fatal.Load() {
 		e.recordExecutorCommand(cmd, "rejected")
 		return ErrExecutorFatal
@@ -379,11 +383,18 @@ func (e *Executor) SubmitWithContext(ctx context.Context, cmd ExecutorCommand) e
 		return ErrExecutorShutdown
 	}
 	defer e.finishSubmit()
+	if err := ctx.Err(); err != nil {
+		e.recordExecutorCommand(cmd, "canceled")
+		return err
+	}
 	if e.rejectMode {
 		select {
 		case <-e.shutdownCh:
 			e.recordExecutorCommand(cmd, "rejected")
 			return ErrExecutorShutdown
+		case <-ctx.Done():
+			e.recordExecutorCommand(cmd, "canceled")
+			return ctx.Err()
 		case e.inbox <- cmd:
 			e.recordExecutorInboxDepth()
 			return nil
