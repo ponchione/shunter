@@ -143,7 +143,7 @@ hardening work.
 
 Near-term work:
 
-- benchmark common reducer workloads and keep query/subscription benchmarks current
+- keep reducer/query/subscription benchmarks current as workloads evolve
 - stress large tables, large rows, many clients, many subscriptions, and restart
   recovery
 - test storage faults around runtime startup and shutdown
