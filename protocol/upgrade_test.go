@@ -239,6 +239,44 @@ func TestUpgradeValidTokenCarriesPermissions(t *testing.T) {
 	}
 }
 
+func TestUpgradeAnonymousPresentedTokenDoesNotAllowAllPermissions(t *testing.T) {
+	s, rec := anonymousServer(t)
+	srv := newTestServer(t, s)
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":         "alice",
+		"iss":         "test-issuer",
+		"iat":         time.Now().Unix(),
+		"permissions": []string{"messages:read"},
+	})
+	token, err := tok.SignedString(testSigningKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
+		authHeader:   "Bearer " + token,
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err != nil {
+		t.Fatalf("dial failed: %v (resp=%v)", err, resp)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	uc := rec.waitLast(t)
+	if uc.Token != "" {
+		t.Fatal("UpgradeContext.Token set for presented token, want empty")
+	}
+	if uc.Claims == nil {
+		t.Fatal("Claims = nil, want validated presented-token claims")
+	}
+	if got := uc.Permissions; len(got) != 1 || got[0] != "messages:read" {
+		t.Fatalf("UpgradeContext.Permissions = %#v, want messages:read", got)
+	}
+	if uc.AllowAllPermissions {
+		t.Fatal("AllowAllPermissions = true for presented token in anonymous mode, want false")
+	}
+}
+
 func TestUpgradeValidTokenQueryParamSucceeds(t *testing.T) {
 	s, _ := strictServer(t)
 	srv := newTestServer(t, s)

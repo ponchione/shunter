@@ -134,7 +134,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		mintedToken = mt
 		identity = id
 	}
-	allowAllPermissions := s.JWT.AuthMode == auth.AuthModeAnonymous
+	allowAllPermissions := !hasToken && s.JWT.AuthMode == auth.AuthModeAnonymous
 
 	// 2. connection_id: parse / generate / reject zero.
 	connID, err := resolveConnectionID(r.URL.Query().Get("connection_id"))
