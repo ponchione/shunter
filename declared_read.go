@@ -244,7 +244,7 @@ func validationOptionsForDeclaredRead(kind declaredReadKind) protocol.SQLQueryVa
 	if kind == declaredReadKindView {
 		return protocol.SQLQueryValidationOptions{AllowLimit: false, AllowProjection: false}
 	}
-	return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true}
+	return protocol.SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true}
 }
 
 func declaredViewTableName(compiled protocol.CompiledSQLQuery, updates []subscription.SubscriptionUpdate) string {

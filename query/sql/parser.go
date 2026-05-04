@@ -145,8 +145,11 @@ type ProjectionColumn struct {
 // AggregateProjection is the bounded query-only aggregate surface currently
 // accepted by the parser.
 type AggregateProjection struct {
-	Func  string
-	Alias string
+	Func string
+	// Column is nil for COUNT(*). Non-nil COUNT(column) arguments are
+	// resolved after FROM/JOIN relation bindings are known.
+	Column *ColumnRef
+	Alias  string
 }
 
 // OrderByColumn is the bounded query-only ORDER BY surface. It is limited to a
@@ -178,6 +181,10 @@ type Statement struct {
 	HasLimit              bool
 	InvalidLimit          *Literal
 	UnsupportedLimit      bool
+	Offset                *uint64
+	HasOffset             bool
+	InvalidOffset         *Literal
+	UnsupportedOffset     bool
 }
 
 type relationBindings struct {
@@ -564,7 +571,6 @@ func (p *parser) parseStatement() (Statement, error) {
 		return Statement{}, err
 	}
 	stmt := Statement{Table: tableName, TableAlias: leftQualifiers[0], ProjectedTable: tableName, ProjectedAlias: projectionQualifier}
-	stmt.Aggregate = aggregate
 	bindings := relationBindings{defaultTable: tableName, byQualifier: singleQualifierMap(tableName, leftQualifiers)}
 	var onFilter Predicate
 	if isKeywordToken(p.peek(), "INNER") {
@@ -620,6 +626,13 @@ func (p *parser) parseStatement() (Statement, error) {
 	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
 		stmt.ProjectedAliasUnknown = true
 	}
+	if aggregate != nil {
+		resolvedAggregate, err := resolveAggregateProjection(aggregate, bindings)
+		if err != nil {
+			return Statement{}, err
+		}
+		stmt.Aggregate = resolvedAggregate
+	}
 	if len(projectionColumns) != 0 {
 		resolvedProjectionColumns, err := resolveProjectionColumns(projectionColumns, bindings)
 		if err != nil {
@@ -648,7 +661,7 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		stmt.Filters, _ = flattenAndFilters(stmt.Predicate)
 	}
-	orderBy, err := p.parseOrderBy(bindings)
+	orderBy, err := p.parseOrderBy(bindings, len(stmt.ProjectionColumns) != 0)
 	if err != nil {
 		return Statement{}, err
 	}
@@ -661,6 +674,14 @@ func (p *parser) parseStatement() (Statement, error) {
 	stmt.InvalidLimit = invalidLimit
 	stmt.HasLimit = hasLimit
 	stmt.UnsupportedLimit = unsupportedLimit
+	offset, invalidOffset, hasOffset, unsupportedOffset, err := p.parseOffset()
+	if err != nil {
+		return Statement{}, err
+	}
+	stmt.Offset = offset
+	stmt.InvalidOffset = invalidOffset
+	stmt.HasOffset = hasOffset
+	stmt.UnsupportedOffset = unsupportedOffset
 	if p.peek().kind == tokSemicolon {
 		p.advance()
 	}
@@ -738,12 +759,20 @@ func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 		return nil, p.unsupported("aggregate projections not supported")
 	}
 	p.advance()
-	if p.peek().kind != tokStar {
-		return nil, p.unsupported("only COUNT(*) aggregate projections supported")
+	var column *ColumnRef
+	if p.peek().kind == tokStar {
+		p.advance()
+	} else if isIdentifierToken(p.peek()) {
+		ref, err := p.parseAggregateColumnRef()
+		if err != nil {
+			return nil, err
+		}
+		column = &ref
+	} else {
+		return nil, p.unsupported("only COUNT(*) or COUNT(column) aggregate projections supported")
 	}
-	p.advance()
 	if p.peek().kind != tokRParen {
-		return nil, p.unsupported("only COUNT(*) aggregate projections supported")
+		return nil, p.unsupported("only COUNT(*) or COUNT(column) aggregate projections supported")
 	}
 	p.advance()
 	if isKeywordToken(p.peek(), "AS") {
@@ -756,7 +785,30 @@ func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &AggregateProjection{Func: "COUNT", Alias: alias}, nil
+	return &AggregateProjection{Func: "COUNT", Column: column, Alias: alias}, nil
+}
+
+func (p *parser) parseAggregateColumnRef() (ColumnRef, error) {
+	t := p.peek()
+	if !isIdentifierToken(t) {
+		return ColumnRef{}, p.unsupported("expected aggregate column name")
+	}
+	p.advance()
+	columnName := t.text
+	if p.peek().kind != tokDot {
+		return ColumnRef{Column: columnName}, nil
+	}
+	qualifier := columnName
+	p.advance()
+	t = p.peek()
+	if !isIdentifierToken(t) {
+		return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
+	}
+	p.advance()
+	if p.peek().kind == tokDot {
+		return ColumnRef{}, p.unsupported("qualified column names not supported")
+	}
+	return ColumnRef{Table: qualifier, Column: t.text, Alias: qualifier}, nil
 }
 
 func (p *parser) parseProjectionItem() (ProjectionColumn, string, error) {
@@ -831,6 +883,27 @@ func resolveProjectionColumns(columns []ProjectionColumn, bindings relationBindi
 		resolved = append(resolved, ProjectionColumn{Table: tableName, Column: col.Column, SourceQualifier: qualifier, OutputAlias: col.OutputAlias})
 	}
 	return resolved, nil
+}
+
+func resolveAggregateProjection(agg *AggregateProjection, bindings relationBindings) (*AggregateProjection, error) {
+	if agg == nil || agg.Column == nil {
+		return agg, nil
+	}
+	ref := *agg.Column
+	if ref.Alias != "" {
+		if resolvedTable, ok := resolveQualifier(ref.Alias, bindings.byQualifier); ok {
+			ref.Table = resolvedTable
+		} else {
+			ref.Table = ref.Alias
+		}
+	} else if bindings.requireQualify {
+		return nil, UnqualifiedNamesError{}
+	} else {
+		ref.Table = bindings.defaultTable
+	}
+	out := *agg
+	out.Column = &ref
+	return &out, nil
 }
 
 func (p *parser) parseRelationQualifiers(tableName string) ([]string, error) {
@@ -978,7 +1051,7 @@ func (p *parser) parseWhere(bindings relationBindings) (Predicate, []Filter, err
 	return pred, filters, nil
 }
 
-func (p *parser) parseOrderBy(bindings relationBindings) (*OrderByColumn, error) {
+func (p *parser) parseOrderBy(bindings relationBindings, allowUnqualifiedOutputName bool) (*OrderByColumn, error) {
 	if !isKeywordToken(p.peek(), "ORDER") {
 		return nil, nil
 	}
@@ -986,7 +1059,7 @@ func (p *parser) parseOrderBy(bindings relationBindings) (*OrderByColumn, error)
 	if err := p.expectKeyword("BY"); err != nil {
 		return nil, err
 	}
-	ref, err := p.parseColumnRefForOrderBy(bindings)
+	ref, err := p.parseColumnRefForOrderBy(bindings, allowUnqualifiedOutputName)
 	if err != nil {
 		return nil, err
 	}
@@ -1008,7 +1081,7 @@ func (p *parser) parseOrderBy(bindings relationBindings) (*OrderByColumn, error)
 	}, nil
 }
 
-func (p *parser) parseColumnRefForOrderBy(bindings relationBindings) (ColumnRef, error) {
+func (p *parser) parseColumnRefForOrderBy(bindings relationBindings, allowUnqualifiedOutputName bool) (ColumnRef, error) {
 	t := p.peek()
 	if !isIdentifierToken(t) {
 		return ColumnRef{}, p.unsupported(fmt.Sprintf("expected ORDER BY column name, got %q", t.text))
@@ -1036,13 +1109,24 @@ func (p *parser) parseColumnRefForOrderBy(bindings relationBindings) (ColumnRef,
 			return ColumnRef{}, p.unsupported("qualified column names not supported")
 		}
 	} else if bindings.requireQualify {
+		if allowUnqualifiedOutputName {
+			return ColumnRef{Column: columnName}, nil
+		}
 		return ColumnRef{}, UnqualifiedNamesError{}
 	}
 	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
 }
 
 func (p *parser) parseLimit() (*uint64, *Literal, bool, bool, error) {
-	if !isKeywordToken(p.peek(), "LIMIT") {
+	return p.parseUnsignedClause("LIMIT")
+}
+
+func (p *parser) parseOffset() (*uint64, *Literal, bool, bool, error) {
+	return p.parseUnsignedClause("OFFSET")
+}
+
+func (p *parser) parseUnsignedClause(keyword string) (*uint64, *Literal, bool, bool, error) {
+	if !isKeywordToken(p.peek(), keyword) {
 		return nil, nil, false, false, nil
 	}
 	p.advance()
@@ -1373,7 +1457,7 @@ func matchesQualifier(candidate string, qualifiers []string) bool {
 
 var reservedWords = map[string]struct{}{
 	"SELECT": {}, "FROM": {}, "WHERE": {}, "AND": {}, "OR": {},
-	"ORDER": {}, "BY": {}, "LIMIT": {}, "GROUP": {}, "HAVING": {},
+	"ORDER": {}, "BY": {}, "LIMIT": {}, "OFFSET": {}, "GROUP": {}, "HAVING": {},
 	"JOIN": {}, "ON": {}, "AS": {}, "INNER": {},
 	"TRUE": {}, "FALSE": {}, "NULL": {},
 }

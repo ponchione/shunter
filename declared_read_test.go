@@ -165,12 +165,12 @@ func TestCallQueryOverPrivateBaseTableUsesDeclarationPermission(t *testing.T) {
 	}
 }
 
-func TestDeclaredQueryOrderByDescLimit(t *testing.T) {
+func TestDeclaredQueryOrderByDescOffsetLimit(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
 		Query(QueryDeclaration{
 			Name:        "recent_messages",
-			SQL:         "SELECT * FROM messages ORDER BY body DESC LIMIT 2",
+			SQL:         "SELECT * FROM messages ORDER BY body DESC LIMIT 1 OFFSET 1",
 			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
 		}))
 	defer rt.Close()
@@ -185,11 +185,39 @@ func TestDeclaredQueryOrderByDescLimit(t *testing.T) {
 	if result.Name != "recent_messages" || result.TableName != "messages" {
 		t.Fatalf("result identity = (%q, %q), want recent_messages/messages", result.Name, result.TableName)
 	}
-	if len(result.Rows) != 2 {
-		t.Fatalf("rows = %#v, want two ordered rows", result.Rows)
+	if len(result.Rows) != 1 {
+		t.Fatalf("rows = %#v, want one offset ordered row", result.Rows)
 	}
-	if result.Rows[0][1].AsString() != "charlie" || result.Rows[1][1].AsString() != "bravo" {
-		t.Fatalf("rows = %#v, want body order charlie, bravo", result.Rows)
+	if result.Rows[0][1].AsString() != "bravo" {
+		t.Fatalf("rows = %#v, want body order offset row bravo", result.Rows)
+	}
+}
+
+func TestDeclaredQueryOrderByProjectionAlias(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message", insertMessageReducer).
+		Query(QueryDeclaration{
+			Name:        "ranked_messages",
+			SQL:         "SELECT body AS text FROM messages ORDER BY text DESC LIMIT 2",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessage(t, rt, "bravo")
+	insertMessage(t, rt, "alpha")
+	insertMessage(t, rt, "charlie")
+
+	result, err := rt.CallQuery(context.Background(), "ranked_messages", WithDeclaredReadPermissions("messages:read"))
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if result.Name != "ranked_messages" || result.TableName != "messages" {
+		t.Fatalf("result identity = (%q, %q), want ranked_messages/messages", result.Name, result.TableName)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("rows = %#v, want two ordered projected rows", result.Rows)
+	}
+	if result.Rows[0][0].AsString() != "charlie" || result.Rows[1][0].AsString() != "bravo" {
+		t.Fatalf("rows = %#v, want text alias order charlie, bravo", result.Rows)
 	}
 }
 
@@ -207,6 +235,57 @@ func TestDeclaredViewRejectsOrderBy(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages ORDER BY body") {
 		t.Fatalf("Build error = %v, want ORDER BY unsupported text", err)
+	}
+}
+
+func TestDeclaredViewRejectsOrderByProjectionAlias(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT body AS text FROM messages ORDER BY text",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want ORDER BY projection alias rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "Unsupported: SELECT body AS text FROM messages ORDER BY text") {
+		t.Fatalf("Build error = %v, want ORDER BY unsupported text", err)
+	}
+}
+
+func TestDeclaredViewRejectsOffset(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT * FROM messages OFFSET 1",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want OFFSET rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "Unsupported: SELECT * FROM messages OFFSET 1") {
+		t.Fatalf("Build error = %v, want OFFSET unsupported text", err)
+	}
+}
+
+func TestDeclaredViewRejectsCountColumnAggregate(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT COUNT(body) AS n FROM messages",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want aggregate rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+		t.Fatalf("Build error = %v, want table-shaped view aggregate rejection", err)
 	}
 }
 
@@ -260,6 +339,40 @@ func TestDeclaredQueryAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	}
 	if len(result.Rows) != 1 || result.Rows[0][1].AsString() != alice.Hex() {
 		t.Fatalf("visible query rows = %#v, want only caller row", result.Rows)
+	}
+}
+
+func TestDeclaredQueryCountColumnAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
+	alice := visibilityRuntimeIdentity(0x25)
+	bob := visibilityRuntimeIdentity(0x26)
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		VisibilityFilter(VisibilityFilterDeclaration{
+			Name: "own_messages",
+			SQL:  "SELECT * FROM messages WHERE body = :sender",
+		}).
+		Query(QueryDeclaration{
+			Name:        "visible_count",
+			SQL:         "SELECT COUNT(body) AS n FROM messages LIMIT 1",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, alice.Hex())
+	insertMessageWithBody(t, rt, 2, bob.Hex())
+	insertMessageWithBody(t, rt, 3, alice.Hex())
+
+	result, err := rt.CallQuery(context.Background(), "visible_count",
+		WithDeclaredReadIdentity(alice),
+		WithDeclaredReadPermissions("messages:read"),
+	)
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if result.Name != "visible_count" || result.TableName != "messages" {
+		t.Fatalf("result identity = (%q, %q), want visible_count/messages", result.Name, result.TableName)
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0].AsUint64() != 2 {
+		t.Fatalf("visible count rows = %#v, want one count row with 2", result.Rows)
 	}
 }
 
@@ -418,6 +531,7 @@ func TestRawSQLEquivalentDoesNotInheritDeclarationPermission(t *testing.T) {
 		AllowLimit:      true,
 		AllowProjection: true,
 		AllowOrderBy:    true,
+		AllowOffset:     true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "no such table: `messages`. If the table exists, it may be marked private.") {
 		t.Fatalf("raw SQL validation error = %v, want private table rejection", err)

@@ -108,9 +108,9 @@ Likely feature slices:
 - richer projections and aliases
 - multi-join support
 - broader `ORDER BY` beyond the current one-off/declared-query
-  projected-table column slice
-- additional aggregates
-- `LIMIT` and possibly `OFFSET`
+  projected-table column and unique projection-output-name slice
+- additional aggregates beyond the current `COUNT(*)` / `COUNT(column)` slice
+- broader `OFFSET` support beyond the current one-off/declared-query slice
 - index-aware planning
 - named declared query execution over the same runtime path as protocol reads
 - clear interaction with read policy and visibility filters

@@ -69,6 +69,7 @@ func declaredReadSpecs(queries []QueryDeclaration, views []ViewDeclaration) []de
 				AllowLimit:      true,
 				AllowProjection: true,
 				AllowOrderBy:    true,
+				AllowOffset:     true,
 			},
 		})
 	}

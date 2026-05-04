@@ -53,6 +53,7 @@ func handleOneOffQueryWithVisibility(
 		AllowLimit:      true,
 		AllowProjection: true,
 		AllowOrderBy:    true,
+		AllowOffset:     true,
 	}, visibilityFilters, caller.AllowAllPermissions)
 	if err != nil {
 		sendOneOffError(conn, msg.MessageID, err.Error(), receipt)
@@ -116,9 +117,12 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 
 	resolver, _ := sl.(schema.IndexResolver)
 	rowLimit := oneOffRowLimit(query.Limit)
+	rowOffset := oneOffRowOffset(query.Offset)
 	scanLimit := rowLimit
 	if query.OrderBy != nil {
 		scanLimit = -1
+	} else {
+		scanLimit = oneOffScanLimit(rowOffset, rowLimit)
 	}
 	var matchedRows []types.ProductValue
 	var encodedRows []types.ProductValue
@@ -127,22 +131,20 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 		// Aggregate shape happens over the full matched input; OFFSET/LIMIT then
 		// slice the one-row aggregate output (reference ProjectList::Limit wraps
 		// ProjectList::Agg). LIMIT 0 or OFFSET >= 1 drops the aggregate row.
-		matchedCount, err := countOneOffMatches(ctx, view, tableID, pred, resolver)
+		matchedCount, err := countOneOffAggregate(ctx, view, tableID, pred, resolver, query.Aggregate)
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
-		if query.Limit == nil || *query.Limit > 0 {
-			encodedRows = []types.ProductValue{{types.NewUint64(matchedCount)}}
-		}
+		encodedRows = sliceOneOffRows([]types.ProductValue{{types.NewUint64(matchedCount)}}, rowOffset, rowLimit)
 	} else if rowLimit != 0 {
 		if joinPred, ok := pred.(subscription.Join); ok {
 			if len(query.ProjectionColumns) != 0 {
 				var rows []types.ProductValue
 				var err error
 				if query.OrderBy != nil {
-					rows, err = evaluateOneOffJoinProjectionOrdered(ctx, view, joinPred, query.ProjectionColumns, query.OrderBy, resolver, rowLimit)
+					rows, err = evaluateOneOffJoinProjectionOrdered(ctx, view, joinPred, query.ProjectionColumns, query.OrderBy, resolver, rowOffset, rowLimit)
 				} else {
-					rows, err = evaluateOneOffJoinProjection(ctx, view, joinPred, query.ProjectionColumns, resolver, rowLimit)
+					rows, err = evaluateOneOffJoinProjection(ctx, view, joinPred, query.ProjectionColumns, resolver, scanLimit)
 				}
 				if err != nil {
 					return SQLQueryResult{}, err
@@ -161,9 +163,9 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 				var rows []types.ProductValue
 				var err error
 				if query.OrderBy != nil {
-					rows, err = evaluateOneOffCrossJoinProjectionOrdered(ctx, view, crossPred, query.ProjectionColumns, query.OrderBy, rowLimit)
+					rows, err = evaluateOneOffCrossJoinProjectionOrdered(ctx, view, crossPred, query.ProjectionColumns, query.OrderBy, rowOffset, rowLimit)
 				} else {
-					rows, err = evaluateOneOffCrossJoinProjection(ctx, view, crossPred, query.ProjectionColumns, rowLimit)
+					rows, err = evaluateOneOffCrossJoinProjection(ctx, view, crossPred, query.ProjectionColumns, scanLimit)
 				}
 				if err != nil {
 					return SQLQueryResult{}, err
@@ -192,10 +194,12 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 		}
 		if query.OrderBy != nil && !rowsAlreadyProjected {
 			var err error
-			matchedRows, err = orderAndLimitOneOffRows(matchedRows, query.OrderBy, rowLimit)
+			matchedRows, err = orderAndLimitOneOffRows(matchedRows, query.OrderBy, rowOffset, rowLimit)
 			if err != nil {
 				return SQLQueryResult{}, err
 			}
+		} else if query.OrderBy == nil {
+			matchedRows = sliceOneOffRows(matchedRows, rowOffset, rowLimit)
 		}
 		if len(query.ProjectionColumns) != 0 && !rowsAlreadyProjected {
 			encodedRows = projectOneOffRows(matchedRows, query.ProjectionColumns)
@@ -255,6 +259,31 @@ func oneOffRowLimit(limit *uint64) int {
 	return int(*limit)
 }
 
+func oneOffRowOffset(offset *uint64) int {
+	if offset == nil {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if *offset > uint64(maxInt) {
+		return maxInt
+	}
+	return int(*offset)
+}
+
+func oneOffScanLimit(offset int, limit int) int {
+	if limit == 0 {
+		return 0
+	}
+	if limit < 0 {
+		return -1
+	}
+	maxInt := int(^uint(0) >> 1)
+	if offset > maxInt-limit {
+		return maxInt
+	}
+	return offset + limit
+}
+
 func oneOffLimitReached(count int, limit int) bool {
 	return limit >= 0 && count >= limit
 }
@@ -264,9 +293,9 @@ type orderedOneOffRow struct {
 	key types.Value
 }
 
-func orderAndLimitOneOffRows(rows []types.ProductValue, orderBy *compiledSQLOrderBy, limit int) ([]types.ProductValue, error) {
+func orderAndLimitOneOffRows(rows []types.ProductValue, orderBy *compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
 	if orderBy == nil {
-		return limitOneOffRows(rows, limit), nil
+		return sliceOneOffRows(rows, offset, limit), nil
 	}
 	idx := orderBy.Column.Schema.Index
 	ordered := make([]orderedOneOffRow, 0, len(rows))
@@ -276,10 +305,10 @@ func orderAndLimitOneOffRows(rows []types.ProductValue, orderBy *compiledSQLOrde
 		}
 		ordered = append(ordered, orderedOneOffRow{row: row, key: row[idx]})
 	}
-	return materializeOrderedOneOffRows(ordered, orderBy.Desc, limit), nil
+	return materializeOrderedOneOffRows(ordered, orderBy.Desc, offset, limit), nil
 }
 
-func materializeOrderedOneOffRows(rows []orderedOneOffRow, desc bool, limit int) []types.ProductValue {
+func materializeOrderedOneOffRows(rows []orderedOneOffRow, desc bool, offset int, limit int) []types.ProductValue {
 	slices.SortStableFunc(rows, func(a, b orderedOneOffRow) int {
 		cmp := a.key.Compare(b.key)
 		if desc {
@@ -287,22 +316,32 @@ func materializeOrderedOneOffRows(rows []orderedOneOffRow, desc bool, limit int)
 		}
 		return cmp
 	})
-	outLen := len(rows)
-	if limit >= 0 && limit < outLen {
-		outLen = limit
+	start := offset
+	if start > len(rows) {
+		start = len(rows)
 	}
+	end := len(rows)
+	if limit >= 0 && limit < end-start {
+		end = start + limit
+	}
+	outLen := end - start
 	out := make([]types.ProductValue, 0, outLen)
-	for i := 0; i < outLen; i++ {
+	for i := start; i < end; i++ {
 		out = append(out, rows[i].row)
 	}
 	return out
 }
 
-func limitOneOffRows(rows []types.ProductValue, limit int) []types.ProductValue {
-	if limit >= 0 && limit < len(rows) {
-		return rows[:limit]
+func sliceOneOffRows(rows []types.ProductValue, offset int, limit int) []types.ProductValue {
+	start := offset
+	if start > len(rows) {
+		start = len(rows)
 	}
-	return rows
+	end := len(rows)
+	if limit >= 0 && limit < end-start {
+		end = start + limit
+	}
+	return rows[start:end]
 }
 
 func countOneOffMatches(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver) (uint64, error) {
@@ -322,6 +361,37 @@ func countOneOffMatches(ctx context.Context, view store.CommittedReadView, table
 		}
 	}
 	return count, nil
+}
+
+func countOneOffAggregate(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, aggregate *compiledSQLAggregate) (uint64, error) {
+	if aggregate == nil || aggregate.Argument == nil {
+		return countOneOffMatches(ctx, view, tableID, pred, resolver)
+	}
+	argument := *aggregate.Argument
+	if joinPred, ok := pred.(subscription.Join); ok {
+		return countOneOffJoinColumn(ctx, view, joinPred, resolver, argument)
+	}
+	if crossPred, ok := pred.(subscription.CrossJoin); ok {
+		return countOneOffCrossJoinColumn(ctx, view, crossPred, argument)
+	}
+	var count uint64
+	for _, pv := range view.TableScan(tableID) {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		if subscription.MatchRow(pred, tableID, pv) && oneOffAggregateRowColumnPresent(pv, tableID, argument) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func oneOffAggregateRowColumnPresent(row types.ProductValue, tableID schema.TableID, column compiledSQLProjectionColumn) bool {
+	if column.Table != tableID {
+		return false
+	}
+	idx := column.Schema.Index
+	return idx >= 0 && idx < len(row)
 }
 
 func evaluateOneOffJoin(ctx context.Context, view store.CommittedReadView, projectedTable schema.TableID, join subscription.Join, resolver schema.IndexResolver, limit int) ([]types.ProductValue, error) {
@@ -351,6 +421,17 @@ func countOneOffJoin(ctx context.Context, view store.CommittedReadView, projecte
 	return count, err
 }
 
+func countOneOffJoinColumn(ctx context.Context, view store.CommittedReadView, join subscription.Join, resolver schema.IndexResolver, column compiledSQLProjectionColumn) (uint64, error) {
+	var count uint64
+	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
+		if oneOffAggregateJoinColumnPresent(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, column) {
+			count++
+		}
+		return true
+	})
+	return count, err
+}
+
 func evaluateOneOffJoinProjection(ctx context.Context, view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn, resolver schema.IndexResolver, limit int) ([]types.ProductValue, error) {
 	var rows []types.ProductValue
 	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
@@ -360,7 +441,7 @@ func evaluateOneOffJoinProjection(ctx context.Context, view store.CommittedReadV
 	return rows, err
 }
 
-func evaluateOneOffJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn, orderBy *compiledSQLOrderBy, resolver schema.IndexResolver, limit int) ([]types.ProductValue, error) {
+func evaluateOneOffJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn, orderBy *compiledSQLOrderBy, resolver schema.IndexResolver, offset int, limit int) ([]types.ProductValue, error) {
 	var rows []orderedOneOffRow
 	var orderErr error
 	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
@@ -381,7 +462,7 @@ func evaluateOneOffJoinProjectionOrdered(ctx context.Context, view store.Committ
 	if orderErr != nil {
 		return nil, orderErr
 	}
-	return materializeOrderedOneOffRows(rows, orderBy.Desc, limit), nil
+	return materializeOrderedOneOffRows(rows, orderBy.Desc, offset, limit), nil
 }
 
 func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, join subscription.Join, resolver schema.IndexResolver, visit func(leftRow, rightRow types.ProductValue) bool) error {
@@ -505,7 +586,7 @@ func evaluateOneOffCrossJoinProjection(ctx context.Context, view store.Committed
 	return rows, err
 }
 
-func evaluateOneOffCrossJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, orderBy *compiledSQLOrderBy, limit int) ([]types.ProductValue, error) {
+func evaluateOneOffCrossJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, orderBy *compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
 	var rows []orderedOneOffRow
 	var orderErr error
 	err := visitOneOffCrossJoinPairs(ctx, view, cross, true, func(leftRow, rightRow types.ProductValue) bool {
@@ -526,7 +607,7 @@ func evaluateOneOffCrossJoinProjectionOrdered(ctx context.Context, view store.Co
 	if orderErr != nil {
 		return nil, orderErr
 	}
-	return materializeOrderedOneOffRows(rows, orderBy.Desc, limit), nil
+	return materializeOrderedOneOffRows(rows, orderBy.Desc, offset, limit), nil
 }
 
 func projectOneOffJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn) types.ProductValue {
@@ -564,6 +645,15 @@ func projectedJoinColumnSource(col compiledSQLProjectionColumn, leftID schema.Ta
 	default:
 		return nil, false
 	}
+}
+
+func oneOffAggregateJoinColumnPresent(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, column compiledSQLProjectionColumn) bool {
+	source, ok := projectedJoinColumnSource(column, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
+	if !ok {
+		return false
+	}
+	idx := column.Schema.Index
+	return idx >= 0 && idx < len(source)
 }
 
 func orderKeyFromJoinPair(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, orderBy *compiledSQLOrderBy) (types.Value, error) {
@@ -640,6 +730,17 @@ func countOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, pro
 		otherTable = cross.Right
 	}
 	return uint64(view.RowCount(projectedTable)) * uint64(view.RowCount(otherTable)), nil
+}
+
+func countOneOffCrossJoinColumn(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, column compiledSQLProjectionColumn) (uint64, error) {
+	var count uint64
+	err := visitOneOffCrossJoinPairs(ctx, view, cross, false, func(leftRow, rightRow types.ProductValue) bool {
+		if oneOffAggregateJoinColumnPresent(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, column) {
+			count++
+		}
+		return true
+	})
+	return count, err
 }
 
 func visitOneOffCrossJoinPairs(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, projectedSideOuter bool, visit func(leftRow, rightRow types.ProductValue) bool) error {

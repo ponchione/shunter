@@ -3514,6 +3514,66 @@ func TestHandleSubscribeSingle_OrderByRejected(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_OrderByProjectionAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT u32 AS rank FROM t ORDER BY rank"
+	msg := &SubscribeSingleMsg{
+		RequestID:   104,
+		QueryID:     105,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 105, "QueryID")
+	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when ORDER BY projection alias appears on a subscription")
+	}
+}
+
+func TestHandleSubscribeSingle_OffsetRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	const sqlText = "SELECT * FROM t OFFSET 2"
+	msg := &SubscribeSingleMsg{
+		RequestID:   104,
+		QueryID:     105,
+		QueryString: sqlText,
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 105, "QueryID")
+	want := "Unsupported: " + sqlText + ", executing: `" + sqlText + "`"
+	if se.Error != want {
+		t.Fatalf("Error = %q, want %q", se.Error, want)
+	}
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called when OFFSET appears on a subscription")
+	}
+}
+
 // TestHandleSubscribeSingle_ShunterLimitPrecedesSetQuantifierRejectText pins
 // reference `SubParser::parse_query` ordering: subscription LIMIT rejection
 // fires before `parse_select` can route SELECT ALL / DISTINCT to the
@@ -4956,6 +5016,31 @@ func TestHandleSubscribeSingle_ShunterCountAliasRejected(t *testing.T) {
 	}
 	se := decoded.(SubscriptionError)
 	requireOptionalUint32(t, se.QueryID, 165, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on aggregate projection")
+	}
+}
+
+func TestHandleSubscribeSingle_ShunterCountColumnAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   166,
+		QueryID:     167,
+		QueryString: "SELECT COUNT(u32) AS n FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 167, "QueryID")
 	if req := executor.getRegisterSetReq(); req != nil {
 		t.Error("executor should not be called on aggregate projection")
 	}

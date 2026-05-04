@@ -319,7 +319,7 @@ func TestVisibilityExpansionFilteredNonProjectedJoinTableDoesNotLeak(t *testing.
 	})
 }
 
-func TestVisibilityExpansionAggregateAndLimitUseVisibleRows(t *testing.T) {
+func TestVisibilityExpansionAggregateLimitAndOffsetUseVisibleRows(t *testing.T) {
 	alice := visibilityIdentity(0x16)
 	bob := visibilityIdentity(0x17)
 	sl, aggregateSchema := visibilityMessagesSchema()
@@ -338,6 +338,18 @@ func TestVisibilityExpansionAggregateAndLimitUseVisibleRows(t *testing.T) {
 	})
 	assertProductRowsEqual(t, countRows, []types.ProductValue{{types.NewUint64(2)}})
 
+	columnCountConn := testConnDirect(nil)
+	columnCountConn.AllowAllPermissions = false
+	columnCountConn.Identity = alice
+	handleOneOffQueryWithVisibility(context.Background(), columnCountConn, &OneOffQueryMsg{
+		MessageID:   []byte("count-column-visible"),
+		QueryString: "SELECT COUNT(thread) AS count FROM messages LIMIT 1",
+	}, &mockStateAccess{snap: &mockSnapshot{rows: rowsByTable}}, sl, filters)
+	columnCountRows := decodeRows(t, firstTableRows(drainOneOff(t, columnCountConn)), &schema.TableSchema{
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "count", Type: schema.KindUint64}},
+	})
+	assertProductRowsEqual(t, columnCountRows, []types.ProductValue{{types.NewUint64(2)}})
+
 	limitConn := testConnDirect(nil)
 	limitConn.AllowAllPermissions = false
 	limitConn.Identity = alice
@@ -348,6 +360,18 @@ func TestVisibilityExpansionAggregateAndLimitUseVisibleRows(t *testing.T) {
 	limitRows := decodeRows(t, firstTableRows(drainOneOff(t, limitConn)), aggregateSchema)
 	assertProductRowsEqual(t, limitRows, []types.ProductValue{
 		{types.NewUint64(2), types.NewString(alice.Hex()), types.NewUint64(1)},
+	})
+
+	offsetConn := testConnDirect(nil)
+	offsetConn.AllowAllPermissions = false
+	offsetConn.Identity = alice
+	handleOneOffQueryWithVisibility(context.Background(), offsetConn, &OneOffQueryMsg{
+		MessageID:   []byte("offset-visible"),
+		QueryString: "SELECT * FROM messages LIMIT 1 OFFSET 1",
+	}, &mockStateAccess{snap: &mockSnapshot{rows: rowsByTable}}, sl, filters)
+	offsetRows := decodeRows(t, firstTableRows(drainOneOff(t, offsetConn)), aggregateSchema)
+	assertProductRowsEqual(t, offsetRows, []types.ProductValue{
+		{types.NewUint64(3), types.NewString(alice.Hex()), types.NewUint64(2)},
 	})
 }
 

@@ -13,16 +13,20 @@ import (
 )
 
 type rapidSQLQuery struct {
-	SQL              string
-	Table            string
-	TableAlias       string
-	ProjectedAlias   string
-	ProjectedTable   string
-	Filters          []rapidSQLFilter
-	Limit            *uint64
-	HasLimit         bool
-	InvalidLimit     *Literal
-	UnsupportedLimit bool
+	SQL               string
+	Table             string
+	TableAlias        string
+	ProjectedAlias    string
+	ProjectedTable    string
+	Filters           []rapidSQLFilter
+	Limit             *uint64
+	HasLimit          bool
+	InvalidLimit      *Literal
+	UnsupportedLimit  bool
+	Offset            *uint64
+	HasOffset         bool
+	InvalidOffset     *Literal
+	UnsupportedOffset bool
 }
 
 type rapidSQLFilter struct {
@@ -166,6 +170,7 @@ func drawRapidSingleTableQuery(t *rapid.T, kw func(string) string) rapidSQLQuery
 		}
 	}
 
+	allowOffset := true
 	switch rapid.IntRange(0, 3).Draw(t, "limitMode") {
 	case 1:
 		limit := rapid.Uint64Range(0, 1024).Draw(t, "limit")
@@ -176,17 +181,44 @@ func drawRapidSingleTableQuery(t *rapid.T, kw func(string) string) rapidSQLQuery
 		b.WriteByte(' ')
 		b.WriteString(strconv.FormatUint(limit, 10))
 	case 2:
+		allowOffset = false
 		q.HasLimit = true
 		q.InvalidLimit = &Literal{Kind: LitFloat, Float: 1.5, Text: "1.5"}
 		b.WriteByte(' ')
 		b.WriteString(kw("LIMIT"))
 		b.WriteString(" 1.5")
 	case 3:
+		allowOffset = false
 		q.HasLimit = true
 		q.UnsupportedLimit = true
 		b.WriteByte(' ')
 		b.WriteString(kw("LIMIT"))
 		b.WriteString(" +1")
+	}
+
+	if allowOffset {
+		switch rapid.IntRange(0, 3).Draw(t, "offsetMode") {
+		case 1:
+			offset := rapid.Uint64Range(0, 1024).Draw(t, "offset")
+			q.Offset = &offset
+			q.HasOffset = true
+			b.WriteByte(' ')
+			b.WriteString(kw("OFFSET"))
+			b.WriteByte(' ')
+			b.WriteString(strconv.FormatUint(offset, 10))
+		case 2:
+			q.HasOffset = true
+			q.InvalidOffset = &Literal{Kind: LitFloat, Float: 1.5, Text: "1.5"}
+			b.WriteByte(' ')
+			b.WriteString(kw("OFFSET"))
+			b.WriteString(" 1.5")
+		case 3:
+			q.HasOffset = true
+			q.UnsupportedOffset = true
+			b.WriteByte(' ')
+			b.WriteString(kw("OFFSET"))
+			b.WriteString(" +1")
+		}
 	}
 
 	if rapid.Bool().Draw(t, "semicolon") {
@@ -366,6 +398,10 @@ func assertRapidQueryStatement(t rapidTestFataler, stmt Statement, q rapidSQLQue
 		t.Fatalf("limit flags = has %v unsupported %v, want has %v unsupported %v for %q",
 			stmt.HasLimit, stmt.UnsupportedLimit, q.HasLimit, q.UnsupportedLimit, q.SQL)
 	}
+	if stmt.HasOffset != q.HasOffset || stmt.UnsupportedOffset != q.UnsupportedOffset {
+		t.Fatalf("offset flags = has %v unsupported %v, want has %v unsupported %v for %q",
+			stmt.HasOffset, stmt.UnsupportedOffset, q.HasOffset, q.UnsupportedOffset, q.SQL)
+	}
 	if stmt.OrderBy != nil {
 		t.Fatalf("OrderBy = %+v, want nil for %q", *stmt.OrderBy, q.SQL)
 	}
@@ -374,6 +410,12 @@ func assertRapidQueryStatement(t rapidTestFataler, stmt Statement, q rapidSQLQue
 	}
 	if !rapidLiteralPtrEqual(stmt.InvalidLimit, q.InvalidLimit) {
 		t.Fatalf("InvalidLimit = %+v, want %+v for %q", stmt.InvalidLimit, q.InvalidLimit, q.SQL)
+	}
+	if !rapidUint64PtrEqual(stmt.Offset, q.Offset) {
+		t.Fatalf("Offset = %v, want %v for %q", stmt.Offset, q.Offset, q.SQL)
+	}
+	if !rapidLiteralPtrEqual(stmt.InvalidOffset, q.InvalidOffset) {
+		t.Fatalf("InvalidOffset = %+v, want %+v for %q", stmt.InvalidOffset, q.InvalidOffset, q.SQL)
 	}
 }
 
@@ -412,6 +454,10 @@ func rapidStatementsEquivalent(a, b Statement) bool {
 		a.UnsupportedLimit != b.UnsupportedLimit ||
 		!rapidUint64PtrEqual(a.Limit, b.Limit) ||
 		!rapidLiteralPtrEqual(a.InvalidLimit, b.InvalidLimit) ||
+		a.HasOffset != b.HasOffset ||
+		a.UnsupportedOffset != b.UnsupportedOffset ||
+		!rapidUint64PtrEqual(a.Offset, b.Offset) ||
+		!rapidLiteralPtrEqual(a.InvalidOffset, b.InvalidOffset) ||
 		len(a.Filters) != len(b.Filters) {
 		return false
 	}
@@ -438,6 +484,10 @@ func rapidStatementsEquivalentIgnoringFilterOrder(a, b Statement) bool {
 		a.UnsupportedLimit != b.UnsupportedLimit ||
 		!rapidUint64PtrEqual(a.Limit, b.Limit) ||
 		!rapidLiteralPtrEqual(a.InvalidLimit, b.InvalidLimit) ||
+		a.HasOffset != b.HasOffset ||
+		a.UnsupportedOffset != b.UnsupportedOffset ||
+		!rapidUint64PtrEqual(a.Offset, b.Offset) ||
+		!rapidLiteralPtrEqual(a.InvalidOffset, b.InvalidOffset) ||
 		!reflect.DeepEqual(a.ProjectionColumns, b.ProjectionColumns) ||
 		!reflect.DeepEqual(a.Aggregate, b.Aggregate) ||
 		!reflect.DeepEqual(a.Join, b.Join) ||

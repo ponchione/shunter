@@ -304,6 +304,41 @@ func TestHandleOneOffQueryLimitZeroDoesNotScan(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQueryOffsetSkipsMatchedRowsBeforeLimit(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("users", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
+	)
+	ts, ok := sl.Table(1)
+	if !ok {
+		t.Fatal("mock schema missing table 1")
+	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("hidden-before-where")},
+			{types.NewUint64(2), types.NewString("first-match")},
+			{types.NewUint64(3), types.NewString("second-match")},
+			{types.NewUint64(4), types.NewString("third-match")},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x14},
+		QueryString: "SELECT * FROM users WHERE id >= 2 LIMIT 1 OFFSET 1",
+	}, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	assertProductRowsEqual(t, pvs, []types.ProductValue{
+		{types.NewUint64(3), types.NewString("second-match")},
+	})
+}
+
 func TestHandleOneOffQueryOrderByDescSortsBeforeLimitAndProjection(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{
@@ -345,6 +380,118 @@ func TestHandleOneOffQueryOrderByDescSortsBeforeLimitAndProjection(t *testing.T)
 	pvs := decodeRows(t, firstTableRows(result), projectedTS)
 	assertProductRowsEqual(t, pvs, []types.ProductValue{
 		{types.NewUint32(2), types.NewString("high")},
+		{types.NewUint32(3), types.NewString("mid")},
+	})
+}
+
+func TestHandleOneOffQueryOrderByProjectionAliasSortsBeforeProjection(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "metrics",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "score", Type: schema.KindUint32},
+			{Index: 2, Name: "label", Type: schema.KindString},
+		},
+	}
+	projectedTS := &schema.TableSchema{
+		ID:   1,
+		Name: "metrics",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "rank", Type: schema.KindUint32},
+			{Index: 1, Name: "label", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("metrics", 1, ts.Columns...)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewUint32(10), types.NewString("low")},
+			{types.NewUint32(2), types.NewUint32(30), types.NewString("high")},
+			{types.NewUint32(3), types.NewUint32(20), types.NewString("mid")},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x16},
+		QueryString: "SELECT score AS rank, label FROM metrics ORDER BY rank DESC LIMIT 2",
+	}, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), projectedTS)
+	assertProductRowsEqual(t, pvs, []types.ProductValue{
+		{types.NewUint32(30), types.NewString("high")},
+		{types.NewUint32(20), types.NewString("mid")},
+	})
+}
+
+func TestHandleOneOffQueryOrderByUnknownProjectionNameRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("metrics", 1,
+		schema.ColumnSchema{Index: 0, Name: "score", Type: schema.KindUint32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(10)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x17},
+		QueryString: "SELECT score AS rank FROM metrics ORDER BY missing",
+	}, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "`missing` is not in scope"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
+	}
+}
+
+func TestHandleOneOffQueryOrderByDescSortsBeforeOffsetLimitAndProjection(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "metrics",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "score", Type: schema.KindUint32},
+			{Index: 2, Name: "label", Type: schema.KindString},
+		},
+	}
+	projectedTS := &schema.TableSchema{
+		ID:   1,
+		Name: "metrics",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "label", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("metrics", 1, ts.Columns...)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewUint32(10), types.NewString("low")},
+			{types.NewUint32(2), types.NewUint32(30), types.NewString("high")},
+			{types.NewUint32(3), types.NewUint32(20), types.NewString("mid")},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x15},
+		QueryString: "SELECT id, label FROM metrics ORDER BY score DESC LIMIT 1 OFFSET 1",
+	}, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), projectedTS)
+	assertProductRowsEqual(t, pvs, []types.ProductValue{
 		{types.NewUint32(3), types.NewString("mid")},
 	})
 }
@@ -5677,6 +5824,61 @@ func TestHandleOneOffQuery_ShunterCountAliasWithWhereReturnsSingleAggregateRow(t
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
+func TestHandleOneOffQuery_ShunterCountColumnAliasWithWhereLimitReturnsFullAggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(false)},
+		{types.NewUint32(3), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCD},
+		QueryString: "SELECT COUNT(u32) AS n FROM t WHERE active = TRUE LIMIT 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ShunterCountColumnOrderByRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+	stateAccess := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCF},
+		QueryString: "SELECT COUNT(u32) AS n FROM t ORDER BY u32",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected ORDER BY aggregate rejection, got nil error")
+	}
+	if got, want := *result.Error, "ORDER BY is not supported with aggregate projections"; got != want {
+		t.Fatalf("Error = %q, want %q", got, want)
+	}
+}
+
 func TestHandleOneOffQuery_ShunterCountAliasZeroRowsReturnsSingleZeroRow(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -5749,6 +5951,49 @@ func TestHandleOneOffQuery_ShunterJoinCountAliasReturnsSingleAggregateRow(t *tes
 	}
 	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
 		t.Fatalf("Tables = %+v, want single aggregate envelope for t", result.Tables)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ShunterJoinCountColumnAliasReturnsSingleAggregateRow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "active", Type: schema.KindBool},
+		}}},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewBool(true)},
+			{types.NewUint32(1), types.NewBool(false)},
+			{types.NewUint32(2), types.NewBool(true)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "n", Type: schema.KindUint64}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCE},
+		QueryString: "SELECT COUNT(s.active) AS n FROM t JOIN s ON t.id = s.t_id WHERE s.active = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
 	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(2)}}
@@ -5972,6 +6217,43 @@ func TestHandleOneOffQuery_ShunterCountAliasWithLimitZeroReturnsNoRows(t *testin
 	}
 	if len(rawRows) != 0 {
 		t.Fatalf("rows = %d, want 0 (LIMIT 0 drops aggregate output row)", len(rawRows))
+	}
+}
+
+// TestHandleOneOffQuery_ShunterCountAliasWithOffsetReturnsNoRows pins that
+// COUNT(*) still counts the full matched input, then OFFSET is applied to the
+// one-row aggregate output. OFFSET 1 therefore skips that aggregate row.
+func TestHandleOneOffQuery_ShunterCountAliasWithOffsetReturnsNoRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xCC},
+		QueryString: "SELECT COUNT(*) AS n FROM t WHERE active = TRUE OFFSET 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (aggregate + OFFSET is one-off-only accepted)", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
+		t.Fatalf("Tables = %+v, want single aggregate envelope for t", result.Tables)
+	}
+	rawRows, err := DecodeRowList(firstTableRows(result))
+	if err != nil {
+		t.Fatalf("DecodeRowList: %v", err)
+	}
+	if len(rawRows) != 0 {
+		t.Fatalf("rows = %d, want 0 (OFFSET 1 skips aggregate output row)", len(rawRows))
 	}
 }
 
@@ -6704,6 +6986,31 @@ func TestHandleOneOffQuery_ShunterDuplicateProjectionAliasRejectText(t *testing.
 	want := "Duplicate name `dup`"
 	if *result.Error != want {
 		t.Fatalf("Error = %q, want %q (OneOff admission has no DBError::WithSql wrap)", *result.Error, want)
+	}
+}
+
+func TestHandleOneOffQuery_DuplicateProjectionAliasWithOrderByRejects(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "i32", Type: schema.KindInt32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {{types.NewUint32(1), types.NewInt32(-1)}}}}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xE2},
+		QueryString: "SELECT u32 AS dup, i32 AS dup FROM t ORDER BY dup",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected error, got nil (success)")
+	}
+	want := "Duplicate name `dup`"
+	if *result.Error != want {
+		t.Fatalf("Error = %q, want %q", *result.Error, want)
 	}
 }
 

@@ -163,6 +163,13 @@ func TestParseOptionalSyntaxMetamorphic(t *testing.T) {
 			},
 		},
 		{
+			name: "aggregate-column-output-as",
+			base: "SELECT COUNT(active) AS n FROM messages WHERE active = TRUE LIMIT 9",
+			vars: []string{
+				"SELECT COUNT(active) n FROM messages WHERE active = TRUE LIMIT 9",
+			},
+		},
+		{
 			name: "join-alias-as",
 			base: "SELECT o.id FROM orders AS o JOIN users AS u ON o.user_id = u.id WHERE u.active = TRUE",
 			vars: []string{
@@ -1339,7 +1346,7 @@ func TestParseSelectAllWithLimit(t *testing.T) {
 }
 
 func TestParseSelectAllWithOrderByAndLimit(t *testing.T) {
-	stmt, err := Parse("SELECT * FROM users WHERE active = TRUE ORDER BY name DESC LIMIT 5")
+	stmt, err := Parse("SELECT * FROM users WHERE active = TRUE ORDER BY name DESC LIMIT 5 OFFSET 2")
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
@@ -1351,6 +1358,32 @@ func TestParseSelectAllWithOrderByAndLimit(t *testing.T) {
 	}
 	if stmt.Limit == nil || *stmt.Limit != 5 {
 		t.Fatalf("Limit = %v, want 5", stmt.Limit)
+	}
+	if stmt.Offset == nil || *stmt.Offset != 2 {
+		t.Fatalf("Offset = %v, want 2", stmt.Offset)
+	}
+}
+
+func TestParseSelectAllWithOffsetWithoutLimit(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users OFFSET 3")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.HasLimit {
+		t.Fatal("HasLimit = true, want false")
+	}
+	if !stmt.HasOffset {
+		t.Fatal("HasOffset = false, want true")
+	}
+	if stmt.Offset == nil || *stmt.Offset != 3 {
+		t.Fatalf("Offset = %v, want 3", stmt.Offset)
+	}
+}
+
+func TestParseRejectsOffsetBeforeLimit(t *testing.T) {
+	_, err := Parse("SELECT * FROM users OFFSET 3 LIMIT 5")
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
 	}
 }
 
@@ -1377,6 +1410,63 @@ func TestParseJoinOrderByQualifiedProjectedTableColumn(t *testing.T) {
 	}
 	if stmt.OrderBy.Table != "Orders" || stmt.OrderBy.Column != "id" || stmt.OrderBy.SourceQualifier != "o" || !stmt.OrderBy.Desc {
 		t.Fatalf("OrderBy = %+v, want Orders.id qualified by o DESC", *stmt.OrderBy)
+	}
+}
+
+func TestParseOrderByProjectionAlias(t *testing.T) {
+	stmt, err := Parse("SELECT score AS rank FROM metrics ORDER BY rank")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("ProjectionColumns = %+v, want one projected column", stmt.ProjectionColumns)
+	}
+	if stmt.ProjectionColumns[0].Column != "score" || stmt.ProjectionColumns[0].OutputAlias != "rank" {
+		t.Fatalf("ProjectionColumns[0] = %+v, want score AS rank", stmt.ProjectionColumns[0])
+	}
+	if stmt.OrderBy == nil {
+		t.Fatal("OrderBy = nil, want rank")
+	}
+	if stmt.OrderBy.Table != "metrics" || stmt.OrderBy.Column != "rank" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
+		t.Fatalf("OrderBy = %+v, want unqualified metrics.rank ASC token", *stmt.OrderBy)
+	}
+}
+
+func TestParseOrderByProjectionImplicitName(t *testing.T) {
+	stmt, err := Parse("SELECT score FROM metrics ORDER BY score")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("ProjectionColumns = %+v, want one projected column", stmt.ProjectionColumns)
+	}
+	if stmt.ProjectionColumns[0].Column != "score" || stmt.ProjectionColumns[0].OutputAlias != "" {
+		t.Fatalf("ProjectionColumns[0] = %+v, want implicit score output name", stmt.ProjectionColumns[0])
+	}
+	if stmt.OrderBy == nil {
+		t.Fatal("OrderBy = nil, want score")
+	}
+	if stmt.OrderBy.Table != "metrics" || stmt.OrderBy.Column != "score" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
+		t.Fatalf("OrderBy = %+v, want unqualified metrics.score ASC token", *stmt.OrderBy)
+	}
+}
+
+func TestParseJoinOrderByProjectionOutputName(t *testing.T) {
+	stmt, err := Parse("SELECT o.id AS order_id FROM Orders o JOIN Inventory product ON o.product_id = product.id ORDER BY order_id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(stmt.ProjectionColumns) != 1 {
+		t.Fatalf("ProjectionColumns = %+v, want one projected column", stmt.ProjectionColumns)
+	}
+	if stmt.ProjectionColumns[0].Table != "Orders" || stmt.ProjectionColumns[0].Column != "id" || stmt.ProjectionColumns[0].OutputAlias != "order_id" {
+		t.Fatalf("ProjectionColumns[0] = %+v, want Orders.id AS order_id", stmt.ProjectionColumns[0])
+	}
+	if stmt.OrderBy == nil {
+		t.Fatal("OrderBy = nil, want order_id")
+	}
+	if stmt.OrderBy.Table != "" || stmt.OrderBy.Column != "order_id" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
+		t.Fatalf("OrderBy = %+v, want unqualified projection output name order_id", *stmt.OrderBy)
 	}
 }
 
@@ -1433,6 +1523,48 @@ func TestParseLimitUint64Boundary(t *testing.T) {
 	}
 	if stmt.InvalidLimit.Kind != LitBigInt || stmt.InvalidLimit.Text != "18446744073709551616" {
 		t.Fatalf("overflow InvalidLimit = %+v, want LitBigInt with source text", *stmt.InvalidLimit)
+	}
+}
+
+func TestParseOffsetUint64Boundary(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users OFFSET 18446744073709551615")
+	if err != nil {
+		t.Fatalf("Parse max uint64 offset error: %v", err)
+	}
+	if !stmt.HasOffset {
+		t.Fatal("HasOffset = false, want true")
+	}
+	if stmt.UnsupportedOffset {
+		t.Fatal("UnsupportedOffset = true, want false")
+	}
+	if stmt.InvalidOffset != nil {
+		t.Fatalf("InvalidOffset = %+v, want nil", *stmt.InvalidOffset)
+	}
+	if stmt.Offset == nil {
+		t.Fatal("Offset = nil, want max uint64")
+	}
+	if *stmt.Offset != ^uint64(0) {
+		t.Fatalf("Offset = %d, want max uint64", *stmt.Offset)
+	}
+
+	stmt, err = Parse("SELECT * FROM users OFFSET 18446744073709551616")
+	if err != nil {
+		t.Fatalf("Parse overflow offset error: %v", err)
+	}
+	if !stmt.HasOffset {
+		t.Fatal("overflow HasOffset = false, want true")
+	}
+	if stmt.UnsupportedOffset {
+		t.Fatal("overflow UnsupportedOffset = true, want false")
+	}
+	if stmt.Offset != nil {
+		t.Fatalf("overflow Offset = %d, want nil", *stmt.Offset)
+	}
+	if stmt.InvalidOffset == nil {
+		t.Fatal("overflow InvalidOffset = nil, want literal metadata")
+	}
+	if stmt.InvalidOffset.Kind != LitBigInt || stmt.InvalidOffset.Text != "18446744073709551616" {
+		t.Fatalf("overflow InvalidOffset = %+v, want LitBigInt with source text", *stmt.InvalidOffset)
 	}
 }
 
@@ -1802,6 +1934,32 @@ func TestParseCountStarBareAliasProjection(t *testing.T) {
 	}
 }
 
+func TestParseCountColumnAliasProjection(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(u32) AS n FROM t WHERE active = TRUE")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(u32) AS n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	if stmt.Aggregate.Column == nil {
+		t.Fatal("Aggregate.Column = nil, want t.u32")
+	}
+	if got, want := *stmt.Aggregate.Column, (ColumnRef{Table: "t", Column: "u32"}); got != want {
+		t.Fatalf("Aggregate.Column = %+v, want %+v", got, want)
+	}
+	pred, ok := stmt.Predicate.(ComparisonPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want ComparisonPredicate", stmt.Predicate)
+	}
+	if pred.Filter.Table != "t" || pred.Filter.Column != "active" || pred.Filter.Op != "=" {
+		t.Fatalf("Predicate.Filter = %+v, want t.active = TRUE", pred.Filter)
+	}
+}
+
 func TestParseCountStarAliasProjectionWithWhere(t *testing.T) {
 	stmt, err := Parse("SELECT COUNT(*) AS n FROM t WHERE active = TRUE")
 	if err != nil {
@@ -1918,6 +2076,28 @@ func TestParseJoinCountStarAliasProjection(t *testing.T) {
 	}
 	if len(stmt.ProjectionColumns) != 0 {
 		t.Fatalf("len(ProjectionColumns) = %d, want 0", len(stmt.ProjectionColumns))
+	}
+}
+
+func TestParseJoinCountColumnAliasProjection(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(s.active) AS n FROM t JOIN s ON t.id = s.t_id")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if stmt.Aggregate == nil {
+		t.Fatal("Aggregate = nil, want COUNT(s.active) AS n metadata")
+	}
+	if stmt.Aggregate.Func != "COUNT" || stmt.Aggregate.Alias != "n" {
+		t.Fatalf("Aggregate = %+v, want Func=COUNT Alias=n", *stmt.Aggregate)
+	}
+	if stmt.Aggregate.Column == nil {
+		t.Fatal("Aggregate.Column = nil, want s.active")
+	}
+	if got, want := *stmt.Aggregate.Column, (ColumnRef{Table: "s", Column: "active", Alias: "s"}); got != want {
+		t.Fatalf("Aggregate.Column = %+v, want %+v", got, want)
+	}
+	if stmt.Join == nil || !stmt.Join.HasOn {
+		t.Fatalf("Join = %+v, want ON join", stmt.Join)
 	}
 }
 
@@ -2039,9 +2219,14 @@ func TestParseRejectsUnsupported(t *testing.T) {
 		{"mixed_qualified_wildcard_projection", "SELECT t.*, u32 FROM t"},
 		{"join_explicit_projection", "SELECT u32 FROM t JOIN s ON t.id = s.id"},
 		{"aggregate_projection", "SELECT COUNT(*) FROM t"},
+		{"aggregate_column_without_alias", "SELECT COUNT(u32) FROM t"},
 		{"mixed_aggregate_projection", "SELECT u32, COUNT(*) AS n FROM t"},
+		{"mixed_count_column_projection", "SELECT u32, COUNT(active) AS n FROM t"},
 		{"aggregate_projection_with_group_by", "SELECT u32, COUNT(*) FROM t GROUP BY u32"},
 		{"aggregate_projection_with_group_by_alias", "SELECT COUNT(*) AS n FROM t GROUP BY u32"},
+		{"aggregate_column_with_group_by_alias", "SELECT COUNT(u32) AS n FROM t GROUP BY u32"},
+		{"aggregate_column_with_having", "SELECT COUNT(u32) AS n FROM t HAVING n > 0"},
+		{"join_unqualified_count_column", "SELECT COUNT(id) AS n FROM t JOIN s ON t.id = s.id"},
 		{"aggregate_multi_way_join", "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.id JOIN r ON s.id = r.id"},
 		{"trailing_garbage", "SELECT * FROM users foo bar"},
 		{"missing_from", "SELECT *"},

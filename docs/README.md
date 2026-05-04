@@ -21,6 +21,9 @@ Do not read broad specs by default.
   candidates, and explicit dependency rejections.
 - `docs/future-features.md` — working list of Shunter-native feature tracks to
   revisit as real applications put pressure on the runtime.
+- `docs/how-to-use-shunter.md` — app-author guide for embedding Shunter,
+  declaring modules, running a runtime, serving protocol traffic, and exporting
+  contracts.
 - `docs/shunter-design-decisions.md` — consolidated current Shunter design
   decisions that code and tests still cite.
 
