@@ -368,9 +368,7 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		for _, projectedRow := range matchesByProjectedRow[projectedRID] {
-			out = append(out, projectedRow)
-		}
+		out = append(out, matchesByProjectedRow[projectedRID]...)
 	}
 	return out, nil
 }
