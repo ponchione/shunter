@@ -5978,6 +5978,136 @@ func TestHandleOneOffQuery_ShunterCountColumnAliasWithWhereLimitReturnsFullAggre
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 
+func TestHandleOneOffQuery_ShunterSumUintColumnAliasWithWhereLimitReturnsFullAggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+		schema.ColumnSchema{Index: 1, Name: "active", Type: schema.KindBool},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint32(1), types.NewBool(true)},
+		{types.NewUint32(2), types.NewBool(false)},
+		{types.NewUint32(3), types.NewBool(true)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "total", Type: schema.KindUint64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD0},
+		QueryString: "SELECT SUM(u32) AS total FROM t WHERE active = TRUE LIMIT 1",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(4)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ShunterSumSignedColumnReturnsInt64Aggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "i32", Type: schema.KindInt32},
+	)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewInt32(7)},
+		{types.NewInt32(-3)},
+		{types.NewInt32(2)},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "total", Type: schema.KindInt64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD1},
+		QueryString: "SELECT SUM(i32) AS total FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewInt64(6)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ShunterSumFloatColumnReturnsFloat64Aggregate(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "f32", Type: schema.KindFloat32},
+	)
+	v1, err := types.NewFloat32(1.5)
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	v2, err := types.NewFloat32(2.25)
+	if err != nil {
+		t.Fatalf("NewFloat32: %v", err)
+	}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{v1},
+		{v2},
+	}}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{
+		ID:      1,
+		Name:    "t",
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "total", Type: schema.KindFloat64}},
+	}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD2},
+		QueryString: "SELECT SUM(f32) AS total FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantValue, err := types.NewFloat64(3.75)
+	if err != nil {
+		t.Fatalf("NewFloat64: %v", err)
+	}
+	wantRows := []types.ProductValue{{wantValue}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ShunterSumNonNumericColumnRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "label", Type: schema.KindString},
+	)
+	stateAccess := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD3},
+		QueryString: "SELECT SUM(label) AS total FROM t",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error == nil {
+		t.Fatal("expected SUM non-numeric rejection, got nil error")
+	}
+	if got, want := *result.Error, "SUM aggregate only supports 64-bit integer and float columns"; got != want {
+		t.Fatalf("Error = %q, want %q", got, want)
+	}
+}
+
 func TestHandleOneOffQuery_ShunterCountColumnOrderByRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := newMockSchema("t", 1,
@@ -6118,6 +6248,50 @@ func TestHandleOneOffQuery_ShunterJoinCountColumnAliasReturnsSingleAggregateRow(
 	}
 	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
 	wantRows := []types.ProductValue{{types.NewUint64(2)}}
+	assertProductRowsEqual(t, gotRows, wantRows)
+}
+
+func TestHandleOneOffQuery_ShunterJoinSumColumnAliasReturnsSingleAggregateRow(t *testing.T) {
+	conn := testConnDirect(nil)
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		}}},
+		"s": {id: 2, schema: &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "t_id", Type: schema.KindUint32},
+			{Index: 1, Name: "points", Type: schema.KindUint32},
+			{Index: 2, Name: "active", Type: schema.KindBool},
+		}}},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewUint32(5), types.NewBool(true)},
+			{types.NewUint32(1), types.NewUint32(7), types.NewBool(false)},
+			{types.NewUint32(2), types.NewUint32(11), types.NewBool(true)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	aggregateSchema := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{{Index: 0, Name: "total", Type: schema.KindUint64}}}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0xD4},
+		QueryString: "SELECT SUM(s.points) AS total FROM t JOIN s ON t.id = s.t_id WHERE s.active = TRUE",
+	}
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	gotRows := decodeRows(t, firstTableRows(result), aggregateSchema)
+	wantRows := []types.ProductValue{{types.NewUint64(16)}}
 	assertProductRowsEqual(t, gotRows, wantRows)
 }
 

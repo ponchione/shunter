@@ -336,6 +336,23 @@ func TestDeclaredViewRejectsCountColumnAggregate(t *testing.T) {
 	}
 }
 
+func TestDeclaredViewRejectsSumColumnAggregate(t *testing.T) {
+	_, err := Build(validChatModule().
+		View(ViewDeclaration{
+			Name: "live_messages",
+			SQL:  "SELECT SUM(id) AS total FROM messages",
+		}), Config{DataDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("Build error = nil, want aggregate rejection for declared view")
+	}
+	if !errors.Is(err, ErrInvalidDeclarationSQL) {
+		t.Fatalf("Build error = %v, want ErrInvalidDeclarationSQL", err)
+	}
+	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+		t.Fatalf("Build error = %v, want table-shaped view aggregate rejection", err)
+	}
+}
+
 func TestSubscribeViewOverPrivateBaseTableUsesDeclarationPermission(t *testing.T) {
 	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
 		Reducer("insert_message", insertMessageReducer).
@@ -420,6 +437,31 @@ func TestDeclaredQueryCountColumnAppliesVisibilityAfterPermissionSucceeds(t *tes
 	}
 	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0].AsUint64() != 2 {
 		t.Fatalf("visible count rows = %#v, want one count row with 2", result.Rows)
+	}
+}
+
+func TestDeclaredQuerySumColumnExecutesThroughRuntimePath(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, validChatModule().
+		Reducer("insert_message_with_body", insertMessageWithBodyReducer).
+		Query(QueryDeclaration{
+			Name:        "message_id_total",
+			SQL:         "SELECT SUM(id) AS total FROM messages LIMIT 1",
+			Permissions: PermissionMetadata{Required: []string{"messages:read"}},
+		}))
+	defer rt.Close()
+	insertMessageWithBody(t, rt, 1, "alpha")
+	insertMessageWithBody(t, rt, 2, "bravo")
+	insertMessageWithBody(t, rt, 3, "charlie")
+
+	result, err := rt.CallQuery(context.Background(), "message_id_total", WithDeclaredReadPermissions("messages:read"))
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if result.Name != "message_id_total" || result.TableName != "messages" {
+		t.Fatalf("result identity = (%q, %q), want message_id_total/messages", result.Name, result.TableName)
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0].AsUint64() != 6 {
+		t.Fatalf("sum rows = %#v, want one sum row with 6", result.Rows)
 	}
 }
 

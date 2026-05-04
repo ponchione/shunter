@@ -380,6 +380,18 @@ func TestVisibilityExpansionAggregateLimitAndOffsetUseVisibleRows(t *testing.T) 
 	})
 	assertProductRowsEqual(t, columnCountRows, []types.ProductValue{{types.NewUint64(2)}})
 
+	sumConn := testConnDirect(nil)
+	sumConn.AllowAllPermissions = false
+	sumConn.Identity = alice
+	handleOneOffQueryWithVisibility(context.Background(), sumConn, &OneOffQueryMsg{
+		MessageID:   []byte("sum-visible"),
+		QueryString: "SELECT SUM(thread) AS total FROM messages LIMIT 1",
+	}, &mockStateAccess{snap: &mockSnapshot{rows: rowsByTable}}, sl, filters)
+	sumRows := decodeRows(t, firstTableRows(drainOneOff(t, sumConn)), &schema.TableSchema{
+		Columns: []schema.ColumnSchema{{Index: 0, Name: "total", Type: schema.KindUint64}},
+	})
+	assertProductRowsEqual(t, sumRows, []types.ProductValue{{types.NewUint64(3)}})
+
 	limitConn := testConnDirect(nil)
 	limitConn.AllowAllPermissions = false
 	limitConn.Identity = alice

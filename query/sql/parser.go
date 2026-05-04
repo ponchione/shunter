@@ -146,8 +146,8 @@ type ProjectionColumn struct {
 // accepted by the parser.
 type AggregateProjection struct {
 	Func string
-	// Column is nil for COUNT(*). Non-nil COUNT(column) arguments are
-	// resolved after FROM/JOIN relation bindings are known.
+	// Column is nil for COUNT(*). Non-nil aggregate arguments are resolved
+	// after FROM/JOIN relation bindings are known.
 	Column *ColumnRef
 	Alias  string
 }
@@ -720,7 +720,7 @@ func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjec
 		}
 		return "", nil, nil, nil
 	}
-	if isIdentifierToken(t) && strings.EqualFold(t.text, "COUNT") && p.pos+1 < len(p.toks) && p.toks[p.pos+1].kind == tokLParen {
+	if p.isAggregateProjectionStart(t) {
 		agg, err := p.parseAggregateProjection()
 		if err != nil {
 			return "", nil, nil, err
@@ -755,9 +755,20 @@ func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjec
 	return "", cols, nil, nil
 }
 
+func (p *parser) isAggregateProjectionStart(t token) bool {
+	if !isIdentifierToken(t) || p.pos+1 >= len(p.toks) || p.toks[p.pos+1].kind != tokLParen {
+		return false
+	}
+	return strings.EqualFold(t.text, "COUNT") || strings.EqualFold(t.text, "SUM")
+}
+
 func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 	fn := p.peek()
-	if !isIdentifierToken(fn) || !strings.EqualFold(fn.text, "COUNT") {
+	if !isIdentifierToken(fn) {
+		return nil, p.unsupported("aggregate projections not supported")
+	}
+	funcName := strings.ToUpper(fn.text)
+	if funcName != "COUNT" && funcName != "SUM" {
 		return nil, p.unsupported("aggregate projections not supported")
 	}
 	p.advance()
@@ -767,6 +778,9 @@ func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 	p.advance()
 	var column *ColumnRef
 	if p.peek().kind == tokStar {
+		if funcName != "COUNT" {
+			return nil, p.unsupported("SUM(*) aggregate projections not supported")
+		}
 		p.advance()
 	} else if isIdentifierToken(p.peek()) {
 		ref, err := p.parseAggregateColumnRef()
@@ -775,10 +789,10 @@ func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 		}
 		column = &ref
 	} else {
-		return nil, p.unsupported("only COUNT(*) or COUNT(column) aggregate projections supported")
+		return nil, p.unsupported("only COUNT(*), COUNT(column), or SUM(column) aggregate projections supported")
 	}
 	if p.peek().kind != tokRParen {
-		return nil, p.unsupported("only COUNT(*) or COUNT(column) aggregate projections supported")
+		return nil, p.unsupported("only COUNT(*), COUNT(column), or SUM(column) aggregate projections supported")
 	}
 	p.advance()
 	if isKeywordToken(p.peek(), "AS") {
@@ -791,7 +805,7 @@ func (p *parser) parseAggregateProjection() (*AggregateProjection, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &AggregateProjection{Func: "COUNT", Column: column, Alias: alias}, nil
+	return &AggregateProjection{Func: funcName, Column: column, Alias: alias}, nil
 }
 
 func (p *parser) parseAggregateColumnRef() (ColumnRef, error) {

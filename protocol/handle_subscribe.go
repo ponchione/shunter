@@ -818,14 +818,42 @@ func compileAggregateProjection(agg *sql.AggregateProjection, argument *compiled
 	if agg == nil {
 		return nil, nil
 	}
-	if !strings.EqualFold(agg.Func, "COUNT") {
+	switch {
+	case strings.EqualFold(agg.Func, "COUNT"):
+		return &compiledSQLAggregate{
+			Func:         "COUNT",
+			Argument:     argument,
+			ResultColumn: schema.ColumnSchema{Index: 0, Name: agg.Alias, Type: schema.KindUint64},
+		}, nil
+	case strings.EqualFold(agg.Func, "SUM"):
+		if argument == nil {
+			return nil, fmt.Errorf("SUM aggregate requires a column argument")
+		}
+		resultKind, ok := sumAggregateResultKind(argument.Schema.Type)
+		if !ok {
+			return nil, fmt.Errorf("SUM aggregate only supports 64-bit integer and float columns")
+		}
+		return &compiledSQLAggregate{
+			Func:         "SUM",
+			Argument:     argument,
+			ResultColumn: schema.ColumnSchema{Index: 0, Name: agg.Alias, Type: resultKind},
+		}, nil
+	default:
 		return nil, fmt.Errorf("aggregate projections not supported")
 	}
-	return &compiledSQLAggregate{
-		Func:         "COUNT",
-		Argument:     argument,
-		ResultColumn: schema.ColumnSchema{Index: 0, Name: agg.Alias, Type: schema.KindUint64},
-	}, nil
+}
+
+func sumAggregateResultKind(kind types.ValueKind) (types.ValueKind, bool) {
+	switch kind {
+	case types.KindInt8, types.KindInt16, types.KindInt32, types.KindInt64:
+		return types.KindInt64, true
+	case types.KindUint8, types.KindUint16, types.KindUint32, types.KindUint64:
+		return types.KindUint64, true
+	case types.KindFloat32, types.KindFloat64:
+		return types.KindFloat64, true
+	default:
+		return 0, false
+	}
 }
 
 func compileSingleRelationAggregateProjection(agg *sql.AggregateProjection, projectedTable string, tableAlias string, tableID schema.TableID, ts *schema.TableSchema) (*compiledSQLAggregate, error) {

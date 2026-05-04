@@ -281,6 +281,37 @@ func TestModuleContractValidationRejectsMultiColumnOrderByViewSQL(t *testing.T) 
 	}
 }
 
+func TestModuleContractValidationAllowsSumAggregateQuerySQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Queries = []QueryDescription{{
+		Name: "message_id_total",
+		SQL:  "SELECT SUM(id) AS total FROM messages",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected SUM aggregate query SQL: %v", err)
+	}
+}
+
+func TestModuleContractValidationRejectsSumAggregateViewSQL(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Views = []ViewDescription{{
+		Name: "live_messages",
+		SQL:  "SELECT SUM(id) AS total FROM messages",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted SUM aggregate view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_messages.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "Column projections are not supported in subscriptions") {
+		t.Fatalf("ValidateModuleContract error = %v, want aggregate unsupported text", err)
+	}
+}
+
 func TestModuleContractValidationRejectsInvalidTableReadPolicyMetadata(t *testing.T) {
 	tests := []struct {
 		name   string

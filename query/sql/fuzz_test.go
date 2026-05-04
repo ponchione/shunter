@@ -16,6 +16,7 @@ var parseFuzzSeeds = []string{
 	"select * from players where id = 1",
 	`SELECT "users".* FROM "users" WHERE "users"."name" = 'ada'`,
 	"SELECT COUNT(*) AS n FROM players WHERE active = TRUE LIMIT 10",
+	"SELECT SUM(score) AS total FROM players WHERE active = TRUE LIMIT 10",
 	"SELECT COUNT(*) AS n FROM players LIMIT 18446744073709551615",
 	"SELECT COUNT(*) AS n FROM players LIMIT 18446744073709551616",
 	"SELECT p.id, team.name FROM players AS p JOIN teams AS team ON p.team_id = team.id WHERE team.active = TRUE",

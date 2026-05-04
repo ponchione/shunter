@@ -5077,6 +5077,31 @@ func TestHandleSubscribeSingle_ShunterCountColumnAliasRejected(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_ShunterSumColumnAliasRejected(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("t", 1,
+		schema.ColumnSchema{Index: 0, Name: "u32", Type: schema.KindUint32},
+	)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   170,
+		QueryID:     171,
+		QueryString: "SELECT SUM(u32) AS total FROM t",
+	}
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	tag, decoded := drainServerMsgEventually(t, conn)
+	if tag != TagSubscriptionError {
+		t.Fatalf("tag = %d, want %d (TagSubscriptionError)", tag, TagSubscriptionError)
+	}
+	se := decoded.(SubscriptionError)
+	requireOptionalUint32(t, se.QueryID, 171, "QueryID")
+	if req := executor.getRegisterSetReq(); req != nil {
+		t.Error("executor should not be called on aggregate projection")
+	}
+}
+
 func TestHandleSubscribeSingle_ShunterCountBareAliasRejected(t *testing.T) {
 	conn := testConnDirect(nil)
 	executor := &mockSubExecutor{}
