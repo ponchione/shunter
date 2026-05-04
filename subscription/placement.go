@@ -43,15 +43,23 @@ func (p *PruningIndexes) TestOnlyIsEmpty() bool {
 // PlaceSubscription routes each (query, table) pair to one pruning tier.
 // Self-joins use table-level placement because leaves apply to one side only.
 func PlaceSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
-	mutateSubscriptionPlacement(idx, pred, hash, true)
+	mutateSubscriptionPlacement(idx, pred, hash, true, nil)
 }
 
 // RemoveSubscription reverses PlaceSubscription.
 func RemoveSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
-	mutateSubscriptionPlacement(idx, pred, hash, false)
+	mutateSubscriptionPlacement(idx, pred, hash, false, nil)
 }
 
-func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash QueryHash, add bool) {
+func placeSubscriptionForResolver(idx *PruningIndexes, pred Predicate, hash QueryHash, resolver IndexResolver) {
+	mutateSubscriptionPlacement(idx, pred, hash, true, resolver)
+}
+
+func removeSubscriptionForResolver(idx *PruningIndexes, pred Predicate, hash QueryHash, resolver IndexResolver) {
+	mutateSubscriptionPlacement(idx, pred, hash, false, resolver)
+}
+
+func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash QueryHash, add bool, resolver IndexResolver) {
 	if j, ok := pred.(Join); ok && j.Left == j.Right {
 		mutateTablePlacement(idx, j.Left, hash, add)
 		return
@@ -66,7 +74,7 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 			continue
 		}
 		if join != nil {
-			if placements := joinEdgesFor(pred, join, t); len(placements) > 0 {
+			if placements := joinEdgesFor(pred, join, t, resolver); len(placements) > 0 {
 				for _, placement := range placements {
 					mutateJoinEdgePlacement(idx, placement.edge, placement.value, hash, add)
 				}
@@ -258,7 +266,7 @@ type joinEdgePlacement struct {
 // joinEdgesFor computes the JoinEdge/filter-value placements for Tier 2 for the
 // given table. Returns nil when no filterable edge exists for this table
 // (callers then fall through to Tier 3).
-func joinEdgesFor(pred Predicate, join *Join, t TableID) []joinEdgePlacement {
+func joinEdgesFor(pred Predicate, join *Join, t TableID, resolver IndexResolver) []joinEdgePlacement {
 	var other TableID
 	var myJoinCol, otherJoinCol ColID
 	switch t {
@@ -276,6 +284,11 @@ func joinEdgesFor(pred Predicate, join *Join, t TableID) []joinEdgePlacement {
 	otherColEqs := findColEqs(pred, other)
 	if len(otherColEqs) == 0 {
 		return nil
+	}
+	if resolver != nil {
+		if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
+			return nil
+		}
 	}
 	placements := make([]joinEdgePlacement, 0, len(otherColEqs))
 	for _, ce := range otherColEqs {

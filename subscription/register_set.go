@@ -20,7 +20,7 @@ func (m *Manager) dropSub(connID types.ConnectionID, subID types.SubscriptionID)
 	qs := m.registry.getQuery(hash)
 	_, last, _ := m.registry.removeSubscriber(connID, subID)
 	if last && qs != nil {
-		RemoveSubscription(m.indexes, qs.predicate, hash)
+		removeSubscriptionForResolver(m.indexes, qs.predicate, hash, m.resolver)
 		m.removeActiveColumns(qs.predicate)
 		m.registry.removeQueryState(hash)
 	}
@@ -452,7 +452,7 @@ func (m *Manager) RegisterSet(
 			// `return_on_err!` on the unsubscribe path and does not apply
 			// the `DBError::WithSql` suffix.
 			qs.sqlText = req.SQLText
-			PlaceSubscription(m.indexes, p, hash)
+			placeSubscriptionForResolver(m.indexes, p, hash, m.resolver)
 			m.addActiveColumns(p)
 		}
 		m.registry.addSubscriber(hash, req.ConnID, subID, req.RequestID, req.QueryID)
