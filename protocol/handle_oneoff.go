@@ -127,6 +127,7 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 	var matchedRows []types.ProductValue
 	var encodedRows []types.ProductValue
 	rowsAlreadyProjected := false
+	rowsAlreadyOrderedAndLimited := false
 	if query.Aggregate != nil {
 		// Aggregate shape happens over the full matched input; OFFSET/LIMIT then
 		// slice the one-row aggregate output (reference ProjectList::Limit wraps
@@ -180,15 +181,24 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 				matchedRows = rows
 			}
 		} else {
-			_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
-				matchedRows = append(matchedRows, pv)
-				return !oneOffLimitReached(len(matchedRows), scanLimit)
-			})
-			if err != nil {
-				return SQLQueryResult{}, err
+			if idx, ok := oneOffSingleTableOrderIndex(query.OrderBy, tableID, resolver); ok {
+				rows, err := evaluateOneOffSingleTableOrderedByIndex(ctx, view, tableID, pred, idx, rowOffset, rowLimit)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				matchedRows = rows
+				rowsAlreadyOrderedAndLimited = true
+			} else {
+				_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
+					matchedRows = append(matchedRows, pv)
+					return !oneOffLimitReached(len(matchedRows), scanLimit)
+				})
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
 			}
 		}
-		if len(query.OrderBy) != 0 && !rowsAlreadyProjected {
+		if len(query.OrderBy) != 0 && !rowsAlreadyProjected && !rowsAlreadyOrderedAndLimited {
 			var err error
 			matchedRows, err = orderAndLimitOneOffRows(matchedRows, query.OrderBy, rowOffset, rowLimit)
 			if err != nil {
@@ -287,6 +297,40 @@ func oneOffIndexableRange(pred subscription.Predicate, tableID schema.TableID) (
 		}
 	}
 	return subscription.ColRange{}, false
+}
+
+func oneOffSingleTableOrderIndex(orderBy []compiledSQLOrderBy, tableID schema.TableID, resolver schema.IndexResolver) (schema.IndexID, bool) {
+	if resolver == nil || len(orderBy) != 1 {
+		return 0, false
+	}
+	term := orderBy[0]
+	if term.Desc || term.Column.Table != tableID || term.Column.Alias != 0 || term.Column.Schema.Index < 0 {
+		return 0, false
+	}
+	return resolver.IndexIDForColumn(tableID, types.ColID(term.Column.Schema.Index))
+}
+
+func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, indexID schema.IndexID, offset int, limit int) ([]types.ProductValue, error) {
+	var rows []types.ProductValue
+	seen := 0
+	for _, row := range view.IndexRange(tableID, indexID, store.UnboundedLow(), store.UnboundedHigh()) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !subscription.MatchRow(pred, tableID, row) {
+			continue
+		}
+		if seen < offset {
+			seen++
+			continue
+		}
+		rows = append(rows, row)
+		seen++
+		if oneOffLimitReached(len(rows), limit) {
+			return rows, nil
+		}
+	}
+	return rows, nil
 }
 
 func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, visit func(types.ProductValue) bool) (bool, error) {

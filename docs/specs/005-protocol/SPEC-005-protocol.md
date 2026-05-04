@@ -442,6 +442,10 @@ range predicate, including a matching term nested under `AND`, for returned
 rows and single-table aggregate inputs. The executor still rechecks the full
 predicate after the index lookup so visibility filters and additional filters
 remain authoritative.
+Single-table `ORDER BY <column> ASC` may use a matching single-column index for
+the ordered scan before applying projection, `OFFSET`, or `LIMIT`; the executor
+still rechecks the full predicate and visibility filters before a row is
+counted toward the ordered output.
 
 ---
 
