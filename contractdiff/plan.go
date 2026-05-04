@@ -36,15 +36,22 @@ const (
 	PlanActionExecutionUnsupported PlanAction = "execution-unsupported"
 )
 
+type PlanGuidanceCode string
+
+const (
+	PlanGuidanceBackupRestore PlanGuidanceCode = "backup-restore"
+)
+
 type PlanOptions struct {
 	Policy            PolicyOptions
 	ValidateContracts bool
 }
 
 type MigrationPlan struct {
-	Summary  PlanSummary   `json:"summary"`
-	Entries  []PlanEntry   `json:"entries"`
-	Warnings []PlanWarning `json:"warnings"`
+	Summary  PlanSummary    `json:"summary"`
+	Entries  []PlanEntry    `json:"entries"`
+	Warnings []PlanWarning  `json:"warnings"`
+	Guidance []PlanGuidance `json:"guidance"`
 }
 
 type PlanSummary struct {
@@ -57,6 +64,7 @@ type PlanSummary struct {
 	DataRewriteNeeded    int  `json:"data_rewrite_needed"`
 	ExecutionUnsupported int  `json:"execution_unsupported"`
 	Blocking             int  `json:"blocking"`
+	BackupRecommended    bool `json:"backup_recommended"`
 	Warnings             int  `json:"warnings"`
 	PolicyFailed         bool `json:"policy_failed"`
 }
@@ -77,6 +85,11 @@ type PlanWarning struct {
 	Surface Surface     `json:"surface"`
 	Name    string      `json:"name"`
 	Detail  string      `json:"detail"`
+}
+
+type PlanGuidance struct {
+	Code   PlanGuidanceCode `json:"code"`
+	Detail string           `json:"detail"`
 }
 
 func PlanJSON(oldData, currentData []byte, opts PlanOptions) (MigrationPlan, error) {
@@ -115,12 +128,17 @@ func Plan(old, current shunter.ModuleContract, opts PlanOptions) MigrationPlan {
 	plan.Summary.TotalChanges = len(plan.Entries)
 	plan.Summary.Warnings = len(plan.Warnings)
 	plan.Summary.PolicyFailed = policy.Failed
+	plan.Summary.BackupRecommended = planBackupRecommended(plan.Entries)
+	if plan.Summary.BackupRecommended {
+		plan.Guidance = append(plan.Guidance, backupRestorePlanGuidance())
+	}
+	sortPlanGuidance(plan.Guidance)
 	return normalizeMigrationPlan(plan)
 }
 
 func (p MigrationPlan) Text() string {
 	p = normalizeMigrationPlan(p)
-	if len(p.Entries) == 0 && len(p.Warnings) == 0 {
+	if len(p.Entries) == 0 && len(p.Warnings) == 0 && len(p.Guidance) == 0 {
 		return "No migration plan changes.\n"
 	}
 	var b strings.Builder
@@ -133,6 +151,9 @@ func (p MigrationPlan) Text() string {
 	}
 	for _, warning := range p.Warnings {
 		fmt.Fprintf(&b, "warning %s %s %s: %s\n", warning.Code, warning.Surface, warning.Name, warning.Detail)
+	}
+	for _, guidance := range p.Guidance {
+		fmt.Fprintf(&b, "guidance %s: %s\n", guidance.Code, guidance.Detail)
 	}
 	return b.String()
 }
@@ -245,6 +266,23 @@ func updatePlanSummaryForEntry(summary *PlanSummary, entry PlanEntry) {
 	}
 	if entry.Severity == PlanSeverityBlocking {
 		summary.Blocking++
+	}
+}
+
+func planBackupRecommended(entries []PlanEntry) bool {
+	for _, entry := range entries {
+		if entry.Severity == PlanSeverityBlocking ||
+			hasPlanClassification(entry.Classifications, shunter.MigrationClassificationDataRewriteNeeded) {
+			return true
+		}
+	}
+	return false
+}
+
+func backupRestorePlanGuidance() PlanGuidance {
+	return PlanGuidance{
+		Code:   PlanGuidanceBackupRestore,
+		Detail: "Stop the runtime before applying this plan to a durable DataDir; back up the complete DataDir with shunter.BackupDataDir or shunter backup, and keep that backup available for restore with shunter.RestoreDataDir or shunter restore.",
 	}
 }
 
@@ -393,6 +431,9 @@ func normalizeMigrationPlan(plan MigrationPlan) MigrationPlan {
 	if plan.Warnings == nil {
 		plan.Warnings = []PlanWarning{}
 	}
+	if plan.Guidance == nil {
+		plan.Guidance = []PlanGuidance{}
+	}
 	return plan
 }
 
@@ -468,6 +509,16 @@ func sortPlanWarnings(warnings []PlanWarning) {
 		}
 		if a.Name != b.Name {
 			return a.Name < b.Name
+		}
+		return a.Detail < b.Detail
+	})
+}
+
+func sortPlanGuidance(guidance []PlanGuidance) {
+	sort.SliceStable(guidance, func(i, j int) bool {
+		a, b := guidance[i], guidance[j]
+		if a.Code != b.Code {
+			return a.Code < b.Code
 		}
 		return a.Detail < b.Detail
 	})

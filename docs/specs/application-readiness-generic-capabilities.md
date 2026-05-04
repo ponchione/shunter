@@ -380,8 +380,8 @@ Exact names can change to match existing module APIs.
 
 ### Operational Rules
 
-- Document backup expectations before destructive migrations.
-- Dry-run planning may come before executable hooks if that reduces risk.
+- Contract dry-run planning emits backup/restore guidance for blocking or
+  data-rewrite changes before destructive migrations touch a durable `DataDir`.
 - Rollback semantics are out of scope until locking and crash-recovery behavior
   is fully specified.
 
@@ -512,4 +512,3 @@ A feature slice is done when:
 - durable encoding and recovery behavior is tested
 - visibility filters and permissions are tested for any new query path
 - no application-domain concepts were added to Shunter
-

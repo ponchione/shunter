@@ -6,6 +6,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
 - Current development line.
 - Gzip-negotiated protocol connections now gzip-compress post-handshake server messages while keeping client messages uncompressed.
+- Added backup/restore guidance to dry-run contract migration plans for blocking or data-rewrite changes.
 - Added reusable offline `DataDir` backup and restore helpers for app-owned binaries.
 - Added generic CLI commands for offline runtime `DataDir` backup and restore.
 - Added runtime snapshot creation and commit log compaction helpers for app-owned maintenance workflows.

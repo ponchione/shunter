@@ -121,6 +121,60 @@ func TestMigrationPlanReportsBreakingIndexChangesAndPolicyDisagreement(t *testin
 	if plan.Summary.Breaking != 2 || plan.Summary.Blocking != 2 {
 		t.Fatalf("summary breaking/blocking = %d/%d, want 2/2", plan.Summary.Breaking, plan.Summary.Blocking)
 	}
+	if !plan.Summary.BackupRecommended {
+		t.Fatal("summary backup recommended = false, want true for blocking changes")
+	}
+}
+
+func TestMigrationPlanAddsBackupRestoreGuidanceForBlockingChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].Columns[0].Type = "string"
+
+	plan := Plan(old, current, PlanOptions{})
+
+	if !plan.Summary.BackupRecommended {
+		t.Fatal("BackupRecommended = false, want true")
+	}
+	if len(plan.Guidance) != 1 {
+		t.Fatalf("guidance count = %d, want 1: %#v", len(plan.Guidance), plan.Guidance)
+	}
+	if plan.Guidance[0].Code != PlanGuidanceBackupRestore {
+		t.Fatalf("guidance code = %s, want %s", plan.Guidance[0].Code, PlanGuidanceBackupRestore)
+	}
+	for _, want := range []string{"durable DataDir", "shunter.BackupDataDir", "shunter.RestoreDataDir"} {
+		if !strings.Contains(plan.Guidance[0].Detail, want) {
+			t.Fatalf("guidance detail = %q, want substring %q", plan.Guidance[0].Detail, want)
+		}
+	}
+	if !strings.Contains(plan.Text(), "guidance backup-restore:") {
+		t.Fatalf("plan text missing backup guidance:\n%s", plan.Text())
+	}
+	jsonOut, err := plan.MarshalCanonicalJSON()
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	if !strings.Contains(string(jsonOut), `"backup_recommended": true`) {
+		t.Fatalf("plan JSON missing backup recommendation:\n%s", jsonOut)
+	}
+	if !strings.Contains(string(jsonOut), `"guidance": [`) {
+		t.Fatalf("plan JSON missing guidance array:\n%s", jsonOut)
+	}
+}
+
+func TestMigrationPlanOmitsBackupRestoreGuidanceForReviewOnlyChanges(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{Name: "sent_at", Type: "timestamp"})
+
+	plan := Plan(old, current, PlanOptions{})
+
+	if plan.Summary.BackupRecommended {
+		t.Fatal("BackupRecommended = true, want false for review-only additive changes")
+	}
+	if len(plan.Guidance) != 0 {
+		t.Fatalf("guidance = %#v, want empty", plan.Guidance)
+	}
 }
 
 func TestMigrationPlanReportsMetadataOnlyChangesSeparately(t *testing.T) {

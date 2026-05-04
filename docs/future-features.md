@@ -57,7 +57,7 @@ Current generic CLI and helper boundary:
 
 - contract diff
 - contract policy
-- contract plan
+- contract plan, including backup/restore guidance for blocking or data-rewrite changes
 - contract codegen from existing JSON
 - offline `DataDir` backup through `shunter.BackupDataDir` and the generic CLI
 - offline `DataDir` restore through `shunter.RestoreDataDir` and the generic CLI
@@ -118,12 +118,14 @@ Likely useful types:
 The current contract diff and metadata tooling gives useful visibility, but
 runtime migration execution is a separate feature track.
 
+Current dry-run contract planning emits backup/restore guidance when blocking
+or data-rewrite changes should be reviewed before touching a durable `DataDir`.
+
 Recommended sequence:
 
 1. Strict startup compatibility checks and better schema-change diagnostics.
 2. App-owned migration hooks run under runtime ownership before normal start.
-3. Dry-run planning with backup/restore guidance.
-4. Executable migration runner once locking, crash recovery, and rollback
+3. Executable migration runner once locking, crash recovery, and rollback
    semantics are explicit.
 
 Migration behavior should be explicit and reviewable. Normal runtime startup

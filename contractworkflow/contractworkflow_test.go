@@ -133,6 +133,34 @@ func TestPlanFilesReturnsDeterministicMigrationPlan(t *testing.T) {
 	assertContains(t, string(jsonOut), `"action": "review-required"`)
 }
 
+func TestPlanFilesIncludesBackupGuidanceForBlockingPlan(t *testing.T) {
+	dir := t.TempDir()
+	previousPath := writeContractFixture(t, dir, "previous.json", workflowContractFixture())
+	current := workflowContractFixture()
+	current.Schema.Tables[0].Columns[0].Type = "string"
+	currentPath := writeContractFixture(t, dir, "current.json", current)
+
+	plan, err := PlanFiles(previousPath, currentPath, contractdiff.PlanOptions{})
+	if err != nil {
+		t.Fatalf("PlanFiles returned error: %v", err)
+	}
+
+	got, err := FormatPlan(plan, FormatText)
+	if err != nil {
+		t.Fatalf("FormatPlan returned error: %v", err)
+	}
+	assertContains(t, string(got), "guidance backup-restore:")
+	assertContains(t, string(got), "shunter.BackupDataDir")
+
+	jsonOut, err := FormatPlan(plan, FormatJSON)
+	if err != nil {
+		t.Fatalf("FormatPlan JSON returned error: %v", err)
+	}
+	assertContains(t, string(jsonOut), `"backup_recommended": true`)
+	assertContains(t, string(jsonOut), `"guidance": [`)
+	assertContains(t, string(jsonOut), `"code": "backup-restore"`)
+}
+
 func TestGenerateFileWritesDeterministicTypeScriptFromContractJSON(t *testing.T) {
 	dir := t.TempDir()
 	contractPath := writeContractFixture(t, dir, "contract.json", workflowContractFixture())

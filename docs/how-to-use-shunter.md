@@ -429,9 +429,15 @@ The generic CLI operates on existing contract JSON files:
 ```bash
 rtk go run ./cmd/shunter contract diff --previous old.json --current shunter.contract.json
 rtk go run ./cmd/shunter contract policy --previous old.json --current shunter.contract.json --strict
+rtk go run ./cmd/shunter contract plan --previous old.json --current shunter.contract.json --validate
 rtk go run ./cmd/shunter contract codegen --contract shunter.contract.json --language typescript --out client.ts
 rtk go run ./cmd/shunter backup --data-dir ./data/chat --out ./backups/chat-2026-05-04
 ```
+
+`contract plan` is a dry-run review artifact. When the plan includes blocking
+or data-rewrite changes, text output includes `guidance backup-restore`, and
+JSON output sets `summary.backup_recommended` with a `backup-restore` guidance
+entry.
 
 The CLI does not dynamically load app modules. Export contracts from an
 app-owned binary that links the module. Backup and restore operate on offline
