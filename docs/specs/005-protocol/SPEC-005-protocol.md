@@ -127,27 +127,38 @@ When compression is disabled for a connection, server messages use the normal fr
 [tag: uint8] [body: BSATN-encoded fields]
 ```
 
-When compression is enabled for a connection and the server chooses to compress a specific message, the payload is:
+When compression is enabled for a connection, post-handshake server messages are
+gzip-compressed and use the explicit compression envelope:
 
 ```
 [compression: uint8] [tag: uint8] [compressed_body: []byte]
 ```
 
-Where `compressed_body` is the gzip-compressed form of the BSATN body bytes only. The message tag itself is never compressed.
+Where `compressed_body` is the gzip-compressed form of the BSATN body bytes
+only. The message tag itself is never compressed. The initial `IdentityToken`
+handshake message is the only exception: when compression was negotiated, it
+still carries the explicit envelope, but with `0x00` and an uncompressed body so
+clients can initialize identity state before enabling heavier message handling.
 
 Compression values:
 - `0x00` = uncompressed body, but explicit compression envelope present for this message: `[0x00][tag][body]`
-- `0x01` = brotli (reserved; Shunter does not implement — returns `ErrBrotliUnsupported` and closes with 1002 reason `brotli unsupported`; implement only if Shunter clients need it)
+- `0x01` = brotli (reserved; Shunter does not implement — compression helpers return `ErrBrotliUnsupported`; implement only if Shunter clients need it)
 - `0x02` = gzip-compressed body: `[0x02][tag][gzip(body)]`
 
 If compression is negotiated as `none`, the explicit compression byte is omitted entirely and all server messages use `[tag][body]`.
 
-Error handling:
-- Brotli tag (`0x01`) → protocol error (`1002`) with reason `brotli unsupported` and close
-- Unknown compression tag → protocol error (`1002`) and close
-- Decompression failure → protocol error (`1002`) and close
+Client → server messages always use the normal `[tag][body]` frame shape,
+including on connections that negotiated `compression=gzip`. A compressed-looking
+client frame is decoded as an ordinary client frame and will usually fail as an
+unknown tag or malformed message; it is not treated as a compression envelope.
 
-**Recommendation:** Implement compression as optional in v1. Default to `none`. Add Gzip as a v1 option when large delta messages become a profiling concern.
+Error handling:
+- Brotli tag (`0x01`) inside a decoded compression envelope → fatal protocol error with reason `brotli unsupported`
+- Unknown compression tag inside a decoded compression envelope → fatal protocol error
+- Decompression failure inside a decoded compression envelope → fatal protocol error
+
+Gzip is the only implemented v1 compression option. Brotli remains reserved
+until real Shunter clients need it.
 
 ### 3.4 Row Encoding (RowList)
 
@@ -721,7 +732,7 @@ Either side may send a WebSocket Close frame. The receiver echoes a Close frame.
 
 Server-initiated closes:
 - `1000` (Normal Closure): graceful engine shutdown (`"server shutdown"`) or normal peer close
-- `1002` (Protocol Error): text frames (`"text frames not supported"`), unsupported brotli (`"brotli unsupported"`), malformed messages (`"malformed message"` or decoder detail), unsupported message families (`"unsupported message type"`)
+- `1002` (Protocol Error): text frames (`"text frames not supported"`), malformed messages (`"malformed message"` or decoder detail), unsupported message families (`"unsupported message type"`)
 - `1008` (Policy Violation): outbound buffer overflow (`"send buffer full"`), incoming flood (`"too many requests"`), message-size violation (`"message too large"`), idle timeout (`"idle timeout"`), OnConnect rejection
 - `1011` (Internal Error): unexpected server error
 
@@ -892,7 +903,7 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 ## 16. Reference-Informed Shunter Decisions
 
 - **Protocol identifier:** Shunter-owned clients must use `v1.bsatn.shunter` (§2.2). Shunter does not admit the SpacetimeDB reference token.
-- **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). Brotli should be implemented only if Shunter clients need it.
+- **Compression envelope tags:** Shunter uses `0x00` = none, `0x01` = brotli (reserved, unsupported — `ErrBrotliUnsupported`), `0x02` = gzip (§3.3). Negotiated `compression=gzip` applies to post-handshake server messages only; client messages remain uncompressed. Brotli should be implemented only if Shunter clients need it.
 - **Outgoing backpressure limit:** v1 bounds each connection's outbound queue at `OutgoingBufferMessages` with default `16 * 1024` (§10.1, §12). Shunter disconnects lagging clients to keep memory bounded.
 - **TransactionUpdate shape:** v1 uses a heavy/light envelope split (§8.5, §8.8). `Failed` collapses Shunter's internal `failed_user`/`failed_panic`/`not_found` distinction onto one arm with the detail carried in the error string.
 - **Subscription RPC surface:** v1 exposes `SubscribeSingle`, `SubscribeMulti`, `UnsubscribeSingle`, `UnsubscribeMulti`, `CallReducer`, and `OneOffQuery` (§6, §7). There is no legacy single `Subscribe` / `Unsubscribe` wire family or separate `QuerySetId` protocol family.
@@ -936,7 +947,7 @@ Subscribe and OneOffQuery handlers need to resolve table names to IDs and valida
 | Tag 7 on server→client frame → fatal decode error | Reserved-tag enforcement |
 | OneOffQuery → correct rows returned from committed snapshot; `message_id` echoed | One-off read semantics |
 | Unknown client message tag → protocol error close | Incoming framing validation |
-| Unknown compression tag / invalid gzip payload → protocol error close | Compression envelope validation |
+| Compression helper rejects unknown compression tag / invalid gzip payload | Compression envelope validation |
 | Client sends > IncomingQueueMessages rapidly → connection closed | Incoming backpressure |
 | Server can't deliver to slow client → connection closed (buffer full) | Outgoing backpressure |
 | Idle connection for > IdleTimeout → connection closed | Idle timeout |

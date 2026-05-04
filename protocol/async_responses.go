@@ -22,7 +22,7 @@ func (s connOnlySender) Send(connID types.ConnectionID, msg any) error {
 	if err != nil {
 		return fmt.Errorf("encode server message: %w", err)
 	}
-	wrapped := EncodeFrame(frame[0], frame[1:], s.conn.Compression, CompressionNone)
+	wrapped := EncodeFrame(frame[0], frame[1:], s.conn.Compression, outboundCompressionMode(s.conn))
 
 	select {
 	case <-s.conn.closed:

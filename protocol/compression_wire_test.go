@@ -3,13 +3,8 @@ package protocol
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"errors"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/coder/websocket"
 )
 
 // TestShunterCompressionTagByteValues pins the reference byte
@@ -83,86 +78,32 @@ func TestShunterCompressionBrotliReservedRejected(t *testing.T) {
 	}
 }
 
-// TestShunterBrotliFrameClosesWithReason drives a brotli-tagged
-// frame into the dispatch loop and asserts the connection is closed
-// with code 1002 and a reason string containing "brotli". Mirrors the
-// pattern of TestUnknownCompressionTag_Closes1002 in close_test.go.
-func TestShunterBrotliFrameClosesWithReason(t *testing.T) {
-	opts := DefaultProtocolOptions()
-	conn, clientWS := testConnPair(t, &opts)
-	conn.Compression = true // enable compression path
+func TestShunterNegotiatedGzipSenderFrame(t *testing.T) {
+	conn, id := testConn(true)
+	mgr := NewConnManager()
+	mgr.Add(conn)
+	sender := NewClientSender(mgr, &fakeInbox{})
 
-	handlers := &MessageHandlers{}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := runDispatchAsync(conn, ctx, handlers)
-
-	// Send binary frame with brotli compression byte (0x01).
-	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
-	_ = clientWS.Write(wCtx, websocket.MessageBinary, []byte{CompressionBrotli, TagSubscribeSingle, 0x00})
-	wCancel()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("dispatch loop did not exit on brotli compression tag")
+	msg := TransactionUpdateLight{
+		RequestID: 42,
+		Update: []SubscriptionUpdate{
+			{QueryID: 7, TableName: "messages", Inserts: bytes.Repeat([]byte{0x42}, 128)},
+		},
+	}
+	if err := sender.SendTransactionUpdateLight(id, &msg); err != nil {
+		t.Fatalf("SendTransactionUpdateLight: %v", err)
 	}
 
-	readCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer rCancel()
-	_, _, err := clientWS.Read(readCtx)
-	var ce websocket.CloseError
-	if !errors.As(err, &ce) {
-		t.Fatalf("expected CloseError, got %v (%T)", err, err)
+	frame := <-conn.OutboundCh
+	if frame[0] != CompressionGzip {
+		t.Fatalf("compression byte = 0x%02x, want 0x02 (gzip)", frame[0])
 	}
-	if ce.Code != websocket.StatusProtocolError {
-		t.Errorf("close code = %d, want %d (1002)", ce.Code, websocket.StatusProtocolError)
+	tag, decoded := decodeOutboundServerFrame(t, conn, frame)
+	if tag != TagTransactionUpdateLight {
+		t.Fatalf("tag = %d, want %d", tag, TagTransactionUpdateLight)
 	}
-	if !strings.Contains(ce.Reason, CloseReasonBrotliUnsupported) {
-		t.Errorf("close reason = %q, want contains %q", ce.Reason, CloseReasonBrotliUnsupported)
-	}
-}
-
-func TestShunterGzipExpansionOverLimitCloses1008(t *testing.T) {
-	opts := DefaultProtocolOptions()
-	opts.MaxMessageSize = 64
-	conn, clientWS := testConnPair(t, &opts)
-	conn.Compression = true // enable compression path
-
-	handlers := &MessageHandlers{}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := runDispatchAsync(conn, ctx, handlers)
-
-	frame, err := WrapCompressed(TagSubscribeSingle, bytes.Repeat([]byte{0x42}, 256), CompressionGzip)
-	if err != nil {
-		t.Fatalf("WrapCompressed gzip: %v", err)
-	}
-	if len(frame) >= int(opts.MaxMessageSize) {
-		t.Fatalf("test frame compressed len = %d, want below raw read limit %d", len(frame), opts.MaxMessageSize)
-	}
-
-	wCtx, wCancel := context.WithTimeout(ctx, time.Second)
-	_ = clientWS.Write(wCtx, websocket.MessageBinary, frame)
-	wCancel()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("dispatch loop did not exit on oversized gzip expansion")
-	}
-
-	readCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer rCancel()
-	_, _, err = clientWS.Read(readCtx)
-	var ce websocket.CloseError
-	if !errors.As(err, &ce) {
-		t.Fatalf("expected CloseError, got %v (%T)", err, err)
-	}
-	if ce.Code != websocket.StatusPolicyViolation {
-		t.Errorf("close code = %d, want %d (1008)", ce.Code, websocket.StatusPolicyViolation)
-	}
-	if !strings.Contains(ce.Reason, CloseReasonMessageTooLarge) {
-		t.Errorf("close reason = %q, want contains %q", ce.Reason, CloseReasonMessageTooLarge)
+	out := decoded.(TransactionUpdateLight)
+	if out.RequestID != msg.RequestID {
+		t.Fatalf("RequestID = %d, want %d", out.RequestID, msg.RequestID)
 	}
 }

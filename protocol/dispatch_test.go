@@ -125,6 +125,53 @@ func TestDispatchLoop_ValidSubscribe(t *testing.T) {
 	}
 }
 
+func TestDispatchLoop_CompressionNegotiatedAcceptsPlainClientMessage(t *testing.T) {
+	conn, client := testConnPair(t, nil)
+	conn.Compression = true
+
+	called := make(chan struct{})
+	handlers := &MessageHandlers{
+		OnSubscribeSingle: func(ctx context.Context, c *Conn, msg *SubscribeSingleMsg) {
+			if msg.QueryID != 42 {
+				t.Errorf("QueryID = %d, want 42", msg.QueryID)
+			}
+			close(called)
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runDispatchAsync(conn, ctx, handlers)
+
+	frame, err := EncodeClientMessage(SubscribeSingleMsg{
+		RequestID:   1,
+		QueryID:     42,
+		QueryString: "SELECT * FROM users",
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer writeCancel()
+	if err := client.Write(writeCtx, websocket.MessageBinary, frame); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnSubscribe was not called for plain client frame")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("dispatch loop did not exit after cancel")
+	}
+}
+
 func TestDispatchLoop_TextFrameCloses(t *testing.T) {
 	conn, client := testConnPair(t, nil)
 

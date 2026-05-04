@@ -79,10 +79,7 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 		return fmt.Errorf("encode server message: %w", err)
 	}
 
-	wrapped := frame
-	if conn.Compression {
-		wrapped = EncodeFrame(frame[0], frame[1:], true, CompressionNone)
-	}
+	wrapped := EncodeFrame(frame[0], frame[1:], conn.Compression, outboundCompressionMode(conn))
 
 	select {
 	case <-conn.closed:
@@ -100,4 +97,11 @@ func (s *connManagerSender) enqueueOnConn(conn *Conn, connID types.ConnectionID,
 		conn.startOutboundOverflowDisconnect(s.inbox, s.mgr)
 		return fmt.Errorf("%w: %x", ErrClientBufferFull, connID[:])
 	}
+}
+
+func outboundCompressionMode(conn *Conn) uint8 {
+	if conn != nil && conn.Compression {
+		return CompressionGzip
+	}
+	return CompressionNone
 }

@@ -34,6 +34,7 @@ func TestWatchReducerResponseExitsOnConnClose(t *testing.T) {
 // a future refactor that accidentally inverts the select arms.
 func TestWatchReducerResponseDeliversOnRespCh(t *testing.T) {
 	conn := testConnDirect(nil)
+	conn.Compression = true
 	respCh := make(chan TransactionUpdate, 1)
 
 	done := make(chan struct{})
@@ -56,7 +57,16 @@ func TestWatchReducerResponseDeliversOnRespCh(t *testing.T) {
 		t.Fatal("watcher did not exit after respCh send")
 	}
 
-	tag, decoded := drainServerMsg(t, conn)
+	var frame []byte
+	select {
+	case frame = <-conn.OutboundCh:
+	default:
+		t.Fatal("expected TransactionUpdate frame on OutboundCh")
+	}
+	if frame[0] != CompressionGzip {
+		t.Fatalf("compression byte = %d, want CompressionGzip", frame[0])
+	}
+	tag, decoded := decodeOutboundServerFrame(t, conn, frame)
 	if tag != TagTransactionUpdate {
 		t.Fatalf("tag = %d, want %d (TagTransactionUpdate)", tag, TagTransactionUpdate)
 	}

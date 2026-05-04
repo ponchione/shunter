@@ -35,11 +35,7 @@ func drainServerMsg(t *testing.T, conn *Conn) (uint8, any) {
 	t.Helper()
 	select {
 	case frame := <-conn.OutboundCh:
-		tag, msg, err := DecodeServerMessage(frame)
-		if err != nil {
-			t.Fatalf("DecodeServerMessage: %v", err)
-		}
-		return tag, msg
+		return decodeOutboundServerFrame(t, conn, frame)
 	default:
 		t.Fatal("expected a message on OutboundCh but channel was empty")
 		return 0, nil
@@ -50,15 +46,30 @@ func drainServerMsgEventually(t *testing.T, conn *Conn) (uint8, any) {
 	t.Helper()
 	select {
 	case frame := <-conn.OutboundCh:
-		tag, msg, err := DecodeServerMessage(frame)
-		if err != nil {
-			t.Fatalf("DecodeServerMessage: %v", err)
-		}
-		return tag, msg
+		return decodeOutboundServerFrame(t, conn, frame)
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected a message on OutboundCh but channel stayed empty")
 		return 0, nil
 	}
+}
+
+func decodeOutboundServerFrame(t *testing.T, conn *Conn, frame []byte) (uint8, any) {
+	t.Helper()
+	if conn != nil && conn.Compression {
+		tag, body, err := UnwrapCompressed(frame)
+		if err != nil {
+			t.Fatalf("UnwrapCompressed: %v", err)
+		}
+		wire := make([]byte, 1+len(body))
+		wire[0] = tag
+		copy(wire[1:], body)
+		frame = wire
+	}
+	tag, msg, err := DecodeServerMessage(frame)
+	if err != nil {
+		t.Fatalf("DecodeServerMessage: %v", err)
+	}
+	return tag, msg
 }
 
 func requireSubscriptionError(t *testing.T, conn *Conn, requestID, queryID uint32, want string) SubscriptionError {

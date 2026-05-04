@@ -10,13 +10,12 @@ module model, storage contracts, and developer workflow.
 
 ## Near-Term Priority Order
 
-1. Shunter protocol stability and versioning.
-2. Richer query and declared-read foundation.
-3. App-owned CLI/runtime helpers.
-4. Migration preflight and app-owned migration hooks.
-5. Type-system vertical slices driven by application schemas.
-6. Storage, recovery, and subscription performance hardening.
-7. Client SDK ergonomics, including a possible React SDK track.
+1. Richer query and declared-read foundation.
+2. App-owned CLI/runtime helpers.
+3. Migration preflight and app-owned migration hooks.
+4. Type-system vertical slices driven by application schemas.
+5. Storage, recovery, and subscription performance hardening.
+6. Client SDK ergonomics, including a possible React SDK track.
 
 ## Client SDK Ergonomics
 
@@ -72,19 +71,6 @@ Useful future helpers:
 
 The generic `shunter` CLI should not pretend it can load arbitrary app modules
 unless Shunter gains a real module loading boundary.
-
-## Protocol Stability
-
-SpacetimeDB protocol compatibility is not a requirement for Shunter. Existing
-SpacetimeDB SDKs are not expected to connect to Shunter.
-
-The important protocol work is Shunter protocol stability:
-
-The remaining item is clear treatment of compression when bandwidth pressure
-justifies it.
-
-Do not add SpacetimeDB energy fields, row wrapper chains, or legacy protocol
-variants unless a Shunter client has a concrete need for equivalent behavior.
 
 ## Query And Declared Reads
 

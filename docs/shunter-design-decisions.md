@@ -26,6 +26,10 @@ Current contract:
 - Generated TypeScript clients expose protocol metadata from the same runtime
   constants: minimum version, current version, default subprotocol, and
   supported subprotocols.
+- Negotiated `compression=gzip` gzip-compresses post-handshake server messages.
+  The initial `IdentityToken` uses a `0x00` compression envelope, and
+  client-to-server messages remain on the normal uncompressed `[tag][body]`
+  shape.
 - Brotli is a reserved compression tag, but Shunter returns a distinct
   unsupported-brotli protocol error until real Shunter clients need it.
 - Client and server protocol decoders reject trailing bytes after a valid

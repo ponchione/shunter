@@ -96,31 +96,10 @@ func (c *Conn) runDispatchLoop(ctx context.Context, handlers *MessageHandlers) {
 			decodeErr error
 			kind      = "unknown"
 		)
-		if c.Compression {
-			var tag uint8
-			var body []byte
-			var unwrapErr error
-			tag, body, unwrapErr = UnwrapCompressedWithLimit(frame, c.opts.MaxMessageSize)
-			if unwrapErr != nil {
-				if errors.Is(unwrapErr, ErrBrotliUnsupported) {
-					closeProtocolError(c, CloseReasonBrotliUnsupported)
-				} else if errors.Is(unwrapErr, ErrMessageTooLarge) {
-					logProtocolBackpressure(c.Observer, "inbound", "message_too_large")
-					go closeWithHandshake(c.ws, ClosePolicy, CloseReasonMessageTooLarge, c.opts.CloseHandshakeTimeout)
-				} else {
-					closeProtocolError(c, CloseReasonMalformedMessage)
-				}
-				recordProtocolMessage(c.Observer, kind, "malformed")
-				return
-			}
-			kind = protocolKindFromTag(tag)
-			msg, decodeErr = decodeClientMessageParts(tag, body)
-		} else {
-			if len(frame) > 0 {
-				kind = protocolKindFromTag(frame[0])
-			}
-			_, msg, decodeErr = DecodeClientMessage(frame)
+		if len(frame) > 0 {
+			kind = protocolKindFromTag(frame[0])
 		}
+		_, msg, decodeErr = DecodeClientMessage(frame)
 		if decodeErr != nil {
 			reason := decodeErr.Error()
 			recordProtocolMessage(c.Observer, kind, "malformed")
