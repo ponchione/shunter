@@ -907,7 +907,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 		return "internal_error"
 	}
 	tx.Seal()
-	changeset, err := store.Commit(e.committed, tx)
+	changeset, err := e.commitTransaction(tx)
 	if err != nil {
 		store.Rollback(tx)
 		status := StatusFailedInternal
@@ -951,6 +951,17 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	e.recordReducerMetric(rr.Name, reducerMetricResultFromStatus(status), handlerDuration, true)
 	e.traceReducerCall(rr.Name, reducerMetricResultFromStatus(status), reducerTraceErrorFromStatus(status))
 	return executorCommandResultFromStatus(status)
+}
+
+func (e *Executor) commitTransaction(tx *store.Transaction) (*store.Changeset, error) {
+	start := time.Now()
+	changeset, err := store.Commit(e.committed, tx)
+	result := "ok"
+	if err != nil {
+		result = "error"
+	}
+	e.recordStoreCommitDuration(result, time.Since(start))
+	return changeset, err
 }
 
 // postCommit runs durability enqueue, subscription evaluation, caller response,

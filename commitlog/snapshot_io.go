@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"lukechampine.com/blake3"
@@ -336,17 +337,35 @@ type FileSnapshotWriter struct {
 	rename        func(string, string) error
 	syncDir       func(string) error
 	removeLock    func(string) error
+	observer      SnapshotObserver
 }
 
 func NewSnapshotWriter(baseDir string, reg schema.SchemaRegistry) SnapshotWriter {
 	return &FileSnapshotWriter{baseDir: baseDir, reg: reg, openTemp: openSnapshotTempFile, rename: os.Rename, syncDir: syncDir, removeLock: RemoveLockFile}
 }
 
+func NewSnapshotWriterWithObserver(baseDir string, reg schema.SchemaRegistry, observer SnapshotObserver) SnapshotWriter {
+	return &FileSnapshotWriter{
+		baseDir:    baseDir,
+		reg:        reg,
+		openTemp:   openSnapshotTempFile,
+		rename:     os.Rename,
+		syncDir:    syncDir,
+		removeLock: RemoveLockFile,
+		observer:   observer,
+	}
+}
+
 func openSnapshotTempFile(path string) (snapshotTempFile, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 }
 
-func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txID types.TxID) error {
+func (w *FileSnapshotWriter) CreateSnapshot(committed *store.CommittedState, txID types.TxID) (err error) {
+	start := time.Now()
+	defer func() {
+		recordSnapshotDuration(w.observer, resultFromErr(err), time.Since(start))
+	}()
+
 	w.mu.Lock()
 	if w.inProgress {
 		w.mu.Unlock()

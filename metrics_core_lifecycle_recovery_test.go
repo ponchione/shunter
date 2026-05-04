@@ -203,6 +203,11 @@ func TestRecoverySkippedSnapshotMetricsMapReasonsOncePerReport(t *testing.T) {
 
 	obs.recordRecoveryCompleted(commitlog.RecoveryReport{
 		RecoveredTxID: 7,
+		ReplayedTxRange: commitlog.RecoveryTxIDRange{
+			Start: 5,
+			End:   7,
+		},
+		ReplayDuration: 2 * time.Millisecond,
 		SkippedSnapshots: []commitlog.SkippedSnapshotReport{
 			{Reason: commitlog.SnapshotSkipPastDurableHorizon},
 			{Reason: commitlog.SnapshotSkipReadFailed},
@@ -231,6 +236,11 @@ func TestRecoverySkippedSnapshotMetricsMapReasonsOncePerReport(t *testing.T) {
 	if got := countMetricObservations(metrics, "counter", MetricRecoverySkippedSnapshotsTotal); got != 3 {
 		t.Fatalf("skipped snapshot counter observations = %d, want 3", got)
 	}
+	requireHistogram(t, metrics, MetricRecoveryReplayDurationSeconds, MetricLabels{
+		Module:  "chat",
+		Runtime: "skip-a",
+		Result:  "ok",
+	})
 }
 
 func TestMetricsDisabledWithRecorderRecordsNothingThroughLifecycle(t *testing.T) {

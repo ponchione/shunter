@@ -2,6 +2,7 @@ package commitlog
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
@@ -49,6 +50,7 @@ type RecoveryReport struct {
 	HasDurableLog        bool
 	DurableLogHorizon    types.TxID
 	ReplayedTxRange      RecoveryTxIDRange
+	ReplayDuration       time.Duration
 	RecoveredTxID        types.TxID
 	ResumePlan           RecoveryResumePlan
 	SkippedSnapshots     []SkippedSnapshotReport
@@ -131,7 +133,9 @@ func OpenAndRecoverWithReport(dir string, reg schema.SchemaRegistry) (*store.Com
 		}
 	}
 
+	replayStart := time.Now()
 	maxAppliedTxID, err := ReplayLog(committed, segments, replayFrom, reg)
+	report.ReplayDuration = time.Since(replayStart)
 	if err != nil {
 		return nil, 0, RecoveryResumePlan{}, report, err
 	}

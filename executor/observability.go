@@ -21,6 +21,7 @@ type Observer interface {
 	RecordExecutorInboxDepth(depth int)
 	RecordReducerCall(reducer, result string)
 	RecordReducerDuration(reducer, result string, duration time.Duration)
+	RecordStoreCommitDuration(result string, duration time.Duration)
 }
 
 type reducerTraceObserver interface {
@@ -101,6 +102,12 @@ func (e *Executor) recordReducerMetric(reducer, result string, duration time.Dur
 	e.observer.RecordReducerCall(reducer, result)
 	if observedDuration {
 		e.observer.RecordReducerDuration(reducer, result, duration)
+	}
+}
+
+func (e *Executor) recordStoreCommitDuration(result string, duration time.Duration) {
+	if e != nil && e.observer != nil {
+		e.observer.RecordStoreCommitDuration(okErrorResult(result), duration)
 	}
 }
 
@@ -208,6 +215,13 @@ func reducerMetricResult(result string) string {
 	default:
 		return "failed_internal"
 	}
+}
+
+func okErrorResult(result string) string {
+	if result == "ok" {
+		return "ok"
+	}
+	return "error"
 }
 
 func reducerMetricName(reducer string) string {

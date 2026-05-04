@@ -16,6 +16,7 @@ type durabilityMetricObserver struct {
 	durable   []types.TxID
 	failures  []string
 	loggedErr []error
+	snapshots []string
 }
 
 func (o *durabilityMetricObserver) LogDurabilityFailed(err error, reason string, txID types.TxID) {
@@ -35,6 +36,12 @@ func (o *durabilityMetricObserver) RecordDurabilityDurableTxID(txID types.TxID) 
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.durable = append(o.durable, txID)
+}
+
+func (o *durabilityMetricObserver) RecordSnapshotDuration(result string, _ time.Duration) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.snapshots = append(o.snapshots, result)
 }
 
 func TestDurabilityMetricsQueueDepthAndDurableTxGauges(t *testing.T) {
@@ -84,6 +91,24 @@ func TestDurabilityMetricsFatalFailureMappedOnce(t *testing.T) {
 	observer.requireFailure(t, "open_failed", 1)
 }
 
+func TestSnapshotMetricsRecordsCreateDurationResult(t *testing.T) {
+	observer := &durabilityMetricObserver{}
+	root := t.TempDir()
+	committed, reg := buildSnapshotCommittedState(t)
+	committed.SetCommittedTxID(1)
+
+	writer := NewSnapshotWriterWithObserver(root, reg, observer)
+	if err := writer.CreateSnapshot(committed, 1); err != nil {
+		t.Fatalf("CreateSnapshot success path: %v", err)
+	}
+	observer.requireSnapshot(t, "ok", 1)
+
+	if err := writer.CreateSnapshot(committed, 2); err == nil {
+		t.Fatal("CreateSnapshot mismatch succeeded, want error")
+	}
+	observer.requireSnapshot(t, "error", 1)
+}
+
 func (o *durabilityMetricObserver) requireDepth(t *testing.T, want int) {
 	t.Helper()
 	o.mu.Lock()
@@ -120,5 +145,20 @@ func (o *durabilityMetricObserver) requireFailure(t *testing.T, reason string, c
 	}
 	if got != count {
 		t.Fatalf("failure reason %q count = %d, want %d in %v", reason, got, count, o.failures)
+	}
+}
+
+func (o *durabilityMetricObserver) requireSnapshot(t *testing.T, result string, count int) {
+	t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var got int
+	for _, snapshot := range o.snapshots {
+		if snapshot == result {
+			got++
+		}
+	}
+	if got != count {
+		t.Fatalf("snapshot result %q count = %d, want %d in %v", result, got, count, o.snapshots)
 	}
 }

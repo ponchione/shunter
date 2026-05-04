@@ -126,6 +126,7 @@ const (
 	MetricDurabilityDurableTxID           MetricName = "durability_durable_tx_id"
 	MetricDurabilityQueueDepth            MetricName = "durability_queue_depth"
 	MetricDurabilityFailuresTotal         MetricName = "durability_failures_total"
+	MetricSnapshotDurationSeconds         MetricName = "snapshot_duration_seconds"
 	MetricSubscriptionActive              MetricName = "subscription_active"
 	MetricSubscriptionEvalDurationSeconds MetricName = "subscription_eval_duration_seconds"
 	MetricSubscriptionFanoutErrorsTotal   MetricName = "subscription_fanout_errors_total"
@@ -134,6 +135,8 @@ const (
 	MetricRecoveryRecoveredTxID           MetricName = "recovery_recovered_tx_id"
 	MetricRecoveryDamagedTailSegments     MetricName = "recovery_damaged_tail_segments"
 	MetricRecoverySkippedSnapshotsTotal   MetricName = "recovery_skipped_snapshots_total"
+	MetricRecoveryReplayDurationSeconds   MetricName = "recovery_replay_duration_seconds"
+	MetricStoreCommitDurationSeconds      MetricName = "store_commit_duration_seconds"
 	MetricStoreReadRowsTotal              MetricName = "store_read_rows_total"
 )
 
@@ -360,6 +363,11 @@ func (o *runtimeObservability) recordRecoveryCompleted(report commitlog.Recovery
 		Component: "commitlog",
 	}, float64(len(report.DamagedTailSegments)))
 	o.setGauge(MetricDurabilityDurableTxID, MetricLabels{}, float64(report.RecoveredTxID))
+	if report.ReplayedTxRange != (commitlog.RecoveryTxIDRange{}) {
+		o.observeHistogram(MetricRecoveryReplayDurationSeconds, MetricLabels{
+			Result: "ok",
+		}, report.ReplayDuration.Seconds())
+	}
 	for _, skipped := range report.SkippedSnapshots {
 		o.addCounter(MetricRecoverySkippedSnapshotsTotal, MetricLabels{
 			Component: "commitlog",
@@ -683,6 +691,12 @@ func (o *runtimeObservability) RecordReducerDuration(reducer, result string, dur
 	}, duration.Seconds())
 }
 
+func (o *runtimeObservability) RecordStoreCommitDuration(result string, duration time.Duration) {
+	o.observeHistogram(MetricStoreCommitDurationSeconds, MetricLabels{
+		Result: okErrorMetricResult(result),
+	}, duration.Seconds())
+}
+
 func (o *runtimeObservability) TraceReducerCall(reducer, result string, err error) {
 	result = reducerMetricResult(result)
 	o.traceSpan(traceSpanReducerCall, "executor", safeTraceError(result, err),
@@ -744,6 +758,12 @@ func (o *runtimeObservability) RecordDurabilityQueueDepth(depth int) {
 
 func (o *runtimeObservability) RecordDurabilityDurableTxID(txID types.TxID) {
 	o.setGauge(MetricDurabilityDurableTxID, MetricLabels{}, float64(txID))
+}
+
+func (o *runtimeObservability) RecordSnapshotDuration(result string, duration time.Duration) {
+	o.observeHistogram(MetricSnapshotDurationSeconds, MetricLabels{
+		Result: okErrorMetricResult(result),
+	}, duration.Seconds())
 }
 
 func (o *runtimeObservability) RecordSubscriptionActive(active int) {
@@ -880,6 +900,13 @@ func subscriptionEvalMetricResult(result string) string {
 	default:
 		return "error"
 	}
+}
+
+func okErrorMetricResult(result string) string {
+	if result == "ok" {
+		return "ok"
+	}
+	return "error"
 }
 
 func subscriptionFanoutMetricReason(reason string) string {

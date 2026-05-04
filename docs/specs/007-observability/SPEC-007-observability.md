@@ -252,6 +252,7 @@ const (
     MetricDurabilityDurableTxID           MetricName = "durability_durable_tx_id"
     MetricDurabilityQueueDepth            MetricName = "durability_queue_depth"
     MetricDurabilityFailuresTotal         MetricName = "durability_failures_total"
+    MetricSnapshotDurationSeconds         MetricName = "snapshot_duration_seconds"
     MetricSubscriptionActive              MetricName = "subscription_active"
     MetricSubscriptionEvalDurationSeconds MetricName = "subscription_eval_duration_seconds"
     MetricSubscriptionFanoutErrorsTotal   MetricName = "subscription_fanout_errors_total"
@@ -260,6 +261,8 @@ const (
     MetricRecoveryRecoveredTxID           MetricName = "recovery_recovered_tx_id"
     MetricRecoveryDamagedTailSegments     MetricName = "recovery_damaged_tail_segments"
     MetricRecoverySkippedSnapshotsTotal   MetricName = "recovery_skipped_snapshots_total"
+    MetricRecoveryReplayDurationSeconds   MetricName = "recovery_replay_duration_seconds"
+    MetricStoreCommitDurationSeconds      MetricName = "store_commit_duration_seconds"
     MetricStoreReadRowsTotal              MetricName = "store_read_rows_total"
 )
 
@@ -332,6 +335,7 @@ Duration histograms MUST use these bucket boundaries in seconds:
 | `shunter_durability_durable_tx_id` | Gauge | `module`, `runtime` | n/a | Latest durable transaction ID. |
 | `shunter_durability_queue_depth` | Gauge | `module`, `runtime` | n/a | Current durability queue depth. |
 | `shunter_durability_failures_total` | Counter | `module`, `runtime`, `reason` | n/a | Fatal durability failures. |
+| `shunter_snapshot_duration_seconds` | Histogram | `module`, `runtime`, `result` | default duration buckets | Time spent creating commitlog snapshots. |
 | `shunter_subscription_active` | Gauge | `module`, `runtime` | n/a | Active subscription count. |
 | `shunter_subscription_eval_duration_seconds` | Histogram | `module`, `runtime`, `result` | default duration buckets | Subscription evaluation duration after a committed transaction. |
 | `shunter_subscription_fanout_errors_total` | Counter | `module`, `runtime`, `reason` | n/a | Fan-out delivery failures. |
@@ -340,6 +344,8 @@ Duration histograms MUST use these bucket boundaries in seconds:
 | `shunter_recovery_recovered_tx_id` | Gauge | `module`, `runtime` | n/a | Recovered transaction horizon from the latest recovery. |
 | `shunter_recovery_damaged_tail_segments` | Gauge | `module`, `runtime` | n/a | Damaged tail segment count from the latest recovery. |
 | `shunter_recovery_skipped_snapshots_total` | Counter | `module`, `runtime`, `reason` | n/a | Skipped recovery snapshots. |
+| `shunter_recovery_replay_duration_seconds` | Histogram | `module`, `runtime`, `result` | default duration buckets | Time spent replaying commitlog records during recovery. |
+| `shunter_store_commit_duration_seconds` | Histogram | `module`, `runtime`, `result` | default duration buckets | Time spent applying store commits to committed state. |
 | `shunter_store_read_rows_total` | Counter | `module`, `runtime`, `kind` | n/a | Rows matched or delivered by committed store read paths. |
 
 Allowed label values:
@@ -357,6 +363,7 @@ Allowed label values:
 | executor command `result` | `ok`, `user_error`, `panic`, `internal_error`, `permission_denied`, `rejected`, `canceled` |
 | reducer `result` | `committed`, `failed_user`, `failed_panic`, `failed_internal`, `failed_permission` |
 | recovery `result` | `success`, `failed` |
+| timing `result` | `ok`, `error` |
 | subscription eval `result` | `ok`, `error` |
 | `reason` | one of the reason values in section 6.1 |
 
@@ -463,6 +470,8 @@ Durability and subscription metrics:
   transaction horizon advances.
 - `durability_failures_total` increments once when a durability failure is
   classified as fatal or prevents startup/recovery from continuing.
+- `snapshot_duration_seconds` observes once for every opt-in observed snapshot
+  writer attempt. Snapshot writer errors use `result="error"`.
 - `subscription_active` MUST be set after subscription register, unregister,
   disconnect cleanup, and runtime close.
 - `subscription_eval_duration_seconds` observes once per post-commit
@@ -477,11 +486,18 @@ Durability and subscription metrics:
 
 Store metrics:
 
+- `store_commit_duration_seconds` observes once per attempted committed-state
+  mutation. Commit errors use `result="error"`.
 - `store_read_rows_total` increments by the number of rows matched or delivered
   through committed snapshot read paths. `kind="table_scan"` covers table
   iteration; `kind="index_scan"`, `kind="index_seek"`, and
   `kind="index_range"` cover index-backed reads. Empty reads MUST NOT
   increment the counter.
+
+Recovery metrics:
+
+- `recovery_replay_duration_seconds` observes once for a successful recovery
+  that replays at least one commitlog record.
 
 ## 7. Prometheus Adapter
 

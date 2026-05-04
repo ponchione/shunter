@@ -161,7 +161,6 @@ Near-term work:
 
 - benchmark common reducer/query/subscription workloads
 - track memory by table and index
-- track commit latency, durability queue depth, snapshot time, and replay time
 - stress large tables, large rows, many clients, many subscriptions, and restart
   recovery
 - document backup/restore and compaction workflows

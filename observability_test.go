@@ -644,6 +644,9 @@ func TestRuntimeObservationMethodsRecoverPanickingSinks(t *testing.T) {
 		{name: "record_reducer_duration", call: func(o *runtimeObservability) {
 			o.RecordReducerDuration("send_message", "committed", time.Millisecond)
 		}},
+		{name: "record_store_commit_duration", call: func(o *runtimeObservability) {
+			o.RecordStoreCommitDuration("ok", time.Millisecond)
+		}},
 		{name: "trace_reducer_call", call: func(o *runtimeObservability) {
 			o.TraceReducerCall("send_message", "failed_user", observerErr)
 		}},
@@ -670,6 +673,9 @@ func TestRuntimeObservationMethodsRecoverPanickingSinks(t *testing.T) {
 		}},
 		{name: "record_durability_durable_tx_id", call: func(o *runtimeObservability) {
 			o.RecordDurabilityDurableTxID(types.TxID(42))
+		}},
+		{name: "record_snapshot_duration", call: func(o *runtimeObservability) {
+			o.RecordSnapshotDuration("error", time.Millisecond)
 		}},
 		{name: "record_subscription_active", call: func(o *runtimeObservability) {
 			o.RecordSubscriptionActive(5)

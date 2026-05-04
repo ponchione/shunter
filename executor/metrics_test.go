@@ -21,6 +21,7 @@ type executorMetricObserver struct {
 	fatalGauge       bool
 	reducerCalls     []reducerMetric
 	reducerDurations []reducerMetric
+	commitDurations  []string
 }
 
 type executorCommandMetric struct {
@@ -74,6 +75,12 @@ func (o *executorMetricObserver) RecordReducerDuration(reducer, result string, _
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.reducerDurations = append(o.reducerDurations, reducerMetric{reducer: reducer, result: result})
+}
+
+func (o *executorMetricObserver) RecordStoreCommitDuration(result string, _ time.Duration) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.commitDurations = append(o.commitDurations, result)
 }
 
 func (o *executorMetricObserver) requireCommand(t *testing.T, kind, result string) {
@@ -147,6 +154,18 @@ func (o *executorMetricObserver) requireReducerDuration(t *testing.T, reducer, r
 	t.Fatalf("missing reducer duration reducer=%q result=%q in %+v", reducer, result, o.reducerDurations)
 }
 
+func (o *executorMetricObserver) requireStoreCommitDuration(t *testing.T, result string) {
+	t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, got := range o.commitDurations {
+		if got == result {
+			return
+		}
+	}
+	t.Fatalf("missing store commit duration result=%q in %+v", result, o.commitDurations)
+}
+
 func TestExecutorMetricsSubmitRejectionAndInboxDepth(t *testing.T) {
 	observer := &executorMetricObserver{}
 	exec, _ := setupExecutorWithObserver(observer, ExecutorConfig{InboxCapacity: 1, RejectOnFull: true})
@@ -218,6 +237,7 @@ func TestExecutorMetricsCommandDurationRecordsOnlyDequeuedCommands(t *testing.T)
 	}
 	observer.requireCommand(t, "call_reducer", "ok")
 	observer.requireCommandDuration(t, "call_reducer", "ok")
+	observer.requireStoreCommitDuration(t, "ok")
 	observer.requireInboxDepth(t, 0)
 }
 
@@ -383,3 +403,4 @@ func (o *blockingCommandObserver) RecordExecutorCommandDuration(string, string, 
 func (o *blockingCommandObserver) RecordExecutorInboxDepth(int)                                {}
 func (o *blockingCommandObserver) RecordReducerCall(string, string)                            {}
 func (o *blockingCommandObserver) RecordReducerDuration(string, string, time.Duration)         {}
+func (o *blockingCommandObserver) RecordStoreCommitDuration(string, time.Duration)             {}

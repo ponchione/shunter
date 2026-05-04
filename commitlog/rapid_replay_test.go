@@ -381,7 +381,11 @@ func TestRapidRunCompactionRejectsFutureSnapshotPreservesRecovery(t *testing.T) 
 		if afterPlan != beforePlan {
 			t.Fatalf("post-rejection resume plan = %+v, want pre-rejection plan %+v", afterPlan, beforePlan)
 		}
-		if !reflect.DeepEqual(afterReport, beforeReport) {
+		afterReportForCompare := afterReport
+		beforeReportForCompare := beforeReport
+		afterReportForCompare.ReplayDuration = 0
+		beforeReportForCompare.ReplayDuration = 0
+		if !reflect.DeepEqual(afterReportForCompare, beforeReportForCompare) {
 			t.Fatalf("post-rejection report = %+v, want pre-rejection report %+v after failed compaction at tx %d",
 				afterReport, beforeReport, futureSnapshotTxID)
 		}

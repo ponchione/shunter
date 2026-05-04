@@ -53,7 +53,7 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 		return "internal_error"
 	}
 	tx.Seal()
-	changeset, err := store.Commit(e.committed, tx)
+	changeset, err := e.commitTransaction(tx)
 	if err != nil {
 		store.Rollback(tx)
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("commit: %w", err))
@@ -105,7 +105,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 		return "internal_error"
 	}
 	tx.Seal()
-	changeset, err := store.Commit(e.committed, tx)
+	changeset, err := e.commitTransaction(tx)
 	if err != nil {
 		store.Rollback(tx)
 		respondLifecycle(cmd.ResponseCh, StatusFailedInternal, 0, fmt.Errorf("commit: %w", err))
@@ -163,7 +163,7 @@ func (e *Executor) sweepDanglingClients(ctx context.Context) error {
 			return err
 		}
 		tx.Seal()
-		changeset, err := store.Commit(e.committed, tx)
+		changeset, err := e.commitTransaction(tx)
 		if err != nil {
 			store.Rollback(tx)
 			return fmt.Errorf("sweep commit conn=%x: %w", t.conn[:], err)

@@ -400,6 +400,12 @@ var metricFamilies = []metricFamily{
 		help:   "Fatal durability failures.",
 	},
 	{
+		name:   shunter.MetricSnapshotDurationSeconds,
+		kind:   metricKindHistogram,
+		labels: []string{"module", "runtime", "result"},
+		help:   "Time spent creating commitlog snapshots.",
+	},
+	{
 		name:   shunter.MetricSubscriptionActive,
 		kind:   metricKindGauge,
 		labels: []string{"module", "runtime"},
@@ -446,6 +452,18 @@ var metricFamilies = []metricFamily{
 		kind:   metricKindCounter,
 		labels: []string{"module", "runtime", "reason"},
 		help:   "Skipped recovery snapshots.",
+	},
+	{
+		name:   shunter.MetricRecoveryReplayDurationSeconds,
+		kind:   metricKindHistogram,
+		labels: []string{"module", "runtime", "result"},
+		help:   "Time spent replaying commitlog records during recovery.",
+	},
+	{
+		name:   shunter.MetricStoreCommitDurationSeconds,
+		kind:   metricKindHistogram,
+		labels: []string{"module", "runtime", "result"},
+		help:   "Time spent applying store commits to committed state.",
 	},
 	{
 		name:   shunter.MetricStoreReadRowsTotal,

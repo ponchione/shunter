@@ -38,6 +38,7 @@ var expectedMetricFamilies = []shunter.MetricName{
 	shunter.MetricDurabilityDurableTxID,
 	shunter.MetricDurabilityQueueDepth,
 	shunter.MetricDurabilityFailuresTotal,
+	shunter.MetricSnapshotDurationSeconds,
 	shunter.MetricSubscriptionActive,
 	shunter.MetricSubscriptionEvalDurationSeconds,
 	shunter.MetricSubscriptionFanoutErrorsTotal,
@@ -46,6 +47,8 @@ var expectedMetricFamilies = []shunter.MetricName{
 	shunter.MetricRecoveryRecoveredTxID,
 	shunter.MetricRecoveryDamagedTailSegments,
 	shunter.MetricRecoverySkippedSnapshotsTotal,
+	shunter.MetricRecoveryReplayDurationSeconds,
+	shunter.MetricStoreCommitDurationSeconds,
 	shunter.MetricStoreReadRowsTotal,
 }
 
@@ -67,6 +70,7 @@ var expectedMetricTypes = map[shunter.MetricName]string{
 	shunter.MetricDurabilityDurableTxID:           "GAUGE",
 	shunter.MetricDurabilityQueueDepth:            "GAUGE",
 	shunter.MetricDurabilityFailuresTotal:         "COUNTER",
+	shunter.MetricSnapshotDurationSeconds:         "HISTOGRAM",
 	shunter.MetricSubscriptionActive:              "GAUGE",
 	shunter.MetricSubscriptionEvalDurationSeconds: "HISTOGRAM",
 	shunter.MetricSubscriptionFanoutErrorsTotal:   "COUNTER",
@@ -75,6 +79,8 @@ var expectedMetricTypes = map[shunter.MetricName]string{
 	shunter.MetricRecoveryRecoveredTxID:           "GAUGE",
 	shunter.MetricRecoveryDamagedTailSegments:     "GAUGE",
 	shunter.MetricRecoverySkippedSnapshotsTotal:   "COUNTER",
+	shunter.MetricRecoveryReplayDurationSeconds:   "HISTOGRAM",
+	shunter.MetricStoreCommitDurationSeconds:      "HISTOGRAM",
 	shunter.MetricStoreReadRowsTotal:              "COUNTER",
 }
 
@@ -96,6 +102,7 @@ var expectedMetricLabels = map[shunter.MetricName][]string{
 	shunter.MetricDurabilityDurableTxID:           {"module", "runtime"},
 	shunter.MetricDurabilityQueueDepth:            {"module", "runtime"},
 	shunter.MetricDurabilityFailuresTotal:         {"module", "runtime", "reason"},
+	shunter.MetricSnapshotDurationSeconds:         {"module", "runtime", "result"},
 	shunter.MetricSubscriptionActive:              {"module", "runtime"},
 	shunter.MetricSubscriptionEvalDurationSeconds: {"module", "runtime", "result"},
 	shunter.MetricSubscriptionFanoutErrorsTotal:   {"module", "runtime", "reason"},
@@ -104,6 +111,8 @@ var expectedMetricLabels = map[shunter.MetricName][]string{
 	shunter.MetricRecoveryRecoveredTxID:           {"module", "runtime"},
 	shunter.MetricRecoveryDamagedTailSegments:     {"module", "runtime"},
 	shunter.MetricRecoverySkippedSnapshotsTotal:   {"module", "runtime", "reason"},
+	shunter.MetricRecoveryReplayDurationSeconds:   {"module", "runtime", "result"},
+	shunter.MetricStoreCommitDurationSeconds:      {"module", "runtime", "result"},
 	shunter.MetricStoreReadRowsTotal:              {"module", "runtime", "kind"},
 }
 
@@ -281,13 +290,19 @@ func TestDurationHistogramsExposeExactSpecBucketBoundaries(t *testing.T) {
 	recorder := adapter.Recorder()
 	recorder.ObserveHistogram(shunter.MetricExecutorCommandDurationSeconds, sampleLabelsFor(shunter.MetricExecutorCommandDurationSeconds), 0.003)
 	recorder.ObserveHistogram(shunter.MetricReducerDurationSeconds, sampleLabelsFor(shunter.MetricReducerDurationSeconds), 0.003)
+	recorder.ObserveHistogram(shunter.MetricSnapshotDurationSeconds, sampleLabelsFor(shunter.MetricSnapshotDurationSeconds), 0.003)
 	recorder.ObserveHistogram(shunter.MetricSubscriptionEvalDurationSeconds, sampleLabelsFor(shunter.MetricSubscriptionEvalDurationSeconds), 0.003)
+	recorder.ObserveHistogram(shunter.MetricRecoveryReplayDurationSeconds, sampleLabelsFor(shunter.MetricRecoveryReplayDurationSeconds), 0.003)
+	recorder.ObserveHistogram(shunter.MetricStoreCommitDurationSeconds, sampleLabelsFor(shunter.MetricStoreCommitDurationSeconds), 0.003)
 
 	families := gatherFamilies(t, registry)
 	for _, name := range []shunter.MetricName{
 		shunter.MetricExecutorCommandDurationSeconds,
 		shunter.MetricReducerDurationSeconds,
+		shunter.MetricSnapshotDurationSeconds,
 		shunter.MetricSubscriptionEvalDurationSeconds,
+		shunter.MetricRecoveryReplayDurationSeconds,
+		shunter.MetricStoreCommitDurationSeconds,
 	} {
 		family := families[publicFamilyName("shunter", name)]
 		if family == nil {
@@ -539,6 +554,8 @@ func sampleLabelsFor(name shunter.MetricName) shunter.MetricLabels {
 		labels.Result = "committed"
 	case shunter.MetricDurabilityFailuresTotal:
 		labels.Reason = "sync_failed"
+	case shunter.MetricSnapshotDurationSeconds:
+		labels.Result = "ok"
 	case shunter.MetricSubscriptionEvalDurationSeconds:
 		labels.Result = "ok"
 	case shunter.MetricSubscriptionFanoutErrorsTotal:
@@ -549,6 +566,10 @@ func sampleLabelsFor(name shunter.MetricName) shunter.MetricLabels {
 		labels.Result = "success"
 	case shunter.MetricRecoverySkippedSnapshotsTotal:
 		labels.Reason = "read_failed"
+	case shunter.MetricRecoveryReplayDurationSeconds:
+		labels.Result = "ok"
+	case shunter.MetricStoreCommitDurationSeconds:
+		labels.Result = "ok"
 	case shunter.MetricStoreReadRowsTotal:
 		labels.Kind = "table_scan"
 	}
