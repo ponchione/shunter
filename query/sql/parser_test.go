@@ -1360,13 +1360,7 @@ func TestParseSelectAllWithOrderByAndLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	if stmt.OrderBy == nil {
-		t.Fatal("OrderBy = nil, want name DESC")
-	}
-	if stmt.OrderBy.Table != "users" || stmt.OrderBy.Column != "name" || stmt.OrderBy.SourceQualifier != "" || !stmt.OrderBy.Desc {
-		t.Fatalf("OrderBy = %+v, want users.name DESC", *stmt.OrderBy)
-	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+	assertOrderBy(t, stmt, []OrderByColumn{{
 		Table:  "users",
 		Column: "name",
 		Desc:   true,
@@ -1407,13 +1401,7 @@ func TestParseOrderByQualifiedAliasAsc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	if stmt.OrderBy == nil {
-		t.Fatal("OrderBy = nil, want item.id ASC")
-	}
-	if stmt.OrderBy.Table != "users" || stmt.OrderBy.Column != "id" || stmt.OrderBy.SourceQualifier != "item" || stmt.OrderBy.Desc {
-		t.Fatalf("OrderBy = %+v, want users.id qualified by item ASC", *stmt.OrderBy)
-	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+	assertOrderBy(t, stmt, []OrderByColumn{{
 		Table:           "users",
 		Column:          "id",
 		SourceQualifier: "item",
@@ -1425,13 +1413,7 @@ func TestParseJoinOrderByQualifiedProjectedTableColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	if stmt.OrderBy == nil {
-		t.Fatal("OrderBy = nil, want o.id DESC")
-	}
-	if stmt.OrderBy.Table != "Orders" || stmt.OrderBy.Column != "id" || stmt.OrderBy.SourceQualifier != "o" || !stmt.OrderBy.Desc {
-		t.Fatalf("OrderBy = %+v, want Orders.id qualified by o DESC", *stmt.OrderBy)
-	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+	assertOrderBy(t, stmt, []OrderByColumn{{
 		Table:           "Orders",
 		Column:          "id",
 		SourceQualifier: "o",
@@ -1450,13 +1432,7 @@ func TestParseOrderByProjectionAlias(t *testing.T) {
 	if stmt.ProjectionColumns[0].Column != "score" || stmt.ProjectionColumns[0].OutputAlias != "rank" {
 		t.Fatalf("ProjectionColumns[0] = %+v, want score AS rank", stmt.ProjectionColumns[0])
 	}
-	if stmt.OrderBy == nil {
-		t.Fatal("OrderBy = nil, want rank")
-	}
-	if stmt.OrderBy.Table != "metrics" || stmt.OrderBy.Column != "rank" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
-		t.Fatalf("OrderBy = %+v, want unqualified metrics.rank ASC token", *stmt.OrderBy)
-	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+	assertOrderBy(t, stmt, []OrderByColumn{{
 		Table:  "metrics",
 		Column: "rank",
 	}})
@@ -1473,13 +1449,7 @@ func TestParseOrderByProjectionImplicitName(t *testing.T) {
 	if stmt.ProjectionColumns[0].Column != "score" || stmt.ProjectionColumns[0].OutputAlias != "" {
 		t.Fatalf("ProjectionColumns[0] = %+v, want implicit score output name", stmt.ProjectionColumns[0])
 	}
-	if stmt.OrderBy == nil {
-		t.Fatal("OrderBy = nil, want score")
-	}
-	if stmt.OrderBy.Table != "metrics" || stmt.OrderBy.Column != "score" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
-		t.Fatalf("OrderBy = %+v, want unqualified metrics.score ASC token", *stmt.OrderBy)
-	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+	assertOrderBy(t, stmt, []OrderByColumn{{
 		Table:  "metrics",
 		Column: "score",
 	}})
@@ -1496,13 +1466,7 @@ func TestParseJoinOrderByProjectionOutputName(t *testing.T) {
 	if stmt.ProjectionColumns[0].Table != "Orders" || stmt.ProjectionColumns[0].Column != "id" || stmt.ProjectionColumns[0].OutputAlias != "order_id" {
 		t.Fatalf("ProjectionColumns[0] = %+v, want Orders.id AS order_id", stmt.ProjectionColumns[0])
 	}
-	if stmt.OrderBy == nil {
-		t.Fatal("OrderBy = nil, want order_id")
-	}
-	if stmt.OrderBy.Table != "" || stmt.OrderBy.Column != "order_id" || stmt.OrderBy.SourceQualifier != "" || stmt.OrderBy.Desc {
-		t.Fatalf("OrderBy = %+v, want unqualified projection output name order_id", *stmt.OrderBy)
-	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{{
+	assertOrderBy(t, stmt, []OrderByColumn{{
 		Column: "order_id",
 	}})
 }
@@ -1512,13 +1476,7 @@ func TestParseMultiColumnOrderBy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	if stmt.OrderBy == nil {
-		t.Fatal("OrderBy = nil, want first term")
-	}
-	if stmt.OrderBy.Column != "active" || !stmt.OrderBy.Desc {
-		t.Fatalf("OrderBy = %+v, want active DESC first term", *stmt.OrderBy)
-	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{
+	assertOrderBy(t, stmt, []OrderByColumn{
 		{Table: "users", Column: "active", Desc: true},
 		{Table: "users", Column: "name"},
 		{Table: "users", Column: "id"},
@@ -1530,7 +1488,7 @@ func TestParseMultiColumnOrderByQualifiedTerms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{
+	assertOrderBy(t, stmt, []OrderByColumn{
 		{Table: "users", Column: "active", SourceQualifier: "item", Desc: true},
 		{Table: "users", Column: "name", SourceQualifier: "item"},
 	})
@@ -1541,7 +1499,7 @@ func TestParseMultiColumnOrderByProjectionAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{
+	assertOrderBy(t, stmt, []OrderByColumn{
 		{Table: "metrics", Column: "rank", Desc: true},
 		{Table: "metrics", Column: "id"},
 	})
@@ -1552,7 +1510,7 @@ func TestParseMultiColumnJoinOrderByProjectionOutputNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	assertOrderByColumns(t, stmt.OrderByColumns, []OrderByColumn{
+	assertOrderBy(t, stmt, []OrderByColumn{
 		{Column: "q", Desc: true},
 		{Column: "order_id"},
 	})
@@ -1577,6 +1535,24 @@ func TestParseRejectsUnqualifiedJoinOrderBy(t *testing.T) {
 	if !errors.Is(err, ErrUnsupportedSQL) {
 		t.Fatalf("Parse err = %v, want ErrUnsupportedSQL", err)
 	}
+}
+
+func assertOrderBy(t *testing.T, stmt Statement, want []OrderByColumn) {
+	t.Helper()
+	if len(want) == 0 {
+		if stmt.OrderBy != nil {
+			t.Fatalf("OrderBy = %+v, want nil", *stmt.OrderBy)
+		}
+		assertOrderByColumns(t, stmt.OrderByColumns, want)
+		return
+	}
+	if stmt.OrderBy == nil {
+		t.Fatalf("OrderBy = nil, want %+v", want[0])
+	}
+	if !reflect.DeepEqual(*stmt.OrderBy, want[0]) {
+		t.Fatalf("OrderBy = %+v, want %+v", *stmt.OrderBy, want[0])
+	}
+	assertOrderByColumns(t, stmt.OrderByColumns, want)
 }
 
 func assertOrderByColumns(t *testing.T, got []OrderByColumn, want []OrderByColumn) {
