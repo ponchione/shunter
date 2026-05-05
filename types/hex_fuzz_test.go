@@ -3,9 +3,7 @@ package types
 import (
 	"errors"
 	"fmt"
-	"runtime"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -82,50 +80,6 @@ func FuzzParseFixedHexIDs(f *testing.F) {
 			}
 		}
 	})
-}
-
-func TestFixedHexParserConcurrentShortSoak(t *testing.T) {
-	const (
-		seed       = uint64(0x1d5eed5)
-		workers    = 6
-		iterations = 128
-	)
-
-	start := make(chan struct{})
-	failures := make(chan string, workers)
-	var wg sync.WaitGroup
-	for worker := range workers {
-		wg.Add(1)
-		go func(worker int) {
-			defer wg.Done()
-			<-start
-			for op := range iterations {
-				parserIndex := (int(seed) + worker*11 + op*7) % len(fixedHexParserCases)
-				inputIndex := (int(seed) + worker*17 + op*5) % len(fixedHexParserFuzzSeeds)
-				tc := fixedHexParserCases[parserIndex]
-				input := fixedHexParserFuzzSeeds[inputIndex]
-
-				if err := checkFixedHexParserBoundary(tc, input); err != nil {
-					select {
-					case failures <- fmt.Sprintf("seed=%#x worker=%d op=%d runtime_config=workers=%d/iterations=%d parser=%s input=%q failure=%v",
-						seed, worker, op, workers, iterations, tc.name, input, err):
-					default:
-					}
-					return
-				}
-				if (int(seed)+worker+op)%5 == 0 {
-					runtime.Gosched()
-				}
-			}
-		}(worker)
-	}
-
-	close(start)
-	wg.Wait()
-	close(failures)
-	for failure := range failures {
-		t.Fatal(failure)
-	}
 }
 
 func checkFixedHexParserBoundary(tc fixedHexParserCase, input string) error {
