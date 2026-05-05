@@ -78,3 +78,10 @@ func (e *UniqueConstraintViolationError) Error() string {
 }
 
 func (e *UniqueConstraintViolationError) Unwrap() error { return ErrUniqueConstraintViolation }
+
+func uniqueViolationError(table *Table, idx *Index, key IndexKey) error {
+	if idx.schema.Primary {
+		return &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+	}
+	return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+}

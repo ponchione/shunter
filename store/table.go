@@ -194,18 +194,7 @@ func (t *Table) insertIntoIndexes(id types.RowID, row types.ProductValue) error 
 					rk := t.indexes[j].ExtractKey(row)
 					t.indexes[j].btree.Remove(rk, id)
 				}
-				if idx.schema.Primary {
-					return &PrimaryKeyViolationError{
-						TableName: t.schema.Name,
-						IndexName: idx.schema.Name,
-						Key:       key,
-					}
-				}
-				return &UniqueConstraintViolationError{
-					TableName: t.schema.Name,
-					IndexName: idx.schema.Name,
-					Key:       key,
-				}
+				return uniqueViolationError(t, idx, key)
 			}
 		}
 

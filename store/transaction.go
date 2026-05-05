@@ -330,10 +330,7 @@ func (t *Transaction) checkCommittedUnique(tableID schema.TableID, table *Table,
 		if t.tx.IsDeleted(tableID, rid) {
 			continue
 		}
-		if idx.schema.Primary {
-			return &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
-		}
-		return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+		return uniqueViolationError(table, idx, key)
 	}
 	return nil
 }
@@ -342,10 +339,7 @@ func (t *Transaction) checkTxUnique(tableID schema.TableID, table *Table, idxOrd
 	entries := t.ensureTxUniqueIndex(tableID, idxOrdinal, idx)
 	for _, entry := range entries[key.hash64()] {
 		if key.Equal(entry.key) {
-			if idx.schema.Primary {
-				return &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
-			}
-			return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+			return uniqueViolationError(table, idx, key)
 		}
 	}
 	return nil

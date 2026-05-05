@@ -159,10 +159,7 @@ func revalidateInsertAgainstPending(tableID schema.TableID, table *Table, row ty
 		}
 		for _, priorKey := range buckets[key.hash64()] {
 			if key.Equal(priorKey) {
-				if idx.schema.Primary {
-					return &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
-				}
-				return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+				return uniqueViolationError(table, idx, key)
 			}
 		}
 	}
@@ -211,10 +208,7 @@ func revalidateInsertAgainstCommitted(tableID schema.TableID, table *Table, row 
 			if txState.IsDeleted(tableID, rid) {
 				continue
 			}
-			if idx.schema.Primary {
-				return &PrimaryKeyViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
-			}
-			return &UniqueConstraintViolationError{TableName: table.schema.Name, IndexName: idx.schema.Name, Key: key}
+			return uniqueViolationError(table, idx, key)
 		}
 	}
 
