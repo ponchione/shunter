@@ -872,7 +872,7 @@ func TestOffsetIndexWriterFixedSeedCadenceTruncateSyncModel(t *testing.T) {
 	seeds := []uint64{0x0ff1ce17, 0x5eedcafe, 0x1badcafe}
 
 	for _, seed := range seeds {
-		idx, _ := mustCreate(t, capEntries)
+		idx, path := mustCreate(t, capEntries)
 		w := NewOffsetIndexWriter(idx, interval)
 		model := offsetIndexWriterModel{cap: capEntries, interval: interval}
 		rng := offsetIndexSoakRand{state: seed}
@@ -910,7 +910,7 @@ func TestOffsetIndexWriterFixedSeedCadenceTruncateSyncModel(t *testing.T) {
 		if err := w.Close(); err != nil {
 			t.Fatalf("seed=%#x final Close: %v", seed, err)
 		}
-		ro, err := OpenOffsetIndex(idx.path)
+		ro, err := OpenOffsetIndex(path)
 		if err != nil {
 			t.Fatalf("seed=%#x final OpenOffsetIndex: %v", seed, err)
 		}

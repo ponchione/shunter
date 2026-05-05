@@ -38,7 +38,6 @@ type OffsetIndexEntry struct {
 // txID <= lastKey (including 0) are rejected as non-monotonic. Mutable reopen
 // clears any ignored tail so later appends cannot resurrect stale entries.
 type OffsetIndexMut struct {
-	path       string
 	f          *os.File
 	cap        uint64
 	numEntries uint64
@@ -65,7 +64,7 @@ func CreateOffsetIndex(path string, cap uint64) (*OffsetIndexMut, error) {
 		os.Remove(path)
 		return nil, err
 	}
-	return &OffsetIndexMut{path: path, f: f, cap: cap}, nil
+	return &OffsetIndexMut{f: f, cap: cap}, nil
 }
 
 // OpenOffsetIndexMut opens an existing index file for append. Scans the
@@ -109,7 +108,7 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 			return nil, err
 		}
 	}
-	return &OffsetIndexMut{path: path, f: f, cap: cap, numEntries: n, lastKey: last}, nil
+	return &OffsetIndexMut{f: f, cap: cap, numEntries: n, lastKey: last}, nil
 }
 
 func requireCreatableOffsetIndexPath(path string) error {
@@ -255,7 +254,6 @@ func (o *OffsetIndexMut) Close() error {
 
 // OffsetIndex is a read-only view over an on-disk sparse offset index.
 type OffsetIndex struct {
-	path       string
 	f          *os.File
 	numEntries uint64
 }
@@ -280,7 +278,7 @@ func OpenOffsetIndex(path string) (*OffsetIndex, error) {
 		f.Close()
 		return nil, err
 	}
-	return &OffsetIndex{path: path, f: f, numEntries: n}, nil
+	return &OffsetIndex{f: f, numEntries: n}, nil
 }
 
 // KeyLookup returns the entry with the largest key <= target. Returns
