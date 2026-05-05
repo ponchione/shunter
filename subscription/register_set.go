@@ -58,52 +58,26 @@ func (c *initialRowCollector) add(out *[]types.ProductValue, row types.ProductVa
 	return nil
 }
 
-// initialQuery scans committed state and returns rows matching the
-// predicate. Single-table predicates use a filtered table scan. Join
-// predicates re-evaluate the full join against committed state and project
-// each joined pair down to the subscription's SELECT side (Join.ProjectRight).
-func (m *Manager) initialQuery(ctx context.Context, pred Predicate, view store.CommittedReadView) ([]types.ProductValue, error) {
-	if view == nil {
-		return nil, nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	var out []types.ProductValue
-
-	switch p := pred.(type) {
-	case Join:
-		joinedRows, err := m.appendProjectedJoinRows(ctx, out, view, p)
-		if err != nil {
-			return nil, err
-		}
-		out = joinedRows
-	case CrossJoin:
-		crossRows, err := m.appendProjectedCrossJoinRows(ctx, out, view, p)
-		if err != nil {
-			return nil, err
-		}
-		out = crossRows
-	default:
-		tables := pred.Tables()
-		if len(tables) == 0 {
-			return nil, nil
-		}
-		return m.initialRowsForTable(newInitialRowCollector(ctx, m.InitialRowLimit), pred, view, tables[0])
-	}
-	return out, nil
-}
-
 func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store.CommittedReadView, subID types.SubscriptionID, queryID uint32) ([]SubscriptionUpdate, error) {
 	if view == nil {
 		return nil, nil
 	}
-	switch pred.(type) {
+	switch p := pred.(type) {
 	case Join, CrossJoin:
-		rows, err := m.initialQuery(ctx, pred, view)
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var rows []types.ProductValue
+		var err error
+		switch p := p.(type) {
+		case Join:
+			rows, err = m.appendProjectedJoinRows(ctx, nil, view, p)
+		case CrossJoin:
+			rows, err = m.appendProjectedCrossJoinRows(ctx, nil, view, p)
+		}
 		if err != nil {
 			return nil, err
 		}
