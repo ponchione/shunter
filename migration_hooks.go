@@ -160,6 +160,18 @@ func RunDataDirMigrations(ctx context.Context, mod *Module, cfg Config, hooks ..
 	return result, nil
 }
 
+// RunModuleDataDirMigrations runs hooks registered on mod with
+// Module.MigrationHook against cfg.DataDir without starting normal runtime
+// services. It is a convenience wrapper for app-owned offline migration
+// binaries that want to reuse the same hook declarations as Runtime.Start.
+func RunModuleDataDirMigrations(ctx context.Context, mod *Module, cfg Config) (MigrationRunResult, error) {
+	if mod == nil {
+		return RunDataDirMigrations(ctx, mod, cfg)
+	}
+	hooks := copyMigrationHooks(mod.migrationHooks)
+	return RunDataDirMigrations(ctx, mod, cfg, hooks...)
+}
+
 func (r *Runtime) runMigrationHooks(ctx context.Context, durability *commitlog.DurabilityWorker) error {
 	if len(r.module.migrationHooks) == 0 {
 		return nil

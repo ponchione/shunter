@@ -9,6 +9,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Pinned one-off aggregate empty-input semantics for `COUNT` and `SUM`.
 - Added `shunter.CheckDataDirCompatibility` for app-owned offline startup schema preflights.
 - Added `shunter.RunDataDirMigrations` for app-owned offline executable migrations.
+- Added `shunter.RunModuleDataDirMigrations` for offline execution of hooks registered with `Module.MigrationHook`.
 - Added app-owned startup migration hooks through `Module.MigrationHook`.
 - Tightened generated TypeScript client callback types to use contract-derived table, reducer, and executable declared query/view name unions.
 - Improved startup snapshot schema mismatch diagnostics to report multiple structural differences in one failure.

@@ -234,6 +234,17 @@ if err := shunter.CheckDataDirCompatibility(mod, shunter.Config{DataDir: "./data
 }
 ```
 
+If the module declares startup migration hooks with `Module.MigrationHook`, an
+offline binary can run those same registered hooks after stopping the runtime:
+
+```go
+result, err := shunter.RunModuleDataDirMigrations(ctx, mod, shunter.Config{DataDir: "./data/chat"})
+if err != nil {
+	return err
+}
+_ = result.DurableTxID
+```
+
 App-owned binaries can perform the offline directory copy after runtime
 ownership has stopped:
 

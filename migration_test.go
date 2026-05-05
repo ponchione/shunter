@@ -335,6 +335,60 @@ func TestRunDataDirMigrationsExecutesOfflineAndLeavesModuleBuildable(t *testing.
 	requireMigrationMessageBodies(t, restarted, "offline-seed", "after-runner")
 }
 
+func TestRunModuleDataDirMigrationsUsesRegisteredHooks(t *testing.T) {
+	dir := t.TempDir()
+	mod := validChatModule().
+		Reducer("insert_after_module_runner", func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+			_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(2), types.NewString("after-module-runner")})
+			return nil, err
+		}).
+		MigrationHook(func(_ context.Context, mc *MigrationContext) error {
+			if mc.CommittedTxID() != 0 {
+				return nil
+			}
+			tableID, _, ok := mc.Schema().TableByName("messages")
+			if !ok {
+				return fmt.Errorf("messages table missing from migration schema")
+			}
+			_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("registered-hook")})
+			return err
+		})
+
+	result, err := RunModuleDataDirMigrations(context.Background(), mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("RunModuleDataDirMigrations: %v", err)
+	}
+	if result.DataDir != dir {
+		t.Fatalf("result data dir = %q, want %q", result.DataDir, dir)
+	}
+	if result.RecoveredTxID != 0 || result.DurableTxID != 1 {
+		t.Fatalf("result tx ids recovered/durable = %d/%d, want 0/1", result.RecoveredTxID, result.DurableTxID)
+	}
+	requireMigrationHookResults(t, result.Hooks, MigrationHookResult{Index: 0, TxID: 1, Changed: true})
+
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build after module migration runner: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start after module migration runner: %v", err)
+	}
+	defer rt.Close()
+	requireMigrationMessageBodies(t, rt, "registered-hook")
+
+	res, err := rt.CallReducer(context.Background(), "insert_after_module_runner", nil)
+	if err != nil {
+		t.Fatalf("CallReducer after module migration runner: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+	if res.TxID != 2 {
+		t.Fatalf("first runtime tx id after module migration runner = %d, want 2", res.TxID)
+	}
+	requireMigrationMessageBodies(t, rt, "registered-hook", "after-module-runner")
+}
+
 func TestRunDataDirMigrationsNoopHookDoesNotConsumeTxID(t *testing.T) {
 	dir := t.TempDir()
 	result, err := RunDataDirMigrations(context.Background(), validChatModule(), Config{DataDir: dir}, func(_ context.Context, mc *MigrationContext) error {
