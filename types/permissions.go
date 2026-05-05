@@ -1,5 +1,7 @@
 package types
 
+import "slices"
+
 // MissingRequiredPermission returns the first non-empty required permission not
 // granted to caller. AllowAllPermissions bypasses the check.
 func MissingRequiredPermission(caller CallerContext, required []string) (string, bool) {
@@ -10,14 +12,7 @@ func MissingRequiredPermission(caller CallerContext, required []string) (string,
 		if requiredPermission == "" {
 			continue
 		}
-		found := false
-		for _, granted := range caller.Permissions {
-			if granted == requiredPermission {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(caller.Permissions, requiredPermission) {
 			return requiredPermission, true
 		}
 	}
