@@ -43,90 +43,59 @@ func indexRangeCollect(seq func(func(types.RowID, types.ProductValue) bool)) []u
 	return out
 }
 
-func TestCommittedSnapshotIndexRangeExclusiveLowInclusiveHigh(t *testing.T) {
-	cs, _ := indexRangeSetup(t, 5)
-	snap := cs.Snapshot()
-	defer snap.Close()
-	got := indexRangeCollect(snap.IndexRange(
-		0, schema.IndexID(0),
-		Exclusive(types.NewUint64(2)),
-		Inclusive(types.NewUint64(4)),
-	))
-	want := []uint64{3, 4}
-	if !slices.Equal(got, want) {
-		t.Fatalf("(2,4] = %v, want %v", got, want)
+func TestCommittedSnapshotIndexRangeCases(t *testing.T) {
+	tests := []struct {
+		name string
+		low  Bound
+		high Bound
+		want []uint64
+	}{
+		{
+			name: "exclusive low inclusive high",
+			low:  Exclusive(types.NewUint64(2)),
+			high: Inclusive(types.NewUint64(4)),
+			want: []uint64{3, 4},
+		},
+		{
+			name: "exclusive low exclusive high",
+			low:  Exclusive(types.NewUint64(2)),
+			high: Exclusive(types.NewUint64(4)),
+			want: []uint64{3},
+		},
+		{
+			name: "unbounded high",
+			low:  Inclusive(types.NewUint64(3)),
+			high: UnboundedHigh(),
+			want: []uint64{3, 4, 5},
+		},
+		{
+			name: "both unbounded ordered scan",
+			low:  UnboundedLow(),
+			high: UnboundedHigh(),
+			want: []uint64{1, 2, 3, 4, 5},
+		},
+		{
+			name: "low greater than high",
+			low:  Inclusive(types.NewUint64(4)),
+			high: Inclusive(types.NewUint64(2)),
+		},
+		{
+			name: "exclusive endpoints at same key",
+			low:  Exclusive(types.NewUint64(3)),
+			high: Exclusive(types.NewUint64(3)),
+		},
 	}
-}
 
-func TestCommittedSnapshotIndexRangeExclusiveLowExclusiveHigh(t *testing.T) {
-	cs, _ := indexRangeSetup(t, 5)
-	snap := cs.Snapshot()
-	defer snap.Close()
-	got := indexRangeCollect(snap.IndexRange(
-		0, schema.IndexID(0),
-		Exclusive(types.NewUint64(2)),
-		Exclusive(types.NewUint64(4)),
-	))
-	want := []uint64{3}
-	if !slices.Equal(got, want) {
-		t.Fatalf("(2,4) = %v, want %v", got, want)
-	}
-}
-
-func TestCommittedSnapshotIndexRangeUnboundedHigh(t *testing.T) {
-	cs, _ := indexRangeSetup(t, 5)
-	snap := cs.Snapshot()
-	defer snap.Close()
-	got := indexRangeCollect(snap.IndexRange(
-		0, schema.IndexID(0),
-		Inclusive(types.NewUint64(3)),
-		UnboundedHigh(),
-	))
-	want := []uint64{3, 4, 5}
-	if !slices.Equal(got, want) {
-		t.Fatalf("[3,+∞) = %v, want %v", got, want)
-	}
-}
-
-func TestCommittedSnapshotIndexRangeBothUnboundedEqualsOrderedScan(t *testing.T) {
-	cs, _ := indexRangeSetup(t, 5)
-	snap := cs.Snapshot()
-	defer snap.Close()
-	got := indexRangeCollect(snap.IndexRange(
-		0, schema.IndexID(0),
-		UnboundedLow(), UnboundedHigh(),
-	))
-	want := []uint64{1, 2, 3, 4, 5}
-	if !slices.Equal(got, want) {
-		t.Fatalf("unbounded = %v, want full ordered scan %v", got, want)
-	}
-}
-
-func TestCommittedSnapshotIndexRangeEmptyRangeLowGreaterThanHigh(t *testing.T) {
-	cs, _ := indexRangeSetup(t, 5)
-	snap := cs.Snapshot()
-	defer snap.Close()
-	got := indexRangeCollect(snap.IndexRange(
-		0, schema.IndexID(0),
-		Inclusive(types.NewUint64(4)),
-		Inclusive(types.NewUint64(2)),
-	))
-	if len(got) != 0 {
-		t.Fatalf("low > high must yield empty, got %v", got)
-	}
-}
-
-func TestCommittedSnapshotIndexRangeExclusiveEndpointsAtSameKey(t *testing.T) {
-	cs, _ := indexRangeSetup(t, 5)
-	snap := cs.Snapshot()
-	defer snap.Close()
-	got := indexRangeCollect(snap.IndexRange(
-		0, schema.IndexID(0),
-		Exclusive(types.NewUint64(3)),
-		Exclusive(types.NewUint64(3)),
-	))
-	if len(got) != 0 {
-		t.Fatalf("(3,3) must yield empty, got %v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs, _ := indexRangeSetup(t, 5)
+			snap := cs.Snapshot()
+			defer snap.Close()
+			got := indexRangeCollect(snap.IndexRange(0, schema.IndexID(0), tt.low, tt.high))
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("IndexRange got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

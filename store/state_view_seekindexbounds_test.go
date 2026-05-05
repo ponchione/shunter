@@ -34,117 +34,108 @@ func seekIndexBoundsCollectSorted(seq func(func(types.RowID) bool)) []types.RowI
 	return out
 }
 
-func TestStateViewSeekIndexBoundsExclusiveLowInclusiveHigh(t *testing.T) {
-	cs, ids := seekIndexBoundsSetup(t, 5)
-	sv := NewStateView(cs, NewTxState())
-	got := seekIndexBoundsCollectSorted(sv.SeekIndexBounds(
-		0, schema.IndexID(0),
-		Exclusive(types.NewUint64(2)),
-		Inclusive(types.NewUint64(4)),
-	))
-	want := []types.RowID{ids[2], ids[3]}
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Fatalf("(2,4] = %v, want %v", got, want)
+func TestStateViewSeekIndexBoundsCases(t *testing.T) {
+	tests := []struct {
+		name          string
+		committedRows int
+		low           Bound
+		high          Bound
+		configureTx   func(*TxState, []types.RowID)
+		want          func([]types.RowID) []types.RowID
+	}{
+		{
+			name:          "exclusive low inclusive high",
+			committedRows: 5,
+			low:           Exclusive(types.NewUint64(2)),
+			high:          Inclusive(types.NewUint64(4)),
+			want: func(ids []types.RowID) []types.RowID {
+				return []types.RowID{ids[2], ids[3]}
+			},
+		},
+		{
+			name:          "inclusive low exclusive high",
+			committedRows: 5,
+			low:           Inclusive(types.NewUint64(2)),
+			high:          Exclusive(types.NewUint64(4)),
+			want: func(ids []types.RowID) []types.RowID {
+				return []types.RowID{ids[1], ids[2]}
+			},
+		},
+		{
+			name:          "both unbounded",
+			committedRows: 5,
+			low:           UnboundedLow(),
+			high:          UnboundedHigh(),
+			want: func(ids []types.RowID) []types.RowID {
+				return append([]types.RowID(nil), ids...)
+			},
+		},
+		{
+			name:          "filters tx deletes",
+			committedRows: 5,
+			low:           Inclusive(types.NewUint64(2)),
+			high:          Inclusive(types.NewUint64(4)),
+			configureTx: func(tx *TxState, ids []types.RowID) {
+				tx.AddDelete(0, ids[2])
+			},
+			want: func(ids []types.RowID) []types.RowID {
+				return []types.RowID{ids[1], ids[3]}
+			},
+		},
+		{
+			name:          "includes tx inserts in range",
+			committedRows: 5,
+			low:           Inclusive(types.NewUint64(3)),
+			high:          Inclusive(types.NewUint64(3)),
+			configureTx: func(tx *TxState, _ []types.RowID) {
+				tx.AddInsert(0, 9001, mkRow(3, "tx"))
+			},
+			want: func(ids []types.RowID) []types.RowID {
+				return []types.RowID{ids[2], 9001}
+			},
+		},
+		{
+			name:          "excludes tx inserts out of range",
+			committedRows: 5,
+			low:           Inclusive(types.NewUint64(1)),
+			high:          Inclusive(types.NewUint64(5)),
+			configureTx: func(tx *TxState, _ []types.RowID) {
+				tx.AddInsert(0, 9001, mkRow(100, "tx-out-of-range"))
+			},
+			want: func(ids []types.RowID) []types.RowID {
+				return append([]types.RowID(nil), ids...)
+			},
+		},
+		{
+			name:          "tx insert exclusive boundary",
+			committedRows: 0,
+			low:           Exclusive(types.NewUint64(3)),
+			high:          UnboundedHigh(),
+			configureTx: func(tx *TxState, _ []types.RowID) {
+				tx.AddInsert(0, 9001, mkRow(3, "at-low"))
+				tx.AddInsert(0, 9002, mkRow(4, "above-low"))
+			},
+			want: func([]types.RowID) []types.RowID {
+				return []types.RowID{9002}
+			},
+		},
 	}
-}
 
-func TestStateViewSeekIndexBoundsInclusiveLowExclusiveHigh(t *testing.T) {
-	cs, ids := seekIndexBoundsSetup(t, 5)
-	sv := NewStateView(cs, NewTxState())
-	got := seekIndexBoundsCollectSorted(sv.SeekIndexBounds(
-		0, schema.IndexID(0),
-		Inclusive(types.NewUint64(2)),
-		Exclusive(types.NewUint64(4)),
-	))
-	want := []types.RowID{ids[1], ids[2]}
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Fatalf("[2,4) = %v, want %v", got, want)
-	}
-}
-
-func TestStateViewSeekIndexBoundsBothUnboundedEqualsScanAll(t *testing.T) {
-	cs, ids := seekIndexBoundsSetup(t, 5)
-	sv := NewStateView(cs, NewTxState())
-	got := seekIndexBoundsCollectSorted(sv.SeekIndexBounds(
-		0, schema.IndexID(0),
-		UnboundedLow(), UnboundedHigh(),
-	))
-	want := append([]types.RowID(nil), ids...)
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Fatalf("unbounded = %v, want all committed rows %v", got, want)
-	}
-}
-
-func TestStateViewSeekIndexBoundsFiltersTxDeletes(t *testing.T) {
-	cs, ids := seekIndexBoundsSetup(t, 5)
-	tx := NewTxState()
-	tx.AddDelete(0, ids[2]) // hide id=3
-	sv := NewStateView(cs, tx)
-	got := seekIndexBoundsCollectSorted(sv.SeekIndexBounds(
-		0, schema.IndexID(0),
-		Inclusive(types.NewUint64(2)),
-		Inclusive(types.NewUint64(4)),
-	))
-	want := []types.RowID{ids[1], ids[3]}
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Fatalf("deletes must hide id=3: got %v, want %v", got, want)
-	}
-}
-
-func TestStateViewSeekIndexBoundsIncludesTxInsertsInRange(t *testing.T) {
-	cs, ids := seekIndexBoundsSetup(t, 5)
-	tx := NewTxState()
-	txID := types.RowID(9001)
-	tx.AddInsert(0, txID, mkRow(3, "tx"))
-	sv := NewStateView(cs, tx)
-	got := seekIndexBoundsCollectSorted(sv.SeekIndexBounds(
-		0, schema.IndexID(0),
-		Inclusive(types.NewUint64(3)),
-		Inclusive(types.NewUint64(3)),
-	))
-	want := []types.RowID{ids[2], txID}
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Fatalf("tx insert with key=3 must be included: got %v, want %v", got, want)
-	}
-}
-
-func TestStateViewSeekIndexBoundsExcludesTxInsertsOutOfRange(t *testing.T) {
-	cs, _ := seekIndexBoundsSetup(t, 5)
-	tx := NewTxState()
-	txID := types.RowID(9001)
-	tx.AddInsert(0, txID, mkRow(100, "tx-out-of-range"))
-	sv := NewStateView(cs, tx)
-	got := seekIndexBoundsCollectSorted(sv.SeekIndexBounds(
-		0, schema.IndexID(0),
-		Inclusive(types.NewUint64(1)),
-		Inclusive(types.NewUint64(5)),
-	))
-	if slices.Contains(got, txID) {
-		t.Fatalf("tx insert with key=100 leaked into [1,5]: got %v", got)
-	}
-}
-
-func TestStateViewSeekIndexBoundsTxInsertExclusiveBoundary(t *testing.T) {
-	cs, _ := seekIndexBoundsSetup(t, 0)
-	tx := NewTxState()
-	txAtLow := types.RowID(9001)
-	txAboveLow := types.RowID(9002)
-	tx.AddInsert(0, txAtLow, mkRow(3, "at-low"))
-	tx.AddInsert(0, txAboveLow, mkRow(4, "above-low"))
-	sv := NewStateView(cs, tx)
-	got := seekIndexBoundsCollectSorted(sv.SeekIndexBounds(
-		0, schema.IndexID(0),
-		Exclusive(types.NewUint64(3)),
-		UnboundedHigh(),
-	))
-	want := []types.RowID{txAboveLow}
-	if !slices.Equal(got, want) {
-		t.Fatalf("exclusive low must drop tx row at boundary: got %v, want %v", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs, ids := seekIndexBoundsSetup(t, tt.committedRows)
+			tx := NewTxState()
+			if tt.configureTx != nil {
+				tt.configureTx(tx, ids)
+			}
+			sv := NewStateView(cs, tx)
+			got := seekIndexBoundsCollectSorted(sv.SeekIndexBounds(0, schema.IndexID(0), tt.low, tt.high))
+			want := tt.want(ids)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Fatalf("SeekIndexBounds got %v, want %v", got, want)
+			}
+		})
 	}
 }
 

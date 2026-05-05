@@ -28,27 +28,107 @@ func seekBoundsCollect(seq func(func(types.RowID) bool)) []types.RowID {
 	return out
 }
 
-func TestBTreeSeekBoundsInclusiveInclusive(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Inclusive(types.NewUint64(2)),
-		Inclusive(types.NewUint64(4)),
-	))
-	want := []types.RowID{20, 30, 40}
-	if !slices.Equal(got, want) {
-		t.Fatalf("SeekBounds [2,4] = %v, want %v", got, want)
+func TestBTreeSeekBoundsCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		keys    []uint64
+		low     Bound
+		high    Bound
+		want    []types.RowID
+		wantNil bool
+	}{
+		{
+			name: "inclusive inclusive",
+			keys: []uint64{1, 2, 3, 4, 5},
+			low:  Inclusive(types.NewUint64(2)),
+			high: Inclusive(types.NewUint64(4)),
+			want: []types.RowID{20, 30, 40},
+		},
+		{
+			name: "exclusive exclusive",
+			keys: []uint64{1, 2, 3, 4, 5},
+			low:  Exclusive(types.NewUint64(2)),
+			high: Exclusive(types.NewUint64(4)),
+			want: []types.RowID{30},
+		},
+		{
+			name: "exclusive inclusive",
+			keys: []uint64{1, 2, 3, 4, 5},
+			low:  Exclusive(types.NewUint64(2)),
+			high: Inclusive(types.NewUint64(4)),
+			want: []types.RowID{30, 40},
+		},
+		{
+			name: "unbounded low",
+			keys: []uint64{1, 2, 3, 4, 5},
+			low:  UnboundedLow(),
+			high: Inclusive(types.NewUint64(3)),
+			want: []types.RowID{10, 20, 30},
+		},
+		{
+			name: "unbounded high",
+			keys: []uint64{1, 2, 3, 4, 5},
+			low:  Exclusive(types.NewUint64(3)),
+			high: UnboundedHigh(),
+			want: []types.RowID{40, 50},
+		},
+		{
+			name:    "low greater than high",
+			keys:    []uint64{1, 2, 3, 4, 5},
+			low:     Inclusive(types.NewUint64(4)),
+			high:    Inclusive(types.NewUint64(2)),
+			wantNil: true,
+		},
+		{
+			name:    "exclusive same value",
+			keys:    []uint64{1, 2, 3, 4, 5},
+			low:     Exclusive(types.NewUint64(3)),
+			high:    Exclusive(types.NewUint64(3)),
+			wantNil: true,
+		},
+		{
+			name: "inclusive same value",
+			keys: []uint64{1, 2, 3, 4, 5},
+			low:  Inclusive(types.NewUint64(3)),
+			high: Inclusive(types.NewUint64(3)),
+			want: []types.RowID{30},
+		},
+		{
+			name: "exclusive low at existing key",
+			keys: []uint64{1, 2, 3, 4, 5},
+			low:  Exclusive(types.NewUint64(3)),
+			high: Inclusive(types.NewUint64(5)),
+			want: []types.RowID{40, 50},
+		},
+		{
+			name: "exclusive low between existing keys",
+			keys: []uint64{10, 20, 30},
+			low:  Exclusive(types.NewUint64(15)),
+			high: UnboundedHigh(),
+			want: []types.RowID{200, 300},
+		},
+		{
+			name:    "empty index",
+			low:     UnboundedLow(),
+			high:    UnboundedHigh(),
+			wantNil: true,
+		},
 	}
-}
 
-func TestBTreeSeekBoundsExclusiveExclusive(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Exclusive(types.NewUint64(2)),
-		Exclusive(types.NewUint64(4)),
-	))
-	want := []types.RowID{30}
-	if !slices.Equal(got, want) {
-		t.Fatalf("SeekBounds (2,4) = %v, want %v", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bt := seekBoundsBuildBTree(tt.keys)
+			got := seekBoundsCollect(bt.SeekBounds(tt.low, tt.high))
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("SeekBounds got %v, want nil", got)
+				}
+				return
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("SeekBounds got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -66,106 +146,12 @@ func TestBTreeSeekBoundsInclusiveExclusiveMatchesSeekRange(t *testing.T) {
 	}
 }
 
-func TestBTreeSeekBoundsExclusiveInclusive(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Exclusive(types.NewUint64(2)),
-		Inclusive(types.NewUint64(4)),
-	))
-	want := []types.RowID{30, 40}
-	if !slices.Equal(got, want) {
-		t.Fatalf("SeekBounds (2,4] = %v, want %v", got, want)
-	}
-}
-
-func TestBTreeSeekBoundsUnboundedLow(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		UnboundedLow(),
-		Inclusive(types.NewUint64(3)),
-	))
-	want := []types.RowID{10, 20, 30}
-	if !slices.Equal(got, want) {
-		t.Fatalf("SeekBounds (-∞,3] = %v, want %v", got, want)
-	}
-}
-
-func TestBTreeSeekBoundsUnboundedHigh(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Exclusive(types.NewUint64(3)),
-		UnboundedHigh(),
-	))
-	want := []types.RowID{40, 50}
-	if !slices.Equal(got, want) {
-		t.Fatalf("SeekBounds (3,+∞) = %v, want %v", got, want)
-	}
-}
-
 func TestBTreeSeekBoundsBothUnboundedEqualsScan(t *testing.T) {
 	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
 	got := seekBoundsCollect(bt.SeekBounds(UnboundedLow(), UnboundedHigh()))
 	want := seekBoundsCollect(bt.Scan())
 	if !slices.Equal(got, want) {
 		t.Fatalf("SeekBounds unbounded = %v, want Scan() = %v", got, want)
-	}
-}
-
-func TestBTreeSeekBoundsEmptyRangeLowGreaterThanHigh(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Inclusive(types.NewUint64(4)),
-		Inclusive(types.NewUint64(2)),
-	))
-	if got != nil {
-		t.Fatalf("SeekBounds low>high should yield nothing, got %v", got)
-	}
-}
-
-func TestBTreeSeekBoundsEmptyRangeExclusiveSameValue(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Exclusive(types.NewUint64(3)),
-		Exclusive(types.NewUint64(3)),
-	))
-	if got != nil {
-		t.Fatalf("SeekBounds exclusive-same = %v, want empty", got)
-	}
-}
-
-func TestBTreeSeekBoundsInclusiveSameValueYieldsSingleKey(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Inclusive(types.NewUint64(3)),
-		Inclusive(types.NewUint64(3)),
-	))
-	want := []types.RowID{30}
-	if !slices.Equal(got, want) {
-		t.Fatalf("SeekBounds [3,3] = %v, want %v", got, want)
-	}
-}
-
-func TestBTreeSeekBoundsExclusiveLowAtExistingKey(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{1, 2, 3, 4, 5})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Exclusive(types.NewUint64(3)),
-		Inclusive(types.NewUint64(5)),
-	))
-	want := []types.RowID{40, 50}
-	if !slices.Equal(got, want) {
-		t.Fatalf("SeekBounds (3,5] skipping existing key = %v, want %v", got, want)
-	}
-}
-
-func TestBTreeSeekBoundsExclusiveLowBetweenExistingKeys(t *testing.T) {
-	bt := seekBoundsBuildBTree([]uint64{10, 20, 30})
-	got := seekBoundsCollect(bt.SeekBounds(
-		Exclusive(types.NewUint64(15)),
-		UnboundedHigh(),
-	))
-	want := []types.RowID{200, 300}
-	if !slices.Equal(got, want) {
-		t.Fatalf("SeekBounds (15,+∞) = %v, want %v", got, want)
 	}
 }
 
@@ -182,14 +168,6 @@ func TestBTreeSeekBoundsMultipleRowIDsPerKeyAscending(t *testing.T) {
 	want := []types.RowID{100, 200, 300}
 	if !slices.Equal(got, want) {
 		t.Fatalf("SeekBounds same-key rowIDs = %v, want ascending %v", got, want)
-	}
-}
-
-func TestBTreeSeekBoundsEmptyIndex(t *testing.T) {
-	bt := NewBTreeIndex()
-	got := seekBoundsCollect(bt.SeekBounds(UnboundedLow(), UnboundedHigh()))
-	if got != nil {
-		t.Fatalf("empty index SeekBounds = %v, want nil", got)
 	}
 }
 
