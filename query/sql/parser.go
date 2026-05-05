@@ -6,8 +6,10 @@ package sql
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -614,7 +616,7 @@ func (p *parser) parseStatement() (Statement, error) {
 			}
 			stmt.ProjectedAlias = projectionQualifier
 		}
-	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
+	} else if projectionQualifier != "" && !slices.Contains(leftQualifiers, projectionQualifier) {
 		stmt.ProjectedAliasUnknown = true
 	}
 	if aggregate != nil {
@@ -972,7 +974,7 @@ func (p *parser) parseJoinClause(bindings relationBindings, fallbackLeftTable st
 	if err := p.expectKeyword("ON"); err != nil {
 		return nil, nil, err
 	}
-	lookup := copyQualifierMap(bindings.byQualifier)
+	lookup := maps.Clone(bindings.byQualifier)
 	addRelationQualifiers(lookup, rightTable, rightQualifiers)
 	leftOn, err := p.parseQualifiedColumnRef(lookup)
 	if err != nil {
@@ -991,8 +993,8 @@ func (p *parser) parseJoinClause(bindings relationBindings, fallbackLeftTable st
 	}
 	_, leftExisting := bindings.byQualifier[leftOn.Alias]
 	_, rightExisting := bindings.byQualifier[rightOn.Alias]
-	leftNew := matchesQualifier(leftOn.Alias, rightQualifiers)
-	rightNew := matchesQualifier(rightOn.Alias, rightQualifiers)
+	leftNew := slices.Contains(rightQualifiers, leftOn.Alias)
+	rightNew := slices.Contains(rightQualifiers, rightOn.Alias)
 	leftKnown := leftExisting || leftNew
 	rightKnown := rightExisting || rightNew
 	if leftKnown && rightKnown {
@@ -1427,15 +1429,6 @@ func (p *parser) consumeUntilStatementEnd() {
 	}
 }
 
-func matchesQualifier(candidate string, qualifiers []string) bool {
-	for _, qualifier := range qualifiers {
-		if candidate == qualifier {
-			return true
-		}
-	}
-	return false
-}
-
 var reservedWords = map[string]struct{}{
 	"SELECT": {}, "FROM": {}, "WHERE": {}, "AND": {}, "OR": {},
 	"ORDER": {}, "BY": {}, "LIMIT": {}, "OFFSET": {}, "GROUP": {}, "HAVING": {},
@@ -1452,14 +1445,6 @@ func singleQualifierMap(tableName string, qualifiers []string) map[string]string
 	out := make(map[string]string, len(qualifiers))
 	for _, qualifier := range qualifiers {
 		out[qualifier] = tableName
-	}
-	return out
-}
-
-func copyQualifierMap(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in))
-	for qualifier, table := range in {
-		out[qualifier] = table
 	}
 	return out
 }
