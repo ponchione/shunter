@@ -138,29 +138,16 @@ func (s *Scheduler) ReplayFromCommitted() ScheduleID {
 	nowNs := s.now().UnixNano()
 	rows := s.snapshotScheduleRows()
 
-	var (
-		maxID          ScheduleID
-		nextWakeup     time.Time
-		inboxSaturated bool
-	)
-	for _, row := range rows {
-		if id := ScheduleID(row[SysScheduledColScheduleID].AsUint64()); id > maxID {
-			maxID = id
+	inboxSaturated := false
+	maxID, nextWakeup, _ := s.scanRows(rows, nowNs, func(row types.ProductValue) bool {
+		if inboxSaturated {
+			return true
 		}
-		nextNs := row[SysScheduledColNextRunAtNs].AsInt64()
-		if nextNs <= nowNs {
-			if !inboxSaturated {
-				if !s.tryEnqueueInFlight(row, true) {
-					inboxSaturated = true
-				}
-			}
-			continue
+		if !s.tryEnqueueInFlight(row, true) {
+			inboxSaturated = true
 		}
-		t := time.Unix(0, nextNs)
-		if nextWakeup.IsZero() || t.Before(nextWakeup) {
-			nextWakeup = t
-		}
-	}
+		return true
+	})
 	s.nextWakeup = nextWakeup
 	return maxID
 }
