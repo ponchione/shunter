@@ -84,13 +84,7 @@ func CheckPolicy(report Report, current shunter.ModuleContract, opts PolicyOptio
 func migrationMetadataForChange(migrations shunter.MigrationContract, change Change) (shunter.MigrationMetadata, bool) {
 	switch change.Surface {
 	case SurfaceTable, SurfaceTableReadPolicy:
-		if metadata, ok := findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceTable, change.Name); ok {
-			return metadata, true
-		}
-		if change.Kind == ChangeKindBreaking {
-			return migrations.Module, true
-		}
-		return shunter.MigrationMetadata{}, false
+		return migrationMetadataForNamedSurface(migrations, shunter.MigrationSurfaceTable, change.Name, change.Kind)
 	case SurfaceColumn, SurfaceIndex:
 		tableName := change.Name
 		if idx := strings.IndexByte(change.Name, '.'); idx >= 0 {
@@ -98,42 +92,20 @@ func migrationMetadataForChange(migrations shunter.MigrationContract, change Cha
 		}
 		return findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceTable, tableName)
 	case SurfaceQuery:
-		if metadata, ok := findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceQuery, change.Name); ok {
-			return metadata, true
-		}
-		if change.Kind == ChangeKindBreaking {
-			return migrations.Module, true
-		}
-		return shunter.MigrationMetadata{}, false
+		return migrationMetadataForNamedSurface(migrations, shunter.MigrationSurfaceQuery, change.Name, change.Kind)
 	case SurfaceView:
-		if metadata, ok := findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceView, change.Name); ok {
-			return metadata, true
-		}
-		if change.Kind == ChangeKindBreaking {
-			return migrations.Module, true
-		}
-		return shunter.MigrationMetadata{}, false
+		return migrationMetadataForNamedSurface(migrations, shunter.MigrationSurfaceView, change.Name, change.Kind)
 	case SurfacePermission:
 		surface, name, ok := strings.Cut(change.Name, ".")
 		if !ok {
 			return shunter.MigrationMetadata{}, false
 		}
 		switch surface {
-		case shunter.MigrationSurfaceQuery:
-			if metadata, ok := findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceQuery, name); ok {
-				return metadata, true
-			}
-		case shunter.MigrationSurfaceView:
-			if metadata, ok := findMigrationDeclaration(migrations.Declarations, shunter.MigrationSurfaceView, name); ok {
-				return metadata, true
-			}
+		case shunter.MigrationSurfaceQuery, shunter.MigrationSurfaceView:
+			return migrationMetadataForNamedSurface(migrations, surface, name, change.Kind)
 		default:
 			return shunter.MigrationMetadata{}, false
 		}
-		if change.Kind == ChangeKindBreaking {
-			return migrations.Module, true
-		}
-		return shunter.MigrationMetadata{}, false
 	case SurfaceVisibilityFilter:
 		return migrations.Module, true
 	case SurfaceReducer, SurfaceContract, SurfaceModule, SurfaceSchema:
@@ -141,6 +113,16 @@ func migrationMetadataForChange(migrations shunter.MigrationContract, change Cha
 	default:
 		return shunter.MigrationMetadata{}, false
 	}
+}
+
+func migrationMetadataForNamedSurface(migrations shunter.MigrationContract, surface, name string, kind ChangeKind) (shunter.MigrationMetadata, bool) {
+	if metadata, ok := findMigrationDeclaration(migrations.Declarations, surface, name); ok {
+		return metadata, true
+	}
+	if kind == ChangeKindBreaking {
+		return migrations.Module, true
+	}
+	return shunter.MigrationMetadata{}, false
 }
 
 func findMigrationDeclaration(declarations []shunter.MigrationContractDeclaration, surface, name string) (shunter.MigrationMetadata, bool) {
