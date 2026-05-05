@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -104,7 +103,7 @@ func (a TableAccess) String() string {
 func (a TableAccess) MarshalJSON() ([]byte, error) {
 	switch a {
 	case TableAccessPrivate, TableAccessPublic, TableAccessPermissioned:
-		return []byte(strconv.Quote(a.String())), nil
+		return json.Marshal(a.String())
 	default:
 		return nil, fmt.Errorf("%w: access %d", ErrInvalidTableReadPolicy, a)
 	}
