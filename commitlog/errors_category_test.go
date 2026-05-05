@@ -17,134 +17,97 @@ import (
 
 // --- Pins 1-9: typed-struct category pins ---
 
-func TestChecksumMismatchErrorCategory(t *testing.T) {
-	err := error(&ChecksumMismatchError{Expected: 1, Got: 2, TxID: 7})
-	if !errors.Is(err, ErrTraversal) {
-		t.Fatalf("errors.Is(err, ErrTraversal) = false")
-	}
-	var cm *ChecksumMismatchError
-	if !errors.As(err, &cm) {
-		t.Fatalf("errors.As(*ChecksumMismatchError) = false")
-	}
-	if cm.Expected != 1 || cm.Got != 2 || cm.TxID != 7 {
-		t.Fatalf("fields mismatch: %+v", cm)
-	}
-}
-
-func TestBadVersionErrorCategory(t *testing.T) {
-	err := error(&BadVersionError{Got: 2})
-	if !errors.Is(err, ErrOpen) {
-		t.Fatalf("errors.Is(err, ErrOpen) = false")
-	}
-	var bv *BadVersionError
-	if !errors.As(err, &bv) {
-		t.Fatalf("errors.As(*BadVersionError) = false")
-	}
-	if bv.Got != 2 {
-		t.Fatalf("Got = %d, want 2", bv.Got)
-	}
-}
-
-func TestUnknownRecordTypeErrorCategory(t *testing.T) {
-	err := error(&UnknownRecordTypeError{Type: 42})
-	if !errors.Is(err, ErrTraversal) {
-		t.Fatalf("errors.Is(err, ErrTraversal) = false")
-	}
-	var u *UnknownRecordTypeError
-	if !errors.As(err, &u) {
-		t.Fatalf("errors.As(*UnknownRecordTypeError) = false")
-	}
-	if u.Type != 42 {
-		t.Fatalf("Type = %d, want 42", u.Type)
-	}
-}
-
-func TestRecordTooLargeErrorCategory(t *testing.T) {
-	err := error(&RecordTooLargeError{Size: 1024, Max: 512})
-	if !errors.Is(err, ErrTraversal) {
-		t.Fatalf("errors.Is(err, ErrTraversal) = false")
-	}
-	var r *RecordTooLargeError
-	if !errors.As(err, &r) {
-		t.Fatalf("errors.As(*RecordTooLargeError) = false")
-	}
-	if r.Size != 1024 || r.Max != 512 {
-		t.Fatalf("fields mismatch: %+v", r)
-	}
-}
-
-func TestRowTooLargeErrorCategory(t *testing.T) {
-	err := error(&RowTooLargeError{Size: 2048, Max: 1024})
-	if !errors.Is(err, ErrTraversal) {
-		t.Fatalf("errors.Is(err, ErrTraversal) = false")
-	}
-	var r *RowTooLargeError
-	if !errors.As(err, &r) {
-		t.Fatalf("errors.As(*RowTooLargeError) = false")
-	}
-	if r.Size != 2048 || r.Max != 1024 {
-		t.Fatalf("fields mismatch: %+v", r)
-	}
-}
-
-func TestHistoryGapErrorCategory(t *testing.T) {
-	err := error(&HistoryGapError{Expected: 5, Got: 7, Segment: "/seg"})
-	if !errors.Is(err, ErrOpen) {
-		t.Fatalf("errors.Is(err, ErrOpen) = false")
-	}
-	var h *HistoryGapError
-	if !errors.As(err, &h) {
-		t.Fatalf("errors.As(*HistoryGapError) = false")
-	}
-	if h.Expected != 5 || h.Got != 7 || h.Segment != "/seg" {
-		t.Fatalf("fields mismatch: %+v", h)
-	}
-}
-
-func TestSchemaMismatchErrorCategory(t *testing.T) {
+func TestTypedStructErrorCategories(t *testing.T) {
 	cause := errors.New("nullable")
-	err := error(&SchemaMismatchError{Detail: "mismatch", Cause: cause})
-	if !errors.Is(err, ErrSnapshot) {
-		t.Fatalf("errors.Is(err, ErrSnapshot) = false")
+	cases := []struct {
+		name     string
+		err      error
+		category error
+	}{
+		{"ChecksumMismatch", &ChecksumMismatchError{Expected: 1, Got: 2, TxID: 7}, ErrTraversal},
+		{"BadVersion", &BadVersionError{Got: 2}, ErrOpen},
+		{"UnknownRecordType", &UnknownRecordTypeError{Type: 42}, ErrTraversal},
+		{"RecordTooLarge", &RecordTooLargeError{Size: 1024, Max: 512}, ErrTraversal},
+		{"RowTooLarge", &RowTooLargeError{Size: 2048, Max: 1024}, ErrTraversal},
+		{"HistoryGap", &HistoryGapError{Expected: 5, Got: 7, Segment: "/seg"}, ErrOpen},
+		{"SchemaMismatch", &SchemaMismatchError{Detail: "mismatch", Cause: cause}, ErrSnapshot},
+		{"SnapshotHashMismatch", &SnapshotHashMismatchError{Expected: [32]byte{1}, Got: [32]byte{2}}, ErrSnapshot},
+		{"OffsetIndexNonMonotonic", &OffsetIndexNonMonotonicError{Last: 9, Got: 5}, ErrIndex},
 	}
-	var sm *SchemaMismatchError
-	if !errors.As(err, &sm) {
-		t.Fatalf("errors.As(*SchemaMismatchError) = false")
-	}
-	if sm.Detail != "mismatch" {
-		t.Fatalf("Detail = %q, want mismatch", sm.Detail)
-	}
-	if !errors.Is(err, cause) {
-		t.Fatalf("existing Unwrap-to-Cause chain broken: errors.Is(err, cause) = false")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !errors.Is(tc.err, tc.category) {
+				t.Fatalf("errors.Is(err, category) = false: %v", tc.err)
+			}
+			assertTypedStructErrorFields(t, tc.err)
+		})
 	}
 }
 
-func TestSnapshotHashMismatchErrorCategory(t *testing.T) {
-	err := error(&SnapshotHashMismatchError{Expected: [32]byte{1}, Got: [32]byte{2}})
-	if !errors.Is(err, ErrSnapshot) {
-		t.Fatalf("errors.Is(err, ErrSnapshot) = false")
-	}
-	var hm *SnapshotHashMismatchError
-	if !errors.As(err, &hm) {
-		t.Fatalf("errors.As(*SnapshotHashMismatchError) = false")
-	}
-	if hm.Expected[0] != 1 || hm.Got[0] != 2 {
-		t.Fatalf("fields mismatch: %+v", hm)
+func assertTypedStructErrorFields(t *testing.T, err error) {
+	t.Helper()
+	switch want := err.(type) {
+	case *ChecksumMismatchError:
+		got := requireErrorAs[*ChecksumMismatchError](t, err)
+		if *got != *want {
+			t.Fatalf("fields mismatch: %+v", got)
+		}
+	case *BadVersionError:
+		got := requireErrorAs[*BadVersionError](t, err)
+		if *got != *want {
+			t.Fatalf("fields mismatch: %+v", got)
+		}
+	case *UnknownRecordTypeError:
+		got := requireErrorAs[*UnknownRecordTypeError](t, err)
+		if *got != *want {
+			t.Fatalf("fields mismatch: %+v", got)
+		}
+	case *RecordTooLargeError:
+		got := requireErrorAs[*RecordTooLargeError](t, err)
+		if *got != *want {
+			t.Fatalf("fields mismatch: %+v", got)
+		}
+	case *RowTooLargeError:
+		got := requireErrorAs[*RowTooLargeError](t, err)
+		if *got != *want {
+			t.Fatalf("fields mismatch: %+v", got)
+		}
+	case *HistoryGapError:
+		got := requireErrorAs[*HistoryGapError](t, err)
+		if *got != *want {
+			t.Fatalf("fields mismatch: %+v", got)
+		}
+	case *SchemaMismatchError:
+		got := requireErrorAs[*SchemaMismatchError](t, err)
+		if got.Detail != want.Detail {
+			t.Fatalf("Detail = %q, want %q", got.Detail, want.Detail)
+		}
+		if want.Cause != nil && !errors.Is(err, want.Cause) {
+			t.Fatalf("existing Unwrap-to-Cause chain broken: errors.Is(err, cause) = false")
+		}
+	case *SnapshotHashMismatchError:
+		got := requireErrorAs[*SnapshotHashMismatchError](t, err)
+		if *got != *want {
+			t.Fatalf("fields mismatch: %+v", got)
+		}
+	case *OffsetIndexNonMonotonicError:
+		got := requireErrorAs[*OffsetIndexNonMonotonicError](t, err)
+		if *got != *want {
+			t.Fatalf("fields mismatch: %+v", got)
+		}
+	default:
+		t.Fatalf("unhandled typed error %T", err)
 	}
 }
 
-func TestOffsetIndexNonMonotonicErrorCategory(t *testing.T) {
-	err := error(&OffsetIndexNonMonotonicError{Last: 9, Got: 5})
-	if !errors.Is(err, ErrIndex) {
-		t.Fatalf("errors.Is(err, ErrIndex) = false")
+func requireErrorAs[T error](t *testing.T, err error) T {
+	t.Helper()
+	var got T
+	if !errors.As(err, &got) {
+		t.Fatalf("errors.As(%T) = false", got)
 	}
-	var nm *OffsetIndexNonMonotonicError
-	if !errors.As(err, &nm) {
-		t.Fatalf("errors.As(*OffsetIndexNonMonotonicError) = false")
-	}
-	if nm.Last != 9 || nm.Got != 5 {
-		t.Fatalf("fields mismatch: %+v", nm)
-	}
+	return got
 }
 
 // --- Pins 10-12: sentinel singleton pins ---

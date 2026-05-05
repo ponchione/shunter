@@ -139,16 +139,14 @@ func TestRunCompactionDeletesCoveredSegmentsAndFsyncsDirectory(t *testing.T) {
 	seg2 := makeScanTestSegment(t, dir, 4, 4, 5, 6)
 	seg3 := makeScanTestSegment(t, dir, 7, 7, 8)
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		syncCalls++
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 6); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
@@ -179,9 +177,7 @@ func TestCompactionRemovesSidecarIndex(t *testing.T) {
 		_ = idx.Close()
 	}
 
-	originalSyncDir := syncDir
-	syncDir = func(string) error { return nil }
-	defer func() { syncDir = originalSyncDir }()
+	ignoreCompactionSyncDir(t)
 
 	if err := RunCompaction(dir, 6); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
@@ -207,9 +203,7 @@ func TestRunCompactionRemovesCoveredSidecarSymlinkWithoutTouchingTarget(t *testi
 	}
 	symlinkOrSkip(t, targetPath, idxPath)
 
-	originalSyncDir := syncDir
-	syncDir = func(string) error { return nil }
-	defer func() { syncDir = originalSyncDir }()
+	ignoreCompactionSyncDir(t)
 
 	if err := RunCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
@@ -234,9 +228,7 @@ func TestCompactionToleratesMissingSidecar(t *testing.T) {
 	seg1 := makeScanTestSegment(t, dir, 1, 1, 2, 3)
 	makeScanTestSegment(t, dir, 4, 4, 5, 6)
 
-	originalSyncDir := syncDir
-	syncDir = func(string) error { return nil }
-	defer func() { syncDir = originalSyncDir }()
+	ignoreCompactionSyncDir(t)
 
 	if err := RunCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction with no sidecars: %v", err)
@@ -265,16 +257,14 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarOnRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		syncCalls++
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
@@ -303,16 +293,14 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarSymlinkOnRetry(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		syncCalls++
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
@@ -355,16 +343,14 @@ func TestRunCompactionRemovesOrphanedCoveredSidecarDirectoryOnRetry(t *testing.T
 		t.Fatal(err)
 	}
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		syncCalls++
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
@@ -399,16 +385,14 @@ func TestRunCompactionRemovesCorruptOrphanedCoveredSidecarOnRetry(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		syncCalls++
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
@@ -440,9 +424,7 @@ func TestRunCompactionRemovesCoveredOrphansButRetainsUncoveredOrphans(t *testing
 		}
 	}
 
-	originalSyncDir := syncDir
-	syncDir = func(string) error { return nil }
-	defer func() { syncDir = originalSyncDir }()
+	ignoreCompactionSyncDir(t)
 
 	if err := RunCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
@@ -475,9 +457,7 @@ func TestRunCompactionRemovesCoveredSymlinkOrphanButRetainsFutureSymlinkOrphan(t
 	symlinkOrSkip(t, coveredTarget, coveredOrphan)
 	symlinkOrSkip(t, futureTarget, futureOrphan)
 
-	originalSyncDir := syncDir
-	syncDir = func(string) error { return nil }
-	defer func() { syncDir = originalSyncDir }()
+	ignoreCompactionSyncDir(t)
 
 	if err := RunCompaction(dir, 3); err != nil {
 		t.Fatalf("RunCompaction: %v", err)
@@ -518,16 +498,14 @@ func TestRunCompactionRemovesCoveredOrphansAfterEntirePrefixGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		syncCalls++
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 6); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
@@ -556,16 +534,14 @@ func TestRunCompactionRemovesCoveredOrphansWhenNoLogSegmentsRemain(t *testing.T)
 		}
 	}
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		syncCalls++
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 6); err != nil {
 		t.Fatalf("RunCompaction retry: %v", err)
@@ -584,14 +560,12 @@ func TestRunCompactionSegmentRemovalFailureIncludesOperationPathAndWraps(t *test
 	makeScanTestSegment(t, dir, 4, 4, 5)
 	removeErr := errors.New("remove segment failed")
 
-	originalRemoveFile := removeFile
-	removeFile = func(path string) error {
+	stubCompactionRemoveFile(t, func(original func(string) error, path string) error {
 		if path == seg1 {
 			return removeErr
 		}
-		return originalRemoveFile(path)
-	}
-	defer func() { removeFile = originalRemoveFile }()
+		return original(path)
+	})
 
 	err := RunCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, removeErr, "remove covered segment", seg1)
@@ -612,14 +586,12 @@ func TestRunCompactionSidecarRemovalFailureIncludesOperationPathAndWraps(t *test
 	}
 	removeErr := errors.New("remove sidecar failed")
 
-	originalRemoveFile := removeFile
-	removeFile = func(path string) error {
+	stubCompactionRemoveFile(t, func(original func(string) error, path string) error {
 		if path == idxPath {
 			return removeErr
 		}
-		return originalRemoveFile(path)
-	}
-	defer func() { removeFile = originalRemoveFile }()
+		return original(path)
+	})
 
 	err = RunCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, removeErr, "remove covered offset index", idxPath)
@@ -643,14 +615,12 @@ func TestRunCompactionOrphanSidecarRemovalFailureIncludesOperationPathAndWraps(t
 	}
 	removeErr := errors.New("remove orphan sidecar failed")
 
-	originalRemoveFile := removeFile
-	removeFile = func(path string) error {
+	stubCompactionRemoveFile(t, func(original func(string) error, path string) error {
 		if path == idxPath {
 			return removeErr
 		}
-		return originalRemoveFile(path)
-	}
-	defer func() { removeFile = originalRemoveFile }()
+		return original(path)
+	})
 
 	err = RunCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, removeErr, "remove orphaned offset index", idxPath)
@@ -663,14 +633,12 @@ func TestRunCompactionSyncFailureIncludesOperationPathAndWraps(t *testing.T) {
 	makeScanTestSegment(t, dir, 4, 4, 5)
 	syncErr := errors.New("sync failed")
 
-	originalSyncDir := syncDir
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		return syncErr
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	err := RunCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
@@ -682,9 +650,8 @@ func TestRunCompactionRetriesDirectorySyncAfterPriorSyncFailure(t *testing.T) {
 	seg2 := makeScanTestSegment(t, dir, 4, 4, 5)
 	syncErr := errors.New("sync failed")
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
@@ -693,8 +660,7 @@ func TestRunCompactionRetriesDirectorySyncAfterPriorSyncFailure(t *testing.T) {
 			return syncErr
 		}
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	err := RunCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
@@ -729,9 +695,8 @@ func TestRunCompactionRetriesDirectorySyncAfterOrphanSidecarCleanup(t *testing.T
 	}
 	syncErr := errors.New("sync failed")
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
@@ -740,8 +705,7 @@ func TestRunCompactionRetriesDirectorySyncAfterOrphanSidecarCleanup(t *testing.T
 			return syncErr
 		}
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	err := RunCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
@@ -769,9 +733,8 @@ func TestRunCompactionRetriesDirectorySyncAfterOnlyOrphanSidecarCleanup(t *testi
 	}
 	syncErr := errors.New("sync failed")
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
@@ -780,8 +743,7 @@ func TestRunCompactionRetriesDirectorySyncAfterOnlyOrphanSidecarCleanup(t *testi
 			return syncErr
 		}
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	err = RunCompaction(dir, 3)
 	assertCompactionFailureContext(t, err, syncErr, "sync directory", dir)
@@ -816,16 +778,14 @@ func TestRunCompactionDoesNotDeleteBoundarySegment(t *testing.T) {
 	boundary := makeScanTestSegment(t, dir, 900, contiguousTxs(900, 1100)...)
 	active := makeScanTestSegment(t, dir, 1101, 1101, 1102)
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		syncCalls++
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 1000); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
@@ -855,16 +815,14 @@ func TestRunCompactionRetainsEmptyDamagedActiveTail(t *testing.T) {
 		}
 	}
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		syncCalls++
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 2); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
@@ -895,16 +853,14 @@ func TestRunCompactionRetainsZeroLengthActiveTail(t *testing.T) {
 		}
 	}
 
-	originalSyncDir := syncDir
 	syncCalls := 0
-	syncDir = func(path string) error {
+	stubCompactionSyncDir(t, func(path string) error {
 		if path != dir {
 			t.Fatalf("syncDir path = %q, want %q", path, dir)
 		}
 		syncCalls++
 		return nil
-	}
-	defer func() { syncDir = originalSyncDir }()
+	})
 
 	if err := RunCompaction(dir, 2); err != nil {
 		t.Fatalf("RunCompaction() error = %v", err)
@@ -984,6 +940,27 @@ func assertCompactionFailureContext(t *testing.T, err, cause error, operation, p
 	if !strings.Contains(text, operation) || !strings.Contains(text, path) {
 		t.Fatalf("error %q should include operation %q and path %q", text, operation, path)
 	}
+}
+
+func stubCompactionSyncDir(t *testing.T, hook func(string) error) {
+	t.Helper()
+	original := syncDir
+	syncDir = hook
+	t.Cleanup(func() { syncDir = original })
+}
+
+func ignoreCompactionSyncDir(t *testing.T) {
+	t.Helper()
+	stubCompactionSyncDir(t, func(string) error { return nil })
+}
+
+func stubCompactionRemoveFile(t *testing.T, hook func(original func(string) error, path string) error) {
+	t.Helper()
+	original := removeFile
+	removeFile = func(path string) error {
+		return hook(original, path)
+	}
+	t.Cleanup(func() { removeFile = original })
 }
 
 func assertSegmentRangesEqual(t *testing.T, got, want []SegmentRange) {
