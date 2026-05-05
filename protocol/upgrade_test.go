@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/ponchione/websocket"
 
 	"github.com/ponchione/shunter/auth"
 )

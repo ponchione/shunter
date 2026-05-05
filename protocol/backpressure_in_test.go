@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 func waitForSignals(t *testing.T, ch <-chan struct{}, want int, label string) {

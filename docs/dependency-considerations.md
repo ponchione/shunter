@@ -1,6 +1,6 @@
 # Dependency Considerations
 
-Last reviewed: 2026-05-01
+Last reviewed: 2026-05-05
 
 This note captures adopted dependencies, dependency suggestions, and explicit
 rejections from the dependency scan of the current Shunter codebase. Candidate
@@ -10,7 +10,7 @@ themselves.
 Current repo context:
 
 - Shunter is intentionally dependency-light today.
-- Direct runtime dependencies are currently limited to `github.com/coder/websocket`,
+- Direct runtime dependencies are currently limited to `github.com/ponchione/websocket`,
   `github.com/golang-jwt/jwt/v5`, `github.com/prometheus/client_golang`,
   and `lukechampine.com/blake3`.
 - Direct test dependencies now include `github.com/google/go-cmp v0.6.0`,
@@ -18,8 +18,9 @@ Current repo context:
   and `pgregory.net/rapid v1.2.0`.
 - Pinned Go tool dependencies now include
   `honnef.co/go/tools/cmd/staticcheck v0.7.0`.
-- `github.com/coder/websocket` is replaced with the local Shunter fork
-  `github.com/ponchione/websocket v1.8.14-shunter.1`.
+- `github.com/ponchione/websocket v1.8.15-shunter.1` is Shunter's
+  direct WebSocket dependency. It is published under the fork's module path so
+  downstream Shunter consumers do not need a `replace` directive.
 - The broad suite passed after adopting `goleak` with:
 
 ```bash
@@ -29,19 +30,20 @@ rtk go test ./... -count=1
 
 ## Adopted Runtime Dependencies
 
-### `github.com/coder/websocket`
+### `github.com/ponchione/websocket`
 
 Used for WebSocket transport in the `protocol` package.
 
 Notes:
 
-- The dependency is replaced with the local Shunter fork
-  `github.com/ponchione/websocket v1.8.14-shunter.1`.
+- The dependency is the Shunter fork published as
+  `github.com/ponchione/websocket v1.8.15-shunter.1`.
+- Do not depend on a non-inherited `replace` directive for this package.
 - Keep protocol code on the context-aware API shape.
 - Do not add a second WebSocket library without a concrete transport
   requirement.
 
-Docs: https://pkg.go.dev/github.com/coder/websocket
+Docs: https://pkg.go.dev/github.com/ponchione/websocket
 
 ### `github.com/prometheus/client_golang`
 

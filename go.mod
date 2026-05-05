@@ -3,9 +3,9 @@ module github.com/ponchione/shunter
 go 1.25.5
 
 require (
-	github.com/coder/websocket v1.8.14
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-cmp v0.6.0
+	github.com/ponchione/websocket v1.8.15-shunter.1
 	github.com/prometheus/client_golang v1.21.1
 	github.com/prometheus/client_model v0.6.2
 	go.uber.org/goleak v1.3.0
@@ -30,7 +30,5 @@ require (
 	google.golang.org/protobuf v1.36.8 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
 )
-
-replace github.com/coder/websocket => github.com/ponchione/websocket v1.8.14-shunter.1
 
 tool honnef.co/go/tools/cmd/staticcheck

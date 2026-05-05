@@ -3,7 +3,7 @@ package protocol
 import (
 	"errors"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 
 	"github.com/ponchione/shunter/types"
 )

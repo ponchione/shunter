@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 // Close codes used by the server (RFC 6455 + SPEC-005 §11.1).

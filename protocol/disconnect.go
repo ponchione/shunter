@@ -3,7 +3,7 @@ package protocol
 import (
 	"context"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 // Disconnect tears down a connection once: drop subscriptions, run

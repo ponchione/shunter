@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 func TestClientInitiatedClose_DisconnectSequenceRuns(t *testing.T) {

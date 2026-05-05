@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 // TestShunterCloseCodeConstants pins the four close codes used by

@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/golang-jwt/jwt/v5"
 	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/bsatn"
 	"github.com/ponchione/shunter/protocol"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
+	"github.com/ponchione/websocket"
 )
 
 const (

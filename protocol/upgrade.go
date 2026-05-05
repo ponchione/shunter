@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 
 	"github.com/ponchione/shunter/auth"
 	"github.com/ponchione/shunter/types"

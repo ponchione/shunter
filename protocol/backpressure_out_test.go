@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 func TestOutgoingBackpressure_BufferFullDisconnects(t *testing.T) {

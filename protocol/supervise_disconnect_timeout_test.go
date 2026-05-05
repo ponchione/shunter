@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 // TestSuperviseLifecycleBoundsDisconnectOnInboxHang is the primary pin

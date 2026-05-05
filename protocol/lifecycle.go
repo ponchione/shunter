@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 
 	"github.com/ponchione/shunter/types"
 )

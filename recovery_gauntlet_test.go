@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	shunter "github.com/ponchione/shunter"
 	"github.com/ponchione/shunter/types"
+	"github.com/ponchione/websocket"
 )
 
 func TestRuntimeGauntletRejectedReducerRestartNoGhostRows(t *testing.T) {

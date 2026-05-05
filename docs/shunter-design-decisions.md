@@ -303,9 +303,9 @@ Authoritative pins:
 
 Current contract:
 
-- Shunter uses `github.com/coder/websocket` for WebSocket transport.
-- The dependency is replaced in `go.mod` with the Shunter fork
-  `github.com/ponchione/websocket`.
+- Shunter uses `github.com/ponchione/websocket` for WebSocket transport.
+- The dependency is the Shunter fork published under its own module path, so
+  downstream consumers do not need a WebSocket `replace` directive.
 - Protocol code relies on the context-first read/write API.
 - App-level compression remains Shunter's protocol-envelope concern; per-frame
   WebSocket compression is not the default protocol shape.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 // TestDispatchLoop_HandlerCtxCancelsOnConnClose pins handler context

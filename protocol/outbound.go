@@ -3,7 +3,7 @@ package protocol
 import (
 	"context"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 // runOutboundWriter drains OutboundCh to the WebSocket in FIFO order.

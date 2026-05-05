@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	shunter "github.com/ponchione/shunter"
+	"github.com/ponchione/websocket"
 )
 
 const (

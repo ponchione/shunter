@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/coder/websocket"
+	"github.com/ponchione/websocket"
 )
 
 // MessageHandlers holds the per-message-type handler functions wired by
