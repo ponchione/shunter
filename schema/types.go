@@ -87,7 +87,7 @@ func NewIndexSchema(id IndexID, name string, columns []int, unique bool, primary
 // Column returns the column with the given name, or false if not found.
 func (ts *TableSchema) Column(name string) (*ColumnSchema, bool) {
 	for i := range ts.Columns {
-		if ts.Columns[i].Name == name || strings.EqualFold(ts.Columns[i].Name, name) {
+		if strings.EqualFold(ts.Columns[i].Name, name) {
 			return &ts.Columns[i], true
 		}
 	}
