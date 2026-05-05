@@ -2,6 +2,7 @@ package shunter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ponchione/shunter/commitlog"
@@ -23,6 +24,23 @@ type MigrationContext struct {
 	schema        schema.SchemaRegistry
 	committedTxID types.TxID
 	tx            *store.Transaction
+}
+
+// MigrationRunResult summarizes an explicit DataDir migration run.
+type MigrationRunResult struct {
+	DataDir       string
+	RecoveredTxID types.TxID
+	DurableTxID   types.TxID
+	Hooks         []MigrationHookResult
+}
+
+// MigrationHookResult reports the outcome for one hook supplied to
+// RunDataDirMigrations or one startup hook registered on Module.
+type MigrationHookResult struct {
+	// Index is the zero-based position of the hook in the supplied hook list.
+	Index   int
+	TxID    types.TxID
+	Changed bool
 }
 
 // ModuleName returns the module name for the runtime being started.
@@ -75,6 +93,73 @@ func copyMigrationHooks(in []MigrationHook) []MigrationHook {
 	return out
 }
 
+// RunDataDirMigrations runs app-owned migration hooks against cfg.DataDir
+// without starting normal runtime services. It is intended for app-owned
+// binaries that link the module directly; callers must stop any runtime that
+// owns the DataDir before calling it.
+func RunDataDirMigrations(ctx context.Context, mod *Module, cfg Config, hooks ...MigrationHook) (MigrationRunResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return MigrationRunResult{}, err
+	}
+	preview, err := previewRuntimeBuild(mod, cfg)
+	if err != nil {
+		return MigrationRunResult{}, err
+	}
+	result := MigrationRunResult{DataDir: preview.dataDir}
+	if len(hooks) == 0 {
+		return result, nil
+	}
+
+	state, recoveredTxID, resumePlan, _, err := openOrBootstrapState(preview.dataDir, preview.registry)
+	if err != nil {
+		return MigrationRunResult{}, fmt.Errorf("run data dir migrations state: %w", err)
+	}
+	result.RecoveredTxID = recoveredTxID
+	result.DurableTxID = recoveredTxID
+
+	options := commitlog.DefaultCommitLogOptions()
+	options.ChannelCapacity = preview.normalized.DurabilityQueueCapacity
+	durability, err := commitlog.NewDurabilityWorkerWithResumePlan(preview.dataDir, resumePlan, options)
+	if err != nil {
+		return MigrationRunResult{}, fmt.Errorf("run data dir migrations durability: %w", err)
+	}
+	defer func() {
+		if durability != nil {
+			_, _ = durability.Close()
+		}
+	}()
+
+	exec := migrationExecutor{
+		moduleName:    mod.name,
+		moduleVersion: mod.version,
+		registry:      preview.registry,
+		state:         state,
+		durability:    durability,
+		currentTxID:   recoveredTxID,
+		durableTxID:   recoveredTxID,
+	}
+	results, err := exec.runHooks(ctx, hooks)
+	if err != nil {
+		_, closeErr := durability.Close()
+		durability = nil
+		return MigrationRunResult{}, errors.Join(err, closeErr)
+	}
+	finalDurableTxID, closeErr := durability.Close()
+	durability = nil
+	if closeErr != nil {
+		return MigrationRunResult{}, closeErr
+	}
+	result.Hooks = results
+	result.DurableTxID = types.TxID(finalDurableTxID)
+	if result.DurableTxID == 0 {
+		result.DurableTxID = exec.durableTxID
+	}
+	return result, nil
+}
+
 func (r *Runtime) runMigrationHooks(ctx context.Context, durability *commitlog.DurabilityWorker) error {
 	if len(r.module.migrationHooks) == 0 {
 		return nil
@@ -82,64 +167,98 @@ func (r *Runtime) runMigrationHooks(ctx context.Context, durability *commitlog.D
 	if durability == nil {
 		return fmt.Errorf("migration hooks require durability worker")
 	}
-	for i, hook := range r.module.migrationHooks {
-		if hook == nil {
-			continue
-		}
-		if err := r.runMigrationHook(ctx, durability, i, hook); err != nil {
-			return err
-		}
+	exec := migrationExecutor{
+		moduleName:    r.module.name,
+		moduleVersion: r.module.version,
+		registry:      r.registry,
+		state:         r.state,
+		durability:    durability,
+		currentTxID:   r.recoveredTxID,
+		durableTxID:   r.durableTxID,
 	}
+	if _, err := exec.runHooks(ctx, r.module.migrationHooks); err != nil {
+		return err
+	}
+	r.recoveredTxID = exec.currentTxID
+	r.durableTxID = exec.durableTxID
 	return nil
 }
 
-func (r *Runtime) runMigrationHook(ctx context.Context, durability *commitlog.DurabilityWorker, hookIndex int, hook MigrationHook) error {
-	if err := ctx.Err(); err != nil {
-		return err
+type migrationExecutor struct {
+	moduleName    string
+	moduleVersion string
+	registry      schema.SchemaRegistry
+	state         *store.CommittedState
+	durability    *commitlog.DurabilityWorker
+	currentTxID   types.TxID
+	durableTxID   types.TxID
+}
+
+func (e *migrationExecutor) runHooks(ctx context.Context, hooks []MigrationHook) ([]MigrationHookResult, error) {
+	var results []MigrationHookResult
+	for i, hook := range hooks {
+		if hook == nil {
+			continue
+		}
+		result, err := e.runHook(ctx, i, hook)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
 	}
-	tx := store.NewTransaction(r.state, r.registry)
+	return results, nil
+}
+
+func (e *migrationExecutor) runHook(ctx context.Context, hookIndex int, hook MigrationHook) (MigrationHookResult, error) {
+	result := MigrationHookResult{Index: hookIndex}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	tx := store.NewTransaction(e.state, e.registry)
 	mctx := &MigrationContext{
-		moduleName:    r.module.name,
-		moduleVersion: r.module.version,
-		schema:        r.registry,
-		committedTxID: r.recoveredTxID,
+		moduleName:    e.moduleName,
+		moduleVersion: e.moduleVersion,
+		schema:        e.registry,
+		committedTxID: e.currentTxID,
 		tx:            tx,
 	}
 	if err := hook(ctx, mctx); err != nil {
 		store.Rollback(tx)
-		return fmt.Errorf("migration hook %d: %w", hookIndex+1, err)
+		return result, fmt.Errorf("migration hook %d: %w", hookIndex+1, err)
 	}
 	if err := ctx.Err(); err != nil {
 		store.Rollback(tx)
-		return err
+		return result, err
 	}
 	if migrationTransactionEmpty(tx) {
 		store.Rollback(tx)
-		return nil
+		return result, nil
 	}
-	txID, err := nextMigrationTxID(r.recoveredTxID)
+	txID, err := nextMigrationTxID(e.currentTxID)
 	if err != nil {
 		store.Rollback(tx)
-		return fmt.Errorf("migration hook %d: %w", hookIndex+1, err)
+		return result, fmt.Errorf("migration hook %d: %w", hookIndex+1, err)
 	}
 	tx.Seal()
-	changeset, err := store.Commit(r.state, tx)
+	changeset, err := store.Commit(e.state, tx)
 	if err != nil {
 		store.Rollback(tx)
-		return fmt.Errorf("migration hook %d commit: %w", hookIndex+1, err)
+		return result, fmt.Errorf("migration hook %d commit: %w", hookIndex+1, err)
 	}
 	if changeset.IsEmpty() {
-		return nil
+		return result, nil
 	}
 	changeset.TxID = txID
-	r.state.SetCommittedTxID(txID)
-	r.state.RecordMemoryUsage()
-	if err := persistMigrationChangeset(ctx, durability, txID, changeset); err != nil {
-		return fmt.Errorf("migration hook %d durability: %w", hookIndex+1, err)
+	e.state.SetCommittedTxID(txID)
+	e.state.RecordMemoryUsage()
+	if err := persistMigrationChangeset(ctx, e.durability, txID, changeset); err != nil {
+		return result, fmt.Errorf("migration hook %d durability: %w", hookIndex+1, err)
 	}
-	r.recoveredTxID = txID
-	r.durableTxID = txID
-	return nil
+	e.currentTxID = txID
+	e.durableTxID = txID
+	result.TxID = txID
+	result.Changed = true
+	return result, nil
 }
 
 func migrationTransactionEmpty(tx *store.Transaction) bool {

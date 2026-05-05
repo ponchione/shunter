@@ -8,6 +8,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Gzip-negotiated protocol connections now gzip-compress post-handshake server messages while keeping client messages uncompressed.
 - Pinned one-off aggregate empty-input semantics for `COUNT` and `SUM`.
 - Added `shunter.CheckDataDirCompatibility` for app-owned offline startup schema preflights.
+- Added `shunter.RunDataDirMigrations` for app-owned offline executable migrations.
 - Added app-owned startup migration hooks through `Module.MigrationHook`.
 - Improved startup snapshot schema mismatch diagnostics to report multiple structural differences in one failure.
 - Added backup/restore guidance to dry-run contract migration plans for blocking or data-rewrite changes.

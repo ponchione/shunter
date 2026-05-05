@@ -267,6 +267,126 @@ func TestMigrationHookFailureRollsBackAndBlocksStart(t *testing.T) {
 	requireMigrationMessageBodies(t, restarted)
 }
 
+func TestRunDataDirMigrationsExecutesOfflineAndLeavesModuleBuildable(t *testing.T) {
+	dir := t.TempDir()
+	mod := validChatModule()
+
+	result, err := RunDataDirMigrations(context.Background(), mod, Config{DataDir: dir}, func(_ context.Context, mc *MigrationContext) error {
+		if mc.ModuleName() != "chat" {
+			return fmt.Errorf("module name = %q, want chat", mc.ModuleName())
+		}
+		if mc.CommittedTxID() != 0 {
+			return fmt.Errorf("committed tx id = %d, want bootstrap horizon", mc.CommittedTxID())
+		}
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		_, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("offline-seed")})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("RunDataDirMigrations: %v", err)
+	}
+	if result.DataDir != dir {
+		t.Fatalf("result data dir = %q, want %q", result.DataDir, dir)
+	}
+	if result.RecoveredTxID != 0 || result.DurableTxID != 1 {
+		t.Fatalf("result tx ids recovered/durable = %d/%d, want 0/1", result.RecoveredTxID, result.DurableTxID)
+	}
+	requireMigrationHookResults(t, result.Hooks, MigrationHookResult{Index: 0, TxID: 1, Changed: true})
+
+	mod.Reducer("insert_after_runner", func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+		_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(2), types.NewString("after-runner")})
+		return nil, err
+	})
+	rt, err := Build(mod, Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build after explicit migration runner: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start after explicit migration runner: %v", err)
+	}
+	requireMigrationMessageBodies(t, rt, "offline-seed")
+
+	res, err := rt.CallReducer(context.Background(), "insert_after_runner", nil)
+	if err != nil {
+		t.Fatalf("CallReducer after explicit migration runner: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+	if res.TxID != 2 {
+		t.Fatalf("first runtime tx id after explicit migration = %d, want 2", res.TxID)
+	}
+	requireMigrationMessageBodies(t, rt, "offline-seed", "after-runner")
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	restarted, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("restarted Build: %v", err)
+	}
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatalf("restarted Start: %v", err)
+	}
+	defer restarted.Close()
+	requireMigrationMessageBodies(t, restarted, "offline-seed", "after-runner")
+}
+
+func TestRunDataDirMigrationsNoopHookDoesNotConsumeTxID(t *testing.T) {
+	dir := t.TempDir()
+	result, err := RunDataDirMigrations(context.Background(), validChatModule(), Config{DataDir: dir}, func(_ context.Context, mc *MigrationContext) error {
+		if mc.Transaction() == nil {
+			return fmt.Errorf("migration transaction is nil")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunDataDirMigrations noop: %v", err)
+	}
+	if result.RecoveredTxID != 0 || result.DurableTxID != 0 {
+		t.Fatalf("noop result tx ids recovered/durable = %d/%d, want 0/0", result.RecoveredTxID, result.DurableTxID)
+	}
+	requireMigrationHookResults(t, result.Hooks, MigrationHookResult{Index: 0})
+
+	rt := buildStartedDeclaredReadRuntimeWithConfig(t, validChatModule().Reducer("insert_message", insertMessageReducer), Config{DataDir: dir})
+	defer rt.Close()
+	insertMessage(t, rt, "first")
+	if got := rt.state.CommittedTxID(); got != 1 {
+		t.Fatalf("first runtime tx id after noop migration = %d, want 1", got)
+	}
+}
+
+func TestRunDataDirMigrationsFailureRollsBackHookTransaction(t *testing.T) {
+	dir := t.TempDir()
+	boom := errors.New("offline boom")
+	_, err := RunDataDirMigrations(context.Background(), validChatModule(), Config{DataDir: dir}, func(_ context.Context, mc *MigrationContext) error {
+		tableID, _, ok := mc.Schema().TableByName("messages")
+		if !ok {
+			return fmt.Errorf("messages table missing from migration schema")
+		}
+		if _, err := mc.Transaction().Insert(tableID, types.ProductValue{types.NewUint64(1), types.NewString("offline-rolled-back")}); err != nil {
+			return err
+		}
+		return boom
+	})
+	if err == nil || !errors.Is(err, boom) {
+		t.Fatalf("RunDataDirMigrations error = %v, want offline boom", err)
+	}
+
+	rt, err := Build(validChatModule(), Config{DataDir: dir})
+	if err != nil {
+		t.Fatalf("Build after failed explicit migration runner: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start after failed explicit migration runner: %v", err)
+	}
+	defer rt.Close()
+	requireMigrationMessageBodies(t, rt)
+}
+
 func assertMigrationDeclaration(t *testing.T, declarations []MigrationContractDeclaration, surface, name string, compatibility MigrationCompatibility, classification MigrationClassification) {
 	t.Helper()
 	for _, declaration := range declarations {
@@ -307,6 +427,18 @@ func requireMigrationMessageBodies(t *testing.T, rt *Runtime, want ...string) {
 	for _, body := range want {
 		if got[body] != 1 {
 			t.Fatalf("message bodies = %#v, want one %q", got, body)
+		}
+	}
+}
+
+func requireMigrationHookResults(t *testing.T, got []MigrationHookResult, want ...MigrationHookResult) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("migration hook results = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("migration hook result[%d] = %#v, want %#v", i, got[i], want[i])
 		}
 	}
 }
