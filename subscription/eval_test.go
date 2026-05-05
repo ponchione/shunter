@@ -1063,6 +1063,60 @@ func TestEvalFilteredJoinFallsBackWhenOppositeJoinColumnUnindexed(t *testing.T) 
 	}
 }
 
+func TestEvalUnfilteredJoinBothSidesDeletedStillEmitsDelete(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	lhs := types.ProductValue{types.NewUint64(7), types.NewString("lhs")}
+	rhs := types.ProductValue{types.NewUint64(100), types.NewUint64(7)}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {lhs},
+		2: {rhs},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 1}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 28, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if got := mgr.indexes.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("table fallback candidates for left table = %v, want empty", got)
+	}
+	if got := mgr.indexes.Table.Lookup(2); len(got) != 0 {
+		t.Fatalf("table fallback candidates for right table = %v, want empty", got)
+	}
+
+	delete(committed.rows[1], types.RowID(1))
+	delete(committed.rows[2], types.RowID(1))
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "lhs",
+			Deletes:   []types.ProductValue{lhs},
+		},
+		2: {
+			TableID:   2,
+			TableName: "rhs",
+			Deletes:   []types.ProductValue{rhs},
+		},
+	}}
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Inserts) != 0 {
+		t.Fatalf("inserts = %v, want none", updates[0].Inserts)
+	}
+	if len(updates[0].Deletes) != 1 || !updates[0].Deletes[0].Equal(lhs) {
+		t.Fatalf("deletes = %v, want projected LHS row %v", updates[0].Deletes, lhs)
+	}
+}
+
 func TestEvalJoinSubscriptionProjectedLeftCancelsJoinedPairChurn(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)

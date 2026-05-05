@@ -83,6 +83,8 @@ Likely feature slices:
 
 Completed slices:
 
+- unfiltered live equi-join candidate pruning uses indexed join-existence
+  edges, including same-transaction opposite-side deletes
 - live join delta committed-probe fallbacks use per-transaction delta indexes
   when the committed join side is unindexed
 - nullable-aware aggregate semantics for one-off and declared queries

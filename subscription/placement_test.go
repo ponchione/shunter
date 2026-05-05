@@ -150,6 +150,31 @@ func TestPlaceJoinWithFilterOnLHSStillTracksRHSChangesViaJoinEdge(t *testing.T) 
 	}
 }
 
+func TestPlaceUnfilteredJoinUsesExistenceEdgesWhenOppositeIndexed(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	idx := NewPruningIndexes()
+	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 1}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+
+	leftEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 1}
+	rightEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 0, RHSFilterCol: 0}
+	if _, ok := idx.JoinEdge.exists[leftEdge][h]; !ok {
+		t.Fatalf("left existence edge missing: %+v", idx.JoinEdge.exists)
+	}
+	if _, ok := idx.JoinEdge.exists[rightEdge][h]; !ok {
+		t.Fatalf("right existence edge missing: %+v", idx.JoinEdge.exists)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex for left table = %v, want empty", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 0 {
+		t.Fatalf("TableIndex for right table = %v, want empty", got)
+	}
+}
+
 func TestPlaceAndTwoColEqs(t *testing.T) {
 	// And{ColEq T1.col0=1, ColEq T2.col0=2} — each lands in ValueIndex.
 	idx := NewPruningIndexes()
@@ -363,6 +388,43 @@ func TestCollectCandidatesJoinRangeEdgeMismatch(t *testing.T) {
 	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
 	if len(cands) != 0 {
 		t.Fatalf("out-of-range join edge should produce 0 candidates: %v", cands)
+	}
+}
+
+func TestCollectCandidatesJoinExistenceEdgeMatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	idx := NewPruningIndexes()
+	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 1}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(7)}},
+	})
+
+	rows := []types.ProductValue{{types.NewUint64(7)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 1 || cands[0] != h {
+		t.Fatalf("join existence candidate = %v, want [%v]", cands, h)
+	}
+}
+
+func TestCollectCandidatesJoinExistenceEdgeMismatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	idx := NewPruningIndexes()
+	p := Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 1}
+	placeSubscriptionForResolver(idx, p, hashN(1), s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(8)}},
+	})
+
+	rows := []types.ProductValue{{types.NewUint64(7)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 0 {
+		t.Fatalf("join existence mismatch candidates = %v, want empty", cands)
 	}
 }
 

@@ -207,7 +207,10 @@ For each (tableID, colID) tracked in cols for this table:
 
 ### 5.2 Tier 2: Join Edge Index
 
-For join subscriptions with a filter on the joined table.
+For join subscriptions that can be pruned through an indexed opposite join
+column. Filtered entries key on an RHS filter value; existence entries key on
+the edge itself and only require that an opposite-side row can share the changed
+row's join key.
 
 **Structure:**
 
@@ -223,6 +226,8 @@ type JoinEdge struct {
 type JoinEdgeIndex struct {
     // edges[edge][encodedFilterValue] = set of query hashes.
     edges map[JoinEdge]map[string]map[QueryHash]struct{}
+    // exists[edge] = set of query hashes for unfiltered/equijoin existence pruning.
+    exists map[JoinEdge]map[QueryHash]struct{}
     // byTable[LHSTable][edge] = refcount, so EdgesForTable returns the
     // LHSTable-rooted edges without scanning the full edges map.
     byTable map[TableID]map[JoinEdge]int
@@ -237,11 +242,13 @@ type JoinEdgeIndex struct {
 For each JoinEdge where LHSTable matches:
     Extract the join column value from the changed row.
     Look up the corresponding RHS row via index on RHSJoinCol.
+    If any RHS row exists, add JoinEdgeIndex existence hashes for edge.
     Extract the RHS filter column value.
     Look up (edge, rhs_value) → query hashes.
 ```
 
-This prunes join subscriptions by checking whether the changed row could satisfy the join + filter condition.
+This prunes join subscriptions by checking whether the changed row could satisfy
+the join condition and, when present, the join + filter condition.
 
 ### 5.3 Tier 3: Table Fallback
 
@@ -437,8 +444,11 @@ EvalAndBroadcast(changeset *Changeset, meta PostCommitMeta) → CommitFanout:
            joinValue := R.Column(edge.LHSJoinCol)
            rhsRow := committed.IndexLookup(edge.RHSTable, edge.RHSJoinCol, joinValue)
            if rhsRow != nil:
+             candidates.AddAll(JoinEdgeIndex.LookupExists(edge))
              filterValue := rhsRow.Column(edge.RHSFilterCol)
              candidates.AddAll(JoinEdgeIndex.Lookup(edge, filterValue))
+           if opposite-side inserts/deletes in this changeset contain joinValue:
+             candidates.AddAll(JoinEdgeIndex.LookupExists(edge))
 
        // Tier 3: Table Fallback
        candidates.AddAll(TableFallback.Lookup(T))

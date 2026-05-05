@@ -41,6 +41,9 @@ func (p *PruningIndexes) TestOnlyIsEmpty() bool {
 	if len(p.JoinEdge.edges) != 0 || len(p.JoinEdge.byTable) != 0 {
 		return false
 	}
+	if len(p.JoinEdge.exists) != 0 {
+		return false
+	}
 	if len(p.JoinRangeEdge.edges) != 0 || len(p.JoinRangeEdge.byTable) != 0 {
 		return false
 	}
@@ -103,6 +106,12 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 				}
 				continue
 			}
+			if placements := joinExistenceEdgesFor(join, t, resolver); len(placements) > 0 {
+				for _, placement := range placements {
+					mutateJoinExistencePlacement(idx, placement.edge, hash, add)
+				}
+				continue
+			}
 		}
 		mutateTablePlacement(idx, t, hash, add)
 	}
@@ -138,6 +147,14 @@ func mutateJoinRangeEdgePlacement(idx *PruningIndexes, edge JoinEdge, lower, upp
 		return
 	}
 	idx.JoinRangeEdge.Remove(edge, lower, upper, hash)
+}
+
+func mutateJoinExistencePlacement(idx *PruningIndexes, edge JoinEdge, hash QueryHash, add bool) {
+	if add {
+		idx.JoinEdge.AddExistence(edge, hash)
+		return
+	}
+	idx.JoinEdge.RemoveExistence(edge, hash)
 }
 
 func mutateTablePlacement(idx *PruningIndexes, table TableID, hash QueryHash, add bool) {
@@ -339,6 +356,10 @@ type joinRangeEdgePlacement struct {
 	upper Bound
 }
 
+type joinExistenceEdgePlacement struct {
+	edge JoinEdge
+}
+
 // joinEdgesFor computes the JoinEdge/filter-value placements for Tier 2 for the
 // given table. Returns nil when no filterable edge exists for this table
 // (callers then fall through to Tier 3).
@@ -425,6 +446,42 @@ func joinRangeEdgesFor(pred Predicate, join *Join, t TableID, resolver IndexReso
 	return placements
 }
 
+// joinExistenceEdgesFor computes join-existence placements for Tier 2 for the
+// given table. Existence placement is safe when the opposite join column has a
+// committed index: candidate collection only needs to prove that at least one
+// opposite-side row can share the changed row's join key.
+func joinExistenceEdgesFor(join *Join, t TableID, resolver IndexResolver) []joinExistenceEdgePlacement {
+	if resolver == nil {
+		return nil
+	}
+	var other TableID
+	var myJoinCol, otherJoinCol ColID
+	switch t {
+	case join.Left:
+		other = join.Right
+		myJoinCol = join.LeftCol
+		otherJoinCol = join.RightCol
+	case join.Right:
+		other = join.Left
+		myJoinCol = join.RightCol
+		otherJoinCol = join.LeftCol
+	default:
+		return nil
+	}
+	if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
+		return nil
+	}
+	return []joinExistenceEdgePlacement{{
+		edge: JoinEdge{
+			LHSTable:     t,
+			RHSTable:     other,
+			LHSJoinCol:   myJoinCol,
+			RHSJoinCol:   otherJoinCol,
+			RHSFilterCol: otherJoinCol,
+		},
+	}}
+}
+
 func collectJoinEdgeCandidates(
 	idx *PruningIndexes,
 	table TableID,
@@ -437,9 +494,11 @@ func collectJoinEdgeCandidates(
 		return
 	}
 	idx.JoinEdge.ForEachEdge(table, func(edge JoinEdge) {
-		forEachJoinedRHSFilterValue(rows, committed, resolver, edge, func(v Value) {
+		if forEachJoinedRHSFilterValue(rows, committed, resolver, edge, func(v Value) {
 			idx.JoinEdge.ForEachHash(edge, v, add)
-		})
+		}) {
+			idx.JoinEdge.ForEachExistenceHash(edge, add)
+		}
 	})
 	idx.JoinRangeEdge.ForEachEdge(table, func(edge JoinEdge) {
 		forEachJoinedRHSFilterValue(rows, committed, resolver, edge, func(v Value) {
@@ -454,11 +513,12 @@ func forEachJoinedRHSFilterValue(
 	resolver IndexResolver,
 	edge JoinEdge,
 	fn func(Value),
-) {
+) bool {
 	rhsIdx, ok := resolver.IndexIDForColumn(edge.RHSTable, edge.RHSJoinCol)
 	if !ok {
-		return
+		return false
 	}
+	matched := false
 	for _, row := range rows {
 		if int(edge.LHSJoinCol) >= len(row) {
 			continue
@@ -470,10 +530,60 @@ func forEachJoinedRHSFilterValue(
 			if !ok {
 				continue
 			}
+			matched = true
 			if int(edge.RHSFilterCol) >= len(rhsRow) {
 				continue
 			}
 			fn(rhsRow[edge.RHSFilterCol])
 		}
 	}
+	return matched
+}
+
+func collectJoinExistenceDeltaCandidates(
+	idx *PruningIndexes,
+	table TableID,
+	rows []types.ProductValue,
+	changeset *store.Changeset,
+	add func(QueryHash),
+) {
+	if changeset == nil || len(rows) == 0 {
+		return
+	}
+	idx.JoinEdge.ForEachEdge(table, func(edge JoinEdge) {
+		tc := changeset.Tables[edge.RHSTable]
+		if tc == nil {
+			return
+		}
+		if !joinKeyOverlapsChangedRows(rows, edge.LHSJoinCol, tc.Inserts, edge.RHSJoinCol) &&
+			!joinKeyOverlapsChangedRows(rows, edge.LHSJoinCol, tc.Deletes, edge.RHSJoinCol) {
+			return
+		}
+		idx.JoinEdge.ForEachExistenceHash(edge, add)
+	})
+}
+
+func joinKeyOverlapsChangedRows(lhsRows []types.ProductValue, lhsCol ColID, rhsRows []types.ProductValue, rhsCol ColID) bool {
+	if len(lhsRows) == 0 || len(rhsRows) == 0 {
+		return false
+	}
+	rhsKeys := make(map[valueKey]struct{}, len(rhsRows))
+	for _, row := range rhsRows {
+		if int(rhsCol) >= len(row) {
+			continue
+		}
+		rhsKeys[encodeValueKey(row[rhsCol])] = struct{}{}
+	}
+	if len(rhsKeys) == 0 {
+		return false
+	}
+	for _, row := range lhsRows {
+		if int(lhsCol) >= len(row) {
+			continue
+		}
+		if _, ok := rhsKeys[encodeValueKey(row[lhsCol])]; ok {
+			return true
+		}
+	}
+	return false
 }

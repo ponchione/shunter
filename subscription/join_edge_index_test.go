@@ -59,6 +59,32 @@ func TestJoinEdgeIndexRemoveCleansUp(t *testing.T) {
 	}
 }
 
+func TestJoinEdgeIndexExistenceAddRemoveCleansUp(t *testing.T) {
+	ji := NewJoinEdgeIndex()
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 1}
+	h := hashN(1)
+	ji.AddExistence(edge, h)
+
+	var got []QueryHash
+	ji.ForEachExistenceHash(edge, func(found QueryHash) {
+		got = append(got, found)
+	})
+	if len(got) != 1 || got[0] != h {
+		t.Fatalf("ForEachExistenceHash = %v, want [%v]", got, h)
+	}
+	if edges := ji.EdgesForTable(1); len(edges) != 1 || edges[0] != edge {
+		t.Fatalf("EdgesForTable = %v, want [%v]", edges, edge)
+	}
+
+	ji.RemoveExistence(edge, h)
+	if len(ji.exists) != 0 {
+		t.Fatalf("exists not cleaned up: %+v", ji.exists)
+	}
+	if len(ji.byTable) != 0 {
+		t.Fatalf("byTable not cleaned up: %+v", ji.byTable)
+	}
+}
+
 func TestJoinEdgeIndexEdgesForTable(t *testing.T) {
 	ji := NewJoinEdgeIndex()
 	e1 := JoinEdge{LHSTable: 1, RHSTable: 2}
