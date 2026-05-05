@@ -688,6 +688,52 @@ func TestOpenAndRecoverSnapshotRebuildsSecondaryIndexes(t *testing.T) {
 	}
 }
 
+func TestOpenAndRecoverSnapshotAndTailRebuildCompositeSecondaryIndexes(t *testing.T) {
+	root := t.TempDir()
+	reg := buildRecoveryCompositeIndexRegistry(t)
+	committed := buildRecoveryCommittedState(t, reg)
+	scores, ok := committed.Table(0)
+	if !ok {
+		t.Fatal("scores table missing")
+	}
+	if err := scores.InsertRow(scores.AllocRowID(), recoveryCompositeRow(1, "red", 10, "seed-red-10")); err != nil {
+		t.Fatal(err)
+	}
+	if err := scores.InsertRow(scores.AllocRowID(), recoveryCompositeRow(2, "blue", 10, "seed-blue-10")); err != nil {
+		t.Fatal(err)
+	}
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	createSnapshotAt(t, writer, committed, 2)
+	writeRecoverySegment(t, root, reg, 3,
+		recoveryRecord{txID: 3, inserts: []types.ProductValue{recoveryCompositeRow(3, "red", 20, "tail-red-20")}},
+	)
+
+	recovered, maxTxID, err := OpenAndRecover(root, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxTxID != 3 {
+		t.Fatalf("maxTxID = %d, want 3", maxTxID)
+	}
+	recoveredScores, ok := recovered.Table(0)
+	if !ok {
+		t.Fatal("recovered scores table missing")
+	}
+	idx := recoveredScores.IndexByID(1)
+	if idx == nil {
+		t.Fatal("composite index missing from recovered table")
+	}
+	assertCompositeIndexBodies(t, recoveredScores, idx, "red", 10, []string{"seed-red-10"})
+	assertCompositeIndexBodies(t, recoveredScores, idx, "red", 20, []string{"tail-red-20"})
+
+	tx := store.NewTransaction(recovered, reg)
+	_, err = tx.Insert(0, recoveryCompositeRow(4, "red", 20, "duplicate-tail-key"))
+	if !errors.Is(err, store.ErrUniqueConstraintViolation) {
+		t.Fatalf("post-recovery duplicate composite key err = %v, want ErrUniqueConstraintViolation", err)
+	}
+}
+
 func TestOpenAndRecoverNoData(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()
@@ -990,6 +1036,29 @@ func buildRecoveryUint8AutoIncrementRegistry(t *testing.T) schema.SchemaRegistry
 	return engine.Registry()
 }
 
+func buildRecoveryCompositeIndexRegistry(t *testing.T) schema.SchemaRegistry {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "scores",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint64, PrimaryKey: true},
+			{Name: "guild", Type: schema.KindString},
+			{Name: "score", Type: schema.KindUint64},
+			{Name: "body", Type: schema.KindString},
+		},
+		Indexes: []schema.IndexDefinition{
+			{Name: "guild_score", Columns: []string{"guild", "score"}, Unique: true},
+		},
+	})
+	engine, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return engine.Registry()
+}
+
 func buildRecoveryCommittedState(t *testing.T, reg schema.SchemaRegistry) *store.CommittedState {
 	t.Helper()
 	committed := store.NewCommittedState()
@@ -1031,6 +1100,37 @@ func writeRecoverySegment(t *testing.T, root string, reg schema.SchemaRegistry, 
 		t.Fatal(err)
 	}
 	return filepath.Join(root, SegmentFileName(startTx))
+}
+
+func recoveryCompositeRow(id uint64, guild string, score uint64, body string) types.ProductValue {
+	return types.ProductValue{
+		types.NewUint64(id),
+		types.NewString(guild),
+		types.NewUint64(score),
+		types.NewString(body),
+	}
+}
+
+func assertCompositeIndexBodies(t *testing.T, table *store.Table, idx *store.Index, guild string, score uint64, want []string) {
+	t.Helper()
+	var got []string
+	for _, rowID := range idx.Seek(store.NewIndexKey(types.NewString(guild), types.NewUint64(score))) {
+		row, ok := table.GetRow(rowID)
+		if !ok {
+			t.Fatalf("index returned missing rowID %d", rowID)
+		}
+		got = append(got, row[3].AsString())
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("composite index (%q,%d) bodies = %v, want %v", guild, score, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("composite index (%q,%d) bodies = %v, want %v", guild, score, got, want)
+		}
+	}
 }
 
 func assertRecoveryRows(t *testing.T, table *store.Table, want map[uint64]string) {

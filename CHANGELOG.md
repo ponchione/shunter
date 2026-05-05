@@ -17,6 +17,8 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Generated TypeScript clients now include a table-name-to-row-type map and a table subscriber callback type derived from it.
 - Added canonical JSON column values with schema export, BSATN encoding, SQL literal coercion, store/index support, subscription hashing, contract validation, and TypeScript `unknown` codegen.
 - Added nullable column semantics across `types.Value`, schema reflection/export, schema-aware row BSATN, store validation/indexing, SQL `IS NULL` predicates, snapshots/recovery, contract diff, and TypeScript `T | null` codegen.
+- Hardened composite secondary index behavior across unique enforcement, reducer index seeks, snapshot/recovery rebuilds, and detached contract validation.
+- Documented fixed-point persisted values as an app-owned scaled integer convention over deterministic integer column kinds.
 
 ## v0.1.0 - 2026-05-05
 

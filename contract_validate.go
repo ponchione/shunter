@@ -83,11 +83,16 @@ func validateContractTables(tables []schema.TableExport, errs *[]error) map[stri
 			if len(index.Columns) == 0 {
 				*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s columns must not be empty", table.Name, index.Name))
 			}
+			indexColumns := make(map[string]struct{}, len(index.Columns))
 			for _, column := range index.Columns {
 				if strings.TrimSpace(column) == "" {
 					*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s column must not be empty", table.Name, index.Name))
 					continue
 				}
+				if _, exists := indexColumns[column]; exists {
+					*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s duplicate index column %q", table.Name, index.Name, column))
+				}
+				indexColumns[column] = struct{}{}
 				if _, ok := columnNames[column]; !ok {
 					*errs = append(*errs, fmt.Errorf("schema.tables.%s.indexes.%s references unknown column %q", table.Name, index.Name, column))
 				}

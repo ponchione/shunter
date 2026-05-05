@@ -30,21 +30,21 @@ capabilities.
 Agents should implement remaining slices in this order unless a later task
 explicitly says otherwise:
 
-1. Composite index and reducer read ergonomics.
-2. Fixed-point numeric convention or column metadata.
-3. External JWT principal bridge.
-4. App-owned migration and import hooks.
-5. Ordered declared reads.
-6. Client/codegen updates for the new surface.
+1. External JWT principal bridge.
+2. App-owned migration and import hooks.
+3. Ordered declared reads.
+4. Client/codegen updates for the new surface.
 
 Completed slices:
 
 - UUID value kind.
 - Canonical JSON value kind.
 - Nullable column semantics.
+- Composite index and reducer read ergonomics.
+- Fixed-point scaled integer convention.
 
-The remaining slices build on the now-stable UUID, JSON, and nullable type
-surface.
+The remaining slices build on the now-stable UUID, JSON, nullable, composite
+index, and integer type surfaces.
 
 ## 3. UUID Value Kind
 
@@ -207,6 +207,8 @@ as an application sentinel.
 
 ## 6. Composite Index And Reducer Read Ergonomics
 
+Status: implemented.
+
 ### Requirement
 
 Composite secondary indexes exist structurally. Production modules need them to
@@ -252,6 +254,9 @@ through `Underlying()`.
 - Reducer helper returns only matching rows and does not expose aliases.
 
 ## 7. Fixed-Point Numeric Strategy
+
+Status: implemented as a scaled integer convention. No fixed-point column
+metadata has been added.
 
 ### Requirement
 

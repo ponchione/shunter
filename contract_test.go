@@ -250,6 +250,23 @@ func TestModuleContractValidationAcceptsJSONColumnType(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationRejectsDuplicateCompositeIndexColumns(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Schema.Tables[0].Indexes = append(contract.Schema.Tables[0].Indexes, schema.IndexExport{
+		Name:    "body_body_idx",
+		Columns: []string{"body", "body"},
+		Unique:  false,
+	})
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted duplicate composite index columns")
+	}
+	if !strings.Contains(err.Error(), `schema.tables.messages.indexes.body_body_idx duplicate index column "body"`) {
+		t.Fatalf("ValidateModuleContract error = %v, want duplicate index column context", err)
+	}
+}
+
 func TestModuleContractValidationRejectsInvalidDeclarationSQL(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Queries = []QueryDescription{{Name: "recent_messages", SQL: "SELECT * FROM missing"}}

@@ -97,6 +97,32 @@ func jsonRow(id, metadata types.Value, name string) types.ProductValue {
 	return types.ProductValue{id, metadata, types.NewString(name)}
 }
 
+func compositeIndexedSchema(unique bool) *schema.TableSchema {
+	return &schema.TableSchema{
+		ID:   0,
+		Name: "scores",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "guild", Type: types.KindString},
+			{Index: 2, Name: "score", Type: types.KindUint64},
+			{Index: 3, Name: "body", Type: types.KindString},
+		},
+		Indexes: []schema.IndexSchema{
+			{ID: 0, Name: "pk", Columns: []int{0}, Unique: true, Primary: true},
+			{ID: 1, Name: "guild_score", Columns: []int{1, 2}, Unique: unique},
+		},
+	}
+}
+
+func compositeRow(id uint64, guild string, score uint64, body string) types.ProductValue {
+	return types.ProductValue{
+		types.NewUint64(id),
+		types.NewString(guild),
+		types.NewUint64(score),
+		types.NewString(body),
+	}
+}
+
 // --- IndexKey tests (E3 Story 3.1) ---
 
 func TestIndexKeyCompare(t *testing.T) {
@@ -581,6 +607,28 @@ func TestTableJSONPrimaryAndSecondaryIndexes(t *testing.T) {
 	}
 }
 
+func TestTableCompositeUniqueIndexCommittedConflict(t *testing.T) {
+	tbl := NewTable(compositeIndexedSchema(true))
+	if err := tbl.InsertRow(tbl.AllocRowID(), compositeRow(1, "red", 10, "first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tbl.InsertRow(tbl.AllocRowID(), compositeRow(2, "red", 11, "same guild different score")); err != nil {
+		t.Fatalf("same first key part should be allowed: %v", err)
+	}
+	if err := tbl.InsertRow(tbl.AllocRowID(), compositeRow(3, "blue", 10, "same score different guild")); err != nil {
+		t.Fatalf("same second key part should be allowed: %v", err)
+	}
+
+	err := tbl.InsertRow(tbl.AllocRowID(), compositeRow(4, "red", 10, "duplicate combined key"))
+	if !errors.Is(err, ErrUniqueConstraintViolation) {
+		t.Fatalf("duplicate composite key err = %v, want ErrUniqueConstraintViolation", err)
+	}
+	idx := tbl.IndexByID(1)
+	if got := idx.Seek(NewIndexKey(types.NewString("red"), types.NewUint64(10))); len(got) != 1 {
+		t.Fatalf("composite unique index after rejected insert = %v, want one row", got)
+	}
+}
+
 func TestTableScan(t *testing.T) {
 	tbl := NewTable(pkSchema())
 	for i := range 5 {
@@ -732,6 +780,80 @@ func TestTransactionUpdateMaintainsUUIDIndexesOnCommit(t *testing.T) {
 	}
 	if got := ownerIndex.Seek(NewIndexKey(owner2)); !slices.Equal(got, []types.RowID{newRID}) {
 		t.Fatalf("secondary new owner after commit = %v, want [%d]", got, newRID)
+	}
+}
+
+func TestTransactionCompositeUniqueConflictWithinOneTransaction(t *testing.T) {
+	cs := NewCommittedState()
+	cs.RegisterTable(0, NewTable(compositeIndexedSchema(true)))
+
+	tx := NewTransaction(cs, nil)
+	if _, err := tx.Insert(0, compositeRow(1, "red", 10, "first")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Insert(0, compositeRow(2, "red", 11, "different score")); err != nil {
+		t.Fatalf("distinct composite key in same tx should be allowed: %v", err)
+	}
+	_, err := tx.Insert(0, compositeRow(3, "red", 10, "duplicate combined key"))
+	if !errors.Is(err, ErrUniqueConstraintViolation) {
+		t.Fatalf("tx duplicate composite key err = %v, want ErrUniqueConstraintViolation", err)
+	}
+}
+
+func TestTransactionUpdateMovesCompositeIndexKey(t *testing.T) {
+	cs := NewCommittedState()
+	tbl := NewTable(compositeIndexedSchema(true))
+	cs.RegisterTable(0, tbl)
+	oldRID := tbl.AllocRowID()
+	if err := tbl.InsertRow(oldRID, compositeRow(1, "red", 10, "old")); err != nil {
+		t.Fatal(err)
+	}
+
+	tx := NewTransaction(cs, nil)
+	newRID, err := tx.Update(0, oldRID, compositeRow(1, "blue", 20, "new"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Commit(cs, tx); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := tbl.IndexByID(1)
+	if got := idx.Seek(NewIndexKey(types.NewString("red"), types.NewUint64(10))); len(got) != 0 {
+		t.Fatalf("old composite key after update commit = %v, want empty", got)
+	}
+	if got := idx.Seek(NewIndexKey(types.NewString("blue"), types.NewUint64(20))); !slices.Equal(got, []types.RowID{newRID}) {
+		t.Fatalf("new composite key after update commit = %v, want [%d]", got, newRID)
+	}
+}
+
+func TestTransactionDeleteRemovesCompositeIndexEntry(t *testing.T) {
+	cs := NewCommittedState()
+	tbl := NewTable(compositeIndexedSchema(false))
+	cs.RegisterTable(0, tbl)
+	deleteRID := tbl.AllocRowID()
+	keepRID := tbl.AllocRowID()
+	if err := tbl.InsertRow(deleteRID, compositeRow(1, "red", 10, "delete")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tbl.InsertRow(keepRID, compositeRow(2, "red", 20, "keep")); err != nil {
+		t.Fatal(err)
+	}
+
+	tx := NewTransaction(cs, nil)
+	if err := tx.Delete(0, deleteRID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Commit(cs, tx); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := tbl.IndexByID(1)
+	if got := idx.Seek(NewIndexKey(types.NewString("red"), types.NewUint64(10))); len(got) != 0 {
+		t.Fatalf("deleted composite key after commit = %v, want empty", got)
+	}
+	if got := idx.Seek(NewIndexKey(types.NewString("red"), types.NewUint64(20))); !slices.Equal(got, []types.RowID{keepRID}) {
+		t.Fatalf("kept composite key after delete commit = %v, want [%d]", got, keepRID)
 	}
 }
 
