@@ -5,6 +5,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Generated TypeScript clients now include a table-name-to-row-type map and a table subscriber callback type derived from it.
 
 ## v0.1.0 - 2026-05-05
 

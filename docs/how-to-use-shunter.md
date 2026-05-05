@@ -446,6 +446,10 @@ The exported `ModuleContract` includes module identity, schema, queries, views,
 visibility filters, permissions, read-model metadata, migration metadata, and
 codegen metadata.
 
+Generated TypeScript includes row interfaces, a `TableRows` table-name-to-row
+map, typed subscription helpers, declared read helper names, and protocol
+metadata.
+
 The generic CLI operates on existing contract JSON files:
 
 ```bash

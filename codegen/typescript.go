@@ -35,7 +35,8 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type ViewSubscriber = (sql: string) => Promise<() => void>;\n")
 	b.WriteString("export type DeclaredQueryRunner = (name: ExecutableQueryName) => Promise<Uint8Array>;\n")
 	b.WriteString("export type DeclaredViewSubscriber = (name: ExecutableViewName) => Promise<() => void>;\n")
-	b.WriteString("export type TableSubscriber<Row> = (table: TableName, onRows?: (rows: Row[]) => void) => Promise<() => void>;\n")
+	b.WriteString("export type TableRow<Name extends TableName> = TableRows[Name];\n")
+	b.WriteString("export type TableSubscriber<Row = never> = <Name extends TableName>(table: Name, onRows?: (rows: ([Row] extends [never] ? TableRow<Name> : Row)[]) => void) => Promise<() => void>;\n")
 	b.WriteString("export type UUID = string;\n")
 	b.WriteString("\n")
 
@@ -65,6 +66,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 
 	writeTypeScriptConstMap(&b, "tables", tableConstants)
 	b.WriteString("export type TableName = (typeof tables)[keyof typeof tables];\n\n")
+	writeTypeScriptTableRows(&b, contract.Schema.Tables, tableTypes)
 	writeTypeScriptTableReadPolicies(&b, contract.Schema.Tables, tableConstants)
 	writeTypeScriptVisibilityFilters(&b, contract.VisibilityFilters)
 	topLevelValueNames := typeScriptTopLevelValueNames()
@@ -189,6 +191,14 @@ func writeTypeScriptSQLConstMap(b *bytes.Buffer, name string, identifiers []name
 		fmt.Fprintf(b, "  %s: %s,\n", identifier.identifier, strconv.Quote(identifier.sql))
 	}
 	b.WriteString("} as const;\n\n")
+}
+
+func writeTypeScriptTableRows(b *bytes.Buffer, tables []schema.TableExport, rowTypes []namedTypeScriptIdentifier) {
+	b.WriteString("export type TableRows = {\n")
+	for i, table := range tables {
+		fmt.Fprintf(b, "  %s: %sRow;\n", strconv.Quote(table.Name), rowTypes[i].identifier)
+	}
+	b.WriteString("};\n\n")
 }
 
 func writeTypeScriptTableReadPolicies(b *bytes.Buffer, tables []schema.TableExport, identifiers []namedTypeScriptIdentifier) {

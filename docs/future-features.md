@@ -25,8 +25,9 @@ Current direction:
 
 - Continue generating client-facing artifacts from `ModuleContract`.
 - Keep the first client surface small and contract-driven.
-- Build SDK layers on the generated TypeScript table, reducer, and executable
-  declared-read name unions rather than raw string callback names.
+- Build SDK layers on the generated TypeScript table-row map plus table,
+  reducer, and executable declared-read name unions rather than raw string
+  callback names.
 - Consider a React SDK once enough projects repeat the same table subscription,
   reducer-call, connection-state, and cache patterns.
 - Avoid owning a broad framework/template ecosystem before the reusable client
