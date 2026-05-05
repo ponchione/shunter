@@ -25,6 +25,8 @@ Current direction:
 
 - Continue generating client-facing artifacts from `ModuleContract`.
 - Keep the first client surface small and contract-driven.
+- Build SDK layers on the generated TypeScript table, reducer, and executable
+  declared-read name unions rather than raw string callback names.
 - Consider a React SDK once enough projects repeat the same table subscription,
   reducer-call, connection-state, and cache patterns.
 - Avoid owning a broad framework/template ecosystem before the reusable client
@@ -33,8 +35,8 @@ Current direction:
 Potential React SDK responsibilities:
 
 - connection lifecycle state
-- typed reducer calls
-- typed declared query/view helpers
+- typed reducer calls using generated reducer-name unions
+- typed declared query/view helpers using generated executable-name unions
 - table/view cache updates from Shunter protocol messages
 - subscription cleanup on component unmount
 - stable handling of reconnect and protocol-version mismatch

@@ -30,12 +30,12 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	if err := writeTypeScriptProtocolMetadata(&b); err != nil {
 		return nil, err
 	}
-	b.WriteString("export type ReducerCaller = (name: string, args: Uint8Array) => Promise<Uint8Array>;\n")
+	b.WriteString("export type ReducerCaller = (name: ReducerName, args: Uint8Array) => Promise<Uint8Array>;\n")
 	b.WriteString("export type QueryRunner = (sql: string) => Promise<Uint8Array>;\n")
 	b.WriteString("export type ViewSubscriber = (sql: string) => Promise<() => void>;\n")
-	b.WriteString("export type DeclaredQueryRunner = (name: string) => Promise<Uint8Array>;\n")
-	b.WriteString("export type DeclaredViewSubscriber = (name: string) => Promise<() => void>;\n")
-	b.WriteString("export type TableSubscriber<Row> = (table: string, onRows?: (rows: Row[]) => void) => Promise<() => void>;\n")
+	b.WriteString("export type DeclaredQueryRunner = (name: ExecutableQueryName) => Promise<Uint8Array>;\n")
+	b.WriteString("export type DeclaredViewSubscriber = (name: ExecutableViewName) => Promise<() => void>;\n")
+	b.WriteString("export type TableSubscriber<Row> = (table: TableName, onRows?: (rows: Row[]) => void) => Promise<() => void>;\n")
 	b.WriteString("export type UUID = string;\n")
 	b.WriteString("\n")
 
@@ -107,7 +107,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type QueryName = (typeof queries)[keyof typeof queries];\n\n")
 	executableQueries := executableQueryIdentifiers(contract.Queries, queryIdentifiers)
 	writeTypeScriptSQLConstMap(&b, "querySQL", executableQueries)
-	b.WriteString("export type ExecutableQueryName = keyof typeof querySQL;\n\n")
+	b.WriteString("export type ExecutableQueryName = (typeof queries)[keyof typeof querySQL];\n\n")
 	for _, query := range executableQueries {
 		functionName := uniqueTypeScriptIdentifier("query"+upperFirst(query.identifier), topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {\n", functionName)
@@ -124,7 +124,7 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 	b.WriteString("export type ViewName = (typeof views)[keyof typeof views];\n\n")
 	executableViews := executableViewIdentifiers(contract.Views, viewIdentifiers)
 	writeTypeScriptSQLConstMap(&b, "viewSQL", executableViews)
-	b.WriteString("export type ExecutableViewName = keyof typeof viewSQL;\n\n")
+	b.WriteString("export type ExecutableViewName = (typeof views)[keyof typeof viewSQL];\n\n")
 	for _, view := range executableViews {
 		functionName := uniqueTypeScriptIdentifier("subscribe"+upperFirst(view.identifier), topLevelValueNames)
 		fmt.Fprintf(&b, "export function %s(subscribeDeclaredView: DeclaredViewSubscriber): Promise<() => void> {\n", functionName)

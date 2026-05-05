@@ -10,6 +10,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - Added `shunter.CheckDataDirCompatibility` for app-owned offline startup schema preflights.
 - Added `shunter.RunDataDirMigrations` for app-owned offline executable migrations.
 - Added app-owned startup migration hooks through `Module.MigrationHook`.
+- Tightened generated TypeScript client callback types to use contract-derived table, reducer, and executable declared query/view name unions.
 - Improved startup snapshot schema mismatch diagnostics to report multiple structural differences in one failure.
 - Added backup/restore guidance to dry-run contract migration plans for blocking or data-rewrite changes.
 - Added reusable offline `DataDir` backup and restore helpers for app-owned binaries.
