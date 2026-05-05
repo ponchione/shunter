@@ -54,7 +54,8 @@ func (p *PruningIndexes) TestOnlyIsEmpty() bool {
 }
 
 // PlaceSubscription routes each (query, table) pair to one pruning tier.
-// Self-joins use table-level placement because leaves apply to one side only.
+// NoRows predicates are omitted because they can never emit deltas. Self-joins
+// use table-level placement because leaves apply to one side only.
 func PlaceSubscription(idx *PruningIndexes, pred Predicate, hash QueryHash) {
 	mutateSubscriptionPlacement(idx, pred, hash, true, nil)
 }
@@ -73,6 +74,9 @@ func removeSubscriptionForResolver(idx *PruningIndexes, pred Predicate, hash Que
 }
 
 func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash QueryHash, add bool, resolver IndexResolver) {
+	if _, ok := pred.(NoRows); ok {
+		return
+	}
 	if j, ok := pred.(Join); ok && j.Left == j.Right {
 		mutateTablePlacement(idx, j.Left, hash, add)
 		return

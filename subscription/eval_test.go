@@ -398,6 +398,28 @@ func TestEvalBatchedTier1SingleLookup(t *testing.T) {
 	}
 }
 
+func TestEvalNoRowsSkipsCandidates(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{NoRows{Table: 1}},
+	}, nil); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if !mgr.indexes.TestOnlyIsEmpty() {
+		t.Fatalf("NoRows should not be placed in pruning indexes: %+v", mgr.indexes)
+	}
+
+	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(42), types.NewString("x")}}, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[types.ConnectionID{1}]; len(got) != 0 {
+		t.Fatalf("NoRows produced fanout: %v", got)
+	}
+}
+
 func TestEvalSelfEquiJoinSubscription(t *testing.T) {
 	// T: (id, u32). Sub: SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32.
 	// Lowered to Join{Left: T, Right: T, LeftCol: 1, RightCol: 1, aliases 0/1}.

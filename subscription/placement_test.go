@@ -35,16 +35,18 @@ func TestPlaceAllRowsGoesToTableIndex(t *testing.T) {
 	}
 }
 
-func TestPlaceNoRowsGoesToTableIndex(t *testing.T) {
+func TestPlaceNoRowsSkipsIndexes(t *testing.T) {
 	idx := NewPruningIndexes()
 	p := NoRows{Table: 1}
 	h := hashN(11)
 	PlaceSubscription(idx, p, h)
-	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != h {
-		t.Fatalf("Table.Lookup(1) = %v, want [%v]", got, h)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("NoRows placement should leave indexes empty: %+v", idx)
 	}
-	if got := idx.Value.TrackedColumns(1); len(got) != 0 {
-		t.Fatalf("ValueIndex should be empty, got tracked columns %v", got)
+
+	RemoveSubscription(idx, p, h)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("NoRows removal should leave indexes empty: %+v", idx)
 	}
 }
 
@@ -301,6 +303,17 @@ func TestCollectCandidatesEmptyTable(t *testing.T) {
 	cands := CollectCandidatesForTable(idx, 1, nil, nil, nil)
 	if len(cands) != 0 {
 		t.Fatalf("empty index candidates = %v", cands)
+	}
+}
+
+func TestCollectCandidatesNoRowsSkipped(t *testing.T) {
+	idx := NewPruningIndexes()
+	PlaceSubscription(idx, NoRows{Table: 1}, hashN(1))
+
+	rows := []types.ProductValue{{types.NewUint64(42)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
+	if len(cands) != 0 {
+		t.Fatalf("NoRows candidates = %v, want empty", cands)
 	}
 }
 

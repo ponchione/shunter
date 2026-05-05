@@ -83,6 +83,8 @@ Likely feature slices:
 
 Completed slices:
 
+- live NoRows predicates skip pruning placement entirely while retaining
+  registration and query-state semantics
 - distinct-table filtered live CrossJoin predicates use local value/range
   pruning on the filtered side while self-cross-joins keep table fallback
 - cross-side live join OR filters split into value/range branch indexes and
