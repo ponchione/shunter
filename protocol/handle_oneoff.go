@@ -686,15 +686,9 @@ func countOneOffAggregate(ctx context.Context, view store.CommittedReadView, tab
 	if aggregate.Distinct {
 		return countDistinctOneOffAggregate(ctx, view, tableID, pred, resolver, argument)
 	}
-	if joinPred, ok := pred.(subscription.Join); ok {
-		return countOneOffJoinColumn(ctx, view, joinPred, resolver, argument)
-	}
-	if crossPred, ok := pred.(subscription.CrossJoin); ok {
-		return countOneOffCrossJoinColumn(ctx, view, crossPred, argument)
-	}
 	var count uint64
-	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
-		if value, ok := oneOffAggregateRowColumnValue(pv, tableID, argument); ok && !value.IsNull() {
+	err := visitOneOffAggregateColumnValues(ctx, view, tableID, pred, resolver, argument, func(value types.Value) bool {
+		if !value.IsNull() {
 			count++
 		}
 		return true
@@ -704,29 +698,8 @@ func countOneOffAggregate(ctx context.Context, view store.CommittedReadView, tab
 
 func countDistinctOneOffAggregate(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, column compiledSQLProjectionColumn) (uint64, error) {
 	seen := newOneOffDistinctValueSet()
-	if joinPred, ok := pred.(subscription.Join); ok {
-		err := visitOneOffJoinPairs(ctx, view, joinPred, resolver, func(leftRow, rightRow types.ProductValue) bool {
-			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, joinPred.Left, joinPred.LeftAlias, joinPred.Right, joinPred.RightAlias, column)
-			if ok && !value.IsNull() {
-				seen.add(value)
-			}
-			return true
-		})
-		return seen.count(), err
-	}
-	if crossPred, ok := pred.(subscription.CrossJoin); ok {
-		err := visitOneOffCrossJoinPairs(ctx, view, crossPred, false, func(leftRow, rightRow types.ProductValue) bool {
-			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, crossPred.Left, crossPred.LeftAlias, crossPred.Right, crossPred.RightAlias, column)
-			if ok && !value.IsNull() {
-				seen.add(value)
-			}
-			return true
-		})
-		return seen.count(), err
-	}
-	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
-		value, ok := oneOffAggregateRowColumnValue(pv, tableID, column)
-		if ok && !value.IsNull() {
+	err := visitOneOffAggregateColumnValues(ctx, view, tableID, pred, resolver, column, func(value types.Value) bool {
+		if !value.IsNull() {
 			seen.add(value)
 		}
 		return true
@@ -740,46 +713,8 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 	}
 	argument := *aggregate.Argument
 	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
-	if joinPred, ok := pred.(subscription.Join); ok {
-		err := visitOneOffJoinPairs(ctx, view, joinPred, resolver, func(leftRow, rightRow types.ProductValue) bool {
-			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, joinPred.Left, joinPred.LeftAlias, joinPred.Right, joinPred.RightAlias, argument)
-			if !ok {
-				return true
-			}
-			if err := acc.add(value); err != nil {
-				acc.err = err
-				return false
-			}
-			return true
-		})
-		if err != nil {
-			return types.Value{}, err
-		}
-		return acc.value()
-	}
-	if crossPred, ok := pred.(subscription.CrossJoin); ok {
-		err := visitOneOffCrossJoinPairs(ctx, view, crossPred, false, func(leftRow, rightRow types.ProductValue) bool {
-			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, crossPred.Left, crossPred.LeftAlias, crossPred.Right, crossPred.RightAlias, argument)
-			if !ok {
-				return true
-			}
-			if err := acc.add(value); err != nil {
-				acc.err = err
-				return false
-			}
-			return true
-		})
-		if err != nil {
-			return types.Value{}, err
-		}
-		return acc.value()
-	}
 	var addErr error
-	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
-		value, ok := oneOffAggregateRowColumnValue(pv, tableID, argument)
-		if !ok {
-			return true
-		}
+	err := visitOneOffAggregateColumnValues(ctx, view, tableID, pred, resolver, argument, func(value types.Value) bool {
 		if err := acc.add(value); err != nil {
 			addErr = err
 			return false
@@ -793,6 +728,26 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 		return types.Value{}, addErr
 	}
 	return acc.value()
+}
+
+func visitOneOffAggregateColumnValues(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, column compiledSQLProjectionColumn, visit func(types.Value) bool) error {
+	if joinPred, ok := pred.(subscription.Join); ok {
+		return visitOneOffJoinPairs(ctx, view, joinPred, resolver, func(leftRow, rightRow types.ProductValue) bool {
+			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, joinPred.Left, joinPred.LeftAlias, joinPred.Right, joinPred.RightAlias, column)
+			return !ok || visit(value)
+		})
+	}
+	if crossPred, ok := pred.(subscription.CrossJoin); ok {
+		return visitOneOffCrossJoinPairs(ctx, view, crossPred, false, func(leftRow, rightRow types.ProductValue) bool {
+			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, crossPred.Left, crossPred.LeftAlias, crossPred.Right, crossPred.RightAlias, column)
+			return !ok || visit(value)
+		})
+	}
+	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(row types.ProductValue) bool {
+		value, ok := oneOffAggregateRowColumnValue(row, tableID, column)
+		return !ok || visit(value)
+	})
+	return err
 }
 
 func oneOffAggregateRowColumnValue(row types.ProductValue, tableID schema.TableID, column compiledSQLProjectionColumn) (types.Value, bool) {
@@ -971,17 +926,6 @@ func countOneOffJoin(ctx context.Context, view store.CommittedReadView, projecte
 	var count uint64
 	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
 		count++
-		return true
-	})
-	return count, err
-}
-
-func countOneOffJoinColumn(ctx context.Context, view store.CommittedReadView, join subscription.Join, resolver schema.IndexResolver, column compiledSQLProjectionColumn) (uint64, error) {
-	var count uint64
-	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
-		if oneOffAggregateJoinColumnPresent(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, column) {
-			count++
-		}
 		return true
 	})
 	return count, err
@@ -1205,11 +1149,6 @@ func projectedJoinColumnSource(col compiledSQLProjectionColumn, leftID schema.Ta
 	}
 }
 
-func oneOffAggregateJoinColumnPresent(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, column compiledSQLProjectionColumn) bool {
-	value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, column)
-	return ok && !value.IsNull()
-}
-
 func oneOffAggregateJoinColumnValue(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, column compiledSQLProjectionColumn) (types.Value, bool) {
 	source, ok := projectedJoinColumnSource(column, leftID, leftAlias, leftRow, rightID, rightAlias, rightRow)
 	if !ok {
@@ -1300,17 +1239,6 @@ func countOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, pro
 		otherTable = cross.Right
 	}
 	return uint64(view.RowCount(projectedTable)) * uint64(view.RowCount(otherTable)), nil
-}
-
-func countOneOffCrossJoinColumn(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, column compiledSQLProjectionColumn) (uint64, error) {
-	var count uint64
-	err := visitOneOffCrossJoinPairs(ctx, view, cross, false, func(leftRow, rightRow types.ProductValue) bool {
-		if oneOffAggregateJoinColumnPresent(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, column) {
-			count++
-		}
-		return true
-	})
-	return count, err
 }
 
 func visitOneOffCrossJoinPairs(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, projectedSideOuter bool, visit func(leftRow, rightRow types.ProductValue) bool) error {
