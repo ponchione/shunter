@@ -305,6 +305,10 @@ func requiredColRanges(pred Predicate, t TableID) ([]ColRange, bool) {
 		if p.Filter != nil {
 			return requiredColRanges(p.Filter, t)
 		}
+	case CrossJoin:
+		if p.Left != p.Right && p.Filter != nil {
+			return requiredColRanges(p.Filter, t)
+		}
 	}
 	return nil, false
 }
@@ -367,6 +371,10 @@ func requiredMixedColEqRanges(pred Predicate, t TableID) (colFilterPlacements, b
 		if p.Filter != nil {
 			return requiredMixedColEqRanges(p.Filter, t)
 		}
+	case CrossJoin:
+		if p.Left != p.Right && p.Filter != nil {
+			return requiredMixedColEqRanges(p.Filter, t)
+		}
 	}
 	return colFilterPlacements{}, false
 }
@@ -422,6 +430,10 @@ func requiredColEqs(pred Predicate, t TableID) ([]ColEq, bool) {
 		return append(left, right...), true
 	case Join:
 		if p.Filter != nil {
+			return requiredColEqs(p.Filter, t)
+		}
+	case CrossJoin:
+		if p.Left != p.Right && p.Filter != nil {
 			return requiredColEqs(p.Filter, t)
 		}
 	}

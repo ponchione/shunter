@@ -83,6 +83,8 @@ Likely feature slices:
 
 Completed slices:
 
+- distinct-table filtered live CrossJoin predicates use local value/range
+  pruning on the filtered side while self-cross-joins keep table fallback
 - cross-side live join OR filters split into value/range branch indexes and
   join-edge branch indexes instead of broad join-existence candidates
 - mixed equality/range OR filters avoid table fallback in live candidate

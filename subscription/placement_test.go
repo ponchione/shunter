@@ -712,3 +712,103 @@ func TestCollectCandidatesJoinMixedOrRangeEdgePrunesMismatch(t *testing.T) {
 		t.Fatalf("mixed OR join edge mismatch candidates = %v, want empty", cands)
 	}
 }
+
+func TestPlaceFilteredCrossJoinUsesLocalValueIndex(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := CrossJoin{
+		Left:  1,
+		Right: 2,
+		Filter: ColEq{
+			Table:  1,
+			Column: 1,
+			Value:  types.NewString("active"),
+		},
+	}
+	h := hashN(1)
+	PlaceSubscription(idx, p, h)
+
+	if got := idx.Value.Lookup(1, 1, types.NewString("active")); len(got) != 1 || got[0] != h {
+		t.Fatalf("cross join value candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex for locally filtered side = %v, want empty", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 1 || got[0] != h {
+		t.Fatalf("TableIndex for unfiltered cross side = %v, want [%v]", got, h)
+	}
+}
+
+func TestPlaceFilteredCrossJoinUsesLocalMixedEqRangeIndexes(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := CrossJoin{
+		Left:  1,
+		Right: 2,
+		Filter: Or{
+			Left: ColEq{Table: 1, Column: 1, Value: types.NewString("active")},
+			Right: ColRange{Table: 1, Column: 2,
+				Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+	h := hashN(1)
+	PlaceSubscription(idx, p, h)
+
+	if got := idx.Value.Lookup(1, 1, types.NewString("active")); len(got) != 1 || got[0] != h {
+		t.Fatalf("cross join mixed equality candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(1, 2, types.NewUint64(60)); len(got) != 1 || got[0] != h {
+		t.Fatalf("cross join mixed range candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex for locally filtered mixed side = %v, want empty", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 1 || got[0] != h {
+		t.Fatalf("TableIndex for unfiltered cross side = %v, want [%v]", got, h)
+	}
+}
+
+func TestCollectCandidatesFilteredCrossJoinPrunesLocalMismatch(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := CrossJoin{
+		Left:  1,
+		Right: 2,
+		Filter: ColEq{
+			Table:  1,
+			Column: 1,
+			Value:  types.NewString("active"),
+		},
+	}
+	PlaceSubscription(idx, p, hashN(1))
+
+	rows := []types.ProductValue{{types.NewUint64(7), types.NewString("inactive")}}
+	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
+	if len(cands) != 0 {
+		t.Fatalf("filtered cross join mismatch candidates = %v, want empty", cands)
+	}
+}
+
+func TestPlaceSelfCrossJoinKeepsTableFallback(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := CrossJoin{
+		Left:       1,
+		Right:      1,
+		LeftAlias:  0,
+		RightAlias: 1,
+		Filter: ColEq{
+			Table:  1,
+			Column: 1,
+			Alias:  0,
+			Value:  types.NewString("active"),
+		},
+	}
+	h := hashN(1)
+	PlaceSubscription(idx, p, h)
+
+	if got := idx.Value.Lookup(1, 1, types.NewString("active")); len(got) != 0 {
+		t.Fatalf("self-cross join should not use value index, got %v", got)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 1 || got[0] != h {
+		t.Fatalf("self-cross join table fallback = %v, want [%v]", got, h)
+	}
+}

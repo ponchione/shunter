@@ -1501,6 +1501,106 @@ func TestEvalCrossJoinProjectsRightOnProjectedInsert(t *testing.T) {
 	}
 }
 
+func TestEvalFilteredCrossJoinLocalFilterUsesValueIndex(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(10)}, {types.NewUint64(11)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := CrossJoin{
+		Left:  1,
+		Right: 2,
+		Filter: ColEq{
+			Table:  1,
+			Column: 1,
+			Value:  types.NewString("active"),
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 24, Predicates: []Predicate{pred},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if got := mgr.indexes.Value.Lookup(1, 1, types.NewString("active")); len(got) != 1 {
+		t.Fatalf("filtered cross join value candidates = %v, want one hash", got)
+	}
+	if got := mgr.indexes.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("table fallback candidates for local filter side = %v, want none", got)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(1), types.NewString("active")}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "left",
+			Inserts:   []types.ProductValue{inserted},
+		},
+	}}
+	committed.addRow(1, 1, inserted)
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Inserts) != 2 {
+		t.Fatalf("insert count = %d, want local row repeated for two partners", len(updates[0].Inserts))
+	}
+	for i, row := range updates[0].Inserts {
+		if !row.Equal(inserted) {
+			t.Fatalf("insert %d = %v, want %v", i, row, inserted)
+		}
+	}
+}
+
+func TestEvalFilteredCrossJoinLocalFilterPrunesMismatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(10)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := CrossJoin{
+		Left:  1,
+		Right: 2,
+		Filter: ColEq{
+			Table:  1,
+			Column: 1,
+			Value:  types.NewString("active"),
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 25, Predicates: []Predicate{pred},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if got := mgr.indexes.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("table fallback candidates for local filter side = %v, want none", got)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(1), types.NewString("inactive")}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "left",
+			Inserts:   []types.ProductValue{inserted},
+		},
+	}}
+	committed.addRow(1, 1, inserted)
+	mgr.EvalAndBroadcast(types.TxID(2), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	if updates := msg.Fanout[types.ConnectionID{1}]; len(updates) != 0 {
+		t.Fatalf("filtered cross join mismatch produced fanout: %v", updates)
+	}
+}
+
 func TestEvalFilteredCrossJoinDeltaMatchesFullBagDiff(t *testing.T) {
 	pred := CrossJoin{
 		Left:  1,
