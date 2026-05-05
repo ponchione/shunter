@@ -341,7 +341,7 @@ type FileSnapshotWriter struct {
 }
 
 func NewSnapshotWriter(baseDir string, reg schema.SchemaRegistry) SnapshotWriter {
-	return &FileSnapshotWriter{baseDir: baseDir, reg: reg, openTemp: openSnapshotTempFile, rename: os.Rename, syncDir: syncDir, removeLock: RemoveLockFile}
+	return NewSnapshotWriterWithObserver(baseDir, reg, nil)
 }
 
 func NewSnapshotWriterWithObserver(baseDir string, reg schema.SchemaRegistry, observer SnapshotObserver) SnapshotWriter {
