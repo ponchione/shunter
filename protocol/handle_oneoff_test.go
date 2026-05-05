@@ -1227,7 +1227,7 @@ func TestExecuteCompiledSQLQueryIndexedMultiColumnOrderByDescUsesCompositeIndexR
 	}
 }
 
-func TestExecuteCompiledSQLQueryMixedDirectionMultiColumnOrderByFallsBackToTableScan(t *testing.T) {
+func TestExecuteCompiledSQLQueryIndexedMixedDirectionMultiColumnOrderByUsesCompositeIndexRange(t *testing.T) {
 	sl, snap := compositeOrderIndexFixture()
 	compiled, err := CompileSQLQueryStringWithVisibility(
 		"SELECT id FROM tasks ORDER BY priority ASC, owner DESC",
@@ -1253,11 +1253,11 @@ func TestExecuteCompiledSQLQueryMixedDirectionMultiColumnOrderByFallsBackToTable
 		{types.NewUint64(5)},
 		{types.NewUint64(4)},
 	})
-	if snap.indexRanges != 0 {
-		t.Fatalf("IndexRange calls = %d, want 0 for mixed-direction ORDER BY fallback", snap.indexRanges)
+	if snap.indexRanges != 1 {
+		t.Fatalf("IndexRange calls = %d, want 1 for mixed-direction indexed ORDER BY", snap.indexRanges)
 	}
-	if snap.tableScans != 1 {
-		t.Fatalf("TableScan calls = %d, want 1 for mixed-direction ORDER BY fallback", snap.tableScans)
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 for mixed-direction indexed ORDER BY", snap.tableScans)
 	}
 }
 

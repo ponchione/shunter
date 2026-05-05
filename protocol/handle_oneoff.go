@@ -304,32 +304,33 @@ func oneOffIndexableRange(pred subscription.Predicate, tableID schema.TableID) (
 
 type oneOffOrderIndex struct {
 	indexID     schema.IndexID
-	desc        bool
 	columnIdxs  []int
 	columnNames []string
+	descs       []bool
 }
 
 func oneOffSingleTableOrderIndex(orderBy []compiledSQLOrderBy, tableID schema.TableID, tableSchema *schema.TableSchema, resolver schema.IndexResolver) (oneOffOrderIndex, bool) {
 	if len(orderBy) == 0 {
 		return oneOffOrderIndex{}, false
 	}
-	desc := orderBy[0].Desc
 	columns := make([]int, len(orderBy))
 	columnNames := make([]string, len(orderBy))
+	descs := make([]bool, len(orderBy))
 	for i, term := range orderBy {
-		if term.Desc != desc || term.Column.Table != tableID || term.Column.Alias != 0 || term.Column.Schema.Index < 0 {
+		if term.Column.Table != tableID || term.Column.Alias != 0 || term.Column.Schema.Index < 0 {
 			return oneOffOrderIndex{}, false
 		}
 		columns[i] = term.Column.Schema.Index
 		columnNames[i] = term.Column.Schema.Name
+		descs[i] = term.Desc
 	}
 	if len(columns) == 1 && resolver != nil {
 		if indexID, ok := resolver.IndexIDForColumn(tableID, types.ColID(columns[0])); ok {
 			return oneOffOrderIndex{
 				indexID:     indexID,
-				desc:        desc,
 				columnIdxs:  columns,
 				columnNames: columnNames,
+				descs:       descs,
 			}, true
 		}
 	}
@@ -340,9 +341,9 @@ func oneOffSingleTableOrderIndex(orderBy []compiledSQLOrderBy, tableID schema.Ta
 		if slices.Equal(idx.Columns, columns) {
 			return oneOffOrderIndex{
 				indexID:     idx.ID,
-				desc:        desc,
 				columnIdxs:  columns,
 				columnNames: columnNames,
+				descs:       descs,
 			}, true
 		}
 	}
@@ -352,6 +353,7 @@ func oneOffSingleTableOrderIndex(orderBy []compiledSQLOrderBy, tableID schema.Ta
 func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, orderIndex oneOffOrderIndex, offset int, limit int) ([]types.ProductValue, error) {
 	var rows []types.ProductValue
 	seen := 0
+	allAsc := orderIndex.allAsc()
 	for _, row := range view.IndexRange(tableID, orderIndex.indexID, store.UnboundedLow(), store.UnboundedHigh()) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -359,7 +361,7 @@ func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.Com
 		if !subscription.MatchRow(pred, tableID, row) {
 			continue
 		}
-		if orderIndex.desc {
+		if !allAsc {
 			rows = append(rows, row)
 			continue
 		}
@@ -373,60 +375,110 @@ func evaluateOneOffSingleTableOrderedByIndex(ctx context.Context, view store.Com
 			return rows, nil
 		}
 	}
-	if orderIndex.desc {
-		return materializeDescendingIndexedOneOffRows(rows, orderIndex.columnIdxs, orderIndex.columnNames, offset, limit)
+	if !allAsc {
+		return materializeIndexedOneOffRows(rows, orderIndex.columnIdxs, orderIndex.columnNames, orderIndex.descs, offset, limit)
 	}
 	return rows, nil
 }
 
-func materializeDescendingIndexedOneOffRows(rows []types.ProductValue, columnIdxs []int, columnNames []string, offset int, limit int) ([]types.ProductValue, error) {
+func (idx oneOffOrderIndex) allAsc() bool {
+	for _, desc := range idx.descs {
+		if desc {
+			return false
+		}
+	}
+	return true
+}
+
+func materializeIndexedOneOffRows(rows []types.ProductValue, columnIdxs []int, columnNames []string, descs []bool, offset int, limit int) ([]types.ProductValue, error) {
 	if limit == 0 || len(rows) == 0 {
 		return nil, nil
 	}
 	var out []types.ProductValue
 	seen := 0
-	for end := len(rows); end > 0; {
-		start := end - 1
-		for start > 0 {
-			equal, err := oneOffOrderKeyRowsEqual(rows[start-1], rows[start], columnIdxs, columnNames)
+	var emitSpan func(start, end, depth int) (bool, error)
+	emitSpan = func(start, end, depth int) (bool, error) {
+		if depth >= len(columnIdxs) {
+			for i := start; i < end; i++ {
+				if seen < offset {
+					seen++
+					continue
+				}
+				out = append(out, rows[i])
+				seen++
+				if oneOffLimitReached(len(out), limit) {
+					return false, nil
+				}
+			}
+			return true, nil
+		}
+		spans, err := oneOffOrderKeySpans(rows, start, end, columnIdxs[depth], oneOffOrderColumnName(columnNames, depth))
+		if err != nil {
+			return false, err
+		}
+		if descs[depth] {
+			for i := len(spans) - 1; i >= 0; i-- {
+				keepGoing, err := emitSpan(spans[i].start, spans[i].end, depth+1)
+				if err != nil || !keepGoing {
+					return keepGoing, err
+				}
+			}
+			return true, nil
+		}
+		for _, span := range spans {
+			keepGoing, err := emitSpan(span.start, span.end, depth+1)
+			if err != nil {
+				return false, err
+			}
+			if !keepGoing {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	if _, err := emitSpan(0, len(rows), 0); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type oneOffRowSpan struct {
+	start int
+	end   int
+}
+
+func oneOffOrderKeySpans(rows []types.ProductValue, start, end int, columnIndex int, columnName string) ([]oneOffRowSpan, error) {
+	var spans []oneOffRowSpan
+	for spanStart := start; spanStart < end; {
+		spanEnd := spanStart + 1
+		for spanEnd < end {
+			equal, err := oneOffOrderColumnValuesEqual(rows[spanEnd-1], rows[spanEnd], columnIndex, columnName)
 			if err != nil {
 				return nil, err
 			}
 			if !equal {
 				break
 			}
-			start--
+			spanEnd++
 		}
-		for i := start; i < end; i++ {
-			if seen < offset {
-				seen++
-				continue
-			}
-			out = append(out, rows[i])
-			seen++
-			if oneOffLimitReached(len(out), limit) {
-				return out, nil
-			}
-		}
-		end = start
+		spans = append(spans, oneOffRowSpan{start: spanStart, end: spanEnd})
+		spanStart = spanEnd
 	}
-	return out, nil
+	return spans, nil
 }
 
-func oneOffOrderKeyRowsEqual(left, right types.ProductValue, columnIdxs []int, columnNames []string) (bool, error) {
-	for i, columnIndex := range columnIdxs {
-		columnName := ""
-		if i < len(columnNames) {
-			columnName = columnNames[i]
-		}
-		if columnIndex < 0 || columnIndex >= len(left) || columnIndex >= len(right) {
-			return false, fmt.Errorf("ORDER BY column %q is missing from row", columnName)
-		}
-		if !left[columnIndex].Equal(right[columnIndex]) {
-			return false, nil
-		}
+func oneOffOrderColumnValuesEqual(left, right types.ProductValue, columnIndex int, columnName string) (bool, error) {
+	if columnIndex < 0 || columnIndex >= len(left) || columnIndex >= len(right) {
+		return false, fmt.Errorf("ORDER BY column %q is missing from row", columnName)
 	}
-	return true, nil
+	return left[columnIndex].Equal(right[columnIndex]), nil
+}
+
+func oneOffOrderColumnName(columnNames []string, depth int) string {
+	if depth < len(columnNames) {
+		return columnNames[depth]
+	}
+	return ""
 }
 
 func visitOneOffSingleTableRows(ctx context.Context, view store.CommittedReadView, tableID schema.TableID, pred subscription.Predicate, resolver schema.IndexResolver, visit func(types.ProductValue) bool) (bool, error) {
