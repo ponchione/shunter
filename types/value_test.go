@@ -315,16 +315,6 @@ func TestCompareUint128(t *testing.T) {
 	}
 }
 
-func TestAccessor128PanicsOnWrongKind(t *testing.T) {
-	v := NewBool(true)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("AsInt128 on Bool did not panic")
-		}
-	}()
-	v.AsInt128()
-}
-
 func TestRoundTripInt256(t *testing.T) {
 	cases := []struct {
 		w0         int64
@@ -436,16 +426,6 @@ func TestCompareUint256(t *testing.T) {
 	}
 }
 
-func TestAccessor256PanicsOnWrongKind(t *testing.T) {
-	v := NewBool(true)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("AsInt256 on Bool did not panic")
-		}
-	}()
-	v.AsInt256()
-}
-
 func TestRoundTripTimestamp(t *testing.T) {
 	for _, m := range []int64{math.MinInt64, -1, 0, 1, 1_739_201_130_000_000, math.MaxInt64} {
 		v := NewTimestamp(m)
@@ -496,16 +476,6 @@ func TestCompareTimestamp(t *testing.T) {
 	if NewTimestamp(3).Compare(NewTimestamp(3)) != 0 {
 		t.Fatal("Timestamp Compare: equal reported non-zero")
 	}
-}
-
-func TestAccessorTimestampPanicsOnWrongKind(t *testing.T) {
-	v := NewBool(true)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("AsTimestamp on Bool did not panic")
-		}
-	}()
-	v.AsTimestamp()
 }
 
 func TestRoundTripDuration(t *testing.T) {
@@ -632,16 +602,6 @@ func TestCompareArrayString(t *testing.T) {
 	}
 }
 
-func TestAccessorArrayStringPanicsOnWrongKind(t *testing.T) {
-	v := NewBool(true)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("AsArrayString on Bool did not panic")
-		}
-	}()
-	v.AsArrayString()
-}
-
 func TestUUIDParseAndCanonicalString(t *testing.T) {
 	v, err := ParseUUID("00112233-4455-6677-8899-aabbccddeeff")
 	if err != nil {
@@ -714,16 +674,6 @@ func TestUUIDEqualCompareAndHash(t *testing.T) {
 	}
 }
 
-func TestAccessorUUIDPanicsOnWrongKind(t *testing.T) {
-	v := NewBool(true)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("AsUUID on Bool did not panic")
-		}
-	}()
-	v.AsUUID()
-}
-
 // --- NaN rejection ---
 
 func TestFloat32RejectsNaN(t *testing.T) {
@@ -794,6 +744,10 @@ func TestAccessorPanicsOnKindMismatch(t *testing.T) {
 		{"AsFloat64", func() { v.AsFloat64() }},
 		{"AsString", func() { v.AsString() }},
 		{"AsBytes", func() { v.AsBytes() }},
+		{"AsInt128", func() { v.AsInt128() }},
+		{"AsInt256", func() { v.AsInt256() }},
+		{"AsTimestamp", func() { v.AsTimestamp() }},
+		{"AsArrayString", func() { v.AsArrayString() }},
 		{"AsUUID", func() { v.AsUUID() }},
 		{"AsDurationMicros", func() { v.AsDurationMicros() }},
 	}
