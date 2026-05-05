@@ -319,6 +319,11 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 		}
 		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows)
 	}
+	projectedCandidates, filterProjected := initialIndexedFilterRowIDs(view, p.Filter, projectedTable, m.resolver)
+	otherCandidates, filterOther := initialIndexedFilterRowIDs(view, p.Filter, otherTable, m.resolver)
+	if hasProjectedIdx && initialJoinScanCost(view, otherTable, otherCandidates, filterOther) < initialJoinScanCost(view, projectedTable, projectedCandidates, filterProjected) {
+		return m.appendProjectedJoinRowsFromProjectedIndex(ctx, out, view, p, projectedTable, projectedJoinCol, projectedIdx, otherTable, otherJoinCol, orientedRows)
+	}
 	add := func(row types.ProductValue) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -329,8 +334,6 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 		out = append(out, row)
 		return nil
 	}
-	projectedCandidates, filterProjected := initialIndexedFilterRowIDs(view, p.Filter, projectedTable, m.resolver)
-	otherCandidates, filterOther := initialIndexedFilterRowIDs(view, p.Filter, otherTable, m.resolver)
 	for projectedRID, projectedRow := range view.TableScan(projectedTable) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -450,6 +453,13 @@ func initialIndexedFilterRowIDs(view store.CommittedReadView, pred Predicate, ta
 		return out, true
 	}
 	return nil, false
+}
+
+func initialJoinScanCost(view store.CommittedReadView, table TableID, candidates map[types.RowID]struct{}, filtered bool) int {
+	if filtered {
+		return len(candidates)
+	}
+	return view.RowCount(table)
 }
 
 func initialRowIDAllowed(candidates map[types.RowID]struct{}, enabled bool, rid types.RowID) bool {

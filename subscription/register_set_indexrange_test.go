@@ -126,6 +126,102 @@ func TestInitialJoinProjectedSideIndexAvoidsNestedTableScans(t *testing.T) {
 	}
 }
 
+func TestInitialJoinBothIndexesScansSmallerSide(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewUint64(7)},
+			{types.NewUint64(2), types.NewUint64(7)},
+			{types.NewUint64(3), types.NewUint64(7)},
+			{types.NewUint64(4), types.NewUint64(7)},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(7)},
+		},
+	})
+	view := newCountingCommitted(inner)
+	mgr := NewManager(s, s)
+	pred := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1}
+
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	rows := collectInserts(res.Update)
+	wantRows := []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(7)},
+		{types.NewUint64(2), types.NewUint64(7)},
+		{types.NewUint64(3), types.NewUint64(7)},
+		{types.NewUint64(4), types.NewUint64(7)},
+	}
+	if len(rows) != len(wantRows) {
+		t.Fatalf("rows len = %d, want %d", len(rows), len(wantRows))
+	}
+	for i := range wantRows {
+		if !rows[i].Equal(wantRows[i]) {
+			t.Fatalf("rows[%d] = %v, want %v", i, rows[i], wantRows[i])
+		}
+	}
+	if view.indexSeekCalls != 1 {
+		t.Fatalf("IndexSeek calls = %d, want 1 (one probe from smaller side)", view.indexSeekCalls)
+	}
+	if view.tableScanCalls != 2 {
+		t.Fatalf("TableScan calls = %d, want 2 (smaller side scan + projected order pass)", view.tableScanCalls)
+	}
+}
+
+func TestInitialJoinBothIndexesUsesFilteredProjectedCost(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(7), types.NewString("skip-a")},
+			{types.NewUint64(7), types.NewString("skip-b")},
+			{types.NewUint64(7), types.NewString("keep")},
+			{types.NewUint64(7), types.NewString("skip-c")},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(7)},
+			{types.NewUint64(11), types.NewUint64(7)},
+		},
+	})
+	view := newCountingCommitted(inner)
+	mgr := NewManager(s, s)
+	pred := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColEq{Table: 1, Column: 1, Value: types.NewString("keep")},
+	}
+
+	res, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{pred},
+	}, view)
+	if err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	rows := collectInserts(res.Update)
+	if view.indexSeekCalls != 2 {
+		t.Fatalf("IndexSeek calls = %d, want 2 (filter seek + one filtered projected probe)", view.indexSeekCalls)
+	}
+	if view.tableScanCalls != 1 {
+		t.Fatalf("TableScan calls = %d, want 1 projected scan", view.tableScanCalls)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows len = %d, want 2 joined projected rows", len(rows))
+	}
+	for _, row := range rows {
+		if !row[1].Equal(types.NewString("keep")) {
+			t.Fatalf("projected row = %v, want filter value keep", row)
+		}
+	}
+}
+
 func TestInitialJoinProjectedSideFilterSkipsJoinProbes(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 1)
