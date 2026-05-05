@@ -159,14 +159,6 @@ func extractStringClaim(raw any) []string {
 			return nil
 		}
 		return []string{v}
-	case []string:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if item != "" {
-				out = append(out, item)
-			}
-		}
-		return out
 	case []any:
 		out := make([]string, 0, len(v))
 		for _, item := range v {
