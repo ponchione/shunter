@@ -9,7 +9,7 @@ import (
 	"hash"
 	"hash/fnv"
 	"math"
-	"strings"
+	"slices"
 	"time"
 )
 
@@ -500,15 +500,7 @@ func (v Value) Equal(other Value) bool {
 	case KindTimestamp, KindDuration:
 		return v.i64 == other.i64
 	case KindArrayString:
-		if len(v.strArr) != len(other.strArr) {
-			return false
-		}
-		for i := range v.strArr {
-			if v.strArr[i] != other.strArr[i] {
-				return false
-			}
-		}
-		return true
+		return slices.Equal(v.strArr, other.strArr)
 	case KindUUID:
 		return v.uuid == other.uuid
 	default:
@@ -541,7 +533,7 @@ func (v Value) Compare(other Value) int {
 	case KindFloat64:
 		return cmp.Compare(v.f64, other.f64)
 	case KindString:
-		return strings.Compare(v.str, other.str)
+		return cmp.Compare(v.str, other.str)
 	case KindBytes:
 		return bytes.Compare(v.buf, other.buf)
 	case KindInt128:
@@ -574,16 +566,7 @@ func (v Value) Compare(other Value) int {
 	case KindTimestamp, KindDuration:
 		return cmp.Compare(v.i64, other.i64)
 	case KindArrayString:
-		n := len(v.strArr)
-		if m := len(other.strArr); m < n {
-			n = m
-		}
-		for i := range n {
-			if c := strings.Compare(v.strArr[i], other.strArr[i]); c != 0 {
-				return c
-			}
-		}
-		return cmp.Compare(len(v.strArr), len(other.strArr))
+		return slices.Compare(v.strArr, other.strArr)
 	case KindUUID:
 		return bytes.Compare(v.uuid[:], other.uuid[:])
 	default:

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"hash"
 	"hash/fnv"
+	"slices"
 )
 
 // ProductValue is an ordered, schema-aligned list of column values.
@@ -12,15 +13,7 @@ type ProductValue []Value
 
 // Equal returns true if pv and other have the same length and element-wise equal values.
 func (pv ProductValue) Equal(other ProductValue) bool {
-	if len(pv) != len(other) {
-		return false
-	}
-	for i := range pv {
-		if !pv[i].Equal(other[i]) {
-			return false
-		}
-	}
-	return true
+	return slices.EqualFunc(pv, other, Value.Equal)
 }
 
 // Hash feeds a length-prefixed canonical representation of each column into h.
