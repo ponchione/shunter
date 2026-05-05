@@ -118,7 +118,7 @@ func Plan(old, current shunter.ModuleContract, opts PlanOptions) MigrationPlan {
 		updatePlanSummaryForEntry(&plan.Summary, entry)
 	}
 	for _, warning := range policy.Warnings {
-		plan.Warnings = append(plan.Warnings, planWarningFromPolicy(warning))
+		plan.Warnings = append(plan.Warnings, PlanWarning(warning))
 	}
 	if opts.ValidateContracts {
 		plan.Warnings = append(plan.Warnings, validatePlanContracts(old, current)...)
@@ -284,10 +284,6 @@ func backupRestorePlanGuidance() PlanGuidance {
 		Code:   PlanGuidanceBackupRestore,
 		Detail: "Stop the runtime before applying this plan to a durable DataDir; back up the complete DataDir with shunter.BackupDataDir or shunter backup, and keep that backup available for restore with shunter.RestoreDataDir or shunter restore.",
 	}
-}
-
-func planWarningFromPolicy(warning PolicyWarning) PlanWarning {
-	return PlanWarning(warning)
 }
 
 func validatePlanContracts(old, current shunter.ModuleContract) []PlanWarning {
