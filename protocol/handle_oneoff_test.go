@@ -1116,6 +1116,244 @@ func TestExecuteCompiledSQLQueryAggregateEmptyInputSemantics(t *testing.T) {
 	}
 }
 
+func TestExecuteCompiledSQLQueryNullableAggregateSemantics(t *testing.T) {
+	sl := newMockSchema("tasks", 1,
+		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},
+		schema.ColumnSchema{Index: 1, Name: "points", Type: schema.KindUint32, Nullable: true},
+	)
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+		{types.NewUint64(1), types.NewNull(types.KindUint32)},
+		{types.NewUint64(2), types.NewUint32(7)},
+		{types.NewUint64(3), types.NewUint32(7)},
+		{types.NewUint64(4), types.NewUint32(9)},
+		{types.NewUint64(5), types.NewNull(types.KindUint32)},
+	}}}}
+	opts := SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	}
+	tests := []struct {
+		name           string
+		sql            string
+		want           types.Value
+		wantNullable   bool
+		wantResultKind schema.ValueKind
+	}{
+		{
+			name:           "count star counts rows",
+			sql:            "SELECT COUNT(*) AS n FROM tasks",
+			want:           types.NewUint64(5),
+			wantResultKind: schema.KindUint64,
+		},
+		{
+			name:           "count column ignores nulls",
+			sql:            "SELECT COUNT(points) AS n FROM tasks",
+			want:           types.NewUint64(3),
+			wantResultKind: schema.KindUint64,
+		},
+		{
+			name:           "count distinct column ignores nulls",
+			sql:            "SELECT COUNT(DISTINCT points) AS n FROM tasks",
+			want:           types.NewUint64(2),
+			wantResultKind: schema.KindUint64,
+		},
+		{
+			name:           "sum nullable column ignores nulls",
+			sql:            "SELECT SUM(points) AS total FROM tasks",
+			want:           types.NewUint64(23),
+			wantNullable:   true,
+			wantResultKind: schema.KindUint64,
+		},
+		{
+			name:           "sum nullable column all null",
+			sql:            "SELECT SUM(points) AS total FROM tasks WHERE points IS NULL",
+			want:           types.NewNull(types.KindUint64),
+			wantNullable:   true,
+			wantResultKind: schema.KindUint64,
+		},
+		{
+			name:           "sum nullable column empty input",
+			sql:            "SELECT SUM(points) AS total FROM tasks WHERE id = 99",
+			want:           types.NewNull(types.KindUint64),
+			wantNullable:   true,
+			wantResultKind: schema.KindUint64,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := CompileSQLQueryString(tt.sql, sl, nil, opts)
+			if err != nil {
+				t.Fatalf("CompileSQLQueryString: %v", err)
+			}
+			result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, state, sl)
+			if err != nil {
+				t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+			}
+			if len(result.Columns) != 1 {
+				t.Fatalf("result columns = %+v, want one aggregate column", result.Columns)
+			}
+			if result.Columns[0].Nullable != tt.wantNullable {
+				t.Fatalf("result column nullable = %t, want %t", result.Columns[0].Nullable, tt.wantNullable)
+			}
+			if result.Columns[0].Type != tt.wantResultKind {
+				t.Fatalf("result column type = %s, want %s", result.Columns[0].Type, tt.wantResultKind)
+			}
+			assertProductRowsEqual(t, result.Rows, []types.ProductValue{{tt.want}})
+		})
+	}
+}
+
+func TestExecuteCompiledSQLQueryJoinNullableAggregateSemantics(t *testing.T) {
+	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+	}}
+	sTS := &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "t_id", Type: schema.KindUint32},
+		{Index: 1, Name: "points", Type: schema.KindUint32, Nullable: true},
+	}}
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: tTS},
+		"s": {id: 2, schema: sTS},
+	}}
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1)},
+			{types.NewUint32(2)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewNull(types.KindUint32)},
+			{types.NewUint32(1), types.NewUint32(5)},
+			{types.NewUint32(2), types.NewUint32(5)},
+			{types.NewUint32(2), types.NewNull(types.KindUint32)},
+		},
+	}}}
+	opts := SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	}
+	tests := []struct {
+		name         string
+		sql          string
+		want         types.Value
+		wantNullable bool
+	}{
+		{
+			name: "count join column ignores nulls",
+			sql:  "SELECT COUNT(s.points) AS n FROM t JOIN s ON t.id = s.t_id",
+			want: types.NewUint64(2),
+		},
+		{
+			name: "count distinct join column ignores nulls",
+			sql:  "SELECT COUNT(DISTINCT s.points) AS n FROM t JOIN s ON t.id = s.t_id",
+			want: types.NewUint64(1),
+		},
+		{
+			name:         "sum join column ignores nulls",
+			sql:          "SELECT SUM(s.points) AS total FROM t JOIN s ON t.id = s.t_id",
+			want:         types.NewUint64(10),
+			wantNullable: true,
+		},
+		{
+			name:         "sum join column all null",
+			sql:          "SELECT SUM(s.points) AS total FROM t JOIN s ON t.id = s.t_id WHERE s.points IS NULL",
+			want:         types.NewNull(types.KindUint64),
+			wantNullable: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := CompileSQLQueryString(tt.sql, sl, nil, opts)
+			if err != nil {
+				t.Fatalf("CompileSQLQueryString: %v", err)
+			}
+			result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, state, sl)
+			if err != nil {
+				t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+			}
+			if len(result.Columns) != 1 {
+				t.Fatalf("result columns = %+v, want one aggregate column", result.Columns)
+			}
+			if result.Columns[0].Nullable != tt.wantNullable {
+				t.Fatalf("result column nullable = %t, want %t", result.Columns[0].Nullable, tt.wantNullable)
+			}
+			assertProductRowsEqual(t, result.Rows, []types.ProductValue{{tt.want}})
+		})
+	}
+}
+
+func TestExecuteCompiledSQLQueryMultiJoinNullableSumSemantics(t *testing.T) {
+	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "u32", Type: schema.KindUint32},
+	}}
+	sTS := &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "u32", Type: schema.KindUint32},
+		{Index: 2, Name: "points", Type: schema.KindUint32, Nullable: true},
+	}}
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: tTS},
+		"s": {id: 2, schema: sTS},
+	}}
+	state := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewUint32(7)},
+		},
+		2: {
+			{types.NewUint32(10), types.NewUint32(7), types.NewNull(types.KindUint32)},
+			{types.NewUint32(20), types.NewUint32(7), types.NewUint32(5)},
+		},
+	}}}
+	opts := SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	}
+	tests := []struct {
+		name string
+		sql  string
+		want types.Value
+	}{
+		{
+			name: "sum ignores nulls",
+			sql:  "SELECT SUM(r.points) AS total FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32",
+			want: types.NewUint64(10),
+		},
+		{
+			name: "sum all null",
+			sql:  "SELECT SUM(r.points) AS total FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32 WHERE r.points IS NULL",
+			want: types.NewNull(types.KindUint64),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := CompileSQLQueryString(tt.sql, sl, nil, opts)
+			if err != nil {
+				t.Fatalf("CompileSQLQueryString: %v", err)
+			}
+			result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, state, sl)
+			if err != nil {
+				t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+			}
+			if len(result.Columns) != 1 || !result.Columns[0].Nullable {
+				t.Fatalf("result columns = %+v, want one nullable aggregate column", result.Columns)
+			}
+			assertProductRowsEqual(t, result.Rows, []types.ProductValue{{tt.want}})
+		})
+	}
+}
+
 func TestExecuteCompiledSQLQueryIndexedRangePredicateUsesIndexRange(t *testing.T) {
 	baseSL := newMockSchema("tasks", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},

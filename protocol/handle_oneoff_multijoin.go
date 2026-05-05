@@ -286,7 +286,7 @@ func countOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedRead
 		seen := newOneOffDistinctValueSet()
 		err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 			value, ok := oneOffMultiJoinColumnValue(tuple, multi, argument)
-			if ok {
+			if ok && !value.IsNull() {
 				seen.add(value)
 			}
 			return true
@@ -295,7 +295,7 @@ func countOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedRead
 	}
 	var count uint64
 	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
-		if _, ok := oneOffMultiJoinColumnValue(tuple, multi, argument); ok {
+		if value, ok := oneOffMultiJoinColumnValue(tuple, multi, argument); ok && !value.IsNull() {
 			count++
 		}
 		return true
@@ -307,7 +307,7 @@ func sumOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadVi
 	if aggregate == nil || aggregate.Argument == nil {
 		return types.Value{}, fmt.Errorf("SUM aggregate requires a column argument")
 	}
-	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type)
+	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 	argument := *aggregate.Argument
 	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 		value, ok := oneOffMultiJoinColumnValue(tuple, multi, argument)

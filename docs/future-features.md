@@ -76,11 +76,14 @@ Direction:
 
 Likely feature slices:
 
-- nullable-aware aggregate semantics
 - broader index-aware planning for remaining unfiltered delta and complex live
   join paths
 - live-view expansion for currently query-only shapes after delta semantics are
   explicit
+
+Completed slices:
+
+- nullable-aware aggregate semantics for one-off and declared queries
 
 Any query expansion must include tests for authorization, visibility filtering,
 subscription deltas, and contract/codegen export where applicable.

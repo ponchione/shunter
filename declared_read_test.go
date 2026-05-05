@@ -568,6 +568,66 @@ func TestDeclaredQuerySumColumnExecutesThroughRuntimePath(t *testing.T) {
 	}
 }
 
+func TestDeclaredQueryNullableAggregateSemantics(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("nullable_score_reads").
+		SchemaVersion(1).
+		TableDef(nullableScoresTableDef()).
+		Reducer("seed_scores", seedNullableScoresReducer).
+		Query(QueryDeclaration{
+			Name:        "non_null_score_count",
+			SQL:         "SELECT COUNT(score) AS n FROM scores",
+			Permissions: PermissionMetadata{Required: []string{"scores:read"}},
+		}).
+		Query(QueryDeclaration{
+			Name:        "distinct_score_count",
+			SQL:         "SELECT COUNT(DISTINCT score) AS n FROM scores",
+			Permissions: PermissionMetadata{Required: []string{"scores:read"}},
+		}).
+		Query(QueryDeclaration{
+			Name:        "score_total",
+			SQL:         "SELECT SUM(score) AS total FROM scores",
+			Permissions: PermissionMetadata{Required: []string{"scores:read"}},
+		}).
+		Query(QueryDeclaration{
+			Name:        "all_null_score_total",
+			SQL:         "SELECT SUM(score) AS total FROM scores WHERE score IS NULL",
+			Permissions: PermissionMetadata{Required: []string{"scores:read"}},
+		}))
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "seed_scores", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	cases := []struct {
+		name string
+		want types.Value
+	}{
+		{name: "non_null_score_count", want: types.NewUint64(3)},
+		{name: "distinct_score_count", want: types.NewUint64(2)},
+		{name: "score_total", want: types.NewUint64(23)},
+		{name: "all_null_score_total", want: types.NewNull(types.KindUint64)},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := rt.CallQuery(context.Background(), tt.name, WithDeclaredReadPermissions("scores:read"))
+			if err != nil {
+				t.Fatalf("CallQuery: %v", err)
+			}
+			if result.Name != tt.name || result.TableName != "scores" {
+				t.Fatalf("result identity = (%q, %q), want %s/scores", result.Name, result.TableName, tt.name)
+			}
+			if len(result.Rows) != 1 || len(result.Rows[0]) != 1 || !result.Rows[0][0].Equal(tt.want) {
+				t.Fatalf("rows = %#v, want one row with %v", result.Rows, tt.want)
+			}
+		})
+	}
+}
+
 func TestDeclaredViewAppliesVisibilityAfterPermissionSucceeds(t *testing.T) {
 	alice := visibilityRuntimeIdentity(0x23)
 	bob := visibilityRuntimeIdentity(0x24)
@@ -772,6 +832,31 @@ func joinReadTableDef(name string) schema.TableDefinition {
 			{Name: "u32", Type: types.KindUint64},
 		},
 	}
+}
+
+func nullableScoresTableDef() schema.TableDefinition {
+	return schema.TableDefinition{
+		Name: "scores",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
+			{Name: "score", Type: types.KindUint32, Nullable: true},
+		},
+	}
+}
+
+func seedNullableScoresReducer(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+	for _, row := range []types.ProductValue{
+		{types.NewUint64(1), types.NewNull(types.KindUint32)},
+		{types.NewUint64(2), types.NewUint32(7)},
+		{types.NewUint64(3), types.NewUint32(7)},
+		{types.NewUint64(4), types.NewUint32(9)},
+		{types.NewUint64(5), types.NewNull(types.KindUint32)},
+	} {
+		if _, err := ctx.DB.Insert(0, row); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
 }
 
 func seedJoinRowsReducer(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {

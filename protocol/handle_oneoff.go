@@ -694,7 +694,7 @@ func countOneOffAggregate(ctx context.Context, view store.CommittedReadView, tab
 	}
 	var count uint64
 	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
-		if oneOffAggregateRowColumnPresent(pv, tableID, argument) {
+		if value, ok := oneOffAggregateRowColumnValue(pv, tableID, argument); ok && !value.IsNull() {
 			count++
 		}
 		return true
@@ -707,7 +707,7 @@ func countDistinctOneOffAggregate(ctx context.Context, view store.CommittedReadV
 	if joinPred, ok := pred.(subscription.Join); ok {
 		err := visitOneOffJoinPairs(ctx, view, joinPred, resolver, func(leftRow, rightRow types.ProductValue) bool {
 			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, joinPred.Left, joinPred.LeftAlias, joinPred.Right, joinPred.RightAlias, column)
-			if ok {
+			if ok && !value.IsNull() {
 				seen.add(value)
 			}
 			return true
@@ -717,7 +717,7 @@ func countDistinctOneOffAggregate(ctx context.Context, view store.CommittedReadV
 	if crossPred, ok := pred.(subscription.CrossJoin); ok {
 		err := visitOneOffCrossJoinPairs(ctx, view, crossPred, false, func(leftRow, rightRow types.ProductValue) bool {
 			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, crossPred.Left, crossPred.LeftAlias, crossPred.Right, crossPred.RightAlias, column)
-			if ok {
+			if ok && !value.IsNull() {
 				seen.add(value)
 			}
 			return true
@@ -726,7 +726,7 @@ func countDistinctOneOffAggregate(ctx context.Context, view store.CommittedReadV
 	}
 	_, err := visitOneOffSingleTableRows(ctx, view, tableID, pred, resolver, func(pv types.ProductValue) bool {
 		value, ok := oneOffAggregateRowColumnValue(pv, tableID, column)
-		if ok {
+		if ok && !value.IsNull() {
 			seen.add(value)
 		}
 		return true
@@ -739,7 +739,7 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 		return types.Value{}, fmt.Errorf("SUM aggregate requires a column argument")
 	}
 	argument := *aggregate.Argument
-	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type)
+	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type, aggregate.ResultColumn.Nullable)
 	if joinPred, ok := pred.(subscription.Join); ok {
 		err := visitOneOffJoinPairs(ctx, view, joinPred, resolver, func(leftRow, rightRow types.ProductValue) bool {
 			value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, joinPred.Left, joinPred.LeftAlias, joinPred.Right, joinPred.RightAlias, argument)
@@ -795,11 +795,6 @@ func sumOneOffAggregate(ctx context.Context, view store.CommittedReadView, table
 	return acc.value()
 }
 
-func oneOffAggregateRowColumnPresent(row types.ProductValue, tableID schema.TableID, column compiledSQLProjectionColumn) bool {
-	_, ok := oneOffAggregateRowColumnValue(row, tableID, column)
-	return ok
-}
-
 func oneOffAggregateRowColumnValue(row types.ProductValue, tableID schema.TableID, column compiledSQLProjectionColumn) (types.Value, bool) {
 	if column.Table != tableID {
 		return types.Value{}, false
@@ -836,21 +831,27 @@ func (s *oneOffDistinctValueSet) count() uint64 {
 }
 
 type oneOffSumAccumulator struct {
-	kind types.ValueKind
-	i64  int64
-	u64  uint64
-	f64  float64
-	err  error
+	kind     types.ValueKind
+	nullable bool
+	seen     bool
+	i64      int64
+	u64      uint64
+	f64      float64
+	err      error
 }
 
-func newOneOffSumAccumulator(kind types.ValueKind) *oneOffSumAccumulator {
-	return &oneOffSumAccumulator{kind: kind}
+func newOneOffSumAccumulator(kind types.ValueKind, nullable bool) *oneOffSumAccumulator {
+	return &oneOffSumAccumulator{kind: kind, nullable: nullable}
 }
 
 func (a *oneOffSumAccumulator) add(value types.Value) error {
 	if a.err != nil {
 		return a.err
 	}
+	if value.IsNull() {
+		return nil
+	}
+	a.seen = true
 	switch a.kind {
 	case types.KindInt64:
 		n, ok := oneOffValueAsInt64(value)
@@ -891,6 +892,9 @@ func (a *oneOffSumAccumulator) add(value types.Value) error {
 func (a *oneOffSumAccumulator) value() (types.Value, error) {
 	if a.err != nil {
 		return types.Value{}, a.err
+	}
+	if a.nullable && !a.seen {
+		return types.NewNull(a.kind), nil
 	}
 	switch a.kind {
 	case types.KindInt64:
@@ -1199,8 +1203,8 @@ func projectedJoinColumnSource(col compiledSQLProjectionColumn, leftID schema.Ta
 }
 
 func oneOffAggregateJoinColumnPresent(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, column compiledSQLProjectionColumn) bool {
-	_, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, column)
-	return ok
+	value, ok := oneOffAggregateJoinColumnValue(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, column)
+	return ok && !value.IsNull()
 }
 
 func oneOffAggregateJoinColumnValue(leftRow, rightRow types.ProductValue, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, column compiledSQLProjectionColumn) (types.Value, bool) {

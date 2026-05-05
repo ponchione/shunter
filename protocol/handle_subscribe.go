@@ -805,7 +805,7 @@ func compileAggregateProjection(agg *sql.AggregateProjection, argument *compiled
 		return &compiledSQLAggregate{
 			Func:         "SUM",
 			Argument:     argument,
-			ResultColumn: schema.ColumnSchema{Index: 0, Name: agg.Alias, Type: resultKind},
+			ResultColumn: schema.ColumnSchema{Index: 0, Name: agg.Alias, Type: resultKind, Nullable: argument.Schema.Nullable},
 		}, nil
 	default:
 		return nil, fmt.Errorf("aggregate projections not supported")
