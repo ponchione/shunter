@@ -80,89 +80,71 @@ func (sv *StateView) ScanTable(tableID schema.TableID) RowIterator {
 // SeekIndex returns visible row IDs whose index key exactly matches key.
 // The committed index result is cloned before yielding to avoid BTree aliasing.
 func (sv *StateView) SeekIndex(tableID schema.TableID, indexID schema.IndexID, key IndexKey) iter.Seq[types.RowID] {
-	return func(yield func(types.RowID) bool) {
-		if sv.committed != nil {
-			if table, idx, ok := sv.lookupIndex(tableID, indexID); ok {
-				for _, rid := range slices.Clone(idx.Seek(key)) {
-					if sv.tx.IsDeleted(tableID, rid) {
-						continue
-					}
-					if _, ok := table.GetRow(rid); !ok {
-						continue
-					}
-					if !yield(rid) {
-						return
-					}
-				}
-				for rid, row := range sv.tx.tableInserts(tableID) {
-					if idx.ExtractKey(row).Equal(key) {
-						if !yield(rid) {
-							return
-						}
-					}
-				}
-				return
-			}
-		}
-	}
+	return sv.seekIndexRows(
+		tableID,
+		indexID,
+		func(idx *Index) []types.RowID {
+			return slices.Clone(idx.Seek(key))
+		},
+		func(idx *Index, row types.ProductValue) bool {
+			return idx.ExtractKey(row).Equal(key)
+		},
+	)
 }
 
 // SeekIndexRange returns visible row IDs whose keys fall in [low, high).
 // The committed index range is collected before yielding to avoid BTree aliasing.
 func (sv *StateView) SeekIndexRange(tableID schema.TableID, indexID schema.IndexID, low, high *IndexKey) iter.Seq[types.RowID] {
-	return func(yield func(types.RowID) bool) {
-		if sv.committed != nil {
-			if table, idx, ok := sv.lookupIndex(tableID, indexID); ok {
-				for _, rid := range slices.Collect(idx.BTree().SeekRange(low, high)) {
-					if sv.tx.IsDeleted(tableID, rid) {
-						continue
-					}
-					if _, ok := table.GetRow(rid); !ok {
-						continue
-					}
-					if !yield(rid) {
-						return
-					}
-				}
-				for rid, row := range sv.tx.tableInserts(tableID) {
-					key := idx.ExtractKey(row)
-					if indexKeyInRange(key, low, high) {
-						if !yield(rid) {
-							return
-						}
-					}
-				}
-				return
-			}
-		}
-	}
+	return sv.seekIndexRows(
+		tableID,
+		indexID,
+		func(idx *Index) []types.RowID {
+			return slices.Collect(idx.BTree().SeekRange(low, high))
+		},
+		func(idx *Index, row types.ProductValue) bool {
+			return indexKeyInRange(idx.ExtractKey(row), low, high)
+		},
+	)
 }
 
 // SeekIndexBounds returns visible row IDs whose keys satisfy both Bound
 // endpoints. The committed range is collected before yielding.
 func (sv *StateView) SeekIndexBounds(tableID schema.TableID, indexID schema.IndexID, low, high Bound) iter.Seq[types.RowID] {
+	return sv.seekIndexRows(
+		tableID,
+		indexID,
+		func(idx *Index) []types.RowID {
+			return slices.Collect(idx.BTree().SeekBounds(low, high))
+		},
+		func(idx *Index, row types.ProductValue) bool {
+			key := idx.ExtractKey(row)
+			return matchesLowerBound(key, low) && matchesUpperBound(key, high)
+		},
+	)
+}
+
+func (sv *StateView) seekIndexRows(tableID schema.TableID, indexID schema.IndexID, committedIDs func(*Index) []types.RowID, txMatch func(*Index, types.ProductValue) bool) iter.Seq[types.RowID] {
 	return func(yield func(types.RowID) bool) {
-		if sv.committed != nil {
-			if table, idx, ok := sv.lookupIndex(tableID, indexID); ok {
-				for _, rid := range slices.Collect(idx.BTree().SeekBounds(low, high)) {
-					if sv.tx.IsDeleted(tableID, rid) {
-						continue
-					}
-					if _, ok := table.GetRow(rid); !ok {
-						continue
-					}
-					if !yield(rid) {
-						return
-					}
-				}
-				for rid, row := range sv.tx.tableInserts(tableID) {
-					key := idx.ExtractKey(row)
-					if matchesLowerBound(key, low) && matchesUpperBound(key, high) {
-						if !yield(rid) {
-							return
-						}
-					}
-				}
+		table, idx, ok := sv.lookupIndex(tableID, indexID)
+		if !ok {
+			return
+		}
+		for _, rid := range committedIDs(idx) {
+			if sv.tx.IsDeleted(tableID, rid) {
+				continue
+			}
+			if _, ok := table.GetRow(rid); !ok {
+				continue
+			}
+			if !yield(rid) {
+				return
+			}
+		}
+		for rid, row := range sv.tx.tableInserts(tableID) {
+			if !txMatch(idx, row) {
+				continue
+			}
+			if !yield(rid) {
 				return
 			}
 		}
