@@ -988,36 +988,21 @@ func countOneOffJoinColumn(ctx context.Context, view store.CommittedReadView, jo
 }
 
 func evaluateOneOffJoinProjection(ctx context.Context, view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn, resolver schema.IndexResolver, limit int) ([]types.ProductValue, error) {
-	var rows []types.ProductValue
-	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
-		rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, columns))
-		return !oneOffLimitReached(len(rows), limit)
-	})
-	return rows, err
+	return collectOneOffPairProjections(
+		func(visit func(types.ProductValue, types.ProductValue) bool) error {
+			return visitOneOffJoinPairs(ctx, view, join, resolver, visit)
+		},
+		join.Left, join.LeftAlias, join.Right, join.RightAlias, columns, limit,
+	)
 }
 
 func evaluateOneOffJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, join subscription.Join, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, resolver schema.IndexResolver, offset int, limit int) ([]types.ProductValue, error) {
-	var rows []orderedOneOffRow
-	var orderErr error
-	err := visitOneOffJoinPairs(ctx, view, join, resolver, func(leftRow, rightRow types.ProductValue) bool {
-		key, err := orderKeysFromJoinPair(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, orderBy)
-		if err != nil {
-			orderErr = err
-			return false
-		}
-		rows = append(rows, orderedOneOffRow{
-			row: projectOneOffJoinPair(leftRow, rightRow, join.Left, join.LeftAlias, join.Right, join.RightAlias, columns),
-			key: key,
-		})
-		return true
-	})
-	if err != nil {
-		return nil, err
-	}
-	if orderErr != nil {
-		return nil, orderErr
-	}
-	return materializeOrderedOneOffRows(rows, orderBy, offset, limit), nil
+	return collectOrderedOneOffPairProjections(
+		func(visit func(types.ProductValue, types.ProductValue) bool) error {
+			return visitOneOffJoinPairs(ctx, view, join, resolver, visit)
+		},
+		join.Left, join.LeftAlias, join.Right, join.RightAlias, columns, orderBy, offset, limit,
+	)
 }
 
 func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, join subscription.Join, resolver schema.IndexResolver, visit func(leftRow, rightRow types.ProductValue) bool) error {
@@ -1133,25 +1118,43 @@ func oneOffJoinPairMatches(join subscription.Join, leftRow, rightRow types.Produ
 }
 
 func evaluateOneOffCrossJoinProjection(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, limit int) ([]types.ProductValue, error) {
+	return collectOneOffPairProjections(
+		func(visit func(types.ProductValue, types.ProductValue) bool) error {
+			return visitOneOffCrossJoinPairs(ctx, view, cross, true, visit)
+		},
+		cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns, limit,
+	)
+}
+
+func evaluateOneOffCrossJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
+	return collectOrderedOneOffPairProjections(
+		func(visit func(types.ProductValue, types.ProductValue) bool) error {
+			return visitOneOffCrossJoinPairs(ctx, view, cross, true, visit)
+		},
+		cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns, orderBy, offset, limit,
+	)
+}
+
+func collectOneOffPairProjections(visitPairs func(func(types.ProductValue, types.ProductValue) bool) error, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn, limit int) ([]types.ProductValue, error) {
 	var rows []types.ProductValue
-	err := visitOneOffCrossJoinPairs(ctx, view, cross, true, func(leftRow, rightRow types.ProductValue) bool {
-		rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns))
+	err := visitPairs(func(leftRow, rightRow types.ProductValue) bool {
+		rows = append(rows, projectOneOffJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, columns))
 		return !oneOffLimitReached(len(rows), limit)
 	})
 	return rows, err
 }
 
-func evaluateOneOffCrossJoinProjectionOrdered(ctx context.Context, view store.CommittedReadView, cross subscription.CrossJoin, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
+func collectOrderedOneOffPairProjections(visitPairs func(func(types.ProductValue, types.ProductValue) bool) error, leftID schema.TableID, leftAlias uint8, rightID schema.TableID, rightAlias uint8, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy, offset int, limit int) ([]types.ProductValue, error) {
 	var rows []orderedOneOffRow
 	var orderErr error
-	err := visitOneOffCrossJoinPairs(ctx, view, cross, true, func(leftRow, rightRow types.ProductValue) bool {
-		key, err := orderKeysFromJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, orderBy)
+	err := visitPairs(func(leftRow, rightRow types.ProductValue) bool {
+		key, err := orderKeysFromJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, orderBy)
 		if err != nil {
 			orderErr = err
 			return false
 		}
 		rows = append(rows, orderedOneOffRow{
-			row: projectOneOffJoinPair(leftRow, rightRow, cross.Left, cross.LeftAlias, cross.Right, cross.RightAlias, columns),
+			row: projectOneOffJoinPair(leftRow, rightRow, leftID, leftAlias, rightID, rightAlias, columns),
 			key: key,
 		})
 		return true
