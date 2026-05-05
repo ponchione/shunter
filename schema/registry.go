@@ -104,12 +104,11 @@ func newSchemaRegistry(schemas []TableSchema, b *Builder) SchemaRegistry {
 }
 
 func (r *schemaRegistry) Table(id TableID) (*TableSchema, bool) {
-	i, ok := r.byID[id]
-	if !ok {
-		return nil, false
+	if i, ok := r.byID[id]; ok {
+		ts := cloneTableSchema(r.tables[i])
+		return &ts, true
 	}
-	ts := cloneTableSchema(r.tables[i])
-	return &ts, true
+	return nil, false
 }
 
 func (r *schemaRegistry) TableByName(name string) (TableID, *TableSchema, bool) {
@@ -139,30 +138,24 @@ func (r *schemaRegistry) TableExists(id TableID) bool {
 }
 
 func (r *schemaRegistry) TableName(id TableID) string {
-	i, ok := r.byID[id]
-	if !ok {
-		return ""
+	if i, ok := r.byID[id]; ok {
+		return r.tables[i].Name
 	}
-	return r.tables[i].Name
+	return ""
 }
 
 func (r *schemaRegistry) ColumnExists(table TableID, col types.ColID) bool {
-	i, ok := r.byID[table]
-	if !ok {
-		return false
+	if i, ok := r.byID[table]; ok {
+		return int(col) >= 0 && int(col) < len(r.tables[i].Columns)
 	}
-	return int(col) >= 0 && int(col) < len(r.tables[i].Columns)
+	return false
 }
 
 func (r *schemaRegistry) ColumnType(table TableID, col types.ColID) ValueKind {
-	i, ok := r.byID[table]
-	if !ok {
-		return 0
+	if i, ok := r.byID[table]; ok && int(col) >= 0 && int(col) < len(r.tables[i].Columns) {
+		return r.tables[i].Columns[col].Type
 	}
-	if int(col) < 0 || int(col) >= len(r.tables[i].Columns) {
-		return 0
-	}
-	return r.tables[i].Columns[col].Type
+	return 0
 }
 
 func (r *schemaRegistry) HasIndex(table TableID, col types.ColID) bool {
@@ -171,11 +164,10 @@ func (r *schemaRegistry) HasIndex(table TableID, col types.ColID) bool {
 }
 
 func (r *schemaRegistry) ColumnCount(table TableID) int {
-	i, ok := r.byID[table]
-	if !ok {
-		return 0
+	if i, ok := r.byID[table]; ok {
+		return len(r.tables[i].Columns)
 	}
-	return len(r.tables[i].Columns)
+	return 0
 }
 
 func (r *schemaRegistry) IndexIDForColumn(table TableID, col types.ColID) (IndexID, bool) {
@@ -183,13 +175,11 @@ func (r *schemaRegistry) IndexIDForColumn(table TableID, col types.ColID) (Index
 }
 
 func (r *schemaRegistry) indexIDForColumn(table TableID, col types.ColID) (IndexID, bool) {
-	i, ok := r.byID[table]
-	if !ok {
-		return 0, false
-	}
-	for _, idx := range r.tables[i].Indexes {
-		if len(idx.Columns) == 1 && idx.Columns[0] == int(col) {
-			return idx.ID, true
+	if i, ok := r.byID[table]; ok {
+		for _, idx := range r.tables[i].Indexes {
+			if len(idx.Columns) == 1 && idx.Columns[0] == int(col) {
+				return idx.ID, true
+			}
 		}
 	}
 	return 0, false
