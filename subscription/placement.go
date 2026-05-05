@@ -248,9 +248,7 @@ func collectCandidatesForTableInto(
 	resolver IndexResolver,
 	set map[QueryHash]struct{},
 ) []QueryHash {
-	for h := range set {
-		delete(set, h)
-	}
+	clear(set)
 
 	// Tier 1: equality-indexed subscriptions.
 	idx.Value.ForEachTrackedColumn(table, func(col ColID) {

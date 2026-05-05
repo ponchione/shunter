@@ -292,9 +292,7 @@ func walkDeltaIndexColumns(pred Predicate, visit func(TableID, ColID)) {
 // values per tracked column, one lookup per distinct value.
 func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.CommittedReadView, st *candidateScratch) map[QueryHash]struct{} {
 	cands := st.candidates
-	for h := range cands {
-		delete(cands, h)
-	}
+	clear(cands)
 	for tid, tc := range cs.Tables {
 		if tc == nil {
 			continue
@@ -336,9 +334,7 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 }
 
 func collectDistinctChangedValues(distinct map[valueKey]Value, col ColID, tc *store.TableChangeset) map[valueKey]Value {
-	for k := range distinct {
-		delete(distinct, k)
-	}
+	clear(distinct)
 	collectDistinctRows(distinct, col, tc.Inserts)
 	collectDistinctRows(distinct, col, tc.Deletes)
 	return distinct

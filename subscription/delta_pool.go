@@ -113,12 +113,8 @@ func acquireCandidateScratch() *candidateScratch {
 }
 
 func releaseCandidateScratch(st *candidateScratch) {
-	for h := range st.candidates {
-		delete(st.candidates, h)
-	}
-	for k := range st.distinct {
-		delete(st.distinct, k)
-	}
+	clear(st.candidates)
+	clear(st.distinct)
 	candidateScratchPool.Put(st)
 }
 
@@ -131,9 +127,7 @@ func acquireProductValueSlice(minCap int) []types.ProductValue {
 }
 
 func releaseProductValueSlice(rows []types.ProductValue) {
-	for i := range rows {
-		rows[i] = nil
-	}
+	clear(rows)
 	rows = rows[:0]
 	productValueSlicePool.Put(&rows)
 }
@@ -143,10 +137,10 @@ func acquireTableDeltaIndex() map[ColID]map[valueKey][]int {
 }
 
 func releaseTableDeltaIndex(byCol map[ColID]map[valueKey][]int) {
-	for col, byVal := range byCol {
+	for _, byVal := range byCol {
 		releaseValuePositionIndex(byVal)
-		delete(byCol, col)
 	}
+	clear(byCol)
 	tableDeltaIndexPool.Put(byCol)
 }
 
@@ -155,10 +149,7 @@ func acquireValuePositionIndex() map[valueKey][]int {
 }
 
 func releaseValuePositionIndex(byVal map[valueKey][]int) {
-	for key, positions := range byVal {
-		byVal[key] = positions[:0]
-		delete(byVal, key)
-	}
+	clear(byVal)
 	valuePositionIndexPool.Put(byVal)
 }
 
@@ -169,46 +160,34 @@ func acquireDeltaView() *DeltaView {
 }
 
 func releaseDeltaView(dv *DeltaView) {
-	for table, rows := range dv.inserts {
+	for _, rows := range dv.inserts {
 		releaseProductValueSlice(rows)
-		delete(dv.inserts, table)
 	}
-	for table, rows := range dv.deletes {
+	clear(dv.inserts)
+	for _, rows := range dv.deletes {
 		releaseProductValueSlice(rows)
-		delete(dv.deletes, table)
 	}
-	for table, byCol := range dv.deltaIdx.insertIdx {
+	clear(dv.deletes)
+	for _, byCol := range dv.deltaIdx.insertIdx {
 		releaseTableDeltaIndex(byCol)
-		delete(dv.deltaIdx.insertIdx, table)
 	}
-	for table, byCol := range dv.deltaIdx.deleteIdx {
+	clear(dv.deltaIdx.insertIdx)
+	for _, byCol := range dv.deltaIdx.deleteIdx {
 		releaseTableDeltaIndex(byCol)
-		delete(dv.deltaIdx.deleteIdx, table)
 	}
+	clear(dv.deltaIdx.deleteIdx)
 	dv.committed = nil
 	deltaViewPool.Put(dv)
 }
 
 // clear empties all internal maps while preserving capacity.
 func (s *dedupState) clear() {
-	for k := range s.insertCounts {
-		delete(s.insertCounts, k)
-	}
-	for k := range s.insertRows {
-		delete(s.insertRows, k)
-	}
-	for i := range s.insertOrder {
-		s.insertOrder[i] = ""
-	}
+	clear(s.insertCounts)
+	clear(s.insertRows)
+	clear(s.insertOrder)
 	s.insertOrder = s.insertOrder[:0]
-	for k := range s.deleteCounts {
-		delete(s.deleteCounts, k)
-	}
-	for k := range s.deleteRows {
-		delete(s.deleteRows, k)
-	}
-	for i := range s.deleteOrder {
-		s.deleteOrder[i] = ""
-	}
+	clear(s.deleteCounts)
+	clear(s.deleteRows)
+	clear(s.deleteOrder)
 	s.deleteOrder = s.deleteOrder[:0]
 }
