@@ -443,14 +443,10 @@ func OpenSegment(path string) (*SegmentReader, error) {
 	}
 	// Parse startTx from filename.
 	base := filepath.Base(path)
-	var startTx uint64
-	if n, scanErr := fmt.Sscanf(base, "%d.log", &startTx); scanErr != nil || n != 1 {
+	startTx, err := parseSegmentFileStartTx(base)
+	if err != nil {
 		f.Close()
-		return nil, fmt.Errorf("commitlog: invalid segment filename %q", base)
-	}
-	if base != SegmentFileName(startTx) {
-		f.Close()
-		return nil, fmt.Errorf("commitlog: non-canonical segment filename %q", base)
+		return nil, err
 	}
 
 	return &SegmentReader{file: f, startTx: startTx}, nil
