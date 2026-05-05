@@ -668,13 +668,9 @@ func parseHexLiteral(text string) ([]byte, error) {
 	if len(body) == 0 || len(body)%2 != 0 {
 		return nil, fmt.Errorf("%w: malformed hex literal %q", ErrUnsupportedSQL, text)
 	}
-	decoded := make([]byte, len(body)/2)
-	for i := 0; i < len(body); i += 2 {
-		u, err := strconv.ParseUint(body[i:i+2], 16, 8)
-		if err != nil {
-			return nil, fmt.Errorf("%w: malformed hex literal %q", ErrUnsupportedSQL, text)
-		}
-		decoded[i/2] = byte(u)
+	decoded, err := hex.DecodeString(body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: malformed hex literal %q", ErrUnsupportedSQL, text)
 	}
 	return decoded, nil
 }
