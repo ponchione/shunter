@@ -293,12 +293,19 @@ res, err := rt.CallReducer(
 	"send_message",
 	payload,
 	shunter.WithRequestID(42),
+	shunter.WithAuthPrincipal(shunter.AuthPrincipal{
+		Issuer:  "https://issuer.example",
+		Subject: "user-123",
+	}),
 	shunter.WithPermissions("messages:write"),
 )
 ```
 
-Use permission options when testing strict permission behavior. In dev auth
-mode, omitting permissions allows all local reducer permissions by default.
+Use `WithAuthPrincipal` when an app-owned local adapter has already validated a
+caller outside the WebSocket protocol. Permission checks still use
+`WithPermissions`; principal permissions are context for reducer code, not an
+admission bypass. In dev auth mode, omitting permissions allows all local
+reducer permissions by default.
 
 ## Read State Locally
 

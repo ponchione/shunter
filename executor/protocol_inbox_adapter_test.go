@@ -861,6 +861,7 @@ func TestProtocolInboxAdapter_RegisterSubscriptionSet_ReplyPrecedesLaterSameGoro
 func TestProtocolInboxAdapter_OnConnect_BridgesLifecycleResponse(t *testing.T) {
 	connID := types.ConnectionID{7}
 	identity := types.Identity{8}
+	principal := types.AuthPrincipal{Issuer: "issuer", Subject: "alice", Audience: []string{"api"}}
 	adapter := newProtocolInboxAdapter(
 		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
 			onConnect, ok := cmd.(OnConnectCmd)
@@ -870,13 +871,17 @@ func TestProtocolInboxAdapter_OnConnect_BridgesLifecycleResponse(t *testing.T) {
 			if onConnect.ConnID != connID || onConnect.Identity != identity {
 				t.Fatalf("OnConnectCmd = %+v", onConnect)
 			}
+			if got := onConnect.Principal; got.Issuer != "issuer" || got.Subject != "alice" ||
+				len(got.Audience) != 1 || got.Audience[0] != "api" {
+				t.Fatalf("OnConnectCmd.Principal = %+v, want copied issuer/subject/audience", got)
+			}
 			onConnect.ResponseCh <- ReducerResponse{Status: StatusCommitted}
 			return nil
 		}},
 		stubProtocolSchemaRegistry{},
 	)
 
-	if err := adapter.OnConnect(context.Background(), connID, identity); err != nil {
+	if err := adapter.OnConnect(context.Background(), connID, identity, principal); err != nil {
 		t.Fatalf("OnConnect: %v", err)
 	}
 }
@@ -897,7 +902,7 @@ func TestProtocolInboxAdapter_OnConnect_UsesBufferedResponseChannel(t *testing.T
 		stubProtocolSchemaRegistry{},
 	)
 
-	if err := adapter.OnConnect(context.Background(), types.ConnectionID{1}, types.Identity{2}); err != nil {
+	if err := adapter.OnConnect(context.Background(), types.ConnectionID{1}, types.Identity{2}, types.AuthPrincipal{}); err != nil {
 		t.Fatalf("OnConnect: %v", err)
 	}
 }
@@ -918,7 +923,7 @@ func TestProtocolInboxAdapter_OnDisconnect_UsesBufferedResponseChannel(t *testin
 		stubProtocolSchemaRegistry{},
 	)
 
-	if err := adapter.OnDisconnect(context.Background(), types.ConnectionID{1}, types.Identity{2}); err != nil {
+	if err := adapter.OnDisconnect(context.Background(), types.ConnectionID{1}, types.Identity{2}, types.AuthPrincipal{}); err != nil {
 		t.Fatalf("OnDisconnect: %v", err)
 	}
 }
@@ -975,6 +980,12 @@ func TestProtocolInboxAdapter_CallReducer_TranslatesFailedReducerResponse(t *tes
 }
 
 func TestProtocolInboxAdapter_CallReducer_ForwardsPermissionContext(t *testing.T) {
+	principal := types.AuthPrincipal{
+		Issuer:      "issuer",
+		Subject:     "alice",
+		Audience:    []string{"shunter-api"},
+		Permissions: []string{"principal:permission"},
+	}
 	adapter := newProtocolInboxAdapter(
 		stubProtocolSubmitter{submit: func(_ context.Context, cmd ExecutorCommand) error {
 			call, ok := cmd.(CallReducerCmd)
@@ -983,6 +994,11 @@ func TestProtocolInboxAdapter_CallReducer_ForwardsPermissionContext(t *testing.T
 			}
 			if got := call.Request.Caller.Permissions; len(got) != 1 || got[0] != "messages:send" {
 				t.Fatalf("caller permissions = %#v, want messages:send", got)
+			}
+			if got := call.Request.Caller.Principal; got.Issuer != "issuer" || got.Subject != "alice" ||
+				len(got.Audience) != 1 || got.Audience[0] != "shunter-api" ||
+				len(got.Permissions) != 1 || got.Permissions[0] != "principal:permission" {
+				t.Fatalf("caller principal = %+v, want copied issuer/subject/audience/permissions", got)
 			}
 			if !call.Request.Caller.AllowAllPermissions {
 				t.Fatal("AllowAllPermissions = false, want true")
@@ -995,6 +1011,7 @@ func TestProtocolInboxAdapter_CallReducer_ForwardsPermissionContext(t *testing.T
 	err := adapter.CallReducer(context.Background(), protocol.CallReducerRequest{
 		ConnID:              types.ConnectionID{3},
 		Identity:            types.Identity{4},
+		Principal:           principal,
 		RequestID:           55,
 		ReducerName:         "DoThing",
 		Permissions:         []string{"messages:send"},

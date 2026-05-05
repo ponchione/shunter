@@ -73,6 +73,7 @@ type UpgradeContext struct {
 	ProtocolVersion     ProtocolVersion
 	Identity            types.Identity
 	ConnectionID        types.ConnectionID
+	Principal           types.AuthPrincipal
 	Permissions         []string
 	AllowAllPermissions bool
 	// Token is the minted anonymous JWT when the server minted one
@@ -105,6 +106,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	var claims *auth.Claims
 	var mintedToken string
 	var identity types.Identity
+	var principal types.AuthPrincipal
 	var permissions []string
 	if hasToken {
 		c, err := auth.ValidateJWT(token, s.JWT)
@@ -114,6 +116,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		}
 		claims = c
 		identity = c.DeriveIdentity()
+		principal = c.Principal()
 		permissions = append([]string(nil), c.Permissions...)
 	} else {
 		if s.JWT.AuthMode != auth.AuthModeAnonymous {
@@ -185,6 +188,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 		ProtocolVersion:     version,
 		Identity:            identity,
 		ConnectionID:        connID,
+		Principal:           principal.Copy(),
 		Permissions:         append([]string(nil), permissions...),
 		AllowAllPermissions: allowAllPermissions,
 		Token:               mintedToken,
@@ -205,6 +209,7 @@ func (s *Server) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 			&options,
 		)
 		c.ProtocolVersion = uc.ProtocolVersion
+		c.Principal = uc.Principal.Copy()
 		c.Permissions = append([]string(nil), uc.Permissions...)
 		c.AllowAllPermissions = uc.AllowAllPermissions
 		c.Observer = s.Observer

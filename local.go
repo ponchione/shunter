@@ -40,6 +40,9 @@ type Value = types.Value
 // ProductValue is an ordered row value.
 type ProductValue = types.ProductValue
 
+// AuthPrincipal carries normalized external-auth claim data for reducer calls.
+type AuthPrincipal = types.AuthPrincipal
+
 // RowID identifies a row within a table.
 type RowID = types.RowID
 
@@ -125,6 +128,14 @@ func WithConnectionID(connID types.ConnectionID) ReducerCallOption {
 	}
 }
 
+// WithAuthPrincipal sets generic external-auth principal data for the local
+// reducer call without requiring a raw JWT.
+func WithAuthPrincipal(principal types.AuthPrincipal) ReducerCallOption {
+	return func(opts *reducerCallOptions) {
+		opts.caller.Principal = principal.Copy()
+	}
+}
+
 // WithPermissions sets the local caller permission tags for the reducer call.
 func WithPermissions(permissions ...string) ReducerCallOption {
 	return func(opts *reducerCallOptions) {
@@ -168,7 +179,7 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 		Request: executor.ReducerRequest{
 			ReducerName: reducerName,
 			Args:        append([]byte(nil), args...),
-			Caller:      callOpts.caller,
+			Caller:      callOpts.caller.Copy(),
 			RequestID:   callOpts.requestID,
 			Source:      executor.CallSourceExternal,
 		},

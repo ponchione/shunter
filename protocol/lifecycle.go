@@ -16,8 +16,8 @@ import (
 // Lifecycle disconnect first drops subscriptions, then runs OnDisconnect;
 // disconnect errors are logged and do not veto teardown.
 type ExecutorInbox interface {
-	OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
-	OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
+	OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error
+	OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error
 	DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
 	// Set-based seam (single/multi variant variant split). Single and Multi
 	// subscribe/unsubscribe paths both route through these — Single
@@ -102,6 +102,7 @@ type UnsubscribeSetCommandResponse struct {
 type CallReducerRequest struct {
 	ConnID              types.ConnectionID
 	Identity            types.Identity
+	Principal           types.AuthPrincipal
 	RequestID           uint32
 	ReducerName         string
 	Args                []byte
@@ -131,7 +132,7 @@ func (c *Conn) RunLifecycle(ctx context.Context, inbox ExecutorInbox, mgr *ConnM
 			mgr.releaseReservation(c)
 		}
 	}()
-	if err := inbox.OnConnect(ctx, c.ID, c.Identity); err != nil {
+	if err := inbox.OnConnect(ctx, c.ID, c.Identity, c.Principal.Copy()); err != nil {
 		reason := truncateCloseReason("onconnect rejected: " + err.Error())
 		_ = c.ws.Close(websocket.StatusPolicyViolation, reason)
 		return fmt.Errorf("%w: onconnect rejected: %v", ErrExecutorAdmissionRejected, err)

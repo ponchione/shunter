@@ -30,10 +30,9 @@ capabilities.
 Agents should implement remaining slices in this order unless a later task
 explicitly says otherwise:
 
-1. External JWT principal bridge.
-2. App-owned migration and import hooks.
-3. Ordered declared reads.
-4. Client/codegen updates for the new surface.
+1. App-owned migration and import hooks.
+2. Ordered declared reads.
+3. Client/codegen updates for the new surface.
 
 Completed slices:
 
@@ -42,6 +41,7 @@ Completed slices:
 - Nullable column semantics.
 - Composite index and reducer read ergonomics.
 - Fixed-point scaled integer convention.
+- External JWT principal bridge.
 
 The remaining slices build on the now-stable UUID, JSON, nullable, composite
 index, and integer type surfaces.
@@ -301,6 +301,8 @@ codegen but does not change the stored `ValueKind`.
 - If metadata is added, test contract export, diff, validation, and codegen.
 
 ## 8. External JWT Principal Bridge
+
+Status: implemented.
 
 ### Requirement
 

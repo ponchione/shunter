@@ -54,6 +54,19 @@ func (c *Claims) DeriveIdentity() types.Identity {
 	return DeriveIdentity(c.Issuer, c.Subject)
 }
 
+// Principal returns the generic external-auth principal represented by c.
+func (c *Claims) Principal() types.AuthPrincipal {
+	if c == nil {
+		return types.AuthPrincipal{}
+	}
+	return types.AuthPrincipal{
+		Issuer:      c.Issuer,
+		Subject:     c.Subject,
+		Audience:    append([]string(nil), c.Audience...),
+		Permissions: append([]string(nil), c.Permissions...),
+	}
+}
+
 // Validation error sentinels (SPEC-005 §4.3).
 var (
 	ErrJWTInvalid             = errors.New("auth: JWT invalid")

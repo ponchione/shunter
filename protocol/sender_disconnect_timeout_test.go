@@ -27,11 +27,11 @@ func newBlockingInbox() *blockingInbox {
 	return &blockingInbox{started: make(chan struct{}, 1)}
 }
 
-func (b *blockingInbox) OnConnect(context.Context, types.ConnectionID, types.Identity) error {
+func (b *blockingInbox) OnConnect(context.Context, types.ConnectionID, types.Identity, types.AuthPrincipal) error {
 	return nil
 }
 
-func (b *blockingInbox) OnDisconnect(_ context.Context, _ types.ConnectionID, _ types.Identity) error {
+func (b *blockingInbox) OnDisconnect(_ context.Context, _ types.ConnectionID, _ types.Identity, _ types.AuthPrincipal) error {
 	b.onDisconnectCalls.Add(1)
 	return nil
 }

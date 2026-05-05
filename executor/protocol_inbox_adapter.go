@@ -37,17 +37,17 @@ func newProtocolInboxAdapter(submitter protocolCommandSubmitter, schemaReg proto
 	return &ProtocolInboxAdapter{submitter: submitter, schemaReg: schemaReg}
 }
 
-func (a *ProtocolInboxAdapter) OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error {
+func (a *ProtocolInboxAdapter) OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error {
 	respCh := make(chan ReducerResponse, 1)
-	if err := a.submitter.SubmitWithContext(ctx, OnConnectCmd{ConnID: connID, Identity: identity, ResponseCh: respCh}); err != nil {
+	if err := a.submitter.SubmitWithContext(ctx, OnConnectCmd{ConnID: connID, Identity: identity, Principal: principal.Copy(), ResponseCh: respCh}); err != nil {
 		return err
 	}
 	return awaitReducerStatus(ctx, respCh, "OnConnect")
 }
 
-func (a *ProtocolInboxAdapter) OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error {
+func (a *ProtocolInboxAdapter) OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error {
 	respCh := make(chan ReducerResponse, 1)
-	if err := a.submitter.SubmitWithContext(ctx, OnDisconnectCmd{ConnID: connID, Identity: identity, ResponseCh: respCh}); err != nil {
+	if err := a.submitter.SubmitWithContext(ctx, OnDisconnectCmd{ConnID: connID, Identity: identity, Principal: principal.Copy(), ResponseCh: respCh}); err != nil {
 		return err
 	}
 	return awaitReducerStatus(ctx, respCh, "OnDisconnect")
@@ -123,6 +123,7 @@ func (a *ProtocolInboxAdapter) CallReducer(ctx context.Context, req protocol.Cal
 			Caller: types.CallerContext{
 				Identity:            req.Identity,
 				ConnectionID:        req.ConnID,
+				Principal:           req.Principal.Copy(),
 				Permissions:         append([]string(nil), req.Permissions...),
 				AllowAllPermissions: req.AllowAllPermissions,
 			},

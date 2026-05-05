@@ -133,8 +133,13 @@ func newLifecycleHarness(t *testing.T, opt lifecycleOpt) *lifecycleHarness {
 
 func submitOnConnect(t *testing.T, exec *Executor, conn types.ConnectionID, id types.Identity) ReducerResponse {
 	t.Helper()
+	return submitOnConnectWithPrincipal(t, exec, conn, id, types.AuthPrincipal{})
+}
+
+func submitOnConnectWithPrincipal(t *testing.T, exec *Executor, conn types.ConnectionID, id types.Identity, principal types.AuthPrincipal) ReducerResponse {
+	t.Helper()
 	ch := make(chan ReducerResponse, 1)
-	if err := exec.Submit(OnConnectCmd{ConnID: conn, Identity: id, ResponseCh: ch}); err != nil {
+	if err := exec.Submit(OnConnectCmd{ConnID: conn, Identity: id, Principal: principal, ResponseCh: ch}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -148,8 +153,13 @@ func submitOnConnect(t *testing.T, exec *Executor, conn types.ConnectionID, id t
 
 func submitOnDisconnect(t *testing.T, exec *Executor, conn types.ConnectionID, id types.Identity) ReducerResponse {
 	t.Helper()
+	return submitOnDisconnectWithPrincipal(t, exec, conn, id, types.AuthPrincipal{})
+}
+
+func submitOnDisconnectWithPrincipal(t *testing.T, exec *Executor, conn types.ConnectionID, id types.Identity, principal types.AuthPrincipal) ReducerResponse {
+	t.Helper()
 	ch := make(chan ReducerResponse, 1)
-	if err := exec.Submit(OnDisconnectCmd{ConnID: conn, Identity: id, ResponseCh: ch}); err != nil {
+	if err := exec.Submit(OnDisconnectCmd{ConnID: conn, Identity: id, Principal: principal, ResponseCh: ch}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -230,7 +240,8 @@ func TestOnConnectRunsReducerWithLifecycleSource(t *testing.T) {
 
 	conn := types.ConnectionID{9}
 	identity := types.Identity{0xBB}
-	resp := submitOnConnect(t, h.exec, conn, identity)
+	principal := types.AuthPrincipal{Issuer: "issuer", Subject: "alice", Audience: []string{"shunter-api"}}
+	resp := submitOnConnectWithPrincipal(t, h.exec, conn, identity, principal)
 	if resp.Status != StatusCommitted {
 		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
 	}
@@ -242,6 +253,10 @@ func TestOnConnectRunsReducerWithLifecycleSource(t *testing.T) {
 	}
 	if gotCaller.Identity != identity {
 		t.Errorf("caller identity=%v, want %v", gotCaller.Identity, identity)
+	}
+	if gotCaller.Principal.Issuer != "issuer" || gotCaller.Principal.Subject != "alice" ||
+		len(gotCaller.Principal.Audience) != 1 || gotCaller.Principal.Audience[0] != "shunter-api" {
+		t.Errorf("caller principal=%+v, want copied issuer/subject/audience", gotCaller.Principal)
 	}
 	// Row was inserted.
 	if n := len(h.sysClientsSnapshot()); n != 1 {
@@ -361,6 +376,10 @@ func TestOnDisconnectDeletesOnlyMatchingSysClientsRow(t *testing.T) {
 // Story 7.3 AC: reducer runs AND row is deleted in the same transaction.
 func TestOnDisconnectRunsReducerAndDeletes(t *testing.T) {
 	rh := &recordedHandler{}
+	var gotCaller types.CallerContext
+	rh.onCall = func(ctx *types.ReducerContext) {
+		gotCaller = ctx.Caller
+	}
 	h := newLifecycleHarness(t, lifecycleOpt{withOnDisconn: true, onDisconnPayload: rh})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -369,7 +388,7 @@ func TestOnDisconnectRunsReducerAndDeletes(t *testing.T) {
 	conn := types.ConnectionID{7}
 	prime(t, h, conn, types.Identity{0x7})
 
-	resp := submitOnDisconnect(t, h.exec, conn, types.Identity{0x7})
+	resp := submitOnDisconnectWithPrincipal(t, h.exec, conn, types.Identity{0x7}, types.AuthPrincipal{Issuer: "issuer", Subject: "bob"})
 	if resp.Status != StatusCommitted {
 		t.Fatalf("status=%d err=%v", resp.Status, resp.Error)
 	}
@@ -378,6 +397,9 @@ func TestOnDisconnectRunsReducerAndDeletes(t *testing.T) {
 	}
 	if n := len(h.sysClientsSnapshot()); n != 0 {
 		t.Errorf("rows=%d, want 0", n)
+	}
+	if gotCaller.Principal.Issuer != "issuer" || gotCaller.Principal.Subject != "bob" {
+		t.Errorf("OnDisconnect caller principal=%+v, want issuer/bob", gotCaller.Principal)
 	}
 }
 

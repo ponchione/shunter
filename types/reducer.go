@@ -44,11 +44,37 @@ type ReducerContext struct {
 	Scheduler   ReducerScheduler
 }
 
+// AuthPrincipal carries normalized external-auth claim data for a reducer
+// invocation. Shunter identity remains the stable runtime identity; this
+// principal is optional application context derived from a validated token or
+// supplied by an app-owned local adapter.
+type AuthPrincipal struct {
+	Issuer      string
+	Subject     string
+	Audience    []string
+	Permissions []string
+}
+
+// Copy returns a detached copy of p.
+func (p AuthPrincipal) Copy() AuthPrincipal {
+	p.Audience = append([]string(nil), p.Audience...)
+	p.Permissions = append([]string(nil), p.Permissions...)
+	return p
+}
+
 // CallerContext captures the identity and timing of a reducer invocation.
 type CallerContext struct {
 	Identity            Identity
 	ConnectionID        ConnectionID
+	Principal           AuthPrincipal
 	Timestamp           time.Time
 	Permissions         []string
 	AllowAllPermissions bool
+}
+
+// Copy returns a detached copy of c.
+func (c CallerContext) Copy() CallerContext {
+	c.Principal = c.Principal.Copy()
+	c.Permissions = append([]string(nil), c.Permissions...)
+	return c
 }

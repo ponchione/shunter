@@ -341,3 +341,34 @@ func TestClaimsDeriveIdentity(t *testing.T) {
 		t.Errorf("Claims.DeriveIdentity returned %x, want %x", got, want)
 	}
 }
+
+func TestClaimsPrincipalCopiesExternalClaims(t *testing.T) {
+	c := &Claims{
+		Issuer:      "issuer",
+		Subject:     "alice",
+		Audience:    []string{"shunter-api"},
+		Permissions: []string{"messages:send"},
+	}
+
+	principal := c.Principal()
+	if principal.Issuer != "issuer" || principal.Subject != "alice" {
+		t.Fatalf("Principal identity = %+v, want issuer/alice", principal)
+	}
+	if len(principal.Audience) != 1 || principal.Audience[0] != "shunter-api" {
+		t.Fatalf("Principal audience = %#v, want shunter-api", principal.Audience)
+	}
+	if len(principal.Permissions) != 1 || principal.Permissions[0] != "messages:send" {
+		t.Fatalf("Principal permissions = %#v, want messages:send", principal.Permissions)
+	}
+
+	principal.Audience[0] = "mutated"
+	principal.Permissions[0] = "mutated"
+	if c.Audience[0] != "shunter-api" || c.Permissions[0] != "messages:send" {
+		t.Fatalf("Principal aliases Claims slices: claims=%+v principal=%+v", c, principal)
+	}
+
+	var nilClaims *Claims
+	if got := nilClaims.Principal(); got.Issuer != "" || got.Subject != "" || got.Audience != nil || got.Permissions != nil {
+		t.Fatalf("nil Claims Principal = %+v, want zero", got)
+	}
+}

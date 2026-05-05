@@ -14,7 +14,7 @@ func (c *Conn) Disconnect(ctx context.Context, code websocket.StatusCode, reason
 		if err := inbox.DisconnectClientSubscriptions(ctx, c.ID); err != nil {
 			logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
 		}
-		if err := inbox.OnDisconnect(ctx, c.ID, c.Identity); err != nil {
+		if err := inbox.OnDisconnect(ctx, c.ID, c.Identity, c.Principal.Copy()); err != nil {
 			logProtocolError(c.Observer, "unknown", "disconnect_failed", err)
 		}
 		mgr.Remove(c.ID)

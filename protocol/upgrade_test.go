@@ -239,6 +239,49 @@ func TestUpgradeValidTokenCarriesPermissions(t *testing.T) {
 	}
 }
 
+func TestUpgradeValidTokenPopulatesPrincipal(t *testing.T) {
+	s, rec := strictServer(t)
+	s.JWT.Audiences = []string{"shunter-api"}
+	srv := newTestServer(t, s)
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":         "alice",
+		"iss":         "https://issuer.example",
+		"aud":         []string{"mobile", "shunter-api"},
+		"iat":         time.Now().Unix(),
+		"permissions": []string{"messages:send", "messages:read"},
+	})
+	token, err := tok.SignedString(testSigningKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, resp, err := dialWS(t, srv, wsDialOpts{
+		authHeader:   "Bearer " + token,
+		subprotocols: []string{"v1.bsatn.shunter"},
+	})
+	if err != nil {
+		t.Fatalf("dial failed: %v (resp=%v)", err, resp)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	uc := rec.waitLast(t)
+	if uc.Identity != auth.DeriveIdentity("https://issuer.example", "alice") {
+		t.Fatalf("Identity = %x, want derived issuer/subject identity", uc.Identity)
+	}
+	if uc.Principal.Issuer != "https://issuer.example" || uc.Principal.Subject != "alice" {
+		t.Fatalf("Principal = %+v, want issuer/subject", uc.Principal)
+	}
+	if got := uc.Principal.Audience; len(got) != 2 || got[0] != "mobile" || got[1] != "shunter-api" {
+		t.Fatalf("Principal.Audience = %#v, want mobile/shunter-api", got)
+	}
+	if got := uc.Principal.Permissions; len(got) != 2 || got[0] != "messages:send" || got[1] != "messages:read" {
+		t.Fatalf("Principal.Permissions = %#v, want send/read tags", got)
+	}
+	if got := uc.Permissions; len(got) != 2 || got[0] != "messages:send" || got[1] != "messages:read" {
+		t.Fatalf("UpgradeContext.Permissions = %#v, want send/read tags", got)
+	}
+}
+
 func TestUpgradeAnonymousPresentedTokenDoesNotAllowAllPermissions(t *testing.T) {
 	s, rec := anonymousServer(t)
 	srv := newTestServer(t, s)

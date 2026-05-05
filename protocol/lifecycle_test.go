@@ -28,31 +28,35 @@ type fakeInbox struct {
 	calls        int
 	gotConnID    types.ConnectionID
 	gotIdentity  types.Identity
+	gotPrincipal types.AuthPrincipal
 
 	// Disconnect knobs + observations (Story 3.6).
 	onDisconnectErr     error
 	disconnectSubsErr   error
 	disconnectCalls     int
 	disconnectSubsCalls int
+	disconnectPrincipal types.AuthPrincipal
 	// events records the order in which disconnect methods fired,
 	// so tests can assert "subs removed BEFORE OnDisconnect".
 	events []string
 }
 
-func (f *fakeInbox) OnConnect(_ context.Context, connID types.ConnectionID, identity types.Identity) error {
+func (f *fakeInbox) OnConnect(_ context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
 	f.gotConnID = connID
 	f.gotIdentity = identity
+	f.gotPrincipal = principal.Copy()
 	return f.onConnectErr
 }
 
-func (f *fakeInbox) OnDisconnect(_ context.Context, connID types.ConnectionID, _ types.Identity) error {
+func (f *fakeInbox) OnDisconnect(_ context.Context, connID types.ConnectionID, _ types.Identity, principal types.AuthPrincipal) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.disconnectCalls++
 	f.events = append(f.events, "OnDisconnect")
+	f.disconnectPrincipal = principal.Copy()
 	_ = connID
 	return f.onDisconnectErr
 }
@@ -82,6 +86,12 @@ func (f *fakeInbox) snapshot() (int, types.ConnectionID, types.Identity) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls, f.gotConnID, f.gotIdentity
+}
+
+func (f *fakeInbox) principalSnapshot() types.AuthPrincipal {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gotPrincipal.Copy()
 }
 
 func (f *fakeInbox) disconnectSnapshot() (onDis, onSubs int, events []string) {
@@ -212,10 +222,16 @@ func TestRunLifecycleSuccessSendsIdentityToken(t *testing.T) {
 	if gotIdentity != expectedIdentity {
 		t.Errorf("OnConnect identity = %x, want %x", gotIdentity, expectedIdentity)
 	}
+	if gotPrincipal := inbox.principalSnapshot(); gotPrincipal.Issuer != "test-issuer" || gotPrincipal.Subject != "alice" {
+		t.Errorf("OnConnect principal = %+v, want issuer test-issuer subject alice", gotPrincipal)
+	}
 
 	// Connection is registered in ConnManager.
-	if mgr.Get(ic.ConnectionID) == nil {
+	serverConn := mgr.Get(ic.ConnectionID)
+	if serverConn == nil {
 		t.Error("ConnManager has no entry for admitted connection")
+	} else if serverConn.Principal.Issuer != "test-issuer" || serverConn.Principal.Subject != "alice" {
+		t.Errorf("Conn principal = %+v, want issuer test-issuer subject alice", serverConn.Principal)
 	}
 }
 

@@ -158,6 +158,34 @@ func TestCallReducerInvokesReducerThroughExecutor(t *testing.T) {
 	}
 }
 
+func TestCallReducerWithAuthPrincipal(t *testing.T) {
+	want := AuthPrincipal{
+		Issuer:      "issuer",
+		Subject:     "alice",
+		Audience:    []string{"shunter-api"},
+		Permissions: []string{"principal:permission"},
+	}
+	var got types.AuthPrincipal
+	rt := buildStartedRuntimeWithReducer(t, "inspect_principal", func(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+		got = ctx.Caller.Principal.Copy()
+		return nil, nil
+	})
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "inspect_principal", nil, WithAuthPrincipal(want))
+	if err != nil {
+		t.Fatalf("CallReducer admission error = %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("status = %v, want committed; reducer err = %v", res.Status, res.Error)
+	}
+	if got.Issuer != want.Issuer || got.Subject != want.Subject ||
+		len(got.Audience) != 1 || got.Audience[0] != "shunter-api" ||
+		len(got.Permissions) != 1 || got.Permissions[0] != "principal:permission" {
+		t.Fatalf("principal = %+v, want %+v", got, want)
+	}
+}
+
 func TestCallReducerDetachesArgsBeforeQueuedExecution(t *testing.T) {
 	blockStarted := make(chan struct{})
 	releaseBlocker := make(chan struct{})
@@ -321,6 +349,14 @@ func TestCallReducerStrictLocalRequiresExplicitPermissions(t *testing.T) {
 	}
 	if res.Status != StatusFailedPermission || !errors.Is(res.Error, ErrPermissionDenied) {
 		t.Fatalf("strict default result = (%v, %v), want permission denied", res.Status, res.Error)
+	}
+
+	res, err = rt.CallReducer(context.Background(), "send_message", nil, WithAuthPrincipal(AuthPrincipal{Permissions: []string{"messages:send"}}))
+	if err != nil {
+		t.Fatalf("CallReducer with principal permissions admission error = %v", err)
+	}
+	if res.Status != StatusFailedPermission || !errors.Is(res.Error, ErrPermissionDenied) {
+		t.Fatalf("strict principal-permissions result = (%v, %v), want permission denied", res.Status, res.Error)
 	}
 
 	res, err = rt.CallReducer(context.Background(), "send_message", nil, WithPermissions("messages:send"))

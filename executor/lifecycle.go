@@ -33,7 +33,7 @@ func (e *Executor) handleOnConnect(cmd OnConnectCmd) string {
 	}
 
 	if rr, hasReducer := e.registry.LookupLifecycle(LifecycleOnConnect); hasReducer {
-		status, err := e.runLifecycleReducer(rr, tx, cmd.ConnID, cmd.Identity)
+		status, err := e.runLifecycleReducer(rr, tx, cmd.ConnID, cmd.Identity, cmd.Principal)
 		if status != StatusCommitted {
 			store.Rollback(tx)
 			respondLifecycle(cmd.ResponseCh, status, 0, err)
@@ -78,7 +78,7 @@ func (e *Executor) handleOnDisconnect(cmd OnDisconnectCmd) string {
 	tx := store.NewTransaction(e.committed, e.schemaReg)
 	reducerStatus := StatusCommitted
 	if rr, hasReducer := e.registry.LookupLifecycle(LifecycleOnDisconnect); hasReducer {
-		reducerStatus, _ = e.runLifecycleReducer(rr, tx, cmd.ConnID, cmd.Identity)
+		reducerStatus, _ = e.runLifecycleReducer(rr, tx, cmd.ConnID, cmd.Identity, cmd.Principal)
 	}
 
 	if reducerStatus != StatusCommitted {
@@ -190,10 +190,12 @@ func (e *Executor) runLifecycleReducer(
 	tx *store.Transaction,
 	conn types.ConnectionID,
 	identity types.Identity,
+	principal types.AuthPrincipal,
 ) (ReducerStatus, error) {
 	caller := types.CallerContext{
 		Identity:     identity,
 		ConnectionID: conn,
+		Principal:    principal.Copy(),
 		Timestamp:    time.Now().UTC(),
 	}
 	db := &reducerDBAdapter{tx: tx}

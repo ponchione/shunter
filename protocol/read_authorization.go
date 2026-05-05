@@ -16,8 +16,7 @@ func NewAuthorizedSchemaLookup(base SchemaLookup, caller types.CallerContext) Sc
 	if base == nil {
 		return nil
 	}
-	caller.Permissions = append([]string(nil), caller.Permissions...)
-	return authorizedSchemaLookup{base: base, caller: caller}
+	return authorizedSchemaLookup{base: base, caller: caller.Copy()}
 }
 
 func authorizedSchemaLookupForConn(base SchemaLookup, conn *Conn) SchemaLookup {
@@ -31,6 +30,7 @@ func readCallerContext(conn *Conn) types.CallerContext {
 	return types.CallerContext{
 		Identity:            conn.Identity,
 		ConnectionID:        conn.ID,
+		Principal:           conn.Principal.Copy(),
 		Permissions:         append([]string(nil), conn.Permissions...),
 		AllowAllPermissions: conn.AllowAllPermissions,
 	}

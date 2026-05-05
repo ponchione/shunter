@@ -62,6 +62,14 @@ func WithDeclaredReadConnectionID(connID types.ConnectionID) DeclaredReadOption 
 	}
 }
 
+// WithDeclaredReadAuthPrincipal sets generic external-auth principal data for
+// a local named read without requiring a raw JWT.
+func WithDeclaredReadAuthPrincipal(principal types.AuthPrincipal) DeclaredReadOption {
+	return func(opts *declaredReadOptions) {
+		opts.caller.Principal = principal.Copy()
+	}
+}
+
 // WithDeclaredReadPermissions sets the caller permission tags for named reads.
 func WithDeclaredReadPermissions(permissions ...string) DeclaredReadOption {
 	return func(opts *declaredReadOptions) {
@@ -331,6 +339,7 @@ func protocolDeclaredReadOptions(conn *protocol.Conn, requestID *uint32) []Decla
 		opts = append(opts,
 			WithDeclaredReadIdentity(conn.Identity),
 			WithDeclaredReadConnectionID(conn.ID),
+			WithDeclaredReadAuthPrincipal(conn.Principal),
 		)
 		if conn.AllowAllPermissions {
 			opts = append(opts, WithDeclaredReadAllowAllPermissions())

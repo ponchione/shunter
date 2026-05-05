@@ -24,11 +24,11 @@ type mockDispatchExecutor struct {
 	callReducerErr   error
 }
 
-func (m *mockDispatchExecutor) OnConnect(_ context.Context, _ types.ConnectionID, _ types.Identity) error {
+func (m *mockDispatchExecutor) OnConnect(_ context.Context, _ types.ConnectionID, _ types.Identity, _ types.AuthPrincipal) error {
 	return nil
 }
 
-func (m *mockDispatchExecutor) OnDisconnect(_ context.Context, _ types.ConnectionID, _ types.Identity) error {
+func (m *mockDispatchExecutor) OnDisconnect(_ context.Context, _ types.ConnectionID, _ types.Identity, _ types.AuthPrincipal) error {
 	return nil
 }
 
@@ -242,6 +242,12 @@ func TestHandleCallReducer_ForwardsFlags_NoSuccessNotify(t *testing.T) {
 
 func TestHandleCallReducer_ForwardsPermissionContext(t *testing.T) {
 	conn := testConnDirect(nil)
+	conn.Principal = types.AuthPrincipal{
+		Issuer:      "issuer",
+		Subject:     "alice",
+		Audience:    []string{"shunter-api"},
+		Permissions: []string{"principal:permission"},
+	}
 	conn.Permissions = []string{"messages:send"}
 	conn.AllowAllPermissions = true
 	exec := &mockDispatchExecutor{}
@@ -259,6 +265,11 @@ func TestHandleCallReducer_ForwardsPermissionContext(t *testing.T) {
 	}
 	if got := exec.callReducerReq.Permissions; len(got) != 1 || got[0] != "messages:send" {
 		t.Fatalf("Permissions = %#v, want messages:send", got)
+	}
+	if got := exec.callReducerReq.Principal; got.Issuer != "issuer" || got.Subject != "alice" ||
+		len(got.Audience) != 1 || got.Audience[0] != "shunter-api" ||
+		len(got.Permissions) != 1 || got.Permissions[0] != "principal:permission" {
+		t.Fatalf("Principal = %+v, want copied issuer/subject/audience/permissions", got)
 	}
 	if !exec.callReducerReq.AllowAllPermissions {
 		t.Fatal("AllowAllPermissions = false, want true")

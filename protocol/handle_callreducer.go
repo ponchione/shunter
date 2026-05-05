@@ -27,6 +27,7 @@ func handleCallReducer(
 	if err := executor.CallReducer(ctx, CallReducerRequest{
 		ConnID:              conn.ID,
 		Identity:            conn.Identity,
+		Principal:           conn.Principal.Copy(),
 		RequestID:           msg.RequestID,
 		ReducerName:         msg.ReducerName,
 		Args:                msg.Args,

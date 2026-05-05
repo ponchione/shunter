@@ -813,6 +813,7 @@ func (e *Executor) handleCallReducer(cmd CallReducerCmd) string {
 	caller := types.CallerContext{
 		Identity:            req.Caller.Identity,
 		ConnectionID:        req.Caller.ConnectionID,
+		Principal:           req.Caller.Principal.Copy(),
 		Timestamp:           time.Now().UTC(),
 		Permissions:         append([]string(nil), req.Caller.Permissions...),
 		AllowAllPermissions: req.Caller.AllowAllPermissions,

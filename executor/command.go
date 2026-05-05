@@ -89,6 +89,7 @@ func (DisconnectClientSubscriptionsCmd) isExecutorCommand() {}
 type OnConnectCmd struct {
 	ConnID     types.ConnectionID
 	Identity   types.Identity
+	Principal  types.AuthPrincipal
 	ResponseCh chan<- ReducerResponse
 }
 
@@ -102,6 +103,7 @@ func (OnConnectCmd) isExecutorCommand() {}
 type OnDisconnectCmd struct {
 	ConnID     types.ConnectionID
 	Identity   types.Identity
+	Principal  types.AuthPrincipal
 	ResponseCh chan<- ReducerResponse
 }
 

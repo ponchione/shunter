@@ -17,6 +17,7 @@ import (
 type Conn struct {
 	ID              types.ConnectionID
 	Identity        types.Identity
+	Principal       types.AuthPrincipal
 	Token           string // validated or minted JWT for this connection
 	ProtocolVersion ProtocolVersion
 	Compression     bool // true when gzip was negotiated at upgrade

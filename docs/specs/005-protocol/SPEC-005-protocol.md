@@ -199,8 +199,15 @@ Shunter validates client identity via a JWT. The JWT must be signed with a key r
 | `exp` | number | Unix timestamp expiry (optional; if present, must not be in the past) |
 | `iat` | number | Issued-at timestamp |
 | `hex_identity` | string | Optional redundant identity claim. If present, it MUST match the identity recomputed from `iss` and `sub`. |
+| `permissions` | string or []string | Optional normalized permission tags forwarded separately for Shunter permission checks and mirrored on the reducer principal. |
 
 `Identity` is declared in `types/types.go` as `[32]byte` — SPEC-001 §2.4 owns the contract, and `types/identity.go` carries the derivation helpers (`DeriveIdentity`, `Hex`, `ParseIdentityHex`, `IsZero`). SPEC-005 does not redeclare the type. The required semantic property at the protocol layer is unchanged: the same `(iss, sub)` pair always maps to the same `Identity` across reconnections.
+
+For validated presented tokens, the protocol layer also stores a generic
+`types.AuthPrincipal{Issuer, Subject, Audience, Permissions}` on the connection
+and forwards a copied principal into lifecycle and external reducer calls.
+Anonymous minted-token connections keep the derived Shunter identity and local
+token but do not synthesize an external principal.
 
 ### 4.2 Token Generation
 
@@ -813,8 +820,8 @@ The executor sends protocol-originated reducer outcomes back through `CallReduce
 
 ```go
 type ExecutorInbox interface {
-    OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
-    OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity) error
+    OnConnect(ctx context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error
+    OnDisconnect(ctx context.Context, connID types.ConnectionID, identity types.Identity, principal types.AuthPrincipal) error
     DisconnectClientSubscriptions(ctx context.Context, connID types.ConnectionID) error
     RegisterSubscriptionSet(ctx context.Context, req RegisterSubscriptionSetRequest) error
     UnregisterSubscriptionSet(ctx context.Context, req UnregisterSubscriptionSetRequest) error

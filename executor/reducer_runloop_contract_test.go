@@ -207,7 +207,16 @@ func TestHandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 
 	call := func(name string, source CallSource) ReducerResponse {
 		ch := make(chan ReducerResponse, 1)
-		if err := exec.Submit(CallReducerCmd{Request: ReducerRequest{ReducerName: name, Source: source, Caller: types.CallerContext{Timestamp: time.Unix(1, 0)}}, ResponseCh: ch}); err != nil {
+		caller := types.CallerContext{
+			Timestamp: time.Unix(1, 0),
+			Principal: types.AuthPrincipal{
+				Issuer:      "issuer",
+				Subject:     "alice",
+				Audience:    []string{"shunter-api"},
+				Permissions: []string{"principal:permission"},
+			},
+		}
+		if err := exec.Submit(CallReducerCmd{Request: ReducerRequest{ReducerName: name, Source: source, Caller: caller}, ResponseCh: ch}); err != nil {
 			t.Fatal(err)
 		}
 		return <-ch
@@ -219,6 +228,11 @@ func TestHandleCallReducerBeginExecuteCommitRollback(t *testing.T) {
 	}
 	if captured.Timestamp.Equal(time.Unix(1, 0)) || captured.Timestamp.Location() != time.UTC {
 		t.Fatalf("caller timestamp was not replaced at dequeue: %+v", captured)
+	}
+	if captured.Principal.Issuer != "issuer" || captured.Principal.Subject != "alice" ||
+		len(captured.Principal.Audience) != 1 || captured.Principal.Audience[0] != "shunter-api" ||
+		len(captured.Principal.Permissions) != 1 || captured.Principal.Permissions[0] != "principal:permission" {
+		t.Fatalf("caller principal = %+v, want copied issuer/subject/audience/permissions", captured.Principal)
 	}
 	if scheduler == nil {
 		t.Fatal("scheduler should be populated on reducer context")

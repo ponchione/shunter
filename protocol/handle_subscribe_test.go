@@ -156,11 +156,11 @@ type mockSubExecutor struct {
 	unregisterSetErr error
 }
 
-func (m *mockSubExecutor) OnConnect(_ context.Context, _ types.ConnectionID, _ types.Identity) error {
+func (m *mockSubExecutor) OnConnect(_ context.Context, _ types.ConnectionID, _ types.Identity, _ types.AuthPrincipal) error {
 	return nil
 }
 
-func (m *mockSubExecutor) OnDisconnect(_ context.Context, _ types.ConnectionID, _ types.Identity) error {
+func (m *mockSubExecutor) OnDisconnect(_ context.Context, _ types.ConnectionID, _ types.Identity, _ types.AuthPrincipal) error {
 	return nil
 }
 

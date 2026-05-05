@@ -139,19 +139,21 @@ type DisconnectClientSubscriptionsCmd struct {
 type OnConnectCmd struct {
     ConnID     ConnectionID
     Identity   Identity
+    Principal  AuthPrincipal
     ResponseCh chan<- ReducerResponse
 }
 
 type OnDisconnectCmd struct {
     ConnID     ConnectionID
     Identity   Identity
+    Principal  AuthPrincipal
     ResponseCh chan<- ReducerResponse
 }
 ```
 
 `SubscriptionSetRegisterRequest`, `SubscriptionSetRegisterResult`, and `SubscriptionSetUnregisterResult` are defined in SPEC-004 §4.1.
 
-Scheduled reducers use `CallReducerCmd` with `Source = CallSourceScheduled`. Lifecycle reducers (`OnConnect` / `OnDisconnect`) do not fit the `CallReducerCmd` shape and use their own command types above; `CallerContext.Source = CallSourceLifecycle` is stamped inside the executor (§10.3, §10.4). v1 has no `init`/`update` lifecycle command (see SPEC-006 §9).
+Scheduled reducers use `CallReducerCmd` with `Source = CallSourceScheduled`. Lifecycle reducers (`OnConnect` / `OnDisconnect`) do not fit the `CallReducerCmd` shape and use their own command types above; the executor treats their post-commit work as `CallSourceLifecycle` internally (§10.3, §10.4). v1 has no `init`/`update` lifecycle command (see SPEC-006 §9).
 
 ### 2.5 Read-Only Access
 
@@ -223,10 +225,20 @@ type ReducerRequest struct {
     IntendedFireAt int64
 }
 
+type AuthPrincipal struct {
+    Issuer      string
+    Subject     string
+    Audience    []string
+    Permissions []string
+}
+
 type CallerContext struct {
-    Identity     Identity
-    ConnectionID ConnectionID // zero for internal callers
-    Timestamp    time.Time
+    Identity            Identity
+    ConnectionID        ConnectionID // zero for internal callers
+    Principal           AuthPrincipal
+    Timestamp           time.Time
+    Permissions         []string
+    AllowAllPermissions bool
 }
 
 type CallSource int
@@ -249,10 +261,11 @@ const (
     StatusFailedUser
     StatusFailedPanic
     StatusFailedInternal
+    StatusFailedPermission
 )
 ```
 
-The executor, not the caller, sets `Caller.Timestamp` when the command is dequeued. Caller-provided timestamps must be ignored. For serialization, logging, and protocol/wire surfaces, only the UTC wall-clock portion of `time.Time` is meaningful; Go's monotonic component is process-local and must be discarded outside the executor process.
+The executor, not the caller, sets `Caller.Timestamp` when the command is dequeued. Caller-provided timestamps must be ignored. The executor copies caller slices before invoking reducer code. `Caller.Principal` is external-auth context only; reducer permission admission uses `Caller.Permissions` / `AllowAllPermissions`. For serialization, logging, and protocol/wire surfaces, only the UTC wall-clock portion of `time.Time` is meaningful; Go's monotonic component is process-local and must be discarded outside the executor process.
 
 ### 3.4 ReducerContext
 
@@ -326,9 +339,12 @@ tx := store.NewTransaction(committed, schema)
 ctx := &ReducerContext{
     ReducerName: req.ReducerName,
     Caller: CallerContext{
-        Identity:     req.Caller.Identity,
-        ConnectionID: req.Caller.ConnectionID,
-        Timestamp:    time.Now().UTC(),
+        Identity:            req.Caller.Identity,
+        ConnectionID:        req.Caller.ConnectionID,
+        Principal:           req.Caller.Principal.Copy(),
+        Timestamp:           time.Now().UTC(),
+        Permissions:         append([]string(nil), req.Caller.Permissions...),
+        AllowAllPermissions: req.Caller.AllowAllPermissions,
     },
     DB:        tx,
     Scheduler: e.scheduler.Handle(),
