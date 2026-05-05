@@ -89,6 +89,7 @@ type indexedCountingSnapshot struct {
 	*mockSnapshot
 	table       schema.TableID
 	column      types.ColID
+	columns     []types.ColID
 	index       schema.IndexID
 	tableScans  int
 	indexSeeks  int
@@ -106,12 +107,14 @@ func (s *indexedCountingSnapshot) IndexSeek(table schema.TableID, index schema.I
 	if table != s.table || index != s.index {
 		return nil
 	}
+	columns := s.indexColumns()
 	var out []types.RowID
 	for rid, row := range s.rows[table] {
-		if int(s.column) >= len(row) {
+		rowKey, ok := indexKeyFromTestRow(row, columns)
+		if !ok {
 			continue
 		}
-		if store.NewIndexKey(row[s.column]).Equal(key) {
+		if rowKey.Equal(key) {
 			out = append(out, types.RowID(rid))
 		}
 	}
@@ -124,21 +127,22 @@ func (s *indexedCountingSnapshot) IndexRange(table schema.TableID, index schema.
 		if table != s.table || index != s.index {
 			return
 		}
+		columns := s.indexColumns()
 		type indexedRow struct {
 			rid types.RowID
 			row types.ProductValue
 		}
 		var matched []indexedRow
 		for rid, row := range s.rows[table] {
-			if int(s.column) >= len(row) {
+			if _, ok := indexKeyFromTestRow(row, columns); !ok {
 				continue
 			}
-			if valueWithinStoreBounds(row[s.column], lower, upper) {
+			if indexKeyWithinStoreBounds(row, columns, lower, upper) {
 				matched = append(matched, indexedRow{rid: types.RowID(rid), row: row})
 			}
 		}
 		slices.SortStableFunc(matched, func(a, b indexedRow) int {
-			return a.row[s.column].Compare(b.row[s.column])
+			return compareTestIndexRows(a.row, b.row, columns)
 		})
 		for _, item := range matched {
 			if !yield(item.rid, item.row) {
@@ -146,6 +150,41 @@ func (s *indexedCountingSnapshot) IndexRange(table schema.TableID, index schema.
 			}
 		}
 	}
+}
+
+func (s *indexedCountingSnapshot) indexColumns() []types.ColID {
+	if len(s.columns) != 0 {
+		return s.columns
+	}
+	return []types.ColID{s.column}
+}
+
+func indexKeyFromTestRow(row types.ProductValue, columns []types.ColID) (store.IndexKey, bool) {
+	parts := make([]types.Value, len(columns))
+	for i, col := range columns {
+		if int(col) >= len(row) {
+			return store.IndexKey{}, false
+		}
+		parts[i] = row[col]
+	}
+	return store.NewIndexKey(parts...), true
+}
+
+func compareTestIndexRows(a, b types.ProductValue, columns []types.ColID) int {
+	for _, col := range columns {
+		cmp := a[col].Compare(b[col])
+		if cmp != 0 {
+			return cmp
+		}
+	}
+	return 0
+}
+
+func indexKeyWithinStoreBounds(row types.ProductValue, columns []types.ColID, lower, upper store.Bound) bool {
+	if len(columns) != 1 {
+		return lower.Unbounded && upper.Unbounded
+	}
+	return valueWithinStoreBounds(row[columns[0]], lower, upper)
 }
 
 func valueWithinStoreBounds(v types.Value, lower, upper store.Bound) bool {
@@ -1116,6 +1155,147 @@ func TestExecuteCompiledSQLQueryIndexedOrderByDescUsesIndexRange(t *testing.T) {
 	if snap.indexGetRow != 0 {
 		t.Fatalf("GetRow calls = %d, want 0 for indexed DESC ORDER BY range rows", snap.indexGetRow)
 	}
+}
+
+func TestExecuteCompiledSQLQueryIndexedMultiColumnOrderByAscUsesCompositeIndexRange(t *testing.T) {
+	sl, snap := compositeOrderIndexFixture()
+	compiled, err := CompileSQLQueryStringWithVisibility(
+		"SELECT id, priority, owner FROM tasks ORDER BY priority ASC, owner ASC LIMIT 2 OFFSET 1",
+		sl,
+		nil,
+		SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true},
+		[]VisibilityFilter{{
+			SQL:           "SELECT * FROM tasks WHERE visible = TRUE",
+			ReturnTableID: 1,
+		}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("CompileSQLQueryStringWithVisibility: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint64(5), types.NewUint32(2), types.NewString("alice")},
+		{types.NewUint64(1), types.NewUint32(2), types.NewString("bob")},
+	})
+	if snap.indexRanges != 1 {
+		t.Fatalf("IndexRange calls = %d, want 1 for composite indexed ORDER BY", snap.indexRanges)
+	}
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 for composite indexed ORDER BY", snap.tableScans)
+	}
+	if snap.indexSeeks != 0 {
+		t.Fatalf("IndexSeek calls = %d, want 0 for composite indexed ORDER BY", snap.indexSeeks)
+	}
+}
+
+func TestExecuteCompiledSQLQueryIndexedMultiColumnOrderByDescUsesCompositeIndexRange(t *testing.T) {
+	sl, snap := compositeOrderIndexFixture()
+	compiled, err := CompileSQLQueryStringWithVisibility(
+		"SELECT id, priority, owner FROM tasks ORDER BY priority DESC, owner DESC LIMIT 2 OFFSET 1",
+		sl,
+		nil,
+		SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true},
+		[]VisibilityFilter{{
+			SQL:           "SELECT * FROM tasks WHERE visible = TRUE",
+			ReturnTableID: 1,
+		}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("CompileSQLQueryStringWithVisibility: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint64(1), types.NewUint32(2), types.NewString("bob")},
+		{types.NewUint64(5), types.NewUint32(2), types.NewString("alice")},
+	})
+	if snap.indexRanges != 1 {
+		t.Fatalf("IndexRange calls = %d, want 1 for composite indexed DESC ORDER BY", snap.indexRanges)
+	}
+	if snap.tableScans != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 for composite indexed DESC ORDER BY", snap.tableScans)
+	}
+	if snap.indexSeeks != 0 {
+		t.Fatalf("IndexSeek calls = %d, want 0 for composite indexed DESC ORDER BY", snap.indexSeeks)
+	}
+}
+
+func TestExecuteCompiledSQLQueryMixedDirectionMultiColumnOrderByFallsBackToTableScan(t *testing.T) {
+	sl, snap := compositeOrderIndexFixture()
+	compiled, err := CompileSQLQueryStringWithVisibility(
+		"SELECT id FROM tasks ORDER BY priority ASC, owner DESC",
+		sl,
+		nil,
+		SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true},
+		[]VisibilityFilter{{
+			SQL:           "SELECT * FROM tasks WHERE visible = TRUE",
+			ReturnTableID: 1,
+		}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("CompileSQLQueryStringWithVisibility: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint64(3)},
+		{types.NewUint64(1)},
+		{types.NewUint64(5)},
+		{types.NewUint64(4)},
+	})
+	if snap.indexRanges != 0 {
+		t.Fatalf("IndexRange calls = %d, want 0 for mixed-direction ORDER BY fallback", snap.indexRanges)
+	}
+	if snap.tableScans != 1 {
+		t.Fatalf("TableScan calls = %d, want 1 for mixed-direction ORDER BY fallback", snap.tableScans)
+	}
+}
+
+func compositeOrderIndexFixture() (*mockSchemaLookup, *indexedCountingSnapshot) {
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "tasks",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint64},
+			{Index: 1, Name: "priority", Type: schema.KindUint32},
+			{Index: 2, Name: "owner", Type: schema.KindString},
+			{Index: 3, Name: "visible", Type: schema.KindBool},
+		},
+		Indexes: []schema.IndexSchema{{
+			ID:      11,
+			Name:    "idx_tasks_priority_owner",
+			Columns: []int{1, 2},
+		}},
+	}
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"tasks": {id: 1, schema: ts},
+	}}
+	snap := &indexedCountingSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{1: {
+			{types.NewUint64(1), types.NewUint32(2), types.NewString("bob"), types.NewBool(true)},
+			{types.NewUint64(2), types.NewUint32(1), types.NewString("bob"), types.NewBool(false)},
+			{types.NewUint64(3), types.NewUint32(1), types.NewString("alice"), types.NewBool(true)},
+			{types.NewUint64(4), types.NewUint32(3), types.NewString("alice"), types.NewBool(true)},
+			{types.NewUint64(5), types.NewUint32(2), types.NewString("alice"), types.NewBool(true)},
+		}}},
+		table:   1,
+		columns: []types.ColID{1, 2},
+		index:   11,
+	}
+	return sl, snap
 }
 
 func TestHandleOneOffQueryMultiColumnOrderByProjectionAliasOffsetLimit(t *testing.T) {
