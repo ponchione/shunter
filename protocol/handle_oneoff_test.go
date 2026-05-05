@@ -3592,6 +3592,73 @@ func TestHandleOneOffQuery_MultiWayJoinReturnsRows(t *testing.T) {
 	})
 }
 
+func TestExecuteCompiledSQLQuery_MultiWayJoinUsesIndexForJoinedRelations(t *testing.T) {
+	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "u32", Type: schema.KindUint32},
+	}}
+	sTS := &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "u32", Type: schema.KindUint32},
+	}}
+	baseSL := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"t": {id: 1, schema: tTS},
+		"s": {id: 2, schema: sTS},
+	}}
+	sl := &indexedOneOffSchemaLookup{
+		mockSchemaLookup: baseSL,
+		table:            2,
+		column:           1,
+		index:            7,
+	}
+	snap := &indexedCountingSnapshot{
+		mockSnapshot: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewUint32(7)},
+				{types.NewUint32(2), types.NewUint32(8)},
+			},
+			2: {
+				{types.NewUint32(10), types.NewUint32(7)},
+				{types.NewUint32(20), types.NewUint32(8)},
+				{types.NewUint32(30), types.NewUint32(9)},
+			},
+		}},
+		table:  2,
+		column: 1,
+		index:  7,
+	}
+
+	compiled, err := CompileSQLQueryString("SELECT r.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32 ORDER BY r.id", sl, nil, SQLQueryValidationOptions{
+		AllowLimit:      true,
+		AllowProjection: true,
+		AllowOrderBy:    true,
+		AllowOffset:     true,
+	})
+	if err != nil {
+		t.Fatalf("CompileSQLQueryString: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: snap}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint32(10), types.NewUint32(7)},
+		{types.NewUint32(20), types.NewUint32(8)},
+	})
+	if snap.tableScans != 1 {
+		t.Fatalf("TableScan calls = %d, want 1 root scan", snap.tableScans)
+	}
+	if snap.indexSeeks != 4 {
+		t.Fatalf("IndexSeek calls = %d, want 4 joined-relation probes", snap.indexSeeks)
+	}
+	if snap.indexGetRow != 4 {
+		t.Fatalf("GetRow calls = %d, want 4 indexed candidates", snap.indexGetRow)
+	}
+}
+
 func TestHandleOneOffQuery_CrossJoinProjection(t *testing.T) {
 	conn := testConnDirect(nil)
 	ordersTS := &schema.TableSchema{ID: 1, Name: "Orders", Columns: []schema.ColumnSchema{{Index: 0, Name: "id", Type: schema.KindUint32}}}

@@ -104,9 +104,10 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 		return SQLQueryResult{}, fmt.Errorf("no such table: `%s`. If the table exists, it may be marked private.", query.TableName)
 	}
 
+	resolver, _ := sl.(schema.IndexResolver)
 	pred := query.Predicate
 	if query.MultiJoin != nil {
-		return executeCompiledSQLMultiJoin(ctx, query, stateAccess)
+		return executeCompiledSQLMultiJoin(ctx, query, stateAccess, resolver)
 	}
 	if err := subscription.ValidateQueryPredicate(pred, sl); err != nil {
 		return SQLQueryResult{}, err
@@ -118,7 +119,6 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 	view := stateAccess.Snapshot()
 	defer view.Close()
 
-	resolver, _ := sl.(schema.IndexResolver)
 	rowLimit := oneOffRowLimit(query.Limit)
 	rowOffset := oneOffRowOffset(query.Offset)
 	scanLimit := rowLimit

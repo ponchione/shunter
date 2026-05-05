@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
 
-func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, stateAccess CommittedStateAccess) (SQLQueryResult, error) {
+func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, stateAccess CommittedStateAccess, resolver schema.IndexResolver) (SQLQueryResult, error) {
 	multi := query.MultiJoin
 	if multi == nil {
 		return SQLQueryResult{}, fmt.Errorf("multi-join metadata must not be nil")
@@ -27,20 +28,20 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 	}
 	var rows []types.ProductValue
 	if query.Aggregate != nil {
-		aggregateValue, err := evaluateOneOffMultiJoinAggregate(ctx, view, multi, query.Aggregate)
+		aggregateValue, err := evaluateOneOffMultiJoinAggregate(ctx, view, multi, resolver, query.Aggregate)
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
 		rows = sliceOneOffRows([]types.ProductValue{{aggregateValue}}, rowOffset, rowLimit)
 	} else if rowLimit != 0 {
 		if len(query.OrderBy) != 0 {
-			ordered, err := evaluateOneOffMultiJoinOrderedRows(ctx, view, multi, query.ProjectionColumns, query.OrderBy)
+			ordered, err := evaluateOneOffMultiJoinOrderedRows(ctx, view, multi, resolver, query.ProjectionColumns, query.OrderBy)
 			if err != nil {
 				return SQLQueryResult{}, err
 			}
 			rows = materializeOrderedOneOffRows(ordered, query.OrderBy, rowOffset, rowLimit)
 		} else {
-			err := visitOneOffMultiJoinTuples(ctx, view, multi, func(tuple []types.ProductValue) bool {
+			err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 				rows = append(rows, projectOneOffMultiJoinTuple(tuple, multi, query.ProjectionColumns))
 				return !oneOffLimitReached(len(rows), scanLimit)
 			})
@@ -53,10 +54,10 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 	return SQLQueryResult{TableName: query.TableName, Rows: rows}, nil
 }
 
-func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy) ([]orderedOneOffRow, error) {
+func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy) ([]orderedOneOffRow, error) {
 	var rows []orderedOneOffRow
 	var orderErr error
-	err := visitOneOffMultiJoinTuples(ctx, view, multi, func(tuple []types.ProductValue) bool {
+	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 		key, err := orderKeysFromMultiJoinTuple(tuple, orderBy)
 		if err != nil {
 			orderErr = err
@@ -77,7 +78,7 @@ func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.Committe
 	return rows, nil
 }
 
-func visitOneOffMultiJoinTuples(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, visit func([]types.ProductValue) bool) error {
+func visitOneOffMultiJoinTuples(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, visit func([]types.ProductValue) bool) error {
 	tuple := make([]types.ProductValue, len(multi.Relations))
 	var walk func(int) (bool, error)
 	walk = func(depth int) (bool, error) {
@@ -90,26 +91,90 @@ func visitOneOffMultiJoinTuples(ctx context.Context, view store.CommittedReadVie
 			return true, nil
 		}
 		rel := multi.Relations[depth]
-		for _, row := range view.TableScan(rel.Table) {
-			if err := ctx.Err(); err != nil {
-				return false, err
-			}
+		var walkErr error
+		keepGoing, err := visitOneOffMultiJoinCandidateRows(ctx, view, multi, resolver, tuple, depth, func(row types.ProductValue) bool {
 			if rel.Visibility != nil && !subscription.MatchRowSide(rel.Visibility, rel.Table, rel.Alias, row) {
-				continue
+				return true
 			}
 			tuple[depth] = row
 			if !multiJoinPrefixConditionsMatch(multi.Conditions, tuple, depth) {
-				continue
+				return true
 			}
-			keepGoing, err := walk(depth + 1)
-			if err != nil || !keepGoing {
-				return keepGoing, err
-			}
+			var next bool
+			next, walkErr = walk(depth + 1)
+			return walkErr == nil && next
+		})
+		if err != nil {
+			return false, err
+		}
+		if walkErr != nil {
+			return false, walkErr
+		}
+		if !keepGoing {
+			return false, nil
 		}
 		return true, nil
 	}
 	_, err := walk(0)
 	return err
+}
+
+type multiJoinIndexedProbe struct {
+	known compiledSQLMultiColumnRef
+	index schema.IndexID
+}
+
+func multiJoinIndexedProbeForDepth(multi *compiledSQLMultiJoin, resolver schema.IndexResolver, depth int) (multiJoinIndexedProbe, bool) {
+	if resolver == nil || depth <= 0 || depth >= len(multi.Relations) {
+		return multiJoinIndexedProbe{}, false
+	}
+	rel := multi.Relations[depth]
+	for _, condition := range multi.Conditions {
+		if condition.Left.Relation == depth && condition.Right.Relation < depth {
+			if idx, ok := resolver.IndexIDForColumn(rel.Table, condition.Left.Column.column); ok {
+				return multiJoinIndexedProbe{known: condition.Right, index: idx}, true
+			}
+		}
+		if condition.Right.Relation == depth && condition.Left.Relation < depth {
+			if idx, ok := resolver.IndexIDForColumn(rel.Table, condition.Right.Column.column); ok {
+				return multiJoinIndexedProbe{known: condition.Left, index: idx}, true
+			}
+		}
+	}
+	return multiJoinIndexedProbe{}, false
+}
+
+func visitOneOffMultiJoinCandidateRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, tuple []types.ProductValue, depth int, visit func(types.ProductValue) bool) (bool, error) {
+	rel := multi.Relations[depth]
+	if probe, ok := multiJoinIndexedProbeForDepth(multi, resolver, depth); ok {
+		value, ok := multiJoinColumnValue(tuple, probe.known)
+		if !ok {
+			return true, nil
+		}
+		key := store.NewIndexKey(value)
+		for _, rid := range view.IndexSeek(rel.Table, probe.index, key) {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			row, ok := view.GetRow(rel.Table, rid)
+			if !ok {
+				continue
+			}
+			if !visit(row) {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	for _, row := range view.TableScan(rel.Table) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if !visit(row) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func multiJoinPrefixConditionsMatch(conditions []compiledSQLMultiJoinCondition, tuple []types.ProductValue, depth int) bool {
@@ -172,28 +237,28 @@ func orderKeysFromMultiJoinTuple(tuple []types.ProductValue, orderBy []compiledS
 	return keys, nil
 }
 
-func evaluateOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, aggregate *compiledSQLAggregate) (types.Value, error) {
+func evaluateOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, aggregate *compiledSQLAggregate) (types.Value, error) {
 	if aggregate == nil {
 		return types.Value{}, fmt.Errorf("aggregate metadata must not be nil")
 	}
 	switch aggregate.Func {
 	case "COUNT":
-		count, err := countOneOffMultiJoinAggregate(ctx, view, multi, aggregate)
+		count, err := countOneOffMultiJoinAggregate(ctx, view, multi, resolver, aggregate)
 		if err != nil {
 			return types.Value{}, err
 		}
 		return types.NewUint64(count), nil
 	case "SUM":
-		return sumOneOffMultiJoinAggregate(ctx, view, multi, aggregate)
+		return sumOneOffMultiJoinAggregate(ctx, view, multi, resolver, aggregate)
 	default:
 		return types.Value{}, fmt.Errorf("aggregate %q not supported", aggregate.Func)
 	}
 }
 
-func countOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, aggregate *compiledSQLAggregate) (uint64, error) {
+func countOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, aggregate *compiledSQLAggregate) (uint64, error) {
 	if aggregate == nil || aggregate.Argument == nil {
 		var count uint64
-		err := visitOneOffMultiJoinTuples(ctx, view, multi, func([]types.ProductValue) bool {
+		err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func([]types.ProductValue) bool {
 			count++
 			return true
 		})
@@ -202,7 +267,7 @@ func countOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedRead
 	argument := *aggregate.Argument
 	if aggregate.Distinct {
 		seen := newOneOffDistinctValueSet()
-		err := visitOneOffMultiJoinTuples(ctx, view, multi, func(tuple []types.ProductValue) bool {
+		err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 			value, ok := oneOffMultiJoinColumnValue(tuple, multi, argument)
 			if ok {
 				seen.add(value)
@@ -212,7 +277,7 @@ func countOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedRead
 		return seen.count(), err
 	}
 	var count uint64
-	err := visitOneOffMultiJoinTuples(ctx, view, multi, func(tuple []types.ProductValue) bool {
+	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 		if _, ok := oneOffMultiJoinColumnValue(tuple, multi, argument); ok {
 			count++
 		}
@@ -221,13 +286,13 @@ func countOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedRead
 	return count, err
 }
 
-func sumOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, aggregate *compiledSQLAggregate) (types.Value, error) {
+func sumOneOffMultiJoinAggregate(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, aggregate *compiledSQLAggregate) (types.Value, error) {
 	if aggregate == nil || aggregate.Argument == nil {
 		return types.Value{}, fmt.Errorf("SUM aggregate requires a column argument")
 	}
 	acc := newOneOffSumAccumulator(aggregate.ResultColumn.Type)
 	argument := *aggregate.Argument
-	err := visitOneOffMultiJoinTuples(ctx, view, multi, func(tuple []types.ProductValue) bool {
+	err := visitOneOffMultiJoinTuples(ctx, view, multi, resolver, func(tuple []types.ProductValue) bool {
 		value, ok := oneOffMultiJoinColumnValue(tuple, multi, argument)
 		if !ok {
 			return true

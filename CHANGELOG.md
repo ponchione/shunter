@@ -5,6 +5,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- One-off and declared multi-way join queries now use matching single-column indexes when probing joined relations.
 - One-off and declared SQL queries now support query-only multi-way joins while live subscriptions continue to reject them.
 - One-off and declared SQL queries now support inner-join `WHERE` column equality filters while live subscription admission keeps rejecting them.
 - Generated TypeScript clients now include a table-name-to-row-type map and a table subscriber callback type derived from it.
