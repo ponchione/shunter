@@ -876,12 +876,7 @@ func resolveProjectionColumns(columns []ProjectionColumn, bindings relationBindi
 		tableName := bindings.defaultTable
 		qualifier := col.SourceQualifier
 		if qualifier != "" {
-			resolvedTable, ok := bindings.byQualifier[qualifier]
-			if ok {
-				tableName = resolvedTable
-			} else {
-				tableName = qualifier
-			}
+			tableName = resolveRelationQualifier(bindings, qualifier)
 		} else if bindings.requireQualify {
 			// Reference `SqlSelect::find_unqualified_vars`
 			// (sql-parser/src/ast/sql.rs:84-95) routes any unqualified
@@ -902,11 +897,7 @@ func resolveAggregateProjection(agg *AggregateProjection, bindings relationBindi
 	}
 	ref := *agg.Column
 	if ref.Alias != "" {
-		if resolvedTable, ok := bindings.byQualifier[ref.Alias]; ok {
-			ref.Table = resolvedTable
-		} else {
-			ref.Table = ref.Alias
-		}
+		ref.Table = resolveRelationQualifier(bindings, ref.Alias)
 	} else if bindings.requireQualify {
 		return nil, UnqualifiedNamesError{}
 	} else {
@@ -1052,10 +1043,7 @@ func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, e
 		return ColumnRef{}, p.unsupported("expected column name after qualifier")
 	}
 	p.advance()
-	tableName, ok := lookup[qualifierTok.text]
-	if !ok {
-		tableName = qualifierTok.text
-	}
+	tableName := resolveQualifier(lookup, qualifierTok.text)
 	return ColumnRef{Table: tableName, Column: columnTok.text, Alias: qualifierTok.text}, nil
 }
 
@@ -1129,11 +1117,7 @@ func (p *parser) parseColumnRef(bindings relationBindings, firstTokenError strin
 		if !isIdentifierToken(t) {
 			return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
 		}
-		resolved, ok := bindings.byQualifier[qualifier]
-		if !ok {
-			resolved = qualifier
-		}
-		tableName = resolved
+		tableName = resolveRelationQualifier(bindings, qualifier)
 		columnName = t.text
 		alias = qualifier
 		p.advance()
@@ -1147,6 +1131,17 @@ func (p *parser) parseColumnRef(bindings relationBindings, firstTokenError strin
 		return ColumnRef{}, UnqualifiedNamesError{}
 	}
 	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
+}
+
+func resolveRelationQualifier(bindings relationBindings, qualifier string) string {
+	return resolveQualifier(bindings.byQualifier, qualifier)
+}
+
+func resolveQualifier(lookup map[string]string, qualifier string) string {
+	if resolved, ok := lookup[qualifier]; ok {
+		return resolved
+	}
+	return qualifier
 }
 
 func (p *parser) parseUnsignedClause(keyword string) (*uint64, *Literal, bool, bool, error) {
