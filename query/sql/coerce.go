@@ -27,9 +27,6 @@ var (
 // Coerce converts a parsed literal into a value for the target column kind.
 // Use CoerceWithCaller for :sender literals.
 func Coerce(lit Literal, kind types.ValueKind) (types.Value, error) {
-	if lit.Kind == LitSender {
-		return types.Value{}, fmt.Errorf("%w: :sender requires caller identity", ErrUnsupportedSQL)
-	}
 	return coerceValue(lit, kind, nil)
 }
 
