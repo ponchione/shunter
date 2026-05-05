@@ -1100,9 +1100,13 @@ func (p *parser) parseOrderBy(bindings relationBindings, allowUnqualifiedOutputN
 }
 
 func (p *parser) parseColumnRefForOrderBy(bindings relationBindings, allowUnqualifiedOutputName bool) (ColumnRef, error) {
+	return p.parseColumnRef(bindings, "expected ORDER BY column name, got %q", allowUnqualifiedOutputName)
+}
+
+func (p *parser) parseColumnRef(bindings relationBindings, firstTokenError string, allowUnqualifiedInJoin bool) (ColumnRef, error) {
 	t := p.peek()
 	if !isIdentifierToken(t) {
-		return ColumnRef{}, p.unsupported(fmt.Sprintf("expected ORDER BY column name, got %q", t.text))
+		return ColumnRef{}, p.unsupported(fmt.Sprintf(firstTokenError, t.text))
 	}
 	p.advance()
 	columnName := t.text
@@ -1127,7 +1131,7 @@ func (p *parser) parseColumnRefForOrderBy(bindings relationBindings, allowUnqual
 			return ColumnRef{}, p.unsupported("qualified column names not supported")
 		}
 	} else if bindings.requireQualify {
-		if allowUnqualifiedOutputName {
+		if allowUnqualifiedInJoin {
 			return ColumnRef{Column: columnName}, nil
 		}
 		return ColumnRef{}, UnqualifiedNamesError{}
@@ -1295,40 +1299,7 @@ func flattenAndFilters(pred Predicate) ([]Filter, bool) {
 }
 
 func (p *parser) parseColumnRefForPredicate(bindings relationBindings) (ColumnRef, error) {
-	t := p.peek()
-	if !isIdentifierToken(t) {
-		return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name, got %q", t.text))
-	}
-	p.advance()
-	columnName := t.text
-	tableName := bindings.defaultTable
-	alias := ""
-	if p.peek().kind == tokDot {
-		qualifier := columnName
-		p.advance()
-		t = p.peek()
-		if !isIdentifierToken(t) {
-			return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
-		}
-		resolved, ok := bindings.byQualifier[qualifier]
-		if !ok {
-			resolved = qualifier
-		}
-		tableName = resolved
-		columnName = t.text
-		alias = qualifier
-		p.advance()
-		if p.peek().kind == tokDot {
-			return ColumnRef{}, p.unsupported("qualified column names not supported")
-		}
-	} else if bindings.requireQualify {
-		// Reference `SqlSelect::find_unqualified_vars`
-		// (sql-parser/src/ast/sql.rs:84-95) routes any unqualified var
-		// in a JOIN scope through `SqlUnsupported::UnqualifiedNames`
-		// (parser/errors.rs:78-79). LHS-of-WHERE-comparison branch.
-		return ColumnRef{}, UnqualifiedNamesError{}
-	}
-	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
+	return p.parseColumnRef(bindings, "expected column name, got %q", false)
 }
 
 func (p *parser) parseOperator() (string, error) {
