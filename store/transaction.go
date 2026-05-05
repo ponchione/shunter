@@ -22,6 +22,7 @@ type Transaction struct {
 	tx              *TxState
 	registry        schema.SchemaRegistry
 	state           atomic.Uint32
+	txNextRowIDs    map[schema.TableID]types.RowID
 	txSequences     map[schema.TableID]uint64
 	txUniqueIndexes map[txUniqueRef]map[uint64][]txUniqueEntry
 	txRowIndexes    map[schema.TableID]map[uint64][]txRowEntry
@@ -267,7 +268,7 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 		}
 	}
 
-	id, err := allocRowIDForInsert(table)
+	id, err := t.allocRowIDForInsert(tableID, table)
 	if err != nil {
 		return 0, err
 	}
@@ -278,6 +279,31 @@ func (t *Transaction) Insert(tableID schema.TableID, row types.ProductValue) (ty
 	return id, nil
 }
 
+func (t *Transaction) allocRowIDForInsert(tableID schema.TableID, table *Table) (types.RowID, error) {
+	next := t.nextRowID(tableID, table)
+	if err := checkRowIDValueAvailable(next); err != nil {
+		return 0, err
+	}
+	t.setNextRowID(tableID, next+1)
+	return next, nil
+}
+
+func (t *Transaction) nextRowID(tableID schema.TableID, table *Table) types.RowID {
+	if t.txNextRowIDs != nil {
+		if next, ok := t.txNextRowIDs[tableID]; ok {
+			return next
+		}
+	}
+	return table.NextID()
+}
+
+func (t *Transaction) setNextRowID(tableID schema.TableID, next types.RowID) {
+	if t.txNextRowIDs == nil {
+		t.txNextRowIDs = make(map[schema.TableID]types.RowID)
+	}
+	t.txNextRowIDs[tableID] = next
+}
+
 func allocRowIDForInsert(table *Table) (types.RowID, error) {
 	if err := checkRowIDAvailable(table); err != nil {
 		return 0, err
@@ -286,7 +312,10 @@ func allocRowIDForInsert(table *Table) (types.RowID, error) {
 }
 
 func checkRowIDAvailable(table *Table) error {
-	next := table.NextID()
+	return checkRowIDValueAvailable(table.NextID())
+}
+
+func checkRowIDValueAvailable(next types.RowID) error {
 	// RowID 0 is outside the allocator range. Consuming MaxUint64 would
 	// wrap the next counter to 0, which snapshots reject as an invalid next_id.
 	if next == 0 || next == ^types.RowID(0) {

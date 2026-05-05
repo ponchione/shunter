@@ -275,6 +275,56 @@ func TestCommitDeleteIdenticalReinsertCollapsesToEmptyChangeset(t *testing.T) {
 	}
 }
 
+func TestCommitAdvancesRowIDAllocation(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	beforeNextID := tbl.NextID()
+
+	tx := NewTransaction(cs, reg)
+	rowID, err := tx.Insert(0, mkRow(1, "alice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rowID != beforeNextID {
+		t.Fatalf("insert RowID = %d, want current next %d", rowID, beforeNextID)
+	}
+	if tbl.NextID() != beforeNextID {
+		t.Fatalf("NextID before commit = %d, want unchanged %d", tbl.NextID(), beforeNextID)
+	}
+
+	if _, err := Commit(cs, tx); err != nil {
+		t.Fatal(err)
+	}
+	if tbl.NextID() != beforeNextID+1 {
+		t.Fatalf("NextID after commit = %d, want %d", tbl.NextID(), beforeNextID+1)
+	}
+}
+
+func TestCommitFailureDoesNotAdvanceRowIDAllocation(t *testing.T) {
+	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	beforeNextID := tbl.NextID()
+
+	tx := NewTransaction(cs, reg)
+	if _, err := tx.Insert(0, mkRow(1, "valid")); err != nil {
+		t.Fatal(err)
+	}
+	// Bypass transaction-time validation so commit revalidation fails after
+	// the transaction has allocated a RowID.
+	tx.TxState().AddInsert(0, 999, types.ProductValue{types.NewUint64(2)})
+
+	_, err := Commit(cs, tx)
+	if !errors.Is(err, ErrRowShapeMismatch) {
+		t.Fatalf("commit error = %v, want ErrRowShapeMismatch", err)
+	}
+	if tbl.NextID() != beforeNextID {
+		t.Fatalf("NextID after failed commit = %d, want unchanged %d", tbl.NextID(), beforeNextID)
+	}
+	if tbl.RowCount() != 0 {
+		t.Fatalf("row count after failed commit = %d, want 0", tbl.RowCount())
+	}
+}
+
 func TestCommitAtomicityFailureLeavesCommittedStateUnchanged(t *testing.T) {
 	cs, reg := buildTestState()
 	tbl, _ := cs.Table(0)
@@ -776,15 +826,19 @@ func TestRollbackScanTableYieldsNothing(t *testing.T) {
 
 func TestRollbackLeavesCommittedStateUnchanged(t *testing.T) {
 	cs, reg := buildTestState()
+	tbl, _ := cs.Table(0)
+	beforeNextID := tbl.NextID()
 	tx := NewTransaction(cs, reg)
 	if _, err := tx.Insert(0, mkRow(1, "alice")); err != nil {
 		t.Fatal(err)
 	}
 	Rollback(tx)
 
-	tbl, _ := cs.Table(0)
 	if tbl.RowCount() != 0 {
 		t.Fatalf("rollback should not mutate committed state; row count = %d", tbl.RowCount())
+	}
+	if tbl.NextID() != beforeNextID {
+		t.Fatalf("rollback should not advance NextID: got %d, want %d", tbl.NextID(), beforeNextID)
 	}
 }
 
