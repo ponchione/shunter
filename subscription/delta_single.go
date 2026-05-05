@@ -66,6 +66,19 @@ func MatchRowSide(pred Predicate, table TableID, sideAlias uint8, row types.Prod
 			return false
 		}
 		return matchBounds(row[p.Column], p.Lower, p.Upper)
+	case ColEqCol:
+		leftMatches := p.LeftTable == table && p.LeftAlias == sideAlias
+		rightMatches := p.RightTable == table && p.RightAlias == sideAlias
+		if !leftMatches && !rightMatches {
+			return true
+		}
+		if leftMatches && rightMatches {
+			if int(p.LeftColumn) >= len(row) || int(p.RightColumn) >= len(row) {
+				return false
+			}
+			return row[p.LeftColumn].Equal(row[p.RightColumn])
+		}
+		return true
 	case And:
 		return MatchRowSide(p.Left, table, sideAlias, row) && MatchRowSide(p.Right, table, sideAlias, row)
 	case Or:
@@ -112,6 +125,16 @@ func MatchJoinPair(pred Predicate, leftTable TableID, leftAlias uint8, leftRow t
 			return false
 		}
 		return matchBounds(row[p.Column], p.Lower, p.Upper)
+	case ColEqCol:
+		left, ok := joinPredicateRow(p.LeftTable, p.LeftAlias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
+		if !ok || int(p.LeftColumn) >= len(left) {
+			return false
+		}
+		right, ok := joinPredicateRow(p.RightTable, p.RightAlias, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)
+		if !ok || int(p.RightColumn) >= len(right) {
+			return false
+		}
+		return left[p.LeftColumn].Equal(right[p.RightColumn])
 	case And:
 		return MatchJoinPair(p.Left, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow) &&
 			MatchJoinPair(p.Right, leftTable, leftAlias, leftRow, rightTable, rightAlias, rightRow)

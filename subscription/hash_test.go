@@ -79,6 +79,14 @@ func TestQueryHashColNeDiffersFromColEq(t *testing.T) {
 	}
 }
 
+func TestQueryHashColEqColDiffersByColumn(t *testing.T) {
+	left := ColEqCol{LeftTable: 1, LeftColumn: 0, RightTable: 2, RightColumn: 0}
+	right := ColEqCol{LeftTable: 1, LeftColumn: 1, RightTable: 2, RightColumn: 0}
+	if ComputeQueryHash(left, nil) == ComputeQueryHash(right, nil) {
+		t.Fatal("ColEqCol hash should include both column references")
+	}
+}
+
 func TestQueryHashOrDiffersFromAnd(t *testing.T) {
 	left := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
 	right := ColEq{Table: 1, Column: 1, Value: types.NewString("alice")}

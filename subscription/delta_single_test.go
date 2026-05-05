@@ -71,6 +71,55 @@ func TestMatchRowColNe(t *testing.T) {
 	}
 }
 
+func TestMatchRowSideColEqColSameSide(t *testing.T) {
+	p := ColEqCol{LeftTable: 1, LeftColumn: 0, RightTable: 1, RightColumn: 1}
+	if !MatchRowSide(p, 1, 0, types.ProductValue{types.NewUint32(7), types.NewUint32(7)}) {
+		t.Fatal("same-side column equality should match equal values")
+	}
+	if MatchRowSide(p, 1, 0, types.ProductValue{types.NewUint32(7), types.NewUint32(8)}) {
+		t.Fatal("same-side column equality should reject different values")
+	}
+}
+
+func TestMatchJoinPairColEqCol(t *testing.T) {
+	p := ColEqCol{LeftTable: 1, LeftColumn: 1, RightTable: 2, RightColumn: 0}
+	if !MatchJoinPair(p,
+		1, 0, types.ProductValue{types.NewUint32(1), types.NewUint32(9)},
+		2, 0, types.ProductValue{types.NewUint32(9), types.NewUint32(2)},
+	) {
+		t.Fatal("joined pair column equality should match equal values")
+	}
+	if MatchJoinPair(p,
+		1, 0, types.ProductValue{types.NewUint32(1), types.NewUint32(9)},
+		2, 0, types.ProductValue{types.NewUint32(8), types.NewUint32(2)},
+	) {
+		t.Fatal("joined pair column equality should reject different values")
+	}
+}
+
+func TestMatchJoinPairColEqColSelfJoinAliases(t *testing.T) {
+	p := ColEqCol{
+		LeftTable:   1,
+		LeftColumn:  0,
+		LeftAlias:   0,
+		RightTable:  1,
+		RightColumn: 1,
+		RightAlias:  1,
+	}
+	if !MatchJoinPair(p,
+		1, 0, types.ProductValue{types.NewUint32(4), types.NewUint32(99)},
+		1, 1, types.ProductValue{types.NewUint32(99), types.NewUint32(4)},
+	) {
+		t.Fatal("self-join column equality should honor aliases")
+	}
+	if MatchJoinPair(p,
+		1, 0, types.ProductValue{types.NewUint32(4), types.NewUint32(99)},
+		1, 1, types.ProductValue{types.NewUint32(99), types.NewUint32(5)},
+	) {
+		t.Fatal("self-join column equality should reject mismatched aliased value")
+	}
+}
+
 func TestMatchRowAnd(t *testing.T) {
 	p := And{
 		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(1)},

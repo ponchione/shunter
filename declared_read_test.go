@@ -251,6 +251,42 @@ func TestDeclaredQueryMultiColumnOrderByProjectionAlias(t *testing.T) {
 	}
 }
 
+func TestDeclaredQueryJoinWhereColumnComparisonExecutes(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("join_reads").
+		SchemaVersion(1).
+		TableDef(joinReadTableDef("t")).
+		TableDef(joinReadTableDef("s")).
+		Reducer("seed_join_rows", seedJoinRowsReducer).
+		Query(QueryDeclaration{
+			Name:        "matching_t_rows",
+			SQL:         "SELECT t.id FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id ORDER BY t.id",
+			Permissions: PermissionMetadata{Required: []string{"joins:read"}},
+		}))
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "seed_join_rows", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	result, err := rt.CallQuery(context.Background(), "matching_t_rows", WithDeclaredReadPermissions("joins:read"))
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if result.Name != "matching_t_rows" || result.TableName != "t" {
+		t.Fatalf("result identity = (%q, %q), want matching_t_rows/t", result.Name, result.TableName)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("rows = %#v, want two matching projected rows", result.Rows)
+	}
+	if result.Rows[0][0].AsUint64() != 1 || result.Rows[1][0].AsUint64() != 3 {
+		t.Fatalf("rows = %#v, want projected ids 1, 3", result.Rows)
+	}
+}
+
 func TestDeclaredViewRejectsOrderBy(t *testing.T) {
 	_, err := Build(validChatModule().
 		View(ViewDeclaration{
@@ -693,6 +729,38 @@ func insertMessageWithBodyReducer(ctx *schema.ReducerContext, args []byte) ([]by
 	}
 	_, err := ctx.DB.Insert(0, types.ProductValue{types.NewUint64(uint64(args[0])), types.NewString(string(args[1:]))})
 	return nil, err
+}
+
+func joinReadTableDef(name string) schema.TableDefinition {
+	return schema.TableDefinition{
+		Name: name,
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: types.KindUint64, PrimaryKey: true},
+			{Name: "u32", Type: types.KindUint64},
+		},
+	}
+}
+
+func seedJoinRowsReducer(ctx *schema.ReducerContext, _ []byte) ([]byte, error) {
+	for _, row := range []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(10)},
+		{types.NewUint64(2), types.NewUint64(20)},
+		{types.NewUint64(3), types.NewUint64(20)},
+	} {
+		if _, err := ctx.DB.Insert(0, row); err != nil {
+			return nil, err
+		}
+	}
+	for _, row := range []types.ProductValue{
+		{types.NewUint64(1), types.NewUint64(10)},
+		{types.NewUint64(99), types.NewUint64(20)},
+		{types.NewUint64(3), types.NewUint64(20)},
+	} {
+		if _, err := ctx.DB.Insert(1, row); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
 }
 
 func insertMessage(t *testing.T, rt *Runtime, body string) {

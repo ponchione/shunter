@@ -157,6 +157,32 @@ func TestTypeScriptGeneratorExportsAggregateOrderByDeclaredQuerySQL(t *testing.T
 	assertContains(t, ts, `return runDeclaredQuery("message_count");`)
 }
 
+func TestTypeScriptGeneratorExportsJoinWhereColumnComparisonDeclaredQuerySQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables, schema.TableExport{
+		Name: "s",
+		Columns: []schema.ColumnExport{
+			{Name: "id", Type: "uint64"},
+			{Name: "u32", Type: "uint64"},
+		},
+	})
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{
+		Name: "matching_messages",
+		SQL:  "SELECT messages.id FROM messages JOIN s ON messages.id = s.u32 WHERE messages.id = s.id",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `matchingMessages: "matching_messages",`)
+	assertContains(t, ts, `matchingMessages: "SELECT messages.id FROM messages JOIN s ON messages.id = s.u32 WHERE messages.id = s.id",`)
+	assertContains(t, ts, `export function queryMatchingMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("matching_messages");`)
+}
+
 func TestGeneratorRejectsUnsupportedLanguage(t *testing.T) {
 	_, err := Generate(contractFixture(), Options{Language: "go"})
 	if err == nil {

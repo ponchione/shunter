@@ -293,6 +293,37 @@ func TestModuleContractValidationRejectsMultiColumnOrderByViewSQL(t *testing.T) 
 	}
 }
 
+func TestModuleContractValidationAllowsJoinWhereColumnComparisonQuerySQL(t *testing.T) {
+	contract := buildJoinReadContract(t)
+	contract.Queries = []QueryDescription{{
+		Name: "matching_t_rows",
+		SQL:  "SELECT t.id FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id",
+	}}
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected join WHERE column comparison query SQL: %v", err)
+	}
+}
+
+func TestModuleContractValidationRejectsJoinWhereColumnComparisonViewSQL(t *testing.T) {
+	contract := buildJoinReadContract(t)
+	contract.Views = []ViewDescription{{
+		Name: "live_matching_t_rows",
+		SQL:  "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id",
+	}}
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted join WHERE column comparison view SQL")
+	}
+	if !strings.Contains(err.Error(), "views.live_matching_t_rows.sql") {
+		t.Fatalf("ValidateModuleContract error = %v, want view SQL context", err)
+	}
+	if !strings.Contains(err.Error(), "join WHERE column comparisons not supported") {
+		t.Fatalf("ValidateModuleContract error = %v, want column comparison unsupported text", err)
+	}
+}
+
 func TestModuleContractValidationAllowsSumAggregateQuerySQL(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Queries = []QueryDescription{{
@@ -963,6 +994,18 @@ func buildContractRuntime(t *testing.T) *Runtime {
 		t.Fatalf("Build returned error: %v", err)
 	}
 	return rt
+}
+
+func buildJoinReadContract(t *testing.T) ModuleContract {
+	t.Helper()
+	rt, err := Build(NewModule("join_contract").
+		SchemaVersion(1).
+		TableDef(joinReadTableDef("t")).
+		TableDef(joinReadTableDef("s")), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	return rt.ExportContract()
 }
 
 func assertPermissionContractDeclaration(t *testing.T, declarations []PermissionContractDeclaration, name, required string) {

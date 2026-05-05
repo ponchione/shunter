@@ -8,10 +8,21 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func TestHandleOneOffQuery_InnerJoinWhereColumnComparisonRejected(t *testing.T) {
+func TestHandleOneOffQuery_InnerJoinWhereColumnComparisonFiltersPairs(t *testing.T) {
 	conn := testConnDirect(nil)
 	sl := exactIdentifierJoinSchema()
-	stateAccess := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}}
+	stateAccess := &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewUint32(10)},
+			{types.NewUint32(2), types.NewUint32(20)},
+			{types.NewUint32(3), types.NewUint32(20)},
+		},
+		2: {
+			{types.NewUint32(1), types.NewUint32(10)},
+			{types.NewUint32(99), types.NewUint32(20)},
+			{types.NewUint32(3), types.NewUint32(20)},
+		},
+	}}}
 
 	const sqlText = "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 WHERE t.id = s.id"
 	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
@@ -19,7 +30,22 @@ func TestHandleOneOffQuery_InnerJoinWhereColumnComparisonRejected(t *testing.T) 
 		QueryString: sqlText,
 	}, stateAccess, sl)
 
-	requireOneOffError(t, conn, "join WHERE column comparisons not supported")
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("one-off error = %q, want nil", *result.Error)
+	}
+	if len(result.Tables) != 1 || result.Tables[0].TableName != "t" {
+		t.Fatalf("tables = %#v, want one t result table", result.Tables)
+	}
+	_, tSchema, ok := sl.TableByName("t")
+	if !ok {
+		t.Fatal("missing t schema")
+	}
+	rows := decodeRows(t, firstTableRows(result), tSchema)
+	assertProductRowsEqual(t, rows, []types.ProductValue{
+		{types.NewUint32(1), types.NewUint32(10)},
+		{types.NewUint32(3), types.NewUint32(20)},
+	})
 }
 
 func TestHandleSubscribeSingle_InnerJoinWhereColumnComparisonRejected(t *testing.T) {

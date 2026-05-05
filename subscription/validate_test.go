@@ -163,6 +163,23 @@ func TestValidateQueryPredicate_UnindexedJoinStillValidatesStructure(t *testing.
 	}
 }
 
+func TestValidateColEqColValid(t *testing.T) {
+	s := baseSchema()
+	p := ColEqCol{LeftTable: 1, LeftColumn: 0, RightTable: 2, RightColumn: 0}
+	if err := ValidatePredicate(p, s); err != nil {
+		t.Fatalf("ValidatePredicate = %v, want nil", err)
+	}
+}
+
+func TestValidateColEqColKindMismatch(t *testing.T) {
+	s := baseSchema()
+	p := ColEqCol{LeftTable: 1, LeftColumn: 1, RightTable: 2, RightColumn: 1}
+	err := ValidatePredicate(p, s)
+	if !errors.Is(err, ErrInvalidPredicate) {
+		t.Fatalf("want ErrInvalidPredicate, got %v", err)
+	}
+}
+
 func TestValidateNoRowsKnownTable(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})

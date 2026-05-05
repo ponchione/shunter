@@ -25,9 +25,6 @@ Current direction:
 
 - Continue generating client-facing artifacts from `ModuleContract`.
 - Keep the first client surface small and contract-driven.
-- Build SDK layers on the generated TypeScript table-row map plus table,
-  reducer, and executable declared-read name unions rather than raw string
-  callback names.
 - Consider a React SDK once enough projects repeat the same table subscription,
   reducer-call, connection-state, and cache patterns.
 - Avoid owning a broad framework/template ecosystem before the reusable client
@@ -56,22 +53,15 @@ runtime isolation problem, not as a SpacetimeDB compatibility goal.
 
 Expand workflow support through app-owned binaries and reusable library helpers.
 
-Current generic CLI and helper boundary:
-
-- contract diff
-- contract policy
-- contract plan, including backup/restore guidance for blocking or data-rewrite changes
-- contract codegen from existing JSON
-- offline `DataDir` compatibility preflight through `shunter.CheckDataDirCompatibility`
-- offline executable `DataDir` migrations through `shunter.RunDataDirMigrations`
-- offline execution of hooks already registered on a module through
-  `shunter.RunModuleDataDirMigrations`
-- app-owned startup migration hooks through `Module.MigrationHook`
-- offline `DataDir` backup through `shunter.BackupDataDir` and the generic CLI
-- offline `DataDir` restore through `shunter.RestoreDataDir` and the generic CLI
-
 The generic `shunter` CLI should not pretend it can load arbitrary app modules
 unless Shunter gains a real module loading boundary.
+
+Open direction:
+
+- add reusable helper APIs only when repeated app-owned workflows make the
+  stable boundary clear
+- keep module-specific operations in app-owned binaries until Shunter has a
+  real module loading boundary
 
 ## Query And Declared Reads
 
@@ -80,24 +70,19 @@ This is the next major capability track.
 Direction:
 
 - Make one-off reads richer first.
-- Keep one-off single-table `ORDER BY <column> ASC/DESC` eligible for matching
-  single-column indexes while rechecking filters and visibility before
-  `OFFSET`/`LIMIT`/projection.
-- Make declared queries richer after the execution model is clear.
+- Keep declared query support aligned with one-off reads once the execution path
+  is proven.
 - Grow live views/subscriptions more carefully because incremental deltas over
   joins, aggregates, ordering, and limits carry higher correctness risk.
 
 Likely feature slices:
 
 - stronger parser/planner boundary
-- richer projections and aliases
 - multi-join support
 - nullable-value semantics for aggregates once nullable types exist
-- `OFFSET` for additional result shapes where snapshot/live-view semantics are
+- broader index-aware planning for joins, multi-column ordering, and live paths
+- live-view expansion for currently query-only shapes after delta semantics are
   explicit
-- broader index-aware planning for joins, multi-column ordering, reverse-cursor
-  descending scans, and live paths
-- clear interaction with read policy and visibility filters
 
 Any query expansion must include tests for authorization, visibility filtering,
 subscription deltas, and contract/codegen export where applicable.
@@ -127,29 +112,13 @@ Likely useful types:
 
 ## Migrations
 
-The current contract diff and metadata tooling gives useful visibility, but
-runtime migration execution is a separate feature track.
-
-Current dry-run contract planning emits backup/restore guidance when blocking
-or data-rewrite changes should be reviewed before touching a durable `DataDir`.
-Startup snapshot selection now reports every detected table/column/index schema
-mismatch from the selected snapshot in one strict startup failure.
-App-owned binaries can preflight a stopped or missing `DataDir` against a
-module schema with `shunter.CheckDataDirCompatibility`. App-owned binaries can
-run explicit stopped-DataDir migrations with `shunter.RunDataDirMigrations`.
-They can also reuse `Module.MigrationHook` registrations offline with
-`shunter.RunModuleDataDirMigrations`, then run the same hooks during
-`Runtime.Start` after recovery and durability are available, and before normal
-runtime readiness. Hooks must be idempotent because offline runs, a failed later
-startup step, or process restart may run them again.
+Migration behavior should remain explicit and reviewable. Normal runtime
+startup should not silently rewrite durable state.
 
 Recommended sequence:
 
 1. Continue refining migration-runner ergonomics once real app-owned binaries
    show repeated migration workflows.
-
-Migration behavior should be explicit and reviewable. Normal runtime startup
-should not silently rewrite durable state.
 
 ## Storage, Recovery, And Performance
 

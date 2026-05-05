@@ -32,6 +32,7 @@ const (
 	tagOr        byte = 0x07
 	tagCrossJoin byte = 0x08
 	tagNoRows    byte = 0x09
+	tagColEqCol  byte = 0x0A
 )
 
 // Within a canonical Bound encoding.
@@ -469,6 +470,14 @@ func encodePredicate(e *canonicalEncoder, pred Predicate) {
 		e.writeByte(p.Alias)
 		encodeBound(e, p.Lower)
 		encodeBound(e, p.Upper)
+	case ColEqCol:
+		e.writeByte(tagColEqCol)
+		e.writeU32(uint32(p.LeftTable))
+		e.writeU32(uint32(p.LeftColumn))
+		e.writeByte(p.LeftAlias)
+		e.writeU32(uint32(p.RightTable))
+		e.writeU32(uint32(p.RightColumn))
+		e.writeByte(p.RightAlias)
 	case And:
 		e.writeByte(tagAnd)
 		encodePredicate(e, p.Left)

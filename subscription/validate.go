@@ -63,6 +63,8 @@ func validateWithOptions(pred Predicate, s SchemaLookup, opts validateOptions) e
 		return validateColNe(p, s)
 	case ColRange:
 		return validateColRange(p, s)
+	case ColEqCol:
+		return validateColEqCol(p, s)
 	case And:
 		return validateBinaryPredicate("And", p.Left, p.Right, s, opts)
 	case Or:
@@ -119,6 +121,21 @@ func validateColRange(p ColRange, s SchemaLookup) error {
 	}
 	if !p.Upper.Unbounded && p.Upper.Value.Kind() != want {
 		return fmt.Errorf("%w: ColRange upper bound kind %s does not match column kind %s", ErrInvalidPredicate, p.Upper.Value.Kind(), want)
+	}
+	return nil
+}
+
+func validateColEqCol(p ColEqCol, s SchemaLookup) error {
+	leftKind, err := validateColumn(p.LeftTable, p.LeftColumn, s)
+	if err != nil {
+		return err
+	}
+	rightKind, err := validateColumn(p.RightTable, p.RightColumn, s)
+	if err != nil {
+		return err
+	}
+	if leftKind != rightKind {
+		return fmt.Errorf("%w: ColEqCol column kinds differ (%s vs %s)", ErrInvalidPredicate, leftKind, rightKind)
 	}
 	return nil
 }
@@ -199,6 +216,13 @@ func validateSelfJoinFilterAliases(p Predicate, leftAlias, rightAlias uint8) err
 	case ColRange:
 		if !isJoinSideAlias(x.Alias, leftAlias, rightAlias) {
 			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.Alias, leftAlias, rightAlias)
+		}
+	case ColEqCol:
+		if !isJoinSideAlias(x.LeftAlias, leftAlias, rightAlias) {
+			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.LeftAlias, leftAlias, rightAlias)
+		}
+		if !isJoinSideAlias(x.RightAlias, leftAlias, rightAlias) {
+			return fmt.Errorf("%w: self-join filter alias %d does not match Join.LeftAlias=%d or RightAlias=%d", ErrInvalidPredicate, x.RightAlias, leftAlias, rightAlias)
 		}
 	case And:
 		return validateSelfJoinFilterAliasChildren(x.Left, x.Right, leftAlias, rightAlias)

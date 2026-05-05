@@ -412,6 +412,14 @@ func retagVisibilityPredicate(pred subscription.Predicate, table schema.TableID,
 			p.Alias = alias
 		}
 		return p
+	case subscription.ColEqCol:
+		if p.LeftTable == table {
+			p.LeftAlias = alias
+		}
+		if p.RightTable == table {
+			p.RightAlias = alias
+		}
+		return p
 	case subscription.And:
 		return subscription.And{
 			Left:  retagVisibilityPredicate(p.Left, table, alias),
@@ -566,7 +574,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 			stmt.Join.RightAlias: {id: rightID, ts: rightTS},
 		}
 		if stmt.Join.HasOn && stmt.Predicate != nil {
-			if _, err := compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTagForJoin(stmt, leftID == rightID), caller); err != nil {
+			if _, err := compileSQLPredicateForRelations(stmt.Predicate, relations, aliasTagForJoin(stmt, leftID == rightID), caller, allowProjection); err != nil {
 				return compiledSQLQuery{}, err
 			}
 		}
@@ -647,7 +655,7 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 		var filter subscription.Predicate
 		if stmt.Join.HasOn && normalizedPredicate != nil {
 			var err error
-			filter, err = compileSQLPredicateForRelations(normalizedPredicate, relations, aliasTag, caller)
+			filter, err = compileSQLPredicateForRelations(normalizedPredicate, relations, aliasTag, caller, allowProjection)
 			if err != nil {
 				return compiledSQLQuery{}, err
 			}
@@ -1051,7 +1059,7 @@ func joinSQLPredicatesWithAnd(left, right sql.Predicate) sql.Predicate {
 }
 
 func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string]relationSchema, caller *types.Identity, noRowsTable schema.TableID) (subscription.Predicate, error) {
-	if _, err := compileSQLPredicateForRelations(pred, relations, func(string) uint8 { return 0 }, caller); err != nil {
+	if _, err := compileSQLPredicateForRelations(pred, relations, func(string) uint8 { return 0 }, caller, false); err != nil {
 		return nil, err
 	}
 	normalized := normalizeSQLPredicate(pred)
@@ -1063,7 +1071,7 @@ func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string
 	case sql.FalsePredicate:
 		return subscription.NoRows{Table: noRowsTable}, nil
 	default:
-		return compileSQLPredicateForRelations(p, relations, func(string) uint8 { return 0 }, caller)
+		return compileSQLPredicateForRelations(p, relations, func(string) uint8 { return 0 }, caller, false)
 	}
 }
 
@@ -1343,7 +1351,7 @@ func coerceLiteral(lit sql.Literal, kind types.ValueKind, caller *types.Identity
 	return sql.Coerce(lit, kind)
 }
 
-func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity) (subscription.Predicate, error) {
+func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]relationSchema, aliasTag func(string) uint8, caller *types.Identity, allowColumnComparisons bool) (subscription.Predicate, error) {
 	switch p := pred.(type) {
 	case nil:
 		if len(relations) != 1 {
@@ -1372,22 +1380,87 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 	case sql.ComparisonPredicate:
 		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag, caller)
 	case sql.ColumnComparisonPredicate:
-		return nil, fmt.Errorf("join WHERE column comparisons not supported")
+		if !allowColumnComparisons {
+			return nil, fmt.Errorf("join WHERE column comparisons not supported")
+		}
+		return compileSQLColumnComparisonForRelations(p, relations, aliasTag)
 	case sql.AndPredicate:
 		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
-			return compileSQLPredicateForRelations(child, relations, aliasTag, caller)
+			return compileSQLPredicateForRelations(child, relations, aliasTag, caller, allowColumnComparisons)
 		}, func(left, right subscription.Predicate) subscription.Predicate {
 			return subscription.And{Left: left, Right: right}
 		})
 	case sql.OrPredicate:
 		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
-			return compileSQLPredicateForRelations(child, relations, aliasTag, caller)
+			return compileSQLPredicateForRelations(child, relations, aliasTag, caller, allowColumnComparisons)
 		}, func(left, right subscription.Predicate) subscription.Predicate {
 			return subscription.Or{Left: left, Right: right}
 		})
 	default:
 		return nil, fmt.Errorf("unsupported SQL predicate %T", pred)
 	}
+}
+
+type compiledSQLColumnRef struct {
+	table  schema.TableID
+	column types.ColID
+	schema *schema.ColumnSchema
+	alias  uint8
+}
+
+func compileSQLColumnComparisonForRelations(pred sql.ColumnComparisonPredicate, relations map[string]relationSchema, aliasTag func(string) uint8) (subscription.Predicate, error) {
+	if pred.Op != "=" {
+		return nil, fmt.Errorf("join WHERE column comparisons only support '='")
+	}
+	left, err := compileSQLColumnRefForRelations(pred.Left, relations, aliasTag)
+	if err != nil {
+		return nil, err
+	}
+	right, err := compileSQLColumnRefForRelations(pred.Right, relations, aliasTag)
+	if err != nil {
+		return nil, err
+	}
+	if left.schema.Type != right.schema.Type {
+		return nil, sql.UnexpectedTypeError{
+			Expected: sql.AlgebraicName(right.schema.Type),
+			Inferred: sql.AlgebraicName(left.schema.Type),
+		}
+	}
+	if isArrayKind(left.schema.Type) {
+		return nil, sql.InvalidOpError{
+			Op:   "=",
+			Type: sql.AlgebraicName(left.schema.Type),
+		}
+	}
+	return subscription.ColEqCol{
+		LeftTable:   left.table,
+		LeftColumn:  left.column,
+		LeftAlias:   left.alias,
+		RightTable:  right.table,
+		RightColumn: right.column,
+		RightAlias:  right.alias,
+	}, nil
+}
+
+func compileSQLColumnRefForRelations(ref sql.ColumnRef, relations map[string]relationSchema, aliasTag func(string) uint8) (compiledSQLColumnRef, error) {
+	qualifier := ref.Alias
+	if qualifier == "" {
+		qualifier = ref.Table
+	}
+	rel, ok := relations[qualifier]
+	if !ok {
+		return compiledSQLColumnRef{}, sql.UnresolvedVarError{Name: qualifier}
+	}
+	col, ok := lookupSQLColumnExact(rel.ts, ref.Column)
+	if !ok {
+		return compiledSQLColumnRef{}, sql.UnresolvedVarError{Name: ref.Column}
+	}
+	return compiledSQLColumnRef{
+		table:  rel.id,
+		column: types.ColID(col.Index),
+		schema: col,
+		alias:  aliasTag(ref.Alias),
+	}, nil
 }
 
 func compileSQLBinaryPredicate(

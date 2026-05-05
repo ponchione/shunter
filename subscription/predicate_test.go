@@ -27,6 +27,23 @@ func TestColNeTablesSingle(t *testing.T) {
 	requireTables(t, "ColNe.Tables()", []TableID{4}, p.Tables())
 }
 
+func TestColEqColTables(t *testing.T) {
+	requireTables(t, "ColEqCol.Tables() two-table", []TableID{4, 7}, ColEqCol{
+		LeftTable:   4,
+		LeftColumn:  0,
+		RightTable:  7,
+		RightColumn: 1,
+	}.Tables())
+	requireTables(t, "ColEqCol.Tables() self-join", []TableID{4}, ColEqCol{
+		LeftTable:   4,
+		LeftColumn:  0,
+		LeftAlias:   0,
+		RightTable:  4,
+		RightColumn: 1,
+		RightAlias:  1,
+	}.Tables())
+}
+
 func TestAllRowsTablesSingle(t *testing.T) {
 	p := AllRows{Table: 9}
 	requireTables(t, "AllRows.Tables()", []TableID{9}, p.Tables())
@@ -109,6 +126,7 @@ func TestPredicateSealed(t *testing.T) {
 	var _ Predicate = ColEq{}
 	var _ Predicate = ColNe{}
 	var _ Predicate = ColRange{}
+	var _ Predicate = ColEqCol{}
 	var _ Predicate = And{}
 	var _ Predicate = Or{}
 	var _ Predicate = AllRows{}

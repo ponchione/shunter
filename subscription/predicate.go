@@ -79,6 +79,25 @@ type ColRange struct {
 func (ColRange) sealed()             {}
 func (p ColRange) Tables() []TableID { return []TableID{p.Table} }
 
+// ColEqCol matches joined row pairs where two columns are equal.
+// Aliases disambiguate relation instances in self-joins.
+type ColEqCol struct {
+	LeftTable   TableID
+	LeftColumn  ColID
+	LeftAlias   uint8
+	RightTable  TableID
+	RightColumn ColID
+	RightAlias  uint8
+}
+
+func (ColEqCol) sealed() {}
+func (p ColEqCol) Tables() []TableID {
+	if p.LeftTable == p.RightTable {
+		return []TableID{p.LeftTable}
+	}
+	return []TableID{p.LeftTable, p.RightTable}
+}
+
 // And combines two predicates; both must match.
 type And struct {
 	Left  Predicate
