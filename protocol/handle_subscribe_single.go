@@ -27,36 +27,62 @@ func handleSubscribeSingleWithVisibility(
 	sl SchemaLookup,
 	visibilityFilters []VisibilityFilter,
 ) {
+	handleSubscribeSetWithVisibility(ctx, conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle, []string{msg.QueryString}, msg.QueryString, executor, sl, visibilityFilters)
+}
+
+func handleSubscribeSetWithVisibility(
+	ctx context.Context,
+	conn *Conn,
+	requestID, queryID uint32,
+	variant SubscriptionSetVariant,
+	queryStrings []string,
+	sqlText string,
+	executor ExecutorInbox,
+	sl SchemaLookup,
+	visibilityFilters []VisibilityFilter,
+) {
 	receipt := time.Now()
 	readSL := authorizedSchemaLookupForConn(sl, conn)
 	caller := readCallerContext(conn)
-	compiled, err := CompileSQLQueryStringWithVisibility(msg.QueryString, readSL, &caller.Identity, SQLQueryValidationOptions{
-		AllowLimit:      false,
-		AllowProjection: false,
-	}, visibilityFilters, caller.AllowAllPermissions)
-	if err != nil {
-		sendSubscribeCompileError(conn, receipt, msg.RequestID, msg.QueryID, err, msg.QueryString)
-		recordProtocolMessage(conn.Observer, "subscribe_single", "validation_error")
-		return
+	preds := make([]any, 0, len(queryStrings))
+	hashIdentities := make([]*types.Identity, 0, len(queryStrings))
+	for _, qs := range queryStrings {
+		compiled, err := CompileSQLQueryStringWithVisibility(qs, readSL, &caller.Identity, SQLQueryValidationOptions{
+			AllowLimit:      false,
+			AllowProjection: false,
+		}, visibilityFilters, caller.AllowAllPermissions)
+		if err != nil {
+			sendSubscribeCompileError(conn, receipt, requestID, queryID, err, qs)
+			recordProtocolMessage(conn.Observer, protocolSubscribeMetricKind(variant), "validation_error")
+			return
+		}
+		preds = append(preds, compiled.Predicate())
+		hashIdentities = append(hashIdentities, compiled.PredicateHashIdentity(caller.Identity))
 	}
-	pred := compiled.Predicate()
 
 	if submitErr := executor.RegisterSubscriptionSet(ctx, RegisterSubscriptionSetRequest{
 		ConnID:                  conn.ID,
-		QueryID:                 msg.QueryID,
-		RequestID:               msg.RequestID,
-		Variant:                 SubscriptionSetVariantSingle,
-		Predicates:              []any{pred},
-		PredicateHashIdentities: []*types.Identity{compiled.PredicateHashIdentity(caller.Identity)},
-		Reply:                   makeSubscribeSetReply(conn, msg.RequestID, msg.QueryID, SubscriptionSetVariantSingle),
+		QueryID:                 queryID,
+		RequestID:               requestID,
+		Variant:                 variant,
+		Predicates:              preds,
+		PredicateHashIdentities: hashIdentities,
+		Reply:                   makeSubscribeSetReply(conn, requestID, queryID, variant),
 		Receipt:                 receipt,
-		SQLText:                 msg.QueryString,
+		SQLText:                 sqlText,
 	}); submitErr != nil {
-		sendExecutorUnavailableError(conn, receipt, msg.RequestID, msg.QueryID, submitErr)
-		recordProtocolMessage(conn.Observer, "subscribe_single", "executor_rejected")
+		sendExecutorUnavailableError(conn, receipt, requestID, queryID, submitErr)
+		recordProtocolMessage(conn.Observer, protocolSubscribeMetricKind(variant), "executor_rejected")
 		return
 	}
-	recordProtocolMessage(conn.Observer, "subscribe_single", "ok")
+	recordProtocolMessage(conn.Observer, protocolSubscribeMetricKind(variant), "ok")
+}
+
+func protocolSubscribeMetricKind(variant SubscriptionSetVariant) string {
+	if variant == SubscriptionSetVariantMulti {
+		return "subscribe_multi"
+	}
+	return "subscribe_single"
 }
 
 // elapsedMicros reports the non-zero microsecond delta since receipt.
