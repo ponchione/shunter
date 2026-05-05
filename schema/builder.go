@@ -106,9 +106,7 @@ func (b *Builder) TableDef(def TableDefinition, opts ...TableOption) *Builder {
 		def.Name = o.name
 	}
 	if o.readPolicy != nil {
-		def.ReadPolicy = copyReadPolicy(*o.readPolicy)
-	} else {
-		def.ReadPolicy = copyReadPolicy(def.ReadPolicy)
+		def.ReadPolicy = *o.readPolicy
 	}
 	b.tables = append(b.tables, copyTableDefinition(def))
 	return b

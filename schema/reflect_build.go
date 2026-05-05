@@ -15,7 +15,7 @@ func buildTableDefinition(typeName string, fields []fieldInfo, opts ...TableOpti
 	}
 	readPolicy := ReadPolicy{}
 	if o.readPolicy != nil {
-		readPolicy = copyReadPolicy(*o.readPolicy)
+		readPolicy = *o.readPolicy
 	}
 
 	columns := make([]ColumnDefinition, len(fields))
