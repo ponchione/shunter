@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"slices"
 	"testing"
 
 	shunter "github.com/ponchione/shunter"
@@ -65,7 +66,7 @@ func TestContractPolicyDeclarationOrderMetamorphic(t *testing.T) {
 				seed, iteration, got.Failed, want.Failed, got.Warnings)
 		}
 		gotWarnings := policyWarningSignatures(got.Warnings)
-		if !equalStringSlices(gotWarnings, wantWarnings) {
+		if !slices.Equal(gotWarnings, wantWarnings) {
 			t.Fatalf("seed=%d iteration=%d operation=PolicyWarningsOrderInvariant\nobserved=%q\nexpected=%q",
 				seed, iteration, gotWarnings, wantWarnings)
 		}
@@ -273,16 +274,4 @@ func policyWarningSignatures(warnings []PolicyWarning) []string {
 		signatures = append(signatures, fmt.Sprintf("%s %s %s: %s", warning.Code, warning.Surface, warning.Name, warning.Detail))
 	}
 	return signatures
-}
-
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

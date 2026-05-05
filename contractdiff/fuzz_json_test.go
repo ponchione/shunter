@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	shunter "github.com/ponchione/shunter"
@@ -181,7 +182,7 @@ func checkFuzzPolicyEquivalence(label, operation string, got, want PolicyResult)
 	}
 	gotWarnings := policyWarningSignatures(got.Warnings)
 	wantWarnings := policyWarningSignatures(want.Warnings)
-	if !equalStringSlices(gotWarnings, wantWarnings) {
+	if !slices.Equal(gotWarnings, wantWarnings) {
 		return fmt.Errorf("%s operation=%s observed_warnings=%q expected_warnings=%q",
 			label, operation, gotWarnings, wantWarnings)
 	}

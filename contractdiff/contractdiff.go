@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -374,7 +375,7 @@ func compareReadModels(out *Report, oldDeclarations, currentDeclarations []shunt
 			out.add(ChangeKindMetadata, SurfaceReadModel, name, "read model metadata added")
 			continue
 		}
-		if !orderedStringSlicesEqual(old.Tables, current.Tables) || !orderedStringSlicesEqual(old.Tags, current.Tags) {
+		if !slices.Equal(old.Tables, current.Tables) || !slices.Equal(old.Tags, current.Tags) {
 			out.add(ChangeKindMetadata, SurfaceReadModel, name, "read model metadata changed")
 		}
 	}
@@ -489,18 +490,6 @@ func stringSliceSubset(values, allowed []string) bool {
 	return true
 }
 
-func orderedStringSlicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func unorderedStringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -534,7 +523,7 @@ func readPoliciesSemanticallyEqual(oldPolicy, currentPolicy schema.ReadPolicy) b
 func indexesEqual(old, current schema.IndexExport) bool {
 	return old.Unique == current.Unique &&
 		old.Primary == current.Primary &&
-		orderedStringSlicesEqual(old.Columns, current.Columns)
+		slices.Equal(old.Columns, current.Columns)
 }
 
 func indexSignature(index schema.IndexExport) string {
@@ -582,19 +571,7 @@ func migrationMetadataEqual(old, current shunter.MigrationMetadata) bool {
 		old.PreviousVersion == current.PreviousVersion &&
 		old.Compatibility == current.Compatibility &&
 		old.Notes == current.Notes &&
-		orderedMigrationClassificationsEqual(old.Classifications, current.Classifications)
-}
-
-func orderedMigrationClassificationsEqual(a, b []shunter.MigrationClassification) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+		slices.Equal(old.Classifications, current.Classifications)
 }
 
 func nonEmptyName(first, fallback string) string {
