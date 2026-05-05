@@ -40,12 +40,12 @@ func TestPlaceNoRowsSkipsIndexes(t *testing.T) {
 	p := NoRows{Table: 1}
 	h := hashN(11)
 	PlaceSubscription(idx, p, h)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("NoRows placement should leave indexes empty: %+v", idx)
 	}
 
 	RemoveSubscription(idx, p, h)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("NoRows removal should leave indexes empty: %+v", idx)
 	}
 }
@@ -58,7 +58,7 @@ func TestPlaceAndWithNoRowsSkipsIndexes(t *testing.T) {
 	}
 	h := hashN(12)
 	PlaceSubscription(idx, p, h)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("AND with NoRows should leave indexes empty: %+v", idx)
 	}
 }
@@ -77,11 +77,11 @@ func TestPlaceJoinWithNoRowsFilterSkipsIndexes(t *testing.T) {
 	}
 	h := hashN(13)
 	placeSubscriptionForResolver(idx, p, h, s)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("join with NoRows filter should leave indexes empty: %+v", idx)
 	}
 	removeSubscriptionForResolver(idx, p, h, s)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("join with NoRows filter removal should leave indexes empty: %+v", idx)
 	}
 }
@@ -95,7 +95,7 @@ func TestPlaceCrossJoinWithNoRowsFilterSkipsIndexes(t *testing.T) {
 	}
 	h := hashN(14)
 	PlaceSubscription(idx, p, h)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("cross join with NoRows filter should leave indexes empty: %+v", idx)
 	}
 }
@@ -133,7 +133,7 @@ func TestPlaceColNeGoesToRangeIndex(t *testing.T) {
 	}
 
 	RemoveSubscription(idx, p, h)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("ColNe removal should clean indexes: %+v", idx)
 	}
 }
@@ -765,7 +765,7 @@ func TestPlaceAndRemoveJoinMixedOrSymmetric(t *testing.T) {
 	h := hashN(1)
 	placeSubscriptionForResolver(idx, p, h, s)
 	removeSubscriptionForResolver(idx, p, h, s)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("indexes not empty after mixed OR remove: %+v", idx)
 	}
 }
@@ -882,7 +882,7 @@ func TestPlaceAndRemoveJoinCrossSideOrSymmetric(t *testing.T) {
 	h := hashN(1)
 	placeSubscriptionForResolver(idx, p, h, s)
 	removeSubscriptionForResolver(idx, p, h, s)
-	if !idx.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(idx) {
 		t.Fatalf("indexes not empty after cross-side OR remove: %+v", idx)
 	}
 }

@@ -408,7 +408,7 @@ func TestEvalNoRowsSkipsCandidates(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("RegisterSet = %v", err)
 	}
-	if !mgr.indexes.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(mgr.indexes) {
 		t.Fatalf("NoRows should not be placed in pruning indexes: %+v", mgr.indexes)
 	}
 
@@ -442,7 +442,7 @@ func TestEvalJoinNoRowsFilterSkipsCandidates(t *testing.T) {
 	}, committed); err != nil {
 		t.Fatalf("RegisterSet = %v", err)
 	}
-	if !mgr.indexes.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(mgr.indexes) {
 		t.Fatalf("join with NoRows filter should not be placed in pruning indexes: %+v", mgr.indexes)
 	}
 
@@ -482,7 +482,7 @@ func TestEvalCrossJoinNoRowsFilterSkipsCandidates(t *testing.T) {
 	}, committed); err != nil {
 		t.Fatalf("RegisterSet = %v", err)
 	}
-	if !mgr.indexes.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(mgr.indexes) {
 		t.Fatalf("cross join with NoRows filter should not be placed in pruning indexes: %+v", mgr.indexes)
 	}
 

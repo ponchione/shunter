@@ -542,7 +542,7 @@ func TestRegisterSet_NoRowsSharesQueryState(t *testing.T) {
 	if len(got.Update) != 0 {
 		t.Fatalf("initial update = %+v, want none for NoRows", got.Update)
 	}
-	if !mgr.indexes.TestOnlyIsEmpty() {
+	if !pruningIndexesEmpty(mgr.indexes) {
 		t.Fatalf("NoRows should not be placed in pruning indexes: %+v", mgr.indexes)
 	}
 	_, err = mgr.RegisterSet(SubscriptionSetRegisterRequest{

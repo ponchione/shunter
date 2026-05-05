@@ -25,34 +25,6 @@ func NewPruningIndexes() *PruningIndexes {
 	}
 }
 
-// TestOnlyIsEmpty reports whether every underlying tier is devoid of
-// placement entries. Used by unwind tests to assert no stale index rows
-// survive a failed RegisterSet. Not part of the production contract.
-func (p *PruningIndexes) TestOnlyIsEmpty() bool {
-	if p == nil {
-		return true
-	}
-	if len(p.Value.args) != 0 || len(p.Value.cols) != 0 {
-		return false
-	}
-	if len(p.Range.ranges) != 0 || len(p.Range.cols) != 0 {
-		return false
-	}
-	if len(p.JoinEdge.edges) != 0 || len(p.JoinEdge.byTable) != 0 {
-		return false
-	}
-	if len(p.JoinEdge.exists) != 0 {
-		return false
-	}
-	if len(p.JoinRangeEdge.edges) != 0 || len(p.JoinRangeEdge.byTable) != 0 {
-		return false
-	}
-	if len(p.Table.tables) != 0 {
-		return false
-	}
-	return true
-}
-
 // PlaceSubscription routes each (query, table) pair to one pruning tier.
 // Predicates that can never match are omitted because they can never emit
 // deltas. Self-joins use table-level placement because leaves apply to one side
