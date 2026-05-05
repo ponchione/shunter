@@ -779,6 +779,91 @@ func TestHandleOneOffQueryMultiColumnOrderByTableScan(t *testing.T) {
 	})
 }
 
+func TestHandleOneOffQueryOrderByDeterministicValueKinds(t *testing.T) {
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "items",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "bytes", Type: schema.KindBytes},
+			{Index: 2, Name: "uuid", Type: schema.KindUUID},
+			{Index: 3, Name: "metadata", Type: schema.KindJSON},
+			{Index: 4, Name: "nickname", Type: schema.KindString, Nullable: true},
+		},
+	}
+	idTS := &schema.TableSchema{
+		ID:   1,
+		Name: "items",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+		},
+	}
+	sl := newMockSchema("items", 1, ts.Columns...)
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{
+				types.NewUint32(1),
+				types.NewBytes([]byte{0x02}),
+				mustUUIDValue(t, "00000000-0000-0000-0000-000000000002"),
+				mustJSONValue(t, `{"rank":2}`),
+				types.NewString("bravo"),
+			},
+			{
+				types.NewUint32(2),
+				types.NewBytes([]byte{0x00}),
+				mustUUIDValue(t, "00000000-0000-0000-0000-000000000000"),
+				mustJSONValue(t, `{"rank":1}`),
+				types.NewNull(types.KindString),
+			},
+			{
+				types.NewUint32(3),
+				types.NewBytes([]byte{0x01}),
+				mustUUIDValue(t, "00000000-0000-0000-0000-000000000001"),
+				mustJSONValue(t, `{"rank":3}`),
+				types.NewString("alpha"),
+			},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	runIDs := func(t *testing.T, orderBy string) []uint32 {
+		t.Helper()
+		conn := testConnDirect(nil)
+		handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+			MessageID:   []byte{0x19},
+			QueryString: "SELECT id FROM items ORDER BY " + orderBy,
+		}, stateAccess, sl)
+		result := drainOneOff(t, conn)
+		if result.Error != nil {
+			t.Fatalf("ORDER BY %s error = %q, want nil", orderBy, *result.Error)
+		}
+		pvs := decodeRows(t, firstTableRows(result), idTS)
+		out := make([]uint32, len(pvs))
+		for i, row := range pvs {
+			out[i] = row[0].AsUint32()
+		}
+		return out
+	}
+
+	cases := []struct {
+		name    string
+		orderBy string
+		want    []uint32
+	}{
+		{name: "bytes asc", orderBy: "bytes ASC", want: []uint32{2, 3, 1}},
+		{name: "uuid desc", orderBy: "uuid DESC", want: []uint32{1, 3, 2}},
+		{name: "json asc", orderBy: "metadata ASC", want: []uint32{2, 1, 3}},
+		{name: "nullable asc", orderBy: "nickname ASC", want: []uint32{2, 3, 1}},
+		{name: "nullable desc", orderBy: "nickname DESC", want: []uint32{1, 3, 2}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runIDs(t, tt.orderBy); !slices.Equal(got, tt.want) {
+				t.Fatalf("ids = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExecuteCompiledSQLQueryIndexedEqualityPredicateUsesIndexSeek(t *testing.T) {
 	baseSL := newMockSchema("tasks", 1,
 		schema.ColumnSchema{Index: 0, Name: "id", Type: schema.KindUint64},

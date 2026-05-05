@@ -250,6 +250,19 @@ func TestModuleContractValidationAcceptsJSONColumnType(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationRejectsUnknownColumnType(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Schema.Tables[0].Columns[1].Type = "notAType"
+
+	err := ValidateModuleContract(contract)
+	if err == nil {
+		t.Fatal("ValidateModuleContract accepted unknown column type")
+	}
+	if !strings.Contains(err.Error(), `schema.tables.messages.columns.body type "notAType" is invalid`) {
+		t.Fatalf("ValidateModuleContract error = %v, want invalid schema column type context", err)
+	}
+}
+
 func TestModuleContractValidationRejectsDuplicateCompositeIndexColumns(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Schema.Tables[0].Indexes = append(contract.Schema.Tables[0].Indexes, schema.IndexExport{

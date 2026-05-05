@@ -30,8 +30,7 @@ capabilities.
 Agents should implement remaining slices in this order unless a later task
 explicitly says otherwise:
 
-1. Ordered declared reads.
-2. Client/codegen updates for the new surface.
+No remaining application-readiness slices are currently tracked here.
 
 Completed slices:
 
@@ -42,9 +41,11 @@ Completed slices:
 - Fixed-point scaled integer convention.
 - External JWT principal bridge.
 - App-owned migration and import hooks.
+- Ordered declared reads.
+- Client/codegen updates for the new surface.
 
-The remaining slices build on the now-stable UUID, JSON, nullable, composite
-index, and integer type surfaces.
+The completed slices build on the now-stable UUID, JSON, nullable, composite
+index, integer type, declared-read, and client/codegen surfaces.
 
 ## 3. UUID Value Kind
 
@@ -413,6 +414,8 @@ registered hooks with `RunModuleDataDirMigrations`.
 
 ## 10. Ordered Declared Reads
 
+Status: implemented.
+
 ### Requirement
 
 Applications need stable ordered reads for leaderboards, feeds, histories, and
@@ -477,6 +480,8 @@ domain-specific materialized view behavior.
   deltas.
 
 ## 12. Client And Codegen Updates
+
+Status: implemented.
 
 ### Requirement
 
