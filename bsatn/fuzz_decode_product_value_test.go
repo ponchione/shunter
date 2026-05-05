@@ -25,6 +25,7 @@ var fuzzProductValueSchema = &schema.TableSchema{
 		{Index: 7, Name: "wide", Type: types.KindUint256},
 		{Index: 8, Name: "uuid", Type: types.KindUUID},
 		{Index: 9, Name: "ttl", Type: types.KindDuration},
+		{Index: 10, Name: "metadata", Type: types.KindJSON},
 	},
 }
 
@@ -56,6 +57,7 @@ func decodeProductValueFuzzSeeds(tb testing.TB) [][]byte {
 			types.NewUint256(1, 2, 3, 4),
 			types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
 			types.NewDuration(12_345_678),
+			mustFuzzJSON(tb, `{"b":2,"a":1}`),
 		},
 		{
 			types.NewUint64(0),
@@ -68,6 +70,7 @@ func decodeProductValueFuzzSeeds(tb testing.TB) [][]byte {
 			types.NewUint256(0, 0, 0, 0),
 			types.NewUUID([16]byte{}),
 			types.NewDuration(0),
+			mustFuzzJSON(tb, `null`),
 		},
 	} {
 		encoded := mustAppendFuzzProductValue(tb, row)
@@ -163,6 +166,20 @@ func mustAppendFuzzProductValue(tb testing.TB, row types.ProductValue) []byte {
 	return encoded
 }
 
+func mustFuzzJSON(tb testing.TB, raw string) types.Value {
+	if tb != nil {
+		tb.Helper()
+	}
+	v, err := types.NewJSON([]byte(raw))
+	if err != nil {
+		if tb != nil {
+			tb.Fatalf("NewJSON seed: %v", err)
+		}
+		panic(err)
+	}
+	return v
+}
+
 func fuzzProductValueWithInvalidNameUTF8() []byte {
 	row := types.ProductValue{
 		types.NewUint64(7),
@@ -174,6 +191,8 @@ func fuzzProductValueWithInvalidNameUTF8() []byte {
 		types.NewTimestamp(1),
 		types.NewUint256(0, 0, 0, 1),
 		types.NewUUID([16]byte{1}),
+		types.NewDuration(1),
+		mustFuzzJSON(nil, `{"ok":true}`),
 	}
 	encoded, err := AppendProductValue(nil, row)
 	if err != nil {
@@ -218,7 +237,7 @@ func boundedFuzzProductValueInput(data []byte, ts *schema.TableSchema) bool {
 			pos += 16
 		case types.KindInt256, types.KindUint256:
 			pos += 32
-		case types.KindString, types.KindBytes:
+		case types.KindString, types.KindBytes, types.KindJSON:
 			n, ok := readFuzzU32(data, pos)
 			if !ok {
 				return true
@@ -271,6 +290,7 @@ func checkClassifiedFuzzBSATNError(op string, data []byte, err error) error {
 	if errors.Is(err, ErrRowLengthMismatch) ||
 		errors.Is(err, ErrInvalidUTF8) ||
 		errors.Is(err, ErrInvalidBool) ||
+		errors.Is(err, types.ErrInvalidJSON) ||
 		errors.Is(err, types.ErrInvalidFloat) ||
 		errors.Is(err, io.EOF) ||
 		errors.Is(err, io.ErrUnexpectedEOF) ||

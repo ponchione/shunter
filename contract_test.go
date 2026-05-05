@@ -238,6 +238,18 @@ func TestModuleContractValidationAcceptsDurationColumnType(t *testing.T) {
 	}
 }
 
+func TestModuleContractValidationAcceptsJSONColumnType(t *testing.T) {
+	contract := buildContractRuntime(t).ExportContract()
+	contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
+		Name: "metadata",
+		Type: "json",
+	})
+
+	if err := ValidateModuleContract(contract); err != nil {
+		t.Fatalf("ValidateModuleContract rejected json column type: %v", err)
+	}
+}
+
 func TestModuleContractValidationRejectsInvalidDeclarationSQL(t *testing.T) {
 	contract := buildContractRuntime(t).ExportContract()
 	contract.Queries = []QueryDescription{{Name: "recent_messages", SQL: "SELECT * FROM missing"}}

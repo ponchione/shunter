@@ -196,6 +196,22 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 			return types.Value{}, mismatch(lit, kind)
 		}
 		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+	case types.KindJSON:
+		if lit.Kind == LitString {
+			v, err := types.NewJSON([]byte(lit.Str))
+			if err == nil {
+				return v, nil
+			}
+			return types.Value{}, InvalidLiteralError{Literal: lit.Str, Type: algebraicName(kind)}
+		}
+		if lit.Kind == LitBool {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		text, ok := renderLiteralSourceText(lit)
+		if !ok {
+			return types.Value{}, mismatch(lit, kind)
+		}
+		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 	default:
 		return types.Value{}, fmt.Errorf("%w: column kind %s not supported by SQL literal coercion", ErrUnsupportedSQL, kind)
 	}
@@ -513,6 +529,8 @@ func algebraicName(k types.ValueKind) string {
 		return "Array<String>"
 	case types.KindUUID:
 		return "UUID"
+	case types.KindJSON:
+		return "JSON"
 	default:
 		return k.String()
 	}

@@ -34,6 +34,7 @@ var rapidValueKinds = []types.ValueKind{
 	types.KindArrayString,
 	types.KindUUID,
 	types.KindDuration,
+	types.KindJSON,
 }
 
 func rapidValue() *rapid.Generator[types.Value] {
@@ -128,6 +129,21 @@ func rapidValueOfKind(kind types.ValueKind) *rapid.Generator[types.Value] {
 				u[i] = rapid.Byte().Draw(t, "b")
 			}
 			return types.NewUUID(u)
+		})
+	case types.KindJSON:
+		return rapid.Map(rapid.SampledFrom([]string{
+			`null`,
+			`true`,
+			`42`,
+			`"hello"`,
+			`["red","blue"]`,
+			`{"b":2,"a":1}`,
+		}), func(raw string) types.Value {
+			v, err := types.NewJSON([]byte(raw))
+			if err != nil {
+				panic(err)
+			}
+			return v
 		})
 	default:
 		panic("unsupported rapid value kind")

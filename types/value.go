@@ -44,6 +44,7 @@ const (
 	KindArrayString
 	KindUUID
 	KindDuration
+	KindJSON
 )
 
 var kindNames = [...]string{
@@ -68,6 +69,7 @@ var kindNames = [...]string{
 	KindArrayString: "ArrayString",
 	KindUUID:        "UUID",
 	KindDuration:    "Duration",
+	KindJSON:        "JSON",
 }
 
 func (k ValueKind) String() string {
@@ -464,6 +466,21 @@ func (v Value) ArrayStringView() []string {
 	return v.strArr
 }
 
+// AsJSON returns a defensive copy of the canonical JSON payload.
+func (v Value) AsJSON() []byte {
+	v.mustKind(KindJSON)
+	cp := make([]byte, len(v.buf))
+	copy(cp, v.buf)
+	return cp
+}
+
+// JSONView returns the canonical JSON payload without copying.
+// The returned slice is read-only by convention; mutating it would mutate v.
+func (v Value) JSONView() []byte {
+	v.mustKind(KindJSON)
+	return v.buf
+}
+
 func (v Value) mustKind(want ValueKind) {
 	if v.kind != want {
 		panic(fmt.Sprintf("shunter: Value.As%s called on %s value", want, v.kind))
@@ -491,7 +508,7 @@ func (v Value) Equal(other Value) bool {
 		return v.f64 == other.f64
 	case KindString:
 		return v.str == other.str
-	case KindBytes:
+	case KindBytes, KindJSON:
 		return bytes.Equal(v.buf, other.buf)
 	case KindInt128, KindUint128:
 		return v.hi128 == other.hi128 && v.lo128 == other.lo128
@@ -534,7 +551,7 @@ func (v Value) Compare(other Value) int {
 		return cmp.Compare(v.f64, other.f64)
 	case KindString:
 		return cmp.Compare(v.str, other.str)
-	case KindBytes:
+	case KindBytes, KindJSON:
 		return bytes.Compare(v.buf, other.buf)
 	case KindInt128:
 		if c := cmp.Compare(int64(v.hi128), int64(other.hi128)); c != 0 {
@@ -621,7 +638,7 @@ func (v Value) writePayload(h hash.Hash64) {
 		h.Write(buf[:])
 	case KindString:
 		h.Write([]byte(v.str))
-	case KindBytes:
+	case KindBytes, KindJSON:
 		h.Write(v.buf)
 	case KindInt128, KindUint128:
 		binary.BigEndian.PutUint64(buf[:], v.hi128)
@@ -664,7 +681,7 @@ func (v Value) payloadLen() uint32 {
 		return 8
 	case KindString:
 		return uint32(len(v.str))
-	case KindBytes:
+	case KindBytes, KindJSON:
 		return uint32(len(v.buf))
 	case KindInt128, KindUint128:
 		return 16

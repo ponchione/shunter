@@ -48,6 +48,15 @@ func mustUUID(t *testing.T, s string) types.Value {
 	return v
 }
 
+func mustJSON(t *testing.T, raw string) types.Value {
+	t.Helper()
+	v, err := types.NewJSON([]byte(raw))
+	if err != nil {
+		t.Fatalf("NewJSON(%q): %v", raw, err)
+	}
+	return v
+}
+
 func uuidIndexedSchema() *schema.TableSchema {
 	return &schema.TableSchema{
 		ID:   2,
@@ -66,6 +75,26 @@ func uuidIndexedSchema() *schema.TableSchema {
 
 func uuidRow(id, owner types.Value, name string) types.ProductValue {
 	return types.ProductValue{id, owner, types.NewString(name)}
+}
+
+func jsonIndexedSchema() *schema.TableSchema {
+	return &schema.TableSchema{
+		ID:   3,
+		Name: "documents",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindJSON},
+			{Index: 1, Name: "metadata", Type: schema.KindJSON},
+			{Index: 2, Name: "name", Type: schema.KindString},
+		},
+		Indexes: []schema.IndexSchema{
+			{ID: 0, Name: "documents_pk", Columns: []int{0}, Unique: true, Primary: true},
+			{ID: 1, Name: "documents_metadata", Columns: []int{1}},
+		},
+	}
+}
+
+func jsonRow(id, metadata types.Value, name string) types.ProductValue {
+	return types.ProductValue{id, metadata, types.NewString(name)}
 }
 
 // --- IndexKey tests (E3 Story 3.1) ---
@@ -94,10 +123,12 @@ func TestIndexKeyConstructorCopiesParts(t *testing.T) {
 func TestIndexKeyConstructorDetachesSliceBackedValues(t *testing.T) {
 	buf := []byte{1, 2, 3}
 	tags := []string{"red", "blue"}
-	key := NewIndexKey(types.NewBytesOwned(buf), types.NewArrayStringOwned(tags))
+	metadata := mustJSON(t, `{"b":2,"a":1}`)
+	key := NewIndexKey(types.NewBytesOwned(buf), types.NewArrayStringOwned(tags), metadata)
 
 	buf[0] = 9
 	tags[0] = "green"
+	metadata.JSONView()[1] = 'z'
 
 	if got := key.Part(0).AsBytes(); !slices.Equal(got, []byte{1, 2, 3}) {
 		t.Fatalf("bytes index key part = %v, want [1 2 3]", got)
@@ -105,15 +136,23 @@ func TestIndexKeyConstructorDetachesSliceBackedValues(t *testing.T) {
 	if got := key.Part(1).AsArrayString(); !slices.Equal(got, []string{"red", "blue"}) {
 		t.Fatalf("array-string index key part = %v, want [red blue]", got)
 	}
+	if got := string(key.Part(2).AsJSON()); got != `{"a":1,"b":2}` {
+		t.Fatalf("JSON index key part = %s, want canonical payload", got)
+	}
 }
 
 func TestIndexKeyPartReturnsDetachedSliceBackedValue(t *testing.T) {
-	key := NewIndexKey(types.NewBytes([]byte{1, 2, 3}))
-	part := key.Part(0)
-	part.BytesView()[0] = 9
+	key := NewIndexKey(types.NewBytes([]byte{1, 2, 3}), mustJSON(t, `{"a":1}`))
+	bytesPart := key.Part(0)
+	bytesPart.BytesView()[0] = 9
+	jsonPart := key.Part(1)
+	jsonPart.JSONView()[1] = 'z'
 
 	if got := key.Part(0).AsBytes(); !slices.Equal(got, []byte{1, 2, 3}) {
 		t.Fatalf("index key mutated through Part result: got %v, want [1 2 3]", got)
+	}
+	if got := string(key.Part(1).AsJSON()); got != `{"a":1}` {
+		t.Fatalf("JSON index key mutated through Part result: got %s", got)
 	}
 }
 
@@ -151,6 +190,17 @@ func TestIndexKeyDurationOrdering(t *testing.T) {
 	high := NewIndexKey(types.NewDuration(1))
 	if low.Compare(high) != -1 {
 		t.Fatalf("Duration index key ordering = %d, want -1 < 1", low.Compare(high))
+	}
+}
+
+func TestIndexKeyJSONCanonicalOrdering(t *testing.T) {
+	a := NewIndexKey(mustJSON(t, `{"b":2,"a":1}`))
+	b := NewIndexKey(mustJSON(t, `{"a":1,"b":3}`))
+	if a.Compare(b) != -1 {
+		t.Fatalf("JSON index key ordering = %d, want canonical a < b", a.Compare(b))
+	}
+	if !a.Equal(NewIndexKey(mustJSON(t, `{"a":1,"b":2}`))) {
+		t.Fatal("JSON index key should use canonical bytes for equality")
 	}
 }
 
@@ -447,6 +497,36 @@ func TestTableUUIDPrimaryAndSecondaryIndexes(t *testing.T) {
 	}
 	if got := ownerIndex.Seek(NewIndexKey(owner)); !slices.Equal(got, []types.RowID{rid2}) {
 		t.Fatalf("secondary Seek(owner) after delete = %v, want [%d]", got, rid2)
+	}
+}
+
+func TestTableJSONPrimaryAndSecondaryIndexes(t *testing.T) {
+	tbl := NewTable(jsonIndexedSchema())
+	id1 := mustJSON(t, `{"b":2,"a":1}`)
+	id2 := mustJSON(t, `{"a":1,"b":3}`)
+	metadata := mustJSON(t, `{"type":"note"}`)
+	row1 := jsonRow(id1, metadata, "one")
+	row2 := jsonRow(id2, metadata, "two")
+
+	rid1 := tbl.AllocRowID()
+	if err := tbl.InsertRow(rid1, row1); err != nil {
+		t.Fatal(err)
+	}
+	rid2 := tbl.AllocRowID()
+	if err := tbl.InsertRow(rid2, row2); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := tbl.PrimaryIndex().Seek(NewIndexKey(mustJSON(t, `{"a":1,"b":2}`))); !slices.Equal(got, []types.RowID{rid1}) {
+		t.Fatalf("primary Seek(id1 canonical equivalent) = %v, want [%d]", got, rid1)
+	}
+	metadataIndex := tbl.IndexByID(1)
+	if got := metadataIndex.Seek(NewIndexKey(metadata)); !slices.Equal(got, []types.RowID{rid1, rid2}) {
+		t.Fatalf("secondary Seek(metadata) = %v, want [%d %d]", got, rid1, rid2)
+	}
+
+	if err := tbl.InsertRow(tbl.AllocRowID(), jsonRow(mustJSON(t, `{"a":1,"b":2}`), metadata, "duplicate")); !errors.Is(err, ErrPrimaryKeyViolation) {
+		t.Fatalf("duplicate canonical JSON primary key err = %v, want ErrPrimaryKeyViolation", err)
 	}
 }
 

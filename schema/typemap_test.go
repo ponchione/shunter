@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -28,6 +29,7 @@ func TestGoTypeToValueKindScalars(t *testing.T) {
 		{reflect.TypeFor[time.Time](), KindTimestamp},
 		{reflect.TypeFor[time.Duration](), KindDuration},
 		{reflect.TypeFor[[]byte](), KindBytes},
+		{reflect.TypeFor[json.RawMessage](), KindJSON},
 		{reflect.TypeFor[[16]byte](), KindUUID},
 	}
 	for _, c := range cases {

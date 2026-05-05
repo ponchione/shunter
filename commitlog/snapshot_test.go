@@ -45,6 +45,35 @@ func buildEmptySnapshotCommittedState(t testing.TB, reg schema.SchemaRegistry) *
 	return cs
 }
 
+func buildJSONSnapshotCommittedState(t *testing.T) (*store.CommittedState, schema.SchemaRegistry, types.ProductValue) {
+	t.Helper()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "documents",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint64, PrimaryKey: true},
+			{Name: "metadata", Type: schema.KindJSON},
+		},
+	})
+	e, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := e.Registry()
+	cs := buildEmptySnapshotCommittedState(t, reg)
+	metadata, err := types.NewJSON([]byte(`{"b":2,"a":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := types.ProductValue{types.NewUint64(1), metadata}
+	documents, _ := cs.Table(0)
+	if err := documents.InsertRow(documents.AllocRowID(), row); err != nil {
+		t.Fatal(err)
+	}
+	return cs, reg, row
+}
+
 func createSnapshotAt(t testing.TB, writer SnapshotWriter, cs *store.CommittedState, txID types.TxID) {
 	t.Helper()
 	cs.SetCommittedTxID(txID)
@@ -67,6 +96,37 @@ func rewriteSnapshotHeaderTxID(t testing.TB, snapshotDir string, txID types.TxID
 	}
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCreateAndReadSnapshotWithJSONRow(t *testing.T) {
+	root := t.TempDir()
+	cs, reg, row := buildJSONSnapshotCommittedState(t)
+	cs.SetCommittedTxID(1)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	if err := writer.CreateSnapshot(cs, 1); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ReadSnapshot(filepath.Join(root, "snapshots", "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []types.ProductValue
+	for _, table := range data.Tables {
+		if table.TableID == 0 {
+			rows = table.Rows
+			break
+		}
+	}
+	if len(rows) != 1 {
+		t.Fatalf("snapshot tables = %+v, want one JSON row", data.Tables)
+	}
+	if !rows[0].Equal(row) {
+		t.Fatalf("snapshot JSON row = %+v, want %+v", rows[0], row)
+	}
+	if got := string(rows[0][1].AsJSON()); got != `{"a":1,"b":2}` {
+		t.Fatalf("snapshot JSON payload = %s, want canonical JSON", got)
 	}
 }
 
@@ -574,7 +634,7 @@ func TestDecodeSchemaSnapshotRejectsInvalidBoolFlags(t *testing.T) {
 }
 
 func TestDecodeSchemaSnapshotRejectsInvalidColumnType(t *testing.T) {
-	data := encodeSchemaSnapshotWithFlags(t, [3]byte{byte(schema.KindDuration) + 1, 0, 0}, [2]byte{1, 1})
+	data := encodeSchemaSnapshotWithFlags(t, [3]byte{byte(schema.KindJSON) + 1, 0, 0}, [2]byte{1, 1})
 	_, _, err := DecodeSchemaSnapshot(bytes.NewReader(data))
 	if !errors.Is(err, ErrSnapshot) {
 		t.Fatalf("DecodeSchemaSnapshot error = %v, want ErrSnapshot category", err)

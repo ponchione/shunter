@@ -619,6 +619,10 @@ func encodeValue(e *canonicalEncoder, v Value) {
 	case types.KindUUID:
 		u := v.AsUUID()
 		e.buf = append(e.buf, u[:]...)
+	case types.KindJSON:
+		b := v.JSONView()
+		e.writeU32(uint32(len(b)))
+		e.buf = append(e.buf, b...)
 	default:
 		panic("subscription: encodeValue unhandled kind")
 	}

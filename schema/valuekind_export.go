@@ -26,6 +26,7 @@ var exportStrings = [...]string{
 	KindArrayString: "arrayString",
 	KindUUID:        "uuid",
 	KindDuration:    "duration",
+	KindJSON:        "json",
 }
 
 // ValueKindExportString returns the lowercase export name for a ValueKind.

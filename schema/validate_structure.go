@@ -54,7 +54,7 @@ func validateStructure(b *Builder) []error {
 				errs = append(errs, fmt.Errorf("table %q: duplicate column name %q", t.Name, c.Name))
 			}
 			colNames[c.Name] = true
-			if c.Type < KindBool || c.Type > KindDuration {
+			if c.Type < KindBool || c.Type > KindJSON {
 				errs = append(errs, fmt.Errorf("table %q column %q: invalid ValueKind %v", t.Name, c.Name, c.Type))
 			}
 			if c.Nullable {

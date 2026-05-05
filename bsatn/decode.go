@@ -188,6 +188,16 @@ func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 			return types.Value{}, err
 		}
 		return types.NewUUID(u), nil
+	case TagJSON:
+		if _, err := io.ReadFull(r, buf[:4]); err != nil {
+			return types.Value{}, err
+		}
+		n := binary.LittleEndian.Uint32(buf[:4])
+		data, err := readLengthPrefixedPayload(r, n)
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewJSON(data)
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}
@@ -476,6 +486,16 @@ func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {
 		var u [16]byte
 		copy(u[:], data)
 		return types.NewUUID(u), nil
+	case TagJSON:
+		n, err := d.readU32()
+		if err != nil {
+			return types.Value{}, err
+		}
+		data, err := d.read(int(n))
+		if err != nil {
+			return types.Value{}, err
+		}
+		return types.NewJSON(data)
 	default:
 		return types.Value{}, &UnknownValueTagError{Tag: tag}
 	}

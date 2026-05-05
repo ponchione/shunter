@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -12,6 +13,7 @@ var ErrUnsupportedFieldType = errors.New("unsupported field type")
 
 var byteSliceType = reflect.TypeFor[[]byte]()
 var byteElemType = reflect.TypeFor[byte]()
+var jsonRawMessageType = reflect.TypeFor[json.RawMessage]()
 var timeTimeType = reflect.TypeFor[time.Time]()
 var timeDurationType = reflect.TypeFor[time.Duration]()
 
@@ -23,6 +25,9 @@ func GoTypeToValueKind(t reflect.Type) (ValueKind, error) {
 		return 0, fmt.Errorf("%w: <nil>", ErrUnsupportedFieldType)
 	}
 
+	if t == jsonRawMessageType {
+		return KindJSON, nil
+	}
 	// Check []byte before generic slice rejection.
 	if t == byteSliceType || (t.Kind() == reflect.Slice && t.Elem() == byteElemType) {
 		return KindBytes, nil

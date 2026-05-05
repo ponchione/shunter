@@ -334,6 +334,51 @@ func TestHandleSubscribeSingle_UUIDLiteralBuildsUUIDPredicate(t *testing.T) {
 	}
 }
 
+func TestHandleSubscribeSingle_JSONLiteralBuildsJSONPredicate(t *testing.T) {
+	conn := testConnDirect(nil)
+	executor := &mockSubExecutor{}
+	sl := newMockSchema("documents", 1,
+		schema.ColumnSchema{Index: 0, Name: "metadata", Type: schema.KindJSON},
+		schema.ColumnSchema{Index: 1, Name: "name", Type: schema.KindString},
+	)
+	want := mustJSONValue(t, `{"b":2,"a":1}`)
+
+	msg := &SubscribeSingleMsg{
+		RequestID:   13,
+		QueryID:     10,
+		QueryString: `SELECT * FROM documents WHERE metadata = '{"a":1,"b":2}'`,
+	}
+
+	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
+
+	select {
+	case frame := <-conn.OutboundCh:
+		t.Fatalf("unexpected message on OutboundCh: %x", frame)
+	default:
+	}
+
+	req := executor.getRegisterSetReq()
+	if req == nil {
+		t.Fatal("executor did not receive RegisterSubscriptionSet call")
+	}
+	if len(req.Predicates) != 1 {
+		t.Fatalf("len(Predicates) = %d, want 1", len(req.Predicates))
+	}
+	colEq, ok := req.Predicates[0].(subscription.ColEq)
+	if !ok {
+		t.Fatalf("Predicates[0] type = %T, want ColEq", req.Predicates[0])
+	}
+	if colEq.Table != 1 || colEq.Column != 0 {
+		t.Fatalf("predicate target = table %d col %d, want table 1 col 0", colEq.Table, colEq.Column)
+	}
+	if colEq.Value.Kind() != schema.KindJSON {
+		t.Fatalf("predicate kind = %v, want JSON", colEq.Value.Kind())
+	}
+	if !colEq.Value.Equal(want) {
+		t.Fatalf("predicate value = %v, want %v", colEq.Value, want)
+	}
+}
+
 func TestHandleSubscribeSingle_MixedCaseTableRejectedByExactSQLPolicy(t *testing.T) {
 	b := schema.NewBuilder().SchemaVersion(1)
 	b.TableDef(schema.TableDefinition{

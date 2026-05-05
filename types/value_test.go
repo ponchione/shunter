@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"testing"
@@ -30,6 +31,15 @@ func mustParseUUID(t *testing.T, s string) Value {
 	v, err := ParseUUID(s)
 	if err != nil {
 		t.Fatalf("ParseUUID(%q): %v", s, err)
+	}
+	return v
+}
+
+func mustJSON(t *testing.T, s string) Value {
+	t.Helper()
+	v, err := NewJSON([]byte(s))
+	if err != nil {
+		t.Fatalf("NewJSON(%q): %v", s, err)
 	}
 	return v
 }
@@ -602,6 +612,74 @@ func TestCompareArrayString(t *testing.T) {
 	}
 }
 
+func TestJSONCanonicalizesWhitespaceAndObjectKeys(t *testing.T) {
+	v := mustJSON(t, `{"z": 1, "a": [true, null, {"b":2}]}`)
+	if v.Kind() != KindJSON {
+		t.Fatalf("Kind = %v, want JSON", v.Kind())
+	}
+	want := []byte(`{"a":[true,null,{"b":2}],"z":1}`)
+	if got := v.AsJSON(); !bytes.Equal(got, want) {
+		t.Fatalf("AsJSON = %s, want %s", got, want)
+	}
+
+	again := mustJSON(t, `{"a":[true,null,{"b":2}],"z":1}`)
+	if !v.Equal(again) {
+		t.Fatal("equivalent JSON payloads should canonicalize equal")
+	}
+}
+
+func TestJSONRejectsInvalidAndDuplicateKeys(t *testing.T) {
+	for _, raw := range []string{
+		``,
+		`{"a":`,
+		`{"a":1} trailing`,
+		`{"a":1,"a":2}`,
+		`{"outer":{"a":1,"a":2}}`,
+	} {
+		if _, err := NewJSON([]byte(raw)); !errors.Is(err, ErrInvalidJSON) {
+			t.Fatalf("NewJSON(%q) err = %v, want ErrInvalidJSON", raw, err)
+		}
+	}
+}
+
+func TestJSONAccessorsDoNotExposeMutableAliases(t *testing.T) {
+	src := []byte(`{"b":2,"a":1}`)
+	v, err := NewJSON(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src[2] = 'X'
+	if got := v.AsJSON(); !bytes.Equal(got, []byte(`{"a":1,"b":2}`)) {
+		t.Fatalf("constructor input mutation leaked into JSON value: %s", got)
+	}
+	got := v.AsJSON()
+	got[1] = 'z'
+	if again := v.AsJSON(); !bytes.Equal(again, []byte(`{"a":1,"b":2}`)) {
+		t.Fatalf("AsJSON mutation leaked into Value: %s", again)
+	}
+}
+
+func TestJSONEqualCompareAndHash(t *testing.T) {
+	a := mustJSON(t, `{"b":2,"a":1}`)
+	a2 := mustJSON(t, `{"a":1,"b":2}`)
+	b := mustJSON(t, `{"a":1,"b":3}`)
+	if !a.Equal(a2) {
+		t.Fatal("canonical-equivalent JSON values not Equal")
+	}
+	if a.Equal(b) {
+		t.Fatal("different JSON values reported Equal")
+	}
+	if a.Compare(b) >= 0 {
+		t.Fatal("JSON Compare should use canonical byte ordering")
+	}
+	if a.Hash64() != a2.Hash64() {
+		t.Fatal("equal JSON values should hash identically")
+	}
+	if a.Hash64() == NewBytes(a.JSONView()).Hash64() {
+		t.Fatal("JSON and Bytes with same payload should hash differently")
+	}
+}
+
 func TestUUIDParseAndCanonicalString(t *testing.T) {
 	v, err := ParseUUID("00112233-4455-6677-8899-aabbccddeeff")
 	if err != nil {
@@ -750,6 +828,7 @@ func TestAccessorPanicsOnKindMismatch(t *testing.T) {
 		{"AsArrayString", func() { v.AsArrayString() }},
 		{"AsUUID", func() { v.AsUUID() }},
 		{"AsDurationMicros", func() { v.AsDurationMicros() }},
+		{"AsJSON", func() { v.AsJSON() }},
 	}
 	for _, a := range accessors {
 		t.Run(a.name, func(t *testing.T) {
@@ -791,8 +870,9 @@ func TestValueKindString(t *testing.T) {
 		{KindArrayString, "ArrayString"},
 		{KindUUID, "UUID"},
 		{KindDuration, "Duration"},
+		{KindJSON, "JSON"},
 		{ValueKind(-1), "ValueKind(-1)"},
-		{ValueKind(len(kindNames)), "ValueKind(21)"},
+		{ValueKind(len(kindNames)), "ValueKind(22)"},
 	}
 	for _, c := range cases {
 		if got := c.k.String(); got != c.want {
@@ -862,6 +942,7 @@ func TestEqualSameKindSameValue(t *testing.T) {
 		{NewString("hello"), NewString("hello")},
 		{NewBytes([]byte{1, 2}), NewBytes([]byte{1, 2})},
 		{mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff"), mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff")},
+		{mustJSON(t, `{"b":2,"a":1}`), mustJSON(t, `{"a":1,"b":2}`)},
 	}
 	for _, p := range pairs {
 		if !p[0].Equal(p[1]) {
@@ -879,6 +960,7 @@ func TestEqualSameKindDifferentValue(t *testing.T) {
 		{NewString("a"), NewString("b")},
 		{NewBytes([]byte{1}), NewBytes([]byte{2})},
 		{mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff"), mustParseUUID(t, "00112233-4455-6677-8899-aabbccddef00")},
+		{mustJSON(t, `{"a":1}`), mustJSON(t, `{"a":2}`)},
 	}
 	for _, p := range pairs {
 		if p[0].Equal(p[1]) {
@@ -1009,6 +1091,7 @@ func TestHashEqualValuesProduceEqualHashes(t *testing.T) {
 		{mustFloat32(t, float32(math.Copysign(0, -1))), mustFloat32(t, 0)},
 		{mustFloat64(t, math.Copysign(0, -1)), mustFloat64(t, 0)},
 		{mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff"), mustParseUUID(t, "00112233-4455-6677-8899-aabbccddeeff")},
+		{mustJSON(t, `{"b":2,"a":1}`), mustJSON(t, `{"a":1,"b":2}`)},
 	}
 	for _, p := range pairs {
 		if p[0].Hash64() != p[1].Hash64() {

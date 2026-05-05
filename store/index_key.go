@@ -91,9 +91,23 @@ func copyIndexValue(v types.Value) types.Value {
 	switch v.Kind() {
 	case types.KindBytes:
 		return types.NewBytes(v.BytesView())
+	case types.KindJSON:
+		return copyJSONValue(v)
 	case types.KindArrayString:
 		return types.NewArrayString(v.ArrayStringView())
 	default:
 		return v
 	}
+}
+
+func copyJSONValue(v types.Value) types.Value {
+	return mustJSONValue(v.JSONView())
+}
+
+func mustJSONValue(raw []byte) types.Value {
+	out, err := types.NewJSON(raw)
+	if err != nil {
+		panic(err)
+	}
+	return out
 }

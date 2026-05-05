@@ -563,7 +563,7 @@ func TestGenerateFileInvalidSchemaColumnTypeLeavesOutputUntouched(t *testing.T) 
 	const trace = "trace=workflow-codegen-invalid-schema-column-type-output-preservation"
 	dir := t.TempDir()
 	invalidContract := workflowContractFixture()
-	invalidContract.Schema.Tables[0].Columns[1].Type = "json"
+	invalidContract.Schema.Tables[0].Columns[1].Type = "notAType"
 	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
 	outputPath := filepath.Join(dir, "client.ts")
 	original := []byte("existing generated output\n")
@@ -578,7 +578,7 @@ func TestGenerateFileInvalidSchemaColumnTypeLeavesOutputUntouched(t *testing.T) 
 	if !errors.Is(err, codegen.ErrInvalidContract) {
 		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
 	}
-	if !strings.Contains(err.Error(), `schema.tables.messages.columns.body type "json" is invalid`) {
+	if !strings.Contains(err.Error(), `schema.tables.messages.columns.body type "notAType" is invalid`) {
 		t.Fatalf("%s GenerateFile error = %v, want invalid schema column type context", trace, err)
 	}
 	got, err := os.ReadFile(outputPath)

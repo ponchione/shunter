@@ -116,6 +116,31 @@ func TestContractDiffReportsDurationColumnType(t *testing.T) {
 	}
 }
 
+func TestContractDiffReportsJSONColumnType(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].Columns = append(current.Schema.Tables[0].Columns, schema.ColumnExport{
+		Name: "metadata",
+		Type: "json",
+	})
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindAdditive, SurfaceColumn, "messages.metadata")
+	if got := report.Text(); !strings.Contains(got, "additive column messages.metadata: column added with type json") {
+		t.Fatalf("Text() = %q, want additive json column detail", got)
+	}
+
+	old = contractFixture()
+	old.Schema.Tables[0].Columns[0].Type = "json"
+	current = contractFixture()
+
+	report = Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceColumn, "messages.id")
+	if got := report.Text(); !strings.Contains(got, "breaking column messages.id: column type changed from json to uint64") {
+		t.Fatalf("Text() = %q, want breaking json column detail", got)
+	}
+}
+
 func TestContractDiffReportsMetadataOnlyChangesSeparately(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()

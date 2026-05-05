@@ -47,6 +47,8 @@ func (pv ProductValue) Copy() ProductValue {
 		switch v.kind {
 		case KindBytes:
 			cp[i] = NewBytes(v.buf)
+		case KindJSON:
+			cp[i] = Value{kind: KindJSON, buf: append([]byte(nil), v.buf...)}
 		case KindArrayString:
 			cp[i] = NewArrayString(v.strArr)
 		default:

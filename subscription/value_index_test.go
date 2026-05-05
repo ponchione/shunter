@@ -96,6 +96,27 @@ func TestValueIndexDurationDoesNotCollideWithInt64(t *testing.T) {
 	}
 }
 
+func TestValueIndexJSONCanonicalLookup(t *testing.T) {
+	v := NewValueIndex()
+	h := hashN(1)
+	j1, err := types.NewJSON([]byte(`{"b":2,"a":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	j2, err := types.NewJSON([]byte(`{"a":1,"b":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.Add(1, 0, j1, h)
+	if got := v.Lookup(1, 0, j2); len(got) != 1 || got[0] != h {
+		t.Fatalf("Lookup(canonical JSON equivalent) = %v, want [%v]", got, h)
+	}
+	v.Remove(1, 0, j2, h)
+	if got := v.Lookup(1, 0, j1); len(got) != 0 {
+		t.Fatalf("Lookup after canonical JSON remove = %v, want empty", got)
+	}
+}
+
 func TestValueIndexCanonicalizesFloatZero(t *testing.T) {
 	v := NewValueIndex()
 	h := hashN(1)

@@ -41,6 +41,7 @@ func decodeValueFuzzSeeds(tb testing.TB) [][]byte {
 		types.NewTimestamp(1_739_201_130_000_000),
 		types.NewDuration(12_345_678),
 		types.NewUUID([16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}),
+		mustFuzzJSON(tb, `{"b":2,"a":1}`),
 	} {
 		encoded := mustAppendFuzzValue(tb, v)
 		seeds = append(seeds, encoded)
@@ -141,7 +142,7 @@ func boundedFuzzValueInput(data []byte) bool {
 		return true
 	}
 	switch data[0] {
-	case TagString, TagBytes:
+	case TagString, TagBytes, TagJSON:
 		if len(data) < 5 {
 			return true
 		}

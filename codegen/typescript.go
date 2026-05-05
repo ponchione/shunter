@@ -368,6 +368,8 @@ func typeScriptColumnType(kind string) (string, error) {
 		return "Uint8Array", nil
 	case "arrayString":
 		return "string[]", nil
+	case "json":
+		return "unknown", nil
 	default:
 		return "", fmt.Errorf("unsupported column type %q", kind)
 	}

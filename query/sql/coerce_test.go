@@ -779,6 +779,44 @@ func TestCoerceNonStringLiteralOnUUIDRejected(t *testing.T) {
 	}
 }
 
+func TestCoerceJSONStringCanonicalizes(t *testing.T) {
+	v, err := Coerce(Literal{Kind: LitString, Str: `{"b":2,"a":1}`}, types.KindJSON)
+	if err != nil {
+		t.Fatalf("Coerce JSON returned error: %v", err)
+	}
+	if v.Kind() != types.KindJSON {
+		t.Fatalf("Kind = %v, want KindJSON", v.Kind())
+	}
+	if got, want := string(v.AsJSON()), `{"a":1,"b":2}`; got != want {
+		t.Fatalf("AsJSON = %q, want %q", got, want)
+	}
+}
+
+func TestCoerceInvalidJSONRejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitString, Str: `{"a":`}, types.KindJSON)
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	if ilErr.Literal != `{"a":` || ilErr.Type != "JSON" {
+		t.Fatalf("got {%q, %q}, want invalid JSON literal context", ilErr.Literal, ilErr.Type)
+	}
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
+	}
+}
+
+func TestCoerceNonStringLiteralOnJSONRejected(t *testing.T) {
+	_, err := Coerce(Literal{Kind: LitInt, Int: 42}, types.KindJSON)
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	if ilErr.Literal != "42" || ilErr.Type != "JSON" {
+		t.Fatalf("got {%q, %q}, want {\"42\", \"JSON\"}", ilErr.Literal, ilErr.Type)
+	}
+}
+
 // TestCoerceSenderRejectsArrayStringColumn pins the reference-informed shape
 // `SELECT * FROM t WHERE arr = :sender` at check.rs:487-489. The :sender
 // parameter materializes as a 32-byte identity; an array-of-string column

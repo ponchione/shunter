@@ -119,6 +119,21 @@ func TestTypeScriptGeneratorMapsDurationColumns(t *testing.T) {
 	assertContains(t, ts, `ttl: bigint;`)
 }
 
+func TestTypeScriptGeneratorMapsJSONColumns(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables[0].Columns = append(contract.Schema.Tables[0].Columns, schema.ColumnExport{
+		Name: "metadata",
+		Type: "json",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	assertContains(t, string(out), `metadata: unknown;`)
+}
+
 func TestTypeScriptGeneratorExportsCountDistinctDeclaredQuerySQL(t *testing.T) {
 	contract := contractFixture()
 	contract.Queries = append(contract.Queries, shunter.QueryDescription{
@@ -343,7 +358,7 @@ func TestGeneratorRejectsInvalidTableReadPolicyWithContext(t *testing.T) {
 
 func TestGeneratorRejectsInvalidSchemaColumnTypeWithContext(t *testing.T) {
 	contract := contractFixture()
-	contract.Schema.Tables[0].Columns[1].Type = "json"
+	contract.Schema.Tables[0].Columns[1].Type = "notAType"
 	data, err := contract.MarshalCanonicalJSON()
 	if err != nil {
 		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
@@ -356,7 +371,7 @@ func TestGeneratorRejectsInvalidSchemaColumnTypeWithContext(t *testing.T) {
 	if !errors.Is(err, ErrInvalidContract) {
 		t.Fatalf("GenerateFromJSON error = %v, want ErrInvalidContract", err)
 	}
-	if !strings.Contains(err.Error(), `schema.tables.messages.columns.body type "json" is invalid`) {
+	if !strings.Contains(err.Error(), `schema.tables.messages.columns.body type "notAType" is invalid`) {
 		t.Fatalf("GenerateFromJSON error = %v, want invalid schema column type context", err)
 	}
 }

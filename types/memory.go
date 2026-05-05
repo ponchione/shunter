@@ -9,7 +9,7 @@ func (v Value) ApproxMemoryBytes() uint64 {
 	switch v.kind {
 	case KindString:
 		n += uint64(len(v.str))
-	case KindBytes:
+	case KindBytes, KindJSON:
 		n += uint64(cap(v.buf))
 	case KindArrayString:
 		n += uint64(cap(v.strArr)) * uint64(unsafe.Sizeof(""))

@@ -228,6 +228,8 @@ func encodeValueKey(v Value) valueKey {
 		releaseCanonicalEncoder(enc)
 	case types.KindUUID:
 		k.uuid = v.AsUUID()
+	case types.KindJSON:
+		k.bytes = string(v.JSONView())
 	}
 	return k
 }

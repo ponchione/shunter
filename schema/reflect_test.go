@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -50,6 +51,23 @@ func TestDiscoverFieldsTimestamp(t *testing.T) {
 	}
 	if fields[2].ColumnName != "ttl" || fields[2].Type != KindDuration {
 		t.Fatalf("duration field = %+v, want ttl KindDuration", fields[2])
+	}
+}
+
+func TestDiscoverFieldsJSON(t *testing.T) {
+	type WithJSON struct {
+		ID       uint64 `shunter:"primarykey"`
+		Metadata json.RawMessage
+	}
+	fields, err := discoverFields(reflect.TypeFor[WithJSON](), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(fields))
+	}
+	if fields[1].ColumnName != "metadata" || fields[1].Type != KindJSON {
+		t.Fatalf("JSON field = %+v, want metadata KindJSON", fields[1])
 	}
 }
 

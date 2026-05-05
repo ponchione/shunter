@@ -89,6 +89,7 @@ var coerceFuzzKinds = []types.ValueKind{
 	types.KindArrayString,
 	types.KindUUID,
 	types.KindDuration,
+	types.KindJSON,
 }
 
 type coerceFuzzReader struct {

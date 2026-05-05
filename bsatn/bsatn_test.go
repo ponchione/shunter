@@ -30,6 +30,15 @@ func mustF64(t *testing.T, v float64) types.Value {
 	return val
 }
 
+func mustJSON(t *testing.T, raw string) types.Value {
+	t.Helper()
+	val, err := types.NewJSON([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return val
+}
+
 func TestValueRoundTrip(t *testing.T) {
 	cases := []types.Value{
 		types.NewBool(true),
@@ -78,6 +87,7 @@ func TestValueRoundTrip(t *testing.T) {
 		types.NewArrayString([]string{"alpha"}),
 		types.NewArrayString([]string{"alpha", "beta", "γ"}),
 		types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
+		mustJSON(t, `{"b":2,"a":1}`),
 	}
 	for _, v := range cases {
 		var buf bytes.Buffer
@@ -113,6 +123,7 @@ func TestProductValueRoundTrip(t *testing.T) {
 			{Index: 2, Name: "score", Type: types.KindInt64},
 			{Index: 3, Name: "uuid", Type: types.KindUUID},
 			{Index: 4, Name: "ttl", Type: types.KindDuration},
+			{Index: 5, Name: "metadata", Type: types.KindJSON},
 		},
 	}
 	pv := types.ProductValue{
@@ -121,6 +132,7 @@ func TestProductValueRoundTrip(t *testing.T) {
 		types.NewInt64(-100),
 		types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
 		types.NewDuration(90_000_000),
+		mustJSON(t, `{"tier":"gold"}`),
 	}
 
 	var buf bytes.Buffer
@@ -142,6 +154,7 @@ func TestAppendProductValueMatchesWriterEncoding(t *testing.T) {
 		types.NewString("alice"),
 		types.NewBytes([]byte{1, 2, 3}),
 		types.NewArrayString([]string{"red", "blue"}),
+		mustJSON(t, `{"b":2,"a":1}`),
 	}
 	var buf bytes.Buffer
 	if err := EncodeProductValue(&buf, pv); err != nil {
@@ -163,6 +176,7 @@ func TestEncodeValueDetectsShortWrites(t *testing.T) {
 		types.NewBytes([]byte{1, 2, 3}),
 		types.NewArrayString([]string{"red", "blue"}),
 		types.NewUUID([16]byte{1, 2, 3}),
+		mustJSON(t, `{"a":1}`),
 	}
 	for _, v := range cases {
 		w := shortWriter{max: 1}
@@ -421,6 +435,25 @@ func TestEncodeArrayStringLittleEndianLayout(t *testing.T) {
 	}
 }
 
+func TestEncodeJSONLittleEndianLayout(t *testing.T) {
+	v := mustJSON(t, `{"b":2,"a":1}`)
+	var buf bytes.Buffer
+	if err := EncodeValue(&buf, v); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	want := []byte{
+		TagJSON,
+		0x0d, 0x00, 0x00, 0x00,
+		'{', '"', 'a', '"', ':', '1', ',', '"', 'b', '"', ':', '2', '}',
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("encoded = %x\nwant     = %x", buf.Bytes(), want)
+	}
+	if EncodedValueSize(v) != len(want) {
+		t.Fatalf("EncodedValueSize(JSON) = %d, want %d", EncodedValueSize(v), len(want))
+	}
+}
+
 // TestDecodeArrayStringRejectsInvalidUTF8 pins that element payloads are
 // validated as utf8, matching the single-KindString rule.
 func TestDecodeArrayStringRejectsInvalidUTF8(t *testing.T) {
@@ -436,8 +469,20 @@ func TestDecodeArrayStringRejectsInvalidUTF8(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONRejectsInvalidJSON(t *testing.T) {
+	raw := []byte{
+		TagJSON,
+		0x07, 0x00, 0x00, 0x00,
+		'{', '"', 'a', '"', ':', '1', ',',
+	}
+	_, err := DecodeValue(bytes.NewReader(raw))
+	if !errors.Is(err, types.ErrInvalidJSON) {
+		t.Fatalf("err = %v, want ErrInvalidJSON", err)
+	}
+}
+
 func TestDecodeValueRejectsHugeTruncatedLengthWithoutAllocation(t *testing.T) {
-	for _, tag := range []byte{TagString, TagBytes} {
+	for _, tag := range []byte{TagString, TagBytes, TagJSON} {
 		raw := []byte{tag, 0xff, 0xff, 0xff, 0xff}
 		_, err := DecodeValue(bytes.NewReader(raw))
 		if !errors.Is(err, io.ErrUnexpectedEOF) {

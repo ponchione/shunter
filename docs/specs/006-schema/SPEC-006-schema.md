@@ -76,19 +76,22 @@ The following Go types may be used as struct field types in registered table str
 | `float64` | Float64 | NaN rejected on insert |
 | `string` | String | UTF-8 |
 | `[]byte` | Bytes | |
+| `json.RawMessage` | JSON | canonical JSON bytes |
 | `[16]byte` | UUID | canonical 16-byte UUID |
 | `time.Time` | Timestamp | stored as UTC Unix microseconds |
 | `time.Duration` | Duration | stored as signed microseconds |
 
 Named Go types whose underlying type is one of the scalar types above are also supported. Example: `type Score int64` is accepted and maps to `Int64`. Defined `time.Time`-shaped struct types map to `Timestamp`; `time.Duration` is supported exactly.
 
-**Excluded in v1:** pointers, interfaces, maps, slices other than `[]byte`, non-embedded nested structs, arrays other than `[16]byte`, nullable/optional fields, `int` / `uint` (platform-width; use explicit widths).
+**Excluded in v1:** pointers, interfaces, maps, slices other than `[]byte` / `json.RawMessage`, non-embedded nested structs, arrays other than `[16]byte`, nullable/optional fields, `int` / `uint` (platform-width; use explicit widths).
 
 **Recommended practice:** Define a named type or alias if semantic clarity is useful. The engine stores only the underlying scalar representation.
 
 **Timestamp helper:** Timestamps in Shunter are stored as `int64` Unix microseconds. Go schemas can use `time.Time` directly; lower-level code can use `types.NewTimestampFromTime` / `Value.AsTime` to convert explicitly.
 
 **Duration helper:** Durations in Shunter are stored as signed microseconds. Go schemas can use `time.Duration` directly; lower-level code can use `types.NewDurationFromTime` / `Value.AsDuration` to convert explicitly.
+
+**JSON helper:** JSON values are stored as canonical JSON bytes. Go schemas can use `json.RawMessage` directly; lower-level code can use `types.NewJSON` / `Value.AsJSON` to validate, canonicalize, and copy JSON payloads explicitly. Canonicalization rejects duplicate object keys and trailing tokens.
 
 **Auto-increment overflow:** `autoincrement` is allowed on any integer column type, but inserts fail with `ErrSequenceOverflow` once the next generated value would exceed the column's representable range.
 
@@ -652,7 +655,7 @@ type TableExport struct {
 
 type ColumnExport struct {
     Name string
-    Type string // "bool", "int8", ... "string", "bytes"
+    Type string // "bool", "int8", ... "string", "bytes", "json"
 }
 
 type IndexExport struct {

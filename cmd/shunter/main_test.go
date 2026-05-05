@@ -997,7 +997,7 @@ func TestContractCodegenInvalidSchemaColumnTypeLeavesOutputUntouched(t *testing.
 	const trace = "trace=cli-codegen-invalid-schema-column-type-output-preservation"
 	dir := t.TempDir()
 	contract := cliContractFixture()
-	contract.Schema.Tables[0].Columns[1].Type = "json"
+	contract.Schema.Tables[0].Columns[1].Type = "notAType"
 	contractPath := writeCLIContract(t, dir, "contract.json", contract)
 	outputPath := filepath.Join(dir, "client.ts")
 	original := []byte("existing generated output\n")
@@ -1018,7 +1018,7 @@ func TestContractCodegenInvalidSchemaColumnTypeLeavesOutputUntouched(t *testing.
 	if stdout.Len() != 0 {
 		t.Fatalf("%s stdout = %s, want empty", trace, stdout.String())
 	}
-	assertContains(t, stderr.String(), `schema.tables.messages.columns.body type "json" is invalid`)
+	assertContains(t, stderr.String(), `schema.tables.messages.columns.body type "notAType" is invalid`)
 	got, err := os.ReadFile(outputPath)
 	if err != nil {
 		t.Fatalf("%s read existing output: %v", trace, err)

@@ -45,6 +45,26 @@ func TestQueryHashDurationUsesDistinctKind(t *testing.T) {
 	}
 }
 
+func TestQueryHashJSONUsesCanonicalBytesAndKind(t *testing.T) {
+	j1, err := types.NewJSON([]byte(`{"b":2,"a":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	j2, err := types.NewJSON([]byte(`{"a":1,"b":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonHash := ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: j1}, nil)
+	canonicalHash := ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: j2}, nil)
+	if jsonHash != canonicalHash {
+		t.Fatal("JSON hash should use canonical bytes")
+	}
+	bytesHash := ComputeQueryHash(ColEq{Table: 1, Column: 0, Value: types.NewBytes(j1.JSONView())}, nil)
+	if jsonHash == bytesHash {
+		t.Fatal("JSON hash should include kind tag and not collapse to raw bytes")
+	}
+}
+
 func TestQueryHashCanonicalizesFloatZero(t *testing.T) {
 	neg32, err := types.NewFloat32(float32(math.Copysign(0, -1)))
 	if err != nil {

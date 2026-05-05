@@ -316,6 +316,15 @@ func mustUUIDValue(t *testing.T, s string) types.Value {
 	return v
 }
 
+func mustJSONValue(t *testing.T, raw string) types.Value {
+	t.Helper()
+	v, err := types.NewJSON([]byte(raw))
+	if err != nil {
+		t.Fatalf("NewJSON(%q): %v", raw, err)
+	}
+	return v
+}
+
 // --- Tests ---
 
 func TestHandleOneOffQuery_Valid(t *testing.T) {
@@ -409,6 +418,50 @@ func TestHandleOneOffQuery_UUIDLiteralFiltersRows(t *testing.T) {
 	}
 	if !pvs[0][0].Equal(matchingID) || !pvs[0][1].Equal(types.NewString("match")) {
 		t.Fatalf("row = %v, want matching UUID row", pvs[0])
+	}
+}
+
+func TestHandleOneOffQuery_JSONLiteralFiltersRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "documents",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "metadata", Type: schema.KindJSON},
+			{Index: 1, Name: "name", Type: schema.KindString},
+		},
+	}
+	sl := newMockSchema("documents", 1, ts.Columns...)
+	matching := mustJSONValue(t, `{"b":2,"a":1}`)
+	other := mustJSONValue(t, `{"a":1,"b":3}`)
+
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{matching, types.NewString("match")},
+				{other, types.NewString("other")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x13},
+		QueryString: `SELECT * FROM documents WHERE metadata = '{"a":1,"b":2}'`,
+	}
+
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
+	}
+	pvs := decodeRows(t, firstTableRows(result), ts)
+	if len(pvs) != 1 {
+		t.Fatalf("got %d rows, want 1", len(pvs))
+	}
+	if !pvs[0][0].Equal(matching) || !pvs[0][1].Equal(types.NewString("match")) {
+		t.Fatalf("row = %v, want matching JSON row", pvs[0])
 	}
 }
 

@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -400,6 +401,7 @@ func TestBuildReflectionPathTimestampColumn(t *testing.T) {
 		ID        uint64 `shunter:"primarykey"`
 		CreatedAt time.Time
 		TTL       time.Duration
+		Metadata  json.RawMessage
 	}
 	b := NewBuilder()
 	b.SchemaVersion(1)
@@ -427,6 +429,13 @@ func TestBuildReflectionPathTimestampColumn(t *testing.T) {
 	}
 	if col.Type != KindDuration {
 		t.Fatalf("ttl type = %v, want KindDuration", col.Type)
+	}
+	col, ok = ts.Column("metadata")
+	if !ok {
+		t.Fatal("metadata column should exist")
+	}
+	if col.Type != KindJSON {
+		t.Fatalf("metadata type = %v, want KindJSON", col.Type)
 	}
 }
 

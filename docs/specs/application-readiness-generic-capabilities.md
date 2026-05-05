@@ -25,25 +25,31 @@ capabilities.
 - Keep application imports app-owned, but provide generic hooks and runtime
   APIs that make them safe and reviewable.
 
-## 2. Implementation Order
+## 2. Remaining Implementation Order
 
-Agents should implement in this order unless a later task explicitly says
-otherwise:
+Agents should implement remaining slices in this order unless a later task
+explicitly says otherwise:
 
-1. UUID value kind.
-2. Canonical JSON value kind.
-3. Nullable column semantics.
-4. Composite index and reducer read ergonomics.
-5. Fixed-point numeric convention or column metadata.
-6. External JWT principal bridge.
-7. App-owned migration and import hooks.
-8. Ordered declared reads.
-9. Client/codegen updates for the new surface.
+1. Nullable column semantics.
+2. Composite index and reducer read ergonomics.
+3. Fixed-point numeric convention or column metadata.
+4. External JWT principal bridge.
+5. App-owned migration and import hooks.
+6. Ordered declared reads.
+7. Client/codegen updates for the new surface.
 
-The first three slices unblock most production-shaped schemas. The query,
-migration, and client work can proceed after the type surface is stable.
+Completed slices:
+
+- UUID value kind.
+- Canonical JSON value kind.
+
+Nullable values are the remaining type-system slice that unblocks most
+production-shaped schemas. The query, migration, and client work can proceed
+after the type surface is stable.
 
 ## 3. UUID Value Kind
+
+Status: implemented.
 
 ### Requirement
 
@@ -96,6 +102,8 @@ specific UUID version or application ID strategy.
 - No application-specific ID aliases.
 
 ## 4. Canonical JSON Value Kind
+
+Status: implemented.
 
 ### Requirement
 

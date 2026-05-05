@@ -31,6 +31,7 @@ const (
 	TagArrayString byte = 18
 	TagUUID        byte = 19
 	TagDuration    byte = 20
+	TagJSON        byte = 21
 )
 
 // AppendValue appends v in BSATN format to dst and returns the extended slice.
@@ -130,6 +131,11 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 	case types.KindUUID:
 		u := v.AsUUID()
 		dst = append(dst, u[:]...)
+	case types.KindJSON:
+		b := v.JSONView()
+		binary.LittleEndian.PutUint32(buf[:4], uint32(len(b)))
+		dst = append(dst, buf[:4]...)
+		dst = append(dst, b...)
 	default:
 		return dst[:start], &UnknownValueTagError{Tag: tag}
 	}
@@ -246,6 +252,13 @@ func EncodeValue(w io.Writer, v types.Value) error {
 	case types.KindUUID:
 		u := v.AsUUID()
 		return writeAll(w, u[:])
+	case types.KindJSON:
+		b := v.JSONView()
+		binary.LittleEndian.PutUint32(buf[:4], uint32(len(b)))
+		if err := writeAll(w, buf[:4]); err != nil {
+			return err
+		}
+		return writeAll(w, b)
 	default:
 		return &UnknownValueTagError{Tag: tag}
 	}
@@ -309,6 +322,8 @@ func EncodedValueSize(v types.Value) int {
 		return n
 	case types.KindUUID:
 		return 17
+	case types.KindJSON:
+		return 1 + 4 + len(v.JSONView())
 	default:
 		return 0
 	}

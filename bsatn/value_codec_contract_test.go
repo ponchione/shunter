@@ -31,6 +31,15 @@ func mustValueF64(t *testing.T, v float64) types.Value {
 	return out
 }
 
+func mustValueJSON(t *testing.T, raw string) types.Value {
+	t.Helper()
+	out, err := types.NewJSON([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func TestValueEncodeDecodeRoundTripAllKinds(t *testing.T) {
 	large := strings.Repeat("a", 70*1024)
 	cases := []types.Value{
@@ -48,6 +57,7 @@ func TestValueEncodeDecodeRoundTripAllKinds(t *testing.T) {
 		types.NewString(large),
 		types.NewBytes([]byte{1, 2, 3, 4}),
 		types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
+		mustValueJSON(t, `{"b":2,"a":1}`),
 	}
 	for _, v := range cases {
 		var buf bytes.Buffer
@@ -100,6 +110,7 @@ func TestValueEncodingTagsAndLittleEndianPayloads(t *testing.T) {
 		{"bytes", types.NewBytes([]byte{0xde, 0xad}), []byte{TagBytes, 0x02, 0x00, 0x00, 0x00, 0xde, 0xad}},
 		{"uuid", types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}), []byte{TagUUID, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}},
 		{"duration", types.NewDuration(0x0102030405060708), []byte{TagDuration, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01}},
+		{"json", mustValueJSON(t, `{"b":2,"a":1}`), []byte{TagJSON, 0x0d, 0x00, 0x00, 0x00, '{', '"', 'a', '"', ':', '1', ',', '"', 'b', '"', ':', '2', '}'}},
 	}
 	for _, tc := range cases {
 		var buf bytes.Buffer
