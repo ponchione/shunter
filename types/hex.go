@@ -5,15 +5,6 @@ import (
 	"fmt"
 )
 
-func isZeroBytes(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func hexString(b []byte) string {
 	return hex.EncodeToString(b)
 }

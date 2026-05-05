@@ -5,7 +5,7 @@ import "errors"
 // IsZero reports whether c is the all-zero ConnectionID. The zero
 // value is reserved for internal callers (no active connection).
 func (c ConnectionID) IsZero() bool {
-	return isZeroBytes(c[:])
+	return c == ConnectionID{}
 }
 
 // Hex returns the canonical 32-char lowercase hex encoding of c.

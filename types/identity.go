@@ -4,7 +4,7 @@ import "errors"
 
 // IsZero reports whether id is the all-zero Identity.
 func (id Identity) IsZero() bool {
-	return isZeroBytes(id[:])
+	return id == Identity{}
 }
 
 // Hex returns the canonical 64-char lowercase hex encoding of id
