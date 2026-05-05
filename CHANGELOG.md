@@ -5,6 +5,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Live subscription initial and final snapshots now use matching single-column indexes for equality and compound single-table filters.
 - One-off and declared single-table queries now use matching composite indexes for multi-column `ORDER BY`, including mixed directions.
 - One-off and declared multi-way join queries now use matching single-column indexes when probing joined relations.
 - One-off and declared SQL queries now support query-only multi-way joins while live subscriptions continue to reject them.

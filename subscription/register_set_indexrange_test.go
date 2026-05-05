@@ -8,11 +8,10 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// Pins the follow-on queue #1 migration: initialQuery routes a bare ColRange
-// on an indexed column through view.IndexRange, and keeps the TableScan
-// fallback for every other shape (unindexed column, nil resolver, compound
-// predicates). Prerequisite primitive is CommittedSnapshot.IndexRange backed
-// by BTreeIndex.SeekBounds (SPEC-001 §7.2 drift fix, 2026-04-22).
+// Pins the live initial-snapshot index path: indexed ColEq uses IndexSeek,
+// indexed ColRange uses IndexRange, and compound And predicates reuse those
+// candidate paths while rechecking the full predicate. Unindexed columns,
+// nil resolvers, and non-indexable shapes stay on TableScan.
 
 // countingCommitted wraps a mockCommitted and records per-method call counts
 // so tests can assert which read path the evaluator took.
@@ -21,6 +20,7 @@ type countingCommitted struct {
 	tableScanCalls  int
 	indexRangeCalls int
 	indexSeekCalls  int
+	getRowCalls     int
 }
 
 func newCountingCommitted(inner *mockCommitted) *countingCommitted {
@@ -47,6 +47,7 @@ func (c *countingCommitted) IndexSeek(tableID TableID, indexID IndexID, key stor
 }
 
 func (c *countingCommitted) GetRow(tableID TableID, rowID types.RowID) (types.ProductValue, bool) {
+	c.getRowCalls++
 	return c.inner.GetRow(tableID, rowID)
 }
 
@@ -125,7 +126,91 @@ func TestInitialJoinProjectedSideIndexAvoidsNestedTableScans(t *testing.T) {
 	}
 }
 
-// 1: Indexed ColRange uses IndexRange, not TableScan.
+func TestInitialQueryIndexedColEqUsesIndexSeek(t *testing.T) {
+	s := testSchema() // table 1 col 0 indexed
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+			{types.NewUint64(2), types.NewString("c")},
+		},
+	})
+	view := newCountingCommitted(inner)
+	mgr := NewManager(s, s)
+	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)}
+	rows := collectInserts(registerColRange(t, mgr, view, pred))
+	if view.indexSeekCalls != 1 {
+		t.Fatalf("IndexSeek calls = %d, want 1", view.indexSeekCalls)
+	}
+	if view.indexRangeCalls != 0 {
+		t.Fatalf("IndexRange calls = %d, want 0 for equality path", view.indexRangeCalls)
+	}
+	if view.tableScanCalls != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 (indexed equality path)", view.tableScanCalls)
+	}
+	if view.getRowCalls != 2 {
+		t.Fatalf("GetRow calls = %d, want 2 indexed candidates", view.getRowCalls)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows len = %d, want 2", len(rows))
+	}
+}
+
+func TestInitialQueryIndexedColEqCompoundRechecksPredicate(t *testing.T) {
+	s := testSchema() // table 1 col 0 indexed
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+			{types.NewUint64(2), types.NewString("c")},
+		},
+	})
+	view := newCountingCommitted(inner)
+	mgr := NewManager(s, s)
+	pred := And{
+		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)},
+		Right: ColEq{Table: 1, Column: 1, Value: types.NewString("b")},
+	}
+	rows := collectInserts(registerColRange(t, mgr, view, pred))
+	if view.indexSeekCalls != 1 {
+		t.Fatalf("IndexSeek calls = %d, want 1", view.indexSeekCalls)
+	}
+	if view.tableScanCalls != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 (indexed equality compound path)", view.tableScanCalls)
+	}
+	if len(rows) != 1 || !rows[0][1].Equal(types.NewString("b")) {
+		t.Fatalf("rows = %v, want exactly {2,b}", rows)
+	}
+}
+
+func TestInitialQueryIndexedColEqCompoundSkipsUnindexedCandidate(t *testing.T) {
+	s := testSchema() // table 1 col 0 indexed; col 1 is not indexed
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("b")},
+			{types.NewUint64(2), types.NewString("b")},
+			{types.NewUint64(2), types.NewString("c")},
+		},
+	})
+	view := newCountingCommitted(inner)
+	mgr := NewManager(s, s)
+	pred := And{
+		Left:  ColEq{Table: 1, Column: 1, Value: types.NewString("b")},
+		Right: ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)},
+	}
+	rows := collectInserts(registerColRange(t, mgr, view, pred))
+	if view.indexSeekCalls != 1 {
+		t.Fatalf("IndexSeek calls = %d, want 1", view.indexSeekCalls)
+	}
+	if view.tableScanCalls != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 (later indexed equality path)", view.tableScanCalls)
+	}
+	if len(rows) != 1 || !rows[0][1].Equal(types.NewString("b")) {
+		t.Fatalf("rows = %v, want exactly {2,b}", rows)
+	}
+}
+
+// Indexed ColRange uses IndexRange, not TableScan.
 func TestInitialQueryIndexedColRangeUsesIndexRange(t *testing.T) {
 	s := testSchema() // table 1 col 0 indexed
 	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
@@ -283,9 +368,9 @@ func TestInitialQueryNilResolverUsesTableScan(t *testing.T) {
 	}
 }
 
-// 7: Compound And wrapping a ColRange stays on the TableScan fallback —
-// the migration is intentionally narrow to bare ColRange.
-func TestInitialQueryCompoundAndStaysOnTableScan(t *testing.T) {
+// Compound And wrapping a ColRange uses IndexRange and rechecks the full
+// predicate against indexed candidates.
+func TestInitialQueryCompoundAndColRangeUsesIndexRange(t *testing.T) {
 	s := testSchema()
 	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
 		1: {
@@ -303,11 +388,11 @@ func TestInitialQueryCompoundAndStaysOnTableScan(t *testing.T) {
 		Right: ColEq{Table: 1, Column: 1, Value: types.NewString("b")},
 	}
 	rows := collectInserts(registerColRange(t, mgr, view, pred))
-	if view.indexRangeCalls != 0 {
-		t.Fatalf("IndexRange calls = %d, want 0 (And is not bare ColRange)", view.indexRangeCalls)
+	if view.indexRangeCalls != 1 {
+		t.Fatalf("IndexRange calls = %d, want 1", view.indexRangeCalls)
 	}
-	if view.tableScanCalls != 1 {
-		t.Fatalf("TableScan calls = %d, want 1 (compound fallback)", view.tableScanCalls)
+	if view.tableScanCalls != 0 {
+		t.Fatalf("TableScan calls = %d, want 0 (indexed compound path)", view.tableScanCalls)
 	}
 	if len(rows) != 1 || !rows[0][1].Equal(types.NewString("b")) {
 		t.Fatalf("rows = %v, want exactly {2,b}", rows)
@@ -377,5 +462,73 @@ func TestUnregisterSetFinalDeltaIndexedColRangeUsesIndexRange(t *testing.T) {
 	}
 	if len(deletes) != 3 {
 		t.Fatalf("final-delta deletes len = %d, want 3", len(deletes))
+	}
+}
+
+func TestUnregisterSetFinalDeltaIndexedColEqUsesIndexSeek(t *testing.T) {
+	s := testSchema()
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("a")},
+			{types.NewUint64(2), types.NewString("b")},
+			{types.NewUint64(2), types.NewString("c")},
+		},
+	})
+	view := newCountingCommitted(inner)
+	mgr := NewManager(s, s)
+	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
+	}, view); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	beforeSeek := view.indexSeekCalls
+	beforeTable := view.tableScanCalls
+	res, err := mgr.UnregisterSet(types.ConnectionID{1}, 10, view)
+	if err != nil {
+		t.Fatalf("UnregisterSet = %v", err)
+	}
+	if view.indexSeekCalls-beforeSeek != 1 {
+		t.Fatalf("UnregisterSet IndexSeek delta = %d, want 1", view.indexSeekCalls-beforeSeek)
+	}
+	if view.tableScanCalls-beforeTable != 0 {
+		t.Fatalf("UnregisterSet TableScan delta = %d, want 0 (indexed final-delta)", view.tableScanCalls-beforeTable)
+	}
+	var deletes []types.ProductValue
+	for _, u := range res.Update {
+		deletes = append(deletes, u.Deletes...)
+	}
+	if len(deletes) != 2 {
+		t.Fatalf("final-delta deletes len = %d, want 2", len(deletes))
+	}
+}
+
+func TestIndexedInitialQueryStillReceivesCommitDeltas(t *testing.T) {
+	s := testSchema()
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(2), types.NewString("initial")},
+		},
+	})
+	view := newCountingCommitted(inner)
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(2)}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
+	}, view); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	mgr.EvalAndBroadcast(types.TxID(1), simpleChangeset(1, []types.ProductValue{
+		{types.NewUint64(2), types.NewString("delta")},
+		{types.NewUint64(3), types.NewString("ignored")},
+	}, nil), view, PostCommitMeta{})
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 || len(updates[0].Inserts) != 1 {
+		t.Fatalf("fanout updates = %+v, want one matching insert", updates)
+	}
+	if !updates[0].Inserts[0][1].Equal(types.NewString("delta")) {
+		t.Fatalf("insert = %v, want delta row", updates[0].Inserts[0])
 	}
 }

@@ -130,16 +130,35 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 		return nil, err
 	}
 	var out []types.ProductValue
-	// SPEC-001 §7.2 / SPEC-004: bare ColRange on an indexed column hits
-	// view.IndexRange directly; the BTree binary-search start + ordered
-	// range walk replaces the full TableScan + per-row bound recheck.
-	// Compound shapes (And/Or), ColEq/ColNe/AllRows, or ranges on an
-	// unindexed column stay on the TableScan+MatchRow fallback.
-	if r, ok := pred.(ColRange); ok && r.Table == table && m.resolver != nil {
-		if idxID, ok := m.resolver.IndexIDForColumn(r.Table, r.Column); ok {
+	if m.resolver != nil {
+		if eq, idxID, ok := initialIndexedEquality(pred, table, m.resolver); ok {
+			key := store.NewIndexKey(eq.Value)
+			for _, rid := range view.IndexSeek(eq.Table, idxID, key) {
+				if err := collector.err(); err != nil {
+					return nil, err
+				}
+				row, ok := view.GetRow(eq.Table, rid)
+				if !ok {
+					continue
+				}
+				if MatchRow(pred, table, row) {
+					if err := collector.add(&out, row); err != nil {
+						return nil, err
+					}
+				}
+			}
+			return out, nil
+		}
+		if r, idxID, ok := initialIndexedRange(pred, table, m.resolver); ok {
 			lower := store.Bound{Value: r.Lower.Value, Inclusive: r.Lower.Inclusive, Unbounded: r.Lower.Unbounded}
 			upper := store.Bound{Value: r.Upper.Value, Inclusive: r.Upper.Inclusive, Unbounded: r.Upper.Unbounded}
 			for _, row := range view.IndexRange(table, idxID, lower, upper) {
+				if err := collector.err(); err != nil {
+					return nil, err
+				}
+				if !MatchRow(pred, table, row) {
+					continue
+				}
 				if err := collector.add(&out, row); err != nil {
 					return nil, err
 				}
@@ -158,6 +177,52 @@ func (m *Manager) initialRowsForTable(collector *initialRowCollector, pred Predi
 		}
 	}
 	return out, nil
+}
+
+func initialIndexedEquality(pred Predicate, table TableID, resolver IndexResolver) (ColEq, IndexID, bool) {
+	var zeroIdx IndexID
+	if resolver == nil {
+		return ColEq{}, zeroIdx, false
+	}
+	switch p := pred.(type) {
+	case ColEq:
+		if p.Table == table && p.Alias == 0 {
+			if idxID, ok := resolver.IndexIDForColumn(p.Table, p.Column); ok {
+				return p, idxID, true
+			}
+		}
+	case And:
+		if eq, idxID, ok := initialIndexedEquality(p.Left, table, resolver); ok {
+			return eq, idxID, true
+		}
+		if eq, idxID, ok := initialIndexedEquality(p.Right, table, resolver); ok {
+			return eq, idxID, true
+		}
+	}
+	return ColEq{}, zeroIdx, false
+}
+
+func initialIndexedRange(pred Predicate, table TableID, resolver IndexResolver) (ColRange, IndexID, bool) {
+	var zeroIdx IndexID
+	if resolver == nil {
+		return ColRange{}, zeroIdx, false
+	}
+	switch p := pred.(type) {
+	case ColRange:
+		if p.Table == table && p.Alias == 0 {
+			if idxID, ok := resolver.IndexIDForColumn(p.Table, p.Column); ok {
+				return p, idxID, true
+			}
+		}
+	case And:
+		if r, idxID, ok := initialIndexedRange(p.Left, table, resolver); ok {
+			return r, idxID, true
+		}
+		if r, idxID, ok := initialIndexedRange(p.Right, table, resolver); ok {
+			return r, idxID, true
+		}
+	}
+	return ColRange{}, zeroIdx, false
 }
 
 func (m *Manager) appendProjectedCrossJoinRows(ctx context.Context, out []types.ProductValue, view store.CommittedReadView, p CrossJoin) ([]types.ProductValue, error) {
