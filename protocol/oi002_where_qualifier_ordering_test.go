@@ -23,14 +23,8 @@ func TestOI002WhereQualifierOrdering_FromResolutionPrecedesWhereQualifier(t *tes
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	const want = "no such table: `missing`. If the table exists, it may be marked private."
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002WhereQualifierOrdering_SubscribeFromResolutionPrecedesWhereQualifier(t *testing.T) {
@@ -48,15 +42,8 @@ func TestOI002WhereQualifierOrdering_SubscribeFromResolutionPrecedesWhereQualifi
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
-	}
-	se := decoded.(SubscriptionError)
 	want := "no such table: `missing`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
+	requireSubscriptionError(t, conn, 738, 739, want)
 }
 
 func TestOI002WhereQualifierOrdering_JoinRightTableResolutionPrecedesWhereQualifier(t *testing.T) {
@@ -74,14 +61,8 @@ func TestOI002WhereQualifierOrdering_JoinRightTableResolutionPrecedesWhereQualif
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	const want = "no such table: `missing`. If the table exists, it may be marked private."
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002WhereQualifierOrdering_SubscribeJoinRightTableResolutionPrecedesWhereQualifier(t *testing.T) {
@@ -99,15 +80,8 @@ func TestOI002WhereQualifierOrdering_SubscribeJoinRightTableResolutionPrecedesWh
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
-	}
-	se := decoded.(SubscriptionError)
 	want := "no such table: `missing`. If the table exists, it may be marked private., executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
+	requireSubscriptionError(t, conn, 740, 741, want)
 }
 
 func TestOI002WhereQualifierOrdering_JoinOnResolutionPrecedesWhereQualifier(t *testing.T) {
@@ -133,14 +107,8 @@ func TestOI002WhereQualifierOrdering_JoinOnResolutionPrecedesWhereQualifier(t *t
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	const want = "`missing` is not in scope"
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002WhereQualifierOrdering_SubscribeJoinOnResolutionPrecedesWhereQualifier(t *testing.T) {
@@ -166,13 +134,6 @@ func TestOI002WhereQualifierOrdering_SubscribeJoinOnResolutionPrecedesWhereQuali
 	}
 	handleSubscribeSingle(context.Background(), conn, msg, executor, sl)
 
-	tag, decoded := drainServerMsgEventually(t, conn)
-	if tag != TagSubscriptionError {
-		t.Fatalf("tag = %d, want TagSubscriptionError", tag)
-	}
-	se := decoded.(SubscriptionError)
 	want := "`missing` is not in scope, executing: `" + sqlText + "`"
-	if se.Error != want {
-		t.Fatalf("Error = %q, want %q", se.Error, want)
-	}
+	requireSubscriptionError(t, conn, 742, 743, want)
 }

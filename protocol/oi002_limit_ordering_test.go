@@ -23,14 +23,8 @@ func TestOI002LimitOrdering_MissingTablePrecedesInvalidLimitLiteral(t *testing.T
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	const want = "no such table: `missing_table`. If the table exists, it may be marked private."
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002LimitOrdering_ProjectionErrorPrecedesInvalidLimitLiteral(t *testing.T) {
@@ -48,14 +42,8 @@ func TestOI002LimitOrdering_ProjectionErrorPrecedesInvalidLimitLiteral(t *testin
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	const want = "`missing` is not in scope"
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002LimitOrdering_WhereErrorPrecedesInvalidLimitLiteral(t *testing.T) {
@@ -73,14 +61,8 @@ func TestOI002LimitOrdering_WhereErrorPrecedesInvalidLimitLiteral(t *testing.T) 
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	const want = "`missing` is not in scope"
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002LimitOrdering_JoinOnErrorPrecedesInvalidLimitLiteral(t *testing.T) {
@@ -106,14 +88,8 @@ func TestOI002LimitOrdering_JoinOnErrorPrecedesInvalidLimitLiteral(t *testing.T)
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	const want = "`missing` is not in scope"
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002LimitOrdering_LeadingPlusLimitRejectedByReferenceParser(t *testing.T) {
@@ -133,14 +109,8 @@ func TestOI002LimitOrdering_LeadingPlusLimitRejectedByReferenceParser(t *testing
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	want := "Unsupported: " + sqlText
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002LimitOrdering_NegativeLimitRejectedByReferenceParser(t *testing.T) {
@@ -160,14 +130,8 @@ func TestOI002LimitOrdering_NegativeLimitRejectedByReferenceParser(t *testing.T)
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	want := "Unsupported: " + sqlText
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002LimitOrdering_SignedLimitRejectedBeforeMissingTable(t *testing.T) {
@@ -185,14 +149,8 @@ func TestOI002LimitOrdering_SignedLimitRejectedBeforeMissingTable(t *testing.T) 
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	want := "Unsupported: " + sqlText
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
 
 func TestOI002LimitOrdering_NonNumericLimitRejectedBeforeProjection(t *testing.T) {
@@ -210,12 +168,6 @@ func TestOI002LimitOrdering_NonNumericLimitRejectedBeforeProjection(t *testing.T
 	}
 	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
 
-	result := drainOneOff(t, conn)
 	want := "Unsupported: " + sqlText
-	if result.Error == nil || *result.Error != want {
-		if result.Error == nil {
-			t.Fatalf("Error = nil, want %q", want)
-		}
-		t.Fatalf("Error = %q, want %q", *result.Error, want)
-	}
+	requireOneOffError(t, conn, want)
 }
