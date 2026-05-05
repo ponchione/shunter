@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -110,23 +111,11 @@ func compareTableSchema(registered, snapshot TableSchema, diffs *[]string) {
 		for i := range registered.Indexes {
 			ri := registered.Indexes[i]
 			si := snapshot.Indexes[i]
-			if ri.Name != si.Name || ri.Unique != si.Unique || ri.Primary != si.Primary || !equalIntSlices(ri.Columns, si.Columns) {
+			if ri.Name != si.Name || ri.Unique != si.Unique || ri.Primary != si.Primary || !slices.Equal(ri.Columns, si.Columns) {
 				*diffs = append(*diffs, fmt.Sprintf("table %q index %d mismatch: registered={name:%q columns:%v unique:%t primary:%t} snapshot={name:%q columns:%v unique:%t primary:%t}", registered.Name, i, ri.Name, ri.Columns, ri.Unique, ri.Primary, si.Name, si.Columns, si.Unique, si.Primary))
 			}
 		}
 	}
-}
-
-func equalIntSlices(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // Start performs runtime initialization, including schema compatibility checks

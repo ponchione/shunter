@@ -2,6 +2,7 @@ package schema
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -178,7 +179,7 @@ func TestBuildTableReadPolicyOptions(t *testing.T) {
 			if ts.ReadPolicy.Access != tt.wantAccess {
 				t.Fatalf("read access = %s, want %s", ts.ReadPolicy.Access, tt.wantAccess)
 			}
-			if !equalStringSlices(ts.ReadPolicy.Permissions, tt.wantPerms) {
+			if !slices.Equal(ts.ReadPolicy.Permissions, tt.wantPerms) {
 				t.Fatalf("read permissions = %#v, want %#v", ts.ReadPolicy.Permissions, tt.wantPerms)
 			}
 		})
@@ -698,18 +699,6 @@ func TestRegistryVersion(t *testing.T) {
 	if e.Registry().Version() != 1 {
 		t.Fatalf("expected version 1, got %d", e.Registry().Version())
 	}
-}
-
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestRegistryReducer(t *testing.T) {
