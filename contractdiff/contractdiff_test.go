@@ -489,41 +489,10 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentContractWithContext(t *tes
 	oldData := mustContractJSON(t, contractFixture())
 	currentData := mustRawContractJSON(t, current)
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(oldData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "current contract") {
-				t.Fatalf("JSON entry point error = %v, want current contract context", err)
-			}
-			if !strings.Contains(err.Error(), "visibility_filters.own_messages return_table_id") {
-				t.Fatalf("JSON entry point error = %v, want visibility filter metadata context", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
+		"current contract",
+		"visibility_filters.own_messages return_table_id",
+	)
 }
 
 func TestContractDiffJSONRejectsSemanticInvalidCurrentMigrationMetadataWithContext(t *testing.T) {
@@ -541,44 +510,11 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentMigrationMetadataWithConte
 	oldData := mustContractJSON(t, contractFixture())
 	currentData := mustRawContractJSON(t, current)
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(oldData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "current contract") {
-				t.Fatalf("JSON entry point error = %v, want current contract context", err)
-			}
-			if !strings.Contains(err.Error(), `migrations.query.history.compatibility = "maybe" is invalid`) {
-				t.Fatalf("JSON entry point error = %v, want migration compatibility context", err)
-			}
-			if !strings.Contains(err.Error(), `migrations.query.history.classifications contains invalid value "rewrite"`) {
-				t.Fatalf("JSON entry point error = %v, want migration classification context", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
+		"current contract",
+		`migrations.query.history.compatibility = "maybe" is invalid`,
+		`migrations.query.history.classifications contains invalid value "rewrite"`,
+	)
 }
 
 func TestContractDiffJSONRejectsCurrentMigrationUnknownTargetWithContext(t *testing.T) {
@@ -593,41 +529,10 @@ func TestContractDiffJSONRejectsCurrentMigrationUnknownTargetWithContext(t *test
 	oldData := mustContractJSON(t, contractFixture())
 	currentData := mustRawContractJSON(t, current)
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(oldData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "current contract") {
-				t.Fatalf("JSON entry point error = %v, want current contract context", err)
-			}
-			if !strings.Contains(err.Error(), "migrations.table.missing_table references unknown table") {
-				t.Fatalf("JSON entry point error = %v, want unknown migration target context", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
+		"current contract",
+		"migrations.table.missing_table references unknown table",
+	)
 }
 
 func TestContractDiffJSONRejectsSemanticInvalidMigrationSurfaceWithContext(t *testing.T) {
@@ -668,41 +573,10 @@ func TestContractDiffJSONRejectsSemanticInvalidMigrationSurfaceWithContext(t *te
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, tt := range []struct {
-				name string
-				run  func() error
-			}{
-				{
-					name: "compare",
-					run: func() error {
-						_, err := CompareJSON(tc.previous, tc.current)
-						return err
-					},
-				},
-				{
-					name: "plan",
-					run: func() error {
-						_, err := PlanJSON(tc.previous, tc.current, PlanOptions{ValidateContracts: true})
-						return err
-					},
-				},
-			} {
-				t.Run(tt.name, func(t *testing.T) {
-					err := tt.run()
-					if err == nil {
-						t.Fatal("JSON entry point returned nil error, want invalid contract")
-					}
-					if !errors.Is(err, ErrInvalidContractJSON) {
-						t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-					}
-					if !strings.Contains(err.Error(), tc.wantContext) {
-						t.Fatalf("JSON entry point error = %v, want %s context", err, tc.wantContext)
-					}
-					if !strings.Contains(err.Error(), `migrations surface "subscription" is invalid`) {
-						t.Fatalf("JSON entry point error = %v, want invalid migration surface context", err)
-					}
-				})
-			}
+			assertJSONEntryPointsRejectInvalidContract(t, tc.previous, tc.current,
+				tc.wantContext,
+				`migrations surface "subscription" is invalid`,
+			)
 		})
 	}
 }
@@ -716,41 +590,10 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentPermissionTargetWithContex
 	oldData := mustContractJSON(t, contractFixture())
 	currentData := mustRawContractJSON(t, current)
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(oldData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "current contract") {
-				t.Fatalf("JSON entry point error = %v, want current contract context", err)
-			}
-			if !strings.Contains(err.Error(), "permissions.query.missing_query references unknown query") {
-				t.Fatalf("JSON entry point error = %v, want permission target context", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
+		"current contract",
+		"permissions.query.missing_query references unknown query",
+	)
 }
 
 func TestContractDiffJSONRejectsSemanticInvalidPreviousPermissionTargetWithContext(t *testing.T) {
@@ -762,41 +605,10 @@ func TestContractDiffJSONRejectsSemanticInvalidPreviousPermissionTargetWithConte
 	previousData := mustRawContractJSON(t, previous)
 	currentData := mustContractJSON(t, contractFixture())
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(previousData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(previousData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "previous contract") {
-				t.Fatalf("JSON entry point error = %v, want previous contract context", err)
-			}
-			if !strings.Contains(err.Error(), "permissions.reducer.missing_reducer references unknown reducer") {
-				t.Fatalf("JSON entry point error = %v, want permission reducer target context", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, previousData, currentData,
+		"previous contract",
+		"permissions.reducer.missing_reducer references unknown reducer",
+	)
 }
 
 func TestContractDiffJSONRejectsSemanticInvalidCurrentReadModelTargetWithContext(t *testing.T) {
@@ -810,41 +622,10 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentReadModelTargetWithContext
 	oldData := mustContractJSON(t, contractFixture())
 	currentData := mustRawContractJSON(t, current)
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(oldData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "current contract") {
-				t.Fatalf("JSON entry point error = %v, want current contract context", err)
-			}
-			if !strings.Contains(err.Error(), "read_model.view.missing_view references unknown view") {
-				t.Fatalf("JSON entry point error = %v, want read_model view target context", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
+		"current contract",
+		"read_model.view.missing_view references unknown view",
+	)
 }
 
 func TestContractDiffJSONRejectsSemanticInvalidReadModelSurfaceWithContext(t *testing.T) {
@@ -883,41 +664,10 @@ func TestContractDiffJSONRejectsSemanticInvalidReadModelSurfaceWithContext(t *te
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, tt := range []struct {
-				name string
-				run  func() error
-			}{
-				{
-					name: "compare",
-					run: func() error {
-						_, err := CompareJSON(tc.previous, tc.current)
-						return err
-					},
-				},
-				{
-					name: "plan",
-					run: func() error {
-						_, err := PlanJSON(tc.previous, tc.current, PlanOptions{ValidateContracts: true})
-						return err
-					},
-				},
-			} {
-				t.Run(tt.name, func(t *testing.T) {
-					err := tt.run()
-					if err == nil {
-						t.Fatal("JSON entry point returned nil error, want invalid contract")
-					}
-					if !errors.Is(err, ErrInvalidContractJSON) {
-						t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-					}
-					if !strings.Contains(err.Error(), tc.wantContext) {
-						t.Fatalf("JSON entry point error = %v, want %s context", err, tc.wantContext)
-					}
-					if !strings.Contains(err.Error(), `read_model surface "subscription" is invalid`) {
-						t.Fatalf("JSON entry point error = %v, want invalid read_model surface context", err)
-					}
-				})
-			}
+			assertJSONEntryPointsRejectInvalidContract(t, tc.previous, tc.current,
+				tc.wantContext,
+				`read_model surface "subscription" is invalid`,
+			)
 		})
 	}
 }
@@ -931,44 +681,11 @@ func TestContractDiffJSONRejectsSemanticInvalidCurrentTableReadPolicyWithContext
 	oldData := mustContractJSON(t, contractFixture())
 	currentData := mustRawContractJSON(t, current)
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(oldData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(oldData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "current contract") {
-				t.Fatalf("JSON entry point error = %v, want current contract context", err)
-			}
-			if !strings.Contains(err.Error(), "schema.tables.messages.read_policy invalid") {
-				t.Fatalf("JSON entry point error = %v, want table read policy context", err)
-			}
-			if !strings.Contains(err.Error(), "public read policy must not include permissions") {
-				t.Fatalf("JSON entry point error = %v, want public read policy detail", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, oldData, currentData,
+		"current contract",
+		"schema.tables.messages.read_policy invalid",
+		"public read policy must not include permissions",
+	)
 }
 
 func TestContractDiffJSONRejectsSemanticInvalidPreviousTableReadPolicyWithContext(t *testing.T) {
@@ -980,44 +697,11 @@ func TestContractDiffJSONRejectsSemanticInvalidPreviousTableReadPolicyWithContex
 	previousData := mustRawContractJSON(t, previous)
 	currentData := mustContractJSON(t, contractFixture())
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(previousData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(previousData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "previous contract") {
-				t.Fatalf("JSON entry point error = %v, want previous contract context", err)
-			}
-			if !strings.Contains(err.Error(), "schema.tables.messages.read_policy invalid") {
-				t.Fatalf("JSON entry point error = %v, want table read policy context", err)
-			}
-			if !strings.Contains(err.Error(), "public read policy must not include permissions") {
-				t.Fatalf("JSON entry point error = %v, want public read policy detail", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, previousData, currentData,
+		"previous contract",
+		"schema.tables.messages.read_policy invalid",
+		"public read policy must not include permissions",
+	)
 }
 
 func TestContractDiffJSONRejectsSemanticInvalidPreviousReadModelWithContext(t *testing.T) {
@@ -1031,41 +715,10 @@ func TestContractDiffJSONRejectsSemanticInvalidPreviousReadModelWithContext(t *t
 	previousData := mustRawContractJSON(t, previous)
 	currentData := mustContractJSON(t, contractFixture())
 
-	for _, tt := range []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "compare",
-			run: func() error {
-				_, err := CompareJSON(previousData, currentData)
-				return err
-			},
-		},
-		{
-			name: "plan",
-			run: func() error {
-				_, err := PlanJSON(previousData, currentData, PlanOptions{ValidateContracts: true})
-				return err
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil {
-				t.Fatal("JSON entry point returned nil error, want invalid contract")
-			}
-			if !errors.Is(err, ErrInvalidContractJSON) {
-				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
-			}
-			if !strings.Contains(err.Error(), "previous contract") {
-				t.Fatalf("JSON entry point error = %v, want previous contract context", err)
-			}
-			if !strings.Contains(err.Error(), `read_model.query.history references unknown table "missing_table"`) {
-				t.Fatalf("JSON entry point error = %v, want read_model table context", err)
-			}
-		})
-	}
+	assertJSONEntryPointsRejectInvalidContract(t, previousData, currentData,
+		"previous contract",
+		`read_model.query.history references unknown table "missing_table"`,
+	)
 }
 
 func TestContractDiffJSONRejectsSemanticInvalidPreviousMigrationMetadataWithContext(t *testing.T) {
@@ -1080,6 +733,14 @@ func TestContractDiffJSONRejectsSemanticInvalidPreviousMigrationMetadataWithCont
 	previousData := mustRawContractJSON(t, previous)
 	currentData := mustContractJSON(t, contractFixture())
 
+	assertJSONEntryPointsRejectInvalidContract(t, previousData, currentData,
+		"previous contract",
+		`migrations.table.messages.compatibility = "maybe" is invalid`,
+	)
+}
+
+func assertJSONEntryPointsRejectInvalidContract(t *testing.T, previous, current []byte, wantSubstrings ...string) {
+	t.Helper()
 	for _, tt := range []struct {
 		name string
 		run  func() error
@@ -1087,14 +748,14 @@ func TestContractDiffJSONRejectsSemanticInvalidPreviousMigrationMetadataWithCont
 		{
 			name: "compare",
 			run: func() error {
-				_, err := CompareJSON(previousData, currentData)
+				_, err := CompareJSON(previous, current)
 				return err
 			},
 		},
 		{
 			name: "plan",
 			run: func() error {
-				_, err := PlanJSON(previousData, currentData, PlanOptions{ValidateContracts: true})
+				_, err := PlanJSON(previous, current, PlanOptions{ValidateContracts: true})
 				return err
 			},
 		},
@@ -1107,11 +768,10 @@ func TestContractDiffJSONRejectsSemanticInvalidPreviousMigrationMetadataWithCont
 			if !errors.Is(err, ErrInvalidContractJSON) {
 				t.Fatalf("JSON entry point error = %v, want ErrInvalidContractJSON", err)
 			}
-			if !strings.Contains(err.Error(), "previous contract") {
-				t.Fatalf("JSON entry point error = %v, want previous contract context", err)
-			}
-			if !strings.Contains(err.Error(), `migrations.table.messages.compatibility = "maybe" is invalid`) {
-				t.Fatalf("JSON entry point error = %v, want previous migration metadata context", err)
+			for _, want := range wantSubstrings {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("JSON entry point error = %v, want substring %q", err, want)
+				}
 			}
 		})
 	}
