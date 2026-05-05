@@ -58,14 +58,7 @@ func CheckSchemaCompatibility(registered SchemaRegistry, snapshot *SnapshotSchem
 		snapshotByID[table.ID] = table
 	}
 	for _, table := range snapshot.Tables {
-		found := false
-		for _, id := range registeredIDs {
-			if id == table.ID {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(registeredIDs, table.ID) {
 			diffs = append(diffs, fmt.Sprintf("snapshot has unexpected table id %d (%s)", table.ID, table.Name))
 		}
 	}
