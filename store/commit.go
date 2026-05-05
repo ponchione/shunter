@@ -19,7 +19,7 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 	cs.Lock()
 	defer cs.Unlock()
 
-	txState := tx.txStateForCommit()
+	txState := tx.tx
 	if err := revalidateCommit(cs, txState); err != nil {
 		return nil, err
 	}

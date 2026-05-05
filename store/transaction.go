@@ -63,8 +63,6 @@ func (t *Transaction) TxState() *TxState {
 	return t.tx
 }
 
-func (t *Transaction) txStateForCommit() *TxState { return t.tx }
-
 // Seal closes reducer-facing access while preserving the transaction buffers
 // for the executor's internal commit path.
 func (t *Transaction) Seal() {

@@ -112,7 +112,7 @@ func advanceReplaySequenceForInsert(table *Table, row types.ProductValue) {
 	if table.sequence == nil || table.sequenceCol < 0 {
 		return
 	}
-	value, ok := replayAutoIncrementValueAsUint64(row[table.sequenceCol], table.schema.Columns[table.sequenceCol].Type)
+	value, ok := autoIncrementValueAsUint64(row[table.sequenceCol], table.schema.Columns[table.sequenceCol].Type)
 	if !ok {
 		return
 	}
@@ -121,10 +121,6 @@ func advanceReplaySequenceForInsert(table *Table, row types.ProductValue) {
 	if current != 0 && next > current {
 		table.sequence.Reset(next)
 	}
-}
-
-func replayAutoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, bool) {
-	return autoIncrementValueAsUint64(v, kind)
 }
 
 // ExportTableState returns the RowID counter and sequence values for snapshot persistence.
