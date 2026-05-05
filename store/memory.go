@@ -48,13 +48,8 @@ func (cs *CommittedState) RecordMemoryUsage() {
 }
 
 func (cs *CommittedState) memoryUsageLocked() []MemoryUsage {
-	ids := cs.tableIDsLocked()
-	out := make([]MemoryUsage, 0, len(ids))
-	for _, tableID := range ids {
-		table, ok := cs.tableLocked(tableID)
-		if !ok {
-			continue
-		}
+	out := make([]MemoryUsage, 0, len(cs.tables))
+	for tableID, table := range cs.tables {
 		out = append(out, table.memoryUsage(tableID)...)
 	}
 	return out
