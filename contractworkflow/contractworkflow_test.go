@@ -375,292 +375,143 @@ func TestGenerateFileRejectsUnsupportedLanguageBeforeReadingContract(t *testing.
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
-func TestGenerateFileSemanticInvalidContractLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=workflow-codegen-semantic-invalid-contract-output-preservation"
-	dir := t.TempDir()
-	invalidContract := workflowContractFixture()
-	invalidContract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
-		Surface: shunter.MigrationSurfaceQuery,
-		Name:    "history",
-		Metadata: shunter.MigrationMetadata{
-			Compatibility: shunter.MigrationCompatibility("maybe"),
+func TestGenerateFileInvalidContractLeavesOutputUntouched(t *testing.T) {
+	cases := []struct {
+		name            string
+		mutate          func(*shunter.ModuleContract)
+		wantErrContains string
+	}{
+		{
+			name: "semantic_invalid_migration_compatibility",
+			mutate: func(contract *shunter.ModuleContract) {
+				contract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+					Surface: shunter.MigrationSurfaceQuery,
+					Name:    "history",
+					Metadata: shunter.MigrationMetadata{
+						Compatibility: shunter.MigrationCompatibility("maybe"),
+					},
+				}}
+			},
+			wantErrContains: "migrations.query.history.compatibility",
 		},
-	}}
-	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
-	outputPath := filepath.Join(dir, "client.ts")
-	original := []byte("existing generated output\n")
-	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
-	}
-
-	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
-	if err == nil {
-		t.Fatalf("%s GenerateFile returned nil error for semantic-invalid contract", trace)
-	}
-	if !errors.Is(err, codegen.ErrInvalidContract) {
-		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
-	}
-	if !strings.Contains(err.Error(), "migrations.query.history.compatibility") {
-		t.Fatalf("%s GenerateFile error = %v, want migration metadata context", trace, err)
-	}
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
-	}
-	if !bytes.Equal(got, original) {
-		t.Fatalf("%s semantic-invalid contract mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
-	}
-	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
-}
-
-func TestGenerateFileInvalidMigrationSurfaceLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=workflow-codegen-invalid-migration-surface-output-preservation"
-	dir := t.TempDir()
-	invalidContract := workflowContractFixture()
-	invalidContract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
-		Surface: "subscription",
-		Name:    "recent_messages",
-		Metadata: shunter.MigrationMetadata{
-			Compatibility: shunter.MigrationCompatibilityCompatible,
+		{
+			name: "invalid_migration_surface",
+			mutate: func(contract *shunter.ModuleContract) {
+				contract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+					Surface: "subscription",
+					Name:    "recent_messages",
+					Metadata: shunter.MigrationMetadata{
+						Compatibility: shunter.MigrationCompatibilityCompatible,
+					},
+				}}
+			},
+			wantErrContains: `migrations surface "subscription" is invalid`,
 		},
-	}}
-	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
-	outputPath := filepath.Join(dir, "client.ts")
-	original := []byte("existing generated output\n")
-	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
-	}
-
-	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
-	if err == nil {
-		t.Fatalf("%s GenerateFile returned nil error for invalid migration surface", trace)
-	}
-	if !errors.Is(err, codegen.ErrInvalidContract) {
-		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
-	}
-	if !strings.Contains(err.Error(), `migrations surface "subscription" is invalid`) {
-		t.Fatalf("%s GenerateFile error = %v, want invalid migration surface context", trace, err)
-	}
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
-	}
-	if !bytes.Equal(got, original) {
-		t.Fatalf("%s invalid migration surface mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
-	}
-	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
-}
-
-func TestGenerateFileUnknownMigrationTargetLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=workflow-codegen-unknown-migration-target-output-preservation"
-	dir := t.TempDir()
-	invalidContract := workflowContractFixture()
-	invalidContract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
-		Surface: shunter.MigrationSurfaceTable,
-		Name:    "missing_table",
-		Metadata: shunter.MigrationMetadata{
-			Compatibility: shunter.MigrationCompatibilityCompatible,
+		{
+			name: "unknown_migration_target",
+			mutate: func(contract *shunter.ModuleContract) {
+				contract.Migrations.Declarations = []shunter.MigrationContractDeclaration{{
+					Surface: shunter.MigrationSurfaceTable,
+					Name:    "missing_table",
+					Metadata: shunter.MigrationMetadata{
+						Compatibility: shunter.MigrationCompatibilityCompatible,
+					},
+				}}
+			},
+			wantErrContains: "migrations.table.missing_table references unknown table",
 		},
-	}}
-	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
-	outputPath := filepath.Join(dir, "client.ts")
-	original := []byte("existing generated output\n")
-	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
+		{
+			name: "unknown_permission_target",
+			mutate: func(contract *shunter.ModuleContract) {
+				contract.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
+					Name:     "missing_reducer",
+					Required: []string{"messages:send"},
+				}}
+			},
+			wantErrContains: "permissions.reducer.missing_reducer references unknown reducer",
+		},
+		{
+			name: "invalid_table_read_policy",
+			mutate: func(contract *shunter.ModuleContract) {
+				contract.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+					Access:      schema.TableAccessPublic,
+					Permissions: []string{"messages:read"},
+				}
+			},
+			wantErrContains: "schema.tables.messages.read_policy invalid",
+		},
+		{
+			name: "invalid_schema_column_type",
+			mutate: func(contract *shunter.ModuleContract) {
+				contract.Schema.Tables[0].Columns[1].Type = "notAType"
+			},
+			wantErrContains: `schema.tables.messages.columns.body type "notAType" is invalid`,
+		},
+		{
+			name: "unknown_read_model_target",
+			mutate: func(contract *shunter.ModuleContract) {
+				contract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+					Surface: shunter.ReadModelSurfaceQuery,
+					Name:    "missing_query",
+					Tables:  []string{"messages"},
+					Tags:    []string{"history"},
+				}}
+			},
+			wantErrContains: "read_model.query.missing_query references unknown query",
+		},
+		{
+			name: "invalid_read_model_surface",
+			mutate: func(contract *shunter.ModuleContract) {
+				contract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+					Surface: "subscription",
+					Name:    "recent_messages",
+					Tables:  []string{"messages"},
+					Tags:    []string{"history"},
+				}}
+			},
+			wantErrContains: `read_model surface "subscription" is invalid`,
+		},
 	}
 
-	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
-	if err == nil {
-		t.Fatalf("%s GenerateFile returned nil error for unknown migration target", trace)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertInvalidContractGenerateFileLeavesOutputUntouched(t, tc.mutate, tc.wantErrContains)
+		})
 	}
-	if !errors.Is(err, codegen.ErrInvalidContract) {
-		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
-	}
-	if !strings.Contains(err.Error(), "migrations.table.missing_table references unknown table") {
-		t.Fatalf("%s GenerateFile error = %v, want unknown migration target context", trace, err)
-	}
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
-	}
-	if !bytes.Equal(got, original) {
-		t.Fatalf("%s unknown migration target mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
-	}
-	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
 
-func TestGenerateFileUnknownPermissionTargetLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=workflow-codegen-unknown-permission-target-output-preservation"
+func assertInvalidContractGenerateFileLeavesOutputUntouched(
+	t *testing.T,
+	mutate func(*shunter.ModuleContract),
+	wantErrContains string,
+) {
+	t.Helper()
 	dir := t.TempDir()
 	invalidContract := workflowContractFixture()
-	invalidContract.Permissions.Reducers = []shunter.PermissionContractDeclaration{{
-		Name:     "missing_reducer",
-		Required: []string{"messages:send"},
-	}}
+	mutate(&invalidContract)
 	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
 	outputPath := filepath.Join(dir, "client.ts")
 	original := []byte("existing generated output\n")
 	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
+		t.Fatalf("write existing output: %v", err)
 	}
 
 	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
 	if err == nil {
-		t.Fatalf("%s GenerateFile returned nil error for unknown permission target", trace)
+		t.Fatal("GenerateFile returned nil error for invalid contract")
 	}
 	if !errors.Is(err, codegen.ErrInvalidContract) {
-		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
+		t.Fatalf("GenerateFile error = %v, want ErrInvalidContract", err)
 	}
-	if !strings.Contains(err.Error(), "permissions.reducer.missing_reducer references unknown reducer") {
-		t.Fatalf("%s GenerateFile error = %v, want permission reducer target context", trace, err)
+	if !strings.Contains(err.Error(), wantErrContains) {
+		t.Fatalf("GenerateFile error = %v, want context %q", err, wantErrContains)
 	}
 	got, err := os.ReadFile(outputPath)
 	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
+		t.Fatalf("read existing output: %v", err)
 	}
 	if !bytes.Equal(got, original) {
-		t.Fatalf("%s unknown permission target mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
-	}
-	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
-}
-
-func TestGenerateFileInvalidTableReadPolicyLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=workflow-codegen-invalid-read-policy-output-preservation"
-	dir := t.TempDir()
-	invalidContract := workflowContractFixture()
-	invalidContract.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
-		Access:      schema.TableAccessPublic,
-		Permissions: []string{"messages:read"},
-	}
-	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
-	outputPath := filepath.Join(dir, "client.ts")
-	original := []byte("existing generated output\n")
-	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
-	}
-
-	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
-	if err == nil {
-		t.Fatalf("%s GenerateFile returned nil error for invalid table read policy", trace)
-	}
-	if !errors.Is(err, codegen.ErrInvalidContract) {
-		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
-	}
-	if !strings.Contains(err.Error(), "schema.tables.messages.read_policy invalid") {
-		t.Fatalf("%s GenerateFile error = %v, want table read policy context", trace, err)
-	}
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
-	}
-	if !bytes.Equal(got, original) {
-		t.Fatalf("%s invalid read policy mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
-	}
-	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
-}
-
-func TestGenerateFileInvalidSchemaColumnTypeLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=workflow-codegen-invalid-schema-column-type-output-preservation"
-	dir := t.TempDir()
-	invalidContract := workflowContractFixture()
-	invalidContract.Schema.Tables[0].Columns[1].Type = "notAType"
-	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
-	outputPath := filepath.Join(dir, "client.ts")
-	original := []byte("existing generated output\n")
-	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
-	}
-
-	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
-	if err == nil {
-		t.Fatalf("%s GenerateFile returned nil error for invalid schema column type", trace)
-	}
-	if !errors.Is(err, codegen.ErrInvalidContract) {
-		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
-	}
-	if !strings.Contains(err.Error(), `schema.tables.messages.columns.body type "notAType" is invalid`) {
-		t.Fatalf("%s GenerateFile error = %v, want invalid schema column type context", trace, err)
-	}
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
-	}
-	if !bytes.Equal(got, original) {
-		t.Fatalf("%s invalid schema column type mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
-	}
-	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
-}
-
-func TestGenerateFileUnknownReadModelTargetLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=workflow-codegen-unknown-read-model-target-output-preservation"
-	dir := t.TempDir()
-	invalidContract := workflowContractFixture()
-	invalidContract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
-		Surface: shunter.ReadModelSurfaceQuery,
-		Name:    "missing_query",
-		Tables:  []string{"messages"},
-		Tags:    []string{"history"},
-	}}
-	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
-	outputPath := filepath.Join(dir, "client.ts")
-	original := []byte("existing generated output\n")
-	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
-	}
-
-	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
-	if err == nil {
-		t.Fatalf("%s GenerateFile returned nil error for unknown read model target", trace)
-	}
-	if !errors.Is(err, codegen.ErrInvalidContract) {
-		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
-	}
-	if !strings.Contains(err.Error(), "read_model.query.missing_query references unknown query") {
-		t.Fatalf("%s GenerateFile error = %v, want read model query target context", trace, err)
-	}
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
-	}
-	if !bytes.Equal(got, original) {
-		t.Fatalf("%s unknown read model target mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
-	}
-	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
-}
-
-func TestGenerateFileInvalidReadModelSurfaceLeavesOutputUntouched(t *testing.T) {
-	const trace = "trace=workflow-codegen-invalid-read-model-surface-output-preservation"
-	dir := t.TempDir()
-	invalidContract := workflowContractFixture()
-	invalidContract.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
-		Surface: "subscription",
-		Name:    "recent_messages",
-		Tables:  []string{"messages"},
-		Tags:    []string{"history"},
-	}}
-	contractPath := writeContractFixture(t, dir, "contract.json", invalidContract)
-	outputPath := filepath.Join(dir, "client.ts")
-	original := []byte("existing generated output\n")
-	if err := os.WriteFile(outputPath, original, 0o666); err != nil {
-		t.Fatalf("%s write existing output: %v", trace, err)
-	}
-
-	err := GenerateFile(contractPath, outputPath, codegen.Options{Language: codegen.LanguageTypeScript})
-	if err == nil {
-		t.Fatalf("%s GenerateFile returned nil error for invalid read model surface", trace)
-	}
-	if !errors.Is(err, codegen.ErrInvalidContract) {
-		t.Fatalf("%s GenerateFile error = %v, want ErrInvalidContract", trace, err)
-	}
-	if !strings.Contains(err.Error(), `read_model surface "subscription" is invalid`) {
-		t.Fatalf("%s GenerateFile error = %v, want invalid read model surface context", trace, err)
-	}
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("%s read existing output: %v", trace, err)
-	}
-	if !bytes.Equal(got, original) {
-		t.Fatalf("%s invalid read model surface mutated output:\nobserved=%q\nexpected=%q", trace, got, original)
+		t.Fatalf("invalid contract mutated output:\nobserved=%q\nexpected=%q", got, original)
 	}
 	assertNoWorkflowTempFiles(t, dir, filepath.Base(outputPath))
 }
