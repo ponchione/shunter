@@ -329,9 +329,14 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 		out = append(out, row)
 		return nil
 	}
-	for _, projectedRow := range view.TableScan(projectedTable) {
+	projectedCandidates, filterProjected := initialIndexedFilterRowIDs(view, p.Filter, projectedTable, m.resolver)
+	otherCandidates, filterOther := initialIndexedFilterRowIDs(view, p.Filter, otherTable, m.resolver)
+	for projectedRID, projectedRow := range view.TableScan(projectedTable) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if !initialRowIDAllowed(projectedCandidates, filterProjected, projectedRID) {
+			continue
 		}
 		if int(projectedJoinCol) >= len(projectedRow) {
 			continue
@@ -341,6 +346,9 @@ func (m *Manager) appendProjectedJoinRows(ctx context.Context, out []types.Produ
 			for _, rid := range view.IndexSeek(otherTable, otherIdx, key) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
+				}
+				if !initialRowIDAllowed(otherCandidates, filterOther, rid) {
+					continue
 				}
 				otherRow, ok := view.GetRow(otherTable, rid)
 				if !ok {
@@ -373,9 +381,14 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 ) ([]types.ProductValue, error) {
 	matchesByProjectedRow := make(map[types.RowID][]types.ProductValue)
 	pending := 0
-	for _, otherRow := range view.TableScan(otherTable) {
+	projectedCandidates, filterProjected := initialIndexedFilterRowIDs(view, p.Filter, projectedTable, m.resolver)
+	otherCandidates, filterOther := initialIndexedFilterRowIDs(view, p.Filter, otherTable, m.resolver)
+	for otherRID, otherRow := range view.TableScan(otherTable) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if !initialRowIDAllowed(otherCandidates, filterOther, otherRID) {
+			continue
 		}
 		if int(otherJoinCol) >= len(otherRow) {
 			continue
@@ -384,6 +397,9 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 		for _, projectedRID := range view.IndexSeek(projectedTable, projectedIdx, key) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
+			}
+			if !initialRowIDAllowed(projectedCandidates, filterProjected, projectedRID) {
+				continue
 			}
 			projectedRow, ok := view.GetRow(projectedTable, projectedRID)
 			if !ok || int(projectedJoinCol) >= len(projectedRow) {
@@ -410,6 +426,38 @@ func (m *Manager) appendProjectedJoinRowsFromProjectedIndex(
 		out = append(out, matchesByProjectedRow[projectedRID]...)
 	}
 	return out, nil
+}
+
+func initialIndexedFilterRowIDs(view store.CommittedReadView, pred Predicate, table TableID, resolver IndexResolver) (map[types.RowID]struct{}, bool) {
+	if view == nil || pred == nil || resolver == nil {
+		return nil, false
+	}
+	if eq, idxID, ok := initialIndexedEquality(pred, table, resolver); ok {
+		out := make(map[types.RowID]struct{})
+		key := store.NewIndexKey(eq.Value)
+		for _, rid := range view.IndexSeek(eq.Table, idxID, key) {
+			out[rid] = struct{}{}
+		}
+		return out, true
+	}
+	if r, idxID, ok := initialIndexedRange(pred, table, resolver); ok {
+		out := make(map[types.RowID]struct{})
+		lower := store.Bound{Value: r.Lower.Value, Inclusive: r.Lower.Inclusive, Unbounded: r.Lower.Unbounded}
+		upper := store.Bound{Value: r.Upper.Value, Inclusive: r.Upper.Inclusive, Unbounded: r.Upper.Unbounded}
+		for rid := range view.IndexRange(r.Table, idxID, lower, upper) {
+			out[rid] = struct{}{}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+func initialRowIDAllowed(candidates map[types.RowID]struct{}, enabled bool, rid types.RowID) bool {
+	if !enabled {
+		return true
+	}
+	_, ok := candidates[rid]
+	return ok
 }
 
 // emittedTableID returns the table ID whose row shape the subscription emits
