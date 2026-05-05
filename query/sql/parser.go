@@ -652,7 +652,7 @@ func (p *parser) parseStatement() (Statement, error) {
 	if len(stmt.OrderByColumns) != 0 {
 		stmt.OrderBy = &stmt.OrderByColumns[0]
 	}
-	limit, invalidLimit, hasLimit, unsupportedLimit, err := p.parseLimit()
+	limit, invalidLimit, hasLimit, unsupportedLimit, err := p.parseUnsignedClause("LIMIT")
 	if err != nil {
 		return Statement{}, err
 	}
@@ -660,7 +660,7 @@ func (p *parser) parseStatement() (Statement, error) {
 	stmt.InvalidLimit = invalidLimit
 	stmt.HasLimit = hasLimit
 	stmt.UnsupportedLimit = unsupportedLimit
-	offset, invalidOffset, hasOffset, unsupportedOffset, err := p.parseOffset()
+	offset, invalidOffset, hasOffset, unsupportedOffset, err := p.parseUnsignedClause("OFFSET")
 	if err != nil {
 		return Statement{}, err
 	}
@@ -1133,14 +1133,6 @@ func (p *parser) parseColumnRefForOrderBy(bindings relationBindings, allowUnqual
 		return ColumnRef{}, UnqualifiedNamesError{}
 	}
 	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
-}
-
-func (p *parser) parseLimit() (*uint64, *Literal, bool, bool, error) {
-	return p.parseUnsignedClause("LIMIT")
-}
-
-func (p *parser) parseOffset() (*uint64, *Literal, bool, bool, error) {
-	return p.parseUnsignedClause("OFFSET")
 }
 
 func (p *parser) parseUnsignedClause(keyword string) (*uint64, *Literal, bool, bool, error) {
