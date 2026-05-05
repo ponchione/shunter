@@ -2,6 +2,10 @@
 
 Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
+## v0.1.1-dev
+
+- Current development line.
+
 ## v0.1.0 - 2026-05-05
 
 - First Shunter release suitable for use as a normal Go module dependency.
