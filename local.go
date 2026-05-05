@@ -167,7 +167,7 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 	cmd := executor.CallReducerCmd{
 		Request: executor.ReducerRequest{
 			ReducerName: reducerName,
-			Args:        args,
+			Args:        append([]byte(nil), args...),
 			Caller:      callOpts.caller,
 			RequestID:   callOpts.requestID,
 			Source:      executor.CallSourceExternal,

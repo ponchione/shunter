@@ -158,6 +158,72 @@ func TestCallReducerInvokesReducerThroughExecutor(t *testing.T) {
 	}
 }
 
+func TestCallReducerDetachesArgsBeforeQueuedExecution(t *testing.T) {
+	blockStarted := make(chan struct{})
+	releaseBlocker := make(chan struct{})
+	seenArgs := make(chan []byte, 1)
+
+	rt, err := Build(validChatModule().
+		Reducer("block_executor", func(_ *schema.ReducerContext, _ []byte) ([]byte, error) {
+			close(blockStarted)
+			<-releaseBlocker
+			return nil, nil
+		}).
+		Reducer("capture_args", func(_ *schema.ReducerContext, args []byte) ([]byte, error) {
+			seenArgs <- append([]byte(nil), args...)
+			return nil, nil
+		}), Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer rt.Close()
+
+	blockDone := make(chan error, 1)
+	go func() {
+		res, err := rt.CallReducer(context.Background(), "block_executor", nil)
+		if err != nil {
+			blockDone <- err
+			return
+		}
+		if res.Status != StatusCommitted {
+			blockDone <- fmt.Errorf("block_executor status = %v, err = %v", res.Status, res.Error)
+			return
+		}
+		blockDone <- nil
+	}()
+
+	select {
+	case <-blockStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocking reducer did not start")
+	}
+
+	args := []byte{0x01, 0x02, 0x03}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if _, err := rt.CallReducer(ctx, "capture_args", args); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued capture_args err = %v, want context deadline exceeded", err)
+	}
+
+	args[0] = 0xff
+	close(releaseBlocker)
+
+	select {
+	case got := <-seenArgs:
+		if string(got) != string([]byte{0x01, 0x02, 0x03}) {
+			t.Fatalf("queued reducer args = %x, want original 010203", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("capture_args reducer did not run")
+	}
+	if err := <-blockDone; err != nil {
+		t.Fatalf("block_executor: %v", err)
+	}
+}
+
 func TestCallReducerUserErrorIsResultNotAdmissionError(t *testing.T) {
 	rt := buildStartedRuntimeWithReducer(t, "fail", func(_ *schema.ReducerContext, _ []byte) ([]byte, error) {
 		return nil, errors.New("user failed")
