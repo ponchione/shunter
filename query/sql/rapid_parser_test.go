@@ -447,25 +447,7 @@ func rapidComparisonLeafCount(pred Predicate) int {
 }
 
 func rapidStatementsEquivalent(a, b Statement) bool {
-	if a.Table != b.Table ||
-		a.TableAlias != b.TableAlias ||
-		a.ProjectedTable != b.ProjectedTable ||
-		a.ProjectedAlias != b.ProjectedAlias ||
-		a.ProjectedAliasUnknown != b.ProjectedAliasUnknown ||
-		!reflect.DeepEqual(a.OrderBy, b.OrderBy) ||
-		!reflect.DeepEqual(a.OrderByColumns, b.OrderByColumns) ||
-		a.HasLimit != b.HasLimit ||
-		a.UnsupportedLimit != b.UnsupportedLimit ||
-		!rapidUint64PtrEqual(a.Limit, b.Limit) ||
-		!rapidLiteralPtrEqual(a.InvalidLimit, b.InvalidLimit) ||
-		a.HasOffset != b.HasOffset ||
-		a.UnsupportedOffset != b.UnsupportedOffset ||
-		!rapidUint64PtrEqual(a.Offset, b.Offset) ||
-		!rapidLiteralPtrEqual(a.InvalidOffset, b.InvalidOffset) ||
-		len(a.Filters) != len(b.Filters) {
-		return false
-	}
-	if rapidComparisonLeafCount(a.Predicate) != rapidComparisonLeafCount(b.Predicate) {
+	if !rapidStatementsBaseEquivalent(a, b) || len(a.Filters) != len(b.Filters) {
 		return false
 	}
 	for i := range a.Filters {
@@ -478,29 +460,33 @@ func rapidStatementsEquivalent(a, b Statement) bool {
 }
 
 func rapidStatementsEquivalentIgnoringFilterOrder(a, b Statement) bool {
-	if a.Table != b.Table ||
-		a.TableAlias != b.TableAlias ||
-		a.ProjectedTable != b.ProjectedTable ||
-		a.ProjectedAlias != b.ProjectedAlias ||
-		a.ProjectedAliasUnknown != b.ProjectedAliasUnknown ||
-		!reflect.DeepEqual(a.OrderBy, b.OrderBy) ||
-		!reflect.DeepEqual(a.OrderByColumns, b.OrderByColumns) ||
-		a.HasLimit != b.HasLimit ||
-		a.UnsupportedLimit != b.UnsupportedLimit ||
-		!rapidUint64PtrEqual(a.Limit, b.Limit) ||
-		!rapidLiteralPtrEqual(a.InvalidLimit, b.InvalidLimit) ||
-		a.HasOffset != b.HasOffset ||
-		a.UnsupportedOffset != b.UnsupportedOffset ||
-		!rapidUint64PtrEqual(a.Offset, b.Offset) ||
-		!rapidLiteralPtrEqual(a.InvalidOffset, b.InvalidOffset) ||
+	if !rapidStatementsBaseEquivalent(a, b) ||
 		!reflect.DeepEqual(a.ProjectionColumns, b.ProjectionColumns) ||
 		!reflect.DeepEqual(a.Aggregate, b.Aggregate) ||
 		!reflect.DeepEqual(a.Join, b.Join) ||
-		!reflect.DeepEqual(a.Joins, b.Joins) ||
-		rapidComparisonLeafCount(a.Predicate) != rapidComparisonLeafCount(b.Predicate) {
+		!reflect.DeepEqual(a.Joins, b.Joins) {
 		return false
 	}
 	return reflect.DeepEqual(rapidFilterMultiset(a.Filters), rapidFilterMultiset(b.Filters))
+}
+
+func rapidStatementsBaseEquivalent(a, b Statement) bool {
+	return a.Table == b.Table &&
+		a.TableAlias == b.TableAlias &&
+		a.ProjectedTable == b.ProjectedTable &&
+		a.ProjectedAlias == b.ProjectedAlias &&
+		a.ProjectedAliasUnknown == b.ProjectedAliasUnknown &&
+		reflect.DeepEqual(a.OrderBy, b.OrderBy) &&
+		reflect.DeepEqual(a.OrderByColumns, b.OrderByColumns) &&
+		a.HasLimit == b.HasLimit &&
+		a.UnsupportedLimit == b.UnsupportedLimit &&
+		rapidUint64PtrEqual(a.Limit, b.Limit) &&
+		rapidLiteralPtrEqual(a.InvalidLimit, b.InvalidLimit) &&
+		a.HasOffset == b.HasOffset &&
+		a.UnsupportedOffset == b.UnsupportedOffset &&
+		rapidUint64PtrEqual(a.Offset, b.Offset) &&
+		rapidLiteralPtrEqual(a.InvalidOffset, b.InvalidOffset) &&
+		rapidComparisonLeafCount(a.Predicate) == rapidComparisonLeafCount(b.Predicate)
 }
 
 func rapidFilterMultiset(filters []Filter) map[string]int {
