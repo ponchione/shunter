@@ -599,8 +599,8 @@ func TestRegisterSetUnwindsPartialStateOnInitialQueryError(t *testing.T) {
 		t.Fatalf("registry should be clear after unwind")
 	}
 	if !mgr.indexes.TestOnlyIsEmpty() {
-		t.Fatalf("pruning indexes not cleared on unwind: value=%+v range=%+v joinedge=%+v table=%+v",
-			mgr.indexes.Value, mgr.indexes.Range, mgr.indexes.JoinEdge, mgr.indexes.Table)
+		t.Fatalf("pruning indexes not cleared on unwind: value=%+v range=%+v joinedge=%+v joinrangeedge=%+v table=%+v",
+			mgr.indexes.Value, mgr.indexes.Range, mgr.indexes.JoinEdge, mgr.indexes.JoinRangeEdge, mgr.indexes.Table)
 	}
 }
 

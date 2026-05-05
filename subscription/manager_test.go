@@ -1415,6 +1415,35 @@ func TestUnregisterLastCleansJoinEdgeIndexes(t *testing.T) {
 	}
 }
 
+func TestUnregisterLastCleansJoinRangeEdgeIndexes(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64, 2: types.KindUint64}, 1)
+	mgr := NewManager(s, s)
+	pred := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColRange{Table: 2, Column: 2,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+	}
+	_, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mgr.indexes.JoinRangeEdge.edges) == 0 || len(mgr.indexes.JoinRangeEdge.byTable) == 0 {
+		t.Fatalf("expected join-range-edge placement, got edges=%v byTable=%v", mgr.indexes.JoinRangeEdge.edges, mgr.indexes.JoinRangeEdge.byTable)
+	}
+	if _, err := mgr.UnregisterSet(types.ConnectionID{1}, 10, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(mgr.indexes.JoinRangeEdge.edges) != 0 || len(mgr.indexes.JoinRangeEdge.byTable) != 0 {
+		t.Fatalf("join-range-edge index not cleaned: edges=%v byTable=%v", mgr.indexes.JoinRangeEdge.edges, mgr.indexes.JoinRangeEdge.byTable)
+	}
+}
+
 func TestUnregisterUnknown(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)

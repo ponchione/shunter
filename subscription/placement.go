@@ -5,21 +5,23 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-// PruningIndexes composes the three pruning tiers (SPEC-004 §5).
+// PruningIndexes composes the pruning tiers (SPEC-004 §5).
 type PruningIndexes struct {
-	Value    *ValueIndex
-	Range    *RangeIndex
-	JoinEdge *JoinEdgeIndex
-	Table    *TableIndex
+	Value         *ValueIndex
+	Range         *RangeIndex
+	JoinEdge      *JoinEdgeIndex
+	JoinRangeEdge *JoinRangeEdgeIndex
+	Table         *TableIndex
 }
 
 // NewPruningIndexes constructs an empty composite.
 func NewPruningIndexes() *PruningIndexes {
 	return &PruningIndexes{
-		Value:    NewValueIndex(),
-		Range:    NewRangeIndex(),
-		JoinEdge: NewJoinEdgeIndex(),
-		Table:    NewTableIndex(),
+		Value:         NewValueIndex(),
+		Range:         NewRangeIndex(),
+		JoinEdge:      NewJoinEdgeIndex(),
+		JoinRangeEdge: NewJoinRangeEdgeIndex(),
+		Table:         NewTableIndex(),
 	}
 }
 
@@ -37,6 +39,9 @@ func (p *PruningIndexes) TestOnlyIsEmpty() bool {
 		return false
 	}
 	if len(p.JoinEdge.edges) != 0 || len(p.JoinEdge.byTable) != 0 {
+		return false
+	}
+	if len(p.JoinRangeEdge.edges) != 0 || len(p.JoinRangeEdge.byTable) != 0 {
 		return false
 	}
 	if len(p.Table.tables) != 0 {
@@ -92,6 +97,12 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 				}
 				continue
 			}
+			if placements := joinRangeEdgesFor(pred, join, t, resolver); len(placements) > 0 {
+				for _, placement := range placements {
+					mutateJoinRangeEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
+				}
+				continue
+			}
 		}
 		mutateTablePlacement(idx, t, hash, add)
 	}
@@ -121,6 +132,14 @@ func mutateJoinEdgePlacement(idx *PruningIndexes, edge JoinEdge, value Value, ha
 	idx.JoinEdge.Remove(edge, value, hash)
 }
 
+func mutateJoinRangeEdgePlacement(idx *PruningIndexes, edge JoinEdge, lower, upper Bound, hash QueryHash, add bool) {
+	if add {
+		idx.JoinRangeEdge.Add(edge, lower, upper, hash)
+		return
+	}
+	idx.JoinRangeEdge.Remove(edge, lower, upper, hash)
+}
+
 func mutateTablePlacement(idx *PruningIndexes, table TableID, hash QueryHash, add bool) {
 	if add {
 		idx.Table.Add(table, hash)
@@ -130,7 +149,7 @@ func mutateTablePlacement(idx *PruningIndexes, table TableID, hash QueryHash, ad
 }
 
 // CollectCandidatesForTable returns the set of candidate query hashes for a
-// single changed table. Consults all three tiers and unions the results.
+// single changed table. Consults all pruning tiers and unions the results.
 //
 // The resolver is optional — when nil, Tier 2 lookups are skipped (useful in
 // tests that only exercise Tier 1 and Tier 3).
@@ -176,35 +195,9 @@ func collectCandidatesForTableInto(
 		})
 	})
 
-	// Tier 2: join edges where this table is the LHS side.
-	if committed != nil && resolver != nil {
-		idx.JoinEdge.ForEachEdge(table, func(edge JoinEdge) {
-			rhsIdx, ok := resolver.IndexIDForColumn(edge.RHSTable, edge.RHSJoinCol)
-			if !ok {
-				return
-			}
-			for _, row := range rows {
-				if int(edge.LHSJoinCol) >= len(row) {
-					continue
-				}
-				joinVal := row[edge.LHSJoinCol]
-				key := store.NewIndexKey(joinVal)
-				rowIDs := committed.IndexSeek(edge.RHSTable, rhsIdx, key)
-				for _, rid := range rowIDs {
-					rhsRow, ok := committed.GetRow(edge.RHSTable, rid)
-					if !ok {
-						continue
-					}
-					if int(edge.RHSFilterCol) >= len(rhsRow) {
-						continue
-					}
-					idx.JoinEdge.ForEachHash(edge, rhsRow[edge.RHSFilterCol], func(h QueryHash) {
-						set[h] = struct{}{}
-					})
-				}
-			}
-		})
-	}
+	collectJoinEdgeCandidates(idx, table, rows, committed, resolver, func(h QueryHash) {
+		set[h] = struct{}{}
+	})
 
 	// Tier 3: table fallback.
 	idx.Table.ForEachHash(table, func(h QueryHash) {
@@ -340,6 +333,12 @@ type joinEdgePlacement struct {
 	value Value
 }
 
+type joinRangeEdgePlacement struct {
+	edge  JoinEdge
+	lower Bound
+	upper Bound
+}
+
 // joinEdgesFor computes the JoinEdge/filter-value placements for Tier 2 for the
 // given table. Returns nil when no filterable edge exists for this table
 // (callers then fall through to Tier 3).
@@ -381,4 +380,100 @@ func joinEdgesFor(pred Predicate, join *Join, t TableID, resolver IndexResolver)
 		})
 	}
 	return placements
+}
+
+// joinRangeEdgesFor computes the JoinEdge/range-filter placements for Tier 2
+// for the given table. Returns nil when no range-filterable edge exists.
+func joinRangeEdgesFor(pred Predicate, join *Join, t TableID, resolver IndexResolver) []joinRangeEdgePlacement {
+	var other TableID
+	var myJoinCol, otherJoinCol ColID
+	switch t {
+	case join.Left:
+		other = join.Right
+		myJoinCol = join.LeftCol
+		otherJoinCol = join.RightCol
+	case join.Right:
+		other = join.Left
+		myJoinCol = join.RightCol
+		otherJoinCol = join.LeftCol
+	default:
+		return nil
+	}
+	otherColRanges := findColRanges(pred, other)
+	if len(otherColRanges) == 0 {
+		return nil
+	}
+	if resolver != nil {
+		if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
+			return nil
+		}
+	}
+	placements := make([]joinRangeEdgePlacement, 0, len(otherColRanges))
+	for _, cr := range otherColRanges {
+		placements = append(placements, joinRangeEdgePlacement{
+			edge: JoinEdge{
+				LHSTable:     t,
+				RHSTable:     other,
+				LHSJoinCol:   myJoinCol,
+				RHSJoinCol:   otherJoinCol,
+				RHSFilterCol: cr.Column,
+			},
+			lower: cr.Lower,
+			upper: cr.Upper,
+		})
+	}
+	return placements
+}
+
+func collectJoinEdgeCandidates(
+	idx *PruningIndexes,
+	table TableID,
+	rows []types.ProductValue,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	add func(QueryHash),
+) {
+	if committed == nil || resolver == nil {
+		return
+	}
+	idx.JoinEdge.ForEachEdge(table, func(edge JoinEdge) {
+		forEachJoinedRHSFilterValue(rows, committed, resolver, edge, func(v Value) {
+			idx.JoinEdge.ForEachHash(edge, v, add)
+		})
+	})
+	idx.JoinRangeEdge.ForEachEdge(table, func(edge JoinEdge) {
+		forEachJoinedRHSFilterValue(rows, committed, resolver, edge, func(v Value) {
+			idx.JoinRangeEdge.ForEachHash(edge, v, add)
+		})
+	})
+}
+
+func forEachJoinedRHSFilterValue(
+	rows []types.ProductValue,
+	committed store.CommittedReadView,
+	resolver IndexResolver,
+	edge JoinEdge,
+	fn func(Value),
+) {
+	rhsIdx, ok := resolver.IndexIDForColumn(edge.RHSTable, edge.RHSJoinCol)
+	if !ok {
+		return
+	}
+	for _, row := range rows {
+		if int(edge.LHSJoinCol) >= len(row) {
+			continue
+		}
+		key := store.NewIndexKey(row[edge.LHSJoinCol])
+		rowIDs := committed.IndexSeek(edge.RHSTable, rhsIdx, key)
+		for _, rid := range rowIDs {
+			rhsRow, ok := committed.GetRow(edge.RHSTable, rid)
+			if !ok {
+				continue
+			}
+			if int(edge.RHSFilterCol) >= len(rhsRow) {
+				continue
+			}
+			fn(rhsRow[edge.RHSFilterCol])
+		}
+	}
 }

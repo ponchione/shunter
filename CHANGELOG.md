@@ -5,6 +5,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Live subscription join candidate pruning now uses required range filters on the opposite joined side when that side's join column is indexed.
 - Live subscription delta candidate pruning now uses range predicates instead of table-wide fallback when the predicate shape is safely range-constrained.
 - Live subscription initial and final snapshots now use matching single-column indexes for equality and compound single-table filters.
 - One-off and declared single-table queries now use matching composite indexes for multi-column `ORDER BY`, including mixed directions.

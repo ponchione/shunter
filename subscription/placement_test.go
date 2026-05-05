@@ -81,6 +81,33 @@ func TestPlaceJoinWithFilterOnRHS(t *testing.T) {
 	}
 }
 
+func TestPlaceJoinWithRangeFilterOnRHS(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColRange{Table: 2, Column: 2,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+	}
+	h := hashN(1)
+	PlaceSubscription(idx, p, h)
+
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	if edges := idx.JoinRangeEdge.EdgesForTable(1); len(edges) != 1 || edges[0] != edge {
+		t.Fatalf("JoinRangeEdgeIndex edges for LHS = %v, want [%v]", edges, edge)
+	}
+	if got := idx.JoinRangeEdge.Lookup(edge, types.NewUint64(15)); len(got) != 1 || got[0] != h {
+		t.Fatalf("JoinRangeEdgeIndex lookup = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(2, 2, types.NewUint64(15)); len(got) != 1 || got[0] != h {
+		t.Fatalf("RangeIndex on T2 = %v, want [%v]", got, h)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex on changed LHS should be empty: %v", got)
+	}
+}
+
 func TestPlaceJoinWithOppositeSideOrFilterAddsEveryJoinEdge(t *testing.T) {
 	idx := NewPruningIndexes()
 	p := Join{
@@ -147,8 +174,14 @@ func TestPlaceAndRemoveSymmetric(t *testing.T) {
 	if len(idx.Value.args) != 0 || len(idx.Value.cols) != 0 {
 		t.Fatalf("ValueIndex not empty after remove")
 	}
+	if len(idx.Range.ranges) != 0 || len(idx.Range.cols) != 0 {
+		t.Fatalf("RangeIndex not empty after remove")
+	}
 	if len(idx.JoinEdge.edges) != 0 {
 		t.Fatalf("JoinEdgeIndex not empty")
+	}
+	if len(idx.JoinRangeEdge.edges) != 0 {
+		t.Fatalf("JoinRangeEdgeIndex not empty")
 	}
 	if len(idx.Table.tables) != 0 {
 		t.Fatalf("TableIndex not empty")
@@ -168,6 +201,40 @@ func TestPlaceAndRemoveJoinSymmetric(t *testing.T) {
 	}
 	if len(idx.JoinEdge.edges) != 0 {
 		t.Fatalf("JoinEdgeIndex not empty after remove")
+	}
+	if len(idx.JoinRangeEdge.edges) != 0 {
+		t.Fatalf("JoinRangeEdgeIndex not empty after remove")
+	}
+	if len(idx.Range.ranges) != 0 || len(idx.Range.cols) != 0 {
+		t.Fatalf("RangeIndex not empty after remove")
+	}
+	if len(idx.Table.tables) != 0 {
+		t.Fatalf("TableIndex not empty after remove")
+	}
+}
+
+func TestPlaceAndRemoveJoinRangeSymmetric(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColRange{Table: 2, Column: 2,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+	}
+	PlaceSubscription(idx, p, hashN(1))
+	RemoveSubscription(idx, p, hashN(1))
+	if len(idx.Value.args) != 0 || len(idx.Value.cols) != 0 {
+		t.Fatalf("ValueIndex not empty after remove")
+	}
+	if len(idx.Range.ranges) != 0 || len(idx.Range.cols) != 0 {
+		t.Fatalf("RangeIndex not empty after remove")
+	}
+	if len(idx.JoinEdge.edges) != 0 {
+		t.Fatalf("JoinEdgeIndex not empty after remove")
+	}
+	if len(idx.JoinRangeEdge.edges) != 0 || len(idx.JoinRangeEdge.byTable) != 0 {
+		t.Fatalf("JoinRangeEdgeIndex not empty after remove")
 	}
 	if len(idx.Table.tables) != 0 {
 		t.Fatalf("TableIndex not empty after remove")
@@ -247,6 +314,55 @@ func TestCollectCandidatesRangeMismatch(t *testing.T) {
 	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
 	if len(cands) != 0 {
 		t.Fatalf("unmatched range should produce 0 candidates: %v", cands)
+	}
+}
+
+func TestCollectCandidatesJoinRangeEdgeMatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64, 2: types.KindUint64}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColRange{Table: 2, Column: 2,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+	}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(7), types.NewUint64(15)}},
+	})
+
+	rows := []types.ProductValue{{types.NewUint64(7)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 1 || cands[0] != h {
+		t.Fatalf("join range-edge candidate = %v, want [%v]", cands, h)
+	}
+}
+
+func TestCollectCandidatesJoinRangeEdgeMismatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64, 2: types.KindUint64}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColRange{Table: 2, Column: 2,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+	}
+	placeSubscriptionForResolver(idx, p, hashN(1), s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(7), types.NewUint64(25)}},
+	})
+
+	rows := []types.ProductValue{{types.NewUint64(7)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 0 {
+		t.Fatalf("out-of-range join edge should produce 0 candidates: %v", cands)
 	}
 }
 

@@ -78,7 +78,8 @@ Direction:
 Likely feature slices:
 
 - nullable-value semantics for aggregates once nullable types exist
-- broader index-aware planning for live join paths
+- broader index-aware planning for remaining live join paths beyond required
+  equality/range filters
 - live-view expansion for currently query-only shapes after delta semantics are
   explicit
 

@@ -319,39 +319,11 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 		})
 
 		// Tier 2: join edges where this table is the LHS.
-		if view != nil && m.resolver != nil {
-			m.indexes.JoinEdge.ForEachEdge(tid, func(edge JoinEdge) {
-				rhsIdx, ok := m.resolver.IndexIDForColumn(edge.RHSTable, edge.RHSJoinCol)
-				if !ok {
-					return
-				}
-				probe := func(row types.ProductValue) {
-					if int(edge.LHSJoinCol) >= len(row) {
-						return
-					}
-					key := store.NewIndexKey(row[edge.LHSJoinCol])
-					rowIDs := view.IndexSeek(edge.RHSTable, rhsIdx, key)
-					for _, rid := range rowIDs {
-						rhsRow, ok := view.GetRow(edge.RHSTable, rid)
-						if !ok {
-							continue
-						}
-						if int(edge.RHSFilterCol) >= len(rhsRow) {
-							continue
-						}
-						m.indexes.JoinEdge.ForEachHash(edge, rhsRow[edge.RHSFilterCol], func(h QueryHash) {
-							cands[h] = struct{}{}
-						})
-					}
-				}
-				for _, row := range tc.Inserts {
-					probe(row)
-				}
-				for _, row := range tc.Deletes {
-					probe(row)
-				}
-			})
+		addJoinCandidate := func(h QueryHash) {
+			cands[h] = struct{}{}
 		}
+		collectJoinEdgeCandidates(m.indexes, tid, tc.Inserts, view, m.resolver, addJoinCandidate)
+		collectJoinEdgeCandidates(m.indexes, tid, tc.Deletes, view, m.resolver, addJoinCandidate)
 
 		// Tier 3: table fallback.
 		m.indexes.Table.ForEachHash(tid, func(h QueryHash) {

@@ -838,6 +838,165 @@ func TestEvalJoinOppositeSideOrFilterCandidateThroughSecondBranch(t *testing.T) 
 	}
 }
 
+func TestEvalJoinOppositeSideRangeFilterCandidate(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindUint64,
+	}, 1)
+
+	rhs := types.ProductValue{types.NewUint64(100), types.NewUint64(7), types.NewUint64(15)}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{2: {rhs}})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColRange{Table: 2, Column: 2,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 28, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	if got := mgr.indexes.JoinRangeEdge.Lookup(edge, types.NewUint64(15)); len(got) != 1 {
+		t.Fatalf("join range-edge candidates = %v, want one hash", got)
+	}
+	if got := mgr.indexes.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("table fallback candidates for changed LHS = %v, want none", got)
+	}
+
+	lhs := types.ProductValue{types.NewUint64(7), types.NewString("lhs")}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "lhs",
+			Inserts:   []types.ProductValue{lhs},
+		},
+	}}
+	committed.addRow(1, 1, lhs)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Inserts) != 1 || !updates[0].Inserts[0].Equal(lhs) {
+		t.Fatalf("inserts = %v, want projected LHS row %v", updates[0].Inserts, lhs)
+	}
+	if len(updates[0].Deletes) != 0 {
+		t.Fatalf("deletes = %v, want none", updates[0].Deletes)
+	}
+}
+
+func TestEvalJoinOppositeSideRangeFilterPrunesMismatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindUint64,
+	}, 1)
+
+	rhs := types.ProductValue{types.NewUint64(100), types.NewUint64(7), types.NewUint64(25)}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{2: {rhs}})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColRange{Table: 2, Column: 2,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 29, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if got := mgr.indexes.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("table fallback candidates for changed LHS = %v, want none", got)
+	}
+
+	lhs := types.ProductValue{types.NewUint64(7), types.NewString("lhs")}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "lhs",
+			Inserts:   []types.ProductValue{lhs},
+		},
+	}}
+	committed.addRow(1, 1, lhs)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	if updates := msg.Fanout[types.ConnectionID{1}]; len(updates) != 0 {
+		t.Fatalf("out-of-range joined row produced fanout: %v", updates)
+	}
+}
+
+func TestEvalJoinRangeFilterOnChangedSideUsesRangeIndex(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindUint64,
+	}, 1)
+
+	lhs := types.ProductValue{types.NewUint64(7), types.NewString("lhs")}
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{1: {lhs}})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColRange{Table: 2, Column: 2,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 30, Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if got := mgr.indexes.Range.Lookup(2, 2, types.NewUint64(15)); len(got) != 1 {
+		t.Fatalf("range candidates for changed RHS = %v, want one hash", got)
+	}
+	if got := mgr.indexes.Table.Lookup(2); len(got) != 0 {
+		t.Fatalf("table fallback candidates for changed RHS = %v, want none", got)
+	}
+
+	rhs := types.ProductValue{types.NewUint64(100), types.NewUint64(7), types.NewUint64(15)}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		2: {
+			TableID:   2,
+			TableName: "rhs",
+			Inserts:   []types.ProductValue{rhs},
+		},
+	}}
+	committed.addRow(2, 1, rhs)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+
+	msg := <-inbox
+	updates := msg.Fanout[types.ConnectionID{1}]
+	if len(updates) != 1 {
+		t.Fatalf("update count = %d, want 1", len(updates))
+	}
+	if len(updates[0].Inserts) != 1 || !updates[0].Inserts[0].Equal(lhs) {
+		t.Fatalf("inserts = %v, want projected LHS row %v", updates[0].Inserts, lhs)
+	}
+	if len(updates[0].Deletes) != 0 {
+		t.Fatalf("deletes = %v, want none", updates[0].Deletes)
+	}
+}
+
 func TestEvalFilteredJoinFallsBackWhenOppositeJoinColumnUnindexed(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
