@@ -15,12 +15,16 @@ type protocolCommandSubmitter interface {
 	SubmitWithContext(ctx context.Context, cmd ExecutorCommand) error
 }
 
+type protocolTableLookup interface {
+	Table(schema.TableID) (*schema.TableSchema, bool)
+}
+
 // ProtocolInboxAdapter is the concrete production bridge that satisfies
 // protocol.ExecutorInbox by translating protocol-layer requests into executor
 // commands.
 type ProtocolInboxAdapter struct {
 	submitter protocolCommandSubmitter
-	schemaReg schema.SchemaRegistry
+	schemaReg protocolTableLookup
 }
 
 var _ protocol.ExecutorInbox = (*ProtocolInboxAdapter)(nil)
@@ -29,7 +33,7 @@ func NewProtocolInboxAdapter(exec *Executor) *ProtocolInboxAdapter {
 	return newProtocolInboxAdapter(exec, exec.schemaReg)
 }
 
-func newProtocolInboxAdapter(submitter protocolCommandSubmitter, schemaReg schema.SchemaRegistry) *ProtocolInboxAdapter {
+func newProtocolInboxAdapter(submitter protocolCommandSubmitter, schemaReg protocolTableLookup) *ProtocolInboxAdapter {
 	return &ProtocolInboxAdapter{submitter: submitter, schemaReg: schemaReg}
 }
 

@@ -44,37 +44,6 @@ func (s stubProtocolSchemaRegistry) Table(id schema.TableID) (*schema.TableSchem
 	return &schema.TableSchema{ID: id, Name: name}, true
 }
 
-func (s stubProtocolSchemaRegistry) TableByName(string) (schema.TableID, *schema.TableSchema, bool) {
-	return 0, nil, false
-}
-
-func (s stubProtocolSchemaRegistry) TableExists(schema.TableID) bool { return false }
-func (s stubProtocolSchemaRegistry) TableName(schema.TableID) string { return "" }
-func (s stubProtocolSchemaRegistry) ColumnExists(schema.TableID, types.ColID) bool {
-	return false
-}
-func (s stubProtocolSchemaRegistry) ColumnType(schema.TableID, types.ColID) schema.ValueKind {
-	return 0
-}
-func (s stubProtocolSchemaRegistry) HasIndex(schema.TableID, types.ColID) bool { return false }
-func (s stubProtocolSchemaRegistry) ColumnCount(schema.TableID) int            { return 0 }
-func (s stubProtocolSchemaRegistry) IndexIDForColumn(schema.TableID, types.ColID) (schema.IndexID, bool) {
-	return 0, false
-}
-
-func (s stubProtocolSchemaRegistry) Tables() []schema.TableID { return nil }
-func (s stubProtocolSchemaRegistry) Reducer(string) (schema.ReducerHandler, bool) {
-	return nil, false
-}
-func (s stubProtocolSchemaRegistry) Reducers() []string { return nil }
-func (s stubProtocolSchemaRegistry) OnConnect() func(*schema.ReducerContext) error {
-	return nil
-}
-func (s stubProtocolSchemaRegistry) OnDisconnect() func(*schema.ReducerContext) error {
-	return nil
-}
-func (s stubProtocolSchemaRegistry) Version() uint32 { return 1 }
-
 func newAdapterTestConn(t *testing.T) (*protocol.Conn, *protocol.ConnManager, protocol.ClientSender) {
 	t.Helper()
 	opts := protocol.DefaultProtocolOptions()
