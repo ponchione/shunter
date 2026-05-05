@@ -223,19 +223,25 @@ func isDamagedTailError(err error) bool {
 	return errors.As(err, &checksumErr)
 }
 
-func canTreatAsDamagedTail(err error, recordCount int) bool {
-	return recordCount > 0 && isDamagedTailError(err)
-}
-
 func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 	sr, err := OpenSegment(path)
 	if err != nil {
-		if isLast && isUnwrittenSegmentHeaderError(err) {
+		if isLast && errors.Is(err, io.EOF) {
 			startTx, parseErr := parseSegmentFileStartTx(filepath.Base(path))
 			if parseErr != nil {
 				return SegmentInfo{}, parseErr
 			}
-			return emptyDamagedTailSegmentInfo(path, startTx), nil
+			lastTx := types.TxID(0)
+			if startTx > 0 {
+				lastTx = types.TxID(startTx - 1)
+			}
+			return SegmentInfo{
+				Path:       path,
+				StartTx:    types.TxID(startTx),
+				LastTx:     lastTx,
+				Valid:      true,
+				AppendMode: AppendByFreshNextSegment,
+			}, nil
 		}
 		return SegmentInfo{}, err
 	}
@@ -259,7 +265,7 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			if canTreatAsDamagedTail(err, recordCount) || canTreatAsEmptyDamagedTail(err, recordCount, isLast) {
+			if isDamagedTailError(err) && (recordCount > 0 || isLast) {
 				info.AppendMode = AppendByFreshNextSegment
 				break
 			}
@@ -297,26 +303,4 @@ func scanOneSegment(path string, isLast bool) (SegmentInfo, error) {
 
 	info.LastTx = types.TxID(lastTx)
 	return info, nil
-}
-
-func isUnwrittenSegmentHeaderError(err error) bool {
-	return errors.Is(err, io.EOF)
-}
-
-func emptyDamagedTailSegmentInfo(path string, startTx uint64) SegmentInfo {
-	lastTx := types.TxID(0)
-	if startTx > 0 {
-		lastTx = types.TxID(startTx - 1)
-	}
-	return SegmentInfo{
-		Path:       path,
-		StartTx:    types.TxID(startTx),
-		LastTx:     lastTx,
-		Valid:      true,
-		AppendMode: AppendByFreshNextSegment,
-	}
-}
-
-func canTreatAsEmptyDamagedTail(err error, recordCount int, isLast bool) bool {
-	return isLast && recordCount == 0 && isDamagedTailError(err)
 }
