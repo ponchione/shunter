@@ -723,14 +723,7 @@ func ReadSnapshot(dir string) (*SnapshotData, error) {
 }
 
 func requireRegularSnapshotFile(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: snapshot file %s is not a regular file", ErrSnapshot, path)
-	}
-	return nil
+	return requireRegularFilePath(path, ErrSnapshot, "snapshot file")
 }
 
 func snapshotReadError(err error) error {

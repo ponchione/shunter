@@ -259,6 +259,10 @@ func CreateSegment(dir string, startTxID uint64) (*SegmentWriter, error) {
 }
 
 func requireCreatableSegmentPath(path string) error {
+	return requireCreatableRegularFilePath(path, ErrOpen, "segment file")
+}
+
+func requireCreatableRegularFilePath(path string, category error, label string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -267,9 +271,9 @@ func requireCreatableSegmentPath(path string) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: segment file %s is not a regular file", ErrOpen, path)
+		return fmt.Errorf("%w: %s %s is not a regular file", category, label, path)
 	}
-	return fmt.Errorf("%w: segment file %s already exists", ErrOpen, path)
+	return fmt.Errorf("%w: %s %s already exists", category, label, path)
 }
 
 // OpenSegmentForAppend opens an existing segment for appending.
@@ -453,12 +457,16 @@ func OpenSegment(path string) (*SegmentReader, error) {
 }
 
 func requireRegularSegmentFile(path string) error {
+	return requireRegularFilePath(path, ErrOpen, "segment file")
+}
+
+func requireRegularFilePath(path string, category error, label string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: segment file %s is not a regular file", ErrOpen, path)
+		return fmt.Errorf("%w: %s %s is not a regular file", category, label, path)
 	}
 	return nil
 }

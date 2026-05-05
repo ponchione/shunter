@@ -112,28 +112,11 @@ func OpenOffsetIndexMut(path string, cap uint64) (*OffsetIndexMut, error) {
 }
 
 func requireCreatableOffsetIndexPath(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: offset index file %s is not a regular file", ErrOpen, path)
-	}
-	return fmt.Errorf("%w: offset index file %s already exists", ErrOpen, path)
+	return requireCreatableRegularFilePath(path, ErrOpen, "offset index file")
 }
 
 func requireRegularOffsetIndexPath(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: offset index file %s is not a regular file", ErrOpen, path)
-	}
-	return nil
+	return requireRegularFilePath(path, ErrOpen, "offset index file")
 }
 
 func offsetIndexFileSize(cap uint64) (int64, error) {
