@@ -12,6 +12,43 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
+func assertUnsupportedSQL(t *testing.T, err error) {
+	t.Helper()
+	if !errors.Is(err, ErrUnsupportedSQL) {
+		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	}
+}
+
+func assertInvalidLiteral(t *testing.T, err error, wantLit, wantType string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var ilErr InvalidLiteralError
+	if !errors.As(err, &ilErr) {
+		t.Fatalf("err = %v, want InvalidLiteralError", err)
+	}
+	if ilErr.Literal != wantLit || ilErr.Type != wantType {
+		t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, wantLit, wantType)
+	}
+	assertUnsupportedSQL(t, err)
+}
+
+func assertUnexpectedType(t *testing.T, err error, wantExpected, wantInferred string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var utErr UnexpectedTypeError
+	if !errors.As(err, &utErr) {
+		t.Fatalf("err = %v, want UnexpectedTypeError", err)
+	}
+	if utErr.Expected != wantExpected || utErr.Inferred != wantInferred {
+		t.Fatalf("got {%q, %q}, want {%q, %q}", utErr.Expected, utErr.Inferred, wantExpected, wantInferred)
+	}
+	assertUnsupportedSQL(t, err)
+}
+
 func TestCoerceIntToUnsigned(t *testing.T) {
 	v, err := Coerce(Literal{Kind: LitInt, Int: 7}, types.KindUint32)
 	if err != nil {
@@ -24,16 +61,12 @@ func TestCoerceIntToUnsigned(t *testing.T) {
 
 func TestCoerceNegativeIntoUnsignedFails(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitInt, Int: -1}, types.KindUint64)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 func TestCoerceIntToSignedRangeCheck(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitInt, Int: 200}, types.KindInt8)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 	v, err := Coerce(Literal{Kind: LitInt, Int: -128}, types.KindInt8)
 	if err != nil {
 		t.Fatalf("Coerce error: %v", err)
@@ -77,9 +110,7 @@ func TestCoerceStringDigitsWidensToInteger(t *testing.T) {
 // ErrUnsupportedSQL and must not quietly produce a value.
 func TestCoerceRejectsStringLiteralOnUint32Column(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitString, Str: "str"}, types.KindUint32)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceRejectsFloatLiteralOnUint32Column pins the reference type-check
@@ -90,9 +121,7 @@ func TestCoerceRejectsStringLiteralOnUint32Column(t *testing.T) {
 // integer kind silently.
 func TestCoerceRejectsFloatLiteralOnUint32Column(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitFloat, Float: 1.3}, types.KindUint32)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceNonBoolLiteralOnBoolEmitsInvalidLiteral pins the reference
@@ -120,19 +149,7 @@ func TestCoerceNonBoolLiteralOnBoolEmitsInvalidLiteral(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Coerce(tc.lit, types.KindBool)
-			if err == nil {
-				t.Fatalf("want error, got nil")
-			}
-			var ilErr InvalidLiteralError
-			if !errors.As(err, &ilErr) {
-				t.Fatalf("err = %v, want InvalidLiteralError", err)
-			}
-			if ilErr.Literal != tc.wantLit || ilErr.Type != "Bool" {
-				t.Fatalf("got {%q, %q}, want {%q, \"Bool\"}", ilErr.Literal, ilErr.Type, tc.wantLit)
-			}
-			if !errors.Is(err, ErrUnsupportedSQL) {
-				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-			}
+			assertInvalidLiteral(t, err, tc.wantLit, "Bool")
 		})
 	}
 }
@@ -162,19 +179,7 @@ func TestCoerceFloatLiteralOnIntegerEmitsInvalidLiteral(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Coerce(Literal{Kind: LitFloat, Float: tc.float}, tc.kind)
-			if err == nil {
-				t.Fatalf("want error, got nil")
-			}
-			var ilErr InvalidLiteralError
-			if !errors.As(err, &ilErr) {
-				t.Fatalf("err = %v, want InvalidLiteralError", err)
-			}
-			if ilErr.Literal != tc.wantLit || ilErr.Type != tc.wantTy {
-				t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, tc.wantLit, tc.wantTy)
-			}
-			if !errors.Is(err, ErrUnsupportedSQL) {
-				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-			}
+			assertInvalidLiteral(t, err, tc.wantLit, tc.wantTy)
 		})
 	}
 }
@@ -245,9 +250,7 @@ func TestCoerceFloatLiteralOverflowsToFloat32Infinity(t *testing.T) {
 
 func TestCoerceSenderWithoutCallerFails(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitSender}, types.KindBytes)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 func TestCoerceSenderWithCallerToBytes(t *testing.T) {
@@ -324,20 +327,8 @@ func TestCoerceSenderResolvesToHexOnStringColumn(t *testing.T) {
 func TestCoerceSenderResolvesToInvalidLiteralOnBoolColumn(t *testing.T) {
 	caller := [32]byte{1, 2, 3}
 	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindBool, &caller)
-	if err == nil {
-		t.Fatal("want error, got nil")
-	}
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
 	wantHex := "010203" + strings.Repeat("00", 29)
-	if ilErr.Literal != wantHex || ilErr.Type != "Bool" {
-		t.Fatalf("got {%q, %q}, want {%q, \"Bool\"}", ilErr.Literal, ilErr.Type, wantHex)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertInvalidLiteral(t, err, wantHex, "Bool")
 }
 
 // TestCoerceIntLiteralToInt128 pins reference valid_literals_for_type at
@@ -387,9 +378,7 @@ func TestCoerceIntLiteralToUint128(t *testing.T) {
 // rejection for `u8 = -1` extended to u128.
 func TestCoerceNegativeIntoUint128Fails(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitInt, Int: -1}, types.KindUint128)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceStringDigitsWidensToInt128 pins reference parse_int at the
@@ -410,9 +399,7 @@ func TestCoerceStringDigitsWidensToInt128(t *testing.T) {
 
 func TestCoerceFloatLiteralOnUint128Rejected(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitFloat, Float: 1.5}, types.KindUint128)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceSenderEmitsInvalidLiteralOnInt128Column pins reference parse on
@@ -426,20 +413,8 @@ func TestCoerceSenderEmitsInvalidLiteralOnInt128Column(t *testing.T) {
 	_ = math.MaxInt8 // keep math import live if the underlying file trims it
 	caller := [32]byte{0xab, 0xcd, 0xef}
 	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindInt128, &caller)
-	if err == nil {
-		t.Fatal("want error, got nil")
-	}
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
 	wantHex := "abcdef" + strings.Repeat("00", 29)
-	if ilErr.Literal != wantHex || ilErr.Type != "I128" {
-		t.Fatalf("got {%q, %q}, want {%q, \"I128\"}", ilErr.Literal, ilErr.Type, wantHex)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertInvalidLiteral(t, err, wantHex, "I128")
 }
 
 // TestCoerceIntLiteralToInt256 pins reference valid_literals_for_type at
@@ -512,9 +487,7 @@ func TestCoerceStringDigitsWidensToInt256(t *testing.T) {
 
 func TestCoerceFloatLiteralOnUint256Rejected(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitFloat, Float: 1.5}, types.KindUint256)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceSenderEmitsInvalidLiteralOnInt256Column mirrors the I128 shape
@@ -524,20 +497,8 @@ func TestCoerceFloatLiteralOnUint256Rejected(t *testing.T) {
 func TestCoerceSenderEmitsInvalidLiteralOnInt256Column(t *testing.T) {
 	caller := [32]byte{0xab, 0xcd, 0xef}
 	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindInt256, &caller)
-	if err == nil {
-		t.Fatal("want error, got nil")
-	}
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
 	wantHex := "abcdef" + strings.Repeat("00", 29)
-	if ilErr.Literal != wantHex || ilErr.Type != "I256" {
-		t.Fatalf("got {%q, %q}, want {%q, \"I256\"}", ilErr.Literal, ilErr.Type, wantHex)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertInvalidLiteral(t, err, wantHex, "I256")
 }
 
 // TestCoerceStringLiteralToTimestamp pins check.rs:334-352 — RFC3339-shaped
@@ -579,16 +540,7 @@ func TestCoerceMalformedTimestampRejected(t *testing.T) {
 	const tsType = "(__timestamp_micros_since_unix_epoch__: I64)"
 	for _, s := range []string{"", "2025-02-10", "not-a-timestamp", "2025-02-10T15:45"} {
 		_, err := Coerce(Literal{Kind: LitString, Str: s}, types.KindTimestamp)
-		var ilErr InvalidLiteralError
-		if !errors.As(err, &ilErr) {
-			t.Fatalf("Coerce(%q) err = %v, want InvalidLiteralError", s, err)
-		}
-		if ilErr.Literal != s || ilErr.Type != tsType {
-			t.Fatalf("Coerce(%q) got {%q, %q}, want {%q, %q}", s, ilErr.Literal, ilErr.Type, s, tsType)
-		}
-		if !errors.Is(err, ErrUnsupportedSQL) {
-			t.Fatalf("Coerce(%q) err does not unwrap to ErrUnsupportedSQL: %v", s, err)
-		}
+		assertInvalidLiteral(t, err, s, tsType)
 	}
 }
 
@@ -599,16 +551,7 @@ func TestCoerceMalformedTimestampRejected(t *testing.T) {
 func TestCoerceIntLiteralOnTimestampRejected(t *testing.T) {
 	const tsType = "(__timestamp_micros_since_unix_epoch__: I64)"
 	_, err := Coerce(Literal{Kind: LitInt, Int: 42}, types.KindTimestamp)
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
-	if ilErr.Literal != "42" || ilErr.Type != tsType {
-		t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, "42", tsType)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertInvalidLiteral(t, err, "42", tsType)
 }
 
 // TestCoerceFloatLiteralOnTimestampRejected pins LitFloat on KindTimestamp ->
@@ -617,16 +560,7 @@ func TestCoerceIntLiteralOnTimestampRejected(t *testing.T) {
 func TestCoerceFloatLiteralOnTimestampRejected(t *testing.T) {
 	const tsType = "(__timestamp_micros_since_unix_epoch__: I64)"
 	_, err := Coerce(Literal{Kind: LitFloat, Float: 1.3}, types.KindTimestamp)
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
-	if ilErr.Literal != "1.3" || ilErr.Type != tsType {
-		t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, "1.3", tsType)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertInvalidLiteral(t, err, "1.3", tsType)
 }
 
 // TestCoerceBoolLiteralOnTimestampRejected pins LitBool on KindTimestamp ->
@@ -638,24 +572,13 @@ func TestCoerceFloatLiteralOnTimestampRejected(t *testing.T) {
 func TestCoerceBoolLiteralOnTimestampRejected(t *testing.T) {
 	const tsType = "(__timestamp_micros_since_unix_epoch__: I64)"
 	_, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindTimestamp)
-	var utErr UnexpectedTypeError
-	if !errors.As(err, &utErr) {
-		t.Fatalf("err = %v, want UnexpectedTypeError", err)
-	}
-	if utErr.Expected != "Bool" || utErr.Inferred != tsType {
-		t.Fatalf("got {%q, %q}, want {Bool, %q}", utErr.Expected, utErr.Inferred, tsType)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertUnexpectedType(t, err, "Bool", tsType)
 }
 
 func TestCoerceSenderRejectsTimestampColumn(t *testing.T) {
 	caller := [32]byte{1}
 	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindTimestamp, &caller)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 func TestCoerceStringLiteralToDuration(t *testing.T) {
@@ -686,47 +609,20 @@ func TestCoerceMalformedDurationRejected(t *testing.T) {
 	const durationType = "(__duration_micros__: I64)"
 	for _, s := range []string{"", "not-a-duration", "5fortnights"} {
 		_, err := Coerce(Literal{Kind: LitString, Str: s}, types.KindDuration)
-		var ilErr InvalidLiteralError
-		if !errors.As(err, &ilErr) {
-			t.Fatalf("Coerce(%q) err = %v, want InvalidLiteralError", s, err)
-		}
-		if ilErr.Literal != s || ilErr.Type != durationType {
-			t.Fatalf("Coerce(%q) got {%q, %q}, want {%q, %q}", s, ilErr.Literal, ilErr.Type, s, durationType)
-		}
-		if !errors.Is(err, ErrUnsupportedSQL) {
-			t.Fatalf("Coerce(%q) err does not unwrap to ErrUnsupportedSQL: %v", s, err)
-		}
+		assertInvalidLiteral(t, err, s, durationType)
 	}
 }
 
 func TestCoerceNonStringLiteralOnDurationRejected(t *testing.T) {
 	const durationType = "(__duration_micros__: I64)"
 	_, err := Coerce(Literal{Kind: LitInt, Int: 42}, types.KindDuration)
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
-	if ilErr.Literal != "42" || ilErr.Type != durationType {
-		t.Fatalf("got {%q, %q}, want {\"42\", %q}", ilErr.Literal, ilErr.Type, durationType)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertInvalidLiteral(t, err, "42", durationType)
 }
 
 func TestCoerceBoolLiteralOnDurationRejected(t *testing.T) {
 	const durationType = "(__duration_micros__: I64)"
 	_, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindDuration)
-	var utErr UnexpectedTypeError
-	if !errors.As(err, &utErr) {
-		t.Fatalf("err = %v, want UnexpectedTypeError", err)
-	}
-	if utErr.Expected != "Bool" || utErr.Inferred != durationType {
-		t.Fatalf("got {%q, %q}, want {Bool, %q}", utErr.Expected, utErr.Inferred, durationType)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertUnexpectedType(t, err, "Bool", durationType)
 }
 
 func TestCoerceStringLiteralToUUID(t *testing.T) {
@@ -752,31 +648,13 @@ func TestCoerceMalformedUUIDRejected(t *testing.T) {
 		"00112233-4455-6677-8899-aabbccddeeff00",
 	} {
 		_, err := Coerce(Literal{Kind: LitString, Str: s}, types.KindUUID)
-		var ilErr InvalidLiteralError
-		if !errors.As(err, &ilErr) {
-			t.Fatalf("Coerce(%q) err = %v, want InvalidLiteralError", s, err)
-		}
-		if ilErr.Literal != s || ilErr.Type != "UUID" {
-			t.Fatalf("Coerce(%q) got {%q, %q}, want {%q, \"UUID\"}", s, ilErr.Literal, ilErr.Type, s)
-		}
-		if !errors.Is(err, ErrUnsupportedSQL) {
-			t.Fatalf("Coerce(%q) err does not unwrap to ErrUnsupportedSQL: %v", s, err)
-		}
+		assertInvalidLiteral(t, err, s, "UUID")
 	}
 }
 
 func TestCoerceNonStringLiteralOnUUIDRejected(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitInt, Int: 42}, types.KindUUID)
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
-	if ilErr.Literal != "42" || ilErr.Type != "UUID" {
-		t.Fatalf("got {%q, %q}, want {\"42\", \"UUID\"}", ilErr.Literal, ilErr.Type)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertInvalidLiteral(t, err, "42", "UUID")
 }
 
 func TestCoerceJSONStringCanonicalizes(t *testing.T) {
@@ -794,27 +672,12 @@ func TestCoerceJSONStringCanonicalizes(t *testing.T) {
 
 func TestCoerceInvalidJSONRejected(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitString, Str: `{"a":`}, types.KindJSON)
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
-	if ilErr.Literal != `{"a":` || ilErr.Type != "JSON" {
-		t.Fatalf("got {%q, %q}, want invalid JSON literal context", ilErr.Literal, ilErr.Type)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertInvalidLiteral(t, err, `{"a":`, "JSON")
 }
 
 func TestCoerceNonStringLiteralOnJSONRejected(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitInt, Int: 42}, types.KindJSON)
-	var ilErr InvalidLiteralError
-	if !errors.As(err, &ilErr) {
-		t.Fatalf("err = %v, want InvalidLiteralError", err)
-	}
-	if ilErr.Literal != "42" || ilErr.Type != "JSON" {
-		t.Fatalf("got {%q, %q}, want {\"42\", \"JSON\"}", ilErr.Literal, ilErr.Type)
-	}
+	assertInvalidLiteral(t, err, "42", "JSON")
 }
 
 // TestCoerceSenderRejectsArrayStringColumn pins the reference-informed shape
@@ -824,9 +687,7 @@ func TestCoerceNonStringLiteralOnJSONRejected(t *testing.T) {
 func TestCoerceSenderRejectsArrayStringColumn(t *testing.T) {
 	caller := [32]byte{1}
 	_, err := CoerceWithCaller(Literal{Kind: LitSender}, types.KindArrayString, &caller)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceLiteralsRejectedOnArrayStringColumn pins reference error class
@@ -851,28 +712,10 @@ func TestCoerceLiteralsRejectedOnArrayStringColumn(t *testing.T) {
 	}
 	for _, c := range invalidCases {
 		_, err := Coerce(c.lit, types.KindArrayString)
-		var ilErr InvalidLiteralError
-		if !errors.As(err, &ilErr) {
-			t.Fatalf("literal %v: err = %v, want InvalidLiteralError", c.lit.Kind, err)
-		}
-		if ilErr.Literal != c.want || ilErr.Type != arrType {
-			t.Fatalf("literal %v: got {%q, %q}, want {%q, %q}", c.lit.Kind, ilErr.Literal, ilErr.Type, c.want, arrType)
-		}
-		if !errors.Is(err, ErrUnsupportedSQL) {
-			t.Fatalf("literal %v: err does not unwrap to ErrUnsupportedSQL: %v", c.lit.Kind, err)
-		}
+		assertInvalidLiteral(t, err, c.want, arrType)
 	}
 	_, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindArrayString)
-	var utErr UnexpectedTypeError
-	if !errors.As(err, &utErr) {
-		t.Fatalf("LitBool: err = %v, want UnexpectedTypeError", err)
-	}
-	if utErr.Expected != "Bool" || utErr.Inferred != arrType {
-		t.Fatalf("LitBool: got {%q, %q}, want {Bool, %q}", utErr.Expected, utErr.Inferred, arrType)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("LitBool: err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertUnexpectedType(t, err, "Bool", arrType)
 }
 
 // bigIntFromStr is a test helper — panics on parse failure, which catches
@@ -962,9 +805,7 @@ func TestCoerceBigIntLiteralOverflowsUint256(t *testing.T) {
 	// 2^256 exactly — one past u256 max.
 	x := new(big.Int).Lsh(big.NewInt(1), 256)
 	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindUint256)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceNegativeBigIntRejectedOnUint256 pins that a negative BigInt
@@ -973,9 +814,7 @@ func TestCoerceBigIntLiteralOverflowsUint256(t *testing.T) {
 func TestCoerceNegativeBigIntRejectedOnUint256(t *testing.T) {
 	x := new(big.Int).Neg(bigIntFromStr(t, "10000000000000000000000000000000000000000"))
 	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindUint256)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceBigIntLiteralOnInt64Rejected pins that a BigInt beyond int64
@@ -984,9 +823,7 @@ func TestCoerceNegativeBigIntRejectedOnUint256(t *testing.T) {
 func TestCoerceBigIntLiteralOnInt64Rejected(t *testing.T) {
 	x := bigIntFromStr(t, "10000000000000000000000000000000000000000")
 	_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, types.KindInt64)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceBigIntLiteralToFloat32Infinity pins that the f32 = 1e40 path
@@ -1108,9 +945,7 @@ func TestCoerceLitBigIntOnStringColumnWidens(t *testing.T) {
 // invents a rendering that diverges from any reference source token.
 func TestCoerceLitBytesOnStringColumnDeferred(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitBytes, Bytes: []byte{0xde, 0xad, 0xbe, 0xef}}, types.KindString)
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
-	}
+	assertUnsupportedSQL(t, err)
 }
 
 // TestCoerceLitBoolOnStringColumnEmitsUnexpectedType pins that the widening
@@ -1122,19 +957,7 @@ func TestCoerceLitBytesOnStringColumnDeferred(t *testing.T) {
 // `TestCoerceBoolToStringFails` (which only asserts ErrUnsupportedSQL).
 func TestCoerceLitBoolOnStringColumnEmitsUnexpectedType(t *testing.T) {
 	_, err := Coerce(Literal{Kind: LitBool, Bool: true}, types.KindString)
-	if err == nil {
-		t.Fatal("want error, got nil")
-	}
-	var utErr UnexpectedTypeError
-	if !errors.As(err, &utErr) {
-		t.Fatalf("err = %v, want UnexpectedTypeError", err)
-	}
-	if utErr.Expected != "Bool" || utErr.Inferred != "String" {
-		t.Fatalf("got {%q, %q}, want {\"Bool\", \"String\"}", utErr.Expected, utErr.Inferred)
-	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-	}
+	assertUnexpectedType(t, err, "Bool", "String")
 }
 
 // TestCoerceLitStringNumericTokenWidensOntoNumericKinds pins string numeric
@@ -1224,19 +1047,7 @@ func TestCoerceLitStringFailingNumericEmitsInvalidLiteral(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Coerce(Literal{Kind: LitString, Str: tc.litStr}, tc.kind)
-			if err == nil {
-				t.Fatal("want error, got nil")
-			}
-			var ilErr InvalidLiteralError
-			if !errors.As(err, &ilErr) {
-				t.Fatalf("err = %v, want InvalidLiteralError", err)
-			}
-			if ilErr.Literal != tc.wantLit || ilErr.Type != tc.wantTy {
-				t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, tc.wantLit, tc.wantTy)
-			}
-			if !errors.Is(err, ErrUnsupportedSQL) {
-				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-			}
+			assertInvalidLiteral(t, err, tc.wantLit, tc.wantTy)
 		})
 	}
 }
@@ -1259,19 +1070,7 @@ func TestCoerceLitBigIntOnNarrowIntegerEmitsInvalidLiteral(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Coerce(Literal{Kind: LitBigInt, Big: x}, tc.kind)
-			if err == nil {
-				t.Fatal("want error, got nil")
-			}
-			var ilErr InvalidLiteralError
-			if !errors.As(err, &ilErr) {
-				t.Fatalf("err = %v, want InvalidLiteralError", err)
-			}
-			if ilErr.Literal != tc.wantLit || ilErr.Type != tc.wantTy {
-				t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, tc.wantLit, tc.wantTy)
-			}
-			if !errors.Is(err, ErrUnsupportedSQL) {
-				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-			}
+			assertInvalidLiteral(t, err, tc.wantLit, tc.wantTy)
 		})
 	}
 }
@@ -1320,19 +1119,7 @@ func TestCoerceParserPreservedSourceTextOnInvalidLiteral(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			lit := parseFilterLiteral(t, tc.sql)
 			_, err := Coerce(lit, tc.kind)
-			if err == nil {
-				t.Fatal("want error, got nil")
-			}
-			var ilErr InvalidLiteralError
-			if !errors.As(err, &ilErr) {
-				t.Fatalf("err = %v, want InvalidLiteralError", err)
-			}
-			if ilErr.Literal != tc.wantLit || ilErr.Type != tc.wantTy {
-				t.Fatalf("got {%q, %q}, want {%q, %q}", ilErr.Literal, ilErr.Type, tc.wantLit, tc.wantTy)
-			}
-			if !errors.Is(err, ErrUnsupportedSQL) {
-				t.Fatalf("err does not unwrap to ErrUnsupportedSQL: %v", err)
-			}
+			assertInvalidLiteral(t, err, tc.wantLit, tc.wantTy)
 		})
 	}
 }
@@ -1419,43 +1206,16 @@ func TestCoerceParserStrNumHexOnBytesViaFromHexPad(t *testing.T) {
 	t.Run("non_hex_string_emits_invalid_literal_array_u8", func(t *testing.T) {
 		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 'not-hex'")
 		_, err := Coerce(lit, types.KindBytes)
-		if err == nil {
-			t.Fatal("want error, got nil")
-		}
-		var ilErr InvalidLiteralError
-		if !errors.As(err, &ilErr) {
-			t.Fatalf("err = %v, want InvalidLiteralError", err)
-		}
-		if ilErr.Literal != "not-hex" || ilErr.Type != "Array<U8>" {
-			t.Fatalf("got {%q, %q}, want {%q, \"Array<U8>\"}", ilErr.Literal, ilErr.Type, "not-hex")
-		}
+		assertInvalidLiteral(t, err, "not-hex", "Array<U8>")
 	})
 	t.Run("lowercase_x_escaped_string_emits_invalid_literal_array_u8", func(t *testing.T) {
 		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 'x''AB'")
 		_, err := Coerce(lit, types.KindBytes)
-		if err == nil {
-			t.Fatal("want error, got nil")
-		}
-		var ilErr InvalidLiteralError
-		if !errors.As(err, &ilErr) {
-			t.Fatalf("err = %v, want InvalidLiteralError", err)
-		}
-		if ilErr.Literal != "x'AB" || ilErr.Type != "Array<U8>" {
-			t.Fatalf("got {%q, %q}, want {%q, \"Array<U8>\"}", ilErr.Literal, ilErr.Type, "x'AB")
-		}
+		assertInvalidLiteral(t, err, "x'AB", "Array<U8>")
 	})
 	t.Run("float_emits_invalid_literal_array_u8", func(t *testing.T) {
 		lit := parseFilterLiteral(t, "SELECT * FROM t WHERE bytes = 1.3")
 		_, err := Coerce(lit, types.KindBytes)
-		if err == nil {
-			t.Fatal("want error, got nil")
-		}
-		var ilErr InvalidLiteralError
-		if !errors.As(err, &ilErr) {
-			t.Fatalf("err = %v, want InvalidLiteralError", err)
-		}
-		if ilErr.Literal != "1.3" || ilErr.Type != "Array<U8>" {
-			t.Fatalf("got {%q, %q}, want {%q, \"Array<U8>\"}", ilErr.Literal, ilErr.Type, "1.3")
-		}
+		assertInvalidLiteral(t, err, "1.3", "Array<U8>")
 	})
 }
