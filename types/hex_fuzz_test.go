@@ -14,16 +14,29 @@ const (
 
 type fixedHexParserCase struct {
 	name       string
+	canonical  string
 	wantLen    int
 	invalidErr error
+	invalid    []string
 	parse      func(string) (string, error)
 }
 
 var fixedHexParserCases = []fixedHexParserCase{
 	{
 		name:       "identity",
+		canonical:  fixedHexIdentitySeed,
 		wantLen:    64,
 		invalidErr: ErrInvalidIdentityHex,
+		invalid: []string{
+			"",
+			"ab",
+			"0123",
+			fixedHexIdentitySeed[:63],
+			fixedHexIdentitySeed + "0",
+			fixedHexIdentitySeed[:63] + "z",
+			" " + fixedHexIdentitySeed[:63],
+			"0x" + fixedHexIdentitySeed[:62],
+		},
 		parse: func(s string) (string, error) {
 			id, err := ParseIdentityHex(s)
 			if err != nil {
@@ -34,8 +47,20 @@ var fixedHexParserCases = []fixedHexParserCase{
 	},
 	{
 		name:       "connection_id",
+		canonical:  fixedHexConnectionIDSeed,
 		wantLen:    32,
 		invalidErr: ErrInvalidConnectionIDHex,
+		invalid: []string{
+			"",
+			"ab",
+			"0123",
+			"0123456789abcdef",
+			fixedHexConnectionIDSeed[:31],
+			fixedHexConnectionIDSeed + "0",
+			fixedHexConnectionIDSeed[:31] + "z",
+			" " + fixedHexConnectionIDSeed[:31],
+			"0x" + fixedHexConnectionIDSeed[:30],
+		},
 		parse: func(s string) (string, error) {
 			connID, err := ParseConnectionIDHex(s)
 			if err != nil {
@@ -46,30 +71,8 @@ var fixedHexParserCases = []fixedHexParserCase{
 	},
 }
 
-var fixedHexParserFuzzSeeds = []string{
-	"",
-	" ",
-	"\x00",
-	fixedHexIdentitySeed,
-	strings.ToUpper(fixedHexIdentitySeed),
-	mixedHexCase(fixedHexIdentitySeed),
-	fixedHexIdentitySeed[:63],
-	fixedHexIdentitySeed + "0",
-	fixedHexIdentitySeed[:63] + "z",
-	" " + fixedHexIdentitySeed[:63],
-	"0x" + fixedHexIdentitySeed[:62],
-	fixedHexConnectionIDSeed,
-	strings.ToUpper(fixedHexConnectionIDSeed),
-	mixedHexCase(fixedHexConnectionIDSeed),
-	fixedHexConnectionIDSeed[:31],
-	fixedHexConnectionIDSeed + "0",
-	fixedHexConnectionIDSeed[:31] + "z",
-	" " + fixedHexConnectionIDSeed[:31],
-	"0x" + fixedHexConnectionIDSeed[:30],
-}
-
 func FuzzParseFixedHexIDs(f *testing.F) {
-	for _, seed := range fixedHexParserFuzzSeeds {
+	for _, seed := range fixedHexParserFuzzSeeds() {
 		f.Add(seed)
 	}
 
@@ -80,6 +83,15 @@ func FuzzParseFixedHexIDs(f *testing.F) {
 			}
 		}
 	})
+}
+
+func fixedHexParserFuzzSeeds() []string {
+	seeds := []string{" ", "\x00"}
+	for _, tc := range fixedHexParserCases {
+		seeds = append(seeds, tc.canonical, strings.ToUpper(tc.canonical), mixedHexCase(tc.canonical))
+		seeds = append(seeds, tc.invalid...)
+	}
+	return seeds
 }
 
 func checkFixedHexParserBoundary(tc fixedHexParserCase, input string) error {

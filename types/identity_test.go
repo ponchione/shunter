@@ -1,9 +1,6 @@
 package types
 
-import (
-	"errors"
-	"testing"
-)
+import "testing"
 
 func TestIdentityIsZero(t *testing.T) {
 	var zero Identity
@@ -33,26 +30,5 @@ func TestIdentityHexRoundTrip(t *testing.T) {
 	}
 	if back != id {
 		t.Errorf("round-trip mismatch: got % x, want % x", back, id)
-	}
-}
-
-func TestParseIdentityHexWrongLength(t *testing.T) {
-	for _, s := range []string{"", "ab", "0123"} {
-		_, err := ParseIdentityHex(s)
-		if !errors.Is(err, ErrInvalidIdentityHex) {
-			t.Errorf("len %d: got %v, want ErrInvalidIdentityHex", len(s), err)
-		}
-	}
-}
-
-func TestParseIdentityHexNonHex(t *testing.T) {
-	// 64 chars but with invalid characters.
-	bad := "z" + string(make([]byte, 63))
-	for i := 1; i < 64; i++ {
-		bad = bad[:i] + "0" + bad[i+1:]
-	}
-	_, err := ParseIdentityHex(bad)
-	if !errors.Is(err, ErrInvalidIdentityHex) {
-		t.Errorf("got %v, want ErrInvalidIdentityHex", err)
 	}
 }

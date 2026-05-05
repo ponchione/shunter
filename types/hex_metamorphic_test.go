@@ -8,52 +8,7 @@ import (
 
 func TestFixedHexParsersMetamorphicCorpus(t *testing.T) {
 	const seed = uint64(0x4e51d7)
-	cases := []struct {
-		name      string
-		canonical string
-		parse     func(string) (string, error)
-		wantErr   error
-		invalid   []string
-	}{
-		{
-			name:      "identity",
-			canonical: fixedHexIdentitySeed,
-			parse: func(s string) (string, error) {
-				id, err := ParseIdentityHex(s)
-				if err != nil {
-					return "", err
-				}
-				return id.Hex(), nil
-			},
-			wantErr: ErrInvalidIdentityHex,
-			invalid: []string{
-				"",
-				"00112233445566778899aabbccddeeffffeeddccbbaa9988776655443322110",
-				"00112233445566778899aabbccddeeffffeeddccbbaa998877665544332211000",
-				"00112233445566778899aabbccddeeffffeeddccbbaa9988776655443322110z",
-			},
-		},
-		{
-			name:      "connection_id",
-			canonical: fixedHexConnectionIDSeed,
-			parse: func(s string) (string, error) {
-				connID, err := ParseConnectionIDHex(s)
-				if err != nil {
-					return "", err
-				}
-				return connID.Hex(), nil
-			},
-			wantErr: ErrInvalidConnectionIDHex,
-			invalid: []string{
-				"",
-				"00112233445566778899aabbccddee",
-				"00112233445566778899aabbccddeeff0",
-				"00112233445566778899aabbccddeefz",
-			},
-		},
-	}
-
-	for caseIndex, tc := range cases {
+	for caseIndex, tc := range fixedHexParserCases {
 		variants := []string{
 			tc.canonical,
 			strings.ToUpper(tc.canonical),
@@ -74,9 +29,9 @@ func TestFixedHexParsersMetamorphicCorpus(t *testing.T) {
 		for invalidIndex, input := range tc.invalid {
 			opIndex := caseIndex*20 + len(variants) + invalidIndex
 			got, err := tc.parse(input)
-			if !errors.Is(err, tc.wantErr) {
+			if !errors.Is(err, tc.invalidErr) {
 				t.Fatalf("seed=%#x op_index=%d runtime_config=parser=%s operation=parse-invalid input=%q observed=(value=%q,error=%v) expected_error=%v",
-					seed, opIndex, tc.name, input, got, err, tc.wantErr)
+					seed, opIndex, tc.name, input, got, err, tc.invalidErr)
 			}
 		}
 	}

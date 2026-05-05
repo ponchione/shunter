@@ -1,9 +1,6 @@
 package types
 
-import (
-	"errors"
-	"testing"
-)
+import "testing"
 
 func TestConnectionIDIsZero(t *testing.T) {
 	var zero ConnectionID
@@ -32,22 +29,5 @@ func TestConnectionIDHexRoundTrip(t *testing.T) {
 	}
 	if back != c {
 		t.Errorf("round-trip mismatch: got % x, want % x", back, c)
-	}
-}
-
-func TestParseConnectionIDHexWrongLength(t *testing.T) {
-	for _, s := range []string{"", "ab", "0123", "0123456789abcdef"} {
-		_, err := ParseConnectionIDHex(s)
-		if !errors.Is(err, ErrInvalidConnectionIDHex) {
-			t.Errorf("len %d: got %v, want ErrInvalidConnectionIDHex", len(s), err)
-		}
-	}
-}
-
-func TestParseConnectionIDHexNonHex(t *testing.T) {
-	bad := "z0123456789abcdef0123456789abcde" // 32 chars with leading z
-	_, err := ParseConnectionIDHex(bad)
-	if !errors.Is(err, ErrInvalidConnectionIDHex) {
-		t.Errorf("got %v, want ErrInvalidConnectionIDHex", err)
 	}
 }
