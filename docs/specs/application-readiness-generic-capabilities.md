@@ -30,9 +30,8 @@ capabilities.
 Agents should implement remaining slices in this order unless a later task
 explicitly says otherwise:
 
-1. App-owned migration and import hooks.
-2. Ordered declared reads.
-3. Client/codegen updates for the new surface.
+1. Ordered declared reads.
+2. Client/codegen updates for the new surface.
 
 Completed slices:
 
@@ -42,6 +41,7 @@ Completed slices:
 - Composite index and reducer read ergonomics.
 - Fixed-point scaled integer convention.
 - External JWT principal bridge.
+- App-owned migration and import hooks.
 
 The remaining slices build on the now-stable UUID, JSON, nullable, composite
 index, and integer type surfaces.
@@ -349,6 +349,8 @@ type AuthPrincipal struct {
 
 ## 9. App-Owned Migration And Import Hooks
 
+Status: implemented.
+
 ### Requirement
 
 Applications need safe ways to initialize and evolve durable Shunter state.
@@ -361,31 +363,28 @@ actual migration logic.
 - Add executable migration hooks as an explicit separate surface.
 - Hooks run under runtime ownership before the runtime reports ready.
 - Hooks run with exclusive write access to durable state.
-- Hooks receive from/to schema version, module metadata, and a transactional DB
-  surface.
+- Hooks receive module metadata, the immutable schema registry, the committed
+  TxID horizon, and a transactional DB surface.
 - Hooks must not use protocol connections or background goroutines.
-- Startup must fail if a required migration path is missing.
+- Startup and preflight must reject incompatible durable state instead of
+  silently rewriting it.
 - Startup must not silently rewrite state without an explicitly registered hook.
 
-Suggested shape:
+Implemented shape:
 
 ```go
-type MigrationHook struct {
-    FromSchemaVersion uint32
-    ToSchemaVersion   uint32
-    Name              string
-    Run               func(*MigrationContext) error
-}
+type MigrationHook func(context.Context, *MigrationContext) error
 
-type MigrationContext struct {
-    Context context.Context
-    FromSchemaVersion uint32
-    ToSchemaVersion   uint32
-    DB types.ReducerDB
-}
+func (c *MigrationContext) ModuleName() string
+func (c *MigrationContext) ModuleVersion() string
+func (c *MigrationContext) Schema() schema.SchemaRegistry
+func (c *MigrationContext) CommittedTxID() types.TxID
+func (c *MigrationContext) Transaction() *store.Transaction
 ```
 
-Exact names can change to match existing module APIs.
+Startup hooks are registered with `Module.MigrationHook`. App-owned offline
+binaries can run explicit hooks with `RunDataDirMigrations` or the module's
+registered hooks with `RunModuleDataDirMigrations`.
 
 ### Import Helpers
 
@@ -405,11 +404,12 @@ Exact names can change to match existing module APIs.
 
 ### Tests
 
-- Empty-state hook runs once before ready.
-- Missing migration hook fails startup.
-- Hook error leaves runtime not ready.
-- Successful hook state is durable across restart.
-- Hook cannot run after normal runtime start.
+- Startup hook commits durably before runtime ready.
+- Hook error rolls back and leaves runtime not ready.
+- Explicit offline migration runner leaves the module buildable.
+- Module-registered hooks are reusable through the offline runner.
+- No-op hooks do not consume TxIDs.
+- Failed offline hooks roll back their transaction.
 
 ## 10. Ordered Declared Reads
 

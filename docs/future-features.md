@@ -12,10 +12,9 @@ module model, storage contracts, and developer workflow.
 
 1. Richer query and declared-read foundation.
 2. App-owned CLI/runtime helpers.
-3. Migration preflight and app-owned migration hooks.
-4. Type-system vertical slices driven by application schemas.
-5. Storage, recovery, and subscription performance hardening.
-6. Client SDK ergonomics, including a possible React SDK track.
+3. Type-system vertical slices driven by application schemas.
+4. Storage, recovery, and subscription performance hardening.
+5. Client SDK ergonomics, including a possible React SDK track.
 
 ## Client SDK Ergonomics
 
@@ -115,8 +114,8 @@ startup should not silently rewrite durable state.
 
 Recommended sequence:
 
-1. Continue refining migration-runner ergonomics once real app-owned binaries
-   show repeated migration workflows.
+1. Continue refining the existing migration-runner ergonomics once real
+   app-owned binaries show repeated migration workflows.
 
 ## Storage, Recovery, And Performance
 
