@@ -957,71 +957,38 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 		return visit(leftRow, rightRow)
 	}
 
+	outerTable, outerCol := join.Left, join.LeftCol
+	innerTable, innerCol := join.Right, join.RightCol
+	emit := func(outerRow, innerRow types.ProductValue) bool {
+		if join.ProjectRight {
+			return visitIfMatch(innerRow, outerRow)
+		}
+		return visitIfMatch(outerRow, innerRow)
+	}
 	if join.ProjectRight {
-		if resolver != nil {
-			if leftIdx, ok := resolver.IndexIDForColumn(join.Left, join.LeftCol); ok {
-				for _, rightRow := range view.TableScan(join.Right) {
-					if err := ctx.Err(); err != nil {
-						return err
-					}
-					if int(join.RightCol) >= len(rightRow) {
-						continue
-					}
-					key := store.NewIndexKey(rightRow[join.RightCol])
-					for _, rid := range view.IndexSeek(join.Left, leftIdx, key) {
-						if err := ctx.Err(); err != nil {
-							return err
-						}
-						leftRow, ok := view.GetRow(join.Left, rid)
-						if !ok {
-							continue
-						}
-						if !visitIfMatch(leftRow, rightRow) {
-							return nil
-						}
-					}
-				}
-				return nil
-			}
-		}
-		for _, rightRow := range view.TableScan(join.Right) {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if int(join.RightCol) >= len(rightRow) {
-				continue
-			}
-			for _, leftRow := range view.TableScan(join.Left) {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				if !visitIfMatch(leftRow, rightRow) {
-					return nil
-				}
-			}
-		}
-		return nil
+		outerTable, outerCol = join.Right, join.RightCol
+		innerTable, innerCol = join.Left, join.LeftCol
 	}
 
 	if resolver != nil {
-		if rightIdx, ok := resolver.IndexIDForColumn(join.Right, join.RightCol); ok {
-			for _, leftRow := range view.TableScan(join.Left) {
+		if innerIdx, ok := resolver.IndexIDForColumn(innerTable, innerCol); ok {
+			for _, outerRow := range view.TableScan(outerTable) {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if int(join.LeftCol) >= len(leftRow) {
+				if int(outerCol) >= len(outerRow) {
 					continue
 				}
-				key := store.NewIndexKey(leftRow[join.LeftCol])
-				for _, rid := range view.IndexSeek(join.Right, rightIdx, key) {
+				key := store.NewIndexKey(outerRow[outerCol])
+				for _, rid := range view.IndexSeek(innerTable, innerIdx, key) {
 					if err := ctx.Err(); err != nil {
 						return err
 					}
-					rightRow, ok := view.GetRow(join.Right, rid)
+					innerRow, ok := view.GetRow(innerTable, rid)
 					if !ok {
 						continue
 					}
-					if !visitIfMatch(leftRow, rightRow) {
+					if !emit(outerRow, innerRow) {
 						return nil
 					}
 				}
@@ -1029,18 +996,19 @@ func visitOneOffJoinPairs(ctx context.Context, view store.CommittedReadView, joi
 			return nil
 		}
 	}
-	for _, leftRow := range view.TableScan(join.Left) {
+
+	for _, outerRow := range view.TableScan(outerTable) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if int(join.LeftCol) >= len(leftRow) {
+		if int(outerCol) >= len(outerRow) {
 			continue
 		}
-		for _, rightRow := range view.TableScan(join.Right) {
+		for _, innerRow := range view.TableScan(innerTable) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if !visitIfMatch(leftRow, rightRow) {
+			if !emit(outerRow, innerRow) {
 				return nil
 			}
 		}
