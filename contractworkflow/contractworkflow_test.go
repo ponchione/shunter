@@ -1022,7 +1022,7 @@ func writeContractFixture(t *testing.T, dir, name string, contract shunter.Modul
 
 func readTextFile(t *testing.T, path string) string {
 	t.Helper()
-	data, err := readFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}

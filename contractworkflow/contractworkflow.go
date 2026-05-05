@@ -286,15 +286,11 @@ func readRequiredFile(label, path string) ([]byte, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("%s path is required", label)
 	}
-	data, err := readFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s %q: %w", label, path, err)
 	}
 	return data, nil
-}
-
-func readFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
 }
 
 func writeFile(path string, data []byte) error {
