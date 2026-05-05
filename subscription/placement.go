@@ -286,10 +286,11 @@ func collectCandidatesForTableInto(
 	return out
 }
 
-// findColRanges returns ColRange predicates whose bounds cover every matching
-// row for table t. Range placement follows the same safety rule as equality
-// placement: AND may use any required child constraint; OR must constrain all
-// branches or fall back to a broader tier.
+// findColRanges returns range constraints whose bounds cover every matching row
+// for table t. ColNe is represented as two exclusive ranges around the rejected
+// value. Range placement follows the same safety rule as equality placement:
+// AND may use any required child constraint; OR must constrain all branches or
+// fall back to a broader tier.
 func findColRanges(pred Predicate, t TableID) []ColRange {
 	out, ok := requiredColRanges(pred, t)
 	if !ok {
@@ -303,6 +304,11 @@ func requiredColRanges(pred Predicate, t TableID) ([]ColRange, bool) {
 	case ColRange:
 		if p.Table == t && rangeHasBound(p) {
 			return []ColRange{p}, true
+		}
+		return nil, false
+	case ColNe:
+		if p.Table == t {
+			return colNeRanges(p), true
 		}
 		return nil, false
 	case And:
@@ -337,6 +343,25 @@ func requiredColRanges(pred Predicate, t TableID) ([]ColRange, bool) {
 	return nil, false
 }
 
+func colNeRanges(p ColNe) []ColRange {
+	return []ColRange{
+		{
+			Table:  p.Table,
+			Column: p.Column,
+			Alias:  p.Alias,
+			Lower:  Bound{Unbounded: true},
+			Upper:  Bound{Value: p.Value, Inclusive: false},
+		},
+		{
+			Table:  p.Table,
+			Column: p.Column,
+			Alias:  p.Alias,
+			Lower:  Bound{Value: p.Value, Inclusive: false},
+			Upper:  Bound{Unbounded: true},
+		},
+	}
+}
+
 func rangeHasBound(p ColRange) bool {
 	return !p.Lower.Unbounded || !p.Upper.Unbounded
 }
@@ -369,6 +394,11 @@ func requiredMixedColEqRanges(pred Predicate, t TableID) (colFilterPlacements, b
 	case ColRange:
 		if p.Table == t && rangeHasBound(p) {
 			return colFilterPlacements{ranges: []ColRange{p}}, true
+		}
+		return colFilterPlacements{}, false
+	case ColNe:
+		if p.Table == t {
+			return colFilterPlacements{ranges: colNeRanges(p)}, true
 		}
 		return colFilterPlacements{}, false
 	case And:

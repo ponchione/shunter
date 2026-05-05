@@ -113,6 +113,31 @@ func TestPlaceColRangeGoesToRangeIndex(t *testing.T) {
 	}
 }
 
+func TestPlaceColNeGoesToRangeIndex(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := ColNe{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	h := hashN(1)
+	PlaceSubscription(idx, p, h)
+
+	if got := idx.Range.Lookup(1, 0, types.NewUint64(41)); len(got) != 1 || got[0] != h {
+		t.Fatalf("ColNe lower-side range candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(1, 0, types.NewUint64(43)); len(got) != 1 || got[0] != h {
+		t.Fatalf("ColNe upper-side range candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(1, 0, types.NewUint64(42)); len(got) != 0 {
+		t.Fatalf("ColNe rejected value candidate = %v, want empty", got)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex should be empty for ColNe: %v", got)
+	}
+
+	RemoveSubscription(idx, p, h)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("ColNe removal should clean indexes: %+v", idx)
+	}
+}
+
 func TestPlaceJoinWithFilterOnRHS(t *testing.T) {
 	// Join{L=1, R=2} with ColEq filter on T2.
 	// LHS (table 1) → JoinEdgeIndex
@@ -154,6 +179,33 @@ func TestPlaceJoinWithRangeFilterOnRHS(t *testing.T) {
 	}
 	if got := idx.Range.Lookup(2, 2, types.NewUint64(15)); len(got) != 1 || got[0] != h {
 		t.Fatalf("RangeIndex on T2 = %v, want [%v]", got, h)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex on changed LHS should be empty: %v", got)
+	}
+}
+
+func TestPlaceJoinWithNeFilterOnRHSUsesRangeEdges(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColNe{Table: 2, Column: 2, Value: types.NewUint64(10)},
+	}
+	h := hashN(1)
+	PlaceSubscription(idx, p, h)
+
+	edge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	if got := idx.JoinRangeEdge.Lookup(edge, types.NewUint64(9)); len(got) != 1 || got[0] != h {
+		t.Fatalf("JoinRangeEdge lower-side ColNe candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinRangeEdge.Lookup(edge, types.NewUint64(11)); len(got) != 1 || got[0] != h {
+		t.Fatalf("JoinRangeEdge upper-side ColNe candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinRangeEdge.Lookup(edge, types.NewUint64(10)); len(got) != 0 {
+		t.Fatalf("JoinRangeEdge rejected ColNe value candidate = %v, want empty", got)
+	}
+	if got := idx.Range.Lookup(2, 2, types.NewUint64(11)); len(got) != 1 || got[0] != h {
+		t.Fatalf("changed-side ColNe range candidate = %v, want [%v]", got, h)
 	}
 	if got := idx.Table.Lookup(1); len(got) != 0 {
 		t.Fatalf("TableIndex on changed LHS should be empty: %v", got)
@@ -429,6 +481,43 @@ func TestCollectCandidatesRangeMismatch(t *testing.T) {
 	}
 }
 
+func TestCollectCandidatesColNeRangeMatchAndMismatch(t *testing.T) {
+	idx := NewPruningIndexes()
+	PlaceSubscription(idx, ColNe{Table: 1, Column: 0, Value: types.NewUint64(42)}, hashN(1))
+
+	matchRows := []types.ProductValue{{types.NewUint64(43)}}
+	cands := CollectCandidatesForTable(idx, 1, matchRows, nil, nil)
+	if len(cands) != 1 || cands[0] != hashN(1) {
+		t.Fatalf("ColNe candidate = %v, want [%v]", cands, hashN(1))
+	}
+
+	mismatchRows := []types.ProductValue{{types.NewUint64(42)}}
+	cands = CollectCandidatesForTable(idx, 1, mismatchRows, nil, nil)
+	if len(cands) != 0 {
+		t.Fatalf("ColNe rejected value should produce no candidates: %v", cands)
+	}
+}
+
+func TestCollectCandidatesMixedEqNeOrUsesIndexes(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Or{
+		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)},
+		Right: ColNe{Table: 1, Column: 1, Value: types.NewUint64(42)},
+	}
+	PlaceSubscription(idx, p, hashN(1))
+
+	rows := []types.ProductValue{{types.NewUint64(8), types.NewUint64(43)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
+	if len(cands) != 1 || cands[0] != hashN(1) {
+		t.Fatalf("mixed Eq/Ne OR range candidate = %v, want [%v]", cands, hashN(1))
+	}
+	rows = []types.ProductValue{{types.NewUint64(8), types.NewUint64(42)}}
+	cands = CollectCandidatesForTable(idx, 1, rows, nil, nil)
+	if len(cands) != 0 {
+		t.Fatalf("mixed Eq/Ne OR mismatch candidates = %v, want empty", cands)
+	}
+}
+
 func TestCollectCandidatesJoinRangeEdgeMatch(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
@@ -475,6 +564,36 @@ func TestCollectCandidatesJoinRangeEdgeMismatch(t *testing.T) {
 	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
 	if len(cands) != 0 {
 		t.Fatalf("out-of-range join edge should produce 0 candidates: %v", cands)
+	}
+}
+
+func TestCollectCandidatesJoinNeRangeEdgeMatchAndMismatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64, 2: types.KindUint64}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: ColNe{Table: 2, Column: 2, Value: types.NewUint64(10)},
+	}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {
+			{types.NewUint64(100), types.NewUint64(7), types.NewUint64(11)},
+			{types.NewUint64(101), types.NewUint64(8), types.NewUint64(10)},
+		},
+	})
+
+	rows := []types.ProductValue{{types.NewUint64(7)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 1 || cands[0] != h {
+		t.Fatalf("join ColNe range-edge candidate = %v, want [%v]", cands, h)
+	}
+	rows = []types.ProductValue{{types.NewUint64(8)}}
+	cands = CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 0 {
+		t.Fatalf("join ColNe rejected value candidates = %v, want empty", cands)
 	}
 }
 

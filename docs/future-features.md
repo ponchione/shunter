@@ -83,6 +83,8 @@ Likely feature slices:
 
 Completed slices:
 
+- ColNe live predicates use two exclusive range placements, including
+  opposite-side join range edges
 - structurally false live predicates, including NoRows roots and join or
   cross-join filters, skip pruning placement while retaining registration
   semantics
