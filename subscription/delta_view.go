@@ -107,6 +107,35 @@ func (dv *DeltaView) DeletedRows(table TableID) []types.ProductValue {
 // inserted=true scans the insert side, false scans the delete side.
 // Panics when the requested column does not have a built delta index.
 func (dv *DeltaView) DeltaIndexScan(table TableID, col ColID, value Value, inserted bool) []types.ProductValue {
+	positions := dv.deltaIndexPositions(table, col, value, inserted)
+	if len(positions) == 0 {
+		return nil
+	}
+	rows := dv.deletes[table]
+	if inserted {
+		rows = dv.inserts[table]
+	}
+	out := make([]types.ProductValue, 0, len(positions))
+	for _, pos := range positions {
+		out = append(out, rows[pos])
+	}
+	return out
+}
+
+func (dv *DeltaView) hasDeltaIndex(table TableID, col ColID, inserted bool) bool {
+	src := dv.deltaIdx.deleteIdx
+	if inserted {
+		src = dv.deltaIdx.insertIdx
+	}
+	byCol, ok := src[table]
+	if !ok {
+		return false
+	}
+	_, ok = byCol[col]
+	return ok
+}
+
+func (dv *DeltaView) deltaIndexPositions(table TableID, col ColID, value Value, inserted bool) []int {
 	src := dv.deltaIdx.deleteIdx
 	rows := dv.deletes[table]
 	if inserted {
@@ -128,11 +157,7 @@ func (dv *DeltaView) DeltaIndexScan(table TableID, col ColID, value Value, inser
 	if len(positions) == 0 {
 		return nil
 	}
-	out := make([]types.ProductValue, 0, len(positions))
-	for _, pos := range positions {
-		out = append(out, rows[pos])
-	}
-	return out
+	return positions
 }
 
 // CommittedScan delegates to the underlying committed view.

@@ -157,6 +157,59 @@ func TestJoinWithCrossSideOrFilterEvaluatesAgainstJoinedPair(t *testing.T) {
 	}
 }
 
+func TestJoinCommittedProbeWithoutIndexMatchesIndexedProbe(t *testing.T) {
+	indexed := newMockCommitted()
+	indexed.setIndex(joinRHS, joinRHSIdx, int(joinRHSCol))
+	fallbackInner := newMockCommitted()
+	for _, committed := range []*mockCommitted{indexed, fallbackInner} {
+		committed.addRow(joinRHS, 10, types.ProductValue{types.NewUint64(100), types.NewUint64(1)})
+		committed.addRow(joinRHS, 11, types.ProductValue{types.NewUint64(200), types.NewUint64(2)})
+		committed.addRow(joinRHS, 12, types.ProductValue{types.NewUint64(200), types.NewUint64(3)})
+	}
+	cs := joinChangeset(
+		joinLHS,
+		[]types.ProductValue{
+			{types.NewUint64(1), types.NewString("keep-left")},
+			{types.NewUint64(2), types.NewString("skip-left")},
+		},
+		[]types.ProductValue{
+			{types.NewUint64(3), types.NewString("skip-left")},
+		},
+		joinRHS, nil, nil,
+	)
+	active := map[TableID][]ColID{joinLHS: {joinLHSCol}, joinRHS: {joinRHSCol}}
+	join := &Join{
+		Left: joinLHS, Right: joinRHS, LeftCol: joinLHSCol, RightCol: joinRHSCol,
+		Filter: Or{
+			Left:  ColEq{Table: joinLHS, Column: 1, Value: types.NewString("keep-left")},
+			Right: ColEq{Table: joinRHS, Column: 0, Value: types.NewUint64(200)},
+		},
+	}
+
+	indexedDV := NewDeltaView(indexed, cs, active)
+	defer indexedDV.Release()
+	indexedFragments := EvalJoinDeltaFragments(indexedDV, join, newJoinResolver())
+
+	fallback := newCountingCommitted(fallbackInner)
+	fallbackDV := NewDeltaView(fallback, cs, active)
+	defer fallbackDV.Release()
+	fallbackResolver := newMockResolver()
+	fallbackResolver.register(joinLHS, joinLHSCol, joinLHSIdx)
+	fallbackFragments := EvalJoinDeltaFragments(fallbackDV, join, fallbackResolver)
+
+	for i := range indexedFragments.Inserts {
+		if !sameRowBag(fallbackFragments.Inserts[i], indexedFragments.Inserts[i]) {
+			t.Fatalf("insert fragment %d = %v, want indexed-probe bag %v", i, fallbackFragments.Inserts[i], indexedFragments.Inserts[i])
+		}
+		if !sameRowBag(fallbackFragments.Deletes[i], indexedFragments.Deletes[i]) {
+			t.Fatalf("delete fragment %d = %v, want indexed-probe bag %v", i, fallbackFragments.Deletes[i], indexedFragments.Deletes[i])
+		}
+	}
+	if fallback.tableScanCalls != 2 {
+		t.Fatalf("TableScan calls = %d, want 2 (one scan for I1 and one for D1)", fallback.tableScanCalls)
+	}
+}
+
 func TestJoinFragmentEqualsFullReEvaluation(t *testing.T) {
 	// Baseline: reconcile the 4+4 fragments via ReconcileJoinDelta and
 	// compare the resulting inserts/deletes to a full re-evaluation of the

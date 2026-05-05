@@ -702,12 +702,13 @@ func TestEvalJoinSubscriptionLeftInsertWhenOnlyLeftJoinColumnIndexed(t *testing.
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 1)
 	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64})
-	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
 		2: {
 			{types.NewUint64(10), types.NewUint64(7)},
 			{types.NewUint64(11), types.NewUint64(7)},
 		},
 	})
+	committed := newCountingCommitted(inner)
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	join := Join{Left: 1, Right: 2, LeftCol: 1, RightCol: 1}
@@ -716,6 +717,7 @@ func TestEvalJoinSubscriptionLeftInsertWhenOnlyLeftJoinColumnIndexed(t *testing.
 	}, committed); err != nil {
 		t.Fatalf("RegisterSet = %v", err)
 	}
+	committed.tableScanCalls = 0
 
 	inserted := types.ProductValue{types.NewUint64(1), types.NewUint64(7)}
 	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
@@ -725,7 +727,7 @@ func TestEvalJoinSubscriptionLeftInsertWhenOnlyLeftJoinColumnIndexed(t *testing.
 			Inserts:   []types.ProductValue{inserted},
 		},
 	}}
-	committed.addRow(1, 1, inserted)
+	inner.addRow(1, 1, inserted)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
 
 	msg := <-inbox
@@ -737,6 +739,9 @@ func TestEvalJoinSubscriptionLeftInsertWhenOnlyLeftJoinColumnIndexed(t *testing.
 	assertRowsEqual(t, updates[0].Inserts, want)
 	if len(updates[0].Deletes) != 0 {
 		t.Fatalf("deletes = %v, want none", updates[0].Deletes)
+	}
+	if committed.tableScanCalls != 1 {
+		t.Fatalf("TableScan calls = %d, want 1 unindexed committed probe scan", committed.tableScanCalls)
 	}
 }
 
@@ -1011,9 +1016,10 @@ func TestEvalFilteredJoinFallsBackWhenOppositeJoinColumnUnindexed(t *testing.T) 
 		types.NewUint64(7),
 		types.NewString("red"),
 	}
-	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+	inner := buildMockCommitted(s, map[TableID][]types.ProductValue{
 		2: {rhs},
 	})
+	committed := newCountingCommitted(inner)
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
 	join := Join{
@@ -1028,6 +1034,7 @@ func TestEvalFilteredJoinFallsBackWhenOppositeJoinColumnUnindexed(t *testing.T) 
 	if got := mgr.indexes.Table.Lookup(1); len(got) != 1 {
 		t.Fatalf("table fallback candidates for changed LHS = %v, want one hash", got)
 	}
+	committed.tableScanCalls = 0
 
 	lhs := types.ProductValue{types.NewUint64(7), types.NewString("lhs")}
 	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
@@ -1037,7 +1044,7 @@ func TestEvalFilteredJoinFallsBackWhenOppositeJoinColumnUnindexed(t *testing.T) 
 			Inserts:   []types.ProductValue{lhs},
 		},
 	}}
-	committed.addRow(1, 1, lhs)
+	inner.addRow(1, 1, lhs)
 	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
 
 	msg := <-inbox
@@ -1050,6 +1057,9 @@ func TestEvalFilteredJoinFallsBackWhenOppositeJoinColumnUnindexed(t *testing.T) 
 	}
 	if len(updates[0].Deletes) != 0 {
 		t.Fatalf("deletes = %v, want none", updates[0].Deletes)
+	}
+	if committed.tableScanCalls != 1 {
+		t.Fatalf("TableScan calls = %d, want 1 filtered unindexed committed probe scan", committed.tableScanCalls)
 	}
 }
 

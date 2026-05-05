@@ -76,13 +76,15 @@ Direction:
 
 Likely feature slices:
 
-- broader index-aware planning for remaining unfiltered delta and complex live
-  join paths
+- broader index-aware planning for remaining live subscription candidate
+  pruning and complex live join paths
 - live-view expansion for currently query-only shapes after delta semantics are
   explicit
 
 Completed slices:
 
+- live join delta committed-probe fallbacks use per-transaction delta indexes
+  when the committed join side is unindexed
 - nullable-aware aggregate semantics for one-off and declared queries
 
 Any query expansion must include tests for authorization, visibility filtering,

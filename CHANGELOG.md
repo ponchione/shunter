@@ -5,6 +5,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 ## v0.1.1-dev
 
 - Current development line.
+- Live subscription join deltas now avoid per-row committed table rescans when only the changed side's join column is indexed.
 - Live subscription initial join snapshots now choose the lower-cost indexed scan side, including filter-reduced candidate sets, when both join columns are indexed.
 - Live subscription initial join snapshots now use indexed required equality/range filters to skip unnecessary join probes.
 - Live subscription join candidate pruning now uses required range filters on the opposite joined side when that side's join column is indexed.
