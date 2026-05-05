@@ -29,7 +29,7 @@ func ParseTag(raw string) (*TagDirectives, error) {
 
 	for _, tok := range tokens {
 		// Determine the canonical key for duplicate detection.
-		key, _, _ := strings.Cut(tok, ":")
+		key, val, hasValue := strings.Cut(tok, ":")
 
 		if seen[key] {
 			return nil, fmt.Errorf("shunter: duplicate directive %q in tag %q", key, raw)
@@ -45,18 +45,15 @@ func ParseTag(raw string) (*TagDirectives, error) {
 			td.Unique = true
 		case tok == "index":
 			td.Index = true
-		case strings.HasPrefix(tok, "index:"):
-			val := tok[len("index:"):]
+		case (key == "index" || key == "name") && hasValue:
 			if val == "" {
 				return nil, fmt.Errorf("shunter: empty value in directive %q in tag %q", tok, raw)
 			}
-			td.IndexName = val
-		case strings.HasPrefix(tok, "name:"):
-			val := tok[len("name:"):]
-			if val == "" {
-				return nil, fmt.Errorf("shunter: empty value in directive %q in tag %q", tok, raw)
+			if key == "index" {
+				td.IndexName = val
+			} else {
+				td.NameOverride = val
 			}
-			td.NameOverride = val
 		case tok == "-":
 			td.Exclude = true
 		default:
