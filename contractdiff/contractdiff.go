@@ -158,7 +158,7 @@ func compareTables(out *Report, oldTables, currentTables []schema.TableExport) {
 }
 
 func compareTableReadPolicy(out *Report, tableName string, oldPolicy, currentPolicy schema.ReadPolicy) {
-	if readPolicySemanticSignature(oldPolicy) == readPolicySemanticSignature(currentPolicy) {
+	if readPoliciesSemanticallyEqual(oldPolicy, currentPolicy) {
 		return
 	}
 	oldSignature := readPolicySignature(oldPolicy)
@@ -204,7 +204,7 @@ func compareIndexes(out *Report, tableName string, oldIndexes, currentIndexes []
 			out.add(ChangeKindAdditive, SurfaceIndex, indexName, "index added")
 			continue
 		}
-		if indexSignature(old) != indexSignature(current) {
+		if !indexesEqual(old, current) {
 			out.add(ChangeKindBreaking, SurfaceIndex, indexName, fmt.Sprintf("index changed from %s to %s", indexSignature(old), indexSignature(current)))
 		}
 	}
@@ -314,7 +314,7 @@ func compareVisibilityFilters(out *Report, oldFilters, currentFilters []shunter.
 			out.add(ChangeKindBreaking, SurfaceVisibilityFilter, name, "visibility filter added")
 			continue
 		}
-		if visibilityFilterSignature(old) != visibilityFilterSignature(current) {
+		if !visibilityFiltersEqual(old, current) {
 			out.add(ChangeKindBreaking, SurfaceVisibilityFilter, name, "visibility filter changed")
 		}
 	}
@@ -341,7 +341,7 @@ func comparePermissionCategory(out *Report, category string, oldDeclarations, cu
 			out.add(permissionChangeKind(category, nil, current.Required), SurfacePermission, fullName, "permission requirements added")
 			continue
 		}
-		if unorderedStringSliceSignature(old.Required) != unorderedStringSliceSignature(current.Required) {
+		if !unorderedStringSlicesEqual(old.Required, current.Required) {
 			out.add(permissionChangeKind(category, old.Required, current.Required), SurfacePermission, fullName, "permission requirements changed")
 		}
 	}
@@ -371,7 +371,7 @@ func compareReadModels(out *Report, oldDeclarations, currentDeclarations []shunt
 			out.add(ChangeKindMetadata, SurfaceReadModel, name, "read model metadata added")
 			continue
 		}
-		if stringSliceSignature(old.Tables) != stringSliceSignature(current.Tables) || stringSliceSignature(old.Tags) != stringSliceSignature(current.Tags) {
+		if !orderedStringSlicesEqual(old.Tables, current.Tables) || !orderedStringSlicesEqual(old.Tags, current.Tags) {
 			out.add(ChangeKindMetadata, SurfaceReadModel, name, "read model metadata changed")
 		}
 	}
@@ -383,7 +383,7 @@ func compareReadModels(out *Report, oldDeclarations, currentDeclarations []shunt
 }
 
 func compareMigrations(out *Report, oldMigrations, currentMigrations shunter.MigrationContract) {
-	if migrationMetadataSignature(oldMigrations.Module) != migrationMetadataSignature(currentMigrations.Module) {
+	if !migrationMetadataEqual(oldMigrations.Module, currentMigrations.Module) {
 		out.add(ChangeKindMetadata, SurfaceMigrationMetadata, "module", "module migration metadata changed")
 	}
 
@@ -396,7 +396,7 @@ func compareMigrations(out *Report, oldMigrations, currentMigrations shunter.Mig
 			out.add(ChangeKindMetadata, SurfaceMigrationMetadata, name, "migration metadata added")
 			continue
 		}
-		if migrationMetadataSignature(old.Metadata) != migrationMetadataSignature(current.Metadata) {
+		if !migrationMetadataEqual(old.Metadata, current.Metadata) {
 			out.add(ChangeKindMetadata, SurfaceMigrationMetadata, name, "migration metadata changed")
 		}
 	}
@@ -473,16 +473,6 @@ func mapBy[T any](values []T, key func(T) string) map[string]T {
 	return out
 }
 
-func stringSliceSignature(values []string) string {
-	return strings.Join(values, "\x00")
-}
-
-func unorderedStringSliceSignature(values []string) string {
-	copied := append([]string(nil), values...)
-	sort.Strings(copied)
-	return stringSliceSignature(copied)
-}
-
 func stringSliceSubset(values, allowed []string) bool {
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, value := range allowed {
@@ -496,8 +486,56 @@ func stringSliceSubset(values, allowed []string) bool {
 	return true
 }
 
+func orderedStringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func unorderedStringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, value := range a {
+		counts[value]++
+	}
+	for _, value := range b {
+		if counts[value] == 0 {
+			return false
+		}
+		counts[value]--
+		if counts[value] == 0 {
+			delete(counts, value)
+		}
+	}
+	return len(counts) == 0
+}
+
+func readPoliciesSemanticallyEqual(oldPolicy, currentPolicy schema.ReadPolicy) bool {
+	if oldPolicy.Access != currentPolicy.Access {
+		return false
+	}
+	if oldPolicy.Access != schema.TableAccessPermissioned {
+		return true
+	}
+	return unorderedStringSlicesEqual(oldPolicy.Permissions, currentPolicy.Permissions)
+}
+
+func indexesEqual(old, current schema.IndexExport) bool {
+	return old.Unique == current.Unique &&
+		old.Primary == current.Primary &&
+		orderedStringSlicesEqual(old.Columns, current.Columns)
+}
+
 func indexSignature(index schema.IndexExport) string {
-	return fmt.Sprintf("columns=%s unique=%t primary=%t", strings.Join(index.Columns, ","), index.Unique, index.Primary)
+	return fmt.Sprintf("columns=%q unique=%t primary=%t", index.Columns, index.Unique, index.Primary)
 }
 
 func readPolicySignature(policy schema.ReadPolicy) string {
@@ -507,15 +545,11 @@ func readPolicySignature(policy schema.ReadPolicy) string {
 	return fmt.Sprintf("%s(%s)", policy.Access, strings.Join(policy.Permissions, ","))
 }
 
-func readPolicySemanticSignature(policy schema.ReadPolicy) string {
-	if policy.Access != schema.TableAccessPermissioned {
-		return policy.Access.String()
-	}
-	return fmt.Sprintf("%s(%s)", policy.Access, unorderedStringSliceSignature(policy.Permissions))
-}
-
-func visibilityFilterSignature(filter shunter.VisibilityFilterDescription) string {
-	return fmt.Sprintf("sql=%s table=%s table_id=%d sender=%t", filter.SQL, filter.ReturnTable, filter.ReturnTableID, filter.UsesCallerIdentity)
+func visibilityFiltersEqual(old, current shunter.VisibilityFilterDescription) bool {
+	return old.SQL == current.SQL &&
+		old.ReturnTable == current.ReturnTable &&
+		old.ReturnTableID == current.ReturnTableID &&
+		old.UsesCallerIdentity == current.UsesCallerIdentity
 }
 
 func migrationDeclarationMap(declarations []shunter.MigrationContractDeclaration) map[string]shunter.MigrationContractDeclaration {
@@ -538,20 +572,26 @@ func migrationDeclarationDisplayName(key string) string {
 	return surface + "." + name
 }
 
-func migrationMetadataSignature(metadata shunter.MigrationMetadata) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "module=%s\nschema=%d\ncontract=%d\nprevious=%s\ncompatibility=%s\nnotes=%s\n",
-		metadata.ModuleVersion,
-		metadata.SchemaVersion,
-		metadata.ContractVersion,
-		metadata.PreviousVersion,
-		metadata.Compatibility,
-		metadata.Notes,
-	)
-	for _, classification := range metadata.Classifications {
-		fmt.Fprintf(&b, "classification=%s\n", classification)
+func migrationMetadataEqual(old, current shunter.MigrationMetadata) bool {
+	return old.ModuleVersion == current.ModuleVersion &&
+		old.SchemaVersion == current.SchemaVersion &&
+		old.ContractVersion == current.ContractVersion &&
+		old.PreviousVersion == current.PreviousVersion &&
+		old.Compatibility == current.Compatibility &&
+		old.Notes == current.Notes &&
+		orderedMigrationClassificationsEqual(old.Classifications, current.Classifications)
+}
+
+func orderedMigrationClassificationsEqual(a, b []shunter.MigrationClassification) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	return b.String()
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func nonEmptyName(first, fallback string) string {

@@ -248,6 +248,100 @@ func TestContractDiffIgnoresDeclaredReadPermissionOrder(t *testing.T) {
 	assertNoChange(t, report.Changes, SurfacePermission, "view.live")
 }
 
+func TestContractDiffDetectsDelimiterCollisionStringSliceChanges(t *testing.T) {
+	t.Run("table_read_policy_permissions", func(t *testing.T) {
+		old := contractFixture()
+		old.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+			Access:      schema.TableAccessPermissioned,
+			Permissions: []string{"alpha", "beta"},
+		}
+		current := contractFixture()
+		current.Schema.Tables[0].ReadPolicy = schema.ReadPolicy{
+			Access:      schema.TableAccessPermissioned,
+			Permissions: []string{"alpha\x00beta"},
+		}
+
+		report, err := CompareJSON(mustContractJSON(t, old), mustContractJSON(t, current))
+		if err != nil {
+			t.Fatalf("CompareJSON returned error: %v", err)
+		}
+
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfaceTableReadPolicy, "messages")
+	})
+
+	t.Run("declared_read_permissions", func(t *testing.T) {
+		old := contractFixture()
+		old.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+			Name:     "history",
+			Required: []string{"alpha", "beta"},
+		}}
+		current := contractFixture()
+		current.Permissions.Queries = []shunter.PermissionContractDeclaration{{
+			Name:     "history",
+			Required: []string{"alpha\x00beta"},
+		}}
+
+		report, err := CompareJSON(mustContractJSON(t, old), mustContractJSON(t, current))
+		if err != nil {
+			t.Fatalf("CompareJSON returned error: %v", err)
+		}
+
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfacePermission, "query.history")
+	})
+
+	t.Run("read_model_tags", func(t *testing.T) {
+		old := contractFixture()
+		old.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+			Surface: shunter.ReadModelSurfaceQuery,
+			Name:    "history",
+			Tables:  []string{"messages"},
+			Tags:    []string{"alpha", "beta"},
+		}}
+		current := contractFixture()
+		current.ReadModel.Declarations = []shunter.ReadModelContractDeclaration{{
+			Surface: shunter.ReadModelSurfaceQuery,
+			Name:    "history",
+			Tables:  []string{"messages"},
+			Tags:    []string{"alpha\x00beta"},
+		}}
+
+		report, err := CompareJSON(mustContractJSON(t, old), mustContractJSON(t, current))
+		if err != nil {
+			t.Fatalf("CompareJSON returned error: %v", err)
+		}
+
+		assertChange(t, report.Changes, ChangeKindMetadata, SurfaceReadModel, "query.history")
+	})
+
+	t.Run("index_columns", func(t *testing.T) {
+		old := contractFixture()
+		old.Schema.Tables[0].Columns = []schema.ColumnExport{
+			{Name: "a,b", Type: "uint64"},
+			{Name: "a", Type: "uint64"},
+			{Name: "b", Type: "uint64"},
+		}
+		old.Schema.Tables[0].Indexes = []schema.IndexExport{{
+			Name:    "collision_ix",
+			Columns: []string{"a,b"},
+			Unique:  true,
+		}}
+		current := contractFixture()
+		current.Schema.Tables[0].Columns = old.Schema.Tables[0].Columns
+		current.Schema.Tables[0].Indexes = []schema.IndexExport{{
+			Name:    "collision_ix",
+			Columns: []string{"a", "b"},
+			Unique:  true,
+		}}
+
+		report, err := CompareJSON(mustContractJSON(t, old), mustContractJSON(t, current))
+		if err != nil {
+			t.Fatalf("CompareJSON returned error: %v", err)
+		}
+
+		assertChange(t, report.Changes, ChangeKindBreaking, SurfaceIndex, "messages.collision_ix")
+	})
+}
+
 func TestContractDiffReportsModuleMetadataChanges(t *testing.T) {
 	old := contractFixture()
 	old.Module.Metadata = map[string]string{
