@@ -94,6 +94,110 @@ func propSchema() *fakeSchema {
 	return s
 }
 
+// propJoinSchema has two uint64 tables with indexed join/filter columns so
+// property tests can exercise join-edge, range-edge, and local value/range
+// pruning without falling back solely because an index is missing.
+func propJoinSchema() *fakeSchema {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 0, 1)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindUint64}, 0, 1)
+	return s
+}
+
+func randomPropRow(r *rand.Rand, valueMax int) types.ProductValue {
+	return types.ProductValue{
+		types.NewUint64(uint64(r.IntN(valueMax))),
+		types.NewUint64(uint64(r.IntN(valueMax))),
+	}
+}
+
+func randomPropRows(r *rand.Rand, n, valueMax int) []types.ProductValue {
+	out := make([]types.ProductValue, n)
+	for i := range out {
+		out[i] = randomPropRow(r, valueMax)
+	}
+	return out
+}
+
+func randomUint64Range(r *rand.Rand, table TableID, col ColID, valueMax int) ColRange {
+	lo := uint64(r.IntN(valueMax))
+	hi := lo + uint64(r.IntN(valueMax))
+	p := ColRange{
+		Table: table, Column: col,
+		Lower: Bound{Value: types.NewUint64(lo), Inclusive: r.IntN(2) == 0},
+		Upper: Bound{Value: types.NewUint64(hi), Inclusive: r.IntN(2) == 0},
+	}
+	switch r.IntN(3) {
+	case 0:
+		p.Lower = Bound{Unbounded: true}
+	case 1:
+		p.Upper = Bound{Unbounded: true}
+	}
+	return p
+}
+
+func randomPruningPredicate(r *rand.Rand, valueMax int) Predicate {
+	value := func() types.Value {
+		return types.NewUint64(uint64(r.IntN(valueMax)))
+	}
+	switch r.IntN(12) {
+	case 0:
+		return ColEq{Table: 1, Column: 1, Value: value()}
+	case 1:
+		return randomUint64Range(r, 1, 1, valueMax)
+	case 2:
+		return ColNe{Table: 1, Column: 1, Value: value()}
+	case 3:
+		return Or{
+			Left:  ColEq{Table: 1, Column: 1, Value: value()},
+			Right: randomUint64Range(r, 1, 1, valueMax),
+		}
+	case 4:
+		return Or{
+			Left:  ColEq{Table: 1, Column: 1, Value: value()},
+			Right: ColNe{Table: 1, Column: 1, Value: value()},
+		}
+	case 5:
+		return NoRows{Table: 1}
+	case 6:
+		return Join{Left: 1, Right: 2, LeftCol: 0, RightCol: 0}
+	case 7:
+		return Join{
+			Left: 1, Right: 2, LeftCol: 0, RightCol: 0,
+			Filter: Or{
+				Left:  ColEq{Table: 2, Column: 1, Value: value()},
+				Right: randomUint64Range(r, 2, 1, valueMax),
+			},
+		}
+	case 8:
+		return Join{
+			Left: 1, Right: 2, LeftCol: 0, RightCol: 0,
+			Filter: Or{
+				Left:  ColEq{Table: 1, Column: 1, Value: value()},
+				Right: randomUint64Range(r, 2, 1, valueMax),
+			},
+		}
+	case 9:
+		return Join{
+			Left: 1, Right: 2, LeftCol: 0, RightCol: 0,
+			Filter: Or{
+				Left:  ColNe{Table: 1, Column: 1, Value: value()},
+				Right: ColNe{Table: 2, Column: 1, Value: value()},
+			},
+		}
+	case 10:
+		return CrossJoin{
+			Left: 1, Right: 2,
+			Filter: Or{
+				Left:  ColEq{Table: 1, Column: 1, Value: value()},
+				Right: randomUint64Range(r, 1, 1, valueMax),
+			},
+		}
+	default:
+		return CrossJoin{Left: 1, Right: 2, Filter: NoRows{Table: 1}}
+	}
+}
+
 func cloneRows(in []types.ProductValue) []types.ProductValue {
 	out := make([]types.ProductValue, len(in))
 	for i, r := range in {
@@ -273,6 +377,94 @@ func runPruningSafetyIteration(t *testing.T, seed uint64) {
 	}
 }
 
+func TestPruningSafetyPropertyComplexLivePredicates(t *testing.T) {
+	const seeds = 30
+	for seed := uint64(1); seed <= seeds; seed++ {
+		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+			runComplexPruningSafetyIteration(t, seed)
+		})
+	}
+}
+
+func runComplexPruningSafetyIteration(t *testing.T, seed uint64) {
+	t.Helper()
+	r := rand.New(rand.NewPCG(seed, seed^0x8CB92BA72F3D8DD7))
+	s := propJoinSchema()
+	valueMax := 12
+
+	init1 := randomPropRows(r, r.IntN(10)+4, valueMax)
+	init2 := randomPropRows(r, r.IntN(10)+4, valueMax)
+	sPre := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: init1,
+		2: init2,
+	})
+
+	numSubs := r.IntN(8) + 4
+	type subEntry struct {
+		queryID uint32
+		pred    Predicate
+	}
+	subs := make([]subEntry, numSubs)
+	for i := 0; i < numSubs; i++ {
+		subs[i] = subEntry{
+			queryID: uint32(300 + i),
+			pred:    randomPruningPredicate(r, valueMax),
+		}
+	}
+
+	inbox := make(chan FanOutMessage, 1)
+	conn := types.ConnectionID{1}
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	for _, e := range subs {
+		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+			ConnID: conn, QueryID: e.queryID, Predicates: []Predicate{e.pred},
+		}, sPre); err != nil {
+			t.Fatalf("RegisterSet(%v): %v", e.pred, err)
+		}
+	}
+
+	inserts1 := randomPropRows(r, r.IntN(3), valueMax)
+	deletes1 := pickRandomRows(r, init1, r.IntN(3))
+	inserts2 := randomPropRows(r, r.IntN(3), valueMax)
+	deletes2 := pickRandomRows(r, init2, r.IntN(3))
+	if len(inserts1)+len(deletes1)+len(inserts2)+len(deletes2) == 0 {
+		inserts1 = randomPropRows(r, 1, valueMax)
+	}
+	cs := &store.Changeset{TxID: 2, Tables: map[TableID]*store.TableChangeset{}}
+	if len(inserts1)+len(deletes1) > 0 {
+		cs.Tables[1] = &store.TableChangeset{
+			TableID:   1,
+			TableName: "t1",
+			Inserts:   inserts1,
+			Deletes:   deletes1,
+		}
+	}
+	if len(inserts2)+len(deletes2) > 0 {
+		cs.Tables[2] = &store.TableChangeset{
+			TableID:   2,
+			TableName: "t2",
+			Inserts:   inserts2,
+			Deletes:   deletes2,
+		}
+	}
+	post1 := applyDelta(init1, inserts1, deletes1)
+	post2 := applyDelta(init2, inserts2, deletes2)
+	sPost := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		1: post1,
+		2: post2,
+	})
+
+	mgr.EvalAndBroadcast(types.TxID(2), cs, sPost, PostCommitMeta{})
+	msg := <-inbox
+	pruned := groupPerQueryDeltas(mgr, msg.Fanout[conn])
+	baseline := evalAllQueries(mgr, cs, sPost)
+
+	if !perQueryDeltasEqual(pruned, baseline) {
+		t.Fatalf("complex pruning safety violated\nseed=%d\ninit1=%v init2=%v\ninserts1=%v deletes1=%v\ninserts2=%v deletes2=%v\npruned=%v\nbaseline=%v",
+			seed, init1, init2, inserts1, deletes1, inserts2, deletes2, pruned, baseline)
+	}
+}
+
 type deltaBag struct {
 	inserts []types.ProductValue
 	deletes []types.ProductValue
@@ -371,7 +563,7 @@ func TestRegistrationSymmetryProperty(t *testing.T) {
 func runRegistrationSymmetryIteration(t *testing.T, seed uint64) {
 	t.Helper()
 	r := rand.New(rand.NewPCG(seed, seed^0xD1B54A32D192ED03))
-	s := propSchema()
+	s := propJoinSchema()
 	mgr := NewManager(s, s)
 
 	idMax := 16
@@ -385,23 +577,10 @@ func runRegistrationSymmetryIteration(t *testing.T, seed uint64) {
 	// (connID, queryID) must be unique per connection; use i as the key so
 	// RegisterSet cannot collide even when the same connID is reused.
 	for i := range entries {
-		var p Predicate
-		switch r.IntN(3) {
-		case 0:
-			p = ColEq{Table: 1, Column: 0, Value: types.NewUint64(uint64(r.IntN(idMax)))}
-		case 1:
-			lo := uint64(r.IntN(idMax))
-			hi := lo + uint64(r.IntN(idMax))
-			p = ColRange{Table: 1, Column: 0,
-				Lower: Bound{Value: types.NewUint64(lo), Inclusive: true},
-				Upper: Bound{Value: types.NewUint64(hi), Inclusive: true}}
-		case 2:
-			p = AllRows{Table: 1}
-		}
 		entries[i] = entry{
 			connID:  types.ConnectionID{byte(r.IntN(4)), byte(i)},
 			queryID: uint32(1000 + i),
-			pred:    p,
+			pred:    randomPruningPredicate(r, idMax),
 		}
 		if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
 			ConnID: entries[i].connID, QueryID: entries[i].queryID, Predicates: []Predicate{entries[i].pred},

@@ -732,6 +732,27 @@ func splitJoinOrBranchPlacements(
 		default:
 			return splitJoinOrPlacements{}, false
 		}
+	case ColNe:
+		ranges := colNeRanges(p)
+		switch p.Table {
+		case side.table:
+			return splitJoinOrPlacements{ranges: ranges}, true
+		case side.other:
+			if !side.otherJoinColumnIndexed(resolver) {
+				return splitJoinOrPlacements{}, false
+			}
+			out := splitJoinOrPlacements{rangeEdges: make([]joinRangeEdgePlacement, 0, len(ranges))}
+			for _, cr := range ranges {
+				out.rangeEdges = append(out.rangeEdges, joinRangeEdgePlacement{
+					edge:  side.edge(cr.Column),
+					lower: cr.Lower,
+					upper: cr.Upper,
+				})
+			}
+			return out, true
+		default:
+			return splitJoinOrPlacements{}, false
+		}
 	case And:
 		var out splitJoinOrPlacements
 		if left, ok := splitJoinOrBranchPlacements(p.Left, side, resolver); ok {

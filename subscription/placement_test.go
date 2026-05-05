@@ -498,6 +498,23 @@ func TestCollectCandidatesColNeRangeMatchAndMismatch(t *testing.T) {
 	}
 }
 
+func TestCollectCandidatesColNeNullRangeMatchAndMismatch(t *testing.T) {
+	idx := NewPruningIndexes()
+	PlaceSubscription(idx, ColNe{Table: 1, Column: 0, Value: types.NewNull(types.KindUint64)}, hashN(1))
+
+	matchRows := []types.ProductValue{{types.NewUint64(1)}}
+	cands := CollectCandidatesForTable(idx, 1, matchRows, nil, nil)
+	if len(cands) != 1 || cands[0] != hashN(1) {
+		t.Fatalf("ColNe null candidate = %v, want [%v]", cands, hashN(1))
+	}
+
+	mismatchRows := []types.ProductValue{{types.NewNull(types.KindUint64)}}
+	cands = CollectCandidatesForTable(idx, 1, mismatchRows, nil, nil)
+	if len(cands) != 0 {
+		t.Fatalf("ColNe null rejected value should produce no candidates: %v", cands)
+	}
+}
+
 func TestCollectCandidatesMixedEqNeOrUsesIndexes(t *testing.T) {
 	idx := NewPruningIndexes()
 	p := Or{
@@ -823,6 +840,73 @@ func TestPlaceJoinWithCrossSideOrFilterAddsSplitBranchIndexes(t *testing.T) {
 	}
 }
 
+func TestPlaceJoinWithCrossSideOrNeFilterAddsSplitRangeIndexes(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+	}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindUint64,
+	}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left:  ColNe{Table: 1, Column: 1, Value: types.NewUint64(10)},
+			Right: ColNe{Table: 2, Column: 2, Value: types.NewUint64(20)},
+		},
+	}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+
+	leftRangeEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	rightRangeEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 0, RHSFilterCol: 1}
+	if got := idx.Range.Lookup(1, 1, types.NewUint64(11)); len(got) != 1 || got[0] != h {
+		t.Fatalf("left branch Ne range candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(1, 1, types.NewUint64(10)); len(got) != 0 {
+		t.Fatalf("left branch rejected value candidate = %v, want empty", got)
+	}
+	if got := idx.JoinRangeEdge.Lookup(leftRangeEdge, types.NewUint64(21)); len(got) != 1 || got[0] != h {
+		t.Fatalf("left-driven Ne range edge = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinRangeEdge.Lookup(leftRangeEdge, types.NewUint64(20)); len(got) != 0 {
+		t.Fatalf("left-driven rejected range edge = %v, want empty", got)
+	}
+	if got := idx.Range.Lookup(2, 2, types.NewUint64(21)); len(got) != 1 || got[0] != h {
+		t.Fatalf("right branch Ne range candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(2, 2, types.NewUint64(20)); len(got) != 0 {
+		t.Fatalf("right branch rejected value candidate = %v, want empty", got)
+	}
+	if got := idx.JoinRangeEdge.Lookup(rightRangeEdge, types.NewUint64(11)); len(got) != 1 || got[0] != h {
+		t.Fatalf("right-driven Ne range edge = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinRangeEdge.Lookup(rightRangeEdge, types.NewUint64(10)); len(got) != 0 {
+		t.Fatalf("right-driven rejected range edge = %v, want empty", got)
+	}
+	if got := idx.JoinEdge.exists[leftRangeEdge]; len(got) != 0 {
+		t.Fatalf("left broad existence candidates = %v, want none", got)
+	}
+	if got := idx.JoinEdge.exists[rightRangeEdge]; len(got) != 0 {
+		t.Fatalf("right broad existence candidates = %v, want none", got)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex for left should be empty for Ne split OR: %v", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 0 {
+		t.Fatalf("TableIndex for right should be empty for Ne split OR: %v", got)
+	}
+
+	removeSubscriptionForResolver(idx, p, h, s)
+	if !pruningIndexesEmpty(idx) {
+		t.Fatalf("indexes not empty after cross-side Ne OR remove: %+v", idx)
+	}
+}
+
 func TestCollectCandidatesJoinCrossSideOrPrunesExistenceOnlyMismatch(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{
@@ -854,6 +938,45 @@ func TestCollectCandidatesJoinCrossSideOrPrunesExistenceOnlyMismatch(t *testing.
 	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
 	if len(cands) != 0 {
 		t.Fatalf("cross-side OR mismatch candidates = %v, want empty", cands)
+	}
+}
+
+func TestCollectCandidatesJoinCrossSideOrNePrunesRejectedValues(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+	}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindUint64,
+	}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left:  ColNe{Table: 1, Column: 1, Value: types.NewUint64(10)},
+			Right: ColNe{Table: 2, Column: 2, Value: types.NewUint64(20)},
+		},
+	}
+	placeSubscriptionForResolver(idx, p, hashN(1), s)
+
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(7), types.NewUint64(20)}},
+	})
+	rows := []types.ProductValue{{types.NewUint64(7), types.NewUint64(10)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 0 {
+		t.Fatalf("cross-side Ne OR rejected-value candidates = %v, want empty", cands)
+	}
+
+	committed = buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(7), types.NewUint64(21)}},
+	})
+	cands = CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 1 || cands[0] != hashN(1) {
+		t.Fatalf("cross-side Ne OR opposite branch candidates = %v, want [%v]", cands, hashN(1))
 	}
 }
 

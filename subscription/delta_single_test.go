@@ -71,6 +71,16 @@ func TestMatchRowColNe(t *testing.T) {
 	}
 }
 
+func TestMatchRowColNeNull(t *testing.T) {
+	p := ColNe{Table: 1, Column: 0, Value: types.NewNull(types.KindUint64)}
+	if MatchRow(p, 1, types.ProductValue{types.NewNull(types.KindUint64)}) {
+		t.Fatal("null rejected value should not match")
+	}
+	if !MatchRow(p, 1, types.ProductValue{types.NewUint64(1)}) {
+		t.Fatal("non-null value should match != NULL predicate")
+	}
+}
+
 func TestMatchRowSideColEqColSameSide(t *testing.T) {
 	p := ColEqCol{LeftTable: 1, LeftColumn: 0, RightTable: 1, RightColumn: 1}
 	if !MatchRowSide(p, 1, 0, types.ProductValue{types.NewUint32(7), types.NewUint32(7)}) {
@@ -94,6 +104,22 @@ func TestMatchJoinPairColEqCol(t *testing.T) {
 		2, 0, types.ProductValue{types.NewUint32(8), types.NewUint32(2)},
 	) {
 		t.Fatal("joined pair column equality should reject different values")
+	}
+}
+
+func TestMatchJoinPairColNeNull(t *testing.T) {
+	p := ColNe{Table: 2, Column: 0, Value: types.NewNull(types.KindUint64)}
+	if MatchJoinPair(p,
+		1, 0, types.ProductValue{types.NewUint64(9)},
+		2, 0, types.ProductValue{types.NewNull(types.KindUint64)},
+	) {
+		t.Fatal("right-side null rejected value should not match")
+	}
+	if !MatchJoinPair(p,
+		1, 0, types.ProductValue{types.NewUint64(9)},
+		2, 0, types.ProductValue{types.NewUint64(10)},
+	) {
+		t.Fatal("right-side non-null value should match != NULL predicate")
 	}
 }
 
