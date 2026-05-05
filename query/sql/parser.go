@@ -606,7 +606,7 @@ func (p *parser) parseStatement() (Statement, error) {
 	}
 	if len(stmt.Joins) != 0 {
 		if projectionQualifier != "" {
-			if projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier); ok {
+			if projectedTable, ok := bindings.byQualifier[projectionQualifier]; ok {
 				stmt.ProjectedTable = projectedTable
 			} else {
 				stmt.ProjectedTable = projectionQualifier
@@ -866,7 +866,7 @@ func resolveProjectionColumns(columns []ProjectionColumn, bindings relationBindi
 		tableName := bindings.defaultTable
 		qualifier := col.SourceQualifier
 		if qualifier != "" {
-			resolvedTable, ok := resolveQualifier(qualifier, bindings.byQualifier)
+			resolvedTable, ok := bindings.byQualifier[qualifier]
 			if ok {
 				tableName = resolvedTable
 			} else {
@@ -892,7 +892,7 @@ func resolveAggregateProjection(agg *AggregateProjection, bindings relationBindi
 	}
 	ref := *agg.Column
 	if ref.Alias != "" {
-		if resolvedTable, ok := resolveQualifier(ref.Alias, bindings.byQualifier); ok {
+		if resolvedTable, ok := bindings.byQualifier[ref.Alias]; ok {
 			ref.Table = resolvedTable
 		} else {
 			ref.Table = ref.Alias
@@ -989,8 +989,8 @@ func (p *parser) parseJoinClause(bindings relationBindings, fallbackLeftTable st
 	if err != nil {
 		return nil, nil, err
 	}
-	leftExisting := qualifierExists(bindings.byQualifier, leftOn.Alias)
-	rightExisting := qualifierExists(bindings.byQualifier, rightOn.Alias)
+	_, leftExisting := bindings.byQualifier[leftOn.Alias]
+	_, rightExisting := bindings.byQualifier[rightOn.Alias]
 	leftNew := matchesQualifier(leftOn.Alias, rightQualifiers)
 	rightNew := matchesQualifier(rightOn.Alias, rightQualifiers)
 	leftKnown := leftExisting || leftNew
@@ -1011,7 +1011,7 @@ func (p *parser) parseJoinClause(bindings relationBindings, fallbackLeftTable st
 	leftTable := fallbackLeftTable
 	leftAlias := fallbackLeftAlias
 	if leftExisting {
-		leftTable, _ = resolveQualifier(leftOn.Alias, bindings.byQualifier)
+		leftTable = bindings.byQualifier[leftOn.Alias]
 		leftAlias = leftOn.Alias
 	}
 	jc := &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}
@@ -1042,7 +1042,7 @@ func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, e
 		return ColumnRef{}, p.unsupported("expected column name after qualifier")
 	}
 	p.advance()
-	tableName, ok := resolveQualifier(qualifierTok.text, lookup)
+	tableName, ok := lookup[qualifierTok.text]
 	if !ok {
 		tableName = qualifierTok.text
 	}
@@ -1115,7 +1115,7 @@ func (p *parser) parseColumnRefForOrderBy(bindings relationBindings, allowUnqual
 		if !isIdentifierToken(t) {
 			return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
 		}
-		resolved, ok := resolveQualifier(qualifier, bindings.byQualifier)
+		resolved, ok := bindings.byQualifier[qualifier]
 		if !ok {
 			resolved = qualifier
 		}
@@ -1310,7 +1310,7 @@ func (p *parser) parseColumnRefForPredicate(bindings relationBindings) (ColumnRe
 		if !isIdentifierToken(t) {
 			return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
 		}
-		resolved, ok := resolveQualifier(qualifier, bindings.byQualifier)
+		resolved, ok := bindings.byQualifier[qualifier]
 		if !ok {
 			resolved = qualifier
 		}
@@ -1501,21 +1501,9 @@ func addRelationQualifiers(lookup map[string]string, tableName string, qualifier
 
 func qualifierCollides(lookup map[string]string, qualifiers []string) bool {
 	for _, qualifier := range qualifiers {
-		if qualifierExists(lookup, qualifier) {
+		if _, ok := lookup[qualifier]; ok {
 			return true
 		}
 	}
 	return false
-}
-
-func qualifierExists(lookup map[string]string, qualifier string) bool {
-	_, ok := lookup[qualifier]
-	return ok
-}
-
-func resolveQualifier(qualifier string, lookup map[string]string) (string, bool) {
-	if resolved, ok := lookup[qualifier]; ok {
-		return resolved, true
-	}
-	return "", false
 }
