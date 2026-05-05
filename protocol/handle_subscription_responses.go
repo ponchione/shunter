@@ -32,20 +32,12 @@ func makeUnsubscribeSetReply(conn *Conn, requestID, queryID uint32, variant Subs
 }
 
 type setReplyDelivery[R any] struct {
-	errorLabel    string
-	singleLabel   string
-	multiLabel    string
-	malformedType string
-	errorOf       func(R) *SubscriptionError
-	sendSingle    func(connOnlySender, *Conn, R) (uint32, bool, error)
-	sendMulti     func(connOnlySender, *Conn, R) (uint32, bool, error)
+	errorOf    func(R) *SubscriptionError
+	sendSingle func(connOnlySender, *Conn, R) (bool, error)
+	sendMulti  func(connOnlySender, *Conn, R) (bool, error)
 }
 
 var subscribeSetReplyDelivery = newSetReplyDelivery(
-	"SubscriptionError",
-	"SubscribeSingleApplied",
-	"SubscribeMultiApplied",
-	"SubscriptionSetCommandResponse",
 	func(resp SubscriptionSetCommandResponse) *SubscriptionError { return resp.Error },
 	func(resp SubscriptionSetCommandResponse) *SubscribeSingleApplied { return resp.SingleApplied },
 	func(resp SubscriptionSetCommandResponse) *SubscribeMultiApplied { return resp.MultiApplied },
@@ -54,10 +46,6 @@ var subscribeSetReplyDelivery = newSetReplyDelivery(
 )
 
 var unsubscribeSetReplyDelivery = newSetReplyDelivery(
-	"unsubscribe SubscriptionError",
-	"UnsubscribeSingleApplied",
-	"UnsubscribeMultiApplied",
-	"UnsubscribeSetCommandResponse",
 	func(resp UnsubscribeSetCommandResponse) *SubscriptionError { return resp.Error },
 	func(resp UnsubscribeSetCommandResponse) *UnsubscribeSingleApplied { return resp.SingleApplied },
 	func(resp UnsubscribeSetCommandResponse) *UnsubscribeMultiApplied { return resp.MultiApplied },
@@ -70,7 +58,6 @@ func newSetReplyDelivery[R any, S interface {
 }, M interface {
 	*SubscribeMultiApplied | *UnsubscribeMultiApplied
 }](
-	errorLabel, singleLabel, multiLabel, malformedType string,
 	errorOf func(R) *SubscriptionError,
 	singleOf func(R) S,
 	multiOf func(R) M,
@@ -78,45 +65,23 @@ func newSetReplyDelivery[R any, S interface {
 	sendMulti func(ClientSender, *Conn, M) error,
 ) setReplyDelivery[R] {
 	return setReplyDelivery[R]{
-		errorLabel:    errorLabel,
-		singleLabel:   singleLabel,
-		multiLabel:    multiLabel,
-		malformedType: malformedType,
-		errorOf:       errorOf,
-		sendSingle:    sendPresentApplied(singleOf, appliedQueryID[S], sendSingle),
-		sendMulti:     sendPresentApplied(multiOf, appliedQueryID[M], sendMulti),
-	}
-}
-
-func appliedQueryID[A interface {
-	*SubscribeSingleApplied | *UnsubscribeSingleApplied | *SubscribeMultiApplied | *UnsubscribeMultiApplied
-}](msg A) uint32 {
-	switch v := any(msg).(type) {
-	case *SubscribeSingleApplied:
-		return v.QueryID
-	case *UnsubscribeSingleApplied:
-		return v.QueryID
-	case *SubscribeMultiApplied:
-		return v.QueryID
-	case *UnsubscribeMultiApplied:
-		return v.QueryID
-	default:
-		return 0
+		errorOf:    errorOf,
+		sendSingle: sendPresentApplied(singleOf, sendSingle),
+		sendMulti:  sendPresentApplied(multiOf, sendMulti),
 	}
 }
 
 func sendPresentApplied[R any, A comparable](
 	appliedOf func(R) A,
-	queryIDOf func(A) uint32,
 	send func(ClientSender, *Conn, A) error,
-) func(connOnlySender, *Conn, R) (uint32, bool, error) {
-	return func(sender connOnlySender, conn *Conn, resp R) (uint32, bool, error) {
+) func(connOnlySender, *Conn, R) (bool, error) {
+	return func(sender connOnlySender, conn *Conn, resp R) (bool, error) {
 		applied := appliedOf(resp)
 		var zero A
 		if applied == zero {
-			return 0, false, nil
+			return false, nil
 		}
-		return queryIDOf(applied), true, send(sender, conn, applied)
+		return true, send(sender, conn, applied)
 	}
 }
 
@@ -130,22 +95,22 @@ func makeSetReply[R any](
 		sender := connOnlySender{conn: conn}
 		if respErr := delivery.errorOf(resp); respErr != nil {
 			if err := SendSubscriptionError(sender, conn, respErr); err != nil {
-				logSubscriptionErrorDeliveryFailure(conn, delivery.errorLabel, respErr, err)
+				logSubscriptionDeliveryFailure(conn, err)
 			}
 			return
 		}
 		if variant == SubscriptionSetVariantSingle {
-			if deliveredQueryID, ok, err := delivery.sendSingle(sender, conn, resp); ok {
+			if ok, err := delivery.sendSingle(sender, conn, resp); ok {
 				if err != nil {
-					logAppliedDeliveryFailure(conn, delivery.singleLabel, deliveredQueryID, err)
+					logSubscriptionDeliveryFailure(conn, err)
 				}
 				return
 			}
 		}
 		if variant == SubscriptionSetVariantMulti {
-			if deliveredQueryID, ok, err := delivery.sendMulti(sender, conn, resp); ok {
+			if ok, err := delivery.sendMulti(sender, conn, resp); ok {
 				if err != nil {
-					logAppliedDeliveryFailure(conn, delivery.multiLabel, deliveredQueryID, err)
+					logSubscriptionDeliveryFailure(conn, err)
 				}
 				return
 			}
@@ -154,10 +119,6 @@ func makeSetReply[R any](
 	}
 }
 
-func logSubscriptionErrorDeliveryFailure(conn *Conn, label string, resp *SubscriptionError, err error) {
-	logProtocolError(conn.Observer, "unknown", "send_failed", err)
-}
-
-func logAppliedDeliveryFailure(conn *Conn, label string, queryID uint32, err error) {
+func logSubscriptionDeliveryFailure(conn *Conn, err error) {
 	logProtocolError(conn.Observer, "unknown", "send_failed", err)
 }
