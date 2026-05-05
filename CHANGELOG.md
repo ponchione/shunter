@@ -2,9 +2,15 @@
 
 Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 
-## v0.1.0-dev
+## v0.1.0 - 2026-05-05
 
-- Current development line.
+- First Shunter release suitable for use as a normal Go module dependency.
+- Published Shunter's WebSocket fork as `github.com/ponchione/websocket v1.8.15-shunter.1` and removed the downstream-only `replace` requirement.
+- Added `Runtime.WaitUntilDurable` for app-owned durable acknowledgements.
+- Added root `IndexBound`, `Inclusive`, `Exclusive`, `UnboundedLow`, `UnboundedHigh`, and index key helpers.
+- Added indexed local reads through `LocalReadView.SeekIndex` and `LocalReadView.SeekIndexRange`.
+- Added indexed reducer reads through `ReducerDB.SeekIndex` and `ReducerDB.SeekIndexRange`.
+- Added root aliases for reducer-facing `ReducerDB`, `Value`, `ProductValue`, `RowID`, and `TxID`.
 - Gzip-negotiated protocol connections now gzip-compress post-handshake server messages while keeping client messages uncompressed.
 - Pinned one-off aggregate empty-input semantics for `COUNT` and `SUM`.
 - Added `shunter.CheckDataDirCompatibility` for app-owned offline startup schema preflights.
