@@ -150,6 +150,9 @@ func isZeroAutoIncrementValue(v types.Value, kind schema.ValueKind) bool {
 }
 
 func autoIncrementValueAsUint64(v types.Value, kind schema.ValueKind) (uint64, bool) {
+	if v.IsNull() {
+		return 0, false
+	}
 	switch kind {
 	case schema.KindInt8:
 		n := int64(v.AsInt8())

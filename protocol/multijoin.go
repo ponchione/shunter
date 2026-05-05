@@ -345,6 +345,16 @@ func compileSQLMultiPredicateForRelations(pred sql.Predicate, relations map[stri
 			return nil, fmt.Errorf("coerce column %q: %v", p.Filter.Column, err)
 		}
 		return &compiledSQLMultiPredicate{Kind: compiledSQLMultiPredicateComparison, Column: column, Op: p.Filter.Op, Value: v}, nil
+	case sql.NullPredicate:
+		column, err := compileSQLMultiColumnRefForRelations(p.Column, relations, multiRelations, aliasTag)
+		if err != nil {
+			return nil, err
+		}
+		op := "="
+		if p.Not {
+			op = "!="
+		}
+		return &compiledSQLMultiPredicate{Kind: compiledSQLMultiPredicateComparison, Column: column, Op: op, Value: types.NewNull(column.Column.schema.Type)}, nil
 	case sql.ColumnComparisonPredicate:
 		if p.Op != "=" {
 			return nil, fmt.Errorf("join WHERE column comparisons only support '='")

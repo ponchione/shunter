@@ -543,7 +543,11 @@ func (w *FileSnapshotWriter) writeSnapshotBody(dst io.Writer, committed *store.C
 		for _, row := range table.rows {
 			rowBuf = rowBuf[:0]
 			var err error
-			rowBuf, err = bsatn.AppendProductValue(rowBuf, row)
+			ts, ok := w.reg.Table(table.tableID)
+			if !ok {
+				return fmt.Errorf("%w: snapshot table section references unknown table %d", ErrSnapshot, table.tableID)
+			}
+			rowBuf, err = bsatn.AppendProductValueForSchema(rowBuf, row, ts)
 			if err != nil {
 				return err
 			}

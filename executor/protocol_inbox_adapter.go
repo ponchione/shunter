@@ -356,11 +356,11 @@ func encodeProtocolSubscriptionUpdates(updates []subscription.SubscriptionUpdate
 }
 
 func encodeProtocolSubscriptionUpdate(update subscription.SubscriptionUpdate) (protocol.SubscriptionUpdate, error) {
-	inserts, err := protocol.EncodeProductRows(update.Inserts)
+	inserts, err := encodeProtocolProductRows(update.Inserts, update.Columns)
 	if err != nil {
 		return protocol.SubscriptionUpdate{}, fmt.Errorf("encode inserts: %w", err)
 	}
-	deletes, err := protocol.EncodeProductRows(update.Deletes)
+	deletes, err := encodeProtocolProductRows(update.Deletes, update.Columns)
 	if err != nil {
 		return protocol.SubscriptionUpdate{}, fmt.Errorf("encode deletes: %w", err)
 	}
@@ -370,6 +370,13 @@ func encodeProtocolSubscriptionUpdate(update subscription.SubscriptionUpdate) (p
 		Inserts:   inserts,
 		Deletes:   deletes,
 	}, nil
+}
+
+func encodeProtocolProductRows(rows []types.ProductValue, columns []schema.ColumnSchema) ([]byte, error) {
+	if len(columns) == 0 {
+		return protocol.EncodeProductRows(rows)
+	}
+	return protocol.EncodeProductRowsForColumns(rows, columns)
 }
 
 // forwardReducerResponse bridges the executor response onto the protocol

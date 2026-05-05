@@ -21,6 +21,7 @@ type CommittedStateAccess interface {
 // SQLQueryResult is the unencoded row result for a compiled one-off SQL query.
 type SQLQueryResult struct {
 	TableName string
+	Columns   []schema.ColumnSchema
 	Rows      []types.ProductValue
 }
 
@@ -68,7 +69,7 @@ func handleOneOffQueryWithVisibility(
 		return
 	}
 
-	encoded, err := EncodeProductRows(result.Rows)
+	encoded, err := EncodeProductRowsForColumns(result.Rows, result.Columns)
 	if err != nil {
 		sendOneOffError(conn, msg.MessageID, "encode error: "+err.Error(), receipt)
 		recordProtocolMessage(conn.Observer, "one_off_query", "internal_error")
@@ -216,7 +217,24 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 			encodedRows = matchedRows
 		}
 	}
-	return SQLQueryResult{TableName: query.TableName, Rows: encodedRows}, nil
+	return SQLQueryResult{TableName: query.TableName, Columns: oneOffResultColumns(query, tableSchema), Rows: encodedRows}, nil
+}
+
+func oneOffResultColumns(query compiledSQLQuery, fallback *schema.TableSchema) []schema.ColumnSchema {
+	if query.Aggregate != nil {
+		return []schema.ColumnSchema{query.Aggregate.ResultColumn}
+	}
+	if len(query.ProjectionColumns) != 0 {
+		columns := make([]schema.ColumnSchema, len(query.ProjectionColumns))
+		for i, col := range query.ProjectionColumns {
+			columns[i] = col.Schema
+		}
+		return columns
+	}
+	if fallback == nil {
+		return nil
+	}
+	return append([]schema.ColumnSchema(nil), fallback.Columns...)
 }
 
 // sendOneOffError emits a failure OneOffQueryResponse matching reference

@@ -76,6 +76,16 @@ func TestGeneratorAcceptsCanonicalContractJSON(t *testing.T) {
 	assertContains(t, ts, `liveMessages: { tables: ["messages"], tags: ["realtime"] },`)
 }
 
+func TestGeneratorMapsNullableColumnsToUnionNull(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables[0].Columns[1].Nullable = true
+	out, err := GenerateTypeScript(contract)
+	if err != nil {
+		t.Fatalf("GenerateTypeScript returned error: %v", err)
+	}
+	assertContains(t, string(out), `body: string | null;`)
+}
+
 func TestGeneratorAcceptsModuleContractWithoutRuntime(t *testing.T) {
 	out, err := Generate(contractFixture(), Options{Language: LanguageTypeScript})
 	if err != nil {

@@ -49,6 +49,27 @@ func TestBuildTableDefinitionPKFlags(t *testing.T) {
 	}
 }
 
+func TestBuildTableDefinitionPointerFieldIsNullable(t *testing.T) {
+	type T struct {
+		ID       uint64  `shunter:"primarykey"`
+		Nickname *string `shunter:"name:nickname,index"`
+	}
+	fields, err := discoverFields(reflect.TypeFor[T](), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := buildTableDefinition("T", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := def.Columns[1]; got.Type != KindString || !got.Nullable || got.Name != "nickname" {
+		t.Fatalf("pointer column = %+v, want nullable string nickname", got)
+	}
+	if len(def.Indexes) != 1 || def.Indexes[0].Columns[0] != "nickname" {
+		t.Fatalf("pointer field tag index not preserved: %+v", def.Indexes)
+	}
+}
+
 func TestBuildTableDefinitionPlainIndex(t *testing.T) {
 	type T struct {
 		ID   uint64 `shunter:"primarykey"`

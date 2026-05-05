@@ -401,6 +401,7 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 		return []SubscriptionUpdate{{
 			TableID:   projected,
 			TableName: m.schema.TableName(projected),
+			Columns:   m.columnsForUpdate(projected),
 			Inserts:   ins,
 			Deletes:   del,
 		}}
@@ -412,6 +413,7 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 		return []SubscriptionUpdate{{
 			TableID:   p.ProjectedTable(),
 			TableName: m.schema.TableName(p.ProjectedTable()),
+			Columns:   m.columnsForUpdate(p.ProjectedTable()),
 			Inserts:   ins,
 			Deletes:   del,
 		}}
@@ -425,6 +427,7 @@ func (m *Manager) evalQuery(qs *queryState, dv *DeltaView) []SubscriptionUpdate 
 			updates = append(updates, SubscriptionUpdate{
 				TableID:   t,
 				TableName: m.schema.TableName(t),
+				Columns:   m.columnsForUpdate(t),
 				Inserts:   ins,
 				Deletes:   del,
 			})

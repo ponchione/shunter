@@ -115,6 +115,8 @@ func NormalizePredicate(pred sql.Predicate) sql.Predicate {
 		return p
 	case sql.ComparisonPredicate:
 		return p
+	case sql.NullPredicate:
+		return p
 	case sql.AndPredicate:
 		left := NormalizePredicate(p.Left)
 		right := NormalizePredicate(p.Right)
@@ -171,6 +173,8 @@ func PredicateUsesCallerIdentity(pred sql.Predicate) bool {
 		return false
 	case sql.ComparisonPredicate:
 		return p.Filter.Literal.Kind == sql.LitSender
+	case sql.NullPredicate:
+		return false
 	case sql.AndPredicate:
 		return PredicateUsesCallerIdentity(p.Left) || PredicateUsesCallerIdentity(p.Right)
 	case sql.OrPredicate:

@@ -90,6 +90,7 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store
 			QueryID:        queryID,
 			TableID:        tableID,
 			TableName:      m.schema.TableName(tableID),
+			Columns:        m.columnsForUpdate(tableID),
 			Inserts:        rows,
 		}}, nil
 	default:
@@ -115,6 +116,7 @@ func (m *Manager) initialUpdates(ctx context.Context, pred Predicate, view store
 				QueryID:        queryID,
 				TableID:        tableID,
 				TableName:      m.schema.TableName(tableID),
+				Columns:        m.columnsForUpdate(tableID),
 				Inserts:        rows,
 			})
 		}

@@ -33,7 +33,7 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
-		tc := ensureTableChangeset(changeset, tableID, table.schema.Name)
+		tc := ensureTableChangeset(changeset, tableID, table.schema)
 		for rowID := range dels {
 			oldRow, ok := table.DeleteRow(rowID)
 			if !ok {
@@ -48,7 +48,7 @@ func Commit(cs *CommittedState, tx *Transaction) (*Changeset, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: %d", ErrTableNotFound, tableID)
 		}
-		tc := ensureTableChangeset(changeset, tableID, table.schema.Name)
+		tc := ensureTableChangeset(changeset, tableID, table.schema)
 		for rowID, row := range ins {
 			if err := table.InsertRow(rowID, row); err != nil {
 				return nil, err
@@ -83,11 +83,17 @@ func Rollback(tx *Transaction) {
 	tx.state.Store(transactionRolledBack)
 }
 
-func ensureTableChangeset(cs *Changeset, id schema.TableID, tableName string) *TableChangeset {
+func ensureTableChangeset(cs *Changeset, id schema.TableID, ts *schema.TableSchema) *TableChangeset {
 	tc := cs.Tables[id]
 	if tc == nil {
-		tc = &TableChangeset{TableID: id, TableName: tableName}
+		tableName := ""
+		if ts != nil {
+			tableName = ts.Name
+		}
+		tc = &TableChangeset{TableID: id, TableName: tableName, Schema: ts}
 		cs.Tables[id] = tc
+	} else if tc.Schema == nil {
+		tc.Schema = ts
 	}
 	return tc
 }

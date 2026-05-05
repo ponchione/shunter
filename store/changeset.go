@@ -15,6 +15,7 @@ type Changeset struct {
 type TableChangeset struct {
 	TableID   schema.TableID
 	TableName string
+	Schema    *schema.TableSchema
 	Inserts   []types.ProductValue
 	Deletes   []types.ProductValue
 }

@@ -83,6 +83,7 @@ func (k ValueKind) String() string {
 // Wide integers store fixed-width words in big-endian order.
 type Value struct {
 	kind   ValueKind
+	isNull bool
 	b      bool
 	i64    int64
 	u64    uint64
@@ -100,7 +101,14 @@ type Value struct {
 // Kind returns the ValueKind of this Value.
 func (v Value) Kind() ValueKind { return v.kind }
 
+// IsNull reports whether this Value is the null sentinel for its kind.
+func (v Value) IsNull() bool { return v.isNull }
+
 // --- Constructors ---
+
+func NewNull(kind ValueKind) Value {
+	return Value{kind: kind, isNull: true}
+}
 
 func NewBool(x bool) Value {
 	return Value{kind: KindBool, b: x}
@@ -485,6 +493,9 @@ func (v Value) mustKind(want ValueKind) {
 	if v.kind != want {
 		panic(fmt.Sprintf("shunter: Value.As%s called on %s value", want, v.kind))
 	}
+	if v.isNull {
+		panic(fmt.Sprintf("shunter: Value.As%s called on null %s value", want, v.kind))
+	}
 }
 
 // --- Equality (Story 1.2) ---
@@ -494,6 +505,9 @@ func (v Value) mustKind(want ValueKind) {
 func (v Value) Equal(other Value) bool {
 	if v.kind != other.kind {
 		return false
+	}
+	if v.isNull || other.isNull {
+		return v.isNull && other.isNull
 	}
 	switch v.kind {
 	case KindBool:
@@ -531,6 +545,16 @@ func (v Value) Equal(other Value) bool {
 func (v Value) Compare(other Value) int {
 	if v.kind != other.kind {
 		panic(fmt.Sprintf("shunter: Value.Compare across kinds: %s vs %s", v.kind, other.kind))
+	}
+	if v.isNull || other.isNull {
+		switch {
+		case v.isNull && other.isNull:
+			return 0
+		case v.isNull:
+			return -1
+		default:
+			return 1
+		}
 	}
 	switch v.kind {
 	case KindBool:
@@ -594,9 +618,14 @@ func (v Value) Compare(other Value) int {
 // --- Hashing (Story 1.4) ---
 
 // Hash feeds the canonical hash representation of v into h.
-// Format: kind byte followed by canonical payload bytes.
+// Format: kind byte, null marker, then canonical payload bytes when present.
 func (v Value) Hash(h hash.Hash64) {
 	h.Write([]byte{byte(v.kind)})
+	if v.isNull {
+		h.Write([]byte{0})
+		return
+	}
+	h.Write([]byte{1})
 	v.writePayload(h)
 }
 
@@ -609,6 +638,9 @@ func (v Value) Hash64() uint64 {
 
 // writePayload writes canonical payload bytes (without kind) into h.
 func (v Value) writePayload(h hash.Hash64) {
+	if v.isNull {
+		return
+	}
 	var buf [8]byte
 	switch v.kind {
 	case KindBool:
@@ -668,6 +700,9 @@ func (v Value) writePayload(h hash.Hash64) {
 
 // payloadLen returns the byte length of the canonical payload.
 func (v Value) payloadLen() uint32 {
+	if v.isNull {
+		return 0
+	}
 	switch v.kind {
 	case KindBool:
 		return 1

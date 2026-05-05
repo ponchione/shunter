@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
@@ -117,11 +118,11 @@ func encodeSubscriptionUpdatesMemoized(updates []subscription.SubscriptionUpdate
 }
 
 func encodeSubscriptionUpdateMemoized(su subscription.SubscriptionUpdate, memo *subscription.EncodingMemo) (SubscriptionUpdate, error) {
-	inserts, err := encodeRowsMemoized(su.Inserts, memo)
+	inserts, err := encodeRowsMemoized(su.Inserts, su.Columns, memo)
 	if err != nil {
 		return SubscriptionUpdate{}, fmt.Errorf("encode inserts: %w", err)
 	}
-	deletes, err := encodeRowsMemoized(su.Deletes, memo)
+	deletes, err := encodeRowsMemoized(su.Deletes, su.Columns, memo)
 	if err != nil {
 		return SubscriptionUpdate{}, fmt.Errorf("encode deletes: %w", err)
 	}
@@ -133,20 +134,26 @@ func encodeSubscriptionUpdateMemoized(su subscription.SubscriptionUpdate, memo *
 	}, nil
 }
 
-func encodeRowsMemoized(rows []types.ProductValue, memo *subscription.EncodingMemo) ([]byte, error) {
+func encodeRowsMemoized(rows []types.ProductValue, columns []schema.ColumnSchema, memo *subscription.EncodingMemo) ([]byte, error) {
 	if len(rows) == 0 {
 		return emptyEncodedRowList, nil
 	}
-	if memo == nil {
-		return encodeRowsUnmemoized(rows)
+	encode := func() ([]byte, error) {
+		if len(columns) == 0 {
+			return encodeRowsUnmemoized(rows)
+		}
+		return EncodeProductRowsForColumns(rows, columns)
 	}
-	key := memoizedRowListKey(rows)
+	if memo == nil {
+		return encode()
+	}
+	key := memoizedRowListKey(rows, columns)
 	if cached, ok := memo.Get(key); ok {
 		if payload, ok := cached.([]byte); ok {
 			return payload, nil
 		}
 	}
-	encoded, err := encodeRowsUnmemoized(rows)
+	encoded, err := encode()
 	if err != nil {
 		return nil, err
 	}
@@ -154,12 +161,21 @@ func encodeRowsMemoized(rows []types.ProductValue, memo *subscription.EncodingMe
 	return encoded, nil
 }
 
-func memoizedRowListKey(rows []types.ProductValue) string {
+func memoizedRowListKey(rows []types.ProductValue, columns []schema.ColumnSchema) string {
 	if len(rows) == 0 {
 		return "binary-row-list:empty"
 	}
 	buf := make([]byte, 0, 16+len(rows)*24)
 	buf = append(buf, "binary-row-list"...)
+	for _, col := range columns {
+		buf = append(buf, '|')
+		buf = strconv.AppendInt(buf, int64(col.Index), 10)
+		buf = append(buf, ':')
+		buf = strconv.AppendInt(buf, int64(col.Type), 10)
+		if col.Nullable {
+			buf = append(buf, '?')
+		}
+	}
 	for _, row := range rows {
 		buf = append(buf, ':')
 		ptr := uintptr(unsafe.Pointer(unsafe.SliceData(row)))

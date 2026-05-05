@@ -11,6 +11,8 @@ var (
 	ErrRowLengthMismatch = errors.New("bsatn: row length mismatch")
 	ErrInvalidUTF8       = errors.New("bsatn: invalid UTF-8")
 	ErrInvalidBool       = errors.New("bsatn: invalid bool")
+	ErrInvalidPresence   = errors.New("bsatn: invalid nullable presence marker")
+	ErrNullWithoutSchema = errors.New("bsatn: null value requires nullable column schema")
 )
 
 type UnknownValueTagError struct{ Tag byte }

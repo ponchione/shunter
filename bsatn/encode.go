@@ -2,9 +2,12 @@ package bsatn
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"math"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -37,6 +40,9 @@ const (
 // AppendValue appends v in BSATN format to dst and returns the extended slice.
 func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 	start := len(dst)
+	if v.IsNull() {
+		return dst, ErrNullWithoutSchema
+	}
 	tag := byte(v.Kind())
 	dst = append(dst, tag)
 	var buf [8]byte
@@ -144,6 +150,9 @@ func AppendValue(dst []byte, v types.Value) ([]byte, error) {
 
 // EncodeValue writes a Value in BSATN format: tag byte + LE payload.
 func EncodeValue(w io.Writer, v types.Value) error {
+	if v.IsNull() {
+		return ErrNullWithoutSchema
+	}
 	tag := byte(v.Kind())
 	if err := writeAll(w, []byte{tag}); err != nil {
 		return err
@@ -294,6 +303,9 @@ func writeStringAll(w io.Writer, s string) error {
 
 // EncodedValueSize returns the encoded size of a Value.
 func EncodedValueSize(v types.Value) int {
+	if v.IsNull() {
+		return 0
+	}
 	switch v.Kind() {
 	case types.KindBool, types.KindInt8, types.KindUint8:
 		return 2 // tag + 1
@@ -339,6 +351,24 @@ func EncodeProductValue(w io.Writer, pv types.ProductValue) error {
 	return nil
 }
 
+// EncodeProductValueForSchema writes all columns using nullable metadata from ts.
+func EncodeProductValueForSchema(w io.Writer, pv types.ProductValue, ts *schema.TableSchema) error {
+	encoded, err := AppendProductValueForSchema(nil, pv, ts)
+	if err != nil {
+		return err
+	}
+	return writeAll(w, encoded)
+}
+
+// EncodeProductValueForColumns writes all columns using nullable metadata from columns.
+func EncodeProductValueForColumns(w io.Writer, pv types.ProductValue, columns []schema.ColumnSchema) error {
+	encoded, err := AppendProductValueForColumns(nil, pv, columns)
+	if err != nil {
+		return err
+	}
+	return writeAll(w, encoded)
+}
+
 // AppendProductValue appends all columns in order.
 func AppendProductValue(dst []byte, pv types.ProductValue) ([]byte, error) {
 	var err error
@@ -351,6 +381,57 @@ func AppendProductValue(dst []byte, pv types.ProductValue) ([]byte, error) {
 	return dst, nil
 }
 
+// AppendProductValueForSchema appends all columns using nullable metadata from ts.
+func AppendProductValueForSchema(dst []byte, pv types.ProductValue, ts *schema.TableSchema) ([]byte, error) {
+	if ts == nil {
+		return AppendProductValue(dst, pv)
+	}
+	return AppendProductValueForColumns(dst, pv, ts.Columns)
+}
+
+// AppendProductValueForColumns appends all columns using nullable metadata from columns.
+func AppendProductValueForColumns(dst []byte, pv types.ProductValue, columns []schema.ColumnSchema) ([]byte, error) {
+	if len(pv) != len(columns) {
+		return dst, errors.Join(
+			ErrRowLengthMismatch,
+			&RowShapeMismatchError{Expected: len(columns), Got: len(pv)},
+		)
+	}
+	var err error
+	for i, col := range columns {
+		dst, err = appendColumnValue(dst, pv[i], col)
+		if err != nil {
+			return dst, err
+		}
+	}
+	return dst, nil
+}
+
+func appendColumnValue(dst []byte, v types.Value, col schema.ColumnSchema) ([]byte, error) {
+	if v.Kind() != col.Type {
+		return dst, &TypeTagMismatchError{Column: col.Name, Expected: col.Type, Got: byte(v.Kind())}
+	}
+	if !col.Nullable {
+		if v.IsNull() {
+			return dst, fmt.Errorf("%w: column %q", ErrNullWithoutSchema, col.Name)
+		}
+		return AppendValue(dst, v)
+	}
+	dst = append(dst, byte(col.Type))
+	if v.IsNull() {
+		return append(dst, 0), nil
+	}
+	before := len(dst)
+	dst, err := AppendValue(dst, v)
+	if err != nil {
+		return dst, err
+	}
+	// AppendValue emitted a tag at before. Replace that tag with the nullable
+	// presence marker; the column tag is already present immediately before it.
+	dst[before] = 1
+	return dst, nil
+}
+
 // EncodedProductValueSize returns the total encoded size.
 func EncodedProductValueSize(pv types.ProductValue) int {
 	n := 0
@@ -358,4 +439,42 @@ func EncodedProductValueSize(pv types.ProductValue) int {
 		n += EncodedValueSize(v)
 	}
 	return n
+}
+
+// EncodedProductValueSizeForSchema returns the encoded size using nullable metadata from ts.
+func EncodedProductValueSizeForSchema(pv types.ProductValue, ts *schema.TableSchema) (int, error) {
+	if ts == nil {
+		return EncodedProductValueSize(pv), nil
+	}
+	return EncodedProductValueSizeForColumns(pv, ts.Columns)
+}
+
+// EncodedProductValueSizeForColumns returns the encoded size using nullable metadata from columns.
+func EncodedProductValueSizeForColumns(pv types.ProductValue, columns []schema.ColumnSchema) (int, error) {
+	if len(pv) != len(columns) {
+		return 0, errors.Join(
+			ErrRowLengthMismatch,
+			&RowShapeMismatchError{Expected: len(columns), Got: len(pv)},
+		)
+	}
+	n := 0
+	for i, col := range columns {
+		v := pv[i]
+		if v.Kind() != col.Type {
+			return 0, &TypeTagMismatchError{Column: col.Name, Expected: col.Type, Got: byte(v.Kind())}
+		}
+		if col.Nullable {
+			if v.IsNull() {
+				n += 2
+			} else {
+				n += EncodedValueSize(v) + 1
+			}
+			continue
+		}
+		if v.IsNull() {
+			return 0, fmt.Errorf("%w: column %q", ErrNullWithoutSchema, col.Name)
+		}
+		n += EncodedValueSize(v)
+	}
+	return n, nil
 }

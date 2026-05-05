@@ -59,6 +59,9 @@ func generateTypeScript(contract shunter.ModuleContract) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
+			if column.Nullable {
+				tsType += " | null"
+			}
 			fmt.Fprintf(&b, "  %s: %s;\n", columnIdentifiers[j].identifier, tsType)
 		}
 		b.WriteString("}\n\n")

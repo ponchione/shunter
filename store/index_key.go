@@ -88,6 +88,9 @@ func ExtractKey(row types.ProductValue, columns []int) IndexKey {
 }
 
 func copyIndexValue(v types.Value) types.Value {
+	if v.IsNull() {
+		return v
+	}
 	switch v.Kind() {
 	case types.KindBytes:
 		return types.NewBytes(v.BytesView())

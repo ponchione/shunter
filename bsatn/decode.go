@@ -34,6 +34,31 @@ func DecodeValueExpecting(r io.Reader, expected types.ValueKind, colName string)
 	return decodePayload(r, tag[0])
 }
 
+func decodeColumnValue(r io.Reader, col schema.ColumnSchema) (types.Value, error) {
+	var tag [1]byte
+	if _, err := io.ReadFull(r, tag[:]); err != nil {
+		return types.Value{}, err
+	}
+	if tag[0] != byte(col.Type) {
+		return types.Value{}, &TypeTagMismatchError{Column: col.Name, Expected: col.Type, Got: tag[0]}
+	}
+	if !col.Nullable {
+		return decodePayload(r, tag[0])
+	}
+	var presence [1]byte
+	if _, err := io.ReadFull(r, presence[:]); err != nil {
+		return types.Value{}, err
+	}
+	switch presence[0] {
+	case 0:
+		return types.NewNull(col.Type), nil
+	case 1:
+		return decodePayload(r, tag[0])
+	default:
+		return types.Value{}, ErrInvalidPresence
+	}
+}
+
 func decodePayload(r io.Reader, tag byte) (types.Value, error) {
 	var buf [8]byte
 	switch tag {
@@ -227,7 +252,7 @@ func DecodeProductValue(r io.Reader, ts *schema.TableSchema) (types.ProductValue
 
 	pv := make(types.ProductValue, len(ts.Columns))
 	for i, col := range ts.Columns {
-		v, err := DecodeValueExpecting(br, col.Type, col.Name)
+		v, err := decodeColumnValue(br, col)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return nil, errors.Join(
@@ -257,7 +282,7 @@ func DecodeProductValueFromBytes(data []byte, ts *schema.TableSchema) (types.Pro
 	d := byteDecoder{data: data}
 	pv := make(types.ProductValue, len(ts.Columns))
 	for i, col := range ts.Columns {
-		v, err := d.decodeValueExpecting(col.Type, col.Name)
+		v, err := d.decodeColumnValue(col)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				shapeErr := &RowShapeMismatchError{TableName: ts.Name, Expected: len(ts.Columns), Got: i}
@@ -302,15 +327,29 @@ func (d *byteDecoder) readU32() (uint32, error) {
 	return binary.LittleEndian.Uint32(data), nil
 }
 
-func (d *byteDecoder) decodeValueExpecting(expected types.ValueKind, colName string) (types.Value, error) {
+func (d *byteDecoder) decodeColumnValue(col schema.ColumnSchema) (types.Value, error) {
 	tag, err := d.read(1)
 	if err != nil {
 		return types.Value{}, err
 	}
-	if tag[0] != byte(expected) {
-		return types.Value{}, &TypeTagMismatchError{Column: colName, Expected: expected, Got: tag[0]}
+	if tag[0] != byte(col.Type) {
+		return types.Value{}, &TypeTagMismatchError{Column: col.Name, Expected: col.Type, Got: tag[0]}
 	}
-	return d.decodePayload(tag[0])
+	if !col.Nullable {
+		return d.decodePayload(tag[0])
+	}
+	presence, err := d.read(1)
+	if err != nil {
+		return types.Value{}, err
+	}
+	switch presence[0] {
+	case 0:
+		return types.NewNull(col.Type), nil
+	case 1:
+		return d.decodePayload(tag[0])
+	default:
+		return types.Value{}, ErrInvalidPresence
+	}
 }
 
 func (d *byteDecoder) decodePayload(tag byte) (types.Value, error) {

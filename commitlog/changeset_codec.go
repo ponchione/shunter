@@ -32,11 +32,11 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 	for _, id := range tableIDs {
 		tc := cs.Tables[id]
 		size += 4
-		insertSize, err := encodedChangesetRowsSize(tc.Inserts, maxRowBytes)
+		insertSize, err := encodedChangesetRowsSize(tc.Inserts, tc.Schema, maxRowBytes)
 		if err != nil {
 			return nil, err
 		}
-		deleteSize, err := encodedChangesetRowsSize(tc.Deletes, maxRowBytes)
+		deleteSize, err := encodedChangesetRowsSize(tc.Deletes, tc.Schema, maxRowBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -59,7 +59,7 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 
 		// Inserts.
 		var err error
-		out, err = appendChangesetRows(out, tc.Inserts, maxRowBytes)
+		out, err = appendChangesetRows(out, tc.Inserts, tc.Schema, maxRowBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -68,7 +68,7 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 		}
 
 		// Deletes.
-		out, err = appendChangesetRows(out, tc.Deletes, maxRowBytes)
+		out, err = appendChangesetRows(out, tc.Deletes, tc.Schema, maxRowBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -80,10 +80,13 @@ func encodeChangesetWithLimits(cs *store.Changeset, maxRowBytes uint32, maxRecor
 	return out, nil
 }
 
-func encodedChangesetRowsSize(rows []types.ProductValue, maxRowBytes uint32) (uint64, error) {
+func encodedChangesetRowsSize(rows []types.ProductValue, ts *schema.TableSchema, maxRowBytes uint32) (uint64, error) {
 	size := uint64(4)
 	for _, row := range rows {
-		rowLen := bsatn.EncodedProductValueSize(row)
+		rowLen, err := bsatn.EncodedProductValueSizeForSchema(row, ts)
+		if err != nil {
+			return 0, err
+		}
 		if err := validateRowPayloadLen(rowLen, maxRowBytes); err != nil {
 			return 0, err
 		}
@@ -92,17 +95,19 @@ func encodedChangesetRowsSize(rows []types.ProductValue, maxRowBytes uint32) (ui
 	return size, nil
 }
 
-func appendChangesetRows(out []byte, rows []types.ProductValue, maxRowBytes uint32) ([]byte, error) {
+func appendChangesetRows(out []byte, rows []types.ProductValue, ts *schema.TableSchema, maxRowBytes uint32) ([]byte, error) {
 	out = appendUint32LE(out, uint32(len(rows)))
 	for _, row := range rows {
-		rowLen := bsatn.EncodedProductValueSize(row)
+		rowLen, err := bsatn.EncodedProductValueSizeForSchema(row, ts)
+		if err != nil {
+			return out, err
+		}
 		if err := validateRowPayloadLen(rowLen, maxRowBytes); err != nil {
 			return out, err
 		}
 		out = appendUint32LE(out, uint32(rowLen))
 		before := len(out)
-		var err error
-		out, err = bsatn.AppendProductValue(out, row)
+		out, err = bsatn.AppendProductValueForSchema(out, row, ts)
 		if err != nil {
 			return out, err
 		}
@@ -178,7 +183,7 @@ func decodeChangesetWithMax(data []byte, reg schema.SchemaRegistry, maxRowBytes 
 			return nil, changesetDecodeErrorf("commitlog: unknown table ID %d", tableID)
 		}
 
-		tc := &store.TableChangeset{TableID: tableID, TableName: ts.Name}
+		tc := &store.TableChangeset{TableID: tableID, TableName: ts.Name, Schema: ts}
 
 		// Inserts.
 		if pos+4 > len(data) {

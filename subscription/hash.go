@@ -550,6 +550,11 @@ func encodeBound(e *canonicalEncoder, b Bound) {
 func encodeValue(e *canonicalEncoder, v Value) {
 	k := v.Kind()
 	e.writeByte(byte(k))
+	if v.IsNull() {
+		e.writeByte(0)
+		return
+	}
+	e.writeByte(1)
 	switch k {
 	case types.KindBool:
 		if v.AsBool() {

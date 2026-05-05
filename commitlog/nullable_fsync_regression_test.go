@@ -8,7 +8,7 @@ import (
 	"github.com/ponchione/shunter/schema"
 )
 
-func TestSelectSnapshotNullableColumnWrapsErrNullableColumn(t *testing.T) {
+func TestSelectSnapshotNullableColumnMismatchIsSchemaMismatch(t *testing.T) {
 	root := t.TempDir()
 	reg := buildSelectionRegistry(t, selectionRegistryConfig{})
 	cs := buildSelectionCommittedState(t, reg)
@@ -24,12 +24,9 @@ func TestSelectSnapshotNullableColumnWrapsErrNullableColumn(t *testing.T) {
 	if !errors.As(err, &mismatch) {
 		t.Fatalf("expected SchemaMismatchError, got %v", err)
 	}
-	if !errors.Is(err, schema.ErrNullableColumn) {
-		t.Fatalf("expected nullable snapshot mismatch to wrap ErrNullableColumn, got %v", err)
-	}
 }
 
-func TestSelectSnapshotRejectsNullableSnapshotEvenWhenRegistryAlsoNullable(t *testing.T) {
+func TestSelectSnapshotAcceptsNullableSnapshotWhenRegistryMatches(t *testing.T) {
 	root := t.TempDir()
 	reg := buildSelectionRegistry(t, selectionRegistryConfig{})
 	cs := buildSelectionCommittedState(t, reg)
@@ -40,13 +37,12 @@ func TestSelectSnapshotRejectsNullableSnapshotEvenWhenRegistryAlsoNullable(t *te
 	})
 	writeSelectionSnapshot(t, root, nullableReg, cs, 5)
 
-	_, err := SelectSnapshot(root, 5, nullableReg)
-	var mismatch *SchemaMismatchError
-	if !errors.As(err, &mismatch) {
-		t.Fatalf("expected SchemaMismatchError, got %v", err)
+	selected, err := SelectSnapshot(root, 5, nullableReg)
+	if err != nil {
+		t.Fatalf("SelectSnapshot nullable match: %v", err)
 	}
-	if !errors.Is(err, schema.ErrNullableColumn) {
-		t.Fatalf("expected direct nullable rejection, got %v", err)
+	if selected == nil || selected.TxID != 5 {
+		t.Fatalf("selected snapshot = %+v, want tx 5", selected)
 	}
 }
 

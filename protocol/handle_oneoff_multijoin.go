@@ -51,7 +51,24 @@ func executeCompiledSQLMultiJoin(ctx context.Context, query compiledSQLQuery, st
 			rows = sliceOneOffRows(rows, rowOffset, rowLimit)
 		}
 	}
-	return SQLQueryResult{TableName: query.TableName, Rows: rows}, nil
+	return SQLQueryResult{TableName: query.TableName, Columns: multiJoinResultColumns(query, multi), Rows: rows}, nil
+}
+
+func multiJoinResultColumns(query compiledSQLQuery, multi *compiledSQLMultiJoin) []schema.ColumnSchema {
+	if query.Aggregate != nil {
+		return []schema.ColumnSchema{query.Aggregate.ResultColumn}
+	}
+	if len(query.ProjectionColumns) != 0 {
+		columns := make([]schema.ColumnSchema, len(query.ProjectionColumns))
+		for i, col := range query.ProjectionColumns {
+			columns[i] = col.Schema
+		}
+		return columns
+	}
+	if multi == nil || multi.ProjectedRelation < 0 || multi.ProjectedRelation >= len(multi.Relations) || multi.Relations[multi.ProjectedRelation].Schema == nil {
+		return nil
+	}
+	return append([]schema.ColumnSchema(nil), multi.Relations[multi.ProjectedRelation].Schema.Columns...)
 }
 
 func evaluateOneOffMultiJoinOrderedRows(ctx context.Context, view store.CommittedReadView, multi *compiledSQLMultiJoin, resolver schema.IndexResolver, columns []compiledSQLProjectionColumn, orderBy []compiledSQLOrderBy) ([]orderedOneOffRow, error) {

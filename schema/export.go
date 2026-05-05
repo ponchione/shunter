@@ -18,8 +18,9 @@ type TableExport struct {
 
 // ColumnExport is the exported shape of one column.
 type ColumnExport struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Nullable bool   `json:"nullable,omitempty"`
 }
 
 // IndexExport is the exported shape of one index.
@@ -51,7 +52,7 @@ func (e *Engine) ExportSchema() *SchemaExport {
 		te := TableExport{Name: ts.Name, ReadPolicy: normalizeReadPolicy(ts.ReadPolicy)}
 		te.Columns = make([]ColumnExport, len(ts.Columns))
 		for i, col := range ts.Columns {
-			te.Columns[i] = ColumnExport{Name: col.Name, Type: ValueKindExportString(col.Type)}
+			te.Columns[i] = ColumnExport{Name: col.Name, Type: ValueKindExportString(col.Type), Nullable: col.Nullable}
 		}
 		te.Indexes = make([]IndexExport, len(ts.Indexes))
 		for i, idx := range ts.Indexes {

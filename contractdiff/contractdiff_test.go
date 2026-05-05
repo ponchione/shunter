@@ -66,6 +66,18 @@ func TestContractDiffDetectsBreakingSurfaceChanges(t *testing.T) {
 	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceView, "live")
 }
 
+func TestContractDiffDetectsNullableColumnChange(t *testing.T) {
+	old := contractFixture()
+	current := contractFixture()
+	current.Schema.Tables[0].Columns[0].Nullable = true
+
+	report := Compare(old, current)
+	assertChange(t, report.Changes, ChangeKindBreaking, SurfaceColumn, "messages.id")
+	if text := report.Text(); !strings.Contains(text, "column nullable changed from false to true") {
+		t.Fatalf("diff text = %q, want nullable change", text)
+	}
+}
+
 func TestContractDiffReportsUUIDColumnType(t *testing.T) {
 	old := contractFixture()
 	current := contractFixture()

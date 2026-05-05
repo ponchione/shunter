@@ -16,6 +16,7 @@ Shunter uses source versions from `VERSION` and release tags named `vX.Y.Z`.
 - One-off and declared SQL queries now support inner-join `WHERE` column equality filters while live subscription admission keeps rejecting them.
 - Generated TypeScript clients now include a table-name-to-row-type map and a table subscriber callback type derived from it.
 - Added canonical JSON column values with schema export, BSATN encoding, SQL literal coercion, store/index support, subscription hashing, contract validation, and TypeScript `unknown` codegen.
+- Added nullable column semantics across `types.Value`, schema reflection/export, schema-aware row BSATN, store validation/indexing, SQL `IS NULL` predicates, snapshots/recovery, contract diff, and TypeScript `T | null` codegen.
 
 ## v0.1.0 - 2026-05-05
 

@@ -158,6 +158,7 @@ func (v *ValueIndex) ForEachTrackedColumn(table TableID, fn func(ColID)) {
 
 type valueKey struct {
 	kind  types.ValueKind
+	null  bool
 	i64   int64
 	u64   uint64
 	str   string
@@ -170,7 +171,10 @@ type valueKey struct {
 
 // encodeValueKey produces a stable comparable key for a Value.
 func encodeValueKey(v Value) valueKey {
-	k := valueKey{kind: v.Kind()}
+	k := valueKey{kind: v.Kind(), null: v.IsNull()}
+	if v.IsNull() {
+		return k
+	}
 	switch v.Kind() {
 	case types.KindBool:
 		if v.AsBool() {

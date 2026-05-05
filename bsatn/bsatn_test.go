@@ -148,6 +148,44 @@ func TestProductValueRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNullableProductValueRoundTripAndEncoding(t *testing.T) {
+	ts := &schema.TableSchema{
+		Name: "players",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "nickname", Type: types.KindString, Nullable: true},
+			{Index: 2, Name: "metadata", Type: types.KindJSON, Nullable: true},
+		},
+	}
+	row := types.ProductValue{
+		types.NewUint64(7),
+		types.NewNull(types.KindString),
+		mustJSON(t, `{"b":2,"a":1}`),
+	}
+	encoded, err := AppendProductValueForSchema(nil, row, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := []byte{TagUint64, 7, 0, 0, 0, 0, 0, 0, 0, TagString, 0, TagJSON, 1}
+	if !bytes.Equal(encoded[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("nullable encoded prefix = % x, want % x", encoded[:len(wantPrefix)], wantPrefix)
+	}
+	got, err := DecodeProductValueFromBytes(encoded, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !row.Equal(got) {
+		t.Fatalf("nullable round-trip = %+v, want %+v", got, row)
+	}
+	size, err := EncodedProductValueSizeForSchema(row, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != len(encoded) {
+		t.Fatalf("EncodedProductValueSizeForSchema = %d, encoded length = %d", size, len(encoded))
+	}
+}
+
 func TestAppendProductValueMatchesWriterEncoding(t *testing.T) {
 	pv := types.ProductValue{
 		types.NewUint64(42),

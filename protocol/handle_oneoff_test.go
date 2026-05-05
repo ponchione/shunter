@@ -421,6 +421,54 @@ func TestHandleOneOffQuery_UUIDLiteralFiltersRows(t *testing.T) {
 	}
 }
 
+func TestHandleOneOffQuery_NullPredicatesFilterRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	ts := &schema.TableSchema{
+		ID:   1,
+		Name: "users",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: schema.KindUint32},
+			{Index: 1, Name: "nickname", Type: schema.KindString, Nullable: true},
+		},
+	}
+	sl := newMockSchema("users", 1, ts.Columns...)
+	snap := &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1), types.NewNull(types.KindString)},
+				{types.NewUint32(2), types.NewString("bob")},
+			},
+		},
+	}
+	stateAccess := &mockStateAccess{snap: snap}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x13},
+		QueryString: "SELECT * FROM users WHERE nickname IS NULL",
+	}, stateAccess, sl)
+	nullResult := drainOneOff(t, conn)
+	if nullResult.Error != nil {
+		t.Fatalf("IS NULL error = %q, want nil", *nullResult.Error)
+	}
+	nullRows := decodeRows(t, firstTableRows(nullResult), ts)
+	if len(nullRows) != 1 || !nullRows[0][0].Equal(types.NewUint32(1)) || !nullRows[0][1].IsNull() {
+		t.Fatalf("IS NULL rows = %+v, want id=1 null nickname", nullRows)
+	}
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte{0x14},
+		QueryString: "SELECT * FROM users WHERE nickname IS NOT NULL",
+	}, stateAccess, sl)
+	notNullResult := drainOneOff(t, conn)
+	if notNullResult.Error != nil {
+		t.Fatalf("IS NOT NULL error = %q, want nil", *notNullResult.Error)
+	}
+	notNullRows := decodeRows(t, firstTableRows(notNullResult), ts)
+	if len(notNullRows) != 1 || !notNullRows[0][0].Equal(types.NewUint32(2)) || notNullRows[0][1].IsNull() {
+		t.Fatalf("IS NOT NULL rows = %+v, want id=2 non-null nickname", notNullRows)
+	}
+}
+
 func TestHandleOneOffQuery_JSONLiteralFiltersRows(t *testing.T) {
 	conn := testConnDirect(nil)
 	ts := &schema.TableSchema{

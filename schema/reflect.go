@@ -10,6 +10,7 @@ type fieldInfo struct {
 	FieldName  string
 	ColumnName string
 	Type       ValueKind
+	Nullable   bool
 	Tags       *TagDirectives
 }
 
@@ -65,8 +66,15 @@ func discoverFields(t reflect.Type, prefix string) ([]fieldInfo, error) {
 			// Non-struct anonymous field — fall through to normal processing.
 		}
 
-		// Map Go type to ValueKind.
-		vk, err := GoTypeToValueKind(f.Type)
+		// Map Go type to ValueKind. Pointer fields declare nullable columns
+		// when their element type maps to a supported Shunter kind.
+		ft := f.Type
+		nullable := false
+		if ft.Kind() == reflect.Pointer {
+			nullable = true
+			ft = ft.Elem()
+		}
+		vk, err := GoTypeToValueKind(ft)
 		if err != nil {
 			return nil, fmt.Errorf("schema error: %s: %w", path, err)
 		}
@@ -81,6 +89,7 @@ func discoverFields(t reflect.Type, prefix string) ([]fieldInfo, error) {
 			FieldName:  f.Name,
 			ColumnName: colName,
 			Type:       vk,
+			Nullable:   nullable,
 			Tags:       td,
 		})
 	}

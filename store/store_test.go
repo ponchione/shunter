@@ -110,6 +110,57 @@ func TestIndexKeyCompare(t *testing.T) {
 	}
 }
 
+func TestIndexKeyCompareNullBeforeNonNull(t *testing.T) {
+	nullKey := NewIndexKey(types.NewNull(types.KindString))
+	valueKey := NewIndexKey(types.NewString(""))
+	if got := nullKey.Compare(valueKey); got >= 0 {
+		t.Fatalf("null key compare = %d, want null before non-null", got)
+	}
+	if got := valueKey.Compare(nullKey); got <= 0 {
+		t.Fatalf("non-null key compare = %d, want after null", got)
+	}
+}
+
+func TestValidateRowNullableColumns(t *testing.T) {
+	ts := &schema.TableSchema{
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "nickname", Type: types.KindString, Nullable: true},
+		},
+	}
+	if err := ValidateRow(ts, types.ProductValue{types.NewUint64(1), types.NewNull(types.KindString)}); err != nil {
+		t.Fatalf("ValidateRow nullable null: %v", err)
+	}
+	if err := ValidateRow(ts, types.ProductValue{types.NewUint64(1), types.NewNull(types.KindUint64)}); !errors.Is(err, ErrTypeMismatch) {
+		t.Fatalf("ValidateRow wrong null kind err = %v, want ErrTypeMismatch", err)
+	}
+	if err := ValidateRow(ts, types.ProductValue{types.NewNull(types.KindUint64), types.NewString("alice")}); !errors.Is(err, ErrNullNotAllowed) {
+		t.Fatalf("ValidateRow non-nullable null err = %v, want ErrNullNotAllowed", err)
+	}
+}
+
+func TestUniqueIndexTreatsNullAsValue(t *testing.T) {
+	ts := &schema.TableSchema{
+		ID:   4,
+		Name: "profiles",
+		Columns: []schema.ColumnSchema{
+			{Index: 0, Name: "id", Type: types.KindUint64},
+			{Index: 1, Name: "nickname", Type: types.KindString, Nullable: true},
+		},
+		Indexes: []schema.IndexSchema{
+			{ID: 0, Name: "nickname_uniq", Columns: []int{1}, Unique: true},
+		},
+	}
+	table := NewTable(ts)
+	if err := table.InsertRow(1, types.ProductValue{types.NewUint64(1), types.NewNull(types.KindString)}); err != nil {
+		t.Fatalf("InsertRow first null: %v", err)
+	}
+	err := table.InsertRow(2, types.ProductValue{types.NewUint64(2), types.NewNull(types.KindString)})
+	if !errors.Is(err, ErrUniqueConstraintViolation) {
+		t.Fatalf("InsertRow duplicate null err = %v, want unique violation", err)
+	}
+}
+
 func TestIndexKeyConstructorCopiesParts(t *testing.T) {
 	parts := []types.Value{types.NewString("a")}
 	key := NewIndexKey(parts...)

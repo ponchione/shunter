@@ -77,7 +77,7 @@ Direction:
 
 Likely feature slices:
 
-- nullable-value semantics for aggregates once nullable types exist
+- nullable-aware aggregate semantics
 - broader index-aware planning for remaining unfiltered delta and complex live
   join paths
 - live-view expansion for currently query-only shapes after delta semantics are
@@ -105,7 +105,6 @@ Each new type should cover:
 
 Likely useful types:
 
-- nullable/optional values with explicit wire semantics
 - arrays beyond `[]string` when an app needs them
 - app-level enums with a simple exported representation
 

@@ -842,6 +842,34 @@ func TestAccessorPanicsOnKindMismatch(t *testing.T) {
 	}
 }
 
+func TestNullValueSemantics(t *testing.T) {
+	nullString := NewNull(KindString)
+	if nullString.Kind() != KindString || !nullString.IsNull() {
+		t.Fatalf("NewNull Kind/IsNull = %s/%t, want String/true", nullString.Kind(), nullString.IsNull())
+	}
+	if !nullString.Equal(NewNull(KindString)) {
+		t.Fatal("null values of the same kind should be equal")
+	}
+	if nullString.Equal(NewString("")) {
+		t.Fatal("null string must not equal empty string")
+	}
+	if got := nullString.Compare(NewString("")); got >= 0 {
+		t.Fatalf("null Compare empty string = %d, want null before non-null", got)
+	}
+	if got := NewString("").Compare(nullString); got <= 0 {
+		t.Fatalf("empty string Compare null = %d, want non-null after null", got)
+	}
+	if nullString.Hash64() == NewString("").Hash64() {
+		t.Fatal("null and empty string hashes must differ")
+	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("AsString on null value did not panic")
+		}
+	}()
+	_ = nullString.AsString()
+}
+
 // --- ValueKind.String() ---
 
 func TestValueKindString(t *testing.T) {

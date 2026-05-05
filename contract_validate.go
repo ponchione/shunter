@@ -326,9 +326,10 @@ func newContractSchemaLookup(schemaExport schema.SchemaExport) contractSchemaLoo
 		for j, column := range table.Columns {
 			kind, _ := valueKindFromExportString(column.Type)
 			ts.Columns[j] = schema.ColumnSchema{
-				Index: j,
-				Name:  column.Name,
-				Type:  kind,
+				Index:    j,
+				Name:     column.Name,
+				Type:     kind,
+				Nullable: column.Nullable,
 			}
 			if _, exists := columnByName[column.Name]; !exists {
 				columnByName[column.Name] = j

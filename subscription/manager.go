@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/types"
 )
@@ -54,6 +55,7 @@ type SubscriptionUpdate struct {
 	QueryID        uint32
 	TableID        TableID
 	TableName      string
+	Columns        []schema.ColumnSchema
 	Inserts        []types.ProductValue
 	Deletes        []types.ProductValue
 }
@@ -142,6 +144,22 @@ func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOpti
 		opt(m)
 	}
 	return m
+}
+
+type tableSchemaLookup interface {
+	Table(TableID) (*schema.TableSchema, bool)
+}
+
+func (m *Manager) columnsForUpdate(tableID TableID) []schema.ColumnSchema {
+	lookup, ok := m.schema.(tableSchemaLookup)
+	if !ok {
+		return nil
+	}
+	ts, ok := lookup.Table(tableID)
+	if !ok || ts == nil {
+		return nil
+	}
+	return append([]schema.ColumnSchema(nil), ts.Columns...)
 }
 
 // CloseFanOut unblocks post-commit fan-out enqueue attempts during shutdown.

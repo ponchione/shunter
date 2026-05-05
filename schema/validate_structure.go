@@ -57,14 +57,13 @@ func validateStructure(b *Builder) []error {
 			if c.Type < KindBool || c.Type > KindJSON {
 				errs = append(errs, fmt.Errorf("table %q column %q: invalid ValueKind %v", t.Name, c.Name, c.Type))
 			}
-			if c.Nullable {
-				errs = append(errs, fmt.Errorf("table %q column %q: %w", t.Name, c.Name, ErrNullableColumn))
-			}
-
 			if c.PrimaryKey {
 				pkCount++
 			}
 			if c.AutoIncrement {
+				if c.Nullable {
+					errs = append(errs, fmt.Errorf("table %q column %q: %w", t.Name, c.Name, ErrNullableAutoIncrement))
+				}
 				if _, _, ok := AutoIncrementBounds(c.Type); !ok {
 					errs = append(errs, fmt.Errorf("table %q column %q: %w", t.Name, c.Name, ErrAutoIncrementType))
 				}

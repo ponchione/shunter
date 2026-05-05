@@ -30,22 +30,21 @@ capabilities.
 Agents should implement remaining slices in this order unless a later task
 explicitly says otherwise:
 
-1. Nullable column semantics.
-2. Composite index and reducer read ergonomics.
-3. Fixed-point numeric convention or column metadata.
-4. External JWT principal bridge.
-5. App-owned migration and import hooks.
-6. Ordered declared reads.
-7. Client/codegen updates for the new surface.
+1. Composite index and reducer read ergonomics.
+2. Fixed-point numeric convention or column metadata.
+3. External JWT principal bridge.
+4. App-owned migration and import hooks.
+5. Ordered declared reads.
+6. Client/codegen updates for the new surface.
 
 Completed slices:
 
 - UUID value kind.
 - Canonical JSON value kind.
+- Nullable column semantics.
 
-Nullable values are the remaining type-system slice that unblocks most
-production-shaped schemas. The query, migration, and client work can proceed
-after the type surface is stable.
+The remaining slices build on the now-stable UUID, JSON, and nullable type
+surface.
 
 ## 3. UUID Value Kind
 
@@ -151,6 +150,8 @@ slice.
 - Contract/codegen coverage.
 
 ## 5. Nullable Column Semantics
+
+Status: implemented.
 
 ### Requirement
 

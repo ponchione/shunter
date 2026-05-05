@@ -130,6 +130,50 @@ func TestCreateAndReadSnapshotWithJSONRow(t *testing.T) {
 	}
 }
 
+func TestCreateAndReadSnapshotWithNullableRow(t *testing.T) {
+	root := t.TempDir()
+	b := schema.NewBuilder()
+	b.SchemaVersion(1)
+	b.TableDef(schema.TableDefinition{
+		Name: "players",
+		Columns: []schema.ColumnDefinition{
+			{Name: "id", Type: schema.KindUint64, PrimaryKey: true},
+			{Name: "nickname", Type: schema.KindString, Nullable: true},
+		},
+	})
+	e, err := b.Build(schema.EngineOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := e.Registry()
+	cs := buildEmptySnapshotCommittedState(t, reg)
+	row := types.ProductValue{types.NewUint64(1), types.NewNull(types.KindString)}
+	players, _ := cs.Table(0)
+	if err := players.InsertRow(players.AllocRowID(), row); err != nil {
+		t.Fatal(err)
+	}
+	cs.SetCommittedTxID(1)
+
+	writer := NewSnapshotWriter(filepath.Join(root, "snapshots"), reg)
+	if err := writer.CreateSnapshot(cs, 1); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ReadSnapshot(filepath.Join(root, "snapshots", "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []types.ProductValue
+	for _, table := range data.Tables {
+		if table.TableID == 0 {
+			rows = table.Rows
+			break
+		}
+	}
+	if len(rows) != 1 || !rows[0].Equal(row) || !rows[0][1].IsNull() {
+		t.Fatalf("snapshot nullable rows = %+v, want %+v", rows, row)
+	}
+}
+
 func TestCreateAndReadSnapshotAllowsEmptyBootstrapState(t *testing.T) {
 	root := t.TempDir()
 	_, reg := testSchema()

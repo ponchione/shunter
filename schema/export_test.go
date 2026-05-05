@@ -19,7 +19,7 @@ func TestExportSchemaIncludesTablesReducersAndLifecycle(t *testing.T) {
 		Name: "players",
 		Columns: []ColumnDefinition{
 			{Name: "id", Type: KindUint64, PrimaryKey: true},
-			{Name: "name", Type: KindString},
+			{Name: "name", Type: KindString, Nullable: true},
 		},
 		Indexes: []IndexDefinition{{Name: "name_idx", Columns: []string{"name"}, Unique: true}},
 	})
@@ -43,6 +43,9 @@ func TestExportSchemaIncludesTablesReducersAndLifecycle(t *testing.T) {
 	}
 	if export.Tables[0].Columns[0].Type != "uint64" || export.Tables[0].Columns[1].Type != "string" {
 		t.Fatalf("column export types = %+v", export.Tables[0].Columns)
+	}
+	if !export.Tables[0].Columns[1].Nullable {
+		t.Fatalf("nullable column export = %+v, want nullable name", export.Tables[0].Columns[1])
 	}
 	if export.Tables[0].Indexes[0].Columns[0] != "id" {
 		t.Fatalf("primary index column export = %v, want [id]", export.Tables[0].Indexes[0].Columns)

@@ -72,13 +72,13 @@ func TestDiscoverFieldsJSON(t *testing.T) {
 }
 
 type BadPtr struct {
-	X *int64
+	X **int64
 }
 
 func TestDiscoverFieldsUnsupportedType(t *testing.T) {
 	_, err := discoverFields(reflect.TypeFor[BadPtr](), "")
 	if err == nil {
-		t.Fatal("expected error for *int64 field")
+		t.Fatal("expected error for **int64 field")
 	}
 }
 

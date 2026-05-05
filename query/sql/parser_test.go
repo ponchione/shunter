@@ -552,6 +552,38 @@ func TestParseQuotedReservedIdentifiers(t *testing.T) {
 	}
 }
 
+func TestParseNullPredicates(t *testing.T) {
+	stmt, err := Parse(`SELECT * FROM users WHERE nickname IS NULL OR nickname IS NOT NULL`)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	orPred, ok := stmt.Predicate.(OrPredicate)
+	if !ok {
+		t.Fatalf("Predicate = %T, want OrPredicate", stmt.Predicate)
+	}
+	left, ok := orPred.Left.(NullPredicate)
+	if !ok || left.Not || left.Column.Column != "nickname" {
+		t.Fatalf("Left = %+v, want nickname IS NULL", orPred.Left)
+	}
+	right, ok := orPred.Right.(NullPredicate)
+	if !ok || !right.Not || right.Column.Column != "nickname" {
+		t.Fatalf("Right = %+v, want nickname IS NOT NULL", orPred.Right)
+	}
+	if len(stmt.Filters) != 0 {
+		t.Fatalf("Filters len = %d, want 0 for null predicate tree", len(stmt.Filters))
+	}
+}
+
+func TestParseRejectsEqualsNull(t *testing.T) {
+	_, err := Parse(`SELECT * FROM users WHERE nickname = NULL`)
+	if err == nil {
+		t.Fatal("Parse error = nil, want unsupported NULL comparison")
+	}
+	if !strings.Contains(err.Error(), "IS NULL") {
+		t.Fatalf("Parse error = %v, want hint to use IS NULL", err)
+	}
+}
+
 func TestParseKeywordsCaseInsensitive(t *testing.T) {
 	stmt, err := Parse("select * from Users where Id = 1")
 	if err != nil {

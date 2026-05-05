@@ -211,7 +211,7 @@ func TestBuildRejectsInvalidValueKind(t *testing.T) {
 
 func TestDiscoverFieldsErrorsIncludeTopLevelStructName(t *testing.T) {
 	type Player struct {
-		CachedAt *int64
+		CachedAt *map[string]string
 	}
 	_, err := discoverFields(reflect.TypeFor[Player](), "")
 	if err == nil {

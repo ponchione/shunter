@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ponchione/shunter/bsatn"
+	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/types"
 )
 
@@ -48,6 +49,45 @@ func EncodeProductRows(rows []types.ProductValue) ([]byte, error) {
 		before := len(out)
 		var err error
 		out, err = bsatn.AppendProductValue(out, row)
+		if err != nil {
+			return nil, err
+		}
+		if got := len(out) - before; got != rowSizes[i] {
+			return nil, fmt.Errorf("protocol: encoded row size changed from %d to %d", rowSizes[i], got)
+		}
+	}
+	return out, nil
+}
+
+// EncodeProductRowsForSchema encodes ProductValue rows using nullable metadata from ts.
+func EncodeProductRowsForSchema(rows []types.ProductValue, ts *schema.TableSchema) ([]byte, error) {
+	if ts == nil {
+		return EncodeProductRows(rows)
+	}
+	return EncodeProductRowsForColumns(rows, ts.Columns)
+}
+
+// EncodeProductRowsForColumns encodes ProductValue rows using nullable metadata from columns.
+func EncodeProductRowsForColumns(rows []types.ProductValue, columns []schema.ColumnSchema) ([]byte, error) {
+	size := 4
+	rowSizes := make([]int, len(rows))
+	for i, row := range rows {
+		n, err := bsatn.EncodedProductValueSizeForColumns(row, columns)
+		if err != nil {
+			return nil, err
+		}
+		rowSizes[i] = n
+		size += 4 + n
+	}
+	out := make([]byte, 4, size)
+	binary.LittleEndian.PutUint32(out[0:4], uint32(len(rows)))
+	var scratch [4]byte
+	for i, row := range rows {
+		binary.LittleEndian.PutUint32(scratch[:], uint32(rowSizes[i]))
+		out = append(out, scratch[:]...)
+		before := len(out)
+		var err error
+		out, err = bsatn.AppendProductValueForColumns(out, row, columns)
 		if err != nil {
 			return nil, err
 		}

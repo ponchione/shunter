@@ -1042,6 +1042,12 @@ func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema
 		f := p.Filter
 		f.Table = tableAlias
 		return normalizeSQLFilterForRelations(f, map[string]relationSchema{tableAlias: rel}, func(string) uint8 { return 0 }, caller)
+	case sql.NullPredicate:
+		if p.Column.Alias != "" && p.Column.Alias != tableAlias {
+			return nil, sql.UnresolvedVarError{Name: p.Column.Alias}
+		}
+		p.Column.Table = tableAlias
+		return normalizeSQLNullPredicateForRelations(p, map[string]relationSchema{tableAlias: rel}, func(string) uint8 { return 0 })
 	case sql.AndPredicate:
 		return compileSQLBinaryPredicate(p.Left, p.Right, func(child sql.Predicate) (subscription.Predicate, error) {
 			return compileSQLPredicateForSingleRelation(child, rel, tableAlias, caller)
@@ -1321,6 +1327,8 @@ func compileSQLPredicateForRelations(pred sql.Predicate, relations map[string]re
 		return nil, nil
 	case sql.ComparisonPredicate:
 		return normalizeSQLFilterForRelations(p.Filter, relations, aliasTag, caller)
+	case sql.NullPredicate:
+		return normalizeSQLNullPredicateForRelations(p, relations, aliasTag)
 	case sql.ColumnComparisonPredicate:
 		if !allowColumnComparisons {
 			return nil, fmt.Errorf("join WHERE column comparisons not supported")
@@ -1455,6 +1463,18 @@ func normalizeSQLFilterForRelations(f sql.Filter, relations map[string]relationS
 		return nil, fmt.Errorf("coerce column %q: %v", f.Column, err)
 	}
 	return normalizePredicate(rel.id, col.Index, aliasTag(f.Alias), f.Op, v)
+}
+
+func normalizeSQLNullPredicateForRelations(p sql.NullPredicate, relations map[string]relationSchema, aliasTag func(string) uint8) (subscription.Predicate, error) {
+	ref, err := compileSQLColumnRefForRelations(p.Column, relations, aliasTag)
+	if err != nil {
+		return nil, err
+	}
+	value := types.NewNull(ref.schema.Type)
+	if p.Not {
+		return subscription.ColNe{Table: ref.table, Column: ref.column, Alias: ref.alias, Value: value}, nil
+	}
+	return subscription.ColEq{Table: ref.table, Column: ref.column, Alias: ref.alias, Value: value}, nil
 }
 
 func normalizePredicate(tableID schema.TableID, colIndex int, alias uint8, op string, value types.Value) (subscription.Predicate, error) {

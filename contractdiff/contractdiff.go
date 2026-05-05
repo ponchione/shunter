@@ -228,6 +228,9 @@ func compareColumns(out *Report, tableName string, oldColumns, currentColumns []
 		if old.Type != current.Type {
 			out.add(ChangeKindBreaking, SurfaceColumn, columnName, fmt.Sprintf("column type changed from %s to %s", old.Type, current.Type))
 		}
+		if old.Nullable != current.Nullable {
+			out.add(ChangeKindBreaking, SurfaceColumn, columnName, fmt.Sprintf("column nullable changed from %t to %t", old.Nullable, current.Nullable))
+		}
 	}
 	for name := range oldByName {
 		if _, ok := currentByName[name]; !ok {

@@ -17,12 +17,19 @@ func (pv ProductValue) Equal(other ProductValue) bool {
 }
 
 // Hash feeds a length-prefixed canonical representation of each column into h.
-// Format per column: kind_byte + payload_len_u32 + payload_bytes.
+// Format per column: kind_byte + null_marker + payload_len_u32 + payload_bytes.
 // The length prefix prevents concatenation ambiguity (e.g. ("a","bc") vs ("ab","c")).
 func (pv ProductValue) Hash(h hash.Hash64) {
 	var buf [4]byte
 	for _, v := range pv {
 		h.Write([]byte{byte(v.kind)})
+		if v.isNull {
+			h.Write([]byte{0})
+			binary.BigEndian.PutUint32(buf[:], 0)
+			h.Write(buf[:])
+			continue
+		}
+		h.Write([]byte{1})
 		binary.BigEndian.PutUint32(buf[:], v.payloadLen())
 		h.Write(buf[:])
 		v.writePayload(h)
@@ -44,6 +51,10 @@ func (pv ProductValue) Copy() ProductValue {
 	}
 	cp := make(ProductValue, len(pv))
 	for i, v := range pv {
+		if v.IsNull() {
+			cp[i] = v
+			continue
+		}
 		switch v.kind {
 		case KindBytes:
 			cp[i] = NewBytes(v.buf)

@@ -105,6 +105,14 @@ type ColumnComparisonPredicate struct {
 
 func (ColumnComparisonPredicate) isPredicate() {}
 
+// NullPredicate is a column IS NULL / IS NOT NULL predicate.
+type NullPredicate struct {
+	Column ColumnRef
+	Not    bool
+}
+
+func (NullPredicate) isPredicate() {}
+
 // AndPredicate combines two child predicates with AND.
 type AndPredicate struct {
 	Left  Predicate
@@ -1244,6 +1252,19 @@ func (p *parser) parseComparisonPredicate(bindings relationBindings) (Predicate,
 	if err != nil {
 		return nil, err
 	}
+	if isKeywordToken(p.peek(), "IS") {
+		p.advance()
+		not := false
+		if isKeywordToken(p.peek(), "NOT") {
+			p.advance()
+			not = true
+		}
+		if !isKeywordToken(p.peek(), "NULL") {
+			return nil, p.unsupported("expected NULL after IS")
+		}
+		p.advance()
+		return NullPredicate{Column: left, Not: not}, nil
+	}
 	op, err := p.parseOperator()
 	if err != nil {
 		return nil, err
@@ -1268,6 +1289,9 @@ func (p *parser) parseComparisonPredicate(bindings relationBindings) (Predicate,
 		// (parser/errors.rs:78-79). RHS-of-WHERE-comparison branch.
 		return nil, UnqualifiedNamesError{}
 	}
+	if isKeywordToken(p.peek(), "NULL") {
+		return nil, p.unsupported("NULL comparisons must use IS NULL or IS NOT NULL")
+	}
 	lit, err := p.parseLiteral()
 	if err != nil {
 		return nil, err
@@ -1285,6 +1309,8 @@ func flattenAndFilters(pred Predicate) ([]Filter, bool) {
 		return nil, false
 	case ComparisonPredicate:
 		return []Filter{p.Filter}, true
+	case NullPredicate:
+		return nil, false
 	case AndPredicate:
 		left, ok := flattenAndFilters(p.Left)
 		if !ok {
