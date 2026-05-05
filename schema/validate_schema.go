@@ -2,11 +2,6 @@ package schema
 
 import "fmt"
 
-var reservedTableNames = map[string]bool{
-	"sys_clients":   true,
-	"sys_scheduled": true,
-}
-
 // validateReducerAndSchemaRules checks reducer registrations and top-level schema rules.
 func validateReducerAndSchemaRules(b *Builder) []error {
 	var errs []error
@@ -23,7 +18,7 @@ func validateReducerAndSchemaRules(b *Builder) []error {
 
 	// Reserved table names.
 	for _, t := range b.tables {
-		if reservedTableNames[t.Name] {
+		if t.Name == "sys_clients" || t.Name == "sys_scheduled" {
 			errs = append(errs, fmt.Errorf("%w: %q", ErrReservedTableName, t.Name))
 		}
 	}
