@@ -607,25 +607,7 @@ func countProjectedRowsWithMultiplier(rows []types.ProductValue, multiplier int)
 }
 
 func diffProjectedRowBags(beforeRows, afterRows []types.ProductValue) (inserts, deletes []types.ProductValue) {
-	beforeCounts, beforeValues, beforeOrder := countProjectedRowsWithMultiplier(beforeRows, 1)
-	afterCounts, afterValues, afterOrder := countProjectedRowsWithMultiplier(afterRows, 1)
-	for _, key := range afterOrder {
-		if afterCounts[key] <= beforeCounts[key] {
-			continue
-		}
-		for n := afterCounts[key] - beforeCounts[key]; n > 0; n-- {
-			inserts = append(inserts, afterValues[key])
-		}
-	}
-	for _, key := range beforeOrder {
-		if beforeCounts[key] <= afterCounts[key] {
-			continue
-		}
-		for n := beforeCounts[key] - afterCounts[key]; n > 0; n-- {
-			deletes = append(deletes, beforeValues[key])
-		}
-	}
-	return inserts, deletes
+	return diffProjectedRowsWithMultiplicity(beforeRows, 1, afterRows, 1)
 }
 
 func projectedRowsBefore(dv *DeltaView, table TableID) []types.ProductValue {
