@@ -1129,27 +1129,8 @@ func (e *Executor) postCommit(
 	return status
 }
 
-type droppedClientDrainer interface {
-	DrainDroppedClients() []types.ConnectionID
-}
-
 func (e *Executor) drainDroppedClients() {
-	if drainer, ok := e.subs.(droppedClientDrainer); ok {
-		e.disconnectDroppedClients(drainer.DrainDroppedClients())
-		return
-	}
-	dropped := e.subs.DroppedClients()
-	for {
-		select {
-		case connID, ok := <-dropped:
-			if !ok {
-				return
-			}
-			e.disconnectDroppedClient(connID)
-		default:
-			return
-		}
-	}
+	e.disconnectDroppedClients(e.subs.DrainDroppedClients())
 }
 
 func (e *Executor) disconnectDroppedClients(connIDs []types.ConnectionID) {
@@ -1186,5 +1167,5 @@ func (noopSubs) UnregisterSet(types.ConnectionID, uint32, store.CommittedReadVie
 }
 func (noopSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
-func (noopSubs) DroppedClients() <-chan types.ConnectionID { return nil }
+func (noopSubs) DrainDroppedClients() []types.ConnectionID { return nil }
 func (noopSubs) DisconnectClient(types.ConnectionID) error { return nil }

@@ -269,5 +269,5 @@ func (stubSubscriptionManager) UnregisterSet(types.ConnectionID, uint32, store.C
 }
 func (stubSubscriptionManager) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
-func (stubSubscriptionManager) DroppedClients() <-chan types.ConnectionID { return nil }
+func (stubSubscriptionManager) DrainDroppedClients() []types.ConnectionID { return nil }
 func (stubSubscriptionManager) DisconnectClient(types.ConnectionID) error { return nil }

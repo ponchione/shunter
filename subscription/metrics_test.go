@@ -99,9 +99,7 @@ func TestSubscriptionMetricsEvalDurationRecordsErrorResult(t *testing.T) {
 
 func TestSubscriptionMetricsFanoutAndDroppedCounters(t *testing.T) {
 	observer := &subscriptionMetricObserver{}
-	dropped := make(chan types.ConnectionID, 1)
-	dropped <- cid(9)
-	worker := NewFanOutWorkerWithObserver(nil, &mockFanOutSender{sendErr: ErrSendBufferFull}, dropped, nil, observer)
+	worker := NewFanOutWorkerWithObserver(nil, &mockFanOutSender{sendErr: ErrSendBufferFull}, func(types.ConnectionID) {}, observer)
 	worker.deliver(context.Background(), FanOutMessage{
 		TxID: 1,
 		Fanout: CommitFanout{
@@ -109,16 +107,6 @@ func TestSubscriptionMetricsFanoutAndDroppedCounters(t *testing.T) {
 		},
 	})
 	observer.requireFanoutReason(t, "buffer_full")
-	observer.requireDroppedReason(t, "buffer_full")
-}
-
-func TestSubscriptionMetricsDroppedSignalFullUsesBufferFullReason(t *testing.T) {
-	observer := &subscriptionMetricObserver{}
-	mgr := NewManager(testSchema(), testSchema(), WithObserver(observer))
-	for i := 0; i < cap(mgr.dropped); i++ {
-		mgr.dropped <- cid(byte(i + 1))
-	}
-	mgr.signalDropped(cid(1))
 	observer.requireDroppedReason(t, "buffer_full")
 }
 

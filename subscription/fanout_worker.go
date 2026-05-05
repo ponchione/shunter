@@ -30,42 +30,20 @@ type FanOutWorker struct {
 	mu             sync.RWMutex
 	confirmedReads map[types.ConnectionID]bool
 	fastReads      map[types.ConnectionID]bool
-	dropped        chan<- types.ConnectionID
-	recordDropped  func()
 	dropClient     func(types.ConnectionID)
 	observer       Observer
 }
 
 // NewFanOutWorker creates a worker that reads from inbox and delivers
-// via sender. Dropped client IDs are signaled on dropped (shared with
-// the Manager's dropped channel so the executor drains one channel).
-func NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID) *FanOutWorker {
-	return NewFanOutWorkerWithDropRecorder(inbox, sender, dropped, nil)
-}
-
-// NewFanOutWorkerWithDropRecorder creates a worker and records successfully
-// signaled dropped clients for health snapshots.
-func NewFanOutWorkerWithDropRecorder(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID, recordDropped func()) *FanOutWorker {
-	return NewFanOutWorkerWithObserver(inbox, sender, dropped, recordDropped, nil)
+// via sender. Buffer-full clients are reported through dropClient so the
+// executor can clean them up after the commit.
+func NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropClient func(types.ConnectionID)) *FanOutWorker {
+	return NewFanOutWorkerWithObserver(inbox, sender, dropClient, nil)
 }
 
 // NewFanOutWorkerWithObserver creates a worker with runtime-scoped
 // observations for fan-out failures and client drops.
-func NewFanOutWorkerWithObserver(inbox <-chan FanOutMessage, sender FanOutSender, dropped chan<- types.ConnectionID, recordDropped func(), observer Observer) *FanOutWorker {
-	return &FanOutWorker{
-		inbox:          inbox,
-		sender:         sender,
-		confirmedReads: make(map[types.ConnectionID]bool),
-		fastReads:      make(map[types.ConnectionID]bool),
-		dropped:        dropped,
-		recordDropped:  recordDropped,
-		observer:       observer,
-	}
-}
-
-// NewFanOutWorkerWithDropHandler creates a worker that reports dropped clients
-// through a lossless manager-owned handler instead of a bounded channel.
-func NewFanOutWorkerWithDropHandler(inbox <-chan FanOutMessage, sender FanOutSender, dropClient func(types.ConnectionID), observer Observer) *FanOutWorker {
+func NewFanOutWorkerWithObserver(inbox <-chan FanOutMessage, sender FanOutSender, dropClient func(types.ConnectionID), observer Observer) *FanOutWorker {
 	return &FanOutWorker{
 		inbox:          inbox,
 		sender:         sender,
@@ -265,14 +243,6 @@ func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
 	w.mu.Unlock()
 	if w.dropClient != nil {
 		w.dropClient(connID)
-		return
-	}
-	select {
-	case w.dropped <- connID:
-		if w.recordDropped != nil {
-			w.recordDropped()
-		}
-	default:
 	}
 }
 

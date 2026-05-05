@@ -87,8 +87,8 @@ type fakeSubs struct {
 	block    chan struct{}
 	onEval   func(view store.CommittedReadView)
 	mu       sync.Mutex
-	dropped  chan types.ConnectionID // DroppedClients() source; nil when unset
-	disconns []types.ConnectionID    // DisconnectClient invocations, in order
+	dropped  []types.ConnectionID
+	disconns []types.ConnectionID // DisconnectClient invocations, in order
 	discErr  func(types.ConnectionID) error
 	panicOn  bool
 }
@@ -120,7 +120,11 @@ func (f *fakeSubs) EvalAndBroadcast(txID types.TxID, cs *store.Changeset, view s
 	f.rec.add("eval-end")
 }
 
-func (f *fakeSubs) DroppedClients() <-chan types.ConnectionID { return f.dropped }
+func (f *fakeSubs) DrainDroppedClients() []types.ConnectionID {
+	out := append([]types.ConnectionID(nil), f.dropped...)
+	f.dropped = nil
+	return out
+}
 
 func (f *fakeSubs) DisconnectClient(connID types.ConnectionID) error {
 	f.mu.Lock()
@@ -131,17 +135,6 @@ func (f *fakeSubs) DisconnectClient(connID types.ConnectionID) error {
 		return f.discErr(connID)
 	}
 	return nil
-}
-
-type fakeDrainingSubs struct {
-	*fakeSubs
-	pending []types.ConnectionID
-}
-
-func (f *fakeDrainingSubs) DrainDroppedClients() []types.ConnectionID {
-	out := append([]types.ConnectionID(nil), f.pending...)
-	f.pending = nil
-	return out
 }
 
 // trackedView wraps a CommittedReadView so tests can assert when Close ran.
@@ -445,11 +438,7 @@ func TestPostCommitSkippedOnReducerUserError(t *testing.T) {
 // multiple drops drained in one pass.
 func TestPostCommitDrainsDroppedClients(t *testing.T) {
 	h := newPipelineHarness(t)
-	// Buffered so we can pre-load drops before the commit.
-	h.subs.dropped = make(chan types.ConnectionID, 4)
-	h.subs.dropped <- types.ConnectionID{1}
-	h.subs.dropped <- types.ConnectionID{2}
-	h.subs.dropped <- types.ConnectionID{3}
+	h.subs.dropped = []types.ConnectionID{{1}, {2}, {3}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -504,42 +493,9 @@ func TestPostCommitDrainsDroppedClients(t *testing.T) {
 	}
 }
 
-func TestPostCommitDrainsDroppedClientsFromManagerDrainer(t *testing.T) {
-	h := newPipelineHarness(t)
-	drainingSubs := &fakeDrainingSubs{
-		fakeSubs: h.subs,
-		pending:  []types.ConnectionID{{1}, {2}, {3}},
-	}
-	h.exec.subs = drainingSubs
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.exec.Run(ctx)
-
-	resp := submit(t, h.exec, "InsertPlayer")
-	if resp.Status != StatusCommitted {
-		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
-	}
-	_ = submit(t, h.exec, "InsertPlayer")
-
-	h.subs.mu.Lock()
-	got := append([]types.ConnectionID(nil), h.subs.disconns...)
-	h.subs.mu.Unlock()
-	want := []types.ConnectionID{{1}, {2}, {3}}
-	if len(got) != len(want) {
-		t.Fatalf("disconns=%v want=%v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("disconns[%d]=%v want=%v", i, got[i], want[i])
-		}
-	}
-}
-
-// Story 5.2 AC: empty channel → drain is a no-op, does not block.
+// Story 5.2 AC: empty drain is a no-op, does not block.
 func TestPostCommitDrainNoopWhenEmpty(t *testing.T) {
 	h := newPipelineHarness(t)
-	h.subs.dropped = make(chan types.ConnectionID, 1) // empty
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go h.exec.Run(ctx)
@@ -552,48 +508,7 @@ func TestPostCommitDrainNoopWhenEmpty(t *testing.T) {
 	n := len(h.subs.disconns)
 	h.subs.mu.Unlock()
 	if n != 0 {
-		t.Fatalf("disconns=%d, want 0 with empty channel", n)
-	}
-}
-
-// Story 5.2 AC: noopSubs (nil DroppedClients channel) must not block the drain.
-func TestPostCommitDrainSurvivesNilChannel(t *testing.T) {
-	h := newPipelineHarness(t)
-	h.subs.dropped = nil
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.exec.Run(ctx)
-
-	resp := submit(t, h.exec, "InsertPlayer")
-	if resp.Status != StatusCommitted {
-		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
-	}
-}
-
-func TestPostCommitDrainSurvivesClosedChannel(t *testing.T) {
-	h := newPipelineHarness(t)
-	h.subs.dropped = make(chan types.ConnectionID)
-	close(h.subs.dropped)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.exec.Run(ctx)
-
-	resp := submit(t, h.exec, "InsertPlayer")
-	if resp.Status != StatusCommitted {
-		t.Fatalf("status = %d err=%v", resp.Status, resp.Error)
-	}
-	// A second command is the serial barrier proving the closed dropped-client
-	// channel did not trap the executor in the post-commit drain loop.
-	resp = submit(t, h.exec, "InsertPlayer")
-	if resp.Status != StatusCommitted {
-		t.Fatalf("barrier status = %d err=%v", resp.Status, resp.Error)
-	}
-
-	h.subs.mu.Lock()
-	got := append([]types.ConnectionID(nil), h.subs.disconns...)
-	h.subs.mu.Unlock()
-	if len(got) != 0 {
-		t.Fatalf("disconnects = %v, want none for closed dropped-client channel", got)
+		t.Fatalf("disconns=%d, want 0 with empty drain", n)
 	}
 }
 
@@ -601,10 +516,7 @@ func TestPostCommitDrainSurvivesClosedChannel(t *testing.T) {
 // drains. All three disconnects must be attempted even if the first errors.
 func TestPostCommitDrainContinuesAfterDisconnectError(t *testing.T) {
 	h := newPipelineHarness(t)
-	h.subs.dropped = make(chan types.ConnectionID, 3)
-	h.subs.dropped <- types.ConnectionID{1}
-	h.subs.dropped <- types.ConnectionID{2}
-	h.subs.dropped <- types.ConnectionID{3}
+	h.subs.dropped = []types.ConnectionID{{1}, {2}, {3}}
 	h.subs.discErr = func(c types.ConnectionID) error {
 		if c == (types.ConnectionID{1}) {
 			return errTestDisconnect

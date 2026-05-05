@@ -320,13 +320,9 @@ func TestEvalErrorQueuesSubscriptionErrorAndDropsConnection(t *testing.T) {
 	if errMsg.TotalHostExecutionDurationMicros == 0 {
 		t.Fatal("TotalHostExecutionDurationMicros = 0, want non-zero (eval-path receipt seam)")
 	}
-	select {
-	case dropped := <-mgr.DroppedClients():
-		if dropped != c {
-			t.Fatalf("dropped connection = %v, want %v", dropped, c)
-		}
-	default:
-		t.Fatal("expected dropped connection signal for eval failure")
+	dropped := mgr.DrainDroppedClients()
+	if len(dropped) != 1 || dropped[0] != c {
+		t.Fatalf("dropped connections = %v, want [%v]", dropped, c)
 	}
 	if len(observer.evalErrors) != 1 {
 		t.Fatalf("eval errors = %+v, want one", observer.evalErrors)
@@ -1269,13 +1265,9 @@ func TestEvalErrorDropSignalsConnectionUntilDisconnectRuns(t *testing.T) {
 	if _, still := mgr.querySets[c][qid]; !still {
 		t.Fatalf("querySets[%v][%d] should remain until DisconnectClient runs", c, qid)
 	}
-	select {
-	case dropped := <-mgr.DroppedClients():
-		if dropped != c {
-			t.Fatalf("dropped connection = %v, want %v", dropped, c)
-		}
-	default:
-		t.Fatal("expected dropped connection signal")
+	dropped := mgr.DrainDroppedClients()
+	if len(dropped) != 1 || dropped[0] != c {
+		t.Fatalf("dropped connections = %v, want [%v]", dropped, c)
 	}
 	mgr.schema = s
 	if err := mgr.DisconnectClient(c); err != nil {

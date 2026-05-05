@@ -46,7 +46,7 @@ func (f *registerDispatchSubs) DisconnectClient(connID types.ConnectionID) error
 }
 func (f *registerDispatchSubs) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
-func (f *registerDispatchSubs) DroppedClients() <-chan types.ConnectionID { return nil }
+func (f *registerDispatchSubs) DrainDroppedClients() []types.ConnectionID { return nil }
 
 type trackingSnapshot struct {
 	store.CommittedReadView

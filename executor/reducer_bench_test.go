@@ -36,7 +36,7 @@ func (benchmarkSubscriptions) UnregisterSet(types.ConnectionID, uint32, store.Co
 func (benchmarkSubscriptions) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
 }
 
-func (benchmarkSubscriptions) DroppedClients() <-chan types.ConnectionID { return nil }
+func (benchmarkSubscriptions) DrainDroppedClients() []types.ConnectionID { return nil }
 
 func (benchmarkSubscriptions) DisconnectClient(types.ConnectionID) error { return nil }
 

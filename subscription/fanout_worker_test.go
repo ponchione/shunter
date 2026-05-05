@@ -123,11 +123,20 @@ func committedOutcome(requestID uint32) *CallerOutcome {
 	return &CallerOutcome{Kind: CallerOutcomeCommitted, RequestID: requestID}
 }
 
+func droppedClientHandler(dropped chan<- types.ConnectionID) func(types.ConnectionID) {
+	if dropped == nil {
+		return nil
+	}
+	return func(connID types.ConnectionID) {
+		dropped <- connID
+	}
+}
+
 func TestFanOutWorker_NonCallerDelivery(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -159,7 +168,7 @@ func TestFanOutWorker_ContextCancel(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -180,7 +189,7 @@ func TestFanOutWorker_ContextCancelWhileWaitingOnTxDurable(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 	conn1 := cid(1)
 	w.SetConfirmedReads(conn1, true)
 
@@ -219,7 +228,7 @@ func TestFanOutWorker_ClosedTxDurableSkipsBlockedMessageAndContinues(t *testing.
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 2)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 	conn1 := cid(1)
 	w.SetConfirmedReads(conn1, true)
 
@@ -257,7 +266,7 @@ func TestFanOutWorker_ClosedInbox(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	done := make(chan struct{})
 	go func() {
@@ -280,7 +289,7 @@ func TestFanOutWorker_CallerDiversion(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -336,7 +345,7 @@ func TestFanOutWorker_CallerDiversion_FailedStatus(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -381,7 +390,7 @@ func TestFanOutWorker_CallerAlwaysReceivesHeavy_EmptyFanout(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -423,7 +432,7 @@ func TestFanOutWorker_NoSuccessNotify_SuppressesCallerHeavy_OnCommitted(t *testi
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -467,7 +476,7 @@ func TestFanOutWorker_NoSuccessNotify_EmptyFanout_NoDelivery(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -509,7 +518,7 @@ func TestFanOutWorker_NoSuccessNotify_DoesNotSuppressOnFailed(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -545,7 +554,7 @@ func TestFanOutWorker_BufferFull_DropsClient(t *testing.T) {
 	mock := &mockFanOutSender{sendErr: ErrSendBufferFull}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -573,7 +582,7 @@ func TestFanOutWorker_BufferFullClearsFastReadState(t *testing.T) {
 	conn1 := cid(1)
 	mock := &mockFanOutSender{sendErr: ErrSendBufferFull}
 	dropped := make(chan types.ConnectionID, 1)
-	w := NewFanOutWorker(nil, mock, dropped)
+	w := NewFanOutWorker(nil, mock, droppedClientHandler(dropped))
 	w.SetConfirmedReads(conn1, false)
 	if w.requiresConfirmedRead(conn1) {
 		t.Fatal("test setup failed: expected fast-read policy before drop")
@@ -601,7 +610,7 @@ func TestFanOutWorker_ConnGone_Silent(t *testing.T) {
 	mock := &mockFanOutSender{sendErr: ErrSendConnGone}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -633,7 +642,7 @@ func TestFanOutWorker_MultipleSlowClients(t *testing.T) {
 	sender := &selectiveFailSender{fail: failConn}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, sender, dropped)
+	w := NewFanOutWorker(inbox, sender, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -724,7 +733,7 @@ func TestFanOutWorker_PublicProtocolDefault_WaitsForDurability(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -757,7 +766,7 @@ func TestFanOutWorker_ConfirmedRead_Waits(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 	conn1 := cid(1)
 	w.SetConfirmedReads(conn1, true)
 
@@ -792,7 +801,7 @@ func TestFanOutWorker_SubscriptionError_PublicProtocolDefault_WaitsForDurability
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -829,7 +838,7 @@ func TestFanOutWorker_ConfirmedReadCallerOnly_Waits(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 	caller := cid(1)
 	w.SetConfirmedReads(caller, true)
 
@@ -864,7 +873,7 @@ func TestFanOutWorker_FastRecipientDoesNotWaitForConfirmedCaller(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 	caller := cid(1)
 	fast := cid(2)
 	w.SetConfirmedReads(caller, true)
@@ -906,7 +915,7 @@ func TestFanOutWorker_FastCallerOnly_DoesNotWaitForTxDurable(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 	caller := cid(1)
 	w.SetConfirmedReads(caller, false)
 
@@ -939,7 +948,7 @@ func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 	conn1 := cid(1)
 	w.SetConfirmedReads(conn1, true)
 
@@ -992,7 +1001,7 @@ func TestFanOutWorker_RemoveClient(t *testing.T) {
 
 func TestFanOutWorker_DeliverDoesNotMutateFanout(t *testing.T) {
 	mock := &mockFanOutSender{}
-	w := NewFanOutWorker(nil, mock, make(chan types.ConnectionID, 1))
+	w := NewFanOutWorker(nil, mock, nil)
 	caller, other := cid(1), cid(2)
 	fanout := CommitFanout{
 		caller: {{SubscriptionID: 1, TableName: "t1"}},
@@ -1009,33 +1018,11 @@ func TestFanOutWorker_DeliverDoesNotMutateFanout(t *testing.T) {
 	}
 }
 
-func TestFanOutWorker_DroppedChannelFullDoesNotBlock(t *testing.T) {
-	mock := &mockFanOutSender{sendErr: ErrSendBufferFull}
-	dropped := make(chan types.ConnectionID, 1)
-	dropped <- cid(9)
-	w := NewFanOutWorker(nil, mock, dropped)
-	done := make(chan struct{})
-	go func() {
-		w.deliver(context.Background(), FanOutMessage{
-			TxID: 1,
-			Fanout: CommitFanout{
-				cid(1): {{SubscriptionID: 1, TableName: "t1"}},
-			},
-		})
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("deliver blocked on full dropped channel")
-	}
-}
-
 func TestFanOutWorker_DropHandlerReceivesEveryDroppedClient(t *testing.T) {
 	var got []types.ConnectionID
-	w := NewFanOutWorkerWithDropHandler(nil, &mockFanOutSender{}, func(connID types.ConnectionID) {
+	w := NewFanOutWorker(nil, &mockFanOutSender{}, func(connID types.ConnectionID) {
 		got = append(got, connID)
-	}, nil)
+	})
 
 	for i := 0; i < 80; i++ {
 		w.markDropped(cid(byte(i + 1)))
@@ -1054,7 +1041,7 @@ func TestFanOutWorker_DropHandlerReceivesEveryDroppedClient(t *testing.T) {
 
 func TestFanOutWorker_ConfirmedReadPolicyConcurrentToggle(t *testing.T) {
 	mock := &mockFanOutSender{}
-	w := NewFanOutWorker(nil, mock, make(chan types.ConnectionID, 16))
+	w := NewFanOutWorker(nil, mock, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ready := make(chan types.TxID, 1)
@@ -1081,7 +1068,7 @@ func TestFanOutWorker_ConcurrentPolicyChurnShortSoak(t *testing.T) {
 		iterations = 64
 	)
 	mock := &mockFanOutSender{}
-	w := NewFanOutWorker(nil, mock, make(chan types.ConnectionID, 16))
+	w := NewFanOutWorker(nil, mock, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -1137,7 +1124,7 @@ func TestFanOutWorker_SubscriptionErrorDelivery(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1203,7 +1190,7 @@ func TestFanOutWorker_ErrorsDeliveredBeforeUpdates(t *testing.T) {
 	}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, sender, dropped)
+	w := NewFanOutWorker(inbox, sender, droppedClientHandler(dropped))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1280,7 +1267,7 @@ func TestFanOutWorker_FullFlow(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s, WithFanOutInbox(fanoutCh))
 
-	worker := NewFanOutWorker(fanoutCh, mock, mgr.DroppedChanSend())
+	worker := NewFanOutWorker(fanoutCh, mock, mgr.SignalDroppedClient)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go worker.Run(ctx)

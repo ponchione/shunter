@@ -14,7 +14,7 @@ func TestCanonicalReducerDeliveryFlow(t *testing.T) {
 	mock := &mockFanOutSender{}
 	inbox := make(chan FanOutMessage, 1)
 	dropped := make(chan types.ConnectionID, 64)
-	w := NewFanOutWorker(inbox, mock, dropped)
+	w := NewFanOutWorker(inbox, mock, droppedClientHandler(dropped))
 
 	caller, other := cid(1), cid(2)
 	w.SetConfirmedReads(caller, true)

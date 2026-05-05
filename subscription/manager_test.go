@@ -1443,28 +1443,11 @@ func TestDisconnectUnknownIsNoop(t *testing.T) {
 	}
 }
 
-func TestDroppedClientsChannel(t *testing.T) {
-	s := testSchema()
-	mgr := NewManager(s, s)
-	if mgr.DroppedClients() == nil {
-		t.Fatal("DroppedClients should not be nil")
-	}
-	mgr.signalDropped(types.ConnectionID{7})
-	select {
-	case got := <-mgr.DroppedClients():
-		if got != (types.ConnectionID{7}) {
-			t.Fatalf("got %v, want {7}", got)
-		}
-	default:
-		t.Fatal("expected dropped signal")
-	}
-}
-
-func TestDrainDroppedClientsRetainsOverflowAndCoalesces(t *testing.T) {
+func TestDrainDroppedClientsRetainsAndCoalesces(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
 	want := make(map[types.ConnectionID]struct{})
-	for i := 0; i < cap(mgr.dropped)+16; i++ {
+	for i := 0; i < 80; i++ {
 		id := types.ConnectionID{byte(i + 1)}
 		mgr.signalDropped(id)
 		want[id] = struct{}{}
