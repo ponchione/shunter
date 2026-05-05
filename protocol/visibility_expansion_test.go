@@ -135,6 +135,73 @@ func TestVisibilityExpansionRawOneOffMultiOrderByOffsetLimitAppliesAfterVisibili
 	})
 }
 
+func TestVisibilityExpansionRawOneOffCrossJoinProjectRightLimitKeepsProjectedOrder(t *testing.T) {
+	sl := &mockSchemaLookup{
+		tables: map[string]struct {
+			id     schema.TableID
+			schema *schema.TableSchema
+		}{
+			"Orders": {
+				id: 1,
+				schema: &schema.TableSchema{
+					ID:         1,
+					Name:       "Orders",
+					ReadPolicy: schema.ReadPolicy{Access: schema.TableAccessPublic},
+					Columns: []schema.ColumnSchema{
+						{Index: 0, Name: "id", Type: schema.KindUint32},
+					},
+				},
+			},
+			"Inventory": {
+				id: 2,
+				schema: &schema.TableSchema{
+					ID:         2,
+					Name:       "Inventory",
+					ReadPolicy: schema.ReadPolicy{Access: schema.TableAccessPublic},
+					Columns: []schema.ColumnSchema{
+						{Index: 0, Name: "id", Type: schema.KindUint32},
+					},
+				},
+			},
+		},
+	}
+	compiled, err := CompileSQLQueryStringWithVisibility(
+		"SELECT product.* FROM Orders o JOIN Inventory product LIMIT 3",
+		sl,
+		nil,
+		SQLQueryValidationOptions{AllowLimit: true, AllowProjection: true, AllowOrderBy: true, AllowOffset: true},
+		[]VisibilityFilter{{
+			SQL:           "SELECT * FROM Inventory WHERE id >= 10",
+			ReturnTableID: 2,
+		}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("CompileSQLQueryStringWithVisibility: %v", err)
+	}
+	result, err := ExecuteCompiledSQLQuery(context.Background(), compiled, &mockStateAccess{snap: &mockSnapshot{
+		rows: map[schema.TableID][]types.ProductValue{
+			1: {
+				{types.NewUint32(1)},
+				{types.NewUint32(2)},
+				{types.NewUint32(3)},
+			},
+			2: {
+				{types.NewUint32(10)},
+				{types.NewUint32(11)},
+			},
+		},
+	}}, sl)
+	if err != nil {
+		t.Fatalf("ExecuteCompiledSQLQuery: %v", err)
+	}
+	assertProductRowsEqual(t, result.Rows, []types.ProductValue{
+		{types.NewUint32(10)},
+		{types.NewUint32(10)},
+		{types.NewUint32(10)},
+	})
+}
+
 func TestVisibilityExpansionRawSubscriptionInitialAndDeltasAreCallerVisible(t *testing.T) {
 	alice := visibilityIdentity(0x0c)
 	bob := visibilityIdentity(0x0d)

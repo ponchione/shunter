@@ -1132,7 +1132,7 @@ func evaluateOneOffCrossJoin(ctx context.Context, view store.CommittedReadView, 
 	}
 	if cross.Filter != nil {
 		var rows []types.ProductValue
-		err := visitOneOffCrossJoinPairs(ctx, view, cross, false, func(leftRow, rightRow types.ProductValue) bool {
+		err := visitOneOffCrossJoinPairs(ctx, view, cross, true, func(leftRow, rightRow types.ProductValue) bool {
 			if cross.ProjectRight {
 				rows = append(rows, rightRow)
 			} else {
