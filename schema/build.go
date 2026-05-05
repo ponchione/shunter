@@ -66,6 +66,8 @@ func (b *Builder) buildEngine(opts EngineOptions) (*Engine, error) {
 
 		// Build columns.
 		ts.Columns = make([]ColumnSchema, len(td.Columns))
+		columnIndexByName := make(map[string]int, len(td.Columns))
+		pkColIdx := -1
 		for j, cd := range td.Columns {
 			ts.Columns[j] = ColumnSchema{
 				Index:         j,
@@ -74,17 +76,14 @@ func (b *Builder) buildEngine(opts EngineOptions) (*Engine, error) {
 				Nullable:      cd.Nullable,
 				AutoIncrement: cd.AutoIncrement,
 			}
+			columnIndexByName[cd.Name] = j
+			if cd.PrimaryKey && pkColIdx == -1 {
+				pkColIdx = j
+			}
 		}
 
 		// Synthesize primary index + assign IndexIDs.
 		var idxID IndexID
-		var pkColIdx int = -1
-		for j, cd := range td.Columns {
-			if cd.PrimaryKey {
-				pkColIdx = j
-				break
-			}
-		}
 		if pkColIdx >= 0 {
 			ts.Indexes = append(ts.Indexes, IndexSchema{
 				ID:      idxID,
@@ -100,12 +99,7 @@ func (b *Builder) buildEngine(opts EngineOptions) (*Engine, error) {
 		for _, id := range td.Indexes {
 			cols := make([]int, len(id.Columns))
 			for k, cn := range id.Columns {
-				for j, cd := range td.Columns {
-					if cd.Name == cn {
-						cols[k] = j
-						break
-					}
-				}
+				cols[k] = columnIndexByName[cn]
 			}
 			ts.Indexes = append(ts.Indexes, IndexSchema{
 				ID:      idxID,
