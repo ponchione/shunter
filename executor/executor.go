@@ -281,7 +281,7 @@ func (e *Executor) rejectCommand(cmd ExecutorCommand, err error) {
 			c.Reply(subscription.SubscriptionSetUnregisterResult{}, err)
 		}
 	case DisconnectClientSubscriptionsCmd:
-		sendErrorResponse(c.ResponseCh, err)
+		sendResponse(c.ResponseCh, err)
 	case OnConnectCmd:
 		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, err)
 	case OnDisconnectCmd:
@@ -422,34 +422,26 @@ func (e *Executor) finishSubmit() {
 func validateResponseChannels(cmd ExecutorCommand) error {
 	switch c := cmd.(type) {
 	case CallReducerCmd:
-		if isUnbufferedReducerResponseChannel(c.ResponseCh) || isUnbufferedProtocolReducerResponseChannel(c.ProtocolResponseCh) {
+		if isUnbufferedChannel(c.ResponseCh) || isUnbufferedChannel(c.ProtocolResponseCh) {
 			return ErrExecutorUnbufferedResponseChannel
 		}
 	case DisconnectClientSubscriptionsCmd:
-		if isUnbufferedErrorChannel(c.ResponseCh) {
+		if isUnbufferedChannel(c.ResponseCh) {
 			return ErrExecutorUnbufferedResponseChannel
 		}
 	case OnConnectCmd:
-		if isUnbufferedReducerResponseChannel(c.ResponseCh) {
+		if isUnbufferedChannel(c.ResponseCh) {
 			return ErrExecutorUnbufferedResponseChannel
 		}
 	case OnDisconnectCmd:
-		if isUnbufferedReducerResponseChannel(c.ResponseCh) {
+		if isUnbufferedChannel(c.ResponseCh) {
 			return ErrExecutorUnbufferedResponseChannel
 		}
 	}
 	return nil
 }
 
-func isUnbufferedReducerResponseChannel(ch chan<- ReducerResponse) bool {
-	return ch != nil && cap(ch) == 0
-}
-
-func isUnbufferedProtocolReducerResponseChannel(ch chan<- ProtocolCallReducerResponse) bool {
-	return ch != nil && cap(ch) == 0
-}
-
-func isUnbufferedErrorChannel(ch chan<- error) bool {
+func isUnbufferedChannel[T any](ch chan<- T) bool {
 	return ch != nil && cap(ch) == 0
 }
 
@@ -504,7 +496,7 @@ func (e *Executor) handleDispatchPanic(cmd ExecutorCommand, r any) string {
 		}
 		e.traceSubscriptionUnregister("internal_error", err)
 	case DisconnectClientSubscriptionsCmd:
-		sendErrorResponse(c.ResponseCh, err)
+		sendResponse(c.ResponseCh, err)
 	case OnConnectCmd:
 		respondLifecycle(c.ResponseCh, StatusFailedInternal, 0, err)
 	case OnDisconnectCmd:
@@ -627,7 +619,7 @@ func (e *Executor) handleUnregisterSubscriptionSet(cmd UnregisterSubscriptionSet
 
 func (e *Executor) handleDisconnectClientSubscriptions(cmd DisconnectClientSubscriptionsCmd) string {
 	err := e.subs.DisconnectClient(cmd.ConnID)
-	sendErrorResponse(cmd.ResponseCh, err)
+	sendResponse(cmd.ResponseCh, err)
 	if err != nil {
 		return "internal_error"
 	}
@@ -767,33 +759,17 @@ func (d *reducerDBAdapter) Underlying() any {
 	return d.tx
 }
 
-func sendReducerResponse(ch chan<- ReducerResponse, resp ReducerResponse) bool {
+func sendResponse[T any](ch chan<- T, resp T) bool {
 	if ch == nil {
 		return true
 	}
 	ch <- resp
-	return true
-}
-
-func sendProtocolCallReducerResponse(ch chan<- ProtocolCallReducerResponse, resp ProtocolCallReducerResponse) bool {
-	if ch == nil {
-		return true
-	}
-	ch <- resp
-	return true
-}
-
-func sendErrorResponse(ch chan<- error, err error) bool {
-	if ch == nil {
-		return true
-	}
-	ch <- err
 	return true
 }
 
 func sendCallReducerResponse(cmd CallReducerCmd, resp ReducerResponse, committed *CommittedCallerPayload) bool {
-	responded := sendReducerResponse(cmd.ResponseCh, resp)
-	protocolResponded := sendProtocolCallReducerResponse(cmd.ProtocolResponseCh, ProtocolCallReducerResponse{
+	responded := sendResponse(cmd.ResponseCh, resp)
+	protocolResponded := sendResponse(cmd.ProtocolResponseCh, ProtocolCallReducerResponse{
 		Reducer:   resp,
 		Committed: committed,
 	})

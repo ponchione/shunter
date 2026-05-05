@@ -652,18 +652,18 @@ func TestSubmitWithContextRejectModeCanceledContextDoesNotEnqueue(t *testing.T) 
 	}
 }
 
-func TestSendReducerResponse_UnbufferedChannelBlocksUntilReceiverReady(t *testing.T) {
+func TestSendResponse_ReducerChannelBlocksUntilReceiverReady(t *testing.T) {
 	ch := make(chan ReducerResponse)
 	done := make(chan struct{})
 
 	go func() {
-		sendReducerResponse(ch, ReducerResponse{Status: StatusCommitted})
+		sendResponse(ch, ReducerResponse{Status: StatusCommitted})
 		close(done)
 	}()
 
 	select {
 	case <-done:
-		t.Fatal("sendReducerResponse returned before a receiver was ready")
+		t.Fatal("sendResponse returned before a receiver was ready")
 	case <-time.After(25 * time.Millisecond):
 	}
 
@@ -679,22 +679,22 @@ func TestSendReducerResponse_UnbufferedChannelBlocksUntilReceiverReady(t *testin
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("sendReducerResponse did not finish after receiver consumed response")
+		t.Fatal("sendResponse did not finish after receiver consumed response")
 	}
 }
 
-func TestSendProtocolCallReducerResponse_UnbufferedChannelBlocksUntilReceiverReady(t *testing.T) {
+func TestSendResponse_ProtocolReducerChannelBlocksUntilReceiverReady(t *testing.T) {
 	ch := make(chan ProtocolCallReducerResponse)
 	done := make(chan struct{})
 
 	go func() {
-		sendProtocolCallReducerResponse(ch, ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}})
+		sendResponse(ch, ProtocolCallReducerResponse{Reducer: ReducerResponse{Status: StatusCommitted}})
 		close(done)
 	}()
 
 	select {
 	case <-done:
-		t.Fatal("sendProtocolCallReducerResponse returned before a receiver was ready")
+		t.Fatal("sendResponse returned before a receiver was ready")
 	case <-time.After(25 * time.Millisecond):
 	}
 
@@ -710,7 +710,7 @@ func TestSendProtocolCallReducerResponse_UnbufferedChannelBlocksUntilReceiverRea
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("sendProtocolCallReducerResponse did not finish after receiver consumed response")
+		t.Fatal("sendResponse did not finish after receiver consumed response")
 	}
 }
 
