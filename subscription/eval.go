@@ -107,7 +107,7 @@ func (m *Manager) sendFanOut(msg FanOutMessage) {
 // evaluate is the inner orchestration: build DeltaView, collect candidates,
 // evaluate each candidate, and assemble the per-connection fanout.
 func (m *Manager) evaluate(txID types.TxID, changeset *store.Changeset, view store.CommittedReadView) (CommitFanout, map[types.ConnectionID][]SubscriptionError) {
-	activeCols := m.collectActiveColumns()
+	activeCols := m.collectDeltaIndexColumns()
 	dv := NewDeltaView(view, changeset, activeCols)
 	defer dv.Release()
 	candidateScratch := acquireCandidateScratch()
@@ -201,11 +201,13 @@ func (m *Manager) handleEvalError(txID types.TxID, qs *queryState, err error, ou
 	}
 }
 
-// collectActiveColumns gathers every (table, column) referenced by an active
-// predicate. Used to decide which delta indexes NewDeltaView should build.
-func (m *Manager) collectActiveColumns() map[TableID][]ColID {
-	out := make(map[TableID][]ColID, len(m.activeColumns))
-	for table, cols := range m.activeColumns {
+// collectDeltaIndexColumns gathers the active (table, column) pairs required
+// by join delta evaluation. Single-table predicate filters are evaluated by
+// scanning the transaction's inserted/deleted rows directly, so indexing those
+// columns would add per-commit work without a reader.
+func (m *Manager) collectDeltaIndexColumns() map[TableID][]ColID {
+	out := make(map[TableID][]ColID, len(m.deltaIndexColumns))
+	for table, cols := range m.deltaIndexColumns {
 		if len(cols) == 0 {
 			continue
 		}
@@ -218,47 +220,41 @@ func (m *Manager) collectActiveColumns() map[TableID][]ColID {
 	return out
 }
 
-func (m *Manager) addActiveColumns(pred Predicate) {
-	m.mutateActiveColumns(pred, 1)
+func (m *Manager) addDeltaIndexColumns(pred Predicate) {
+	m.mutateDeltaIndexColumns(pred, 1)
 }
 
-func (m *Manager) removeActiveColumns(pred Predicate) {
-	m.mutateActiveColumns(pred, -1)
+func (m *Manager) removeDeltaIndexColumns(pred Predicate) {
+	m.mutateDeltaIndexColumns(pred, -1)
 }
 
-func (m *Manager) mutateActiveColumns(pred Predicate, delta int) {
-	if m.activeColumns == nil {
-		m.activeColumns = make(map[TableID]map[ColID]int)
+func (m *Manager) mutateDeltaIndexColumns(pred Predicate, delta int) {
+	if m.deltaIndexColumns == nil {
+		m.deltaIndexColumns = make(map[TableID]map[ColID]int)
 	}
-	walkPredicateColumns(pred, func(t TableID, c ColID) {
-		cols, ok := m.activeColumns[t]
+	walkDeltaIndexColumns(pred, func(t TableID, c ColID) {
+		cols, ok := m.deltaIndexColumns[t]
 		if !ok {
 			if delta <= 0 {
 				return
 			}
 			cols = make(map[ColID]int)
-			m.activeColumns[t] = cols
+			m.deltaIndexColumns[t] = cols
 		}
 		cols[c] += delta
 		if cols[c] <= 0 {
 			delete(cols, c)
 		}
 		if len(cols) == 0 {
-			delete(m.activeColumns, t)
+			delete(m.deltaIndexColumns, t)
 		}
 	})
 }
 
-func walkPredicateColumns(pred Predicate, visit func(TableID, ColID)) {
+func walkDeltaIndexColumns(pred Predicate, visit func(TableID, ColID)) {
 	var walk func(p Predicate)
 	walk = func(p Predicate) {
 		switch x := p.(type) {
-		case ColEq:
-			visit(x.Table, x.Column)
-		case ColNe:
-			visit(x.Table, x.Column)
-		case ColRange:
-			visit(x.Table, x.Column)
 		case And:
 			if x.Left != nil {
 				walk(x.Left)

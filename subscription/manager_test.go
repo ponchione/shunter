@@ -1284,11 +1284,34 @@ func TestUnregisterNotLast(t *testing.T) {
 	}
 }
 
-func TestActiveColumnsCacheTracksQueryLifetime(t *testing.T) {
+func TestDeltaIndexColumnsIgnoreSingleTableFilters(t *testing.T) {
 	s := testSchema()
 	mgr := NewManager(s, s)
 	connID := types.ConnectionID{1}
 	pred := ColEq{Table: 1, Column: 0, Value: types.NewUint64(42)}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: connID, QueryID: 10, Predicates: []Predicate{pred},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if active := mgr.collectDeltaIndexColumns(); len(active) != 0 {
+		t.Fatalf("delta index columns for single-table predicate = %v, want empty", active)
+	}
+}
+
+func TestDeltaIndexColumnsCacheTracksJoinLifetime(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64, 1: types.KindString}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	mgr := NewManager(s, s)
+	connID := types.ConnectionID{1}
+	pred := Join{
+		Left:     1,
+		Right:    2,
+		LeftCol:  0,
+		RightCol: 0,
+		Filter:   ColEq{Table: 1, Column: 1, Value: types.NewString("active")},
+	}
 	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
 		ConnID: connID, QueryID: 10, Predicates: []Predicate{pred},
 	}, nil); err != nil {
@@ -1299,22 +1322,28 @@ func TestActiveColumnsCacheTracksQueryLifetime(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	active := mgr.collectActiveColumns()
+	active := mgr.collectDeltaIndexColumns()
 	if got := active[1]; len(got) != 1 || got[0] != 0 {
-		t.Fatalf("active columns after register = %v, want table 1 col 0", active)
+		t.Fatalf("delta index columns after register = %v, want table 1 col 0", active)
+	}
+	if got := active[2]; len(got) != 1 || got[0] != 0 {
+		t.Fatalf("delta index columns after register = %v, want table 2 col 0", active)
 	}
 	if _, err := mgr.UnregisterSet(connID, 10, nil); err != nil {
 		t.Fatal(err)
 	}
-	active = mgr.collectActiveColumns()
+	active = mgr.collectDeltaIndexColumns()
 	if got := active[1]; len(got) != 1 || got[0] != 0 {
-		t.Fatalf("active columns after non-last unregister = %v, want table 1 col 0", active)
+		t.Fatalf("delta index columns after non-last unregister = %v, want table 1 col 0", active)
+	}
+	if got := active[2]; len(got) != 1 || got[0] != 0 {
+		t.Fatalf("delta index columns after non-last unregister = %v, want table 2 col 0", active)
 	}
 	if _, err := mgr.UnregisterSet(connID, 11, nil); err != nil {
 		t.Fatal(err)
 	}
-	if active := mgr.collectActiveColumns(); len(active) != 0 {
-		t.Fatalf("active columns after last unregister = %v, want empty", active)
+	if active := mgr.collectDeltaIndexColumns(); len(active) != 0 {
+		t.Fatalf("delta index columns after last unregister = %v, want empty", active)
 	}
 }
 

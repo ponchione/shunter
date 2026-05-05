@@ -321,7 +321,7 @@ func hashForSubscriptionID(mgr *Manager, subID types.SubscriptionID) (QueryHash,
 // manager's internal evalQuery path, so the only dimension varying from the
 // pruned path is candidate selection.
 func evalAllQueries(mgr *Manager, cs *store.Changeset, view store.CommittedReadView) map[QueryHash]deltaBag {
-	activeCols := mgr.collectActiveColumns()
+	activeCols := mgr.collectDeltaIndexColumns()
 	dv := NewDeltaView(view, cs, activeCols)
 	out := map[QueryHash]deltaBag{}
 	for h, qs := range mgr.registry.byHash {

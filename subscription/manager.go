@@ -82,25 +82,25 @@ type SubscriptionManager interface {
 // Manager is the default SubscriptionManager implementation.
 // It is single-goroutine safe (the executor drives it).
 type Manager struct {
-	schema          SchemaLookup
-	resolver        IndexResolver
-	registry        *queryRegistry
-	indexes         *PruningIndexes
-	inbox           chan<- FanOutMessage
-	dropped         chan types.ConnectionID
-	droppedMu       sync.Mutex
-	droppedPending  map[types.ConnectionID]struct{}
-	droppedOrder    []types.ConnectionID
-	activeColumns   map[TableID]map[ColID]int
-	querySets       map[types.ConnectionID]map[uint32][]types.SubscriptionID
-	nextSubID       types.SubscriptionID
-	activeSets      atomic.Int64
-	droppedTotal    atomic.Uint64
-	observer        Observer
-	fanoutMu        sync.Mutex
-	fanoutClosed    bool
-	fanoutClosedCh  chan struct{}
-	fanoutCloseOnce sync.Once
+	schema            SchemaLookup
+	resolver          IndexResolver
+	registry          *queryRegistry
+	indexes           *PruningIndexes
+	inbox             chan<- FanOutMessage
+	dropped           chan types.ConnectionID
+	droppedMu         sync.Mutex
+	droppedPending    map[types.ConnectionID]struct{}
+	droppedOrder      []types.ConnectionID
+	deltaIndexColumns map[TableID]map[ColID]int
+	querySets         map[types.ConnectionID]map[uint32][]types.SubscriptionID
+	nextSubID         types.SubscriptionID
+	activeSets        atomic.Int64
+	droppedTotal      atomic.Uint64
+	observer          Observer
+	fanoutMu          sync.Mutex
+	fanoutClosed      bool
+	fanoutClosedCh    chan struct{}
+	fanoutCloseOnce   sync.Once
 
 	// InitialRowLimit caps the initial-query row count returned to the
 	// client. Zero means unlimited.
@@ -130,15 +130,15 @@ func WithObserver(observer Observer) ManagerOption {
 // NewManager constructs a Manager.
 func NewManager(schema SchemaLookup, resolver IndexResolver, opts ...ManagerOption) *Manager {
 	m := &Manager{
-		schema:         schema,
-		resolver:       resolver,
-		registry:       newQueryRegistry(),
-		indexes:        NewPruningIndexes(),
-		dropped:        make(chan types.ConnectionID, 64),
-		droppedPending: make(map[types.ConnectionID]struct{}),
-		activeColumns:  make(map[TableID]map[ColID]int),
-		querySets:      make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
-		fanoutClosedCh: make(chan struct{}),
+		schema:            schema,
+		resolver:          resolver,
+		registry:          newQueryRegistry(),
+		indexes:           NewPruningIndexes(),
+		dropped:           make(chan types.ConnectionID, 64),
+		droppedPending:    make(map[types.ConnectionID]struct{}),
+		deltaIndexColumns: make(map[TableID]map[ColID]int),
+		querySets:         make(map[types.ConnectionID]map[uint32][]types.SubscriptionID),
+		fanoutClosedCh:    make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(m)

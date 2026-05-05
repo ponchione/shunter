@@ -26,12 +26,12 @@ type DeltaIndexes struct {
 }
 
 // NewDeltaView constructs a DeltaView from a changeset and a committed snapshot.
-// activeColumns is the set of columns per table that at least one active
-// subscription cares about; delta indexes are built only for these columns.
+// deltaIndexColumns is the set of columns per table needed by join delta
+// evaluation; delta indexes are built only for these columns.
 func NewDeltaView(
 	committed store.CommittedReadView,
 	changeset *store.Changeset,
-	activeColumns map[TableID][]ColID,
+	deltaIndexColumns map[TableID][]ColID,
 ) *DeltaView {
 	dv := acquireDeltaView()
 	dv.committed = committed
@@ -53,7 +53,7 @@ func NewDeltaView(
 			dv.deletes[tid] = del
 		}
 	}
-	for table, cols := range activeColumns {
+	for table, cols := range deltaIndexColumns {
 		dv.buildDeltaIndex(table, cols)
 	}
 	return dv

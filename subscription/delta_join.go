@@ -17,7 +17,7 @@ type JoinFragments struct {
 // EvalJoinDeltaFragments computes the IVM 4+4 fragments for a two-table join
 // subscription. The resolver maps (table, column) → indexID for committed
 // lookups. Delta-side lookups use the delta indexes built by NewDeltaView —
-// callers must include the join columns in activeColumns when constructing
+// callers must include the join columns in deltaIndexColumns when constructing
 // the DeltaView.
 func EvalJoinDeltaFragments(dv *DeltaView, join *Join, resolver IndexResolver) JoinFragments {
 	var f JoinFragments
