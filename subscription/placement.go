@@ -505,6 +505,52 @@ type splitJoinOrPlacements struct {
 	rangeEdges []joinRangeEdgePlacement
 }
 
+type joinPlacementSide struct {
+	table        TableID
+	other        TableID
+	joinCol      ColID
+	otherJoinCol ColID
+}
+
+func joinPlacementSideFor(join *Join, table TableID) (joinPlacementSide, bool) {
+	switch table {
+	case join.Left:
+		return joinPlacementSide{
+			table:        join.Left,
+			other:        join.Right,
+			joinCol:      join.LeftCol,
+			otherJoinCol: join.RightCol,
+		}, true
+	case join.Right:
+		return joinPlacementSide{
+			table:        join.Right,
+			other:        join.Left,
+			joinCol:      join.RightCol,
+			otherJoinCol: join.LeftCol,
+		}, true
+	default:
+		return joinPlacementSide{}, false
+	}
+}
+
+func (s joinPlacementSide) edge(filterCol ColID) JoinEdge {
+	return JoinEdge{
+		LHSTable:     s.table,
+		RHSTable:     s.other,
+		LHSJoinCol:   s.joinCol,
+		RHSJoinCol:   s.otherJoinCol,
+		RHSFilterCol: filterCol,
+	}
+}
+
+func (s joinPlacementSide) otherJoinColumnIndexed(resolver IndexResolver) bool {
+	if resolver == nil {
+		return true
+	}
+	_, ok := resolver.IndexIDForColumn(s.other, s.otherJoinCol)
+	return ok
+}
+
 func (p splitJoinOrPlacements) hasAny() bool {
 	return len(p.eqs) > 0 || len(p.ranges) > 0 || len(p.edges) > 0 || len(p.rangeEdges) > 0
 }
@@ -520,39 +566,21 @@ func (p *splitJoinOrPlacements) append(other splitJoinOrPlacements) {
 // given table. Returns nil when no filterable edge exists for this table
 // (callers then fall through to Tier 3).
 func joinEdgesFor(pred Predicate, join *Join, t TableID, resolver IndexResolver) []joinEdgePlacement {
-	var other TableID
-	var myJoinCol, otherJoinCol ColID
-	switch t {
-	case join.Left:
-		other = join.Right
-		myJoinCol = join.LeftCol
-		otherJoinCol = join.RightCol
-	case join.Right:
-		other = join.Left
-		myJoinCol = join.RightCol
-		otherJoinCol = join.LeftCol
-	default:
+	side, ok := joinPlacementSideFor(join, t)
+	if !ok {
 		return nil
 	}
-	otherColEqs := findColEqs(pred, other)
+	otherColEqs := findColEqs(pred, side.other)
 	if len(otherColEqs) == 0 {
 		return nil
 	}
-	if resolver != nil {
-		if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
-			return nil
-		}
+	if !side.otherJoinColumnIndexed(resolver) {
+		return nil
 	}
 	placements := make([]joinEdgePlacement, 0, len(otherColEqs))
 	for _, ce := range otherColEqs {
 		placements = append(placements, joinEdgePlacement{
-			edge: JoinEdge{
-				LHSTable:     t,
-				RHSTable:     other,
-				LHSJoinCol:   myJoinCol,
-				RHSJoinCol:   otherJoinCol,
-				RHSFilterCol: ce.Column,
-			},
+			edge:  side.edge(ce.Column),
 			value: ce.Value,
 		})
 	}
@@ -562,39 +590,21 @@ func joinEdgesFor(pred Predicate, join *Join, t TableID, resolver IndexResolver)
 // joinRangeEdgesFor computes the JoinEdge/range-filter placements for Tier 2
 // for the given table. Returns nil when no range-filterable edge exists.
 func joinRangeEdgesFor(pred Predicate, join *Join, t TableID, resolver IndexResolver) []joinRangeEdgePlacement {
-	var other TableID
-	var myJoinCol, otherJoinCol ColID
-	switch t {
-	case join.Left:
-		other = join.Right
-		myJoinCol = join.LeftCol
-		otherJoinCol = join.RightCol
-	case join.Right:
-		other = join.Left
-		myJoinCol = join.RightCol
-		otherJoinCol = join.LeftCol
-	default:
+	side, ok := joinPlacementSideFor(join, t)
+	if !ok {
 		return nil
 	}
-	otherColRanges := findColRanges(pred, other)
+	otherColRanges := findColRanges(pred, side.other)
 	if len(otherColRanges) == 0 {
 		return nil
 	}
-	if resolver != nil {
-		if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
-			return nil
-		}
+	if !side.otherJoinColumnIndexed(resolver) {
+		return nil
 	}
 	placements := make([]joinRangeEdgePlacement, 0, len(otherColRanges))
 	for _, cr := range otherColRanges {
 		placements = append(placements, joinRangeEdgePlacement{
-			edge: JoinEdge{
-				LHSTable:     t,
-				RHSTable:     other,
-				LHSJoinCol:   myJoinCol,
-				RHSJoinCol:   otherJoinCol,
-				RHSFilterCol: cr.Column,
-			},
+			edge:  side.edge(cr.Column),
 			lower: cr.Lower,
 			upper: cr.Upper,
 		})
@@ -612,52 +622,28 @@ func mixedJoinEdgesFor(
 	t TableID,
 	resolver IndexResolver,
 ) ([]joinEdgePlacement, []joinRangeEdgePlacement) {
-	var other TableID
-	var myJoinCol, otherJoinCol ColID
-	switch t {
-	case join.Left:
-		other = join.Right
-		myJoinCol = join.LeftCol
-		otherJoinCol = join.RightCol
-	case join.Right:
-		other = join.Left
-		myJoinCol = join.RightCol
-		otherJoinCol = join.LeftCol
-	default:
+	side, ok := joinPlacementSideFor(join, t)
+	if !ok {
 		return nil, nil
 	}
-	otherColEqs, otherColRanges := findMixedColEqRanges(pred, other)
+	otherColEqs, otherColRanges := findMixedColEqRanges(pred, side.other)
 	if len(otherColEqs) == 0 && len(otherColRanges) == 0 {
 		return nil, nil
 	}
-	if resolver != nil {
-		if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
-			return nil, nil
-		}
+	if !side.otherJoinColumnIndexed(resolver) {
+		return nil, nil
 	}
 	valuePlacements := make([]joinEdgePlacement, 0, len(otherColEqs))
 	for _, ce := range otherColEqs {
 		valuePlacements = append(valuePlacements, joinEdgePlacement{
-			edge: JoinEdge{
-				LHSTable:     t,
-				RHSTable:     other,
-				LHSJoinCol:   myJoinCol,
-				RHSJoinCol:   otherJoinCol,
-				RHSFilterCol: ce.Column,
-			},
+			edge:  side.edge(ce.Column),
 			value: ce.Value,
 		})
 	}
 	rangePlacements := make([]joinRangeEdgePlacement, 0, len(otherColRanges))
 	for _, cr := range otherColRanges {
 		rangePlacements = append(rangePlacements, joinRangeEdgePlacement{
-			edge: JoinEdge{
-				LHSTable:     t,
-				RHSTable:     other,
-				LHSJoinCol:   myJoinCol,
-				RHSJoinCol:   otherJoinCol,
-				RHSFilterCol: cr.Column,
-			},
+			edge:  side.edge(cr.Column),
 			lower: cr.Lower,
 			upper: cr.Upper,
 		})
@@ -670,18 +656,8 @@ func mixedJoinEdgesFor(
 // avoids falling back to broad join-existence candidates for shapes like
 // `left.flag = true OR right.score > 50`.
 func splitJoinOrPlacementsFor(pred Predicate, join *Join, t TableID, resolver IndexResolver) (splitJoinOrPlacements, bool) {
-	var other TableID
-	var myJoinCol, otherJoinCol ColID
-	switch t {
-	case join.Left:
-		other = join.Right
-		myJoinCol = join.LeftCol
-		otherJoinCol = join.RightCol
-	case join.Right:
-		other = join.Left
-		myJoinCol = join.RightCol
-		otherJoinCol = join.LeftCol
-	default:
+	side, ok := joinPlacementSideFor(join, t)
+	if !ok {
 		return splitJoinOrPlacements{}, false
 	}
 	if pred == nil {
@@ -690,7 +666,7 @@ func splitJoinOrPlacementsFor(pred Predicate, join *Join, t TableID, resolver In
 	if j, ok := pred.(Join); ok {
 		return splitJoinOrPlacementsFor(j.Filter, join, t, resolver)
 	}
-	placements, ok := splitJoinOrPredicatePlacements(pred, t, other, myJoinCol, otherJoinCol, resolver)
+	placements, ok := splitJoinOrPredicatePlacements(pred, side, resolver)
 	if !ok || !placements.hasAny() || !splitJoinOrNeedsBothSides(placements) {
 		return splitJoinOrPlacements{}, false
 	}
@@ -699,49 +675,39 @@ func splitJoinOrPlacementsFor(pred Predicate, join *Join, t TableID, resolver In
 
 func splitJoinOrPredicatePlacements(
 	pred Predicate,
-	t, other TableID,
-	myJoinCol, otherJoinCol ColID,
+	side joinPlacementSide,
 	resolver IndexResolver,
 ) (splitJoinOrPlacements, bool) {
 	switch p := pred.(type) {
 	case Or:
-		left, leftOK := splitJoinOrPredicatePlacements(p.Left, t, other, myJoinCol, otherJoinCol, resolver)
-		right, rightOK := splitJoinOrPredicatePlacements(p.Right, t, other, myJoinCol, otherJoinCol, resolver)
+		left, leftOK := splitJoinOrPredicatePlacements(p.Left, side, resolver)
+		right, rightOK := splitJoinOrPredicatePlacements(p.Right, side, resolver)
 		if !leftOK || !rightOK {
 			return splitJoinOrPlacements{}, false
 		}
 		left.append(right)
 		return left, true
 	default:
-		return splitJoinOrBranchPlacements(pred, t, other, myJoinCol, otherJoinCol, resolver)
+		return splitJoinOrBranchPlacements(pred, side, resolver)
 	}
 }
 
 func splitJoinOrBranchPlacements(
 	pred Predicate,
-	t, other TableID,
-	myJoinCol, otherJoinCol ColID,
+	side joinPlacementSide,
 	resolver IndexResolver,
 ) (splitJoinOrPlacements, bool) {
 	switch p := pred.(type) {
 	case ColEq:
 		switch p.Table {
-		case t:
+		case side.table:
 			return splitJoinOrPlacements{eqs: []ColEq{p}}, true
-		case other:
-			if resolver != nil {
-				if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
-					return splitJoinOrPlacements{}, false
-				}
+		case side.other:
+			if !side.otherJoinColumnIndexed(resolver) {
+				return splitJoinOrPlacements{}, false
 			}
 			return splitJoinOrPlacements{edges: []joinEdgePlacement{{
-				edge: JoinEdge{
-					LHSTable:     t,
-					RHSTable:     other,
-					LHSJoinCol:   myJoinCol,
-					RHSJoinCol:   otherJoinCol,
-					RHSFilterCol: p.Column,
-				},
+				edge:  side.edge(p.Column),
 				value: p.Value,
 			}}}, true
 		default:
@@ -752,22 +718,14 @@ func splitJoinOrBranchPlacements(
 			return splitJoinOrPlacements{}, false
 		}
 		switch p.Table {
-		case t:
+		case side.table:
 			return splitJoinOrPlacements{ranges: []ColRange{p}}, true
-		case other:
-			if resolver != nil {
-				if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
-					return splitJoinOrPlacements{}, false
-				}
+		case side.other:
+			if !side.otherJoinColumnIndexed(resolver) {
+				return splitJoinOrPlacements{}, false
 			}
 			return splitJoinOrPlacements{rangeEdges: []joinRangeEdgePlacement{{
-				edge: JoinEdge{
-					LHSTable:     t,
-					RHSTable:     other,
-					LHSJoinCol:   myJoinCol,
-					RHSJoinCol:   otherJoinCol,
-					RHSFilterCol: p.Column,
-				},
+				edge:  side.edge(p.Column),
 				lower: p.Lower,
 				upper: p.Upper,
 			}}}, true
@@ -776,10 +734,10 @@ func splitJoinOrBranchPlacements(
 		}
 	case And:
 		var out splitJoinOrPlacements
-		if left, ok := splitJoinOrBranchPlacements(p.Left, t, other, myJoinCol, otherJoinCol, resolver); ok {
+		if left, ok := splitJoinOrBranchPlacements(p.Left, side, resolver); ok {
 			out.append(left)
 		}
-		if right, ok := splitJoinOrBranchPlacements(p.Right, t, other, myJoinCol, otherJoinCol, resolver); ok {
+		if right, ok := splitJoinOrBranchPlacements(p.Right, side, resolver); ok {
 			out.append(right)
 		}
 		return out, out.hasAny()
@@ -802,31 +760,15 @@ func joinExistenceEdgesFor(join *Join, t TableID, resolver IndexResolver) []join
 	if resolver == nil {
 		return nil
 	}
-	var other TableID
-	var myJoinCol, otherJoinCol ColID
-	switch t {
-	case join.Left:
-		other = join.Right
-		myJoinCol = join.LeftCol
-		otherJoinCol = join.RightCol
-	case join.Right:
-		other = join.Left
-		myJoinCol = join.RightCol
-		otherJoinCol = join.LeftCol
-	default:
+	side, ok := joinPlacementSideFor(join, t)
+	if !ok {
 		return nil
 	}
-	if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
+	if !side.otherJoinColumnIndexed(resolver) {
 		return nil
 	}
 	return []joinExistenceEdgePlacement{{
-		edge: JoinEdge{
-			LHSTable:     t,
-			RHSTable:     other,
-			LHSJoinCol:   myJoinCol,
-			RHSJoinCol:   otherJoinCol,
-			RHSFilterCol: otherJoinCol,
-		},
+		edge: side.edge(side.otherJoinCol),
 	}}
 }
 
