@@ -25,13 +25,12 @@ type FanOutSender interface {
 // delivers them through the protocol layer. Runs on its own goroutine
 // separate from the executor (SPEC-004 §8.1 / Story 6.1).
 type FanOutWorker struct {
-	inbox          <-chan FanOutMessage
-	sender         FanOutSender
-	mu             sync.RWMutex
-	confirmedReads map[types.ConnectionID]bool
-	fastReads      map[types.ConnectionID]bool
-	dropClient     func(types.ConnectionID)
-	observer       Observer
+	inbox      <-chan FanOutMessage
+	sender     FanOutSender
+	mu         sync.RWMutex
+	fastReads  map[types.ConnectionID]bool
+	dropClient func(types.ConnectionID)
+	observer   Observer
 }
 
 // NewFanOutWorker creates a worker that reads from inbox and delivers
@@ -45,12 +44,11 @@ func NewFanOutWorker(inbox <-chan FanOutMessage, sender FanOutSender, dropClient
 // observations for fan-out failures and client drops.
 func NewFanOutWorkerWithObserver(inbox <-chan FanOutMessage, sender FanOutSender, dropClient func(types.ConnectionID), observer Observer) *FanOutWorker {
 	return &FanOutWorker{
-		inbox:          inbox,
-		sender:         sender,
-		confirmedReads: make(map[types.ConnectionID]bool),
-		fastReads:      make(map[types.ConnectionID]bool),
-		dropClient:     dropClient,
-		observer:       observer,
+		inbox:      inbox,
+		sender:     sender,
+		fastReads:  make(map[types.ConnectionID]bool),
+		dropClient: dropClient,
+		observer:   observer,
 	}
 }
 
@@ -77,10 +75,11 @@ func (w *FanOutWorker) SetConfirmedReads(connID types.ConnectionID, enabled bool
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if enabled {
-		w.confirmedReads[connID] = true
 		delete(w.fastReads, connID)
 	} else {
-		delete(w.confirmedReads, connID)
+		if w.fastReads == nil {
+			w.fastReads = make(map[types.ConnectionID]bool)
+		}
 		w.fastReads[connID] = true
 	}
 }
@@ -89,7 +88,6 @@ func (w *FanOutWorker) SetConfirmedReads(connID types.ConnectionID, enabled bool
 func (w *FanOutWorker) RemoveClient(connID types.ConnectionID) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	delete(w.confirmedReads, connID)
 	delete(w.fastReads, connID)
 }
 
@@ -238,7 +236,6 @@ func (w *FanOutWorker) handleSendError(connID types.ConnectionID, err error) str
 func (w *FanOutWorker) markDropped(connID types.ConnectionID) {
 	w.recordClientDropped("buffer_full", connID)
 	w.mu.Lock()
-	delete(w.confirmedReads, connID)
 	delete(w.fastReads, connID)
 	w.mu.Unlock()
 	if w.dropClient != nil {

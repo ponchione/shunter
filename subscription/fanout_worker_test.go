@@ -598,9 +598,6 @@ func TestFanOutWorker_BufferFullClearsFastReadState(t *testing.T) {
 	if _, ok := w.fastReads[conn1]; ok {
 		t.Fatal("buffer-full drop left stale fast-read state")
 	}
-	if _, ok := w.confirmedReads[conn1]; ok {
-		t.Fatal("buffer-full drop left stale confirmed-read state")
-	}
 	if !w.requiresConfirmedRead(conn1) {
 		t.Fatal("dropped client should fall back to default confirmed-read policy if reused")
 	}
@@ -974,28 +971,28 @@ func TestFanOutWorker_NilTxDurable_Skips(t *testing.T) {
 }
 
 func TestFanOutWorker_SetConfirmedReads_Toggle(t *testing.T) {
-	w := &FanOutWorker{confirmedReads: make(map[types.ConnectionID]bool), fastReads: make(map[types.ConnectionID]bool)}
+	w := NewFanOutWorker(nil, nil, nil)
 	conn1 := cid(1)
 
-	w.SetConfirmedReads(conn1, true)
-	if !w.confirmedReads[conn1] {
-		t.Fatal("expected confirmed reads enabled")
+	w.SetConfirmedReads(conn1, false)
+	if w.requiresConfirmedRead(conn1) {
+		t.Fatal("expected fast-read policy")
 	}
 
-	w.SetConfirmedReads(conn1, false)
-	if w.confirmedReads[conn1] {
-		t.Fatal("expected confirmed reads disabled")
+	w.SetConfirmedReads(conn1, true)
+	if !w.requiresConfirmedRead(conn1) {
+		t.Fatal("expected confirmed-read default")
 	}
 }
 
 func TestFanOutWorker_RemoveClient(t *testing.T) {
-	w := &FanOutWorker{confirmedReads: make(map[types.ConnectionID]bool), fastReads: make(map[types.ConnectionID]bool)}
+	w := NewFanOutWorker(nil, nil, nil)
 	conn1 := cid(1)
-	w.confirmedReads[conn1] = true
+	w.SetConfirmedReads(conn1, false)
 
 	w.RemoveClient(conn1)
-	if _, ok := w.confirmedReads[conn1]; ok {
-		t.Fatal("RemoveClient should clear confirmedReads entry")
+	if !w.requiresConfirmedRead(conn1) {
+		t.Fatal("RemoveClient should clear fast-read entry")
 	}
 }
 
