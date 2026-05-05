@@ -18,68 +18,36 @@ func testMintConfig() *MintConfig {
 	}
 }
 
-func TestMintAnonymousTokenNilConfigFailsBeforeRandomRead(t *testing.T) {
-	originalReadRandom := readRandom
-	readRandom = func([]byte) (int, error) {
-		t.Fatal("MintAnonymousToken read randomness before rejecting nil config")
-		return 0, nil
-	}
-	defer func() { readRandom = originalReadRandom }()
+func TestMintAnonymousTokenInvalidConfigFailsBeforeRandomRead(t *testing.T) {
+	check := func(name string, cfg *MintConfig, wantContext string) {
+		t.Run(name, func(t *testing.T) {
+			originalReadRandom := readRandom
+			readRandom = func([]byte) (int, error) {
+				t.Fatalf("MintAnonymousToken read randomness before rejecting %s", name)
+				return 0, nil
+			}
+			defer func() { readRandom = originalReadRandom }()
 
-	token, id, err := MintAnonymousToken(nil)
-	if err == nil {
-		t.Fatal("MintAnonymousToken nil config returned nil error")
+			token, id, err := MintAnonymousToken(cfg)
+			if err == nil {
+				t.Fatalf("MintAnonymousToken %s returned nil error", name)
+			}
+			if token != "" || !id.IsZero() {
+				t.Fatalf("MintAnonymousToken %s returned token=%q identity=%s, want empty", name, token, id.Hex())
+			}
+			if !strings.Contains(err.Error(), wantContext) {
+				t.Fatalf("MintAnonymousToken %s error = %v, want %s context", name, err, wantContext)
+			}
+		})
 	}
-	if token != "" || !id.IsZero() {
-		t.Fatalf("MintAnonymousToken nil config returned token=%q identity=%s, want empty", token, id.Hex())
-	}
-	if !strings.Contains(err.Error(), "config is required") {
-		t.Fatalf("MintAnonymousToken nil config error = %v, want config context", err)
-	}
-}
 
-func TestMintAnonymousTokenEmptySigningKeyFailsBeforeRandomRead(t *testing.T) {
-	originalReadRandom := readRandom
-	readRandom = func([]byte) (int, error) {
-		t.Fatal("MintAnonymousToken read randomness before rejecting empty signing key")
-		return 0, nil
-	}
-	defer func() { readRandom = originalReadRandom }()
-
+	check("nil config", nil, "config is required")
 	cfg := testMintConfig()
 	cfg.SigningKey = nil
-	token, id, err := MintAnonymousToken(cfg)
-	if err == nil {
-		t.Fatal("MintAnonymousToken empty signing key returned nil error")
-	}
-	if token != "" || !id.IsZero() {
-		t.Fatalf("MintAnonymousToken empty signing key returned token=%q identity=%s, want empty", token, id.Hex())
-	}
-	if !strings.Contains(err.Error(), "signing key is required") {
-		t.Fatalf("MintAnonymousToken empty signing key error = %v, want signing key context", err)
-	}
-}
-
-func TestMintAnonymousTokenEmptyIssuerFailsBeforeRandomRead(t *testing.T) {
-	originalReadRandom := readRandom
-	readRandom = func([]byte) (int, error) {
-		t.Fatal("MintAnonymousToken read randomness before rejecting empty issuer")
-		return 0, nil
-	}
-	defer func() { readRandom = originalReadRandom }()
-
-	cfg := testMintConfig()
+	check("empty signing key", cfg, "signing key is required")
+	cfg = testMintConfig()
 	cfg.Issuer = ""
-	token, id, err := MintAnonymousToken(cfg)
-	if err == nil {
-		t.Fatal("MintAnonymousToken empty issuer returned nil error")
-	}
-	if token != "" || !id.IsZero() {
-		t.Fatalf("MintAnonymousToken empty issuer returned token=%q identity=%s, want empty", token, id.Hex())
-	}
-	if !strings.Contains(err.Error(), "issuer is required") {
-		t.Fatalf("MintAnonymousToken empty issuer error = %v, want issuer context", err)
-	}
+	check("empty issuer", cfg, "issuer is required")
 }
 
 func TestMintAnonymousTokenValidatesRoundTrip(t *testing.T) {
