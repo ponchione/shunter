@@ -73,16 +73,9 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	if len(config.SigningKey) == 0 {
 		return nil, fmt.Errorf("%w: signing key is required", ErrJWTInvalid)
 	}
-	parsed, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) {
-		// v1 supports HS256 only. Reject unexpected methods so an
-		// attacker can't downgrade to `alg: none` or request a
-		// different algorithm whose key material we haven't
-		// configured.
-		if t.Method != jwt.SigningMethodHS256 {
-			return nil, fmt.Errorf("%w: unsupported signing alg %v", ErrJWTInvalid, t.Header["alg"])
-		}
+	parsed, err := jwt.Parse(tokenString, func(*jwt.Token) (any, error) {
 		return config.SigningKey, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	if err != nil {
 		return nil, errors.Join(ErrJWTInvalid, err)
 	}
