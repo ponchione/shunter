@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -183,10 +184,8 @@ func extractStringClaim(raw any) []string {
 // tokenAud appears in configuredAllowed.
 func audienceAllowed(tokenAud, configuredAllowed []string) bool {
 	for _, want := range configuredAllowed {
-		for _, got := range tokenAud {
-			if got == want {
-				return true
-			}
+		if slices.Contains(tokenAud, want) {
+			return true
 		}
 	}
 	return false
