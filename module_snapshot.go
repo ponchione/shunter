@@ -10,6 +10,7 @@ type moduleSnapshot struct {
 	visibilityFilters []VisibilityFilterDescription
 	migration         MigrationMetadata
 	tableMigrations   map[string]MigrationMetadata
+	migrationHooks    []MigrationHook
 }
 
 func newModuleSnapshot(mod *Module, visibilityFilters []VisibilityFilterDescription) moduleSnapshot {
@@ -26,6 +27,7 @@ func newModuleSnapshot(mod *Module, visibilityFilters []VisibilityFilterDescript
 		visibilityFilters: copyVisibilityFilterDescriptions(visibilityFilters),
 		migration:         copyMigrationMetadata(mod.migration),
 		tableMigrations:   copyMigrationMetadataMap(mod.tableMigrations),
+		migrationHooks:    copyMigrationHooks(mod.migrationHooks),
 	}
 }
 

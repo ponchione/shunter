@@ -120,6 +120,15 @@ func (r *Runtime) Start(ctx context.Context) error {
 		r.recordStartFailure(ctx, err, time.Since(startedAt))
 		return err
 	}
+	if err := r.runMigrationHooks(ctx, durability); err != nil {
+		err = fmt.Errorf("run migration hooks: %w", err)
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		r.recordStartFailure(ctx, err, time.Since(startedAt))
+		return err
+	}
 
 	fanOutCapacity := r.buildConfig.ExecutorQueueCapacity
 	fanOutInbox := make(chan subscription.FanOutMessage, fanOutCapacity)

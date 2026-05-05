@@ -17,6 +17,7 @@ type Module struct {
 	visibilityFilters []VisibilityFilterDeclaration
 	migration         MigrationMetadata
 	tableMigrations   map[string]MigrationMetadata
+	migrationHooks    []MigrationHook
 }
 
 // NewModule creates a module definition shell with the supplied name.
@@ -121,6 +122,16 @@ func (m *Module) TableMigration(tableName string, metadata MigrationMetadata) *M
 		m.tableMigrations = make(map[string]MigrationMetadata)
 	}
 	m.tableMigrations[tableName] = copyMigrationMetadata(metadata)
+	return m
+}
+
+// MigrationHook registers an app-owned startup migration hook. Hooks run during
+// Runtime.Start after recovery and durability are available, but before normal
+// reducer, subscription, and protocol readiness.
+func (m *Module) MigrationHook(h MigrationHook) *Module {
+	if h != nil {
+		m.migrationHooks = append(m.migrationHooks, h)
+	}
 	return m
 }
 
