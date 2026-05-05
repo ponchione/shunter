@@ -53,14 +53,14 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 	if lit.Kind == LitString && isNumericKind(kind) {
 		parsed, err := parseNumericLiteral(lit.Str)
 		if err != nil {
-			return types.Value{}, InvalidLiteralError{Literal: lit.Str, Type: algebraicName(kind)}
+			return types.Value{}, invalidLiteralText(lit.Str, kind)
 		}
 		return coerceValue(parsed, kind, caller)
 	}
 	if lit.Kind == LitBytes && lit.Text != "" && isNumericKind(kind) {
 		parsed, err := parseNumericLiteral(lit.Text)
 		if err != nil {
-			return types.Value{}, InvalidLiteralError{Literal: lit.Text, Type: algebraicName(kind)}
+			return types.Value{}, invalidLiteralText(lit.Text, kind)
 		}
 		return coerceValue(parsed, kind, caller)
 	}
@@ -87,7 +87,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 			if err == nil {
 				return types.NewBytes(b), nil
 			}
-			return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+			return types.Value{}, invalidLiteralText(text, kind)
 		}
 		return types.Value{}, mismatch(lit, kind)
 	case types.KindFloat32:
@@ -146,14 +146,7 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 				return types.NewTimestamp(micros), nil
 			}
 		}
-		if lit.Kind == LitBool {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		text, ok := renderLiteralSourceText(lit)
-		if !ok {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return invalidSourceTextLiteral(lit, kind)
 	case types.KindDuration:
 		// Duration string literals use Go's duration grammar and store signed
 		// microseconds, matching the runtime duration unit.
@@ -162,56 +155,28 @@ func coerceValue(lit Literal, kind types.ValueKind, caller *[32]byte) (types.Val
 				return types.NewDuration(micros), nil
 			}
 		}
-		if lit.Kind == LitBool {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		text, ok := renderLiteralSourceText(lit)
-		if !ok {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return invalidSourceTextLiteral(lit, kind)
 	case types.KindArrayString:
 		// Shunter SQL has no array literal grammar; source-text literals reject.
-		if lit.Kind == LitBool {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		text, ok := renderLiteralSourceText(lit)
-		if !ok {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return invalidSourceTextLiteral(lit, kind)
 	case types.KindUUID:
 		if lit.Kind == LitString {
 			v, err := types.ParseUUID(lit.Str)
 			if err == nil {
 				return v, nil
 			}
-			return types.Value{}, InvalidLiteralError{Literal: lit.Str, Type: algebraicName(kind)}
+			return types.Value{}, invalidLiteralText(lit.Str, kind)
 		}
-		if lit.Kind == LitBool {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		text, ok := renderLiteralSourceText(lit)
-		if !ok {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return invalidSourceTextLiteral(lit, kind)
 	case types.KindJSON:
 		if lit.Kind == LitString {
 			v, err := types.NewJSON([]byte(lit.Str))
 			if err == nil {
 				return v, nil
 			}
-			return types.Value{}, InvalidLiteralError{Literal: lit.Str, Type: algebraicName(kind)}
+			return types.Value{}, invalidLiteralText(lit.Str, kind)
 		}
-		if lit.Kind == LitBool {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		text, ok := renderLiteralSourceText(lit)
-		if !ok {
-			return types.Value{}, mismatch(lit, kind)
-		}
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return invalidSourceTextLiteral(lit, kind)
 	default:
 		return types.Value{}, fmt.Errorf("%w: column kind %s not supported by SQL literal coercion", ErrUnsupportedSQL, kind)
 	}
@@ -221,15 +186,13 @@ func coerceSigned(lit Literal, kind types.ValueKind, lo, hi int64, mk func(int64
 	// LitBigInt always overflows narrow signed kinds; preserve source text in
 	// the InvalidLiteral error when available.
 	if lit.Kind == LitBigInt {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	if lit.Kind != LitInt {
 		return types.Value{}, mismatch(lit, kind)
 	}
 	if lit.Int < lo || lit.Int > hi {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	return mk(lit.Int), nil
 }
@@ -238,20 +201,17 @@ func coerceUnsigned(lit Literal, kind types.ValueKind, hi uint64, mk func(uint64
 	// LitBigInt always overflows narrow unsigned kinds; preserve source text in
 	// the InvalidLiteral error when available.
 	if lit.Kind == LitBigInt {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	if lit.Kind != LitInt {
 		return types.Value{}, mismatch(lit, kind)
 	}
 	if lit.Int < 0 {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	u := uint64(lit.Int)
 	if u > hi {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	return mk(u), nil
 }
@@ -281,8 +241,7 @@ func coerceWideUnsigned(
 	switch lit.Kind {
 	case LitInt:
 		if lit.Int < 0 {
-			text, _ := renderLiteralSourceText(lit)
-			return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+			return types.Value{}, invalidLiteralFromSource(lit, kind)
 		}
 		return mkInt(uint64(lit.Int)), nil
 	case LitBigInt:
@@ -299,16 +258,35 @@ func mismatch(lit Literal, kind types.ValueKind) error {
 	}
 	// Float-to-integer mismatches report InvalidLiteral with preserved text.
 	if lit.Kind == LitFloat && isIntegerKind(kind) {
-		text, _ := renderLiteralSourceText(lit)
-		return InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return invalidLiteralFromSource(lit, kind)
 	}
 	// Non-bool source-text literals into Bool report InvalidLiteral.
 	if kind == types.KindBool {
 		if text, ok := renderLiteralSourceText(lit); ok {
-			return InvalidLiteralError{Literal: text, Type: "Bool"}
+			return invalidLiteralText(text, kind)
 		}
 	}
 	return fmt.Errorf("%w: %s literal cannot be coerced to %s", ErrUnsupportedSQL, lit.Kind, kind)
+}
+
+func invalidSourceTextLiteral(lit Literal, kind types.ValueKind) (types.Value, error) {
+	if lit.Kind == LitBool {
+		return types.Value{}, mismatch(lit, kind)
+	}
+	text, ok := renderLiteralSourceText(lit)
+	if !ok {
+		return types.Value{}, mismatch(lit, kind)
+	}
+	return types.Value{}, invalidLiteralText(text, kind)
+}
+
+func invalidLiteralFromSource(lit Literal, kind types.ValueKind) error {
+	text, _ := renderLiteralSourceText(lit)
+	return invalidLiteralText(text, kind)
+}
+
+func invalidLiteralText(text string, kind types.ValueKind) error {
+	return InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
 }
 
 // renderLiteralSourceText returns preserved parser text when available, then
@@ -598,8 +576,7 @@ func parseDurationLiteral(s string) (int64, bool) {
 func coerceBigIntToInt128(lit Literal, kind types.ValueKind) (types.Value, error) {
 	x := lit.Big
 	if x.Cmp(int128Max) > 0 || x.Cmp(int128Min) < 0 {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	t := new(big.Int).Set(x)
 	if t.Sign() < 0 {
@@ -616,13 +593,8 @@ func coerceBigIntToInt128(lit Literal, kind types.ValueKind) (types.Value, error
 // Rejects negative values and values >= 2^128.
 func coerceBigIntToUint128(lit Literal, kind types.ValueKind) (types.Value, error) {
 	x := lit.Big
-	if x.Sign() < 0 {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
-	}
-	if x.Cmp(uint128Max) >= 0 {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+	if x.Sign() < 0 || x.Cmp(uint128Max) >= 0 {
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	var buf [16]byte
 	x.FillBytes(buf[:])
@@ -637,8 +609,7 @@ func coerceBigIntToUint128(lit Literal, kind types.ValueKind) (types.Value, erro
 func coerceBigIntToInt256(lit Literal, kind types.ValueKind) (types.Value, error) {
 	x := lit.Big
 	if x.Cmp(int256Max) > 0 || x.Cmp(int256Min) < 0 {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	t := new(big.Int).Set(x)
 	if t.Sign() < 0 {
@@ -659,13 +630,8 @@ func coerceBigIntToInt256(lit Literal, kind types.ValueKind) (types.Value, error
 // comfortably in u256 (max ~1.16e77).
 func coerceBigIntToUint256(lit Literal, kind types.ValueKind) (types.Value, error) {
 	x := lit.Big
-	if x.Sign() < 0 {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
-	}
-	if x.Cmp(uint256Max) >= 0 {
-		text, _ := renderLiteralSourceText(lit)
-		return types.Value{}, InvalidLiteralError{Literal: text, Type: algebraicName(kind)}
+	if x.Sign() < 0 || x.Cmp(uint256Max) >= 0 {
+		return types.Value{}, invalidLiteralFromSource(lit, kind)
 	}
 	var buf [32]byte
 	x.FillBytes(buf[:])
