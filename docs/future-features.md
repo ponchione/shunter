@@ -77,7 +77,6 @@ Direction:
 
 Likely feature slices:
 
-- stronger parser/planner boundary
 - multi-join support
 - nullable-value semantics for aggregates once nullable types exist
 - broader index-aware planning for joins, multi-column ordering, and live paths

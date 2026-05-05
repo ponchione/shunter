@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	queryplan "github.com/ponchione/shunter/internal/queryplan"
 	"github.com/ponchione/shunter/query/sql"
 	"github.com/ponchione/shunter/schema"
 	"github.com/ponchione/shunter/subscription"
@@ -197,79 +198,6 @@ func joinProjectsRight(stmt sql.Statement, selfJoin bool) bool {
 	return alias == stmt.Join.RightTable
 }
 
-func isSQLTruePredicate(pred sql.Predicate) bool {
-	_, ok := pred.(sql.TruePredicate)
-	return ok
-}
-
-func isSQLFalsePredicate(pred sql.Predicate) bool {
-	_, ok := pred.(sql.FalsePredicate)
-	return ok
-}
-
-func normalizeSQLPredicate(pred sql.Predicate) sql.Predicate {
-	switch p := pred.(type) {
-	case nil:
-		return nil
-	case sql.TruePredicate:
-		return p
-	case sql.FalsePredicate:
-		return p
-	case sql.ComparisonPredicate:
-		return p
-	case sql.AndPredicate:
-		left := normalizeSQLPredicate(p.Left)
-		right := normalizeSQLPredicate(p.Right)
-		if isSQLFalsePredicate(left) {
-			return left
-		}
-		if isSQLFalsePredicate(right) {
-			return right
-		}
-		if isSQLTruePredicate(left) {
-			return right
-		}
-		if isSQLTruePredicate(right) {
-			return left
-		}
-		return sql.AndPredicate{Left: left, Right: right}
-	case sql.OrPredicate:
-		left := normalizeSQLPredicate(p.Left)
-		right := normalizeSQLPredicate(p.Right)
-		if isSQLTruePredicate(left) || isSQLTruePredicate(right) {
-			return sql.TruePredicate{}
-		}
-		if isSQLFalsePredicate(left) {
-			return right
-		}
-		if isSQLFalsePredicate(right) {
-			return left
-		}
-		return sql.OrPredicate{Left: left, Right: right}
-	default:
-		return pred
-	}
-}
-
-func sqlPredicateUsesCallerIdentity(pred sql.Predicate) bool {
-	switch p := pred.(type) {
-	case nil:
-		return false
-	case sql.TruePredicate:
-		return false
-	case sql.FalsePredicate:
-		return false
-	case sql.ComparisonPredicate:
-		return p.Filter.Literal.Kind == sql.LitSender
-	case sql.AndPredicate:
-		return sqlPredicateUsesCallerIdentity(p.Left) || sqlPredicateUsesCallerIdentity(p.Right)
-	case sql.OrPredicate:
-		return sqlPredicateUsesCallerIdentity(p.Left) || sqlPredicateUsesCallerIdentity(p.Right)
-	default:
-		return false
-	}
-}
-
 // wrapSubscribeCompileErrorSQL appends the offending SQL to a compile error.
 func wrapSubscribeCompileErrorSQL(err error, sqlText string) string {
 	// Subscribe surfaces use a distinct unsupported-SELECT prefix.
@@ -458,64 +386,20 @@ func orSubscriptionPredicates(left, right subscription.Predicate) subscription.P
 }
 
 func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, allowLimit bool, allowProjection bool, allowOrderBy bool, allowOffset bool) (compiledSQLQuery, error) {
-	stmt, err := sql.Parse(qs)
+	plan, err := queryplan.Build(qs, queryplan.Options{
+		AllowLimit:   allowLimit,
+		AllowOrderBy: allowOrderBy,
+		AllowOffset:  allowOffset,
+	})
 	if err != nil {
-		// Typed compile errors already carry the final user-facing text.
-		var dupErr sql.DuplicateNameError
-		if errors.As(err, &dupErr) {
-			return compiledSQLQuery{}, err
-		}
-		var unresolvedErr sql.UnresolvedVarError
-		if errors.As(err, &unresolvedErr) {
-			return compiledSQLQuery{}, err
-		}
-		var unsupSelectErr sql.UnsupportedSelectError
-		if errors.As(err, &unsupSelectErr) {
-			if !allowLimit && unsupSelectErr.HasLimit {
-				return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: unsupSelectErr.SQL}
-			}
-			return compiledSQLQuery{}, err
-		}
-		var unqualErr sql.UnqualifiedNamesError
-		if errors.As(err, &unqualErr) {
-			return compiledSQLQuery{}, err
-		}
-		var joinTypeErr sql.UnsupportedJoinTypeError
-		if errors.As(err, &joinTypeErr) {
-			return compiledSQLQuery{}, err
-		}
-		var unsupExprErr sql.UnsupportedExprError
-		if errors.As(err, &unsupExprErr) {
-			return compiledSQLQuery{}, err
-		}
-		return compiledSQLQuery{}, fmt.Errorf("parse: %v", err)
+		return compiledSQLQuery{}, err
 	}
-	stmtOrderBy := statementOrderByColumns(stmt)
-	if stmt.UnsupportedLimit {
-		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
-	}
-	if stmt.UnsupportedOffset {
-		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
-	}
-	if !allowOrderBy && len(stmtOrderBy) != 0 {
-		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
-	}
-	if !allowLimit && stmt.HasLimit {
-		// Reference `SubParser::parse_query`
-		// (sql-parser/src/parser/sub.rs:94-107) rejects subscription
-		// queries carrying `limit: Some(...)` through
-		// `SubscriptionUnsupported::feature(query)`, rendered as
-		// `Unsupported: {query}` via parser/errors.rs:18-19. The full
-		// original SQL stands in for the formatted Query.
-		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
-	}
-	if !allowOffset && stmt.HasOffset {
-		return compiledSQLQuery{}, sql.UnsupportedFeatureError{SQL: qs}
-	}
+	stmt := plan.Statement
+	stmtOrderBy := plan.OrderBy
 	// Resolve tables, predicates, and projections before return-shape guards.
 	// Keep the original predicate tree so folding does not hide type errors.
-	normalizedPredicate := normalizeSQLPredicate(stmt.Predicate)
-	usesCallerIdentity := sqlPredicateUsesCallerIdentity(normalizedPredicate)
+	normalizedPredicate := plan.NormalizedPredicate
+	usesCallerIdentity := plan.UsesCallerIdentity
 	if stmt.Join != nil {
 		leftID, leftTS, ok := lookupSQLTableExact(sl, stmt.Join.LeftTable)
 		if !ok {
@@ -1062,7 +946,7 @@ func compileCrossJoinWhereLiteralFilter(pred sql.Predicate, relations map[string
 	if _, err := compileSQLPredicateForRelations(pred, relations, func(string) uint8 { return 0 }, caller, false); err != nil {
 		return nil, err
 	}
-	normalized := normalizeSQLPredicate(pred)
+	normalized := queryplan.NormalizePredicate(pred)
 	switch p := normalized.(type) {
 	case nil:
 		return nil, nil
@@ -1186,16 +1070,6 @@ func compileProjectionColumn(col sql.ProjectionColumn, tableID schema.TableID, t
 		compiledCol.Name = col.OutputAlias
 	}
 	return compiledSQLProjectionColumn{Schema: compiledCol, Table: tableID, Alias: alias}, nil
-}
-
-func statementOrderByColumns(stmt sql.Statement) []sql.OrderByColumn {
-	if len(stmt.OrderByColumns) != 0 {
-		return stmt.OrderByColumns
-	}
-	if stmt.OrderBy != nil {
-		return []sql.OrderByColumn{*stmt.OrderBy}
-	}
-	return nil
 }
 
 func compileAggregateOrderBy(orderBy []sql.OrderByColumn, aggregate *compiledSQLAggregate, projectedTable string) ([]compiledSQLOrderBy, error) {
