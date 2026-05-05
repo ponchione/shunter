@@ -420,6 +420,88 @@ func TestEvalNoRowsSkipsCandidates(t *testing.T) {
 	}
 }
 
+func TestEvalJoinNoRowsFilterSkipsCandidates(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(7)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	join := Join{
+		Left:     1,
+		Right:    2,
+		LeftCol:  0,
+		RightCol: 0,
+		Filter:   NoRows{Table: 1},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 11,
+		Predicates: []Predicate{join},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if !mgr.indexes.TestOnlyIsEmpty() {
+		t.Fatalf("join with NoRows filter should not be placed in pruning indexes: %+v", mgr.indexes)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(7)}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "left",
+			Inserts:   []types.ProductValue{inserted},
+		},
+	}}
+	committed.addRow(1, 1, inserted)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[types.ConnectionID{1}]; len(got) != 0 {
+		t.Fatalf("join with NoRows filter produced fanout: %v", got)
+	}
+}
+
+func TestEvalCrossJoinNoRowsFilterSkipsCandidates(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64})
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(10)}},
+	})
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	pred := CrossJoin{
+		Left:   1,
+		Right:  2,
+		Filter: NoRows{Table: 1},
+	}
+	if _, err := mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 12,
+		Predicates: []Predicate{pred},
+	}, committed); err != nil {
+		t.Fatalf("RegisterSet = %v", err)
+	}
+	if !mgr.indexes.TestOnlyIsEmpty() {
+		t.Fatalf("cross join with NoRows filter should not be placed in pruning indexes: %+v", mgr.indexes)
+	}
+
+	inserted := types.ProductValue{types.NewUint64(1)}
+	cs := &store.Changeset{TxID: 1, Tables: map[schema.TableID]*store.TableChangeset{
+		1: {
+			TableID:   1,
+			TableName: "left",
+			Inserts:   []types.ProductValue{inserted},
+		},
+	}}
+	committed.addRow(1, 1, inserted)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, committed, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[types.ConnectionID{1}]; len(got) != 0 {
+		t.Fatalf("cross join with NoRows filter produced fanout: %v", got)
+	}
+}
+
 func TestEvalSelfEquiJoinSubscription(t *testing.T) {
 	// T: (id, u32). Sub: SELECT a.* FROM t AS a JOIN t AS b ON a.u32 = b.u32.
 	// Lowered to Join{Left: T, Right: T, LeftCol: 1, RightCol: 1, aliases 0/1}.

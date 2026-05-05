@@ -50,6 +50,56 @@ func TestPlaceNoRowsSkipsIndexes(t *testing.T) {
 	}
 }
 
+func TestPlaceAndWithNoRowsSkipsIndexes(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := And{
+		Left:  ColEq{Table: 1, Column: 0, Value: types.NewUint64(7)},
+		Right: NoRows{Table: 2},
+	}
+	h := hashN(12)
+	PlaceSubscription(idx, p, h)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("AND with NoRows should leave indexes empty: %+v", idx)
+	}
+}
+
+func TestPlaceJoinWithNoRowsFilterSkipsIndexes(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left:     1,
+		Right:    2,
+		LeftCol:  0,
+		RightCol: 0,
+		Filter:   NoRows{Table: 1},
+	}
+	h := hashN(13)
+	placeSubscriptionForResolver(idx, p, h, s)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("join with NoRows filter should leave indexes empty: %+v", idx)
+	}
+	removeSubscriptionForResolver(idx, p, h, s)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("join with NoRows filter removal should leave indexes empty: %+v", idx)
+	}
+}
+
+func TestPlaceCrossJoinWithNoRowsFilterSkipsIndexes(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := CrossJoin{
+		Left:   1,
+		Right:  2,
+		Filter: NoRows{Table: 1},
+	}
+	h := hashN(14)
+	PlaceSubscription(idx, p, h)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("cross join with NoRows filter should leave indexes empty: %+v", idx)
+	}
+}
+
 func TestPlaceColRangeGoesToRangeIndex(t *testing.T) {
 	idx := NewPruningIndexes()
 	p := ColRange{Table: 1, Column: 0, Lower: Bound{Value: types.NewUint64(1)}, Upper: Bound{Unbounded: true}}
@@ -314,6 +364,30 @@ func TestCollectCandidatesNoRowsSkipped(t *testing.T) {
 	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
 	if len(cands) != 0 {
 		t.Fatalf("NoRows candidates = %v, want empty", cands)
+	}
+}
+
+func TestCollectCandidatesJoinNoRowsFilterSkipped(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{0: types.KindUint64}, 0)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left:     1,
+		Right:    2,
+		LeftCol:  0,
+		RightCol: 0,
+		Filter:   NoRows{Table: 1},
+	}
+	placeSubscriptionForResolver(idx, p, hashN(1), s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(7)}},
+	})
+
+	rows := []types.ProductValue{{types.NewUint64(7)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 0 {
+		t.Fatalf("join NoRows filter candidates = %v, want empty", cands)
 	}
 }
 
