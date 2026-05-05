@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ponchione/shunter/store"
 	"github.com/ponchione/shunter/subscription"
 	"github.com/ponchione/shunter/types"
 )
@@ -115,7 +114,7 @@ func TestReducerContractsMatchSpec(t *testing.T) {
 }
 
 func TestSchedulerHandleMinimalContract(t *testing.T) {
-	var scheduler SchedulerHandle = stubScheduler{}
+	var scheduler SchedulerHandle = stubReducerScheduler{}
 	id, err := scheduler.Schedule("job", []byte("a"), time.Unix(10, 0))
 	if err != nil || id != 1 {
 		t.Fatalf("Schedule() = (%d, %v), want (1, nil)", id, err)
@@ -195,8 +194,8 @@ func TestEpic1CommandShapesMatchSpec(t *testing.T) {
 }
 
 func TestEpic1InterfacesAndErrorsExist(t *testing.T) {
-	var _ DurabilityHandle = stubDurability{}
-	var _ SubscriptionManager = stubSubscriptionManager{}
+	var _ DurabilityHandle = noopDurability{}
+	var _ SubscriptionManager = noopSubs{}
 
 	base := []error{
 		ErrReducerNotFound,
@@ -244,30 +243,3 @@ func (stubReducerScheduler) ScheduleRepeat(string, []byte, time.Duration) (types
 	return 2, nil
 }
 func (stubReducerScheduler) Cancel(types.ScheduleID) (bool, error) { return true, nil }
-
-type stubScheduler struct{}
-
-func (stubScheduler) Schedule(string, []byte, time.Time) (types.ScheduleID, error) { return 1, nil }
-func (stubScheduler) ScheduleRepeat(string, []byte, time.Duration) (types.ScheduleID, error) {
-	return 2, nil
-}
-func (stubScheduler) Cancel(types.ScheduleID) (bool, error) { return true, nil }
-
-type stubDurability struct{}
-
-func (stubDurability) EnqueueCommitted(types.TxID, *store.Changeset) {}
-func (stubDurability) WaitUntilDurable(types.TxID) <-chan types.TxID { return nil }
-func (stubDurability) FatalError() error                             { return nil }
-
-type stubSubscriptionManager struct{}
-
-func (stubSubscriptionManager) RegisterSet(subscription.SubscriptionSetRegisterRequest, store.CommittedReadView) (subscription.SubscriptionSetRegisterResult, error) {
-	return subscription.SubscriptionSetRegisterResult{}, nil
-}
-func (stubSubscriptionManager) UnregisterSet(types.ConnectionID, uint32, store.CommittedReadView) (subscription.SubscriptionSetUnregisterResult, error) {
-	return subscription.SubscriptionSetUnregisterResult{}, nil
-}
-func (stubSubscriptionManager) EvalAndBroadcast(types.TxID, *store.Changeset, store.CommittedReadView, subscription.PostCommitMeta) {
-}
-func (stubSubscriptionManager) DrainDroppedClients() []types.ConnectionID { return nil }
-func (stubSubscriptionManager) DisconnectClient(types.ConnectionID) error { return nil }
