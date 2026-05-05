@@ -302,25 +302,17 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 
 		// Tier 1: batched value-index lookup.
 		m.indexes.Value.ForEachTrackedColumn(tid, func(col ColID) {
-			distinct := st.distinct
-			for k := range distinct {
-				delete(distinct, k)
-			}
-			collectDistinct := func(rows []types.ProductValue) {
-				for _, row := range rows {
-					if int(col) >= len(row) {
-						continue
-					}
-					k := encodeValueKey(row[col])
-					if _, ok := distinct[k]; !ok {
-						distinct[k] = row[col]
-					}
-				}
-			}
-			collectDistinct(tc.Inserts)
-			collectDistinct(tc.Deletes)
-			for _, v := range distinct {
+			for _, v := range collectDistinctChangedValues(st.distinct, col, tc) {
 				m.indexes.Value.ForEachHash(tid, col, v, func(h QueryHash) {
+					cands[h] = struct{}{}
+				})
+			}
+		})
+
+		// Tier 1b: batched range-index lookup.
+		m.indexes.Range.ForEachTrackedColumn(tid, func(col ColID) {
+			for _, v := range collectDistinctChangedValues(st.distinct, col, tc) {
+				m.indexes.Range.ForEachHash(tid, col, v, func(h QueryHash) {
 					cands[h] = struct{}{}
 				})
 			}
@@ -367,6 +359,32 @@ func (m *Manager) collectCandidatesInto(cs *store.Changeset, view store.Committe
 		})
 	}
 	return cands
+}
+
+func collectDistinctChangedValues(distinct map[valueKey]Value, col ColID, tc *store.TableChangeset) map[valueKey]Value {
+	for k := range distinct {
+		delete(distinct, k)
+	}
+	collectDistinctRows(distinct, col, tc.Inserts)
+	collectDistinctRows(distinct, col, tc.Deletes)
+	return distinct
+}
+
+func collectDistinctRows(distinct map[valueKey]Value, col ColID, rows []types.ProductValue) {
+	forEachRowColumnValue(rows, col, func(v Value) {
+		k := encodeValueKey(v)
+		if _, ok := distinct[k]; !ok {
+			distinct[k] = v
+		}
+	})
+}
+
+func forEachRowColumnValue(rows []types.ProductValue, col ColID, fn func(Value)) {
+	for _, row := range rows {
+		if int(col) < len(row) {
+			fn(row[col])
+		}
+	}
 }
 
 // evalQuerySafe wraps evalQuery in a panic recovery so one broken

@@ -48,13 +48,16 @@ func TestPlaceNoRowsGoesToTableIndex(t *testing.T) {
 	}
 }
 
-func TestPlaceColRangeGoesToTableIndex(t *testing.T) {
+func TestPlaceColRangeGoesToRangeIndex(t *testing.T) {
 	idx := NewPruningIndexes()
 	p := ColRange{Table: 1, Column: 0, Lower: Bound{Value: types.NewUint64(1)}, Upper: Bound{Unbounded: true}}
 	h := hashN(1)
 	PlaceSubscription(idx, p, h)
-	if got := idx.Table.Lookup(1); len(got) != 1 {
-		t.Fatalf("TableIndex = %v, want 1", got)
+	if got := idx.Range.Lookup(1, 0, types.NewUint64(2)); len(got) != 1 || got[0] != h {
+		t.Fatalf("RangeIndex = %v, want [%v]", got, h)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex should be empty: %v", got)
 	}
 }
 
@@ -216,5 +219,55 @@ func TestCollectCandidatesValueMismatch(t *testing.T) {
 	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
 	if len(cands) != 0 {
 		t.Fatalf("unmatched value should produce 0 candidates: %v", cands)
+	}
+}
+
+func TestCollectCandidatesRangeMatch(t *testing.T) {
+	idx := NewPruningIndexes()
+	PlaceSubscription(idx, ColRange{Table: 1, Column: 0,
+		Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+		Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+	}, hashN(1))
+
+	rows := []types.ProductValue{{types.NewUint64(15)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
+	if len(cands) != 1 || cands[0] != hashN(1) {
+		t.Fatalf("range candidate = %v, want [%v]", cands, hashN(1))
+	}
+}
+
+func TestCollectCandidatesRangeMismatch(t *testing.T) {
+	idx := NewPruningIndexes()
+	PlaceSubscription(idx, ColRange{Table: 1, Column: 0,
+		Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+		Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+	}, hashN(1))
+
+	rows := []types.ProductValue{{types.NewUint64(25)}}
+	cands := CollectCandidatesForTable(idx, 1, rows, nil, nil)
+	if len(cands) != 0 {
+		t.Fatalf("unmatched range should produce 0 candidates: %v", cands)
+	}
+}
+
+func TestPlaceOrRangeBranchesUseRangeIndex(t *testing.T) {
+	idx := NewPruningIndexes()
+	p := Or{
+		Left: ColRange{Table: 1, Column: 0,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+		},
+		Right: ColRange{Table: 1, Column: 0,
+			Lower: Bound{Value: types.NewUint64(30), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(40), Inclusive: true},
+		},
+	}
+	PlaceSubscription(idx, p, hashN(1))
+
+	if got := idx.Range.Lookup(1, 0, types.NewUint64(35)); len(got) != 1 || got[0] != hashN(1) {
+		t.Fatalf("OR range branch candidate = %v, want [%v]", got, hashN(1))
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex should be empty for fully range-constrained OR: %v", got)
 	}
 }

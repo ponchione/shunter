@@ -8,6 +8,7 @@ import (
 // PruningIndexes composes the three pruning tiers (SPEC-004 §5).
 type PruningIndexes struct {
 	Value    *ValueIndex
+	Range    *RangeIndex
 	JoinEdge *JoinEdgeIndex
 	Table    *TableIndex
 }
@@ -16,6 +17,7 @@ type PruningIndexes struct {
 func NewPruningIndexes() *PruningIndexes {
 	return &PruningIndexes{
 		Value:    NewValueIndex(),
+		Range:    NewRangeIndex(),
 		JoinEdge: NewJoinEdgeIndex(),
 		Table:    NewTableIndex(),
 	}
@@ -29,6 +31,9 @@ func (p *PruningIndexes) TestOnlyIsEmpty() bool {
 		return true
 	}
 	if len(p.Value.args) != 0 || len(p.Value.cols) != 0 {
+		return false
+	}
+	if len(p.Range.ranges) != 0 || len(p.Range.cols) != 0 {
 		return false
 	}
 	if len(p.JoinEdge.edges) != 0 || len(p.JoinEdge.byTable) != 0 {
@@ -73,6 +78,13 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 			}
 			continue
 		}
+		colRanges := findColRanges(pred, t)
+		if len(colRanges) > 0 {
+			for _, cr := range colRanges {
+				mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
+			}
+			continue
+		}
 		if join != nil {
 			if placements := joinEdgesFor(pred, join, t, resolver); len(placements) > 0 {
 				for _, placement := range placements {
@@ -91,6 +103,14 @@ func mutateValuePlacement(idx *PruningIndexes, table TableID, col ColID, value V
 		return
 	}
 	idx.Value.Remove(table, col, value, hash)
+}
+
+func mutateRangePlacement(idx *PruningIndexes, table TableID, col ColID, lower, upper Bound, hash QueryHash, add bool) {
+	if add {
+		idx.Range.Add(table, col, lower, upper, hash)
+		return
+	}
+	idx.Range.Remove(table, col, lower, upper, hash)
 }
 
 func mutateJoinEdgePlacement(idx *PruningIndexes, edge JoinEdge, value Value, hash QueryHash, add bool) {
@@ -140,14 +160,20 @@ func collectCandidatesForTableInto(
 
 	// Tier 1: equality-indexed subscriptions.
 	idx.Value.ForEachTrackedColumn(table, func(col ColID) {
-		for _, row := range rows {
-			if int(col) >= len(row) {
-				continue
-			}
-			idx.Value.ForEachHash(table, col, row[col], func(h QueryHash) {
+		forEachRowColumnValue(rows, col, func(v Value) {
+			idx.Value.ForEachHash(table, col, v, func(h QueryHash) {
 				set[h] = struct{}{}
 			})
-		}
+		})
+	})
+
+	// Tier 1b: range-indexed subscriptions.
+	idx.Range.ForEachTrackedColumn(table, func(col ColID) {
+		forEachRowColumnValue(rows, col, func(v Value) {
+			idx.Range.ForEachHash(table, col, v, func(h QueryHash) {
+				set[h] = struct{}{}
+			})
+		})
 	})
 
 	// Tier 2: join edges where this table is the LHS side.
@@ -190,6 +216,57 @@ func collectCandidatesForTableInto(
 		out = append(out, h)
 	}
 	return out
+}
+
+// findColRanges returns ColRange predicates whose bounds cover every matching
+// row for table t. Range placement follows the same safety rule as equality
+// placement: AND may use any required child constraint; OR must constrain all
+// branches or fall back to a broader tier.
+func findColRanges(pred Predicate, t TableID) []ColRange {
+	out, ok := requiredColRanges(pred, t)
+	if !ok {
+		return nil
+	}
+	return out
+}
+
+func requiredColRanges(pred Predicate, t TableID) ([]ColRange, bool) {
+	switch p := pred.(type) {
+	case ColRange:
+		if p.Table == t && rangeHasBound(p) {
+			return []ColRange{p}, true
+		}
+		return nil, false
+	case And:
+		left, leftOK := requiredColRanges(p.Left, t)
+		right, rightOK := requiredColRanges(p.Right, t)
+		switch {
+		case leftOK && rightOK:
+			return append(left, right...), true
+		case leftOK:
+			return left, true
+		case rightOK:
+			return right, true
+		default:
+			return nil, false
+		}
+	case Or:
+		left, leftOK := requiredColRanges(p.Left, t)
+		right, rightOK := requiredColRanges(p.Right, t)
+		if !leftOK || !rightOK {
+			return nil, false
+		}
+		return append(left, right...), true
+	case Join:
+		if p.Filter != nil {
+			return requiredColRanges(p.Filter, t)
+		}
+	}
+	return nil, false
+}
+
+func rangeHasBound(p ColRange) bool {
+	return !p.Lower.Unbounded || !p.Upper.Unbounded
 }
 
 // findColEqs returns ColEq predicates whose values cover every matching row

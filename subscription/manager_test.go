@@ -1365,6 +1365,27 @@ func TestUnregisterLastCleansIndexes(t *testing.T) {
 	}
 }
 
+func TestUnregisterLastCleansRangeIndexes(t *testing.T) {
+	s := testSchema()
+	mgr := NewManager(s, s)
+	pred := ColRange{Table: 1, Column: 0,
+		Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+		Upper: Bound{Value: types.NewUint64(20), Inclusive: true},
+	}
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10, Predicates: []Predicate{pred},
+	}, nil)
+	if got := mgr.indexes.Range.Lookup(1, 0, types.NewUint64(15)); len(got) != 1 {
+		t.Fatalf("range pruning index missing before unregister: %v", got)
+	}
+	if _, err := mgr.UnregisterSet(types.ConnectionID{1}, 10, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := mgr.indexes.Range.Lookup(1, 0, types.NewUint64(15)); len(got) != 0 {
+		t.Fatalf("range pruning index not cleaned: %v", got)
+	}
+}
+
 func TestUnregisterLastCleansJoinEdgeIndexes(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64}, 0)

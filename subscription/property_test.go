@@ -435,10 +435,13 @@ func runRegistrationSymmetryIteration(t *testing.T, seed uint64) {
 	}
 }
 
-// pruningIndexesEmpty peeks into each tier's internal state. All three must
+// pruningIndexesEmpty peeks into each tier's internal state. All tiers must
 // contain zero entries for registration symmetry to hold.
 func pruningIndexesEmpty(idx *PruningIndexes) bool {
 	if len(idx.Value.args) != 0 || len(idx.Value.cols) != 0 {
+		return false
+	}
+	if len(idx.Range.ranges) != 0 || len(idx.Range.cols) != 0 {
 		return false
 	}
 	if len(idx.JoinEdge.edges) != 0 || len(idx.JoinEdge.byTable) != 0 {

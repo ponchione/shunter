@@ -1175,7 +1175,7 @@ func TestEvalPruningFallbackVsBaseline(t *testing.T) {
 	s := testSchema()
 	inbox := make(chan FanOutMessage, 1)
 	mgr := NewManager(s, s, WithFanOutInbox(inbox))
-	// ColRange subs land in Tier 3 (range predicates have no equality).
+	// ColRange subs land in the range pruning tier.
 	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
 		ConnID: types.ConnectionID{1}, QueryID: 10,
 		Predicates: []Predicate{ColRange{Table: 1, Column: 0,
@@ -1187,7 +1187,25 @@ func TestEvalPruningFallbackVsBaseline(t *testing.T) {
 	msg := <-inbox
 	u := msg.Fanout[types.ConnectionID{1}]
 	if len(u) != 1 || len(u[0].Inserts) != 1 {
-		t.Fatalf("Tier 3 range predicate missed: %v", u)
+		t.Fatalf("range predicate missed: %v", u)
+	}
+}
+
+func TestEvalRangePruningSkipsOutOfRangeChange(t *testing.T) {
+	s := testSchema()
+	inbox := make(chan FanOutMessage, 1)
+	mgr := NewManager(s, s, WithFanOutInbox(inbox))
+	_, _ = mgr.RegisterSet(SubscriptionSetRegisterRequest{
+		ConnID: types.ConnectionID{1}, QueryID: 10,
+		Predicates: []Predicate{ColRange{Table: 1, Column: 0,
+			Lower: Bound{Value: types.NewUint64(10), Inclusive: true},
+			Upper: Bound{Value: types.NewUint64(100), Inclusive: true}}},
+	}, nil)
+	cs := simpleChangeset(1, []types.ProductValue{{types.NewUint64(5), types.NewString("out")}}, nil)
+	mgr.EvalAndBroadcast(types.TxID(1), cs, nil, PostCommitMeta{})
+	msg := <-inbox
+	if got := msg.Fanout[types.ConnectionID{1}]; len(got) != 0 {
+		t.Fatalf("out-of-range change produced fanout: %v", got)
 	}
 }
 
