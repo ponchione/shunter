@@ -805,13 +805,16 @@ func (p *parser) parseAggregateColumnRef() (ColumnRef, error) {
 		return ColumnRef{}, p.unsupported("expected aggregate column name")
 	}
 	p.advance()
-	columnName := t.text
+	return p.parseColumnRefAfterIdentifier(t.text)
+}
+
+func (p *parser) parseColumnRefAfterIdentifier(columnName string) (ColumnRef, error) {
 	if p.peek().kind != tokDot {
 		return ColumnRef{Column: columnName}, nil
 	}
 	qualifier := columnName
 	p.advance()
-	t = p.peek()
+	t := p.peek()
 	if !isIdentifierToken(t) {
 		return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
 	}
@@ -1107,30 +1110,21 @@ func (p *parser) parseColumnRef(bindings relationBindings, firstTokenError strin
 		return ColumnRef{}, p.unsupported(fmt.Sprintf(firstTokenError, t.text))
 	}
 	p.advance()
-	columnName := t.text
-	tableName := bindings.defaultTable
-	alias := ""
-	if p.peek().kind == tokDot {
-		qualifier := columnName
-		p.advance()
-		t = p.peek()
-		if !isIdentifierToken(t) {
-			return ColumnRef{}, p.unsupported(fmt.Sprintf("expected column name after qualifier %q", qualifier))
-		}
-		tableName = resolveRelationQualifier(bindings, qualifier)
-		columnName = t.text
-		alias = qualifier
-		p.advance()
-		if p.peek().kind == tokDot {
-			return ColumnRef{}, p.unsupported("qualified column names not supported")
-		}
+	ref, err := p.parseColumnRefAfterIdentifier(t.text)
+	if err != nil {
+		return ColumnRef{}, err
+	}
+	if ref.Alias != "" {
+		ref.Table = resolveRelationQualifier(bindings, ref.Alias)
 	} else if bindings.requireQualify {
 		if allowUnqualifiedInJoin {
-			return ColumnRef{Column: columnName}, nil
+			return ref, nil
 		}
 		return ColumnRef{}, UnqualifiedNamesError{}
+	} else {
+		ref.Table = bindings.defaultTable
 	}
-	return ColumnRef{Table: tableName, Column: columnName, Alias: alias}, nil
+	return ref, nil
 }
 
 func resolveRelationQualifier(bindings relationBindings, qualifier string) string {
