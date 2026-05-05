@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash"
@@ -279,34 +280,22 @@ func ParseUUID(s string) (Value, error) {
 	if len(s) != 36 {
 		return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
 	}
+	if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+		return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
+	}
+	var compact [32]byte
 	j := 0
-	for i := 0; i < len(s); {
+	for i := range len(s) {
 		if i == 8 || i == 13 || i == 18 || i == 23 {
-			if s[i] != '-' {
-				return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
-			}
-			i++
 			continue
 		}
-		if i+1 >= len(s) {
+		if s[i] >= 'A' && s[i] <= 'F' {
 			return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
 		}
-		hi, ok := lowerHexValue(s[i])
-		if !ok {
-			return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
-		}
-		lo, ok := lowerHexValue(s[i+1])
-		if !ok {
-			return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
-		}
-		if j >= len(out) {
-			return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
-		}
-		out[j] = hi<<4 | lo
+		compact[j] = s[i]
 		j++
-		i += 2
 	}
-	if j != len(out) {
+	if _, err := hex.Decode(out[:], compact[:]); err != nil {
 		return Value{}, fmt.Errorf("shunter: %w: %q", ErrInvalidUUID, s)
 	}
 	return NewUUID(out), nil
@@ -398,16 +387,15 @@ func (v Value) AsUUID() [16]byte {
 func (v Value) UUIDString() string {
 	u := v.AsUUID()
 	var out [36]byte
-	j := 0
-	for i, b := range u {
-		if i == 4 || i == 6 || i == 8 || i == 10 {
-			out[j] = '-'
-			j++
-		}
-		out[j] = lowerHexDigits[b>>4]
-		out[j+1] = lowerHexDigits[b&0x0f]
-		j += 2
-	}
+	hex.Encode(out[0:8], u[0:4])
+	out[8] = '-'
+	hex.Encode(out[9:13], u[4:6])
+	out[13] = '-'
+	hex.Encode(out[14:18], u[6:8])
+	out[18] = '-'
+	hex.Encode(out[19:23], u[8:10])
+	out[23] = '-'
+	hex.Encode(out[24:36], u[10:16])
 	return string(out[:])
 }
 
@@ -734,18 +722,5 @@ func (v Value) payloadLen() uint32 {
 		return 16
 	default:
 		return 0
-	}
-}
-
-var lowerHexDigits = [...]byte{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'}
-
-func lowerHexValue(b byte) (byte, bool) {
-	switch {
-	case b >= '0' && b <= '9':
-		return b - '0', true
-	case b >= 'a' && b <= 'f':
-		return b - 'a' + 10, true
-	default:
-		return 0, false
 	}
 }
