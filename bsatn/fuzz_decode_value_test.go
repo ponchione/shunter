@@ -29,8 +29,8 @@ func decodeValueFuzzSeeds(tb testing.TB) [][]byte {
 		types.NewBool(true),
 		types.NewInt64(-42),
 		types.NewUint64(42),
-		mustFuzzFloat32(tb, 1.5),
-		mustFuzzFloat64(tb, -2.25),
+		mustFloat32Value(tb, 1.5),
+		mustFloat64Value(tb, -2.25),
 		types.NewString("alice"),
 		types.NewBytes([]byte{0xde, 0xad, 0xbe, 0xef}),
 		types.NewArrayString([]string{"north", "", "south"}),
@@ -41,7 +41,7 @@ func decodeValueFuzzSeeds(tb testing.TB) [][]byte {
 		types.NewTimestamp(1_739_201_130_000_000),
 		types.NewDuration(12_345_678),
 		types.NewUUID([16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}),
-		mustFuzzJSON(tb, `{"b":2,"a":1}`),
+		mustJSONValue(tb, `{"b":2,"a":1}`),
 	} {
 		encoded := mustAppendFuzzValue(tb, v)
 		seeds = append(seeds, encoded)
@@ -105,24 +105,6 @@ func checkDecodeValueFuzzInput(data []byte) error {
 		return fmt.Errorf("canonical encoding is unstable: first=%x second=%x original=%s", appended, appendedAgain, fuzzBSATNInputLabel(data))
 	}
 	return nil
-}
-
-func mustFuzzFloat32(tb testing.TB, x float32) types.Value {
-	tb.Helper()
-	v, err := types.NewFloat32(x)
-	if err != nil {
-		tb.Fatalf("NewFloat32 seed: %v", err)
-	}
-	return v
-}
-
-func mustFuzzFloat64(tb testing.TB, x float64) types.Value {
-	tb.Helper()
-	v, err := types.NewFloat64(x)
-	if err != nil {
-		tb.Fatalf("NewFloat64 seed: %v", err)
-	}
-	return v
 }
 
 func mustAppendFuzzValue(tb testing.TB, v types.Value) []byte {

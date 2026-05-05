@@ -12,33 +12,6 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func mustF32(t *testing.T, v float32) types.Value {
-	t.Helper()
-	val, err := types.NewFloat32(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return val
-}
-
-func mustF64(t *testing.T, v float64) types.Value {
-	t.Helper()
-	val, err := types.NewFloat64(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return val
-}
-
-func mustJSON(t *testing.T, raw string) types.Value {
-	t.Helper()
-	val, err := types.NewJSON([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return val
-}
-
 func TestValueRoundTrip(t *testing.T) {
 	cases := []types.Value{
 		types.NewBool(true),
@@ -51,8 +24,8 @@ func TestValueRoundTrip(t *testing.T) {
 		types.NewUint32(4294967295),
 		types.NewInt64(math.MinInt64),
 		types.NewUint64(math.MaxUint64),
-		mustF32(t, 3.14),
-		mustF64(t, 2.718281828),
+		mustFloat32Value(t, 3.14),
+		mustFloat64Value(t, 2.718281828),
 		types.NewString("hello"),
 		types.NewString(""),
 		types.NewBytes([]byte{0xDE, 0xAD}),
@@ -87,7 +60,7 @@ func TestValueRoundTrip(t *testing.T) {
 		types.NewArrayString([]string{"alpha"}),
 		types.NewArrayString([]string{"alpha", "beta", "γ"}),
 		types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
-		mustJSON(t, `{"b":2,"a":1}`),
+		mustJSONValue(t, `{"b":2,"a":1}`),
 	}
 	for _, v := range cases {
 		var buf bytes.Buffer
@@ -132,7 +105,7 @@ func TestProductValueRoundTrip(t *testing.T) {
 		types.NewInt64(-100),
 		types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
 		types.NewDuration(90_000_000),
-		mustJSON(t, `{"tier":"gold"}`),
+		mustJSONValue(t, `{"tier":"gold"}`),
 	}
 
 	var buf bytes.Buffer
@@ -160,7 +133,7 @@ func TestNullableProductValueRoundTripAndEncoding(t *testing.T) {
 	row := types.ProductValue{
 		types.NewUint64(7),
 		types.NewNull(types.KindString),
-		mustJSON(t, `{"b":2,"a":1}`),
+		mustJSONValue(t, `{"b":2,"a":1}`),
 	}
 	encoded, err := AppendProductValueForSchema(nil, row, ts)
 	if err != nil {
@@ -192,7 +165,7 @@ func TestAppendProductValueMatchesWriterEncoding(t *testing.T) {
 		types.NewString("alice"),
 		types.NewBytes([]byte{1, 2, 3}),
 		types.NewArrayString([]string{"red", "blue"}),
-		mustJSON(t, `{"b":2,"a":1}`),
+		mustJSONValue(t, `{"b":2,"a":1}`),
 	}
 	var buf bytes.Buffer
 	if err := EncodeProductValue(&buf, pv); err != nil {
@@ -214,7 +187,7 @@ func TestEncodeValueDetectsShortWrites(t *testing.T) {
 		types.NewBytes([]byte{1, 2, 3}),
 		types.NewArrayString([]string{"red", "blue"}),
 		types.NewUUID([16]byte{1, 2, 3}),
-		mustJSON(t, `{"a":1}`),
+		mustJSONValue(t, `{"a":1}`),
 	}
 	for _, v := range cases {
 		w := shortWriter{max: 1}
@@ -474,7 +447,7 @@ func TestEncodeArrayStringLittleEndianLayout(t *testing.T) {
 }
 
 func TestEncodeJSONLittleEndianLayout(t *testing.T) {
-	v := mustJSON(t, `{"b":2,"a":1}`)
+	v := mustJSONValue(t, `{"b":2,"a":1}`)
 	var buf bytes.Buffer
 	if err := EncodeValue(&buf, v); err != nil {
 		t.Fatalf("encode: %v", err)

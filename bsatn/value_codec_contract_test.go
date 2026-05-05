@@ -13,33 +13,6 @@ import (
 	"github.com/ponchione/shunter/types"
 )
 
-func mustValueF32(t *testing.T, v float32) types.Value {
-	t.Helper()
-	out, err := types.NewFloat32(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-func mustValueF64(t *testing.T, v float64) types.Value {
-	t.Helper()
-	out, err := types.NewFloat64(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-func mustValueJSON(t *testing.T, raw string) types.Value {
-	t.Helper()
-	out, err := types.NewJSON([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
 func TestValueEncodeDecodeRoundTripAllKinds(t *testing.T) {
 	large := strings.Repeat("a", 70*1024)
 	cases := []types.Value{
@@ -52,12 +25,12 @@ func TestValueEncodeDecodeRoundTripAllKinds(t *testing.T) {
 		types.NewUint32(0x89ABCDEF),
 		types.NewInt64(-0x102030405060708),
 		types.NewUint64(0x0102030405060708),
-		mustValueF32(t, math.Float32frombits(0x80000000)),
-		mustValueF64(t, math.Float64frombits(0x8000000000000000)),
+		mustFloat32Value(t, math.Float32frombits(0x80000000)),
+		mustFloat64Value(t, math.Float64frombits(0x8000000000000000)),
 		types.NewString(large),
 		types.NewBytes([]byte{1, 2, 3, 4}),
 		types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}),
-		mustValueJSON(t, `{"b":2,"a":1}`),
+		mustJSONValue(t, `{"b":2,"a":1}`),
 	}
 	for _, v := range cases {
 		var buf bytes.Buffer
@@ -78,8 +51,8 @@ func TestValueEncodeDecodeRoundTripAllKinds(t *testing.T) {
 }
 
 func TestValueEncodingTagsAndLittleEndianPayloads(t *testing.T) {
-	f32 := mustValueF32(t, 1.5)
-	f64 := mustValueF64(t, -3.25)
+	f32 := mustFloat32Value(t, 1.5)
+	f64 := mustFloat64Value(t, -3.25)
 	cases := []struct {
 		name string
 		v    types.Value
@@ -110,7 +83,7 @@ func TestValueEncodingTagsAndLittleEndianPayloads(t *testing.T) {
 		{"bytes", types.NewBytes([]byte{0xde, 0xad}), []byte{TagBytes, 0x02, 0x00, 0x00, 0x00, 0xde, 0xad}},
 		{"uuid", types.NewUUID([16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}), []byte{TagUUID, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}},
 		{"duration", types.NewDuration(0x0102030405060708), []byte{TagDuration, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01}},
-		{"json", mustValueJSON(t, `{"b":2,"a":1}`), []byte{TagJSON, 0x0d, 0x00, 0x00, 0x00, '{', '"', 'a', '"', ':', '1', ',', '"', 'b', '"', ':', '2', '}'}},
+		{"json", mustJSONValue(t, `{"b":2,"a":1}`), []byte{TagJSON, 0x0d, 0x00, 0x00, 0x00, '{', '"', 'a', '"', ':', '1', ',', '"', 'b', '"', ':', '2', '}'}},
 	}
 	for _, tc := range cases {
 		var buf bytes.Buffer
