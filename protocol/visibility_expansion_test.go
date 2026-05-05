@@ -416,6 +416,66 @@ func TestVisibilityExpansionFilteredNonProjectedJoinTableDoesNotLeak(t *testing.
 	})
 }
 
+func TestVisibilityExpansionMultiWayJoinFiltersEveryRelation(t *testing.T) {
+	alice := visibilityIdentity(0x24)
+	bob := visibilityIdentity(0x25)
+	conn := testConnDirect(nil)
+	conn.AllowAllPermissions = false
+	conn.Identity = alice
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
+	}{
+		"visible": {
+			id: 1,
+			schema: &schema.TableSchema{
+				ID:         1,
+				Name:       "visible",
+				ReadPolicy: schema.ReadPolicy{Access: schema.TableAccessPublic},
+				Columns: []schema.ColumnSchema{
+					{Index: 0, Name: "id", Type: schema.KindUint64},
+					{Index: 1, Name: "label", Type: schema.KindString},
+				},
+			},
+		},
+		"secret": {
+			id: 2,
+			schema: &schema.TableSchema{
+				ID:         2,
+				Name:       "secret",
+				ReadPolicy: schema.ReadPolicy{Access: schema.TableAccessPublic},
+				Columns: []schema.ColumnSchema{
+					{Index: 0, Name: "id", Type: schema.KindUint64},
+					{Index: 1, Name: "visible_id", Type: schema.KindUint64},
+					{Index: 2, Name: "owner", Type: schema.KindString},
+				},
+			},
+		},
+	}}
+
+	handleOneOffQueryWithVisibility(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte("multi-join-visible"),
+		QueryString: "SELECT copy.* FROM visible base JOIN secret sec ON base.id = sec.visible_id JOIN visible copy ON sec.visible_id = copy.id",
+	}, &mockStateAccess{snap: &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint64(1), types.NewString("bob-secret")},
+			{types.NewUint64(2), types.NewString("alice-secret")},
+		},
+		2: {
+			{types.NewUint64(10), types.NewUint64(1), types.NewString(bob.Hex())},
+			{types.NewUint64(11), types.NewUint64(2), types.NewString(alice.Hex())},
+		},
+	}}}, sl, []VisibilityFilter{
+		{SQL: "SELECT * FROM secret WHERE owner = :sender", ReturnTableID: 2, UsesCallerIdentity: true},
+	})
+
+	visibleTS := sl.tables["visible"].schema
+	rows := decodeRows(t, firstTableRows(drainOneOff(t, conn)), visibleTS)
+	assertProductRowsEqual(t, rows, []types.ProductValue{
+		{types.NewUint64(2), types.NewString("alice-secret")},
+	})
+}
+
 func TestVisibilityExpansionAggregateLimitAndOffsetUseVisibleRows(t *testing.T) {
 	alice := visibilityIdentity(0x16)
 	bob := visibilityIdentity(0x17)

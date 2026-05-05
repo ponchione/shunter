@@ -183,6 +183,41 @@ func TestTypeScriptGeneratorExportsJoinWhereColumnComparisonDeclaredQuerySQL(t *
 	assertContains(t, ts, `return runDeclaredQuery("matching_messages");`)
 }
 
+func TestTypeScriptGeneratorExportsMultiJoinDeclaredQuerySQL(t *testing.T) {
+	contract := contractFixture()
+	contract.Schema.Tables = append(contract.Schema.Tables,
+		schema.TableExport{
+			Name: "s",
+			Columns: []schema.ColumnExport{
+				{Name: "id", Type: "uint64"},
+				{Name: "u32", Type: "uint64"},
+			},
+		},
+		schema.TableExport{
+			Name: "r",
+			Columns: []schema.ColumnExport{
+				{Name: "id", Type: "uint64"},
+				{Name: "u32", Type: "uint64"},
+			},
+		},
+	)
+	contract.Queries = append(contract.Queries, shunter.QueryDescription{
+		Name: "multi_join_messages",
+		SQL:  "SELECT r.id FROM messages JOIN s ON messages.id = s.u32 JOIN r ON s.u32 = r.u32",
+	})
+
+	out, err := Generate(contract, Options{Language: LanguageTypeScript})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	ts := string(out)
+
+	assertContains(t, ts, `multiJoinMessages: "multi_join_messages",`)
+	assertContains(t, ts, `multiJoinMessages: "SELECT r.id FROM messages JOIN s ON messages.id = s.u32 JOIN r ON s.u32 = r.u32",`)
+	assertContains(t, ts, `export function queryMultiJoinMessages(runDeclaredQuery: DeclaredQueryRunner): Promise<Uint8Array> {`)
+	assertContains(t, ts, `return runDeclaredQuery("multi_join_messages");`)
+}
+
 func TestGeneratorRejectsUnsupportedLanguage(t *testing.T) {
 	_, err := Generate(contractFixture(), Options{Language: "go"})
 	if err == nil {

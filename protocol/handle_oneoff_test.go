@@ -3547,47 +3547,49 @@ func TestHandleOneOffQuery_AliasedSelfCrossJoinEmptyTable(t *testing.T) {
 	}
 }
 
-// TestHandleOneOffQuery_MultiWayJoinRejected pins the reference-matched
-// rejection of three-way join shapes at the one-off admission boundary.
-// Client receives OneOffQueryResult with Status=1 and a non-empty error.
-// Reference subscription runtime bails with
-// "Invalid number of tables in subscription: {N}" at
-// reference/SpacetimeDB/crates/subscription/src/lib.rs:251.
-func TestHandleOneOffQuery_MultiWayJoinRejected(t *testing.T) {
-	b := schema.NewBuilder().SchemaVersion(1)
-	b.TableDef(schema.TableDefinition{
-		Name:    "t",
-		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
-	})
-	b.TableDef(schema.TableDefinition{
-		Name:    "s",
-		Columns: []schema.ColumnDefinition{{Name: "id", Type: schema.KindUint32, PrimaryKey: true}, {Name: "u32", Type: schema.KindUint32}},
-	})
-	eng, err := b.Build(schema.EngineOptions{})
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
-	cases := []struct {
-		name        string
-		queryString string
+func TestHandleOneOffQuery_MultiWayJoinReturnsRows(t *testing.T) {
+	conn := testConnDirect(nil)
+	tTS := &schema.TableSchema{ID: 1, Name: "t", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "u32", Type: schema.KindUint32},
+	}}
+	sTS := &schema.TableSchema{ID: 2, Name: "s", Columns: []schema.ColumnSchema{
+		{Index: 0, Name: "id", Type: schema.KindUint32},
+		{Index: 1, Name: "u32", Type: schema.KindUint32},
+	}}
+	sl := &mockSchemaLookup{tables: map[string]struct {
+		id     schema.TableID
+		schema *schema.TableSchema
 	}{
-		{"cross_chain", "SELECT t.* FROM t JOIN s JOIN s AS r"},
-		{"on_chain", "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"},
+		"t": {id: 1, schema: tTS},
+		"s": {id: 2, schema: sTS},
+	}}
+	snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{
+		1: {
+			{types.NewUint32(1), types.NewUint32(7)},
+			{types.NewUint32(2), types.NewUint32(8)},
+		},
+		2: {
+			{types.NewUint32(10), types.NewUint32(7)},
+			{types.NewUint32(20), types.NewUint32(8)},
+			{types.NewUint32(30), types.NewUint32(7)},
+		},
+	}}
+	stateAccess := &mockStateAccess{snap: snap}
+	msg := &OneOffQueryMsg{
+		MessageID:   []byte{0x60},
+		QueryString: "SELECT r.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32 WHERE r.id >= 20 AND s.id <= 20 ORDER BY r.id",
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			conn := testConnDirect(nil)
-			sl := registrySchemaLookup{reg: eng.Registry()}
-			snap := &mockSnapshot{rows: map[schema.TableID][]types.ProductValue{}}
-			stateAccess := &mockStateAccess{snap: snap}
-			msg := &OneOffQueryMsg{MessageID: []byte{0x60}, QueryString: c.queryString}
-			handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
-			result := drainOneOff(t, conn)
-			if result.Error == nil || *result.Error == "" {
-				t.Fatal("expected non-empty error message")
-			}
-		})
+	handleOneOffQuery(context.Background(), conn, msg, stateAccess, sl)
+	result := drainOneOff(t, conn)
+	if result.Error != nil {
+		t.Fatalf("Error = %q, want nil (success)", *result.Error)
 	}
+	pvs := decodeRows(t, firstTableRows(result), sTS)
+	assertProductRowsEqual(t, pvs, []types.ProductValue{
+		{types.NewUint32(20), types.NewUint32(8)},
+		{types.NewUint32(30), types.NewUint32(7)},
+	})
 }
 
 func TestHandleOneOffQuery_CrossJoinProjection(t *testing.T) {

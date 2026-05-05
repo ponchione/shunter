@@ -496,6 +496,7 @@ func rapidStatementsEquivalentIgnoringFilterOrder(a, b Statement) bool {
 		!reflect.DeepEqual(a.ProjectionColumns, b.ProjectionColumns) ||
 		!reflect.DeepEqual(a.Aggregate, b.Aggregate) ||
 		!reflect.DeepEqual(a.Join, b.Join) ||
+		!reflect.DeepEqual(a.Joins, b.Joins) ||
 		rapidComparisonLeafCount(a.Predicate) != rapidComparisonLeafCount(b.Predicate) {
 		return false
 	}

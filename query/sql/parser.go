@@ -179,6 +179,7 @@ type Statement struct {
 	OrderBy           *OrderByColumn
 	OrderByColumns    []OrderByColumn
 	Join              *JoinClause
+	Joins             []JoinClause
 	Predicate         Predicate
 	Filters           []Filter
 	Limit             *uint64
@@ -576,31 +577,34 @@ func (p *parser) parseStatement() (Statement, error) {
 	}
 	stmt := Statement{Table: tableName, TableAlias: leftQualifiers[0], ProjectedTable: tableName, ProjectedAlias: projectionQualifier}
 	bindings := relationBindings{defaultTable: tableName, byQualifier: singleQualifierMap(tableName, leftQualifiers)}
-	var onFilter Predicate
-	if isKeywordToken(p.peek(), "INNER") {
-		p.advance()
-		if !isKeywordToken(p.peek(), "JOIN") {
-			return Statement{}, p.unsupported("expected JOIN after INNER")
+	for {
+		if isKeywordToken(p.peek(), "INNER") {
+			p.advance()
+			if !isKeywordToken(p.peek(), "JOIN") {
+				return Statement{}, p.unsupported("expected JOIN after INNER")
+			}
+		} else if isKeywordToken(p.peek(), "CROSS") {
+			p.advance()
+			if !isKeywordToken(p.peek(), "JOIN") {
+				return Statement{}, p.unsupported("expected JOIN after CROSS")
+			}
+		} else if isUnsupportedJoinStartToken(p.peek()) {
+			return Statement{}, UnsupportedJoinTypeError{}
+		} else if !isKeywordToken(p.peek(), "JOIN") {
+			break
 		}
-	} else if isKeywordToken(p.peek(), "CROSS") {
-		p.advance()
-		if !isKeywordToken(p.peek(), "JOIN") {
-			return Statement{}, p.unsupported("expected JOIN after CROSS")
-		}
-	} else if isUnsupportedJoinStartToken(p.peek()) {
-		return Statement{}, UnsupportedJoinTypeError{}
-	}
-	if isKeywordToken(p.peek(), "JOIN") {
-		join, rightQualifiers, onPred, err := p.parseJoinClause(tableName, leftQualifiers)
+		join, rightQualifiers, err := p.parseJoinClause(bindings, tableName, leftQualifiers[0])
 		if err != nil {
 			return Statement{}, err
 		}
-		onFilter = onPred
-		stmt.Join = join
-		bindings = relationBindings{
-			requireQualify: true,
-			byQualifier:    joinQualifierMap(tableName, leftQualifiers, join.RightTable, rightQualifiers),
+		if stmt.Join == nil {
+			stmt.Join = join
 		}
+		stmt.Joins = append(stmt.Joins, *join)
+		bindings.requireQualify = true
+		addRelationQualifiers(bindings.byQualifier, join.RightTable, rightQualifiers)
+	}
+	if len(stmt.Joins) != 0 {
 		if projectionQualifier != "" {
 			if projectedTable, ok := resolveQualifier(projectionQualifier, bindings.byQualifier); ok {
 				stmt.ProjectedTable = projectedTable
@@ -609,23 +613,6 @@ func (p *parser) parseStatement() (Statement, error) {
 				stmt.ProjectedAliasUnknown = true
 			}
 			stmt.ProjectedAlias = projectionQualifier
-		}
-		// Reference-informed rejection: subscription runtime at
-		// reference/SpacetimeDB/crates/subscription/src/lib.rs:251 bails with
-		// "Invalid number of tables in subscription: {N}" for N >= 3. Shunter
-		// rejects the chain shape at the parser boundary so the rejection is
-		// intentional and pinned, not an incidental "unexpected token" miss.
-		if msg, ok := p.trailingJoinKeywordError("INNER"); ok {
-			return Statement{}, p.unsupported(msg)
-		}
-		if msg, ok := p.trailingJoinKeywordError("CROSS"); ok {
-			return Statement{}, p.unsupported(msg)
-		}
-		if isUnsupportedJoinStartToken(p.peek()) {
-			return Statement{}, UnsupportedJoinTypeError{}
-		}
-		if isKeywordToken(p.peek(), "JOIN") {
-			return Statement{}, p.unsupported("multi-way join not supported: subscriptions are limited to at most two relations")
 		}
 	} else if projectionQualifier != "" && !matchesQualifier(projectionQualifier, leftQualifiers) {
 		stmt.ProjectedAliasUnknown = true
@@ -656,14 +643,6 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		stmt.Predicate = pred
 		stmt.Filters = filters
-	}
-	if onFilter != nil {
-		if stmt.Predicate != nil {
-			stmt.Predicate = AndPredicate{Left: onFilter, Right: stmt.Predicate}
-		} else {
-			stmt.Predicate = onFilter
-		}
-		stmt.Filters, _ = flattenAndFilters(stmt.Predicate)
 	}
 	orderByColumns, err := p.parseOrderBy(bindings, len(stmt.ProjectionColumns) != 0 || stmt.Aggregate != nil)
 	if err != nil {
@@ -696,16 +675,6 @@ func (p *parser) parseStatement() (Statement, error) {
 		return Statement{}, p.unsupported(fmt.Sprintf("unexpected token %q", p.peek().text))
 	}
 	return stmt, nil
-}
-
-func (p *parser) trailingJoinKeywordError(keyword string) (string, bool) {
-	if !isKeywordToken(p.peek(), keyword) {
-		return "", false
-	}
-	if p.pos+1 < len(p.toks) && isKeywordToken(p.toks[p.pos+1], "JOIN") {
-		return "multi-way join not supported: subscriptions are limited to at most two relations", true
-	}
-	return "expected JOIN after " + keyword, true
 }
 
 func (p *parser) parseProjection() (string, []ProjectionColumn, *AggregateProjection, error) {
@@ -969,75 +938,87 @@ func (p *parser) parseAlias() (string, error) {
 	return t.text, nil
 }
 
-func (p *parser) parseJoinClause(leftTable string, leftQualifiers []string) (*JoinClause, []string, Predicate, error) {
+func (p *parser) parseJoinClause(bindings relationBindings, fallbackLeftTable string, fallbackLeftAlias string) (*JoinClause, []string, error) {
 	if err := p.expectKeyword("JOIN"); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	rightTok := p.peek()
 	if !isIdentifierToken(rightTok) {
-		return nil, nil, nil, p.unsupported("expected joined table name")
+		return nil, nil, p.unsupported("expected joined table name")
 	}
 	p.advance()
 	rightTable := rightTok.text
 	rightQualifiers, err := p.parseRelationQualifiers(rightTable)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	leftAlias := leftQualifiers[0]
 	rightAlias := rightQualifiers[0]
-	if leftAlias == rightAlias {
+	if qualifierCollides(bindings.byQualifier, rightQualifiers) {
 		// Defer duplicate-alias rejection so compile-time table lookup ordering
 		// can report a missing left table first.
 		p.consumeUntilStatementEnd()
 		return &JoinClause{
-			LeftTable:      leftTable,
+			LeftTable:      fallbackLeftTable,
 			RightTable:     rightTable,
-			LeftAlias:      leftAlias,
+			LeftAlias:      fallbackLeftAlias,
 			RightAlias:     rightAlias,
 			HasOn:          false,
 			AliasCollision: true,
-		}, rightQualifiers, nil, nil
+		}, rightQualifiers, nil
 	}
 	if !isKeywordToken(p.peek(), "ON") {
-		return &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil, nil
+		return &JoinClause{LeftTable: fallbackLeftTable, RightTable: rightTable, LeftAlias: fallbackLeftAlias, RightAlias: rightAlias, HasOn: false}, rightQualifiers, nil
 	}
 	if err := p.expectKeyword("ON"); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	lookup := joinQualifierMap(leftTable, leftQualifiers, rightTable, rightQualifiers)
+	lookup := copyQualifierMap(bindings.byQualifier)
+	addRelationQualifiers(lookup, rightTable, rightQualifiers)
 	leftOn, err := p.parseQualifiedColumnRef(lookup)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	op, err := p.parseOperator()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	if op != "=" {
-		return nil, nil, nil, UnsupportedJoinTypeError{}
+		return nil, nil, UnsupportedJoinTypeError{}
 	}
 	rightOn, err := p.parseQualifiedColumnRef(lookup)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	_, leftKnown := resolveQualifier(leftOn.Alias, lookup)
-	_, rightKnown := resolveQualifier(rightOn.Alias, lookup)
+	leftExisting := qualifierExists(bindings.byQualifier, leftOn.Alias)
+	rightExisting := qualifierExists(bindings.byQualifier, rightOn.Alias)
+	leftNew := matchesQualifier(leftOn.Alias, rightQualifiers)
+	rightNew := matchesQualifier(rightOn.Alias, rightQualifiers)
+	leftKnown := leftExisting || leftNew
+	rightKnown := rightExisting || rightNew
 	if leftKnown && rightKnown {
 		if leftOn.Alias == rightOn.Alias {
-			return nil, nil, nil, p.unsupported("JOIN ON must compare columns from different relations")
+			return nil, nil, p.unsupported("JOIN ON must compare columns from different relations")
 		}
-		if leftOn.Alias == rightAlias && rightOn.Alias == leftAlias {
+		if leftNew && rightExisting {
 			leftOn, rightOn = rightOn, leftOn
+			leftExisting, rightExisting = rightExisting, leftExisting
+			leftNew, rightNew = rightNew, leftNew
 		}
-		if leftOn.Alias != leftAlias || rightOn.Alias != rightAlias {
-			return nil, nil, nil, p.unsupported("JOIN ON must compare left relation to right relation")
+		if !leftExisting || !rightNew || leftNew || rightExisting {
+			return nil, nil, p.unsupported("JOIN ON must compare an existing relation to the joined relation")
 		}
+	}
+	leftTable := fallbackLeftTable
+	leftAlias := fallbackLeftAlias
+	if leftExisting {
+		leftTable, _ = resolveQualifier(leftOn.Alias, bindings.byQualifier)
+		leftAlias = leftOn.Alias
 	}
 	jc := &JoinClause{LeftTable: leftTable, RightTable: rightTable, LeftAlias: leftAlias, RightAlias: rightAlias, HasOn: true, LeftOn: leftOn, RightOn: rightOn}
 	if isKeywordToken(p.peek(), "AND") || isKeywordToken(p.peek(), "OR") {
-		return nil, nil, nil, UnsupportedJoinTypeError{}
+		return nil, nil, UnsupportedJoinTypeError{}
 	}
-	return jc, rightQualifiers, nil, nil
+	return jc, rightQualifiers, nil
 }
 
 func (p *parser) parseQualifiedColumnRef(lookup map[string]string) (ColumnRef, error) {
@@ -1512,12 +1493,32 @@ func singleQualifierMap(tableName string, qualifiers []string) map[string]string
 	return out
 }
 
-func joinQualifierMap(leftTable string, leftQualifiers []string, rightTable string, rightQualifiers []string) map[string]string {
-	out := singleQualifierMap(leftTable, leftQualifiers)
-	for _, qualifier := range rightQualifiers {
-		out[qualifier] = rightTable
+func copyQualifierMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for qualifier, table := range in {
+		out[qualifier] = table
 	}
 	return out
+}
+
+func addRelationQualifiers(lookup map[string]string, tableName string, qualifiers []string) {
+	for _, qualifier := range qualifiers {
+		lookup[qualifier] = tableName
+	}
+}
+
+func qualifierCollides(lookup map[string]string, qualifiers []string) bool {
+	for _, qualifier := range qualifiers {
+		if qualifierExists(lookup, qualifier) {
+			return true
+		}
+	}
+	return false
+}
+
+func qualifierExists(lookup map[string]string, qualifier string) bool {
+	_, ok := lookup[qualifier]
+	return ok
 }
 
 func resolveQualifier(qualifier string, lookup map[string]string) (string, bool) {

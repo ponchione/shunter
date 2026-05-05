@@ -1248,55 +1248,33 @@ func TestParseRejectsJoinWhereColumnEqualityRequiresQualifiedColumns(t *testing.
 	}
 }
 
-// TestParseRejectsMultiWayJoinChain pins the reference-matched rejection of
-// three-way join shapes. The reference type checker accepts this shape
-// (reference/SpacetimeDB/crates/expr/src/check.rs tests at line 459) but the
-// reference subscription runtime rejects it at
-// reference/SpacetimeDB/crates/subscription/src/lib.rs:251 with
-// "Invalid number of tables in subscription: 3". Shunter rejects the chain
-// shape at the parser boundary. WHERE-based column-vs-column forms are a
-// separate widening; the chain itself is the rejection surface.
-func TestParseRejectsMultiWayJoinChain(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-	}{
-		{"cross_chain", "SELECT t.* FROM t JOIN s JOIN s AS r"},
-		{"on_chain", "SELECT t.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32"},
-		{"inner_keyword", "SELECT t.* FROM t INNER JOIN s INNER JOIN s AS r"},
+func TestParseMultiWayJoinChain(t *testing.T) {
+	stmt, err := Parse("SELECT r.* FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32 WHERE r.u32 > 1")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			_, err := Parse(c.in)
-			if err == nil {
-				t.Fatalf("Parse(%q) = nil error, want multi-way rejection", c.in)
-			}
-			if !errors.Is(err, ErrUnsupportedSQL) {
-				t.Fatalf("Parse(%q) err = %v, want ErrUnsupportedSQL", c.in, err)
-			}
-			if !strings.Contains(err.Error(), "multi-way join") {
-				t.Fatalf("Parse(%q) err = %q, want mention of multi-way join", c.in, err.Error())
-			}
-		})
+	if len(stmt.Joins) != 2 {
+		t.Fatalf("Joins len = %d, want 2", len(stmt.Joins))
+	}
+	if stmt.Join == nil || stmt.Join.RightAlias != "s" {
+		t.Fatalf("Join = %+v, want first join to s", stmt.Join)
+	}
+	second := stmt.Joins[1]
+	if second.LeftAlias != "s" || second.RightAlias != "r" || !second.HasOn {
+		t.Fatalf("second join = %+v, want s -> r ON join", second)
+	}
+	if stmt.ProjectedTable != "s" || stmt.ProjectedAlias != "r" {
+		t.Fatalf("ProjectedTable/Alias = %q/%q, want s/r", stmt.ProjectedTable, stmt.ProjectedAlias)
 	}
 }
 
-// TestParseRejectsMultiWayJoinOnForwardReference pins the reference-rejected
-// shape `SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r` where the
-// second JOIN's alias `r` is referenced by the first JOIN's ON clause before
-// it is brought into scope. Reference rejects this at type-check
-// (reference/SpacetimeDB/crates/expr/src/check.rs line 527, test
-// "Alias r is not in scope when it is referenced"). Shunter's parser rejects
-// it via the existing left-to-right qualifier-resolution walk inside
-// parseJoinClause; this test pins that behavior so future refactors cannot
-// silently loosen it.
-func TestParseRejectsMultiWayJoinOnForwardReference(t *testing.T) {
-	_, err := Parse("SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r")
-	if err == nil {
-		t.Fatal("expected rejection for ON clause referencing not-yet-in-scope alias")
+func TestParseMultiWayJoinForwardReferenceReachesCompileBoundary(t *testing.T) {
+	stmt, err := Parse("SELECT t.* FROM t JOIN s ON t.u32 = r.u32 JOIN s AS r")
+	if err != nil {
+		t.Fatalf("Parse error = %v, want parser to preserve unresolved qualifier for compile-time error", err)
 	}
-	if !errors.Is(err, ErrUnsupportedSQL) {
-		t.Fatalf("err = %v, want ErrUnsupportedSQL", err)
+	if len(stmt.Joins) != 2 || stmt.Joins[0].LeftOn.Alias != "t" || stmt.Joins[0].RightOn.Alias != "r" {
+		t.Fatalf("Statement = %+v, want first ON to preserve unresolved alias r", stmt)
 	}
 }
 
@@ -2417,7 +2395,6 @@ func TestParseRejectsUnsupported(t *testing.T) {
 		{"aggregate_column_with_group_by_alias", "SELECT COUNT(u32) AS n FROM t GROUP BY u32"},
 		{"aggregate_column_with_having", "SELECT COUNT(u32) AS n FROM t HAVING n > 0"},
 		{"join_unqualified_count_column", "SELECT COUNT(id) AS n FROM t JOIN s ON t.id = s.id"},
-		{"aggregate_multi_way_join", "SELECT COUNT(*) AS n FROM t JOIN s ON t.id = s.id JOIN r ON s.id = r.id"},
 		{"trailing_garbage", "SELECT * FROM users foo bar"},
 		{"missing_from", "SELECT *"},
 		{"missing_table", "SELECT * FROM"},

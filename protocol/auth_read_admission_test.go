@@ -270,6 +270,21 @@ func TestAuthReadAdmissionPrivateJoinPredicateDoesNotLeakShape(t *testing.T) {
 	requireOneOffAuthError(t, conn, "no such table: `secret`. If the table exists, it may be marked private.")
 }
 
+func TestAuthReadAdmissionPrivateMultiWayJoinTableRejected(t *testing.T) {
+	conn := strictReadAdmissionConn()
+	sl := authReadJoinLookup(
+		schema.ReadPolicy{Access: schema.TableAccessPublic},
+		schema.ReadPolicy{Access: schema.TableAccessPrivate},
+	)
+
+	handleOneOffQuery(context.Background(), conn, &OneOffQueryMsg{
+		MessageID:   []byte("private-multi-join"),
+		QueryString: "SELECT visible.* FROM visible JOIN secret ON visible.id = secret.visible_id JOIN visible AS v2 ON secret.visible_id = v2.id",
+	}, authReadState(nil), sl)
+
+	requireOneOffAuthError(t, conn, "no such table: `secret`. If the table exists, it may be marked private.")
+}
+
 func TestAuthReadAdmissionSubscribeMultiUnauthorizedQueryRegistersNone(t *testing.T) {
 	conn := strictReadAdmissionConn()
 	executor := &mockSubExecutor{}

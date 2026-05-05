@@ -105,6 +105,9 @@ func ExecuteCompiledSQLQuery(ctx context.Context, compiled CompiledSQLQuery, sta
 	}
 
 	pred := query.Predicate
+	if query.MultiJoin != nil {
+		return executeCompiledSQLMultiJoin(ctx, query, stateAccess)
+	}
 	if err := subscription.ValidateQueryPredicate(pred, sl); err != nil {
 		return SQLQueryResult{}, err
 	}

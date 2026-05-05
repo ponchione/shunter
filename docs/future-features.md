@@ -77,7 +77,6 @@ Direction:
 
 Likely feature slices:
 
-- multi-join support
 - nullable-value semantics for aggregates once nullable types exist
 - broader index-aware planning for joins, multi-column ordering, and live paths
 - live-view expansion for currently query-only shapes after delta semantics are

@@ -287,6 +287,39 @@ func TestDeclaredQueryJoinWhereColumnComparisonExecutes(t *testing.T) {
 	}
 }
 
+func TestDeclaredQueryMultiWayJoinAggregateExecutes(t *testing.T) {
+	rt := buildStartedDeclaredReadRuntime(t, NewModule("multi_join_reads").
+		SchemaVersion(1).
+		TableDef(joinReadTableDef("t")).
+		TableDef(joinReadTableDef("s")).
+		Reducer("seed_join_rows", seedJoinRowsReducer).
+		Query(QueryDeclaration{
+			Name:        "matching_tuple_count",
+			SQL:         "SELECT COUNT(*) AS n FROM t JOIN s ON t.u32 = s.u32 JOIN s AS r ON s.u32 = r.u32 WHERE r.id <> 99",
+			Permissions: PermissionMetadata{Required: []string{"joins:read"}},
+		}))
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "seed_join_rows", nil)
+	if err != nil {
+		t.Fatalf("seed reducer admission: %v", err)
+	}
+	if res.Status != StatusCommitted {
+		t.Fatalf("seed reducer status = %v, err = %v, want committed", res.Status, res.Error)
+	}
+
+	result, err := rt.CallQuery(context.Background(), "matching_tuple_count", WithDeclaredReadPermissions("joins:read"))
+	if err != nil {
+		t.Fatalf("CallQuery: %v", err)
+	}
+	if result.Name != "matching_tuple_count" || result.TableName != "t" {
+		t.Fatalf("result identity = (%q, %q), want matching_tuple_count/t", result.Name, result.TableName)
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0].AsUint64() != 5 {
+		t.Fatalf("rows = %#v, want count 5", result.Rows)
+	}
+}
+
 func TestDeclaredViewRejectsOrderBy(t *testing.T) {
 	_, err := Build(validChatModule().
 		View(ViewDeclaration{

@@ -16,6 +16,7 @@ type compiledSQLQuery struct {
 	TableName          string
 	Predicate          subscription.Predicate
 	UsesCallerIdentity bool
+	MultiJoin          *compiledSQLMultiJoin
 	ProjectionColumns  []compiledSQLProjectionColumn
 	Aggregate          *compiledSQLAggregate
 	OrderBy            []compiledSQLOrderBy
@@ -37,8 +38,56 @@ type compiledSQLAggregate struct {
 }
 
 type compiledSQLOrderBy struct {
-	Column compiledSQLProjectionColumn
-	Desc   bool
+	Column   compiledSQLProjectionColumn
+	Desc     bool
+	Relation int
+}
+
+type compiledSQLMultiJoin struct {
+	Relations         []compiledSQLMultiJoinRelation
+	Conditions        []compiledSQLMultiJoinCondition
+	Filter            *compiledSQLMultiPredicate
+	ProjectedRelation int
+}
+
+type compiledSQLMultiJoinRelation struct {
+	Table      schema.TableID
+	Alias      uint8
+	Qualifier  string
+	Schema     *schema.TableSchema
+	Visibility subscription.Predicate
+}
+
+type compiledSQLMultiJoinCondition struct {
+	Left  compiledSQLMultiColumnRef
+	Right compiledSQLMultiColumnRef
+}
+
+type compiledSQLMultiColumnRef struct {
+	Column   compiledSQLColumnRef
+	Relation int
+}
+
+type compiledSQLMultiPredicateKind uint8
+
+const (
+	compiledSQLMultiPredicateTrue compiledSQLMultiPredicateKind = iota
+	compiledSQLMultiPredicateFalse
+	compiledSQLMultiPredicateComparison
+	compiledSQLMultiPredicateColumnComparison
+	compiledSQLMultiPredicateAnd
+	compiledSQLMultiPredicateOr
+)
+
+type compiledSQLMultiPredicate struct {
+	Kind        compiledSQLMultiPredicateKind
+	Left        *compiledSQLMultiPredicate
+	Right       *compiledSQLMultiPredicate
+	Column      compiledSQLMultiColumnRef
+	Op          string
+	Value       types.Value
+	LeftColumn  compiledSQLMultiColumnRef
+	RightColumn compiledSQLMultiColumnRef
 }
 
 // VisibilityFilter is validated row-level visibility metadata supplied by the
@@ -83,6 +132,9 @@ func (q CompiledSQLQuery) UsesCallerIdentity() bool {
 
 // ReferencedTables returns the table IDs referenced by the compiled predicate.
 func (q CompiledSQLQuery) ReferencedTables() []schema.TableID {
+	if q.query.MultiJoin != nil {
+		return q.query.MultiJoin.referencedTables()
+	}
 	if q.query.Predicate == nil {
 		return nil
 	}
@@ -115,6 +167,9 @@ func copyCompiledSQLQuery(query compiledSQLQuery) compiledSQLQuery {
 			aggregate.Argument = &argument
 		}
 		out.Aggregate = &aggregate
+	}
+	if query.MultiJoin != nil {
+		out.MultiJoin = copyCompiledSQLMultiJoin(query.MultiJoin)
 	}
 	if len(query.OrderBy) > 0 {
 		out.OrderBy = make([]compiledSQLOrderBy, len(query.OrderBy))
@@ -251,6 +306,13 @@ func ApplyVisibilityFilters(compiled CompiledSQLQuery, sl SchemaLookup, caller *
 	}
 	query := copyCompiledSQLQuery(compiled.query)
 	if allowAll || len(filters) == 0 || query.Predicate == nil {
+		if query.MultiJoin != nil && !allowAll && len(filters) != 0 {
+			usesCallerIdentity, err := applyMultiJoinVisibility(query.MultiJoin, sl, caller, filters)
+			if err != nil {
+				return CompiledSQLQuery{}, err
+			}
+			query.UsesCallerIdentity = query.UsesCallerIdentity || usesCallerIdentity
+		}
 		return newCompiledSQLQuery(query), nil
 	}
 	expanded, usesCallerIdentity, err := expandPredicateVisibility(query.Predicate, sl, caller, filters)
@@ -400,6 +462,12 @@ func compileSQLQueryString(qs string, sl SchemaLookup, caller *types.Identity, a
 	// Keep the original predicate tree so folding does not hide type errors.
 	normalizedPredicate := plan.NormalizedPredicate
 	usesCallerIdentity := plan.UsesCallerIdentity
+	if len(stmt.Joins) > 1 {
+		if !allowProjection {
+			return compiledSQLQuery{}, fmt.Errorf("multi-way joins are only supported for one-off queries and executable declared queries")
+		}
+		return compileMultiJoinSQLQuery(stmt, stmtOrderBy, normalizedPredicate, usesCallerIdentity, qs, sl, caller)
+	}
 	if stmt.Join != nil {
 		leftID, leftTS, ok := lookupSQLTableExact(sl, stmt.Join.LeftTable)
 		if !ok {
