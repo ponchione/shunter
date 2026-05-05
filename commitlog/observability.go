@@ -53,19 +53,12 @@ func traceDurabilityBatch(observer Observer, txID uint64, result string, err err
 
 func recordSnapshotDuration(observer SnapshotObserver, result string, duration time.Duration) {
 	if observer != nil {
-		observer.RecordSnapshotDuration(okErrorResult(result), duration)
+		observer.RecordSnapshotDuration(result, duration)
 	}
 }
 
 func resultFromErr(err error) string {
 	if err == nil {
-		return "ok"
-	}
-	return "error"
-}
-
-func okErrorResult(result string) string {
-	if result == "ok" {
 		return "ok"
 	}
 	return "error"
