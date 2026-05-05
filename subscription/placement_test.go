@@ -564,6 +564,123 @@ func TestPlaceAndRemoveJoinMixedOrSymmetric(t *testing.T) {
 	}
 }
 
+func TestPlaceJoinWithCrossSideOrFilterAddsSplitBranchIndexes(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindString,
+	}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindUint64,
+	}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left: ColEq{Table: 1, Column: 1, Value: types.NewString("active")},
+			Right: ColRange{Table: 2, Column: 2,
+				Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+
+	leftRangeEdge := JoinEdge{LHSTable: 1, RHSTable: 2, LHSJoinCol: 0, RHSJoinCol: 1, RHSFilterCol: 2}
+	rightValueEdge := JoinEdge{LHSTable: 2, RHSTable: 1, LHSJoinCol: 1, RHSJoinCol: 0, RHSFilterCol: 1}
+	if got := idx.Value.Lookup(1, 1, types.NewString("active")); len(got) != 1 || got[0] != h {
+		t.Fatalf("left branch value candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinRangeEdge.Lookup(leftRangeEdge, types.NewUint64(60)); len(got) != 1 || got[0] != h {
+		t.Fatalf("left-driven range edge = %v, want [%v]", got, h)
+	}
+	if got := idx.Range.Lookup(2, 2, types.NewUint64(60)); len(got) != 1 || got[0] != h {
+		t.Fatalf("right branch range candidate = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinEdge.Lookup(rightValueEdge, types.NewString("active")); len(got) != 1 || got[0] != h {
+		t.Fatalf("right-driven value edge = %v, want [%v]", got, h)
+	}
+	if got := idx.JoinEdge.exists[leftRangeEdge]; len(got) != 0 {
+		t.Fatalf("left broad existence candidates = %v, want none", got)
+	}
+	if got := idx.JoinEdge.exists[rightValueEdge]; len(got) != 0 {
+		t.Fatalf("right broad existence candidates = %v, want none", got)
+	}
+	if got := idx.Table.Lookup(1); len(got) != 0 {
+		t.Fatalf("TableIndex for left should be empty for split OR: %v", got)
+	}
+	if got := idx.Table.Lookup(2); len(got) != 0 {
+		t.Fatalf("TableIndex for right should be empty for split OR: %v", got)
+	}
+}
+
+func TestCollectCandidatesJoinCrossSideOrPrunesExistenceOnlyMismatch(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindString,
+	}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindUint64,
+	}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left: ColEq{Table: 1, Column: 1, Value: types.NewString("active")},
+			Right: ColRange{Table: 2, Column: 2,
+				Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+	placeSubscriptionForResolver(idx, p, hashN(1), s)
+	committed := buildMockCommitted(s, map[TableID][]types.ProductValue{
+		2: {{types.NewUint64(100), types.NewUint64(7), types.NewUint64(40)}},
+	})
+
+	rows := []types.ProductValue{{types.NewUint64(7), types.NewString("inactive")}}
+	cands := CollectCandidatesForTable(idx, 1, rows, committed, s)
+	if len(cands) != 0 {
+		t.Fatalf("cross-side OR mismatch candidates = %v, want empty", cands)
+	}
+}
+
+func TestPlaceAndRemoveJoinCrossSideOrSymmetric(t *testing.T) {
+	s := newFakeSchema()
+	s.addTable(1, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindString,
+	}, 0)
+	s.addTable(2, map[ColID]types.ValueKind{
+		0: types.KindUint64,
+		1: types.KindUint64,
+		2: types.KindUint64,
+	}, 1)
+	idx := NewPruningIndexes()
+	p := Join{
+		Left: 1, Right: 2, LeftCol: 0, RightCol: 1,
+		Filter: Or{
+			Left: ColEq{Table: 1, Column: 1, Value: types.NewString("active")},
+			Right: ColRange{Table: 2, Column: 2,
+				Lower: Bound{Value: types.NewUint64(50), Inclusive: false},
+				Upper: Bound{Unbounded: true},
+			},
+		},
+	}
+	h := hashN(1)
+	placeSubscriptionForResolver(idx, p, h, s)
+	removeSubscriptionForResolver(idx, p, h, s)
+	if !idx.TestOnlyIsEmpty() {
+		t.Fatalf("indexes not empty after cross-side OR remove: %+v", idx)
+	}
+}
+
 func TestCollectCandidatesJoinMixedOrRangeEdgePrunesMismatch(t *testing.T) {
 	s := newFakeSchema()
 	s.addTable(1, map[ColID]types.ValueKind{0: types.KindUint64})

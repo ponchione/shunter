@@ -125,6 +125,21 @@ func mutateSubscriptionPlacement(idx *PruningIndexes, pred Predicate, hash Query
 				}
 				continue
 			}
+			if placements, ok := splitJoinOrPlacementsFor(pred, join, t, resolver); ok {
+				for _, ce := range placements.eqs {
+					mutateValuePlacement(idx, t, ce.Column, ce.Value, hash, add)
+				}
+				for _, cr := range placements.ranges {
+					mutateRangePlacement(idx, t, cr.Column, cr.Lower, cr.Upper, hash, add)
+				}
+				for _, placement := range placements.edges {
+					mutateJoinEdgePlacement(idx, placement.edge, placement.value, hash, add)
+				}
+				for _, placement := range placements.rangeEdges {
+					mutateJoinRangeEdgePlacement(idx, placement.edge, placement.lower, placement.upper, hash, add)
+				}
+				continue
+			}
 			if placements := joinExistenceEdgesFor(join, t, resolver); len(placements) > 0 {
 				for _, placement := range placements {
 					mutateJoinExistencePlacement(idx, placement.edge, hash, add)
@@ -447,6 +462,24 @@ type joinExistenceEdgePlacement struct {
 	edge JoinEdge
 }
 
+type splitJoinOrPlacements struct {
+	eqs        []ColEq
+	ranges     []ColRange
+	edges      []joinEdgePlacement
+	rangeEdges []joinRangeEdgePlacement
+}
+
+func (p splitJoinOrPlacements) hasAny() bool {
+	return len(p.eqs) > 0 || len(p.ranges) > 0 || len(p.edges) > 0 || len(p.rangeEdges) > 0
+}
+
+func (p *splitJoinOrPlacements) append(other splitJoinOrPlacements) {
+	p.eqs = append(p.eqs, other.eqs...)
+	p.ranges = append(p.ranges, other.ranges...)
+	p.edges = append(p.edges, other.edges...)
+	p.rangeEdges = append(p.rangeEdges, other.rangeEdges...)
+}
+
 // joinEdgesFor computes the JoinEdge/filter-value placements for Tier 2 for the
 // given table. Returns nil when no filterable edge exists for this table
 // (callers then fall through to Tier 3).
@@ -594,6 +627,135 @@ func mixedJoinEdgesFor(
 		})
 	}
 	return valuePlacements, rangePlacements
+}
+
+// splitJoinOrPlacementsFor covers OR filters whose branches constrain
+// different join sides. Existing pure paths handle same-side ORs; this path
+// avoids falling back to broad join-existence candidates for shapes like
+// `left.flag = true OR right.score > 50`.
+func splitJoinOrPlacementsFor(pred Predicate, join *Join, t TableID, resolver IndexResolver) (splitJoinOrPlacements, bool) {
+	var other TableID
+	var myJoinCol, otherJoinCol ColID
+	switch t {
+	case join.Left:
+		other = join.Right
+		myJoinCol = join.LeftCol
+		otherJoinCol = join.RightCol
+	case join.Right:
+		other = join.Left
+		myJoinCol = join.RightCol
+		otherJoinCol = join.LeftCol
+	default:
+		return splitJoinOrPlacements{}, false
+	}
+	if pred == nil {
+		return splitJoinOrPlacements{}, false
+	}
+	if j, ok := pred.(Join); ok {
+		return splitJoinOrPlacementsFor(j.Filter, join, t, resolver)
+	}
+	placements, ok := splitJoinOrPredicatePlacements(pred, t, other, myJoinCol, otherJoinCol, resolver)
+	if !ok || !placements.hasAny() || !splitJoinOrNeedsBothSides(placements) {
+		return splitJoinOrPlacements{}, false
+	}
+	return placements, true
+}
+
+func splitJoinOrPredicatePlacements(
+	pred Predicate,
+	t, other TableID,
+	myJoinCol, otherJoinCol ColID,
+	resolver IndexResolver,
+) (splitJoinOrPlacements, bool) {
+	switch p := pred.(type) {
+	case Or:
+		left, leftOK := splitJoinOrPredicatePlacements(p.Left, t, other, myJoinCol, otherJoinCol, resolver)
+		right, rightOK := splitJoinOrPredicatePlacements(p.Right, t, other, myJoinCol, otherJoinCol, resolver)
+		if !leftOK || !rightOK {
+			return splitJoinOrPlacements{}, false
+		}
+		left.append(right)
+		return left, true
+	default:
+		return splitJoinOrBranchPlacements(pred, t, other, myJoinCol, otherJoinCol, resolver)
+	}
+}
+
+func splitJoinOrBranchPlacements(
+	pred Predicate,
+	t, other TableID,
+	myJoinCol, otherJoinCol ColID,
+	resolver IndexResolver,
+) (splitJoinOrPlacements, bool) {
+	switch p := pred.(type) {
+	case ColEq:
+		switch p.Table {
+		case t:
+			return splitJoinOrPlacements{eqs: []ColEq{p}}, true
+		case other:
+			if resolver != nil {
+				if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
+					return splitJoinOrPlacements{}, false
+				}
+			}
+			return splitJoinOrPlacements{edges: []joinEdgePlacement{{
+				edge: JoinEdge{
+					LHSTable:     t,
+					RHSTable:     other,
+					LHSJoinCol:   myJoinCol,
+					RHSJoinCol:   otherJoinCol,
+					RHSFilterCol: p.Column,
+				},
+				value: p.Value,
+			}}}, true
+		default:
+			return splitJoinOrPlacements{}, false
+		}
+	case ColRange:
+		if !rangeHasBound(p) {
+			return splitJoinOrPlacements{}, false
+		}
+		switch p.Table {
+		case t:
+			return splitJoinOrPlacements{ranges: []ColRange{p}}, true
+		case other:
+			if resolver != nil {
+				if _, ok := resolver.IndexIDForColumn(other, otherJoinCol); !ok {
+					return splitJoinOrPlacements{}, false
+				}
+			}
+			return splitJoinOrPlacements{rangeEdges: []joinRangeEdgePlacement{{
+				edge: JoinEdge{
+					LHSTable:     t,
+					RHSTable:     other,
+					LHSJoinCol:   myJoinCol,
+					RHSJoinCol:   otherJoinCol,
+					RHSFilterCol: p.Column,
+				},
+				lower: p.Lower,
+				upper: p.Upper,
+			}}}, true
+		default:
+			return splitJoinOrPlacements{}, false
+		}
+	case And:
+		var out splitJoinOrPlacements
+		if left, ok := splitJoinOrBranchPlacements(p.Left, t, other, myJoinCol, otherJoinCol, resolver); ok {
+			out.append(left)
+		}
+		if right, ok := splitJoinOrBranchPlacements(p.Right, t, other, myJoinCol, otherJoinCol, resolver); ok {
+			out.append(right)
+		}
+		return out, out.hasAny()
+	default:
+		return splitJoinOrPlacements{}, false
+	}
+}
+
+func splitJoinOrNeedsBothSides(p splitJoinOrPlacements) bool {
+	hasCurrentSide := len(p.eqs) > 0 || len(p.ranges) > 0
+	hasOtherSide := len(p.edges) > 0 || len(p.rangeEdges) > 0
+	return hasCurrentSide && hasOtherSide
 }
 
 // joinExistenceEdgesFor computes join-existence placements for Tier 2 for the

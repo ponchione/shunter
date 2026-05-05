@@ -83,6 +83,8 @@ Likely feature slices:
 
 Completed slices:
 
+- cross-side live join OR filters split into value/range branch indexes and
+  join-edge branch indexes instead of broad join-existence candidates
 - mixed equality/range OR filters avoid table fallback in live candidate
   pruning, including opposite-side live join edges when the join side is indexed
 - unfiltered live equi-join candidate pruning uses indexed join-existence
