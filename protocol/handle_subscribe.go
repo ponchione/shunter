@@ -1066,46 +1066,39 @@ func compileSQLPredicateForSingleRelation(pred sql.Predicate, rel relationSchema
 }
 
 func compileProjectionColumns(projectedTable string, tableAlias string, columns []sql.ProjectionColumn, tableID schema.TableID, ts *schema.TableSchema) ([]compiledSQLProjectionColumn, error) {
-	if len(columns) == 0 {
-		return nil, nil
-	}
-	resolved := make([]compiledSQLProjectionColumn, 0, len(columns))
-	seen := make(map[string]struct{}, len(columns))
-	for _, col := range columns {
-		if err := checkDuplicateProjectionName(col, seen); err != nil {
-			return nil, err
-		}
+	return compileProjectionColumnList(columns, func(col sql.ProjectionColumn) (compiledSQLProjectionColumn, error) {
 		if col.SourceQualifier != "" && col.SourceQualifier != tableAlias {
-			return nil, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
+			return compiledSQLProjectionColumn{}, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
 		}
-		compiledCol, err := compileProjectionColumn(col, tableID, ts, 0)
-		if err != nil {
-			return nil, err
-		}
-		resolved = append(resolved, compiledCol)
-	}
-	return resolved, nil
+		return compileProjectionColumn(col, tableID, ts, 0)
+	})
 }
 
 func compileJoinProjectionColumns(columns []sql.ProjectionColumn, relations map[string]relationSchema, aliasTag func(string) uint8) ([]compiledSQLProjectionColumn, error) {
-	if len(columns) == 0 {
-		return nil, nil
-	}
-	resolved := make([]compiledSQLProjectionColumn, 0, len(columns))
-	seen := make(map[string]struct{}, len(columns))
-	for _, col := range columns {
-		if err := checkDuplicateProjectionName(col, seen); err != nil {
-			return nil, err
-		}
+	return compileProjectionColumnList(columns, func(col sql.ProjectionColumn) (compiledSQLProjectionColumn, error) {
 		qualifier := col.SourceQualifier
 		if qualifier == "" {
 			qualifier = col.Table
 		}
 		rel, ok := relations[qualifier]
 		if !ok {
-			return nil, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
+			return compiledSQLProjectionColumn{}, sql.UnresolvedVarError{Name: projectionQualifierName(col)}
 		}
-		compiledCol, err := compileProjectionColumn(col, rel.id, rel.ts, aliasTag(col.SourceQualifier))
+		return compileProjectionColumn(col, rel.id, rel.ts, aliasTag(col.SourceQualifier))
+	})
+}
+
+func compileProjectionColumnList(columns []sql.ProjectionColumn, compile func(sql.ProjectionColumn) (compiledSQLProjectionColumn, error)) ([]compiledSQLProjectionColumn, error) {
+	if len(columns) == 0 {
+		return nil, nil
+	}
+	resolved := make([]compiledSQLProjectionColumn, 0, len(columns))
+	seen := make(map[string]struct{}, len(columns))
+	for _, col := range columns {
+		if err := checkDuplicateProjectionName(col, seen); err != nil {
+			return nil, err
+		}
+		compiledCol, err := compile(col)
 		if err != nil {
 			return nil, err
 		}
