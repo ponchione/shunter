@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"runtime"
 	"sync"
 	"testing"
@@ -259,6 +260,52 @@ func TestValidateJWTPermissionClaims(t *testing.T) {
 	}
 	if got := claims.Permissions; len(got) != 1 || got[0] != "messages:admin" {
 		t.Fatalf("single-string Permissions = %#v, want admin tag", got)
+	}
+}
+
+func TestValidateJWTLooseStringListClaims(t *testing.T) {
+	cfg := &JWTConfig{SigningKey: testKey}
+	tests := []struct {
+		name            string
+		audience        any
+		permissions     any
+		wantAudience    []string
+		wantPermissions []string
+	}{
+		{
+			name:            "strings",
+			audience:        "",
+			permissions:     "",
+			wantAudience:    []string{""},
+			wantPermissions: nil,
+		},
+		{
+			name:            "lists",
+			audience:        []any{"", "shunter-prod", 42},
+			permissions:     []any{"", "messages:send", 17},
+			wantAudience:    []string{"", "shunter-prod"},
+			wantPermissions: []string{"messages:send"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := mintHS256(t, jwt.MapClaims{
+				"sub":         "alice",
+				"iss":         "issuer",
+				"aud":         tt.audience,
+				"permissions": tt.permissions,
+			})
+			claims, err := ValidateJWT(s, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(claims.Audience, tt.wantAudience) {
+				t.Fatalf("Audience = %#v, want %#v", claims.Audience, tt.wantAudience)
+			}
+			if !reflect.DeepEqual(claims.Permissions, tt.wantPermissions) {
+				t.Fatalf("Permissions = %#v, want %#v", claims.Permissions, tt.wantPermissions)
+			}
+		})
 	}
 }
 

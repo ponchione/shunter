@@ -129,10 +129,10 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 		}
 		c.HexIdentity = hex
 	}
-	c.Permissions = extractStringClaim(mc["permissions"])
+	c.Permissions = extractStringListClaim(mc["permissions"], false)
 
 	// Audience: normalize to []string and optionally enforce policy.
-	c.Audience = extractAudience(mc["aud"])
+	c.Audience = extractStringListClaim(mc["aud"], true)
 	if len(config.Audiences) > 0 {
 		if !audienceAllowed(c.Audience, config.Audiences) {
 			return nil, fmt.Errorf("%w: got %v, allowed %v", ErrJWTAudienceMismatch, c.Audience, config.Audiences)
@@ -142,40 +142,22 @@ func ValidateJWT(tokenString string, config *JWTConfig) (*Claims, error) {
 	return c, nil
 }
 
-// extractAudience normalizes the JSON-loose `aud` shape (string, or
-// []any with string elements, or missing) into []string.
-func extractAudience(raw any) []string {
+// extractStringListClaim normalizes JSON-loose claim shapes: string,
+// []any with string elements, or missing. allowEmpty preserves the
+// JWT audience behavior while permissions continue to drop empty tags.
+func extractStringListClaim(raw any, allowEmpty bool) []string {
 	switch v := raw.(type) {
 	case nil:
 		return nil
 	case string:
-		return []string{v}
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func extractStringClaim(raw any) []string {
-	switch v := raw.(type) {
-	case nil:
-		return nil
-	case string:
-		if v == "" {
+		if v == "" && !allowEmpty {
 			return nil
 		}
 		return []string{v}
 	case []any:
 		out := make([]string, 0, len(v))
 		for _, item := range v {
-			if s, ok := item.(string); ok && s != "" {
+			if s, ok := item.(string); ok && (allowEmpty || s != "") {
 				out = append(out, s)
 			}
 		}
