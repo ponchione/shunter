@@ -687,21 +687,7 @@ func (d *reducerDBAdapter) ScanTable(tableID uint32) iter.Seq2[types.RowID, type
 	if err := d.checkOpenLocked(); err != nil {
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
-	type entry struct {
-		id  types.RowID
-		row types.ProductValue
-	}
-	var rows []entry
-	for id, row := range d.tx.ScanTable(schema.TableID(tableID)) {
-		rows = append(rows, entry{id: id, row: row})
-	}
-	return func(yield func(types.RowID, types.ProductValue) bool) {
-		for _, row := range rows {
-			if !yield(row.id, row.row) {
-				return
-			}
-		}
-	}
+	return snapshotReducerRows(d.tx.ScanTable(schema.TableID(tableID)))
 }
 
 func (d *reducerDBAdapter) SeekIndex(tableID uint32, indexID uint32, key ...types.Value) iter.Seq2[types.RowID, types.ProductValue] {
@@ -710,21 +696,7 @@ func (d *reducerDBAdapter) SeekIndex(tableID uint32, indexID uint32, key ...type
 	if err := d.checkOpenLocked(); err != nil {
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
-	type entry struct {
-		id  types.RowID
-		row types.ProductValue
-	}
-	var rows []entry
-	for id, row := range d.tx.SeekIndex(schema.TableID(tableID), schema.IndexID(indexID), key...) {
-		rows = append(rows, entry{id: id, row: row})
-	}
-	return func(yield func(types.RowID, types.ProductValue) bool) {
-		for _, row := range rows {
-			if !yield(row.id, row.row) {
-				return
-			}
-		}
-	}
+	return snapshotReducerRows(d.tx.SeekIndex(schema.TableID(tableID), schema.IndexID(indexID), key...))
 }
 
 func (d *reducerDBAdapter) SeekIndexRange(tableID uint32, indexID uint32, lower, upper types.IndexBound) iter.Seq2[types.RowID, types.ProductValue] {
@@ -733,16 +705,20 @@ func (d *reducerDBAdapter) SeekIndexRange(tableID uint32, indexID uint32, lower,
 	if err := d.checkOpenLocked(); err != nil {
 		return func(func(types.RowID, types.ProductValue) bool) {}
 	}
+	return snapshotReducerRows(d.tx.SeekIndexRange(schema.TableID(tableID), schema.IndexID(indexID), lower, upper))
+}
+
+func snapshotReducerRows(rows iter.Seq2[types.RowID, types.ProductValue]) iter.Seq2[types.RowID, types.ProductValue] {
 	type entry struct {
 		id  types.RowID
 		row types.ProductValue
 	}
-	var rows []entry
-	for id, row := range d.tx.SeekIndexRange(schema.TableID(tableID), schema.IndexID(indexID), lower, upper) {
-		rows = append(rows, entry{id: id, row: row})
+	var snapshot []entry
+	for id, row := range rows {
+		snapshot = append(snapshot, entry{id: id, row: row})
 	}
 	return func(yield func(types.RowID, types.ProductValue) bool) {
-		for _, row := range rows {
+		for _, row := range snapshot {
 			if !yield(row.id, row.row) {
 				return
 			}
