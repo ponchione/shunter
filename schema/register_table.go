@@ -27,6 +27,6 @@ func RegisterTable[T any](b *Builder, opts ...TableOption) error {
 		return err
 	}
 
-	b.TableDef(def, opts...)
+	b.TableDef(def)
 	return nil
 }

@@ -149,3 +149,32 @@ func TestRegisterTableExcludedEmbeddedFieldsOmitted(t *testing.T) {
 		t.Fatalf("excluded_embedded columns = %+v, want only name", ts.Columns)
 	}
 }
+
+func TestRegisterTableAppliesOptionsOnce(t *testing.T) {
+	type OptionOnce struct {
+		ID uint64 `shunter:"primarykey"`
+	}
+
+	b := NewBuilder()
+	b.SchemaVersion(1)
+
+	calls := 0
+	err := RegisterTable[OptionOnce](b, func(o *tableOptions) {
+		calls++
+		o.name = "option_once"
+	})
+	if err != nil {
+		t.Fatalf("RegisterTable failed: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("RegisterTable applied option %d times, want 1", calls)
+	}
+
+	eng, err := b.Build(EngineOptions{})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	if _, _, ok := eng.Registry().TableByName("option_once"); !ok {
+		t.Fatal("option_once table missing")
+	}
+}
