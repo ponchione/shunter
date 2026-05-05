@@ -352,6 +352,45 @@ func TestReadExposesCommittedRowsAndClosesSnapshot(t *testing.T) {
 	}
 }
 
+func TestLocalIndexedReadsAndDurableWait(t *testing.T) {
+	const messagesTableID schema.TableID = 0
+	rt := buildStartedRuntimeWithReducer(t, "upsert_message", func(ctx *schema.ReducerContext, args []byte) ([]byte, error) {
+		for rowID := range ctx.DB.SeekIndex(uint32(messagesTableID), uint32(0), types.NewUint64(1)) {
+			_, err := ctx.DB.Update(uint32(messagesTableID), rowID, types.ProductValue{types.NewUint64(1), types.NewString(string(args))})
+			return nil, err
+		}
+		_, err := ctx.DB.Insert(uint32(messagesTableID), types.ProductValue{types.NewUint64(1), types.NewString(string(args))})
+		return nil, err
+	})
+	defer rt.Close()
+
+	res, err := rt.CallReducer(context.Background(), "upsert_message", []byte("hello"))
+	if err != nil || res.Status != StatusCommitted {
+		t.Fatalf("CallReducer insert result = (%v, %v), want committed", res, err)
+	}
+	if err := rt.WaitUntilDurable(context.Background(), res.TxID); err != nil {
+		t.Fatalf("WaitUntilDurable: %v", err)
+	}
+	res, err = rt.CallReducer(context.Background(), "upsert_message", []byte("updated"))
+	if err != nil || res.Status != StatusCommitted {
+		t.Fatalf("CallReducer update result = (%v, %v), want committed", res, err)
+	}
+
+	err = rt.Read(context.Background(), func(view LocalReadView) error {
+		var bodies []string
+		for _, row := range view.SeekIndex(messagesTableID, 0, types.NewUint64(1)) {
+			bodies = append(bodies, row[1].AsString())
+		}
+		if len(bodies) != 1 || bodies[0] != "updated" {
+			return fmt.Errorf("SeekIndex bodies = %v, want [updated]", bodies)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+}
+
 func buildStartedRuntimeWithReducer(t *testing.T, name string, handler schema.ReducerHandler) *Runtime {
 	t.Helper()
 	rt, err := Build(validChatModule().Reducer(name, handler), Config{DataDir: t.TempDir()})

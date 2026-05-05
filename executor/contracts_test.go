@@ -227,6 +227,12 @@ func (stubReducerDB) GetRow(uint32, types.RowID) (types.ProductValue, bool) { re
 func (stubReducerDB) ScanTable(uint32) iter.Seq2[types.RowID, types.ProductValue] {
 	return func(yield func(types.RowID, types.ProductValue) bool) {}
 }
+func (stubReducerDB) SeekIndex(uint32, uint32, ...types.Value) iter.Seq2[types.RowID, types.ProductValue] {
+	return func(yield func(types.RowID, types.ProductValue) bool) {}
+}
+func (stubReducerDB) SeekIndexRange(uint32, uint32, types.IndexBound, types.IndexBound) iter.Seq2[types.RowID, types.ProductValue] {
+	return func(yield func(types.RowID, types.ProductValue) bool) {}
+}
 func (stubReducerDB) Underlying() any { return nil }
 
 type stubReducerScheduler struct{}

@@ -56,11 +56,7 @@ func (k IndexKey) hash64() uint64 {
 }
 
 // Bound represents one endpoint of an index range.
-type Bound struct {
-	Value     types.Value
-	Inclusive bool
-	Unbounded bool
-}
+type Bound = types.IndexBound
 
 // UnboundedLow constructs an unbounded lower endpoint.
 func UnboundedLow() Bound {

@@ -614,3 +614,44 @@ func (t *Transaction) ScanTable(tableID schema.TableID) iter.Seq2[types.RowID, t
 	}
 	return NewStateView(t.committed, t.tx).ScanTable(tableID)
 }
+
+// SeekIndex yields rows visible in this transaction whose index key exactly
+// matches key.
+func (t *Transaction) SeekIndex(tableID schema.TableID, indexID schema.IndexID, key ...types.Value) iter.Seq2[types.RowID, types.ProductValue] {
+	if err := t.checkUsable(); err != nil {
+		return func(func(types.RowID, types.ProductValue) bool) {}
+	}
+	view := NewStateView(t.committed, t.tx)
+	indexKey := NewIndexKey(key...)
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for rid := range view.SeekIndex(tableID, indexID, indexKey) {
+			row, ok := view.GetRow(tableID, rid)
+			if !ok {
+				continue
+			}
+			if !yield(rid, row) {
+				return
+			}
+		}
+	}
+}
+
+// SeekIndexRange yields rows visible in this transaction whose index key falls
+// between lower and upper.
+func (t *Transaction) SeekIndexRange(tableID schema.TableID, indexID schema.IndexID, lower, upper types.IndexBound) iter.Seq2[types.RowID, types.ProductValue] {
+	if err := t.checkUsable(); err != nil {
+		return func(func(types.RowID, types.ProductValue) bool) {}
+	}
+	view := NewStateView(t.committed, t.tx)
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for rid := range view.SeekIndexBounds(tableID, indexID, Bound(lower), Bound(upper)) {
+			row, ok := view.GetRow(tableID, rid)
+			if !ok {
+				continue
+			}
+			if !yield(rid, row) {
+				return
+			}
+		}
+	}
+}

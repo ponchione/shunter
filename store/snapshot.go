@@ -111,6 +111,16 @@ func (s *CommittedSnapshot) IndexSeek(tableID schema.TableID, indexID schema.Ind
 	return slices.Clone(ids)
 }
 
+// SeekIndex yields rows whose index key exactly matches key.
+func (s *CommittedSnapshot) SeekIndex(tableID schema.TableID, indexID schema.IndexID, key ...types.Value) iter.Seq2[types.RowID, types.ProductValue] {
+	s.ensureOpen()
+	t, idx, ok := s.lookupIndex(tableID, indexID)
+	if !ok {
+		return func(func(types.RowID, types.ProductValue) bool) {}
+	}
+	return s.rowsFromRowIDs(t, idx.Seek(NewIndexKey(key...)), StoreReadKindIndexSeek)
+}
+
 func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.IndexID, lower, upper Bound) iter.Seq2[types.RowID, types.ProductValue] {
 	s.ensureOpen()
 	t, idx, ok := s.lookupIndex(tableID, indexID)
@@ -138,6 +148,11 @@ func (s *CommittedSnapshot) IndexRange(tableID schema.TableID, indexID schema.In
 			}
 		}
 	}
+}
+
+// SeekIndexRange yields rows whose index key falls between lower and upper.
+func (s *CommittedSnapshot) SeekIndexRange(tableID schema.TableID, indexID schema.IndexID, lower, upper Bound) iter.Seq2[types.RowID, types.ProductValue] {
+	return s.IndexRange(tableID, indexID, lower, upper)
 }
 
 func matchesLowerBound(key IndexKey, bound Bound) bool {

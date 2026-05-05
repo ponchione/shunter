@@ -733,6 +733,52 @@ func (d *reducerDBAdapter) ScanTable(tableID uint32) iter.Seq2[types.RowID, type
 	}
 }
 
+func (d *reducerDBAdapter) SeekIndex(tableID uint32, indexID uint32, key ...types.Value) iter.Seq2[types.RowID, types.ProductValue] {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.checkOpenLocked(); err != nil {
+		return func(func(types.RowID, types.ProductValue) bool) {}
+	}
+	type entry struct {
+		id  types.RowID
+		row types.ProductValue
+	}
+	var rows []entry
+	for id, row := range d.tx.SeekIndex(schema.TableID(tableID), schema.IndexID(indexID), key...) {
+		rows = append(rows, entry{id: id, row: row})
+	}
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for _, row := range rows {
+			if !yield(row.id, row.row) {
+				return
+			}
+		}
+	}
+}
+
+func (d *reducerDBAdapter) SeekIndexRange(tableID uint32, indexID uint32, lower, upper types.IndexBound) iter.Seq2[types.RowID, types.ProductValue] {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.checkOpenLocked(); err != nil {
+		return func(func(types.RowID, types.ProductValue) bool) {}
+	}
+	type entry struct {
+		id  types.RowID
+		row types.ProductValue
+	}
+	var rows []entry
+	for id, row := range d.tx.SeekIndexRange(schema.TableID(tableID), schema.IndexID(indexID), lower, upper) {
+		rows = append(rows, entry{id: id, row: row})
+	}
+	return func(yield func(types.RowID, types.ProductValue) bool) {
+		for _, row := range rows {
+			if !yield(row.id, row.row) {
+				return
+			}
+		}
+	}
+}
+
 func (d *reducerDBAdapter) Underlying() any {
 	d.mu.Lock()
 	defer d.mu.Unlock()

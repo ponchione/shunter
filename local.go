@@ -31,6 +31,52 @@ const (
 // ReducerResult is the result of a local reducer execution.
 type ReducerResult = executor.ReducerResponse
 
+// ReducerDB is the reducer-facing transactional database surface.
+type ReducerDB = types.ReducerDB
+
+// Value is a Shunter cell value.
+type Value = types.Value
+
+// ProductValue is an ordered row value.
+type ProductValue = types.ProductValue
+
+// RowID identifies a row within a table.
+type RowID = types.RowID
+
+// TxID identifies a committed transaction.
+type TxID = types.TxID
+
+// IndexBound represents one endpoint of an indexed range read.
+type IndexBound = store.Bound
+
+// IndexKey is an ordered tuple of Values used as an index key.
+type IndexKey = store.IndexKey
+
+// NewIndexKey constructs an IndexKey from parts.
+func NewIndexKey(parts ...types.Value) IndexKey {
+	return store.NewIndexKey(parts...)
+}
+
+// UnboundedLow constructs an unbounded lower endpoint for an indexed range.
+func UnboundedLow() IndexBound {
+	return store.UnboundedLow()
+}
+
+// UnboundedHigh constructs an unbounded upper endpoint for an indexed range.
+func UnboundedHigh() IndexBound {
+	return store.UnboundedHigh()
+}
+
+// Inclusive constructs an inclusive index range endpoint.
+func Inclusive(value types.Value) IndexBound {
+	return store.Inclusive(value)
+}
+
+// Exclusive constructs an exclusive index range endpoint.
+func Exclusive(value types.Value) IndexBound {
+	return store.Exclusive(value)
+}
+
 var (
 	// ErrLocalReadNilCallback reports that Runtime.Read was called without a read callback.
 	ErrLocalReadNilCallback = errors.New("shunter: local read callback must not be nil")
@@ -42,6 +88,8 @@ var (
 type LocalReadView interface {
 	TableScan(id schema.TableID) iter.Seq2[types.RowID, types.ProductValue]
 	GetRow(tableID schema.TableID, rowID types.RowID) (types.ProductValue, bool)
+	SeekIndex(tableID schema.TableID, indexID schema.IndexID, key ...types.Value) iter.Seq2[types.RowID, types.ProductValue]
+	SeekIndexRange(tableID schema.TableID, indexID schema.IndexID, lower, upper IndexBound) iter.Seq2[types.RowID, types.ProductValue]
 	RowCount(tableID schema.TableID) int
 }
 
@@ -135,6 +183,46 @@ func (r *Runtime) CallReducer(ctx context.Context, reducerName string, args []by
 		return res, nil
 	case <-ctx.Done():
 		return ReducerResult{}, ctx.Err()
+	}
+}
+
+// WaitUntilDurable blocks until txID is confirmed durable on disk.
+func (r *Runtime) WaitUntilDurable(ctx context.Context, txID types.TxID) error {
+	if txID == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	if r.durableTxID >= txID {
+		r.mu.Unlock()
+		return nil
+	}
+	if err := r.readyLocked(); err != nil {
+		r.mu.Unlock()
+		return err
+	}
+	durability := r.durability
+	if durability == nil {
+		r.mu.Unlock()
+		return ErrRuntimeNotReady
+	}
+	wait := durability.WaitUntilDurable(txID)
+	r.mu.Unlock()
+
+	select {
+	case <-wait:
+		if err := durability.FatalError(); err != nil {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

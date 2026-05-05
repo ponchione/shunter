@@ -18,6 +18,8 @@ type ReducerDB interface {
 	Update(tableID uint32, rowID RowID, newRow ProductValue) (RowID, error)
 	GetRow(tableID uint32, rowID RowID) (ProductValue, bool)
 	ScanTable(tableID uint32) iter.Seq2[RowID, ProductValue]
+	SeekIndex(tableID uint32, indexID uint32, key ...Value) iter.Seq2[RowID, ProductValue]
+	SeekIndexRange(tableID uint32, indexID uint32, lower, upper IndexBound) iter.Seq2[RowID, ProductValue]
 	Underlying() any
 }
 
